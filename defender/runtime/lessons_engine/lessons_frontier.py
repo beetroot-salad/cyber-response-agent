@@ -26,7 +26,9 @@ from pathlib import Path
 
 # The only `defender.*` import allowed above the guard: `_venv` is stdlib-only, while other
 # modules may import pydantic or PyYAML, which the bare launching interpreter lacks.
-# `test_corpus_fold_seed.test_c2c` pins this ordering.
+# `test_corpus_fold_seed.test_c2c` pins this ordering. The module carries no import-root
+# bootstrap, so the command runs as `python -m defender.runtime.lessons_engine.lessons_frontier`
+# with the checkout root importable; started by file path, `defender` is not found.
 from defender._venv import reexec_into_venv
 
 if __name__ == "__main__":

@@ -12,7 +12,8 @@ def reexec_into_venv(script: str) -> None:
     """Re-exec `script` under `defender/.venv` if it is not already running there.
 
     Not usable from `defender/run.py` or `defender/learning/loop.py`, which must re-exec before
-    any `defender.*` import (importing this helper is one), so they inline the same lines.
+    any `defender.*` import (importing this helper is one), so they inline the same re-exec —
+    without the `DEFENDER_BOX` skip below: both are host-side entry points.
 
     Inside a box (`DEFENDER_BOX` set) the image's `python3` already has what is needed, and
     re-execing into the mounted `.venv` would undercut the boundary, so it is skipped. See

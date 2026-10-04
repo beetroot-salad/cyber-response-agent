@@ -8,15 +8,15 @@ overwrote its payload sidecar (C1, C13).
 The design (issue #1127, as amended after the review of PR #1139) answers with a REFUSAL, never
 a cut:
 
-* A — `record_query.PARAMS_NESTING_LIMIT = 32`, a plain product constant rather than the
+* A — `_query_rules.PARAMS_NESTING_LIMIT = 32`, a plain product constant rather than the
   reader's bound less one: far enough under the reader that a line embedding params a few
   levels down (a wire-log record, a ledger row) still reads back. `params_too_deep(value)` stays
   the one public predicate. It walks the Python value the way `_io._json_safe_walk` does — a
   level per `Mapping` or list/tuple/set/frozenset, values not keys — and stops once past the
   limit, so a cyclic value is too deep and the walk terminates.
-* B — the cleaner every params writer goes through (`record_query._json_safe_params`, used by
-  `append_query_row` and by `ServedCall.row()`) raises the typed `record_query.ParamsTooDeep`, a
-  `ValueError`, past the limit — before `append_query_row` persists the seq's payload sidecar,
+* B — the cleaner every params writer goes through (`_query_rules._json_safe_params`, used by
+  `append_query_row` and by `ServedCall.row()`) raises the typed `_query_rules.ParamsTooDeep` (an
+  `Exception`, not a `ValueError`) past the limit — before `append_query_row` persists the seq's payload sidecar,
   and never the `RecursionError` an unbounded walk hits a few thousand levels down.
 
 The arm that matters most is the DIFFERENTIAL: across depths 1..60 and every container kind,
@@ -163,10 +163,10 @@ def _sidecars(run_dir: Path) -> list[Path]:
 
 
 def too_deep_error() -> type[BaseException]:
-    """`record_query.ParamsTooDeep`, resolved when an arm needs it, so a missing name fails
+    """`_query_rules.ParamsTooDeep`, resolved when an arm needs it, so a missing name fails
     that arm with a plain message instead of failing every arm at collection."""
     error = getattr(_query_rules, "ParamsTooDeep", None)
-    assert isinstance(error, type), "record_query.ParamsTooDeep does not exist"
+    assert isinstance(error, type), "_query_rules.ParamsTooDeep does not exist"
     return error
 
 

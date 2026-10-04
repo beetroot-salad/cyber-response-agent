@@ -47,7 +47,6 @@ from defender.tests._defender_sql import (
     EXIT_INPUT_ERROR,
     EXIT_OK,
     EXIT_QUERY_ERROR,
-    SQL_PY,
     assert_query_error,
     run_sql_py,
 )

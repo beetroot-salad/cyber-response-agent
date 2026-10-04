@@ -309,7 +309,7 @@ def test_every_shipped_sentinel_is_skipped_by_the_shared_predicate(tmp_path, que
     """    A `∅.`-prefixed row is never primed, whichever sentinel it is.
 
     Parametrized over the shipped constants rather than over a `"∅."` literal, because the
-    predicate has to be `record_query.is_reserved_query_id` and not a second spelling of the
+    predicate has to be `_query_rules.is_reserved_query_id` and not a second spelling of the
     prefix: a sentinel primed as a capture serves a record of something that NEVER REACHED A
     SYSTEM as though it were the estate's answer, and the row behind it says `captured`.
 
