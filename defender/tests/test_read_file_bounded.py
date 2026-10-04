@@ -155,7 +155,7 @@ def test_a_captured_payload_is_read_at_the_CAPTURE_ceiling() -> None:
     when the capture ceiling dropped to 8 KB, equality would have truncated `defender/SKILL.md`
     (33,590 bytes) and 16 of 20 files under `docs/` to bound a payload read. The bound now
     follows the PATH, so both hold at once."""
-    from defender.scripts.gather_tools.payload_view import passthrough_max_bytes
+    from defender.runtime.payload_view import passthrough_max_bytes
 
     assert tools._cap_for(Path("/run/gather_raw/l-1/0.json")) == passthrough_max_bytes()
 

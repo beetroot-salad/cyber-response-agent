@@ -24,7 +24,10 @@
       "defender/learning",
       "defender/evals",
       "defender/scripts",
-      "defender/run.py"
+      "defender/run.py",
+      "defender/_venv.py",
+      "defender/_query_rules.py",
+      "defender/_pricing.py"
     ],
     "entrypointStems": [
       "loop",
@@ -374,7 +377,7 @@
           "reexec_into_venv",
           "_VENV_PY"
         ],
-        "note": "DECLARED BY #1092's GROUNDING (base b016749c). The environment a granted program runs under inside a box: `BOX_ENV_ALLOWLIST` (runtime/box_codec.py, MOVED THERE BY #1096 from box/_spec.py, which now re-exports it along with `_BOX_MARK_ENV` — the owner is the stdlib module the in-box entrypoint imports, so the entrypoint's per-exec closure does not pay for the `box` package door) is the ONE key set, rendered onto `docker run --env` by BOTH argv builders (`_create_argv` indexes `env_pairs[key]` for every allowlist key with NO default — a key added to the allowlist and not to `infra_env`/`_LOCALE_ENV` is a KeyError on every two-arg start; `_render_env` merges locale defaults, then the caller's allowlisted keys VALUE-BLIND, then the derived infra keys which win), inherited by every `docker exec`, and re-filtered from `os.environ` by the entrypoint (`bash_exec.py::_run_box_entrypoint`) before any command runs. The two HOST lanes are writers of the same shape and are listed because the allowlist governs them too: `_host_fallback_env` copies every allowlisted key out of `request.env` and `run_env` inherits the operator's whole `os.environ` — so a key that joins the allowlist reaches the unsandboxed lane through those two copies whenever the caller or the shell carries it. The READERS the static walk cannot see are the three granted shell shims (`bin/defender-sql:9-10`, `bin/defender-invlang:7-8`, `bin/defender-lessons:8-9`; `bin/defender-policy:9-10` ungranted) — each `exec`s `${DEFENDER_DIR}/.venv/bin/python3` when it is executable, else bare `python3` — and `scripts/_venv.py::reexec_into_venv`, which `os.execv`s into `defender/.venv/bin/python3` when that path `is_file()`; both are cross-process edges classified by hand in #1092's brief."
+        "note": "DECLARED BY #1092's GROUNDING (base b016749c). The environment a granted program runs under inside a box: `BOX_ENV_ALLOWLIST` (runtime/box_codec.py, MOVED THERE BY #1096 from box/_spec.py, which now re-exports it along with `_BOX_MARK_ENV` — the owner is the stdlib module the in-box entrypoint imports, so the entrypoint's per-exec closure does not pay for the `box` package door) is the ONE key set, rendered onto `docker run --env` by BOTH argv builders (`_create_argv` indexes `env_pairs[key]` for every allowlist key with NO default — a key added to the allowlist and not to `infra_env`/`_LOCALE_ENV` is a KeyError on every two-arg start; `_render_env` merges locale defaults, then the caller's allowlisted keys VALUE-BLIND, then the derived infra keys which win), inherited by every `docker exec`, and re-filtered from `os.environ` by the entrypoint (`bash_exec.py::_run_box_entrypoint`) before any command runs. The two HOST lanes are writers of the same shape and are listed because the allowlist governs them too: `_host_fallback_env` copies every allowlisted key out of `request.env` and `run_env` inherits the operator's whole `os.environ` — so a key that joins the allowlist reaches the unsandboxed lane through those two copies whenever the caller or the shell carries it. The READERS the static walk cannot see are the three granted shell shims (`bin/defender-sql:9-10`, `bin/defender-invlang:7-8`, `bin/defender-lessons:8-9`; `bin/defender-policy:9-10` ungranted) — each `exec`s `${DEFENDER_DIR}/.venv/bin/python3` when it is executable, else bare `python3` — and `_venv.py::reexec_into_venv`, which `os.execv`s into `defender/.venv/bin/python3` when that path `is_file()`; both are cross-process edges classified by hand in #1092's brief."
       },
       "tenant_root": {
         "writers": [
@@ -461,6 +464,23 @@
           "lead-zero.yaml"
         ],
         "note": "DECLARED BY #1107's GROUNDING (re-grounded on dafb2da3, PR #1116's head — #1078 pass A, stacked per the human's base decision; first declared against 58c16165). The host-only `settings/` half of a tenant folder, `<tenants root>/<tenant>/settings/` (`_tenants.TenantDir.settings`; default tenants root `<repo>/knowledge/tenants` via `default_tenants_root`, overridable by an entry point's `--tenants-root`, plus the CI-checked `knowledge/tenant-template/`). NOT the same root as `tenant_root` above: #1078's data root holds the tenant ROW (`<data root>/<T>/tenant.json`) and the runs/episodes/learning trees, and `_tenant.create_tenant` (its one writer) never writes under a tenants root. Declared as an EMPTY-WRITER root, which is the fact worth recording: no production code writes under it — every file is operator-authored (the test helpers `_tenants1106.plant_tenant` and friends write fixture tenants into tmp roots). Its readers today each open their file PER CALL: `_stub_transport.load_config` and `elastic_adapter.load_config` per adapter call, `case_ticket._load_mapping` per screen/writer call (path-keyed `_MAPPING_CACHE`), `ticket_writer._load_config` per ticket step, and `configured_patterns` / `write_door_from_env` per launcher/registry call — and three of them lay the PROCESS environment over the file (`config_from(..., env)`, `ctx.env.get(prefixed) or raw.get(prefixed)`, `os.environ.get(...) or raw.get(...)`). #1107 moves every reader behind ONE resolve-time parse on `RunTenant` (only `secrets.env`, new, stays read per lookup) and removes the environment overlay. The model cannot read this root (`permission.files.decide_read` is deny-by-default over the run dir and the defender corpus, and `resolve_tenant` refuses a tenants root inside a box-mounted tree), and `_tenants._refuse_links` walks it for links ONCE, at resolve. The #1107 record types (`SystemConfig`, `ElasticSettings`, `CaseMapping`, `SecretLookup`) and the secret lookup's reader are deliberately NOT listed: they do not exist until write-code-from-spec builds them — add them, and drop the per-call readers that go, in the commit that does."
+      },
+      "run_mirror": {
+        "writers": [
+          "defender/scripts/visualize/visualize_run.py::mirror_page",
+          "defender/scripts/visualize/visualize_run.py::_mirror",
+          "defender/scripts/visualize/_mirror_write.py::write_page"
+        ],
+        "readers": [],
+        "grep": [
+          "run-visualizations",
+          "DEFENDER_RUN_VISUALIZATIONS_DIR",
+          "MIRROR_DIR_NAME",
+          "MIRROR_DIR_ENV",
+          "mirror_root",
+          "_MIRROR_WRITER"
+        ],
+        "note": "DECLARED BY #1080's GROUNDING (base 80888efb). The dev-only run-page mirror: `<main checkout>/run-visualizations/<run_id>/runtime.html` (`visualize_run.mirror_page` composes `RunPaths(mirror_root() / run_id).runtime_html`). The root resolves, in order: the `DEFENDER_RUN_VISUALIZATIONS_DIR` override; else the main checkout reached from `_DEFENDER_DIR.parent`, where `_DEFENDER_DIR = Path(__file__).resolve().parents[2]` (visualize_run.py:62) — a FILE-DEPTH anchor, so a move of visualize_run.py to another depth silently re-roots the default; else `start` itself. Under pytest the default is refused (`MirrorRootRefused`) and the conftest sets the override for every test, so no test exercises the default anchor. Writer paths: in-process `_mirror_write.write_page` when no privilege drop is needed, else a child `[sys.executable, '-I', <_mirror_write.py path>, <dest>]` run as the mirror folder's owner (visualize_run.py:141-144); the child path comes from `_mirror_write.__file__` (visualize_run.py:68) and the module must stay stdlib-only. No code reads it back: the operator opens the pages. Caller chain: `run_common.py:252` (lazy import inside try → `VisualizeFailed`, never the run's exit code) → `visualize_run.publish_page` → `mirror_page`. Under #1080's 2026-10-04 scope cut visualize/* stays in scripts/: its move into the reports module is parked with #1105 (after #1105's rev 4); update these addresses in the commit that moves them."
       }
     }
   },

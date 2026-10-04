@@ -14,7 +14,7 @@ Per dispatch
                        return gather itself saw (wire log), and lists `unsupported` measurements
                        the summary states that no return contains. Cached under results/extractions/.
   * requests, retries (retry-prompt parts fed back), queries, query_errors
-  * cost (defender.scripts.pricing), cached share, reasoning tokens
+  * cost (defender._pricing), cached share, reasoning tokens
   * wall (first→last gather response), and how many sibling dispatches overlapped it
 Per run
   * dispatches, disposition vs label, concluded, review outcome, whole-run $ by role
@@ -46,7 +46,7 @@ JUDGE_MODEL = "claude-opus-5"
 SEEN_CAP = 120_000  # bytes of tool-return text the judge sees per dispatch
 
 sys.path.insert(0, str(_EXP.parents[1]))  # the `defender` package is <repo>/defender
-from defender.scripts.pricing import usage_cost  # noqa: E402
+from defender._pricing import usage_cost  # noqa: E402
 
 _JUDGE = """You score a security 'gather' summary against what the gather subagent actually saw.
 The subagent was asked to report specific measurements (the DIMENSIONS below) over systems of

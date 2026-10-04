@@ -18,7 +18,7 @@ from defender.learning.core.config import (
 )
 # The reducer lane's routing key, imported from its owner so every seam asking "is this the
 # reducer's row" compares the same literal.
-from defender.scripts.gather_tools.record_query import BASH_SHIM_QUERY_ID
+from defender._query_rules import BASH_SHIM_QUERY_ID
 
 
 

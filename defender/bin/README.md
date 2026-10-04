@@ -46,6 +46,12 @@ shims resolve from any cwd.
   still clear it for its own children. `defender-policy`, the one OPERATOR
   tool no agent lane ever admits (above), was not part of this fix and keeps
   its venv-first lookup unconditionally, by design (#1092 non-obligation).
+- `defender-sql` and `defender-lessons` run their engines as modules
+  (`python3 -P -m defender.runtime.sql_engine.sql`, `…lessons_engine.lessons_fm`) with the
+  shim's own checkout root first on `PYTHONPATH` and the working folder kept off the import
+  path, so the engine that answers is always the one beside the shim, never a checkout an
+  inherited `PYTHONPATH` or the caller's folder names. `defender-sql` refuses (exit 2) when
+  `DEFENDER_DIR` is unset or names no folder.
 - `defender-invlang` runs `-m defender.skills.invlang.cli` from REPO_ROOT
   (package-relative imports) and injects `DEFENDER_RUNS_BASE` as the corpus
   root (derived, `<T>/runs`), so the agent never passes a path.

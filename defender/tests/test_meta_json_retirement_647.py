@@ -79,6 +79,9 @@ UNRELATED_TREES = (
 # rather than the growing list of one-offs it replaces. The lint SCRIPTS beside them stay in
 # scope — they are code and could import for real.
 LINT_BASELINE_SUFFIX = "_baseline.json"
+#: A test suite's `goldens/` folder holds outputs captured at some base commit: frozen data that
+#: may name a file, never code that depends on it.
+GOLDENS_DIR = "/goldens/"
 HISTORICAL_RECORD = UNRELATED_TREES
 
 SUITE_FILES = (
@@ -112,12 +115,13 @@ def repo_grep(pattern: str, *pathspecs: str) -> list[str]:
 
 def live_hits(hits: list[str], *, extra_excludes: tuple[str, ...] = ()) -> list[str]:
     """`hits` minus the historical-record and unrelated trees, minus this suite's own files,
-    minus the lint baselines that merely RECORD a site by name."""
+    minus the lint baselines and test goldens that merely RECORD a site by name."""
     excluded = HISTORICAL_RECORD + SUITE_FILES + extra_excludes
     return [
         h for h in hits
         if not any(h.startswith(p) for p in excluded)
-        and LINT_BASELINE_SUFFIX not in h.split(":", 1)[0]
+        and LINT_BASELINE_SUFFIX not in (path := h.split(":", 1)[0])
+        and GOLDENS_DIR not in path
     ]
 
 

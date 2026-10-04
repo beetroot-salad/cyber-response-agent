@@ -4,15 +4,16 @@ import os
 import sys
 from pathlib import Path
 
-#: `defender/`, derived from this file's location so it is right however deep the caller sits.
-_DEFENDER_DIR = Path(__file__).resolve().parents[1]
+#: `defender/`, the folder this module sits in, so it is right however deep the caller sits.
+_DEFENDER_DIR = Path(__file__).resolve().parent
 
 
 def reexec_into_venv(script: str) -> None:
     """Re-exec `script` under `defender/.venv` if it is not already running there.
 
     Not usable from `defender/run.py` or `defender/learning/loop.py`, which must re-exec before
-    any `defender.*` import (importing this helper is one), so they inline the same lines.
+    any `defender.*` import (importing this helper is one), so they inline the same re-exec —
+    without the `DEFENDER_BOX` skip below: both are host-side entry points.
 
     Inside a box (`DEFENDER_BOX` set) the image's `python3` already has what is needed, and
     re-execing into the mounted `.venv` would undercut the boundary, so it is skipped. See
@@ -20,6 +21,9 @@ def reexec_into_venv(script: str) -> None:
     """
     if os.environ.get("DEFENDER_BOX"):
         return
-    venv_py = _DEFENDER_DIR / ".venv" / "bin" / "python3"
-    if venv_py.is_file() and Path(sys.executable) != venv_py:
+    venv = _DEFENDER_DIR / ".venv"
+    venv_py = venv / "bin" / "python3"
+    # Already in it is a question of which environment this interpreter runs, not of how its
+    # path is spelled: `python` vs `python3`, a `..` or a linked checkout all name the same venv.
+    if venv_py.is_file() and Path(sys.prefix).resolve() != venv.resolve():
         os.execv(str(venv_py), [str(venv_py), str(script), *sys.argv[1:]])

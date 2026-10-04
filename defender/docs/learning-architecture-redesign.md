@@ -310,7 +310,7 @@ validator already know how to do.
 with `??`, plus the open hypothesis set — so a lesson declares the pattern it applies to and
 matching is mechanical, fewer slots matching more. This is assembly: the invlang advisory
 verb already does frontier-keyed recall (signature anchor plus open hypothesis names), and
-`scripts/lessons/lessons_env_retrieve.py` already matches by slot-wise selector containment,
+`lessons_env_retrieve.py` already matches by slot-wise selector containment,
 `*` and fewer-slots-matching-more included.
 
 Three gaps close it. The advisory recalls precedent *cases*; lessons need selectors and
@@ -335,7 +335,7 @@ a CR is the base rate and the inference is invalid at any scope. A specificity f
 have forced fabricated selectors onto the two lessons where empty is the truthful answer, so
 no gate ships. Note the scope of what replaces it: the specificity RANKING #919 builds is on the
 DEFENDER corpus's new `frontier_nodes` / `frontier_edges` selectors, matched by
-`scripts/lessons/lessons_frontier.py`. The `entities: []` lessons live in the sibling
+`runtime/lessons_engine/lessons_frontier.py`. The `entities: []` lessons live in the sibling
 ENVIRONMENT corpus, which `lessons_env_retrieve.py` still returns unranked and in filename
 order — the three survivors there (`cmdb-indexes-by-hostname-not-ip`,
 `authorized-keys-key-accumulation-detection`, `dev-workstation-to-jump-box`) are unchanged by

@@ -790,7 +790,7 @@ demands:
     # honest correction — `defender-sql` IS gate-allowed to run write-shaped SQL (COPY/ATTACH/
     # EXPORT); the gate never parses the SQL. What actually refuses is duckdb's own
     # `enable_external_access=false` + `lock_configuration=true` inside
-    # `scripts/gather_tools/sql.py`, a module the obligation never named. The test must drive
+    # `runtime/sql_engine/sql.py` (scripts/gather_tools/sql.py before #1080), a module the obligation never named. The test must drive
     # the SQL lane too, or it pins a boundary that is not where the safety lives.
   - id: write_file_not_granted_to_main
     kind: negative

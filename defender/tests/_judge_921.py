@@ -115,7 +115,7 @@ from defender.tests._triplet_947 import (  # noqa: F401 — re-exported vocabula
     write_family,
 )
 
-#: The canonical identity of one question — `record_query._request_key`'s function, which the
+#: The canonical identity of one question — `_query_rules._request_key`'s function, which the
 #: ledger, the episode's pair key and the review's own drift list all mint through. Re-exported
 #: so a fixture that has to plant a recorded key mints it the way the recorder does rather than
 #: hand-writing a `json.dumps` that matches only by luck of dict order.

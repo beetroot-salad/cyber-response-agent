@@ -19,7 +19,7 @@ from defender.tests._claim1175 import claim_git
 from defender import _git
 from defender.learning.leads import pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError, collect_general_failures
-from defender.scripts.gather_tools.record_query import BASH_SHIM_QUERY_ID
+from defender._query_rules import BASH_SHIM_QUERY_ID
 from defender.tests._declared870 import (
     BINDER,
     PITFALLS_SECTION,

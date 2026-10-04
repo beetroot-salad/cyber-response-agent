@@ -2,14 +2,14 @@
 
 A ledger row puts `params` (and `asked_params`) directly under the row object, exactly as the
 queries table does, and both columns go through the one params cleaner
-(`record_query._json_safe_params`). Before #1127 the ledger wrote a params map nested past the
+(`_query_rules._json_safe_params`). Before #1127 the ledger wrote a params map nested past the
 reader's bound anyway, and the served-call path wrote TWO such lines per call (the family `base`
 row inside `_base_payload`, then the world's own row), neither of which any reader — `_absorb`,
 the episode's comparisons, the judge — would ever see.
 
 The design (issue #1127, as amended after the two reviews of PR #1139):
 
-* the cleaner raises `record_query.ParamsTooDeep` past `PARAMS_NESTING_LIMIT` (32, the map
+* the cleaner raises `_query_rules.ParamsTooDeep` past `PARAMS_NESTING_LIMIT` (32, the map
   counted), bounded — so a params map thousands of levels deep is refused, not a
   `RecursionError` — naming the field that was too deep;
 * `ServedCall` cleans `params` and `asked_params` once, AS IT IS BUILT: a call no row could
@@ -43,7 +43,7 @@ from defender.learning.branch.ledger import (  # noqa: E402
     payload_text,
     request_key,
 )
-from defender.scripts.gather_tools.record_query import ParamsTooDeep  # noqa: E402
+from defender._query_rules import ParamsTooDeep
 from defender.tests.test_1127_params_nesting_limit import (  # noqa: E402
     FAR,
     LIMIT,

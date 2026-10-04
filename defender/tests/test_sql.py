@@ -1,4 +1,4 @@
-"""Tests for the defender-sql aggregation shim (scripts/gather_tools/sql.py).
+"""Tests for the defender-sql aggregation shim (runtime/sql_engine/sql.py).
 
 Pins two contracts:
 
@@ -35,7 +35,7 @@ pytestmark = pytest.mark.skipif(
     reason="duckdb isn't installed (it lives in the `runtime` extra, not dev/CI)",
 )
 
-defender_sql = load_module(DEFENDER / "scripts" / "gather_tools" / "sql.py", name="defender_sql")
+defender_sql = load_module(DEFENDER / "runtime" / "sql_engine" / "sql.py", name="defender_sql")
 
 
 def _run_full(monkeypatch, capsys, payload, query: str) -> tuple[int, str, str]:

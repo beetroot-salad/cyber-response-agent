@@ -116,7 +116,7 @@ et al. (feedback-loop debt, which starts accruing once lessons feed back).
 6. **No index, no service.** Flat markdown, grep over frontmatter. Three pushes
    read it: the PLAN-time signature block (`runtime/orient.py`), the #919
    frontier block on a write that moved the open set
-   (`scripts/lessons/lessons_frontier.py`), and the #936 frontier block the
+   (`runtime/lessons_engine/lessons_frontier.py`), and the #936 frontier block the
    compaction fold's row carries — the same derivation as #919, over the whole
    document (not the cut record) at the moment the fold displaces the turns
    that showed earlier blocks; derived fresh, not a re-show

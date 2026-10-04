@@ -64,7 +64,7 @@ observation licenses does not care which rule fired; it bites once the
 investigation has the question open. That second lane matches the lesson
 against the live `investigation.md`'s **frontier** — its unresolved `??` slots
 and its undischarged `ac<n>` authorization contracts — and pushes the top 3 on
-the `append_block` that moved it (`scripts/lessons/lessons_frontier.py`).
+the `append_block` that moved it (`runtime/lessons_engine/lessons_frontier.py`).
 
 Declare a selector when the lesson answers a question the document can have
 OPEN. Omit both keys when the lesson's trigger is a procedure rather than an

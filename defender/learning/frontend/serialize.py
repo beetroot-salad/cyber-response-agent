@@ -14,7 +14,7 @@ DEFENDER = REPO_ROOT / "defender"
 if (_root := str(REPO_ROOT)) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.scripts._venv import reexec_into_venv  # noqa: E402
+from defender._venv import reexec_into_venv  # noqa: E402
 
 if __name__ == "__main__":
     reexec_into_venv(__file__)

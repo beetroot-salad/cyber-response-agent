@@ -10,7 +10,7 @@ summary — and the judge concluded the defender never queried that system (`lea
 the curator wrote a lesson telling the runtime to run a query the role does not hold.
 
 THE SHAPE OF THE FIX. One ledger, one more sentinel kind: a denial is now a `∅.denied` row
-(`record_query.DENIED_QUERY_ID`) in the queries table, written by the same call the grant
+(`_query_rules.DENIED_QUERY_ID`) in the queries table, written by the same call the grant
 check's two neighbouring branches make, so every property the table already has — inherited
 by a sibling world, screened and copied by the archive, split onto `.sentinels` by the join,
 partitioned out of the learning loop by its prefix — is the denial's for free, and the judge
@@ -44,11 +44,11 @@ from defender.runtime.circuit_breaker import (  # noqa: E402
     DENIED_EXIT_CODE,
     INFRA_ERROR_CLASS,
 )
-from defender.scripts.gather_tools.record_query import (  # noqa: E402
+from defender.scripts.gather_tools.record_query import REJECTION_BUDGET
+from defender._query_rules import (
     ABOVE_GUARD_QUERY_ID,
     BASH_SHIM_QUERY_ID,
     DENIED_QUERY_ID,
-    REJECTION_BUDGET,
     REPEAT_TRIP_QUERY_ID,
     RESERVED_QUERY_ID_PREFIX,
 )

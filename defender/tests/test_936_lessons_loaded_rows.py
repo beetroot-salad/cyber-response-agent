@@ -152,7 +152,7 @@ def test_render_takes_a_lead_and_the_default_is_the_write_return_header(tmp_path
     are untouched); `render(hits, lead=…)` puts the given lead on line 1 and leaves the hit
     lines byte-identical; `render([], lead=…)` is still empty, since the fold gates "no
     block" on that falsiness exactly as `_frontier_recall` does."""
-    from defender.scripts.lessons.lessons_frontier import match_lessons, render
+    from defender.runtime.lessons_engine.lessons_frontier import match_lessons, render
     from defender.skills.invlang.frontier import frontier_from_text
 
     corpus = tmp_path / "defender" / "lessons"

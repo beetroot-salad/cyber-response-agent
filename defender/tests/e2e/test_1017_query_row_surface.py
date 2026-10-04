@@ -34,11 +34,10 @@ from defender._run_paths import RunPaths  # noqa: E402
 from defender.learning.lead_repository import joined, load_queries  # noqa: E402
 from defender.runtime import lead_zero  # noqa: E402
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS  # noqa: E402
+from defender import _query_rules  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
-from defender.scripts.gather_tools.record_query import (  # noqa: E402
-    ABOVE_GUARD_QUERY_ID,
-    QUERY_ROW_COLUMNS,
-)
+from defender.scripts.gather_tools.record_query import QUERY_ROW_COLUMNS
+from defender._query_rules import ABOVE_GUARD_QUERY_ID
 from defender.tests import _judge_921 as J  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
@@ -95,7 +94,7 @@ def test_every_writer_of_the_table_leaves_rows_keyed_exactly_as_declared(tmp_pat
         _bad_args("ghostone", verb="ghostverb"), DONE,
     ])
     kinds = {row["query_id"] for row in r.own_rows}
-    assert kinds == {"elastic.query", record_query.BASH_SHIM_QUERY_ID, ABOVE_GUARD_QUERY_ID}, \
+    assert kinds == {"elastic.query", _query_rules.BASH_SHIM_QUERY_ID, ABOVE_GUARD_QUERY_ID}, \
         f"the three writer paths did not all leave a row: {kinds}"
     assert any(row["lead_id"] in lead_zero.RESERVED_LEAD_IDS for row in r.rows), \
         "lead-0 left no row, so the universal below does not reach its writer"

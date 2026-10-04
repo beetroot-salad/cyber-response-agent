@@ -47,7 +47,7 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
-# Hand-rolled rather than `scripts/_venv.reexec_into_venv`, matching `run.py`: this must run
+# Hand-rolled rather than `_venv.reexec_into_venv`, matching `run.py`: this must run
 # BEFORE any `defender.*` import resolves, and reaching that helper is itself such an import.
 _DEFENDER_DIR = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _DEFENDER_DIR.parent

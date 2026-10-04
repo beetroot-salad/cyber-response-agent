@@ -145,7 +145,7 @@ def _fold_run(tmp_path: Path, monkeypatch, *, tree: Path,
 def _expected_hits(doc: str, corpus: Path) -> list[str]:
     """The lesson names the shared derivation must produce for `doc` — the same two calls
     `_frontier_recall` makes, over the same corpus."""
-    from defender.scripts.lessons.lessons_frontier import match_lessons
+    from defender.runtime.lessons_engine.lessons_frontier import match_lessons
     from defender.skills.invlang.frontier import frontier_from_text
 
     return [h.name for h in match_lessons(frontier_from_text(doc), corpus)]
@@ -218,7 +218,7 @@ def test_the_fold_block_is_the_shared_derivation_top_three_and_lead_included(
     matches NOW (not a re-show of what it was shown — the block is derived fresh and can name
     a lesson it never saw), differs here and nowhere else in this file: every other scenario
     matches at most one lesson at mint."""
-    from defender.scripts.lessons.lessons_frontier import FOLD_LEAD, match_lessons, render
+    from defender.runtime.lessons_engine.lessons_frontier import FOLD_LEAD, match_lessons, render
     from defender.skills.invlang.frontier import frontier_from_text
 
     tree = _planted_defender(tmp_path)

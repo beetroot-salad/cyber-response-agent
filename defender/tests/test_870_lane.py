@@ -21,12 +21,8 @@ from defender.learning.leads.lead_extraction import collect_general_failures
 from defender.runtime import tools
 from defender.runtime.circuit_breaker import error_class_for_exit
 from defender.runtime.query_tool import resolve_query_id
-from defender.scripts.gather_tools import sql as defender_sql
-from defender.scripts.gather_tools.record_query import (
-    ABOVE_GUARD_QUERY_ID,
-    BASH_SHIM_QUERY_ID,
-    REPEAT_TRIP_QUERY_ID,
-)
+from defender.runtime.sql_engine import sql as defender_sql
+from defender._query_rules import ABOVE_GUARD_QUERY_ID, BASH_SHIM_QUERY_ID, REPEAT_TRIP_QUERY_ID
 from defender.tests._declared870 import (
     BINDER,
     REDUCER_REL,

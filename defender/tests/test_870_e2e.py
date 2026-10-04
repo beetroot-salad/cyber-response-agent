@@ -28,7 +28,7 @@ from defender.learning.leads import pitfalls_curator  # noqa: E402
 from defender.learning.leads.lead_extraction import collect_general_failures  # noqa: E402
 from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
-from defender.scripts.gather_tools.record_query import BASH_SHIM_QUERY_ID  # noqa: E402
+from defender._query_rules import BASH_SHIM_QUERY_ID
 from defender.tests._declared870 import (  # noqa: E402
     BINDER,
     REDUCER_REL,
