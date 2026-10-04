@@ -296,14 +296,28 @@ def load_reviewed_mapping(
     unparseable, non-mapping, and unread keys, naming `what` and `path`. Values are the
     caller's to interpret.
     """
-    where = f"{what} at {path}"
+    return parse_reviewed_mapping(
+        read_reviewed_text(path, what=what, error=error), path,
+        what=what, known=known, error=error)
+
+
+def read_reviewed_text(path: Path, *, what: str, error: type[Exception]) -> str:
+    """`load_reviewed_mapping`'s read half: the file's text, or `error` for an absent or
+    unreadable one. Split out so a caller can key a cache on the exact text it then parses."""
     if not path.is_file():
         raise error(f"{what} not found at {path}")
     try:
-        text = path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8")
     except TEXT_READ_ERRORS as e:
-        raise error(f"{where} is unreadable ({e})") from e
+        raise error(f"{what} at {path} is unreadable ({e})") from e
 
+
+def parse_reviewed_mapping(
+    text: str, path: Path, *, what: str, known: tuple[str, ...], error: type[Exception],
+) -> Mapping[object, object]:
+    """`load_reviewed_mapping`'s parse half, over `text` already read from `path` (named in
+    every refusal)."""
+    where = f"{what} at {path}"
     duplicates = duplicate_key_paths(text)
     if duplicates:
         raise error(

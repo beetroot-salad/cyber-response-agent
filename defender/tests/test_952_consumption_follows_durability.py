@@ -483,6 +483,7 @@ def test_952_o1_consumption_happens_before_the_push_and_is_not_undone_by_its_fai
     assert [r["branch"] for r in records] == [f"lead-author/{branch.batch_id}"]
     assert records[0]["batch_id"] == branch.batch_id
     assert records[0]["reason"] == "push rejected"
+    assert records[0]["label"] == "lead_author_drain", "the record names the wrong lane"
 
     err = capsys.readouterr().err
     expected = (

@@ -19,10 +19,13 @@ on PR #1157).
 """
 from __future__ import annotations
 
+import inspect
 import os
 import shutil
-import time
+import threading
 from pathlib import Path
+
+import pytest
 
 from defender.scripts import tenant as tenant_py
 from defender.tests.tenant_1120_piece1 import _spec1120 as H
@@ -113,17 +116,42 @@ def test_a_replace_object_does_not_make_an_edited_id_look_committed(tmp_path: Pa
     H.assert_refused(H.check(tenant_py, None, "--folder", str(knowledge)), str(tenant_id_file))
 
 
+#: The bound the FIFO test hands the committed read: long enough for a git process to start on
+#: a loaded runner, far short of the FIFO's wait (forever). Not a whole number, so the message
+#: naming it is checked however a float is spelled.
+_FIFO_BOUND = 1.5
+
+
+def test_the_committed_read_is_bounded_by_its_fifteen_second_constant_by_default() -> None:
+    """`check`'s committed read (`_findings` passes no `timeout`) is bounded by
+    `_COMMITTED_READ_TIMEOUT`, 15 seconds — so the FIFO test's short injected bound cannot hide a
+    changed production default."""
+    default = inspect.signature(tenant_py._tenant_id_committed).parameters["timeout"].default
+    assert default == tenant_py._COMMITTED_READ_TIMEOUT == 15
+
+
 def test_a_fifo_in_git_fails_closed_instead_of_hanging(tmp_path: Path) -> None:
-    """`.git/HEAD` swapped for a FIFO nobody writes: check exits 1 naming "cannot verify
-    .tenant-id is committed", well inside the driver's own timeout."""
+    """`.git/HEAD` swapped for a FIFO nobody writes: the committed read fails closed naming
+    "cannot verify .tenant-id is committed" BECAUSE git did not answer within the bound it was
+    handed (not a git error), well before ten times that bound."""
     knowledge = H.cloned_tenant(tmp_path, tmp_path / "root")
     head = knowledge / ".git" / "HEAD"
     head.unlink()
     os.mkfifo(head)
-    started = time.monotonic()
-    H.assert_refused(H.check(tenant_py, None, "--folder", str(knowledge)),
-                     H.CANNOT_VERIFY_TENANT_ID)
-    assert time.monotonic() - started < 120
+    answered: list[str | None] = []
+    worker = threading.Thread(
+        target=lambda: answered.append(tenant_py._tenant_id_committed(knowledge,
+                                                                      timeout=_FIFO_BOUND)),
+        daemon=True)
+    worker.start()
+    worker.join(10 * _FIFO_BOUND)
+    if worker.is_alive():  # unbounded: free the blocked git (open the FIFO's other end), fail
+        os.close(os.open(head, os.O_RDWR | os.O_NONBLOCK))
+        pytest.fail(f"no answer within {10 * _FIFO_BOUND}s: the git read is not bounded")
+    finding = answered[0]
+    assert finding is not None
+    assert H.CANNOT_VERIFY_TENANT_ID in finding, finding
+    assert f"did not answer within {_FIFO_BOUND}s" in finding, finding
 
 
 def test_a_repo_with_no_commits_reports_the_id_as_not_committed(tmp_path: Path) -> None:

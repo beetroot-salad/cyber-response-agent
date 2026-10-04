@@ -42,6 +42,25 @@ def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
     return _LOCAL_AUTO_WORKERS
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption("--shard", default=None, metavar="I/N",
+                     help="run only shard I of N: whole test files, balanced by recorded cost "
+                          "(see tests/_shard.py); the shards together run every test once")
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    spec = config.getoption("--shard")
+    if not spec:
+        return
+    from defender.tests import _shard
+
+    index, count = _shard.parse_shard(spec)
+    mine = _shard.shard_of_files([item.nodeid for item in items], index, count)
+    kept = [item for item in items if _shard.file_of(item.nodeid) in mine]
+    config.hook.pytest_deselected(items=[item for item in items if item not in kept])
+    items[:] = kept
+
+
 REAL_REPO = Path(__file__).resolve().parents[2]
 LEARNING_SRC = REAL_REPO / "defender" / "learning"
 

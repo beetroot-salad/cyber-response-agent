@@ -21,8 +21,10 @@ def load_messages(run_dir: Path) -> list[dict]:
     Falls back to the older run-root location so older run dirs still render a transcript.
     This is a host-side reader; the `wire_logs/` placement matters only to the read gate."""
     current = RunPaths(run_dir).wire_log
+    # No read limit (#1174): the wire log runs past 100 MB on long runs, and this is an
+    # operator tool over a log the host wrote, not a sandbox-writable record.
     return read_jsonl_rows(
-        current if current.is_file() else Path(run_dir) / RUN_LAYOUT.wire_log.name)
+        current if current.is_file() else Path(run_dir) / RUN_LAYOUT.wire_log.name, limit=None)
 
 
 def _pretty_model(name: str) -> str:

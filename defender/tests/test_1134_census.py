@@ -270,7 +270,7 @@ _astlib = import_lint_lib("_astlib")
 #: The worktree this file lives in — never `defender.__file__`: the shared venv's editable
 #: install points at the main checkout, so an import-derived root would scan the wrong tree.
 WORKTREE = Path(__file__).resolve().parents[2]
-TREE = C.Tree(WORKTREE)
+TREE = C.tree_of(WORKTREE)
 
 DRAIN = "learning/author/drain.py"
 SHARED = "learning/author/shared.py"
@@ -436,8 +436,9 @@ ALLOW: tuple[Allowed, ...] = (
     Allowed(LANE_TREES, "DrainTrees.open", "construct", "hold(p, os_=os_)", D3,
             "one `hold` per mount of the list it is handed, at the mount point itself (A3)"),
     Allowed(LANE_TREES, "open_drain_trees", "construct",
-            "DrainTrees.open(wt_paths.drain_writable_trees(label))", D3,
-            "exactly `drain_writable_trees(label)`, the list the box mounts rw (A3/O4)"),
+            "DrainTrees.open(label.writable_trees(wt_paths))", D3,
+            "exactly `label.writable_trees(wt_paths)`, the list the box mounts rw (A3/O4; "
+            "the member owns it since #1179)"),
     Allowed(LANE_TREES, "kind_at", "attr", "full.is_file()", D3, _MISS),
     Allowed(LANE_TREES, "kind_at", "attr", "full.is_dir()", D3, _MISS),
     Allowed(LANE_TREES, "kind_at", "call", "os.path.lexists(full)", D3, _MISS),
@@ -522,11 +523,11 @@ ALLOW: tuple[Allowed, ...] = (
     Allowed(DRAINS, "_invoke_pitfalls", "construct", "open_drain_trees(paths, label)", D3,
             "the pitfalls work step's trees, for the label its seam was bound: " + _OPENER),
     Allowed(DRAINS, "_drain_box_request", "construct", "paths.with_repo_root(wt)", D3,
-            "the drain working copy's paths, whose `drain_writable_trees(label)` the box mounts rw "
+            "the drain working copy's paths, whose `label.writable_trees(...)` the box mounts rw "
             "(A3/O4: the one mount list)"),
     Allowed(DRAINS, "_run_worktree_batch", "construct", "paths.with_repo_root(wt)", D3,
             "the drain working copy's paths handed to the work step, whose seam opens exactly "
-            "their `drain_writable_trees(label)` (A3/O4: the one mount list)"),
+            "their `label.writable_trees(...)` (A3/O4: the one mount list)"),
     Allowed(HARNESS, "run_author", "construct", "LoopPaths(repo_root=tmp)", D3,
             "the harness's scratch repo: the paths its opener holds the author trees of "
             "(pinned to `<tmp>` by test_1134_curator_label)"),
@@ -1940,6 +1941,19 @@ def _apply(module: str, source: str, edits: tuple[tuple[str, str, int], ...]) ->
     return source
 
 
+_CLEAN_ANCHORS: dict[tuple[str, frozenset[str]], Counter] = {}
+
+
+def _clean_anchors(module: str, kinds: frozenset[str]) -> Counter:
+    """The anchors the census finds in `module`'s unedited source, scanned once per (module,
+    kinds): every regression row that edits the same module compares against the same scan."""
+    key = (module, kinds)
+    if key not in _CLEAN_ANCHORS:
+        _CLEAN_ANCHORS[key] = Counter(h.anchor for h in C.census_source(
+            WORKTREE, module, _source(module), tree=TREE, kinds=kinds))
+    return _CLEAN_ANCHORS[key]
+
+
 @pytest.mark.parametrize("name", sorted(REGRESSIONS))
 def test_an_adversary_regression_is_an_unexpected_hit(name: str):
     """Each real regression from the adversaries (v1: s5-adv-patches/, s6-adv-patches/final.diff,
@@ -1951,8 +1965,7 @@ def test_an_adversary_regression_is_an_unexpected_hit(name: str):
     kinds = kinds_of(reg.module)
     clean = _source(reg.module)
     allowed = {e.anchor: e.count for e in ALLOW if e.module == reg.module}
-    before = Counter(h.anchor for h in C.census_source(
-        WORKTREE, reg.module, clean, tree=TREE, kinds=kinds))
+    before = _clean_anchors(reg.module, kinds)
     hits = C.census_source(WORKTREE, reg.module, _apply(reg.module, clean, reg.edits), tree=TREE,
                            kinds=kinds)
     unexpected_hits, stale = judge(reg.module, hits, kinds=kinds)
@@ -2335,7 +2348,7 @@ EVASIONS: dict[str, tuple[str, tuple[tuple[str, str, str], ...]]] = {
         "from defender._paths import DefenderPaths as DP\ndef f(root):\n    return DP(root).skills_dir\n",
         (("f", "construct", "DP(root)"),)),
     "with-repo-root": (
-        "def f(paths, root):\n    return paths.with_repo_root(root).drain_writable_trees('author_drain')\n",
+        "def f(paths, root):\n    return paths.with_repo_root(root).skills_dir\n",
         (("f", "construct", "paths.with_repo_root(root)"),)),
     "replace-repo-root": (
         "import dataclasses\ndef f(paths, root):\n    return dataclasses.replace(paths, repo_root=root)\n",
@@ -2416,6 +2429,19 @@ EVASIONS: dict[str, tuple[str, tuple[tuple[str, str, str], ...]]] = {
         tuple(("f", "attr", t) for t in (
             "p.is_fifo()", "p.is_socket()", "p.is_mount()", "p.is_block_device()",
             "p.is_char_device()", "p.owner()", "p.lchmod(420)", "p.link_to(q)"))),
+    "verb-on-a-class-the-checkout-does-not-define": (
+        "import os, zipfile\nfrom pathlib import Path\nclass MyP(Path):\n    pass\n"
+        "def f(e, z, p):\n    os.DirEntry.stat(e)\n    zipfile.Path.read_text(z)\n"
+        "    MyP.unlink(p)\n",
+        (("f", "attr", "os.DirEntry.stat(e)"), ("f", "attr", "zipfile.Path.read_text(z)"),
+         ("f", "attr", "MyP.unlink(p)"))),
+    "value-verb-referenced-by-a-shared-name": (
+        "def f(p):\n    cb = p.open\n    return cb, p.stat, p.resolve, p.replace\n",
+        (("f", "load", "p.open"), ("f", "load", "p.stat"), ("f", "load", "p.resolve"),
+         ("f", "load", "p.replace"))),
+    "path-class-through-a-defender-re-export": (
+        "from defender import _paths\ndef f(p):\n    _paths.Path.unlink(p)\n",
+        (("f", "attr", "_paths.Path.unlink(p)"),)),
     "methodcaller-verb": (
         "import operator\ndef f(p):\n    return operator.methodcaller('read_text')(p)\n",
         (("f", "getattr", "operator.methodcaller('read_text')"),)),
@@ -2748,6 +2774,10 @@ PROVEN: dict[str, str] = {
     "listing-record-fields": (
         _H + "def f(rec, listing, v: Bound):\n    v.under('x')\n"
         "    return rec.entries, (listing.entries or {}).items(), listing.entries is None\n"),
+    "a-defender-classes-own-verb": (
+        "from defender._episode_handle import Episode\n"
+        "class Local:\n    def open(self, p): ...\n"
+        "def f(p):\n    Episode.open(p)\n    Local.open(p)\n"),
 }
 
 
@@ -2758,7 +2788,7 @@ def test_a_proven_handle_or_a_look_alike_is_not_a_hit(name: str):
 
 
 @pytest.mark.parametrize("opener", [
-    "open_drain_trees(paths, AUTHOR_DRAIN_LABEL)", "DrainTrees.open(paths.drain_writable_trees(L))",
+    "open_drain_trees(paths, AUTHOR_DRAIN_LABEL)", "DrainTrees.open(L.writable_trees(paths))",
 ])
 def test_a_with_opened_trees_chain_is_proven(opener: str):
     """`with <opener> as trees:` -> `trees.mount(...)` -> `.view().under(...)`: every link is

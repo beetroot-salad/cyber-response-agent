@@ -27,6 +27,7 @@ blind to the misses — `pyrefly-refs` is rooted at `configDir: defender` and si
 from __future__ import annotations
 
 import ast
+import functools
 import os
 import re
 import subprocess
@@ -37,6 +38,9 @@ import pytest
 
 from defender._run_paths import RunPaths
 from defender.hooks import _run_dir as hooks_run_dir
+from defender.tests._by_path import cached_parse, import_lint_lib
+
+ScanBlind = import_lint_lib("_astlib").ScanBlind
 
 DEFENDER = Path(__file__).resolve().parents[1]
 REPO_ROOT = DEFENDER.parent
@@ -85,6 +89,17 @@ SUITE_FILES = (
 
 
 
+@functools.cache
+def _repo_grep_cached(pattern: str, pathspecs: tuple[str, ...]) -> tuple[str, ...]:
+    cmd = ["git", "grep", "-n", "-I", "-E", pattern]
+    if pathspecs:
+        cmd += ["--", *pathspecs]
+    r = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
+    if r.returncode not in (0, 1):
+        raise AssertionError(f"git grep failed ({r.returncode}): {r.stderr.strip()}")
+    return tuple(line for line in r.stdout.splitlines() if line.strip())
+
+
 def repo_grep(pattern: str, *pathspecs: str) -> list[str]:
     """Every tracked line in the repo matching `pattern`, as `path:lineno:text`.
 
@@ -92,13 +107,7 @@ def repo_grep(pattern: str, *pathspecs: str) -> list[str]:
     `scripts/testing/gather_only.py` from two prior censuses. Tracked files only, so a
     stale `__pycache__` or an untracked scratch file cannot fake a hit or a miss.
     """
-    cmd = ["git", "grep", "-n", "-I", "-E", pattern]
-    if pathspecs:
-        cmd += ["--", *pathspecs]
-    r = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
-    if r.returncode not in (0, 1):
-        raise AssertionError(f"git grep failed ({r.returncode}): {r.stderr.strip()}")
-    return [line for line in r.stdout.splitlines() if line.strip()]
+    return list(_repo_grep_cached(pattern, pathspecs))
 
 
 def live_hits(hits: list[str], *, extra_excludes: tuple[str, ...] = ()) -> list[str]:
@@ -605,8 +614,8 @@ def test_no_accessor_names_a_file_nothing_reads():
     unread = set(accessors)
     for path in dict.fromkeys(consumers):
         try:
-            tree = ast.parse((REPO_ROOT / path).read_text(encoding="utf-8", errors="replace"))
-        except SyntaxError:  # pragma: no cover — a tracked .py that does not parse
+            _text, tree = cached_parse(REPO_ROOT / path, path)
+        except ScanBlind:  # pragma: no cover — a tracked .py that does not parse
             continue
         unread -= _run_paths_reads(tree, accessors)
     # SELF-RETIRING, in both directions (#1077 D7 review). The subtraction used to be

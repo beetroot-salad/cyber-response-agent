@@ -8,7 +8,7 @@ unpack `v[N]->>'$'` — and on an all-text payload that recipe crashed outright.
 the lead says where the rows and the names are, and `data` is one row per row, one column per
 name, each column typed from ITS OWN JSON values.
 
-Every test drives the real program as a process (`run_sql_py`: the argv after `defender-sql`,
+Every test drives the real program's own `main()` in a warm child process (`run_sql_warm`, see `_sql_warm.py`; the timing test and `--help` still spawn it fresh via `run_sql_py`: the argv after `defender-sql`,
 the payload on stdin) and asserts what the lead observes — the JSON rows on stdout, the exit
 code, the stderr text, the types `DESCRIBE data` prints. Each test names the obligation of the
 #1138 design it pins (O1–O10, M7). Every negative is paired with a positive control on the same
@@ -44,6 +44,7 @@ from defender.tests._defender_sql import (
     assert_query_error,
     run_sql_py,
 )
+from defender.tests._sql_warm import run_sql_warm
 
 _DOC = DEFENDER / "skills" / "gather" / "defender-sql.md"
 
@@ -69,12 +70,12 @@ def _text(payload: dict | list | str) -> str:
 
 def _flag(payload, sql: str, rows: str = "values", names: str = "columns"):
     """`cat <payload> | defender-sql --rows <rows> --names <names> '<sql>'`."""
-    return run_sql_py("--rows", rows, "--names", names, sql, stdin=_text(payload))
+    return run_sql_warm("--rows", rows, "--names", names, sql, stdin=_text(payload))
 
 
 def _plain(payload, sql: str):
     """`cat <payload> | defender-sql '<sql>'` — no declaration."""
-    return run_sql_py(sql, stdin=_text(payload))
+    return run_sql_warm(sql, stdin=_text(payload))
 
 
 def _ok(proc: subprocess.CompletedProcess) -> list:
@@ -171,8 +172,8 @@ def test_o1_a_nested_path_with_an_index_resolves(spelling):
     def run(sql: str, n: int):
         rows, names = f"tables[{n}].rows", f"tables[{n}].columns"
         if spelling == "equals":
-            return run_sql_py(f"--rows={rows}", f"--names={names}", sql, stdin=json.dumps(_AZURE))
-        return run_sql_py("--rows", rows, "--names", names, sql, stdin=json.dumps(_AZURE))
+            return run_sql_warm(f"--rows={rows}", f"--names={names}", sql, stdin=json.dumps(_AZURE))
+        return run_sql_warm("--rows", rows, "--names", names, sql, stdin=json.dumps(_AZURE))
 
     assert _ok(run("SELECT Computer, Count FROM data WHERE Count > 6", 0)) == [
         {"Computer": "db-1", "Count": 7}]
@@ -551,8 +552,8 @@ def test_o3_every_declaration_defect_is_refused_with_its_exit_and_the_fix_loads(
     defect removed: it loads and answers the right count, so every refusal above is about the
     defect and not about the payload, the query or the flags in general."""
     d = _DEFECTS[case]
-    _refused(run_sql_py(*d.argv, stdin=d.stdin), d.exit, *d.mentions)
-    assert _ok(run_sql_py(*d.fixed_argv, stdin=d.fixed_stdin)) == [{"n": d.n}]
+    _refused(run_sql_warm(*d.argv, stdin=d.stdin), d.exit, *d.mentions)
+    assert _ok(run_sql_warm(*d.fixed_argv, stdin=d.fixed_stdin)) == [{"n": d.n}]
 
 
 def test_o3_names_that_differ_only_by_non_ascii_case_are_distinct_columns():
@@ -871,7 +872,7 @@ def test_o6_the_names_key_is_the_candidate_whose_length_matches_the_rows(payload
     assert found, f"no declaration on stderr: {proc.stderr!r}"
     assert found.groups() == declared, proc.stderr
     printed = ("--rows", found.group(1), "--names", found.group(2))
-    assert _ok(run_sql_py(*printed, sql, stdin=json.dumps(payload))) == rows
+    assert _ok(run_sql_warm(*printed, sql, stdin=json.dumps(payload))) == rows
 
 
 @pytest.mark.parametrize(("payload", "sql", "rows"), [
@@ -1085,7 +1086,7 @@ def test_r1_an_empty_positional_result_gets_the_note_and_its_declaration_answers
     assert found, f"an empty positional result printed no declaration: {proc.stderr!r}"
     assert found.groups() == declared, proc.stderr
     printed = ("--rows", found.group(1), "--names", found.group(2))
-    assert _ok(run_sql_py(*printed, _SQL, stdin=json.dumps(payload))) == [{"n": 0}]
+    assert _ok(run_sql_warm(*printed, _SQL, stdin=json.dumps(payload))) == [{"n": 0}]
 
 
 def test_r1_a_non_empty_list_of_rows_fires_even_with_no_names_beside_it():
@@ -1114,7 +1115,7 @@ def test_r1_no_note_where_the_payload_is_not_one_object_holding_positional_rows(
     one row PER object — `count(*)` answers 2 here, so "count(*) answers 1" would be a false
     claim — and an empty list fires only beside a non-empty list of names. A list that is not
     all lists is not rows. None of these prints anything on stderr."""
-    proc = run_sql_py(_SQL, stdin=stdin)
+    proc = run_sql_warm(_SQL, stdin=stdin)
     assert _ok(proc) == [{"n": n}]
     assert "--rows" not in proc.stderr, proc.stderr
     assert "answers 1" not in proc.stderr, proc.stderr
@@ -1163,9 +1164,9 @@ def test_r2_a_lone_surrogate_in_a_cell_is_an_input_error_not_a_traceback(bad, go
     text = payload(bad)
     assert "\\ud" in text, "premise: the surrogate travels as a JSON escape"
     assert text.isascii(), "premise: the payload text is plain ASCII"
-    proc = run_sql_py("--rows", "recs", "--names", "hdr", _SQL, stdin=text)
+    proc = run_sql_warm("--rows", "recs", "--names", "hdr", _SQL, stdin=text)
     _refused(proc, EXIT_INPUT_ERROR, "load")
-    assert _ok(run_sql_py("--rows", "recs", "--names", "hdr", _SQL, stdin=payload(good))) == [{"n": 2}]
+    assert _ok(run_sql_warm("--rows", "recs", "--names", "hdr", _SQL, stdin=payload(good))) == [{"n": 2}]
 
 
 def test_r2_a_valid_surrogate_pair_is_not_a_defect():
@@ -1173,7 +1174,7 @@ def test_r2_a_valid_surrogate_pair_is_not_a_defect():
     round-trips — the refusal above is about a LONE surrogate, not about escapes."""
     text = json.dumps({"hdr": ["user"], "recs": [["\U0001F600"], ["bob"]]})
     assert "\\ud83d\\ude00" in text, "premise: the pair travels escaped"
-    assert _ok(run_sql_py("--rows", "recs", "--names", "hdr", "SELECT user FROM data ORDER BY 1",
+    assert _ok(run_sql_warm("--rows", "recs", "--names", "hdr", "SELECT user FROM data ORDER BY 1",
                           stdin=text)) == [{"user": "bob"}, {"user": "\U0001F600"}]
 
 
@@ -1212,7 +1213,7 @@ def test_r3_every_flagged_run_over_a_json_column_says_it_holds_json_and_how_to_c
     the JSON column(s) on stderr, says `->>'$'` gives text, and hands over a `TRY_CAST` recipe.
     That recipe, bound to this column and run, orders the numbers AS numbers: max 412, and two
     rows above 9 — the text `n/a` a NULL, not an error."""
-    proc = run_sql_py("--rows", "recs", "--names", "hdr", sql, stdin=json.dumps(_JSON_NUMBERS))
+    proc = run_sql_warm("--rows", "recs", "--names", "hdr", sql, stdin=json.dumps(_JSON_NUMBERS))
     assert proc.returncode in (EXIT_OK, EXIT_QUERY_ERROR), proc.stderr
     assert "Traceback" not in proc.stderr
     assert "event.code" in proc.stderr, proc.stderr

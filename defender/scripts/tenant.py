@@ -32,8 +32,11 @@ folder with no data root at all (tenant CI).
 `migrate` is ONE-OFF, for a tenant set up before #1120 (a row and `runs/` under the data root,
 its settings committed in the product repo until #1120 deleted them): it builds the knowledge
 folder acceptance now requires from the last copy in the checkout's history, as a new repo
-exactly like scaffold's, and the operator then runs `setup <tenant-id>`. Exit status: 0 clean, 1 a finding or a refusal, 2 a
-usage error. Every refusal is printed as `[tenant.py] <message>`.
+exactly like scaffold's, and the operator then runs `setup <tenant-id>`.
+
+Exit status: 0 clean, 1 a finding or a refusal, 2 a usage error. A check that could not judge (the
+grant census not taken, `.tenant-id` unverifiable) is one more finding, not a separate code, and
+the checks that need no census still run. Every refusal is printed as `[tenant.py] <message>`.
 """
 from __future__ import annotations
 
@@ -72,7 +75,7 @@ if __name__ == "__main__":
     _root = str(_REPO_ROOT)
     sys.path[:] = [_root, *(entry for entry in sys.path if entry != _root)]
 
-from defender import _git, _tenant, _tenant_census  # noqa: E402
+from defender import _git, _tenant  # noqa: E402
 from defender._io import guarded_mkdir, read_plain_bytes, write_guarded  # noqa: E402
 from defender._tenants import SETTINGS_HALF, TENANT_ID_FILE, template_dir  # noqa: E402
 from defender.runtime import run_tenant  # noqa: E402
@@ -160,24 +163,34 @@ def check_folder(folder: Path) -> int:
 
 def _findings(knowledge: Path) -> list[str]:
     """Everything `check` reports about a folder acceptance (or the folder rules) passed: the
-    settings files load, the grant census both ways and the lead-zero agreement against the
-    running checkout, and the committed `.tenant-id`."""
+    settings files load, the grant table loads, the lead-zero agreement against the running
+    catalog, the grant census both ways against the running checkout, and the committed
+    `.tenant-id`. A census that cannot be taken costs only the census: its finding says the
+    table went unchecked and why, and every other rule still runs."""
     settings = knowledge / SETTINGS_HALF
     findings: list[str] = []
     try:
         _settings_files_parse(settings)
     except _tenant.TenantRefused as bad:
         findings.append(str(bad))
+    # Here, not at the top: the census reaches the lead-author's whole extraction stack, which
+    # only `check` uses — `setup`, `scaffold` and `migrate` start without paying for it.
+    from defender import _tenant_census
+
+    table = dispositions_path(settings)
+    census: _tenant_census.Census | None = None
     try:
         census = _tenant_census.take_census(_DEFENDER_DIR, _REPO_ROOT)
     except _tenant_census.CensusUnavailable as blind:
-        findings.append(f"the grant census could not be taken: {blind}")
-    else:
-        table = dispositions_path(settings)
-        try:
-            findings += _tenant_census.table_findings(settings, census).lines(table)
-        except DispositionError as unloadable:
-            findings.append(str(unloadable))
+        findings.append(
+            f"{table} was not checked against the running checkout's adapters (for verbs nobody "
+            f"decides, or rows no adapter declares): the grant census could not be taken — {blind}")
+    try:
+        findings += (_tenant_census.table_findings(settings, census).lines(table)
+                     if census is not None
+                     else _tenant_census.folder_findings(settings, _DEFENDER_DIR).lines())
+    except DispositionError as unloadable:
+        findings.append(str(unloadable))
     committed = _tenant_id_committed(knowledge)
     if committed is not None:
         findings.append(committed)
@@ -190,7 +203,7 @@ def _report(findings: list[str]) -> int:
     return 1 if findings else 0
 
 
-def _tenant_id_committed(folder: Path) -> str | None:
+def _tenant_id_committed(folder: Path, timeout: float = _COMMITTED_READ_TIMEOUT) -> str | None:
     """For a folder that is a git work tree: `None` when HEAD commits its `agent/.tenant-id`
     as it stands — byte for byte, except that a CRLF checkout of an LF commit (`core.autocrlf`,
     an `eol=crlf` attribute) matches — else the finding: the file untracked, staged only, or
@@ -201,12 +214,13 @@ def _tenant_id_committed(folder: Path) -> str | None:
     folder (git would answer from an enclosing repo) fails closed too: the answer is the
     folder's own repository's or none. Replace objects are ignored (a `refs/replace` entry
     could stand an edited blob in for the committed one, and a clone does not carry it), and
-    each git call is bounded: a `.git` holding a FIFO fails closed rather than hanging."""
+    each git call is bounded by `timeout` seconds: a `.git` holding a FIFO fails closed rather
+    than hanging."""
     rel = TENANT_ID_FILE.as_posix()
     if not os.path.lexists(folder / ".git") or not os.path.lexists(folder / rel):
         return None
     env = {**_git.env_for_cwd(), "GIT_NO_REPLACE_OBJECTS": "1"}
-    bound = _COMMITTED_READ_TIMEOUT
+    bound = timeout
     try:
         top = _git.git(["rev-parse", "--show-toplevel"], cwd=folder, env=env, timeout=bound)
         if Path(top).resolve() != folder.resolve():
@@ -220,8 +234,8 @@ def _tenant_id_committed(folder: Path) -> str | None:
                      if listed else None)
     except subprocess.TimeoutExpired:
         return f"{_CANNOT_VERIFY}: git did not answer within {bound}s over {folder / '.git'}"
-    except FileNotFoundError as absent:
-        return f"{_CANNOT_VERIFY}: git is not available on PATH ({absent})"
+    except OSError as unstarted:
+        return f"{_CANNOT_VERIFY}: {_git.unstarted(unstarted)} ({unstarted})"
     except _git.GitError as failed:
         return f"{_CANNOT_VERIFY}: git could not read {folder}'s repository: {failed.stderr}"
     if committed is None:

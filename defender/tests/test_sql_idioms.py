@@ -51,6 +51,7 @@ from defender.tests._defender_sql import (
     assert_query_error,
     run_sql_py,
 )
+from defender.tests._sql_warm import run_sql_warm
 from defender.tests._locale import C_LOCALE_ENV
 
 _DOC = DEFENDER / "skills" / "gather" / "defender-sql.md"
@@ -79,7 +80,7 @@ def _sql(
     payload: str, query: str, env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """`cat <payload.json> | defender-sql '<query>'` as a lead types it."""
-    return run_sql_py(query, stdin=payload, env=env)
+    return run_sql_warm(query, stdin=payload, env=env)
 
 
 def _rows(payload: str, query: str) -> list:
@@ -94,7 +95,7 @@ _ESQL_DECLARED = ("--rows", "values", "--names", "columns")
 
 def _declared(payload: str, query: str, declaration: tuple[str, ...] = _ESQL_DECLARED) -> list:
     """`cat <payload.json> | defender-sql --rows … --names … '<query>'` — the declared form."""
-    proc = run_sql_py(*declaration, query, stdin=payload)
+    proc = run_sql_warm(*declaration, query, stdin=payload)
     assert proc.returncode == EXIT_OK, f"defender-sql failed: {proc.stderr}"
     return json.loads(proc.stdout)
 

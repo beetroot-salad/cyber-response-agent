@@ -181,7 +181,7 @@ def test_c1_lessons_common_reexports_the_same_object():
     assert "iter_lessons" in common.__all__
 
 
-def test_c1b_the_venv_reexec_anchors_on_its_own_location_not_the_callers_depth():
+def test_c1b_the_venv_reexec_anchors_on_its_own_location_not_the_callers_depth(tmp_path):
     """``reexec_into_venv`` finds ``defender/.venv`` from ITS OWN path, so a caller may sit at
     any depth in the tree. The ``script`` argument names what to re-run — it does not locate
     the interpreter.
@@ -192,24 +192,35 @@ def test_c1b_the_venv_reexec_anchors_on_its_own_location_not_the_callers_depth()
     level up it silently pointed at the wrong tree, and for one near the filesystem root it
     raised ``IndexError`` before it could re-exec anything.
 
-    Asserted statically rather than by calling it: the function's success path IS an
-    ``os.execv``, so a test that reached it would replace the pytest process. ``test_c3``
-    below is the live positive control, in a subprocess that can afford to be re-exec'd."""
+    Driven live, in a child that can afford to be replaced: a caller OUTSIDE the defender tree,
+    at a depth no caller has, run under the base interpreter (not the venv's), calls the guard
+    with its own path. The guard must re-exec it under ``defender/.venv`` — which it can only
+    find from its own location, since nothing at or above the caller holds a ``.venv`` — and
+    the re-run must be the same script with the same arguments."""
     venv = importlib.import_module("defender._venv")
     assert venv._DEFENDER_DIR == DEFENDER, (
         "the anchor must be defender/ itself — the interpreter lives at defender/.venv")
+    venv_py = DEFENDER / ".venv" / "bin" / "python3"
+    assert venv_py.is_file(), f"no venv interpreter at {venv_py} to re-exec into"
+    base_py = Path(sys._base_executable)
+    assert base_py != venv_py
 
-    tree = ast.parse((DEFENDER / "_venv.py").read_text())
-    fn = next(n for n in tree.body
-              if isinstance(n, ast.FunctionDef) and n.name == "reexec_into_venv")
-    execv = next(n for n in ast.walk(fn)
-                 if isinstance(n, ast.Call) and ast.unparse(n.func) == "os.execv")
-    handed_on = {id(n) for n in ast.walk(execv) if isinstance(n, ast.Name)}
-    uses = [n for n in ast.walk(fn) if isinstance(n, ast.Name) and n.id == "script"]
-    assert uses, "the parameter is unused — the fixture is reading the wrong function"
-    assert all(id(n) in handed_on for n in uses), (
-        "`script` is being read outside the execv argv — the interpreter must not be "
-        "derived from the caller's own path (that is the depth lock)")
+    caller = tmp_path / "a" / "b" / "c" / "d" / "e" / "caller.py"
+    caller.parent.mkdir(parents=True)
+    caller.write_text(textwrap.dedent(f"""
+        import sys
+        sys.path.insert(0, {str(REPO_ROOT)!r})
+        from defender._venv import reexec_into_venv
+        reexec_into_venv(__file__)
+        sys.stdout.write(repr((sys.executable, sys.argv)))
+    """), encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if k not in ("DEFENDER_BOX", "PYTHONPATH")}
+    proc = subprocess.run([str(base_py), str(caller), "--flag", "x"], capture_output=True,
+                          text=True, encoding="utf-8", env=env, cwd=tmp_path, check=False)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout == repr((str(venv_py), [str(caller), "--flag", "x"])), (
+        "the guard did not re-exec a caller outside the tree under defender/.venv — the "
+        f"interpreter is being derived from the caller's own path (the depth lock): {proc.stdout!r}")
 
 
 #: The module the guard lives in — the ONE ``defender.*`` import a script may make before calling it.

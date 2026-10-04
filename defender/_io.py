@@ -36,13 +36,25 @@ tuple first (mypy rejects a star-unpack in an ``except`` display)::
 _FILE_MODE = 0o644
 
 
-def read_text_utf8(path: Path) -> str:
-    return path.read_text(encoding="utf-8")  # lint-text-io: ok — the canonical pinned reader
+#: The most a whole-file read takes in by default (#1174): a planted sparse file
+#: (`truncate -s 1T`) would otherwise have CPython pre-size a buffer of `st_size + 1`. Nothing
+#: read through `_io` comes near it but the wire log, whose one reader (an operator tool over a
+#: host-written log) passes `limit=None`.
+READ_LIMIT = 64 * 1024 * 1024
 
 
-def read_text_soft(path: Path) -> tuple[str | None, str | None]:
+def read_text_utf8(path: Path, *, limit: int | None = READ_LIMIT) -> str:
+    """The canonical text read: UTF-8 with universal newlines, as `Path.read_text` reads, and
+    opened as it opens (following links, blocking). Bounded (#1174): a file over `limit`
+    (`None` for none) raises an `OSError`, before reading or once it grows past it."""
+    return _read_followed(path, limit=limit, errors="strict")
+
+
+def read_text_soft(
+    path: Path, *, limit: int | None = READ_LIMIT,
+) -> tuple[str | None, str | None]:
     try:
-        return read_text_utf8(path), None
+        return read_text_utf8(path, limit=limit), None
     except TEXT_READ_ERRORS as e:
         return None, str(e)
 
@@ -67,7 +79,9 @@ def entry_present(path: Path) -> bool:
     return True
 
 
-def read_guarded(path: Path, *, errors: str = "strict") -> tuple[str | None, str | None]:
+def read_guarded(
+    path: Path, *, errors: str = "strict", os_: Any = os,
+) -> tuple[str | None, str | None]:
     """:func:`write_guarded`'s READ-side twin: the text at ``path``, or a refusal reason.
 
     Same return shape as :func:`read_text_soft`, but anything other than a plain,
@@ -79,12 +93,12 @@ def read_guarded(path: Path, *, errors: str = "strict") -> tuple[str | None, str
     on absence differently uses :func:`read_plain` and catches it.
     """
     try:
-        return read_plain(path, errors=errors), None
+        return read_plain(path, errors=errors, os_=os_), None
     except TEXT_READ_ERRORS as e:
         return None, str(e)
 
 
-def read_plain(path: Path, *, errors: str = "strict") -> str:
+def read_plain(path: Path, *, errors: str = "strict", os_: Any = os) -> str:
     """The guarded read as a RAISING primitive: the text of the plain, single-linked regular
     file at ``path``, read with universal newlines exactly as ``Path.read_text`` would — or the
     exception that stopped it, every one a member of :data:`TEXT_READ_ERRORS`:
@@ -94,7 +108,11 @@ def read_plain(path: Path, *, errors: str = "strict") -> str:
         symlink (refused at the open, ``ELOOP``), a hard link (``EMLINK``, the write side's
         own errno for the shape ``O_NOFOLLOW`` cannot refuse), a directory, fifo, socket or
         device (``ELOOP``, as the write side folds them);
-      * any other ``OSError`` — the file is there and could not be read (``EACCES``, ``EIO``);
+      * any other ``OSError`` — the file is there and could not be read (``EACCES``, ``EIO``),
+        including the read step's refusals (:func:`_read_plain_fd`): larger than
+        :data:`READ_LIMIT` (``EFBIG``), no data yet on the non-blocking descriptor
+        (``EAGAIN``), gone while it was read (an ``ENOENT`` that is NOT a
+        ``FileNotFoundError``), and a path that does not encode (``EINVAL``);
       * ``UnicodeDecodeError`` — its bytes are not UTF-8.
 
     Plainness is judged on the open descriptor (``O_NOFOLLOW`` then ``fstat``), not by
@@ -102,50 +120,194 @@ def read_plain(path: Path, *, errors: str = "strict") -> str:
     """
     # `_open_plain_fd` opens with `O_NONBLOCK`: a planted FIFO would otherwise block the open
     # forever before `fstat` could refuse it.
-    fd = _open_plain_fd(path)
+    fd, st = _open_plain_fd(path, os_)
     try:
-        with os.fdopen(fd, "r", encoding="utf-8", errors=errors) as fh:
-            fd = -1  # `fdopen` owns it now; the finally below must not close it twice.
-            return fh.read()
+        text = _read_plain_fd(os_, fd, st.st_size, binary=False, errors=errors)
     finally:
-        if fd >= 0:
-            os.close(fd)
+        os_.close(fd)
+    assert isinstance(text, str)
+    return text
 
 
-def read_plain_bytes(path: Path) -> bytes:
+def read_plain_bytes(path: Path, *, os_: Any = os) -> bytes:
     """:func:`read_plain` without newline translation, for records whose exact bytes matter
     (e.g. the alert's content hash)."""
-    fd = _open_plain_fd(path)
+    fd, st = _open_plain_fd(path, os_)
     try:
-        with os.fdopen(fd, "rb") as fh:
-            fd = -1
-            return fh.read()
+        data = _read_plain_fd(os_, fd, st.st_size, binary=True)
     finally:
-        if fd >= 0:
-            os.close(fd)
+        os_.close(fd)
+    assert isinstance(data, bytes)
+    return data
 
 
-def read_bytes_guarded(path: Path) -> tuple[bytes | None, str | None]:
+def read_bytes_guarded(path: Path, *, os_: Any = os) -> tuple[bytes | None, str | None]:
     """:func:`read_guarded`'s bytes twin — ``(data, None)`` or ``(None, reason)``."""
     try:
-        return read_plain_bytes(path), None
+        return read_plain_bytes(path, os_=os_), None
     except TEXT_READ_ERRORS as e:
         return None, str(e)
 
 
-def _open_plain_fd(path: Path) -> int:
-    """The guarded open both plain readers share; the caller owns the returned fd."""
+#: One `read(2)` of the read step: a typical record (investigation.md is capped at 64 KiB) is
+#: one read plus the empty one that says EOF.
+_READ_CHUNK = 256 * 1024
+
+_VANISHED = "the file vanished while it was being read"
+_NOT_A_PATH = "not an encodable path"
+
+
+class _TooLarge(OSError):
+    """The read step's own size refusal (`EFBIG`): over the limit by `fstat`, or grown past it
+    while read. Its own type, so a caller that heals from oversize content (the run-state JSON
+    update, #1174 amendment 2) never heals from an unrelated `EFBIG` a fault raised."""
+
+
+def _too_large(limit: int) -> _TooLarge:
+    return _TooLarge(errno.EFBIG, f"larger than the read limit ({limit} bytes)")
+
+
+class _ReadVanished(OSError):
+    """An `ENOENT` after the descriptor was opened and judged plain. A subclass is not mapped to
+    `FileNotFoundError` the way `OSError(ENOENT, ...)` is, so no reader's `except
+    FileNotFoundError` (absent) catches it: it is a refusal (#1174 O3)."""
+
+
+def _read_plain_fd(
+    os_: Any, fd: int, size: int, *, binary: bool, errors: str = "strict",
+    limit: int | None = READ_LIMIT,
+) -> str | bytes:
+    """The one place a whole file's bytes are read (#1174): every whole-file read in `_io`
+    comes here, the guarded readers, the canonical wrappers and the locked JSON routines.
+
+    The whole content of `fd`, an open descriptor, or the refusal that stopped it:
+    `_TooLarge` when `size` (the `st_size` of the open's own `fstat`, not asked again: one
+    `fstat` per opened handle, #1049) is over `limit`, before any byte is read, or when the
+    reads run past it (it grew); `BlockingIOError` when a non-blocking descriptor has no data
+    yet; `_ReadVanished` for an `ENOENT` from a `read`. `limit=None` reads with no bound.
+
+    The first read asks for `size + 1`, so a file whose size `fstat` tells reads in one call
+    plus the empty one that says EOF; the step keeps reading until a read returns nothing,
+    whatever `fstat` said, so a file that grew, or a procfs file reporting `st_size` 0, reads
+    in full. Text is decoded as UTF-8 under `errors`, then given universal newlines exactly as
+    `Path.read_text` would (translated only when a `\\r` is there). The descriptor stays the
+    caller's to close."""
+    if limit is not None and size > limit:
+        raise _too_large(limit)
+    buf = bytearray()
+    want = size + 1 if size > 0 else _READ_CHUNK
     try:
-        fd = open_nofollow_fd(Path(path), os.O_RDONLY | os.O_NONBLOCK)
+        while chunk := os_.read(fd, want):
+            buf += chunk
+            if limit is not None and len(buf) > limit:
+                raise _too_large(limit)
+            want = _READ_CHUNK
+    except FileNotFoundError:
+        raise _ReadVanished(errno.ENOENT, _VANISHED) from None
+    if binary:
+        return bytes(buf)
+    text = buf.decode("utf-8", errors)
+    if "\r" in text:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return text
+
+
+def _read_followed(path: Path, *, limit: int | None, errors: str) -> str:
+    """The canonical wrappers' read: opened as `Path.read_text` opens (following links,
+    blocking, #1174 O9), then the shared step with the wrapper's `limit`."""
+    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
+    try:
+        text = _read_plain_fd(os, fd, os.fstat(fd).st_size, binary=False, errors=errors,
+                              limit=limit)
+    finally:
+        os.close(fd)
+    assert isinstance(text, str)
+    return text
+
+
+def _json_object(raw: bytes) -> dict | None:
+    """`raw` as a JSON object, or `None` when it is not usable as one: undecodable, not JSON,
+    nested past :data:`JSON_NESTING_LIMIT` (judged before decoding, :func:`load_json_artifact`),
+    or not an object."""
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    doc, reason = load_json_artifact(text)
+    return doc if reason is None and isinstance(doc, dict) else None
+
+
+def _rewrite_fd(os_: Any, fd: int, data: bytes) -> None:
+    """Replace the whole content of the locked, open `fd` with `data`, in place: back to 0,
+    truncate, then write until every byte is down."""
+    os_.lseek(fd, 0, os.SEEK_SET)
+    os_.ftruncate(fd, 0)
+    view = memoryview(data)
+    while view:
+        view = view[os_.write(fd, view):]
+
+
+def locked_json_update(
+    open_locked: Any, mutate: Callable[[dict], Any], *,
+    default: Callable[[], dict] = dict, os_: Any = os,
+) -> dict:
+    """The locked read-modify-write of a run-state JSON object (#1174 amendment 2): callers get
+    contents, never a handle to read.
+
+    `open_locked` is a context manager yielding the locked record's descriptor and its `fstat`
+    (:func:`locked_for_rewrite`, :func:`rooted_locked_for_rewrite`). The whole record is read
+    through the shared step; content unusable as state (over :data:`READ_LIMIT`, undecodable,
+    not JSON, too deep, not an object) starts over from `default()` (O6). Any other read fault
+    propagates and nothing is written (O7). `mutate` changes the state in place; it is written
+    back whole, and returned."""
+    with open_locked as (fd, st):
+        try:
+            raw = _read_plain_fd(os_, fd, st.st_size, binary=True)
+        except _TooLarge:
+            state = None
+        else:
+            assert isinstance(raw, bytes)
+            state = _json_object(raw)
+        if state is None:
+            state = default()
+        mutate(state)
+        _rewrite_fd(os_, fd, json.dumps(state, indent=2).encode())
+    return state
+
+
+def locked_json_read(open_locked: Any, *, os_: Any = os) -> dict:
+    """The locked read of a run-state JSON object (#1174 O8): `open_locked` is
+    :func:`locked_for_read`'s context manager. `{}` when the record is absent, refused, or
+    unreadable (every `TEXT_READ_ERRORS` member, the size limit among them), and when its
+    content is unusable as state."""
+    try:
+        with open_locked as (fd, st):
+            raw = _read_plain_fd(os_, fd, st.st_size, binary=True)
+    except TEXT_READ_ERRORS:
+        return {}
+    assert isinstance(raw, bytes)
+    return _json_object(raw) or {}
+
+
+def _open_plain_fd(path: Path, os_: Any = os) -> tuple[int, os.stat_result]:
+    """The guarded open both plain readers share, and the descriptor's one `fstat`; the caller
+    owns the returned fd. A path that does not encode is refused (`EINVAL`) before any open
+    (#1174 O4)."""
+    try:
+        os.fsencode(path)
+    except UnicodeEncodeError:
+        raise OSError(errno.EINVAL, _NOT_A_PATH) from None
+    try:
+        fd = open_nofollow_fd(Path(path), os.O_RDONLY | os.O_NONBLOCK, os_=os_)
     except OSError as e:
         # Reword a symlink-at-the-leaf `ELOOP` as the alias refusal. An `ELOOP` from a looped
         # component higher up keeps its own strerror: the leaf is not the alias.
-        if getattr(e, "write_guarded_alias", False) and _leaf_is_link(path):
+        if getattr(e, "write_guarded_alias", False) and _leaf_is_link(path, os_):
             raise _mark_alias(OSError(errno.ELOOP, ALIAS_READ_REFUSAL, str(path)),
                               is_alias=True) from None
         raise
     try:
-        st = os.fstat(fd)
+        st = os_.fstat(fd)
         # `O_NOFOLLOW` cannot refuse a hard link, so check the link count; directories,
         # FIFOs, sockets and devices get the same refusal as a planted symlink.
         if not is_plain_entry(st):
@@ -154,16 +316,16 @@ def _open_plain_fd(path: Path) -> int:
                 str(path),
             )
     except BaseException:
-        os.close(fd)
+        os_.close(fd)
         raise
-    return fd
+    return fd, st
 
 
-def _leaf_is_link(path: Path) -> bool:
+def _leaf_is_link(path: Path, os_: Any = os) -> bool:
     """Is the entry at `path` itself a symlink? `False` if it cannot be `lstat`ed (a looped
     parent), where the leaf is not the alias."""
     try:
-        return stat.S_ISLNK(os.lstat(path).st_mode)
+        return stat.S_ISLNK(os_.lstat(path).st_mode)
     except OSError:
         return False
 
@@ -180,7 +342,7 @@ _PLATFORM_FAULT = ("the episode-tree reader walks each directory step with O_PAT
 _STEP_FLAGS = (_O_PATH or 0) | os.O_NOFOLLOW | os.O_CLOEXEC
 
 #: The root's own open (`bind`): an `O_PATH` directory handle that follows the operator's
-#: spelling; `Bound.entries()` opens `.` for reading off it only when listing.
+#: spelling; a listing (`Bound._listing`) opens `.` for reading off it only then.
 _ROOT_FLAGS = (_O_PATH or 0) | os.O_DIRECTORY | os.O_CLOEXEC
 
 #: `errors=` values `Bound.read` admits; anything else is refused before any open.
@@ -191,8 +353,8 @@ _NOT_A_NAME = "not a valid relative name — a name is a sequence of plain path 
 
 def _parse_name(name: str | PurePath) -> tuple[str, tuple[str, ...]]:
     """A `bind`ed reader's name grammar: a POSIX `str` or a `PurePath`, split on `/` into
-    non-empty components that are never `.` or `..`. Absolute names, NULs and empty components
-    raise `ValueError` (naming no path) before any open.
+    non-empty components that are never `.` or `..`. Absolute names, NULs, empty components and
+    a spelling that does not encode raise `ValueError` (naming no path) before any open.
     """
     if isinstance(name, PurePath):
         spelling = name.as_posix()
@@ -202,6 +364,10 @@ def _parse_name(name: str | PurePath) -> tuple[str, tuple[str, ...]]:
         raise ValueError(_NOT_A_NAME)
     if not spelling or spelling.startswith("/") or "\x00" in spelling:
         raise ValueError(_NOT_A_NAME)
+    try:
+        os.fsencode(spelling)  # a lone surrogate (not an undecodable byte) is no name (#1174)
+    except UnicodeEncodeError:
+        raise ValueError(_NOT_A_NAME) from None
     parts = tuple(spelling.split("/"))
     if any(p in ("", ".", "..") for p in parts):
         raise ValueError(_NOT_A_NAME)
@@ -389,41 +555,51 @@ def _open_refusal(e: OSError, where: Path) -> OSError:
 def _open_leaf(os_: Any, dir_fd: int, leaf: str, flags: int, where: Path) -> int:
     """Open `leaf` off `dir_fd` no-follow and non-blocking, then judge the descriptor. The
     caller owns the returned fd."""
+    return _open_leaf_stat(os_, dir_fd, leaf, flags, where)[0]
+
+
+def _open_leaf_stat(
+    os_: Any, dir_fd: int, leaf: str, flags: int, where: Path,
+) -> tuple[int, os.stat_result]:
+    """:func:`_open_leaf`, also answering the descriptor's one `fstat` (the plainness
+    judgement), so a reader takes the size from it rather than asking again."""
     try:
         fd = os_.open(leaf, flags | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, _FILE_MODE,
                       dir_fd=dir_fd)
     except OSError as e:
         raise _open_refusal(e, where) from None
     try:
-        _refuse_unless_plain_stat(os_.fstat(fd), where)
+        st = os_.fstat(fd)
+        _refuse_unless_plain_stat(st, where)
     except BaseException:
         os_.close(fd)
         raise
-    return fd
+    return fd, st
 
 
 def _read_leaf(
     os_: Any, dir_fd: int, leaf: str, where: Path, *, binary: bool, errors: str = "strict",
 ) -> str | bytes:
     """The whole of the plain file `leaf` (the open decides), or the exception that stopped it:
-    `FileNotFoundError` when absent, else a member of `TEXT_READ_ERRORS`."""
-    fd = _open_leaf(os_, dir_fd, leaf, os.O_RDONLY, where)
+    `FileNotFoundError` when absent at the open, else a member of `TEXT_READ_ERRORS` (the read
+    step's refusals among them, :func:`_read_plain_fd`)."""
+    fd, st = _open_leaf_stat(os_, dir_fd, leaf, os.O_RDONLY, where)
     try:
-        fh = os_.fdopen(fd, "rb") if binary else os_.fdopen(
-            fd, "r", encoding="utf-8", errors=errors)
-    except BaseException:
-        os_.close(fd)  # `fdopen` failed to take the fd, so it is still ours to close
-        raise
-    with fh:
-        return fh.read()
+        return _read_plain_fd(os_, fd, st.st_size, binary=binary, errors=errors)
+    finally:
+        os_.close(fd)
 
 
 def _read_reason(e: BaseException) -> str:
     """A refused read's reason, naming no path: the alias sentence for a link, hard link or
     other non-plain entry, else the error's own words."""
+    if isinstance(e, _ReadVanished):
+        return _VANISHED
     if isinstance(e, OSError) and e.errno:
         if e.errno in (errno.ELOOP, errno.EMLINK):
             return ALIAS_READ_REFUSAL
+        if isinstance(e, _TooLarge) or (e.errno == errno.EINVAL and e.strerror == _NOT_A_PATH):
+            return str(e.strerror)
         return os.strerror(e.errno)
     return str(e)
 
@@ -553,36 +729,55 @@ class Bound:
         dead directory be reopened and the C library ends its listing early, so it is judged
         by its link count once the scan is done (`st_nlink == 0`: no name holds it). A
         directory still linked when the scan ends was there for the whole listing."""
-        spelling = "/".join(self._prefix)
+        absent, reason, listed = self._listing(_entry_kind, lambda e: e.strerror or str(e))
+        return EntriesRead(name="/".join(self._prefix), entries=listed, absent=absent,
+                           reason=reason)
+
+    def _listing(
+        self, judge: Callable[[Any], Any], reason_of: Callable[[OSError], str],
+    ) -> tuple[bool, str | None, dict[str, Any] | None]:
+        """The one listing step `entries()` and `stat_entries` share: `(absent, reason, rows)`,
+        each row `judge(entry)` of one scanned entry, and a scan fault `reason_of(error)`.
+
+        A directory no name holds when its listing ends (`st_nlink == 0` on the reopened
+        descriptor, the held root among them) is absent, never present and empty: the kernel
+        lets a dead directory be reopened and the C library ends its listing early, so the
+        link count is asked once the scan is done, and also when the scan faulted, so an entry
+        vanishing with its dead folder is the folder's absence, not a refusal. A live
+        directory's scan fault stays the refusal (the dead check failing on a faulted scan
+        leaves it so), and the check's own fault after a clean scan is a refusal too."""
         if self._absent:
-            return EntriesRead(name=spelling, entries=None, absent=True, reason=None)
+            return True, None, None
         if self._error is not None:
-            return EntriesRead(name=spelling, entries=None, absent=False, reason=self._error)
+            return False, self._error, None
         try:
             with self._handle.dup() as root_fd:
                 kind, payload = self._directory_fd(root_fd)
         except OSError as e:  # the root closed: the dup's `EBADF`
-            return EntriesRead(name=spelling, entries=None, absent=False,
-                               reason=(e.strerror or str(e)))
+            return False, (e.strerror or str(e)), None
         if kind != "leaf":
-            return EntriesRead(name=spelling, entries=None, absent=kind == "absent",
-                               reason=None if kind == "absent" else str(payload))
+            return kind == "absent", None if kind == "absent" else str(payload), None
         fd = payload
         try:
-            with self._os.scandir(fd) as it:
-                listed = {entry.name: _entry_kind(entry) for entry in it}
-            dead = self._os.fstat(fd).st_nlink == 0
-        except OSError as e:
-            return EntriesRead(name=spelling, entries=None, absent=False,
-                               reason=(e.strerror or str(e)))
+            try:
+                with self._os.scandir(fd) as it:
+                    rows = {entry.name: judge(entry) for entry in it}
+            except OSError as fault:
+                try:
+                    dead = self._os.fstat(fd).st_nlink == 0
+                except OSError:
+                    dead = False
+                return (True, None, None) if dead else (False, reason_of(fault), None)
+            try:
+                dead = self._os.fstat(fd).st_nlink == 0
+            except OSError as e:
+                return False, reason_of(e), None
         finally:
             self._os.close(fd)
-        if dead:
-            return EntriesRead(name=spelling, entries=None, absent=True, reason=None)
-        return EntriesRead(name=spelling, entries=listed, absent=False, reason=None)
+        return (True, None, None) if dead else (False, None, rows)
 
     def _directory_fd(self, root_fd: int) -> tuple[str, Any]:
-        """A read handle on the bound directory for `entries`: the prefix walked as folders,
+        """A read handle on the bound directory for `_listing`: the prefix walked as folders,
         then `.` reopened for reading off the last handle (the walk's handles are `O_PATH`)."""
         try:
             with _descend(self._os, root_fd, self._prefix, Path(".")) as dir_fd:
@@ -627,32 +822,15 @@ def stat_entry(bound: Bound, name: str | PurePath) -> StatRead:
 
 def stat_entries(bound: Bound) -> StatsRead:
     """Every entry of the directory `bound` names, each judged without following it: the
-    directory is reached as `Bound.entries` reaches it (once), and each entry is `stat`ed
-    no-follow relative to it — one call per entry, where `entries()` plus a `stat_entry` per
-    name would walk from the root again for every one. Opens no entry: a FIFO cannot block
-    it. A function beside `Bound`, like `stat_entry`, for the same reason (#1133 O3)."""
-    spelling = "/".join(bound._prefix)
-    if bound._absent:
-        return StatsRead(name=spelling, stats=None, absent=True, reason=None)
-    if bound._error is not None:
-        return StatsRead(name=spelling, stats=None, absent=False, reason=bound._error)
-    try:
-        with bound._handle.dup() as root_fd:
-            kind, payload = bound._directory_fd(root_fd)
-    except OSError as e:  # the root closed: the dup's `EBADF`
-        return StatsRead(name=spelling, stats=None, absent=False, reason=(e.strerror or str(e)))
-    if kind != "leaf":
-        return StatsRead(name=spelling, stats=None, absent=kind == "absent",
-                         reason=None if kind == "absent" else str(payload))
-    fd = payload
-    try:
-        with bound._os.scandir(fd) as it:
-            stats = {entry.name: entry.stat(follow_symlinks=False) for entry in it}
-    except OSError as e:
-        return StatsRead(name=spelling, stats=None, absent=False, reason=_read_reason(e))
-    finally:
-        bound._os.close(fd)
-    return StatsRead(name=spelling, stats=stats, absent=False, reason=None)
+    directory is reached and scanned by the listing step `Bound.entries` is built on
+    (`Bound._listing`, once), and each entry is `stat`ed no-follow relative to it — one call
+    per entry, where `entries()` plus a `stat_entry` per name would walk from the root again
+    for every one. So a directory deleted under the listing is absent here as it is there
+    (#1177). Opens no entry: a FIFO cannot block it. A function beside `Bound`, like
+    `stat_entry`, for the same reason (#1133 O3)."""
+    absent, reason, stats = bound._listing(
+        lambda entry: entry.stat(follow_symlinks=False), _read_reason)
+    return StatsRead(name="/".join(bound._prefix), stats=stats, absent=absent, reason=reason)
 
 
 def bind(root: Path, *, os_: Any = os) -> Bound:  # lint-dup: ok — an unrelated `bind` (an AgentDeps builder) already lives at runtime/agent_definition.py:294; the shared word names two unrelated concepts, not one contract split in two
@@ -742,18 +920,20 @@ def parse_jsonl_row(line: str) -> dict | None:
     return obj if reason is None and isinstance(obj, dict) else None
 
 
-def read_jsonl_rows(path: Path) -> list[dict]:
-    return read_jsonl_rows_report(path)[0]
+def read_jsonl_rows(path: Path, *, limit: int | None = READ_LIMIT) -> list[dict]:
+    return read_jsonl_rows_report(path, limit=limit)[0]
 
 
-def read_jsonl_rows_report(path: Path) -> tuple[list[dict], int]:
+def read_jsonl_rows_report(
+    path: Path, *, limit: int | None = READ_LIMIT,
+) -> tuple[list[dict], int]:
     """JSONL rows plus the number of non-blank lines that were not rows, for callers that must
-    account for lost evidence.
+    account for lost evidence. Bounded like :func:`read_text_utf8` (`limit`, #1174): a file
+    over it raises an `OSError`.
     """
     if not path.is_file():
         return [], 0
-    text = path.read_text(encoding="utf-8", errors="replace")  # lint-jsonl-io: ok — the canonical tolerant reader  # noqa: E501
-    return _jsonl_rows_of(text)
+    return _jsonl_rows_of(_read_followed(path, limit=limit, errors="replace"))
 
 
 def _jsonl_rows_of(text: str) -> tuple[list[dict], int]:
@@ -1071,28 +1251,53 @@ def _refuse_unless_plain_stat(st: os.stat_result, where: object) -> None:
         )
 
 
-def open_nofollow_fd(path: Path, flags: int) -> int:
+def open_nofollow_fd(path: Path, flags: int, *, os_: Any = os) -> int:
     """`O_NOFOLLOW` open whose `ELOOP` is marked as an alias refusal: after
     `_refuse_unless_plain`, it means a symlink was planted in the race window, and must not
     count toward the accounting kill circuit as an ordinary failure."""
     try:
-        return os.open(path, flags | os.O_NOFOLLOW, _FILE_MODE)
+        return os_.open(path, flags | os.O_NOFOLLOW, _FILE_MODE)
     except OSError as e:
         raise _mark_alias(e, is_alias=e.errno == errno.ELOOP) from None
 
 
 @contextlib.contextmanager
-def locked_for_rewrite(path: Path, *, binary: bool = False) -> Iterator[Any]:
+def locked_for_rewrite(path: Path, *, os_: Any = os) -> Iterator[tuple[int, os.stat_result]]:
     """The locked read-modify-write prefix: refuse a non-plain target, open with
-    `O_NOFOLLOW`, then take the exclusive lock — in that order, so refusal precedes any lock or
-    write. Yields the locked handle at position 0."""
+    `O_NOFOLLOW` (creating it when absent), judge the descriptor plain on its own `fstat` (a
+    hard link planted after the precheck, #1174 O11), then take the exclusive lock — in that
+    order, so refusal precedes any lock or write. Yields the locked descriptor, at position 0,
+    and that `fstat`; never a file object (callers get contents, #1174 amendment 2)."""
     path = Path(path)
     _refuse_unless_plain(path)
-    fd = open_nofollow_fd(path, os.O_RDWR | os.O_CREAT)
-    opener = os.fdopen(fd, "r+b") if binary else os.fdopen(fd, "r+", encoding="utf-8")
-    with opener as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        yield f
+    fd = open_nofollow_fd(path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, os_=os_)
+    try:
+        st = os_.fstat(fd)
+        _refuse_unless_plain_stat(st, path)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield fd, st
+    finally:
+        os_.close(fd)
+
+
+@contextlib.contextmanager
+def locked_for_read(path: Path, *, os_: Any = os) -> Iterator[tuple[int, os.stat_result]]:
+    """The locked read's opener (#1174 O8): no-follow, non-blocking, read-only — it creates
+    nothing — judged plain on its descriptor, under a shared lock. Yields the descriptor and
+    its `fstat`. An absent record raises `FileNotFoundError`; a link or other non-plain entry,
+    its refusal."""
+    path = Path(path)
+    try:
+        fd = os_.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError as e:
+        raise _mark_alias(e, is_alias=e.errno == errno.ELOOP) from None
+    try:
+        st = os_.fstat(fd)
+        _refuse_unless_plain_stat(st, path)
+        fcntl.flock(fd, fcntl.LOCK_SH)
+        yield fd, st
+    finally:
+        os_.close(fd)
 
 
 def write_guarded(
@@ -1156,10 +1361,8 @@ def write_guarded(
             with os.fdopen(fd, "a", encoding="utf-8") as f:
                 f.write(text)
     elif mode == "update":
-        with locked_for_rewrite(path, binary=isinstance(text, (bytes, bytearray))) as f:
-            f.seek(0)
-            f.truncate()
-            f.write(text)
+        with locked_for_rewrite(path) as (fd, _st):
+            _rewrite_fd(os, fd, text.encode("utf-8") if isinstance(text, str) else bytes(text))
     else:
         raise ValueError(f"unknown write_guarded mode: {mode!r}")
 
@@ -1433,24 +1636,21 @@ def _replace_at(
 
 @contextlib.contextmanager
 def rooted_locked_for_rewrite(
-    root: Path, name: str | PurePath, *, binary: bool = False, os_: Any = os,
-) -> Iterator[Any]:
+    root: Path, name: str | PurePath, *, os_: Any = os,
+) -> Iterator[tuple[int, os.stat_result]]:
     """:func:`locked_for_rewrite` for `name` under `root`: the folders walked (never made), the
     record judged, opened (created when absent) and judged again on its descriptor, then the
-    exclusive lock. Yields the locked handle at position 0."""
+    exclusive lock. Yields the locked descriptor, at position 0, and its `fstat`."""
     _spelling, parts = _parse_name(name)
     where = Path(root, *parts)
     with _rooted(os_, root, parts[:-1]) as dir_fd:
         _leaf_present(os_, dir_fd, parts[-1], where)
-        fd = _open_leaf(os_, dir_fd, parts[-1], os.O_RDWR | os.O_CREAT, where)
+        fd, st = _open_leaf_stat(os_, dir_fd, parts[-1], os.O_RDWR | os.O_CREAT, where)
     try:
-        opener = os_.fdopen(fd, "r+b") if binary else os_.fdopen(fd, "r+", encoding="utf-8")
-    except BaseException:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield fd, st
+    finally:
         os_.close(fd)
-        raise
-    with opener as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        yield f
 
 
 # The held root (#1133): an `Episode`'s one open handle on its episode dir. Every verb works
