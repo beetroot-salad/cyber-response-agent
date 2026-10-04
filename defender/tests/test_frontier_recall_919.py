@@ -13,7 +13,7 @@ What ships:
     document's still-unresolved surface: `OpenSlot` per open `class` / `ident` / `attrs.<name>`
     (post-`:R attr_updates`, so a refinement that closed a slot removes it), and `OpenContract`
     per `:H h-NNN.authz` contract no `:R authz` row has authorized.
-  * `scripts/lessons/lessons_frontier.py` — `match_lessons` over the two new OPTIONAL lesson
+  * `runtime/lessons_engine/lessons_frontier.py` — `match_lessons` over the two new OPTIONAL lesson
     frontmatter keys (`frontier_nodes`, `frontier_edges`), ranked by SPECIFICITY, `top_k` 3.
   * `_tool_append_block` derives the recall over the pre- and post-append document and appends
     a rendered lessons section only when the two differ.
@@ -271,10 +271,10 @@ def _contract_tuples(text: str) -> list[tuple]:
 
 def _lessons_frontier():
     """The retrieval script as a module. Imported rather than path-loaded: it is a real
-    module under `defender.scripts.lessons`, the way its retired sibling was, and nothing
+    module under `defender.runtime.lessons_engine`, the way its retired sibling was, and nothing
     here rebinds a module constant (the `--corpus` seam is what a fixture corpus goes
     through)."""
-    from defender.scripts.lessons import lessons_frontier
+    from defender.runtime.lessons_engine import lessons_frontier
 
     return lessons_frontier
 

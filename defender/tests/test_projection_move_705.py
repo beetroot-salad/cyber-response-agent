@@ -34,7 +34,7 @@ from defender.tests._by_path import WORKTREE, load_module
 
 import pytest
 
-from defender.scripts.pricing import usage_cost
+from defender._pricing import usage_cost
 from defender._run_paths import RunPaths
 from defender.tests._session_store_705 import (
     crafted_html_payload,

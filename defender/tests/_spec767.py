@@ -574,6 +574,6 @@ def served_comments(t: dict[str, Any]) -> list[Any]:
 
 def rendered(payload: Any, tmp_path: Path, *, ceiling: int | None = None) -> str:
     """What gather's payload view hands the model for this payload (c7, executed)."""
-    from defender.scripts.gather_tools.payload_view import render
+    from defender.runtime.payload_view import render
 
     return render(json.dumps(payload), None, tmp_path, ceiling=ceiling)

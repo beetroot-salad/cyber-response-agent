@@ -254,8 +254,8 @@ def test_no_questioner_lesson_reaches_the_defender_agents_own_prompt(tmp_path):
     """
     orient = W.mod("runtime.orient")
     run_common = W.mod("run_common")
-    lessons_fm = W.mod("scripts.lessons.lessons_fm")
-    frontier = W.mod("scripts.lessons.lessons_frontier")
+    lessons_fm = W.mod("runtime.lessons_engine.lessons_fm")
+    frontier = W.mod("runtime.lessons_engine.lessons_frontier")
     paths = W.loop_paths(tmp_path)
     W.questioner_lesson(paths, "q", body="QUESTIONER-ONLY-BODY", pattern=W.EVENTS_PATTERN)
 

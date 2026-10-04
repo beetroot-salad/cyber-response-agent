@@ -1,0 +1,85 @@
+{
+ "_meta": {
+  "base": "80888efb9a46fb5a298eea264316f79c374a1232",
+  "how": "runtime.verbs.read_roster(PATHS.adapters_dir) at the base (the registry's path load of the staying adapters); and the names each of the five confinement importers took from defender.scripts.adapters.confinement at the base (AST of their import statements)"
+ },
+ "roster_verbs": {
+  "change-mgmt": [
+   "active-changes",
+   "get-change",
+   "health-check",
+   "list-changes"
+  ],
+  "cmdb": [
+   "get-host",
+   "health-check",
+   "list-hosts",
+   "list-roles"
+  ],
+  "elastic": [
+   "alerts",
+   "esql",
+   "health-check",
+   "query"
+  ],
+  "host-state": [
+   "authorized-keys",
+   "container-inspect",
+   "fim-checksum",
+   "health-check",
+   "package-list",
+   "passwd",
+   "proc-tree"
+  ],
+  "identity": [
+   "can-access",
+   "get-user",
+   "health-check",
+   "list-authorized-hosts",
+   "list-roles",
+   "list-users"
+  ],
+  "tacit-knowledge": [
+   "health-check",
+   "lookup"
+  ],
+  "threat-intel": [
+   "health-check",
+   "list-indicators",
+   "lookup"
+  ],
+  "ticket": [
+   "case-opened-at",
+   "get-ticket",
+   "health-check",
+   "key-pattern",
+   "list-tickets"
+  ]
+ },
+ "confinement_importers": {
+  "defender/learning/branch/estate/registry.py": [
+   "VIEW_NAMESPACE",
+   "ConfinementFault",
+   "is_world_view"
+  ],
+  "defender/learning/branch/estate/stagers/elastic.py": [
+   "ViewNameError",
+   "refuse_unnameable_world",
+   "world_view"
+  ],
+  "defender/learning/branch/redaction.py": [
+   "VIEW_NAMESPACE"
+  ],
+  "defender/learning/branch/staging.py": [
+   "VIEW_NAMESPACE",
+   "_reach_ok",
+   "_view_stem",
+   "is_world_view",
+   "world_view"
+  ],
+  "defender/runtime/branch/_family.py": [
+   "ViewNameError",
+   "refuse_unnameable_world"
+  ]
+ }
+}

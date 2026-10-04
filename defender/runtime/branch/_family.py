@@ -44,7 +44,7 @@ from defender._vocab import (
     normalized_disposition,
 )
 from defender.scripts.adapters.confinement import ViewNameError, refuse_unnameable_world
-from defender.scripts.gather_tools.record_query import ParamsTooDeep, _json_safe_params
+from defender._query_rules import ParamsTooDeep, _json_safe_params
 
 #: The base world's role: the control every other world is compared against. Exactly one world
 #: claims it.

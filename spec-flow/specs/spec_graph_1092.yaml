@@ -1030,7 +1030,7 @@ structure:
     - {id: defender_sql_shim,       frame: leg,         provenance: design}   # bin/defender-sql:9-11 — [-x venv python] else python3; M6: bare python3 when marked; sql.py:171-180's remedy follows the lane
     - {id: defender_invlang_shim,   frame: leg,         provenance: design}   # bin/defender-invlang:6-9
     - {id: defender_lessons_shim,   frame: leg,         provenance: design}   # bin/defender-lessons:7-10 — its scripts also self-re-exec through reexec_into_venv (C16)
-    - {id: reexec_into_venv,        frame: leg,         provenance: design}   # scripts/_venv.py:12-21 — os.execv into defender/.venv/bin/python3 when is_file(); M6: returns early when marked
+    - {id: reexec_into_venv,        frame: leg,         provenance: design}   # _venv.py (scripts/_venv.py:12-21 before #1080) — os.execv into defender/.venv/bin/python3 when is_file(); M6: returns early when marked
     - {id: box_dockerfile,          frame: leg,         provenance: design}   # defender/box.Dockerfile AS THE BUILD-TIME READER: COPY defender/pyproject.toml + defender/uv.lock, sync into /usr/local (dual-listed — see boundaries)
     - {id: BoxSpec,                 frame: leg,         provenance: design}   # runtime/box/_spec.py:39-60 AS THE IMPORTER of defender._model (M7 port) (dual-listed — see boundaries)
     # --- the grounded neighbourhood (provenance: code) — what reality imposes -----------------
@@ -1382,7 +1382,7 @@ structure:
       facets: {}
     - id: duckdb_import
       provenance: code
-      # scripts/gather_tools/sql.py:171-180 — `import duckdb` inside `_run`; the ImportError
+      # runtime/sql_engine/sql.py (scripts/gather_tools/sql.py:171-180 before #1080) — `import duckdb` inside `_run`; the ImportError
       # branch prints today's venv remedy and returns EXIT_NO_RUNTIME (N9); d28 splits the
       # remedy by lane.
       facets: {}

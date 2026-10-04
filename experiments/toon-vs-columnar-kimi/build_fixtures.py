@@ -17,7 +17,7 @@ sys.path.insert(0, "/workspace")
 import toons  # noqa: E402
 
 from defender.scripts.adapters.elastic_adapter import esql_payload  # noqa: E402
-from defender.scripts.gather_tools.payload_view import passthrough_max_bytes  # noqa: E402
+from defender.runtime.payload_view import passthrough_max_bytes  # noqa: E402
 
 HERE = Path(__file__).parent
 CEILING = passthrough_max_bytes()

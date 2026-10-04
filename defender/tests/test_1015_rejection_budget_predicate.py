@@ -46,6 +46,7 @@ from defender.runtime.circuit_breaker import (
     INFRA_ERROR_CLASS,
     error_class_for_exit,
 )
+from defender import _query_rules
 from defender.scripts.gather_tools import record_query as rq
 
 # THE SURFACE UNDER TEST — none of it exists on this base (RED by construction)
@@ -104,7 +105,7 @@ def _above(seq: int, **kw) -> dict:
     name asserts membership, and in a suite whose whole subject is which rows are counted that
     is an arm measuring the opposite population while staying green. Spelled this way the
     conflict is a `TypeError` at the call."""
-    return _row(seq, query_id=rq.ABOVE_GUARD_QUERY_ID, **kw)
+    return _row(seq, query_id=_query_rules.ABOVE_GUARD_QUERY_ID, **kw)
 
 
 def _ghosts(n: int, *, lead: str = LEAD) -> list[dict]:
@@ -306,7 +307,7 @@ def test_a_below_guard_refusal_is_not_the_budgets_either():
     below = _row(99, system="elastic", verb="query", exit_code=64)
     above = _above(99, system="elastic", verb="query", exit_code=64)
 
-    assert below["query_id"] != rq.ABOVE_GUARD_QUERY_ID
+    assert below["query_id"] != _query_rules.ABOVE_GUARD_QUERY_ID
     assert rejection_budget_trip([*prior, below], LEAD) is None, \
         "a parameter refusal below the guard was counted against the rejection budget"
     assert rejection_budget_trip([*prior, above], LEAD) is not None, \

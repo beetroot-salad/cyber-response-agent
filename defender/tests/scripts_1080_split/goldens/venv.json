@@ -1,0 +1,343 @@
+{
+ "_meta": {
+  "base": "80888efb",
+  "how": "capture_venv.py imported test_1080_venv and ran each observe_* (copies of the base tree's defender/ code with recording, dangling, directory, linked and real-directory venv interpreters planted; the real sql wrapper over a shadow duckdb) under SPEC1080_AT_BASE=1, normalised by the module's norm()",
+  "revised": "2026-10-04, post-review (human): the shims run their engines as modules and the lessons wrapper is gone, so its rows are dropped and the shim's are added (its --tags answer is the base's bytes); bin/ exec lines read `-P -m <engine module>` where they named the wrapper's path; and reexec_into_venv compares environments (sys.prefix), so a respelled path to the same venv settles at once. Every other value is the base capture, unchanged. Re-observed by running this module's observe_* functions over the implementation."
+ },
+ "targets": {
+  "unmarked": {
+   "rc": 0,
+   "out": "EXEC\tdefender-venv\t<TMP>/tree/defender/.venv/bin/python3\tthe-script.py\t--tags\ttwo words\n",
+   "err": ""
+  },
+  "marked": {
+   "rc": 0,
+   "out": "NO-EXEC under <PY>\n",
+   "err": ""
+  }
+ },
+ "s054": {
+  "venv folder absent": {
+   "rc": 0,
+   "out": "NO-EXEC under <PY>\n",
+   "err": ""
+  },
+  "venv present": {
+   "rc": 0,
+   "out": "EXEC\tdefender-venv\t<TMP>/present/defender/.venv/bin/python3\tthe-script.py\t--tags\ttwo words\n",
+   "err": ""
+  },
+  "only the repository root has a venv": {
+   "rc": 0,
+   "out": "NO-EXEC under <PY>\n",
+   "err": ""
+  }
+ },
+ "s055": {
+  "dangling link": {
+   "rc": 0,
+   "out": "NO-EXEC under <PY>\n",
+   "err": ""
+  },
+  "file without the execute bit": {
+   "rc": 1,
+   "out": "",
+   "err": {
+    "traceback_last": "PermissionError: [Errno 13] Permission denied"
+   }
+  },
+  "directory": {
+   "rc": 0,
+   "out": "NO-EXEC under <PY>\n",
+   "err": ""
+  },
+  "link to a file without the execute bit": {
+   "rc": 1,
+   "out": "",
+   "err": {
+    "traceback_last": "PermissionError: [Errno 13] Permission denied"
+   }
+  },
+  "link to a directory": {
+   "rc": 0,
+   "out": "NO-EXEC under <PY>\n",
+   "err": ""
+  },
+  "link to an executable": {
+   "rc": 0,
+   "out": "EXEC\tlinked-executable\t<TMP>/tree-5/defender/.venv/bin/python3\tthe-script.py\t--tags\ttwo words\n",
+   "err": ""
+  }
+ },
+ "s056": {
+  "api server": {
+   "rc": 0,
+   "out": "EXEC\tdefender-venv\t<TMP>/tree/defender/.venv/bin/python3\t<TMP>/tree/defender/api/serve.py\t--alpha\ttwo words\n",
+   "err": ""
+  },
+  "frontend build": {
+   "rc": 0,
+   "out": "EXEC\tdefender-venv\t<TMP>/tree/defender/.venv/bin/python3\t<TMP>/tree/defender/learning/frontend/build.py\t--alpha\ttwo words\n",
+   "err": ""
+  },
+  "frontend serializer": {
+   "rc": 0,
+   "out": "EXEC\tdefender-venv\t<TMP>/tree/defender/.venv/bin/python3\t<TMP>/tree/defender/learning/frontend/serialize.py\t--alpha\ttwo words\n",
+   "err": ""
+  }
+ },
+ "s058": {
+  "helper, marked": {
+   "rc": 0,
+   "out": "NO-EXEC under <PY>\n",
+   "err": ""
+  },
+  "helper, unmarked": {
+   "rc": 0,
+   "out": "EXEC\tmounted-venv\t<TMP>/tree/defender/.venv/bin/python3\tthe-script.py\t--tags\ttwo words\n",
+   "err": ""
+  },
+  "shim on the box lane, marked": {
+   "rc": 0,
+   "out": "source_signature:\n  sig-one                          1\ntelemetry_source:\n  sensor-one                       1\nattack_phase:\n  phase-one                        1\n",
+   "err": ""
+  },
+  "shim, the same tree unmarked": {
+   "rc": 0,
+   "out": "EXEC\tmounted-venv\t<TMP>/tree/defender/.venv/bin/python3\t-P\t-m\tdefender.runtime.lessons_engine.lessons_fm\t--tags\n",
+   "err": ""
+  }
+ },
+ "s124": {
+  "api server, linked venv, base interpreter": {
+   "starts": [
+    "<BASE-PY>",
+    "<TMP>/tree-0-0/defender/.venv/bin/python3"
+   ],
+   "exec lines": [],
+   "rc": null,
+   "out": null
+  },
+  "frontend build, linked venv, base interpreter": {
+   "starts": [
+    "<BASE-PY>",
+    "<TMP>/tree-0-1/defender/.venv/bin/python3"
+   ],
+   "exec lines": [],
+   "rc": null,
+   "out": null
+  },
+  "frontend serializer, linked venv, base interpreter": {
+   "starts": [
+    "<BASE-PY>",
+    "<TMP>/tree-0-2/defender/.venv/bin/python3"
+   ],
+   "exec lines": [],
+   "rc": null,
+   "out": null
+  },
+  "lessons shim, linked venv": {
+   "starts": [
+    "<TMP>/tree-0-shim/defender/.venv/bin/python3"
+   ],
+   "exec lines": [],
+   "rc": 0,
+   "out": "source_signature:\n  sig-one                          1\ntelemetry_source:\n  sensor-one                       1\nattack_phase:\n  phase-one                        1\n"
+  },
+  "api server, real-directory venv, base interpreter": {
+   "starts": [
+    "<BASE-PY>",
+    "<TMP>/tree-1-0/defender/.venv/bin/python3"
+   ],
+   "exec lines": [],
+   "rc": null,
+   "out": null
+  },
+  "frontend build, real-directory venv, base interpreter": {
+   "starts": [
+    "<BASE-PY>",
+    "<TMP>/tree-1-1/defender/.venv/bin/python3"
+   ],
+   "exec lines": [],
+   "rc": null,
+   "out": null
+  },
+  "frontend serializer, real-directory venv, base interpreter": {
+   "starts": [
+    "<BASE-PY>",
+    "<TMP>/tree-1-2/defender/.venv/bin/python3"
+   ],
+   "exec lines": [],
+   "rc": null,
+   "out": null
+  },
+  "lessons shim, real-directory venv": {
+   "starts": [
+    "<TMP>/tree-1-shim/defender/.venv/bin/python3"
+   ],
+   "exec lines": [],
+   "rc": 0,
+   "out": "source_signature:\n  sig-one                          1\ntelemetry_source:\n  sensor-one                       1\nattack_phase:\n  phase-one                        1\n"
+  },
+  "frontend serializer, linked venv, this suite's venv interpreter": {
+   "starts": [
+    "<PY>"
+   ],
+   "exec lines": [],
+   "rc": null,
+   "out": null
+  },
+  "frontend serializer, linked venv, the copy's venv interpreter": {
+   "starts": [
+    "<TMP>/tree-spellings/defender/.venv/bin/python3"
+   ],
+   "exec lines": [],
+   "rc": null,
+   "out": null
+  },
+  "frontend serializer, linked venv, the copy's venv interpreter, dot-dot spelled": {
+   "starts": [
+    "<TMP>/tree-spellings/defender/.venv/bin/python3"
+   ],
+   "exec lines": [],
+   "rc": null,
+   "out": null
+  },
+  "frontend serializer, linked venv, the copy's venv interpreter, through a linked checkout path": {
+   "starts": [
+    "<TMP>/tree-spellings-link/defender/.venv/bin/python3"
+   ],
+   "exec lines": [],
+   "rc": null,
+   "out": null
+  }
+ },
+ "s179": {
+  "helper, unset": {
+   "rc": 0,
+   "out": "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\tthe-script.py\t--tags\ttwo words\n",
+   "err": ""
+  },
+  "api server, unset": [
+   "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t<TMP>/tree-0/defender/api/serve.py\t--alpha\ttwo words"
+  ],
+  "frontend build, unset": [
+   "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t<TMP>/tree-0/defender/learning/frontend/build.py\t--alpha\ttwo words"
+  ],
+  "frontend serializer, unset": [
+   "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t<TMP>/tree-0/defender/learning/frontend/serialize.py\t--alpha\ttwo words"
+  ],
+  "bin/defender-lessons, unset": [
+   "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t-P\t-m\tdefender.runtime.lessons_engine.lessons_fm\tSELECT 1"
+  ],
+  "bin/defender-sql, unset": [
+   "EXEC\tdefender-venv\t<TMP>/tree-0/defender/.venv/bin/python3\t-P\t-m\tdefender.runtime.sql_engine.sql\tSELECT 1"
+  ],
+  "helper, empty": {
+   "rc": 0,
+   "out": "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\tthe-script.py\t--tags\ttwo words\n",
+   "err": ""
+  },
+  "api server, empty": [
+   "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t<TMP>/tree-1/defender/api/serve.py\t--alpha\ttwo words"
+  ],
+  "frontend build, empty": [
+   "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t<TMP>/tree-1/defender/learning/frontend/build.py\t--alpha\ttwo words"
+  ],
+  "frontend serializer, empty": [
+   "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t<TMP>/tree-1/defender/learning/frontend/serialize.py\t--alpha\ttwo words"
+  ],
+  "bin/defender-lessons, empty": [
+   "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t-P\t-m\tdefender.runtime.lessons_engine.lessons_fm\tSELECT 1"
+  ],
+  "bin/defender-sql, empty": [
+   "EXEC\tdefender-venv\t<TMP>/tree-1/defender/.venv/bin/python3\t-P\t-m\tdefender.runtime.sql_engine.sql\tSELECT 1"
+  ],
+  "helper, 0": {
+   "rc": 0,
+   "out": "NO-EXEC under <PY>\n",
+   "err": ""
+  },
+  "api server, 0": [],
+  "frontend build, 0": [],
+  "frontend serializer, 0": [],
+  "bin/defender-lessons, 0": [
+   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.runtime.lessons_engine.lessons_fm\tSELECT 1"
+  ],
+  "bin/defender-sql, 0": [
+   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.runtime.sql_engine.sql\tSELECT 1"
+  ],
+  "helper, false": {
+   "rc": 0,
+   "out": "NO-EXEC under <PY>\n",
+   "err": ""
+  },
+  "api server, false": [],
+  "frontend build, false": [],
+  "frontend serializer, false": [],
+  "bin/defender-lessons, false": [
+   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.runtime.lessons_engine.lessons_fm\tSELECT 1"
+  ],
+  "bin/defender-sql, false": [
+   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.runtime.sql_engine.sql\tSELECT 1"
+  ],
+  "helper, 1": {
+   "rc": 0,
+   "out": "NO-EXEC under <PY>\n",
+   "err": ""
+  },
+  "api server, 1": [],
+  "frontend build, 1": [],
+  "frontend serializer, 1": [],
+  "bin/defender-lessons, 1": [
+   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.runtime.lessons_engine.lessons_fm\tSELECT 1"
+  ],
+  "bin/defender-sql, 1": [
+   "EXEC\tbare-python3\t<TMP>/bare-bin/python3\t-P\t-m\tdefender.runtime.sql_engine.sql\tSELECT 1"
+  ],
+  "sql engine without duckdb, unset": {
+   "rc": 69,
+   "out": "",
+   "err": "defender-sql: duckdb is not installed (cd defender && uv pip install --python .venv/bin/python -e '.[runtime]').\n"
+  },
+  "sql engine without duckdb, empty": {
+   "rc": 69,
+   "out": "",
+   "err": "defender-sql: duckdb is not installed (cd defender && uv pip install --python .venv/bin/python -e '.[runtime]').\n"
+  },
+  "sql engine without duckdb, 0": {
+   "rc": 69,
+   "out": "",
+   "err": "defender-sql: duckdb is not installed in this box image (run `python3 defender/scripts/box_image.py build` to rebuild it).\n"
+  },
+  "sql engine without duckdb, false": {
+   "rc": 69,
+   "out": "",
+   "err": "defender-sql: duckdb is not installed in this box image (run `python3 defender/scripts/box_image.py build` to rebuild it).\n"
+  },
+  "sql engine without duckdb, 1": {
+   "rc": 69,
+   "out": "",
+   "err": "defender-sql: duckdb is not installed in this box image (run `python3 defender/scripts/box_image.py build` to rebuild it).\n"
+  }
+ },
+ "s206": {
+  "lessons shim": {
+   "starts": [
+    "<TMP>/tree/defender/.venv/bin/python3"
+   ],
+   "exec lines": [],
+   "rc": 0,
+   "out": "source_signature:\n  sig-one                          1\ntelemetry_source:\n  sensor-one                       1\nattack_phase:\n  phase-one                        1\n"
+  },
+  "frontend serializer": {
+   "starts": [
+    "<BASE-PY>",
+    "<TMP>/tree/defender/.venv/bin/python3"
+   ],
+   "exec lines": [],
+   "rc": null,
+   "out": null
+  }
+ }
+}

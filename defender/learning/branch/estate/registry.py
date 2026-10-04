@@ -36,7 +36,7 @@ from defender.scripts.adapters.faults import USAGE_EXIT_CODE
 
 from ..comparator import Verdict, canonical, mechanical
 from ..ledger import BASE, FAULT, REFUSED, STAGED, Ledger, LedgerError, ServedCall, payload_text
-from defender.scripts.gather_tools.record_query import ParamsTooDeep, _json_safe_params
+from defender._query_rules import ParamsTooDeep, _json_safe_params
 from . import applier as applier_module
 from .applier import WorldApplier
 from .stagers.dispatch import STAGERS

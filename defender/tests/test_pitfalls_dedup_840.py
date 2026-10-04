@@ -43,7 +43,7 @@ from defender.learning.core import drains, persist
 from defender.learning.core.config import LoopPaths
 from defender.learning.leads import pitfalls_curator
 from defender.learning.leads.lead_extraction import ExecutedLead, collect_general_failures
-from defender.scripts.gather_tools.record_query import BASH_SHIM_QUERY_ID
+from defender._query_rules import BASH_SHIM_QUERY_ID
 from defender.tests._repo import seed_skills_repo
 from defender.tests._lead_author_1134 import lead_trees
 

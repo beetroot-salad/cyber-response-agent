@@ -1,0 +1,1326 @@
+{
+ "_meta": {
+  "base": "80888efb",
+  "how": "pytest over the scratch capture module with the suite conftest as a plugin, running the BASE renderers, footer, frontend build and pricing (old defender.scripts paths) over the fixtures and setup helpers defined in test_1080_episode_frontend_and_pricing.py; tmp roots normalized by its _norm; whole pages under goldens/pages/."
+ },
+ "episode_by_path": {
+  "argv": [
+   "<python>",
+   "defender/scripts/visualize/visualize_episode.py",
+   "<EPISODE_DIR>"
+  ],
+  "env": "the test process's environment without PYTHONPATH; cwd outside the checkout",
+  "returncode": 0,
+  "stdout": "<EPISODE_DIR>/learning.html\n",
+  "stderr": "",
+  "page_file": "pages/episode-sample.html",
+  "page_sha256": "7d046d8ad7381646f02d4144025d1ae898ea64128f2ef89b9f7491f7f2cd0f34",
+  "page_bytes": 73921
+ },
+ "episode_dir_forms": {
+  "missing": {
+   "outcome": {
+    "raises": "JudgeRefused",
+    "message": "episode <TMP>/no-such-episode: no such episode directory"
+   },
+   "page_sha256": null,
+   "page_is_symlink": false,
+   "top_level": [],
+   "given_still_a_link": null
+  },
+  "empty": {
+   "outcome": {
+    "raises": "JudgeRefused",
+    "message": "the manifest (family.yaml) could not be read: nothing is at that name"
+   },
+   "page_sha256": null,
+   "page_is_symlink": false,
+   "top_level": [],
+   "given_still_a_link": null
+  },
+  "no_stamp": {
+   "outcome": {
+    "returns": {
+     "path": "<TMP>/episodes/20260728t161845z-fresh-case-n59/learning.html"
+    }
+   },
+   "page_sha256": "0b11557551bb7f22c016c526970ced28d6eebbd9ff8d853223a3c45fb667db7c",
+   "page_is_symlink": false,
+   "top_level": [
+    "family.yaml",
+    "judge.yaml",
+    "learning.html",
+    "review.yaml",
+    "runs",
+    "samples.yaml",
+    "served",
+    "staged.yaml",
+    "wire_logs",
+    "worlds"
+   ],
+   "given_still_a_link": null
+  },
+  "stamp_without_tenant_id": {
+   "outcome": {
+    "returns": {
+     "path": "<TMP>/episodes/20260728t161845z-fresh-case-n59/learning.html"
+    }
+   },
+   "page_sha256": "7d046d8ad7381646f02d4144025d1ae898ea64128f2ef89b9f7491f7f2cd0f34",
+   "page_is_symlink": false,
+   "top_level": [
+    "family.yaml",
+    "judge.yaml",
+    "learning.html",
+    "provenance.json",
+    "review.yaml",
+    "runs",
+    "samples.yaml",
+    "served",
+    "staged.yaml",
+    "wire_logs",
+    "worlds"
+   ],
+   "given_still_a_link": null
+  },
+  "stamp_with_unknown_keys": {
+   "outcome": {
+    "returns": {
+     "path": "<TMP>/episodes/20260728t161845z-fresh-case-n59/learning.html"
+    }
+   },
+   "page_sha256": "7d046d8ad7381646f02d4144025d1ae898ea64128f2ef89b9f7491f7f2cd0f34",
+   "page_is_symlink": false,
+   "top_level": [
+    "family.yaml",
+    "judge.yaml",
+    "learning.html",
+    "provenance.json",
+    "review.yaml",
+    "runs",
+    "samples.yaml",
+    "served",
+    "staged.yaml",
+    "wire_logs",
+    "worlds"
+   ],
+   "given_still_a_link": null
+  },
+  "partial_records_manifest_only": {
+   "outcome": {
+    "returns": {
+     "path": "<TMP>/episodes/20260728t161845z-fresh-case-n59/learning.html"
+    }
+   },
+   "page_sha256": "d193883032fb0520080905ac7dbc91f76e4f79cc2de4efce8bc59b9d8d2ff509",
+   "page_is_symlink": false,
+   "top_level": [
+    "family.yaml",
+    "learning.html",
+    "review.yaml",
+    "served",
+    "worlds"
+   ],
+   "given_still_a_link": null
+  },
+  "partial_records_no_manifest": {
+   "outcome": {
+    "raises": "JudgeRefused",
+    "message": "the manifest (family.yaml) could not be read: nothing is at that name"
+   },
+   "page_sha256": null,
+   "page_is_symlink": false,
+   "top_level": [
+    "judge.yaml",
+    "provenance.json",
+    "review.yaml",
+    "runs",
+    "samples.yaml",
+    "served",
+    "staged.yaml",
+    "wire_logs",
+    "worlds"
+   ],
+   "given_still_a_link": null
+  },
+  "symlink": {
+   "outcome": {
+    "returns": {
+     "path": "<TMP>/latest/learning.html"
+    }
+   },
+   "page_sha256": "7d046d8ad7381646f02d4144025d1ae898ea64128f2ef89b9f7491f7f2cd0f34",
+   "page_is_symlink": false,
+   "top_level": [
+    "family.yaml",
+    "judge.yaml",
+    "learning.html",
+    "provenance.json",
+    "review.yaml",
+    "runs",
+    "samples.yaml",
+    "served",
+    "staged.yaml",
+    "wire_logs",
+    "worlds"
+   ],
+   "given_still_a_link": true
+  }
+ },
+ "episode_rerender": {
+  "over_a_stale_page": {
+   "outcome": {
+    "returns": {
+     "path": "<TMP>/episodes/20260728t161845z-fresh-case-n59/learning.html"
+    }
+   },
+   "page_sha256": "7d046d8ad7381646f02d4144025d1ae898ea64128f2ef89b9f7491f7f2cd0f34",
+   "inode_replaced": true,
+   "top_level": [
+    "family.yaml",
+    "judge.yaml",
+    "learning.html",
+    "provenance.json",
+    "review.yaml",
+    "runs",
+    "samples.yaml",
+    "served",
+    "staged.yaml",
+    "wire_logs",
+    "worlds"
+   ]
+  },
+  "over_its_own_page": {
+   "outcome": {
+    "returns": {
+     "path": "<TMP>/episodes/20260728t161845z-fresh-case-n59/learning.html"
+    }
+   },
+   "page_sha256": "7d046d8ad7381646f02d4144025d1ae898ea64128f2ef89b9f7491f7f2cd0f34",
+   "inode_replaced": true,
+   "top_level": [
+    "family.yaml",
+    "judge.yaml",
+    "learning.html",
+    "provenance.json",
+    "review.yaml",
+    "runs",
+    "samples.yaml",
+    "served",
+    "staged.yaml",
+    "wire_logs",
+    "worlds"
+   ]
+  }
+ },
+ "episode_renderer_unloadable": {
+  "control_rc": 0,
+  "control_warnings": [],
+  "control_listing": [
+   "family.yaml",
+   "judge.yaml",
+   "learning.html",
+   "provenance.json",
+   "review.yaml",
+   "runs/",
+   "runs/20260728t161845z-fresh-case-n59-a.scrub-verdict.json",
+   "runs/20260728t161845z-fresh-case-n59-a/",
+   "runs/20260728t161845z-fresh-case-n59-a/alert.json",
+   "runs/20260728t161845z-fresh-case-n59-a/executed_queries.jsonl",
+   "runs/20260728t161845z-fresh-case-n59-a/gather_raw/",
+   "runs/20260728t161845z-fresh-case-n59-a/gather_summaries/",
+   "runs/20260728t161845z-fresh-case-n59-a/gather_summaries/l-001.md",
+   "runs/20260728t161845z-fresh-case-n59-a/investigation.md",
+   "runs/20260728t161845z-fresh-case-n59-a/lessons_loaded.jsonl",
+   "runs/20260728t161845z-fresh-case-n59-a/provenance.json",
+   "runs/20260728t161845z-fresh-case-n59-a/report.md",
+   "runs/20260728t161845z-fresh-case-n59-b.scrub-verdict.json",
+   "runs/20260728t161845z-fresh-case-n59-b/",
+   "runs/20260728t161845z-fresh-case-n59-b/alert.json",
+   "runs/20260728t161845z-fresh-case-n59-b/executed_queries.jsonl",
+   "runs/20260728t161845z-fresh-case-n59-b/gather_raw/",
+   "runs/20260728t161845z-fresh-case-n59-b/gather_summaries/",
+   "runs/20260728t161845z-fresh-case-n59-b/gather_summaries/l-001.md",
+   "runs/20260728t161845z-fresh-case-n59-b/investigation.md",
+   "runs/20260728t161845z-fresh-case-n59-b/lessons_loaded.jsonl",
+   "runs/20260728t161845z-fresh-case-n59-b/provenance.json",
+   "runs/20260728t161845z-fresh-case-n59-b/report.md",
+   "runs/20260728t161845z-fresh-case-n59-c.scrub-verdict.json",
+   "runs/20260728t161845z-fresh-case-n59-c/",
+   "runs/20260728t161845z-fresh-case-n59-c/alert.json",
+   "runs/20260728t161845z-fresh-case-n59-c/executed_queries.jsonl",
+   "runs/20260728t161845z-fresh-case-n59-c/gather_raw/",
+   "runs/20260728t161845z-fresh-case-n59-c/gather_summaries/",
+   "runs/20260728t161845z-fresh-case-n59-c/gather_summaries/l-001.md",
+   "runs/20260728t161845z-fresh-case-n59-c/investigation.md",
+   "runs/20260728t161845z-fresh-case-n59-c/lessons_loaded.jsonl",
+   "runs/20260728t161845z-fresh-case-n59-c/provenance.json",
+   "runs/20260728t161845z-fresh-case-n59-c/report.md",
+   "runs/_tenant.json",
+   "samples.yaml",
+   "served/",
+   "served/20260728t161845z.fresh.case.n59.a.jsonl",
+   "served/20260728t161845z.fresh.case.n59.b.jsonl",
+   "served/20260728t161845z.fresh.case.n59.c.jsonl",
+   "served/base.jsonl",
+   "staged.yaml",
+   "timing.json",
+   "wire_logs/",
+   "wire_logs/judge_b_0_framed_trace.jsonl",
+   "wire_logs/judge_c_0_framed_trace.jsonl",
+   "wire_logs/judge_family_0_framed_trace.jsonl",
+   "worlds/",
+   "worlds/a/",
+   "worlds/a/alert.json",
+   "worlds/a/executed_queries.jsonl",
+   "worlds/a/gather_raw/",
+   "worlds/a/gather_summaries/",
+   "worlds/a/gather_summaries/l-001.md",
+   "worlds/a/investigation.md",
+   "worlds/a/lessons_loaded.jsonl",
+   "worlds/a/provenance.json",
+   "worlds/a/report.md",
+   "worlds/a/run_dir",
+   "worlds/a/scrub_verdict.json",
+   "worlds/b/",
+   "worlds/b/alert.json",
+   "worlds/b/executed_queries.jsonl",
+   "worlds/b/gather_raw/",
+   "worlds/b/gather_summaries/",
+   "worlds/b/gather_summaries/l-001.md",
+   "worlds/b/investigation.md",
+   "worlds/b/judge/",
+   "worlds/b/judge/0.yaml",
+   "worlds/b/lessons_loaded.jsonl",
+   "worlds/b/provenance.json",
+   "worlds/b/report.md",
+   "worlds/b/run_dir",
+   "worlds/b/scrub_verdict.json",
+   "worlds/c/",
+   "worlds/c/alert.json",
+   "worlds/c/executed_queries.jsonl",
+   "worlds/c/gather_raw/",
+   "worlds/c/gather_summaries/",
+   "worlds/c/gather_summaries/l-001.md",
+   "worlds/c/investigation.md",
+   "worlds/c/judge/",
+   "worlds/c/judge/0.yaml",
+   "worlds/c/lessons_loaded.jsonl",
+   "worlds/c/provenance.json",
+   "worlds/c/report.md",
+   "worlds/c/run_dir",
+   "worlds/c/scrub_verdict.json",
+   "worlds/family/",
+   "worlds/family/judge/"
+  ],
+  "rc": 0,
+  "listing": [
+   "family.yaml",
+   "judge.yaml",
+   "provenance.json",
+   "review.yaml",
+   "runs/",
+   "runs/20260728t161845z-fresh-case-n59-a.scrub-verdict.json",
+   "runs/20260728t161845z-fresh-case-n59-a/",
+   "runs/20260728t161845z-fresh-case-n59-a/alert.json",
+   "runs/20260728t161845z-fresh-case-n59-a/executed_queries.jsonl",
+   "runs/20260728t161845z-fresh-case-n59-a/gather_raw/",
+   "runs/20260728t161845z-fresh-case-n59-a/gather_summaries/",
+   "runs/20260728t161845z-fresh-case-n59-a/gather_summaries/l-001.md",
+   "runs/20260728t161845z-fresh-case-n59-a/investigation.md",
+   "runs/20260728t161845z-fresh-case-n59-a/lessons_loaded.jsonl",
+   "runs/20260728t161845z-fresh-case-n59-a/provenance.json",
+   "runs/20260728t161845z-fresh-case-n59-a/report.md",
+   "runs/20260728t161845z-fresh-case-n59-b.scrub-verdict.json",
+   "runs/20260728t161845z-fresh-case-n59-b/",
+   "runs/20260728t161845z-fresh-case-n59-b/alert.json",
+   "runs/20260728t161845z-fresh-case-n59-b/executed_queries.jsonl",
+   "runs/20260728t161845z-fresh-case-n59-b/gather_raw/",
+   "runs/20260728t161845z-fresh-case-n59-b/gather_summaries/",
+   "runs/20260728t161845z-fresh-case-n59-b/gather_summaries/l-001.md",
+   "runs/20260728t161845z-fresh-case-n59-b/investigation.md",
+   "runs/20260728t161845z-fresh-case-n59-b/lessons_loaded.jsonl",
+   "runs/20260728t161845z-fresh-case-n59-b/provenance.json",
+   "runs/20260728t161845z-fresh-case-n59-b/report.md",
+   "runs/20260728t161845z-fresh-case-n59-c.scrub-verdict.json",
+   "runs/20260728t161845z-fresh-case-n59-c/",
+   "runs/20260728t161845z-fresh-case-n59-c/alert.json",
+   "runs/20260728t161845z-fresh-case-n59-c/executed_queries.jsonl",
+   "runs/20260728t161845z-fresh-case-n59-c/gather_raw/",
+   "runs/20260728t161845z-fresh-case-n59-c/gather_summaries/",
+   "runs/20260728t161845z-fresh-case-n59-c/gather_summaries/l-001.md",
+   "runs/20260728t161845z-fresh-case-n59-c/investigation.md",
+   "runs/20260728t161845z-fresh-case-n59-c/lessons_loaded.jsonl",
+   "runs/20260728t161845z-fresh-case-n59-c/provenance.json",
+   "runs/20260728t161845z-fresh-case-n59-c/report.md",
+   "runs/_tenant.json",
+   "samples.yaml",
+   "served/",
+   "served/20260728t161845z.fresh.case.n59.a.jsonl",
+   "served/20260728t161845z.fresh.case.n59.b.jsonl",
+   "served/20260728t161845z.fresh.case.n59.c.jsonl",
+   "served/base.jsonl",
+   "staged.yaml",
+   "timing.json",
+   "wire_logs/",
+   "wire_logs/judge_b_0_framed_trace.jsonl",
+   "wire_logs/judge_c_0_framed_trace.jsonl",
+   "wire_logs/judge_family_0_framed_trace.jsonl",
+   "worlds/",
+   "worlds/a/",
+   "worlds/a/alert.json",
+   "worlds/a/executed_queries.jsonl",
+   "worlds/a/gather_raw/",
+   "worlds/a/gather_summaries/",
+   "worlds/a/gather_summaries/l-001.md",
+   "worlds/a/investigation.md",
+   "worlds/a/lessons_loaded.jsonl",
+   "worlds/a/provenance.json",
+   "worlds/a/report.md",
+   "worlds/a/run_dir",
+   "worlds/a/scrub_verdict.json",
+   "worlds/b/",
+   "worlds/b/alert.json",
+   "worlds/b/executed_queries.jsonl",
+   "worlds/b/gather_raw/",
+   "worlds/b/gather_summaries/",
+   "worlds/b/gather_summaries/l-001.md",
+   "worlds/b/investigation.md",
+   "worlds/b/judge/",
+   "worlds/b/judge/0.yaml",
+   "worlds/b/lessons_loaded.jsonl",
+   "worlds/b/provenance.json",
+   "worlds/b/report.md",
+   "worlds/b/run_dir",
+   "worlds/b/scrub_verdict.json",
+   "worlds/c/",
+   "worlds/c/alert.json",
+   "worlds/c/executed_queries.jsonl",
+   "worlds/c/gather_raw/",
+   "worlds/c/gather_summaries/",
+   "worlds/c/gather_summaries/l-001.md",
+   "worlds/c/investigation.md",
+   "worlds/c/judge/",
+   "worlds/c/judge/0.yaml",
+   "worlds/c/lessons_loaded.jsonl",
+   "worlds/c/provenance.json",
+   "worlds/c/report.md",
+   "worlds/c/run_dir",
+   "worlds/c/scrub_verdict.json",
+   "worlds/family/",
+   "worlds/family/judge/"
+  ],
+  "page_warning": {
+   "prefix": "episode 20260728t161845z-fresh-case-n59: the page could not be rendered (",
+   "logger_level": [
+    "defender.learning.branch.cli",
+    "WARNING"
+   ],
+   "base_message": "episode 20260728t161845z-fresh-case-n59: the page could not be rendered (ModuleNotFoundError('import of <PAGE_MODULE> halted; None in sys.modules'))"
+  },
+  "other_warnings": []
+ },
+ "frontend": {
+  "queues_view": {
+   "state_root": "/srv/fixture-1080/state",
+   "channels": [
+    {
+     "name": "findings",
+     "accent": "defender",
+     "has_stuck_record": true,
+     "hold_means": "held until a person moves them — nothing retries a hold",
+     "depth": {
+      "queued": 4
+     },
+     "unreadable": 3,
+     "held": {
+      "count": 2,
+      "ids": [
+       "f-2",
+       "f-3"
+      ]
+     },
+     "deadletter": [
+      {
+       "id": null,
+       "reason": "row carries no value under 'finding_id'",
+       "when": "2026-09-12T07:08:09+00:00",
+       "row": {
+        "run_id": "r10"
+       }
+      },
+      {
+       "id": "g-3",
+       "reason": "the author never took it",
+       "when": null,
+       "row": {
+        "finding_id": "g-3",
+        "k": "v"
+       }
+      },
+      {
+       "id": null,
+       "reason": "row carries no value under 'finding_id'",
+       "when": null,
+       "row": {
+        "run_id": "r9",
+        "note": "no id under finding_id"
+       }
+      },
+      {
+       "id": "g-1",
+       "reason": "the author never took it",
+       "when": "2026-09-10T04:05:06+00:00",
+       "row": {
+        "finding_id": "g-1",
+        "title": "<script>alert(1)</script>"
+       }
+      }
+     ],
+     "stuck": {
+      "fault_class": "GitProbeError<b>",
+      "row_ids": [
+       "f-1",
+       "f-2",
+       "f-4"
+      ],
+      "consecutive_ticks": 1,
+      "reason": "read-only git probe (worktree status) failed: <index.lock> held",
+      "recorded_at": "2026-09-17T12:05:00+00:00"
+     }
+    },
+    {
+     "name": "questioner_findings",
+     "accent": "learning",
+     "has_stuck_record": true,
+     "hold_means": "held until a person moves them — nothing retries a hold",
+     "depth": {
+      "queued": 2
+     },
+     "unreadable": 0,
+     "held": {
+      "count": 1,
+      "ids": [
+       "q-2"
+      ]
+     },
+     "deadletter": [],
+     "stuck": null
+    },
+    {
+     "name": "pitfalls",
+     "accent": "oracle",
+     "has_stuck_record": false,
+     "hold_means": "declined by the curator — offered again every tick, retired at the offer ceiling",
+     "depth": {
+      "queued": 3
+     },
+     "unreadable": 0,
+     "held": {
+      "count": 1,
+      "ids": [
+       "p-2"
+      ]
+     },
+     "deadletter": [
+      {
+       "id": "p-9",
+       "reason": "undeclared-system:evil",
+       "when": null,
+       "row": {
+        "pitfall_id": "p-9",
+        "system": "evil",
+        "occurrences": 2
+       }
+      }
+     ],
+     "stuck": null
+    }
+   ],
+   "quarantine": {
+    "markers": {
+     "rows": [
+      {
+       "queue": "delivery",
+       "identity": "z-delivery-1",
+       "failed": "unreadable pending-delivery record",
+       "run_dir": null
+      },
+      {
+       "queue": "lead_author",
+       "identity": "run-a",
+       "failed": "unreadable: run_dir is not an absolute path",
+       "run_dir": null
+      },
+      {
+       "queue": "lead_author",
+       "identity": "run-b",
+       "failed": "artifact-missing <img src=x onerror=alert(2)>",
+       "run_dir": "/srv/runs/run-b"
+      }
+     ],
+     "unreadable": 2
+    },
+    "deliveries": {
+     "rows": [
+      {
+       "branch": "learning/leads/b2",
+       "batch_id": "b2",
+       "label": "lead author",
+       "at": "2026-09-16T10:00:00+00:00",
+       "reason": "opening the PR failed"
+      },
+      {
+       "branch": "learning/lessons/b1",
+       "batch_id": "b1",
+       "label": "lessons author",
+       "at": "2026-09-15T10:00:00+00:00",
+       "reason": "push rejected"
+      }
+     ],
+     "unreadable": 1
+    },
+    "tainted": {
+     "dir": "/srv/fixture-1080/repo/.worktrees/quarantine",
+     "cap": 10,
+     "held": 2,
+     "rows": [
+      {
+       "batch_id": "b-later",
+       "archive": "b-later.tar.gz",
+       "quarantined_at": "2026-09-14T09:10:11+00:00",
+       "label": "lead author",
+       "taint": "a world-writable file survived the scrub",
+       "cause": "RuntimeError('the batch was already dying')",
+       "verdict": {
+        "scanned": true,
+        "clean": false
+       },
+       "findings": 0
+      },
+      {
+       "batch_id": "a-earlier",
+       "archive": "a-earlier.tar.gz",
+       "quarantined_at": "2026-09-11T08:00:00+00:00",
+       "label": "lessons author",
+       "taint": "symlink escapes the worktree",
+       "cause": null,
+       "verdict": {},
+       "findings": 2
+      }
+     ],
+     "unreadable": 1
+    }
+   }
+  },
+  "queues_view_how": "test_903_queue_view's four seeders over a tmp LoopPaths, through serialize_queues.build_view; the tmp root respelled /srv/fixture-1080",
+  "queues_page_file": "pages/frontend-queues.html",
+  "queues_page_sha256": "c25bb9fa4cf8b3ab67351fa332e7864c327582d22d9ff3938a906813b3d18536",
+  "lessons_view": {
+   "generated_at": "2026-10-03T00:00:00+00:00",
+   "groups": {
+    "defender": {
+     "lessons": [
+      {
+       "name": "pivot-<b>one</b>",
+       "description": "img onerror=x",
+       "path": "defender/lessons/pivot.md",
+       "stale": false
+      }
+     ]
+    },
+    "actor": {
+     "lessons": []
+    },
+    "environment": {
+     "lessons": []
+    }
+   }
+  },
+  "lessons_page_file": "pages/frontend-lessons.html",
+  "lessons_page_sha256": "97d83a87dd5b256f7dd156c92f66064593937896e22a2c25f4b4ea69f6dbbbab"
+ },
+ "footer": {
+  "tracked_history": "\n<footer id=\"sec-footer\" class=\"footer\">\n  <h2>concurrent lesson commits</h2>\n  <div class=\"footer-caveat\">\n    The author flushes the pending-findings queue when it crosses the threshold,\n    so commits below were authored during this run's wall-clock window but may\n    fold in findings from earlier runs.\n  </div>\n  <details class=\"block lesson-commit\"><summary>revise the first lesson, add a second</summary><div class=\"body\"><div class=\"commit-meta\">2021-01-02T00:00:00Z · 7f9ca86d05</div><pre class=\"text files\">M\tdefender/lessons/first.md\nA\tdefender/lessons/second.md</pre><pre class=\"json diff\">diff --git a/defender/lessons/first.md b/defender/lessons/first.md\nindex 4148113..3a6b4de 100644\n--- a/defender/lessons/first.md\n+++ b/defender/lessons/first.md\n@@ -2,4 +2,4 @@\n name: first\n ---\n \n-first body\n+first body, revised\ndiff --git a/defender/lessons/second.md b/defender/lessons/second.md\nnew file mode 100644\nindex 0000000..d5a0ebb\n--- /dev/null\n+++ b/defender/lessons/second.md\n@@ -0,0 +1,5 @@\n+---\n+name: second\n+---\n+\n+second body</pre></div></details>\n<details class=\"block lesson-commit\"><summary>add the first lesson</summary><div class=\"body\"><div class=\"commit-meta\">2021-01-01T00:00:00Z · 26f17f9e44</div><pre class=\"text files\">A\tdefender/lessons/first.md</pre><pre class=\"json diff\">diff --git a/defender/lessons/first.md b/defender/lessons/first.md\nnew file mode 100644\nindex 0000000..4148113\n--- /dev/null\n+++ b/defender/lessons/first.md\n@@ -0,0 +1,5 @@\n+---\n+name: first\n+---\n+\n+first body</pre></div></details>\n</footer>\n",
+  "no_git_on_path": "\n<footer id=\"sec-footer\" class=\"footer\">\n  <h2>concurrent lesson commits</h2>\n  <div class=\"footer-caveat\">\n    The author flushes the pending-findings queue when it crosses the threshold,\n    so commits below were authored during this run's wall-clock window but may\n    fold in findings from earlier runs.\n  </div>\n  <div class=\"empty\">lesson change tracking unavailable (git unavailable: [Errno 2] No such file or directory: &#x27;git&#x27;)</div>\n</footer>\n",
+  "untracked_corpus": "\n<footer id=\"sec-footer\" class=\"footer\">\n  <h2>concurrent lesson commits</h2>\n  <div class=\"footer-caveat\">\n    The author flushes the pending-findings queue when it crosses the threshold,\n    so commits below were authored during this run's wall-clock window but may\n    fold in findings from earlier runs.\n  </div>\n  <div class=\"empty\">no lesson commits since this run started (2020-09-13T12:26:40+00:00)</div>\n</footer>\n",
+  "not_a_repository": "\n<footer id=\"sec-footer\" class=\"footer\">\n  <h2>concurrent lesson commits</h2>\n  <div class=\"footer-caveat\">\n    The author flushes the pending-findings queue when it crosses the threshold,\n    so commits below were authored during this run's wall-clock window but may\n    fold in findings from earlier runs.\n  </div>\n  <div class=\"empty\">lesson change tracking unavailable (fatal: not a git repository (or any of the parent directories): .git)</div>\n</footer>\n",
+  "GIT_DIR": "\n<footer id=\"sec-footer\" class=\"footer\">\n  <h2>concurrent lesson commits</h2>\n  <div class=\"footer-caveat\">\n    The author flushes the pending-findings queue when it crosses the threshold,\n    so commits below were authored during this run's wall-clock window but may\n    fold in findings from earlier runs.\n  </div>\n  <details class=\"block lesson-commit\"><summary>a lesson in another repository</summary><div class=\"body\"><div class=\"commit-meta\">2021-02-01T00:00:00Z · 467cbf78fa</div><pre class=\"text files\">A\tdefender/lessons/other.md</pre><pre class=\"json diff\">diff --git a/defender/lessons/other.md b/defender/lessons/other.md\nnew file mode 100644\nindex 0000000..65c735c\n--- /dev/null\n+++ b/defender/lessons/other.md\n@@ -0,0 +1,5 @@\n+---\n+name: other\n+---\n+\n+other body</pre></div></details>\n</footer>\n",
+  "GIT_WORK_TREE": {
+   "same_as_unset": true
+  },
+  "GIT_INDEX_FILE": {
+   "same_as_unset": true
+  },
+  "untrusted_checkout_as_root": "\n<footer id=\"sec-footer\" class=\"footer\">\n  <h2>concurrent lesson commits</h2>\n  <div class=\"footer-caveat\">\n    The author flushes the pending-findings queue when it crosses the threshold,\n    so commits below were authored during this run's wall-clock window but may\n    fold in findings from earlier runs.\n  </div>\n  <div class=\"empty\">lesson change tracking unavailable (fatal: detected dubious ownership in repository at &#x27;<TREE>&#x27;\nTo add an exception for this directory, call:\n\n\tgit config --global --add safe.directory <TREE>)</div>\n</footer>\n"
+ },
+ "location_values": {
+  "primitives_REPO_ROOT": ".",
+  "primitives_ASSETS": {
+   "base_path": "defender/scripts/visualize/assets",
+   "files": {
+    "runtime.js": "fac831be83834c4d4d243733655f45f6eb9d6b162b46b4dc60e622432efbc0bb",
+    "episode.css": "7fb8b4bf9df00cb222704e56604311464881589cc6022341c4a48161cdbc1723",
+    "styles.css": "495f2af5dd95df12ba4d85b1b4d1fead2c85c40f1d880f9e046ce356e64ddc68"
+   }
+  },
+  "lessons_fm_REPO_ROOT": ".",
+  "lessons_frontier_REPO_ROOT": ".",
+  "workspace_map_DEFENDER_DIR": "defender",
+  "venv_DEFENDER_DIR": "defender",
+  "MIRROR_WRITER": {
+   "base_path": "defender/scripts/visualize/_mirror_write.py",
+   "name": "_mirror_write.py",
+   "defines": "write_page"
+  },
+  "mirror_root_default": "<MAIN_CHECKOUT>/run-visualizations",
+  "mirror_root_default_how": "a child (PYTEST_CURRENT_TEST and the override unset); <MAIN_CHECKOUT> is git rev-parse --git-common-dir's parent"
+ },
+ "suite_asserts": {
+  "defender/tests/e2e/test_replay_skeleton.py": [
+   "assert 'check sshd auth history' in lead_row.read_text()",
+   "assert 'dev.dana' in payload.read_text()",
+   "assert 'failure_kind:' not in report, 'an override the review DECIDED is recorded as the review machinery failing'",
+   "assert 'failure_kind:' not in report, 'the frontmatter names a machinery failure on a run where every stage answered'",
+   "assert (run_dir / 'investigation.md').read_text() == '+ probe\\n'",
+   "assert (run_dir / 'tool_trace.jsonl').is_file()",
+   "assert (run_dir / 'tool_trace.jsonl').is_file()",
+   "assert CAUSE_EVIDENCE_CANNOT_DISCRIMINATE in report",
+   "assert GATHER_DEF.tools.query is True",
+   "assert MAIN_DEF.tools.append is True",
+   "assert MAIN_DEF.tools.query is False",
+   "assert MAIN_DEF.tools.write is False, 'main holds the path-taking write lane again; the escape is expressible'",
+   "assert RunPaths(run_dir).wire_log.is_file()",
+   "assert _review_bundle.LENS_READING in trace, f\"the {lens} reading is not the harness's — the run reached the provider-backed bundle, not the injected one\"",
+   "assert gather_replay.calls == 2",
+   "assert lead_row.is_file()",
+   "assert len(rows) == 1",
+   "assert m is not None",
+   "assert m is not None",
+   "assert m is not None",
+   "assert m.group(1) == 'inconclusive'",
+   "assert m.group(1) == 'malicious', 'a review that ran and found the close sound must leave the drafted disposition alone'",
+   "assert m.group(1) == 'unresolved', 'the drafted `malicious` reached disk past a review that found a gap'",
+   "assert main_replay.calls == 3",
+   "assert normalize(produced, run_dir=run_dir, run_id=run_id) == normalize(golden, run_dir=run_dir, run_id=run_id)",
+   "assert normalize(produced_inv, run_dir=run_dir, run_id=run_id) == normalize(inv_text, run_dir=run_dir, run_id=run_id)",
+   "assert not live, f'a live stage reached a provider: the run is no longer hermetic ({len(live)} review wire records)'",
+   "assert not permission.decide_bash(cmd, policy=compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)).allow",
+   "assert not permission.decide_bash(cmd, policy=compile_policy_for(_tenants1106.fixture_gather_def(), run_dir=run, defender_dir=dfn)).allow",
+   "assert payload.is_file()",
+   "assert probe.calls >= 2, 'deny did not bounce the agent back into the loop'",
+   "assert reason_substr in probe.seen[-1]",
+   "assert replay.calls == 3, f'expected 3 model turns, got {replay.calls}'",
+   "assert replay.calls == len(turns), f'replayed {replay.calls}/{len(turns)} turns (early stop = an unexpected gate deny)'",
+   "assert row['exit_code'] == 0",
+   "assert row['lead_id'] == 'l-001'",
+   "assert row['system'] == 'elastic'",
+   "assert rows, f'the {role} stage left no trace row'",
+   "assert rows[0].get('ok') is True, f'the {role} stage did not answer'",
+   "assert validate_companion(produced, None) == []",
+   "assert validate_companion(produced_inv, None) == []",
+   "assert wire_log.is_file(), 'the wire log is not where this belt is looking — a missing file reads as zero live records, so the assertion below would pass without measuring anything'",
+   "assert {p.name for p in run_dir.parent.iterdir()} == before | {sidecar_path(run_dir).name}, \"the append created something outside the run dir and the host's own run-end sidecar\""
+  ],
+  "defender/tests/e2e/test_query_tool_611.py": [
+   "assert '<run-' not in on_disk, 'the persisted payload must be the raw bytes, never wrapped'",
+   "assert 'Blocked' not in bash_result, f'the gate refused the declared pipe: {bash_result!r}'",
+   "assert 'FROM logs | LIMIT 2' in row['raw_command']",
+   "assert '[circuit-breaker]' in r.gather_saw",
+   "assert '`solid`' in catalog",
+   "assert 'arg0' not in row['params']",
+   "assert 'connection refused' in row['payload_digest']",
+   "assert 'defender-record-query' not in NON_ADAPTER_SHIMS",
+   "assert 'defender-record-query' not in _SHIM_FLAGS",
+   "assert 'dev.dana' in out",
+   "assert 'dev.dana' in seen, 'the truncated view of the payload must reach the model'",
+   "assert 'elastic' in row['raw_command']",
+   "assert 'exit=0' in seen",
+   "assert 'hollow' not in catalog, 'a system with no declared verbs was advertised to gather'",
+   "assert 'is DOWN' in r.gather_saw",
+   "assert 'kaboom in the adapter' in row['payload_digest']",
+   "assert 'narrow the window and retry' in r.gather_saw",
+   "assert 'query' in _built(GATHER_DEF, tmp_path)._function_toolset.tools",
+   "assert 'query' in agent._function_toolset.tools",
+   "assert 'query' in reason.lower(), f'the deny reason does not name the query tool: {reason}'",
+   "assert 'query' in row['raw_command']",
+   "assert 'query' in with_query._function_toolset.tools",
+   "assert 'query' not in _built(MAIN_DEF, tmp_path)._function_toolset.tools",
+   "assert 'query' not in without._function_toolset.tools",
+   "assert 'query_id' not in {f.name for f in fields(runtime_tools.GatherDeps)}",
+   "assert 'require_closed' in declared_params(verbs[verb]), verb",
+   "assert 'sk-secret-do-not-leak' not in ''.join(env.values())",
+   "assert 'standalone' not in reason.lower(), f'the deny reason teaches a dead route: {reason}'",
+   "assert 'timed out' in row['payload_digest']",
+   "assert 'verbs' in inspect.signature(drive).parameters",
+   "assert (dst / row['payload_path']).read_text() == (r.run_dir / row['payload_path']).read_text()",
+   "assert GATHER_DEF.tools.query is True",
+   "assert MAIN_DEF.tools.query is False",
+   "assert [lead.lead_id for lead in own_staged] == [LEAD]",
+   "assert [row['exit_code'] for row in r.own_rows] == [2, 2]",
+   "assert _decide(f\"cat gather_raw/{LEAD}/0.json | defender-sql 'SELECT 1'\", gather, run_dir).allow",
+   "assert _decide(f\"cat gather_raw/{LEAD}/0.json | defender-sql 'SELECT 1'\", gather, run_dir).allow",
+   "assert _decide(f\"cat {payload} | defender-sql 'SELECT count(*) FROM data'\", gather, run_dir).allow",
+   "assert after.startswith(before), \"the replay's message history is not cumulative\"",
+   "assert all((g.route is Route.PLAIN for g in gather.bash_allow))",
+   "assert all((ref is not None for ref in refs)), 'a row carries no payload path — the judge falls back to 0.json and reads another query'",
+   "assert all((row.get('query_id') != bad_qid for row in r.rows)), 'a traversal query_id was recorded into the queries table'",
+   "assert all((row['exit_code'] != 0 for row in r.rows)), 'a system with an empty VERBS declaration answered a query'",
+   "assert any((isinstance(c, query_tool.QueryCapture) for c in _capabilities(with_query))), 'the query tool was registered without its capture capability'",
+   "assert callable(fn), f'{system}.{name} is not callable'",
+   "assert callable(getattr(record_query, live, None)), f'runtime/query_tool.py imports {live} — the module no longer provides it'",
+   "assert callable(runtime_tools._read_char_cap)",
+   "assert cap.after_tool_execute is AbstractCapability.after_tool_execute, 'capture leans on after_tool_execute, which a raising tool and ModelRetry both skip'",
+   "assert cap.wrap_tool_execute is not AbstractCapability.wrap_tool_execute, 'capture does not override wrap_tool_execute'",
+   "assert cap.wrap_tool_validate is not AbstractCapability.wrap_tool_validate, 'capture does not override wrap_tool_validate — an arg-shape failure writes no row'",
+   "assert catalog is not None",
+   "assert cfg_a['URL_BASE'] == 'http://tree-a:9200'",
+   "assert cfg_b['URL_BASE'] == 'http://tree-b:9200', \"the second tree's verb read the first tree's config (an import-time DEFENDER_DIR)\"",
+   "assert circuit_breaker.RUN_FAIL_KILL_LIMIT == 5",
+   "assert circuit_breaker.is_tripped(r.run_dir, 'elastic')",
+   "assert ctx_ann is VerbContext or (isinstance(ctx_ann, str) and ctx_ann.rpartition('.')[2] == 'VerbContext'), f'{system}.{name}: leading param `{sig_params[0].name}` is not annotated VerbContext — nothing distinguishes the carriage from a model param the ctx would overwrite'",
+   "assert descriptor_catalog(a / 'skills', read_roster(a / 'scripts' / 'adapters'), grant) is not None",
+   "assert descriptor_catalog(b / 'skills', read_roster(b / 'scripts' / 'adapters'), grant) is not None",
+   "assert detail[:80] in row['payload_digest']",
+   "assert env.get('DEFENDER_DIR') == str(DEFENDER)",
+   "assert env.get('DEFENDER_RUN_DIR') == str(r.run_dir)",
+   "assert env.get('PATH'), 'the transport child got no PATH — the scrub emptied the env'",
+   "assert exc in declared, f'{exc.__name__} is not carved out of the capture catch-all'",
+   "assert f'[record_query] raw payload: {payload_abs}' in seen",
+   "assert fn_a(ctx_a) == {'tree': str(a)}",
+   "assert fn_b(ctx_b) == {'tree': str(b)}, \"tree B's verb ran tree A's module — the roster/registry froze the first tree it saw\"",
+   "assert gather.calls == 4, 'one of the three non-query tools was intercepted and derailed'",
+   "assert got == ['alpha', 'beta']",
+   "assert isinstance(row['raw_command'], str)",
+   "assert json.loads((r.run_dir / row['payload_path']).read_text(encoding='utf-8')) == PAYLOAD",
+   "assert json.loads(on_disk) == PAYLOAD",
+   "assert json.loads(payload_abs.read_text(encoding='utf-8'))['values'] == _ESQL_RAW['values'], 'premise: the query tool captured the ES|QL payload the bash call reads'",
+   "assert json.loads(r.payload()) == PAYLOAD",
+   "assert keys, 'no provider key vars declared — the scrub would be vacuous'",
+   "assert leaked == [], f'the verb was handed a provider key: {leaked}'",
+   "assert len(gather.seen) >= 3, 'the replay never reached the turn after the bash call'",
+   "assert len(own_staged[0].queries) == 2",
+   "assert len(queries) == 2",
+   "assert len(r.own_rows) == 2, 'the pre-call trip recorded a query that never executed'",
+   "assert len(r.own_rows) == 5",
+   "assert len(re.findall('</run-[0-9a-f]+-untrusted>', out)) == 1",
+   "assert len(re.findall('<run-[0-9a-f]+-untrusted>', out)) == 1",
+   "assert len(rec.calls) == 1",
+   "assert len(rec.calls) == 1, 'the verb never ran'",
+   "assert len(rec.calls) == 2, 'the tripped system was queried again'",
+   "assert len(rows) == 1, 'an arg-shape failure wrote no row — half the exit-64 class is gone'",
+   "assert len(rows) == 1, f'expected exactly one queries row, got {rows}'",
+   "assert len(rows) == 2",
+   "assert len(set(keys)) == len(keys), f'duplicate (lead_id, seq) key: {keys}'",
+   "assert len(set(map(str, refs))) == 2",
+   "assert len({row['payload_path'] for row in rows}) == 2",
+   "assert naked == [], f'a transport forks a child with the INHERITED environment: {naked}'",
+   "assert not (run_dir / 'gather_raw' / LEAD).exists(), 'a non-query tool wrote a payload'",
+   "assert not Path(row['payload_path']).is_absolute()",
+   "assert not _decide(\"cat ../../etc/passwd | defender-sql 'SELECT 1'\", gather, run_dir).allow",
+   "assert not _decide(f'cat {payload} # record_query', main, run_dir).allow",
+   "assert not _decide(f'cat {payload}', main, run_dir).allow",
+   "assert not any((isinstance(c, query_tool.QueryCapture) for c in _capabilities(without)))",
+   "assert not decision.allow, f'gather can still run an adapter from bash: {cmd}'",
+   "assert not getattr(agent, '_cap_toolsets', []), 'the query tool arrived via a capability-owned toolset, invisible to the #538 assertions'",
+   "assert not hasattr(_replay_harness, gone), f\"{gone} (the record_query.subprocess monkeypatch seam) is still the harness's fake\"",
+   "assert not hasattr(decision, 'adapter_argv')",
+   "assert not hasattr(decision, 'sql_pipe')",
+   "assert not hasattr(record_query, dead), f'record_query.{dead} outlived its CLI'",
+   "assert not hasattr(ticket_adapter, gone), f'ticket_adapter.{gone} outlived its CLI'",
+   "assert not leaked, f'{system}.{name}: param(s) {leaked} bind positionally, so the model can never supply them — spell them `*, {leaked[0]}: <type>`'",
+   "assert not permission.decide_read(payload, run_dir=run_dir, defender_dir=DEFENDER, policy=main).allow",
+   "assert not var_kw, f'{system}.{name}: **{var_kw[0]} is not a declared param surface the validator can read'",
+   "assert offenders == [], f'a transport still exits the process instead of raising: {offenders}'",
+   "assert offenders == [], f'a transport subprocess decodes STRICTLY: {offenders}'",
+   "assert offenders == [], f'verb params name a program/command/path: {offenders}'",
+   "assert own_rows == [], 'a non-query tool call wrote a queries row'",
+   "assert p.annotation is not inspect.Parameter.empty, f'{system}.{name}.{p.name} carries no annotation — the validator has no type'",
+   "assert query_tool._raw_args(body) == {}, 'a recursive arguments body no longer coarsens to `{}` — if it raises here instead, the rejection handler writes no row and the companion guard stops counting'",
+   "assert query_tool.resolve_query_id('elastic', '', None) == 'elastic.ad-hoc'",
+   "assert r.breaker.get('total_failures', 0) == 0",
+   "assert r.breaker['systems']['elastic']['failures'] == 1",
+   "assert r.breaker['systems']['elastic']['failures'] == 1",
+   "assert r.breaker['systems']['elastic']['failures'] == 1",
+   "assert r.breaker['total_failures'] >= circuit_breaker.RUN_FAIL_KILL_LIMIT",
+   "assert r.gather.calls == 2",
+   "assert r.gather.calls == 4",
+   "assert r.gather.calls >= 2, 'the empty-VERBS system was not rejected back to the model'",
+   "assert r.gather.calls >= 2, 'the rejection did not bounce the gather agent back into its loop'",
+   "assert r.gather.calls >= 2, 'the traversal rejection did not bounce back to the model'",
+   "assert r.main.calls == 1, 'RunAborted was swallowed — the run kept going past the kill limit'",
+   "assert r.main.calls == 2",
+   "assert r1.row()['query_id'] == 'elastic.sshd-auth-history'",
+   "assert r2.row()['query_id'] == 'elastic.query'",
+   "assert re.search('\"n\":\\\\s*2', gather.seen[-1]), 'defender-sql over the persisted payload did not aggregate the real rows'",
+   "assert re.search('\"n\":\\\\s*3\\\\b', bash_result), bash_result",
+   "assert re.search('\"s\":\\\\s*424\\\\b', bash_result), bash_result",
+   "assert re.search('</run-[0-9a-f]+-untrusted>', seen), 'the frame never closed'",
+   "assert re.search('<run-[0-9a-f]+-untrusted>', seen), 'the return was not framed'",
+   "assert read_jsonl_rows(dst / 'executed_queries.jsonl') == r.rows",
+   "assert rec.calls == []",
+   "assert rec.calls == []",
+   "assert rec.calls == []",
+   "assert rec.calls == [], 'a traversal query_id reached the transport'",
+   "assert rec.calls == [], f'{label} reached the verb — validation is not at the boundary'",
+   "assert rec.only().params == {'native_query': 'FROM logs | LIMIT 2', 'limit': 10}",
+   "assert rec.only().params == {'native_query': 'x'}",
+   "assert row['error_class'] == 'agent-fixable'",
+   "assert row['error_class'] == 'infra'",
+   "assert row['error_class'] == 'infra'",
+   "assert row['error_class'] == 'infra'",
+   "assert row['error_class'] == error_class_for_exit(row['exit_code'])",
+   "assert row['error_class'] is None",
+   "assert row['error_class'] is None",
+   "assert row['exit_code'] != 0",
+   "assert row['exit_code'] != 0",
+   "assert row['exit_code'] != 0, 'an unmapped fault was recorded as a SUCCESS'",
+   "assert row['exit_code'] != 1, 'a missing config is still misfiled as an agent-fixable error'",
+   "assert row['exit_code'] != 124, 'the seam synthesized a timeout it did not enforce'",
+   "assert row['exit_code'] == 0",
+   "assert row['exit_code'] == 0",
+   "assert row['exit_code'] == 0",
+   "assert row['exit_code'] == 0",
+   "assert row['exit_code'] == 2",
+   "assert row['exit_code'] == 2",
+   "assert row['exit_code'] == 2",
+   "assert row['exit_code'] == 64",
+   "assert row['lead_id'] == LEAD",
+   "assert row['params'] == {'native_query': 'FROM logs | LIMIT 2', 'limit': 2}",
+   "assert row['payload_digest']",
+   "assert row['payload_digest'].startswith(f\"exit={row['exit_code']}; \")",
+   "assert row['payload_path'] == f'gather_raw/{LEAD}/0.json'",
+   "assert row['payload_status'] == 'empty'",
+   "assert row['payload_status'] == 'error'",
+   "assert row['payload_status'] == 'error'",
+   "assert row['payload_status'] == 'error'",
+   "assert row['payload_status'] == 'error'",
+   "assert row['payload_status'] == 'ok'",
+   "assert row['query_id'] == 'elastic.sshd-auth-baseline-7d'",
+   "assert row['query_id'] == 'elastic.sshd-auth-history'",
+   "assert row['seq'] == 0",
+   "assert row['system'] == 'elastic'",
+   "assert row['system'] == 'elastic'",
+   "assert row['system'] == 'ghost'",
+   "assert row['system_key'] == '', \"an executed row was fingerprinted, which splits its own system's repeat count\"",
+   "assert row['verb'] == 'nosuch-verb'",
+   "assert row['verb'] == 'query', \"verb must hold the tool's real verb, not the query_id suffix\"",
+   "assert rows[0]['error_class'] == 'agent-fixable'",
+   "assert rows[0]['exit_code'] == 64",
+   "assert rows[0]['payload_status'] == 'error'",
+   "assert set(NON_ADAPTER_SHIMS) <= set(_SHIM_FLAGS), 'a shim carries no _SHIM_FLAGS entry — its shape degrades to free text'",
+   "assert set(row) == ROW_KEYS",
+   "assert sig_params, f'{system}.{name}: takes no parameters at all, not even a ctx'",
+   "assert sig_params[0].kind in positional, f'{system}.{name}: takes no leading VerbContext — the tool passes it positionally'",
+   "assert sorted((c.params['tag'] for c in rec.calls)) == ['alpha', 'beta']",
+   "assert sorted((row['seq'] for row in rows)) == [0, 1]",
+   "assert sorted(reg.systems()) == on_disk, 'the registry roster is not the adapter roster'",
+   "assert tag not in body, f'the frame salt {tag!r} occurs inside its own body — gather can close its frame'",
+   "assert tags, 'the query return carried no untrusted wrap at all'",
+   "assert verbs, f'{system} declares no verbs'",
+   "assert {'list-tickets', 'get-ticket'} <= set(verbs)"
+  ],
+  "defender/tests/e2e/test_808_run_dir_tables.py": [
+   "assert (res.run_dir / row['payload_path']).is_file()",
+   "assert (run_dir / 'gather_raw' / f'{L0}.lead.json').is_file(), 'lead-0 never claimed anything on this run dir, so nothing met the planted collision — the survival assertion below would be green over a run that did nothing'",
+   "assert (run_dir / 'gather_raw' / f'{L3}.lead.json').read_text(encoding='utf-8') == planted, \"the re-claim overwrote the first sidecar; claim_lead's O_EXCL arm leaves it untouched\"",
+   "assert L0 != L3",
+   "assert LEAD_ID_RE.match(L0), \"the reserved id is outside the namespace's own regex\"",
+   "assert LEAD_ID_RE.match(lead), f\"{lead} is outside the lead-id namespace's regex\"",
+   "assert [r['seq'] for r in rows] == [0, 1, 2], 'seq is not allocated per lead and monotonic'",
+   "assert [r['seq'] for r in rows] == [0, 1, 2], f\"lead-0 allocated {[r['seq'] for r in rows]} — a private counter re-claimed seq 0\"",
+   "assert any((p.fullmatch(f'gather_raw/{lead}/1.json') for p in _PAYLOAD_SHAPES)), f\"{lead}'s payload path is outside the run-dir whitelist\"",
+   "assert any((pattern.fullmatch(shape) for pattern in _PAYLOAD_SHAPES)), f'{shape} is outside the run-dir payload whitelist — the pointer is uncontained'",
+   "assert claim_lead({'run_dir': str(probe_dir), 'lead_id': 'l-777', 'goal': '', 'what_to_summarize': ['x']}) == NOT_CLAIMED, \"claim_lead's falsy-goal arm reports something other than NOT_CLAIMED — re-read r14 before relying on the guard this demand asks for\"",
+   "assert degraded.has_sidecar(L0), 'a degraded resolution left l-000 claimed nowhere, so its rows have no owner'",
+   "assert f'{lead}.lead.json' in names, f'{lead} has no leads row: {names}'",
+   "assert happy.has_sidecar(L0), 'the happy path produced no leads row for l-000 — the guard below would be green over a lead that never existed, which is the vacuous shape'",
+   "assert happy.rows_for(L0), 'the happy path produced no query rows for l-000'",
+   "assert isinstance(sidecar.get('goal'), str), f\"l-000's goal is not a string: {sidecar!r}\"",
+   "assert isinstance(sidecar.get('what_to_summarize'), list), \"l-000's what_to_summarize is not a list — the same swallow arm\"",
+   "assert len(rows) == 3, f'the shell fetch plus two backing indices produced {len(rows)} rows, not three'",
+   "assert len({L0, L3, MAIN_LEAD}) == 3, \"a reserved id collided with MAIN's own sequence\"",
+   "assert main.calls >= 1, \"the run never reached MAIN's first prompt\"",
+   "assert model_row.get(PROVENANCE_KEY) != HARNESS_PROVENANCE, 'a lead the MODEL dispatched is marked harness-authored — the field distinguishes nothing and every reader taught to trust it is now wrong'",
+   "assert not (probe_dir / 'gather_raw' / 'l-777.lead.json').exists(), 'the falsy-goal arm now writes a sidecar; the swallow this demand guards is gone'",
+   "assert not (res.rows_for(lead) and (not res.has_sidecar(lead))), f'[{label}] rows exist under {lead} with no leads row — joined() marks it orphan=True'",
+   "assert res.payloads(L0) == ['0.json', '1.json', '2.json']",
+   "assert res.sidecar(lead).get(PROVENANCE_KEY) == HARNESS_PROVENANCE, f\"{lead}'s leads row does not mark itself harness-authored\"",
+   "assert row['lead_id'] == L0",
+   "assert sidecar['goal'].strip(), \"l-000's goal is falsy — claim_lead's swallow arm claims nothing and writes nothing\"",
+   "assert sidecar['what_to_summarize'], \"l-000's what_to_summarize is empty\"",
+   "assert slot.read_text(encoding='utf-8') == '[\"THE EARLIER PAYLOAD\"]', \"lead-0's payload write overwrote a slot the shared counter had already handed out\"",
+   "assert summary is not None, 'the re-claim raised ModelRetry out of `_user_prompt` — the run ended before MAIN'"
+  ],
+  "defender/tests/e2e/test_1084_mirror_e2e.py": [
+   "assert 'MirrorRootRefused' in records[0].getMessage(), f\"the warning does not name the resolver's exception: {records[0].getMessage()!r}\"",
+   "assert 'Permission denied' in warned, f'the warning does not carry the error: {warned!r}'",
+   "assert '[Errno' not in message, f\"the warning carries the error's str(), not its reason: {message!r}\"",
+   "assert 'run.py' in before, 'positive control: the snapshot is not reading defender/'",
+   "assert (folder / PAGE).read_bytes() == (run_dir / PAGE).read_bytes(), \"positive control: the mirror does not hold the run's page\"",
+   "assert (good / run_dir.name / PAGE).read_bytes() == (run_dir / PAGE).read_bytes()",
+   "assert (occupied / 'keep').read_bytes() == b'KEEP\\n'",
+   "assert (run_visualizations_dir / run_dir.name / PAGE).is_file()",
+   "assert (st.st_uid, st.st_gid) == (uid, gid), f'{path} is owned by {st.st_uid}:{st.st_gid}, not {uid}:{gid}'",
+   "assert MARKER in page, \"positive control: the page handed over is this run's\"",
+   "assert MARKER in page.decode('utf-8'), \"the page does not carry this run's own final turn\"",
+   "assert MARKER in page.read_text(encoding='utf-8')",
+   "assert MARKER in record.read_text(encoding='utf-8'), \"the page record does not carry this run's own final turn\"",
+   "assert [_stray_state(p) for p in strays] == strays_before, \"the refused copy still landed at a real checkout's top-level mirror\"",
+   "assert [_stray_state(p) for p in strays] == strays_before, \"the render also wrote a copy at a real checkout's top-level mirror, bypassing the override (#1084 adversary H3)\"",
+   "assert _fingerprint(owned_tree.mirror) == before, f'the {shape} mirror folder was written'",
+   "assert _fingerprint(target) == before, f'the root-only target changed through {site}'",
+   "assert _warning_records(caplog) == [], 'a copy skipped by design was warned about'",
+   "assert _warning_records(caplog) == [], 'a copy that landed was warned about'",
+   "assert _warning_records(caplog) == [], 'a copy that landed was warned about'",
+   "assert _warnings(caplog) == [], 'a copy that landed was warned about'",
+   "assert _warnings(caplog) == [], 'a copy that landed was warned about'",
+   "assert _warnings(caplog) == [], 'a copy that landed was warned about'",
+   "assert _warnings(caplog) == [], f'the outside copy was warned about: {_warnings(caplog)!r}'",
+   "assert any(('MirrorRootRefused' in w or 'is unset under pytest' in w for w in warned)), f\"the refused copy was not warned with the resolver's reason; warnings were {warned!r}\"",
+   "assert any((needle in w for w in warned)), f'the copy failed silently: no WARNING names {needle!r}; warnings were {warned!r}'",
+   "assert blocker.read_bytes() == b'a file, not a folder\\n'",
+   "assert bystander.read_bytes() == b'BYSTANDER\\n', 'the page was written through the existing file in place, not staged and renamed'",
+   "assert changed == [], f'the render wrote under defender/: {changed}'",
+   "assert claim not in message, f'the line claims a value the variable does not hold ({claim!r}): {message!r}'",
+   "assert dest.is_symlink(), 'the planted link was replaced'",
+   "assert dest.read_bytes() == page.encode('utf-8')",
+   "assert dest.read_bytes() == page.encode('utf-8')",
+   "assert expected == run_visualizations_dir / run_dir.name / PAGE",
+   "assert expected.read_bytes() == page.encode('utf-8')",
+   "assert gid != owned_tree.gid, \"precondition: 4242 must differ from the uid's passwd group\"",
+   "assert len(_infos_naming(caplog, str(expected))) == 1, f'a landed copy was not reported once at INFO naming {expected}: {[r.getMessage() for r in caplog.records]!r}'",
+   "assert len(before) > 100, 'positive control: the snapshot is not reading defender/'",
+   "assert len(records) == 1, f'expected one WARNING for the failed copy; got {[r.getMessage() for r in records]!r}'",
+   "assert len(records) == 1, f'the refused copy was not ONE warning: {records!r}'",
+   "assert len(skipped) == 1, f'expected one INFO saying the page was not copied under {_env.DEPLOYMENT_ENV} (production); got {[r.getMessage() for r in caplog.records]!r}'",
+   "assert link.is_symlink(), f'the link at {site} was replaced or removed'",
+   "assert message.count(str(dest)) == 1, f'the warning names the destination {message.count(str(dest))} times, not once: {message!r}'",
+   "assert mirrored.is_absolute()",
+   "assert mirrored.is_file(), f'no mirrored page at {mirrored}'",
+   "assert mirrored.read_bytes() == (run_dir / PAGE).read_bytes()",
+   "assert mirrored.read_bytes() == (run_dir / PAGE).read_bytes()",
+   "assert mirrored.read_bytes() == page, \"the mirror is not the run's page\"",
+   "assert not (tmp_path / 'not-yet').exists(), 'an off-dev copy created the copy root'",
+   "assert not _under(outside, run_common.REPO_ROOT), 'precondition: outside the checkout'",
+   "assert not _under(run_dir, run_common.DEFENDER_DIR), 'precondition: the run dir must not sit under defender/, or its own writes would be in the snapshot'",
+   "assert not mirrored.exists(), 'precondition: a stale page at the override'",
+   "assert not owned_tree.mirror.exists()",
+   "assert not stale.is_symlink()",
+   "assert occupied.read_bytes() == (run_dir / PAGE).read_bytes()",
+   "assert os.geteuid() != 0 or os.lstat(root.parent).st_uid == 0, 'precondition: the copy is written in-process, not by a dropped-privilege child'",
+   "assert os.lstat(folder / PAGE).st_ino != os.lstat(bystander).st_ino",
+   "assert os.readlink(dest) == str(outside), 'the planted link was re-aimed'",
+   "assert os.readlink(link) == str(target), f'the link at {site} was re-aimed'",
+   "assert outside.read_bytes() == b'OUTSIDE\\n', 'the copy was written through the planted link'",
+   "assert outside.read_bytes() == b'OUTSIDE\\n', 'the post-run step wrote through the link'",
+   "assert page.read_bytes() == (run_dir / PAGE).read_bytes()",
+   "assert page.read_bytes() == (run_dir / PAGE).read_bytes()",
+   "assert page.read_bytes() == (run_dir / PAGE).read_bytes()",
+   "assert page.read_bytes() == (run_dir / PAGE).read_bytes()",
+   "assert probe.returncode == 0, f'infrastructure: uid {tree.uid} cannot run {sys.executable}: {probe.stderr}'",
+   "assert reason in message, f\"the warning does not carry the error's reason {reason!r}: {message!r}\"",
+   "assert record.is_file(), f'the page record {record} was not written'",
+   "assert root == run_visualizations_dir, 'precondition: the copy resolves to the override'",
+   "assert stale.read_bytes() == (run_dir / PAGE).read_bytes(), 'the stale page was not replaced'",
+   "assert str(refused.value) in records[0].getMessage(), f\"the warning does not carry the refusal's message: {records[0].getMessage()!r}\"",
+   "assert type_name in message, f\"the warning does not name the error's type {type_name}: {message!r}\"",
+   "assert vr.main(['visualize_run.py', str(run_dir)]) == 0",
+   "assert vr.mirror_page(page, run_dir.name) == 'copied'",
+   "assert vr.mirror_page(page, run_dir.name) == 'copied'",
+   "assert vr.mirror_page(page, run_dir.name) == 'copied'",
+   "assert vr.mirror_page(page, run_dir.name) == 'failed'",
+   "assert vr.mirror_page(page, run_dir.name) == 'failed'",
+   "assert vr.mirror_page(page, run_dir.name) == 'failed'",
+   "assert vr.mirror_page(page, run_dir.name) == 'failed'",
+   "assert vr.mirror_page(page, run_dir.name) == 'skipped'",
+   "assert vr.mirror_page(vr.render_page(run_dir), run_dir.name) == 'copied'"
+  ],
+  "defender/tests/test_1096_entrypoint_closure.py": [
+   "assert 'hunter2' not in done.stdout.decode('utf-8', 'replace')",
+   "assert box.BOX_ENV_ALLOWLIST is box_codec.BOX_ENV_ALLOWLIST",
+   "assert box._BOX_MARK_ENV is box_codec._BOX_MARK_ENV",
+   "assert done.returncode == 0, done.stderr.decode('utf-8', 'replace')",
+   "assert done.returncode == 0, done.stderr.decode('utf-8', 'replace')",
+   "assert done.returncode == 0, done.stderr.decode('utf-8', 'replace')",
+   "assert done.returncode == 0, f\"the entrypoint died before answering (rc={done.returncode}):\\n{done.stderr.decode('utf-8', 'replace')}\"",
+   "assert report == 'ORDINARY_IMPORT_SURVIVED=True', f'{report}: running the entrypoint as the main module REPLACED the module object that an ordinary import had already put in place'",
+   "assert report == 'UNDER_IMPORT_NAME=__main__', f\"{report}: the interpreter holds a SECOND copy of the entrypoint module — the one it ran as the main module, and another that `box_codec`'s import built from source, paid on every `docker exec`\"",
+   "assert result.err == b'', result",
+   "assert result.out == b'hi from the box\\n', result",
+   "assert result.rc == 0, result",
+   "assert seen['DEFENDER_BOX'] == '1', seen",
+   "assert set(box_codec._BOX_MARK_ENV) <= set(box_codec.BOX_ENV_ALLOWLIST)",
+   "assert set(seen) == {'PATH', 'PYTHONPATH', 'DEFENDER_BOX', 'TZ'}, sorted(seen)"
+  ]
+ },
+ "pricing": {
+  "rows": [
+   [
+    "kimi-k3",
+    {
+     "dict": [
+      [
+       "input_tokens",
+       1000
+      ],
+      [
+       "output_tokens",
+       2000
+      ],
+      [
+       "cache_creation_input_tokens",
+       300
+      ],
+      [
+       "cache_read_input_tokens",
+       4000
+      ]
+     ]
+    },
+    {
+     "float": "0.0351"
+    }
+   ],
+   [
+    "accounts/fireworks/models/kimi-k3",
+    {
+     "dict": [
+      [
+       "input_tokens",
+       1000
+      ],
+      [
+       "output_tokens",
+       2000
+      ],
+      [
+       "cache_creation_input_tokens",
+       300
+      ],
+      [
+       "cache_read_input_tokens",
+       4000
+      ]
+     ]
+    },
+    {
+     "float": "0.0351"
+    }
+   ],
+   [
+    "fireworks:glm-5p3",
+    {
+     "dict": [
+      [
+       "input_tokens",
+       1000
+      ],
+      [
+       "output_tokens",
+       2000
+      ],
+      [
+       "cache_creation_input_tokens",
+       300
+      ],
+      [
+       "cache_read_input_tokens",
+       4000
+      ]
+     ]
+    },
+    {
+     "float": "0.01166"
+    }
+   ],
+   [
+    "glm-5.3-flash",
+    {
+     "dict": [
+      [
+       "input_tokens",
+       1000
+      ],
+      [
+       "output_tokens",
+       2000
+      ],
+      [
+       "cache_creation_input_tokens",
+       300
+      ],
+      [
+       "cache_read_input_tokens",
+       4000
+      ]
+     ]
+    },
+    {
+     "float": "0.001315"
+    }
+   ],
+   [
+    "anthropic:claude-sonnet-4-6-20250514",
+    {
+     "dict": [
+      [
+       "input_tokens",
+       1000
+      ],
+      [
+       "output_tokens",
+       2000
+      ],
+      [
+       "cache_creation_input_tokens",
+       300
+      ],
+      [
+       "cache_read_input_tokens",
+       4000
+      ]
+     ]
+    },
+    {
+     "float": "0.035325"
+    }
+   ],
+   [
+    "claude-haiku-4-5",
+    {
+     "dict": [
+      [
+       "input_tokens",
+       1000
+      ],
+      [
+       "output_tokens",
+       2000
+      ],
+      [
+       "cache_creation_input_tokens",
+       300
+      ],
+      [
+       "cache_read_input_tokens",
+       4000
+      ]
+     ]
+    },
+    {
+     "float": "0.011775"
+    }
+   ],
+   [
+    "deepseek-v4p1-flash",
+    {
+     "dict": [
+      [
+       "input_tokens",
+       123456789
+      ],
+      [
+       "cache_read_input_tokens",
+       7
+      ]
+     ]
+    },
+    {
+     "float": "27.160493629"
+    }
+   ],
+   [
+    "",
+    {
+     "dict": [
+      [
+       "input_tokens",
+       1000
+      ],
+      [
+       "output_tokens",
+       2000
+      ],
+      [
+       "cache_creation_input_tokens",
+       300
+      ],
+      [
+       "cache_read_input_tokens",
+       4000
+      ]
+     ]
+    },
+    {
+     "float": "0.035325"
+    }
+   ],
+   [
+    "gpt-4o",
+    {
+     "dict": [
+      [
+       "input_tokens",
+       1000
+      ],
+      [
+       "output_tokens",
+       2000
+      ],
+      [
+       "cache_creation_input_tokens",
+       300
+      ],
+      [
+       "cache_read_input_tokens",
+       4000
+      ]
+     ]
+    },
+    {
+     "float": "0.0"
+    }
+   ],
+   [
+    "glm-5.2",
+    "not a usage mapping",
+    {
+     "float": "0.0"
+    }
+   ],
+   [
+    "kimi-k2p6",
+    {
+     "dict": []
+    },
+    {
+     "float": "0.0"
+    }
+   ],
+   [
+    "glm-5p2",
+    {
+     "dict": [
+      [
+       "input_tokens",
+       true
+      ],
+      [
+       "output_tokens",
+       {
+        "float": "1.5"
+       }
+      ]
+     ]
+    },
+    {
+     "float": "8e-06"
+    }
+   ]
+  ],
+  "providers_package_loads": [],
+  "base_pricing_module_loads": [],
+  "base_observe_loads_pydantic_ai": true
+ }
+}
