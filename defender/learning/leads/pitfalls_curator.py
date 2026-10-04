@@ -6,8 +6,10 @@ import logging
 import re
 import sys
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 from uuid import uuid4
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
@@ -35,6 +37,7 @@ from defender.learning.leads.declared_systems import (
     ADAPTERS_REL,
     adapter_declared_systems,
 )
+from defender.runtime import box as _box
 from defender.runtime.verbs import is_system_name
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.learning._prompt import stage_user_message, structured_json_body
@@ -425,6 +428,7 @@ def _verify_pitfalls_state(
             _pitfalls_rule, repo_root,
             systems=systems, reducer_offered=reducer_offered, tree_for=tree_for,
         ),
+        tree_for=tree_for,
     )
 
 
@@ -551,6 +555,7 @@ def run_pitfalls(
     box=None,
     on_curated: Callable[[PitfallsDisposition], None] | None = None,
     lock_wait_seconds: int | None = None,
+    freeze: Callable[[Any], AbstractContextManager[None]] = _box.frozen,
 ) -> int:
     """One curation tick over the pitfalls queue.
 
@@ -641,17 +646,19 @@ def run_pitfalls(
             f"pitfalls curator exited rc={rc}; leaving queue intact"
         )
 
-    changed = _verify_pitfalls_state(
-        repo_root, baseline_stray, systems=systems, reducer_offered=reducer_offered,
-        tree_for=trees.tree_for,
-    )
-    sha = None
-    if changed:
-        sha = _author_shared.commit_corpus(
-            repo_root, repo_root / "defender" / "skills",
-            _pitfalls_commit_message(changed),
+    # Frozen from the gate's first read to the commit, as the lead author's (#1178).
+    with freeze(box):
+        changed = _verify_pitfalls_state(
+            repo_root, baseline_stray, systems=systems, reducer_offered=reducer_offered,
+            tree_for=trees.tree_for,
         )
-    else:
+        sha = None
+        if changed:
+            sha = _author_shared.commit_corpus(
+                repo_root, repo_root / "defender" / "skills",
+                _pitfalls_commit_message(changed),
+            )
+    if not changed:
         _logger.info("pitfalls curator made no corpus edits (valid no-edit tick)")
     # After the commit: a reducer row's criterion needs the confirmed edit, which only
     # `changed` carries.

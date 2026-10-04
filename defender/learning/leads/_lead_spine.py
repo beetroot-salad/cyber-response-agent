@@ -11,7 +11,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender._io import Held
 from defender.learning.core import config as _loop_config
-from defender.learning.core.lane_trees import DrainTrees
+from defender.learning.core.lane_trees import DrainTrees, TreeFor, read_at
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.learning.leads.path_validation import SKILLS_REL, _porcelain_records
 
@@ -62,13 +62,19 @@ def _verify_corpus_scope(
     *,
     actor: str,
     rule: Callable[[str, str], None],
+    tree_for: TreeFor,
     batch_rule: Callable[[list[tuple[str, str]]], None] | None = None,
 ) -> list[str]:
     """Per-path `rule` over every in-corpus change, then an optional whole-batch `batch_rule`.
 
     `batch_rule` is for invariants only decidable across the batch (e.g. whether a deleted
     draft's identity was taken over by another file in the same commit). It runs last, on
-    records `rule` already admitted."""
+    records `rule` already admitted.
+
+    Every record `rule` admits that is not a deletion must also be a plain file, read through
+    the lane's held mount (`tree_for`): a link, a hard link, a FIFO or a folder at a committed
+    name is refused, never committed (#1178). Checked after `rule`, so a refusal `rule` already
+    gives keeps its own message."""
     records = _porcelain_records(repo_root)
 
     def _in_corpus(p: str) -> bool:
@@ -84,6 +90,13 @@ def _verify_corpus_scope(
         if not _in_corpus(path):
             continue
         rule(xy, path)
+        if "D" not in xy:
+            _text, reason = read_at(repo_root, tree_for, path)
+            if reason is not None:
+                raise LeadAuthorError(
+                    f"{actor} left {path} as something other than a plain file ({reason}); "
+                    "refusing to commit"
+                )
         in_corpus.append((xy, path))
     if batch_rule is not None:
         batch_rule(in_corpus)

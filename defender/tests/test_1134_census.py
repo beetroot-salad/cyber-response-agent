@@ -1651,8 +1651,9 @@ REGRESSIONS: dict[str, Regression] = {
          "_verify_skills_state(repo_root, baseline_stray, systems=deps.systems, minted=minted, "
          "tree_for=lambda _path: None)", 1),)),
     "s6v2-E2b-run-pitfalls-plain-tree-for": Regression(PITFALLS, (
-        ("        tree_for=trees.tree_for,\n    )\n    sha = None\n",
-         "        tree_for=lambda _path: None,\n    )\n    sha = None\n", 1),
+        # Indented one level by #1178's `with freeze(box):` around the gate and the commit.
+        ("            tree_for=trees.tree_for,\n        )\n        sha = None\n",
+         "            tree_for=lambda _path: None,\n        )\n        sha = None\n", 1),
     ), (("run_pitfalls", "tree_for",
          "_verify_pitfalls_state(repo_root, baseline_stray, systems=systems, "
          "reducer_offered=reducer_offered, tree_for=lambda _path: None)", 1),)),

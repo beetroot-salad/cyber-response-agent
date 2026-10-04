@@ -493,6 +493,7 @@ def _verify_skills_state(
         rule=functools.partial(
             _skills_rule, repo_root, resolver, systems=systems, tree_for=tree_for,
         ),
+        tree_for=tree_for,
         batch_rule=functools.partial(_covers_rule, repo_root, minted, tree_for=tree_for),
     )
 

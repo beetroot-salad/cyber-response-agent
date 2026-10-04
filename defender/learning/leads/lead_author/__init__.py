@@ -14,6 +14,7 @@ import logging
 import string
 import sys
 from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager
 from defender._model import model
 from defender._run_paths import RunPaths
 from pathlib import Path
@@ -36,6 +37,7 @@ from defender.learning.core import persist as _loop_persist
 from defender.learning._prompt import stage_user_message, structured_json_body
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads import lead_render
+from defender.runtime import box as _box
 from defender.runtime.verbs import engine_for
 
 from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)
@@ -177,6 +179,9 @@ class LeadAuthorDeps:
     skills: Held
     #: The lane's `DrainTrees.tree_for`, for the post-agent rules, which hold git-status names.
     tree_for: TreeFor
+    #: Holds the box frozen around the gate and the commit (#1178), so nothing it runs writes
+    #: between what the gate read and what is committed.
+    freeze: Callable[[Any], AbstractContextManager[None]] = _box.frozen
 
 
 def build_lead_author_deps(
@@ -349,13 +354,16 @@ def _run_locked(
         _logger.critical(f"lead-author spawn exited rc={rc}; see the trace under {run_dir} (drain will quarantine)")
         return 2
 
-    changed = _verify_skills_state(
-        repo_root, baseline_stray, systems=deps.systems, minted=minted, tree_for=deps.tree_for,
-    )
-    sha = _author_shared.commit_corpus(
-        repo_root, repo_root / "defender" / "skills",
-        _loop_commit_message(run_dir, changed),
-    )
+    # The box is frozen from the gate's first read to the commit (#1178): the agent has
+    # returned, but a process it left behind could still write.
+    with deps.freeze(box):
+        changed = _verify_skills_state(
+            repo_root, baseline_stray, systems=deps.systems, minted=minted, tree_for=deps.tree_for,
+        )
+        sha = _author_shared.commit_corpus(
+            repo_root, repo_root / "defender" / "skills",
+            _loop_commit_message(run_dir, changed),
+        )
     on_done(sha)
     _logger.info(f"done; commit_made={sha is not None} commit={(sha or 'none')[:12]}")
     return 0

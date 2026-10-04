@@ -5,10 +5,11 @@ box, not properties of one.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 
 from defender._io import sweep_staged, write_guarded
@@ -388,6 +389,51 @@ def stop_box(box: BoxExecutor, *, docker: DockerFn = _docker) -> None:
         raise BoxFault(
             f"could not tear down the box {box.name}: {(proc.stderr or '').strip()}"
         )
+
+
+@contextlib.contextmanager
+def frozen(box: BoxExecutor | None, *, docker: DockerFn = _docker) -> Iterator[None]:
+    """Hold every process of `box` frozen for the `with` body (#1178): nothing the box runs can
+    write while the host judges and commits what it left.
+
+    A no-op for no box or an unsandboxed one (nothing to freeze). Otherwise the body runs only
+    once the box is provably paused (`docker pause`, then `docker inspect` reports
+    `State.Paused`), as the scrub runs only once the box is provably dead; anything short of
+    that is a `BoxFault` and the body never runs. On exit the box is unpaused; a failure there is
+    a `BoxFault`, unless the body is already raising, whose exception then propagates and the
+    unpause fault is logged."""
+    if box is None or not box.sandboxed:
+        yield
+        return
+    proc = _call(docker, ["docker", "pause", box.name])
+    if proc.returncode != 0:
+        raise BoxFault(f"could not pause the box {box.name}: {(proc.stderr or '').strip()}")
+    try:
+        proc = _call(docker, ["docker", "inspect", "-f", "{{.State.Paused}}", box.name])
+        if proc.returncode != 0 or (proc.stdout or "").strip() != "true":
+            raise BoxFault(
+                f"the box {box.name} is not provably paused (inspect rc={proc.returncode}: "
+                f"{(proc.stdout or proc.stderr or '').strip()!r})"
+            )
+    except BoxFault:
+        with contextlib.suppress(BoxFault):
+            _call(docker, ["docker", "unpause", box.name])
+        raise
+    try:
+        yield
+    except BaseException:
+        try:
+            _unpause(box, docker)
+        except BoxFault as e:
+            _logger.error(f"{e} — while the frozen body was already failing")
+        raise
+    _unpause(box, docker)
+
+
+def _unpause(box: BoxExecutor, docker: DockerFn) -> None:
+    proc = _call(docker, ["docker", "unpause", box.name])
+    if proc.returncode != 0:
+        raise BoxFault(f"could not unpause the box {box.name}: {(proc.stderr or '').strip()}")
 
 
 def stop_and_scrub(
