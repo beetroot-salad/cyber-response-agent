@@ -96,6 +96,21 @@ def git(
         args, cwd=cwd, check=check, timeout=timeout, input=input, env=env).stdout.strip()
 
 
+def git_z(
+    args: Sequence[str],
+    *,
+    cwd: Path,
+    timeout: float | None = None,
+    input: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> list[str]:
+    """The NUL-separated fields of a `-z` git call's output, unstripped (`git()` strips, which
+    would eat whitespace that belongs to the first or last name), with the empty tail dropped."""
+    out = _run(args, cwd=cwd, timeout=timeout, input=input, env=env).stdout
+    fields = out.split("\0")
+    return fields[:-1] if fields and fields[-1] == "" else fields
+
+
 def git_ok(
     args: Sequence[str], *, cwd: Path = REPO_ROOT, timeout: float | None = None,
     env: Mapping[str, str] | None = None,

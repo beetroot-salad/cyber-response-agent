@@ -113,18 +113,18 @@ _GATE_GIT_TIMEOUT = 120.0
 _REGULAR_MODES = frozenset({"100644", "100755"})
 
 
-def _gate_git(repo_root: Path, args: list[str], *, input: str | None = None) -> str:
-    """One git call of the gate: attributes from HEAD's tree, never a worktree `.gitattributes`
-    the box may have written (`committed_view_env`), and bounded."""
-    return _git.git(args, cwd=repo_root, env=_git.committed_view_env(),
-                    timeout=_GATE_GIT_TIMEOUT, input=input)
+def _gate_git(repo_root: Path, args: list[str], *, input: str | None = None) -> list[str]:
+    """One `-z` git call of the gate, as its NUL-separated fields: attributes from HEAD's tree,
+    never a worktree `.gitattributes` the box may have written (`committed_view_env`), and
+    bounded."""
+    return _git.git_z(args, cwd=repo_root, env=_git.committed_view_env(),
+                      timeout=_GATE_GIT_TIMEOUT, input=input)
 
 
 def _staged_records(repo_root: Path) -> dict[str, tuple[str, str]]:
     """`{path: (status, new mode)}` for everything the index holds that HEAD does not: the whole
     index, no pathspec, renames off so a promote reads as a delete plus an add (C14)."""
-    out = _gate_git(repo_root, ["diff", "--cached", "--raw", "--no-renames", "-z", "HEAD"])
-    fields = out.split("\0")
+    fields = _gate_git(repo_root, ["diff", "--cached", "--raw", "--no-renames", "-z", "HEAD"])
     staged: dict[str, tuple[str, str]] = {}
     for meta, path in zip(fields[0::2], fields[1::2], strict=False):
         if not meta:
@@ -135,13 +135,30 @@ def _staged_records(repo_root: Path) -> dict[str, tuple[str, str]]:
     return staged
 
 
-def _stage_candidates(repo_root: Path, candidates: list[str]) -> list[tuple[str, str]]:
-    """Stage exactly `candidates` and check the index holds exactly them, each a deletion or a
-    regular file (#1178 O2, O3). Answers the staged records, `(xy, path)` with xy `"<status> "`,
-    for the second pass. Every refusal is a `LeadAuthorError`, never a `GitError`: a box process
+def _judged_deletions(repo_root: Path, candidates: list[str]) -> set[str]:
+    """Which `candidates` the first pass judged as deletions, asked of `git status` the moment it
+    returns: a judged delete the box re-creates must not be staged as content (#1178 step 3)."""
+    wanted = set(candidates)
+    records = _git.git_status(repo_root, pathspec=SKILLS_REL, no_renames=True,
+                              timeout=_GATE_GIT_TIMEOUT, env=_git.committed_view_env())
+    return {path for xy, path in records if path in wanted and "D" in xy}
+
+
+def _stage_candidates(
+    repo_root: Path, candidates: list[str], deletions: set[str],
+) -> list[tuple[str, str]]:
+    """Stage exactly `candidates` and check the index holds exactly them: each staged as a
+    deletion exactly when the first pass judged one (`deletions`), and as a regular file
+    otherwise (#1178 O2, O3). Answers the staged records, `(xy, path)` with xy `"<status> "`,
+    for the second pass.
+
+    `update-index`, not `add`: it takes each name literally, reads no `.gitignore` (one the box
+    makes a FIFO would hang `add`), and fails on a folder or a FIFO at a name rather than staging
+    something else there. Every refusal is a `LeadAuthorError`, never a `GitError`: a box process
     that deletes a candidate must cost this claim, not halt the drain (GitError is systemic)."""
     try:
-        _gate_git(repo_root, ["--literal-pathspecs", "add", "-A", "--", *candidates])
+        _gate_git(repo_root, ["update-index", "--add", "--remove", "-z", "--stdin"],
+                  input="".join(f"{p}\0" for p in candidates))
         staged = _staged_records(repo_root)
     except (_git.GitError, _git.GitTimeout) as e:
         raise LeadAuthorError(
@@ -151,6 +168,13 @@ def _stage_candidates(repo_root: Path, candidates: list[str]) -> list[tuple[str,
         raise LeadAuthorError(
             f"the staged paths {sorted(staged)} are not the judged paths {sorted(candidates)}; "
             "refusing to commit (the tree changed under the gate)"
+        )
+    flipped = sorted(p for p, (status, _mode) in staged.items()
+                     if (status == "D") != (p in deletions))
+    if flipped:
+        raise LeadAuthorError(
+            f"staged {flipped} as {'deleted' if flipped[0] not in deletions else 'present'}, "
+            "not as the gate judged it; refusing to commit (the tree changed under the gate)"
         )
     odd = sorted(p for p, (status, mode) in staged.items()
                  if status != "D" and mode not in _REGULAR_MODES)
@@ -172,7 +196,7 @@ def _staged_snapshot(repo_root: Path, tree_for: TreeFor) -> Iterator[TreeFor]:
         names = _gate_git(repo_root, ["ls-files", "-z", "--", SKILLS_REL])
         if names:
             _gate_git(repo_root, ["checkout-index", "-z", "--stdin", f"--prefix={snap}/"],
-                      input=names if names.endswith("\0") else names + "\0")
+                      input="".join(f"{n}\0" for n in names))
         skills = repo_root / SKILLS_REL
         snap_skills = snap / SKILLS_REL
         guarded_mkdir(snap_skills, base=snap)
@@ -204,7 +228,8 @@ def commit_judged(
     `judge(tree_for, None)` is the first pass: today's gate (git status, stray check, rules) over
     the held mount, returning the admitted paths, so today's verdicts and messages stand and a
     link is refused before git reads it. Then exactly those paths are staged and the index is
-    checked to hold exactly them, as regular files or deletions; the staged `skills/` tree is
+    checked to hold exactly them, each a deletion exactly when the first pass judged one and a
+    regular file otherwise; the staged `skills/` tree is
     copied to a host-private snapshot, and `judge(snapshot_tree_for, records)` judges it again
     with the staged records; it must admit the same paths. The index is committed with no
     pathspec, so the commit is the bytes the second pass read, whatever a still-running box writes
@@ -217,10 +242,14 @@ def commit_judged(
     drain's reset discards whatever a refusal left staged."""
     fire = step or _no_step
     changed = judge(tree_for, None)
+    try:
+        deletions = _judged_deletions(repo_root, changed) if changed else set()
+    except (_git.GitError, _git.GitTimeout) as e:
+        raise LeadAuthorError(f"reading the judged paths' state failed ({e}); refusing to commit") from e
     fire("judged")
     if not changed:
         return [], None
-    records = _stage_candidates(repo_root, changed)
+    records = _stage_candidates(repo_root, changed, deletions)
     fire("staged")
     with _staged_snapshot(repo_root, tree_for) as snapshot_tree_for:
         fire("snapshotted")
@@ -231,7 +260,8 @@ def commit_judged(
             "refusing to commit"
         )
     fire("rejudged")
-    _gate_git(repo_root, ["commit", "-q", "-F", "-"], input=message(changed))
+    _git.git(["commit", "-q", "-F", "-"], cwd=repo_root, env=_git.committed_view_env(),
+             timeout=_GATE_GIT_TIMEOUT, input=message(changed))
     return changed, _git.git_head_sha(repo_root)
 
 
