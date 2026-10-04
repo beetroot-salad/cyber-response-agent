@@ -4,20 +4,22 @@ committers judge and commit with their drain box frozen, and the gate admits onl
 Four groups, each driven through a seam, never `monkeypatch.setattr`:
 
 - `frozen` (D1'): `runtime.box.frozen(box, docker=...)` over an injected docker seam that
-  records every argv. A no-op without a sandboxed box; otherwise pause, confirm the pause by
-  inspect, run the body, unpause; every fault before the body refuses it (`BoxFault`); an
-  unpause fault is a `BoxFault` unless the body's own exception is in flight.
+  records every argv and answers `inspect` per field. A no-op without a sandboxed box;
+  otherwise pause, confirm the pause by inspect, run the body, unpause; every fault before the
+  body refuses it (`BoxFault`), a seam that raises included; an unpause fault is a `BoxFault`
+  unless the body's own exception (any `BaseException`) is in flight, which is still unpaused.
 - Wiring (D2'): `LeadAuthorDeps.freeze` and `run_pitfalls(freeze=)`, each an injected recording
   freeze. Entered after the agent returned and before the gate's first read (the lane's
   `tree_for`, wrapped to log), left only once the commit exists, once per claim / batch,
   handed the entry point's `box`. A freeze that cannot be entered propagates `BoxFault` with
-  nothing committed or staged.
-- What the freeze protects: bytes written on the way in are what the gate judges and the
-  commit carries; bytes written on the way out (after the commit) never reach HEAD.
+  nothing committed or staged. Both seams default to the real `frozen`, which refuses a box it
+  cannot pause.
+- What the freeze protects: bytes and paths written on the way in are what the gate judges
+  and the commit carries; bytes written on the way out (after the commit) never reach HEAD.
 - The plain-file rule (D3'): a symlink or a hard link at an address no content rule reads
-  (a catalog draft, a system-skill draft, `queries/<sys>/README.md`; the pitfalls lane's
-  `execution.md`) is refused with HEAD unchanged; a plain file there commits, and so does an
-  executable one (mode 100755).
+  (a catalog draft, a system-skill draft, `queries/<sys>/README.md`, each also one folder
+  deeper; the pitfalls lane's `execution.md`), or a FIFO at such a committed name, is refused
+  with HEAD unchanged; a plain file there commits, and so does an executable one (100755).
 
 The real-box row (a live writer held still by `frozen`) is in `test_1178_frozen_box.py`.
 """
@@ -25,9 +27,12 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import inspect
 import logging
 import os
+import shutil
 import subprocess
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -40,6 +45,7 @@ from defender.learning.core import persist
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.leads import lead_author, pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
+from defender.runtime import box as box_mod
 from defender.runtime.box import BoxExecutor, BoxFault, BoxSpec, _DockerTransport, unboxed_executor
 from defender.tests._declared869 import LeadAuthorSpawn, Spawn, pitfall_row
 from defender.tests._declared870 import (
@@ -103,33 +109,47 @@ class Daemon:
     """The injected `docker=` seam: appends `("docker", verb, argv)` to the shared `log` and
     answers per verb. It decides nothing about what an answer means.
 
-    `inspect` is answered for the question asked: `true`/`false` for a `.State.Paused` format,
-    `paused`/`running` for a `.State.Status` one (either is a way to ask "is it paused")."""
+    `inspect` is answered per field, as a daemon answers for a box whose pause did or did not
+    take (`paused`): `.State.Paused` is `true`/`false`, `.State.Status` is `paused`/`running`,
+    `.State.Running` is `true` either way (a paused container is still running), and any other
+    field is no boolean at all. So only a question about the paused state tells the two apart.
+
+    `raises` maps a verb to the exception the seam raises for it (after logging the call), as
+    the real seam does when the binary is missing (`OSError`) or the daemon hangs
+    (`subprocess.TimeoutExpired`)."""
 
     def __init__(self, log: list, *, pause_rc: int = 0, inspect_rc: int = 0,
-                 paused: bool = True, unpause_rc: int = 0) -> None:
+                 paused: bool = True, unpause_rc: int = 0,
+                 raises: dict[str, BaseException] | None = None) -> None:
         self.log = log
         self.pause_rc = pause_rc
         self.inspect_rc = inspect_rc
         self.paused = paused
         self.unpause_rc = unpause_rc
+        self.raises = dict(raises or {})
 
     def __call__(self, argv, **_kwargs: object) -> subprocess.CompletedProcess:
         argv = list(argv)
         verb = argv[1] if len(argv) > 1 else ""
         self.log.append(("docker", verb, argv))
+        if verb in self.raises:
+            raise self.raises[verb]
         if verb == "pause":
             return self._reply(argv, self.pause_rc, "")
         if verb == "unpause":
             return self._reply(argv, self.unpause_rc, "")
         if verb == "inspect":
-            asked = " ".join(argv)
-            if "Status" in asked:
-                state = "paused" if self.paused else "running"
-            else:
-                state = "true" if self.paused else "false"
-            return self._reply(argv, self.inspect_rc, f"{state}\n")
+            return self._reply(argv, self.inspect_rc, self._field(" ".join(argv)))
         return self._reply(argv, 1, "")
+
+    def _field(self, asked: str) -> str:
+        if ".State.Paused" in asked:
+            return "true\n" if self.paused else "false\n"
+        if ".State.Status" in asked:
+            return "paused\n" if self.paused else "running\n"
+        if ".State.Running" in asked:
+            return "true\n"
+        return "map[asked:a field this fake does not model]\n"
 
     @staticmethod
     def _reply(argv: list[str], rc: int, out: str) -> subprocess.CompletedProcess:
@@ -215,6 +235,48 @@ def test_the_bodys_own_exception_outranks_an_unpause_fault(unpause_rc: int, capl
     if unpause_rc:
         said = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
         assert any(BOX_NAME in m for m in said), said
+
+
+def _seam_fault(kind: str) -> BaseException:
+    """What the real docker seam raises: no binary (`OSError`), or a daemon that never answered
+    within the seam's timeout (`subprocess.TimeoutExpired`)."""
+    if kind == "OSError":
+        return FileNotFoundError(2, "No such file or directory", "docker")
+    return subprocess.TimeoutExpired(cmd=["docker"], timeout=120)
+
+
+@pytest.mark.parametrize("verb", ["pause", "inspect", "unpause"])
+@pytest.mark.parametrize("kind", ["OSError", "TimeoutExpired"])
+def test_a_docker_seam_that_raises_is_a_box_fault(kind: str, verb: str):
+    """The seam raises instead of answering, at the pause, the inspect or the unpause: each is a
+    `BoxFault` (the systemic class a drain halts on), never the bare `OSError` /
+    `TimeoutExpired`, and the body runs only when the raise comes after it (the unpause)."""
+    log: list = []
+    with pytest.raises(BoxFault):
+        _hold(_sandboxed(), Daemon(log, raises={verb: _seam_fault(kind)}), log)
+    assert (("body",) in log) == (verb == "unpause"), log
+
+
+@pytest.mark.parametrize("kind", ["OSError", "TimeoutExpired"])
+def test_a_seam_raise_at_the_unpause_does_not_replace_the_bodys_exception(kind: str):
+    """The body raises `LeadAuthorError` and the seam then raises at the unpause: the body's own
+    exception propagates, unchanged."""
+    log: list = []
+    refusal = LeadAuthorError("agent wrote x; refusing to commit")
+    with pytest.raises(LeadAuthorError) as got:
+        _hold(_sandboxed(), Daemon(log, raises={"unpause": _seam_fault(kind)}), log,
+              raises=refusal)
+    assert got.value is refusal
+    assert _steps(log) == ["pause", "inspect", "body", "unpause"], log
+
+
+def test_a_base_exception_in_the_body_still_unpauses():
+    """A `KeyboardInterrupt` in the body (not an `Exception`): the box is still unpaused, and the
+    interrupt propagates."""
+    log: list = []
+    with pytest.raises(KeyboardInterrupt):
+        _hold(_sandboxed(), Daemon(log), log, raises=KeyboardInterrupt())
+    assert _steps(log) == ["pause", "inspect", "body", "unpause"], log
 
 
 # ---------------------------------------------------------------------------------------
@@ -337,24 +399,40 @@ class LeadScene:
         return f"defender/skills/{name}"
 
 
-def _lead_scene(tmp_path: Path) -> LeadScene:
+def _lead_scene(tmp_path: Path, committed: dict[str, str] | None = None) -> LeadScene:
+    """The lead worktree, with `committed` (`{name below skills/: text}`) also committed."""
     repo = _worktree(tmp_path)
+    if committed:
+        for name, text in committed.items():
+            write(repo / "defender" / "skills" / name, text)
+        commit_all(repo, "seed the names the agent rewrites")
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     return LeadScene(tmp=tmp_path, repo=repo, paths=paths, run_dir=_run_dir(tmp_path),
                      head=_git.git_head_sha(repo))
 
 
+def _clear(at: Path) -> None:
+    """Whatever stands at `at` removed, a FIFO included (`clear` handles files, links, dirs)."""
+    if os.path.lexists(at) and not at.is_symlink() and not at.is_dir() and not at.is_file():
+        at.unlink()
+    clear(at)
+
+
 def _plant(at: Path, text: str, kind: str, outside: Path) -> None:
     """`text` at `at` as a plain file (`plain`), an executable plain file (`exec`, 0755), a
-    symlink to a file outside the repo holding it (`link`) or a hard link to one (`hardlink`)."""
-    clear(at)
+    symlink to a file outside the repo holding it (`link`) or a hard link to one (`hardlink`);
+    or a FIFO at `at` (`fifo`, `text` unused)."""
+    _clear(at)
     if kind in ("plain", "exec"):
         write(at, text)
         if kind == "exec":
             at.chmod(0o755)
         return
-    target = write(outside / f"{kind}-{at.parent.name}-{at.name}", text)
     at.parent.mkdir(parents=True, exist_ok=True)
+    if kind == "fifo":
+        os.mkfifo(at)
+        return
+    target = write(outside / f"{kind}-{at.parent.name}-{at.name}", text)
     if kind == "link":
         at.symlink_to(target)
     elif kind == "hardlink":
@@ -364,25 +442,110 @@ def _plant(at: Path, text: str, kind: str, outside: Path) -> None:
 
 
 def _run_lead(s: LeadScene, log: list, *, name: str, text: str, kind: str = "plain",
-              freeze: Freeze | None = None, box: Any = None) -> tuple:
+              freeze: Freeze | None = None, box: Any = None,
+              more: dict[str, str] | None = None) -> tuple:
     """Drive `lead_author.run` over the scene: the agent (rc 0) leaves `text` at `name` as
-    `kind`. With `freeze`, it is injected as `deps.freeze` and the lane's `tree_for` logs."""
+    `kind`, and each of `more` (`{name: text}`) as a plain file. The lane's `tree_for` logs each
+    path asked of it into `log`; with `freeze`, it is injected as `deps.freeze`."""
 
     def leave(_run_dir: Path) -> None:
         _plant(s.at(name), text, kind, s.tmp / "outside")
+        for other, other_text in (more or {}).items():
+            _plant(s.at(other), other_text, "plain", s.tmp / "outside")
         log.append(("agent",))
 
     spawn = LeadAuthorSpawn(leave)
     with lead_trees(s.paths) as trees:
         deps = _deps(s.paths, trees, spawn, [ELASTIC_LEAD])
+        deps = dataclasses.replace(deps, tree_for=_logging_tree_for(deps.tree_for, log))
         if freeze is not None:
-            deps = dataclasses.replace(
-                deps, freeze=freeze, tree_for=_logging_tree_for(deps.tree_for, log),
-            )
+            deps = dataclasses.replace(deps, freeze=freeze)
         got = _outcome(lambda: lead_author.run(
             s.run_dir, label=LEAD, paths=s.paths, deps=deps, box=box))
     assert spawn.calls, "the agent was never reached, so the gate never ran"
     return got
+
+
+def _absent_box() -> BoxExecutor:
+    """A sandboxed box (the docker transport) naming a container no daemon holds: the real
+    `frozen` cannot pause it, whether or not a docker binary or daemon is there to ask."""
+    name = f"defender-drain-f1178-absent-{uuid.uuid4().hex[:12]}"
+    spec = BoxSpec()
+    return BoxExecutor(spec=spec, transport=_DockerTransport(name, spec), name=name)
+
+
+@pytest.fixture(params=["path-as-is", "no-docker-on-path"])
+def docker_on_path(request, tmp_path: Path, monkeypatch) -> str:
+    """The real seam's two environments: `PATH` as the run found it (a docker binary, and a
+    daemon, where the host has them), and a `PATH` holding only `git`, so the seam finds no
+    docker binary at all."""
+    if request.param == "no-docker-on-path":
+        git = shutil.which("git")
+        assert git is not None, "these rows drive real git"
+        bin_dir = tmp_path / "bin-git-only"
+        bin_dir.mkdir()
+        (bin_dir / "git").symlink_to(git)
+        monkeypatch.setenv("PATH", str(bin_dir))
+        assert shutil.which("docker") is None
+    return request.param
+
+
+def test_the_production_freeze_is_runtime_box_frozen(tmp_path: Path):
+    """Both seams default to the real `runtime.box.frozen`: the deps the lane builds for itself,
+    and `run_pitfalls`' `freeze=` default."""
+    s = _lead_scene(tmp_path)
+    with lead_trees(s.paths) as trees:
+        deps = lead_author.build_lead_author_deps(s.paths, trees=trees)
+        assert deps.freeze is box_mod.frozen
+    default = inspect.signature(pitfalls_curator.run_pitfalls).parameters["freeze"].default
+    assert default is box_mod.frozen
+
+
+def test_the_lead_author_default_freeze_refuses_a_box_it_cannot_pause(
+        tmp_path: Path, docker_on_path: str):
+    """`run(deps=<the lane's own>, box=<sandboxed, no such container>)`, no freeze injected: the
+    default seam asks the real docker to pause the box, which fails (no binary, no daemon, or
+    no such container), so the run raises `BoxFault`; HEAD unchanged, nothing staged. A default
+    that froze nothing would commit the agent's draft."""
+    s = _lead_scene(tmp_path)
+    got = _run_lead(s, [], name=AGENT_NAME, text=VETTED, box=_absent_box())
+    assert got[:2] == ("raised", "BoxFault"), got
+    assert _git.git_head_sha(s.repo) == s.head
+    assert _nothing_staged(s.repo)
+
+
+#: Paths first written on the freeze's way in: never in the agent's batch, so only a `git
+#: status` taken inside the freeze lists them for the gate. `None`: admitted and committed.
+LEAD_WAY_IN = [
+    pytest.param("gather/queries/wazuh/_draft/new1178.md", query_template("elastic.new1178", "draft"),
+                 REFUSED_SAYS, id="new-md-refused"),
+    pytest.param("gather/queries/wazuh/evil1178.txt", "not markdown\n", "outside", id="new-non-md"),
+    pytest.param("gather/queries/wazuh/_draft/new1178.md", query_template("wazuh.new1178", "draft"),
+                 None, id="new-md-admissible"),
+]
+
+
+@pytest.mark.parametrize(("name", "text", "says"), LEAD_WAY_IN)
+def test_a_lead_author_path_first_written_on_the_way_in_is_judged(
+        tmp_path: Path, name: str, text: str, says: str | None):
+    """The freeze's way in writes a NEW path beside the agent's vetted draft: a draft whose id
+    disagrees with its folder, or a non-`.md` file under `skills/`, is refused (HEAD unchanged,
+    nothing staged); an admissible new draft (the control) is judged and committed with the
+    rest. A gate that listed the batch before the freeze would commit the new path unjudged."""
+    s = _lead_scene(tmp_path)
+    log: list = []
+    freeze = Freeze(log, s.repo, on_enter=lambda: write(s.at(name), text))
+    got = _run_lead(s, log, name=AGENT_NAME, text=VETTED, freeze=freeze, box=object())
+    if says is None:
+        assert got == ("returned", 0), got
+        assert _git.git_show_file(s.repo, "HEAD", s.rel(name)) == text
+        assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED
+        return
+    assert got[:2] == ("raised", "LeadAuthorError"), got
+    assert says in got[2], got
+    assert s.rel(name) in got[2], got
+    assert _git.git_head_sha(s.repo) == s.head, "a path written on the way in was committed"
+    assert _nothing_staged(s.repo)
 
 
 def test_the_lead_author_gate_and_commit_run_inside_one_freeze(tmp_path: Path):
@@ -502,25 +665,74 @@ def _system_rows() -> list[dict]:
 
 
 def _run_pitfalls(s: PitfallsScene, log: list, *, rel: str, text: str, kind: str = "plain",
-                  freeze: Freeze | None = None, box: Any = None) -> tuple:
-    """Drive `run_pitfalls` over the scene: the curator (rc 0) leaves `text` at `rel` as `kind`.
-    With `freeze`, it is passed as `freeze=` and the trees log each `tree_for` call."""
+                  freeze: Freeze | None = None, box: Any = None,
+                  more: dict[str, str] | None = None) -> tuple:
+    """Drive `run_pitfalls` over the scene: the curator (rc 0) leaves `text` at `rel` as `kind`,
+    and each of `more` (`{rel: text}`) as a plain file. The trees log each `tree_for` call into
+    `log`; with `freeze`, it is passed as `freeze=`."""
 
     def curate(_root: Path) -> None:
         _plant(s.at(rel), text, kind, s.tmp / "outside")
+        for other, other_text in (more or {}).items():
+            _plant(s.at(other), other_text, "plain", s.tmp / "outside")
         log.append(("agent",))
 
     spawn = Spawn(curate)
     with lead_trees(s.paths) as trees:
-        if freeze is None:
-            got = _outcome(lambda: pitfalls_curator.run_pitfalls(
-                paths=s.paths, trees=trees, invoke=spawn, box=box))
-        else:
-            got = _outcome(lambda: pitfalls_curator.run_pitfalls(
-                paths=s.paths, trees=LoggedTrees(trees, log), invoke=spawn, box=box,
-                freeze=freeze))
+        seam = {} if freeze is None else {"freeze": freeze}
+        got = _outcome(lambda: pitfalls_curator.run_pitfalls(
+            paths=s.paths, trees=LoggedTrees(trees, log), invoke=spawn, box=box, **seam))
     assert spawn.calls, "the curator was never reached, so the gate never ran"
     return got
+
+
+def test_the_pitfalls_default_freeze_refuses_a_box_it_cannot_pause(
+        tmp_path: Path, monkeypatch, docker_on_path: str):
+    """`run_pitfalls(box=<sandboxed, no such container>)` with no `freeze=`: the default seam
+    asks the real docker to pause the box and fails, so the tick raises `BoxFault`; HEAD
+    unchanged, nothing staged, every queued row still queued."""
+    s = _pitfalls_scene(tmp_path, monkeypatch, _reducer_rows())
+    queued = sorted(r["pitfall_id"] for r in persist.read_pitfalls(s.paths))
+    got = _run_pitfalls(s, [], rel=REDUCER_REL, text=REDUCER_VETTED, box=_absent_box())
+    assert got[:2] == ("raised", "BoxFault"), got
+    assert _git.git_head_sha(s.repo) == s.head
+    assert _nothing_staged(s.repo)
+    assert sorted(r["pitfall_id"] for r in persist.read_pitfalls(s.paths)) == queued
+
+
+#: As `LEAD_WAY_IN`, for the pitfalls lane: a new draft is outside its scope, a new non-`.md` is
+#: a stray; a new `execution.md` for a declared system (`cmdb`, adapter only) is admitted.
+PITFALLS_WAY_IN = [
+    pytest.param("defender/skills/gather/queries/wazuh/_draft/new1178.md",
+                 query_template("wazuh.new1178", "draft"), "non-execution.md", id="new-md-refused"),
+    pytest.param("defender/skills/elastic/evil1178.txt", "not markdown\n", "outside",
+                 id="new-non-md"),
+    pytest.param("defender/skills/cmdb/execution.md", "# cmdb\n\n## Common pitfalls\n\n- key it\n",
+                 None, id="new-md-admissible"),
+]
+
+
+@pytest.mark.parametrize(("rel", "text", "says"), PITFALLS_WAY_IN)
+def test_a_pitfalls_path_first_written_on_the_way_in_is_judged(
+        tmp_path: Path, monkeypatch, rel: str, text: str, says: str | None):
+    """The freeze's way in writes a NEW path beside the curator's vetted reducer edit: a path
+    outside the lane's scope or a non-`.md` stray is refused (HEAD unchanged, nothing staged);
+    an admissible new `execution.md` (the control) is judged and committed with the rest."""
+    s = _pitfalls_scene(tmp_path, monkeypatch, _reducer_rows())
+    log: list = []
+    freeze = Freeze(log, s.repo, on_enter=lambda: write(s.at(rel), text))
+    got = _run_pitfalls(s, log, rel=REDUCER_REL, text=REDUCER_VETTED, freeze=freeze,
+                        box=object())
+    if says is None:
+        assert got == ("returned", 0), got
+        assert _git.git_show_file(s.repo, "HEAD", rel) == text
+        assert _git.git_show_file(s.repo, "HEAD", REDUCER_REL) == REDUCER_VETTED
+        return
+    assert got[:2] == ("raised", "LeadAuthorError"), got
+    assert says in got[2], got
+    assert rel in got[2], got
+    assert _git.git_head_sha(s.repo) == s.head, "a path written on the way in was committed"
+    assert _nothing_staged(s.repo)
 
 
 def test_the_pitfalls_gate_and_commit_run_inside_one_freeze(tmp_path: Path, monkeypatch):
@@ -602,14 +814,25 @@ LEAD_ADDRESSES = [
                  id="system-skill-draft"),
     pytest.param("gather/queries/wazuh/README.md", "# wazuh queries\n\nWhat lives here.\n",
                  id="catalog-readme"),
+    # The same three one folder deeper: the path rule admits each, and no content rule reads
+    # them either.
+    pytest.param("gather/queries/wazuh/_draft/sub/d1178.md",
+                 query_template("wazuh.d1178", "draft"), id="nested-catalog-draft"),
+    pytest.param("elastic/_draft/sub/d1178.md", "# elastic draft\n\n- a lifted note\n",
+                 id="nested-system-skill-draft"),
+    pytest.param("gather/queries/wazuh/sub/README.md", "# wazuh sub-queries\n\nWhat lives here.\n",
+                 id="nested-catalog-readme"),
 ]
 
 KINDS = ["link", "hardlink", "plain", "exec"]
 
+#: The kinds the gate must refuse at a committed name.
+REFUSED_KINDS = ("link", "hardlink", "fifo")
+
 
 def _assert_plain_file_rule(got: tuple, repo: Path, head: str, rel: str, text: str,
                             kind: str) -> None:
-    if kind in ("link", "hardlink"):
+    if kind in REFUSED_KINDS:
         assert got[:2] == ("raised", "LeadAuthorError"), got
         assert "refusing to commit" in got[2], got
         assert rel in got[2], got
@@ -636,16 +859,71 @@ def test_the_lead_author_gate_commits_only_a_plain_file(
     _assert_plain_file_rule(got, s.repo, s.head, s.rel(name), text, kind)
 
 
-@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("kind", ["fifo", "plain"])
+@pytest.mark.parametrize(("name", "text"), LEAD_ADDRESSES)
+def test_a_fifo_at_a_committed_lead_author_name_is_refused(
+        tmp_path: Path, name: str, text: str, kind: str):
+    """`name` is committed as a plain file; the agent replaces it with a FIFO. `git status`
+    reports a FIFO only where it stands at a tracked name (as a modification; an untracked FIFO
+    is not listed at all), so that is the reachable shape. The gate refuses it as no plain file
+    (`LeadAuthorError`), HEAD unchanged, nothing staged; without the rule, `git add` fails and
+    the claim dies as a `GitError`, a systemic fault. Control: the agent rewrites the same
+    committed name as a plain file, which commits.
+
+    A folder at a committed name is not pinned: `git status` reports it as the name's deletion
+    plus the plain files below it, each judged by the rules for those records."""
+    s = _lead_scene(tmp_path, committed={name: text})
+    rewritten = text + "\n- rewritten by the agent\n"
+    got = _run_lead(s, [], name=name, text=rewritten, kind=kind)
+    _assert_plain_file_rule(got, s.repo, s.head, s.rel(name), rewritten, kind)
+
+
+def test_every_lead_author_record_the_gate_admits_is_read_through_the_held_mount(tmp_path: Path):
+    """The agent leaves a plain file at every address above in one batch: each is committed, and
+    each was asked of the lane's `tree_for` (the held mount) before the commit. Structural: on
+    this lane `_frontmatter_id` already asks every in-scope path, so this row does not tell the
+    plain-file rule apart from that read; the address rows above do."""
+    names = {p.values[0]: p.values[1] for p in LEAD_ADDRESSES}
+    first, *rest = names
+    s = _lead_scene(tmp_path)
+    log: list = []
+    got = _run_lead(s, log, name=first, text=names[first],
+                    more={n: names[n] for n in rest})
+    assert got == ("returned", 0), got
+    asked = {e[1] for e in log if e[0] == "read"}
+    for name, text in names.items():
+        assert _git.git_show_file(s.repo, "HEAD", s.rel(name)) == text, name
+        assert str(s.repo / s.rel(name)) in asked, f"{name} was committed unread"
+
+
+@pytest.mark.parametrize("kind", [*KINDS, "fifo"])
 def test_the_pitfalls_gate_commits_only_a_plain_execution_md(
         tmp_path: Path, monkeypatch, kind: str):
     """Through `run_pitfalls(trees=, invoke=)`: the curator leaves `elastic/execution.md` (a
     surface this lane commits with no content rule) as a symlink or a hard link to an outside
-    file holding a valid edit: refused, HEAD unchanged, nothing staged. Controls: the same bytes
-    as a plain file commit at 100644, as an executable one at 100755.
+    file holding a valid edit, or as a FIFO in place of the committed file: refused, HEAD
+    unchanged, nothing staged. Controls: the same bytes as a plain file commit at 100644, as an
+    executable one at 100755.
 
-    Red on main: the link rows commit."""
+    Red on main: the link rows commit, and the FIFO row fails in `git add` (`GitError`)."""
     s = _pitfalls_scene(tmp_path, monkeypatch, _system_rows())
     rel = f"defender/skills/{EXECUTION_NAME}"
     got = _run_pitfalls(s, [], rel=rel, text=EXECUTION_TEXT, kind=kind)
     _assert_plain_file_rule(got, s.repo, s.head, rel, EXECUTION_TEXT, kind)
+
+
+def test_every_pitfalls_record_the_gate_admits_is_read_through_the_held_mount(
+        tmp_path: Path, monkeypatch):
+    """The curator edits `elastic/execution.md` and the reducer surface in one tick: both are
+    committed, and both were asked of the lane's `tree_for` before the commit. On main only the
+    reducer was (its content rule reads it); the `execution.md` was committed unread."""
+    s = _pitfalls_scene(tmp_path, monkeypatch, [*_system_rows(), *_reducer_rows()])
+    rel = f"defender/skills/{EXECUTION_NAME}"
+    log: list = []
+    got = _run_pitfalls(s, log, rel=REDUCER_REL, text=REDUCER_VETTED,
+                        more={rel: EXECUTION_TEXT})
+    assert got == ("returned", 0), got
+    asked = {e[1] for e in log if e[0] == "read"}
+    for committed, text in ((REDUCER_REL, REDUCER_VETTED), (rel, EXECUTION_TEXT)):
+        assert _git.git_show_file(s.repo, "HEAD", committed) == text, committed
+        assert str(s.repo / committed) in asked, f"{committed} was committed unread"
