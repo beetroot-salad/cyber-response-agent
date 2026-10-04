@@ -37,7 +37,7 @@ defender/
                     #   close_tool.py + challenge_gate.py + review/ — the write-time review gate on every confident close
   hooks/            # gate LOGIC imported as libraries (lead claim, descriptors, budget, lesson-load) — no longer Claude Code hooks
   skills/           # invlang, gather, handbook, advisory + per-system references (elastic/ identity/ cmdb/ ticket/ change-mgmt/ threat-intel/ host-state/)
-  scripts/          # adapters/, gather_tools/, visualize/, lessons/, case_history/, policy_cli.py, pricing.py, workspace_map.py
+  scripts/          # adapters/, gather_tools/ (record_query, the defender-sql wrapper), visualize/, lessons/ (the defender-lessons wrapper), case_history/, policy_cli.py, workspace_map.py
   learning/         # offline loop: loop.py (the two authoring stages), lead_repository.py (THE read/join surface),
                     #   _prompt.py + _pydantic_stage.py (the shared stage-assembly pair, used by every engine),
                     #   branch/, judge/, author/, core/, leads/, ops/, frontend/

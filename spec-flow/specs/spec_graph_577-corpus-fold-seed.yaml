@@ -309,7 +309,7 @@ structure:
             in-process:  {trust: operator, constraints: []}
             bare-python3: {trust: operator, constraints: [no-module-top-yaml-import]}
 
-    - id: lessons_common_module  # scripts/lessons/_lessons_common.py — now a re-export shim
+    - id: lessons_common_module  # runtime/lessons_engine/_lessons_common.py (scripts/lessons/ before #1080) — now a re-export shim
       provenance: design
       facets: {}
 
