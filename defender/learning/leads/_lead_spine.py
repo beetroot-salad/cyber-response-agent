@@ -13,7 +13,8 @@ from defender._io import Held
 from defender.learning.core import config as _loop_config
 from defender.learning.core.lane_trees import DrainTrees, TreeFor, read_at
 from defender.learning.leads.lead_extraction import LeadAuthorError
-from defender.learning.leads.path_validation import SKILLS_REL, _porcelain_records
+from defender._claim_git import ClaimGit
+from defender.learning.leads.path_validation import SKILLS_REL
 
 
 PENDING_DIR = _loop_config.DEFAULT_PATHS.lead_pending_dir
@@ -63,6 +64,7 @@ def _verify_corpus_scope(
     actor: str,
     rule: Callable[[str, str], None],
     tree_for: TreeFor,
+    git: ClaimGit,
     batch_rule: Callable[[list[tuple[str, str]]], None] | None = None,
 ) -> list[str]:
     """Per-path `rule` over every in-corpus change, then an optional whole-batch `batch_rule`.
@@ -74,20 +76,19 @@ def _verify_corpus_scope(
     Every record `rule` admits that is not a deletion must also be a plain file, read through
     the lane's held mount (`tree_for`): a link, a hard link, a FIFO or a folder at a committed
     name is refused, never committed (#1178). Checked after `rule`, so a refusal `rule` already
-    gives keeps its own message."""
-    records = _porcelain_records(repo_root)
+    gives keeps its own message.
 
-    def _in_corpus(p: str) -> bool:
-        return p.startswith(SKILLS_REL) and p.endswith(".md")
-
-    new_stray = sorted({p for _, p in records if not _in_corpus(p)} - set(baseline_stray))
+    The changes come from the claim's `git` session, which no ignore or attributes file the agent
+    left can hide a path from or block (#1175); its corpus test is the one the baseline used."""
+    records = git.changes()
+    new_stray = sorted({p for _, p in records if not git.in_corpus(p)} - set(baseline_stray))
     if new_stray:
         raise LeadAuthorError(
             f"{actor} changed files outside {SKILLS_REL}*.md: {new_stray}; refusing to commit"
         )
     in_corpus: list[tuple[str, str]] = []
     for xy, path in records:
-        if not _in_corpus(path):
+        if not git.in_corpus(path):
             continue
         rule(xy, path)
         if "D" not in xy:

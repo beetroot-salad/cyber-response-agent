@@ -392,17 +392,18 @@ def stop_box(box: BoxExecutor, *, docker: DockerFn = _docker) -> None:
 
 
 @contextlib.contextmanager
-def frozen(box: BoxExecutor | None, *, docker: DockerFn = _docker) -> Iterator[None]:
+def frozen(box: object, *, docker: DockerFn = _docker) -> Iterator[None]:
     """Hold every process of `box` frozen for the `with` body (#1178): nothing the box runs can
     write while the host judges and commits what it left.
 
-    A no-op for no box or an unsandboxed one (nothing to freeze). Otherwise the body runs only
+    A no-op for anything but a sandboxed `BoxExecutor` (no box, the unsandboxed fallback, a
+    test's stand-in): nothing there is a container to freeze. Otherwise the body runs only
     once the box is provably paused (`docker pause`, then `docker inspect` reports
     `State.Paused`), as the scrub runs only once the box is provably dead; anything short of
     that is a `BoxFault` and the body never runs. On exit the box is unpaused; a failure there is
     a `BoxFault`, unless the body is already raising, whose exception then propagates and the
     unpause fault is logged."""
-    if box is None or not box.sandboxed:
+    if not (isinstance(box, BoxExecutor) and box.sandboxed):
         yield
         return
     proc = _call(docker, ["docker", "pause", box.name])

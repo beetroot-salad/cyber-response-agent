@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._claim1175 import claim_git
 from defender import _git
 from defender.learning.leads import lead_author
 from defender.learning.leads.lead_extraction import LeadAuthorError
@@ -85,7 +86,7 @@ def test_skills_path_rule_refuses_an_undeclared_system_skill(tmp_path):
             tree_for=lane_tree_for(repo))
     with pytest.raises(LeadAuthorError):
         lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                         tree_for=lane_tree_for(repo))
+                                         tree_for=lane_tree_for(repo), git=claim_git(repo))
 
     assert phantom.is_file(), "the refusal is the gate's, not the filesystem's"
     assert "defender/skills/fakesys2/SKILL.md" not in head_files(repo)
@@ -189,7 +190,7 @@ def test_the_lane_cannot_commit_a_non_system_skill_md(tmp_path):
           "---\nname: defender-gather\n---\n# gather\nedited by the lane\n")
     with pytest.raises(LeadAuthorError):
         lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                         tree_for=lane_tree_for(repo))
+                                         tree_for=lane_tree_for(repo), git=claim_git(repo))
 
     # The live edge FK-10 leaves open, stated: declare `gather` and the refusal lifts.
     assert lead_author._skills_path_rule(
@@ -292,7 +293,7 @@ def test_the_marker_is_the_one_file_the_lane_cannot_commit(tmp_path):
     before = head_files(repo)
     with pytest.raises(LeadAuthorError):
         lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                         tree_for=lane_tree_for(repo))
+                                         tree_for=lane_tree_for(repo), git=claim_git(repo))
     assert head_files(repo) == before
 
     # And through the composed gate on the NESTED form, which is the one an agent can write
@@ -302,7 +303,7 @@ def test_the_marker_is_the_one_file_the_lane_cannot_commit(tmp_path):
     assert nested.is_file(), "the refusal is the gate's, not the filesystem's"
     with pytest.raises(LeadAuthorError):
         lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                         tree_for=lane_tree_for(repo))
+                                         tree_for=lane_tree_for(repo), git=claim_git(repo))
     assert head_files(repo) == before
 
 
@@ -338,7 +339,7 @@ def test_the_marker_write_is_admitted_and_still_never_lands(tmp_path):
     before = head_files(repo)
     with pytest.raises(LeadAuthorError):
         lead_author._verify_skills_state(repo, baseline_stray=[], systems=DECLARED,
-                                         tree_for=lane_tree_for(repo))
+                                         tree_for=lane_tree_for(repo), git=claim_git(repo))
     assert head_files(repo) == before
 
 
