@@ -1,0 +1,3096 @@
+{
+ "_meta": {
+  "base": "80888efb",
+  "how": "each producer in test_1080_sql_engine.PRODUCERS run at the base under SPEC1080_AT_BASE=1: the base bin/defender-sql and bin/defender-lessons shims, their engines by path, the box closure child and the permission gate, over the fixed inputs in the test module, normalised by its _norm"
+ },
+ "arg_shapes.bare-separator": {
+  "dict": [
+   [
+    "rc",
+    2
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "usage: defender-sql [-h] [--rows PATH] [--names PATH] sql\ndefender-sql: error: the following arguments are required: sql\n"
+   ]
+  ]
+ },
+ "arg_shapes.dash-leading": {
+  "dict": [
+   [
+    "rc",
+    2
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "usage: defender-sql [-h] [--rows PATH] [--names PATH] sql\ndefender-sql: error: the following arguments are required: sql\n"
+   ]
+  ]
+ },
+ "arg_shapes.dash-number-after-separator": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: query error: Parser Error: syntax error at or near \"-\"\n\nLINE 1: -1\n        ^\n  hint: `data` has columns [user, n, host]; flat/array shape — the payload's keys ARE `data`'s columns; `SELECT * FROM data`, no `unnest`.\n"
+   ]
+  ]
+ },
+ "arg_shapes.empty": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "Traceback (most recent call last): <frames elided>\nAttributeError: 'NoneType' object has no attribute 'fetchall'\n"
+   ]
+  ]
+ },
+ "arg_shapes.extra-positional": {
+  "dict": [
+   [
+    "rc",
+    2
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "usage: defender-sql [-h] [--rows PATH] [--names PATH] sql\ndefender-sql: error: unrecognized arguments: extra\n"
+   ]
+  ]
+ },
+ "arg_shapes.non-ascii": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"e\": \"\\u00e9\", \"j\": \"\\u65e5\\u672c\", \"user\": \"alice\"}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "arg_shapes.separator-then-sql": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"n\": 3}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "arg_shapes.two-sqls": {
+  "dict": [
+   [
+    "rc",
+    2
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "usage: defender-sql [-h] [--rows PATH] [--names PATH] sql\ndefender-sql: error: unrecognized arguments: SELECT 2 AS y\n"
+   ]
+  ]
+ },
+ "arg_shapes.whitespace": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "Traceback (most recent call last): <frames elided>\nAttributeError: 'NoneType' object has no attribute 'fetchall'\n"
+   ]
+  ]
+ },
+ "bare_wrapper.help": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "usage: defender-sql [-h] [--rows PATH] [--names PATH] sql\n\nSandboxed SQL aggregation over a JSON/NDJSON payload on stdin, exposed as the\ntable `data`. Tier-2 fallback for a source with no native aggregation (see\nskills/connect/adapter.md).\n\npositional arguments:\n  sql           A read-only SQL query over the `data` table (the parsed stdin\n                payload).\n\noptions:\n  -h, --help    show this help message and exit\n  --rows PATH   Where the payload's positional rows are (a list of lists),\n                e.g. `values` or `tables[0].rows`. With --names, `data` holds\n                one row per row, one column per name, each column typed from\n                its own JSON values.\n  --names PATH  Where the rows' column names are: a list of strings, or of\n                objects with a `name`, e.g. `columns`. Goes with --rows.\n\nthe payload IS the table — there is no wrapper envelope to reach through.\nexample: defender-<system> query '<filter>' | defender-sql \"SELECT h.user,\ncount(*) c FROM (SELECT unnest(hits) h FROM data) GROUP BY 1 ORDER BY c DESC\".\nPositional rows behind a list of column names, declared: defender-<system>\nquery '<query>' | defender-sql --rows values --names columns 'SELECT\n\"source.ip\", count(*) c FROM data GROUP BY 1 ORDER BY c DESC'\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "bare_wrapper.query": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "closure.defender-lessons": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "source_signature:\n  rule-alpha                       1\n  rule-beta                        1\ntelemetry_source:\n  auditd                           2\n  falco                            1\nattack_phase:\n  execution                        1\n  persistence                      1\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "closure.defender-sql": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "dir_unset.box": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "<ROOT>/defender/bin/defender-sql: line 19: DEFENDER_DIR: DEFENDER_DIR is not set\n"
+   ]
+  ]
+ },
+ "dir_unset.host": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "<ROOT>/defender/bin/defender-sql: line 16: DEFENDER_DIR: DEFENDER_DIR is not set\n"
+   ]
+  ]
+ },
+ "gate.gather.control.lessons-token": {
+  "dict": [
+   [
+    "allow",
+    true
+   ],
+   [
+    "reason",
+    ""
+   ]
+  ]
+ },
+ "gate.gather.control.sql-token": {
+  "dict": [
+   [
+    "allow",
+    true
+   ],
+   [
+    "reason",
+    ""
+   ]
+  ]
+ },
+ "gate.gather.defender-lessons.exec-new-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.gather.defender-lessons.exec-old-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.gather.defender-lessons.module-new": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.gather.defender-lessons.module-old": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.gather.defender-lessons.piped-new-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.gather.defender-lessons.python3-new-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.gather.defender-lessons.python3-new-relative": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.gather.defender-lessons.python3-old-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.gather.defender-lessons.read-new": {
+  "dict": [
+   [
+    "read_roots",
+    true
+   ],
+   [
+    "decide_read",
+    {
+     "dict": [
+      [
+       "allow",
+       false
+      ],
+      [
+       "reason",
+       "Blocked: <FILE> is not a readable path for this agent — its reads are the paths it declares (its own run dir + the corpus `.md` under lessons/skills/examples), and this is not one of them."
+      ]
+     ]
+    }
+   ],
+   [
+    "cat",
+    {
+     "dict": [
+      [
+       "allow",
+       false
+      ],
+      [
+       "reason",
+       "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+      ]
+     ]
+    }
+   ]
+  ]
+ },
+ "gate.gather.defender-lessons.read-old": {
+  "dict": [
+   [
+    "read_roots",
+    true
+   ],
+   [
+    "decide_read",
+    {
+     "dict": [
+      [
+       "allow",
+       false
+      ],
+      [
+       "reason",
+       "Blocked: <FILE> is not a readable path for this agent — its reads are the paths it declares (its own run dir + the corpus `.md` under lessons/skills/examples), and this is not one of them."
+      ]
+     ]
+    }
+   ],
+   [
+    "cat",
+    {
+     "dict": [
+      [
+       "allow",
+       false
+      ],
+      [
+       "reason",
+       "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+      ]
+     ]
+    }
+   ]
+  ]
+ },
+ "gate.gather.defender-sql.exec-new-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.gather.defender-sql.exec-old-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.gather.defender-sql.module-new": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.gather.defender-sql.module-old": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.gather.defender-sql.piped-new-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.gather.defender-sql.python3-new-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.gather.defender-sql.python3-new-relative": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.gather.defender-sql.python3-old-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.gather.defender-sql.read-new": {
+  "dict": [
+   [
+    "read_roots",
+    true
+   ],
+   [
+    "decide_read",
+    {
+     "dict": [
+      [
+       "allow",
+       false
+      ],
+      [
+       "reason",
+       "Blocked: <FILE> is not a readable path for this agent — its reads are the paths it declares (its own run dir + the corpus `.md` under lessons/skills/examples), and this is not one of them."
+      ]
+     ]
+    }
+   ],
+   [
+    "cat",
+    {
+     "dict": [
+      [
+       "allow",
+       false
+      ],
+      [
+       "reason",
+       "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+      ]
+     ]
+    }
+   ]
+  ]
+ },
+ "gate.gather.defender-sql.read-old": {
+  "dict": [
+   [
+    "read_roots",
+    true
+   ],
+   [
+    "decide_read",
+    {
+     "dict": [
+      [
+       "allow",
+       false
+      ],
+      [
+       "reason",
+       "Blocked: <FILE> is not a readable path for this agent — its reads are the paths it declares (its own run dir + the corpus `.md` under lessons/skills/examples), and this is not one of them."
+      ]
+     ]
+    }
+   ],
+   [
+    "cat",
+    {
+     "dict": [
+      [
+       "allow",
+       false
+      ],
+      [
+       "reason",
+       "Blocked: reach a data source with the `query` tool, never with bash — `query(system=…, verb=…, params={…}, query_id=…)`. Bash here is local computation over a payload already on disk: the read-only viewers (cat/grep/head/tail/wc), of which only `cat` opens a file — the rest read STDIN, so pipe into them, e.g. `cat <ABSOLUTE payload path> | grep '<substring>'`, or aggregate with `cat <payload path> | defender-sql '<SQL>'`. Prefer the absolute path the query result reports; a relative one resolves against the run dir. Do not run arbitrary shell."
+      ]
+     ]
+    }
+   ]
+  ]
+ },
+ "gate.main.control.lessons-token": {
+  "dict": [
+   [
+    "allow",
+    true
+   ],
+   [
+    "reason",
+    ""
+   ]
+  ]
+ },
+ "gate.main.control.sql-token": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.main.defender-lessons.exec-new-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.main.defender-lessons.exec-old-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.main.defender-lessons.module-new": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.main.defender-lessons.module-old": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.main.defender-lessons.piped-new-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.main.defender-lessons.python3-new-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.main.defender-lessons.python3-new-relative": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.main.defender-lessons.python3-old-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.main.defender-lessons.read-new": {
+  "dict": [
+   [
+    "read_roots",
+    true
+   ],
+   [
+    "decide_read",
+    {
+     "dict": [
+      [
+       "allow",
+       false
+      ],
+      [
+       "reason",
+       "Blocked: <FILE> is not a readable path for this agent — its reads are the paths it declares (its own run dir + the corpus `.md` under lessons/skills/examples), and this is not one of them."
+      ]
+     ]
+    }
+   ],
+   [
+    "cat",
+    {
+     "dict": [
+      [
+       "allow",
+       false
+      ],
+      [
+       "reason",
+       "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+      ]
+     ]
+    }
+   ]
+  ]
+ },
+ "gate.main.defender-lessons.read-old": {
+  "dict": [
+   [
+    "read_roots",
+    true
+   ],
+   [
+    "decide_read",
+    {
+     "dict": [
+      [
+       "allow",
+       false
+      ],
+      [
+       "reason",
+       "Blocked: <FILE> is not a readable path for this agent — its reads are the paths it declares (its own run dir + the corpus `.md` under lessons/skills/examples), and this is not one of them."
+      ]
+     ]
+    }
+   ],
+   [
+    "cat",
+    {
+     "dict": [
+      [
+       "allow",
+       false
+      ],
+      [
+       "reason",
+       "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+      ]
+     ]
+    }
+   ]
+  ]
+ },
+ "gate.main.defender-sql.exec-new-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.main.defender-sql.exec-old-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.main.defender-sql.module-new": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.main.defender-sql.module-old": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.main.defender-sql.piped-new-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.main.defender-sql.python3-new-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.main.defender-sql.python3-new-relative": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.main.defender-sql.python3-old-path": {
+  "dict": [
+   [
+    "allow",
+    false
+   ],
+   [
+    "reason",
+    "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+   ]
+  ]
+ },
+ "gate.main.defender-sql.read-new": {
+  "dict": [
+   [
+    "read_roots",
+    true
+   ],
+   [
+    "decide_read",
+    {
+     "dict": [
+      [
+       "allow",
+       false
+      ],
+      [
+       "reason",
+       "Blocked: <FILE> is not a readable path for this agent — its reads are the paths it declares (its own run dir + the corpus `.md` under lessons/skills/examples), and this is not one of them."
+      ]
+     ]
+    }
+   ],
+   [
+    "cat",
+    {
+     "dict": [
+      [
+       "allow",
+       false
+      ],
+      [
+       "reason",
+       "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+      ]
+     ]
+    }
+   ]
+  ]
+ },
+ "gate.main.defender-sql.read-old": {
+  "dict": [
+   [
+    "read_roots",
+    true
+   ],
+   [
+    "decide_read",
+    {
+     "dict": [
+      [
+       "allow",
+       false
+      ],
+      [
+       "reason",
+       "Blocked: <FILE> is not a readable path for this agent — its reads are the paths it declares (its own run dir + the corpus `.md` under lessons/skills/examples), and this is not one of them."
+      ]
+     ]
+    }
+   ],
+   [
+    "cat",
+    {
+     "dict": [
+      [
+       "allow",
+       false
+      ],
+      [
+       "reason",
+       "Blocked: only the defender-* shims and read-only viewers (cat/grep/head/tail/wc) are permitted from the main loop, and only `cat` opens a file — the rest read STDIN, so pipe into them: `cat <path> | grep <pattern>`. Dispatch gather for data-source access; do not run arbitrary shell."
+      ]
+     ]
+    }
+   ]
+  ]
+ },
+ "host_import.constants": {
+  "dict": [
+   [
+    "EXIT_OK",
+    0
+   ],
+   [
+    "EXIT_QUERY_ERROR",
+    1
+   ],
+   [
+    "EXIT_INPUT_ERROR",
+    2
+   ],
+   [
+    "EXIT_NO_RUNTIME",
+    69
+   ]
+  ]
+ },
+ "host_import.table_codes": {
+  "dict": [
+   [
+    "EXIT_OK",
+    0
+   ],
+   [
+    "EXIT_QUERY_ERROR",
+    1
+   ],
+   [
+    "EXIT_INPUT_ERROR",
+    64
+   ],
+   [
+    "EXIT_NO_RUNTIME",
+    2
+   ]
+  ]
+ },
+ "image.recipe": {
+  "dict": [
+   [
+    "hash_inputs",
+    {
+     "tuple": [
+      "box.Dockerfile",
+      "uv.lock",
+      "pyproject.toml"
+     ]
+    }
+   ],
+   [
+    "recipe_version",
+    "v2"
+   ]
+  ]
+ },
+ "lanes.abbreviated-flag": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"n\": 2}]\n"
+   ],
+   [
+    "stderr",
+    "defender-sql: note — the payload declares `truncated`: these rows are not all that matched. A 0 or a miss here means 'not in these rows', NOT 'absent' — a truncated payload cannot support an absence refutation.\n"
+   ]
+  ]
+ },
+ "lanes.attach": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: query error: Permission Error: Cannot access file \"<TMP>/attached.duckdb\" - file system operations are disabled by configuration\n  hint: `data` has columns [user, n, host]; flat/array shape — the payload's keys ARE `data`'s columns; `SELECT * FROM data`, no `unnest`.\n"
+   ]
+  ]
+ },
+ "lanes.copy-to": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: query error: Permission Error: Cannot access file \"<TMP>/copied.csv\" - file system operations are disabled by configuration\n  hint: `data` has columns [user, n, host]; flat/array shape — the payload's keys ARE `data`'s columns; `SELECT * FROM data`, no `unnest`.\n"
+   ]
+  ]
+ },
+ "lanes.declared": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"host.name\": \"a\", \"count\": 1}, {\"host.name\": \"b\", \"count\": 2}]\n"
+   ],
+   [
+    "stderr",
+    "defender-sql: note — the payload declares `truncated`: these rows are not all that matched. A 0 or a miss here means 'not in these rows', NOT 'absent' — a truncated payload cannot support an absence refutation.\n"
+   ]
+  ]
+ },
+ "lanes.declared-after-sql": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"n\": 2}]\n"
+   ],
+   [
+    "stderr",
+    "defender-sql: note — the payload declares `truncated`: these rows are not all that matched. A 0 or a miss here means 'not in these rows', NOT 'absent' — a truncated payload cannot support an absence refutation.\n"
+   ]
+  ]
+ },
+ "lanes.declared-equals-form": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"n\": 2}]\n"
+   ],
+   [
+    "stderr",
+    "defender-sql: note — the payload declares `truncated`: these rows are not all that matched. A 0 or a miss here means 'not in these rows', NOT 'absent' — a truncated payload cannot support an absence refutation.\n"
+   ]
+  ]
+ },
+ "lanes.declared-names-first": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"n\": 2}]\n"
+   ],
+   [
+    "stderr",
+    "defender-sql: note — the payload declares `truncated`: these rows are not all that matched. A 0 or a miss here means 'not in these rows', NOT 'absent' — a truncated payload cannot support an absence refutation.\n"
+   ]
+  ]
+ },
+ "lanes.help-flag": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "usage: defender-sql [-h] [--rows PATH] [--names PATH] sql\n\nSandboxed SQL aggregation over a JSON/NDJSON payload on stdin, exposed as the\ntable `data`. Tier-2 fallback for a source with no native aggregation (see\nskills/connect/adapter.md).\n\npositional arguments:\n  sql           A read-only SQL query over the `data` table (the parsed stdin\n                payload).\n\noptions:\n  -h, --help    show this help message and exit\n  --rows PATH   Where the payload's positional rows are (a list of lists),\n                e.g. `values` or `tables[0].rows`. With --names, `data` holds\n                one row per row, one column per name, each column typed from\n                its own JSON values.\n  --names PATH  Where the rows' column names are: a list of strings, or of\n                objects with a `name`, e.g. `columns`. Goes with --rows.\n\nthe payload IS the table — there is no wrapper envelope to reach through.\nexample: defender-<system> query '<filter>' | defender-sql \"SELECT h.user,\ncount(*) c FROM (SELECT unnest(hits) h FROM data) GROUP BY 1 ORDER BY c DESC\".\nPositional rows behind a list of column names, declared: defender-<system>\nquery '<query>' | defender-sql --rows values --names columns 'SELECT\n\"source.ip\", count(*) c FROM data GROUP BY 1 ORDER BY c DESC'\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "lanes.names-alone": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: --rows and --names go together: --rows says where the positional rows are, --names where their column names are. Pass both, or neither.\n"
+   ]
+  ]
+ },
+ "lanes.query": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "lanes.read-csv-passwd": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: query error: Permission Error: Cannot access file \"/etc/passwd\" - file system operations are disabled by configuration\n\nLINE 1: SELECT * FROM read_csv('/etc/passwd')\n                      ^\n  hint: `data` has columns [user, n, host]; flat/array shape — the payload's keys ARE `data`'s columns; `SELECT * FROM data`, no `unnest`.\n"
+   ]
+  ]
+ },
+ "lanes.read-text-passwd": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: query error: Permission Error: Cannot access file \"/etc/passwd\" - file system operations are disabled by configuration\n\nLINE 1: SELECT * FROM read_text('/etc/passwd')\n                      ^\n  hint: `data` has columns [user, n, host]; flat/array shape — the payload's keys ARE `data`'s columns; `SELECT * FROM data`, no `unnest`.\n"
+   ]
+  ]
+ },
+ "lanes.rows-alone": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: --rows and --names go together: --rows says where the positional rows are, --names where their column names are. Pass both, or neither.\n"
+   ]
+  ]
+ },
+ "lanes.unknown-flag": {
+  "dict": [
+   [
+    "rc",
+    2
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "usage: defender-sql [-h] [--rows PATH] [--names PATH] sql\ndefender-sql: error: unrecognized arguments: --bogus SELECT 1\n"
+   ]
+  ]
+ },
+ "lanes.unlock-external-access": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: query error: Invalid Input Error: Cannot change configuration option \"enable_external_access\" - the configuration has been locked\n  hint: `data` has columns [user, n, host]; flat/array shape — the payload's keys ARE `data`'s columns; `SELECT * FROM data`, no `unnest`.\n"
+   ]
+  ]
+ },
+ "mount.defender-lessons.grep": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "<MOUNT>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "mount.defender-lessons.show": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "--- <MOUNT>/defender/lessons/spec1080-alpha.md\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "mount.defender-lessons.tags": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "source_signature:\n  rule-alpha                       1\n  rule-beta                        1\ntelemetry_source:\n  auditd                           2\n  falco                            1\nattack_phase:\n  execution                        1\n  persistence                      1\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "mount.defender-sql.query": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "no_runtime.bad-query.box": {
+  "dict": [
+   [
+    "run",
+    {
+     "dict": [
+      [
+       "rc",
+       1
+      ],
+      [
+       "stdout",
+       ""
+      ],
+      [
+       "stderr",
+       "defender-sql: query error: Parser Error: syntax error at or near \"SELEKT\"\n\nLINE 1: SELEKT 1\n        ^\n  hint: `data` has columns [user, n, host]; flat/array shape — the payload's keys ARE `data`'s columns; `SELECT * FROM data`, no `unnest`.\n"
+      ]
+     ]
+    }
+   ],
+   [
+    "table_code",
+    1
+   ],
+   [
+    "error_class",
+    "agent-fixable"
+   ],
+   [
+    "model_reads",
+    "exit=1\n--- stdout ---\n\n--- stderr ---\ndefender-sql: query error: Parser Error: syntax error at or near \"SELEKT\"\n\nLINE 1: SELEKT 1\n        ^\n  hint: `data` has columns [user, n, host]; flat/array shape — the payload's keys ARE `data`'s columns; `SELECT * FROM data`, no `unnest`.\n"
+   ]
+  ]
+ },
+ "no_runtime.bad-query.host": {
+  "dict": [
+   [
+    "run",
+    {
+     "dict": [
+      [
+       "rc",
+       1
+      ],
+      [
+       "stdout",
+       ""
+      ],
+      [
+       "stderr",
+       "defender-sql: query error: Parser Error: syntax error at or near \"SELEKT\"\n\nLINE 1: SELEKT 1\n        ^\n  hint: `data` has columns [user, n, host]; flat/array shape — the payload's keys ARE `data`'s columns; `SELECT * FROM data`, no `unnest`.\n"
+      ]
+     ]
+    }
+   ],
+   [
+    "table_code",
+    1
+   ],
+   [
+    "error_class",
+    "agent-fixable"
+   ],
+   [
+    "model_reads",
+    "exit=1\n--- stdout ---\n\n--- stderr ---\ndefender-sql: query error: Parser Error: syntax error at or near \"SELEKT\"\n\nLINE 1: SELEKT 1\n        ^\n  hint: `data` has columns [user, n, host]; flat/array shape — the payload's keys ARE `data`'s columns; `SELECT * FROM data`, no `unnest`.\n"
+   ]
+  ]
+ },
+ "no_runtime.no-duckdb.box": {
+  "dict": [
+   [
+    "run",
+    {
+     "dict": [
+      [
+       "rc",
+       69
+      ],
+      [
+       "stdout",
+       ""
+      ],
+      [
+       "stderr",
+       "defender-sql: duckdb is not installed in this box image (run `python3 defender/scripts/box_image.py build` to rebuild it).\n"
+      ]
+     ]
+    }
+   ],
+   [
+    "table_code",
+    2
+   ],
+   [
+    "error_class",
+    "infra"
+   ],
+   [
+    "model_reads",
+    "exit=69\n--- stdout ---\n\n--- stderr ---\ndefender-sql: duckdb is not installed in this box image (run `python3 defender/scripts/box_image.py build` to rebuild it).\n"
+   ]
+  ]
+ },
+ "no_runtime.no-duckdb.host": {
+  "dict": [
+   [
+    "run",
+    {
+     "dict": [
+      [
+       "rc",
+       69
+      ],
+      [
+       "stdout",
+       ""
+      ],
+      [
+       "stderr",
+       "defender-sql: duckdb is not installed (cd defender && uv pip install --python .venv/bin/python -e '.[runtime]').\n"
+      ]
+     ]
+    }
+   ],
+   [
+    "table_code",
+    2
+   ],
+   [
+    "error_class",
+    "infra"
+   ],
+   [
+    "model_reads",
+    "exit=69\n--- stdout ---\n\n--- stderr ---\ndefender-sql: duckdb is not installed (cd defender && uv pip install --python .venv/bin/python -e '.[runtime]').\n"
+   ]
+  ]
+ },
+ "no_runtime.no-pytz.box": {
+  "dict": [
+   [
+    "run",
+    {
+     "dict": [
+      [
+       "rc",
+       69
+      ],
+      [
+       "stdout",
+       ""
+      ],
+      [
+       "stderr",
+       "defender-sql: pytz is not installed in this box image (run `python3 defender/scripts/box_image.py build` to rebuild it).\n"
+      ]
+     ]
+    }
+   ],
+   [
+    "table_code",
+    2
+   ],
+   [
+    "error_class",
+    "infra"
+   ],
+   [
+    "model_reads",
+    "exit=69\n--- stdout ---\n\n--- stderr ---\ndefender-sql: pytz is not installed in this box image (run `python3 defender/scripts/box_image.py build` to rebuild it).\n"
+   ]
+  ]
+ },
+ "no_runtime.no-pytz.host": {
+  "dict": [
+   [
+    "run",
+    {
+     "dict": [
+      [
+       "rc",
+       69
+      ],
+      [
+       "stdout",
+       ""
+      ],
+      [
+       "stderr",
+       "defender-sql: pytz is not installed (cd defender && uv pip install --python .venv/bin/python -e '.[runtime]').\n"
+      ]
+     ]
+    }
+   ],
+   [
+    "table_code",
+    2
+   ],
+   [
+    "error_class",
+    "infra"
+   ],
+   [
+    "model_reads",
+    "exit=69\n--- stdout ---\n\n--- stderr ---\ndefender-sql: pytz is not installed (cd defender && uv pip install --python .venv/bin/python -e '.[runtime]').\n"
+   ]
+  ]
+ },
+ "no_runtime.plain-without-pytz.box": {
+  "dict": [
+   [
+    "run",
+    {
+     "dict": [
+      [
+       "rc",
+       0
+      ],
+      [
+       "stdout",
+       "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+      ],
+      [
+       "stderr",
+       ""
+      ]
+     ]
+    }
+   ],
+   [
+    "table_code",
+    0
+   ],
+   [
+    "error_class",
+    null
+   ],
+   [
+    "model_reads",
+    "exit=0\n--- stdout ---\n[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ]
+  ]
+ },
+ "no_runtime.plain-without-pytz.host": {
+  "dict": [
+   [
+    "run",
+    {
+     "dict": [
+      [
+       "rc",
+       0
+      ],
+      [
+       "stdout",
+       "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+      ],
+      [
+       "stderr",
+       ""
+      ]
+     ]
+    }
+   ],
+   [
+    "table_code",
+    0
+   ],
+   [
+    "error_class",
+    null
+   ],
+   [
+    "model_reads",
+    "exit=0\n--- stdout ---\n[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ]
+  ]
+ },
+ "optional_results.decimal": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"d\": \"12345.6789\", \"e\": \"0.10\", \"s\": \"9.0\"}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "optional_results.nested-list": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"nl\": [[1, 2], [3]], \"st\": {\"k\": [1, 2], \"z\": \"x\"}, \"users\": [\"alice\", \"bob\", \"alice\"]}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "optional_results.other-types": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"iv\": \"1 day, 0:00:00\", \"b\": \"b'\\\\x00\\\\x01'\", \"d\": \"2026-01-02\", \"t\": \"03:04:05.000000\", \"n\": null, \"i\": null}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "optional_results.wide-row": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"c0\": 0, \"c1\": 1, \"c2\": 2, \"c3\": 3, \"c4\": 4, \"c5\": 5, \"c6\": 6, \"c7\": 7, \"c8\": 8, \"c9\": 9, \"c10\": 10, \"c11\": 11, \"c12\": 12, \"c13\": 13, \"c14\": 14, \"c15\": 15, \"c16\": 16, \"c17\": 17, \"c18\": 18, \"c19\": 19, \"c20\": 20, \"c21\": 21, \"c22\": 22, \"c23\": 23, \"c24\": 24, \"c25\": 25, \"c26\": 26, \"c27\": 27, \"c28\": 28, \"c29\": 29, \"c30\": 30, \"c31\": 31, \"c32\": 32, \"c33\": 33, \"c34\": 34, \"c35\": 35, \"c36\": 36, \"c37\": 37, \"c38\": 38, \"c39\": 39, \"c40\": 40, \"c41\": 41, \"c42\": 42, \"c43\": 43, \"c44\": 44, \"c45\": 45, \"c46\": 46, \"c47\": 47, \"c48\": 48, \"c49\": 49, \"c50\": 50, \"c51\": 51, \"c52\": 52, \"c53\": 53, \"c54\": 54, \"c55\": 55, \"c56\": 56, \"c57\": 57, \"c58\": 58, \"c59\": 59, \"c60\": 60, \"c61\": 61, \"c62\": 62, \"c63\": 63, \"c64\": 64, \"c65\": 65, \"c66\": 66, \"c67\": 67, \"c68\": 68, \"c69\": 69, \"c70\": 70, \"c71\": 71, \"c72\": 72, \"c73\": 73, \"c74\": 74, \"c75\": 75, \"c76\": 76, \"c77\": 77, \"c78\": 78, \"c79\": 79, \"c80\": 80, \"c81\": 81, \"c82\": 82, \"c83\": 83, \"c84\": 84, \"c85\": 85, \"c86\": 86, \"c87\": 87, \"c88\": 88, \"c89\": 89, \"c90\": 90, \"c91\": 91, \"c92\": 92, \"c93\": 93, \"c94\": 94, \"c95\": 95, \"c96\": 96, \"c97\": 97, \"c98\": 98, \"c99\": 99, \"c100\": 100, \"c101\": 101, \"c102\": 102, \"c103\": 103, \"c104\": 104, \"c105\": 105, \"c106\": 106, \"c107\": 107, \"c108\": 108, \"c109\": 109, \"c110\": 110, \"c111\": 111, \"c112\": 112, \"c113\": 113, \"c114\": 114, \"c115\": 115, \"c116\": 116, \"c117\": 117, \"c118\": 118, \"c119\": 119, \"c120\": 120, \"c121\": 121, \"c122\": 122, \"c123\": 123, \"c124\": 124, \"c125\": 125, \"c126\": 126, \"c127\": 127, \"c128\": 128, \"c129\": 129, \"c130\": 130, \"c131\": 131, \"c132\": 132, \"c133\": 133, \"c134\": 134, \"c135\": 135, \"c136\": 136, \"c137\": 137, \"c138\": 138, \"c139\": 139, \"c140\": 140, \"c141\": 141, \"c142\": 142, \"c143\": 143, \"c144\": 144, \"c145\": 145, \"c146\": 146, \"c147\": 147, \"c148\": 148, \"c149\": 149, \"c150\": 150, \"c151\": 151, \"c152\": 152, \"c153\": 153, \"c154\": 154, \"c155\": 155, \"c156\": 156, \"c157\": 157, \"c158\": 158, \"c159\": 159, \"c160\": 160, \"c161\": 161, \"c162\": 162, \"c163\": 163, \"c164\": 164, \"c165\": 165, \"c166\": 166, \"c167\": 167, \"c168\": 168, \"c169\": 169, \"c170\": 170, \"c171\": 171, \"c172\": 172, \"c173\": 173, \"c174\": 174, \"c175\": 175, \"c176\": 176, \"c177\": 177, \"c178\": 178, \"c179\": 179, \"c180\": 180, \"c181\": 181, \"c182\": 182, \"c183\": 183, \"c184\": 184, \"c185\": 185, \"c186\": 186, \"c187\": 187, \"c188\": 188, \"c189\": 189, \"c190\": 190, \"c191\": 191, \"c192\": 192, \"c193\": 193, \"c194\": 194, \"c195\": 195, \"c196\": 196, \"c197\": 197, \"c198\": 198, \"c199\": 199, \"c200\": 200, \"c201\": 201, \"c202\": 202, \"c203\": 203, \"c204\": 204, \"c205\": 205, \"c206\": 206, \"c207\": 207, \"c208\": 208, \"c209\": 209, \"c210\": 210, \"c211\": 211, \"c212\": 212, \"c213\": 213, \"c214\": 214, \"c215\": 215, \"c216\": 216, \"c217\": 217, \"c218\": 218, \"c219\": 219, \"c220\": 220, \"c221\": 221, \"c222\": 222, \"c223\": 223, \"c224\": 224, \"c225\": 225, \"c226\": 226, \"c227\": 227, \"c228\": 228, \"c229\": 229, \"c230\": 230, \"c231\": 231, \"c232\": 232, \"c233\": 233, \"c234\": 234, \"c235\": 235, \"c236\": 236, \"c237\": 237, \"c238\": 238, \"c239\": 239, \"c240\": 240, \"c241\": 241, \"c242\": 242, \"c243\": 243, \"c244\": 244, \"c245\": 245, \"c246\": 246, \"c247\": 247, \"c248\": 248, \"c249\": 249, \"c250\": 250, \"c251\": 251, \"c252\": 252, \"c253\": 253, \"c254\": 254, \"c255\": 255, \"c256\": 256, \"c257\": 257, \"c258\": 258, \"c259\": 259, \"c260\": 260, \"c261\": 261, \"c262\": 262, \"c263\": 263, \"c264\": 264, \"c265\": 265, \"c266\": 266, \"c267\": 267, \"c268\": 268, \"c269\": 269, \"c270\": 270, \"c271\": 271, \"c272\": 272, \"c273\": 273, \"c274\": 274, \"c275\": 275, \"c276\": 276, \"c277\": 277, \"c278\": 278, \"c279\": 279, \"c280\": 280, \"c281\": 281, \"c282\": 282, \"c283\": 283, \"c284\": 284, \"c285\": 285, \"c286\": 286, \"c287\": 287, \"c288\": 288, \"c289\": 289, \"c290\": 290, \"c291\": 291, \"c292\": 292, \"c293\": 293, \"c294\": 294, \"c295\": 295, \"c296\": 296, \"c297\": 297, \"c298\": 298, \"c299\": 299}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "optional_results.zoned-timestamp": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"t\": \"2025-12-31T22:00:00.000000Z\", \"p\": \"2026-01-01T03:00:00.000000Z\", \"d\": \"2026-01-01T00:00:00.000000Z\"}, {\"t\": \"2025-12-31T22:00:00.000000Z\", \"p\": \"2026-01-01T03:00:00.000000Z\", \"d\": \"2026-01-01T00:00:00.000000Z\"}, {\"t\": \"2025-12-31T22:00:00.000000Z\", \"p\": \"2026-01-01T03:00:00.000000Z\", \"d\": \"2026-01-01T00:00:00.000000Z\"}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "other_cwd.filesystem-root.defender-lessons.grep": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "other_cwd.filesystem-root.defender-lessons.show": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "--- <CO>/defender/lessons/spec1080-alpha.md\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "other_cwd.filesystem-root.defender-lessons.tags": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "source_signature:\n  rule-alpha                       1\n  rule-beta                        1\ntelemetry_source:\n  auditd                           2\n  falco                            1\nattack_phase:\n  execution                        1\n  persistence                      1\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "other_cwd.filesystem-root.defender-sql.query": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "other_cwd.foreign-checkout.defender-lessons.grep": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "other_cwd.foreign-checkout.defender-lessons.show": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "--- <CO>/defender/lessons/spec1080-alpha.md\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "other_cwd.foreign-checkout.defender-lessons.tags": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "source_signature:\n  rule-alpha                       1\n  rule-beta                        1\ntelemetry_source:\n  auditd                           2\n  falco                            1\nattack_phase:\n  execution                        1\n  persistence                      1\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "other_cwd.foreign-checkout.defender-sql.query": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "other_cwd.foreign-defender.defender-lessons.grep": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "other_cwd.foreign-defender.defender-lessons.show": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "--- <CO>/defender/lessons/spec1080-alpha.md\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "other_cwd.foreign-defender.defender-lessons.tags": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "source_signature:\n  rule-alpha                       1\n  rule-beta                        1\ntelemetry_source:\n  auditd                           2\n  falco                            1\nattack_phase:\n  execution                        1\n  persistence                      1\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "other_cwd.foreign-defender.defender-sql.query": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "other_cwd.run-folder.defender-lessons.grep": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "other_cwd.run-folder.defender-lessons.show": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "--- <CO>/defender/lessons/spec1080-alpha.md\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "other_cwd.run-folder.defender-lessons.tags": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "source_signature:\n  rule-alpha                       1\n  rule-beta                        1\ntelemetry_source:\n  auditd                           2\n  falco                            1\nattack_phase:\n  execution                        1\n  persistence                      1\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "other_cwd.run-folder.defender-sql.query": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "read_only.cache-prefix-uncreatable.defender-lessons": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "source_signature:\n  rule-alpha                       1\n  rule-beta                        1\ntelemetry_source:\n  auditd                           2\n  falco                            1\nattack_phase:\n  execution                        1\n  persistence                      1\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "read_only.cache-prefix-uncreatable.defender-sql": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "read_only.pycache-is-a-file.defender-lessons": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "source_signature:\n  rule-alpha                       1\n  rule-beta                        1\ntelemetry_source:\n  auditd                           2\n  falco                            1\nattack_phase:\n  execution                        1\n  persistence                      1\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "read_only.pycache-is-a-file.defender-sql": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "rows_names.control-both-paired": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"n\": 2}]\n"
+   ],
+   [
+    "stderr",
+    "defender-sql: note — the payload declares `truncated`: these rows are not all that matched. A 0 or a miss here means 'not in these rows', NOT 'absent' — a truncated payload cannot support an absence refutation.\n"
+   ]
+  ]
+ },
+ "rows_names.directories": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: --rows '<TMP>/a-folder' does not resolve: no key '<TMP>/a-folder' there.\n"
+   ]
+  ]
+ },
+ "rows_names.missing-files": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: --rows '<TMP>/no-such-rows' does not resolve: no key '<TMP>/no-such-rows' there.\n"
+   ]
+  ]
+ },
+ "rows_names.names-alone": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: --rows and --names go together: --rows says where the positional rows are, --names where their column names are. Pass both, or neither.\n"
+   ]
+  ]
+ },
+ "rows_names.outside-the-run": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: --rows '/etc/passwd' does not resolve: no key '/etc/passwd' there.\n"
+   ]
+  ]
+ },
+ "rows_names.rows-alone": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: --rows and --names go together: --rows says where the positional rows are, --names where their column names are. Pass both, or neither.\n"
+   ]
+  ]
+ },
+ "rows_names.unreadable-file": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: --rows '<TMP>/unreadable-file' does not resolve: no key '<TMP>/unreadable-file' there.\n"
+   ]
+  ]
+ },
+ "spellings.defender-lessons.moved-away.box": {
+  "dict": [
+   [
+    "rc",
+    2
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "python3: can't open file '<TMP>/moved-away/defender/scripts/lessons/lessons_fm.py': [Errno 2] No such file or directory\n"
+   ]
+  ]
+ },
+ "spellings.defender-lessons.moved-away.host": {
+  "dict": [
+   [
+    "rc",
+    2
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "python3: can't open file '<TMP>/moved-away/defender/scripts/lessons/lessons_fm.py': [Errno 2] No such file or directory\n"
+   ]
+  ]
+ },
+ "spellings.defender-lessons.plain.box": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "spellings.defender-lessons.relative.box": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "spellings.defender-lessons.relative.host": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "spellings.defender-lessons.space.box": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "spellings.defender-lessons.symlink.box": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "spellings.defender-lessons.symlink.host": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "spellings.defender-lessons.trailing-slash.box": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "spellings.defender-sql.moved-away.box": {
+  "dict": [
+   [
+    "rc",
+    2
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "python3: can't open file '<TMP>/moved-away/defender/scripts/gather_tools/sql.py': [Errno 2] No such file or directory\n"
+   ]
+  ]
+ },
+ "spellings.defender-sql.moved-away.host": {
+  "dict": [
+   [
+    "rc",
+    2
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "python3: can't open file '<TMP>/moved-away/defender/scripts/gather_tools/sql.py': [Errno 2] No such file or directory\n"
+   ]
+  ]
+ },
+ "spellings.defender-sql.plain.box": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "spellings.defender-sql.relative.box": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "spellings.defender-sql.relative.host": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "spellings.defender-sql.space.box": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "spellings.defender-sql.symlink.box": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "spellings.defender-sql.symlink.host": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "spellings.defender-sql.trailing-slash.box": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "stale_above.bare.defender-lessons.grep": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "stale_above.bare.defender-lessons.show": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "--- <CO>/defender/lessons/spec1080-alpha.md\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "stale_above.bare.defender-lessons.tags": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "source_signature:\n  rule-alpha                       1\n  rule-beta                        1\ntelemetry_source:\n  auditd                           2\n  falco                            1\nattack_phase:\n  execution                        1\n  persistence                      1\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "stale_above.bare.defender-sql.query": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "stale_above.box.defender-lessons.grep": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "stale_above.box.defender-lessons.show": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "--- <CO>/defender/lessons/spec1080-alpha.md\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "stale_above.box.defender-lessons.tags": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "source_signature:\n  rule-alpha                       1\n  rule-beta                        1\ntelemetry_source:\n  auditd                           2\n  falco                            1\nattack_phase:\n  execution                        1\n  persistence                      1\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "stale_above.box.defender-sql.query": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "statuses.bad-flag": {
+  "dict": [
+   [
+    "rc",
+    2
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "usage: defender-sql [-h] [--rows PATH] [--names PATH] sql\ndefender-sql: error: unrecognized arguments: --bogus\n"
+   ]
+  ]
+ },
+ "statuses.bad-flag.host": {
+  "dict": [
+   [
+    "table_code",
+    64
+   ],
+   [
+    "error_class",
+    "agent-fixable"
+   ],
+   [
+    "model_reads",
+    "exit=2\n--- stdout ---\n\n--- stderr ---\nusage: defender-sql [-h] [--rows PATH] [--names PATH] sql\ndefender-sql: error: unrecognized arguments: --bogus\n"
+   ]
+  ]
+ },
+ "statuses.bad-regex": {
+  "dict": [
+   [
+    "rc",
+    2
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "error: bad regex: missing ), unterminated subpattern at position 0\n"
+   ]
+  ]
+ },
+ "statuses.bad-sql": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: query error: Binder Error: Referenced column \"nope\" not found in FROM clause!\nCandidate bindings: \"n\", \"host\", \"user\"\n\nLINE 1: SELECT nope FROM data\n               ^\n  hint: `data` has columns [user, n, host]; flat/array shape — the payload's keys ARE `data`'s columns; `SELECT * FROM data`, no `unnest`.\n"
+   ]
+  ]
+ },
+ "statuses.bad-sql.host": {
+  "dict": [
+   [
+    "table_code",
+    1
+   ],
+   [
+    "error_class",
+    "agent-fixable"
+   ],
+   [
+    "model_reads",
+    "exit=1\n--- stdout ---\n\n--- stderr ---\ndefender-sql: query error: Binder Error: Referenced column \"nope\" not found in FROM clause!\nCandidate bindings: \"n\", \"host\", \"user\"\n\nLINE 1: SELECT nope FROM data\n               ^\n  hint: `data` has columns [user, n, host]; flat/array shape — the payload's keys ARE `data`'s columns; `SELECT * FROM data`, no `unnest`.\n"
+   ]
+  ]
+ },
+ "statuses.no-input": {
+  "dict": [
+   [
+    "rc",
+    2
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: no input on stdin — the payload is empty. This is NOT an empty result set: the query that produced it recorded no observation at all, so nothing here supports a claim about what is present or absent.\n"
+   ]
+  ]
+ },
+ "statuses.no-input.host": {
+  "dict": [
+   [
+    "table_code",
+    64
+   ],
+   [
+    "error_class",
+    "agent-fixable"
+   ],
+   [
+    "model_reads",
+    "exit=2\n--- stdout ---\n\n--- stderr ---\ndefender-sql: no input on stdin — the payload is empty. This is NOT an empty result set: the query that produced it recorded no observation at all, so nothing here supports a claim about what is present or absent.\n"
+   ]
+  ]
+ },
+ "statuses.no-runtime": {
+  "dict": [
+   [
+    "rc",
+    69
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: duckdb is not installed in this box image (run `python3 defender/scripts/box_image.py build` to rebuild it).\n"
+   ]
+  ]
+ },
+ "statuses.no-runtime.host": {
+  "dict": [
+   [
+    "table_code",
+    2
+   ],
+   [
+    "error_class",
+    "infra"
+   ],
+   [
+    "model_reads",
+    "exit=69\n--- stdout ---\n\n--- stderr ---\ndefender-sql: duckdb is not installed in this box image (run `python3 defender/scripts/box_image.py build` to rebuild it).\n"
+   ]
+  ]
+ },
+ "statuses.ok": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "statuses.ok.host": {
+  "dict": [
+   [
+    "table_code",
+    0
+   ],
+   [
+    "error_class",
+    null
+   ],
+   [
+    "model_reads",
+    "exit=0\n--- stdout ---\n[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ]
+  ]
+ },
+ "stdin.closed": {
+  "dict": [
+   [
+    "rc",
+    1
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "Traceback (most recent call last): <frames elided>\nAttributeError: 'NoneType' object has no attribute 'buffer'\n"
+   ]
+  ]
+ },
+ "stdin.empty": {
+  "dict": [
+   [
+    "rc",
+    2
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: no input on stdin — the payload is empty. This is NOT an empty result set: the query that produced it recorded no observation at all, so nothing here supports a claim about what is present or absent.\n"
+   ]
+  ]
+ },
+ "stdin.huge-single-line": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"n\": 300000, \"top\": 299999}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "stdin.non-text": {
+  "dict": [
+   [
+    "rc",
+    2
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: stdin is not valid JSON or NDJSON: Invalid Input Error: Malformed JSON in file \"<SCRATCH>/data.json\", at byte 1 in record/value 2: UTF-16 encoding is not supported. \n\nLINE 1: CREATE TABLE data AS SELECT * FROM read_json_auto(?, maximum_object_size=1073741824)\n                                           ^\n"
+   ]
+  ]
+ },
+ "stdin.non-text-declared": {
+  "dict": [
+   [
+    "rc",
+    2
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: stdin is not one JSON document (--rows/--names need one; NDJSON cannot be declared): Expecting value: line 1 column 1 (char 0)\n"
+   ]
+  ]
+ },
+ "stdin.whitespace": {
+  "dict": [
+   [
+    "rc",
+    2
+   ],
+   [
+    "stdout",
+    ""
+   ],
+   [
+    "stderr",
+    "defender-sql: no input on stdin — the payload is empty. This is NOT an empty result set: the query that produced it recorded no observation at all, so nothing here supports a claim about what is present or absent.\n"
+   ]
+  ]
+ },
+ "survival.declared.box": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"host.name\": \"a\", \"count\": 1}, {\"host.name\": \"b\", \"count\": 2}]\n"
+   ],
+   [
+    "stderr",
+    "defender-sql: note — the payload declares `truncated`: these rows are not all that matched. A 0 or a miss here means 'not in these rows', NOT 'absent' — a truncated payload cannot support an absence refutation.\n"
+   ]
+  ]
+ },
+ "survival.declared.host": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"host.name\": \"a\", \"count\": 1}, {\"host.name\": \"b\", \"count\": 2}]\n"
+   ],
+   [
+    "stderr",
+    "defender-sql: note — the payload declares `truncated`: these rows are not all that matched. A 0 or a miss here means 'not in these rows', NOT 'absent' — a truncated payload cannot support an absence refutation.\n"
+   ]
+  ]
+ },
+ "survival.help.box": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "usage: defender-sql [-h] [--rows PATH] [--names PATH] sql\n\nSandboxed SQL aggregation over a JSON/NDJSON payload on stdin, exposed as the\ntable `data`. Tier-2 fallback for a source with no native aggregation (see\nskills/connect/adapter.md).\n\npositional arguments:\n  sql           A read-only SQL query over the `data` table (the parsed stdin\n                payload).\n\noptions:\n  -h, --help    show this help message and exit\n  --rows PATH   Where the payload's positional rows are (a list of lists),\n                e.g. `values` or `tables[0].rows`. With --names, `data` holds\n                one row per row, one column per name, each column typed from\n                its own JSON values.\n  --names PATH  Where the rows' column names are: a list of strings, or of\n                objects with a `name`, e.g. `columns`. Goes with --rows.\n\nthe payload IS the table — there is no wrapper envelope to reach through.\nexample: defender-<system> query '<filter>' | defender-sql \"SELECT h.user,\ncount(*) c FROM (SELECT unnest(hits) h FROM data) GROUP BY 1 ORDER BY c DESC\".\nPositional rows behind a list of column names, declared: defender-<system>\nquery '<query>' | defender-sql --rows values --names columns 'SELECT\n\"source.ip\", count(*) c FROM data GROUP BY 1 ORDER BY c DESC'\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "survival.help.host": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "usage: defender-sql [-h] [--rows PATH] [--names PATH] sql\n\nSandboxed SQL aggregation over a JSON/NDJSON payload on stdin, exposed as the\ntable `data`. Tier-2 fallback for a source with no native aggregation (see\nskills/connect/adapter.md).\n\npositional arguments:\n  sql           A read-only SQL query over the `data` table (the parsed stdin\n                payload).\n\noptions:\n  -h, --help    show this help message and exit\n  --rows PATH   Where the payload's positional rows are (a list of lists),\n                e.g. `values` or `tables[0].rows`. With --names, `data` holds\n                one row per row, one column per name, each column typed from\n                its own JSON values.\n  --names PATH  Where the rows' column names are: a list of strings, or of\n                objects with a `name`, e.g. `columns`. Goes with --rows.\n\nthe payload IS the table — there is no wrapper envelope to reach through.\nexample: defender-<system> query '<filter>' | defender-sql \"SELECT h.user,\ncount(*) c FROM (SELECT unnest(hits) h FROM data) GROUP BY 1 ORDER BY c DESC\".\nPositional rows behind a list of column names, declared: defender-<system>\nquery '<query>' | defender-sql --rows values --names columns 'SELECT\n\"source.ip\", count(*) c FROM data GROUP BY 1 ORDER BY c DESC'\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "survival.query.box": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "survival.query.host": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "symlinked.shim.defender-lessons.grep": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "symlinked.shim.defender-lessons.show": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "--- <CO>/defender/lessons/spec1080-alpha.md\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "symlinked.shim.defender-lessons.tags": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "source_signature:\n  rule-alpha                       1\n  rule-beta                        1\ntelemetry_source:\n  auditd                           2\n  falco                            1\nattack_phase:\n  execution                        1\n  persistence                      1\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "symlinked.shim.defender-sql.query": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "symlinked.wrapper.defender-lessons.grep": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "<CO>/defender/lessons/spec1080-alpha.md\talpha lesson of the 1080 sql group\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "symlinked.wrapper.defender-lessons.show": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "--- <CO>/defender/lessons/spec1080-alpha.md\nname: spec1080-alpha\ndescription: alpha lesson of the 1080 sql group\nsource_signature: [rule-alpha]\ntelemetry_source: [auditd]\nattack_phase: [persistence]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "symlinked.wrapper.defender-lessons.tags": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "source_signature:\n  rule-alpha                       1\n  rule-beta                        1\ntelemetry_source:\n  auditd                           2\n  falco                            1\nattack_phase:\n  execution                        1\n  persistence                      1\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "symlinked.wrapper.defender-sql.query": {
+  "dict": [
+   [
+    "rc",
+    0
+   ],
+   [
+    "stdout",
+    "[{\"user\": \"alice\", \"total\": 4, \"c\": 2}, {\"user\": \"bob\", \"total\": 5, \"c\": 1}]\n"
+   ],
+   [
+    "stderr",
+    ""
+   ]
+  ]
+ },
+ "two_copies.constants": {
+  "dict": [
+   [
+    "EXIT_OK",
+    0
+   ],
+   [
+    "EXIT_QUERY_ERROR",
+    1
+   ],
+   [
+    "EXIT_INPUT_ERROR",
+    2
+   ],
+   [
+    "EXIT_NO_RUNTIME",
+    69
+   ]
+  ]
+ },
+ "two_copies.statuses": {
+  "dict": [
+   [
+    "ok",
+    0
+   ],
+   [
+    "bad-sql",
+    1
+   ],
+   [
+    "declaration-refused",
+    1
+   ],
+   [
+    "declared-not-json",
+    2
+   ],
+   [
+    "no-input",
+    2
+   ],
+   [
+    "no-runtime",
+    69
+   ]
+  ]
+ }
+}
