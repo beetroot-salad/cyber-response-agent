@@ -439,7 +439,7 @@ def thawed(box: object, *, docker: DockerFn = _docker) -> Iterator[None]:
     lane's box is frozen except while an agent runs in it.
 
     The body runs only once the box is proven running (`docker unpause`, then `docker inspect`),
-    else `BoxFault`. On exit — a return or any exception, an interrupt included — the box is
+    else `BoxFault`, after a best-effort re-freeze. On exit — a return or any exception, an interrupt included — the box is
     frozen again by `pause_box`; a box that cannot be re-frozen is a `BoxFault` that outranks the
     body's own exception, since the host's next step must not run beside it. A no-op when there is
     no container to hold."""
@@ -447,13 +447,21 @@ def thawed(box: object, *, docker: DockerFn = _docker) -> Iterator[None]:
     if name is None:
         yield
         return
-    proc = _call(docker, ["docker", "unpause", name])
-    status = _status(docker, name)
-    if status != "running":
-        raise BoxFault(
-            f"could not thaw the box {name} (unpause rc={proc.returncode}: "
-            f"{(proc.stderr or '').strip()}; status {status!r})"
-        )
+    try:
+        proc = _call(docker, ["docker", "unpause", name])
+        status = _status(docker, name)
+        if status != "running":
+            raise BoxFault(
+                f"could not thaw the box {name} (unpause rc={proc.returncode}: "
+                f"{(proc.stderr or '').strip()}; status {status!r})"
+            )
+    except BaseException:
+        # A thaw that could not be proven may still have unpaused the box: freeze it again
+        # before the refusal unwinds through host steps (the claim's cleanup), best-effort —
+        # the refusal is the fault that matters.
+        with contextlib.suppress(BoxFault):
+            pause_box(box, docker=docker)
+        raise
     try:
         yield
     finally:
