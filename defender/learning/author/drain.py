@@ -322,8 +322,9 @@ def _bump_rows(
                     "attempts": rec[counter_key],
                     "deadletter_reason": reason,
                     **retirement_stamp(),
-                    # Nested rather than spread, so a graveyard entry has one shape on every
-                    # channel and is readable without knowing its queue.
+                    # Nested rather than spread, so a `_bump_rows` entry has one shape on every
+                    # channel and is readable without knowing its queue (`_retire_unkeyable`
+                    # spreads its row flat; the queue page reads both shapes).
                     "row": {k: v for k, v in rec.items() if k != counter_key},
                 }
                 for rec in retired
@@ -1242,9 +1243,9 @@ def _retire_unkeyable(
     """Retire rows with no id under the channel's key at once, on their own rotation; their
     well-formed batch-mates are authored this tick.
 
-    Not left to the closing rotation: a keyless row can't be matched by id, so that rotation
-    would remove it via `None` in the processed set — swallowing any keyless row appended
-    meanwhile, with no graveyard entry — and it never runs on a retiring or stuck tick.
+    Not left to the closing rotation, which never runs on a retiring or stuck tick. A keyless
+    row can't be matched by id, so `rotate` matches it by content: this rotation removes these
+    rows and keeps any other keyless row appended meanwhile.
 
     The record is flat (row content at top level, not nested under `row` as `retire` writes
     it), since there is no id to reference; consumers must branch on the presence of `row`."""

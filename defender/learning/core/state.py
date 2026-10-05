@@ -4,14 +4,19 @@ Everything the host keeps under the learning state root — the curation request
 pending deliveries, the three findings-shaped queues with their consumed ledgers, dead letters
 and stuck reports, the gap ledger, the disposition reports, the lock files — is reached through
 `LearningState`, opened at an entry point on an EXISTING root (`LearningState.open(paths)`). No
-production module outside this one composes, opens, lists, locks or renames a path under the
-root (the census in `tests/learning_state_1135/test_1135_front_door.py` holds that).
+production module outside this one composes, opens, lists, locks or renames a path to one of
+those records (the census in `tests/learning_state_1135/test_1135_front_door.py` holds that).
+`runs/`, under the same root, is #1166's and is still reached by path, and the eval harness
+seeds its own scratch tree by path; neither is a record of this handle.
 
 A planted link, hard link, FIFO, or a folder where a file belongs, anywhere below the root is
-refused as `StateRefused`, never followed and never read as absent. `StateRefused` is not an
+refused as `StateRefused`, never followed and never read as absent (the display verbs below
+turn it into an unreadable count instead of raising). `StateRefused` is not an
 `OSError` (today's `except OSError` arms must not swallow it) and is a member of
 `faults.SYSTEMIC_FAULTS`, so a drain tick stops and exits 2. The queue page, the run-end enqueue
-and the judge are the declared exemptions: they catch it where they sit. Ordinary I/O errors
+and the judge are the declared exemptions: the display verbs convert it to an unreadable count
+for the page, `run_common.enqueue_curation` catches it at the run-end enqueue, and
+`branch/cli._grade` catches it for the judge. Ordinary I/O errors
 keep today's routes. A link at or above the root is operator configuration and is followed once,
 at `open`.
 
@@ -231,13 +236,19 @@ class PendingDelivery:
     """One batch whose commit is on a local branch and whose push or PR has not yet landed:
     its record's id (the file name's stem), the branch and the batch id.
 
-    @owns branch @owns batch_id — the one reader of a delivery record's fields is
-    `LearningState.deliveries`, the only constructor of this type; a caller that needs either
-    value takes it from the `PendingDelivery` it is handed and never re-parses the record."""
+    @owns branch @owns batch_id — the one reader that builds a `PendingDelivery` from a
+    delivery record is `LearningState.deliveries`, the only constructor of this type; a caller
+    that needs either value for a delivery to land takes it from the `PendingDelivery` it is
+    handed. The queue page reads the raw bodies `delivery_rows` returns, for display only."""
 
     id: str
     branch: str
     batch_id: str
+
+
+def _is_stamped_copy(row: dict, entry: dict) -> bool:
+    """`entry` is `row` with more fields stamped on (every field of `row` is in `entry`, equal)."""
+    return all(k in entry and entry[k] == v for k, v in row.items())
 
 
 @dataclass(frozen=True)
@@ -552,7 +563,7 @@ class LearningState:
     ) -> None:
         """The locked rewrite: under the channel's append lock (`timeout` a deadline, `None` blocks),
         replace the queue with `held` plus whatever was appended since the batch's read (a row
-        whose id the batch already handled is dropped), then append `consumed` to the ledger.
+        the batch already handled is dropped: by id, or by its content when it has no id), then append `consumed` to the ledger.
 
         Both files are judged before either is written, so a refused ledger stops the rotate
         with the queue untouched (D8). The crash window between the replace and the append is
@@ -563,10 +574,18 @@ class LearningState:
             self._judge(channel.queue)
             self._judge(channel.consumed)
             # Always merges: a non-merging rewrite would drop rows appended between the batch's
-            # read and its rewrite. `.get`, since the drain routes keyless rows here so they leave.
-            processed = {e.get(key) for e in held} | {e.get(key) for e in consumed}
+            # read and its rewrite. The drain routes keyless rows here so they leave: a keyless
+            # row has no id to match, so it is matched by its content (a handled entry is the
+            # queued row plus whatever the batch stamped on it), and never makes `None` a
+            # "handled id". A different keyless row appended since the read stays queued.
+            handled = [*held, *consumed]
+            processed = {e[key] for e in handled if e.get(key) is not None}
+            keyless = [e for e in handled if e.get(key) is None]
             current = self._read_rows(channel.queue)[0]
-            survivors = list(held) + [r for r in current if r.get(key) not in processed]
+            survivors = list(held) + [
+                r for r in current
+                if (r[key] not in processed if r.get(key) is not None
+                    else not any(_is_stamped_copy(r, e) for e in keyless))]
             self._write(channel.queue, "".join(json.dumps(e) + "\n" for e in survivors),
                         "replace")
             if consumed:
@@ -624,7 +643,9 @@ class LearningState:
         return len(self.stuck_rows(channel))
 
     def stuck_append(self, channel: Channel, record: dict) -> None:
-        """Append one stuck record. Lock-free, as always: the repo lock keeps it in order."""
+        """Append one stuck record. Lock-free, as always. `run_batch`'s own recorders run under the
+        repo lock, which keeps them in order; the record `_drain_one_curator` writes for a fault
+        raised above `run_batch` runs outside it, under the author-drain lock alone."""
         channel = self._channel(channel)
         self._append_rows(channel.stuck, [record])
 
@@ -686,8 +707,8 @@ class LearningState:
 
         Claiming moves the record out of the queue (`move_at`) before serving, so a re-ask
         landing mid-serve gets a free top-level slot. Orphans in `inflight/` from a dead pass are
-        reclaimed unconditionally — sound only because both callers hold the drainer lock, so no
-        live pass can own a claim. A queued request whose name is already claimed in this pass
+        reclaimed unconditionally — sound only because every caller must hold the drainer lock, so
+        no live pass can own a claim (today's one caller, the lead-author drain, does). A queued request whose name is already claimed in this pass
         is not moved, which would overwrite the claim: it waits for the next pass.
 
         An unreadable record is quarantined rather than skipped, or it would be reclaimed and

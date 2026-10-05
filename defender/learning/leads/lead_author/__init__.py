@@ -454,7 +454,7 @@ worktree and opens the PR.
 
 Preconditions
   * No other lead-author tick may be running (per-author queue lock at
-    defender/learning/_pending_leads/.lock, held by the drain for its whole tick —
+    _pending_leads/.lock under the learning state root, held by the drain for its whole tick —
     serve, pitfalls curation, scrub, push, PR). Violating it is not silent: this
     returns rc=3 without serving, and a drain tick that finds the lock held skips
     before claiming any request rather than counting the skip as a serve.
