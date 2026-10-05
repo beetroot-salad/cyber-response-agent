@@ -119,6 +119,43 @@
         ],
         "note": "DECLARED BY #773's GROUNDING (base 3b4f5797). `learning_queue` above declares the queue FILES; nothing declared the DIRECTORY they and their sidecars live in, which is where #773's M6 gap ledger (`findings.forward_bad.jsonl`) lands. `LoopPaths.pending_dir` is `state_root/\"_pending\"` (learning/core/config.py:71) and `with_repo_root` PRESERVES `state_root` (config.py:63-64), so this root stays HOST-SIDE across the drain's worktree swap and is outside every box mount — that containment is the whole of #773's S5 and a future refactor of `with_repo_root` would silently break it. Today's files: `findings.jsonl` and `consumed.jsonl` (the two channels' queue + consumed ledger, written only by `persist._rewrite_queue`), `findings.deadletter.jsonl` (the graveyard, `drain.retire:215`), `findings.stuck.jsonl` (`drain._record_stuck:781`), `findings.held_report.log` (`lessons/run.write_held_report` -> `shared.write_disposition_report`, THE one writer for both curators), plus the lock files and the `questioner_*` sibling set. ALL THREE existing drain appends here carry the suppression `# lint-unguarded-tree-write: ok — learning_queue sidecar, host-side, outside every box mount` (drain.py:215,667,781); a new appender without it is blocked by CI. `persist.read_pitfalls` is deliberately NOT listed: it reads `paths.pitfalls.file` under `pitfalls_pending_dir`, a different root. `findings.forward_bad.jsonl` is likewise NOT listed and its writer is NOT named, because neither exists until write-code-from-spec builds them — add the writer in the commit that creates it, per this block's own rule that every entry name a symbol that resolves."
       },
+      "learning_state": {
+        "writers": [
+          "defender/learning/core/markers.py::enqueue_case_for_curation",
+          "defender/learning/core/markers.py::rewrite_marker",
+          "defender/learning/core/markers.py::requeue_marker",
+          "defender/learning/core/markers.py::claim_markers",
+          "defender/learning/core/markers.py::quarantine_marker",
+          "defender/learning/core/drains.py::_record_pending_delivery",
+          "defender/learning/core/drains.py::_requeue_or_drop",
+          "defender/learning/core/drains.py::_deliver_pending",
+          "defender/_flock.py::open_lock",
+          "defender/learning/author/shared.py::write_disposition_report",
+          "defender/learning/author/drain.py::_append_gap_record",
+          "defender/learning/leads/_lead_spine.py::_spawn_author_agent"
+        ],
+        "readers": [
+          "defender/learning/core/drains.py::_has_lead_author_work",
+          "defender/learning/core/drains.py::_pending_deliveries",
+          "defender/learning/core/drains.py::_pending_queue_counts",
+          "defender/learning/frontend/serialize_queues.py::build_view"
+        ],
+        "grep": [
+          "author-queue",
+          "_pending_delivery",
+          "_pending_leads",
+          "_pending_pitfalls",
+          "author_queue_dir",
+          "pending_delivery_dir",
+          "lead_pending_dir",
+          "pitfalls_pending_dir",
+          "state_root",
+          "_author.lock",
+          "author-drain.lock",
+          "DEFENDER_LEARNING_STATE_DIR"
+        ],
+        "note": "DECLARED BY #1135's GROUNDING (base 80888efb; re-grounded at d9128afa against design revision 3, which KEEPS today's request layout below — `author-queue/<case_id>.json`, `inflight/`, `failed/` — behind one handle, so only the writer/reader symbols move, into that handle's module, when it lands). The whole learning state tree under `LoopPaths.state_root` (default `defender/learning/` itself — config.py:65-67 — or `$DEFENDER_LEARNING_STATE_DIR`, resolved). `learning_queue` and `pending_dir` above declare the channel files and `_pending/`; nothing declared the rest of the tree: the curation requests `author-queue/<case_id>.json` with its `inflight/` claims and `failed/` dead letters (markers.py), the undelivered-batch records `_pending_delivery/*.json` and their `failed/` (drains.py), the lead state dir `_pending_leads/` (its `.lock`, and the pitfalls curator's stage dir), `_pending_pitfalls/` (the pitfalls channel), and the root-level locks `_author.lock`, `.author-drain.lock`, `.lead-author-drain.lock` (all opened by `_flock.open_lock`, which follows a link at the name and creates its target — #1135 C10). Every host touch at 80888efb sits in 13 modules (#1135 C2: 76 direct operations); #1135 moves them behind one handle, so after it lands the writers/readers here collapse to that module and this entry must be re-pointed in the commit that lands it. `run_common.enqueue_curation` (run_common.py:343-371) is the one live producer of `author-queue/`, through `enqueue_case_for_curation`. Agent-stage records (`wire_logs/`, `budget.json`, `lessons_loaded.jsonl`) that the stage harness writes into `_pending/` and `_pending_leads/` belong to `learning_run_dir`, not here. `_pending_pitfalls/` and `_pending_delivery/` are NOT gitignored under the default root (.gitignore:81-99 lists the others)."
+      },
       "session_store": {
         "writers": [
           "defender/runtime/session_store.py::StoreHandle.new_session",

@@ -1,0 +1,2785 @@
+# rewritten_tier_map.yaml — clause #41's old-assert -> new-assert map
+# (o3_rewritten_tier_keeps_every_assert; spec_graph_1135-learning-state-handle.yaml).
+#
+# WHAT: every test (per test, JF11 — never per file) that reaches a name #1135 removes or
+# reshapes, with each of its asserts. The OLD side was seeded at phase E against base
+# d9128afa; every `new` is null. write-code-from-spec fills each `new` as it rewrites the
+# test against the handle's verbs, KEEPING EACH ASSERT (an assert with no successor is a
+# dropped assert, which the clause forbids), or marks the entry `fixture-only` when the
+# test's only change is an import or a fixture (a built state root in place of queue_dir=
+# or a bare path) — those stay in the regression tier.
+#
+# TIERS (JF11): a test edited beyond imports, fixtures and the ONE named arity site
+# (test_drain719_locks.py:307, the trigger_author lambda) is a rewritten-tier test and
+# keeps a map entry here, whatever file it is in. A planted-folder test whose plant is now
+# a refusal (StateRefused, exit 2, no stuck record) keeps its guard property by switching
+# to an ordinary-failure injector at the same point (#41's outcome; JF11's D22 reading).
+# Those are seeded by hand (`PLANTED_FOLDER_TESTS` in the generator) and carry a
+# `planted folder (JF11)` reach tag, whatever route they reach a removed name by.
+#
+# REGENERATE (old side only; it overwrites this file, so carry filled `new` values over):
+#   PYTHONPATH=<worktree> python defender/tests/learning_state_1135/_rewritten_tier_census.py
+#
+# `tests` reach a removed name in their own body or through a SAME-FILE helper (or
+# fixture); `reaches` names the name and its route (`X via helper`). A same-file route
+# may be a fixture (a fixture-only edit) or an assert helper: the implementer decides per
+# test. A `'X' (named in a string)` hit is a census row or message pinning the name by
+# text. `via_shared_helpers_only` tests reach one only through another test module's
+# helper (listed without asserts). `helpers` are the non-test functions that reach one.
+# `seam_implementors` implement the 5-positional trigger_author seam; every test that
+# injects one changes with the seam (O5), as a harness edit. A test that injects the seam
+# as a lambda naming any positional parameter is in `tests` itself
+# (`trigger_author (lambda implementor)`); `lambda *a, **k: ...` binds no shape.
+summary:
+  base: "d9128afa"
+  tests: 153
+  files: 27
+  asserts: 591
+  via_shared_helpers_only: 299
+  helpers: 37
+  seam_implementors: 2
+  removed_names:
+    "claim_markers": "O3 rewritten-tier helper"
+    "requeue_marker": "O3 rewritten-tier helper"
+    "quarantine_marker": "O3 rewritten-tier helper"
+    "queue_lock": "O3 rewritten-tier helper"
+    "acquire_flock": "O3 rewritten-tier helper"
+    "acquire_flock_within": "O3 rewritten-tier helper"
+    "flock_or_skip": "O3 rewritten-tier helper"
+    "graveyard_file": "O3 rewritten-tier helper"
+    "stuck_report_file": "O3 rewritten-tier helper"
+    "rotate_queue_locked": "O3 rewritten-tier helper"
+    "_pending_deliveries": "O3 rewritten-tier helper"
+    "learning_state_root": "O4/D5 removal"
+    "_queue_trust_root": "O4/D5 removal"
+    "PENDING_DIR": "O4/D5 removal"
+    "QUEUE_LOCK_FILE": "O4/D5 removal"
+    "enqueue_for_authoring": "O4/D5 removal"
+    "queue_dir=": "decision 4 removal (the judge override keyword)"
+    "trigger_author (5-positional)": "O3 rewritten-tier seam (O5 reshape)"
+    "trigger_author (lambda implementor)": "a lambda fake that binds the seam positionally (O5)"
+    "planted folder (JF11)": "seeded by hand: the plant is now a refusal"
+  planted_folder_tests: 4
+  design_volume_note: "rev 1 O3: 21 files, largest test_903 x20, test_author_shared x15, test_952 x12, test_1134_lead_author_handle x11; rev 2: 22 files, test_1134_lead_author_handle has 2 hits, the rev-1 counts do not reproduce (claims G31, X8: 22 files, 93 refs)"
+  o3_helper_refs_per_file:   # G31's probe re-run: whole-word refs of rev 1's O3 list
+    total_files: 22
+    total_refs: 94
+    "defender/tests/test_903_queue_view.py": 21
+    "defender/tests/test_952_consumption_follows_durability.py": 14
+    "defender/tests/test_author_shared.py": 11
+    "defender/tests/test_queue_drains_852.py": 10
+    "defender/tests/_drain719.py": 5
+    "defender/tests/test_881_loop_plumbing.py": 5
+    "defender/tests/test_drain719_config.py": 5
+    "defender/tests/test_author_preflight.py": 4
+    "defender/tests/test_1134_census.py": 3
+    "defender/tests/test_drain719_locks.py": 3
+    "defender/tests/test_1134_mount_list.py": 2
+    "defender/tests/_declared870.py": 1
+    "defender/tests/learning/test_loop.py": 1
+    "defender/tests/test_1007_corpus.py": 1
+    "defender/tests/test_773_deferral.py": 1
+    "defender/tests/test_773_gap_ledger.py": 1
+    "defender/tests/test_869_reporting.py": 1
+    "defender/tests/test_921_enqueue_gate.py": 1
+    "defender/tests/test_author_atomic.py": 1
+    "defender/tests/test_drain719_retire.py": 1
+    "defender/tests/test_frames_680_lifecycle.py": 1
+    "defender/tests/test_orchestrate_thresholds.py": 1
+  tests_per_file:
+    "defender/tests/test_903_queue_view.py": 47
+    "defender/tests/test_1007_partition.py": 21
+    "defender/tests/learning/test_loop.py": 15
+    "defender/tests/test_1134_census.py": 11
+    "defender/tests/test_orchestrate_thresholds.py": 7
+    "defender/tests/test_1134_curator_label.py": 6
+    "defender/tests/test_952_consumption_follows_durability.py": 6
+    "defender/tests/test_1025_page_borrows.py": 5
+    "defender/tests/e2e/test_922_spine.py": 4
+    "defender/tests/test_author_shared.py": 4
+    "defender/tests/test_1007_ladder.py": 3
+    "defender/tests/test_773_gap_ledger.py": 3
+    "defender/tests/test_1007_family.py": 2
+    "defender/tests/test_881_loop_plumbing.py": 2
+    "defender/tests/test_921_enqueue_gate.py": 2
+    "defender/tests/test_drain719_config.py": 2
+    "defender/tests/test_drain719_locks.py": 2
+    "defender/tests/test_queue_drains_852.py": 2
+    "defender/tests/test_1007_corpus.py": 1
+    "defender/tests/test_1133_census.py": 1
+    "defender/tests/test_869_reporting.py": 1
+    "defender/tests/test_921_launcher_frame.py": 1
+    "defender/tests/test_author_atomic.py": 1
+    "defender/tests/test_author_preflight.py": 1
+    "defender/tests/test_drain719_guard.py": 1
+    "defender/tests/test_drain719_retire.py": 1
+    "defender/tests/test_frames_680_lifecycle.py": 1
+tests:
+  - file: "defender/tests/e2e/test_922_spine.py"
+    test: "test_922_graded_episode_reaches_the_corpus_through_the_family_partition"
+    reaches:
+      - "queue_dir= (J.mod('learning.judge').grade_episode) via graded_episode"
+    asserts:
+      - old: "assert record['episode_outcome'] == 'gradable'"
+        new: null
+      - old: "assert record['enqueued_rows'] == len(queued) == 2, f'the graded episode did not put its rows on the shared queue: {queued}'"
+        new: null
+      - old: "assert {r['direction'] for r in D.pending(channel)} == {'family'}, \"the spine's producer is the family judge; a non-family row here means the drive is not exercising the partition this demand is about\""
+        new: null
+      - old: "assert rc == 0, 'author_drain did not complete its batch'"
+        new: null
+      - old: "assert len(agent.calls) == 1, f'the findings curator ran {len(agent.calls)} times, not once'"
+        new: null
+      - old: "assert authored == queued, f\"the curator was handed {authored}, not the graded episode's rows {queued} — the family partition did not admit them for authoring\""
+        new: null
+      - old: "assert head_after != head_before, 'the corpus author opened no commit'"
+        new: null
+      - old: "assert len(lessons) == 1, f'the corpus gained {len(lessons)} documents, not one'"
+        new: null
+      - old: "assert {r['finding_id'] for r in D.pending(channel)} == set(queued), \"the committed rows left the queue before the batch's PR — `hold_committed=True` is what keeps them there for the next tick to retire\""
+        new: null
+      - old: "assert drive_author_drain(paths, TriggerRecorder(second))[0] == 0"
+        new: null
+      - old: "assert second.calls == [], 'the second tick authored the same findings again — the corpus attribution the first tick wrote is not being read back'"
+        new: null
+      - old: "assert set(consumed) == set(queued), f'the rows did not rotate off the queue as consumed: {sorted(consumed)}'"
+        new: null
+      - old: "assert all((r['consumed_category'] == 'consumed_idempotent' for r in consumed.values()))"
+        new: null
+      - old: "assert D.pending(channel) == [], 'the authored rows are still queued'"
+        new: null
+      - old: "assert D.git(paths.repo_root, 'rev-parse', 'HEAD').stdout.strip() == head_after, 'the second tick opened a second commit for findings already in the corpus'"
+        new: null
+      - old: "assert fid in body, f'the committed lesson does not attribute {fid}'"
+        new: null
+  - file: "defender/tests/e2e/test_922_spine.py"
+    test: "test_922_author_drain_triggers_exactly_the_findings_curator"
+    reaches:
+      - "queue_dir= (J.mod('learning.judge').grade_episode) via graded_episode"
+    asserts:
+      - old: "assert rc == 0"
+        new: null
+      - old: "assert sorted(trigger.modules) == ['author', 'questioner_curator'], f'author_drain triggered {trigger.modules} — it is still discovering its curators by iterating the direction table, so the retired observation channels are still drained'"
+        new: null
+      - old: "assert call['pending_file'] == paths.findings.file, f\"the findings trigger names {call['pending_file']}, not the findings queue\""
+        new: null
+      - old: "assert call['threshold_env'] == 'LEARNING_AUTHOR_THRESHOLD'"
+        new: null
+      - old: "assert call['pending_label'] == 'pending'"
+        new: null
+  - file: "defender/tests/e2e/test_922_spine.py"
+    test: "test_922_the_drain_box_gets_exactly_the_lessons_corpus_writable"
+    reaches:
+      - "queue_dir= (J.mod('learning.judge').grade_episode) via graded_episode"
+    asserts:
+      - old: "assert rc == 0"
+        new: null
+      - old: "assert writable_sources(request) == {paths.lessons_dir, paths.lessons_questioner_dir}, f\"the drain box's writable mounts are {sorted(map(str, writable_sources(request)))} — the mount set is still derived from the direction table, so a retired corpus is still handed to the batch as a writable bind\""
+        new: null
+      - old: "assert readonly_sources(request) == {paths.repo_root}, f'the drain box lost its read-only worktree mount: {request.mounts}'"
+        new: null
+      - old: "assert B.mount_for(request, retired) is None, f'{retired} is still bound into the drain box'"
+        new: null
+  - file: "defender/tests/e2e/test_922_spine.py"
+    test: "test_922_a_full_findings_queue_alone_wakes_the_drain"
+    reaches:
+      - "queue_dir= (J.mod('learning.judge').grade_episode) via graded_episode"
+    asserts:
+      - old: "assert rc == 0"
+        new: null
+      - old: "assert 'author' in trigger.modules, \"the findings queue alone did not wake the drain — the surviving channel's own threshold no longer answers the wake gate\""
+        new: null
+      - old: "assert writable_sources(rec.only_request()) == {paths.lessons_dir, paths.lessons_questioner_dir}"
+        new: null
+      - old: "assert not (paths.pending_dir / name).exists(), 'this control is about a findings-only queue; an observation queue exists'"
+        new: null
+  - file: "defender/tests/learning/test_loop.py"
+    test: "test_rotate_queue_locked_preserves_concurrent_appends"
+    reaches:
+      - "rotate_queue_locked"
+    asserts:
+      - old: "assert {s['finding_id'] for s in survivors} == {'r/1', 'r/2'}"
+        new: null
+      - old: "assert held_row['held_reason'] == 'no_ground_truth'"
+        new: null
+      - old: "assert consumed_rows[0]['consumed_commit'] == 'abc123'"
+        new: null
+      - old: "assert 'consumed_at' in consumed_rows[0]"
+        new: null
+  - file: "defender/tests/learning/test_loop.py"
+    test: "test_enqueue_for_authoring_writes_marker"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "assert spec == {'run_id': 'case-a', 'run_dir': str(run_dir.resolve())}"
+        new: null
+  - file: "defender/tests/learning/test_loop.py"
+    test: "test_author_drain_triggers_all_curators"
+    reaches:
+      - "trigger_author (lambda implementor)"
+    asserts:
+      - old: "assert triggered == ['author', 'questioner_curator']"
+        new: null
+  - file: "defender/tests/learning/test_loop.py"
+    test: "test_lead_author_drain_runs_lead_author_then_clears_marker"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "assert [rd for _, rd in seen] == [run_dir.resolve()]"
+        new: null
+      - old: "assert str(seen[0][0]).startswith('/tmp/wt-')"
+        new: null
+      - old: "assert not (paths.author_queue_dir / 'case-b.json').exists()"
+        new: null
+      - old: "assert branch.events == ['lease-check', 'start', 'finish', 'cleanup']"
+        new: null
+  - file: "defender/tests/learning/test_loop.py"
+    test: "test_lead_author_drain_runs_pitfalls_after_markers"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "assert order == ['marker', 'pitfalls']"
+        new: null
+  - file: "defender/tests/learning/test_loop.py"
+    test: "test_lead_author_drain_marks_artifact_missing"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "assert seen == [run_dir.resolve()]"
+        new: null
+      - old: "assert not (paths.author_queue_dir / 'case-gone.json').exists()"
+        new: null
+      - old: "assert json.loads(failed.read_text())['failed'] == 'artifact-missing'"
+        new: null
+  - file: "defender/tests/learning/test_loop.py"
+    test: "test_lead_author_drain_dead_letters_an_unservable_marker"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "assert seen == [run_dir.resolve()], 'the healthy request in the same pass was not served'"
+        new: null
+      - old: "assert not (paths.author_queue_dir / 'case-broken.json').exists()"
+        new: null
+      - old: "assert not (paths.author_queue_dir / 'inflight' / 'case-broken.json').exists(), 'the unservable marker was left claimed — the next tick reclaims and re-fails on it'"
+        new: null
+      - old: "assert json.loads(failed.read_text())['failed'].startswith('unreadable')"
+        new: null
+      - old: "assert drains._has_lead_author_work(paths) is False, 'the queue still reports work on a request nothing can ever serve'"
+        new: null
+  - file: "defender/tests/learning/test_loop.py"
+    test: "test_lead_author_drain_skips_when_lease_held"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "assert rc == 0"
+        new: null
+      - old: "assert seen == []"
+        new: null
+      - old: "assert 'start' not in branch.events"
+        new: null
+      - old: "assert (paths.author_queue_dir / 'case-lease.json').exists()"
+        new: null
+  - file: "defender/tests/learning/test_loop.py"
+    test: "test_lead_author_drain_singleton_lock_distinct_from_lessons"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "assert rc == 0"
+        new: null
+      - old: "assert seen == [run_dir.resolve()]"
+        new: null
+  - file: "defender/tests/learning/test_loop.py"
+    test: "test_lead_author_drain_quarantines_poison_run_dir"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "assert seen == [good.resolve()]"
+        new: null
+      - old: "assert not (paths.author_queue_dir / 'case-poison.json').exists()"
+        new: null
+      - old: "assert json.loads(failed.read_text())['failed'].startswith('lead-author-error')"
+        new: null
+  - file: "defender/tests/learning/test_loop.py"
+    test: "test_lead_author_drain_quarantines_on_nonzero_rc"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "assert not (paths.author_queue_dir / 'case-rc.json').exists()"
+        new: null
+      - old: "assert json.loads(failed.read_text())['failed'].startswith('lead-author-error')"
+        new: null
+  - file: "defender/tests/learning/test_loop.py"
+    test: "test_lead_author_drain_bounded_retry_then_quarantine"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "assert not marker.exists()"
+        new: null
+      - old: "assert json.loads(failed.read_text())['failed'].startswith('transient-exhausted')"
+        new: null
+      - old: "assert marker.exists()"
+        new: null
+      - old: "assert json.loads(marker.read_text())['attempts'] == expected"
+        new: null
+      - old: "assert not failed.exists()"
+        new: null
+  - file: "defender/tests/learning/test_loop.py"
+    test: "test_lead_author_drain_opens_distinct_lead_author_pr"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "assert rc == 0"
+        new: null
+      - old: "assert forge.open_calls[0]['head'].startswith('lead-author/')"
+        new: null
+      - old: "assert not forge.open_calls[0]['head'].startswith('lessons/')"
+        new: null
+      - old: "assert forge.list_calls == ['lead-author/']"
+        new: null
+  - file: "defender/tests/learning/test_loop.py"
+    test: "test_lead_author_drain_delivers_a_retained_branch_on_the_next_tick"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "assert drains.lead_author_drain(paths, run_lead_author=_author, branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub) == 0"
+        new: null
+      - old: "assert len(forge.open_calls) == 1"
+        new: null
+      - old: "assert [json.loads(r.read_text())['branch'] for r in records] == [head]"
+        new: null
+      - old: "assert not (paths.author_queue_dir / 'case-pr.json').exists(), 'the served run was re-queued'"
+        new: null
+      - old: "assert _real(work, 'rev-parse', '--verify', f'refs/heads/{head}').returncode == 0"
+        new: null
+      - old: "assert drains.lead_author_drain(paths, run_lead_author=_author, branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub) == 0"
+        new: null
+      - old: "assert len(served) == 1, \"the retained batch's run was served again\""
+        new: null
+      - old: "assert [c['head'] for c in forge.open_calls] == [head, head]"
+        new: null
+      - old: "assert forge.head_calls == [head], 'delivery must look for an open PR before opening one'"
+        new: null
+      - old: "assert list(paths.pending_delivery_dir.glob('*.json')) == []"
+        new: null
+      - old: "assert head in remote, 'the retained branch never reached origin'"
+        new: null
+      - old: "assert f'delivered retained branch {head}: opened PR https://github.com/o/r/pull/78' in err"
+        new: null
+  - file: "defender/tests/learning/test_loop.py"
+    test: "test_lead_author_drain_resets_worktree_between_markers"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "assert clean_at_entry['case-a-poison'] is True"
+        new: null
+      - old: "assert clean_at_entry['case-b-good'] is True"
+        new: null
+      - old: "assert end.stdout.strip() == ''"
+        new: null
+      - old: "assert (paths.author_queue_dir / 'failed' / 'case-a-poison.json').exists()"
+        new: null
+      - old: "assert not (paths.author_queue_dir / 'case-b-good.json').exists()"
+        new: null
+  - file: "defender/tests/test_1007_corpus.py"
+    test: "test_nothing_lands_outside_the_declared_write_set"
+    reaches:
+      - "queue_dir= (judge_mod.grade_episode)"
+    asserts:
+      - old: "assert new == set(), f'the pass wrote artifacts outside the declared set: {sorted(map(str, new))}'"
+        new: null
+      - old: "assert queue_files <= {paths.findings.file.name, W.QUESTIONER_QUEUE_FILENAME, paths.findings.append_lock.name, W.questioner_channel(paths).append_lock.name, paths.findings.consumed.name, W.questioner_channel(paths).consumed.name, '.lock'}, f'the queue directory gained {sorted(queue_files)}'"
+        new: null
+  - file: "defender/tests/test_1007_family.py"
+    test: "test_the_family_reply_admits_a_family_level_finding"
+    reaches:
+      - "queue_dir= (grade)"
+    asserts:
+      - old: "assert rows, 'the family finding reached no queue row'"
+        new: null
+      - old: "assert rows[0]['world'] is None, f\"a family finding is stamped world={rows[0]['world']!r}\""
+        new: null
+      - old: "assert rows[0]['subject'] == W.SUBJECT_WORLD"
+        new: null
+  - file: "defender/tests/test_1007_family.py"
+    test: "test_the_family_call_emits_no_defender_finding"
+    reaches:
+      - "queue_dir= (grade)"
+    asserts:
+      - old: "assert judge.family_prompts, f'no family call was made at all, so the absence below proves nothing: {judge.agent_ids}'"
+        new: null
+      - old: "assert from_family == [], f'the family call produced defender queue rows: {from_family}'"
+        new: null
+  - file: "defender/tests/test_1007_ladder.py"
+    test: "test_a_measured_nothing_world_withholds_its_defender_findings"
+    reaches:
+      - "queue_dir= (grade)"
+    asserts:
+      - old: "assert row['withheld_reason'] == 'measured_nothing', f\"withheld_reason is {row.get('withheld_reason')!r}\""
+        new: null
+      - old: "assert 'b' in set(result.withheld_worlds)"
+        new: null
+      - old: "assert [r for r in W.queue_rows(paths.findings) if r.get('subject') == W.SUBJECT_DEFENDER] == [], 'a defender finding for a world that measured nothing reached the queue'"
+        new: null
+      - old: "assert len(result.withheld_findings) == 1, f'expected exactly one withheld finding, got {result.withheld_findings!r}'"
+        new: null
+      - old: "assert withheld['world'] == 'b'"
+        new: null
+      - old: "assert withheld['reason'] == 'measured_nothing'"
+        new: null
+      - old: "assert withheld['finding']['claim'] == W.finding()['claim'], \"the withheld finding's own content did not survive — only its bucket/reason did\""
+        new: null
+      - old: "assert on_disk == result.withheld_findings, \"judge.yaml's own withheld_findings disagrees with what grade_episode returned\""
+        new: null
+  - file: "defender/tests/test_1007_ladder.py"
+    test: "test_a_mechanical_world_finding_is_told_from_a_model_drawn_one_by_provenance"
+    reaches:
+      - "queue_dir= (grade)"
+    asserts:
+      - old: "assert sorted((r['provenance'] for r in rows)) == ['mechanical', 'model'], f'the two same-bucket findings collapsed to {rows} — the open vocabulary means the bucket cannot tell an arithmetic finding from a drawn one'"
+        new: null
+  - file: "defender/tests/test_1007_ladder.py"
+    test: "test_an_episode_killed_before_the_sibling_ran_withholds_with_episode_incomplete"
+    reaches:
+      - "queue_dir= (grade)"
+    asserts:
+      - old: "assert [r for r in W.queue_rows(paths.findings) if r.get('subject') == W.SUBJECT_DEFENDER] == [], 'an unfinished episode still accused the defender'"
+        new: null
+      - old: "assert row['withheld_reason'] == 'episode_incomplete', f\"world {label} reads {row.get('withheld_reason')!r} on an episode with no served row at all\""
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_world_row_refused_at_the_defender_appender"
+    reaches:
+      - "queue_dir= (enqueue.append_rows)"
+      - "queue_dir= (enqueue.append_world_rows)"
+    asserts:
+      - old: "assert W.queue_rows(paths.findings) == [], 'the refused world row still landed'"
+        new: null
+      - old: "assert [r['subject'] for r in W.queue_rows(W.questioner_channel(paths))] == [W.SUBJECT_WORLD]"
+        new: null
+      - old: "with pytest.raises(W.refusals())"
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_defender_row_still_reaches_the_findings_channel"
+    reaches:
+      - "queue_dir= (enqueue.append_rows)"
+    asserts:
+      - old: "assert appended == 1"
+        new: null
+      - old: "assert [r['finding_id'] for r in landed] == [f'{W.EPISODE_ID}/b/0/0']"
+        new: null
+      - old: "assert landed[0]['type'] == 'lead-set'"
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_a_defender_row_with_direction_world_is_refused_at_the_appender_too"
+    reaches:
+      - "queue_dir= (enqueue.append_rows)"
+    asserts:
+      - old: "assert W.queue_rows(paths.findings) == [], 'the disagreeing row still landed'"
+        new: null
+      - old: "with pytest.raises(W.refusals())"
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_a_world_row_type_is_not_gated_against_the_defender_vocabulary"
+    reaches:
+      - "queue_dir= (enqueue.append_rows)"
+      - "queue_dir= (enqueue.append_world_rows)"
+    asserts:
+      - old: "assert novel not in cfg.QUEUEABLE_FINDING_TYPES"
+        new: null
+      - old: "assert [r['type'] for r in W.queue_rows(W.questioner_channel(paths))] == [novel]"
+        new: null
+      - old: "with pytest.raises(W.refusals())"
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_a_defender_family_row_is_gated_exactly_as_today"
+    reaches:
+      - "queue_dir= (enqueue.append_rows)"
+    asserts:
+      - old: "assert enqueue.append_rows(tmp_path, [queue_row()], queue_dir=paths.pending_dir) == 1"
+        new: null
+      - old: "assert landed['direction'] == 'family'"
+        new: null
+      - old: "assert len(to_author) + len(held) + len(consumed) == 1"
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_a_world_queue_row_is_a_full_finding_row_plus_four_fields"
+    reaches:
+      - "queue_dir= (enqueue.append_world_rows)"
+    asserts:
+      - old: "assert landed['direction'] == W.SUBJECT_WORLD"
+        new: null
+      - old: "assert landed['run_id'] == W.EPISODE_ID"
+        new: null
+      - old: "assert key in landed, f'the world row is missing the finding-row key {key!r}'"
+        new: null
+      - old: "assert key in landed, f'the world row is missing {key!r}'"
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_two_appends_of_one_finding_id_land_once"
+    reaches:
+      - "queue_dir= (enqueue.append_world_rows)"
+    asserts:
+      - old: "assert [r['finding_id'] for r in rows] == [f'{W.EPISODE_ID}/b/0/0'], f'one finding id landed twice: {rows}'"
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_a_world_bucket_spelled_like_a_defender_bucket_is_admitted_and_read_by_subject"
+    reaches:
+      - "queue_dir= (enqueue.append_rows)"
+      - "queue_dir= (enqueue.append_world_rows)"
+    asserts:
+      - old: "assert parsed.findings[0].subject == W.SUBJECT_WORLD"
+        new: null
+      - old: "assert parsed.findings[0].bucket == 'lead-set'"
+        new: null
+      - old: "assert len(W.queue_rows(W.questioner_channel(paths))) == 1"
+        new: null
+      - old: "assert len(W.queue_rows(paths.findings)) == 1"
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_a_near_miss_subject_is_refused_with_no_case_fold_and_no_trim"
+    reaches:
+      - "queue_dir= (enqueue.append_world_rows)"
+    asserts:
+      - old: "assert W.queue_rows(W.questioner_channel(paths)) == []"
+        new: null
+      - old: "with pytest.raises(W.refusals())"
+        new: null
+      - old: "with pytest.raises(W.refusals())"
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_a_defender_queue_row_carries_its_subject_key"
+    reaches:
+      - "queue_dir= (enqueue.append_rows)"
+    asserts:
+      - old: "assert W.queue_rows(paths.findings)[0]['subject'] == W.SUBJECT_DEFENDER"
+        new: null
+      - old: "assert len(W.queue_rows(paths.findings)) == 1, 'the subject-less row landed anyway'"
+        new: null
+      - old: "with pytest.raises(W.refusals())"
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_a_defender_subject_row_cannot_reach_the_questioner_curator"
+    reaches:
+      - "queue_dir= (enqueue.append_world_rows)"
+    asserts:
+      - old: "assert W.queue_rows(W.questioner_channel(paths)) == []"
+        new: null
+      - old: "with pytest.raises(W.refusals())"
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_a_model_supplied_world_is_ignored_and_the_draws_own_directory_wins"
+    reaches:
+      - "queue_dir= (judge_mod.grade_episode)"
+    asserts:
+      - old: "assert {r['world'] for r in rows} == {'b', 'c'}, f\"the model's own `world` value reached the row: {[r['world'] for r in rows]}\""
+        new: null
+      - old: "assert row['world'] in row['finding_id'], f\"row {row['finding_id']} is stamped for world {row['world']!r} — the id and the stamp name different worlds\""
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_every_family_level_finding_carries_a_null_world"
+    reaches:
+      - "queue_dir= (judge_mod.grade_episode)"
+    asserts:
+      - old: "assert family_rows, 'the family draw enqueued nothing at all'"
+        new: null
+      - old: "assert row['world'] is None, f\"a family finding is stamped world={row['world']!r}\""
+        new: null
+      - old: "assert row['source_run_dir'].endswith(ep.name), f\"a family finding's source_run_dir is {row['source_run_dir']!r}, not the episode\""
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_a_family_findings_identity_is_minted_by_the_pass_not_by_the_model"
+    reaches:
+      - "queue_dir= (judge_mod.grade_episode)"
+    asserts:
+      - old: "assert ids, 'no family-keyed row was enqueued'"
+        new: null
+      - old: "assert len(set(ids)) == len(ids), f'two family findings share one id: {ids}'"
+        new: null
+      - old: "assert episode_id == ep.name, f'{fid} names episode {episode_id!r}'"
+        new: null
+      - old: "assert label == 'family', f'{fid} is keyed on world {label!r}, not the family'"
+        new: null
+      - old: "assert draw.isdigit(), f\"{fid}'s draw coordinate is {draw!r}\""
+        new: null
+      - old: "assert index.isdigit(), f\"{fid}'s finding index is {index!r}\""
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_a_world_row_missing_pattern_holding_system_or_subject_is_refused_at_the_appender"
+    reaches:
+      - "queue_dir= (enqueue.append_world_rows)"
+    asserts:
+      - old: "assert W.queue_rows(W.questioner_channel(paths)) == []"
+        new: null
+      - old: "assert len(W.queue_rows(W.questioner_channel(paths))) == 1"
+        new: null
+      - old: "with pytest.raises(W.refusals())"
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_a_re_grade_appends_no_second_mechanical_world_finding"
+    reaches:
+      - "queue_dir= (judge_mod.grade_episode)"
+    asserts:
+      - old: "assert len(mech) == 1, f'a re-grade minted a second mechanical row: {mech}'"
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_an_unqueueable_defender_finding_does_not_suppress_the_world_findings"
+    reaches:
+      - "queue_dir= (judge_mod.grade_episode)"
+    asserts:
+      - old: "assert [r for r in W.queue_rows(paths.findings)] == [], 'a discard episode still enqueued a defender row'"
+        new: null
+      - old: "assert [r['type'] for r in W.queue_rows(W.questioner_channel(paths)) if r['provenance'] == 'model'] == ['a-world-reading'], 'the discard outcome took the world findings with it'"
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_an_ungradable_world_enqueues_nothing_on_either_channel"
+    reaches:
+      - "queue_dir= (judge_mod.grade_episode)"
+    asserts:
+      - old: "assert any(('/b/' in r['finding_id'] for r in W.queue_rows(paths.findings))), 'the control failed — the gradable sibling enqueued nothing either'"
+        new: null
+      - old: "assert rows == [], f'an ungradable world enqueued {rows} on {channel.file.name}'"
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_a_questioner_queue_row_carries_no_defender_verdict_word"
+    reaches:
+      - "queue_dir= (enqueue.append_world_rows)"
+    asserts:
+      - old: "assert word not in rendered, f'the world row carries the defender verdict word {word!r}: {landed}'"
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_a_world_row_reusing_a_consumed_defender_finding_id_still_reaches_its_own_curator"
+    reaches:
+      - "queue_dir= (enqueue.append_world_rows)"
+    asserts:
+      - old: "assert held == 0, f'the row was held, not suppressed: {held}'"
+        new: null
+      - old: "assert pending == 1, 'the world row was suppressed by a defender-channel consumption of the same id — the two channels are sharing one id space AND one consumption record'"
+        new: null
+  - file: "defender/tests/test_1007_partition.py"
+    test: "test_two_episodes_appending_at_once_lose_no_questioner_row"
+    reaches:
+      - "queue_dir= (enqueue.append_world_rows)"
+    asserts:
+      - old: "assert errors == [], f'an appender raised under interleaving: {errors!r}'"
+        new: null
+      - old: "assert len(landed) == 24, f'{24 - len(landed)} rows were lost under interleaving'"
+        new: null
+  - file: "defender/tests/test_1025_page_borrows.py"
+    test: "test_1025_an_ungradable_worlds_mechanical_finding_is_queued_and_the_page_says_so"
+    reaches:
+      - "queue_dir= (enqueue.enqueue_report)"
+    asserts:
+      - old: "assert coord in [r['finding_id'] for r in report.world_rows], report.world_rows"
+        new: null
+      - old: "assert row_id in page.ids, page.ids_with('f-')"
+        new: null
+      - old: "assert 'world author: enqueued' in group, group"
+        new: null
+      - old: "assert 'world ungradable' not in group, group"
+        new: null
+      - old: "assert coord in page.text_of(row_id), page.text_of(row_id)"
+        new: null
+  - file: "defender/tests/test_1025_page_borrows.py"
+    test: "test_1025_route_finding_is_the_rule_enqueue_report_walks"
+    reaches:
+      - "queue_dir= (enqueue.enqueue_report)"
+    asserts:
+      - old: "assert report.appended == 4, report"
+        new: null
+      - old: "assert sum((1 for lane in routed.values() if lane == enqueue.ROUTE_DEFENDER)) == 4"
+        new: null
+      - old: "assert report.appended == 0, report"
+        new: null
+      - old: "assert sum((1 for lane in routed.values() if lane == enqueue.ROUTE_NEVER_ELIGIBLE)) == 4"
+        new: null
+      - old: "assert len(report.withheld_findings) == 4, report.withheld_findings"
+        new: null
+      - old: "assert coord in world_ids, (coord, lane)"
+        new: null
+      - old: "assert coord in withheld_ids, (coord, lane)"
+        new: null
+      - old: "assert coord in unqueueable_ids, (coord, lane)"
+        new: null
+      - old: "assert lane == enqueue.ROUTE_DEFENDER, (coord, lane)"
+        new: null
+      - old: "assert coord not in world_ids | withheld_ids | unqueueable_ids, (coord, lane)"
+        new: null
+  - file: "defender/tests/test_1025_page_borrows.py"
+    test: "test_1025_a_record_naming_one_world_twice_never_files_its_world_finding_as_a_defender_lesson"
+    reaches:
+      - "queue_dir= (enqueue.enqueue_report)"
+    asserts:
+      - old: "assert report.appended == 0, report"
+        new: null
+      - old: "assert not [r for r in report.world_rows if r['finding_id'] == coord], report.world_rows"
+        new: null
+      - old: "assert any((line.startswith(coord) and 'ungradable' in line for line in report.unqueueable)), report.unqueueable"
+        new: null
+      - old: "assert 'about the world' not in row_file.read_text(encoding='utf-8'), row_file"
+        new: null
+  - file: "defender/tests/test_1025_page_borrows.py"
+    test: "test_1025_the_fixture_ledger_is_the_passes_own"
+    reaches:
+      - "queue_dir= (enqueue.enqueue_report)"
+    asserts:
+      - old: "assert report.dispositions == doc['dispositions']"
+        new: null
+      - old: "assert [w['finding_id'] for w in report.withheld_findings] == [w['finding_id'] for w in doc['withheld_findings']]"
+        new: null
+      - old: "assert report.unqueueable == doc['unqueueable_findings'] == []"
+        new: null
+      - old: "assert report.dispositions == E.block_defender_lane(E.sample_grade(), 'discard')['dispositions']"
+        new: null
+  - file: "defender/tests/test_1025_page_borrows.py"
+    test: "test_1025_a_record_naming_one_world_twice_renders_exactly_what_the_pass_filed"
+    reaches:
+      - "queue_dir= (enqueue.enqueue_report)"
+    asserts:
+      - old: "assert len(withheld) == 4, report.dispositions"
+        new: null
+      - old: "assert report.appended == 4, report"
+        new: null
+      - old: "assert 'record: 4 enqueued · page found: 4' in acct, acct"
+        new: null
+      - old: "assert 'withheld list: 4 entries · 4 matched' in acct, acct"
+        new: null
+      - old: "assert 'disagree' not in acct, acct"
+        new: null
+      - old: "assert 'withheld' in page.group_of(f'f-{E.WITHHELD_WORLD}-0-{i}').text()"
+        new: null
+      - old: "assert 'defender: enqueued' in page.group_of(f'f-{E.GRADED_WORLD}-0-{i}').text()"
+        new: null
+      - old: "assert part in three, (part, three)"
+        new: null
+  - file: "defender/tests/test_1133_census.py"
+    test: "test_o5_no_function_takes_a_path_below_the_episode_dir_but_the_allowlist"
+    reaches:
+      - "'_queue_trust_root' (named in a string) via PARAM_ALLOWLIST"
+    asserts:
+      - old: "assert not extra, report"
+        new: null
+      - old: "assert not stale, report"
+        new: null
+  - file: "defender/tests/test_1134_census.py"
+    test: "test_the_module_touches_its_trees_only_through_the_handle"
+    reaches:
+      - "'PENDING_DIR' (named in a string) via ALLOW"
+      - "'graveyard_file' (named in a string) via ALLOW"
+    asserts:
+      - old: "assert not both, f'known gaps also allow-listed: {sorted(both)}'"
+        new: null
+  - file: "defender/tests/test_1134_census.py"
+    test: "test_the_module_builds_handles_only_at_the_named_openers"
+    reaches:
+      - "'PENDING_DIR' (named in a string) via ALLOW"
+      - "'graveyard_file' (named in a string) via ALLOW"
+    asserts: []   # no assert in its own body: it asserts through a helper
+  - file: "defender/tests/test_1134_census.py"
+    test: "test_the_allow_list_is_well_formed"
+    reaches:
+      - "'PENDING_DIR' (named in a string) via ALLOW"
+      - "'graveyard_file' (named in a string) via ALLOW"
+    asserts:
+      - old: "assert not [a for a, n in anchors.items() if n > 1], 'one entry per anchor; use `count`'"
+        new: null
+      - old: "assert all((e.reason in REASONS for e in ALLOW)), [e for e in ALLOW if e.reason not in REASONS]"
+        new: null
+      - old: "assert all((e.count >= 1 and e.why for e in ALLOW))"
+        new: null
+      - old: "assert {e.module for e in ALLOW} <= set(C.OPENER_MODULES)"
+        new: null
+      - old: "assert all((e.kind in C.KINDS for e in (*ALLOW, *KNOWN_GAPS)))"
+        new: null
+      - old: "assert all((e.kind == 'construct' for e in ALLOW if e.module not in C.D6_MODULES)), 'a scan-B-only module is judged on `construct` alone'"
+        new: null
+      - old: "assert all(((e.kind == 'listing') == (e.reason == B2) for e in ALLOW)), 'B2 names a sanctioned listing, and a listing has no other reason'"
+        new: null
+      - old: "assert dict(by_reason) == ALLOW_COUNT_BY_REASON"
+        new: null
+  - file: "defender/tests/test_1134_census.py"
+    test: "test_every_construct_entry_is_a_named_opener_or_a_shared_readers_own_bind"
+    reaches:
+      - "'PENDING_DIR' (named in a string) via ALLOW"
+      - "'graveyard_file' (named in a string) via ALLOW"
+    asserts:
+      - old: "assert {e.reason for e in construct} == {D3, N_H}"
+        new: null
+      - old: "assert {e.module for e in construct if e.reason == N_H} == {CORPUS, SCAFFOLD}"
+        new: null
+  - file: "defender/tests/test_1134_census.py"
+    test: "test_only_the_named_listers_list_and_the_curator_lists_nothing"
+    reaches:
+      - "'PENDING_DIR' (named in a string) via ALLOW"
+      - "'graveyard_file' (named in a string) via ALLOW"
+    asserts:
+      - old: "assert tuple(sorted(C.CURATOR_MODULES)) == tuple(sorted(CURATOR_MODULES))"
+        new: null
+      - old: "assert raw == LISTERS"
+        new: null
+      - old: "assert not {m for m, _q in raw} & CURATOR_MODULES"
+        new: null
+      - old: "assert reached == CURATOR_READS"
+        new: null
+      - old: "assert DRAIN not in {m for m, _q in reached}"
+        new: null
+      - old: "assert not [e for e in ALLOW if e.module == CORPUS and e.kind == 'listing' and ('.entries()' in e.text)]"
+        new: null
+      - old: "assert C.READERS[C.ENTRY_KIND] == C.READERS[C.LIST_TREE] == (0, 'view', 'bound')"
+        new: null
+      - old: "assert C.READERS[C.VIEW_AT] == (0, 'held', 'held')"
+        new: null
+  - file: "defender/tests/test_1134_census.py"
+    test: "test_judge_counts_anchors_and_reports_stale_entries"
+    reaches:
+      - "'PENDING_DIR' (named in a string) via ALLOW"
+      - "'graveyard_file' (named in a string) via ALLOW"
+    asserts:
+      - old: "assert [h.text for h in unexpected] == ['twice()', 'once()', 'built()']"
+        new: null
+      - old: "assert stale == ['f call: gone() (allowed x1, found x0)']"
+        new: null
+      - old: "assert [h.text for h in unexpected] == ['built()']"
+        new: null
+      - old: "assert stale == []"
+        new: null
+  - file: "defender/tests/test_1134_census.py"
+    test: "test_a_d3_fallback_still_asks_tree_for_first"
+    reaches:
+      - "'PENDING_DIR' (named in a string) via ALLOW"
+      - "'graveyard_file' (named in a string) via ALLOW"
+    asserts:
+      - old: "assert d3 - TREE_FOR_FALLBACKS == {(DRAIN, '_spawn_repair')}, 'a new D3 entry: is it a fallback behind a `tree_for` miss (add it to TREE_FOR_FALLBACKS), or a checked-in file outside the mounts?'"
+        new: null
+      - old: "assert not silent, f'D3 fallbacks that no longer ask `tree_for`: {silent}'"
+        new: null
+      - old: "assert not judge(DRAIN, C.census_source(WORKTREE, DRAIN, dropped, tree=TREE))[0], 'the anchors alone cannot see a dropped handle branch'"
+        new: null
+      - old: "assert not _asks_tree_for(DRAIN, dropped, '_put_back')"
+        new: null
+  - file: "defender/tests/test_1134_census.py"
+    test: "test_each_d3_fallback_touch_sits_behind_its_tree_for_miss"
+    reaches:
+      - "'PENDING_DIR' (named in a string) via ALLOW"
+      - "'graveyard_file' (named in a string) via ALLOW"
+    asserts:
+      - old: "assert seen == sum((e.count for e in ALLOW if e.reason == D3 and e.kind != 'construct' and ((e.module, e.qualname) in TREE_FOR_FALLBACKS)))"
+        new: null
+      - old: "assert not off, off"
+        new: null
+  - file: "defender/tests/test_1134_census.py"
+    test: "test_a_fallback_moved_off_its_miss_is_caught"
+    reaches:
+      - "'PENDING_DIR' (named in a string) via ALLOW"
+      - "'graveyard_file' (named in a string) via ALLOW"
+    asserts:
+      - old: "assert not judge(module, C.census_source(WORKTREE, module, patched, tree=TREE))[0], 'the anchors alone do not see it: this row is what does'"
+        new: null
+      - old: "assert _d3_fallback_touches(module, patched)[0], name"
+        new: null
+  - file: "defender/tests/test_1134_census.py"
+    test: "test_d5_each_inline_write_waiver_sits_on_an_n_e_census_hit"
+    reaches:
+      - "'PENDING_DIR' (named in a string) via ALLOW"
+      - "'graveyard_file' (named in a string) via ALLOW"
+    asserts:
+      - old: "assert not bad, bad"
+        new: null
+      - old: "assert waived == D5_INLINE_WAIVERS"
+        new: null
+  - file: "defender/tests/test_1134_census.py"
+    test: "test_an_adversary_regression_is_an_unexpected_hit"
+    reaches:
+      - "'PENDING_DIR' (named in a string) via ALLOW"
+      - "'graveyard_file' (named in a string) via ALLOW"
+    asserts:
+      - old: "assert before[anchor] == allowed.get(anchor, 0), f'not clean before the regression: {anchor}'"
+        new: null
+      - old: "assert unexpected[anchor] == count, f'{name}: {qualname} {kind} `{text}` not flagged x{count} (got x{unexpected[anchor]}); unexpected: {sorted(unexpected)}'"
+        new: null
+      - old: "assert any((s.startswith(f'{qualname} {kind}: {text} (') for s in stale)), (name, stale)"
+        new: null
+  - file: "defender/tests/test_1134_curator_label.py"
+    test: "test_the_trigger_requires_the_label_and_runs_the_batch_under_its_trees"
+    reaches:
+      - "trigger_author (5-positional)"
+    asserts:
+      - old: "assert 'held_reason' not in pending(w.paths.findings)[0]"
+        new: null
+      - old: "assert 'held_reason' in row, row"
+        new: null
+      - old: "assert stuck_records(w.paths.findings) == []"
+        new: null
+      - old: "with pytest.raises(TypeError)"
+        new: null
+  - file: "defender/tests/test_1134_curator_label.py"
+    test: "test_the_trigger_opens_the_trees_of_the_label_it_is_handed_and_no_other"
+    reaches:
+      - "trigger_author (5-positional)"
+    asserts:
+      - old: "assert 'held_reason' not in pending(w.paths.findings)[0]"
+        new: null
+      - old: "assert 'held_reason' in row, row"
+        new: null
+      - old: "assert stuck_records(paths.findings) == []"
+        new: null
+      - old: "with pytest.raises(FatalConfigError)"
+        new: null
+  - file: "defender/tests/test_1134_curator_label.py"
+    test: "test_a_hold_fault_at_the_open_propagates_out_of_the_seam"
+    reaches:
+      - "trigger_author (5-positional)"
+    asserts:
+      - old: "assert 'held_reason' not in pending(paths.findings)[0]"
+        new: null
+      - old: "assert not os.path.lexists(paths.lessons_questioner_dir)"
+        new: null
+      - old: "assert descriptors_under(repo) == []"
+        new: null
+      - old: "with pytest.raises(FileNotFoundError)"
+        new: null
+  - file: "defender/tests/test_1134_curator_label.py"
+    test: "test_the_trigger_holds_the_labels_mounts_only_while_the_batch_runs"
+    reaches:
+      - "trigger_author (5-positional)"
+    asserts:
+      - old: "assert descriptors_under(w.repo) == []"
+        new: null
+      - old: "assert seen, \"the curator's batch never built its config\""
+        new: null
+      - old: "assert all((held == _held_roots(paths) for held in seen)), (seen, _held_roots(paths))"
+        new: null
+      - old: "assert len(_held_roots(paths)) == (3 if extra else 2)"
+        new: null
+      - old: "assert descriptors_under(w.repo) == [], 'a held root outlived the seam'"
+        new: null
+      - old: "assert 'held_reason' in pending(paths.findings)[0]"
+        new: null
+      - old: "assert bad == [], bad"
+        new: null
+  - file: "defender/tests/test_1134_curator_label.py"
+    test: "test_the_trigger_releases_the_trees_when_the_batch_raises"
+    reaches:
+      - "trigger_author (5-positional)"
+    asserts:
+      - old: "assert seen == [_held_roots(paths)], seen"
+        new: null
+      - old: "assert descriptors_under(w.repo) == [], 'a held root outlived the raising seam'"
+        new: null
+      - old: "assert drains._maybe_trigger_author(*_trigger_args(paths), label=AUTHOR_DRAIN_LABEL) is None"
+        new: null
+      - old: "with pytest.raises(RuntimeError, match='the batch blew up')"
+        new: null
+  - file: "defender/tests/test_1134_curator_label.py"
+    test: "test_below_the_threshold_nothing_is_held"
+    reaches:
+      - "trigger_author (5-positional)"
+    asserts:
+      - old: "assert asked == []"
+        new: null
+      - old: "assert seen == []"
+        new: null
+      - old: "assert 'held_reason' not in pending(paths.findings)[0]"
+        new: null
+      - old: "assert descriptors_under(w.repo) == []"
+        new: null
+  - file: "defender/tests/test_773_gap_ledger.py"
+    test: "test_a_crash_between_the_commit_and_the_gap_ledger_write_773"
+    reaches:
+      - "graveyard_file via _spec773.build_scene"
+      - "planted folder (JF11): now a refusal; rewrite to an ordinary-failure injector (the gap ledger path)"
+    asserts:
+      - old: "assert 'bad' in sc.pending_by_id()"
+        new: null
+      - old: "assert sc.category_of('bad') is None"
+        new: null
+      - old: "with pytest.raises(IsADirectoryError)"
+        new: null
+  - file: "defender/tests/test_773_gap_ledger.py"
+    test: "test_gap_ledger_append_raises_an_io_error_773"
+    reaches:
+      - "graveyard_file via _spec773.build_scene"
+      - "planted folder (JF11): now a refusal; rewrite to an ordinary-failure injector (the gap ledger path)"
+    asserts:
+      - old: "assert sc.consumed() == []"
+        new: null
+      - old: "assert 'f1' in sc.pending_by_id()"
+        new: null
+      - old: "assert sc.corpus_files() == []"
+        new: null
+      - old: "with pytest.raises(IsADirectoryError)"
+        new: null
+  - file: "defender/tests/test_773_gap_ledger.py"
+    test: "test_producer_reenqueues_a_finding_id_mid_ledger_write_window_773"
+    reaches:
+      - "queue_dir= (enqueue.append_rows)"
+    asserts:
+      - old: "assert 'f1' in sc.pending_by_id()"
+        new: null
+      - old: "assert appended == 1"
+        new: null
+      - old: "assert len([r for r in sc.pending() if r.get('finding_id') == 'f1']) == 2"
+        new: null
+      - old: "with pytest.raises(TimeoutError)"
+        new: null
+  - file: "defender/tests/test_869_reporting.py"
+    test: "test_a_dropped_row_takes_a_terminal_undeclared_category"
+    reaches:
+      - "graveyard_file"
+    asserts:
+      - old: "assert consumed['r:l-002:0']['consumed_category'] == 'consumed_unattributable'"
+        new: null
+      - old: "assert 'consumed_commit' not in consumed['r:l-002:0']"
+        new: null
+      - old: "assert consumed['r:l-000:0']['consumed_category'] == 'consumed_committed'"
+        new: null
+      - old: "assert persist.read_pitfalls(paths) == [], 'pending must go empty; the row is terminal'"
+        new: null
+      - old: "assert 'r:l-002:0' in graveyard, 'the dropped row leaves no durable record, so nothing reaches human review'"
+        new: null
+      - old: "assert 'r:l-000:0' not in graveyard"
+        new: null
+      - old: "assert repo.is_dir()"
+        new: null
+  - file: "defender/tests/test_881_loop_plumbing.py"
+    test: "test_881_a_fault_before_the_rotation_in_the_unkeyable_retirement_is_recorded_too"
+    reaches:
+      - "graveyard_file"
+    asserts:
+      - old: "assert cfg.invoke_agent.calls == [], 'the tick reached the author; the fault under test is the one BEFORE the gate'"
+        new: null
+      - old: "assert list(graveyard.iterdir()) == [], 'nothing can have been graveyarded'"
+        new: null
+      - old: "assert h.pending(ch) == rows, 'the row must stay queued — `IsADirectoryError` retires nothing'"
+        new: null
+      - old: "assert len(records) == 1, 'a fault the drain cannot retire escaped the tick with no operator signal, because the guard covers the rotation and not the whole retirement'"
+        new: null
+      - old: "assert records[0]['fault_class'] == 'IsADirectoryError', f'the record does not name the fault class, or the guard names only the one class the sibling test injects: {records[0]}'"
+        new: null
+      - old: "assert records[0]['row_ids'], 'the record names no rows, so the guard was handed the wrong batch — the rows this tick is stuck on are the unkeyable ones'"
+        new: null
+      - old: "assert drain.run_batch(cfg=cfg) == 0"
+        new: null
+      - old: "assert h.pending(ch) == [], 'the retirement did not clear the row once unobstructed'"
+        new: null
+      - old: "assert len(h.graveyard(ch)) == 1, 'the retirement did not graveyard the row'"
+        new: null
+      - old: "assert len(h.stuck_records(ch)) == 1, 'an ordinary unkeyable retirement wrote a stuck record; the report then names every bad row rather than every wedged tick'"
+        new: null
+      - old: "with pytest.raises(IsADirectoryError)"
+        new: null
+  - file: "defender/tests/test_881_loop_plumbing.py"
+    test: "test_881_a_tick_whose_gate_held_the_whole_batch_names_those_rows_when_it_sticks"
+    reaches:
+      - "stuck_report_file via _drain719.stuck_records"
+      - "planted folder (JF11): now a refusal; rewrite to an ordinary-failure injector (the held report path)"
+    asserts:
+      - old: "assert cfg.invoke_agent.calls == [], 'the gate admitted a row, so this is not the held-whole tick the test is about'"
+        new: null
+      - old: "assert len(records) == 1, f'the fault left no stuck record: {records}'"
+        new: null
+      - old: "assert sorted(records[0]['row_ids']) == ['a/0', 'a/1', 'a/2'], f\"the stuck record names none of the rows the tick is stuck on — the guard was handed the authoring leg's empty batch instead of the rows in flight: {records[0]}\""
+        new: null
+      - old: "assert drain.run_batch(cfg=cfg) == 0"
+        new: null
+      - old: "assert len(h.stuck_records(ch)) == 1, 'an ordinary holding tick wrote a stuck record; the report then names every tick that declined a row rather than every wedged one'"
+        new: null
+      - old: "assert cfg.held_report.is_file(), 'the held report was not written once unobstructed'"
+        new: null
+      - old: "with pytest.raises(IsADirectoryError)"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_a_manifest_or_record_of_the_wrong_type_degrades_that_row_never_the_page"
+    reaches:
+      - "graveyard_file"
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert _channel(view, 'findings')['deadletter'] == [{'id': None, 'reason': '', 'when': None, 'row': {'k': 'v'}}, {'id': 'g-list', 'reason': 'r', 'when': None, 'row': {'value': ['not', 'a', 'mapping']}}]"
+        new: null
+      - old: "assert _channel(view, 'findings')['stuck'] == {'fault_class': '', 'row_ids': [], 'consecutive_ticks': 0, 'reason': '', 'recorded_at': None}"
+        new: null
+      - old: "assert _channel(view, 'pitfalls')['held'] == {'count': 2, 'ids': ['p-real']}"
+        new: null
+      - old: "assert _channel(view, 'pitfalls')['deadletter'][0]['row'] == {'pitfall_id': 'p-nan', 'score': None}"
+        new: null
+      - old: "assert 'NaN' not in serialize_queues.dump_contract(view)"
+        new: null
+      - old: "assert '0 ticks running' in _rendered(page)"
+        new: null
+      - old: "assert '2 held' in _rendered(page)"
+        new: null
+      - old: "assert taint['findings'] == 0"
+        new: null
+      - old: "assert taint['verdict'] == {}"
+        new: null
+      - old: "assert taint['quarantined_at'] is None"
+        new: null
+      - old: "assert taint['cause'] is None"
+        new: null
+      - old: "assert delivery['at'] is None"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_an_empty_state_root_reads_as_three_idle_channels_and_nothing_set_aside"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert view['state_root'] == str(paths.state_root)"
+        new: null
+      - old: "assert view['quarantine'] == {'markers': {'rows': [], 'unreadable': 0}, 'deliveries': {'rows': [], 'unreadable': 0}, 'tainted': {'dir': str(paths.quarantine_dir), 'cap': 10, 'held': 0, 'rows': [], 'unreadable': 0}}"
+        new: null
+      - old: "assert _channel(view, name) == {'name': name, 'accent': accent, 'has_stuck_record': flag, 'hold_means': _channel(view, name)['hold_means'], 'depth': {'queued': 0}, 'unreadable': 0, 'held': {'count': 0, 'ids': []}, 'deadletter': [], 'stuck': None}"
+        new: null
+      - old: "assert _channel(view, name)['hold_means']"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_one_more_row_moves_exactly_one_number"
+    reaches:
+      - "graveyard_file"
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert _channel(after, 'questioner_findings')['deadletter'] == [{'id': 'q-dead', 'reason': 'ceiling', 'when': '2026-09-18T00:00:00+00:00', 'row': {'finding_id': 'q-dead'}}]"
+        new: null
+      - old: "assert after['quarantine'] == before['quarantine']"
+        new: null
+      - old: "assert ch == _channel(before, ch['name'])"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_the_channels_are_the_serializers_own_literal_three_in_order"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert [ch['name'] for ch in view['channels']] == ['findings', 'questioner_findings', 'pitfalls']"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_each_channel_carries_its_accent_and_whether_a_stuck_record_exists_for_it"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert accents == {'findings': 'defender', 'questioner_findings': 'learning', 'pitfalls': 'oracle'}"
+        new: null
+      - old: "assert flags == {'findings': True, 'questioner_findings': True, 'pitfalls': False}"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_queue_depth_is_the_readable_rows_of_the_pending_file"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert _channel(view, 'findings')['depth'] == {'queued': 4}"
+        new: null
+      - old: "assert _channel(view, 'questioner_findings')['depth'] == {'queued': 2}"
+        new: null
+      - old: "assert _channel(view, 'pitfalls')['depth'] == {'queued': 3}"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_unreadable_sums_a_channels_three_sidecars_counting_each_once"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert _channel(view, 'findings')['unreadable'] == 3"
+        new: null
+      - old: "assert _channel(view, 'questioner_findings')['unreadable'] == 0"
+        new: null
+      - old: "assert _channel(view, 'pitfalls')['unreadable'] == 0"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_findings_holds_are_every_row_carrying_held_reason_however_empty"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert held['ids'] == ['f-2', 'f-3']"
+        new: null
+      - old: "assert held['count'] == len(held['ids'])"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_pitfalls_holds_are_rows_the_curator_was_offered_and_declined"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert held['ids'] == ['p-2']"
+        new: null
+      - old: "assert held['count'] == len(held['ids'])"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_questioner_holds_use_the_same_marker_as_findings"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert held == {'count': 1, 'ids': ['q-2']}"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_each_lane_says_what_its_own_hold_means"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert means['findings'] == means['questioner_findings']"
+        new: null
+      - old: "assert 'person' in means['findings']"
+        new: null
+      - old: "assert 'retries' in means['findings']"
+        new: null
+      - old: "assert 'person' not in means['pitfalls']"
+        new: null
+      - old: "assert 'every tick' in means['pitfalls']"
+        new: null
+      - old: "assert 'ceiling' in means['pitfalls']"
+        new: null
+      - old: "assert f\"2 held</b> · {means['findings']}\" in body"
+        new: null
+      - old: "assert f\"1 held</b> · {means['pitfalls']}\" in body"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_dead_letters_are_newest_first_and_normalised_field_by_field"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert _channel(view, 'findings')['deadletter'] == EXPECTED_FINDINGS_DEADLETTER"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_a_curator_drop_reads_as_a_dead_letter_with_no_attempts_in_the_contract"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert entry == {'id': 'p-9', 'reason': 'undeclared-system:evil', 'when': None, 'row': {'pitfall_id': 'p-9', 'system': 'evil', 'occurrences': 2}}"
+        new: null
+      - old: "assert set(entry) == {'id', 'reason', 'when', 'row'}"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_a_channel_with_no_graveyard_file_lists_no_dead_letters"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert _channel(view, 'questioner_findings')['deadletter'] == []"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_stuck_is_the_last_record_of_the_report_with_its_own_time"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert _channel(view, 'findings')['stuck'] == STUCK_LAST"
+        new: null
+      - old: "assert _channel(view, 'findings')['stuck']['consecutive_ticks'] == 1"
+        new: null
+      - old: "assert set(STUCK_LAST) == {'fault_class', 'row_ids', 'consecutive_ticks', 'reason', 'recorded_at'}"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_stuck_is_null_when_the_report_exists_but_holds_no_record"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert ch['stuck'] is None"
+        new: null
+      - old: "assert ch['has_stuck_record'] is True"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_the_pitfalls_lane_has_no_stuck_record_and_says_so_structurally"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert ch['stuck'] is None"
+        new: null
+      - old: "assert ch['has_stuck_record'] is False"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_the_findings_lane_records_stuck_ticks_even_before_it_has_written_one"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert ch['has_stuck_record'] is True"
+        new: null
+      - old: "assert ch['stuck'] is None"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_failed_markers_from_both_queue_dirs_are_listed_and_told_apart"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert view['quarantine']['markers']['rows'] == EXPECTED_MARKERS"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_pending_deliveries_are_listed_newest_first"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert view['quarantine']['deliveries']['rows'] == EXPECTED_DELIVERIES"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_tainted_manifests_are_listed_newest_first_with_the_verdict_kept"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert view['quarantine']['tainted']['rows'] == EXPECTED_TAINTED"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_each_set_aside_list_counts_its_own_unreadable_files"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert q['markers']['unreadable'] == 2"
+        new: null
+      - old: "assert q['deliveries']['unreadable'] == 1"
+        new: null
+      - old: "assert q['tainted']['unreadable'] == 1"
+        new: null
+      - old: "assert [ch['unreadable'] for ch in view['channels']] == [3, 0, 0]"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_held_is_the_writers_count_of_archives_not_of_readable_manifests"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert len(tainted['rows']) == 2"
+        new: null
+      - old: "assert tainted['held'] == 4"
+        new: null
+      - old: "assert tainted['held'] == quarantine.held_archives(qdir)"
+        new: null
+      - old: "assert '4 / 10' in _rendered(build.render_queues(serialize_queues.build_view(paths)))"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_the_page_names_the_quarantine_directory_because_it_is_not_under_the_state_root"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert view['quarantine']['tainted']['dir'] == str(paths.quarantine_dir)"
+        new: null
+      - old: "assert paths.quarantine_dir == AuthorBranch(repo_root=paths.repo_root).quarantine_dir"
+        new: null
+      - old: "assert not str(paths.quarantine_dir).startswith(str(paths.state_root))"
+        new: null
+      - old: "assert html.escape(str(paths.quarantine_dir), quote=True) in _rendered(build.render_queues(view))"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_the_near_cap_warning_shows_at_two_slots_left_and_never_on_an_empty_directory"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert 'class=\"cap\">2 / 10</span>' in page_for(10)"
+        new: null
+      - old: "assert 'class=\"cap near\">2 / 4</span>' in page_for(4)"
+        new: null
+      - old: "assert 'class=\"cap near\">2 / 2</span>' in page_for(2)"
+        new: null
+      - old: "assert 'class=\"cap\">0 / 2</span>' in page_for(2)"
+        new: null
+      - old: "assert '.q-group h3 .cap.near' in build.QUEUES_CSS"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_an_unreadable_sidecar_or_directory_is_counted_not_fatal"
+    reaches:
+      - "graveyard_file"
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert findings['deadletter'] == []"
+        new: null
+      - old: "assert findings['unreadable'] == 2"
+        new: null
+      - old: "assert tainted == {'dir': str(paths.quarantine_dir), 'cap': 10, 'held': None, 'rows': [], 'unreadable': 1}"
+        new: null
+      - old: "assert '? / 10' in _rendered(page)"
+        new: null
+      - old: "assert '1 unreadable file skipped' in _rendered(page)"
+        new: null
+      - old: "assert '2 unreadable lines skipped' in _rendered(page)"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_the_taint_cap_defaults_to_ten"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert view['quarantine']['tainted']['cap'] == 10"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_the_taint_cap_follows_its_environment_variable"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert serialize_queues.build_view(paths)['quarantine']['tainted']['cap'] == 3"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_build_view_says_which_state_root_it_read_and_carries_no_timestamp"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert view['state_root'] == str(paths.state_root)"
+        new: null
+      - old: "assert 'generated_at' not in view"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_stamped_view_takes_the_paths_it_is_handed"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert stamped['state_root'] == str(paths.state_root)"
+        new: null
+      - old: "assert stamped['quarantine']['tainted']['dir'] == str(paths.quarantine_dir)"
+        new: null
+      - old: "assert stamped['generated_at']"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_the_page_embeds_the_view_it_was_handed_unchanged"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert _embedded_data(build.render_queues(view)) == view"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_a_row_that_looks_like_a_script_tag_opens_no_script_tag"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert SCRIPT_PAYLOAD in json.dumps(view), 'the fixture lost its payload'"
+        new: null
+      - old: "assert SCRIPT_PAYLOAD not in json.dumps(quiet)"
+        new: null
+      - old: "assert loud_page.count('<script') == quiet_page.count('<script')"
+        new: null
+      - old: "assert loud_page.count('</script') == quiet_page.count('</script')"
+        new: null
+      - old: "assert SCRIPT_PAYLOAD not in loud_page"
+        new: null
+      - old: "assert 'alert(1)' in loud_page, \"the row's own content never reached the page\""
+        new: null
+      - old: "assert _embedded_data(loud_page) == view"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_the_page_renders_every_dead_letter_and_hold_it_carries"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert 'no id' in body"
+        new: null
+      - old: "assert 'No dead letters' in body"
+        new: null
+      - old: "assert '2 held' in body"
+        new: null
+      - old: "assert 'queued</span><span class=\"qt-val\">4</span>' in body"
+        new: null
+      - old: "assert 'dead</span><span class=\"qt-val n-warn\">4</span>' in body"
+        new: null
+      - old: "assert ch['name'] in body"
+        new: null
+      - old: "assert html.escape(entry['reason'], quote=True) in body"
+        new: null
+      - old: "assert rid in body"
+        new: null
+      - old: "assert entry['id'] in body"
+        new: null
+      - old: "assert html.escape(str(value), quote=True) in body"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_the_page_renders_what_was_set_aside_and_tells_the_two_groups_apart"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert 'Needs a person' in body"
+        new: null
+      - old: "assert 'Retrying itself' in body"
+        new: null
+      - old: "assert '2 / 10' in body"
+        new: null
+      - old: "assert 'no scan recorded' in body"
+        new: null
+      - old: "assert '2 unreadable files skipped' in body"
+        new: null
+      - old: "assert '1 unreadable file skipped' in body"
+        new: null
+      - old: "assert '3 unreadable lines skipped' in body"
+        new: null
+      - old: "assert m['identity'] in body"
+        new: null
+      - old: "assert html.escape(m['failed'], quote=True).replace('onerror=', 'on\\u200berror=') in body"
+        new: null
+      - old: "assert d['branch'] in body"
+        new: null
+      - old: "assert t['batch_id'] in body"
+        new: null
+      - old: "assert t['taint'] in body"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_the_fault_band_carries_the_class_the_ticks_and_the_time"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert html.escape(stuck['fault_class'], quote=True) in body"
+        new: null
+      - old: "assert stuck['recorded_at'] in body"
+        new: null
+      - old: "assert '1 tick' in body"
+        new: null
+      - old: "assert html.escape(stuck['reason'], quote=True) in body"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_every_attacker_influenced_string_reaches_the_page_escaped"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert '<img src=x onerror=alert(2)>' not in body"
+        new: null
+      - old: "assert 'onerror=' not in body"
+        new: null
+      - old: "assert '&lt;img src=x on\\u200berror=alert(2)&gt;' in body"
+        new: null
+      - old: "assert body.count('<script') == 1"
+        new: null
+      - old: "assert body.count('</script') == 1"
+        new: null
+      - old: "assert body.count('<img') == 0"
+        new: null
+      - old: "assert hostile not in body, hostile"
+        new: null
+      - old: "assert html.escape(hostile, quote=True) in body, hostile"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_content_that_spells_a_placeholder_is_content"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert body.count('<details class=\"q-card') == len(view['channels']) + 1"
+        new: null
+      - old: "assert page.count('\"state_root\":') == 1"
+        new: null
+      - old: "assert '${cards}' in body"
+        new: null
+      - old: "assert '${queues_json}' in body"
+        new: null
+      - old: "assert _embedded_data(page) == loud"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_a_timestamp_is_escaped_once"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert '&lt;b&gt;2026-0' in body"
+        new: null
+      - old: "assert '&amp;lt;' not in body"
+        new: null
+      - old: "assert 'since &amp;2026-09-' in body"
+        new: null
+      - old: "assert '&amp;amp;' not in body"
+        new: null
+      - old: "assert '&lt;i&gt;2026-0' in body"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_the_row_is_rendered_by_the_run_visualizers_own_highlighter"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert visualize_primitives.pretty_json_html(_channel(odd, 'findings')['deadletter'][0]['row']) in body"
+        new: null
+      - old: "assert '<span class=\"j-bool\">true</span>' in body"
+        new: null
+      - old: "assert '<span class=\"j-null\">null</span>' in body"
+        new: null
+      - old: "assert build.esc_untrusted is visualize_primitives.esc_untrusted"
+        new: null
+      - old: "assert not hasattr(build, '_esc')"
+        new: null
+      - old: "assert not hasattr(build, '_json_pretty')"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_the_last_fault_band_is_on_the_page_only_when_a_channel_is_stuck"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert 'Last fault' in _rendered(build.render_queues(view))"
+        new: null
+      - old: "assert 'Last fault' not in _rendered(build.render_queues(calm))"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_the_two_pages_link_to_each_other"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert 'href=\"queues.html\"' in build.render({'groups': {}})"
+        new: null
+      - old: "assert 'href=\"lessons.html\"' in build.render_queues(view)"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_main_writes_the_queue_pages_beside_the_lessons_pages"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts:
+      - old: "assert build.main(paths) == 0"
+        new: null
+      - old: "assert [ch['name'] for ch in queues['channels']] == ['findings', 'questioner_findings', 'pitfalls']"
+        new: null
+      - old: "assert queues['generated_at']"
+        new: null
+      - old: "assert Path(queues['state_root']) == paths.state_root"
+        new: null
+      - old: "assert [t['batch_id'] for t in queues['quarantine']['tainted']['rows']] == ['b-later', 'a-earlier']"
+        new: null
+      - old: "assert _embedded_data((frontend / 'queues.html').read_text(encoding='utf-8')) == queues"
+        new: null
+      - old: "assert (frontend / 'lessons.json').is_file()"
+        new: null
+      - old: "assert (frontend / 'lessons.html').is_file()"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_retire_stamps_the_dead_letter_it_writes"
+    reaches:
+      - "graveyard_file"
+    asserts:
+      - old: "assert record['deadletter_reason'] == 'the ceiling'"
+        new: null
+      - old: "assert record['row'] == {'finding_id': 'a/0', 'run_id': 'a'}"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_retiring_an_unkeyable_row_stamps_its_flat_record"
+    reaches:
+      - "graveyard_file"
+    asserts:
+      - old: "assert 'row' not in record"
+        new: null
+      - old: "assert record['run_id'] == 'r9'"
+        new: null
+      - old: "assert record['deadletter_reason'] == \"row carries no value under 'finding_id'\""
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_the_curators_dropped_row_carries_the_time_it_was_dropped"
+    reaches:
+      - "graveyard_file"
+    asserts:
+      - old: "assert record['deadletter_reason'] == 'undeclared-system:evil'"
+        new: null
+      - old: "assert record['row'] == rows[0]"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_recording_a_stuck_tick_stamps_when_it_was_recorded"
+    reaches:
+      - "stuck_report_file"
+    asserts:
+      - old: "assert record['fault_class'] == 'TimeoutError'"
+        new: null
+      - old: "assert record['row_ids'] == ['a/0']"
+        new: null
+      - old: "assert record['consecutive_ticks'] == 1"
+        new: null
+  - file: "defender/tests/test_903_queue_view.py"
+    test: "test_nothing_in_the_tree_still_says_the_graveyard_is_unread"
+    reaches:
+      - "graveyard_file"
+    asserts:
+      - old: "assert 'nothing in production reads this back' not in (drain.graveyard_file.__doc__ or '')"
+        new: null
+      - old: "assert 'serialize_queues' in (drain.graveyard_file.__doc__ or '')"
+        new: null
+      - old: "assert stale == []"
+        new: null
+  - file: "defender/tests/test_921_enqueue_gate.py"
+    test: "test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_and_index"
+    reaches:
+      - "queue_dir= (J.mod('learning.judge').grade_episode)"
+    asserts:
+      - old: "assert len(ids) == len(set(ids)), f'colliding finding ids inside one pass: {ids}'"
+        new: null
+      - old: "assert retried == len(ids)"
+        new: null
+      - old: "assert again == ids, 'a retried enqueue minted new ids; the guard keys on the id alone, so a fresh id per retry defeats it entirely'"
+        new: null
+      - old: "assert len(fresh) == len(set(fresh)) == 8, f'two worlds x two draws x two findings did not mint eight distinct ids: {fresh}'"
+        new: null
+  - file: "defender/tests/test_921_enqueue_gate.py"
+    test: "test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted"
+    reaches:
+      - "queue_dir= (J.mod('learning.judge').grade_episode)"
+    asserts:
+      - old: "assert Path(record['enqueued_to']) == channel.file, 'the pass wrote somewhere other than the queue it was pointed at, so nothing below is about the torn tail'"
+        new: null
+      - old: "assert record['queue_malformed_rows'] == 1, 'the torn trailing line was dropped without a count; a silent skip and a counted skip are the same drain and different evidence, and the count is the only thing that says a writer left a row half-written'"
+        new: null
+      - old: "assert unreadable == 1, f'{unreadable} unreadable line(s) on the queue: the torn tail cost more than itself — an appended row was concatenated onto the fragment and lost with it'"
+        new: null
+      - old: "assert 'run-adv/0' in ids, 'the adversarial row that was already queued went with the torn tail'"
+        new: null
+      - old: "assert len(family_ids) == record['enqueued_rows'], f\"the record claims {record['enqueued_rows']} enqueued rows and {len(family_ids)} are readable; a row of this pass's own was swallowed by the fragment\""
+        new: null
+      - old: "assert J.mod('learning.author.drain').run_batch(cfg=D.cfg_for(paths, 'findings', invoke_agent=agent)) == 0"
+        new: null
+      - old: "assert D.stuck_records(channel) == [], \"a torn trailing row stuck-recorded the batch; P6's blast radius is every direction riding in that tick, which is the whole reason the reader must skip it\""
+        new: null
+      - old: "assert 'run-adv/0' in authored, 'the direction that already works stopped draining because of a torn line written by the direction this issue adds'"
+        new: null
+  - file: "defender/tests/test_921_launcher_frame.py"
+    test: "test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_counts"
+    reaches:
+      - "queue_dir= (judge_mod.grade_episode)"
+    asserts:
+      - old: "assert record['enqueued_rows'] == grade.enqueued_rows"
+        new: null
+      - old: "assert record['enqueued_rows'] > 0, 'a gradable episode with findings enqueued nothing'"
+        new: null
+      - old: "assert completed, 'the family record carries no per-world rows at all'"
+        new: null
+      - old: "assert all((n > 0 for n in completed.values())), 'the family record does not carry a per-world completed-draw count'"
+        new: null
+      - old: "assert not (ep2 / 'judge.yaml').exists(), 'the family record was written before the enqueue: its presence would then certify an enqueue that never happened'"
+        new: null
+      - old: "with pytest.raises(J.refusals())"
+        new: null
+  - file: "defender/tests/test_952_consumption_follows_durability.py"
+    test: "test_952_m1_the_disposition_applies_sentinels_and_unlinks_before_the_pitfalls_rotation"
+    reaches:
+      - "'queue_lock' (named in a string) via _bounded"
+    asserts:
+      - old: "assert branch.events == ['lease-check', 'start', 'cleanup'], 'the push ran ahead of, or despite, an apply that did not complete'"
+        new: null
+      - old: "assert _done_sha(run_dir) == SHA"
+        new: null
+      - old: "assert author_markers(paths) == []"
+        new: null
+      - old: "assert _inflight(paths) == []"
+        new: null
+      - old: "assert paths.pitfalls.file.read_bytes() == queue_before"
+        new: null
+      - old: "assert not paths.pitfalls.consumed.exists()"
+        new: null
+      - old: "assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 1, 'the decline bump ran ahead of the rotation it is ordered behind'"
+        new: null
+      - old: "with pytest.raises(TimeoutError)"
+        new: null
+  - file: "defender/tests/test_952_consumption_follows_durability.py"
+    test: "test_952_o2_the_lessons_lane_failure_line_is_lane_neutral_and_records_delivery"
+    reaches:
+      - "trigger_author (lambda implementor)"
+    asserts:
+      - old: "assert rc == 0"
+        new: null
+      - old: "assert 'author' in triggered, 'the tick never ran a curator, so the line below is vacuous'"
+        new: null
+      - old: "assert branch.events == ['lease-check', 'start', 'finish', 'cleanup']"
+        new: null
+      - old: "assert [r['branch'] for r in _pending_deliveries(paths)] == [f'lessons/{branch.batch_id}']"
+        new: null
+      - old: "assert any((line.endswith(expected) for line in err.splitlines())), f\"the lessons lane's line must be the lane-neutral sentence ALONE:\\n{err}\""
+        new: null
+      - old: "assert 'inflight' not in err, 'the lessons lane claimed something about markers'"
+        new: null
+      - old: "assert 'pitfall' not in err, 'the lessons lane claimed something about pitfall rows'"
+        new: null
+      - old: "assert 'consumed' not in err, 'the lessons lane made a claim about consumption'"
+        new: null
+      - old: "assert 'work stays queued' not in err"
+        new: null
+      - old: "assert 'batch produced no commits' not in err"
+        new: null
+  - file: "defender/tests/test_952_consumption_follows_durability.py"
+    test: "test_952_m1_the_deferred_rotation_reaches_the_queue_lock_with_a_deadline"
+    reaches:
+      - "'queue_lock' (named in a string) via _bounded"
+    asserts:
+      - old: "assert disposition.apply(paths, timeout_seconds=0) == 0"
+        new: null
+      - old: "assert consumed[COMMITTED_ID]['consumed_category'] == 'consumed_committed'"
+        new: null
+      - old: "assert consumed[COMMITTED_ID]['consumed_commit'] == SHA"
+        new: null
+      - old: "assert list(rows) == [HELD_ID]"
+        new: null
+      - old: "assert rows[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 2"
+        new: null
+      - old: "assert paths.pitfalls.file.read_bytes() == queue_before"
+        new: null
+      - old: "assert not paths.pitfalls.consumed.exists()"
+        new: null
+      - old: "assert paths.pitfalls.file.read_bytes() == queue_before"
+        new: null
+      - old: "with pytest.raises(TimeoutError)"
+        new: null
+      - old: "with pytest.raises(TimeoutError)"
+        new: null
+  - file: "defender/tests/test_952_consumption_follows_durability.py"
+    test: "test_952_m1_the_immediate_rotation_is_bounded_under_the_drain_and_unbounded_by_hand"
+    reaches:
+      - "'queue_lock' (named in a string) via _bounded"
+    asserts:
+      - old: "assert paths.pitfalls.file.read_bytes() == queue_before"
+        new: null
+      - old: "assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_agent_must_not_run, trees=lead_trees(paths)) == 0"
+        new: null
+      - old: "assert queue_ids(paths) == []"
+        new: null
+      - old: "assert consumed_by_id(paths)['u:l-001:0']['consumed_category'] == 'consumed_unattributable'"
+        new: null
+      - old: "with pytest.raises(TimeoutError)"
+        new: null
+  - file: "defender/tests/test_952_consumption_follows_durability.py"
+    test: "test_952_e_the_lessons_lane_logs_no_retained_summary_on_a_systemic_fault"
+    reaches:
+      - "trigger_author (lambda implementor)"
+    asserts:
+      - old: "assert 'author' in triggered, 'the tick never ran a curator, so the negatives are vacuous'"
+        new: null
+      - old: "assert 'cleanup' in branch.events"
+        new: null
+      - old: "assert 'batch not consumed' not in err, 'the lessons lane logged a summary it never collected'"
+        new: null
+      - old: "assert 'inflight' not in err"
+        new: null
+      - old: "assert 'pitfall' not in err"
+        new: null
+      - old: "assert 'work stays queued' not in err"
+        new: null
+      - old: "with pytest.raises(expected_type)"
+        new: null
+  - file: "defender/tests/test_952_consumption_follows_durability.py"
+    test: "test_952_m1_the_deferred_decline_bump_is_bounded_too"
+    reaches:
+      - "'queue_lock' (named in a string) via _bounded"
+    asserts:
+      - old: "assert paths.pitfalls.file.read_bytes() == queue_before"
+        new: null
+      - old: "assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 1"
+        new: null
+      - old: "assert held_only.apply(paths, timeout_seconds=0) == 0"
+        new: null
+      - old: "assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 2"
+        new: null
+      - old: "assert COMMITTED_ID in _rows_by_id(paths), 'a held-only apply rotated the committed row'"
+        new: null
+      - old: "with pytest.raises(TimeoutError)"
+        new: null
+  - file: "defender/tests/test_author_atomic.py"
+    test: "test_agent_exception_leaves_queue_intact"
+    reaches:
+      - "acquire_flock"
+    asserts:
+      - old: "assert rc == 2"
+        new: null
+      - old: "assert {r['finding_id'] for r in rows} == {'run-K/0'}, 'queue must survive agent failure'"
+        new: null
+      - old: "assert [r.get('attempts') for r in rows] == [1]"
+        new: null
+      - old: "assert not tmp_repo.paths.pending_file.with_suffix('.deadletter.jsonl').exists()"
+        new: null
+      - old: "assert fh is not None"
+        new: null
+  - file: "defender/tests/test_author_preflight.py"
+    test: "test_lock_refuses_concurrent_run"
+    reaches:
+      - "acquire_flock"
+    asserts:
+      - old: "assert fh is not None"
+        new: null
+      - old: "assert third is not None"
+        new: null
+      - old: "assert second is None"
+        new: null
+  - file: "defender/tests/test_author_shared.py"
+    test: "test_flock_or_skip_acquires_then_releases"
+    reaches:
+      - "acquire_flock"
+      - "flock_or_skip"
+    asserts:
+      - old: "assert fh is not None"
+        new: null
+      - old: "assert locked is True"
+        new: null
+      - old: "assert lock.parent.is_dir()"
+        new: null
+  - file: "defender/tests/test_author_shared.py"
+    test: "test_flock_or_skip_yields_false_when_held"
+    reaches:
+      - "acquire_flock"
+      - "flock_or_skip"
+    asserts:
+      - old: "assert holder is not None"
+        new: null
+      - old: "assert locked is False"
+        new: null
+  - file: "defender/tests/test_author_shared.py"
+    test: "test_flock_or_skip_propagates_non_contention_oserror"
+    reaches:
+      - "flock_or_skip"
+    asserts:
+      - old: "assert excinfo.value.errno == errno.ENOLCK"
+        new: null
+      - old: "with pytest.raises(OSError, match='No locks available')"
+        new: null
+  - file: "defender/tests/test_author_shared.py"
+    test: "test_acquire_flock_closes_handle_when_error_propagates"
+    reaches:
+      - "'acquire_flock' (named in a string)"
+      - "acquire_flock"
+    asserts:
+      - old: "assert opened, 'acquire_flock never opened the lock file'"
+        new: null
+      - old: "assert all((fh.closed for fh in opened)), 'acquire_flock leaked the lock-file handle'"
+        new: null
+      - old: "with pytest.raises(OSError, match='No locks available')"
+        new: null
+  - file: "defender/tests/test_drain719_config.py"
+    test: "test_new_queue_paths_resolve_under_state_root_not_the_worktree"
+    reaches:
+      - "graveyard_file"
+    asserts:
+      - old: "assert paths.state_root == state"
+        new: null
+      - old: "assert cfg.corpus_dir.is_relative_to(paths.repo_root), 'the corpus is repo-rooted'"
+        new: null
+      - old: "assert drain.run_batch(cfg=fault) == 2"
+        new: null
+      - old: "assert drain.graveyard_file(ch).is_file()"
+        new: null
+      - old: "assert not (paths.repo_root / 'defender' / 'learning' / '_pending').exists()"
+        new: null
+      - old: "assert state in p.parents, f'{name}: {p} is not under the state root'"
+        new: null
+      - old: "assert paths.repo_root not in p.parents"
+        new: null
+  - file: "defender/tests/test_drain719_config.py"
+    test: "test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch"
+    reaches:
+      - "graveyard_file"
+      - "stuck_report_file"
+    asserts:
+      - old: "assert drain.run_batch(cfg=fault) == 2"
+        new: null
+      - old: "assert drain.graveyard_file(ch).is_file()"
+        new: null
+      - old: "assert ch.drain_lock.exists()"
+        new: null
+      - old: "assert drain.run_batch(cfg=clean) == 0, 'the new state files aborted the next batch'"
+        new: null
+      - old: "assert drain.run_batch(cfg=stray) == 2, 'a path outside the ignored prefix must be seen'"
+        new: null
+      - old: "assert p.is_relative_to(paths.pending_dir), f'{p} is outside the ignored prefix'"
+        new: null
+  - file: "defender/tests/test_drain719_guard.py"
+    test: "test_a_plain_oserror_from_a_lock_acquisition_is_classified_systemic"
+    reaches:
+      - "graveyard_file via _drain719.graveyard"
+      - "planted folder (JF11): now a refusal; rewrite to an ordinary-failure injector (the drain lock path)"
+    asserts:
+      - old: "assert h.pending(ch) == rows"
+        new: null
+      - old: "assert h.graveyard(ch) == []"
+        new: null
+      - old: "assert h.attempts_of(ch, 'a/0') is None"
+        new: null
+      - old: "with pytest.raises(OSError)"
+        new: null
+  - file: "defender/tests/test_drain719_locks.py"
+    test: "test_rotate_blocks_while_append_lock_held"
+    reaches:
+      - "rotate_queue_locked"
+    asserts:
+      - old: "assert worker.finished_within(20), 'the rotation never completed after release'"
+        new: null
+      - old: "assert h.pending(ch) == []"
+        new: null
+      - old: "assert not worker.finished_within(1.0), 'the rotation proceeded under a held append lock'"
+        new: null
+      - old: "assert h.pending_by_id(ch) == {'a/0': h.row_for('findings', 'a/0')}"
+        new: null
+  - file: "defender/tests/test_drain719_locks.py"
+    test: "test_the_drain_acquires_its_three_locks_in_one_declared_order"
+    reaches:
+      - "acquire_flock"
+    asserts:
+      - old: "assert tuple(drain.LOCK_ORDER) == ('drain_lock', 'repo_lock', 'append_lock')"
+        new: null
+      - old: "assert agent.calls == []"
+        new: null
+      - old: "assert drain.run_batch(cfg=cfg) == 0"
+        new: null
+      - old: "assert repo_fh is not None, 'the skipped tick was still holding the repo lock'"
+        new: null
+  - file: "defender/tests/test_drain719_retire.py"
+    test: "test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact"
+    reaches:
+      - "graveyard_file"
+    asserts:
+      - old: "assert ch.file.read_bytes() == before, 'the queue survives a failed retirement write'"
+        new: null
+      - old: "with pytest.raises(OSError)"
+        new: null
+  - file: "defender/tests/test_frames_680_lifecycle.py"
+    test: "test_revert_lesson_driver_holds_shared_author_lock_and_calls_through"
+    reaches:
+      - "'flock_or_skip' (named in a string)"
+    asserts:
+      - old: "assert seen == [('lock', paths.author_drain_lock_file), ('revert', 'defender/lessons/bad.md', 'bad')]"
+        new: null
+      - old: "assert revert_lesson.revert('bad', branch=branch, paths=paths) == 0"
+        new: null
+  - file: "defender/tests/test_orchestrate_thresholds.py"
+    test: "test_has_lead_author_work_raises_on_bad_pitfalls_threshold_with_marker_queued"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "with pytest.raises(FatalConfigError, match='LEARNING_PITFALLS_THRESHOLD')"
+        new: null
+  - file: "defender/tests/test_orchestrate_thresholds.py"
+    test: "test_lead_author_max_retries_bad_value_raises_fatal_config"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "with pytest.raises(FatalConfigError, match='LEAD_AUTHOR_MAX_RETRIES')"
+        new: null
+  - file: "defender/tests/test_orchestrate_thresholds.py"
+    test: "test_lead_author_marker_drain_reraises_fatal_lift_threshold"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "assert not (failed_dir / f'{run_dir.name}.json').exists()"
+        new: null
+      - old: "assert (paths.author_queue_dir / 'inflight' / f'{run_dir.name}.json').exists()"
+        new: null
+      - old: "with pytest.raises(FatalConfigError)"
+        new: null
+  - file: "defender/tests/test_orchestrate_thresholds.py"
+    test: "test_lead_author_drain_unlinks_marker_on_success"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "assert not (paths.author_queue_dir / f'{run_dir.name}.json').exists()"
+        new: null
+      - old: "assert not (paths.author_queue_dir / 'failed' / f'{run_dir.name}.json').exists()"
+        new: null
+  - file: "defender/tests/test_orchestrate_thresholds.py"
+    test: "test_lead_author_drain_quarantines_a_plain_failure"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "assert not (paths.author_queue_dir / f'{run_dir.name}.json').exists()"
+        new: null
+      - old: "assert failed.exists()"
+        new: null
+      - old: "assert 'lead-author-error' in json.loads(failed.read_text())['failed']"
+        new: null
+  - file: "defender/tests/test_orchestrate_thresholds.py"
+    test: "test_lead_author_drain_requeues_a_transient_with_bumped_attempts"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "assert marker.exists()"
+        new: null
+      - old: "assert not (paths.author_queue_dir / 'failed' / f'{run_dir.name}.json').exists()"
+        new: null
+      - old: "assert json.loads(marker.read_text())['attempts'] == 1"
+        new: null
+  - file: "defender/tests/test_orchestrate_thresholds.py"
+    test: "test_lead_author_drain_bad_lift_threshold_is_fatal_two"
+    reaches:
+      - "enqueue_for_authoring"
+    asserts:
+      - old: "assert rc == 2"
+        new: null
+  - file: "defender/tests/test_queue_drains_852.py"
+    test: "test_852_f04_requeue_is_create_if_absent_and_leaves_no_staging_file"
+    reaches:
+      - "requeue_marker"
+    asserts:
+      - old: "assert markers.requeue_marker(slot, {'case_id': 'case-A', 'run_dir': '/runs/run-1'}) is True"
+        new: null
+      - old: "assert markers.requeue_marker(slot, {'case_id': 'case-A', 'run_dir': '/runs/stale'}) is False"
+        new: null
+      - old: "assert json.loads(slot.read_text())['run_dir'] == '/runs/run-1', 'the refused re-queue wrote itself in anyway'"
+        new: null
+      - old: "assert [p.name for p in queue_dir.iterdir()] == ['case-A.json'], 'the re-queue left its staging file in the queue directory'"
+        new: null
+  - file: "defender/tests/test_queue_drains_852.py"
+    test: "test_852_f04_a_free_slot_still_takes_the_re_queue"
+    reaches:
+      - "requeue_marker"
+    asserts:
+      - old: "assert markers.requeue_marker(slot, spec) is True"
+        new: null
+      - old: "assert json.loads(slot.read_text()) == spec"
+        new: null
+via_shared_helpers_only:   # reach a removed name ONLY through a shared test module's helper:
+  # the helper is harness (a fixture edit); the test is regression tier unless its own body
+  # changes, and then it moves to `tests` with its asserts (JF11).
+  - {file: "defender/tests/test_1007_corpus.py", test: "test_a_faulting_curator_leaves_the_others_commit_and_consumed_markers_intact", reaches: ["stuck_report_file via _drain719.stuck_records"]}
+  - {file: "defender/tests/test_1035_one_roster_read.py", test: "test_the_pitfalls_drain_does_not_spend_the_queue_on_an_unreadable_adapters_tree", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_a_link_lesson_citing_the_batch_is_unattributable_and_left_for_the_scrub", reaches: ["graveyard_file via _spec773.build_questioner_scene", "graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_control_the_same_bytes_as_a_plain_lesson_are_attributed_and_committed", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_control_an_unattributable_plain_lesson_is_swept_by_the_fault_restore", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_a_non_md_link_stray_in_the_corpus_is_refused_and_the_tick_is_stuck", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_control_a_non_md_plain_stray_is_reverted_and_the_tick_commits", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_a_stray_in_the_sibling_corpus_goes_through_the_sibling_mount", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_a_link_left_by_the_repair_at_an_unapproved_name_is_refused_and_propagates", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_control_a_plain_file_left_by_the_repair_at_an_unapproved_name_is_removed", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_o5_3_a_retire_member_still_retires_over_a_plant_at_a_snapshot_name", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_o5_3_a_non_member_fault_propagates_unchanged_over_a_plant", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_o5_3_control_with_nothing_planted_the_snapshot_file_is_restored", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_a_fifo_at_a_new_name_is_left_and_the_fault_still_retires", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_a_linked_folder_holding_a_snapshot_name_replaces_the_fault", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_a_corpus_mount_the_agent_removed_replaces_the_fault", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_a_non_folder_at_a_holding_folders_name_replaces_the_fault", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_a_failing_disk_on_the_fault_restore_replaces_the_fault", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_a_before_state_git_cannot_read_raises_out_of_run_batch_before_the_agent", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_a_corpus_the_held_mount_cannot_read_still_has_its_before_state", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_a_nested_lesson_the_agent_rewrote_is_restored_on_the_fault_path", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_a_gitignored_name_the_agent_made_survives_a_faulted_tick", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_the_snapshot_attribution_and_fault_restore_use_cfg_corpus", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_attribution_asks_cfg_corpus_and_a_refused_read_cites_nothing", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_drain.py", test: "test_the_verifier_judges_the_text_cfg_corpus_reads", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_1134_curator_git_bounds.py", test: "test_a_gitignore_fifo_the_agent_leaves_is_a_stuck_git_probe_not_a_hung_tick", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_git_bounds.py", test: "test_control_a_plain_gitignore_is_a_stray_and_the_tick_commits", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_git_bounds.py", test: "test_a_gitattributes_fifo_the_agent_leaves_is_never_opened_and_the_tick_commits", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_git_bounds.py", test: "test_control_a_plain_gitattributes_is_a_stray_reverted_before_the_commit", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_git_bounds.py", test: "test_a_gitattributes_fifo_on_the_fault_path_is_never_opened_and_the_fault_retires", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_git_bounds.py", test: "test_control_a_plain_gitattributes_on_the_fault_path_is_swept_and_the_fault_retires", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_git_bounds.py", test: "test_a_comparison_that_does_not_answer_is_the_ticks_probe_and_the_undo_writes_back", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_git_bounds.py", test: "test_every_git_call_the_tick_makes_before_its_commit_is_bounded", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_git_bounds.py", test: "test_every_git_call_the_fault_undo_makes_is_bounded_and_the_fault_keeps_its_routing", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_git_bounds.py", test: "test_a_fault_undo_whose_rev_parse_does_not_answer_keeps_the_fault_and_deletes_nothing", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_git_bounds.py", test: "test_a_fault_undo_whose_reset_does_not_answer_keeps_the_fault_and_still_restores", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_git_bounds.py", test: "test_a_fault_undo_whose_status_does_not_answer_sweeps_what_git_ls_files_names", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_git_bounds.py", test: "test_control_a_fault_undo_whose_git_answers_sweeps_and_restores_without_a_fallback", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_git_bounds.py", test: "test_a_gitattributes_fifo_beside_a_rewritten_gitkeep_is_never_opened_by_its_checkout", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_git_bounds.py", test: "test_control_a_plain_gitattributes_beside_a_rewritten_gitkeep_is_reverted_with_it", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_git_bounds.py", test: "test_a_read_slower_than_a_short_git_timeout_is_a_probe_error_naming_it", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_git_bounds.py", test: "test_control_the_same_slow_read_answers_under_a_long_git_timeout", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_git_bounds.py", test: "test_the_commit_is_not_bounded_a_pre_commit_hook_slower_than_git_timeout_still_commits", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_git_compare.py", test: "test_a_git_failure_in_the_settle_comparison_is_the_ticks_stuck_git_probe", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_git_compare.py", test: "test_a_hard_link_holding_a_lessons_exact_bytes_is_never_committed", reaches: ["graveyard_file via test_1134_curator_drain._scene"]}
+  - {file: "defender/tests/test_1134_curator_label.py", test: "test_author_drains_real_default_seam_carries_the_label_to_the_open", reaches: ["stuck_report_file via _drain719.stuck_records"]}
+  - {file: "defender/tests/test_1134_curator_label.py", test: "test_a_missing_corpus_mount_is_a_hold_fault_each_curator_records_stuck", reaches: ["stuck_report_file via _drain719.stuck_records"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_the_drains_explicit_list_commit_is_a_new_function_beside_an_unchanged_commit_fn_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_an_empty_approved_list_commits_nothing_and_invokes_no_git_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_approved_list_and_deletions_list_are_both_empty_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_an_empty_approved_list_still_lets_the_rest_of_the_tick_complete_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_the_commit_names_the_approved_files_and_the_curator_deletions_and_nothing_else_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_a_dirty_file_outside_the_corpus_never_enters_the_commit_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_a_curator_deletion_under_the_corpus_is_named_in_the_commit_list_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_git_status_reports_a_deleted_corpus_file_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_deletions_list_names_a_path_git_status_never_reported_deleted_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_the_commit_list_is_built_in_repo_relative_paths_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_the_committed_set_is_recomputed_after_the_commit_not_before_it_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_a_reported_committed_finding_no_approved_file_cites_is_deferred_not_consumed_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_disk_runs_out_of_space_partway_through_gits_own_commit_write_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_the_commit_step_reads_author_result_only_for_skip_reasons_and_commit_message_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_a_skipped_finding_lands_in_the_consumed_skip_category_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_author_result_committed_bucket_is_empty_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_author_result_committed_id_is_foreign_to_this_batch_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_git_status_reports_no_changed_corpus_files_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_git_status_call_itself_produces_no_output_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_git_status_reports_an_untracked_file_under_the_corpus_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_git_status_reports_a_rename_pair_or_a_mode_or_name_only_change_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_a_mode_only_change_with_identical_bytes_is_treated_as_unchanged_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_git_status_reports_an_unexpected_two_letter_status_code_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_git_status_call_the_check_steps_paths_are_derived_from_fails_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_a_git_read_inside_the_new_check_step_that_loses_the_index_lock_race_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_commit_list.py", test: "test_verify_agent_state_after_repair_spawn_depends_on_a_failing_git_read_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_a_deferred_row_bumps_the_deferrals_counter_and_graveyards_at_the_ceiling_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_every_deferred_finding_is_named_in_the_held_reports_deferred_group_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_the_deferral_rotation_passes_the_configured_repo_lock_wait_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_a_bad_verdict_does_not_bump_the_attempts_counter_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_deferrals_and_attempts_counters_move_independently_across_ticks_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_a_deferred_rows_count_after_ten_consecutive_deferring_ticks_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_a_deferral_that_reaches_the_ceiling_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_a_deferred_row_as_the_wake_gate_sees_it_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_drain_ticks_own_loop_continuation_is_unaffected_by_the_new_row_fields_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_max_attempts_one_retires_on_the_first_failure_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_a_finding_cited_by_one_approved_file_and_one_refused_file_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_a_finding_cited_by_two_approved_files_is_consumed_committed_exactly_once_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_every_batch_row_reaches_exactly_one_disposition_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_a_file_carrying_one_terminal_pair_and_one_approved_pair_after_pass_two_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_a_pair_good_in_pass_one_on_a_file_that_later_goes_terminal_for_a_different_pair_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_a_file_cited_by_one_refused_finding_and_one_cleared_finding_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_a_batch_row_the_curator_mentions_nowhere_and_no_file_cites_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_rotation_runs_exactly_once_per_tick_even_when_the_commit_step_returned_none_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_a_tick_that_both_defers_a_row_and_closes_its_rotation_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_a_finding_faulted_and_deferred_in_the_same_tick_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_a_tick_whose_batch_faults_before_reaching_the_deferred_list_computation_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_repo_lock_wait_exceeded_at_the_closing_rotation_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_repo_lock_wait_exceeded_specifically_on_the_deferral_bump_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_deferral.py", test: "test_a_locked_rotation_that_expires_waiting_for_the_append_lock_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_a_gap_record_carries_finding_run_direction_batch_path_text_verdicts_and_time_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_the_gap_record_carries_every_verdict_with_its_reasoning_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_a_ledger_record_for_a_finding_refused_in_both_passes_on_two_different_files_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_the_ledger_gains_its_entries_only_once_both_passes_have_settled_every_pair_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_the_recorded_lesson_text_of_a_file_that_is_restored_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_a_terminal_finding_whose_file_never_existed_before_the_tick_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_the_gap_ledger_is_written_under_the_host_side_pending_dir_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_the_ledger_after_the_worktree_is_discarded_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_a_terminal_bad_finding_leaves_the_pending_file_as_consumed_forward_bad_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_a_consumed_forward_bad_row_carries_no_consumed_commit_field_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_the_gap_record_is_written_before_the_queue_rotates_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_ledger_append_and_rotation_observed_mid_sequence_by_a_reader_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_a_crash_between_the_ledger_append_and_the_rotation_replayed_on_a_later_tick_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_the_held_report_names_forward_bad_terminal_and_deferred_and_no_forward_bad_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_the_report_line_of_a_tick_whose_only_event_was_a_terminal_refusal_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_the_ledger_and_the_report_disagreeing_about_one_finding_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_the_held_report_reflects_the_state_after_rotation_not_a_pre_rotation_snapshot_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_the_drain_appends_a_forward_check_terminal_block_to_the_commit_message_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_curator_authored_prose_cannot_forge_the_forward_check_terminal_header_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_gap_ledger.py", test: "test_the_pre_author_idempotency_read_on_the_tick_after_a_refusal_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_path_like_strings_planted_in_author_result_never_reach_the_check_or_the_commit_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_author_result_fields_filled_with_path_like_strings_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_author_result_commit_message_contains_a_path_like_string_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_author_result_commit_message_contains_a_traversal_sequence_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_author_result_consumed_skip_reason_contains_a_path_like_string_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_author_result_observability_gaps_carries_adversarial_content_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_queue_row_run_id_contains_path_traversal_characters_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_queue_row_is_missing_its_run_id_field_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_queue_row_direction_is_an_unrecognized_value_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_queue_row_batch_id_does_not_match_this_ticks_batch_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_changed_lesson_file_is_zero_bytes_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_changed_lesson_files_frontmatter_block_is_unparseable_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_changed_lesson_file_has_no_citation_field_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_changed_lesson_files_citation_list_is_empty_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_changed_lesson_files_citations_span_this_batch_and_an_earlier_one_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_a_changed_file_citing_only_findings_from_an_earlier_batch_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_a_lesson_citing_an_id_that_belongs_to_the_sibling_channels_batch_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_a_tick_whose_corpus_is_already_dirty_when_it_starts_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_a_non_markdown_file_left_under_the_corpus_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_inputs.py", test: "test_the_source_run_directories_after_a_tick_that_unwound_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_one_truth.py", test: "test_a_repair_that_drops_one_of_two_citations_is_terminal_for_the_dropped_finding", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_one_truth.py", test: "test_a_concurrent_edit_that_strips_the_citations_mid_check_is_not_committed", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_one_truth.py", test: "test_a_repair_spawn_orphan_file_is_restored_and_the_tree_is_clean_after_the_tick", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_one_truth.py", test: "test_a_repair_spawn_edit_to_an_untouched_head_lesson_is_restored", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_one_truth.py", test: "test_a_non_md_stray_after_the_repair_spawn_is_reverted_exactly_as_after_the_first", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_one_truth.py", test: "test_a_mode_only_change_is_put_back_and_the_tree_is_clean_after_the_tick", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_one_truth.py", test: "test_a_finding_the_curator_did_not_report_but_an_approved_file_cites_is_committed", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_one_truth.py", test: "test_a_finding_the_curator_filed_as_skipped_but_wrote_a_lesson_for_takes_the_trees_fate", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_one_truth.py", test: "test_a_missing_investigation_in_the_cited_run_is_a_bad_pair_not_a_stuck_tick", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_at_most_one_repair_spawn_runs_per_tick_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_a_tick_with_no_refused_pair_at_all_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_curators_own_write_shape_grants_are_unaffected_by_the_repair_spawns_narrower_grant_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_the_repair_prompt_carries_the_row_the_text_and_the_reasoning_wrapped_as_untrusted_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_repair_prompt_none_uses_the_shipped_default_at_spawn_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_repair_prompt_resource_is_missing_or_unreadable_at_spawn_time_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_a_pass_one_bad_pair_is_terminal_unless_pass_two_approves_its_file_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_pass_two_re_checks_only_the_files_the_repair_spawn_changed_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_repair_spawn_touches_a_file_beyond_the_bad_pairs_it_was_given_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_repair_spawn_produces_no_edit_for_a_bad_pair_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_repair_spawns_output_is_byte_identical_to_the_pre_repair_file_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_pair_verdict_flips_between_passes_on_an_untouched_file_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_pass_two_re_runs_verify_agent_state_and_re_checks_every_changed_file_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_a_repair_spawn_that_writes_outside_the_corpus_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_the_repair_spawn_cannot_delete_a_corpus_file_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_a_repair_spawn_that_addresses_only_some_of_the_bad_pairs_in_one_file_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_repair_spawn_creates_a_brand_new_file_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_repair_prompts_reasoning_text_for_a_pair_is_empty_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_pass_one_reasoning_unavailable_because_its_trace_write_failed_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_a_terminal_file_is_unlinked_if_new_and_restored_to_its_bytes_if_it_existed_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_a_terminal_file_edited_across_both_passes_restores_to_its_pre_tick_snapshot_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_restoring_a_file_the_first_spawn_created_and_the_repair_spawn_further_edited_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_restore_corpus_joins_repo_relative_and_corpus_relative_paths_correctly_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_snapshot_restore_cannot_read_back_a_terminal_files_original_bytes_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_a_faulting_repair_spawn_unwinds_and_the_batch_is_re_authored_under_attempts_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_repair_spawn_model_call_fails_transiently_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_repair_spawn_faults_for_a_dependency_reason_distinct_from_a_box_violation_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_a_faulting_repair_spawn_lands_in_the_same_ordering_slot_as_a_faulting_first_spawn_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_a_repair_spawn_that_faults_after_editing_some_of_its_files_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_repair_spawn_underlying_transport_timeout_not_wrapped_as_a_known_fault_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_a_repair_caused_unvouch_is_terminal_for_its_own_finding_only_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_a_repair_rewrite_that_drops_its_citations_is_refused_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_repair_pass.py", test: "test_repair_spawns_rewrite_leaves_the_files_frontmatter_unparseable_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_tool_removal.py", test: "test_the_curator_partitions_the_batch_into_committed_and_consumed_skip_only_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_tool_removal.py", test: "test_author_result_carries_an_unrecognized_bucket_key_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_tool_removal.py", test: "test_author_result_consumed_skip_bucket_is_missing_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_tool_removal.py", test: "test_the_curator_prompts_account_of_a_mixed_file_after_the_change_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_tool_removal.py", test: "test_the_author_result_still_carries_observability_gaps_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_tool_removal.py", test: "test_a_citation_of_an_earlier_batch_finding_is_not_verified_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_tool_removal.py", test: "test_a_questioner_tick_runs_vouching_and_no_verdict_step_773", reaches: ["graveyard_file via _spec773.build_questioner_scene"]}
+  - {file: "defender/tests/test_773_tool_removal.py", test: "test_the_questioner_channel_still_refuses_an_unvouched_file_773", reaches: ["graveyard_file via _spec773.build_questioner_scene"]}
+  - {file: "defender/tests/test_773_tool_removal.py", test: "test_a_questioner_tick_with_a_changed_file_citing_no_batch_finding_773", reaches: ["graveyard_file via _spec773.build_questioner_scene"]}
+  - {file: "defender/tests/test_773_tool_removal.py", test: "test_a_questioner_tick_whose_curator_committed_nothing_773", reaches: ["graveyard_file via _spec773.build_questioner_scene"]}
+  - {file: "defender/tests/test_773_tool_removal.py", test: "test_the_questioner_tick_skips_only_the_verdict_stage_not_the_surrounding_ordering_773", reaches: ["graveyard_file via _spec773.build_questioner_scene"]}
+  - {file: "defender/tests/test_773_tool_removal.py", test: "test_an_unset_verifier_key_ends_the_tick_before_the_first_curator_spawn_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_tool_removal.py", test: "test_preflight_runs_once_before_any_curator_spawn_this_tick_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_tool_removal.py", test: "test_a_configuration_fault_tick_writes_no_gap_record_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_tool_removal.py", test: "test_a_channel_with_no_forward_check_on_a_host_with_no_verifier_key_773", reaches: ["graveyard_file via _spec773.build_questioner_scene"]}
+  - {file: "defender/tests/test_773_tool_removal.py", test: "test_preflight_ordering_when_author_and_verifier_share_a_provider_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_tool_removal.py", test: "test_a_lessons_tick_that_ends_on_a_configuration_fault_while_the_sibling_channel_has_work_773", reaches: ["graveyard_file via _spec773.build_questioner_scene", "graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_forward_check_run_returns_verdict_and_reasoning_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_pair_verdict_carries_path_finding_source_verdict_reasoning_and_pass_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_tick_derives_approved_terminal_and_deferred_from_pair_verdicts_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_corpus_author_config_carries_forward_check_exempt_and_repair_prompt_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_reply_carrying_two_conflicting_verdict_lines_raises_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_an_exempt_pair_is_recorded_as_a_first_class_pair_verdict_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_bad_pair_keeps_its_file_out_of_the_commit_and_the_tree_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_file_edited_after_its_check_does_not_commit_on_the_pre_edit_verdict_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_file_citing_a_consumed_skip_finding_is_checked_against_that_finding_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_file_is_approved_only_when_every_one_of_its_pairs_is_good_or_exempt_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_lesson_the_check_refused_as_the_runtime_would_later_find_it_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_ticks_committed_files_against_what_the_check_actually_saw_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_good_file_still_commits_on_a_tick_that_also_produced_a_bad_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_file_cited_only_by_a_family_finding_commits_on_exempt_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_forward_check_none_skips_the_verdict_step_but_not_vouching_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_changed_file_citing_no_batch_finding_raises_author_error_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_file_whose_citations_match_head_no_longer_passes_vouching_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_file_whose_bytes_return_to_head_after_editing_no_longer_exempts_itself_from_vouching_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_curator_reports_no_commits_but_leaves_dirty_corpus_edits_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_curator_reports_committed_but_leaves_the_corpus_clean_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_file_vouched_in_pass_one_is_re_vouched_unchanged_in_pass_two_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_first_spawn_deletion_of_a_pre_existing_lesson_still_passes_vouching_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_failing_pair_is_re_run_once_then_recorded_bad_with_a_forward_check_error_reason_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_verifier_call_transient_error_on_one_pair_single_retry_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_verifier_reply_has_no_recognizable_verdict_line_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_verifier_reply_names_an_unrecognized_verdict_token_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_doubly_failed_pairs_reasoning_concatenates_both_attempts_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_call_that_never_completes_is_not_a_verdict_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_pair_whose_out_of_process_dependency_is_unreachable_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_provider_outage_fails_every_pair_in_the_fan_out_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_verifier_key_valid_at_preflight_but_rejected_at_call_time_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_second_pass_verifier_call_fails_for_a_repaired_pairs_dependency_reason_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_verifier_fan_out_worker_raises_while_siblings_are_still_in_flight_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_stage_abort_raised_from_inside_a_pairs_verifier_call_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_fatal_configuration_error_raised_mid_fan_out_after_preflight_passed_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_stage_abort_from_inside_the_verdict_step_is_not_folded_into_the_retire_set_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_stage_abort_and_fatal_config_error_propagate_out_of_the_per_pair_handler_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_a_fault_in_the_check_step_unwinds_the_agent_edits_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_the_per_pair_checks_fan_out_under_verify_batch_workers_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_the_per_pair_checks_run_serially_under_verify_batch_workers_of_one_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_each_check_gets_a_distinct_drain_owned_index_across_both_passes_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_two_checks_in_the_same_tick_are_minted_the_same_check_index_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_check_index_stays_distinct_across_a_pairs_own_retry_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_check_index_reused_across_both_verdict_passes_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_the_check_reads_only_the_run_dir_named_by_the_queue_row_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_check_pairs_are_the_tree_citations_intersected_with_this_batch_ids_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_the_verifier_call_count_per_pass_equals_the_cited_batch_pair_count_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_the_verifier_call_count_of_a_tick_that_folds_k_findings_into_one_file_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_the_same_finding_cited_twice_in_one_file_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_two_batch_rows_naming_the_same_source_case_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_two_files_citing_the_same_finding_checked_concurrently_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_approved_determination_waits_for_every_fanned_out_pair_of_a_file_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_verifier_reply_text_shaped_like_the_drains_own_records_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_773_verdict_pass.py", test: "test_verifier_model_resolves_through_any_registered_provider_773", reaches: ["graveyard_file via _spec773.build_scene"]}
+  - {file: "defender/tests/test_870_deadletter.py", test: "test_a_systemless_row_retires_as_no_system", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_870_deadletter.py", test: "test_a_malformed_name_retires_as_malformed_system", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_870_deadletter.py", test: "test_an_undeclared_name_retires_naming_itself", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_870_deadletter.py", test: "test_a_ceiling_retirement_names_its_exception_class", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_870_partition.py", test: "test_a_taught_reducer_row_is_consumed_not_retired", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_870_partition.py", test: "test_a_no_edit_reducer_tick_holds_its_rows", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_870_partition.py", test: "test_a_perpetually_declined_hold_retires_at_the_ceiling", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_870_partition.py", test: "test_a_faulting_tick_does_not_spend_the_offer_budget", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_870_partition.py", test: "test_a_reducer_only_batch_still_reaches_the_curator", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_870_partition.py", test: "test_no_row_leaves_the_queue_without_a_record", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_870_partition.py", test: "test_two_curation_ticks_land_distinctly_in_every_shared_sink", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_870_partition.py", test: "test_a_committed_batch_is_not_re_bumped", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_870_threshold.py", test: "test_silent_reducer_failures_alone_do_not_open_the_lane", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_881_loop_plumbing.py", test: "test_881_a_contended_append_lock_in_the_unkeyable_retirement_leaves_a_stuck_record", reaches: ["acquire_flock via _drain719.Holder.__enter__", "graveyard_file via _drain719.graveyard", "stuck_report_file via _drain719.stuck_records"]}
+  - {file: "defender/tests/test_881_loop_plumbing.py", test: "test_881_stuck_unkeyable_ticks_fold_by_row_content_and_not_by_an_empty_id_list", reaches: ["acquire_flock via _drain719.Holder.__enter__", "stuck_report_file via _drain719.stuck_records"]}
+  - {file: "defender/tests/test_921_enqueue_gate.py", test: "test_921_enqueue_refuses_a_row_that_would_key_error_the_shared_gate", reaches: ["stuck_report_file via _drain719.stuck_records"]}
+  - {file: "defender/tests/test_952_consumption_follows_durability.py", test: "test_952_o3_a_batch_that_passes_the_scrub_consumes_what_it_served", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_952_consumption_follows_durability.py", test: "test_952_o1_consumption_happens_before_the_push_and_is_not_undone_by_its_failure", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_952_consumption_follows_durability.py", test: "test_952_o1_a_git_fault_from_finish_batch_propagates_after_the_consumption", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_952_consumption_follows_durability.py", test: "test_952_m4_run_pitfalls_hands_its_partition_to_on_curated_and_consumes_nothing_committed", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_952_consumption_follows_durability.py", test: "test_952_o5_run_pitfalls_default_consumes_exactly_as_today", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_952_consumption_follows_durability.py", test: "test_952_g_a_held_only_deferred_tick_defers_the_decline_bump", reaches: ["graveyard_file via _declared870.graveyard_by_id"]}
+  - {file: "defender/tests/test_drain719_config.py", test: "test_a_non_integer_ceiling_aborts_the_tick_before_any_row_is_processed", reaches: ["graveyard_file via _drain719.graveyard"]}
+  - {file: "defender/tests/test_drain719_config.py", test: "test_the_ceiling_is_read_once_per_batch_at_config_build", reaches: ["graveyard_file via _drain719.graveyard"]}
+  - {file: "defender/tests/test_drain719_config.py", test: "test_pitfalls_agent_failure_bumps_attempts_and_retires_at_the_ceiling", reaches: ["graveyard_file via _drain719.graveyard"]}
+  - {file: "defender/tests/test_drain719_config.py", test: "test_pitfalls_batch_retires_at_the_ceiling", reaches: ["graveyard_file via _drain719.graveyard"]}
+  - {file: "defender/tests/test_drain719_config.py", test: "test_pitfalls_retirement_removes_batch_ids_not_the_whole_queue", reaches: ["graveyard_file via _drain719.graveyard"]}
+  - {file: "defender/tests/test_drain719_config.py", test: "test_pitfalls_retire_goes_through_the_locked_rotation", reaches: ["acquire_flock via _drain719.Holder.__enter__", "graveyard_file via _drain719.graveyard"]}
+  - {file: "defender/tests/test_drain719_guard.py", test: "test_a_failure_in_no_named_class_leaves_the_row_queued_with_its_count_untouched", reaches: ["graveyard_file via _drain719.graveyard"]}
+  - {file: "defender/tests/test_drain719_guard.py", test: "test_a_repeatedly_failing_row_that_never_retires_surfaces_a_named_operator_signal", reaches: ["graveyard_file via _drain719.graveyard", "stuck_report_file via _drain719.stuck_records"]}
+  - {file: "defender/tests/test_drain719_guard.py", test: "test_the_retire_set_is_the_same_on_findings_as_on_the_observation_channels", reaches: ["graveyard_file via _drain719.graveyard"]}
+  - {file: "defender/tests/test_drain719_guard.py", test: "test_externally_killed_box_command_is_not_reported_as_a_successful_batch", reaches: ["graveyard_file via _drain719.graveyard"]}
+  - {file: "defender/tests/test_drain719_guard.py", test: "test_mid_batch_author_timeout_bumps_the_row_and_is_ceiling_eligible", reaches: ["graveyard_file via _drain719.graveyard"]}
+  - {file: "defender/tests/test_drain719_guard.py", test: "test_systemic_faults_propagate_without_bumping_attempts", reaches: ["graveyard_file via _drain719.graveyard"]}
+  - {file: "defender/tests/test_drain719_hardening.py", test: "test_a_git_failure_in_a_read_only_probe_does_not_spend_an_attempt", reaches: ["graveyard_file via _drain719.graveyard", "stuck_report_file via _drain719.stuck_records"]}
+  - {file: "defender/tests/test_drain719_hardening.py", test: "test_the_retire_seams_append_lock_wait_ends_at_the_configured_deadline", reaches: ["acquire_flock via _drain719.Holder.__enter__", "stuck_report_file via _drain719.stuck_records"]}
+  - {file: "defender/tests/test_drain719_locks.py", test: "test_every_channel_declares_its_lock_topology", reaches: ["acquire_flock via _drain719.Holder.__enter__"]}
+  - {file: "defender/tests/test_drain719_locks.py", test: "test_retire_blocks_while_append_lock_held", reaches: ["acquire_flock via _drain719.Holder.__enter__", "graveyard_file via _drain719.graveyard"]}
+  - {file: "defender/tests/test_drain719_locks.py", test: "test_every_channels_read_batch_happens_under_the_append_lock", reaches: ["acquire_flock via _drain719.Holder.__enter__"]}
+  - {file: "defender/tests/test_drain719_locks.py", test: "test_the_drains_nonblocking_acquisition_excludes_a_real_blocking_appender_through_run_batch", reaches: ["acquire_flock via _drain719.Holder.__enter__"]}
+  - {file: "defender/tests/test_drain719_locks.py", test: "test_the_drains_append_lock_wait_ends_at_the_configured_repo_lock_deadline", reaches: ["acquire_flock via _drain719.Holder.__enter__"]}
+  - {file: "defender/tests/test_drain719_locks.py", test: "test_a_bare_module_invocation_beside_a_live_drain_skips_its_tick", reaches: ["acquire_flock via _drain719.Holder.__enter__"]}
+  - {file: "defender/tests/test_drain719_locks.py", test: "test_second_author_drain_invocation_returns_without_blocking", reaches: ["acquire_flock via _drain719.Holder.__enter__"]}
+  - {file: "defender/tests/test_drain719_retire.py", test: "test_an_intervening_success_does_not_reset_the_attempt_count", reaches: ["graveyard_file via _drain719.graveyard"]}
+  - {file: "defender/tests/test_drain719_retire.py", test: "test_ceiling_of_one_retires_on_the_first_failure", reaches: ["graveyard_file via _drain719.graveyard"]}
+  - {file: "defender/tests/test_drain719_retire.py", test: "test_zero_ceiling_retires_on_first_failure", reaches: ["graveyard_file via _drain719.graveyard"]}
+  - {file: "defender/tests/test_drain719_retire.py", test: "test_negative_ceiling_retires_like_zero", reaches: ["graveyard_file via _drain719.graveyard"]}
+  - {file: "defender/tests/test_drain719_retire.py", test: "test_an_all_empty_tick_writes_no_consumed_row_and_no_graveyard_row", reaches: ["graveyard_file via _drain719.graveyard"]}
+  - {file: "defender/tests/test_drain719_retire.py", test: "test_attempt_count_survives_a_fresh_process", reaches: ["graveyard_file via _drain719.graveyard"]}
+helpers:
+  - file: "defender/tests/_declared870.py"
+    function: "graveyard_by_id"
+    reaches:
+      - "graveyard_file"
+    asserts: 0
+  - file: "defender/tests/_drain719.py"
+    function: "graveyard"
+    reaches:
+      - "graveyard_file"
+    asserts: 0
+  - file: "defender/tests/_drain719.py"
+    function: "stuck_records"
+    reaches:
+      - "stuck_report_file"
+    asserts: 0
+  - file: "defender/tests/_drain719.py"
+    function: "Holder.__enter__"
+    reaches:
+      - "acquire_flock"
+      - "acquire_flock via Holder.__enter__"
+    asserts: 1
+  - file: "defender/tests/_spec773.py"
+    function: "Scene.graveyard"
+    reaches:
+      - "graveyard_file via _drain719.graveyard"
+    asserts: 0
+  - file: "defender/tests/_spec773.py"
+    function: "build_scene"
+    reaches:
+      - "graveyard_file via _drain719.graveyard"
+    asserts: 0
+  - file: "defender/tests/_spec773.py"
+    function: "build_questioner_scene"
+    reaches:
+      - "graveyard_file via _drain719.graveyard"
+    asserts: 0
+  - file: "defender/tests/conftest.py"
+    function: "build_scene"
+    reaches:
+      - "graveyard_file via _spec773.build_scene"
+    asserts: 1
+  - file: "defender/tests/conftest.py"
+    function: "build_questioner_scene"
+    reaches:
+      - "graveyard_file via _spec773.build_questioner_scene"
+    asserts: 1
+  - file: "defender/tests/e2e/test_922_spine.py"
+    function: "graded_episode"
+    reaches:
+      - "queue_dir= (J.mod('learning.judge').grade_episode)"
+    asserts: 0
+  - file: "defender/tests/test_1134_census.py"
+    function: "judge"
+    reaches:
+      - "'PENDING_DIR' (named in a string) via ALLOW"
+      - "'graveyard_file' (named in a string) via ALLOW"
+    asserts: 0
+  - file: "defender/tests/test_1134_census.py"
+    function: "_d3_fallback_touches"
+    reaches:
+      - "'PENDING_DIR' (named in a string) via ALLOW"
+      - "'graveyard_file' (named in a string) via ALLOW"
+    asserts: 0
+  - file: "defender/tests/test_1134_curator_drain.py"
+    function: "_scene"
+    reaches:
+      - "graveyard_file via _spec773.build_scene"
+    asserts: 0
+  - file: "defender/tests/test_1134_curator_git_bounds.py"
+    function: "_gitignore_scene"
+    reaches:
+      - "graveyard_file via test_1134_curator_drain._scene"
+    asserts: 0
+  - file: "defender/tests/test_1134_curator_git_bounds.py"
+    function: "_gitattributes_scene"
+    reaches:
+      - "graveyard_file via test_1134_curator_drain._scene"
+    asserts: 0
+  - file: "defender/tests/test_1134_curator_git_bounds.py"
+    function: "_fault_scene"
+    reaches:
+      - "graveyard_file via test_1134_curator_drain._scene"
+    asserts: 0
+  - file: "defender/tests/test_1134_curator_git_bounds.py"
+    function: "_census_scene"
+    reaches:
+      - "graveyard_file via test_1134_curator_drain._scene"
+    asserts: 0
+  - file: "defender/tests/test_1134_curator_git_bounds.py"
+    function: "_census_run"
+    reaches:
+      - "graveyard_file via test_1134_curator_drain._scene"
+    asserts: 0
+  - file: "defender/tests/test_1134_curator_git_bounds.py"
+    function: "_stalled_calls"
+    reaches:
+      - "graveyard_file via test_1134_curator_drain._scene"
+    asserts: 3
+  - file: "defender/tests/test_1134_curator_git_bounds.py"
+    function: "_undo_scene"
+    reaches:
+      - "graveyard_file via test_1134_curator_drain._scene"
+    asserts: 0
+  - file: "defender/tests/test_1134_curator_git_bounds.py"
+    function: "_undo_run"
+    reaches:
+      - "graveyard_file via test_1134_curator_drain._scene"
+    asserts: 0
+  - file: "defender/tests/test_1134_curator_git_bounds.py"
+    function: "_gitkeep_scene"
+    reaches:
+      - "graveyard_file via test_1134_curator_drain._scene"
+    asserts: 0
+  - file: "defender/tests/test_1134_curator_git_bounds.py"
+    function: "_slow_head_run"
+    reaches:
+      - "graveyard_file via test_1134_curator_drain._scene"
+    asserts: 0
+  - file: "defender/tests/test_773_deferral.py"
+    function: "_orphan_tick"
+    reaches:
+      - "graveyard_file via _spec773.build_scene"
+    asserts: 0
+  - file: "defender/tests/test_773_gap_ledger.py"
+    function: "_refused"
+    reaches:
+      - "graveyard_file via _spec773.build_scene"
+    asserts: 0
+  - file: "defender/tests/test_870_deadletter.py"
+    function: "_reason"
+    reaches:
+      - "graveyard_file via _declared870.graveyard_by_id"
+    asserts: 0
+  - file: "defender/tests/test_881_loop_plumbing.py"
+    function: "_tick_meeting_an_appender_at_the_unkeyable_retirement"
+    reaches:
+      - "acquire_flock via _drain719.Holder.__enter__"
+    asserts: 3
+  - file: "defender/tests/test_903_queue_view.py"
+    function: "_seed_findings"
+    reaches:
+      - "graveyard_file"
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts: 0
+  - file: "defender/tests/test_903_queue_view.py"
+    function: "_seed_questioner"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts: 0
+  - file: "defender/tests/test_903_queue_view.py"
+    function: "_seed_pitfalls"
+    reaches:
+      - "graveyard_file"
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts: 0
+  - file: "defender/tests/test_903_queue_view.py"
+    function: "_seed_set_aside"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts: 0
+  - file: "defender/tests/test_903_queue_view.py"
+    function: "paths"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts: 0
+  - file: "defender/tests/test_903_queue_view.py"
+    function: "view"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts: 0
+  - file: "defender/tests/test_903_queue_view.py"
+    function: "_channel"
+    reaches:
+      - "graveyard_file via _seed_findings"
+      - "graveyard_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_findings"
+      - "stuck_report_file via _seed_pitfalls"
+      - "stuck_report_file via _seed_questioner"
+    asserts: 1
+  - file: "defender/tests/test_952_consumption_follows_durability.py"
+    function: "_bounded"
+    reaches:
+      - "'queue_lock' (named in a string)"
+    asserts: 0
+  - file: "defender/tests/test_952_consumption_follows_durability.py"
+    function: "_assert_consumed"
+    reaches:
+      - "graveyard_file via _declared870.graveyard_by_id"
+    asserts: 10
+  - file: "defender/tests/test_drain719_retire.py"
+    function: "_retires_on_the_first_failure"
+    reaches:
+      - "graveyard_file via _drain719.graveyard"
+    asserts: 3
+seam_implementors:
+  - {file: "defender/tests/e2e/test_922_spine.py", qualname: "TriggerRecorder.__call__"}
+  - {file: "defender/tests/test_1007_corpus.py", qualname: "TwoLaneRecorder.__call__"}
