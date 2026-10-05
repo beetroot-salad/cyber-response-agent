@@ -26,7 +26,9 @@ Tests -> obligations:
   batch-end removal reach the carried docker, none the `docker` on `PATH`.
 - E1'/O4, the post-create stop: `test_a_post_create_stop_fault_still_gets_the_batch_end_removal`
   (refused, no effect, unproven, the seam raising: no work, `rm -f`, the scan after it, no
-  pointer), with its `holds` control; F4: `test_a_post_create_stop_that_leaves_the_box_dead_lets_the_work_run`.
+  pointer), with its `holds` control; F4:
+  `test_a_post_create_stop_is_proven_only_by_exited_or_dead` (`dead` proves it; `paused` and
+  `restarting` do not).
 - O4, batch start: `test_a_batch_start_fault_escapes_as_on_main_before_any_work` (a create or
   sentinel `BoxFault` with main's pointer, a link-ban `AliasBanNotInForce` as itself; no work,
   no stop or start, the worktree cleaned up); F2/F3, the handle at batch start:
@@ -194,6 +196,24 @@ def test_each_agent_run_in_the_work_starts_the_one_box_and_stops_it(
 # ---------------------------------------------------------------------------------------
 
 
+def _drive_past_the_post_create_stop(tmp_path: Path, daemon: X.FakeDaemon,
+                                     ) -> tuple[Any, RunsInWork, list[str], str]:
+    """One batch over `daemon`, the real `start_box` making the box and its post-create stop:
+    asserts the batch-end `docker rm -f` removed the box, the tree was scanned only after, and
+    `PATH`'s docker was never asked. Returns what escaped, the work, the event log and the
+    box's name."""
+    events: list[str] = []
+    start = X.HeldStart(daemon, events)
+    work = RunsInWork(daemon, 0)
+    watch = X.ScanWatch(daemon, events)
+    got, _branch = _drive(tmp_path, do_work=work, start_box=start, events=events, scrub=watch)
+    assert ["docker", "rm", "-f", start.requests[0].name] in daemon.docker_calls(), (
+        "no batch-end removal")
+    watch.assert_scanned_once_the_box_was_gone()
+    X.no_path_docker(daemon)
+    return got, work, events, start.requests[0].name
+
+
 @pytest.mark.parametrize("stop", [*X.STOP_FAULTS, "holds"])
 def test_a_post_create_stop_fault_still_gets_the_batch_end_removal(
         tmp_path: Path, monkeypatch, stop: str):
@@ -205,15 +225,7 @@ def test_a_post_create_stop_fault_still_gets_the_batch_end_removal(
     daemon = _daemon(tmp_path, monkeypatch)
     if stop != "holds":
         X.fail_stop(daemon, stop, at=1, inspect_at=1)
-    events: list[str] = []
-    start = X.HeldStart(daemon, events)
-    work = RunsInWork(daemon, 0)
-    watch = X.ScanWatch(daemon, events)
-    got, _branch = _drive(tmp_path, do_work=work, start_box=start, events=events, scrub=watch)
-    name = start.requests[0].name
-    assert ["docker", "rm", "-f", name] in daemon.docker_calls(), "no batch-end removal"
-    watch.assert_scanned_once_the_box_was_gone()
-    X.no_path_docker(daemon)
+    got, work, events, _name = _drive_past_the_post_create_stop(tmp_path, daemon)
     if stop == "holds":
         assert got is None, got
         assert len(work.seen) == 1
@@ -224,21 +236,26 @@ def test_a_post_create_stop_fault_still_gets_the_batch_end_removal(
     assert not any(e.startswith("finish_batch:") for e in events), events
 
 
-def test_a_post_create_stop_that_leaves_the_box_dead_lets_the_work_run(tmp_path: Path,
-                                                                       monkeypatch):
-    """F4: the post-create stop leaves the box `dead`, not `exited`: nothing runs in it, so it
-    is proven stopped and the work runs. Control: the row above (`holds`)."""
+@pytest.mark.parametrize("left", ["dead", "paused", "restarting"])
+def test_a_post_create_stop_is_proven_only_by_exited_or_dead(tmp_path: Path, monkeypatch,
+                                                             left: str):
+    """F4: the post-create stop answers 0 and leaves the box `dead`: nothing runs in it, so it
+    is proven stopped and the work runs. Left `paused` (its processes frozen, not killed) or
+    `restarting`, it is not: a `BoxFault` naming the status escapes with no pointer, the work
+    never runs, the batch-end `rm -f` still removes the box and nothing is delivered."""
     daemon = _daemon(tmp_path, monkeypatch)
-    daemon.stop_leaves_it_dead(at=[1])
-    events: list[str] = []
-    start = X.HeldStart(daemon, events)
-    work = RunsInWork(daemon, 0)
-    got, _branch = _drive(tmp_path, do_work=work, start_box=start, events=events,
-                          scrub=X.ScanWatch(daemon, events))
-    assert got is None, got
-    assert [s for _, s in work.seen] == [{start.requests[0].name: "dead"}], work.seen
-    assert any(e.startswith("finish_batch:") for e in events), events
-    X.no_path_docker(daemon)
+    daemon.stop_leaves_it_as(left, at=1)
+    got, work, events, name = _drive_past_the_post_create_stop(tmp_path, daemon)
+    if left == "dead":
+        assert got is None, got
+        assert [s for _, s in work.seen] == [{name: "dead"}], work.seen
+        assert any(e.startswith("finish_batch:") for e in events), events
+        return
+    assert isinstance(got, BoxFault), f"a box left {left!r} passed as stopped: {got!r}"
+    assert left in str(got), f"the fault does not name the status it saw: {got}"
+    assert X.POINTER not in str(got), got
+    assert work.seen == [], f"the work ran beside a box left {left!r}"
+    assert not any(e.startswith("finish_batch:") for e in events), events
 
 
 # ---------------------------------------------------------------------------------------
@@ -330,13 +347,15 @@ def test_an_executor_the_batch_cannot_hold_a_handle_on_is_a_batch_start_fault(
 @pytest.mark.parametrize("failure", [
     pytest.param(lambda: RuntimeError("the agent crashed"), id="exception"),
     pytest.param(KeyboardInterrupt, id="keyboard-interrupt"),
+    *X.PROCESS_FAULTS,
 ])
 def test_a_run_stop_fault_under_a_failing_run_halts_the_batch_with_the_failure_as_context(
         tmp_path: Path, monkeypatch, failure: Any, stop: str):
-    """The work's run raises X and the run's stop fails: a `BoxFault` escapes the batch, never
-    X, with X in its chain (its `__context__`, behind the seam's own exception when the seam
-    raised); no pointer (mid-batch); nothing delivered; the batch-end `rm -f` and the scan after
-    it still run. Control (`holds`): X escapes as itself."""
+    """The work's run raises X (a crash, an interrupt, the spawn's own `TimeoutExpired` or
+    `OSError`) and the run's stop fails: a `BoxFault` escapes the batch, never X, with X in its
+    chain (its `__context__`, behind the seam's own exception when the seam raised at the stop
+    or at its proof); no pointer (mid-batch); nothing delivered; the batch-end `rm -f` and the
+    scan after it still run. Control (`holds`): X escapes as itself."""
     daemon = _daemon(tmp_path, monkeypatch)
     if stop != "holds":
         # 1: the post-create stop; 2: the run's. The status asks: 1 proves the post-create
@@ -355,13 +374,8 @@ def test_a_run_stop_fault_under_a_failing_run_halts_the_batch_with_the_failure_a
     if stop == "holds":
         assert got is raised, got
         return
-    assert isinstance(got, BoxFault), f"the run's failure outranked its stop fault: {got!r}"
+    X.assert_the_stop_fault_won(got, raised, daemon, stop)
     assert X.POINTER not in str(got), got
-    if stop.startswith("seam-"):
-        assert daemon.seam_raised == ["stop"], daemon.seam_raised
-        assert raised in X.chain(got), X.chain(got)
-    else:
-        assert got.__context__ is raised, X.chain(got)
 
 
 # ---------------------------------------------------------------------------------------

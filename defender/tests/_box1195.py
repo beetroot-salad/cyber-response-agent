@@ -25,7 +25,8 @@ The fake daemon (`FakeDaemon`) is callable as a docker seam, so an executor can 
 `docker`; called so, it can also raise at a chosen call instead of answering (`seam_raises`: no
 binary, a daemon that never answered). A `Tripwire` installed as the `docker` program first on
 `PATH` shows that nothing reaches the real one (`no_path_docker`). `fail_stop` makes a chosen
-`docker stop` fail each of the ways in `STOP_FAULTS`. A lane's host steps write into a `Journal`, which marks each into the
+`docker stop` fail each of the ways in `STOP_FAULTS`; `assert_the_stop_fault_won` is F1's
+verdict over such a stop under a failing run. A lane's host steps write into a `Journal`, which marks each into the
 daemon's own call log and notes which containers were running at that moment: so a row can
 split the log into run windows (between a `docker start` and the next `docker stop`) and see
 that each holds exactly its spawn, and that no host step ran beside a running box. Nothing is
@@ -34,6 +35,7 @@ patched onto a module.
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 import os
 import shutil
@@ -82,11 +84,54 @@ BATCH_START_FAULTS = [
     pytest.param("allow_an_alias", AliasBanNotInForce, False, id="link-ban"),
 ]
 
+def spawn_timeout() -> subprocess.TimeoutExpired:
+    """A spawn's own CLI timing out: a `SubprocessError`."""
+    return subprocess.TimeoutExpired(cmd=["claude"], timeout=600)
+
+
+def spawn_broken_pipe() -> OSError:
+    """A spawn's own pipe breaking: an `OSError`."""
+    return BrokenPipeError(errno.EPIPE, "Broken pipe")
+
+
+#: A spawn's own process faults, which F1 covers like any other failure in a run: the stop's
+#: fault still wins over them.
+PROCESS_FAULTS = [
+    pytest.param(spawn_timeout, id="TimeoutExpired"),
+    pytest.param(spawn_broken_pipe, id="OSError"),
+]
+
 #: The ways a stop fails to prove the box stopped (`fail_stop`): refused (rc 1, the box keeps
 #: running), answering 0 with the box still running, taking while the status asked after it goes
-#: unanswered, or the docker seam raising at it (no binary; a daemon that never answered).
+#: unanswered, the docker seam raising at it (no binary; a daemon that never answered), or the
+#: seam raising at the status asked after it (its proof).
 STOP_FAULTS = ["refused", "takes-no-effect", "status-unanswered", "seam-OSError",
-               "seam-TimeoutExpired"]
+               "seam-TimeoutExpired", "proof-seam-OSError", "proof-seam-TimeoutExpired"]
+
+
+def seam_step(stop: str) -> str | None:
+    """The step at which a `STOP_FAULTS` entry makes the seam raise: `stop`, `status` (the
+    stop's proof), or `None` for a fault the daemon answers."""
+    if stop.startswith("seam-"):
+        return "stop"
+    if stop.startswith("proof-seam-"):
+        return "status"
+    return None
+
+
+def assert_the_stop_fault_won(got: BaseException | None, raised: BaseException,
+                              daemon: FakeDaemon, stop: str) -> None:
+    """F1: the run raised `raised` and its stop failed as `stop` says: a `BoxFault` escaped,
+    never `raised`, with `raised` as its `__context__`, one link further back (behind the seam's
+    own exception) when the seam raised, at the step it was set to."""
+    assert isinstance(got, BoxFault), f"the run's failure outranked its stop fault: {got!r}"
+    assert got is not raised, "the run's own exception escaped though its stop failed"
+    step = seam_step(stop)
+    if step is None:
+        assert got.__context__ is raised, f"the run's failure is not the context: {chain(got)}"
+        return
+    assert daemon.seam_raised == [step], f"the seam raised at {daemon.seam_raised}, not {step}"
+    assert raised in chain(got), f"the run's failure was lost: {chain(got)}"
 
 
 # ---------------------------------------------------------------------------------------
@@ -197,7 +242,7 @@ class FakeDaemon:
         daemon_mod.save(self.dir, daemon_mod.fresh_state())
         #: The `Tripwire` on `PATH` beside it, when `boxed` installed one.
         self.tripwire: Tripwire | None = None
-        self._seam_faults: list[tuple[str, str, list[int] | None]] = []
+        self._seam_faults: list[dict[str, Any]] = []
         self._seam_counts: dict[str, int] = {}
         self.seam_raised: list[str] = []
 
@@ -213,20 +258,33 @@ class FakeDaemon:
         """Raise instead of answering, when a `seam_raises` fault is due at this call."""
         step = _step_of(argv)
         self._seam_counts[step] = self._seam_counts.get(step, 0) + 1
-        for kind, want, at in self._seam_faults:
-            if want in ("*", step) and (at is None or self._seam_counts[step] in at):
-                self.seam_raised.append(step)
-                if kind == "OSError":
-                    raise FileNotFoundError(2, "No such file or directory", "docker")
-                raise subprocess.TimeoutExpired(cmd=argv, timeout=120)
+        for fault in self._seam_faults:
+            if fault["step"] not in ("*", step) or not self._seam_due(fault, step):
+                continue
+            self.seam_raised.append(step)
+            if fault["kind"] == "OSError":
+                raise FileNotFoundError(2, "No such file or directory", "docker")
+            raise subprocess.TimeoutExpired(cmd=argv, timeout=120)
 
-    def seam_raises(self, kind: str, *, step: str, at: Iterable[int] | None = None) -> None:
+    def _seam_due(self, fault: dict[str, Any], step: str) -> bool:
+        after_stop = fault["after_stop"]
+        if after_stop is None:
+            return fault["at"] is None or self._seam_counts[step] in fault["at"]
+        if fault["fired"] or self._seam_counts.get("stop", 0) != after_stop:
+            return False
+        fault["fired"] = True
+        return True
+
+    def seam_raises(self, kind: str, *, step: str, at: Iterable[int] | None = None,
+                    after_stop: int | None = None) -> None:
         """Called in process, the daemon raises `kind` instead of answering (`OSError`: no
         docker binary; `TimeoutExpired`: a daemon that never answered): at the `step` calls (as
         `steps` names them, or `"*"` for any) numbered `at` (from 1, counted per step from this
-        daemon's creation), else every one. The call never reaches the daemon's log;
-        `seam_raised` lists each step that raised."""
-        self._seam_faults.append((kind, step, None if at is None else list(at)))
+        daemon's creation), else every one; or, with `after_stop`, at the first `step` call
+        after the `after_stop`-th `docker stop` (the stop's proof, for `step="status"`). The
+        call never reaches the daemon's log; `seam_raised` lists each step that raised."""
+        self._seam_faults.append({"kind": kind, "step": step, "after_stop": after_stop,
+                                  "at": None if at is None else list(at), "fired": False})
 
     def install(self, monkeypatch: Any) -> Path:
         """Put a `docker` program running this daemon first on `PATH`; returns it."""
@@ -313,6 +371,12 @@ class FakeDaemon:
         """`docker stop` takes, and the container is left `dead` rather than `exited` (as
         `refuse_start` picks): nothing runs in it either way."""
         self._verb_fault("stop", "dead", at, times)
+
+    def stop_leaves_it_as(self, status: str, *, at: int) -> None:
+        """The `at`-th `docker stop` answers rc 0 and leaves the container in `status` (`paused`:
+        its processes frozen, not killed; `restarting`), as a daemon may report a stop that did
+        not take."""
+        self._edit(lambda s: s["faults"]["stop"]["leave"].__setitem__(str(at), status))
 
     def refuse_inspect(self, *, at: Iterable[int]) -> None:
         """The `inspect -f` calls numbered `at` (from 1) answer rc 1, as for no such object."""
@@ -549,6 +613,8 @@ def fail_stop(daemon: FakeDaemon, stop: str, *, at: int, inspect_at: int) -> Non
         daemon.stop_takes_no_effect(at=[at])
     elif stop == "status-unanswered":
         daemon.refuse_inspect(at=[inspect_at])
+    elif stop.startswith("proof-seam-"):
+        daemon.seam_raises(stop.removeprefix("proof-seam-"), step="status", after_stop=at)
     else:
         daemon.seam_raises(stop.removeprefix("seam-"), step="stop", at=[at])
 

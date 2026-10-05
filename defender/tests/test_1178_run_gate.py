@@ -40,7 +40,11 @@ log and notes what was running at that moment. A run window is a `docker start` 
   the docker): one create at batch start and its stop before the first claim; the F1 rows; a
   claim's stop fault after a clean agent escapes; nothing is committed or delivered; the
   batch-end `rm -f` removes the box before the scan. A fault creating or checking the box at
-  batch start claims no claim, bumps no attempt and dead-letters nothing.
+  batch start claims no claim, bumps no attempt and dead-letters nothing. A claim a box fault
+  halted is charged its one serve's attempt and no more (N14), and the next tick, the daemon
+  healthy, serves it (`test_a_claim_a_box_fault_halted_is_served_on_the_next_tick`). The deps
+  the claim's spawn binds refuse the handle as its box
+  (`test_the_lead_authors_deps_refuse_the_handle_as_its_box`).
 - The plain-file rule (#1178 D4'', which stands, unchanged): every non-deletion record the gate
   admits must be placed by a held mount and be a plain, single-name regular file there, by a
   no-follow stat (it reads no content). A symlink, a hard link or a FIFO at an address no
@@ -57,6 +61,7 @@ post-create stop and removal in `test_1195_worktree_batch.py`; the real-box row 
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
 import subprocess
 from collections.abc import Callable
@@ -73,8 +78,10 @@ from defender.learning.core import drains, markers, persist
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.leads import lead_author, pitfalls_curator
 from defender.learning.author.shared import AuthorError
+from defender.learning.leads.lead_author_engine import LEAD_AUTHOR_DEF
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.runtime import box as box_mod
+from defender.runtime.agent_definition import bind
 from defender.runtime.box import BoxFault
 from defender.tests import _box1195 as X
 from defender.tests._claim1175 import claim_git
@@ -1107,6 +1114,14 @@ def _attempts(paths: LoopPaths) -> list[Any]:
     return [r.get("attempts") for r in persist.read_pitfalls(paths)]
 
 
+def _claim_attempts(s: LeadScene) -> dict[str, Any]:
+    """Each claimed marker's (`inflight/`) `attempts`: a serve is charged once, before its run
+    (N14), and a box fault charges nothing more."""
+    inflight = s.paths.author_queue_dir / "inflight"
+    return {p.name: json.loads(p.read_text(encoding="utf-8")).get("attempts")
+            for p in sorted(inflight.glob("*.json"))}
+
+
 def test_the_lead_drain_runs_one_window_per_agent_and_none_between(tmp_path: Path, monkeypatch):
     """`_drain_lead_author(..., box=<the batch's stopped box>)` serving one claim and one
     pitfalls tick through the real lanes: each lane handed the handle (F3), and exactly two run
@@ -1151,7 +1166,8 @@ def test_a_claims_run_start_fault_halts_the_lane_and_dead_letters_nothing(
     """Two claims queued; the first claim's run cannot start (refused, not taking, or the box
     found running): a `BoxFault` escapes `_drain_lead_author`. The first claim's agent never
     ran, the second claim is never claimed, the pitfalls tick never runs, nothing is committed,
-    no claim is dead-lettered, and the box is stopped. Control: the next row."""
+    no claim is dead-lettered, the first is charged its one serve's attempt and no more (N14),
+    and the box is stopped. Control: the next row."""
     daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     _start_fault(daemon, fault)
     s = _lead_scene(tmp_path)
@@ -1167,6 +1183,8 @@ def test_a_claims_run_start_fault_halts_the_lane_and_dead_letters_nothing(
         "the lane went on to serve another claim")
     assert lanes.pitfalls_ticks == 0, "the pitfalls tick ran after a box fault"
     assert _failed(s) == [], "a claim was dead-lettered for a box that would not start"
+    assert _claim_attempts(s) == {"case-run-0.json": 1}, (
+        f"the box fault charged the claim more than its one serve: {_claim_attempts(s)}")
     assert _git.git_head_sha(s.repo) == s.head
     assert daemon.status(NAME) == "exited"
 
@@ -1203,7 +1221,8 @@ def test_a_claims_stop_fault_after_a_clean_agent_halts_the_lane(
         tmp_path: Path, monkeypatch, stop: str):
     """Two claims queued; the first claim's agent leaves a valid draft and returns 0, then its
     run's stop fails: a `BoxFault` escapes `_drain_lead_author`. Nothing is committed, the second
-    claim is never claimed, the pitfalls tick never runs, and no claim is dead-lettered.
+    claim is never claimed, the pitfalls tick never runs, no claim is dead-lettered, and the
+    first is charged its one serve's attempt and no more (N14).
     Control: `test_the_lead_drain_runs_one_window_per_agent_and_none_between` (the stop
     taking)."""
     daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
@@ -1221,6 +1240,8 @@ def test_a_claims_stop_fault_after_a_clean_agent_halts_the_lane(
         "the lane went on to serve another claim")
     assert lanes.pitfalls_ticks == 0, "the pitfalls tick ran after a box fault"
     assert _failed(s) == [], "a claim was dead-lettered for a box that would not stop"
+    assert _claim_attempts(s) == {"case-run-0.json": 1}, (
+        f"the box fault charged the claim more than its one serve: {_claim_attempts(s)}")
     assert _git.git_head_sha(s.repo) == s.head, "a commit landed beside a box that would not stop"
 
 
@@ -1299,11 +1320,12 @@ def _claim_then_pitfalls(tmp_path: Path, monkeypatch: Any
             _git.git_show_file(s.repo, "HEAD", EXECUTION_REL))
 
 
-#: What the pitfalls curator raises inside its run: `AuthorError` (a `RETIRE_SET` member) and a
-#: crash; either retires the tick's batch, bumping its rows.
+#: What the pitfalls curator raises inside its run: `AuthorError` (a `RETIRE_SET` member), a
+#: crash, and its own process faults; each retires the tick's batch, bumping its rows.
 PITFALLS_F1_FAILURES = [
     pytest.param(lambda: AuthorError("the curator refused"), id="AuthorError"),
     pytest.param(lambda: RuntimeError("the curator crashed"), id="RuntimeError"),
+    *X.PROCESS_FAULTS,
 ]
 
 
@@ -1312,8 +1334,9 @@ PITFALLS_F1_FAILURES = [
 def test_a_stop_fault_under_a_failing_curator_halts_the_lane_and_bumps_no_pitfalls_row(
         tmp_path: Path, monkeypatch, failure: Any, stop: str):
     """F1, with no later run: `_drain_lead_author` over one claim (whose run holds and commits)
-    and the pitfalls tick, the last run of the batch. The curator raises X inside its run and
-    the run's stop fails (refused, without effect, unproven, the seam raising): a `BoxFault`
+    and the pitfalls tick, the last run of the batch. The curator raises X inside its run (a
+    refusal, a crash, its CLI timing out, its pipe breaking) and the run's stop fails (refused,
+    without effect, unproven, the seam raising at the stop or at its proof): a `BoxFault`
     escapes, never X, with X in its chain (its `__context__`, behind the seam's own exception
     when the seam raised). No pitfalls row's attempts change, and the curator's edit is not
     committed. Control (`holds`): X is handled as before: the drain retires the tick's batch as
@@ -1344,12 +1367,7 @@ def test_a_stop_fault_under_a_failing_curator_halts_the_lane_and_bumps_no_pitfal
         assert got is None, got
         assert _attempts(s.paths) == [1] * len(attempts_before), _attempts(s.paths)
         return
-    assert isinstance(got, BoxFault), f"the curator's failure outranked its stop fault: {got!r}"
-    if stop.startswith("seam-"):
-        assert daemon.seam_raised == ["stop"], daemon.seam_raised
-        assert raised in X.chain(got), X.chain(got)
-    else:
-        assert got.__context__ is raised, X.chain(got)
+    X.assert_the_stop_fault_won(got, raised, daemon, stop)
     assert _attempts(s.paths) == attempts_before, "a pitfalls row was bumped for a box fault"
 
 
@@ -1474,6 +1492,8 @@ def test_a_run_start_fault_through_the_default_claim_step_halts_the_lane(
     assert queued == ["case-claim-1.json"], (
         f"the next claim was served, or the first handed back as a transient: {queued}")
     assert claimed == ["case-claim-0.json"], claimed
+    assert _claim_attempts(s) == {"case-claim-0.json": 1}, (
+        f"the box fault charged the claim more than its one serve: {_claim_attempts(s)}")
 
 
 def test_a_run_start_fault_through_the_default_pitfalls_step_halts_the_lane(
@@ -1550,10 +1570,12 @@ def _kept(daemon: X.FakeDaemon) -> list[str]:
 
 
 #: What the first claim's agent raises inside its run: the gate's own refusal, which
-#: dead-letters the claim, and a crash, dead-lettered the same way.
+#: dead-letters the claim, and a crash and the agent's own process faults (its CLI timing out,
+#: its pipe breaking), dead-lettered the same way.
 LEAD_F1_FAILURES = [
     pytest.param(lambda: LeadAuthorError("the agent failed"), id="LeadAuthorError"),
     pytest.param(lambda: RuntimeError("the agent crashed"), id="RuntimeError"),
+    *X.PROCESS_FAULTS,
 ]
 
 
@@ -1564,10 +1586,12 @@ def test_a_stop_fault_under_a_failing_agent_halts_the_lead_drain_with_the_failur
         tmp_path: Path, monkeypatch, failure: Any, stop: str, follows: str):
     """F1 through `lead_author_drain` as production wires it (only `start_box=` bringing the
     docker; the lanes, the branch and the scan injected). The first claim's agent raises X
-    inside its run, and its run's stop fails (refused, without effect, unproven, the seam
-    raising): a `BoxFault` escapes at once, never X, with X as its `__context__` (behind the
+    inside its run (a refusal, a crash, its CLI timing out, its pipe breaking), and its run's
+    stop fails (refused, without effect, unproven, the seam raising at the stop or at its
+    proof): a `BoxFault` escapes at once, never X, with X as its `__context__` (behind the
     seam's own exception when the seam raised). So X is never handled as X: no claim is
-    dead-lettered (the first stays claimed for the next tick's reclaim), nothing is committed or
+    dead-lettered (the first stays claimed for the next tick's reclaim, charged its one serve's
+    attempt and no more), nothing is committed or
     delivered, the pitfalls tick never runs, and no later `docker start` is asked, whether a
     second claim waits (`next-claim`, whose run would refuse beside the box) or nothing does
     (`nothing-follows`, where no later run would catch a box left running). The batch-end
@@ -1604,14 +1628,11 @@ def test_a_stop_fault_under_a_failing_agent_halts_the_lead_drain_with_the_failur
             assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED
             assert any(e.startswith("finish_batch:") for e in events), events
         return
-    assert isinstance(got, BoxFault), f"the agent's failure outranked its stop fault: {got!r}"
-    if stop.startswith("seam-"):
-        assert daemon.seam_raised == ["stop"], daemon.seam_raised
-        assert raised in X.chain(got), X.chain(got)
-    else:
-        assert got.__context__ is raised, X.chain(got)
+    X.assert_the_stop_fault_won(got, raised, daemon, stop)
     assert X.POINTER not in str(got), f"a mid-batch box fault got a build pointer: {got}"
     assert _failed(s) == [], "a claim was dead-lettered under a box fault"
+    assert _claim_attempts(s) == {"case-run-0.json": 1}, (
+        f"the box fault charged the claim more than its one serve: {_claim_attempts(s)}")
     assert _claim_files(s) == (["case-run-1.json"] if follows == "next-claim" else [],
                                ["case-run-0.json"]), _claim_files(s)
     assert kept[:4] == ["create", "stop", "start", "agent:run-0"], kept
@@ -1660,6 +1681,65 @@ def test_a_claims_stop_fault_after_a_clean_agent_halts_the_production_drain(
     assert _git.git_head_sha(s.repo) == s.head, "a commit landed beside a box that would not stop"
     assert not any(e.startswith("finish_batch:") for e in events), events
     assert _failed(s) == [], "the claim was dead-lettered for a box that would not stop"
+    assert _claim_attempts(s) == {"case-run-0.json": 1}, (
+        f"the box fault charged the claim more than its one serve: {_claim_attempts(s)}")
+
+
+def test_a_claim_a_box_fault_halted_is_served_on_the_next_tick(tmp_path: Path, monkeypatch):
+    """N14/O5: tick 1 (`lead_author_drain` as production wires it, one claim) halts on its run's
+    stop, refused after a clean agent: the claim stays claimed, charged its one serve's attempt.
+    Tick 2, the daemon healthy, reclaims and serves it: the agent runs again in a window of its
+    own, the draft is committed and the batch delivered, and the claim is never quarantined or
+    dead-lettered. A box fault that charged the claim every attempt it had left would have tick
+    2 quarantine it unserved."""
+    s, daemon = _production_lead_scene(tmp_path, monkeypatch, "run-0")
+    served: list[str] = []
+
+    def author(run_dir: Path) -> None:
+        daemon.mark(f"agent:{run_dir.name}")
+        served.append(run_dir.name)
+        write(s.at(AGENT_NAME), VETTED)
+        if len(served) == 1:
+            daemon.refuse_stop()  # tick 1's run only
+
+    got1, _lanes, events1, _watch = _production_lead_drain(s, daemon, author)
+    assert isinstance(got1, BoxFault), f"tick 1 did not halt on its box fault: {got1!r}"
+    assert not any(e.startswith("finish_batch:") for e in events1), events1
+    assert _claim_attempts(s) == {"case-run-0.json": 1}, _claim_attempts(s)
+
+    got2, _lanes, events2, watch2 = _production_lead_drain(s, daemon, author)
+
+    assert got2 is None, f"tick 2 did not serve the claim: {got2!r}"
+    assert served == ["run-0", "run-0"], f"tick 2 did not serve the claim again: {served}"
+    assert _failed(s) == [], f"the claim was quarantined or dead-lettered: {_failed(s)}"
+    assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED
+    assert any(e.startswith("finish_batch:") for e in events2), events2
+    assert _claim_files(s) == ([], []), _claim_files(s)
+    watch2.assert_scanned_once_the_box_was_gone()
+    X.no_path_docker(daemon)
+
+
+@pytest.mark.parametrize("handed", ["handle", "executor"])
+def test_the_lead_authors_deps_refuse_the_handle_as_its_box(tmp_path: Path, monkeypatch,
+                                                            handed: str):
+    """O6/F3: the deps the claim's spawn binds (`bind(LEAD_AUTHOR_DEF, ..., box=...)`, as
+    `lead_author_engine` does), handed the run handle where the executor belongs: refused
+    (`AgentDeps.box` validates `BoxLike`, which the handle is not), and nothing starts the box.
+    Control (`executor`): the deps bind, holding the executor."""
+    daemon, box, runs = X.boxed(tmp_path, monkeypatch, NAME)
+    s = _lead_scene(tmp_path)
+    built: list[Any] = []
+    got = X.caught(lambda: built.append(bind(
+        LEAD_AUTHOR_DEF, s.run_dir, defender_dir=s.repo / "defender",
+        box=runs if handed == "handle" else box)))
+    assert daemon.docker_calls() == [], f"binding the spawn's deps asked docker: {daemon.steps()}"
+    X.no_path_docker(daemon)
+    if handed == "executor":
+        assert got is None, got
+        assert built[0].box is box
+        return
+    assert isinstance(got, ValueError), f"the spawn's deps took the run handle as its box: {got!r}"
+    assert built == []
 
 
 @pytest.mark.parametrize(("knob", "kind", "pointed"), X.BATCH_START_FAULTS)

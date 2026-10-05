@@ -27,8 +27,8 @@ the way a daemon does and answers each verb the box code asks.
   running answers rc 1.
 - `start <name>`: `exited` (or `created`) -> `running`. On a container already running it
   answers rc 0 and changes nothing, as docker does (#1195 C3). A paused or dead one is refused.
-- `stop [-t N] <name>`: `running` (or `paused`) -> `exited` (or `dead`, under a `dead` fault);
-  rc 0 and no change on one that is not running.
+- `stop [-t N] <name>`: `running` (or `paused`) -> `exited` (or `dead`, under a `dead` fault, or
+  whatever status a `leave` fault names); rc 0 and no change on one that is not running.
 - `rm -f <name>`: removes it (rc 0 whether or not it existed, as docker 29 does), unless an
   `rm` fault is pending: then rc 1 and the container stays as it was.
 
@@ -65,7 +65,7 @@ def fresh_state() -> dict:
         "faults": {"rm": 0, "alias_allowed": False, "down": False, "create": False,
                    "sentinel": False,
                    "start": {"refuse": [], "noop": []},
-                   "stop": {"refuse": [], "noop": [], "dead": []},
+                   "stop": {"refuse": [], "noop": [], "dead": [], "leave": {}},
                    "inspect": {"refuse": []}},
         "counts": {"start": 0, "stop": 0, "inspect": 0, "boot": 0},
         "on": {"start": [], "stop": []},
@@ -159,7 +159,8 @@ def _run_verb(state: dict, verb: str, name: str) -> tuple[int, str, str]:
         return 0, f"{name}\n", ""
     if box["status"] in ("running", "paused"):
         _box_writes(state["on"]["stop"], n)
-        box["status"] = "dead" if _due(faults.get("dead", []), n) else "exited"
+        left = faults.get("leave", {}).get(str(n))
+        box["status"] = left or ("dead" if _due(faults.get("dead", []), n) else "exited")
     return 0, f"{name}\n", ""
 
 

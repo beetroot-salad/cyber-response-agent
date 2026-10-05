@@ -39,11 +39,19 @@ Tests -> obligations:
   window per spawn, `rm -f` before the scan; the executor carrying the docker it was created
   with, or production's default): `test_the_production_drain_runs_one_box_stopped_between_its_agent_runs`.
 - F1 (O5): `test_a_stop_fault_under_a_failing_spawn_halts_author_drain_with_the_failure_as_context`
-  (`RuntimeError`, `AuthorError`, `ModelRetry` x a stop refused, without effect, unproven, the
-  seam raising x the questioner following or nothing following; the `holds` control handles
-  each as before), and through the DEFAULT curator step,
+  (`RuntimeError`, `AuthorError`, `ModelRetry`, the spawn's own `TimeoutExpired` or `OSError`
+  x a stop refused, without effect, unproven, the seam raising at the stop or at its proof x
+  the questioner following or nothing following; the `holds` control handles each as
+  before); the same at the repair spawn,
+  `test_a_stop_fault_under_a_failing_repair_halts_author_drain_with_the_failure_as_context`;
+  and through the DEFAULT curator step,
   `test_a_stop_fault_under_a_failing_default_spawn_halts_the_drain` (the batch box's whole
-  docker sequence: nothing after the failed stop but the removal).
+  docker sequence: nothing after the failed stop but the removal) and
+  `test_a_seam_fault_at_the_stops_proof_through_the_default_curator_step_halts_the_drain`
+  (the proof asked through `_call`, so the seam's fault is a `BoxFault`, nothing delivered).
+- O6/F3, the deps a lessons spawn binds: `test_a_lessons_spawns_deps_refuse_the_handle_as_its_box`
+  (the curator's and the repair's front doors refuse the handle and start nothing; the
+  executor binds).
 - E3' (N11''): `test_a_swallowed_stop_fault_makes_the_next_curators_run_refuse` (a trigger that
   swallows the `BoxFault`; with its `holds` control).
 - O4, batch start: `test_a_batch_start_fault_charges_no_curator_row_and_writes_no_stuck_record`
@@ -89,6 +97,8 @@ from pydantic_ai.exceptions import ModelRetry
 from defender import _git, _io
 from defender._git import GitError
 from defender._io import NotPlainEntry
+from defender.learning.author.curator_engine import CorpusRepairDeps, CuratorDeps
+from defender.learning.author.drain import RETIRE_SET
 from defender.learning.core import config as author_config
 from defender.learning.core import drains
 from defender.learning.core.config import FatalConfigError, LoopPaths, StageAbort
@@ -593,16 +603,17 @@ F1_FAILURES = [
     pytest.param(lambda: RuntimeError("the agent crashed"), id="RuntimeError"),
     pytest.param(lambda: S.author_error("the agent's report was refused"), id="AuthorError"),
     pytest.param(lambda: ModelRetry("the model gave up retrying"), id="ModelRetry"),
+    *X.PROCESS_FAULTS,
 ]
 
 
 def _assert_handled_as_before(t: Tick, raised: BaseException, got: BaseException | None,
                               events: list[str], *, follows: bool) -> None:
     """The F1 control: the run's stop held, so the spawn's failure is handled as without a box
-    (a crash contained and recorded stuck; a retiring fault bumping f1), the questioner curator
-    is served when it has a row, and the batch is delivered."""
+    (a crash or a process fault contained and recorded stuck; a retiring fault bumping f1), the
+    questioner curator is served when it has a row, and the batch is delivered."""
     assert got is None, got
-    retiring = not isinstance(raised, RuntimeError)
+    retiring = isinstance(raised, RETIRE_SET)
     assert t.sc.pending_by_id()["f1"].get("attempts") == (1 if retiring else None)
     assert _stuck_classes(t.paths, "findings") == [type(raised).__name__]
     assert t.modules() == ["author", "questioner_curator"]
@@ -653,22 +664,81 @@ def test_a_stop_fault_under_a_failing_spawn_halts_author_drain_with_the_failure_
     if stop == "holds":
         _assert_handled_as_before(t, raised, got, events, follows=follows)
         return
-    assert isinstance(got, BoxFault), f"the spawn's failure outranked its stop fault: {got!r}"
-    assert got is not raised
-    if stop.startswith("seam-"):
-        assert daemon.seam_raised == ["stop"], daemon.seam_raised
-        assert raised in X.chain(got), f"the spawn's failure was lost: {X.chain(got)}"
-    else:
-        assert got.__context__ is raised, f"the spawn's failure is not the context: {X.chain(got)}"
+    X.assert_the_stop_fault_won(got, raised, daemon, stop)
+    _assert_halted_by_the_stop_fault(t, got, q_curator, daemon, events, starts=1)
+
+
+def _assert_halted_by_the_stop_fault(  # noqa: PLR0913 — one halted tick's whole record
+        t: Tick, got: BaseException | None, q_curator: S.FakeCurator, daemon: X.FakeDaemon,
+        events: list[str], *, starts: int) -> None:
+    """F1 through `author_drain`: the stop fault halted the drain in the lessons curator, so the
+    spawn's failure was never handled as itself. No build pointer; f1 not bumped by
+    `_handle_retire`; the findings channel's stuck record names `BoxFault`; the questioner
+    curator never triggered; no start after the faulting run's (`starts` in all); nothing
+    committed or delivered."""
     assert X.POINTER not in str(got), f"a mid-batch box fault got a build pointer: {got}"
     assert t.sc.pending_by_id()["f1"].get("attempts") is None, "f1 was bumped for a box fault"
     assert _stuck_classes(t.paths, "findings") == ["BoxFault"]
     assert t.modules() == ["author"], "the drain went on past a box that would not stop"
     assert q_curator.calls == []
     assert _stuck_classes(t.paths, "questioner_findings") == []
-    assert daemon.steps().count("start") == 1, daemon.steps()
+    assert daemon.steps().count("start") == starts, daemon.steps()
     assert t.sc.head_files() == [], "a commit landed beside a box that would not stop"
     assert not any(e.startswith("finish_batch:") for e in events), events
+
+
+#: What the repair raises inside its run: the retiring `AuthorError` and `ModelRetry`, a crash,
+#: and its own CLI timing out.
+REPAIR_F1_FAILURES = [
+    pytest.param(lambda: S.author_error("the repair's report was refused"), id="AuthorError"),
+    pytest.param(lambda: ModelRetry("the repair gave up retrying"), id="ModelRetry"),
+    pytest.param(lambda: RuntimeError("the repair crashed"), id="RuntimeError"),
+    pytest.param(X.spawn_timeout, id="TimeoutExpired"),
+]
+
+
+@pytest.mark.parametrize("follows", [True, False], ids=["questioner-follows", "nothing-follows"])
+@pytest.mark.parametrize("stop", [*X.STOP_FAULTS, "holds"])
+@pytest.mark.parametrize("failure", REPAIR_F1_FAILURES)
+def test_a_stop_fault_under_a_failing_repair_halts_author_drain_with_the_failure_as_context(
+        tmp_path: Path, monkeypatch, failure: Any, stop: str, follows: bool):
+    """F1 at the repair spawn, through `author_drain` (only `start_box=` bringing the docker):
+    the curator leaves `a.md`, judged BAD, so the repair runs in a window of its own; it rewrites
+    `a.md` and raises X (`AuthorError`, `ModelRetry`, a crash, its CLI timing out), and its
+    run's stop fails (refused, without effect, unproven, the seam raising at the stop or at its
+    proof). A `BoxFault` escapes, never X, with X as its context: the repair's refusal is not the
+    tick's verdict on its rows. f1 is not bumped, the lesson is undone, the questioner curator
+    is never triggered, with a row to run or none, and nothing is committed or delivered.
+    Control (`holds`): X is handled as the curator spawn's is."""
+    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
+    daemon = X.FakeDaemon(tmp_path)
+    daemon.tripwire = X.Tripwire(tmp_path).install(monkeypatch)
+    raised = failure()
+
+    def crash(*_a: Any) -> None:
+        if stop != "holds":  # 1: the post-create stop; 2: the curator's run's; 3: the repair's
+            X.fail_stop(daemon, stop, at=3, inspect_at=daemon.inspect_count() + 1)
+        raise raised
+
+    curator = S.FakeCurator(writes={"a.md": S.lesson("f1")})
+    repair = S.FakeRepair(writes={"a.md": REPAIRED}, also=crash)
+    q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")})
+    t = _tick(tmp_path, [], curator=curator, q_curator=q_curator,
+              verifier=_verifier([], {"a.md": ["BAD", "GOOD"]}), repair=repair,
+              q_rows=("w1",) if follows else ())
+    run, events, watch = _lane(t, daemon)
+
+    got = X.caught(run)
+
+    assert repair.spawned == 1, "the repair never ran, so the row is vacuous"
+    assert not (t.sc.corpus / "a.md").exists(), "the tick's lesson was not undone"
+    watch.assert_scanned_once_the_box_was_gone()
+    X.no_path_docker(daemon)
+    if stop == "holds":
+        _assert_handled_as_before(t, raised, got, events, follows=follows)
+        return
+    X.assert_the_stop_fault_won(got, raised, daemon, stop)
+    _assert_halted_by_the_stop_fault(t, got, q_curator, daemon, events, starts=2)
 
 
 # ---------------------------------------------------------------------------------------
@@ -902,6 +972,77 @@ def test_a_stop_fault_under_a_failing_default_spawn_halts_the_drain(tmp_path: Pa
     assert sc.paths.questioner_findings.file.read_bytes() == q_before
     assert _stuck_classes(sc.paths, "questioner_findings") == []
     assert not any(e.startswith("finish_batch:") for e in events), events
+
+
+@pytest.mark.parametrize("proof", ["seam-OSError", "seam-TimeoutExpired", "holds"])
+def test_a_seam_fault_at_the_stops_proof_through_the_default_curator_step_halts_the_drain(
+        tmp_path: Path, monkeypatch, proof: str):
+    """`author_drain` with every default but the docker, the questioner below its threshold
+    (nothing follows), and an unroutable curator model: the findings curator's real spawn raises
+    `FatalConfigError` inside its run's window. Its run's stop takes no effect (the box keeps
+    running), and the status asked after it, the stop's proof, raises at the seam (no binary, a
+    daemon that never answered). The proof goes through `_call`, so that is a `BoxFault`: it
+    escapes `author_drain`, the findings channel records it, and nothing is delivered. A raw
+    `OSError` or `TimeoutExpired` would be contained above `run_batch` as a crash, and the batch
+    would deliver beside a running box. Control (`holds`): the stop takes and is proven; the
+    `FatalConfigError` is contained and `author_drain` returns."""
+    sc, daemon = _default_scene(tmp_path, monkeypatch, findings=True)
+    monkeypatch.setenv("LEARNING_AUTHOR_MODEL", "no-such-model-1195")
+    monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "99")
+    if proof != "holds":
+        daemon.stop_takes_no_effect(at=[2])  # 1: the post-create stop; 2: the findings run's
+        daemon.seam_raises(proof.removeprefix("seam-"), step="status", after_stop=2)
+    events: list[str] = []
+    watch = X.ScanWatch(daemon, events)
+
+    got = _default_drain(sc, daemon, events, watch)
+
+    watch.assert_scanned_once_the_box_was_gone()
+    X.no_path_docker(daemon)
+    assert sc.head_sha() == sc.base_sha
+    if proof == "holds":
+        assert got is None, got
+        assert _stuck_classes(sc.paths, "findings") == ["FatalConfigError"], (
+            "the findings curator's spawn never ran in its window")
+        return
+    assert daemon.seam_raised == ["status"], (daemon.seam_raised, daemon.steps())
+    assert isinstance(got, BoxFault), f"the stop's proof escaped as {got!r}"
+    assert any(isinstance(e, FatalConfigError) for e in X.chain(got)), X.chain(got)
+    assert _stuck_classes(sc.paths, "findings") == ["BoxFault"]
+    assert not any(e.startswith("finish_batch:") for e in events), (
+        f"the batch delivered beside a box whose stop was never proven: {events}")
+
+
+# ---------------------------------------------------------------------------------------
+# O6/F3: a lessons spawn's deps refuse the handle as its box
+# ---------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("handed", ["handle", "executor"])
+@pytest.mark.parametrize("front_door", ["curator", "repair"])
+def test_a_lessons_spawns_deps_refuse_the_handle_as_its_box(tmp_path: Path, monkeypatch,
+                                                            front_door: str, handed: str):
+    """The deps a lessons spawn binds through its real front door (`CuratorDeps.for_run`,
+    `CorpusRepairDeps.for_run`, over the tick's corpus), handed the run handle where the
+    executor belongs, as a spawn handed `cfg.box` outside a window would be: refused
+    (`AgentDeps.box` validates `BoxLike`, which the handle is not), and nothing starts the box
+    for it. Control (`executor`): the deps bind, holding the executor."""
+    daemon, box, runs = X.boxed(tmp_path, monkeypatch, NAME)
+    sc = S.build_scene(tmp_path, curator=S.FakeCurator())
+    spawn_dir = tmp_path / "spawn1195"
+    spawn_dir.mkdir()
+    deps_cls = CuratorDeps if front_door == "curator" else CorpusRepairDeps
+    built: list[Any] = []
+    got = X.caught(lambda: built.append(deps_cls.for_run(
+        spawn_dir, sc.repo, sc.corpus, box=runs if handed == "handle" else box)))
+    assert daemon.docker_calls() == [], f"binding a spawn's deps asked docker: {daemon.steps()}"
+    X.no_path_docker(daemon)
+    if handed == "executor":
+        assert got is None, got
+        assert built[0].box is box
+        return
+    assert isinstance(got, ValueError), f"the spawn's deps took the run handle as its box: {got!r}"
+    assert built == []
 
 
 # ---------------------------------------------------------------------------------------
