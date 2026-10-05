@@ -55,6 +55,7 @@ from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_
 from defender.runtime import box as box_mod
 from defender.runtime.box import AliasBanNotInForce, BoxFault, unboxed_executor
 from defender.tests import _box1195 as X
+from defender.tests import _state1135
 from defender.tests._spec1092 import GitWorktreeBranch
 from defender.tests.e2e._box665 import RecordingBranch, loop_paths
 
@@ -83,14 +84,20 @@ def _batch_id(events: list[str]) -> str:
 def _drive(tmp_path: Path, *, do_work: Any, start_box: Any, events: list, scrub: Any,
            stop_box: Any = box_mod.stop_box, branch: Any = None,
            label: Any = AUTHOR_DRAIN_LABEL) -> tuple[BaseException | None, Any]:
-    """`_run_worktree_batch` over a recording branch (or `branch`): what it raised, and the
-    branch."""
+    """`_run_worktree_batch` over a recording branch (or `branch`), with the learning-state
+    handle over the scene's root as a lane's entry opens it: what it raised, and the branch."""
     branch = (  # lint-default: ok — the default is built from this call's tmp_path and events
         branch if branch is not None else RecordingBranch(tmp_path / "wt", events=events))
-    got = X.caught(lambda: drains._run_worktree_batch(
-        loop_paths(tmp_path), branch, label=label, has_work=lambda _p: True, do_work=do_work,
-        start_box=start_box, stop_box=stop_box, scrub=scrub,
-    ))
+    paths = loop_paths(tmp_path)
+
+    def batch() -> int:
+        with _state1135.state_for_paths(paths) as state:
+            return drains._run_worktree_batch(
+                paths, state, branch, label=label, has_work=lambda _state: True,
+                do_work=do_work, start_box=start_box, stop_box=stop_box, scrub=scrub,
+            )
+
+    got = X.caught(batch)
     return got, branch
 
 

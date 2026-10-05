@@ -102,11 +102,13 @@ from defender.learning.author.drain import RETIRE_SET
 from defender.learning.core import config as author_config
 from defender.learning.core import drains
 from defender.learning.core.config import FatalConfigError, LoopPaths, StageAbort
+from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
 from defender.runtime import box as box_mod
 from defender.runtime import providers
 from defender.runtime.box import BoxFault
 from defender.runtime.verbs import RegistryError
 from defender.tests import _box1195 as X
+from defender.tests import _state1135
 from defender.tests import _spec773 as S
 from defender.tests._curator1134 import (
     JournalHeld,
@@ -193,7 +195,7 @@ class Spawn:
 
 
 def _queue_files(paths: LoopPaths) -> tuple[Path, ...]:
-    return (paths.findings.file, paths.questioner_findings.file)
+    return (paths.state_root / FINDINGS.queue, paths.state_root / QUESTIONER_FINDINGS.queue)
 
 
 def _queued(paths: LoopPaths) -> tuple[bytes | None, ...]:
@@ -286,7 +288,12 @@ class Tick:
     def paths(self) -> LoopPaths:
         return self.sc.paths
 
-    def trigger(self, _paths: LoopPaths, _pending_file: Path, _threshold_env: str,
+    @property
+    def state(self) -> Any:
+        """The learning-state handle the lessons curator's config holds, over the tick's root."""
+        return self.sc.cfg.state
+
+    def trigger(self, _paths: LoopPaths, _state: Any, _channel: Any, _threshold_env: str,
                 module_name: str, _pending_label: str, *, box: Any = None) -> None:
         self.log.append(("trigger", module_name))
         self.triggered.append((module_name, box))
@@ -309,7 +316,7 @@ def _tick(  # noqa: PLR0913 — one tick's two curators, every seam a row varies
     """The lessons curator over `f1` (`curator`, `verifier`, `repair`) and the questioner curator
     over `q_rows` (`q_curator`, no forward check), in one worktree."""
     sc = S.build_scene(tmp_path, curator=curator, seed_corpus=seed_corpus)
-    S.seed(sc.paths.questioner_findings, [S.world_row(i) for i in q_rows])
+    S.seed(sc.paths, QUESTIONER_FINDINGS, [S.world_row(i) for i in q_rows])
     lessons = _wire(sc.cfg, log, curator=curator, verifier=verifier, repair=repair,
                     journal=journal, on_place=on_place)
     questioner = _wire(questioner_cfg(sc.paths), log, curator=q_curator, journal=journal)
@@ -321,7 +328,7 @@ def _questioner_rel(t: Tick, name: str) -> str:
 
 
 def _stuck_classes(paths: LoopPaths, channel: str) -> list[str]:
-    return [r.get("fault_class") for r in S.stuck_records(getattr(paths, channel))]
+    return [r.get("fault_class") for r in S.stuck_records(paths, S.channel_of(channel))]
 
 
 def _seeing_box(fn: Callable[..., Any], seen: list) -> Callable[..., Any]:
@@ -418,7 +425,7 @@ def test_one_tick_runs_one_window_per_spawn_across_both_curators(tmp_path: Path,
               verifier=_verifier(log, {"a.md": ["BAD", "GOOD"]}),
               repair=S.FakeRepair(writes={"a.md": REPAIRED}), journal=True)
 
-    drains._drain_curators(t.paths, t.trigger, box=runs)
+    drains._drain_curators(t.paths, t.state, t.trigger, box=runs)
 
     assert t.modules() == ["author", "questioner_curator"]
     assert all(b is runs for _, b in t.triggered), "a curator was handed something but the handle"
@@ -469,7 +476,7 @@ def test_the_pre_state_is_captured_before_the_run_starts(tmp_path: Path, monkeyp
     assert rc == 2
     assert sc.head_files() == []
     assert sc.pending_by_id()["f1"].get("attempts") == 1
-    assert any(STRAY_REL in str(r.get("reason")) for r in S.stuck_records(sc.channel))
+    assert any(STRAY_REL in str(r.get("reason")) for r in S.stuck_records(sc.paths, sc.channel))
     assert stray.read_text() == "committed\n"
 
 
@@ -488,7 +495,7 @@ def test_a_failing_spawns_box_is_stopped_before_the_undo_runs(tmp_path: Path, mo
     q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")})
     t = _tick(tmp_path, log, curator=curator, q_curator=q_curator, journal=True)
 
-    drains._drain_curators(t.paths, t.trigger, box=runs)
+    drains._drain_curators(t.paths, t.state, t.trigger, box=runs)
 
     log.assert_runs_hold_exactly(["agent", "agent"], SPAWN_KINDS)
     undo = [i for i, e in enumerate(log) if e == ("unlink", "a.md")]
@@ -767,10 +774,10 @@ def test_a_swallowed_stop_fault_makes_the_next_curators_run_refuse(tmp_path: Pat
     t = _tick(tmp_path, [], curator=curator, q_curator=q_curator)
     masked: list[BoxFault] = []
 
-    def swallowing(paths: LoopPaths, file: Path, env: str, module_name: str, label: str, *,
-                   box: Any = None) -> None:
+    def swallowing(paths: LoopPaths, state: Any, channel: Any, env: str, module_name: str,
+                   label: str, *, box: Any = None) -> None:
         try:
-            t.trigger(paths, file, env, module_name, label, box=box)
+            t.trigger(paths, state, channel, env, module_name, label, box=box)
         except BoxFault as e:
             if module_name != "author":
                 raise
@@ -860,7 +867,7 @@ def _default_scene(tmp_path: Path, monkeypatch: Any, *, findings: bool
     X.clear_opt_out(monkeypatch)
     _ambient_verifier_key(monkeypatch)
     sc = S.build_scene(tmp_path, rows=[S.finding_row("f1", run_id="f1")] if findings else [])
-    S.seed(sc.paths.questioner_findings, [S.world_row("w1")])
+    S.seed(sc.paths, QUESTIONER_FINDINGS, [S.world_row("w1")])
     X.plant_image_inputs(sc.repo)
     S.git(sc.repo, "add", "-A", "--", "defender")
     S.git(sc.repo, "commit", "-q", "-m", "the box image inputs")
@@ -903,7 +910,7 @@ def test_a_run_start_fault_through_the_default_curator_step_halts_the_drain(
     asks the daemon anything outside its run."""
     sc, daemon = _default_scene(tmp_path, monkeypatch, findings=queued == "both")
     daemon.refuse_start(at=[1])
-    q_before = sc.paths.questioner_findings.file.read_bytes()
+    q_before = (sc.paths.state_root / QUESTIONER_FINDINGS.queue).read_bytes()
     events: list[str] = []
     watch = X.ScanWatch(daemon, events)
 
@@ -921,7 +928,7 @@ def test_a_run_start_fault_through_the_default_curator_step_halts_the_drain(
         return
     assert _stuck_classes(sc.paths, "findings") == ["BoxFault"], (
         "the box fault was not the findings curator's own")
-    assert sc.paths.questioner_findings.file.read_bytes() == q_before, (
+    assert (sc.paths.state_root / QUESTIONER_FINDINGS.queue).read_bytes() == q_before, (
         "the questioner's queue moved after the findings curator's box fault")
     assert _stuck_classes(sc.paths, "questioner_findings") == [], (
         "the questioner curator was served after the findings curator's box fault")
@@ -948,7 +955,7 @@ def test_a_stop_fault_under_a_failing_default_spawn_halts_the_drain(tmp_path: Pa
     monkeypatch.setenv("LEARNING_AUTHOR_MODEL", "no-such-model-1195")
     if stop == "refused":
         daemon.refuse_stop(at=[2])  # 1: the post-create stop; 2: the findings curator's run
-    q_before = sc.paths.questioner_findings.file.read_bytes()
+    q_before = (sc.paths.state_root / QUESTIONER_FINDINGS.queue).read_bytes()
     events: list[str] = []
     watch = X.ScanWatch(daemon, events)
 
@@ -969,7 +976,7 @@ def test_a_stop_fault_under_a_failing_default_spawn_halts_the_drain(tmp_path: Pa
     assert isinstance(got.__context__, FatalConfigError), X.chain(got)
     assert _stuck_classes(sc.paths, "findings") == ["BoxFault"]
     assert calls == [*first_run, "rm"], f"the daemon was asked after the failed stop: {calls}"
-    assert sc.paths.questioner_findings.file.read_bytes() == q_before
+    assert (sc.paths.state_root / QUESTIONER_FINDINGS.queue).read_bytes() == q_before
     assert _stuck_classes(sc.paths, "questioner_findings") == []
     assert not any(e.startswith("finish_batch:") for e in events), events
 
@@ -1051,8 +1058,8 @@ def test_a_lessons_spawns_deps_refuse_the_handle_as_its_box(tmp_path: Path, monk
 
 
 def _raising_trigger(calls: list[str], fault: BaseException) -> Callable[..., None]:
-    def trigger(_paths: LoopPaths, _file: Path, _env: str, module_name: str, _label: str, *,
-                box: Any = None) -> None:
+    def trigger(_paths: LoopPaths, _state: Any, _channel: Any, _env: str, module_name: str,
+                _label: str, *, box: Any = None) -> None:
         calls.append(module_name)
         if module_name == "author":
             raise fault
@@ -1066,16 +1073,17 @@ def test_a_box_fault_from_the_first_curators_step_halts_the_drain(tmp_path: Path
     same object) and the second curator is never triggered. Control: a `RuntimeError` there is
     contained, recorded on the findings channel's stuck report, and the second curator runs."""
     paths = loop_paths(tmp_path)
+    state = _state1135.state_for_paths(paths)
     exc: BaseException = BoxFault("the box did not start") if fault == "BoxFault" else RuntimeError("x")
     calls: list[str] = []
     trigger = _raising_trigger(calls, exc)
     if fault == "RuntimeError":
-        drains._drain_curators(paths, trigger, box=None)
+        drains._drain_curators(paths, state, trigger, box=None)
         assert calls == ["author", "questioner_curator"]
         assert _stuck_classes(paths, "findings") == ["RuntimeError"]
         return
     with pytest.raises(BoxFault) as got:
-        drains._drain_curators(paths, trigger, box=None)
+        drains._drain_curators(paths, state, trigger, box=None)
     assert got.value is exc
     assert calls == ["author"], "the second curator ran after a box fault"
 
@@ -1193,7 +1201,7 @@ def _assert_halted_in_the_second_curator(t: Tick) -> None:
     assert t.sc.head_text(_rel(t.sc, "a.md")) == S.lesson("f1"), "the first curator never committed"
     assert t.sc.head_text(_questioner_rel(t, "q.md")) is None, "a commit landed after a box fault"
     assert not (t.paths.lessons_questioner_dir / "q.md").exists(), "the lesson was not undone"
-    assert S.pending_by_id(t.paths.questioner_findings)["w1"].get("attempts") is None
+    assert S.pending_by_id(t.paths, QUESTIONER_FINDINGS)["w1"].get("attempts") is None
     assert _stuck_classes(t.paths, "questioner_findings") == ["BoxFault"]
     assert _stuck_classes(t.paths, "findings") == []
 
@@ -1211,7 +1219,7 @@ def test_a_box_fault_in_the_first_curator_halts_the_tick_before_the_second(
     t = f.t
     q_queued = _queued(t.paths)[1]
 
-    got = X.caught(lambda: drains._drain_curators(t.paths, t.trigger, box=f.runs))
+    got = X.caught(lambda: drains._drain_curators(t.paths, t.state, t.trigger, box=f.runs))
 
     _assert_is_the_box_fault(got, f)
     _assert_halted_after_the_first_curator(t, f.q_curator, q_queued)
@@ -1237,7 +1245,7 @@ def test_a_box_fault_in_the_second_curator_halts_the_drain(tmp_path: Path, monke
     `BoxFault`."""
     f = _box_fault_scene(tmp_path, monkeypatch, source, in_curator="questioner_curator")
 
-    got = X.caught(lambda: drains._drain_curators(f.t.paths, f.t.trigger, box=f.runs))
+    got = X.caught(lambda: drains._drain_curators(f.t.paths, f.t.state, f.t.trigger, box=f.runs))
 
     _assert_is_the_box_fault(got, f)
     _assert_halted_in_the_second_curator(f.t)
@@ -1274,7 +1282,7 @@ def test_control_a_non_box_fault_in_the_first_curator_is_contained_and_the_secon
     q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")})
     t = _tick(tmp_path, [], curator=curator, q_curator=q_curator)
 
-    drains._drain_curators(t.paths, t.trigger, box=runs)
+    drains._drain_curators(t.paths, t.state, t.trigger, box=runs)
 
     assert t.modules() == ["author", "questioner_curator"]
     assert len(q_curator.calls) == 1
@@ -1334,7 +1342,7 @@ def test_a_box_fault_outranks_an_undo_fault_and_the_second_curator_never_runs(
                          plant=_swap_sub_for_a_link(tmp_path / "outside" / "moved-sub"))
     q_queued = _queued(f.t.paths)[1]
 
-    got = X.caught(lambda: drains._drain_curators(f.t.paths, f.t.trigger, box=f.runs))
+    got = X.caught(lambda: drains._drain_curators(f.t.paths, f.t.state, f.t.trigger, box=f.runs))
 
     _assert_is_the_box_fault(got, f)
     _assert_halted_after_the_first_curator(f.t, f.q_curator, q_queued)
@@ -1367,7 +1375,7 @@ def test_control_an_undo_fault_still_replaces_a_non_box_fault(
     q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")})
     t = _tick(tmp_path, [], curator=curator, q_curator=q_curator, seed_corpus=SEEDED_SUB)
 
-    drains._drain_curators(t.paths, t.trigger, box=runs)
+    drains._drain_curators(t.paths, t.state, t.trigger, box=runs)
 
     assert _stuck_classes(t.paths, "findings") == ["OSError"]
     assert t.sc.pending_by_id()["f1"].get("attempts") is None
@@ -1562,7 +1570,7 @@ def test_a_process_left_in_the_box_cannot_change_a_judged_lesson(tmp_path: Path,
     process = LeftProcess(daemon)
     t, verifier = _o1_tick(tmp_path, process, writes)
 
-    drains._drain_curators(t.paths, t.trigger, box=runs)
+    drains._drain_curators(t.paths, t.state, t.trigger, box=runs)
 
     assert verifier.texts_for("a.md") == [SPAWNED]
     assert process.act is not None, "no process was left in the box, so the row is vacuous"
@@ -1583,7 +1591,7 @@ def test_control_a_process_that_outlived_its_run_would_race_the_commit(
     process = LeftProcess(daemon, outlives_its_run=True)
     t, verifier = _o1_tick(tmp_path, process, writes)
 
-    drains._drain_curators(t.paths, t.trigger, box=runs)
+    drains._drain_curators(t.paths, t.state, t.trigger, box=runs)
 
     assert verifier.texts_for("a.md") == [SPAWNED]
     assert process.acts == [writes]
@@ -1604,7 +1612,7 @@ def test_what_the_box_writes_during_its_own_run_is_what_is_judged(tmp_path: Path
     t, verifier = _o1_tick(tmp_path, process, None)
     daemon.on_stop(t.sc.corpus / "a.md", VARIANT, at=1)
 
-    drains._drain_curators(t.paths, t.trigger, box=runs)
+    drains._drain_curators(t.paths, t.state, t.trigger, box=runs)
 
     assert verifier.texts_for("a.md") == [VARIANT]
     assert t.sc.head_text(_rel(t.sc, "a.md")) == VARIANT
@@ -1649,7 +1657,7 @@ def test_a_process_the_repair_left_cannot_change_the_lesson_judged_after_it(
     process = LeftProcess(daemon)
     t, verifier, repair = _repair_o1_tick(tmp_path, process)
 
-    got = X.caught(lambda: drains._drain_curators(t.paths, t.trigger, box=runs))
+    got = X.caught(lambda: drains._drain_curators(t.paths, t.state, t.trigger, box=runs))
 
     assert len(repair.calls) == 1, "the repair never ran, so the row is vacuous"
     assert process.act is not None, "no process was left in the box, so the row is vacuous"
@@ -1673,7 +1681,7 @@ def test_control_a_process_the_repair_left_that_outlived_its_run_would_race_the_
     process = LeftProcess(daemon, outlives_its_run=True)
     t, verifier, _repair = _repair_o1_tick(tmp_path, process)
 
-    drains._drain_curators(t.paths, t.trigger, box=runs)
+    drains._drain_curators(t.paths, t.state, t.trigger, box=runs)
 
     assert verifier.texts_for("a.md") == [S.lesson("f1"), REPAIRED]
     assert process.acts == ["rewrite"]
@@ -1723,8 +1731,8 @@ def test_a_path_the_box_first_writes_as_its_run_stops_is_settled_and_judged(
         return
     assert rc == 2, rc
     assert sc.head_files() == [], "a commit landed beside a stray the box left as it stopped"
-    assert any(NEW_STRAY in str(r.get("reason")) for r in S.stuck_records(sc.channel)), (
-        S.stuck_records(sc.channel))
+    assert any(NEW_STRAY in str(r.get("reason")) for r in S.stuck_records(sc.paths, sc.channel)), (
+        S.stuck_records(sc.paths, sc.channel))
 
 
 # ---------------------------------------------------------------------------------------
@@ -1748,7 +1756,7 @@ def test_a_seam_fault_at_the_runs_stop_halts_the_lessons_drain(tmp_path: Path, m
     q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")})
     t = _tick(tmp_path, [], curator=curator, q_curator=q_curator)
 
-    got = X.caught(lambda: drains._drain_curators(t.paths, t.trigger, box=runs))
+    got = X.caught(lambda: drains._drain_curators(t.paths, t.state, t.trigger, box=runs))
 
     assert len(curator.calls) == 1, "the spawn never ran, so the row is vacuous"
     X.no_path_docker(daemon)

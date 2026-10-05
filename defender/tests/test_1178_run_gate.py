@@ -74,7 +74,7 @@ import pytest
 from defender import _git
 from defender._io import READ_LIMIT
 from defender._run_paths import RunPaths
-from defender.learning.core import drains, markers, persist
+from defender.learning.core import drains, persist
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.leads import lead_author, pitfalls_curator
 from defender.learning.author.shared import AuthorError
@@ -84,6 +84,7 @@ from defender.runtime import box as box_mod
 from defender.runtime.agent_definition import bind
 from defender.runtime.box import BoxFault
 from defender.tests import _box1195 as X
+from defender.tests import _state1135
 from defender.tests._claim1175 import claim_git
 from defender.tests._declared869 import LeadAuthorSpawn, Spawn, pitfall_row
 from defender.tests._declared870 import (
@@ -279,6 +280,7 @@ def _lead_scene(tmp_path: Path, committed: dict[str, str] | None = None) -> Lead
             write(repo / "defender" / "skills" / name, text)
         commit_all(repo, "seed the names the agent rewrites")
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    paths.state_root.mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
     return LeadScene(tmp=tmp_path, repo=repo, paths=paths, run_dir=_run_dir(tmp_path),
                      head=_git.git_head_sha(repo))
 
@@ -548,7 +550,7 @@ def _pitfalls_scene(tmp_path: Path, monkeypatch, rows: list[dict]) -> PitfallsSc
     write_reducer_surface(repo)
     commit_all(repo, "seed the reducer surface")
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    persist.append_pitfalls(rows, paths=paths)
+    persist.append_pitfalls(rows, state=_state1135.state_for_paths(paths))
     return PitfallsScene(tmp=tmp_path, repo=repo, paths=paths, head=_git.git_head_sha(repo))
 
 
@@ -561,7 +563,7 @@ def _system_rows() -> list[dict]:
 
 
 def _queued(s: PitfallsScene) -> list[str]:
-    return sorted(r["pitfall_id"] for r in persist.read_pitfalls(s.paths))
+    return sorted(r["pitfall_id"] for r in persist.read_pitfalls(_state1135.state_for_paths(s.paths)))
 
 
 def _drive_pitfalls(  # noqa: PLR0913 — one drive, every seam a row varies
@@ -1047,14 +1049,15 @@ def _queue_claims(s: LeadScene, *run_names: str) -> list[Path]:
     for name in run_names:
         run_dir = s.tmp / "runs" / name
         (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
-        markers.enqueue_case_for_curation(f"case-{name}", run_dir, s.paths)
+        _state1135.enqueue_case(_state1135.state_for_paths(s.paths), f"case-{name}", run_dir)
         run_dirs.append(run_dir)
     return run_dirs
 
 
 class Lanes:
     """The drain's two work steps, each driving its REAL lane over the worktree it is handed:
-    `run_lead` serves a claim through `lead_author.run` (only the agent and the two tables
+    `run_lead` serves a claim through the run `lead_author.run_under_held_queue_lock` makes
+    (`_run_locked`, over the real deps on the drain's handle; only the agent and the two tables
     faked), `run_pitfalls` a tick through `run_pitfalls` (only the curator faked), each handed
     the box the drain handed down (`handed` records it). With a `log`, each lane's host steps
     and gate reads log into it. `pitfalls_ticks` counts the pitfalls ticks. With
@@ -1069,23 +1072,25 @@ class Lanes:
         self.handed: list[Any] = []
         self.swallowed: list[BoxFault] = []
 
-    def run_lead(self, paths: LoopPaths, run_dir: Path, *, box: Any = None, on_done: Any,
-                 **_kw: Any) -> int:
+    def run_lead(self, paths: LoopPaths, state: Any, run_dir: Path, *, box: Any = None,
+                 on_done: Any, **_kw: Any) -> int:
         self.handed.append(box)
         with lead_trees(paths) as trees:
-            deps = _deps(paths, trees, self.agent, [ELASTIC_LEAD])
+            deps = dataclasses.replace(_deps(paths, trees, self.agent, [ELASTIC_LEAD]), state=state)
             if self.log is not None:
                 deps = _journaled_deps(deps, self.log)
             try:
-                return lead_author.run(run_dir, label=LEAD, paths=paths, deps=deps, box=box,
-                                       on_done=on_done)
+                # The drain holds the queue lock for the whole tick, so the lane runs under it,
+                # as the drain's own default seam does (`run(deps=)` would take it again and
+                # skip).
+                return lead_author._run_locked(run_dir, deps, box=box, on_done=on_done)
             except BoxFault as e:
                 if not self.swallow:
                     raise
                 self.swallowed.append(e)
                 return 0
 
-    def run_pitfalls(self, paths: LoopPaths, *, box: Any = None, on_curated: Any,
+    def run_pitfalls(self, paths: LoopPaths, state: Any, *, box: Any = None, on_curated: Any,
                      **_kw: Any) -> int:
         self.handed.append(box)
         self.pitfalls_ticks += 1
@@ -1093,31 +1098,45 @@ class Lanes:
             return 0
         with lead_trees(paths) as trees:
             held = trees if self.log is None else LoggedTrees(trees, self.log)
-            return pitfalls_curator.run_pitfalls(paths=paths, trees=held, invoke=self.curator,
-                                                 box=box, on_curated=on_curated)
+            return pitfalls_curator.run_pitfalls(paths=paths, state=state, trees=held,
+                                                 invoke=self.curator, box=box,
+                                                 on_curated=on_curated)
+
+
+def _request_dir(s: LeadScene, *below: str) -> Path:
+    """The lead-author request queue's folder (or one below it), spelled literally as the #1135
+    suite spells it: `state.py` names it for no caller."""
+    return s.paths.state_root.joinpath("author-queue", *below)
+
+
+def _drain(s: LeadScene, lanes: Lanes, **kw: Any) -> Any:
+    """`drains._drain_lead_author` over the scene's paths, on a learning-state handle over its
+    root (as the lane's entry opens one), its two work steps `lanes`'."""
+    return drains._drain_lead_author(s.paths, _state1135.state_for_paths(s.paths), lanes.run_lead,
+                                     lanes.run_pitfalls, **kw)
 
 
 def _failed(s: LeadScene) -> list[str]:
     """The names of the claims the lane dead-lettered."""
-    failed = s.paths.author_queue_dir / markers.FAILED_MARKER_DIRNAME
+    failed = _request_dir(s, "failed")
     return sorted(p.name for p in failed.glob("*.json")) if failed.is_dir() else []
 
 
 def _claim_files(s: LeadScene) -> tuple[list[str], list[str]]:
     """The lead-author queue's markers: those still queued, and those claimed (`inflight/`)."""
-    qdir = s.paths.author_queue_dir
+    qdir = _request_dir(s)
     return (sorted(p.name for p in qdir.glob("*.json")),
             sorted(p.name for p in (qdir / "inflight").glob("*.json")))
 
 
 def _attempts(paths: LoopPaths) -> list[Any]:
-    return [r.get("attempts") for r in persist.read_pitfalls(paths)]
+    return [r.get("attempts") for r in persist.read_pitfalls(_state1135.state_for_paths(paths))]
 
 
 def _claim_attempts(s: LeadScene) -> dict[str, Any]:
     """Each claimed marker's (`inflight/`) `attempts`: a serve is charged once, before its run
     (N14), and a box fault charges nothing more."""
-    inflight = s.paths.author_queue_dir / "inflight"
+    inflight = _request_dir(s, "inflight")
     return {p.name: json.loads(p.read_text(encoding="utf-8")).get("attempts")
             for p in sorted(inflight.glob("*.json"))}
 
@@ -1132,7 +1151,7 @@ def test_the_lead_drain_runs_one_window_per_agent_and_none_between(tmp_path: Pat
     daemon, box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    persist.append_pitfalls(_system_rows(), paths=s.paths)
+    persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))
     _queue_claims(s, "run-0")
     log = X.Journal(daemon)
 
@@ -1146,7 +1165,7 @@ def test_the_lead_drain_runs_one_window_per_agent_and_none_between(tmp_path: Pat
 
     lanes = Lanes(BoxSeenLeadSpawn(author), BoxSeenSpawn(curate), log=log)
 
-    drains._drain_lead_author(s.paths, lanes.run_lead, lanes.run_pitfalls, box=runs)
+    _drain(s, lanes, box=runs)
 
     log.assert_runs_hold_exactly(["agent", "curator"], ("agent", "curator"))
     kinds = [e[0] for e in log]
@@ -1174,8 +1193,7 @@ def test_a_claims_run_start_fault_halts_the_lane_and_dead_letters_nothing(
     _queue_claims(s, "run-0", "run-1")
     lanes = Lanes(BoxSeenLeadSpawn(lambda _rd: write(s.at(AGENT_NAME), VETTED)))
 
-    got = X.caught(lambda: drains._drain_lead_author(s.paths, lanes.run_lead, lanes.run_pitfalls,
-                                                     box=runs))
+    got = X.caught(lambda: _drain(s, lanes, box=runs))
 
     assert isinstance(got, BoxFault), got
     assert lanes.agent.calls == [], "an agent ran though its box never started"
@@ -1207,7 +1225,7 @@ def test_control_a_claims_agent_fault_dead_letters_that_claim_and_the_next_is_se
 
     lanes = Lanes(BoxSeenLeadSpawn(author), log=log)
 
-    drains._drain_lead_author(s.paths, lanes.run_lead, lanes.run_pitfalls, box=runs)
+    _drain(s, lanes, box=runs)
 
     log.assert_runs_hold_exactly(["agent", "agent"], ("agent",))
     assert [b is box for b in lanes.agent.boxes] == [True, True], lanes.agent.boxes
@@ -1231,8 +1249,7 @@ def test_a_claims_stop_fault_after_a_clean_agent_halts_the_lane(
     _queue_claims(s, "run-0", "run-1")
     lanes = Lanes(BoxSeenLeadSpawn(lambda _rd: write(s.at(AGENT_NAME), VETTED)))
 
-    got = X.caught(lambda: drains._drain_lead_author(s.paths, lanes.run_lead, lanes.run_pitfalls,
-                                                     box=runs))
+    got = X.caught(lambda: _drain(s, lanes, box=runs))
 
     assert isinstance(got, BoxFault), got
     assert len(lanes.agent.calls) == 1, lanes.agent.calls
@@ -1269,7 +1286,7 @@ def test_a_pitfalls_box_fault_halts_the_lane_and_bumps_no_pitfalls_row(
         daemon.refuse_stop(at=[2])
     s = _lead_scene(tmp_path)
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    persist.append_pitfalls(_system_rows(), paths=s.paths)
+    persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))
     _queue_claims(s, "run-0")
     attempts_before = _attempts(s.paths)
     execution_before = _git.git_show_file(s.repo, "HEAD", EXECUTION_REL)
@@ -1280,8 +1297,7 @@ def test_a_pitfalls_box_fault_halts_the_lane_and_bumps_no_pitfalls_row(
     lanes = Lanes(BoxSeenLeadSpawn(lambda _rd: write(s.at(AGENT_NAME), VETTED)),
                   BoxSeenSpawn(curate, rc=1 if where == "curator-fails" else 0))
 
-    got = X.caught(lambda: drains._drain_lead_author(s.paths, lanes.run_lead, lanes.run_pitfalls,
-                                                     box=runs))
+    got = X.caught(lambda: _drain(s, lanes, box=runs))
 
     attempts = _attempts(s.paths)
     assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED, (
@@ -1314,7 +1330,7 @@ def _claim_then_pitfalls(tmp_path: Path, monkeypatch: Any
     daemon, box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    persist.append_pitfalls(_system_rows(), paths=s.paths)
+    persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))
     _queue_claims(s, "run-0")
     return (daemon, box, runs, s, _attempts(s.paths),
             _git.git_show_file(s.repo, "HEAD", EXECUTION_REL))
@@ -1354,8 +1370,7 @@ def test_a_stop_fault_under_a_failing_curator_halts_the_lane_and_bumps_no_pitfal
     lanes = Lanes(BoxSeenLeadSpawn(lambda _rd: write(s.at(AGENT_NAME), VETTED)),
                   BoxSeenSpawn(curate))
 
-    got = X.caught(lambda: drains._drain_lead_author(s.paths, lanes.run_lead, lanes.run_pitfalls,
-                                                     box=runs))
+    got = X.caught(lambda: _drain(s, lanes, box=runs))
 
     assert len(lanes.curator.calls) == 1, "the curator never ran, so the row is vacuous"
     assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED, (
@@ -1396,8 +1411,7 @@ def test_a_swallowed_stop_fault_in_the_last_claim_makes_the_pitfalls_run_refuse(
     lanes = Lanes(BoxSeenLeadSpawn(lambda _rd: write(s.at(AGENT_NAME), VETTED)),
                   BoxSeenSpawn(curate), swallow_claim_box_faults=True)
 
-    got = X.caught(lambda: drains._drain_lead_author(s.paths, lanes.run_lead, lanes.run_pitfalls,
-                                                     box=runs))
+    got = X.caught(lambda: _drain(s, lanes, box=runs))
 
     assert len(lanes.agent.calls) == 1
     assert lanes.pitfalls_ticks == 1
@@ -1472,8 +1486,8 @@ def test_a_run_start_fault_through_the_default_claim_step_halts_the_lane(
     leads = {"claim-0": WAZUH_LEAD if first == "box-faults" else None, "claim-1": ELASTIC_LEAD}
     for name, lead in leads.items():
         rows = [(lead.query_id, lead.system, lead.verb)] if lead is not None else []
-        markers.enqueue_case_for_curation(f"case-{name}", _run_dir(tmp_path / name, *rows),
-                                          s.paths)
+        _state1135.enqueue_case(_state1135.state_for_paths(s.paths), f"case-{name}",
+                                _run_dir(tmp_path / name, *rows))
 
     got, calls, events, watch = _held_lead_drain(s, monkeypatch)
 
@@ -1507,7 +1521,7 @@ def test_a_run_start_fault_through_the_default_pitfalls_step_halts_the_lane(
     `test_a_pitfalls_box_fault_halts_the_lane_and_bumps_no_pitfalls_row[curator-fails]`."""
     s = _lead_scene(tmp_path)
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    persist.append_pitfalls(_system_rows(), paths=s.paths)
+    persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))
     attempts_before = _attempts(s.paths)
 
     got, calls, events, watch = _held_lead_drain(s, monkeypatch)
@@ -1753,9 +1767,9 @@ def test_a_batch_start_fault_claims_nothing_and_dead_letters_nothing(
     attempts change, and nothing is committed or delivered."""
     s, daemon = _production_lead_scene(tmp_path, monkeypatch, "run-0", "run-1")
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    persist.append_pitfalls(_system_rows(), paths=s.paths)
+    persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))
     attempts_before = _attempts(s.paths)
-    qdir = s.paths.author_queue_dir
+    qdir = _request_dir(s)
     markers_before = {p.name: p.read_bytes() for p in qdir.glob("*.json")}
     getattr(daemon, knob)()
 
