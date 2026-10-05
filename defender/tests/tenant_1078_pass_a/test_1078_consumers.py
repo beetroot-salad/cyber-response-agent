@@ -35,6 +35,7 @@ from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
 from defender.tests.tenant_1078_pass_a._census_1078 import docstring_ids
+from defender.tests import _state1135
 
 TENANT = H.VALID_ID
 
@@ -47,7 +48,7 @@ def _judge_roots(tmp_path: Path, monkeypatch, *, stale_base: Path | None = None)
     """The judge's queue root under tmp (never the checkout's `learning/_pending/`), an
     episodes root, a data root with T created, and — when given — a STALE retired knob, so a
     consumer that still reads it is caught reading the wrong tree. Returns the data root."""
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     if stale_base is None:
         monkeypatch.delenv(J.RUNS_BASE_ENV, raising=False)

@@ -45,6 +45,7 @@ from defender.tests import _drain719 as D
 from defender.tests import _judge_921 as J
 from defender.tests._curator1134 import author_trees
 from defender.tests.e2e import _box665 as B
+from defender.tests import _state1135
 
 pytestmark = pytest.mark.e2e
 
@@ -72,7 +73,7 @@ def _isolated_roots(tmp_path, monkeypatch):
     """
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
     # Stated rather than inherited: the drive below queues two family rows, and the shipped
     # default of 5 would make every assertion below vacuous on a drain that never woke.
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
@@ -110,10 +111,10 @@ class TriggerRecorder:
         self.calls: list[dict] = []
         self._agent = agent
 
-    def __call__(self, paths, pending_file, threshold_env, module_name, pending_label,
+    def __call__(self, paths, state, channel, threshold_env, module_name, pending_label,
                  *, box=None) -> None:
         self.calls.append({
-            "pending_file": pending_file, "threshold_env": threshold_env,
+            "pending_file": state.describe(channel), "threshold_env": threshold_env,
             "module_name": module_name, "pending_label": pending_label, "box": box,
         })
         if module_name != "author":
@@ -123,11 +124,12 @@ class TriggerRecorder:
         # verifier's key source is faked too, or a host with no real key configured
         # (CI) would fail here on a scenario that was never about key sourcing at all.
         cfg = dataclasses.replace(
-            lessons_run.build_author_config(paths, trees=author_trees(paths), box=box),
+            lessons_run.build_author_config(
+                paths, state=state, trees=author_trees(paths), box=box),
             invoke_agent=self._agent,
             source_key=lambda model, *, label=None: None,
         )
-        lessons_run.run_batch(paths=paths, cfg=cfg, hold_committed=True, box=box)
+        lessons_run.run_batch(paths=paths, state=state, cfg=cfg, hold_committed=True, box=box)
 
     @property
     def modules(self) -> list[str]:
@@ -143,9 +145,12 @@ def graded_episode(tmp_path: Path, paths, *, reply=None):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-    J.mod("learning.judge").grade_episode(
-        ep, judge=J.FakeJudge(default=reply or J.as_reply_text(J.reply_doc())),
-        runs_base=tmp_path / "defender-runs", draws=1, queue_dir=paths.pending_dir)
+    from defender.learning.core.state import LearningState
+
+    with LearningState.open(paths) as state:
+        J.mod("learning.judge").grade_episode(
+            ep, judge=J.FakeJudge(default=reply or J.as_reply_text(J.reply_doc())),
+            runs_base=tmp_path / "defender-runs", draws=1, state=state)
     return ep, J.judge_record(ep)
 
 
@@ -345,7 +350,7 @@ def test_922_author_drain_triggers_exactly_the_findings_curator(tmp_path):
     # Selected BY MODULE rather than by position, for the same reason the set above is sorted:
     # the tick now triggers two curators and their order is not a contract.
     call = next(c for c in trigger.calls if c["module_name"] == "author")
-    assert call["pending_file"] == paths.findings.file, (
+    assert call["pending_file"] == str(paths.findings.file), (
         f"the findings trigger names {call['pending_file']}, not the findings queue")
     assert call["threshold_env"] == "LEARNING_AUTHOR_THRESHOLD"
     assert call["pending_label"] == "pending"

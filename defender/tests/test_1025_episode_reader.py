@@ -63,6 +63,7 @@ from defender._io import bind
 from defender._run_paths import RunPaths
 from defender.tests import _judge_921 as J
 from defender.tests._spec791 import PROJECT_PROFILE
+from defender.tests import _state1135
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -73,7 +74,7 @@ def _tmp_roots(tmp_path, monkeypatch):
     own tree — never the checkout's runs base or its real `learning/_pending/`."""
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _judge():

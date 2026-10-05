@@ -47,13 +47,14 @@ import yaml
 from defender._yaml import safe_load
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
+from defender.tests import _state1135
 
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _parse(text: str) -> str:

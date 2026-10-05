@@ -16,8 +16,8 @@ from pathlib import Path
 import pytest
 
 from defender.tests import _episode_1025 as E
-from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
+from defender.tests import _state1135
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -31,7 +31,7 @@ S = E.SAMPLE
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def visualize_episode():

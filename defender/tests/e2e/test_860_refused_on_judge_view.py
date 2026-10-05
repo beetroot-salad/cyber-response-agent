@@ -76,6 +76,7 @@ from defender.tests.test_1017_row_schema import (  # noqa: E402
 )
 from defender.tests.test_denial_gather_632 import DENIED_PAIR, _registry  # noqa: E402
 from defender.tests._lead_author_1134 import repo_skills  # noqa: E402
+from defender.tests import _state1135
 
 pytestmark = pytest.mark.e2e
 
@@ -100,7 +101,7 @@ def judge_roots(tmp_path, monkeypatch):
     binding (ruff F811) — the `test_984` idiom. `setenv`, never `setattr`."""
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 DENIED_LEAD = "l-002"

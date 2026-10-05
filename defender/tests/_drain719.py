@@ -81,9 +81,9 @@ except ImportError as _missing_target:  # pragma: no cover — the pre-implement
 
     drain = _NotYetWritten("defender.learning.author.drain", _missing_target)  # type: ignore[assignment]
 
-from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
 from defender.learning.author.lessons import run as lessons_run  # type: ignore[import-not-found]
-from defender.learning.core import persist  # type: ignore[import-not-found]
+from defender import _flock as _lockfile  # type: ignore[import-not-found]
+from defender.learning.core.state import LearningState  # type: ignore[import-not-found]
 from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
 
 #: The channels one folded drain body serves. `pitfalls` is the other queue but is drained by
@@ -124,8 +124,10 @@ def _findings_cfg(paths: LoopPaths):
 
     from defender.tests._curator1134 import author_trees
 
-    return _dc.replace(lessons_run.build_author_config(paths, trees=author_trees(paths)),
-                       forward_check=None)
+    return _dc.replace(
+        lessons_run.build_author_config(
+            paths, state=LearningState.open(paths), trees=author_trees(paths)),
+        forward_check=None)
 
 
 BUILDERS = {
@@ -196,7 +198,9 @@ def _make_repo(tmp_path: Path) -> Path:
 def make_paths(tmp_path: Path, *, state_dir: Path | None = None) -> LoopPaths:
     """`LoopPaths` over a fresh repo. `state_dir` relocates every queue, lock and
     graveyard away from the worktree without moving the corpus."""
-    return LoopPaths(repo_root=make_repo(tmp_path), state_dir=state_dir)
+    paths = LoopPaths(repo_root=make_repo(tmp_path), state_dir=state_dir)
+    paths.state_root.mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
+    return paths
 
 
 def channel_of(paths: LoopPaths, name: str):
@@ -298,11 +302,11 @@ def pending_by_id(channel) -> dict[str, dict]:
 
 
 def graveyard(channel) -> list[dict]:
-    return read_rows(drain.graveyard_file(channel))
+    return read_rows(channel.file.with_suffix(".deadletter.jsonl"))
 
 
 def stuck_records(channel) -> list[dict]:
-    return read_rows(drain.stuck_report_file(channel))
+    return read_rows(channel.file.with_suffix(".stuck.jsonl"))
 
 
 def consumed(channel) -> list[dict]:
@@ -428,19 +432,25 @@ class Holder:
 
         def run() -> None:
             if self.blocking_discipline:
-                with persist._flock(self.path):
+                fh = _lockfile.open_lock(self.path)
+                try:
+                    _lockfile.take(fh, timeout_seconds=None)
                     self.acquired = True
                     self._held.set()
                     self._release.wait(timeout=60)
+                finally:
+                    _lockfile.release(fh)
             else:
-                fh = author_shared.acquire_flock(self.path)
-                self.acquired = fh is not None
+                fh = _lockfile.open_lock(self.path)
+                self.acquired = _lockfile.take(fh, timeout_seconds=0)
                 self._held.set()
                 try:
                     self._release.wait(timeout=60)
                 finally:
-                    if fh is not None:
-                        author_shared.release_flock(fh)
+                    if self.acquired:
+                        _lockfile.release(fh)
+                    else:
+                        fh.close()
 
         self._thread = threading.Thread(target=run, daemon=True)
         self._thread.start()

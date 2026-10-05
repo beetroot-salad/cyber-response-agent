@@ -44,6 +44,7 @@ from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests import test_1025_episode_reader as R
 from defender.tests._by_path import load_lint_gate
+from defender.tests import _state1135
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -69,7 +70,7 @@ MARKUP = "<script>alert(1)</script><img src=x onerror=alert(1)>"
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def visualize_episode():

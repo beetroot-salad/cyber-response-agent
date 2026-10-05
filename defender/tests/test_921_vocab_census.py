@@ -27,6 +27,7 @@ import pytest
 from defender.tests import _drain719 as D
 from defender.tests import _judge_921 as J
 from defender.tests import _tenants1106 as T1106  # noqa: E402
+from defender.tests import _state1135
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +38,7 @@ def _tmp_roots(tmp_path, monkeypatch):
     # this test's own and not the checkout's real `learning/_pending/`. Isolation belongs
     # here rather than in the appender: a production path that picks a different queue when
     # an env var is unset is a pass whose rows can land where no drain reads.
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _vocab():

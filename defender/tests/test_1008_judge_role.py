@@ -41,6 +41,7 @@ import pytest
 
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
+from defender.tests import _state1135
 
 #: The grant surfaces `AgentDefinition` defaults to deny-all on
 #: (`runtime/agent_definition.py:63-86`). The whole of O3 is that NONE of them is spelled at
@@ -79,7 +80,7 @@ def _tmp_roots(tmp_path, monkeypatch):
     """
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _role():

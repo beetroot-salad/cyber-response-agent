@@ -40,6 +40,7 @@ from defender._episode_paths import LAYOUT, EpisodePaths
 from defender._clock import now_iso, parse_iso_utc
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
+from defender.tests import _state1135
 
 #: The six steps, in the order the launcher runs them — the names a reader of the record keys on.
 EXPECTED_STEPS = ["questioner", "staging", "review", "runs", "verify", "judge"]
@@ -52,7 +53,7 @@ def _tmp_roots(tmp_path, monkeypatch):
     lands in this test's own tree and never in the checkout's."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _cli():
@@ -794,7 +795,7 @@ def test_1025_a_failed_judge_still_leaves_the_judge_row(tmp_path, monkeypatch, c
     _clocked(rows, before=launch.before, after=launch.after)
 
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-seam-failed"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
     launch = _launch(tmp_path, judge=J.FakeJudge(fault=J.Fault(raise_after=0)))
     assert launch.rc == 0, "a raising judge seam ended the episode"
     assert launch.judge.calls > 0, "the control failed: the judge seam was never reached"

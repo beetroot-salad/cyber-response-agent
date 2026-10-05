@@ -73,6 +73,7 @@ from defender.tests import _judge_921 as J
 from defender.tests import _spec1133 as S
 from defender.tests import _triplet_947 as T
 from defender.tests.test_947_capture_prime import append_call, call_row, source_run
+from defender.tests import _state1135
 
 EPISODE_ID = "ep-1133"
 #: A staged cluster name, as the staging step records one.
@@ -89,7 +90,7 @@ def roots(tmp_path, monkeypatch):
     the runs base, the episodes root and the learning state root the judge's queue lands in."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 @pytest.fixture
