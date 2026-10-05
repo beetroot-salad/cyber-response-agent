@@ -145,19 +145,22 @@ def _docker_runtimes() -> frozenset[str]:
 
 @functools.cache
 def _daemon() -> tuple[bool, Path | None, frozenset[str]]:
-    """(a box can start from this process, where the data root must live under
-    docker-outside-of-Docker or `None` natively, the runtimes the daemon registers). Asked once,
-    lazily, so collecting this file runs no docker command."""
+    """(a box can start from this process, where the data root must live, the runtimes the
+    daemon registers). Asked once, lazily, so collecting this file runs no docker command.
+
+    The anchor is the checkout's gitignored `.defender-runs/` natively too, never pytest's tmp
+    dir: that sits under `/tmp`, and inside the box `/tmp` is the box's own writable tmpfs, so
+    the run folder's parent there is box scratch, not the host's runs folder, and the write
+    attempts would land in it (owner ruling, #1105 PR 1's first CI run)."""
     if not daemon_reachable():
         return False, None, frozenset()
-    anchor = None
+    anchor = H.WORKTREE / ".defender-runs"
     if is_dood():
         mounts = box_mod._shared_mounts(box_mod._docker)
         if not mounts or not box_mod._covered(H.DEFENDER, mounts):
             return False, None, frozenset()
         # The repo tree is shared with the daemon (defender_dir is bound out of it), so a data
         # root under its gitignored `.defender-runs/` is too (test_540's placement).
-        anchor = H.WORKTREE / ".defender-runs"
     return True, anchor, _docker_runtimes()
 
 
