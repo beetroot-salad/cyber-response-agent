@@ -234,6 +234,8 @@ def test_both_docker_run_argv_builders_differ_from_today_only_by_the_marker_env_
         "--label", f"{box_mod.START_TOKEN_LABEL}={token}",
         "--runtime", spec.runtime, "--network", "none", "--read-only",
         "--security-opt", f"seccomp={box_mod.ALIAS_PROFILE_PATH}",
+        # #1188: every box's file-size cap, soft = hard, in bytes.
+        "--ulimit", f"fsize={spec.file_size_limit}:{spec.file_size_limit}",
     ]
     infra = {**box_mod.infra_env(defender_dir, run_dir), **box_mod._LOCALE_ENV}
     today_run_dir = [

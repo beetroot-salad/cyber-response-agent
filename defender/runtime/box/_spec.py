@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar, Protocol, runtime_checkable
 
+from defender._io import READ_LIMIT
 from defender._model import model
 from defender.runtime import bash_exec
 from defender.runtime.box_codec import (
@@ -45,6 +46,12 @@ class BoxSpec:
     rootfs: str | None = None
     lifecycle: str = "per_run"
     tmpfs_size: str = "64m"
+    #: The largest file, in bytes, any process in the box may make — sparse files included,
+    #: since the kernel judges the apparent size (#1188). The host's whole-file read cap by
+    #: default, so nothing the box writes is too big for a host reader to take in. Docker's
+    #: `--ulimit fsize` takes bytes; soft and hard are both set to it, and the box holds no
+    #: `CAP_SYS_RESOURCE` to raise the hard one.
+    file_size_limit: int = READ_LIMIT
 
     ENV_VAR: ClassVar[str] = "DEFENDER_BOX_RUNTIME"
     RUNTIMES: ClassVar[tuple[str, ...]] = ("runsc", "runc")

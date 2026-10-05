@@ -75,6 +75,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         "--read-only",
         "--pull=never",
         "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
+        *_file_size_ulimit(spec),
         "--mount", f"type=bind,source={run_src},target={run_dir}",
         "--mount", f"type=bind,source={defender_src},target={defender_dir},readonly",
     ]
@@ -196,6 +197,13 @@ def _start_boxed(
     return BoxExecutor(spec=spec, transport=_DockerTransport(name, spec), name=name)
 
 
+def _file_size_ulimit(spec: BoxSpec) -> list[str]:
+    """The `docker run` flags capping every file the box makes at `spec.file_size_limit` bytes,
+    soft = hard (#1188). Shared by both argv builders so the two lanes cannot disagree."""
+    limit = spec.file_size_limit
+    return ["--ulimit", f"fsize={limit}:{limit}"]
+
+
 def _render_argv(
     request: BoxRequest, mounts: Sequence[tuple[Path, Path]] = (),
     start_token: str = "",
@@ -208,6 +216,7 @@ def _render_argv(
         "--read-only",
         "--pull=never",
         "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
+        *_file_size_ulimit(request.spec),
     ]
     for m in request.mounts:
         if mounts and not _covered(Path(m.source), mounts):
