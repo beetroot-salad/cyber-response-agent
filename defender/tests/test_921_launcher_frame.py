@@ -21,6 +21,9 @@ import pytest
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests import _state1135
+from defender.learning.core.config import LoopPaths
+from defender.learning.core.state import LearningState, StateRefused
+from defender.tests._state1135 import env_state
 
 
 @pytest.fixture(autouse=True)
@@ -135,7 +138,7 @@ def test_921_rejected_and_incomplete_episodes_are_not_graded(tmp_path):
     for outcome in ("accepted", "rejected", "incomplete"):
         ep = J.accepted_episode(tmp_path / outcome, outcome=outcome)
         judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-        judge_mod.grade_episode(ep, judge=judge, runs_base=tmp_path / outcome / "defender-runs")
+        judge_mod.grade_episode(ep, judge=judge, runs_base=tmp_path / outcome / "defender-runs", state=env_state())
         seen[outcome] = (judge.calls, (ep / "judge.yaml").is_file())
         if outcome != "accepted":
             record = J.judge_record(ep)
@@ -192,12 +195,12 @@ def test_921_existing_judge_yaml_stops_a_second_grade(tmp_path):
     base = tmp_path / "defender-runs"
 
     first = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    judge_mod.grade_episode(ep, judge=first, runs_base=base)
+    judge_mod.grade_episode(ep, judge=first, runs_base=base, state=env_state())
     assert first.calls > 0, "the control failed: the first pass never reached the model"
     before = (ep / "judge.yaml").read_text(encoding="utf-8")
 
     second = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    judge_mod.grade_episode(ep, judge=second, runs_base=base)
+    judge_mod.grade_episode(ep, judge=second, runs_base=base, state=env_state())
     assert second.calls == 0, "a second grade ran over an episode already graded"
     assert (ep / "judge.yaml").read_text(encoding="utf-8") == before
 
@@ -206,7 +209,7 @@ def test_921_existing_judge_yaml_stops_a_second_grade(tmp_path):
     (ep / "judge.yaml").write_text("\x00not: [a, family, grade", encoding="utf-8")
     third = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
     with pytest.raises(J.refusals()):
-        judge_mod.grade_episode(ep, judge=third, runs_base=base)
+        judge_mod.grade_episode(ep, judge=third, runs_base=base, state=env_state())
 
 
 # ---------------------------------------------------------------------------------------
@@ -233,7 +236,7 @@ def test_921_both_episode_write_sinks_go_through_write_guarded(tmp_path):
 
     with pytest.raises(J.refusals()):
         judge_mod.grade_episode(
-            ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), runs_base=base)
+            ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), runs_base=base, state=env_state())
     assert outside.read_text(encoding="utf-8") == "untouched\n", (
         "the family record was written THROUGH an aliased target")
 
@@ -244,7 +247,7 @@ def test_921_both_episode_write_sinks_go_through_write_guarded(tmp_path):
     (draw_dir / "0.yaml").symlink_to(outside)
     with pytest.raises(J.refusals()):
         judge_mod.grade_episode(
-            ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), runs_base=base)
+            ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), runs_base=base, state=env_state())
     assert outside.read_text(encoding="utf-8") == "untouched\n"
 
 
@@ -267,7 +270,7 @@ def test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_c
     base = tmp_path / "defender-runs"
 
     grade = judge_mod.grade_episode(
-        ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), runs_base=base)
+        ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), runs_base=base, state=env_state())
     record = J.judge_record(ep)
     assert record["enqueued_rows"] == grade.enqueued_rows
     assert record["enqueued_rows"] > 0, "a gradable episode with findings enqueued nothing"
@@ -280,14 +283,15 @@ def test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_c
     ep2 = J.accepted_episode(tmp_path / "second")
     queue_dir = tmp_path / "second" / "queue"
     queue_dir.mkdir(parents=True, exist_ok=True)
-    queue_dir.chmod(0o500)
-    try:
-        with pytest.raises(J.refusals()):
-            judge_mod.grade_episode(
-                ep2, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-                runs_base=tmp_path / "second" / "defender-runs", queue_dir=queue_dir)
-    finally:
-        queue_dir.chmod(0o700)
+    # An enqueue that cannot land: the queue's holding folder is a regular file (a permission
+    # bit would not bind a root test runner, and the handle owns the root's layout now).
+    (queue_dir / "_pending").write_text("not a directory", encoding="utf-8")
+    refused = LearningState.open(LoopPaths(repo_root=tmp_path / "second", state_dir=queue_dir))
+    # `StateRefused` is deliberately not an `OSError`, so it is not folded into `JudgeRefused`.
+    with pytest.raises((*J.refusals(), StateRefused)):
+        judge_mod.grade_episode(
+            ep2, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
+            runs_base=tmp_path / "second" / "defender-runs", state=refused)
     assert not (ep2 / "judge.yaml").exists(), (
         "the family record was written before the enqueue: its presence would then certify an "
         "enqueue that never happened")
@@ -329,7 +333,7 @@ def test_921_the_three_knobs_are_resolved_once_and_an_oversized_lead_is_truncate
         "x" * 4000 + "\nTAIL-OF-THE-OVERSIZED-LEAD\n", encoding="utf-8")
 
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    judge_mod.grade_episode(ep, judge=judge, runs_base=tmp_path / "defender-runs")
+    judge_mod.grade_episode(ep, judge=judge, runs_base=tmp_path / "defender-runs", state=env_state())
 
     record = J.judge_record(ep)
     assert record["draws"]["configured"] == 2

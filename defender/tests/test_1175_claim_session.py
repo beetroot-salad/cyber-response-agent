@@ -563,8 +563,8 @@ def test_o8_control_unstartable_git_after_a_clean_lead_author_claim_ends_the_tic
         tampering = _leaving(LIFT, EDITED_LIFT, patch, path_dir, _serving(served))
         plain = _serving(served)
 
-        def step(paths: Any, run_dir: Path, **kw: Any) -> None:
-            (tampering if run_dir == run_a else plain)(paths, run_dir, **kw)
+        def step(paths: Any, state: Any, run_dir: Path, **kw: Any) -> None:
+            (tampering if run_dir == run_a else plain)(paths, state, run_dir, **kw)
 
         got = _tick(sc, run_lead_author=step, run_pitfalls=_no_curation, git_timeout=BOUND)
 

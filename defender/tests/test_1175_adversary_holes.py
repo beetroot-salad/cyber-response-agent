@@ -136,7 +136,7 @@ def test_s7_a_cleanup_git_error_after_a_clean_claim_ends_the_tick(tmp_path, monk
     sc = _lead_scene(tmp_path, monkeypatch, cases=("case-a", "case-b"))
     served: list[Path] = []
 
-    def serve(paths, run_dir, *, box=None, on_done):
+    def serve(paths, _state, run_dir, *, box=None, on_done):
         served.append(run_dir)
         if len(served) == 1:
             (paths.repo_root / ".git" / "index.lock").write_text("")
@@ -156,7 +156,7 @@ def test_s8_a_cleanup_overrun_after_a_dead_lettered_claim_ends_the_tick(tmp_path
     sc = _lead_scene(tmp_path, monkeypatch, cases=("case-a", "case-b"))
     served: list[Path] = []
 
-    def step(paths, run_dir, *, box=None, on_done):
+    def step(paths, _state, run_dir, *, box=None, on_done):
         served.append(run_dir)
         if len(served) == 1:
             (paths.repo_root / LIFT).write_text("# left by a refused claim\n")

@@ -28,6 +28,7 @@ from defender.learning.core.config import AUTHOR_DRAIN_LABEL
 from defender.runtime import box as box_mod
 from defender.runtime.box import BoxRequest, Mount
 from defender.runtime.box_codec import BoxFault
+from defender.tests._curator1134 import open_state
 from defender.tests._spec1092 import (
     BUILD_COMMAND_TAIL,
     DEFENDER,
@@ -367,9 +368,11 @@ def test_the_drain_lanes_missing_image_fault_names_the_cut_commit_and_a_checkout
         rec = BoxLifecycleRecorder()
         branch: Any = GitWorktreeBranch(tmp_path / f"wt-{id(docker)}", events=rec.events)
         starter = FaultingStartBox(docker)
+        paths = loop_paths(tmp_path)
+        state = open_state(paths)
         with pytest.raises(BoxFault) as e:
             _run_worktree_batch(
-                loop_paths(tmp_path), branch, label=AUTHOR_DRAIN_LABEL, has_work=lambda p: True,
+                paths, state, branch, label=AUTHOR_DRAIN_LABEL, has_work=lambda p: True,
                 do_work=lambda *a, **k: None, start_box=starter, stop_box=rec.stop_box,
                 scrub=rec.scrub,
             )

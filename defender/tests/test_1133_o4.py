@@ -71,6 +71,7 @@ from defender.tests import _triplet_947 as T
 from defender.tests._umask import umask
 from defender.tests.test_947_capture_prime import append_call, call_row, source_run
 from defender.tests import _state1135
+from defender.tests._state1135 import env_state
 
 EPISODE_ID = "ep-1133"
 TOKEN = "e1133.b"
@@ -699,7 +700,7 @@ def test_o4_6_a_link_at_a_malformed_draws_name_is_refused_logged_and_left_and_th
     caplog.set_level(logging.WARNING)
     judge = _malformed_first()
     J.mod("learning.judge").grade_episode(ep, judge=judge, runs_base=tmp_path / "defender-runs",
-                                          draws=2)
+                                          draws=2, state=env_state())
 
     assert "judge:b:1" in judge.agent_ids, "the draw loop stopped at the refused removal"
     link = draw_dir / "0.yaml"
@@ -725,7 +726,7 @@ def test_o4_6_a_plain_stale_draw_at_a_malformed_index_is_still_removed(tmp_path,
     (draw_dir / "0.yaml").write_text("findings: [{bucket: stale}]\n", encoding="utf-8")
 
     J.mod("learning.judge").grade_episode(ep, judge=_malformed_first(),
-                                          runs_base=tmp_path / "defender-runs", draws=2)
+                                          runs_base=tmp_path / "defender-runs", draws=2, state=env_state())
 
     assert not os.path.lexists(draw_dir / "0.yaml"), "the stale plain draw survived"
     assert (draw_dir / "1.yaml").is_file()
@@ -906,12 +907,12 @@ def test_o4_8_2_grade_episode_refuses_a_missing_episode_dir_and_does_not_recreat
 
     with pytest.raises(judge_mod.JudgeRefused):
         judge_mod.grade_episode(ep, runs_base=tmp_path / "defender-runs",
-                                judge=ScriptedJudge({}, default="never called"))
+                                judge=ScriptedJudge({}, default="never called"), state=env_state())
     assert S.census(tmp_path) == before, f"grading a {kind} episode dir created something"
 
     control = T.episode(tmp_path / "control")
     grade = judge_mod.grade_episode(control, runs_base=tmp_path / "defender-runs",
-                                    judge=ScriptedJudge({}, default="never called"))
+                                    judge=ScriptedJudge({}, default="never called"), state=env_state())
     assert grade.not_graded is not None
     assert (control / "judge.yaml").is_file()
 

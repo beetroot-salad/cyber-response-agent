@@ -267,7 +267,6 @@ def test_discover_system_drafts_hands_out_no_undeclared_directory(
     deps = dataclasses.replace(
         lead_deps(paths),
         invoke_agent=spawn, extract=lambda _rd: ([], []),
-        acquire_queue_lock=lambda: object(), release_queue_lock=lambda _fh: None,
     )
     run_dir = tmp_path / "run-x"
     (run_dir / "gather_raw").mkdir(parents=True)

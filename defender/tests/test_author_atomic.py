@@ -5,7 +5,7 @@ import json
 from dataclasses import replace
 
 from defender._io import read_jsonl_rows
-from defender.learning.author import shared
+from defender.learning.core.state import CURATOR_DRAIN_LOCK, TRY_ONCE
 
 
 def test_agent_exception_leaves_queue_intact(tmp_repo, helpers, monkeypatch):
@@ -24,9 +24,8 @@ def test_agent_exception_leaves_queue_intact(tmp_repo, helpers, monkeypatch):
     assert [r.get("attempts") for r in rows] == [1]
     assert not tmp_repo.paths.pending_file.with_suffix(".deadletter.jsonl").exists()
 
-    fh = shared.acquire_flock(tmp_repo.cfg.channel.drain_lock)
-    assert fh is not None
-    shared.release_flock(fh)
+    with tmp_repo.state.lock(CURATOR_DRAIN_LOCK, wait=TRY_ONCE) as taken:
+        assert taken, "the drain lock must be free after the failed tick"
 
 
 def test_dlq_quarantines_poison_findings_batch(tmp_repo, helpers, monkeypatch):
@@ -118,7 +117,7 @@ def test_hold_committed_keeps_findings_queued_until_corpus_covers_them(
     )
     assert a.run_batch(hold_committed=True, cfg=cfg) == 0
     assert "run-H/0" in tmp_repo.paths.pending_file.read_text()
-    consumed = tmp_repo.cfg.channel.consumed.read_text() if tmp_repo.cfg.channel.consumed.exists() else ""
+    consumed = tmp_repo.paths.findings.consumed.read_text() if tmp_repo.paths.findings.consumed.exists() else ""
     assert "run-H/0" not in consumed
     held_row = json.loads(tmp_repo.paths.pending_file.read_text().splitlines()[0])
     assert "consumed_category" not in held_row
@@ -129,7 +128,7 @@ def test_hold_committed_keeps_findings_queued_until_corpus_covers_them(
     cfg = replace(tmp_repo.cfg, invoke_agent=must_not_author)
     assert a.run_batch(hold_committed=True, cfg=cfg) == 0
     assert tmp_repo.paths.pending_file.read_text().strip() == ""
-    assert "run-H/0" in tmp_repo.cfg.channel.consumed.read_text()
+    assert "run-H/0" in tmp_repo.paths.findings.consumed.read_text()
 
 
 def test_default_rotate_consumes_committed_immediately(tmp_repo, helpers, monkeypatch):
@@ -143,4 +142,4 @@ def test_default_rotate_consumes_committed_immediately(tmp_repo, helpers, monkey
     )
     assert a.run_batch(cfg=cfg) == 0
     assert tmp_repo.paths.pending_file.read_text().strip() == ""
-    assert "run-D/0" in tmp_repo.cfg.channel.consumed.read_text()
+    assert "run-D/0" in tmp_repo.paths.findings.consumed.read_text()

@@ -112,7 +112,8 @@ def _refused():
 def _grade(ep: Path, tmp_path: Path):
     """The real grading pass over `ep`, through its own seams — never a live provider."""
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    return _judge().grade_episode(ep, judge=judge, runs_base=tmp_path / "defender-runs")
+    return _judge().grade_episode(ep, judge=judge, runs_base=tmp_path / "defender-runs",
+                                   state=_state1135.env_state())
 
 
 def _passthrough(label: str) -> dict:

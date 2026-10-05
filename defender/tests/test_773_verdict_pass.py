@@ -18,7 +18,7 @@ import pytest
 
 from defender.learning.core.config import FatalConfigError
 from defender.tests import _spec773 as S
-from defender.tests._curator1134 import author_trees
+from defender.tests._curator1134 import author_trees, open_state
 
 LESSON = "defender/lessons/l1.md"
 LESSON2 = "defender/lessons/l2.md"
@@ -396,7 +396,7 @@ def test_the_lessons_channel_wires_findings_check_and_skips_forward_check_773(tm
     from defender.learning.author.verify_forward.checks import FINDINGS_CHECK
 
     paths = S.make_paths(tmp_path)
-    cfg = S.lessons_run.build_author_config(paths, trees=author_trees(paths))
+    cfg = S.lessons_run.build_author_config(paths, state=open_state(paths), trees=author_trees(paths))
     assert cfg.forward_check is FINDINGS_CHECK
     assert cfg.exempt is S.skips_forward_check
 

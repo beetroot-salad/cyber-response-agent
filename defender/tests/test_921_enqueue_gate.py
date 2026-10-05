@@ -36,7 +36,10 @@ import pytest
 from defender.tests import _drain719 as D
 from defender.tests import _judge_921 as J
 from defender.tests._curator1134 import author_trees
+from defender.learning.core.config import LoopPaths
+from defender.learning.core.state import LearningState
 from defender.tests import _state1135
+from defender.tests._state1135 import env_state
 
 
 @pytest.fixture(autouse=True)
@@ -77,7 +80,7 @@ def _graded(tmp_path, **kw):
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        runs_base=tmp_path / "defender-runs", draws=1)
+        runs_base=tmp_path / "defender-runs", draws=1, state=env_state())
     return ep, J.judge_record(ep)
 
 
@@ -217,7 +220,7 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
     ids = [row["finding_id"] for row in first]
     assert len(ids) == len(set(ids)), f"colliding finding ids inside one pass: {ids}"
 
-    retried = enqueue.enqueue(ep, J.mod("learning.judge.family").grade_family(ep))
+    retried = enqueue.enqueue(ep, J.mod("learning.judge.family").grade_family(ep), state=env_state())
     again = [row["finding_id"] for row in J.enqueued_rows(record)][len(ids):]
     assert retried == len(ids)
     assert again == ids, (
@@ -232,9 +235,12 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
     # Its OWN queue: the appender writes to the one configured findings queue, and this second
     # fixture episode reuses the first one's episode id by construction, so sharing a sink here
     # would count the first episode's rows as this one's rather than test the id minting.
+    own_root = tmp_path / "two" / "queue"
+    own_root.mkdir(parents=True)
+    own = LearningState.open(LoopPaths(repo_root=tmp_path / "two", state_dir=own_root))
     J.mod("learning.judge").grade_episode(
         ep2, judge=J.FakeJudge(default=two), runs_base=tmp_path / "two" / "defender-runs",
-        draws=2, queue_dir=tmp_path / "two" / "queue")
+        draws=2, state=own)
     fresh = [row["finding_id"] for row in J.enqueued_rows(J.judge_record(ep2))]
     assert len(fresh) == len(set(fresh)) == 8, (
         f"two worlds x two draws x two findings did not mint eight distinct ids: {fresh}")
@@ -259,7 +265,7 @@ def test_921_enqueue_refuses_discard_and_corpus_contradiction(tmp_path):
         (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
         J.mod("learning.judge").grade_episode(
             ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc(episode_outcome=word))),
-            runs_base=tmp_path / word / "defender-runs", draws=1)
+            runs_base=tmp_path / word / "defender-runs", draws=1, state=env_state())
         record = J.judge_record(ep)
         assert record["episode_outcome"] == word
         assert record["enqueued_rows"] == 0
@@ -283,7 +289,7 @@ def test_921_gradable_episode_appends_one_row_per_finding(tmp_path):
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=two_findings), runs_base=tmp_path / "defender-runs",
-        draws=2)
+        draws=2, state=env_state())
 
     record = J.judge_record(ep)
     rows = J.enqueued_rows(record)
@@ -313,7 +319,7 @@ def test_921_enqueue_refuses_a_row_that_would_key_error_the_shared_gate(tmp_path
         broken = _family_row()
         broken.pop(missing)
         with pytest.raises(J.refusals()) as raised:
-            enqueue.append_rows(ep, [broken])
+            enqueue.append_rows(ep, [broken], state=env_state())
         assert missing in str(raised.value)
     assert len(J.enqueued_rows(record)) == before, "a refused row was appended anyway"
 
@@ -434,12 +440,12 @@ def test_921_decision_discipline_is_queueable_and_an_unknown_type_is_refused(tmp
     assert "decision-discipline" in config.QUEUEABLE_FINDING_TYPES
     before = len(J.enqueued_rows(record))
     with pytest.raises(J.refusals()) as raised:
-        enqueue.append_rows(ep, [_family_row(type="root-cause-vibes")])
+        enqueue.append_rows(ep, [_family_row(type="root-cause-vibes")], state=env_state())
     assert "root-cause-vibes" in str(raised.value)
     assert len(J.enqueued_rows(record)) == before
 
     # Positive control: the same row with a queueable type lands.
-    assert enqueue.append_rows(ep, [_family_row("ep-1/b/0/7", type="decision-discipline")]) == 1
+    assert enqueue.append_rows(ep, [_family_row("ep-1/b/0/7", type="decision-discipline")], state=env_state()) == 1
 
 
 
@@ -467,7 +473,7 @@ def test_921_rows_are_appended_under_the_queue_lock_one_row_per_finding(tmp_path
     def append(tag: str) -> None:
         try:
             enqueue.append_rows(ep, [
-                _family_row(f"ep-1/{tag}/{n}", finding=f"{tag}-{n}-{big}") for n in range(20)])
+                _family_row(f"ep-1/{tag}/{n}", finding=f"{tag}-{n}-{big}") for n in range(20)], state=env_state())
         except BaseException as exc:  # noqa: BLE001 — recorded and re-raised by the assertion
             errors.append(exc)
 
@@ -526,7 +532,7 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        runs_base=tmp_path / "defender-runs", draws=1, queue_dir=channel.file.parent)
+        runs_base=tmp_path / "defender-runs", draws=1, state=LearningState.open(paths))
 
     record = J.judge_record(ep)
     assert Path(record["enqueued_to"]) == channel.file, (
@@ -597,7 +603,7 @@ def test_921_self_contradicting_episode_is_discard_and_the_record_is_the_artifac
 
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        runs_base=tmp_path / "defender-runs", draws=1)
+        runs_base=tmp_path / "defender-runs", draws=1, state=env_state())
 
     record = J.judge_record(ep)
     assert record["episode_outcome"] == "discard"
@@ -621,7 +627,7 @@ def test_921_world_contradicted_by_the_corpus_is_corpus_contradiction(tmp_path):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=contradiction), runs_base=tmp_path / "defender-runs",
-        draws=2)
+        draws=2, state=env_state())
 
     record = J.judge_record(ep)
     assert record["episode_outcome"] == "corpus-contradiction"
@@ -635,7 +641,7 @@ def test_921_world_contradicted_by_the_corpus_is_corpus_contradiction(tmp_path):
     (ok / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     J.mod("learning.judge").grade_episode(
         ok, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        runs_base=tmp_path / "ok" / "defender-runs", draws=2)
+        runs_base=tmp_path / "ok" / "defender-runs", draws=2, state=env_state())
     assert J.enqueued_rows(J.judge_record(ok)), "the positive control enqueued nothing"
 
 
@@ -657,7 +663,7 @@ def test_921_discard_needs_the_control_drift_key_or_a_majority_of_draws(tmp_path
                  J.as_reply_text(J.reply_doc()), J.as_reply_text(J.reply_doc())],
         default=J.as_reply_text(J.reply_doc()))
     J.mod("learning.judge").grade_episode(
-        ep, judge=minority, runs_base=tmp_path / "defender-runs", draws=3)
+        ep, judge=minority, runs_base=tmp_path / "defender-runs", draws=3, state=env_state())
 
     record = J.judge_record(ep)
     assert record["episode_outcome"] == "gradable", (
@@ -702,7 +708,7 @@ def test_921_a_family_row_is_exempt_from_the_forward_check(tmp_path):
 
     lessons_run = J.mod("learning.author.lessons.run")
     paths2 = D.make_paths(tmp_path / "cfg")
-    cfg = lessons_run.build_author_config(paths2, trees=author_trees(paths2))
+    cfg = lessons_run.build_author_config(paths2, trees=author_trees(paths2), state=LearningState.open(paths2))
     assert cfg.exempt is checks.skips_forward_check
 
 

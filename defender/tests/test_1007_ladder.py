@@ -17,6 +17,7 @@ import pytest
 
 from defender._episode_handle import Episode
 from defender.tests import _world_1007 as W
+from defender.tests._state1135 import env_state
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -63,6 +64,7 @@ def grade(ep: Path, *, judge=None, **kw):
     D4/J48: `runs_base` is a required keyword; this wrapper defaults it to a harmless,
     never-created sibling dir for every caller that does not care which base is threaded."""
     kw.setdefault("runs_base", ep.parent / "runs-base")
+    kw.setdefault("state", env_state())
     judge_mod = W.mod("learning.judge")
     return judge_mod.grade_episode(
         ep, judge=judge if judge is not None else W.FakeJudge(W.reply_document()), **kw)
@@ -186,7 +188,7 @@ def test_a_measured_nothing_world_withholds_its_defender_findings(tmp_path, monk
                             capture_replays=[W.replay_entry("k1", differs=False)]))
 
     result = grade(ep, judge=W.FakeJudge(W.reply_document(findings=[W.finding()])),
-                   queue_dir=paths.pending_dir)
+                   state=W.learning_state(paths))
 
     row = rows_of(result)["b"]
     assert row["withheld_reason"] == "measured_nothing", (
@@ -614,7 +616,7 @@ def test_a_mechanical_world_finding_is_told_from_a_model_drawn_one_by_provenance
                             reachable_by_capture=False,
                             capture_replays=[W.replay_entry("k1", differs=False)]))
 
-    grade(ep, judge=judge, queue_dir=paths.pending_dir)
+    grade(ep, judge=judge, state=W.learning_state(paths))
 
     # ON ONE WORLD. `FakeJudge` answers every call with the same document, so the family-level
     # call draws this bucket too and files it as a row of its own (`world: None`) — a THIRD row
@@ -645,7 +647,7 @@ def test_an_episode_killed_before_the_sibling_ran_withholds_with_episode_incompl
     ep = graded_episode(tmp_path, monkeypatch, worlds=("b", "c"), served={"b": [], "c": []})
 
     result = grade(ep, judge=W.FakeJudge(W.reply_document(findings=[W.finding()])),
-                   queue_dir=paths.pending_dir)
+                   state=W.learning_state(paths))
 
     for label, row in rows_of(result).items():
         assert row["withheld_reason"] == "episode_incomplete", (

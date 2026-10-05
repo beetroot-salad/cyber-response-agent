@@ -307,7 +307,10 @@ def test_1025_an_episode_with_no_judge_yaml_still_renders_its_stages_and_worlds_
     each — the state 92-reconciliation F-1 executed) render as J9a says: their rows under ONE
     group headed "no grade record — not enqueued", no disposition claimed, band unchanged.
     """
-    (tmp_path / "learning-state").write_text("not a directory", encoding="utf-8")
+    # The handle refuses a root that is not a folder up front (before any draw is paid for),
+    # so the post-draw refusal this scenario needs is the queue's holding folder being a
+    # regular file: the root opens, the draws run, and only the enqueue is refused.
+    (tmp_path / "learning-state" / "_pending").write_text("not a directory", encoding="utf-8")
     launch = ST._launch(tmp_path)
     assert launch.rc == 0
     assert launch.judge.calls > 0

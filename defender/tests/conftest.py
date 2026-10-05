@@ -265,7 +265,9 @@ def tmp_repo(tmp_path: Path):
     # built against it fakes `invoke_agent` alone, never meaning to exercise a real
     # verifier model call. A test that wants the check overrides `forward_check` itself.
     import dataclasses as _dc
-    cfg = _dc.replace(author_mod.build_author_config(paths, trees=author_trees(paths)),
+    from defender.tests._curator1134 import open_state
+    state = open_state(paths)
+    cfg = _dc.replace(author_mod.build_author_config(paths, state=state, trees=author_trees(paths)),
                       forward_check=None)
 
     class Ctx:
@@ -274,6 +276,7 @@ def tmp_repo(tmp_path: Path):
             self.author = author_mod
             self.paths = paths
             self.cfg = cfg
+            self.state = state
             self.run_git = run_git
 
     return Ctx()

@@ -87,7 +87,8 @@ from typing import Any
 import pytest
 
 from defender import _io
-from defender.learning.core import config, drains, markers
+from defender.learning.core import config, drains
+from defender.tests._state1135 import enqueue_case, state_for_paths
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL, DrainLabel, LoopPaths,
 )
@@ -195,6 +196,7 @@ class Leaf:
 
 def _leaf(tmp_path: Path) -> Leaf:
     paths = LoopPaths(repo_root=tmp_path / MAIN, state_dir=tmp_path / "learning-state")
+    paths.state_root.mkdir(parents=True, exist_ok=True)  # the handle never creates its root (#1135)
     return Leaf(paths=paths, wt=tmp_path / "wt-leaf")
 
 
@@ -981,6 +983,7 @@ def start_drive(tmp_path: Path, label: str, kind: str, prefix: str) -> Drive:
     asked: list[tuple[Path, str]] = []
     cls = LoopPaths if kind == "shipped" else relocated_paths(asked)
     paths = cls(repo_root=tmp_path / MAIN, state_dir=tmp_path / "learning-state")
+    paths.state_root.mkdir(parents=True, exist_ok=True)  # the handle never creates its root (#1135)
     other = LEAD if label == AUTHOR else AUTHOR
     rec = B.BoxLifecycleRecorder()
     branch = CheckoutBranch(tmp_path / "worktrees", events=rec.events,
@@ -1082,7 +1085,7 @@ def test_the_lead_lane_mounts_its_leafs_skills_and_its_work_step_holds_it(
     `skills/`, by descriptor, and a write through it lands there. Over `relocated_paths` the same
     holds for its relocated tree (`relocated-<leaf>-skills`), read of the leaf for
     `lead_author_drain`. All of it holds with the branch's prefix the author lane's
-    (`lessons/`). The queue is the real one (`markers.enqueue_case_for_curation`, what
+    (`lessons/`). The queue is the real one (`_state1135.enqueue_case`, what
     `test_queue_drains_852._queued_run` wraps), so the lane's own wake gate opens. That
     module's `_drain` is not reused: it fixes `start_box=` and `branch=`, and this drive must
     record the request and keep the leaf apart from `paths.repo_root`.
@@ -1094,7 +1097,8 @@ def test_the_lead_lane_mounts_its_leafs_skills_and_its_work_step_holds_it(
     d = start_drive(tmp_path, LEAD, kind, prefix)
     run_dir = tmp_path / "runs" / "run-1"
     run_dir.mkdir(parents=True)
-    markers.enqueue_case_for_curation("case-1", run_dir, d.paths)
+    with state_for_paths(d.paths) as state:
+        enqueue_case(state, "case-1", run_dir)
 
     rc = drains.lead_author_drain(
         d.paths, run_lead_author=d.step, run_pitfalls=lambda *_a, **_kw: 0, branch=d.branch,

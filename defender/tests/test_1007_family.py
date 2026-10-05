@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from defender.tests import _world_1007 as W
+from defender.tests._state1135 import env_state
 
 
 #: A pointer the FAMILY-level call is actually shown. Its default evidence is
@@ -50,6 +51,7 @@ def grade(ep: Path, judge, **kw):
     default (a harmless, never-created sibling dir) covers every indirect caller that does not
     care which base is threaded."""
     kw.setdefault("runs_base", ep.parent / "runs-base")
+    kw.setdefault("state", env_state())  # #1135: the handle over the env-named root, as a launcher opens it
     return W.mod("learning.judge").grade_episode(ep, judge=judge, **kw)
 
 
@@ -117,7 +119,7 @@ def test_the_family_reply_admits_a_family_level_finding(tmp_path, monkeypatch):
         findings=[W.world_finding(bucket="undiscriminating-family",
                                   evidence=FAMILY_EVIDENCE)]))
 
-    grade(ep, judge, queue_dir=paths.pending_dir)
+    grade(ep, judge, state=W.learning_state(paths))
 
     rows = [r for r in W.queue_rows(W.questioner_channel(paths))
             if r["type"] == "undiscriminating-family"]
@@ -191,7 +193,7 @@ def test_the_family_call_emits_no_defender_finding(tmp_path, monkeypatch):
     ep = family_episode(tmp_path, monkeypatch)
     judge = W.FakeJudge(W.reply_document(findings=[W.finding()]))
 
-    grade(ep, judge, queue_dir=paths.pending_dir)
+    grade(ep, judge, state=W.learning_state(paths))
 
     assert judge.family_prompts, (
         f"no family call was made at all, so the absence below proves nothing: "

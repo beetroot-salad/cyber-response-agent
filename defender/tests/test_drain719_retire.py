@@ -13,6 +13,7 @@ established seam — never `monkeypatch.setattr`.
 from __future__ import annotations
 
 import ast
+import errno
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,8 @@ import pytest
 import _drain719 as h
 from _drain719 import drain  # the not-yet-written target, via the suite's own shim
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
+from defender.learning.core.state import FINDINGS, LearningState
+from defender.tests import _state1135
 
 
 # Demand #0 — the return-value contract, after decision 1 flipped its `2` branch
@@ -168,7 +171,7 @@ def test_retire_leaves_every_row_outside_the_batch_byte_identical(tmp_path: Path
     ]
     h.seed(ch, [h.row_for("findings", "a/0"), *outsiders])
 
-    drain.retire(channel=ch, batch_ids=["a/0"], reason="scoped", max_attempts=1)
+    drain.retire(_state1135.state_for_paths(paths), channel=FINDINGS, batch_ids=["a/0"], reason="scoped", max_attempts=1)
 
     survivors = h.pending_by_id(ch)
     assert sorted(survivors) == ["a/1", "a/2"]
@@ -176,18 +179,25 @@ def test_retire_leaves_every_row_outside_the_batch_byte_identical(tmp_path: Path
     assert survivors["a/2"] == outsiders[1]
 
 
-def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(tmp_path: Path):
+def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(
+    tmp_path: Path, monkeypatch
+):
     """A11: the retire step's OWN write failing is systemic. It sits outside the widened
     guard by construction (decision 6), so the fault propagates out of the drain instead of
     being caught and counted as another attempt against the row it was trying to retire —
-    and the active queue is left byte-identical for the next tick to re-read. Induced for
-    real: the channel's graveyard path is a directory, so the append cannot land."""
+    and the active queue is left byte-identical for the next tick to re-read. Induced:
+    the graveyard append hits ENOSPC (a folder planted at the graveyard's name is now a
+    refusal, not an ordinary failure — #1135 — so the fault is injected at the handle's verb)."""
     paths = h.make_paths(tmp_path)
     h.write_source_refs(paths, "a")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
     before = ch.file.read_bytes()
-    drain.graveyard_file(ch).mkdir(parents=True)
+
+    def _disk_full(self, channel, entries):
+        raise OSError(errno.ENOSPC, "no space left on device")
+
+    monkeypatch.setattr(LearningState, "deadletter", _disk_full)
 
     cfg = h.cfg_for(
         paths,
@@ -232,49 +242,41 @@ def test_an_all_empty_tick_writes_no_consumed_row_and_no_graveyard_row(tmp_path:
 
 
 
-#: `(file, function)` pairs that reach `write_atomic` without writing a QUEUE — the census's
-#: proxy for "rewrites a queue file wholesale" went wide the moment a second kind of writer
-#: adopted the same seam. `synthesize_drafts` writes one `_draft/{digest}.md` catalog template
-#: per identity, into the corpus, never into `state_dir`: no queue, nothing to merge, no
-#: lost-append race for a rotation to close. Keyed on the FUNCTION and not on the file (the way
-#: `markers.py` is skipped whole) so the rest of `draft_synthesis.py` stays inside the census —
-#: an exclusion the width of a module is one that stops answering the moment that module grows
-#: a second writer.
-_NOT_A_QUEUE_WRITER = frozenset({("draft_synthesis.py", "synthesize_drafts")})
-
-
 def test_exactly_one_function_rewrites_a_pending_file(tmp_path: Path):
     """D9 removes the second write path rather than adding a lock to it: after the fold
     exactly one function under `defender/learning` rewrites a queue file wholesale, and the
     retire seam reaches it through the same locked rotation that rotation uses. The census
     picks the subject; the drive is what discharges it — a row appended between the read and
-    the rewrite survives, which only the merging rotation gives."""
+    the rewrite survives, which only the merging rotation gives.
+
+    Under #1135 the rewrite is a `replace`-mode write of a channel's `.queue` through the
+    handle's one write door, so the census names that call shape (the old `write_atomic`
+    callers no longer exist under `defender/learning`)."""
     import defender.learning as learning_pkg  # type: ignore[import-not-found]
 
     root = Path(learning_pkg.__path__[0]).resolve()  # namespace pkg: __file__ is None
     writers: dict[str, set[str]] = {}
     for py in sorted(root.rglob("*.py")):
-        if py.name == "markers.py":
-            continue  # a marker-directory queue, explicitly out of scope (A5)
         tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            if (py.name, node.name) in _NOT_A_QUEUE_WRITER:
-                continue
             for call in ast.walk(node):
-                if isinstance(call, ast.Call):
-                    fn = call.func
-                    nm = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
-                    if nm == "write_atomic":
-                        writers.setdefault(node.name, set()).add(py.name)
-    assert set(writers) == {"_rewrite_queue"}, f"more than one queue rewriter: {writers}"
+                if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                        and call.func.attr == "_write" and call.args):
+                    continue
+                target = call.args[0]
+                replaces = any(isinstance(a, ast.Constant) and a.value == "replace"
+                               for a in call.args[1:])
+                if replaces and isinstance(target, ast.Attribute) and target.attr == "queue":
+                    writers.setdefault(node.name, set()).add(py.name)
+    assert set(writers) == {"rotate"}, f"more than one queue rewriter: {writers}"
 
     paths = h.make_paths(tmp_path)
     h.write_source_refs(paths, "a")
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0"), h.row_for("findings", "a/9")])
-    drain.retire(channel=ch, batch_ids=["a/0"], reason="via the rotation", max_attempts=1)
+    drain.retire(_state1135.state_for_paths(paths), channel=FINDINGS, batch_ids=["a/0"], reason="via the rotation", max_attempts=1)
     assert sorted(h.pending_by_id(ch)) == ["a/9"]
 
 
@@ -288,7 +290,7 @@ def test_attempt_count_survives_a_fresh_process(tmp_path: Path):
     ch = h.channel_of(paths, "findings")
     h.seed(ch, [h.row_for("findings", "a/0")])
 
-    drain.retire(channel=ch, batch_ids=["a/0"], reason="first process", max_attempts=3)
+    drain.retire(_state1135.state_for_paths(paths), channel=FINDINGS, batch_ids=["a/0"], reason="first process", max_attempts=3)
     assert h.attempts_of(ch, "a/0") == 1
 
     script = (
@@ -296,8 +298,9 @@ def test_attempt_count_survives_a_fresh_process(tmp_path: Path):
         "from pathlib import Path\n"
         "from defender.learning.author import drain\n"
         "from defender.learning.core.config import LoopPaths\n"
+        "from defender.learning.core.state import FINDINGS, LearningState\n"
         "paths = LoopPaths(repo_root=Path(sys.argv[1]))\n"
-        "out = drain.retire(channel=paths.findings, batch_ids=['a/0'],\n"
+        "out = drain.retire(LearningState.open(paths), channel=FINDINGS, batch_ids=['a/0'],\n"
         "                   reason='second process', max_attempts=2)\n"
         "print(out.bumped['a/0'])\n"
     )

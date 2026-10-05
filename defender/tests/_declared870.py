@@ -340,8 +340,9 @@ def by_surface(handoffs: list[dict]) -> dict[str, list[dict]]:
 def queue_ids(paths) -> list[str]:
     """The ids still pending, in file order — the observable FK-7's held rows live in."""
     from defender.learning.core import persist
+    from defender.tests import _state1135
 
-    return [str(r["pitfall_id"]) for r in persist.read_pitfalls(paths)]
+    return [str(r["pitfall_id"]) for r in persist.read_pitfalls(_state1135.state_for_paths(paths))]
 
 
 def consumed_by_id(paths) -> dict[str, dict]:
@@ -349,8 +350,7 @@ def consumed_by_id(paths) -> dict[str, dict]:
 
 
 def graveyard_by_id(paths) -> dict[str, dict]:
-    from defender.learning.author import drain
-
     return {
-        str(r["pitfall_id"]): r for r in read_rows(drain.graveyard_file(paths.pitfalls))
+        str(r["pitfall_id"]): r
+        for r in read_rows(paths.pitfalls.file.with_suffix(".deadletter.jsonl"))
     }

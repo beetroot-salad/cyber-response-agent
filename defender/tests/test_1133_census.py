@@ -164,10 +164,8 @@ _DYNAMIC_IMPORTS = frozenset({"importlib.import_module", "builtins.__import__"})
 
 #: The residue D6' leaves, exactly, re-derived on the final tree.
 RESIDUE = frozenset({
-    # The queue writer (N-d: learning state, #1134/#1135).
-    ("learning.judge.enqueue", "_append_validated_rows", "guarded_mkdir"),
-    ("learning.judge.enqueue", "_append_validated_rows", ".open"),
-    ("learning.judge.enqueue", "_append_validated_rows", "write_guarded"),
+    # (The queue writer's three rows are gone: #1135 moved it onto the learning-state handle, so
+    # it makes no guarded write of its own any more.)
     # The archive's copy lane (N-a).
     ("learning.branch.archive", "_screen_destinations", ".unlink"),
     ("learning.branch.archive", "archive_episode", "shutil.copy2"),
@@ -955,7 +953,6 @@ _CARVE_READ = "O5 carve-out: a path-taking reader of a run-shaped tree or a base
 _CARVE_ARITH = ("O5 carve-out: the judge's pointer-containment arithmetic, which resolves a "
                 "model-cited pointer and reads nothing")
 _GIT = "a path inside a git revision (`git show <rev>:<path>`), not a file on disk"
-_QUEUE = "N-d: the judge queue writer's own files (learning state, not the episode)"
 _ALERT = "the investigation's alert input, a run file read before any episode exists"
 #: Rev 3 (R1) removes `episode._answers(path)`'s row: `_answers` takes the rows `delta_o` read
 #: through its one `bind`, not a path.
@@ -968,9 +965,6 @@ PARAM_ALLOWLIST = frozenset({
      "the host staging door's HTTP request path, not a file"),
     ("learning.judge", "_memoized_show.invoke", "path", _GIT),
     ("learning.judge.render", "_git_show_default", "path", _GIT),
-    ("learning.judge.enqueue", "_append_validated_rows", "lock_file", _QUEUE),
-    ("learning.judge.enqueue", "_append_validated_rows", "pending_file", _QUEUE),
-    ("learning.judge.enqueue", "_queue_trust_root", "pending_file", _QUEUE),
     ("run", "_Investigate.__call__", "alert_path", _ALERT),
     ("run", "_drive_investigation", "alert_path", _ALERT),
     ("run", "_materialize_run", "alert", _ALERT),

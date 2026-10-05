@@ -73,16 +73,18 @@ def lane_fields(paths: LoopPaths) -> dict[str, Any]:
     return {"skills": trees.mount(paths.skills_dir), "tree_for": trees.tree_for}
 
 
-def lead_deps(paths: LoopPaths, **replaced: Any) -> Any:
+def lead_deps(paths: LoopPaths, *, state: Any = None, **replaced: Any) -> Any:
     """`build_lead_author_deps(paths, trees=<the lead drain's trees over paths>)`, with the
     `replaced` fields swapped in (`dataclasses.replace`). The deps hold the trees' `Held` and
     bound `tree_for`, so the trees stay open while the deps are referenced; a refusal closes
     them and propagates."""
     from defender.learning.leads import lead_author
+    from defender.tests._curator1134 import open_state
 
     trees = lead_trees(paths)
     try:
-        deps = lead_author.build_lead_author_deps(paths, trees=trees)
+        deps = lead_author.build_lead_author_deps(
+            paths, state=state if state is not None else open_state(paths), trees=trees)
     except BaseException:
         trees.close()
         raise

@@ -886,7 +886,8 @@ class SwappingJudge:
 def _grade(tmp_path: Path, ep: Path, judge: Any) -> Any:
     try:
         return J.mod("learning.judge").grade_episode(
-            ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=2)
+            ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=2,
+            state=_state1135.env_state())
     except Exception as refused:  # noqa: BLE001 — the refusal is the observation
         return refused
 

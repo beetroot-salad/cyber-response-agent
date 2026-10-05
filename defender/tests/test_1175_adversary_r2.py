@@ -217,8 +217,8 @@ def test_r2c_unstartable_git_after_a_requeued_claim_ends_the_tick(tmp_path, monk
         transient = _leaving(LIFT, EDITED_LIFT, patch, path_dir, retry)
         plain = _serving(served)
 
-        def step(paths: Any, run_dir: Path, **kw: Any) -> None:
-            (transient if run_dir == run_a else plain)(paths, run_dir, **kw)
+        def step(paths: Any, state: Any, run_dir: Path, **kw: Any) -> None:
+            (transient if run_dir == run_a else plain)(paths, state, run_dir, **kw)
 
         got = _tick(sc, run_lead_author=step, run_pitfalls=_no_curation, git_timeout=BOUND)
 

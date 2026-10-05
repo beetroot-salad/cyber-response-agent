@@ -15,7 +15,7 @@ which runs before both, was not — so a fault anywhere in it escaped `run_batch
 neither a graveyard entry nor a stuck record. The demand is a guard round the STEP, so the
 tests below fault it at two different seams with two different classes: a `TimeoutError` from
 its rotation's own bounded wait under a genuinely contended append lock, and an
-`IsADirectoryError` from the graveyard append that precedes it. Its stuck records must also
+`OSError(ENOSPC)` from the graveyard append that precedes it (#1135: a folder planted there is now a `StateRefused`, which records nothing by design). Its stuck records must also
 fold by ROW, which for a keyless row means by its content — an empty id list, or any key
 coarser than the row, reads two unrelated poison rows as one problem getting worse.
 
@@ -33,8 +33,9 @@ is paired with its control on the same address.
 """
 from __future__ import annotations
 
-import dataclasses
+import errno
 import json
+import os
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -42,14 +43,8 @@ from pathlib import Path
 import pytest
 
 import _drain719 as h
+from defender.learning.core.state import FINDINGS, LearningState
 from _drain719 import drain  # noqa: F401 — the target; the shim keeps collection alive
-
-#: The suffix `drain.graveyard_file` derives the channel's graveyard path with. Deriving it is
-#: the FIRST thing `_retire_unkeyable` does after `_tick` released the append lock, and the
-#: last before its rotation asks for that lock again — which is what makes it the one instant
-#: an appender can arrive with no race to lose. Spelled here because `_QueueFileThatLetsAn
-#: AppenderIn` must let every other suffix (`.stuck.jsonl`) through untouched.
-_GRAVEYARD_SUFFIX = ".deadletter.jsonl"
 
 
 def _ids_in(line: str, label: str) -> str:
@@ -119,7 +114,7 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
     h.seed(ch, [legacy, family, authorable])
     agent = h.recording(h.committing("881-o3"))
     cfg = h.cfg_for(paths, "findings", invoke_agent=agent)
-    report = cfg.held_report
+    report = paths.state_root / FINDINGS.report
 
     assert drain.run_batch(cfg=cfg) == 0
     assert [[r["finding_id"] for r in call["rows"]] for call in agent.calls] == [["z/0"]], (
@@ -180,63 +175,78 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
 # ---------------------------------------------------------------------------------------
 
 
-class _QueueFileThatLetsAnAppenderIn(type(Path())):
-    """The queue file, plus one callback fired at the single instant an appender can arrive
-    with no race to lose.
+class _StateThatLetsAnAppenderIn(LearningState):
+    """The learning state handle, plus one callback fired at the single instant an appender can
+    arrive with no race to lose.
 
-    That instant is the graveyard path's derivation. `_retire_unkeyable` evaluates
-    `graveyard_file(channel)` — this object's `with_suffix(".deadletter.jsonl")` — as the
-    argument to its graveyard append, and that sits AFTER `_tick` released the append lock
-    (the batch read is over) and BEFORE `persist.rotate_queue_locked` asks for it again. So
-    nothing holds the lock when the callback runs and the appender can take it
+    That instant is the end of the retirement's graveyard append. `_retire_unkeyable` calls
+    `state.deadletter(...)` and then `state.rotate(...)`, and the call between them sits AFTER
+    `_tick` released the append lock (the batch read is over) and BEFORE the rotation asks for
+    it again. So nothing holds the lock when the callback runs and the appender can take it
     SYNCHRONOUSLY: `Holder.__enter__` returns only once it OWNS the lock, so when the drain
     resumes the lock is already held. No thread, no interval to guess at, nothing to lose
     under load.
 
-    The read-side hook this replaced fired while the drain HELD the lock, which left the
-    appender able only to queue as a waiter behind it — and "has it queued yet" is not
-    observable, so the ordering rested on a sleep and lost it under `-n auto`.
-
-    This is the seam because the code has no earlier one: the unkeyable retirement runs
-    BEFORE `cfg.gate` and `cfg.invoke_agent`, so the `commit_fn`-shaped hook
-    `tests/test_drain719_hardening.py` uses to let an appender in mid-tick lands too late.
-
     Nothing about the contention is faked. The appender takes the real `flock` on the real
-    lock path with the appender's own blocking discipline (`persist.queue_lock`, no
-    deadline), and the `TimeoutError` under test is raised by the retire rotation's own
-    bounded wait. What the hook decides is only WHEN the appender arrives — the same thing
-    the hardening suite's `commit_then_appender_takes_the_lock` decides.
+    lock file with the appender's own blocking discipline (no deadline), and the `TimeoutError`
+    under test is raised by the retire rotation's own bounded wait. What the hook decides is
+    only WHEN the appender arrives.
 
-    Every other suffix is passed straight through, `.stuck.jsonl` above all: `stuck_report_
-    file` derives the report these tests then read the same way, and it is derived AFTER the
-    fault, when the appender is already in. Every other path operation is the real `Path`'s
-    and answers with real `Path` objects.
+    It enters through `dataclasses.replace(cfg, state=...)`, the config seam, not through
+    `monkeypatch.setattr`: a handle sharing the real one's descriptor (`over`), with the one
+    verb wrapped. The real handle must outlive it."""
 
-    It enters through `dataclasses.replace(cfg.channel, file=...)`, the config seam, not
-    through `monkeypatch.setattr` — and so it IS a `Path` (#1067: `QueueChannel.file` is
-    validated strictly, and a duck with `__fspath__` is refused at that seam), the concrete
-    class `Path()` builds on this platform, with the one method overridden. Built through
-    `over`, not a constructor of its own: `Path`'s own construction differs between 3.11
-    (`__new__`) and 3.12 (`__init__`), and a factory needs to know neither. The hook lives on
-    the instance; a path derived from this one (`.parent`, `with_name`) carries the class
-    defaults below and never fires."""
-
-    _on_graveyard_path: Callable[[], None] | None = None
+    _on_deadletter: Callable[[], None] | None = None
     _fired: bool = False
 
     @classmethod
-    def over(cls, real: Path, on_graveyard_path: Callable[[], None]) -> Path:
-        self = cls(real)
-        self._on_graveyard_path = on_graveyard_path
+    def over(cls, real: LearningState, on_deadletter: Callable[[], None]) -> LearningState:
+        self = cls.__new__(cls)
+        self.__dict__.update(real.__dict__)
+        self._real = real  # keeps the shared descriptor open for as long as this one lives
+        self._on_deadletter = on_deadletter
         return self
 
-    def with_suffix(self, suffix: str) -> Path:
-        # A REAL `Path`, as every other operation on this one answers with.
-        derived = Path(str(self)).with_suffix(suffix)
-        if suffix == _GRAVEYARD_SUFFIX and not self._fired and self._on_graveyard_path:
+    def deadletter(self, channel, entries):
+        super().deadletter(channel, entries)
+        if not self._fired and self._on_deadletter:
             self._fired = True
-            self._on_graveyard_path()
-        return derived
+            self._on_deadletter()
+
+
+class _StateWhoseDiskIsFull(LearningState):
+    """The learning state handle, with one verb answering `ENOSPC` while `full` is set.
+
+    #1135: a folder planted where the graveyard or the held report belongs is now a refusal
+    (`StateRefused`), which stops the tick and records NOTHING by design ("a planted entry
+    stops the tick, and nothing is recorded after it"). The fault these tests need is an
+    ordinary I/O fault outside `RETIRE_SET`, met at the same seam, so it is a full disk on the
+    one verb that seam calls. It enters through `dataclasses.replace(cfg, state=...)`, the
+    config seam, sharing the real handle's descriptor (the real handle must outlive it), and
+    `full = False` is the obstruction removed, for the paired control on the same config."""
+
+    _verb: str = ""
+    full: bool = True
+
+    @classmethod
+    def over(cls, real: LearningState, verb: str) -> _StateWhoseDiskIsFull:
+        self = cls.__new__(cls)
+        self.__dict__.update(real.__dict__)
+        self._real = real
+        self._verb = verb
+        return self
+
+    def _maybe_full(self, verb: str) -> None:
+        if self.full and verb == self._verb:
+            raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+
+    def deadletter(self, channel, entries):
+        self._maybe_full("deadletter")
+        super().deadletter(channel, entries)
+
+    def disposition_report(self, channel, text):
+        self._maybe_full("disposition_report")
+        super().disposition_report(channel, text)
 
 
 def _tick_meeting_an_appender_at_the_unkeyable_retirement(
@@ -262,11 +272,10 @@ def _tick_meeting_an_appender_at_the_unkeyable_retirement(
         # tick, so it returns at once.
         appender.__enter__()
 
-    watched = dataclasses.replace(
-        ch, file=_QueueFileThatLetsAnAppenderIn.over(ch.file, _an_appender_arrives)
-    )
+    real = LearningState.open(paths)
     cfg = h.cfg_for(
-        paths, "findings", channel=watched, repo_lock_wait_seconds=lock_wait,
+        paths, "findings", state=_StateThatLetsAnAppenderIn.over(real, _an_appender_arrives),
+        repo_lock_wait_seconds=lock_wait,
         invoke_agent=h.recording(h.committing("881-o4")),
     )
     tick = h.Background(lambda: drain.run_batch(cfg=cfg))
@@ -389,10 +398,11 @@ def test_881_a_fault_before_the_rotation_in_the_unkeyable_retirement_is_recorded
     wedged in silence. That is the shape this suite has shipped before (PR #678: a catch-all
     fault demand discharged at one seam and believed of the whole region).
 
-    The fault is a real one, met at a real seam: the graveyard path is a DIRECTORY, so
-    `append_jsonl`'s `open(path, "a")` raises `IsADirectoryError` — a genuine filesystem
-    condition on the very file the retirement exists to write, not an injected exception,
-    and not in `RETIRE_SET`, so nothing retires and the row stays queued.
+    The fault is met at a real seam: the graveyard append, on the very file the retirement
+    exists to write, answers `ENOSPC` (`_StateWhoseDiskIsFull`; before #1135 it was a folder
+    planted at the graveyard path, which the handle now refuses as `StateRefused` and records
+    nothing for, by design). `OSError` is not in `RETIRE_SET`, so nothing retires and the row
+    stays queued.
 
     THE PAIRED CONTROL is the second half: with the obstruction removed the same retirement
     completes, graveyards its row and records nothing further — so the guard cannot be
@@ -403,27 +413,26 @@ def test_881_a_fault_before_the_rotation_in_the_unkeyable_retirement_is_recorded
     ch = h.channel_of(paths, "findings")
     rows = [_unkeyable("a/0")]
     h.seed(ch, rows)
-    graveyard = drain.graveyard_file(ch)
-    graveyard.mkdir(parents=True)
+    full = _StateWhoseDiskIsFull.over(LearningState.open(paths), "deadletter")
     cfg = h.cfg_for(
-        paths, "findings", repo_lock_wait_seconds=1,
+        paths, "findings", repo_lock_wait_seconds=1, state=full,
         invoke_agent=h.recording(h.committing("881-o4-seams")),
     )
 
-    with pytest.raises(IsADirectoryError):
+    with pytest.raises(OSError, match="No space left"):
         drain.run_batch(cfg=cfg)
 
     assert cfg.invoke_agent.calls == [], (  # type: ignore[attr-defined]
         "the tick reached the author; the fault under test is the one BEFORE the gate"
     )
-    assert list(graveyard.iterdir()) == [], "nothing can have been graveyarded"
-    assert h.pending(ch) == rows, "the row must stay queued — `IsADirectoryError` retires nothing"
+    assert h.graveyard(ch) == [], "nothing can have been graveyarded"
+    assert h.pending(ch) == rows, "the row must stay queued — `OSError` retires nothing"
     records = h.stuck_records(ch)
     assert len(records) == 1, (
         "a fault the drain cannot retire escaped the tick with no operator signal, because "
         "the guard covers the rotation and not the whole retirement"
     )
-    assert records[0]["fault_class"] == "IsADirectoryError", (
+    assert records[0]["fault_class"] == "OSError", (
         "the record does not name the fault class, or the guard names only the one class "
         f"the sibling test injects: {records[0]}"
     )
@@ -433,7 +442,7 @@ def test_881_a_fault_before_the_rotation_in_the_unkeyable_retirement_is_recorded
     )
 
     # The paired control: unobstructed, the same retirement is ordinary work.
-    graveyard.rmdir()
+    full.full = False
     assert drain.run_batch(cfg=cfg) == 0
     assert h.pending(ch) == [], "the retirement did not clear the row once unobstructed"
     assert len(h.graveyard(ch)) == 1, "the retirement did not graveyard the row"
@@ -596,9 +605,10 @@ def test_881_a_tick_whose_gate_held_the_whole_batch_names_those_rows_when_it_sti
     An operator paging on "stuck for N ticks" would read one problem where there are several,
     and could not say which rows any of them is about.
 
-    The fault is a real one at a real seam: the held report's path is a DIRECTORY, so
-    `write_held_report`'s `open(path, "a")` raises `IsADirectoryError` — not in `RETIRE_SET`,
-    so nothing retires. It fires only because the gate held something, which is the same
+    The fault is met at a real seam: the held report's append answers `ENOSPC`
+    (`_StateWhoseDiskIsFull`; before #1135 it was a folder planted at the report's path, which
+    the handle now refuses as `StateRefused` and records nothing for, by design) — `OSError` is
+    not in `RETIRE_SET`, so nothing retires. It fires only because the gate held something, which is the same
     condition that empties `to_author`, so the two halves cannot be separated by the fixture.
 
     THE PAIRED CONTROL is the same tick unobstructed: it holds the same rows, writes its
@@ -609,11 +619,12 @@ def test_881_a_tick_whose_gate_held_the_whole_batch_names_those_rows_when_it_sti
     ch = h.channel_of(paths, "findings")
     held = [h.row_for("findings", f"a/{i}") for i in range(3)]
     h.seed(ch, held)
-    cfg = h.cfg_for(paths, "findings", invoke_agent=h.recording(h.committing("881-o4-rotate")))
-    cfg.held_report.parent.mkdir(parents=True, exist_ok=True)
-    cfg.held_report.mkdir()
+    full = _StateWhoseDiskIsFull.over(LearningState.open(paths), "disposition_report")
+    cfg = h.cfg_for(paths, "findings", state=full,
+                    invoke_agent=h.recording(h.committing("881-o4-rotate")))
+    held_report = paths.state_root / FINDINGS.report
 
-    with pytest.raises(IsADirectoryError):
+    with pytest.raises(OSError, match="No space left"):
         drain.run_batch(cfg=cfg)
 
     assert cfg.invoke_agent.calls == [], (  # type: ignore[attr-defined]
@@ -627,10 +638,10 @@ def test_881_a_tick_whose_gate_held_the_whole_batch_names_those_rows_when_it_sti
     )
 
     # The control: unobstructed, the same tick holds the same rows and records nothing more.
-    cfg.held_report.rmdir()
+    full.full = False
     assert drain.run_batch(cfg=cfg) == 0
     assert len(h.stuck_records(ch)) == 1, (
         "an ordinary holding tick wrote a stuck record; the report then names every tick "
         "that declined a row rather than every wedged one"
     )
-    assert cfg.held_report.is_file(), "the held report was not written once unobstructed"
+    assert held_report.is_file(), "the held report was not written once unobstructed"

@@ -50,12 +50,13 @@ import pytest
 from defender import _git
 from defender._io import READ_LIMIT
 from defender._run_paths import RunPaths
-from defender.learning.core import drains, markers, persist
+from defender.learning.core import drains, persist
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.leads import lead_author, pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.runtime import box as box_mod
 from defender.runtime.box import BoxExecutor, BoxFault, BoxSpec, _DockerTransport
+from defender.tests import _state1135
 from defender.tests._claim1175 import claim_git
 from defender.tests._declared869 import LeadAuthorSpawn, Spawn, pitfall_row
 from defender.tests._declared870 import (
@@ -143,6 +144,7 @@ def _drain_scene(tmp_path: Path, claims: int) -> LoopPaths:
     repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",), skills=("elastic",),
                      catalog=("elastic",))
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    paths.state_root.mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
     for i in range(claims):
         run_dir = tmp_path / f"run-{i}"
         (run_dir / "gather_raw").mkdir(parents=True)
@@ -165,17 +167,18 @@ class DrainLanes:
         if self.pause_fault is not None:
             raise self.pause_fault
 
-    def run_lead_author(self, _paths: LoopPaths, _run_dir: Path, *, box: Any = None,
-                        **_kw: Any) -> None:
+    def run_lead_author(self, _paths: LoopPaths, _state: Any, _run_dir: Path, *,
+                        box: Any = None, **_kw: Any) -> None:
         self.log.append(("serve", box))
 
-    def run_pitfalls(self, _paths: LoopPaths, *, box: Any = None, **_kw: Any) -> int:
+    def run_pitfalls(self, _paths: LoopPaths, _state: Any, *, box: Any = None,
+                     **_kw: Any) -> int:
         self.log.append(("pitfalls", box))
         return 0
 
     def drain(self, paths: LoopPaths, box: Any) -> Any:
         return drains._drain_lead_author(
-            paths, self.run_lead_author, self.run_pitfalls, box=box, pause=self.pause,
+            paths, _state1135.state_for_paths(paths), self.run_lead_author, self.run_pitfalls, box=box, pause=self.pause,
         )
 
 
@@ -363,6 +366,7 @@ def _lead_scene(tmp_path: Path, committed: dict[str, str] | None = None) -> Lead
             write(repo / "defender" / "skills" / name, text)
         commit_all(repo, "seed the names the agent rewrites")
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    paths.state_root.mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
     return LeadScene(tmp=tmp_path, repo=repo, paths=paths, run_dir=_run_dir(tmp_path),
                      head=_git.git_head_sha(repo))
 
@@ -457,7 +461,8 @@ def test_the_production_thaw_is_runtime_box_thawed(tmp_path: Path):
     and `run_pitfalls`' `thaw=` default."""
     s = _lead_scene(tmp_path)
     with lead_trees(s.paths) as trees:
-        deps = lead_author.build_lead_author_deps(s.paths, trees=trees)
+        deps = lead_author.build_lead_author_deps(
+            s.paths, state=_state1135.state_for_paths(s.paths), trees=trees)
         assert deps.thaw is box_mod.thawed
     default = inspect.signature(pitfalls_curator.run_pitfalls).parameters["thaw"].default
     assert default is box_mod.thawed
@@ -615,7 +620,7 @@ def _pitfalls_scene(tmp_path: Path, monkeypatch, rows: list[dict]) -> PitfallsSc
     write_reducer_surface(repo)
     commit_all(repo, "seed the reducer surface")
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    persist.append_pitfalls(rows, paths=paths)
+    persist.append_pitfalls(rows, state=_state1135.state_for_paths(paths))
     return PitfallsScene(tmp=tmp_path, repo=repo, paths=paths, head=_git.git_head_sha(repo))
 
 
@@ -628,7 +633,7 @@ def _system_rows() -> list[dict]:
 
 
 def _queued(s: PitfallsScene) -> list[str]:
-    return sorted(r["pitfall_id"] for r in persist.read_pitfalls(s.paths))
+    return sorted(r["pitfall_id"] for r in persist.read_pitfalls(_state1135.state_for_paths(s.paths)))
 
 
 def _drive_pitfalls(  # noqa: PLR0913 — one drive, every seam a row varies
@@ -1148,7 +1153,7 @@ def test_the_drains_default_seams_hold_the_box_frozen_except_around_each_agent(
     committed."""
     s = _lead_scene(tmp_path)
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
-    persist.append_pitfalls(_system_rows(), paths=s.paths)
+    persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))
     write(s.paths.author_queue_dir / "case-0.json",
           json.dumps({"case_id": "case-0", "run_dir": str(s.run_dir)}) + "\n")
     shim = DockerShim(tmp_path, monkeypatch)
@@ -1163,18 +1168,19 @@ def test_the_drains_default_seams_hold_the_box_frozen_except_around_each_agent(
 
     lead_spawn, curator = LeadAuthorSpawn(author), Spawn(curate)
 
-    def run_lead(paths: LoopPaths, run_dir: Path, *, box: Any = None, on_done: Any) -> int:
+    def run_lead(paths: LoopPaths, state: Any, run_dir: Path, *, box: Any = None,
+                 on_done: Any) -> int:
         with lead_trees(paths) as trees:
             deps = _deps(paths, trees, lead_spawn, [ELASTIC_LEAD])
-            return lead_author.run(run_dir, label=LEAD, paths=paths, deps=deps, box=box,
-                                   on_done=on_done)
+            return lead_author.run(run_dir, label=LEAD, paths=paths, state=state, deps=deps,
+                                   box=box, on_done=on_done)
 
-    def run_pitfalls(paths: LoopPaths, *, box: Any = None, on_curated: Any) -> int:
+    def run_pitfalls(paths: LoopPaths, state: Any, *, box: Any = None, on_curated: Any) -> int:
         with lead_trees(paths) as trees:
-            return pitfalls_curator.run_pitfalls(paths=paths, trees=trees, invoke=curator,
-                                                 box=box, on_curated=on_curated)
+            return pitfalls_curator.run_pitfalls(paths=paths, state=state, trees=trees,
+                                                 invoke=curator, box=box, on_curated=on_curated)
 
-    drains._drain_lead_author(s.paths, run_lead, run_pitfalls, box=shim.box())
+    drains._drain_lead_author(s.paths, _state1135.state_for_paths(s.paths), run_lead, run_pitfalls, box=shim.box())
     assert lead_spawn.calls, "the lead-author claim never reached its agent"
     assert curator.calls, "the pitfalls tick never reached its curator"
     assert shim.steps() == [*PAUSED, *THAWED, "agent", *PAUSED, *THAWED, "curator", *PAUSED]
@@ -1191,7 +1197,7 @@ def test_the_production_drain_freezes_its_box_before_it_serves(tmp_path: Path, m
     paths = loop_paths(tmp_path)
     run_dir = tmp_path / "runs" / "run-1"
     (run_dir / "gather_raw").mkdir(parents=True)
-    markers.enqueue_case_for_curation("case-1", run_dir, paths)
+    _state1135.enqueue_case(_state1135.state_for_paths(paths), "case-1", run_dir)
     shim = DockerShim(tmp_path, monkeypatch)
     box = shim.box()
     started: list[Any] = []
@@ -1200,12 +1206,12 @@ def test_the_production_drain_freezes_its_box_before_it_serves(tmp_path: Path, m
         started.append(request)
         return box
 
-    def serve(_paths: LoopPaths, _run_dir: Path, *, box: Any = None, on_done: Any,
-              **_kw: Any) -> None:
+    def serve(_paths: LoopPaths, _state: Any, _run_dir: Path, *, box: Any = None,
+              on_done: Any, **_kw: Any) -> None:
         shim.mark("serve")
         on_done(None)
 
-    def curate(_paths: LoopPaths, *, box: Any = None, **_kw: Any) -> int:
+    def curate(_paths: LoopPaths, _state: Any, *, box: Any = None, **_kw: Any) -> int:
         shim.mark("pitfalls")
         return 0
 

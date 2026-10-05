@@ -15,7 +15,7 @@ day, after `/code-review`):
   swallows its own failures (a missed `.value` would lose the manifest silently and log an
   error), so these rows assert on the written file, never on an exception.
 - O3, every message that carries a label shows its value, never `DrainLabel.AUTHOR` or
-  `<DrainLabel.AUTHOR: ...>`: the claim log of `markers.claim_markers`, the quarantine log, and
+  `<DrainLabel.AUTHOR: ...>`: the claim log of `LearningState.claim`, the quarantine log, and
   the lead-author refusal (formatted with `!r` before #1179).
 
 Real primitives throughout: a real scrub taints a real tree with a planted link, the real writers
@@ -34,15 +34,16 @@ from typing import Any
 import pytest
 
 from defender.learning.author.branch import AuthorBranch, BranchError
-from defender.learning.core import drains, markers
+from defender.learning.core import drains
+from defender.learning.core.state import LEAD_QUEUE_LOCK, TRY_ONCE
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL, DrainLabel, LoopPaths,
 )
 from defender.learning.core.quarantine import preserve_tainted_tree
 from defender.learning.leads import lead_author
 from defender.learning.leads.lead_author import LeadAuthorError
-from defender.learning.leads.lead_author._handoff import acquire_queue_lock, release_queue_lock
 from defender.runtime import scrub as scrub_mod
+from defender.tests._state1135 import state_for_paths
 from defender.tests._tree_listing_1134 import descriptors_under
 from defender.tests.e2e import _box665 as B
 from defender.tests.test_1134_mount_list import UNKNOWN_LABELS
@@ -59,6 +60,7 @@ LEAKS = ("DrainLabel", "<", "AUTHOR:")
 def _paths(tmp_path: Path) -> LoopPaths:
     repo = tmp_path / "repo"
     (repo / "defender").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "state").mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
     return LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
 
 
@@ -84,7 +86,7 @@ def test_the_pending_delivery_record_writes_the_labels_value(tmp_path: Path, lab
     paths = _paths(tmp_path)
     branch = AuthorBranch(repo_root=paths.repo_root, worktree_base=tmp_path / "wts")
 
-    drains._record_pending_delivery(paths, branch, "batch-7", label=label, reason="push failed")
+    drains._record_pending_delivery(state_for_paths(paths), branch, "batch-7", label=label, reason="push failed")
 
     [record] = sorted(paths.pending_delivery_dir.glob("*.json"))
     doc = json.loads(record.read_text(encoding="utf-8"))
@@ -148,15 +150,14 @@ def test_the_quarantine_manifest_writes_the_labels_value_and_logs_it(
 @pytest.mark.parametrize("label", MEMBERS, ids=lambda m: m.value)
 def test_the_claim_log_shows_the_labels_value(
         tmp_path: Path, label: DrainLabel, caplog: pytest.LogCaptureFixture):
-    """`claim_markers(label=<member>)` logs its queue count under the value.
+    """`state.claim(label=<member>)` logs its queue count under the value.
 
     Catches: an f-string `{label}` over a member whose `str()` is the enum's default
     (`DrainLabel.AUTHOR`)."""
-    queue = tmp_path / "queue"
-    queue.mkdir()
+    state = state_for_paths(_paths(tmp_path))
     with caplog.at_level(logging.INFO):
-        assert list(markers.claim_markers(
-            queue, identity_key="run_id", label=label, noun="authoring")) == []
+        assert list(state.claim(
+            "run_id", label=label, noun="authoring")) == []  # type: ignore[arg-type]
     [line] = [r.getMessage() for r in caplog.records if "queued for authoring" in r.getMessage()]
     _assert_shows_value(line, label)
     assert line.startswith(f"{VALUES[label]}: ")
@@ -178,10 +179,10 @@ def test_the_lead_author_refusal_names_the_labels_value(tmp_path: Path):
     class Reached(Exception):
         pass
 
-    def lock() -> None:
+    def lock(_role: object, *, wait: object) -> None:
         raise Reached
 
-    deps = SimpleNamespace(paths=paths, acquire_queue_lock=lock)
+    deps = SimpleNamespace(paths=paths, state=SimpleNamespace(lock=lock))
     with pytest.raises(LeadAuthorError) as e:
         lead_author.run(run_dir, label=AUTHOR_DRAIN_LABEL, deps=deps)  # type: ignore[arg-type]
     msg = str(e.value)
@@ -216,22 +217,19 @@ def test_the_lead_author_lane_raises_on_a_non_member_before_the_queue_lock(
     run_dir.mkdir()
     paths = _paths(tmp_path)
 
-    def lock() -> None:
+    def lock(_role: object, *, wait: object) -> None:
         raise AssertionError("a non-member got past the grant check to the queue lock")
 
-    deps = SimpleNamespace(paths=paths, acquire_queue_lock=lock)
+    deps = SimpleNamespace(paths=paths, state=SimpleNamespace(lock=lock))
     with pytest.raises(AttributeError):
         lead_author.run(run_dir, label=value, deps=deps)  # type: ignore[arg-type]
 
-    held = acquire_queue_lock(paths)
-    assert held is not None, "precondition: the test holds the queue lock"
-    try:
+    with state_for_paths(paths).lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as held:
+        assert held, "precondition: the test holds the queue lock"
         assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths) == \
             lead_author.QUEUE_LOCK_SKIP_RC, "control: the held lock makes a member skip"
         with pytest.raises(AttributeError):
             lead_author.run(run_dir, label=value, paths=paths)  # type: ignore[arg-type]
-    finally:
-        release_queue_lock(held)
 
 
 # ---------------------------------------------------------------------------------------
@@ -322,7 +320,7 @@ def _retain(root: Path, branch: Any) -> Path:
     """A retained delivery from an earlier tick, under the lane's branch prefix, as the real
     writer leaves it (the label written is irrelevant to delivery)."""
     paths = B.loop_paths(root)
-    drains._record_pending_delivery(paths, branch, "retained-1", label=AUTHOR_DRAIN_LABEL,
+    drains._record_pending_delivery(state_for_paths(paths), branch, "retained-1", label=AUTHOR_DRAIN_LABEL,
                                     reason="push rejected")
     [record] = sorted(paths.pending_delivery_dir.glob("*.json"))
     return record

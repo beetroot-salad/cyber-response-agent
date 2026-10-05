@@ -30,7 +30,8 @@ import pytest
 
 import _drain719 as h
 from _drain719 import drain
-from defender.learning.core import drains, markers
+from defender.learning.core import drains
+from defender.learning.core.state import Claimed
 from defender.learning.leads import lead_author
 from defender.tests._spec791 import (
     SpecBranch,
@@ -42,6 +43,7 @@ from defender.tests._spec791 import (
     noop_stop_box,
 )
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
+from defender.tests import _state1135
 
 
 # F-02 — the corpus commit is pathspec-wide; attribution is what bounds it
@@ -213,10 +215,17 @@ def test_852_f02_a_modified_file_that_claims_a_new_source_still_needs_a_voucher(
 # F-03 — a skip is not a serve
 
 
+def _enqueue(paths, case_id: str, run_dir: Path) -> None:
+    """The curation request the investigation's tail files (`run_common.enqueue_curation`'s own
+    body), through the handle."""
+    _state1135.state_for_paths(paths).enqueue_curation(
+        case_id, {"case_id": case_id, "run_dir": str(run_dir.resolve())})
+
+
 def _queued_run(tmp_path: Path, case_id: str, name: str, paths) -> Path:
     run_dir = tmp_path / "runs" / name
     run_dir.mkdir(parents=True, exist_ok=True)
-    markers.enqueue_case_for_curation(case_id, run_dir, paths)
+    _enqueue(paths, case_id, run_dir)
     return run_dir
 
 
@@ -277,7 +286,7 @@ def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path)
     for name in ("case-1.json", "case-2.json"):
         assert "attempts" not in marker_body(paths.author_queue_dir / name), \
             "a skip spent one of the request's three retries"
-    assert drains._has_lead_author_work(paths) is True, \
+    assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is True, \
         "the queue went quiet on work that is still queued"
 
 
@@ -335,11 +344,11 @@ def test_852_f04_a_transient_retry_does_not_clobber_a_fresher_request(tmp_path: 
 
     served: list[Path] = []
 
-    def serve(_paths, run_dir, *, box=None, **_kw):
+    def serve(_paths, _state, run_dir, *, box=None, **_kw):
         served.append(run_dir)
         if len(served) == 1:
             # The operator re-investigates the case while the lane is curating it...
-            markers.enqueue_case_for_curation("case-A", second, paths)
+            _enqueue(paths, "case-A", second)
             # ...and the agent spawn then hits the transient the drain retries on.
             raise drains._LeadAuthorRetry("lead-author hit a swallowed transient (rc=None)")
 
@@ -367,23 +376,35 @@ def test_852_f04_requeue_is_create_if_absent_and_leaves_no_staging_file(tmp_path
 
     The staging half is not decoration: the re-queue writes through a temp file so the slot
     goes from absent to fully-written in one step, and a temp file left behind in a directory
-    the drain globs is a marker-shaped object nothing owns."""
-    queue_dir = tmp_path / "author-queue"
-    queue_dir.mkdir()
-    slot = queue_dir / "case-A.json"
+    the drain globs is a marker-shaped object nothing owns.
 
-    assert markers.requeue_marker(slot, {"case_id": "case-A", "run_dir": "/runs/run-1"}) is True
-    assert markers.requeue_marker(slot, {"case_id": "case-A", "run_dir": "/runs/stale"}) is False
-    assert json.loads(slot.read_text())["run_dir"] == "/runs/run-1", \
+    #1135: the primitive is the handle's `requeue` verb over a claim (`markers.requeue_marker`
+    took a bare path and is gone), so the free slot is the one a claim just freed."""
+    state = _state1135.state_over(tmp_path / "state")
+    run_dir = tmp_path / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    state.enqueue_curation("case-A", {"case_id": "case-A", "run_dir": str(run_dir)})
+    [claim] = list(state.claim("case_id"))
+    queue_dir = tmp_path / "state" / "author-queue"
+    slot = queue_dir / "case-A.json"
+    assert not slot.exists(), "the claim left the slot occupied"
+
+    assert state.requeue(claim) is True
+    stale = Claimed(key="case-A", name="case-A.json",
+                    spec={"case_id": "case-A", "run_dir": "/runs/stale"})
+    assert state.requeue(stale) is False
+    assert json.loads(slot.read_text())["run_dir"] == str(run_dir), \
         "the refused re-queue wrote itself in anyway"
-    assert [p.name for p in queue_dir.iterdir()] == ["case-A.json"], \
+    assert {p.name for p in queue_dir.iterdir()} == {"case-A.json", "inflight"}, \
         "the re-queue left its staging file in the queue directory"
+
 
 
 @pytest.mark.parametrize("spec", [{"case_id": "c"}, {"run_id": "r", "attempts": 2}])
 def test_852_f04_a_free_slot_still_takes_the_re_queue(tmp_path: Path, spec: dict):
     """The ordinary case, under both row shapes the queue carries: nothing else landed, so
     the request goes back exactly as it was handed over."""
-    slot = tmp_path / "queue" / "row.json"
-    assert markers.requeue_marker(slot, spec) is True
+    state = _state1135.state_over(tmp_path / "state")
+    slot = tmp_path / "state" / "author-queue" / "row.json"
+    assert state.requeue(Claimed(key="row", name="row.json", spec=spec)) is True
     assert json.loads(slot.read_text()) == spec

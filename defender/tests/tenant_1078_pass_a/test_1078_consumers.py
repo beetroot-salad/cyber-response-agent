@@ -36,6 +36,7 @@ from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
 from defender.tests.tenant_1078_pass_a._census_1078 import docstring_ids
 from defender.tests import _state1135
+from defender.tests._state1135 import env_state
 
 TENANT = H.VALID_ID
 
@@ -141,7 +142,7 @@ def test_d4_judge_probe_threaded(tmp_path, monkeypatch):
     ep = _episode(tmp_path, "collide")
     judge_refused = H.mod("learning.judge.family").JudgeRefused
     with pytest.raises(judge_refused) as refused:
-        _grade_episode()(ep, judge=_judge(), runs_base=base, draws=1)
+        _grade_episode()(ep, judge=_judge(), runs_base=base, draws=1, state=env_state())
     assert "'b'" in str(refused.value), f"the refusal is not the probe's: {refused.value}"
     assert str(base / "b") in str(refused.value), (
         f"the refusal is not the label-collision probe's: {refused.value}")
@@ -151,11 +152,11 @@ def test_d4_judge_probe_threaded(tmp_path, monkeypatch):
     clean_base = tmp_path / "clean-base"
     clean_base.mkdir()
     _grade_episode()(_episode(tmp_path, "clean"), judge=_judge(), runs_base=clean_base,
-                     draws=1)
+                     draws=1, state=env_state())
 
     unthreaded = _episode(tmp_path, "unthreaded")
     with pytest.raises(TypeError):
-        _grade_episode()(unthreaded, judge=_judge(), draws=1)
+        _grade_episode()(unthreaded, judge=_judge(), draws=1, state=env_state())
 
 
 def test_collision_probe_over_a_tenant_runs_base_holding_a_label_named_run(tmp_path,
@@ -175,7 +176,7 @@ def test_collision_probe_over_a_tenant_runs_base_holding_a_label_named_run(tmp_p
     (base / "b").symlink_to(tmp_path / "nowhere")
     judge_refused = H.mod("learning.judge.family").JudgeRefused
     with pytest.raises(judge_refused) as refused:
-        _grade_episode()(_episode(tmp_path, "ep"), judge=_judge(), runs_base=base, draws=1)
+        _grade_episode()(_episode(tmp_path, "ep"), judge=_judge(), runs_base=base, draws=1, state=env_state())
     assert "collides" in str(refused.value), refused.value
     assert "'b'" in str(refused.value), refused.value
 
@@ -194,14 +195,14 @@ def test_d4_render_union_threaded(tmp_path, monkeypatch):
     _trial(base, "trial-under-the-tenant")
 
     judge = _judge()
-    _grade_episode()(_episode(tmp_path, "ep"), judge=judge, runs_base=base, draws=1)
+    _grade_episode()(_episode(tmp_path, "ep"), judge=judge, runs_base=base, draws=1, state=env_state())
     world_prompts = [p for p in judge.prompts if "trial-under-the-tenant" in p]
     assert world_prompts, "the sibling union did not read the threaded runs base"
     assert not any("trial-under-the-stale-knob" in p for p in judge.prompts), (
         "the sibling union read the retired DEFENDER_RUNS_BASE rather than the threaded base")
 
     with pytest.raises(TypeError):
-        _grade_episode()(_episode(tmp_path, "unthreaded"), judge=_judge(), draws=1)
+        _grade_episode()(_episode(tmp_path, "unthreaded"), judge=_judge(), draws=1, state=env_state())
 
 
 def test_judge_sibling_union_after_the_switch(tmp_path, monkeypatch):
@@ -218,7 +219,7 @@ def test_judge_sibling_union_after_the_switch(tmp_path, monkeypatch):
 
     judge = _judge()
     _grade_episode()(_episode(tmp_path, "ep"), judge=judge, runs_base=H.runs_base_for(TENANT),
-                     draws=1)
+                     draws=1, state=env_state())
     shown = "\n".join(judge.prompts)
     assert "tenant-trial" in shown, "the union did not read runs_base_for(T)"
     assert "old-layout-trial" not in shown, "a trial in the old runs base entered the union"

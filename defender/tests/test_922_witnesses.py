@@ -54,6 +54,7 @@ from defender.tests import _triplet_947 as T
 from defender.tests._by_path import load_lint_gate
 from defender.tests._repo import seed_adapter_stubs
 from defender.tests import _state1135
+from defender.tests._state1135 import env_state
 
 DEFENDER = Path(__file__).resolve().parents[1]
 
@@ -130,7 +131,7 @@ def test_922_the_family_judge_frames_the_archived_bodies_it_grades(tmp_path):
 
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
     J.mod("learning.judge").grade_episode(
-        ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=1)
+        ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=1, state=env_state())
 
     assert "judge:b:0" in judge.agent_ids, (
         f"the judge never called for world b: {judge.agent_ids} — nothing to assert against")

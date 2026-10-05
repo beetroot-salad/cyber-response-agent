@@ -774,15 +774,19 @@ def test_1025_a_failed_judge_still_leaves_the_judge_row(tmp_path, monkeypatch, c
     the five before it, inside the launch's clock bracket.
 
     Two failures, each under its own episodes root. The grade itself fails: the learning state
-    root the enqueue appends to is a regular FILE, so the family grade cannot land and
+    root's pending folder, which the enqueue appends into, is a regular FILE, so the family grade cannot land and
     `grade_episode` raises into the frame body's catch (control: the launcher reports
     "the judge pass failed" and writes no `judge.yaml`). The seam fails: the judge's model call
     raises on every draw, which the grade holds per draw (control: the seam was reached).
     """
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-grade-failed"))
-    blocker = tmp_path / "learning-state-as-a-file"
-    blocker.write_text("not a directory\n", encoding="utf-8")
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(blocker))
+    # The state root must exist (#1135: nothing creates it, and the handle opens before the
+    # judge is called), so the unlandable append is made by a FILE sitting where the findings
+    # queue's folder belongs.
+    state_root = tmp_path / "learning-state-with-a-file-for-pending"
+    state_root.mkdir()
+    (state_root / "_pending").write_text("not a directory\n", encoding="utf-8")
+    monkeypatch.setenv(J.STATE_DIR_ENV, str(state_root))
     launch = _launch(tmp_path)
     assert launch.rc == 0, "a failed grade ended the episode instead of being held"
     assert launch.judge.calls > 0, "the control failed: the judge seam was never reached"

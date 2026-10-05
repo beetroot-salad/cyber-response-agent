@@ -444,7 +444,8 @@ def test_1008_every_judge_draw_is_declared_under_the_judges_role(tmp_path):
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
 
     J.mod("learning.judge").grade_episode(
-        ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=2)
+        ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=2,
+        state=_state1135.env_state())
 
     assert judge.calls == 6, (
         f"the judge was called {judge.calls} times, not once per draw per graded world plus "

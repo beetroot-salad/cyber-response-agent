@@ -20,6 +20,7 @@ import pytest
 from defender._episode_handle import Episode
 from defender.tests import _judge_921 as J
 from defender.tests import _state1135
+from defender.tests._state1135 import env_state
 
 
 @pytest.fixture(autouse=True)
@@ -329,7 +330,7 @@ def test_921_model_findings_explain_a_bucket_and_never_assign_it(tmp_path):
         J.finding_doc(bucket="lead-quality", anchor="l-002", topic="scope"),
     ]))
     judge_mod.grade_episode(ep, judge=J.FakeJudge(default=loud),
-                            runs_base=tmp_path / "defender-runs")
+                            runs_base=tmp_path / "defender-runs", state=env_state())
 
     record = J.judge_record(ep)
     assert J.world_rows(record)["b"]["bucket"] == "decision-discipline", (
@@ -361,7 +362,7 @@ def test_921_the_majority_denominator_is_completed_draws(tmp_path):
     # Two answers, then the seam degrades: `raise_after=2` is P9's one class, both ways.
     judge = J.FakeJudge(replies=[discard, discard], default=discard,
                         fault=J.Fault(raise_after=2))
-    judge_mod.grade_episode(ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=4)
+    judge_mod.grade_episode(ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=4, state=env_state())
 
     record = J.judge_record(ep)
     assert record["draws"] == {"configured": 4, "completed": 2}, (
@@ -384,7 +385,7 @@ def test_921_the_majority_denominator_is_completed_draws(tmp_path):
     dead = J.accepted_episode(tmp_path / "dead", ledgers={"b": [J.staged_row("b")], "c": []})
     (dead / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     judge_mod.grade_episode(dead, judge=J.FakeJudge(fault=J.Fault(raise_after=0)),
-                            runs_base=tmp_path / "dead" / "defender-runs", draws=2)
+                            runs_base=tmp_path / "dead" / "defender-runs", draws=2, state=env_state())
     dead_rows = J.world_rows(J.judge_record(dead))
     assert dead_rows["b"]["completed_draws"] == 0
     assert dead_rows["b"]["bucket"], (

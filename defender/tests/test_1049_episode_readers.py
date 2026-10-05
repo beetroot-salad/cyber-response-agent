@@ -702,7 +702,8 @@ def test_1049_every_caller_coalesces_none_at_the_read_site(tmp_path):
         assert staging.teardown(episode, door=door) == []
     assert staging.sweep(ep, episode_token=TOKEN, door=door) == []
 
-    record = judge.grade_episode(ep, judge=J.FakeJudge(), runs_base=base, git_show=J.FakeGitShow())
+    record = judge.grade_episode(ep, judge=J.FakeJudge(), runs_base=base, git_show=J.FakeGitShow(),
+                                 state=_state1135.env_state())
     assert record.not_graded is not None, record
     assert record.not_graded.reason == 'no review.yaml on disk', record
 

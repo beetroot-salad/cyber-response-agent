@@ -77,6 +77,7 @@ from defender.tests import _spec1133 as S
 from defender.tests import _triplet_947 as T
 from defender.tests.test_947_capture_prime import append_call, call_row, source_run
 from defender.tests import _state1135
+from defender.tests._state1135 import env_state
 
 EPISODE_ID = "ep-1133"
 #: Where a primer waits for its rival, and a launcher for the other: generous, since a wedged
@@ -523,7 +524,7 @@ def grade(tmp_path: Path, ep: Path, judge: ScriptedJudge) -> Any:
     """The judge pass, or the refusal it raised."""
     try:
         return J.mod("learning.judge").grade_episode(
-            ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=2)
+            ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=2, state=env_state())
     except Exception as refused:  # noqa: BLE001 — the refusal is the observation
         return refused
 

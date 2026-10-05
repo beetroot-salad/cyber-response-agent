@@ -57,7 +57,7 @@ def _prompts(tmp_path, ep, *, runs_base=None, **kw):
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
     J.mod("learning.judge").grade_episode(
         ep, judge=judge, runs_base=runs_base if runs_base is not None
-        else tmp_path / "defender-runs", **kw)
+        else tmp_path / "defender-runs", **{"state": _state1135.env_state(), **kw})
     return judge
 
 
@@ -592,7 +592,8 @@ def test_921_the_lesson_commit_is_pinned_once_per_pass_and_allow_dirty_is_a_cave
     git_show = J.FakeGitShow(bodies={("deadbee", "defender/lessons/L1.md"): "# L1 body\n"})
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        runs_base=tmp_path / "defender-runs", git_show=git_show, draws=1)
+        runs_base=tmp_path / "defender-runs", git_show=git_show, draws=1,
+        state=_state1135.env_state())
 
     assert set(git_show.revs) == {"deadbee"}, (
         "two worlds of one episode read their lesson bodies at different refs")

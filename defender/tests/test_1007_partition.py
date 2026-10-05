@@ -19,8 +19,10 @@ from pathlib import Path
 
 import pytest
 
+from defender.learning.core.state import QUESTIONER_FINDINGS
 from defender.tests import _world_1007 as W
 from defender.tests._curator1134 import author_trees
+from defender.learning.core.state import LearningState
 
 
 #: A pointer the FAMILY-level call is actually shown. Its default evidence is
@@ -121,10 +123,10 @@ def test_world_row_refused_at_the_defender_appender(tmp_path):
     paths = W.loop_paths(tmp_path)
 
     with pytest.raises(W.refusals()):
-        enqueue.append_rows(tmp_path, [world_row()], queue_dir=paths.pending_dir)
+        enqueue.append_rows(tmp_path, [world_row()], state=W.learning_state(paths))
 
     assert W.queue_rows(paths.findings) == [], "the refused world row still landed"
-    enqueue.append_world_rows(tmp_path, [world_row()], queue_dir=paths.pending_dir)
+    enqueue.append_world_rows(tmp_path, [world_row()], state=W.learning_state(paths))
     assert [r["subject"] for r in W.queue_rows(W.questioner_channel(paths))] == [W.SUBJECT_WORLD]
 
 
@@ -141,7 +143,7 @@ def test_defender_row_still_reaches_the_findings_channel(tmp_path):
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
 
-    appended = enqueue.append_rows(tmp_path, [queue_row()], queue_dir=paths.pending_dir)
+    appended = enqueue.append_rows(tmp_path, [queue_row()], state=W.learning_state(paths))
 
     assert appended == 1
     landed = W.queue_rows(paths.findings)
@@ -173,7 +175,7 @@ def test_a_defender_row_with_direction_world_is_refused_at_the_appender_too(tmp_
 
     with pytest.raises(W.refusals()):
         enqueue.append_rows(
-            tmp_path, [queue_row(direction=W.SUBJECT_WORLD)], queue_dir=paths.pending_dir)
+            tmp_path, [queue_row(direction=W.SUBJECT_WORLD)], state=W.learning_state(paths))
 
     assert W.queue_rows(paths.findings) == [], "the disagreeing row still landed"
 
@@ -197,11 +199,11 @@ def test_a_world_row_type_is_not_gated_against_the_defender_vocabulary(tmp_path)
     novel = "a-bucket-nobody-listed"
     assert novel not in cfg.QUEUEABLE_FINDING_TYPES
 
-    enqueue.append_world_rows(tmp_path, [world_row(type=novel)], queue_dir=paths.pending_dir)
+    enqueue.append_world_rows(tmp_path, [world_row(type=novel)], state=W.learning_state(paths))
 
     assert [r["type"] for r in W.queue_rows(W.questioner_channel(paths))] == [novel]
     with pytest.raises(W.refusals()):
-        enqueue.append_rows(tmp_path, [queue_row(type=novel)], queue_dir=paths.pending_dir)
+        enqueue.append_rows(tmp_path, [queue_row(type=novel)], state=W.learning_state(paths))
 
 
 def test_lessons_gate_refuses_direction_world_loudly(tmp_path):
@@ -218,7 +220,7 @@ def test_lessons_gate_refuses_direction_world_loudly(tmp_path):
     """
     author = W.mod("learning.author.lessons.run")
     paths = W.loop_paths(tmp_path)
-    cfg = author.build_author_config(paths, trees=author_trees(paths))
+    cfg = author.build_author_config(paths, trees=author_trees(paths), state=LearningState.open(paths))
 
     with pytest.raises(W.refusals()):
         author._gate_findings([queue_row(direction=W.SUBJECT_WORLD, subject=W.SUBJECT_WORLD)],
@@ -238,7 +240,7 @@ def test_lessons_gate_still_passes_a_family_row(tmp_path):
     """
     author = W.mod("learning.author.lessons.run")
     paths = W.loop_paths(tmp_path)
-    cfg = author.build_author_config(paths, trees=author_trees(paths))
+    cfg = author.build_author_config(paths, trees=author_trees(paths), state=LearningState.open(paths))
 
     to_author, held, consumed = author._gate_findings([queue_row()], cfg)
 
@@ -310,10 +312,10 @@ def test_a_defender_family_row_is_gated_exactly_as_today(tmp_path):
     author = W.mod("learning.author.lessons.run")
     paths = W.loop_paths(tmp_path)
 
-    assert enqueue.append_rows(tmp_path, [queue_row()], queue_dir=paths.pending_dir) == 1
+    assert enqueue.append_rows(tmp_path, [queue_row()], state=W.learning_state(paths)) == 1
     landed = W.queue_rows(paths.findings)[0]
     to_author, held, consumed = author._gate_findings(
-        [landed], author.build_author_config(paths, trees=author_trees(paths)))
+        [landed], author.build_author_config(paths, trees=author_trees(paths), state=LearningState.open(paths)))
 
     assert landed["direction"] == "family"
     assert len(to_author) + len(held) + len(consumed) == 1
@@ -368,7 +370,7 @@ def test_a_world_queue_row_is_a_full_finding_row_plus_four_fields(tmp_path):
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
 
-    enqueue.append_world_rows(tmp_path, [world_row()], queue_dir=paths.pending_dir)
+    enqueue.append_world_rows(tmp_path, [world_row()], state=W.learning_state(paths))
 
     landed = W.queue_rows(W.questioner_channel(paths))[0]
     for key in queue_row():
@@ -391,8 +393,8 @@ def test_two_appends_of_one_finding_id_land_once(tmp_path):
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
 
-    enqueue.append_world_rows(tmp_path, [world_row()], queue_dir=paths.pending_dir)
-    enqueue.append_world_rows(tmp_path, [world_row()], queue_dir=paths.pending_dir)
+    enqueue.append_world_rows(tmp_path, [world_row()], state=W.learning_state(paths))
+    enqueue.append_world_rows(tmp_path, [world_row()], state=W.learning_state(paths))
 
     rows = W.queue_rows(W.questioner_channel(paths))
     assert [r["finding_id"] for r in rows] == [f"{W.EPISODE_ID}/b/0/0"], (
@@ -464,8 +466,8 @@ def test_a_world_bucket_spelled_like_a_defender_bucket_is_admitted_and_read_by_s
     assert parsed.findings[0].bucket == "lead-set"
 
     enqueue.append_world_rows(tmp_path, [world_row(type="lead-set")],
-                              queue_dir=paths.pending_dir)
-    enqueue.append_rows(tmp_path, [queue_row(type="lead-set")], queue_dir=paths.pending_dir)
+                              state=W.learning_state(paths))
+    enqueue.append_rows(tmp_path, [queue_row(type="lead-set")], state=W.learning_state(paths))
     assert len(W.queue_rows(W.questioner_channel(paths))) == 1
     assert len(W.queue_rows(paths.findings)) == 1
 
@@ -491,7 +493,7 @@ def test_a_near_miss_subject_is_refused_with_no_case_fold_and_no_trim(tmp_path):
             run.validate_reply(W.reply_text(findings=[W.finding(subject=near)]))
         with pytest.raises(W.refusals()):
             enqueue.append_world_rows(tmp_path, [world_row(subject=near)],
-                                      queue_dir=paths.pending_dir)
+                                      state=W.learning_state(paths))
     assert W.queue_rows(W.questioner_channel(paths)) == []
 
 
@@ -514,7 +516,7 @@ def test_a_defender_queue_row_carries_its_subject_key(tmp_path):
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
 
-    enqueue.append_rows(tmp_path, [queue_row()], queue_dir=paths.pending_dir)
+    enqueue.append_rows(tmp_path, [queue_row()], state=W.learning_state(paths))
 
     assert W.queue_rows(paths.findings)[0]["subject"] == W.SUBJECT_DEFENDER
     # REQUIRED, not merely carried: a row that reached the appender without one would
@@ -524,7 +526,7 @@ def test_a_defender_queue_row_carries_its_subject_key(tmp_path):
     bare = queue_row()
     bare.pop("subject")
     with pytest.raises(W.refusals()):
-        enqueue.append_rows(tmp_path, [bare], queue_dir=paths.pending_dir)
+        enqueue.append_rows(tmp_path, [bare], state=W.learning_state(paths))
     assert len(W.queue_rows(paths.findings)) == 1, "the subject-less row landed anyway"
 
 
@@ -545,7 +547,7 @@ def test_a_defender_subject_row_cannot_reach_the_questioner_curator(tmp_path):
     paths = W.loop_paths(tmp_path)
 
     with pytest.raises(W.refusals()):
-        enqueue.append_world_rows(tmp_path, [queue_row()], queue_dir=paths.pending_dir)
+        enqueue.append_world_rows(tmp_path, [queue_row()], state=W.learning_state(paths))
 
     assert W.queue_rows(W.questioner_channel(paths)) == []
 
@@ -567,7 +569,7 @@ def test_a_model_supplied_world_is_ignored_and_the_draws_own_directory_wins(
     ep = episode_with_worlds(tmp_path, monkeypatch, labels=("b", "c"))
     judge = W.FakeJudge(W.reply_document(findings=[W.world_finding(world="c")]))
 
-    judge_mod.grade_episode(ep, judge=judge, queue_dir=paths.pending_dir,
+    judge_mod.grade_episode(ep, judge=judge, state=W.learning_state(paths),
                             runs_base=ep.parent / "runs-base")
 
     rows = [r for r in W.queue_rows(W.questioner_channel(paths)) if r["provenance"] == "model"]
@@ -598,7 +600,7 @@ def test_every_family_level_finding_carries_a_null_world(tmp_path, monkeypatch):
         findings=[W.world_finding(bucket="undiscriminating-family",
                                   evidence=FAMILY_EVIDENCE)]))
 
-    judge_mod.grade_episode(ep, judge=judge, queue_dir=paths.pending_dir,
+    judge_mod.grade_episode(ep, judge=judge, state=W.learning_state(paths),
                             runs_base=ep.parent / "runs-base")
 
     family_rows = [r for r in W.queue_rows(W.questioner_channel(paths))
@@ -631,7 +633,7 @@ def test_a_family_findings_identity_is_minted_by_the_pass_not_by_the_model(
         W.world_finding(bucket="a-second-family-reading", evidence=FAMILY_EVIDENCE),
     ]))
 
-    judge_mod.grade_episode(ep, judge=judge, queue_dir=paths.pending_dir,
+    judge_mod.grade_episode(ep, judge=judge, state=W.learning_state(paths),
                             runs_base=ep.parent / "runs-base")
 
     ids = [r["finding_id"] for r in W.queue_rows(W.questioner_channel(paths))
@@ -696,9 +698,9 @@ def test_a_world_row_missing_pattern_holding_system_or_subject_is_refused_at_the
         row = world_row()
         row.pop(missing)
         with pytest.raises(W.refusals()):
-            enqueue.append_world_rows(tmp_path, [row], queue_dir=paths.pending_dir)
+            enqueue.append_world_rows(tmp_path, [row], state=W.learning_state(paths))
     assert W.queue_rows(W.questioner_channel(paths)) == []
-    enqueue.append_world_rows(tmp_path, [world_row()], queue_dir=paths.pending_dir)
+    enqueue.append_world_rows(tmp_path, [world_row()], state=W.learning_state(paths))
     assert len(W.queue_rows(W.questioner_channel(paths))) == 1
 
 
@@ -728,10 +730,10 @@ def test_a_re_grade_appends_no_second_mechanical_world_finding(tmp_path, monkeyp
             capture_replays=[W.replay_entry("k1", differs=False)]))})
 
     judge_mod.grade_episode(ep, judge=W.FakeJudge(W.reply_document()),
-                            queue_dir=paths.pending_dir, runs_base=ep.parent / "runs-base")
+                            state=W.learning_state(paths), runs_base=ep.parent / "runs-base")
     (ep / W.JUDGE_NAME).unlink()        # force a genuine re-grade, not the existing-record path
     judge_mod.grade_episode(ep, judge=W.FakeJudge(W.reply_document()),
-                            queue_dir=paths.pending_dir, runs_base=ep.parent / "runs-base")
+                            state=W.learning_state(paths), runs_base=ep.parent / "runs-base")
 
     mech = [r for r in W.queue_rows(W.questioner_channel(paths))
             if r.get("provenance") == "mechanical"]
@@ -758,7 +760,7 @@ def test_an_unqueueable_defender_finding_does_not_suppress_the_world_findings(
         outcome="discard",
         findings=[W.finding(), W.world_finding(bucket="a-world-reading")]))
 
-    judge_mod.grade_episode(ep, judge=judge, queue_dir=paths.pending_dir,
+    judge_mod.grade_episode(ep, judge=judge, state=W.learning_state(paths),
                             runs_base=ep.parent / "runs-base")
 
     assert [r for r in W.queue_rows(paths.findings)] == [], (
@@ -790,7 +792,7 @@ def test_an_ungradable_world_enqueues_nothing_on_either_channel(tmp_path, monkey
     judge = W.FakeJudge(W.reply_document(
         findings=[W.finding(), W.world_finding(bucket="a-world-reading")]))
 
-    judge_mod.grade_episode(ep, judge=judge, queue_dir=paths.pending_dir,
+    judge_mod.grade_episode(ep, judge=judge, state=W.learning_state(paths),
                             runs_base=ep.parent / "runs-base")
 
     for channel in (paths.findings, W.questioner_channel(paths)):
@@ -815,7 +817,7 @@ def test_a_questioner_queue_row_carries_no_defender_verdict_word(tmp_path):
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
 
-    enqueue.append_world_rows(tmp_path, [world_row()], queue_dir=paths.pending_dir)
+    enqueue.append_world_rows(tmp_path, [world_row()], state=W.learning_state(paths))
 
     landed = W.queue_rows(W.questioner_channel(paths))[0]
     rendered = json.dumps(landed)
@@ -848,12 +850,12 @@ def test_a_world_row_reusing_a_consumed_defender_finding_id_still_reaches_its_ow
                              consumed_category="consumed_idempotent")) + "\n",
         encoding="utf-8")
     enqueue.append_world_rows(tmp_path, [world_row(finding_id=shared_id)],
-                              queue_dir=paths.pending_dir)
+                              state=W.learning_state(paths))
 
     # #881 (merged from main) renamed the drain's counter to `_pending_queue_counts`,
     # returning `(authorable, held)` rather than one int — this row carries no `held_reason`,
     # so it counts on the authorable side.
-    pending, held = drains._pending_queue_counts(W.questioner_channel(paths).file)
+    pending, held = drains._pending_queue_counts(W.learning_state(paths), QUESTIONER_FINDINGS)
 
     assert held == 0, f"the row was held, not suppressed: {held}"
     assert pending == 1, (
@@ -881,7 +883,7 @@ def test_two_episodes_appending_at_once_lose_no_questioner_row(tmp_path):
     def drive(rows):
         try:
             start.wait(timeout=5)
-            enqueue.append_world_rows(tmp_path, rows, queue_dir=paths.pending_dir)
+            enqueue.append_world_rows(tmp_path, rows, state=W.learning_state(paths))
         except BaseException as bad:                       # noqa: BLE001 — reported below
             errors.append(bad)
 

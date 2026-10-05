@@ -86,6 +86,7 @@ from defender.learning.author import drain
 from defender.learning.author import shared as author_shared
 from defender.learning.author.lessons import run as lessons_run
 from defender.learning.core.config import LoopPaths, QueueChannel
+from defender.learning.core.state import LearningState
 from defender.tests._curator1134 import author_trees
 
 
@@ -251,13 +252,13 @@ class Scene:
         )
 
     def gap_records(self) -> list[dict]:
-        return read_rows(self.cfg.pending_dir / GAP_LEDGER_NAME)
+        return read_rows(self.paths.pending_dir / GAP_LEDGER_NAME)
 
     def report_lines(self) -> list[str]:
         """The channel's own disposition report — `held_report` on the lessons channel,
         `skip_report` on the questioner's. One accessor, because both are written by the
         same `shared.write_disposition_report` and both are what "reported" means."""
-        path = getattr(self.cfg, "held_report", None) or self.cfg.skip_report
+        path = self.paths.pending_dir / Path(self.cfg.channel.report).name
         return path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
 
     def pending(self) -> list[dict]:
@@ -336,7 +337,8 @@ def build_scene(  # noqa: PLR0913 — one tick's whole world, threaded rather th
     repair = repair if repair is not None else FakeRepair()
     keys = keys if keys is not None else FakeKeySource()
 
-    base = lessons_run.build_author_config(paths, trees=author_trees(paths))
+    base = lessons_run.build_author_config(
+        paths, state=LearningState.open(paths), trees=author_trees(paths))
     wiring: dict[str, Any] = {
         "invoke_agent": curator,
         "forward_check": verifier.as_check(),
@@ -407,7 +409,8 @@ def build_questioner_scene(
     verifier = FakeVerifier()
     repair = FakeRepair()
 
-    base = questioner_run.build_questioner_config(paths, trees=author_trees(paths))
+    base = questioner_run.build_questioner_config(
+        paths, state=LearningState.open(paths), trees=author_trees(paths))
     wiring: dict[str, Any] = {
         "invoke_agent": curator,
         "forward_check": None,

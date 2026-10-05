@@ -325,6 +325,7 @@ def configured_layout(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
     may touch. Environment steering through the resolver the shipped code already reads.
     """
     base, src, root = _configured_layout_947(tmp_path, monkeypatch)
+    (tmp_path / "learning-state").mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
     monkeypatch.setenv(STATE_DIR_ENV, str(tmp_path / "learning-state"))
     return base, src, root
 
@@ -741,7 +742,13 @@ def loop_paths(tmp_path: Path, *, repo_root: Path | None = None):
     cfg = mod("learning.core.config")
     root = repo_root if repo_root is not None else tmp_path / "repo"
     (root / "defender").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "learning-state").mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
     return cfg.LoopPaths(repo_root=root, state_dir=tmp_path / "learning-state")
+
+
+def learning_state(paths: Any):
+    """A `LearningState` handle over `paths`' state root (#1135) — what every verb taking `state=` wants."""
+    return mod("learning.core.state").LearningState.open(paths)
 
 
 def questioner_channel(paths: Any):

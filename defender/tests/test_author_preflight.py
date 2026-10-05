@@ -7,24 +7,22 @@ from dataclasses import replace
 import pytest
 
 from defender.learning.author import shared
+from defender.learning.core.state import TRY_ONCE
 
 
 def test_lock_refuses_concurrent_run(tmp_repo, helpers):
     """A second author tick exits cleanly while the first holds the queue lock.
 
     The author drives this through the shared drain body's drain-role gate; the lock
-    primitive is ``shared.acquire_flock`` on the channel's drain lock-file."""
-    lock_file = tmp_repo.cfg.channel.drain_lock
-    fh = shared.acquire_flock(lock_file)
-    assert fh is not None
-    try:
-        second = shared.acquire_flock(lock_file)
-        assert second is None
-    finally:
-        shared.release_flock(fh)
-    third = shared.acquire_flock(lock_file)
-    assert third is not None
-    shared.release_flock(third)
+    primitive is the handle's ``lock(role, wait=TRY_ONCE)`` on the channel's drain role."""
+    role = tmp_repo.cfg.channel.drain_role
+    state = tmp_repo.state
+    with state.lock(role, wait=TRY_ONCE) as first:
+        assert first
+        with state.lock(role, wait=TRY_ONCE) as second:
+            assert not second
+    with state.lock(role, wait=TRY_ONCE) as third:
+        assert third
 
 
 def test_repo_lock_held_returns_zero(tmp_repo, helpers):
@@ -39,7 +37,7 @@ def test_repo_lock_held_returns_zero(tmp_repo, helpers):
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-A", "benign")
     helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-A/0", run_id="run-A")
 
-    lock_file = tmp_repo.cfg.repo_lock_file
+    lock_file = tmp_repo.paths.author_lock_file
     lock_file.parent.mkdir(parents=True, exist_ok=True)
     holder = lock_file.open("a+")
     fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
@@ -176,7 +174,7 @@ def test_ground_truth_gate_benign_authors_off_malicious(tmp_repo, helpers, monke
 
     consumed = [
         json.loads(line)
-        for line in tmp_repo.cfg.channel.consumed.read_text().splitlines()
+        for line in tmp_repo.paths.findings.consumed.read_text().splitlines()
         if line.strip()
     ]
     assert [c["finding_id"] for c in consumed] == ["run-M/0"]
@@ -215,7 +213,7 @@ def test_idempotency_filter_skips_already_authored(tmp_repo, helpers, monkeypatc
     assert tmp_repo.paths.pending_file.read_text().strip() == ""
     consumed = [
         json.loads(line)
-        for line in tmp_repo.cfg.channel.consumed.read_text().splitlines()
+        for line in tmp_repo.paths.findings.consumed.read_text().splitlines()
         if line.strip()
     ]
     assert len(consumed) == 1

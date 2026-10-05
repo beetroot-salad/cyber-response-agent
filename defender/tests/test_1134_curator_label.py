@@ -59,7 +59,9 @@ from defender.learning.core.config import (
 )
 from defender._tree_listing import entry_kind
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
+from defender.learning.core.state import FINDINGS
 from defender.tests._by_path import import_lint_lib
+from defender.tests._state1135 import state_for_paths
 from defender.tests._curator1134 import (
     is_link_to,
     leaf_refusal,
@@ -97,9 +99,9 @@ def test_the_builders_require_the_trees_and_take_their_mounts(tmp_path, channel)
     build, attr = BUILDERS[channel]
 
     with pytest.raises(TypeError):
-        build(w.paths)
+        build(w.paths, state=w.state)
 
-    cfg = build(w.paths, trees=w.trees)
+    cfg = build(w.paths, state=w.state, trees=w.trees)
     assert cfg.corpus_dir == getattr(w.paths, attr)
     assert cfg.corpus is w.trees.mount(cfg.corpus_dir)
     assert cfg.tree_for == w.trees.tree_for
@@ -114,14 +116,14 @@ def test_run_batch_takes_exactly_one_of_trees_and_cfg(tmp_path, channel):
     w = world(tmp_path)
     build, _attr = BUILDERS[channel]
     run = RUNNERS[channel]
-    cfg = build(w.paths, trees=w.trees)
+    cfg = build(w.paths, state=w.state, trees=w.trees)
 
     with pytest.raises(TypeError):
-        run(paths=w.paths)
+        run(paths=w.paths, state=w.state)
     with pytest.raises(TypeError):
-        run(paths=w.paths, trees=w.trees, cfg=cfg)
+        run(paths=w.paths, state=w.state, trees=w.trees, cfg=cfg)
 
-    assert run(paths=w.paths, trees=w.trees) == 0
+    assert run(paths=w.paths, state=w.state, trees=w.trees) == 0
     assert run(cfg=cfg) == 0
 
 
@@ -192,9 +194,9 @@ def test_trees_that_do_not_hold_the_corpus_exactly_are_fatal_config(tmp_path, ch
         for mount in trees.mounts:
             assert str(mount) in said, (mount, said)
         with pytest.raises(FatalConfigError):
-            build(paths, trees=trees)
+            build(paths, state=w.state, trees=trees)
         with pytest.raises(FatalConfigError):
-            RUNNERS[channel](paths=paths, trees=trees)
+            RUNNERS[channel](paths=paths, state=w.state, trees=trees)
 
 
 @pytest.mark.parametrize("channel", sorted(BUILDERS))
@@ -210,7 +212,7 @@ def test_lane_corpus_is_the_trees_own_mount_whatever_opened_them(tmp_path, chann
     with DrainTrees.open((paths.lessons_dir, paths.lessons_questioner_dir)) as trees:
         corpus_dir = getattr(paths, attr)
         assert author_shared.lane_corpus(trees, corpus_dir) is trees.mount(corpus_dir)
-        cfg = build(paths, trees=trees)
+        cfg = build(paths, state=w.state, trees=trees)
         assert cfg.corpus is trees.mount(corpus_dir)
         hit = cfg.tree_for(paths.lessons_questioner_dir / "y.md")
         assert hit is not None
@@ -230,7 +232,7 @@ def test_cfg_corpus_is_the_held_mount_and_never_follows_a_link(tmp_path, channel
     untouched. The positive control: a plain file at the same name is read and rewritten."""
     w = world(tmp_path)
     build, attr = BUILDERS[channel]
-    cfg = build(w.paths, trees=w.trees)
+    cfg = build(w.paths, state=w.state, trees=w.trees)
     root = getattr(w.paths, attr)
 
     target = w.target("secret.md")
@@ -292,7 +294,7 @@ def _held_queue(paths: LoopPaths) -> None:
 
 
 def _trigger_args(paths: LoopPaths) -> tuple:
-    return (paths, paths.findings.file, "LEARNING_AUTHOR_THRESHOLD", "author", "pending")
+    return (paths, state_for_paths(paths), FINDINGS, "LEARNING_AUTHOR_THRESHOLD", "author", "pending")
 
 
 def test_the_trigger_requires_the_label_and_runs_the_batch_under_its_trees(tmp_path, monkeypatch):
@@ -434,17 +436,18 @@ def test_a_hold_fault_at_the_open_propagates_out_of_the_seam(tmp_path, monkeypat
 
 def _spy_paths(repo: Path, state: Path, seen: list[list[str]], *,
                fault: BaseException | None = None) -> LoopPaths:
-    """A `LoopPaths` (the seam's `paths`) that records, each time `author_lock_file` is asked for
-    (the builders read it after the open), what this process holds under the repo; with `fault`,
-    raises it after recording. A class per call."""
+    """A `LoopPaths` (the seam's `paths`) that records, each time `runs_dir` is asked for
+    (the builders read it after the open; `author_lock_file`, which they used to read, is the
+    state handle's now), what this process holds under the repo; with `fault`, raises it after
+    recording. A class per call."""
 
     class Spy(LoopPaths):
         @property
-        def author_lock_file(self) -> Path:  # type: ignore[override]
+        def runs_dir(self) -> Path:  # type: ignore[override]
             seen.append(sorted(descriptors_under(self.repo_root)))
             if fault is not None:
                 raise fault
-            return super().author_lock_file
+            return super().runs_dir
 
     return Spy(repo_root=repo, state_dir=state)
 
@@ -635,12 +638,18 @@ def test_the_trigger_opens_the_trees_with_its_own_label_around_the_curator_call(
 
 @pytest.mark.parametrize("channel", sorted(CHANNEL_MODULES))
 def test_each_channel_main_opens_its_trees_with_the_author_label(channel):
-    """`main()` (the manual CLI) opens `open_drain_trees(DEFAULT_PATHS, AUTHOR_DRAIN_LABEL)` — the
-    constant by name — and runs `run_batch(trees=<those trees>)` inside it. Not driven: `main`
-    runs against `DEFAULT_PATHS`, this checkout's own state."""
+    """`main()` (the manual CLI) opens `open_drain_trees(paths, AUTHOR_DRAIN_LABEL)` — the
+    constant by name — and runs `run_batch(trees=<those trees>)` inside it, where `paths` is the
+    one `loop_paths()` resolved (the live checkout's own, as `DEFAULT_PATHS` was before the state
+    handle needed the paths resolved at call time). Not driven: `main` runs against this
+    checkout's own state."""
     fn = _function(_tree(CHANNEL_MODULES[channel]), "main")
     [(with_, call, bound)] = _open_withs(fn)
-    assert _is_name(call.args[0] if call.args else None, "DEFAULT_PATHS"), ast.dump(call)
+    assert _is_name(call.args[0] if call.args else None, "paths"), ast.dump(call)
+    [assign] = [n for n in ast.walk(fn) if isinstance(n, ast.Assign)
+                and any(_is_name(t, "paths") for t in n.targets)]
+    assert isinstance(assign.value, ast.Call), ast.dump(assign)
+    assert _callee(assign.value) == "loop_paths", ast.dump(assign)
     assert _is_name(_label_arg(call), "AUTHOR_DRAIN_LABEL"), ast.dump(call)
     runs = _calls(fn, "run_batch")
     assert len(runs) == 1, [ast.dump(c) for c in runs]
@@ -890,6 +899,6 @@ def test_the_trigger_holds_nothing_for_an_injected_seam(tmp_path, monkeypatch):
                              start_box=rec.start_box, stop_box=rec.stop_box, scrub=rec.scrub)
 
     assert rc == 0
-    assert [c[0][3] for c in calls] == ["author", "questioner_curator"]
+    assert [c[0][4] for c in calls] == ["author", "questioner_curator"]
     assert all("label" not in c[1] for c in calls), calls
     assert all(c[2] == [] for c in calls), "the lane held trees around an injected seam"

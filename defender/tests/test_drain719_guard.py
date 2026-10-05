@@ -44,8 +44,10 @@ import _drain719 as h
 from _drain719 import drain  # the not-yet-written target, via the suite's own shim
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
 from defender.learning.core.config import FatalConfigError, StageAbort  # type: ignore[import-not-found]
+from defender.learning.core.state import StateRefused  # type: ignore[import-not-found]
 from defender.runtime.box import BoxFault  # type: ignore[import-not-found]
 from defender._git import GitError  # type: ignore[import-not-found]
+from defender.tests import _state1135
 
 #: Decision 8's retire set, spelled out here so a test can name a member and a non-member
 #: without reading them back off the implementation it is meant to constrain.
@@ -337,7 +339,10 @@ def test_a_plain_oserror_from_a_lock_acquisition_is_classified_systemic(tmp_path
         max_attempts=1,
         invoke_agent=h.raising(AssertionError("never reached")),
     )
-    with pytest.raises(OSError):  # noqa: PT011 - the lock-acquisition OSError's exact subclass (IsADirectoryError etc.) is platform-dependent; the point is that it escapes uncaught and uncounted
+    # #1135: the handle refuses a folder where the lock file belongs as `StateRefused` (not an
+    # `OSError`, a `SYSTEMIC_FAULTS` member) instead of the primitive's `IsADirectoryError`; what
+    # is proved is unchanged: the acquisition failure escapes uncaught and uncounted.
+    with pytest.raises(StateRefused):
         drain.run_batch(cfg=cfg)
     assert h.pending(ch) == rows
     assert h.graveyard(ch) == []
@@ -402,20 +407,20 @@ def test_systemic_faults_propagate_without_bumping_attempts(tmp_path: Path):
     ):
         h.seed(paths.pitfalls, rows)
 
-        def leg(_paths, box=None, _exc=exc, **_kw):
+        def leg(_paths, _state, box=None, _exc=exc, **_kw):
             raise _exc
 
         with pytest.raises(type(exc)):
-            drains._drain_pitfalls(paths, leg)
+            drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), leg)
         assert h.pending(paths.pitfalls) == rows, f"{type(exc).__name__}: no row was touched"
         assert h.graveyard(paths.pitfalls) == []
 
     h.seed(paths.pitfalls, rows)
 
-    def failing_author(_paths, box=None, **_kw):
+    def failing_author(_paths, _state, box=None, **_kw):
         raise author_shared.AuthorError("converted pitfalls rc")
 
-    drains._drain_pitfalls(paths, failing_author)
+    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), failing_author)
     assert [r.get("attempts") for r in h.pending(paths.pitfalls)] == [1, 1], (
         "the non-exempt AuthorError did not bump both rows"
     )

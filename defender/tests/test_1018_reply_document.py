@@ -659,7 +659,7 @@ def _grade(tmp_path, ep, judge, **kw):
     """The real pass. Returns the grade so the caller can assert the pass RETURNED — O2's
     "never the pass"."""
     return J.mod("learning.judge").grade_episode(
-        ep, judge=judge, runs_base=tmp_path / "defender-runs", **kw)
+        ep, judge=judge, runs_base=tmp_path / "defender-runs", state=_state1135.env_state(), **kw)
 
 
 def _wire_row(ep: Path, label: str, draw: int) -> dict:

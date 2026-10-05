@@ -19,8 +19,8 @@ from pathlib import Path
 
 import _drain719 as h
 from _drain719 import drain  # the not-yet-written target, via the suite's own shim
-from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
-from defender.learning.core import drains, persist  # type: ignore[import-not-found]
+from defender.learning.core.state import FINDINGS, REPO_LOCK, TRY_ONCE, LearningState
+from defender.learning.core import drains  # type: ignore[import-not-found]
 
 
 def _judge_doc(n: int) -> dict:
@@ -103,10 +103,8 @@ def test_rotate_blocks_while_append_lock_held(tmp_path: Path):
     h.seed(ch, [h.row_for("findings", "a/0")])
 
     def rotate():
-        persist.rotate_queue_locked(
-            pending_file=ch.file, consumed_file=ch.consumed, lock_file=ch.append_lock,
-            id_key=ch.id_key, held=[], consumed=[h.row_for("findings", "a/0")],
-            commit_sha=None,
+        LearningState.open(paths).rotate(
+            FINDINGS, [], [h.row_for("findings", "a/0")], None,
         )
 
     worker = h.Background(rotate)
@@ -128,7 +126,9 @@ def test_retire_blocks_while_append_lock_held(tmp_path: Path):
     h.seed(ch, [h.row_for("findings", "a/0")])
 
     worker = h.Background(
-        lambda: drain.retire(channel=ch, batch_ids=["a/0"], reason="excluded", max_attempts=1)
+        lambda: drain.retire(
+            LearningState.open(paths), channel=FINDINGS, batch_ids=["a/0"], reason="excluded",
+            max_attempts=1)
     )
     with h.Holder(ch.append_lock):
         worker._thread.start()
@@ -262,9 +262,8 @@ def test_the_drain_acquires_its_three_locks_in_one_declared_order(tmp_path: Path
     cfg = h.cfg_for(paths, "findings", invoke_agent=agent, repo_lock_wait_seconds=1)
     with h.Holder(ch.drain_lock, blocking_discipline=False):
         assert drain.run_batch(cfg=cfg) == 0
-        repo_fh = author_shared.acquire_flock(paths.author_lock_file)
-        assert repo_fh is not None, "the skipped tick was still holding the repo lock"
-        author_shared.release_flock(repo_fh)
+        with LearningState.open(paths).lock(REPO_LOCK, wait=TRY_ONCE) as took:
+            assert took, "the skipped tick was still holding the repo lock"
     assert agent.calls == []
 
 

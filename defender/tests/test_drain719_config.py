@@ -20,9 +20,19 @@ import _drain719 as h
 from _drain719 import drain  # the not-yet-written target, via the suite's own shim
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
 from defender.learning.core import drains, persist  # type: ignore[import-not-found]
-from defender.learning.core.config import FatalConfigError  # type: ignore[import-not-found]
+from defender.learning.core.config import FatalConfigError
+from defender.learning.core.state import PITFALLS  # type: ignore[import-not-found]
 from defender.learning.leads import pitfalls_curator  # type: ignore[import-not-found]
+from defender.tests import _state1135
 from defender.tests._lead_author_1134 import lead_trees
+
+
+def _graveyard_file(ch) -> Path:
+    return ch.file.with_suffix(".deadletter.jsonl")
+
+
+def _stuck_file(ch) -> Path:
+    return ch.file.with_suffix(".stuck.jsonl")
 
 
 def _pitfalls_rows(n: int) -> list[dict]:
@@ -49,7 +59,7 @@ def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Pat
 
     for name in h.ALL_CHANNELS:
         ch = h.channel_of(paths, name)
-        targets = [ch.file, ch.consumed, ch.append_lock, drain.graveyard_file(ch)]
+        targets = [ch.file, ch.consumed, ch.append_lock, _graveyard_file(ch)]
         if ch.drain_lock is not None:
             targets.append(ch.drain_lock)
         for p in targets:
@@ -68,7 +78,7 @@ def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Pat
         invoke_agent=h.raising(author_shared.AuthorError("so the graveyard is written")),
     )
     assert drain.run_batch(cfg=fault) == 2
-    assert drain.graveyard_file(ch).is_file()
+    assert _graveyard_file(ch).is_file()
     assert not (paths.repo_root / "defender" / "learning" / "_pending").exists()
 
 
@@ -86,7 +96,7 @@ def test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch(tmp_path: Path
     ch = h.channel_of(paths, "findings")
 
     for p in (
-        ch.append_lock, ch.drain_lock, drain.graveyard_file(ch), drain.stuck_report_file(ch)
+        ch.append_lock, ch.drain_lock, _graveyard_file(ch), _stuck_file(ch)
     ):
         assert p.is_relative_to(paths.pending_dir), f"{p} is outside the ignored prefix"
 
@@ -98,7 +108,7 @@ def test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch(tmp_path: Path
         invoke_agent=h.raising(author_shared.AuthorError("writes the graveyard")),
     )
     assert drain.run_batch(cfg=fault) == 2
-    assert drain.graveyard_file(ch).is_file()
+    assert _graveyard_file(ch).is_file()
     assert ch.drain_lock.exists()
 
     h.seed(ch, [h.row_for("findings", "a/1")])
@@ -253,17 +263,17 @@ def test_pitfalls_agent_failure_bumps_attempts_and_retires_at_the_ceiling(
         "it would fall through uncaught and the channel would stay stuck"
     )
 
-    def leg(_paths, box=None, **_kw):
-        return pitfalls_curator.run_pitfalls(paths=_paths, invoke=lambda *a, **k: 7,
+    def leg(_paths, _state, box=None, **_kw):
+        return pitfalls_curator.run_pitfalls(paths=_paths, state=_state, invoke=lambda *a, **k: 7,
                                              trees=lead_trees(_paths))
 
-    drains._drain_pitfalls(paths, leg)
+    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), leg)
     assert [r.get("attempts") for r in h.pending(paths.pitfalls)] == [1, 1], (
         "the converted rc did not bump both rows"
     )
     assert h.graveyard(paths.pitfalls) == []
 
-    drains._drain_pitfalls(paths, leg)
+    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), leg)
     assert h.pending(paths.pitfalls) == []
     grave = h.graveyard(paths.pitfalls)
     assert sorted(r["pitfall_id"] for r in grave) == ["r:l-000:0", "r:l-001:0"]
@@ -282,17 +292,17 @@ def test_pitfalls_batch_retires_at_the_ceiling(tmp_path: Path, monkeypatch):
     paths = h.make_paths(tmp_path)
     h.seed(paths.pitfalls, _pitfalls_rows(2))
 
-    def leg(_paths, box=None, **_kw):
+    def leg(_paths, _state, box=None, **_kw):
         raise author_shared.AuthorError("pitfalls curation failed")
 
     for expected in (1, 2):
-        drains._drain_pitfalls(paths, leg)
+        drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), leg)
         assert [r.get("attempts") for r in h.pending(paths.pitfalls)] == [expected, expected], (
             f"attempts did not reach {expected} on tick {expected}"
         )
         assert h.graveyard(paths.pitfalls) == []
 
-    drains._drain_pitfalls(paths, leg)
+    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), leg)
     grave = h.graveyard(paths.pitfalls)
     assert h.pending(paths.pitfalls) == []
     assert [r.get("attempts") for r in grave] == [3, 3]
@@ -322,16 +332,16 @@ def test_pitfalls_retirement_removes_batch_ids_not_the_whole_queue(tmp_path: Pat
     h.seed(paths.pitfalls, _pitfalls_rows(2))
     late = h.row_for("pitfalls", "r:l-999:0")
 
-    def leg(_paths, box=None, **_kw):
-        rc = pitfalls_curator.run_pitfalls(paths=_paths, invoke=lambda *a, **k: 7,
+    def leg(_paths, _state, box=None, **_kw):
+        rc = pitfalls_curator.run_pitfalls(paths=_paths, state=_state, invoke=lambda *a, **k: 7,
                                            trees=lead_trees(_paths))
         return rc
 
-    def failing_then_append(_paths, box=None, **_kw):
-        persist.append_pitfalls([late], paths=_paths)
-        return leg(_paths, box=box)
+    def failing_then_append(_paths, _state, box=None, **_kw):
+        persist.append_pitfalls([late], state=_state)
+        return leg(_paths, _state, box=box)
 
-    drains._drain_pitfalls(paths, failing_then_append)
+    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), failing_then_append)
 
     survivors = h.pending(paths.pitfalls)
     assert [r["pitfall_id"] for r in survivors] == ["r:l-999:0"]
@@ -359,7 +369,7 @@ def test_pitfalls_retire_goes_through_the_locked_rotation(tmp_path: Path):
 
     worker = h.Background(
         lambda: drain.retire(
-            channel=ch, batch_ids=["r:l-000:0"], reason="pitfalls retire", max_attempts=1
+            _state1135.state_for_paths(paths), channel=PITFALLS, batch_ids=["r:l-000:0"], reason="pitfalls retire", max_attempts=1
         )
     )
     with h.Holder(ch.append_lock):

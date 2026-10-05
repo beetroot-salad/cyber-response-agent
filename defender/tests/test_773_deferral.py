@@ -11,6 +11,7 @@ lost).
 """
 from __future__ import annotations
 
+from pathlib import Path
 import time
 
 import pytest
@@ -64,7 +65,7 @@ def _hold_append_lock(store: dict):
 
     def grab(*args):
         cfg = args[2]
-        holder = S.Holder(cfg.channel.append_lock)
+        holder = S.Holder(Path(cfg.state.describe(cfg.channel)).parent / Path(cfg.channel.append_lock).name)
         holder.__enter__()
         store["holder"] = holder
 
@@ -234,7 +235,7 @@ def test_a_deferred_row_as_the_wake_gate_sees_it_773(tmp_path):
     )
     ticks = 1
     while sc.pending_by_id().get("orphan") and ticks < 10:
-        authorable, held = drains._pending_queue_counts(sc.channel.file)
+        authorable, held = drains._pending_queue_counts(sc.cfg.state, sc.cfg.channel)
         assert authorable >= 1, "a deferred row must still read as work to the wake gate"
         assert held == 0, "a deferred row is not a permanent hold"
         _defer_again(sc, f"filler{ticks}")
@@ -256,7 +257,7 @@ def test_drain_ticks_own_loop_continuation_is_unaffected_by_the_new_row_fields_7
 
     sc = _orphan_tick(tmp_path, max_attempts=5)
     assert sc.run() == 0
-    authorable, held = drains._pending_queue_counts(sc.channel.file)
+    authorable, held = drains._pending_queue_counts(sc.cfg.state, sc.cfg.channel)
     assert (authorable, held) == (1, 0)
 
     S.seed(sc.channel, sc.pending())
@@ -454,7 +455,7 @@ def test_a_batch_row_the_curator_mentions_nowhere_and_no_file_cites_773(tmp_path
     """A row the curator mentions in no bucket and that no changed file cites stays queued
     EXACTLY as it was, with no counter of any kind bumped.
 
-    C3: a row named in neither the held nor the consumed list of `rotate_queue_locked` is
+    C3: a row named in neither the held nor the consumed list of the queue rotation is
     left untouched — the probe watched `r2` survive a rotation that named only `r0` and
     `r1`. It is distinct from O4's deferral case, which is a row the curator DID report and
     no approved file cites."""

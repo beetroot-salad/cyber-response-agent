@@ -39,6 +39,7 @@ from defender import run as run_py  # noqa: E402
 from defender import run_common  # noqa: E402
 from defender.learning.core import drains  # noqa: E402
 from defender.runtime import scrub as scrub_mod  # noqa: E402
+from defender.tests._state1135 import set_state_dir  # noqa: E402
 from defender.tests._spec791 import (  # noqa: E402
     SCRUB_PROPERTY_TEST,
     TAIL_SEAM,
@@ -66,7 +67,7 @@ HELD_OUT_ALERT = json.dumps({"rule": {"id": "9999"}, "held": "out"}).encode("utf
 def state(tmp_path, monkeypatch):
     """A learning state root and a runs base under tmp, and a key per provider so the
     entrypoint's startup preflight cannot fail ahead of the tail these demands are about."""
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    set_state_dir(monkeypatch, tmp_path / "state")  # the root is never created lazily (#1135)
     satisfy_entrypoint_keys(monkeypatch, tmp_path)
     return loop_paths(tmp_path)
 
@@ -148,7 +149,7 @@ def test_791_finished_investigation_drives_catalog_curation(tmp_path, state):
     branch = SpecBranch(tmp_path / "worktrees")
     rc = drains.lead_author_drain(
         state,
-        run_lead_author=lambda _paths, rd, *, box=None, **_kw: served.append(rd),
+        run_lead_author=lambda _paths, _state, rd, *, box=None, **_kw: served.append(rd),
         run_pitfalls=lambda *_a, **_kw: 0,
         branch=branch, start_box=noop_start_box, stop_box=noop_stop_box, scrub=noop_scrub,
     )
@@ -228,7 +229,7 @@ def test_791_a_curation_re_ask_issued_mid_drain_is_not_destroyed(tmp_path, state
 
     served: list[Path] = []
 
-    def serve_and_re_ask(_paths, run_dir, *, box=None, **_kw):
+    def serve_and_re_ask(_paths, _state, run_dir, *, box=None, **_kw):
         served.append(run_dir)
         if len(served) == 1:
             # The operator re-investigates the case while the lane is curating it.
