@@ -569,3 +569,119 @@ def test_the_file_tools_call_no_path_seam(site):
         _decide_write_and_its_helpers() if site == "permission.decide_write" else [_module(site)]
     )
     assert _offences(nodes) == [], f"{site} still reaches the host through a path seam"
+
+
+# ---------------------------------------------------------------------------------------------
+# adversary round (#1136): plants deeper than the immediate parent, a link at the name for the
+# remaining tools, the gate's baseline over a FIFO, a census by object, and today's messages
+
+
+def test_a_folder_link_two_levels_above_the_name_is_refused_for_reads(tmp_path):
+    """`run/g -> run`: `g/gather_summaries/l-001.md` resolves to a summary MAIN may read, so the
+    gate admits it. A link anywhere on the path is refused, not only at the immediate parent.
+    The real path reads as today."""
+    deps, run = _main(tmp_path)
+    (run / "gather_summaries").mkdir()
+    (run / "gather_summaries" / "l-001.md").write_text("INSIDE\n", encoding="utf-8")
+    os.symlink(run, run / "g", target_is_directory=True)
+
+    assert "INSIDE" in _tool_read_file(deps, "gather_summaries/l-001.md")
+    message = _refused(lambda: _tool_read_file(deps, "g/gather_summaries/l-001.md"))
+    assert "INSIDE" not in message
+
+
+def test_a_folder_link_two_levels_above_the_name_is_refused_for_curator_io(tmp_path):
+    """`defender/alias -> defender`: `defender/alias/lessons/a.md` resolves to a lesson the
+    curator may read and write. Both are refused and the lesson is unchanged; the real path
+    reads and writes as today."""
+    deps, corpus = _curator(tmp_path)
+    lesson = corpus / "a.md"
+    lesson.write_text("ORIGINAL lesson\n", encoding="utf-8")
+    os.symlink(corpus.parent, corpus.parent / "alias", target_is_directory=True)
+    deep = "defender/alias/lessons/a.md"
+
+    _refused(lambda: _tool_lesson_read(deps, deep, part="full"))
+    before = _snapshot(lesson)
+    _refused(lambda: _tool_write_file(deps, deep, "REDIRECTED\n"))
+    _refused(lambda: _tool_edit_file(deps, deep, "ORIGINAL", "REDIRECTED"))
+    assert _snapshot(lesson) == before, "a write landed through the linked folder"
+
+    assert "ORIGINAL lesson" in _tool_lesson_read(deps, "defender/lessons/a.md", part="full")
+    _tool_write_file(deps, "defender/lessons/a.md", "REWRITTEN\n")
+    assert lesson.read_text(encoding="utf-8") == "REWRITTEN\n"
+
+
+def test_lesson_read_and_edit_file_refuse_a_symlink_at_the_name(tmp_path):
+    """`lessons/b.md -> lessons/a.md`, a name the gate admits for both tools: `lesson_read`
+    returns none of `a.md`'s bytes, `edit_file` leaves `a.md` unchanged and the link standing.
+    `a.md` itself reads and edits as today."""
+    deps, corpus = _curator(tmp_path)
+    real = corpus / "a.md"
+    real.write_text("ORIGINAL lesson\n", encoding="utf-8")
+    link = corpus / "b.md"
+    os.symlink(real, link)
+
+    message = _refused(lambda: _tool_lesson_read(deps, "defender/lessons/b.md", part="full"))
+    assert "ORIGINAL" not in message
+    before = _snapshot(real)
+    _refused(lambda: _tool_edit_file(deps, "defender/lessons/b.md", "ORIGINAL", "REDIRECTED"))
+    assert _snapshot(real) == before, "edit_file wrote through the link"
+    assert os.path.islink(link), "the refusal replaced the planted link"
+
+    _tool_edit_file(deps, "defender/lessons/a.md", "ORIGINAL", "EDITED")
+    assert real.read_text(encoding="utf-8") == "EDITED lesson\n"
+
+
+def test_the_write_gate_over_a_fifo_at_investigation_md_denies_without_blocking(tmp_path):
+    """The gate's append-only baseline over a reader-less FIFO at `investigation.md`: it answers
+    at once and denies (the baseline could not be read), never blocks the run. A plain file is
+    a baseline, and an extending append is allowed."""
+    deps, run = _main(tmp_path)
+    inv = run / "investigation.md"
+    proposal = "+ first\n+ second\n"
+
+    def decide():
+        return permission.decide_write(
+            inv, proposal, run_dir=deps.run_dir, defender_dir=deps.defender_dir,
+            policy=deps.policy,
+        )
+
+    inv.write_text("+ first\n", encoding="utf-8")
+    assert decide().allow
+    inv.unlink()
+    os.mkfifo(inv)
+    with _within():
+        assert not decide().allow, "the gate took a FIFO as the baseline"
+
+
+def test_the_file_tools_hold_no_path_seam_by_object():
+    """The census by object, not spelling: no module-level name of the file tools' modules (the
+    whole `runtime/tools` package's tool modules, `lesson_read` and `permission/files.py`) is
+    bound to a path-seam function, whatever it is called and wherever it was re-exported from.
+    `_deps.py` is excluded: its `lessons_loaded` append is a run record (#1165)."""
+    import importlib
+
+    import defender._io as io_mod
+
+    seams = {getattr(io_mod, n) for n in _SEAMS if hasattr(io_mod, n)}
+    assert seams, "no seam resolved — the census would pass vacuously"
+    offences = []
+    for modname in (
+        "defender.runtime.tools._files", "defender.runtime.tools._document",
+        "defender.runtime.tools._bash", "defender.runtime.tools",
+        "defender.learning.author.lesson_read", "defender.runtime.permission.files",
+    ):
+        mod = importlib.import_module(modname)
+        offences += [f"{modname}.{k}" for k, v in vars(mod).items() if any(v is s for s in seams)]
+    assert offences == [], offences
+
+
+def test_read_file_keeps_todays_messages(tmp_path):
+    """Plain-tree messages are unchanged: a missing file is `file not found: <path>`, and
+    undecodable bytes are `<path> is not valid UTF-8 text (binary or corrupt)`."""
+    deps, run = _main(tmp_path)
+    assert _refused(lambda: _tool_read_file(deps, "nope.txt")) == "file not found: nope.txt"
+    (run / "bin.txt").write_bytes(b"\xff\xfe\x00bad")
+    assert _refused(lambda: _tool_read_file(deps, "bin.txt")) == (
+        "bin.txt is not valid UTF-8 text (binary or corrupt)"
+    )
