@@ -241,6 +241,8 @@ def run(
     queue lock, and closed when the run ends; with `deps`, a label that does not mount
     `deps.paths.skills_dir` is refused (#1134). The label is used first, on both paths, so a
     non-member raises before the queue lock or any of the run (#1179 O1')."""
+    if deps is None and paths is None:
+        raise TypeError("run takes paths= (or deps=)")
     writable = label.writable_trees(deps.paths if deps is not None else paths)  # type: ignore[arg-type]
     if not run_dir.is_dir():
         _logger.critical(f"run_dir not found: {run_dir}")
@@ -260,8 +262,7 @@ def run(
                 return QUEUE_LOCK_SKIP_RC
             return _run_locked(run_dir, deps, box=box, on_done=sink)
 
-    if paths is None:
-        raise TypeError("run takes paths= (or deps=)")
+    assert paths is not None  # the guard above: without `deps`, `paths` is required
     with contextlib.ExitStack() as owned:
         if state is None:
             state = owned.enter_context(LearningState.open(paths))
@@ -542,7 +543,6 @@ __all__ = [
     "_SAFE_ID_SEGMENT",
     "_VALID_PAYLOAD_STATUSES",
     "_answered_after_batch",
-    "_author_shared",
     "_check_promoted_template",
     "_corpus",
     "_covers_rule",
@@ -590,7 +590,6 @@ __all__ = [
     "_verify_skills_state",
     "_write_state",
     "done_sentinel_text",
-    "queue_lock_file",
     "answered_identities",
     "argparse",
     "build_handoff",

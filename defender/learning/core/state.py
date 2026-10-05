@@ -247,8 +247,11 @@ class PendingDelivery:
 
 
 def _is_stamped_copy(row: dict, entry: dict) -> bool:
-    """`entry` is `row` with more fields stamped on (every field of `row` is in `entry`, equal)."""
-    return all(k in entry and entry[k] == v for k, v in row.items())
+    """`entry` is `row` as the batch stamped it: the same fields once the stamps (`consumed_*`,
+    `attempts`) are set aside. Exact, so an empty row, or a row that is merely a subset of a
+    handled one, is not mistaken for it."""
+    return {k: v for k, v in entry.items()
+            if not k.startswith("consumed_") and k != "attempts"} == row
 
 
 @dataclass(frozen=True)
@@ -514,11 +517,12 @@ class LearningState:
         `None` when an appender held the lock past `timeout` (a busy channel is not a fault, so the
         tick skips)."""
         channel = self._channel(channel)
-        try:
-            with self._append_lock(channel, timeout):
-                return self.rows_report(channel)
-        except TimeoutError:
-            return None
+        with contextlib.ExitStack() as stack:
+            try:
+                stack.enter_context(self._append_lock(channel, timeout))
+            except TimeoutError:  # the lock's own deadline only, never a fault inside the read
+                return None
+            return self.rows_report(channel)
 
     def append(
         self, channel: Channel, rows: list[dict], *, dedup_key: str | None = None,
@@ -789,8 +793,9 @@ class LearningState:
         return True
 
     def done(self, claimed: Claimed) -> None:
-        """Release the claim: unlink its record in `inflight/`."""
-        with contextlib.suppress(FileNotFoundError):
+        """Release the claim: unlink its record in `inflight/`. Best-effort: an ordinary failure
+        leaves it for the next pass's reclaim; a refusal is not an `OSError` and still stops."""
+        with contextlib.suppress(OSError):
             self._unlink(f"{_INFLIGHT}/{claimed.name}")
 
     def quarantine(self, claimed: Claimed, reason: str) -> None:
@@ -861,8 +866,8 @@ class LearningState:
         return out
 
     def delivered(self, delivery: PendingDelivery) -> None:
-        """Drop the record of a batch that has now been delivered."""
-        with contextlib.suppress(FileNotFoundError):
+        """Drop the record of a batch that has now been delivered. Best-effort, like `done`."""
+        with contextlib.suppress(OSError):
             self._unlink(f"{_DELIVERY}/{delivery.id}.json")
 
     def quarantine_delivery(self, delivery: PendingDelivery | str, reason: str) -> None:

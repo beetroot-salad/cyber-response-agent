@@ -132,14 +132,14 @@
           "defender/learning/core/drains.py::_record_pending_delivery",
           "defender/learning/core/drains.py::_requeue_or_drop",
           "defender/learning/core/drains.py::_deliver_pending",
-          "defender/_flock.py::open_lock",
+          "defender/_io.py::open_lock_at",
           "defender/learning/author/shared.py::write_disposition_report",
           "defender/learning/author/drain.py::_append_gap_record",
           "defender/learning/leads/_lead_spine.py::_spawn_author_agent"
         ],
         "readers": [
           "defender/learning/core/drains.py::_has_lead_author_work",
-          "defender/learning/core/drains.py::_pending_deliveries",
+          "defender/learning/core/state.py::LearningState.deliveries",
           "defender/learning/core/drains.py::_pending_queue_counts",
           "defender/learning/frontend/serialize_queues.py::build_view"
         ],

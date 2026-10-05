@@ -18,3 +18,54 @@ def test_rotate_keeps_a_keyless_row_appended_after_the_batch_read(tmp_path):
 
     rows, _bad = state.rows_report(FINDINGS)
     assert rows == [{"x": 2}, {"finding_id": "k"}]
+
+
+def test_rotate_keeps_an_empty_keyless_row_and_a_row_that_is_only_a_subset(tmp_path):
+    """A handled keyless entry removes only the queued row it was made from (that row plus the
+    batch's stamp): not an empty row, and not a different row whose fields happen to be a subset."""
+    paths = make_paths(tmp_path)
+    state = LearningState.open(paths)
+    state.append(FINDINGS, [{"a": 1, "b": 2}])
+    state.append(FINDINGS, [{}, {"a": 1}])
+
+    state.rotate(FINDINGS, [], [{"a": 1, "b": 2, "consumed_category": "consumed_retired"}], None)
+
+    rows, _bad = state.rows_report(FINDINGS)
+    assert rows == [{}, {"a": 1}]
+
+
+def test_read_window_reports_a_read_time_timeout_instead_of_a_busy_channel(tmp_path, monkeypatch):
+    """Only the lock's own deadline means "an appender holds it"; a TimeoutError out of the read
+    inside the window is an ordinary I/O fault and must reach the caller."""
+    import pytest
+
+    paths = make_paths(tmp_path)
+    state = LearningState.open(paths)
+
+    def slow_read(self, channel):
+        raise TimeoutError("read timed out")
+
+    monkeypatch.setattr(LearningState, "rows_report", slow_read)
+    with pytest.raises(TimeoutError, match="read timed out"):
+        state.read_window(FINDINGS, timeout=1)
+
+
+def test_releasing_a_claim_or_a_delivery_survives_an_ordinary_unlink_failure(tmp_path, monkeypatch):
+    """`done` and `delivered` are best-effort, as the unlinks they replaced were: an ordinary
+    failure leaves the record for the next pass and does not abort the apply or the delivery."""
+    import errno
+
+    from defender.learning.core.state import PendingDelivery
+
+    paths = make_paths(tmp_path)
+    state = LearningState.open(paths)
+    (tmp_path / "r").mkdir()
+    state.enqueue_curation("case-1", {"case_id": "case-1", "run_dir": str((tmp_path / "r").resolve())})
+    [claim] = list(state.claim("case_id"))
+
+    def denied(self, name):
+        raise PermissionError(errno.EACCES, "denied")
+
+    monkeypatch.setattr(type(state._held), "unlink", denied)
+    state.done(claim)
+    state.delivered(PendingDelivery("a-b1", "a/b1", "b1"))

@@ -80,6 +80,7 @@ def materialize(scenario: Path, tmp: Path) -> Path:
 def run_lead_author(tmp: Path, run_dir: Path) -> subprocess.CompletedProcess:
     venv_py = find_venv_py(REAL_REPO_ROOT)
     env = os.environ.copy()
+    (tmp / "_state").mkdir(exist_ok=True)  # lint-unguarded-tree-write: ok — eval scratch dir; the handle never creates its root
     env["DEFENDER_LEARNING_STATE_DIR"] = str(tmp / "_state")
     return _run(
         [str(venv_py), str(tmp / "defender" / "learning" / "leads" / "lead_author.py"), str(run_dir)],  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
