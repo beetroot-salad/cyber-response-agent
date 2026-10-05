@@ -563,8 +563,8 @@ def test_o8_control_unstartable_git_after_a_clean_lead_author_claim_ends_the_tic
         tampering = _leaving(LIFT, EDITED_LIFT, patch, path_dir, _serving(served))
         plain = _serving(served)
 
-        def step(paths: Any, run_dir: Path, **kw: Any) -> None:
-            (tampering if run_dir == run_a else plain)(paths, run_dir, **kw)
+        def step(paths: Any, state: Any, run_dir: Path, **kw: Any) -> None:
+            (tampering if run_dir == run_a else plain)(paths, state, run_dir, **kw)
 
         got = _tick(sc, run_lead_author=step, run_pitfalls=_no_curation, git_timeout=BOUND)
 
@@ -582,7 +582,7 @@ def test_o8_control_unstartable_git_after_a_clean_lead_author_claim_ends_the_tic
     assert _inflight(sc.paths) == {"case-a.json": {
         "case_id": "case-a", "run_dir": str(run_a.resolve()), "attempts": 1}}, _inflight(sc.paths)
     assert author_markers(sc.paths) == ["case-b.json"]
-    assert marker_body(sc.paths.author_queue_dir / "case-b.json") == {
+    assert marker_body(sc.paths.state_root / "author-queue" / "case-b.json") == {
         "case_id": "case-b", "run_dir": str(run_b.resolve())}
     assert _failed(sc.paths) == []
     assert "finish" not in sc.branch.events

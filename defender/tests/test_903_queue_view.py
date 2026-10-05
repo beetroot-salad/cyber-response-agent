@@ -37,6 +37,7 @@ from defender.learning.author import drain
 from defender.learning.author.branch import AuthorBranch
 from defender.learning.core import quarantine
 from defender.learning.core.config import LoopPaths, loop_paths
+from defender.learning.core.state import FINDINGS, PITFALLS, QUESTIONER_FINDINGS, Channel, LearningState
 from defender.learning.frontend import build, serialize_queues
 from defender.learning.leads import pitfalls_curator
 
@@ -199,6 +200,28 @@ EXPECTED_TAINTED = [
 # seeding
 
 
+def _make_paths(tmp_path: Path) -> LoopPaths:
+    """`LoopPaths` over a state root that exists: the handle never creates it (#1135)."""
+    paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=tmp_path / "state")
+    paths.state_root.mkdir(parents=True, exist_ok=True)
+    return paths
+
+
+def _build(paths: LoopPaths) -> dict:
+    """`serialize_queues.build_view` over a handle opened on `paths` for the one call."""
+    with LearningState.open(paths) as state:
+        return serialize_queues.build_view(paths, state)
+
+
+def _graveyard_file(paths: LoopPaths, channel: Channel) -> Path:
+    """The channel's dead-letter sidecar, beside its queue (the layout is unchanged)."""
+    return paths.state_root / channel.deadletter
+
+
+def _stuck_file(paths: LoopPaths, channel: Channel) -> Path:
+    return paths.state_root / channel.stuck
+
+
 def _write_lines(path: Path, entries: list) -> None:
     """Seed a JSONL sidecar. A `str` entry is written verbatim, so a torn line is a torn
     line rather than a JSON-encoded string that happens to look like one."""
@@ -220,8 +243,8 @@ def _write_torn_json(path: Path) -> None:
 
 
 def _seed_findings(paths: LoopPaths) -> None:
-    ch = paths.findings
-    _write_lines(ch.file, [
+    ch = FINDINGS
+    _write_lines(paths.state_root / ch.queue, [
         {"finding_id": "f-1", "run_id": "r1", "title": BENIGN_PAYLOAD},
         {"finding_id": "f-2", "held_reason": "waits on a fact with no writer"},
         # PRESENCE, not truthiness — `drains._pending_queue_counts`' own rule.
@@ -230,38 +253,38 @@ def _seed_findings(paths: LoopPaths) -> None:
         {"finding_id": "f-4", "forward_bad_reason": "the corpus moved under it"},
         TORN,
     ])
-    _write_lines(drain.graveyard_file(ch), [
+    _write_lines(_graveyard_file(paths, ch), [
         NESTED_STAMPED, TORN, FLAT_UNSTAMPED, NESTED_UNSTAMPED, FLAT_STAMPED, TORN,
     ])
-    _write_lines(drain.stuck_report_file(ch), [STUCK_FIRST, STUCK_MIDDLE, STUCK_LAST])
+    _write_lines(_stuck_file(paths, ch), [STUCK_FIRST, STUCK_MIDDLE, STUCK_LAST])
 
 
 def _seed_questioner(paths: LoopPaths) -> None:
-    ch = paths.questioner_findings
-    _write_lines(ch.file, [
+    ch = QUESTIONER_FINDINGS
+    _write_lines(paths.state_root / ch.queue, [
         {"finding_id": "q-1", "subject": "world"},
         {"finding_id": "q-2", "held_reason": "no source bundle"},
     ])
     # EMPTY, not absent: the file exists and holds no record.
-    _write_lines(drain.stuck_report_file(ch), [])
+    _write_lines(_stuck_file(paths, ch), [])
     # No graveyard file at all — the empty-dead-letters arm.
 
 
 def _seed_pitfalls(paths: LoopPaths) -> None:
-    ch = paths.pitfalls
-    _write_lines(ch.file, [
+    ch = PITFALLS
+    _write_lines(paths.state_root / ch.queue, [
         {"pitfall_id": "p-1", "offers_declined": 0},
         {"pitfall_id": "p-2", "offers_declined": 2},
         {"pitfall_id": "p-3", "system": "elastic"},
     ])
-    _write_lines(drain.graveyard_file(ch), [CURATOR_DROP])
+    _write_lines(_graveyard_file(paths, ch), [CURATOR_DROP])
     # A STRAY stuck file — a copied state dir, a stale write. The lane records no stuck tick,
     # so `has_stuck_record` must stay false and `stuck` null whatever this file holds.
-    _write_lines(drain.stuck_report_file(ch), [STUCK_FIRST])
+    _write_lines(_stuck_file(paths, ch), [STUCK_FIRST])
 
 
 def _seed_set_aside(paths: LoopPaths) -> None:
-    lead_failed = paths.author_queue_dir / "failed"
+    lead_failed = paths.state_root / "author-queue" / "failed"
     _write_json(lead_failed / "run-a.json", {
         "run_id": "run-a", "failed": "unreadable: run_dir is not an absolute path",
     })
@@ -272,21 +295,21 @@ def _seed_set_aside(paths: LoopPaths) -> None:
     _write_torn_json(lead_failed / "torn.json")
     _write_torn_json(lead_failed / "torn-2.json")
 
-    delivery_failed = paths.pending_delivery_dir / "failed"
+    delivery_failed = paths.state_root / "_pending_delivery" / "failed"
     # `_pending_deliveries` quarantines with an EMPTY spec, so `failed` is the whole record.
     _write_json(delivery_failed / "z-delivery-1.json", {
         "failed": "unreadable pending-delivery record",
     })
 
-    _write_json(paths.pending_delivery_dir / "a-older.json", {
+    _write_json(paths.state_root / "_pending_delivery" / "a-older.json", {
         "branch": "learning/lessons/b1", "batch_id": "b1", "label": "lessons author",
         "reason": "push rejected", "at": "2026-09-15T10:00:00+00:00",
     })
-    _write_json(paths.pending_delivery_dir / "b-newer.json", {
+    _write_json(paths.state_root / "_pending_delivery" / "b-newer.json", {
         "branch": "learning/leads/b2", "batch_id": "b2", "label": "lead author",
         "reason": "opening the PR failed", "at": "2026-09-16T10:00:00+00:00",
     })
-    _write_torn_json(paths.pending_delivery_dir / "c-torn.json")
+    _write_torn_json(paths.state_root / "_pending_delivery" / "c-torn.json")
 
     qdir = paths.quarantine_dir
     _write_json(qdir / "a-earlier.json", TAINT_EARLIER)
@@ -304,24 +327,24 @@ def test_a_manifest_or_record_of_the_wrong_type_degrades_that_row_never_the_page
     each is one degraded row, and the page still lists everything else. The contract is the
     typed boundary: nothing off disk reaches the renderer un-coerced, so the whole page is
     built here rather than asserted not to raise."""
-    paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=tmp_path / "state")
-    _write_lines(paths.findings.file, [])
-    _write_lines(drain.graveyard_file(paths.findings), [
+    paths = _make_paths(tmp_path)
+    _write_lines(paths.state_root / FINDINGS.queue, [])
+    _write_lines(_graveyard_file(paths, FINDINGS), [
         {"finding_id": "g-list", "deadletter_reason": "r", "row": ["not", "a", "mapping"]},
         {"finding_id": 7, "deadletter_reason": None, "retired_at": 12, "row": {"k": "v"}},
     ])
-    _write_lines(drain.stuck_report_file(paths.findings), [
+    _write_lines(_stuck_file(paths, FINDINGS), [
         {"fault_class": ["X"], "row_ids": "f-1", "consecutive_ticks": "many", "reason": None,
          "recorded_at": 5},
     ])
-    _write_lines(paths.pitfalls.file, [
+    _write_lines(paths.state_root / PITFALLS.queue, [
         {"pitfall_id": "p-prose", "offers_declined": "lots"},
         {"pitfall_id": "p-bool", "offers_declined": True},
         {"pitfall_id": "p-real", "offers_declined": 1},
         # Held, with no usable id: COUNTED (the wake gate counts it) but not named.
         {"pitfall_id": 7, "offers_declined": 3},
     ])
-    _write_lines(drain.graveyard_file(paths.pitfalls), [
+    _write_lines(_graveyard_file(paths, PITFALLS), [
         # `json.loads` accepts a bare NaN; the contract must not write one back.
         '{"pitfall_id": "p-nan", "deadletter_reason": "r", "row": {"pitfall_id": "p-nan", "score": NaN}}',
     ])
@@ -330,9 +353,9 @@ def test_a_manifest_or_record_of_the_wrong_type_degrades_that_row_never_the_page
         "batch_id": "odd", "archive": "odd.tar.gz", "quarantined_at": 20260914,
         "label": ["lead"], "taint": "t", "cause": 5, "verdict": "clean", "findings": 3,
     })
-    _write_json(paths.pending_delivery_dir / "odd.json", {"batch_id": "b", "at": 3})
+    _write_json(paths.state_root / "_pending_delivery" / "odd.json", {"batch_id": "b", "at": 3})
 
-    view = serialize_queues.build_view(paths)
+    view = _build(paths)
     page = build.render_queues(view)
 
     assert _channel(view, "findings")["deadletter"] == [
@@ -363,9 +386,9 @@ def test_an_empty_state_root_reads_as_three_idle_channels_and_nothing_set_aside(
     is present and idle, every set-aside list is empty, and the cap is still reported — so a
     serializer that answered from anything but the files it was handed would be caught by the
     difference between this and the seeded root."""
-    paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=tmp_path / "state")
+    paths = _make_paths(tmp_path)
 
-    view = serialize_queues.build_view(paths)
+    view = _build(paths)
 
     assert view["state_root"] == str(paths.state_root)
     for name, accent, flag in (("findings", "defender", True),
@@ -389,13 +412,13 @@ def test_an_empty_state_root_reads_as_three_idle_channels_and_nothing_set_aside(
 def test_one_more_row_moves_exactly_one_number(paths):
     """The seeded root plus one dead letter on the questioner channel: only that channel's
     list and count move, and the rest of the view is byte-identical."""
-    before = serialize_queues.build_view(paths)
-    _write_lines(drain.graveyard_file(paths.questioner_findings), [
+    before = _build(paths)
+    _write_lines(_graveyard_file(paths, QUESTIONER_FINDINGS), [
         {"finding_id": "q-dead", "attempts": 3, "deadletter_reason": "ceiling",
          "retired_at": "2026-09-18T00:00:00+00:00", "row": {"finding_id": "q-dead"}},
     ])
 
-    after = serialize_queues.build_view(paths)
+    after = _build(paths)
 
     assert _channel(after, "questioner_findings")["deadletter"] == [
         {"id": "q-dead", "reason": "ceiling", "when": "2026-09-18T00:00:00+00:00",
@@ -410,7 +433,7 @@ def test_one_more_row_moves_exactly_one_number(paths):
 @pytest.fixture
 def paths(tmp_path: Path) -> LoopPaths:
     """A whole state root, seeded from every writer that feeds the page."""
-    out = LoopPaths(repo_root=tmp_path / "repo", state_dir=tmp_path / "state")
+    out = _make_paths(tmp_path)
     _seed_findings(out)
     _seed_questioner(out)
     _seed_pitfalls(out)
@@ -420,7 +443,7 @@ def paths(tmp_path: Path) -> LoopPaths:
 
 @pytest.fixture
 def view(paths: LoopPaths) -> dict:
-    return serialize_queues.build_view(paths)
+    return _build(paths)
 
 
 def _channel(view: dict, name: str) -> dict:
@@ -599,9 +622,9 @@ def test_the_pitfalls_lane_has_no_stuck_record_and_says_so_structurally(view):
 def test_the_findings_lane_records_stuck_ticks_even_before_it_has_written_one(tmp_path):
     """The other half of "structural": a findings root with NO stuck file at all still says
     `has_stuck_record: true` — the lane records them, it just has not had one."""
-    paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=tmp_path / "state")
-    _write_lines(paths.findings.file, [])
-    ch = _channel(serialize_queues.build_view(paths), "findings")
+    paths = _make_paths(tmp_path)
+    _write_lines(paths.state_root / FINDINGS.queue, [])
+    ch = _channel(_build(paths), "findings")
     assert ch["has_stuck_record"] is True
     assert ch["stuck"] is None
 
@@ -653,12 +676,12 @@ def test_held_is_the_writers_count_of_archives_not_of_readable_manifests(paths):
     (qdir / "orphan.tar.gz").write_bytes(b"")          # archive, no manifest
     (qdir / "c-torn.tar.gz").write_bytes(b"")          # archive, torn manifest (seeded)
 
-    tainted = serialize_queues.build_view(paths)["quarantine"]["tainted"]
+    tainted = _build(paths)["quarantine"]["tainted"]
 
     assert len(tainted["rows"]) == 2
     assert tainted["held"] == 4
     assert tainted["held"] == quarantine.held_archives(qdir)
-    assert "4 / 10" in _rendered(build.render_queues(serialize_queues.build_view(paths)))
+    assert "4 / 10" in _rendered(build.render_queues(_build(paths)))
 
 
 def test_the_page_names_the_quarantine_directory_because_it_is_not_under_the_state_root(view, paths):
@@ -678,7 +701,7 @@ def test_the_near_cap_warning_shows_at_two_slots_left_and_never_on_an_empty_dire
     count", which at a cap of two is true of nothing at all."""
     def page_for(cap: int) -> str:
         monkeypatch.setenv("LEARNING_TAINT_QUARANTINE_MAX", str(cap))
-        return _rendered(build.render_queues(serialize_queues.build_view(paths)))
+        return _rendered(build.render_queues(_build(paths)))
 
     assert 'class="cap">2 / 10</span>' in page_for(10)         # eight slots left
     assert 'class="cap near">2 / 4</span>' in page_for(4)      # two left
@@ -695,14 +718,14 @@ def test_an_unreadable_sidecar_or_directory_is_counted_not_fatal(paths):
     one unreadable on its list and a `held` of null, and the page is still built."""
     if not hasattr(os, "geteuid") or os.geteuid() == 0:
         pytest.skip("permission bits do not bind root")
-    drain.graveyard_file(paths.findings).chmod(0)
+    _graveyard_file(paths, FINDINGS).chmod(0)
     paths.quarantine_dir.chmod(0)
     try:
-        view = serialize_queues.build_view(paths)
+        view = _build(paths)
         page = build.render_queues(view)
     finally:
         paths.quarantine_dir.chmod(0o700)
-        drain.graveyard_file(paths.findings).chmod(0o600)
+        _graveyard_file(paths, FINDINGS).chmod(0o600)
 
     findings = _channel(view, "findings")
     assert findings["deadletter"] == []
@@ -725,7 +748,7 @@ def test_the_taint_cap_follows_its_environment_variable(paths, monkeypatch):
     """The same address, moved: the cap is `LEARNING_TAINT_QUARANTINE_MAX`, read where the
     writer reads it, not a constant copied into the serializer."""
     monkeypatch.setenv("LEARNING_TAINT_QUARANTINE_MAX", "3")
-    assert serialize_queues.build_view(paths)["quarantine"]["tainted"]["cap"] == 3
+    assert _build(paths)["quarantine"]["tainted"]["cap"] == 3
 
 
 # --------------------------------------------------------------------------------------
@@ -753,7 +776,7 @@ def test_stamped_view_resolves_the_state_root_at_call_time_and_stamps_it(tmp_pat
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(root))
 
     with _Clock() as clock:
-        stamped = serialize_queues.stamped_view()
+        stamped = serialize_queues.stamped_view(loop_paths())
 
     assert Path(stamped["state_root"]) == root.resolve()
     assert stamped["quarantine"]["tainted"]["dir"] == str(loop_paths().quarantine_dir)
@@ -1046,19 +1069,19 @@ class _Clock:
 @pytest.fixture
 def bare(tmp_path: Path) -> LoopPaths:
     """State only — every writer below appends beside its own queue and reads no tree."""
-    return LoopPaths(repo_root=tmp_path / "repo", state_dir=tmp_path / "state")
+    return _make_paths(tmp_path)
 
 
 def test_retire_stamps_the_dead_letter_it_writes(bare):
     """O8, writer 1 of 4. A dead letter with no time is a row a human cannot place against
     anything else that happened — and `when` is the only column the page can sort on."""
-    ch = bare.findings
-    _write_lines(ch.file, [{"finding_id": "a/0", "run_id": "a"}])
+    ch = FINDINGS
+    _write_lines(bare.state_root / ch.queue, [{"finding_id": "a/0", "run_id": "a"}])
 
-    with _Clock() as clock:
-        drain.retire(channel=ch, batch_ids=["a/0"], reason="the ceiling", max_attempts=1)
+    with _Clock() as clock, LearningState.open(bare) as state:
+        drain.retire(state, channel=FINDINGS, batch_ids=["a/0"], reason="the ceiling", max_attempts=1)
 
-    [record] = read_jsonl_rows(drain.graveyard_file(ch))
+    [record] = read_jsonl_rows(_graveyard_file(bare, ch))
     assert record["deadletter_reason"] == "the ceiling"
     assert record["row"] == {"finding_id": "a/0", "run_id": "a"}
     clock.check(record.get("retired_at"))
@@ -1067,13 +1090,13 @@ def test_retire_stamps_the_dead_letter_it_writes(bare):
 def test_retiring_an_unkeyable_row_stamps_its_flat_record(bare):
     """O8, writer 2 of 4 — and the stamp rides on the FLAT shape without giving it a `row`
     key, since that key is the very thing a reader branches on."""
-    ch = bare.questioner_findings
-    _write_lines(ch.file, [])
+    ch = QUESTIONER_FINDINGS
+    _write_lines(bare.state_root / ch.queue, [])
 
-    with _Clock() as clock:
-        drain._retire_unkeyable(ch, [{"run_id": "r9", "note": "no id here"}], logging.getLogger("defender.test"), 5)
+    with _Clock() as clock, LearningState.open(bare) as state:
+        drain._retire_unkeyable(state, QUESTIONER_FINDINGS, [{"run_id": "r9", "note": "no id here"}], logging.getLogger("defender.test"), 5)
 
-    [record] = read_jsonl_rows(drain.graveyard_file(ch))
+    [record] = read_jsonl_rows(_graveyard_file(bare, ch))
     assert "row" not in record
     assert record["run_id"] == "r9"
     assert record["deadletter_reason"] == "row carries no value under 'finding_id'"
@@ -1085,10 +1108,10 @@ def test_the_curators_dropped_row_carries_the_time_it_was_dropped(bare):
     even loosely, so it is the one a missing stamp costs most."""
     rows = [{"pitfall_id": "p-9", "system": "evil", "occurrences": 2}]
 
-    with _Clock() as clock:
-        pitfalls_curator._graveyard_dropped_rows(bare, rows, ["p-9"])
+    with _Clock() as clock, LearningState.open(bare) as state:
+        pitfalls_curator._graveyard_dropped_rows(state, rows, ["p-9"])
 
-    [record] = read_jsonl_rows(drain.graveyard_file(bare.pitfalls))
+    [record] = read_jsonl_rows(_graveyard_file(bare, PITFALLS))
     assert record["deadletter_reason"] == "undeclared-system:evil"
     assert record["row"] == rows[0]
     clock.check(record.get("retired_at"))
@@ -1098,14 +1121,14 @@ def test_recording_a_stuck_tick_stamps_when_it_was_recorded(bare):
     """O8, writer 4 of 4. The stuck file is append-only and nothing clears it, so the band is
     "last faulted at" and NOT "stuck right now" — without `recorded_at` the page cannot say
     which of those it is showing."""
-    ch = bare.findings
+    ch = FINDINGS
 
-    with _Clock() as clock:
-        drain.record_stuck(ch, TimeoutError("the append lock never came free"), [
+    with _Clock() as clock, LearningState.open(bare) as state:
+        drain.record_stuck(state, FINDINGS, TimeoutError("the append lock never came free"), [
             {"finding_id": "a/0"},
         ])
 
-    [record] = read_jsonl_rows(drain.stuck_report_file(ch))
+    [record] = read_jsonl_rows(_stuck_file(bare, ch))
     assert record["fault_class"] == "TimeoutError"
     assert record["row_ids"] == ["a/0"]
     assert record["consecutive_ticks"] == 1
@@ -1149,8 +1172,10 @@ def test_nothing_in_the_tree_still_says_the_graveyard_is_unread():
     """Mechanism 8: every docstring, test and spec-graph clause that deferred to #903 now
     names the page as the reader. `graveyard_file`'s own docstring is the one the issue
     quoted."""
-    assert "nothing in production reads this back" not in (drain.graveyard_file.__doc__ or "")
-    assert "serialize_queues" in (drain.graveyard_file.__doc__ or "")
+    # `drain.graveyard_file` is gone (#1135); the verb that writes the graveyard now owns the
+    # docstring that names its reader.
+    assert "nothing in production reads this back" not in (LearningState.deadletter.__doc__ or "")
+    assert "queue page" in (LearningState.deadletter.__doc__ or "")
     repo = Path(build.__file__).resolve().parents[3]
     stale = []
     for path in [*(repo / "defender").rglob("*.py"), *(repo / "spec-flow" / "specs").glob("*.yaml")]:

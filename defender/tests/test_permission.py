@@ -653,7 +653,7 @@ def test_write_allow_md_only_denies_non_md(tmp_path):
 def test_write_allow_no_implicit_run_dir(tmp_path):
     """the flat allowlist REPLACES the old run-dir base (no implicit run_dir): a writer that declares
     only a skills subtree may NOT write run_dir. This is the #3 fix — the lead author (run_dir=source
-    case dir) and pitfalls curator (run_dir=PENDING_DIR) no longer get a blanket run-dir write grant.
+    case dir) and pitfalls curator (run_dir=the pending folder) no longer get a blanket run-dir write grant.
     Positive control: the declared skills path IS allowed."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()

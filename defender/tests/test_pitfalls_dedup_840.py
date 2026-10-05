@@ -41,9 +41,11 @@ import pytest
 from defender.learning.author import drain
 from defender.learning.core import drains, persist
 from defender.learning.core.config import LoopPaths
+from defender.learning.core.state import PITFALLS
 from defender.learning.leads import pitfalls_curator
 from defender.learning.leads.lead_extraction import ExecutedLead, collect_general_failures
 from defender._query_rules import BASH_SHIM_QUERY_ID
+from defender.tests import _state1135
 from defender.tests._repo import seed_skills_repo
 from defender.tests._lead_author_1134 import lead_trees
 
@@ -104,12 +106,12 @@ def _shim(pid: str, *, digest: str = UNNEST, system: str = "", **extra) -> dict:
 
 def _pending(paths: LoopPaths) -> list[dict]:
     """The queue's ROWS — the evidence, one line per failure."""
-    return persist.read_pitfalls(paths)
+    return persist.read_pitfalls(_state1135.state_for_paths(paths))
 
 
 def _records(paths: LoopPaths) -> list[dict]:
     """The queue's RECORD SET — what the threshold counts and the curator receives."""
-    return persist.merge_pitfalls(persist.read_pitfalls(paths))
+    return persist.merge_pitfalls(persist.read_pitfalls(_state1135.state_for_paths(paths)))
 
 
 # The collapse itself — one looping lead is one lesson, and the loop is still legible.
@@ -123,7 +125,7 @@ def test_one_looping_leads_eight_turns_become_one_record_carrying_its_count(path
     collected = collect_general_failures(executed, Path("reviewer-measure-0807-b"), catalog=[])
     assert len(collected) == 8, "the collector is per-row and #823 N3 keeps it that way"
 
-    persist.append_pitfalls(collected, paths=paths)
+    persist.append_pitfalls(collected, state=_state1135.state_for_paths(paths))
     assert len(_pending(paths)) == 8, "the rows are the evidence and all eight are kept"
     records = _records(paths)
     assert len(records) == 1, "eight copies of one lesson were eight lessons"
@@ -140,7 +142,7 @@ def test_two_different_mistakes_in_one_lead_stay_two_records(paths):
     executed = [_lead(sql="SELECT unnest(data)"),
                 _lead(sql="SELECT @timestamp", digest=QUOTING, query_index=1)]
     persist.append_pitfalls(
-        collect_general_failures(executed, Path("r"), catalog=[]), paths=paths)
+        collect_general_failures(executed, Path("r"), catalog=[]), state=_state1135.state_for_paths(paths))
     assert sorted(r["stderr_digest"] for r in _records(paths)) == sorted([QUOTING, UNNEST])
     assert [r["occurrences"] for r in _records(paths)] == [1, 1]
 
@@ -150,7 +152,7 @@ def test_the_same_digest_from_two_systems_stays_two_records(paths):
     channel — collapsing across systems would send a host-state lesson to elastic's file."""
     persist.append_pitfalls(
         [_row("r:l-001:0"), _row("r:l-002:0", system="host-state",
-                                 query_id="host-state.ps")], paths=paths)
+                                 query_id="host-state.ps")], state=_state1135.state_for_paths(paths))
     assert {r["system"] for r in _records(paths)} == {"elastic", "host-state"}
 
 
@@ -172,7 +174,7 @@ def test_the_reducer_owns_its_lesson_whatever_attributed_it(paths):
     persist.append_pitfalls(
         [_shim("r:l-001:0", system="elastic"), _shim("r:l-002:0"),
          _row("r:l-003:0")],
-        paths=paths,
+        state=_state1135.state_for_paths(paths),
     )
     records = _records(paths)
     assert len(records) == 2, "the reducer rows did not merge, or swallowed the system row"
@@ -192,7 +194,7 @@ def test_two_distinct_queries_earning_one_rejection_are_one_lesson(paths):
     are one bullet. Pinned so widening the key is a decision rather than a drift."""
     rows = [_row("r:l-001:0", executed_query="FROM a | STATS x") | {"query_id": "elastic.a"},
             _row("r:l-002:0", executed_query="FROM b | STATS y") | {"query_id": "elastic.b"}]
-    persist.append_pitfalls(rows, paths=paths)
+    persist.append_pitfalls(rows, state=_state1135.state_for_paths(paths))
     assert len(_records(paths)) == 1
     assert _records(paths)[0]["occurrences"] == 2
 
@@ -201,7 +203,7 @@ def test_a_later_run_repeating_the_mistake_bumps_the_count(paths):
     """Cross-run, which is the half a collector-side dedup could not reach: three runs that
     each make the same mistake once are still one lesson, and the queue says so."""
     for run in ("run-a", "run-b", "run-c"):
-        persist.append_pitfalls([_row(f"{run}:l-001:0")], paths=paths)
+        persist.append_pitfalls([_row(f"{run}:l-001:0")], state=_state1135.state_for_paths(paths))
     records = _records(paths)
     assert len(records) == 1
     assert records[0]["occurrences"] == 3
@@ -213,8 +215,8 @@ def test_a_merged_record_keeps_the_exemplars_queue_bookkeeping(paths):
     still there — here `attempts`, from a batch whose curation already failed once. A merge
     that rebuilt the record from selected fields would reset a recurring mistake's
     retirement clock and a batch that always fails could never reach the ceiling."""
-    persist.append_pitfalls([_row("r:l-001:0"), _row("r2:l-001:0")], paths=paths)
-    drain.retire(channel=paths.pitfalls, batch_ids=["r:l-001:0", "r2:l-001:0"],
+    persist.append_pitfalls([_row("r:l-001:0"), _row("r2:l-001:0")], state=_state1135.state_for_paths(paths))
+    drain.retire(_state1135.state_for_paths(paths), channel=PITFALLS, batch_ids=["r:l-001:0", "r2:l-001:0"],
                  reason="the curator exited nonzero", max_attempts=5)
     record = _records(paths)[0]
     assert record["attempts"] == 1, "the retire bump did not survive the merge"
@@ -229,7 +231,7 @@ def test_merging_a_record_set_twice_changes_nothing(paths):
          _row("r:l-004:0", digest=QUOTING),
          _row("r:l-005:0", system="host-state", query_id="host-state.ps"),
          _row("r:l-006:0", digest="")],
-        paths=paths,
+        state=_state1135.state_for_paths(paths),
     )
     once = _records(paths)
     assert len(once) == 4
@@ -247,7 +249,7 @@ def test_a_row_whose_digest_carries_no_diagnosis_keys_to_itself(paths):
     carve-out replaces."""
     same = [_row(f"r:l-00{i}:0", digest="exit=1; ", executed_query=f"SELECT {i}")
             for i in range(3)]
-    persist.append_pitfalls(same, paths=paths)
+    persist.append_pitfalls(same, state=_state1135.state_for_paths(paths))
     records = _records(paths)
     assert len(records) == 3, "three unrelated failures collapsed onto one empty diagnosis"
     assert [r["executed_query"] for r in records] == ["SELECT 0", "SELECT 1", "SELECT 2"], (
@@ -259,8 +261,8 @@ def test_a_row_whose_digest_carries_no_diagnosis_keys_to_itself(paths):
     for digest in ("exit=2;", "", "   "):
         p = LoopPaths(repo_root=paths.repo_root, state_dir=paths.state_dir / f"v{len(digest)}")
         persist.append_pitfalls(
-            [_row(f"v:l-00{i}:0", digest=digest) for i in range(2)], paths=p)
-        assert len(persist.merge_pitfalls(persist.read_pitfalls(p))) == 2, (
+            [_row(f"v:l-00{i}:0", digest=digest) for i in range(2)], state=_state1135.state_for_paths(p))
+        assert len(persist.merge_pitfalls(persist.read_pitfalls(_state1135.state_for_paths(p)))) == 2, (
             f"two failures merged on the empty diagnosis {digest!r}"
         )
 
@@ -280,10 +282,10 @@ def test_the_merge_key_normalises_system_the_way_the_handoff_groups_it():
 def test_an_empty_append_leaves_the_queue_untouched(paths):
     """The rewrite must not fire on a no-op append — a run with no agent-fixable failure is
     the common case, and it has no business rewriting another run's queue."""
-    persist.append_pitfalls([_row("r:l-001:0")], paths=paths)
-    before = paths.pitfalls.file.read_text(encoding="utf-8")
-    assert persist.append_pitfalls([], paths=paths) == 0
-    assert paths.pitfalls.file.read_text(encoding="utf-8") == before
+    persist.append_pitfalls([_row("r:l-001:0")], state=_state1135.state_for_paths(paths))
+    before = (paths.state_root / PITFALLS.queue).read_text(encoding="utf-8")
+    assert persist.append_pitfalls([], state=_state1135.state_for_paths(paths)) == 0
+    assert (paths.state_root / PITFALLS.queue).read_text(encoding="utf-8") == before
 
 
 # O3's repair — the threshold now counts distinct mistakes, so clearing it means the channel
@@ -291,7 +293,7 @@ def test_an_empty_append_leaves_the_queue_untouched(paths):
 
 
 def _invoke_spy(calls: list) -> object:
-    def _invoke(handoffs, *, repo_root, box=None):
+    def _invoke(handoffs, *, state, repo_root, box=None):
         calls.append(handoffs)
         return 0
     return _invoke
@@ -311,7 +313,7 @@ def test_a_single_lesson_repeated_does_not_clear_the_threshold(paths, monkeypatc
     else, so what separates them is visible rather than incidental.
     """
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
-    persist.append_pitfalls([_row(f"r:l-003:{i}") for i in range(8)], paths=paths)
+    persist.append_pitfalls([_row(f"r:l-003:{i}") for i in range(8)], state=_state1135.state_for_paths(paths))
     calls: list = []
 
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_invoke_spy(calls),
@@ -336,14 +338,14 @@ def test_an_attributed_reducer_lesson_repeated_does_clear_it(paths, monkeypatch)
     """
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
     persist.append_pitfalls(
-        [_shim(f"r:l-003:{i}", system="elastic") for i in range(8)], paths=paths)
+        [_shim(f"r:l-003:{i}", system="elastic") for i in range(8)], state=_state1135.state_for_paths(paths))
 
     records = _records(paths)
     assert len(records) == 1, "attribution still splits one reducer mistake"
     assert records[0]["occurrences"] == 8
     assert len(records) < 3, "the count alone clears it, so the disjunct is not what fired"
 
-    assert drains._has_lead_author_work(paths) is True, "the drain never wakes for it"
+    assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is True, "the drain never wakes for it"
     calls: list = []
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_invoke_spy(calls),
                                          trees=lead_trees(paths)) == 0
@@ -364,7 +366,7 @@ def test_three_distinct_lessons_do_clear_it(paths, monkeypatch):
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
     persist.append_pitfalls(
         [_row(f"r:l-00{i}:0", digest=f"exit=1; distinct error {i}") for i in range(3)],
-        paths=paths,
+        state=_state1135.state_for_paths(paths),
     )
     calls: list = []
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_invoke_spy(calls),
@@ -384,13 +386,13 @@ def test_the_wake_gate_counts_what_the_curation_gate_counts(paths, monkeypatch):
     the disjunct, whose own both-readers arm is
     `an_attributed_reducer_lesson_repeated_does_clear_it`."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
-    persist.append_pitfalls([_row(f"r:l-003:{i}") for i in range(8)], paths=paths)
-    assert drains._has_lead_author_work(paths) is False
+    persist.append_pitfalls([_row(f"r:l-003:{i}") for i in range(8)], state=_state1135.state_for_paths(paths))
+    assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is False
 
     persist.append_pitfalls(
         [_row("r:l-004:0", digest="exit=1; a second error"),
-         _row("r:l-005:0", digest="exit=1; a third error")], paths=paths)
-    assert drains._has_lead_author_work(paths) is True
+         _row("r:l-005:0", digest="exit=1; a third error")], state=_state1135.state_for_paths(paths))
+    assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is True
 
 
 # What the curator receives — collapsed, counted, severest first.
@@ -431,7 +433,7 @@ def test_every_duplicate_row_behind_a_curated_record_rotates(paths, monkeypatch)
     made no reducer edit."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     persist.append_pitfalls(
-        [_row(f"r:l-003:{i}", query_id="elastic.esql") for i in range(4)], paths=paths,
+        [_row(f"r:l-003:{i}", query_id="elastic.esql") for i in range(4)], state=_state1135.state_for_paths(paths),
     )
 
     calls: list = []
@@ -440,5 +442,5 @@ def test_every_duplicate_row_behind_a_curated_record_rotates(paths, monkeypatch)
     assert len(calls[0][0]["failures"]) == 1, "the curator saw the duplicates"
     assert _pending(paths) == []
     consumed = [json.loads(ln) for ln in
-                paths.pitfalls.consumed.read_text(encoding="utf-8").splitlines()]
+                (paths.state_root / PITFALLS.consumed).read_text(encoding="utf-8").splitlines()]
     assert sorted(c["pitfall_id"] for c in consumed) == [f"r:l-003:{i}" for i in range(4)]

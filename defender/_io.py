@@ -15,7 +15,7 @@ import sys
 import threading
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path, PurePath
-from typing import Any, Literal, overload
+from typing import IO, Any, Literal, overload
 
 TEXT_READ_ERRORS: tuple[type[Exception], ...] = (OSError, UnicodeDecodeError)
 """What reading a text file can raise: unreadable (``OSError``) or undecodable
@@ -1766,6 +1766,50 @@ def hold_new(parent: Path, name: str, *, os_: Any = os,
     finally:
         os_.close(parent_fd)
     return Held(os_, fd, parent / name, open_unnamed=open_unnamed)
+
+
+def move_at(held: Held, src: str | PurePath, dst: str | PurePath) -> None:
+    """Rename the plain file `src` to `dst`, both below the held root, by `renameat` between the
+    two holding folders' descriptors. A function beside `Held`, not a method: the handle's own
+    surface is pinned to its verbs (#1133).
+
+    Both folder chains are walked with no link followed (`dst`'s are made). Both leaves are
+    judged by `_leaf_present`: the source must be a plain file (`FileNotFoundError` when absent),
+    the destination absent or a plain file, which is replaced as `os.replace` does. A link, hard
+    link, FIFO or folder at either is the core's refusal and is left in place. The judgement and
+    the rename are two steps, with the swap caveat `_unlink_at` documents."""
+    os_ = held._os
+    _s_spelling, s_parts = _parse_name(src)
+    _d_spelling, d_parts = _parse_name(dst)
+    with held._dup() as root_fd, _descend(
+            os_, root_fd, s_parts[:-1], held._where) as src_fd:
+        if not _leaf_present(os_, src_fd, s_parts[-1], Path(held._where, *s_parts)):
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT),
+                                    str(Path(held._where, *s_parts)))
+        with _descend(os_, root_fd, d_parts[:-1], held._where, create=True) as dst_fd:
+            _leaf_present(os_, dst_fd, d_parts[-1], Path(held._where, *d_parts))
+            os_.rename(s_parts[-1], d_parts[-1], src_dir_fd=src_fd, dst_dir_fd=dst_fd)
+
+
+def open_lock_at(held: Held, name: str | PurePath) -> IO[str]:
+    """An open file at `name` below the held root, for `flock`: the holding folders walked and
+    made with no link followed, the name judged by a no-follow stat (a link, hard link, FIFO or
+    folder there is the core's refusal, before any open), then opened `O_RDWR|O_CREAT` through
+    `_open_leaf` (no-follow, non-blocking, close-on-exec, the descriptor judged plain). Created
+    `0644` (umask applied), never truncated. Timing stays in `_flock.take` / `release`; the
+    caller closes the file."""
+    os_ = held._os
+    _spelling, parts = _parse_name(name)
+    where = Path(held._where, *parts)
+    with held._dup() as root_fd, _descend(
+            os_, root_fd, parts[:-1], held._where, create=True) as dir_fd:
+        _leaf_present(os_, dir_fd, parts[-1], where)
+        fd = _open_leaf(os_, dir_fd, parts[-1], os.O_RDWR | os.O_CREAT, where)
+    try:
+        return os_.fdopen(fd, "a+", encoding="utf-8")
+    except BaseException:
+        os_.close(fd)
+        raise
 
 
 #: The staged-name marker, matched loosely (not the exact `<name>.staged-<16 hex>` shape) so

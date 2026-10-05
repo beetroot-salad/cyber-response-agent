@@ -8,8 +8,9 @@ from typing import Any
 from defender._io import Held
 from defender.learning.author import shared as _shared
 from defender.learning.author.verify_forward.checks import ForwardCheck
-from defender.learning.core.config import QueueChannel, source_first_party_key
+from defender.learning.core.config import source_first_party_key
 from defender.learning.core.lane_trees import TreeFor
+from defender.learning.core.state import Channel, LearningState
 
 #: How long one curator git call over the worktree may take, in seconds, before the tick treats
 #: it as a git failure (`CorpusAuthorConfig.git_timeout`). Each is a local status, lookup or
@@ -48,7 +49,9 @@ class CorpusAuthorConfig:
 
     repo_root: Path
     runs_dir: Path
-    pending_dir: Path
+    #: The learning state handle, opened by the entry point on the entry's own paths: the
+    #: channel's queue, ledgers, locks and reports are all reached through it.
+    state: LearningState
     #: The corpus folder's spelling: git pathspecs, the readers' `where=`, the forward check's
     #: and the curator engine's path checks. Never opened: every host read, write, delete and
     #: listing of the corpus goes through `corpus` (#1134).
@@ -61,8 +64,7 @@ class CorpusAuthorConfig:
     #: the lane's mounts.
     tree_for: TreeFor
     corpus_dir_rel: str
-    channel: QueueChannel
-    repo_lock_file: Path
+    channel: Channel
     repo_lock_wait_seconds: int
     log_prefix: str
     author_prompt: Path

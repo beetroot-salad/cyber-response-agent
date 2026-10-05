@@ -51,6 +51,7 @@ from typing import Any
 from defender._io import Bound, Held, NotPlainEntry, RecordRead, hold, open_unnamed_at
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
+from defender.tests._state1135 import state_for_paths as open_state  # noqa: F401 — re-export: this module's tests open their handle through it
 from defender.tests._tree_listing_1134 import RealOs, fd_path, last_component
 
 #: The type `DrainTrees.tree_for` has (bound): a working-copy path to `(held mount, name)`, or
@@ -87,24 +88,27 @@ def seamed_trees(paths: LoopPaths, os_: Any) -> DrainTrees:
 
 
 def author_cfg(paths: LoopPaths, *, trees: DrainTrees | None = None, manifest_seed: str | None = None,
-               box: Any = None, **replaced: Any) -> Any:
+               box: Any = None, state: Any = None, **replaced: Any) -> Any:
     """The REAL lessons config: `build_author_config(paths, trees=<trees, else author_trees(paths)>,
     manifest_seed=..., box=...)`, with the `replaced` fields swapped in (`dataclasses.replace`)."""
     from defender.learning.author.lessons import run as lessons_run
 
     cfg = lessons_run.build_author_config(
-        paths, trees=trees if trees is not None else author_trees(paths),
+        paths, state=state if state is not None else open_state(paths),
+        trees=trees if trees is not None else author_trees(paths),
         manifest_seed=manifest_seed, box=box)
     return dataclasses.replace(cfg, **replaced) if replaced else cfg
 
 
 def questioner_cfg(paths: LoopPaths, *, trees: DrainTrees | None = None,
-                   manifest_seed: str | None = None, box: Any = None, **replaced: Any) -> Any:
+                   manifest_seed: str | None = None, box: Any = None, state: Any = None,
+                   **replaced: Any) -> Any:
     """The REAL questioner config, as `author_cfg` builds the lessons one."""
     from defender.learning.author.questioner import run as questioner_run
 
     cfg = questioner_run.build_questioner_config(
-        paths, trees=trees if trees is not None else author_trees(paths),
+        paths, state=state if state is not None else open_state(paths),
+        trees=trees if trees is not None else author_trees(paths),
         manifest_seed=manifest_seed, box=box)
     return dataclasses.replace(cfg, **replaced) if replaced else cfg
 
@@ -423,6 +427,8 @@ class World:
     paths: LoopPaths
     outside: Path
     trees: DrainTrees
+    #: The learning-state handle over `paths`' root (made first: the handle never creates it).
+    state: Any = None
 
     @property
     def corpus_dir(self) -> Path:
@@ -451,7 +457,8 @@ class World:
 
     def cfg(self, **replaced: Any) -> Any:
         """The REAL lessons config over these trees, the drain-run check disarmed."""
-        return author_cfg(self.paths, trees=self.trees, **{"forward_check": None, **replaced})
+        return author_cfg(self.paths, trees=self.trees, state=self.state,
+                          **{"forward_check": None, **replaced})
 
     def target(self, name: str, text: str | bytes | None = None) -> Path:
         """A file outside the repo carrying the mark (or `text`)."""
@@ -495,4 +502,5 @@ def world(tmp_path: Path) -> World:
     outside = tmp_path / "outside"
     outside.mkdir()
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    return World(tmp=tmp_path, repo=repo, paths=paths, outside=outside, trees=author_trees(paths))
+    return World(tmp=tmp_path, repo=repo, paths=paths, outside=outside, trees=author_trees(paths),
+                 state=open_state(paths))

@@ -13,6 +13,7 @@ established seam — never `monkeypatch.setattr`.
 from __future__ import annotations
 
 import ast
+import dataclasses
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,8 @@ import pytest
 import _drain719 as h
 from _drain719 import drain  # the not-yet-written target, via the suite's own shim
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
+from defender.learning.core.state import FINDINGS
+from defender.tests import _state1135
 
 
 # Demand #0 — the return-value contract, after decision 1 flipped its `2` branch
@@ -57,9 +60,9 @@ def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path)
     queued, still authorable next tick — which is the same "clean tick, no reset" shape this
     test is about."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     h.write_source_refs(paths, "run-I")
-    h.seed(ch, [h.row_for("findings", "run-I/0")])
+    h.seed(paths, ch, [h.row_for("findings", "run-I/0")])
 
     fault = h.cfg_for(
         paths,
@@ -68,7 +71,7 @@ def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path)
         invoke_agent=h.raising(author_shared.AuthorError("first failure")),
     )
     assert drain.run_batch(cfg=fault) == 2
-    assert h.attempts_of(ch, "run-I/0") == 1
+    assert h.attempts_of(paths, ch, "run-I/0") == 1
 
     def hold_back(rows, batch_id, cfg):
         # Mentioned in NEITHER bucket (§773 C3): the row stays queued exactly as it was,
@@ -82,11 +85,11 @@ def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path)
     ok = h.recording(hold_back)
     assert drain.run_batch(cfg=h.cfg_for(paths, "findings", max_attempts=2, invoke_agent=ok)) == 0
     assert len(ok.calls) == 1, "the successful tick never reached the agent"
-    assert h.attempts_of(ch, "run-I/0") == 1, "a clean tick reset the count"
+    assert h.attempts_of(paths, ch, "run-I/0") == 1, "a clean tick reset the count"
 
     assert drain.run_batch(cfg=fault) == 2
-    assert h.pending(ch) == []
-    assert [r["attempts"] for r in h.graveyard(ch)] == [2], "2, not 1 — no reset happened"
+    assert h.pending(paths, ch) == []
+    assert [r["attempts"] for r in h.graveyard(paths, ch)] == [2], "2, not 1 — no reset happened"
 
 
 
@@ -115,8 +118,8 @@ def _retires_on_the_first_failure(tmp_path: Path, ceiling: int) -> None:
     """Shared body for the three ceiling members; each demand's own test drives it."""
     paths = h.make_paths(tmp_path)
     h.write_source_refs(paths, "b")
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "b/0")])
+    ch = h.channel_of("findings")
+    h.seed(paths, ch, [h.row_for("findings", "b/0")])
     cfg = h.cfg_for(
         paths,
         "findings",
@@ -124,8 +127,8 @@ def _retires_on_the_first_failure(tmp_path: Path, ceiling: int) -> None:
         invoke_agent=h.raising(author_shared.AuthorError("one and done")),
     )
     assert drain.run_batch(cfg=cfg) == 2
-    assert h.pending(ch) == []
-    assert [r["attempts"] for r in h.graveyard(ch)] == [1]
+    assert h.pending(paths, ch) == []
+    assert [r["attempts"] for r in h.graveyard(paths, ch)] == [1]
 
 
 def test_ceiling_of_one_retires_on_the_first_failure(tmp_path: Path):
@@ -161,33 +164,37 @@ def test_retire_leaves_every_row_outside_the_batch_byte_identical(tmp_path: Path
     failure."""
     paths = h.make_paths(tmp_path)
     h.write_source_refs(paths, "a")
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     outsiders = [
         h.row_for("findings", "a/1", note="keep me", nested={"x": [1, 2]}),
         h.row_for("findings", "a/2", attempts=7),
     ]
-    h.seed(ch, [h.row_for("findings", "a/0"), *outsiders])
+    h.seed(paths, ch, [h.row_for("findings", "a/0"), *outsiders])
 
-    drain.retire(channel=ch, batch_ids=["a/0"], reason="scoped", max_attempts=1)
+    drain.retire(_state1135.state_for_paths(paths), channel=FINDINGS, batch_ids=["a/0"], reason="scoped", max_attempts=1)
 
-    survivors = h.pending_by_id(ch)
+    survivors = h.pending_by_id(paths, ch)
     assert sorted(survivors) == ["a/1", "a/2"]
     assert survivors["a/1"] == outsiders[0]
     assert survivors["a/2"] == outsiders[1]
 
 
-def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(tmp_path: Path):
+def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(
+    tmp_path: Path, monkeypatch
+):
     """A11: the retire step's OWN write failing is systemic. It sits outside the widened
     guard by construction (decision 6), so the fault propagates out of the drain instead of
     being caught and counted as another attempt against the row it was trying to retire —
-    and the active queue is left byte-identical for the next tick to re-read. Induced for
-    real: the channel's graveyard path is a directory, so the append cannot land."""
+    and the active queue is left byte-identical for the next tick to re-read. Induced:
+    the graveyard append hits ENOSPC (a folder planted at the graveyard's name is now a
+    refusal, not an ordinary failure — #1135 — so the fault is injected at the handle's verb)."""
     paths = h.make_paths(tmp_path)
     h.write_source_refs(paths, "a")
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "a/0")])
-    before = ch.file.read_bytes()
-    drain.graveyard_file(ch).mkdir(parents=True)
+    ch = h.channel_of("findings")
+    h.seed(paths, ch, [h.row_for("findings", "a/0")])
+    before = (paths.state_root / ch.queue).read_bytes()
+
+    from defender.tests.test_881_loop_plumbing import _StateWhoseDiskIsFull
 
     cfg = h.cfg_for(
         paths,
@@ -195,9 +202,10 @@ def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(
         max_attempts=1,
         invoke_agent=h.raising(author_shared.AuthorError("triggers a retirement")),
     )
+    cfg = dataclasses.replace(cfg, state=_StateWhoseDiskIsFull.over(cfg.state, "deadletter"))
     with pytest.raises(OSError):  # noqa: PT011 - the OS-level append failure's exact subclass is platform-dependent; the point is that it propagates uncaught
         drain.run_batch(cfg=cfg)
-    assert ch.file.read_bytes() == before, "the queue survives a failed retirement write"
+    assert (paths.state_root / ch.queue).read_bytes() == before, "the queue survives a failed retirement write"
 
 
 
@@ -211,14 +219,14 @@ def test_an_all_empty_tick_writes_no_consumed_row_and_no_graveyard_row(tmp_path:
     paths = h.make_paths(tmp_path)
     h.write_source_refs(paths, "a")
     for name in h.AUTHOR_CHANNELS:
-        ch = h.channel_of(paths, name)
+        ch = h.channel_of(name)
         cfg = h.cfg_for(paths, name, invoke_agent=h.raising(AssertionError("never called")))
         assert drain.run_batch(cfg=cfg) == 0
-        assert h.consumed(ch) == []
-        assert h.graveyard(ch) == []
+        assert h.consumed(paths, ch) == []
+        assert h.graveyard(paths, ch) == []
 
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "a/0")])
+    ch = h.channel_of("findings")
+    h.seed(paths, ch, [h.row_for("findings", "a/0")])
     live = h.cfg_for(
         paths,
         "findings",
@@ -226,21 +234,10 @@ def test_an_all_empty_tick_writes_no_consumed_row_and_no_graveyard_row(tmp_path:
         invoke_agent=h.raising(author_shared.AuthorError("so the sinks can be seen")),
     )
     assert drain.run_batch(cfg=live) == 2
-    assert h.graveyard(ch)
-    assert h.consumed(ch)
+    assert h.graveyard(paths, ch)
+    assert h.consumed(paths, ch)
 
 
-
-
-#: `(file, function)` pairs that reach `write_atomic` without writing a QUEUE — the census's
-#: proxy for "rewrites a queue file wholesale" went wide the moment a second kind of writer
-#: adopted the same seam. `synthesize_drafts` writes one `_draft/{digest}.md` catalog template
-#: per identity, into the corpus, never into `state_dir`: no queue, nothing to merge, no
-#: lost-append race for a rotation to close. Keyed on the FUNCTION and not on the file (the way
-#: `markers.py` is skipped whole) so the rest of `draft_synthesis.py` stays inside the census —
-#: an exclusion the width of a module is one that stops answering the moment that module grows
-#: a second writer.
-_NOT_A_QUEUE_WRITER = frozenset({("draft_synthesis.py", "synthesize_drafts")})
 
 
 def test_exactly_one_function_rewrites_a_pending_file(tmp_path: Path):
@@ -248,34 +245,37 @@ def test_exactly_one_function_rewrites_a_pending_file(tmp_path: Path):
     exactly one function under `defender/learning` rewrites a queue file wholesale, and the
     retire seam reaches it through the same locked rotation that rotation uses. The census
     picks the subject; the drive is what discharges it — a row appended between the read and
-    the rewrite survives, which only the merging rotation gives."""
+    the rewrite survives, which only the merging rotation gives.
+
+    Under #1135 the rewrite is a `replace`-mode write of a channel's `.queue` through the
+    handle's one write door, so the census names that call shape (the old `write_atomic`
+    callers no longer exist under `defender/learning`)."""
     import defender.learning as learning_pkg  # type: ignore[import-not-found]
 
     root = Path(learning_pkg.__path__[0]).resolve()  # namespace pkg: __file__ is None
     writers: dict[str, set[str]] = {}
     for py in sorted(root.rglob("*.py")):
-        if py.name == "markers.py":
-            continue  # a marker-directory queue, explicitly out of scope (A5)
         tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            if (py.name, node.name) in _NOT_A_QUEUE_WRITER:
-                continue
             for call in ast.walk(node):
-                if isinstance(call, ast.Call):
-                    fn = call.func
-                    nm = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
-                    if nm == "write_atomic":
-                        writers.setdefault(node.name, set()).add(py.name)
-    assert set(writers) == {"_rewrite_queue"}, f"more than one queue rewriter: {writers}"
+                if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                        and call.func.attr == "_write" and call.args):  # lint-ast-resolve: ok — a census of one private method's spelling, which has no alias
+                    continue
+                target = call.args[0]
+                replaces = any(isinstance(a, ast.Constant) and a.value == "replace"
+                               for a in call.args[1:])
+                if replaces and isinstance(target, ast.Attribute) and target.attr == "queue":
+                    writers.setdefault(node.name, set()).add(py.name)
+    assert set(writers) == {"rotate"}, f"more than one queue rewriter: {writers}"
 
     paths = h.make_paths(tmp_path)
     h.write_source_refs(paths, "a")
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "a/0"), h.row_for("findings", "a/9")])
-    drain.retire(channel=ch, batch_ids=["a/0"], reason="via the rotation", max_attempts=1)
-    assert sorted(h.pending_by_id(ch)) == ["a/9"]
+    ch = h.channel_of("findings")
+    h.seed(paths, ch, [h.row_for("findings", "a/0"), h.row_for("findings", "a/9")])
+    drain.retire(_state1135.state_for_paths(paths), channel=FINDINGS, batch_ids=["a/0"], reason="via the rotation", max_attempts=1)
+    assert sorted(h.pending_by_id(paths, ch)) == ["a/9"]
 
 
 def test_attempt_count_survives_a_fresh_process(tmp_path: Path):
@@ -285,24 +285,25 @@ def test_attempt_count_survives_a_fresh_process(tmp_path: Path):
     reach a second actor at all."""
     paths = h.make_paths(tmp_path)
     h.write_source_refs(paths, "a")
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "a/0")])
+    ch = h.channel_of("findings")
+    h.seed(paths, ch, [h.row_for("findings", "a/0")])
 
-    drain.retire(channel=ch, batch_ids=["a/0"], reason="first process", max_attempts=3)
-    assert h.attempts_of(ch, "a/0") == 1
+    drain.retire(_state1135.state_for_paths(paths), channel=FINDINGS, batch_ids=["a/0"], reason="first process", max_attempts=3)
+    assert h.attempts_of(paths, ch, "a/0") == 1
 
     script = (
         "import sys\n"
         "from pathlib import Path\n"
         "from defender.learning.author import drain\n"
         "from defender.learning.core.config import LoopPaths\n"
+        "from defender.learning.core.state import FINDINGS, LearningState\n"
         "paths = LoopPaths(repo_root=Path(sys.argv[1]))\n"
-        "out = drain.retire(channel=paths.findings, batch_ids=['a/0'],\n"
+        "out = drain.retire(LearningState.open(paths), channel=FINDINGS, batch_ids=['a/0'],\n"
         "                   reason='second process', max_attempts=2)\n"
         "print(out.bumped['a/0'])\n"
     )
     proc = h.run_in_subprocess(script, repo=paths.repo_root)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == "2", "the fresh process read 1 off the row and bumped to 2"
-    assert h.pending(ch) == []
-    assert [r["attempts"] for r in h.graveyard(ch)] == [2]
+    assert h.pending(paths, ch) == []
+    assert [r["attempts"] for r in h.graveyard(paths, ch)] == [2]

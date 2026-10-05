@@ -62,6 +62,7 @@ from defender.tests.test_1017_row_schema import (  # noqa: E402
     _row,
     _table,
 )
+from defender.tests import _state1135  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -266,7 +267,7 @@ def judge_roots(tmp_path, monkeypatch):
     root and the learning state dir — so a render here reads nothing of the checkout's."""
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _world_row(seq: int, **overrides) -> dict:

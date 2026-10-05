@@ -33,7 +33,7 @@ demand, not an author's private convenience:
 * `defender/learning/author/drain.py`
   - `PairVerdict(rel_path, finding_id, source_id, verdict, reasoning, pass_no)` — frozen
     (Data model, `rel_path` per §7 FK-14).
-  - `GAP_LEDGER_NAME = "findings.forward_bad.jsonl"` under `cfg.pending_dir` (M6/S5).
+  - `GAP_LEDGER_NAME = "findings.forward_bad.jsonl"` under the findings queue's folder, `_pending/` (M6/S5).
   - `DEFERRED_CEILING_REASON = "deferred_ceiling"` — the deferral exit's own
     `deadletter_reason`, distinct from a fault's (§7 FK-17).
   - `TERMINAL_BLOCK_HEADER = "Forward-check terminal:"` — the drain's commit-message block
@@ -68,6 +68,7 @@ from typing import Any
 from defender.tests._drain719 import (  # noqa: F401 — re-exported substrate
     Background,
     Holder,
+    channel_of,
     consumed,
     finding_row,
     git,
@@ -85,7 +86,8 @@ from defender.tests._drain719 import (  # noqa: F401 — re-exported substrate
 from defender.learning.author import drain
 from defender.learning.author import shared as author_shared
 from defender.learning.author.lessons import run as lessons_run
-from defender.learning.core.config import LoopPaths, QueueChannel
+from defender.learning.core.config import LoopPaths
+from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS, Channel, LearningState
 from defender.tests._curator1134 import author_trees
 
 
@@ -187,7 +189,7 @@ class Scene:
 
     paths: LoopPaths
     cfg: Any
-    channel: QueueChannel
+    channel: Channel
     repo: Path
     corpus: Path
     rows: list[dict]
@@ -251,29 +253,29 @@ class Scene:
         )
 
     def gap_records(self) -> list[dict]:
-        return read_rows(self.cfg.pending_dir / GAP_LEDGER_NAME)
+        return read_rows((self.paths.state_root / FINDINGS.queue).parent / GAP_LEDGER_NAME)
 
     def report_lines(self) -> list[str]:
         """The channel's own disposition report — `held_report` on the lessons channel,
         `skip_report` on the questioner's. One accessor, because both are written by the
         same `shared.write_disposition_report` and both are what "reported" means."""
-        path = getattr(self.cfg, "held_report", None) or self.cfg.skip_report
+        path = self.paths.state_root / self.cfg.channel.report
         return path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
 
     def pending(self) -> list[dict]:
-        return pending(self.channel)
+        return pending(self.paths, self.channel)
 
     def pending_by_id(self) -> dict[str, dict]:
-        return pending_by_id(self.channel)
+        return pending_by_id(self.paths, self.channel)
 
     def consumed(self) -> list[dict]:
-        return consumed(self.channel)
+        return consumed(self.paths, self.channel)
 
     def consumed_by_id(self) -> dict[str, dict]:
         return {r["finding_id"]: r for r in self.consumed() if "finding_id" in r}
 
     def graveyard(self) -> list[dict]:
-        return graveyard(self.channel)
+        return graveyard(self.paths, self.channel)
 
     def category_of(self, fid: str) -> str | None:
         row = self.consumed_by_id().get(fid)
@@ -328,15 +330,16 @@ def build_scene(  # noqa: PLR0913 — one tick's whole world, threaded rather th
         git(repo, "add", "-A")
         git(repo, "commit", "-q", "-m", "seed corpus")
 
-    channel = getattr(paths, channel_name)
-    seed(channel, rows)
+    channel = channel_of(channel_name)
+    seed(paths, channel, rows)
 
     curator = curator if curator is not None else FakeCurator()
     verifier = verifier if verifier is not None else FakeVerifier()
     repair = repair if repair is not None else FakeRepair()
     keys = keys if keys is not None else FakeKeySource()
 
-    base = lessons_run.build_author_config(paths, trees=author_trees(paths))
+    base = lessons_run.build_author_config(
+        paths, state=LearningState.open(paths), trees=author_trees(paths))
     wiring: dict[str, Any] = {
         "invoke_agent": curator,
         "forward_check": verifier.as_check(),
@@ -399,15 +402,16 @@ def build_questioner_scene(
     git(repo, "commit", "-q", "-m", "questioner corpus")
 
     rows = list(rows if rows is not None else [world_row("w1")])
-    channel = paths.questioner_findings
-    seed(channel, rows)
+    channel = QUESTIONER_FINDINGS
+    seed(paths, channel, rows)
 
     curator = curator if curator is not None else FakeCurator()
     keys = keys if keys is not None else FakeKeySource()
     verifier = FakeVerifier()
     repair = FakeRepair()
 
-    base = questioner_run.build_questioner_config(paths, trees=author_trees(paths))
+    base = questioner_run.build_questioner_config(
+        paths, state=LearningState.open(paths), trees=author_trees(paths))
     wiring: dict[str, Any] = {
         "invoke_agent": curator,
         "forward_check": None,

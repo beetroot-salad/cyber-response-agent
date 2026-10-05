@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import functools
 import importlib
-import json
 import logging
 import subprocess
 import uuid
@@ -14,13 +13,12 @@ from collections.abc import Callable
 
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL,
-    DEFAULT_PATHS,
     DrainLabel,
     LEAD_AUTHOR_DRAIN_LABEL,
     LoopPaths,
-    QueueChannel,
     author_max_attempts,
     env_int,
+    loop_paths,
     merge_mode,
     now_iso,
     pitfalls_threshold,
@@ -29,22 +27,12 @@ from defender.learning.core.config import (
 from defender import _git
 from defender._claim_git import ClaimGit
 from defender._paths import DefenderPaths
-from defender._io import guarded_mkdir, read_jsonl_rows_report
 from defender.runtime import box as box_mod
 from defender.learning.author import drain
-from defender.learning.author import shared as _author_shared
 from defender.learning.author.branch import AuthorBranch, BranchError
 from defender.learning.core.faults import run_or_dead_letter
 from defender.learning.core.lane_trees import open_drain_trees
 from defender.learning.author._config import GIT_TIMEOUT_SECONDS
-from defender.learning.core.markers import (
-    ClaimedMarker,
-    claim_markers,
-    marker_identity,
-    quarantine_marker,
-    requeue_marker,
-    rewrite_marker,
-)
 from defender.learning.core.persist import (
     merge_pitfalls,
     pitfalls_lane_is_open,
@@ -52,6 +40,20 @@ from defender.learning.core.persist import (
 )
 from defender.learning.core.pitfalls_disposition import PitfallsDisposition
 from defender.learning.core.quarantine import preserve_tainted_tree
+from defender.learning.core.state import (
+    AUTHOR_DRAIN_LOCK,
+    FINDINGS,
+    PITFALLS,
+    LEAD_AUTHOR_DRAIN_LOCK,
+    LEAD_QUEUE_LOCK,
+    QUESTIONER_FINDINGS,
+    TRY_ONCE,
+    Channel,
+    Claimed,
+    LearningState,
+    PendingDelivery,  # noqa: F401 — re-export: the delivery record the drains and the pin name
+    StateRefused,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -61,7 +63,7 @@ class _LeadAuthorRetry(Exception):
 
 
 def _invoke_lead_author(
-    paths: LoopPaths, run_dir: Path, *, label: DrainLabel, box: Any = None,
+    paths: LoopPaths, state: LearningState, run_dir: Path, *, label: DrainLabel, box: Any = None,
     on_done: Callable[[str | None], None], git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> None:
     """The lead-author lane's default work step for one claim. `label` is the lane's (bound in by
@@ -78,7 +80,7 @@ def _invoke_lead_author(
         rc = _run_curator_module(
             "lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             lambda mod: mod.run_under_held_queue_lock(
-                run_dir, paths=paths, trees=trees, box=box, on_done=on_done,
+                run_dir, paths=paths, state=state, trees=trees, box=box, on_done=on_done,
                 git_timeout=git_timeout,
             ),
         )
@@ -90,7 +92,8 @@ def _invoke_lead_author(
 
 def _maybe_trigger_author(
     paths: LoopPaths,
-    pending_file: Path,
+    state: LearningState,
+    channel: Channel,
     threshold_env: str,
     module_name: str,
     pending_label: str,
@@ -107,7 +110,7 @@ def _maybe_trigger_author(
     threshold = env_int(threshold_env, 5)
     # Held is logged beside authorable: the count is authorable rows, not queue depth, so
     # without it a queue of permanent holds would log `pending=0` with no explanation.
-    pending_count, held_count = _pending_queue_counts(pending_file)
+    pending_count, held_count = _pending_queue_counts(state, channel)
     if pending_count < threshold:
         _logger.info(
             f"{pending_label}={pending_count} held={held_count} threshold={threshold} "
@@ -121,7 +124,8 @@ def _maybe_trigger_author(
     with open_drain_trees(paths, label) as trees:
         rc = _run_curator_module(
             module_name,
-            lambda mod: mod.run_batch(hold_committed=True, paths=paths, trees=trees, box=box),
+            lambda mod: mod.run_batch(
+                hold_committed=True, paths=paths, state=state, trees=trees, box=box),
         )
     if rc not in (0, None):
         _logger.warning(f"{module_name} returned rc={rc} (queue intact, retry next tick)")
@@ -146,19 +150,19 @@ def _run_curator_module(module_name: str, call: Callable[[Any], int]):
         return None
 
 
-def _curator_queue_checks(paths: LoopPaths) -> list[tuple[Path, str]]:
+def _curator_queue_checks() -> list[tuple[Channel, str]]:
     """The queues whose depth can wake this drain: the findings and questioner-findings
     channels.
 
     Named rather than derived from another table, so adding or removing a channel is an
     explicit edit here."""
     return [
-        (paths.pending_file, "LEARNING_AUTHOR_THRESHOLD"),
-        (paths.questioner_findings_file, "LEARNING_QUESTIONER_THRESHOLD"),
+        (FINDINGS, "LEARNING_AUTHOR_THRESHOLD"),
+        (QUESTIONER_FINDINGS, "LEARNING_QUESTIONER_THRESHOLD"),
     ]
 
 
-def _pending_queue_counts(pending_file: Path) -> tuple[int, int]:
+def _pending_queue_counts(state: LearningState, channel: Channel) -> tuple[int, int]:
     """`(authorable, held)` — queued rows a tick could still author, and rows it has declined.
     Both come from one read, since the wake gate's number means little to an operator without
     the other.
@@ -170,12 +174,12 @@ def _pending_queue_counts(pending_file: Path) -> tuple[int, int]:
 
     An unreadable line counts as authorable, so a queue of junk still wakes a tick;
     `drain._tick` then runs through to a rotation, which rewrites the file without it."""
-    rows, unreadable = read_jsonl_rows_report(pending_file)
+    rows, unreadable = state.rows_report(channel)
     held = sum(1 for row in rows if "held_reason" in row)
     return len(rows) - held + unreadable, held
 
 
-def _has_curator_work(paths: LoopPaths) -> bool:
+def _has_curator_work(state: LearningState) -> bool:
     """Whether any wakeable queue holds a threshold's worth of authorable rows.
 
     Logs the counts for a non-empty queue that doesn't wake: this is the gate that stops the
@@ -183,32 +187,28 @@ def _has_curator_work(paths: LoopPaths) -> bool:
     queues stay silent, to avoid a line every pass on every queue. Not `any(...)`, so every
     queue gets its line."""
     woken = False
-    for pending_file, env in _curator_queue_checks(paths):
+    for channel, env in _curator_queue_checks():
         threshold = env_int(env, 5)
-        authorable, held = _pending_queue_counts(pending_file)
+        authorable, held = _pending_queue_counts(state, channel)
         if authorable >= threshold:
             woken = True
         elif authorable or held:
             _logger.info(
-                f"{pending_file.name}: pending={authorable} held={held} "
+                f"{channel.name}: pending={authorable} held={held} "
                 f"threshold={threshold} — not woken"
             )
     return woken
 
 
-def _has_lead_author_work(paths: LoopPaths) -> bool:
+def _has_lead_author_work(state: LearningState) -> bool:
     threshold = pitfalls_threshold()
-    qdir = paths.author_queue_dir
-    if qdir.is_dir() and any(qdir.glob("*.json")):
-        return True
-    # A marker stranded in `inflight/` by a drain that died mid-serve is still work: the
-    # drainer reclaims it, so this gate must wake for it.
-    inflight = qdir / "inflight"
-    if inflight.is_dir() and any(inflight.glob("*.json")):
+    # Queued requests, and any stranded in `inflight/` by a drain that died mid-serve: the
+    # drainer reclaims those, so this gate must wake for them.
+    if state.has_requests():
         return True
     # The same condition `run_pitfalls` gates on, so the drain never wakes for a curation that
     # then declines, nor sleeps through one it would take.
-    return pitfalls_lane_is_open(merge_pitfalls(read_pitfalls(paths)), threshold)
+    return pitfalls_lane_is_open(merge_pitfalls(read_pitfalls(state)), threshold)
 
 
 #: The faults `_drain_one_curator` lets out of a curator rather than containing to its channel:
@@ -222,40 +222,53 @@ _HALTING: tuple[type[BaseException], ...] = (
 
 
 def _drain_one_curator(
-    paths: LoopPaths, trigger_author: Callable[..., None], channel: QueueChannel,
-    threshold_env: str, module_name: str, pending_label: str, *, box: Any,
+    paths: LoopPaths, state: LearningState, trigger_author: Callable[..., None],
+    channel: Channel, threshold_env: str, module_name: str, pending_label: str, *, box: Any,
 ) -> None:
     """Run one curator, containing its fault to its own channel.
 
     `trigger_author` is a caller-supplied seam whose exception discipline can't be assumed, so
-    the isolation lives here. A `RETIRE_SET` fault or a `BoxFault` (#1195) propagates; anything
-    else is recorded on this channel's stuck report and swallowed, so the sibling curator still
-    runs."""
-    from defender._io import read_jsonl_rows
-
+    the isolation lives here. A `RETIRE_SET` fault or a `BoxFault` (#1195) propagates; so does a
+    `StateRefused`, which no `Exception` arm catches (a planted entry below the state root stops
+    the whole tick, and recording it stuck would write after the refusal); anything else is
+    recorded on this channel's stuck report and swallowed, so the sibling curator still runs."""
     # `run_batch` already records non-`RETIRE_SET` faults before re-raising. A second record
     # here, with a different row set, would reset `consecutive_ticks` every tick, so the count
     # tells "already recorded" from "raised above `run_batch`, recorded nowhere".
-    recorded_before = drain.stuck_record_count(channel)
+    recorded_before = state.stuck_count(channel)
+    fault: BaseException | None = None
     try:
-        trigger_author(paths, channel.file, threshold_env, module_name, pending_label, box=box)
+        trigger_author(
+            paths, state, channel, threshold_env, module_name, pending_label, box=box)
     # `SystemExit` is contained, since it is not an interrupt: escaping would skip the sibling
     # curator and unwind past `finish_batch`, discarding the first curator's authored lessons
     # with nothing recorded on either channel.
     except _HALTING:
         raise
     except (Exception, SystemExit) as e:  # noqa: BLE001 — every other fault class is recorded, never silently swallowed
-        already = drain.stuck_record_count(channel) > recorded_before
+        fault = e
+    if fault is None:
+        return
+    # Recorded after the arm has closed: the fault is contained, not displaced, so a refusal met
+    # while recording it carries no `__context__` for the stage runner to report as displaced.
+    # An ordinary failure to record is logged, never raised: this frame must not raise on a
+    # non-retiring fault, the recording's own included.
+    try:
+        already = state.stuck_count(channel) > recorded_before
         if not already:
-            rows = read_jsonl_rows(channel.file) if channel.file.is_file() else []
-            drain.record_stuck(channel, e, rows)
-        _logger.error(f"{module_name}: {type(e).__name__} took this curator out of the tick "
-                      f"({'already recorded in' if already else 'recorded to'} "
-                      f"{drain.stuck_report_file(channel)}); the other curator still ran")
+            drain.record_stuck(state, channel, fault, state.rows(channel))
+    except Exception as unrecorded:  # noqa: BLE001 — never replaces the contained fault
+        _logger.error(f"{module_name}: stuck record NOT written: {unrecorded!r} (the fault "
+                      f"itself: {fault!r})")
+        return
+    _logger.error(f"{module_name}: {type(fault).__name__} took this curator out of the tick "
+                  f"({'already recorded in' if already else 'recorded to'} "
+                  f"{channel.name}'s stuck report); the other curator still ran")
 
 
 def _drain_curators(
     paths: LoopPaths,
+    state: LearningState,
     trigger_author: Callable[..., None],
     *,
     box: Any = None,
@@ -263,17 +276,15 @@ def _drain_curators(
     # The same two channels the wake gate (`_curator_queue_checks`) answers for. Both curators
     # share one tick — worktree, box, branch, PR lease — and `_drain_one_curator` contains each
     # one's non-retiring fault, so it never stops the other or its commit. A `RETIRE_SET` fault
-    # propagates, so one in the first curator can cost the second its turn. This frame must not
-    # raise on any other fault but a `BoxFault`, or `finish_batch` is never reached and neither
-    # curator's work is committed. The batch's box is stopped between agent runs and runs only
-    # inside each spawn's `box_for_run` (#1195).
-    _drain_one_curator(paths, trigger_author, paths.findings, "LEARNING_AUTHOR_THRESHOLD",
+    # propagates, so one in the first curator can cost the second its turn; so does a refusal.
+    # This frame must not raise on any other fault but a `BoxFault`, or `finish_batch` is never
+    # reached and neither curator's work is committed. The batch's box is stopped between agent
+    # runs and runs only inside each spawn's `box_for_run` (#1195).
+    _drain_one_curator(paths, state, trigger_author, FINDINGS, "LEARNING_AUTHOR_THRESHOLD",
                        "author", "pending", box=box)
-    _drain_one_curator(paths, trigger_author, paths.questioner_findings,
+    _drain_one_curator(paths, state, trigger_author, QUESTIONER_FINDINGS,
                        "LEARNING_QUESTIONER_THRESHOLD", "questioner_curator",
                        "questioner_pending", box=box)
-
-
 
 
 def _claim_git(paths: LoopPaths, git_timeout: float) -> ClaimGit:
@@ -283,27 +294,26 @@ def _claim_git(paths: LoopPaths, git_timeout: float) -> ClaimGit:
 
 
 def _quarantine_lead_author_failure(
-    spec: dict, marker: Path, queue_dir: Path, e: Exception
+    state: LearningState, claim: Claimed, e: Exception
 ) -> None:
-    quarantine_marker(spec, marker, queue_dir, f"lead-author-error: {e!r}")
+    state.quarantine(claim, f"lead-author-error: {e!r}")
 
 
-def _requeue_or_drop(claim: ClaimedMarker, *, note: str) -> None:
+def _requeue_or_drop(state: LearningState, claim: Claimed, *, note: str) -> None:
     """Hand one claimed request back to the queue, then release the claim.
 
     The re-queue lands at the top level (not the `inflight/` slot being released) and is
     create-if-absent: a fresher request for the same case that arrived meanwhile wins, and
-    this older spec is dropped. The spec comes off the claim so the re-queue and the unlink
+    this older spec is dropped. The spec comes off the claim so the re-queue and the release
     can't refer to different claims."""
-    if requeue_marker(claim.queued_path, claim.spec):
+    if state.requeue(claim):
         _logger.info(f"lead_author_drain: {note} — left queued for retry")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     else:
         _logger.info(
             f"lead_author_drain: {note} — a fresher request for the same case landed "  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             "while it was claimed and supersedes it; dropping this one"
         )
-    with contextlib.suppress(OSError):
-        claim.path.unlink()
+    state.done(claim)
 
 
 @model(frozen=True)
@@ -312,7 +322,7 @@ class ServedMarker:
     whether the curator reached the exit that records the run done (the no-executed-leads,
     no-pending-drafts exit doesn't), and its commit (`None` for done without a commit)."""
 
-    claim: ClaimedMarker
+    claim: Claimed
     done: bool
     sha: str | None
 
@@ -322,7 +332,7 @@ class BatchDisposition:
     """Everything a lead-author tick consumes from shared state, collected during `do_work`
     and applied only once the batch's tree has passed the scrub.
 
-    The consumption points (served marker unlink, per-run `done` sentinel, pitfalls rotation
+    The consumption points (served marker release, per-run `done` sentinel, pitfalls rotation
     and decline bumps) write to the state root, which survives the worktree swap. Applied
     inside `do_work`, a tainted scrub would already have emptied the queue for a commit that
     must never be delivered.
@@ -331,11 +341,11 @@ class BatchDisposition:
     queues, and delivery is retried separately (`_deliver_pending`) without re-running agents.
 
     Never persisted: an exit before the apply drops it, and served claims stay in `inflight/`
-    for `claim_markers` to reclaim (not re-queued, since a stale re-queue and a fresher
+    for the next claim to reclaim (not re-queued, since a stale re-queue and a fresher
     same-case marker would collide on one inflight path). Each reclaim counts an attempt, so a
     batch that never passes the scrub is quarantined at the usual ceiling.
 
-    `apply` is ordered sentinels → unlinks → pitfalls rotation → decline bumps, so a crash
+    `apply` is ordered sentinels → releases → pitfalls rotation → decline bumps, so a crash
     mid-apply costs a re-serve or re-curation, never a loss."""
 
     served: list[ServedMarker]
@@ -344,17 +354,16 @@ class BatchDisposition:
     #: commit exists. `None` (no deadline) only when a test drives the internals directly.
     lock_wait_seconds: int | None
 
-    def apply(self, paths: LoopPaths) -> None:
+    def apply(self, state: LearningState) -> None:
         from defender.learning.leads.lead_author import write_done_sentinel
 
         for marker in self.served:
             if marker.done:
                 write_done_sentinel(marker.claim.run_dir, marker.sha)
         for marker in self.served:
-            with contextlib.suppress(OSError):
-                marker.claim.path.unlink()
+            state.done(marker.claim)
         if self.pitfalls is not None:
-            self.pitfalls.apply(paths, timeout_seconds=self.lock_wait_seconds)
+            self.pitfalls.apply(state, timeout_seconds=self.lock_wait_seconds)
 
     def retained_summary(self) -> str:
         """What a tick that did not reach the apply left behind — for the log line that says
@@ -370,33 +379,31 @@ class BatchDisposition:
 
 def _drain_lead_author_markers(
     paths: LoopPaths,
+    state: LearningState,
     run_lead_author: Callable[..., None],
     *,
     box: Any = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> list[ServedMarker]:
-    qdir = paths.author_queue_dir
     max_retries = env_int("LEAD_AUTHOR_MAX_RETRIES", 3)
-    # `case_id`: this queue's live writer (`enqueue_case_for_curation`) mints the filename
-    # from the case, so that is what an unreadable row's dead letter is keyed on.
-    claims = claim_markers(
-        qdir, identity_key="case_id", label=LEAD_AUTHOR_DRAIN_LABEL, noun="lead-author",
+    # `case_id`: this queue's live writer (`enqueue_curation`) mints the filename from the
+    # case, so that is what an unreadable row's dead letter is keyed on.
+    claims = state.claim(
+        "case_id", label=LEAD_AUTHOR_DRAIN_LABEL, noun="lead-author",
     )
     served: list[ServedMarker] = []
     for claim in claims:
-        claimed, spec, run_dir = claim.path, claim.spec, claim.run_dir
+        spec, run_dir = claim.spec, claim.run_dir
         # Every serve is an attempt, counted before the agent runs: a claim the apply never
         # reached is reclaimed next tick, and a run that taints every tree must hit the ceiling.
         attempts = int(spec.get("attempts", 0)) + 1
         if attempts > max_retries:
-            quarantine_marker(
-                spec, claimed, qdir,
-                f"served {attempts - 1} time(s) without being recorded done",
-            )
+            state.quarantine(
+                claim, f"served {attempts - 1} time(s) without being recorded done")
             continue
         # On the claim alone: the spec in hand stays as read, so a terminal refusal's dead
         # letter carries no counter; the transient arm stamps the spec only when it re-queues.
-        rewrite_marker(claimed, {**spec, "attempts": attempts})
+        state.stamp(claim, {**spec, "attempts": attempts})
         # The curator's commit, handed back for `BatchDisposition.apply` to record once the
         # tree passes the scrub.
         done: list[str | None] = []
@@ -404,25 +411,21 @@ def _drain_lead_author_markers(
             try:
                 drained = run_or_dead_letter(
                     functools.partial(
-                        run_lead_author, paths, run_dir, box=box, on_done=done.append,
+                        run_lead_author, paths, state, run_dir, box=box, on_done=done.append,
                     ),
-                    functools.partial(
-                        _quarantine_lead_author_failure, spec, claimed, paths.author_queue_dir
-                    ),
+                    functools.partial(_quarantine_lead_author_failure, state, claim),
                     propagate=(_LeadAuthorRetry,),
                 )
             except _LeadAuthorRetry as e:
                 drained = False
                 if attempts >= max_retries:
-                    quarantine_marker(
-                        spec, claimed, paths.author_queue_dir,
-                        f"transient-exhausted after {attempts} attempt(s): {e!r}",
-                    )
+                    state.quarantine(
+                        claim, f"transient-exhausted after {attempts} attempt(s): {e!r}")
                 else:
                     spec["attempts"] = attempts
                     _requeue_or_drop(
-                        claim,
-                        note=f"transient on {marker_identity(spec, claimed)} "
+                        state, claim,
+                        note=f"transient on {claim.identity} "
                              f"(attempt {attempts}/{max_retries})",
                     )
         if drained:
@@ -433,7 +436,7 @@ def _drain_lead_author_markers(
 
 
 def _invoke_pitfalls(
-    paths: LoopPaths, *, label: DrainLabel, box: Any = None,
+    paths: LoopPaths, state: LearningState, *, label: DrainLabel, box: Any = None,
     on_curated: Callable[[PitfallsDisposition], None], lock_wait_seconds: int | None = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> int:
@@ -445,7 +448,7 @@ def _invoke_pitfalls(
         rc = _run_curator_module(
             "pitfalls_curator",
             lambda mod: mod.run_pitfalls(
-                paths=paths, trees=trees, box=box, on_curated=on_curated,
+                paths=paths, state=state, trees=trees, box=box, on_curated=on_curated,
                 lock_wait_seconds=lock_wait_seconds, git_timeout=git_timeout,
             ),
         )
@@ -453,13 +456,14 @@ def _invoke_pitfalls(
 
 
 def _retire_pitfalls_batch(
-    paths: LoopPaths, batch_ids: list[str], lock_wait_seconds: int | None, e: Exception,
+    state: LearningState, batch_ids: list[str], lock_wait_seconds: int | None, e: Exception,
 ) -> None:
     _logger.error(f"lead_author_drain: pitfalls curation error: {e!r}; discarding edits")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     if not batch_ids:
         return
     drain.retire(
-        channel=paths.pitfalls,
+        state,
+        channel=PITFALLS,
         batch_ids=batch_ids,
         # `batch-error:<class>` is the groupable vocabulary, beside `_graveyard_dropped_rows`'
         # classes and the hold ceiling's reason. The truncated message follows because one
@@ -473,6 +477,7 @@ def _retire_pitfalls_batch(
 
 def _drain_pitfalls(
     paths: LoopPaths,
+    state: LearningState,
     run_pitfalls: Callable[..., int],
     *,
     box: Any = None,
@@ -481,20 +486,21 @@ def _drain_pitfalls(
 ) -> PitfallsDisposition | None:
     # The batch is fixed at this read: a pitfall appended while the curation runs must not be
     # bumped.
-    batch_ids = [str(r["pitfall_id"]) for r in read_pitfalls(paths) if r.get("pitfall_id")]
+    batch_ids = [str(r["pitfall_id"]) for r in read_pitfalls(state) if r.get("pitfall_id")]
     # Only the success-path consumption is handed back; failure dispositions don't depend on
     # the scrub and are applied immediately.
     curated: list[PitfallsDisposition] = []
     with _claim_git(paths, git_timeout).claim():
         run_or_dead_letter(
-            lambda: run_pitfalls(paths, box=box, on_curated=curated.append),
-            functools.partial(_retire_pitfalls_batch, paths, batch_ids, lock_wait_seconds),
+            lambda: run_pitfalls(paths, state, box=box, on_curated=curated.append),
+            functools.partial(_retire_pitfalls_batch, state, batch_ids, lock_wait_seconds),
         )
     return curated[-1] if curated else None
 
 
 def _drain_lead_author(
     paths: LoopPaths,
+    state: LearningState,
     run_lead_author: Callable[..., None],
     run_pitfalls: Callable[..., int],
     *,
@@ -504,9 +510,10 @@ def _drain_lead_author(
 ) -> BatchDisposition:
     # The batch's box is stopped between agent runs and runs only inside each spawn's
     # `box_for_run`, so no host step of the tick runs beside a process an agent left (#1195).
-    served = _drain_lead_author_markers(paths, run_lead_author, box=box, git_timeout=git_timeout)
+    served = _drain_lead_author_markers(
+        paths, state, run_lead_author, box=box, git_timeout=git_timeout)
     pitfalls = _drain_pitfalls(
-        paths, run_pitfalls, box=box, lock_wait_seconds=lock_wait_seconds,
+        paths, state, run_pitfalls, box=box, lock_wait_seconds=lock_wait_seconds,
         git_timeout=git_timeout,
     )
     return BatchDisposition(
@@ -537,61 +544,26 @@ def _drain_box_request(
     )
 
 
-@model(frozen=True)
-class PendingDelivery:
-    """One batch whose commit is on a local branch and whose push or PR has not yet
-    landed. Written by the tick that failed to deliver it; read, and removed once delivered,
-    by a later tick of the same lane."""
-
-    path: Path
-    branch: str
-    batch_id: str
-
-
-def _pending_delivery_record(paths: LoopPaths, branch: AuthorBranch, batch_id: str) -> Path:
-    slug = branch.branch_prefix.rstrip("/").replace("/", "-") or "author"
-    return paths.pending_delivery_dir / f"{slug}-{batch_id}.json"
-
-
 def _record_pending_delivery(
-    paths: LoopPaths, branch: AuthorBranch, batch_id: str, *, label: DrainLabel, reason: str,
+    state: LearningState, branch: AuthorBranch, batch_id: str, *, label: DrainLabel, reason: str,
 ) -> None:
-    record = _pending_delivery_record(paths, branch, batch_id)
-    guarded_mkdir(record.parent, base=paths.state_root)
-    rewrite_marker(record, {
+    slug = branch.branch_prefix.rstrip("/").replace("/", "-") or "author"
+    state.record_delivery(f"{slug}-{batch_id}", {
         "branch": branch.branch_name(batch_id), "batch_id": batch_id, "label": str(label),
         "reason": reason, "at": now_iso(),
     })
 
 
-def _pending_deliveries(paths: LoopPaths, branch: AuthorBranch) -> list[PendingDelivery]:
-    """This lane's undelivered batches — only those under `branch.branch_prefix`, since the
-    other lane delivers under its own drain lock. An unreadable record names no branch or lane,
-    so it is quarantined rather than logged every tick forever."""
-    d = paths.pending_delivery_dir
-    out: list[PendingDelivery] = []
-    for path in sorted(d.glob("*.json")) if d.is_dir() else []:
-        try:
-            spec = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            spec = None
-        if not isinstance(spec, dict) or not isinstance(spec.get("batch_id"), str):
-            quarantine_marker({}, path, d, "unreadable pending-delivery record")
-            continue
-        name = str(spec.get("branch", ""))
-        if name.startswith(branch.branch_prefix):
-            out.append(PendingDelivery(path, name, spec["batch_id"]))
-    return out
-
-
-def _deliver_pending(paths: LoopPaths, branch: AuthorBranch, label: DrainLabel) -> bool:
+def _deliver_pending(
+    state: LearningState, branch: AuthorBranch, label: DrainLabel,
+) -> bool:
     """Deliver every batch this lane committed but could not push or open a PR for, before
     anything new is served. Answers whether the lane is clear to serve.
 
     An undelivered batch holds the writer lease like an open PR: the next batch must build on
     its commit, and a fresh branch beside it would open conflicting PRs. So a failed delivery
     parks the lane until the remote takes it. Nothing here re-runs an agent."""
-    for pending in _pending_deliveries(paths, branch):
+    for pending in state.deliveries(branch.branch_prefix):
         try:
             pr = branch.deliver(pending.batch_id)
         except BranchError as e:
@@ -600,8 +572,7 @@ def _deliver_pending(paths: LoopPaths, branch: AuthorBranch, label: DrainLabel) 
                 "it holds the writer lease; nothing served this tick"
             )
             return False
-        with contextlib.suppress(OSError):
-            pending.path.unlink()
+        state.delivered(pending)
         if pr is None:
             _logger.info(
                 f"{label}: retained branch {pending.branch} has nothing left to deliver "
@@ -613,7 +584,7 @@ def _deliver_pending(paths: LoopPaths, branch: AuthorBranch, label: DrainLabel) 
 
 
 def _land_batch(
-    paths: LoopPaths, branch: AuthorBranch, batch_id: str, wt: Path, label: DrainLabel,
+    state: LearningState, branch: AuthorBranch, batch_id: str, wt: Path, label: DrainLabel,
 ) -> tuple[str | None, bool]:
     """Push and open the PR: `(pr, delivered)`. `pr` is `None` for a zero-commit batch. On a
     `BranchError` the commit stays on a local branch `cleanup` never deletes, and the failure
@@ -621,7 +592,7 @@ def _land_batch(
     try:
         return branch.finish_batch(batch_id, wt), True
     except BranchError as e:
-        _record_pending_delivery(paths, branch, batch_id, label=label, reason=str(e))
+        _record_pending_delivery(state, branch, batch_id, label=label, reason=str(e))
         _logger.error(
             f"{label}: finish_batch failed: {e} — commit retained on local branch "
             f"{branch.branch_name(batch_id)}; delivery is retried next tick, before "
@@ -631,14 +602,15 @@ def _land_batch(
 
 
 def _open_batch(
-    paths: LoopPaths, branch: AuthorBranch, *, label: DrainLabel, has_work: Callable[[LoopPaths], bool],
+    state: LearningState, branch: AuthorBranch, *, label: DrainLabel,
+    has_work: Callable[[LearningState], bool],
 ) -> tuple[str, Path] | None:
     """Everything that decides whether a tick serves at all, in order: an earlier batch's
     delivery (which holds the lease while it fails), the wake gate, the open-PR lease, the
     worktree. `(batch_id, worktree)` to serve into, or `None` for a tick that stops here."""
-    if not _deliver_pending(paths, branch, label):
+    if not _deliver_pending(state, branch, label):
         return None
-    if not has_work(paths):
+    if not has_work(state):
         _logger.info(f"{label}: nothing queued and no curator at threshold — skipping")
         return None
     try:
@@ -671,12 +643,13 @@ def _unwind_worktree_start_fault(e: BaseException, wt: Path, branch: AuthorBranc
         raise box_mod.BoxFault(f"{e}\n\n{pointer}") from e
 
 
-def _run_worktree_batch(
+def _run_worktree_batch(  # noqa: PLR0913, C901 — one batch, kept whole
     paths: LoopPaths,
+    state: LearningState,
     branch: AuthorBranch,
     *,
     label: DrainLabel,
-    has_work: Callable[[LoopPaths], bool],
+    has_work: Callable[[LearningState], bool],
     do_work: Callable[..., BatchDisposition | None],
     start_box: Callable[..., Any] = box_mod.start_box,
     stop_box: Callable[..., None] = box_mod.stop_box,
@@ -696,7 +669,7 @@ def _run_worktree_batch(
     The label is asked for its trees first: a non-member raises before `_open_batch`, so no
     delivery, worktree, box, held root or record ever exists for it (#1179 O1')."""
     label.writable_trees(paths)
-    opened = _open_batch(paths, branch, label=label, has_work=has_work)
+    opened = _open_batch(state, branch, label=label, has_work=has_work)
     if opened is None:
         return 0
     batch_id, wt = opened
@@ -732,9 +705,9 @@ def _run_worktree_batch(
                 box, wt, stop_box=stop_box, scrub_tree=scrub, in_flight=not work_ok,
             )
         if disposition is not None:
-            disposition.apply(paths)
+            disposition.apply(state)
         consumed = True
-        pr, delivered = _land_batch(paths, branch, batch_id, wt, label)
+        pr, delivered = _land_batch(state, branch, batch_id, wt, label)
     except box_mod.RunTainted as taint:
         # The `finally` destroys this tree, which is the only copy of what the box planted
         # (nothing was consumed or pushed), so preserve it for a human. An except clause
@@ -743,6 +716,13 @@ def _run_worktree_batch(
             wt, branch.quarantine_dir,
             batch_id=batch_id, branch=branch.branch_name(batch_id), label=label, taint=taint,
         )
+        raise
+    except StateRefused as halted:
+        # The halt may strand a commit this batch already made: it stays on its local branch
+        # (`cleanup` never deletes one), so the operator is told which.
+        _logger.error(
+            f"{label}: halted by a refused state entry; any commit of batch {batch_id} is on "
+            f"local branch {branch.branch_name(batch_id)}: {halted}")
         raise
     finally:
         # A disposition not (fully) applied stays for the next tick's reclaim; its steps are
@@ -784,9 +764,9 @@ def _lead_author_pr_body(branch: str) -> str:
 
 
 def author_drain(
-    paths: LoopPaths = DEFAULT_PATHS,
+    paths: LoopPaths | None = None,
     *,
-    # `(paths, pending_file, threshold_env, module_name, pending_label, *, box)`.
+    # `(paths, state, channel, threshold_env, module_name, pending_label, *, box)`.
     trigger_author: Callable[..., None] | None = None,
     branch: AuthorBranch | None = None,
     start_box: Callable[..., Any] = box_mod.start_box,
@@ -794,6 +774,8 @@ def author_drain(
     scrub: Callable[[Path], None] = box_mod.scrub,
 ) -> int:
     _validate_merge_mode()
+    if paths is None:
+        paths = loop_paths()
     # The lane's label reaches its work step bound into the DEFAULT seam, so an injected seam
     # keeps its call shape (#1134).
     if trigger_author is None:
@@ -801,22 +783,24 @@ def author_drain(
     if branch is None:
         branch = AuthorBranch(repo_root=paths.repo_root)
 
-    with _author_shared.flock_or_skip(paths.author_drain_lock_file) as locked:
+    # The root is opened once, here, and handed inward; a missing root stops the stage.
+    with LearningState.open(paths) as state, state.lock(
+            AUTHOR_DRAIN_LOCK, wait=TRY_ONCE) as locked:
         if not locked:
             _logger.warning("author_drain: another drainer holds the lock — exiting")
             return 0
         return _run_worktree_batch(
-            paths, branch, label=AUTHOR_DRAIN_LABEL,
+            paths, state, branch, label=AUTHOR_DRAIN_LABEL,
             has_work=_has_curator_work,
             do_work=lambda wt_paths, *, box=None: _drain_curators(
-                wt_paths, trigger_author, box=box
+                wt_paths, state, trigger_author, box=box
             ),
             start_box=start_box, stop_box=stop_box, scrub=scrub,
         )
 
 
 def lead_author_drain(
-    paths: LoopPaths = DEFAULT_PATHS,
+    paths: LoopPaths | None = None,
     *,
     run_lead_author: Callable[..., None] | None = None,
     run_pitfalls: Callable[..., int] | None = None,
@@ -830,6 +814,8 @@ def lead_author_drain(
     here, and, bound into the DEFAULT seams only, the lanes' own (#1175). One that overruns is a
     systemic `GitError` (`_claim_git.GitOverran`)."""
     _validate_merge_mode()
+    if paths is None:
+        paths = loop_paths()
     # Read every configured value before a worktree, box or agent exists, so a malformed
     # setting refuses the tick rather than a commit.
     lock_wait_seconds = repo_lock_wait_seconds()
@@ -852,9 +838,8 @@ def lead_author_drain(
             pr_body=_lead_author_pr_body,
         )
 
-    from defender.learning.leads.lead_author import acquire_queue_lock, release_queue_lock
-
-    with _author_shared.flock_or_skip(paths.lead_author_drain_lock_file) as locked:
+    with LearningState.open(paths) as state, state.lock(
+            LEAD_AUTHOR_DRAIN_LOCK, wait=TRY_ONCE) as locked:
         if not locked:
             _logger.warning("lead_author_drain: another drainer holds the lock — exiting")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             return 0
@@ -862,19 +847,16 @@ def lead_author_drain(
         # held for the whole tick: the `done` sentinel is only written after the scrub, and a
         # by-hand run in that gap would see no sentinel and re-serve the run. Contended, the
         # tick skips before claiming anything.
-        queue_lock = acquire_queue_lock(paths)
-        if queue_lock is None:
-            _logger.warning("lead_author_drain: another lead-author run holds the queue lock — skipping")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
-            return 0
-        try:
+        with state.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as queue_locked:
+            if not queue_locked:
+                _logger.warning("lead_author_drain: another lead-author run holds the queue lock — skipping")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+                return 0
             return _run_worktree_batch(
-                paths, branch, label=LEAD_AUTHOR_DRAIN_LABEL,
+                paths, state, branch, label=LEAD_AUTHOR_DRAIN_LABEL,
                 has_work=_has_lead_author_work,
                 do_work=lambda wt_paths, *, box=None: _drain_lead_author(
-                    wt_paths, run_lead_author, run_pitfalls, box=box,
+                    wt_paths, state, run_lead_author, run_pitfalls, box=box,
                     lock_wait_seconds=lock_wait_seconds, git_timeout=git_timeout,
                 ),
                 start_box=start_box, stop_box=stop_box, scrub=scrub,
             )
-        finally:
-            release_queue_lock(queue_lock)

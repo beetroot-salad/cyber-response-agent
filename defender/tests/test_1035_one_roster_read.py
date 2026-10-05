@@ -67,6 +67,7 @@ from defender.tests._declared869 import (
     seed_tree,
     write,
 )
+from defender.tests._curator1134 import open_state
 from defender.tests._declared870 import graveyard_by_id, queue_ids
 from defender.tests._roster1035 import (
     EXIT_RAISED_EXPECTED,
@@ -77,6 +78,7 @@ from defender.tests._roster1035 import (
     run_as_nobody,
 )
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
+from defender.learning.core.state import PITFALLS
 
 #: The phrase O5 keeps: `test_hardening_772.py` matches the resolver's absent-directory
 #: message on it through `bind`, and M2 unifies BOTH cannot-read arms onto it.
@@ -531,12 +533,13 @@ def test_an_unsearchable_adapters_directory_is_not_a_successful_pitfalls_tick(
     adapters = _repo_adapters(repo)
     paths = LoopPaths(repo_root=repo, state_dir=repo / "state")
     persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "mcpsys"), pitfall_row("r:l-001:0", "mcpsys")], paths=paths,
+        [pitfall_row("r:l-000:0", "mcpsys"), pitfall_row("r:l-001:0", "mcpsys")],
+        state=open_state(paths),
     )
-    assert len(persist.read_pitfalls(paths)) == 2
+    assert len(persist.read_pitfalls(open_state(paths))) == 2
 
     def probe():
-        return drains._invoke_pitfalls(paths, on_curated=lambda _d: None,
+        return drains._invoke_pitfalls(paths, open_state(paths), on_curated=lambda _d: None,
                                        label=LEAD_AUTHOR_DRAIN_LABEL)
 
     with handed_to_nobody(repo, adapters, 0o400):
@@ -546,15 +549,15 @@ def test_an_unsearchable_adapters_directory_is_not_a_successful_pitfalls_tick(
         f"the raise is not the resolver's own refusal; {verdict.describe()}"
     )
     assert CONTINUING not in verdict.log, f"the drain seam swallowed the fault: {verdict.log!r}"
-    assert len(persist.read_pitfalls(paths)) == 2, "the queue was rotated on a failed tick"
-    assert not paths.pitfalls.consumed.exists(), "rows were stamped consumed on a failed tick"
+    assert len(persist.read_pitfalls(open_state(paths))) == 2, "the queue was rotated on a failed tick"
+    assert not (paths.state_root / PITFALLS.consumed).exists(), "rows were stamped consumed on a failed tick"
 
     with handed_to_nobody(repo, adapters, 0o755):
         control = run_as_nobody(probe, expected=LeadAuthorError)
     _expect_returned(control, 0)
     assert CONTINUING not in control.log, control.log
     assert CANNOT_READ not in control.log, control.log
-    assert persist.read_pitfalls(paths) == [], (
+    assert persist.read_pitfalls(open_state(paths)) == [], (
         "the readable control did not get past the resolver to rotate the unattributable rows"
     )
 
@@ -851,7 +854,8 @@ def _seed_pitfalls_queue(tmp_path: Path, monkeypatch) -> tuple[Path, LoopPaths]:
                      catalog=())
     paths = LoopPaths(repo_root=repo, state_dir=repo / "state")
     persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "mcpsys"), pitfall_row("r:l-001:0", "mcpsys")], paths=paths,
+        [pitfall_row("r:l-000:0", "mcpsys"), pitfall_row("r:l-001:0", "mcpsys")],
+        state=open_state(paths),
     )
     assert queue_ids(paths) == ["r:l-000:0", "r:l-001:0"]
     return repo, paths
@@ -881,7 +885,7 @@ def test_the_pitfalls_drain_does_not_spend_the_queue_on_an_unreadable_adapters_t
 
     with pytest.raises(LeadAuthorError) as exc:
         drains._drain_pitfalls(
-            paths, functools.partial(drains._invoke_pitfalls, label=LEAD_AUTHOR_DRAIN_LABEL))
+            paths, open_state(paths), functools.partial(drains._invoke_pitfalls, label=LEAD_AUTHOR_DRAIN_LABEL))
     assert f"{adapters} is {CANNOT_READ}" in str(exc.value), (
         f"the raise is not the resolver's own refusal: {exc.value}"
     )
@@ -890,7 +894,7 @@ def test_the_pitfalls_drain_does_not_spend_the_queue_on_an_unreadable_adapters_t
         "batch's own failure"
     )
     assert queue_ids(paths) == ["r:l-000:0", "r:l-001:0"], "the queue was spent on a host fault"
-    assert all(int(r.get("attempts") or 0) == 0 for r in persist.read_pitfalls(paths)), (
+    assert all(int(r.get("attempts") or 0) == 0 for r in persist.read_pitfalls(open_state(paths))), (
         "a queued row's lifetime `attempts` was bumped for a tree this process cannot read"
     )
     assert graveyard_by_id(paths) == {}, "rows were retired for a host fault"
@@ -899,7 +903,7 @@ def test_the_pitfalls_drain_does_not_spend_the_queue_on_an_unreadable_adapters_t
     # already put the committed adapters directory back, so the control needs no rebuild.
     assert (adapters / "cmdb_adapter.py").is_file()
     drains._drain_pitfalls(
-        paths, functools.partial(drains._invoke_pitfalls, label=LEAD_AUTHOR_DRAIN_LABEL))
+        paths, open_state(paths), functools.partial(drains._invoke_pitfalls, label=LEAD_AUTHOR_DRAIN_LABEL))
     assert queue_ids(paths) == [], (
         "the readable control did not get past the resolver to rotate the unattributable rows"
     )

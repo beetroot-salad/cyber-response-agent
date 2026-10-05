@@ -13,6 +13,7 @@ import pytest
 
 from defender.tests import _spec773 as S
 from defender.tests._curator1134 import author_trees
+from defender.learning.core.state import LearningState
 
 LESSON = "defender/lessons/l1.md"
 
@@ -305,7 +306,7 @@ def test_queue_row_is_missing_the_field_the_exempt_predicate_reads_773(tmp_path)
     # a predicate the config did not wire could be `.get`-based and still never run.
     paths = S.make_paths(tmp_path)
     assert S.lessons_run.build_author_config(
-        paths, trees=author_trees(paths)).exempt is checks.skips_forward_check
+        paths, state=LearningState.open(paths), trees=author_trees(paths)).exempt is checks.skips_forward_check
 
 
 # ---------------------------------------------------------------------------
@@ -456,7 +457,7 @@ def test_a_tick_whose_corpus_is_already_dirty_when_it_starts_773(tmp_path):
     assert sc.curator.calls == []
     reported = " ".join(
         [r.get("deadletter_reason", "") for r in sc.graveyard()]
-        + [r.get("reason", "") for r in S.stuck_records(sc.channel)]
+        + [r.get("reason", "") for r in S.stuck_records(sc.paths, sc.channel)]
     )
     assert "left-behind.md" in reported or "dirty" in reported.lower()
 

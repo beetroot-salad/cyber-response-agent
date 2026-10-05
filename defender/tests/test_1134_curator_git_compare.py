@@ -316,7 +316,7 @@ def test_a_git_failure_in_the_settle_comparison_is_the_ticks_stuck_git_probe(
 
     assert result == "raised", got
     assert type(got) is drain.GitProbeError, repr(got)
-    assert [r.get("fault_class") for r in S.stuck_records(sc.channel)] == ["GitProbeError"]
+    assert [r.get("fault_class") for r in S.stuck_records(sc.paths, sc.channel)] == ["GitProbeError"]
     assert sc.pending_by_id()["f1"].get("attempts") is None
     assert sc.head_files() == []
     assert (sc.corpus / SEEDED).read_text() == lesson_text("f0")

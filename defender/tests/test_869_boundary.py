@@ -44,6 +44,7 @@ from defender.tests._declared869 import (
     write_adapter,
 )
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
+from defender.tests._curator1134 import open_state
 from defender.tests._lead_author_1134 import drafts_under, lane_tree_for, lead_deps, lead_trees
 
 
@@ -74,8 +75,6 @@ def _lead_author_deps(paths: LoopPaths, spawn: LeadAuthorSpawn):
         lead_deps(paths),
         invoke_agent=spawn,
         extract=lambda _run_dir: ([], []),
-        acquire_queue_lock=lambda: object(),
-        release_queue_lock=lambda _fh: None,
     )
 
 
@@ -132,11 +131,12 @@ def test_run_pitfalls_resolves_systems_before_the_curator_is_spawned(tmp_path, m
     repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic", "mcpsys"),
                      skills=("elastic",), catalog=())
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    state = open_state(paths)
     persist.append_pitfalls(
         [pitfall_row("r:l-000:0", "elastic"),
          pitfall_row("r:l-001:0", "late"),
          pitfall_row("r:l-002:0", "mcpsys")],
-        paths=paths,
+        state=state,
     )
 
     def edit(root: Path) -> None:
@@ -145,7 +145,7 @@ def test_run_pitfalls_resolves_systems_before_the_curator_is_spawned(tmp_path, m
 
     spawn = Spawn(edit)
     capsys.readouterr()
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths)) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, state=state, invoke=spawn, trees=lead_trees(paths)) == 0
 
     assert spawn.systems_seen == ["elastic"]
     assert "late" in declared_systems(repo)     # the tree DOES declare it, by the end
@@ -270,16 +270,17 @@ def test_pitfalls_resolves_the_tree_it_commits_into(tmp_path, monkeypatch, capsy
     assert "wtonly" not in declared_systems(_git.REPO_ROOT)
 
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    state = open_state(paths)
     persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "wtonly"), pitfall_row("r:l-001:0", "wtonly")], paths=paths,
+        [pitfall_row("r:l-000:0", "wtonly"), pitfall_row("r:l-001:0", "wtonly")], state=state,
     )
     spawn = Spawn(lambda root: write(marker_file(root, "wtonly"), "# pitfalls\n- x\n"))
     capsys.readouterr()
 
-    assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths)) == 0
+    assert pitfalls_curator.run_pitfalls(paths=paths, state=state, invoke=spawn, trees=lead_trees(paths)) == 0
     assert spawn.systems_seen == ["wtonly"]
     assert spawn.handoffs[0]["path"] == "defender/skills/wtonly/execution.md"
-    assert persist.read_pitfalls(paths) == []
+    assert persist.read_pitfalls(state) == []
 
 
 def test_a_marker_planted_during_the_tick_does_not_declare_its_system(tmp_path, monkeypatch):
@@ -315,8 +316,9 @@ def test_a_marker_planted_during_the_tick_does_not_declare_its_system(tmp_path, 
     repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",), skills=("elastic",),
                      catalog=("elastic",))
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    state = open_state(paths)
     persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "elastic"), pitfall_row("r:l-001:0", "elastic")], paths=paths,
+        [pitfall_row("r:l-000:0", "elastic"), pitfall_row("r:l-001:0", "elastic")], state=state,
     )
 
     def land_an_adapter_then_plant(root: Path) -> None:
@@ -326,12 +328,12 @@ def test_a_marker_planted_during_the_tick_does_not_declare_its_system(tmp_path, 
 
     before = head_sha(repo)
     with pytest.raises(LeadAuthorError, match="mcpsys"):
-        pitfalls_curator.run_pitfalls(paths=paths, invoke=Spawn(land_an_adapter_then_plant),
+        pitfalls_curator.run_pitfalls(paths=paths, state=state, invoke=Spawn(land_an_adapter_then_plant),
                                       trees=lead_trees(paths))
     # The tree agrees ON THIS LANE'S OWN VALUE by the end of the tick — the TICK does not.
     assert "mcpsys" in adapter_declared_systems(repo)
     assert "mcpsys" in declared_systems(repo)
-    assert persist.read_pitfalls(paths), "the batch must survive a refused tick"
+    assert persist.read_pitfalls(state), "the batch must survive a refused tick"
     assert before != head_sha(repo), "the plant's own commit is the mid-tick change"
 
     other = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",),
@@ -375,36 +377,37 @@ def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, capsys)
     repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",), skills=("elastic",),
                      catalog=("elastic",))
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    state = open_state(paths)
     persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "elastic"), pitfall_row("r:l-001:0", "elastic")], paths=paths,
+        [pitfall_row("r:l-000:0", "elastic"), pitfall_row("r:l-001:0", "elastic")], state=state,
     )
     # The drain's own input: one queued lead-author request, which lane 1 will refuse.
-    write(paths.author_queue_dir / "case-1.json",
+    write(paths.state_root / "author-queue" / "case-1.json",
           json.dumps({"case_id": "case-1", "run_dir": str(_run_dir(tmp_path))}) + "\n")
 
     residue = "residue that lane 1 left behind\n"
     lane1_calls: list[Path] = []
 
-    def lane1(_paths, _run_dir, *, box=None, **_kw):
+    def lane1(_paths, _state, _run_dir, *, box=None, **_kw):
         lane1_calls.append(_run_dir)
         skill_md(repo, "elastic").write_text(residue, encoding="utf-8")
         raise LeadAuthorError("lane 1 refuses this marker")
 
-    def lane2(_paths, *, box=None, **_kw):
+    def lane2(_paths, _state, *, box=None, **_kw):
         return pitfalls_curator.run_pitfalls(
-            paths=_paths, invoke=Spawn(
+            paths=_paths, state=_state, invoke=Spawn(
                 lambda root: write(marker_file(root, "elastic"), "# e\n## Common pitfalls\n- x\n")
             ),
             trees=lead_trees(_paths),
         )
 
     capsys.readouterr()
-    drains._drain_lead_author(paths, lane1, lane2)
+    drains._drain_lead_author(paths, state, lane1, lane2)
 
     # Both lanes actually ran, and lane 1 actually refused: without this the residue claim
     # would be green over a drain that never reached either lane.
     assert lane1_calls, "lane 1 was never served, so it left no residue to carry"
-    assert (paths.author_queue_dir / "failed" / "case-1.json").is_file()
+    assert (paths.state_root / "author-queue" / "failed" / "case-1.json").is_file()
 
     committed = git(repo, "log", "--all", "-p", "--", str(skill_md(repo, "elastic").relative_to(repo))).stdout
     assert residue.strip() not in committed
@@ -440,8 +443,9 @@ def test_the_pitfalls_lane_is_handed_the_adapter_half_and_the_gates_the_union(
                      skills=("elastic",), catalog=("elastic",))
     assert not adapter_file(repo, "mcpsys").exists()
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    state = open_state(paths)
     persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "elastic"), pitfall_row("r:l-001:0", "mcpsys")], paths=paths,
+        [pitfall_row("r:l-000:0", "elastic"), pitfall_row("r:l-001:0", "mcpsys")], state=state,
     )
 
     capsys.readouterr()

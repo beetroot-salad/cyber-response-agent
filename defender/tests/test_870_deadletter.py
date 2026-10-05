@@ -42,6 +42,7 @@ from defender.tests._declared870 import (
     shim_row,
     write_reducer_surface,
 )
+from defender.tests import _state1135
 from defender.tests._lead_author_1134 import lead_trees
 
 #: M9's closed vocabulary, all four members (FK-11 adds the last). Two writers append to one
@@ -66,9 +67,9 @@ def _reason(paths, row: dict) -> str:
     the caller's own comparison against its expected reason, not on a `KeyError` in this shared
     helper — which would read as a broken test rather than as an unmet demand.
     """
-    persist.append_pitfalls([row], paths=paths)
-    rows = persist.read_pitfalls(paths)
-    pitfalls_curator._graveyard_dropped_rows(paths, rows, [row["pitfall_id"]])
+    persist.append_pitfalls([row], state=_state1135.state_for_paths(paths))
+    rows = persist.read_pitfalls(_state1135.state_for_paths(paths))
+    pitfalls_curator._graveyard_dropped_rows(_state1135.state_for_paths(paths), rows, [row["pitfall_id"]])
     entry = graveyard_by_id(paths).get(row["pitfall_id"], {})
     return str(entry.get("deadletter_reason"))
 
@@ -148,15 +149,15 @@ def test_a_malformed_name_retires_as_malformed_system(paths, tmp_path, monkeypat
     commit_all(repo, "seed the reducer surface")
     inert = LoopPaths(repo_root=repo, state_dir=tmp_path / "state-inert")
     idless = {k: v for k, v in pitfall_row("x:l-000:0", "elastic").items() if k != "pitfall_id"}
-    persist.append_pitfalls([idless, pitfall_row("k:l-000:0", "elastic")], paths=inert)
-    assert len(persist.merge_pitfalls(persist.read_pitfalls(inert))) == 2, (
+    persist.append_pitfalls([idless, pitfall_row("k:l-000:0", "elastic")], state=_state1135.state_for_paths(inert))
+    assert len(persist.merge_pitfalls(persist.read_pitfalls(_state1135.state_for_paths(inert)))) == 2, (
         "an id-less row stopped counting toward the threshold arithmetic"
     )
 
     assert pitfalls_curator.run_pitfalls(
         paths=inert, invoke=Spawn(curate_execution_md("elastic")), trees=lead_trees(inert),
     ) == 0
-    survivors = persist.read_pitfalls(inert)
+    survivors = persist.read_pitfalls(_state1135.state_for_paths(inert))
     assert [r.get("pitfall_id") for r in survivors] == [None], (
         "RECORDED, NOT DEMANDED: the id-less row is inert — it survives the tick untouched "
         "while every row with an id leaves. If this ever changes it is a decision, not a fix"
@@ -212,12 +213,12 @@ def test_a_ceiling_retirement_names_its_exception_class(tmp_path, monkeypatch):
     write_reducer_surface(repo)
     commit_all(repo, "seed the reducer surface")
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    persist.append_pitfalls([shim_row("r:l-003:0")], paths=paths)
+    persist.append_pitfalls([shim_row("r:l-003:0")], state=_state1135.state_for_paths(paths))
 
-    def _explodes(p, box=None, **_kw):
+    def _explodes(p, _state, box=None, **_kw):
         raise ImportError("the curator module vanished mid-tick")
 
-    drains._drain_pitfalls(paths, _explodes)
+    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), _explodes)
 
     entry = graveyard_by_id(paths).get("r:l-003:0", {})
     reason = str(entry.get("deadletter_reason", ""))
@@ -256,7 +257,7 @@ def test_the_consumed_category_says_unattributable(tmp_path, monkeypatch):
     nothing_teachable = LoopPaths(repo_root=repo, state_dir=tmp_path / "state-a")
     persist.append_pitfalls(
         [pitfall_row("a:l-000:0", "newsys"), pitfall_row("a:l-001:0", "fakesys")],
-        paths=nothing_teachable,
+        state=_state1135.state_for_paths(nothing_teachable),
     )
     spawn = Spawn(None)
     assert pitfalls_curator.run_pitfalls(paths=nothing_teachable, invoke=spawn,
@@ -269,7 +270,7 @@ def test_the_consumed_category_says_unattributable(tmp_path, monkeypatch):
     persist.append_pitfalls(
         [pitfall_row("b:l-000:0", "elastic"), pitfall_row("b:l-001:0", "newsys"),
          shim_row("b:l-002:0")],
-        paths=mixed,
+        state=_state1135.state_for_paths(mixed),
     )
     assert pitfalls_curator.run_pitfalls(
         paths=mixed, invoke=Spawn(edits(curate_execution_md("elastic"), curate_reducer_surface())),

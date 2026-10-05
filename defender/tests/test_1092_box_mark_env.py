@@ -22,6 +22,7 @@ import pytest
 from pydantic import ValidationError
 from pydantic.dataclasses import is_pydantic_dataclass
 
+from defender._io import READ_LIMIT
 from defender.run_common import run_env
 from defender.runtime import box as box_mod
 from defender.runtime.box import BOX_ENV_ALLOWLIST, BoxRequest, BoxSpec, Mount
@@ -234,6 +235,10 @@ def test_both_docker_run_argv_builders_differ_from_today_only_by_the_marker_env_
         "--label", f"{box_mod.START_TOKEN_LABEL}={token}",
         "--runtime", spec.runtime, "--network", "none", "--read-only",
         "--security-opt", f"seccomp={box_mod.ALIAS_PROFILE_PATH}",
+        # #1188: every box's file-size cap — the host's whole-file read cap, soft = hard, in
+        # bytes — then core dumps off, so a writer the cap kills leaves no core behind.
+        "--ulimit", f"fsize={READ_LIMIT}:{READ_LIMIT}",
+        "--ulimit", "core=0:0",
     ]
     infra = {**box_mod.infra_env(defender_dir, run_dir), **box_mod._LOCALE_ENV}
     today_run_dir = [

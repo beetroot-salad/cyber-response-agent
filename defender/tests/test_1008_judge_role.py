@@ -41,6 +41,7 @@ import pytest
 
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
+from defender.tests import _state1135
 
 #: The grant surfaces `AgentDefinition` defaults to deny-all on
 #: (`runtime/agent_definition.py:63-86`). The whole of O3 is that NONE of them is spelled at
@@ -79,7 +80,7 @@ def _tmp_roots(tmp_path, monkeypatch):
     """
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _role():
@@ -443,7 +444,8 @@ def test_1008_every_judge_draw_is_declared_under_the_judges_role(tmp_path):
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
 
     J.mod("learning.judge").grade_episode(
-        ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=2)
+        ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=2,
+        state=_state1135.env_state())
 
     assert judge.calls == 6, (
         f"the judge was called {judge.calls} times, not once per draw per graded world plus "

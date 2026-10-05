@@ -184,7 +184,6 @@ def test_an_empty_declared_set_refuses_the_lead_author_lane(tmp_path, monkeypatc
     deps = dataclasses.replace(
         lead_deps(paths),
         invoke_agent=spawn, extract=lambda _rd: ([], []),
-        acquire_queue_lock=lambda: object(), release_queue_lock=lambda _fh: None,
     )
     assert deps.systems == frozenset()
 

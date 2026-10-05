@@ -14,6 +14,7 @@ from defender._model import model
 from defender.learning.author import drain as _author_drain
 from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
+from defender.learning.core.state import PITFALLS, LearningState
 
 _logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ OFFERS_DECLINED_KEY = "offers_declined"
 
 
 def _retire_exhausted_holds(
-    paths, held_ids: list[str], *, timeout_seconds: int | None = None,
+    state: LearningState, held_ids: list[str], *, timeout_seconds: int | None = None,
 ) -> int:
     """Bump every held row once, and retire the ones that have now been offered too often.
 
@@ -44,7 +45,8 @@ def _retire_exhausted_holds(
     if not held_ids:
         return 0
     outcome = _author_drain.retire(
-        channel=paths.pitfalls,
+        state,
+        channel=PITFALLS,
         batch_ids=held_ids,
         reason=HELD_CEILING_REASON,
         max_attempts=_loop_config.author_max_attempts(),
@@ -81,7 +83,7 @@ class PitfallsDisposition:
     sha: str | None
     held_ids: tuple[str, ...]
 
-    def apply(self, paths: _loop_config.LoopPaths, *, timeout_seconds: int | None) -> int:
+    def apply(self, state: LearningState, *, timeout_seconds: int | None) -> int:
         """Rotate the committed rows out, then bump the held ones. Returns how many held rows
         were retired at the offer ceiling.
 
@@ -90,9 +92,9 @@ class PitfallsDisposition:
         drain passes its configured wait since it holds the tick's locks."""
         if self.committed_ids:
             _loop_persist.rotate_pitfalls(
-                list(self.committed_ids), self.sha, paths=paths,
+                list(self.committed_ids), self.sha, state=state,
                 category="consumed_committed", timeout_seconds=timeout_seconds,
             )
         return _retire_exhausted_holds(
-            paths, list(self.held_ids), timeout_seconds=timeout_seconds,
+            state, list(self.held_ids), timeout_seconds=timeout_seconds,
         )

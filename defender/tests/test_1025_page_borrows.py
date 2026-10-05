@@ -26,6 +26,7 @@ import pytest
 from defender.tests import _episode_1025 as E
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
+from defender.tests import _state1135
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -39,7 +40,7 @@ S = E.SAMPLE
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def visualize_episode():
@@ -196,7 +197,7 @@ def test_1025_an_ungradable_worlds_mechanical_finding_is_queued_and_the_page_say
     row["mechanical_world_findings"] = [mechanical]
     doc["worlds"][0] = row
     # what the pass itself does with that row — the oracle the page must agree with
-    report = enqueue.enqueue_report(ep.dir, doc, queue_dir=tmp_path / "queue", drawn={},
+    report = enqueue.enqueue_report(ep.dir, doc, state=_state1135.state_over(tmp_path / "queue"), drawn={},
                                     family_drawn={})
     coord = f"{E.EPISODE_ID}/{E.WITHHELD_WORLD}/mechanical/0"
     assert coord in [r["finding_id"] for r in report.world_rows], report.world_rows
@@ -229,7 +230,7 @@ def test_1025_route_finding_is_the_rule_enqueue_report_walks(tmp_path):
 
     def lanes(verdict_word):
         d = dict(doc, verdict_word=verdict_word)
-        report = enqueue.enqueue_report(ep.dir, d, queue_dir=tmp_path / f"q-{verdict_word}")
+        report = enqueue.enqueue_report(ep.dir, d, state=_state1135.state_over(tmp_path / f"q-{verdict_word}"))
         rows_by_row = {w["world"]: w for w in d["worlds"]}
         withheld = enqueue.withheld_reasons_of(d["worlds"])
         blocked = enqueue.defender_lane_blocked(verdict_word)
@@ -367,7 +368,7 @@ def test_1025_a_record_naming_one_world_twice_never_files_its_world_finding_as_a
     doc["worlds"].append(E.ungradable_row(E.GRADED_WORLD))
     E.draw_document(ep.dir, E.GRADED_WORLD, 0,
                     E.draw_doc(findings=[E.finding(subject="world", claim="about the world")]))
-    report = enqueue.enqueue_report(ep.dir, doc, queue_dir=tmp_path / "queue")
+    report = enqueue.enqueue_report(ep.dir, doc, state=_state1135.state_over(tmp_path / "queue"))
     coord = f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/0"
     assert report.appended == 0, report
     assert not [r for r in report.world_rows if r["finding_id"] == coord], report.world_rows
@@ -397,14 +398,14 @@ def test_1025_the_fixture_ledger_is_the_passes_own(tmp_path):
     enqueue = E.mod("learning.judge.enqueue")
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
-    report = enqueue.enqueue_report(ep.dir, doc, queue_dir=tmp_path / "queue")
+    report = enqueue.enqueue_report(ep.dir, doc, state=_state1135.state_over(tmp_path / "queue"))
     assert report.dispositions == doc["dispositions"]
     assert [w["finding_id"] for w in report.withheld_findings] == [
         w["finding_id"] for w in doc["withheld_findings"]]
     assert report.unqueueable == doc["unqueueable_findings"] == []
 
     report = enqueue.enqueue_report(ep.dir, dict(doc, verdict_word="discard"),
-                                    queue_dir=tmp_path / "queue-discard")
+                                    state=_state1135.state_over(tmp_path / "queue-discard"))
     assert report.dispositions == E.block_defender_lane(E.sample_grade(), "discard")["dispositions"]
 
 
@@ -485,7 +486,7 @@ def test_1025_a_record_naming_one_world_twice_renders_exactly_what_the_pass_file
     doc = E.sample_grade()
     doc["worlds"].append(E.world_row(E.WITHHELD_WORLD, declared="benign", has_refused=None,
                                      bucket="lead-set"))
-    report = enqueue.enqueue_report(ep.dir, doc, queue_dir=tmp_path / "queue")
+    report = enqueue.enqueue_report(ep.dir, doc, state=_state1135.state_over(tmp_path / "queue"))
     doc["dispositions"] = report.dispositions
     doc["withheld_findings"] = report.withheld_findings
     doc["enqueued_rows"] = report.appended

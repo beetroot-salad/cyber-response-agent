@@ -62,16 +62,20 @@ def run_author(tmp: Path) -> tuple[AuthorRun, float]:
     from defender.learning.author.lessons import run as author
     from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LoopPaths
     from defender.learning.core.lane_trees import open_drain_trees
+    from defender.learning.core.state import LearningState, StateRefused
 
     paths = LoopPaths(repo_root=tmp)
-    with open_drain_trees(paths, AUTHOR_DRAIN_LABEL) as trees:
-        cfg = author.build_author_config(paths, trees=trees, manifest_seed=MANIFEST_SEED)
+    paths.state_root.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — eval harness scratch tmp dir; the handle never creates its root
+    with LearningState.open(paths) as state, open_drain_trees(paths, AUTHOR_DRAIN_LABEL) as trees:
+        cfg = author.build_author_config(
+            paths, state=state, trees=trees, manifest_seed=MANIFEST_SEED)
         out, err = io.StringIO(), io.StringIO()
         t0 = time.monotonic()
         try:
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                rc = author.run_batch(paths=paths, cfg=cfg)
-        except Exception as e:  # noqa: BLE001 — an eval harness reports the fault, never re-raises
+                rc = author.run_batch(paths=paths, state=state, cfg=cfg)
+        # `StateRefused` is named: it is not an `Exception`, and the harness reports it too.
+        except (Exception, StateRefused) as e:  # noqa: BLE001 — an eval harness reports the fault, never re-raises
             rc = 1
             err.write(f"\n{type(e).__name__}: {e}\n")
     return AuthorRun(rc, out.getvalue(), err.getvalue()), time.monotonic() - t0

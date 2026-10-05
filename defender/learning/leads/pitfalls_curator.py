@@ -18,16 +18,16 @@ from defender._corpus import _FENCE_RE
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender.learning.author import drain as _author_drain
 from defender.learning.author import shared as _author_shared
-from defender._io import ENTRY_FILE, append_jsonl
+from defender._io import ENTRY_FILE
 from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
 from defender.learning.core import pitfalls_disposition as _disposition
 from defender.learning.core.lane_trees import DrainTrees, TreeFor, kind_at, read_at
+from defender.learning.core.state import PITFALLS, LearningState
 from defender._claim_git import ClaimGit
 from defender.learning.author._config import GIT_TIMEOUT_SECONDS
 from defender.learning.leads._lead_spine import (
-    PENDING_DIR,
     _loop_commit_body,
     _spawn_author_agent,
     _verify_corpus_scope,
@@ -142,7 +142,7 @@ def _build_pitfalls_handoffs(rows: list[dict], *, systems: frozenset[str]) -> li
 
 
 def _invoke_pitfalls_agent(
-    handoffs: list[dict], *, repo_root: Path,
+    handoffs: list[dict], *, state: LearningState, repo_root: Path,
     spawn: Callable[..., int] = _spawn_author_agent,
     salt: str | None = None,
     box=None,
@@ -158,7 +158,7 @@ def _invoke_pitfalls_agent(
         batch_id="pitfalls",
         user_prompt=user_prompt,
         repo_root=repo_root,
-        learning_run_dir=PENDING_DIR,
+        learning_run_dir=state.stage_dir(_loop_config.LEAD_AUTHOR_DRAIN_LABEL),
         log_label="pitfalls curator",
         salt=stage_salt, box=box,
     )
@@ -522,22 +522,22 @@ def _deadletter_reason(row: dict) -> str:
     return f"undeclared-system:{system}"
 
 
-def _graveyard_dropped_rows(paths, rows: list[dict], dropped_ids: list[str]) -> None:
+def _graveyard_dropped_rows(
+    state: LearningState, rows: list[dict], dropped_ids: list[str],
+) -> None:
     """Graveyard dropped rows for human review. Terminal: `drain.retire`'s ceiling doesn't apply,
     since an undeclared name is refused on the first tick, never retried."""
     if not dropped_ids:
         return
     ids = set(dropped_ids)
-    key = paths.pitfalls.id_key
+    key = PITFALLS.id_key
     entries = [
         {key: r[key], "deadletter_reason": _deadletter_reason(r), "row": r,
          **_author_drain.retirement_stamp()}
         for r in rows if r.get(key) in ids
     ]
     if entries:
-        append_jsonl(  # lint-unguarded-tree-write: ok — learning_queue sidecar, host-side, outside every box mount
-            _author_drain.graveyard_file(paths.pitfalls), entries,
-        )
+        state.deadletter(PITFALLS, entries)
 
 
 #: Re-exported from `core/pitfalls_disposition`, which holds the success-path consumption and
@@ -548,9 +548,10 @@ OFFERS_DECLINED_KEY = _disposition.OFFERS_DECLINED_KEY
 PitfallsDisposition = _disposition.PitfallsDisposition
 
 
-def run_pitfalls(
+def run_pitfalls(  # noqa: PLR0913, C901 — one tick's whole injection surface
     *,
-    paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS,
+    paths: _loop_config.LoopPaths | None = None,
+    state: LearningState | None = None,
     trees: DrainTrees,
     invoke: Callable[..., int] | None = None,
     box=None,
@@ -576,8 +577,17 @@ def run_pitfalls(
     `trees` are the lane's held mounts (the drain's work step opens them for its label): the
     commit gate reads the working copy through them (#1134). Checked before any work: they must
     hold `paths.skills_dir` itself as a mount point, else `LeadAuthorError`."""
+    # An entry point on its own (by hand) opens the handle; the drain hands its own in.
+    if paths is None:
+        paths = _loop_config.loop_paths()
+    if state is None:
+        with LearningState.open(paths) as own:
+            return run_pitfalls(
+                paths=paths, state=own, trees=trees, invoke=invoke, box=box,
+                on_curated=on_curated, lock_wait_seconds=lock_wait_seconds,
+                git_timeout=git_timeout)
     lane_skills(trees, paths)
-    rows = _loop_persist.read_pitfalls(paths)
+    rows = _loop_persist.read_pitfalls(state)
     # The gate counts distinct mistakes, not rows: the queue keeps one row per failure, so a
     # looping lead would otherwise clear the threshold on a single lesson.
     records = _loop_persist.merge_pitfalls(rows)
@@ -627,9 +637,9 @@ def run_pitfalls(
             f"{len(records)} queued pitfall(s) in {len(batch_ids)} row(s) but none named a "
             f"system the adapter set at {repo_root / ADAPTERS_REL} declares — dropping"
         )
-        _graveyard_dropped_rows(paths, rows, dropped_ids)
+        _graveyard_dropped_rows(state, rows, dropped_ids)
         _loop_persist.rotate_pitfalls(
-            dropped_ids, None, paths=paths, category="consumed_unattributable",
+            dropped_ids, None, state=state, category="consumed_unattributable",
             timeout_seconds=lock_wait_seconds,
         )
         return 0
@@ -646,7 +656,8 @@ def run_pitfalls(
     # The box runs for the spawn only, and is stopped before the gate reads what it wrote
     # (#1195).
     with _box.box_for_run(box) as run_box:
-        rc = (invoke or _invoke_pitfalls_agent)(handoffs, repo_root=repo_root, box=run_box)
+        rc = (invoke or _invoke_pitfalls_agent)(
+            handoffs, state=state, repo_root=repo_root, box=run_box)
     if rc != 0:
         # Raised, not returned: a returned rc goes uninspected. `AuthorError` is in the drain's
         # retire set, so a repeatedly failing batch reaches the bounded retirement.
@@ -671,9 +682,9 @@ def run_pitfalls(
     # Unattributable rows leave now whatever `on_curated` is: no scrub can make an undeclared
     # system teachable, and deferring would re-graveyard them on the retry.
     if dropped_ids:
-        _graveyard_dropped_rows(paths, rows, dropped_ids)
+        _graveyard_dropped_rows(state, rows, dropped_ids)
         _loop_persist.rotate_pitfalls(
-            dropped_ids, None, paths=paths, category="consumed_unattributable",
+            dropped_ids, None, state=state, category="consumed_unattributable",
             timeout_seconds=lock_wait_seconds,
         )
     disposition = PitfallsDisposition(
@@ -691,7 +702,7 @@ def run_pitfalls(
             "to the drain to consume once the batch passes the scrub"
         )
         return 0
-    retired = disposition.apply(paths, timeout_seconds=lock_wait_seconds)
+    retired = disposition.apply(state, timeout_seconds=lock_wait_seconds)
     # Distinct id sets throughout, since a `pitfall_id` may repeat in the queue file.
     rotated = set(committed_ids) | set(dropped_ids)
     # Retired rows left this tick, so they are excluded from the held count.

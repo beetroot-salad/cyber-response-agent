@@ -27,8 +27,8 @@ from defender.learning.author import shared as _shared
 from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL,
-    DEFAULT_PATHS,
     LoopPaths,
+    loop_paths,
     StageContext,
     StageWiring,
     author_effort as _author_effort,
@@ -39,6 +39,7 @@ from defender.learning.core.config import (
     author_timeout as _author_timeout,
 )
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
+from defender.learning.core.state import QUESTIONER_FINDINGS, LearningState
 
 
 AuthorError = _shared.AuthorError
@@ -54,7 +55,6 @@ class QuestionerAuthorConfig(CorpusAuthorConfig):
     No hold report, since the idempotency-only gate never holds; but a skip report, because a
     `consumed_skip` is terminal and this line is the only trace the finding was seen."""
 
-    skip_report: Path
     manifest_seed: str | None = None
     author_model: str = field(default_factory=_author_model)
     author_timeout: int = field(default_factory=_author_timeout)
@@ -62,8 +62,8 @@ class QuestionerAuthorConfig(CorpusAuthorConfig):
 
 
 def build_questioner_config(
-    paths: LoopPaths = DEFAULT_PATHS, *, trees: DrainTrees, manifest_seed: str | None = None,
-    box: Any = None,
+    paths: LoopPaths, *, state: LearningState, trees: DrainTrees,
+    manifest_seed: str | None = None, box: Any = None,
 ) -> QuestionerAuthorConfig:
     """This channel's config over `paths`, reading and writing its corpus through `trees`, the
     lane's open trees (`open_drain_trees`): they must hold `paths.lessons_questioner_dir` itself
@@ -75,10 +75,8 @@ def build_questioner_config(
         tree_for=trees.tree_for,
         corpus_dir_rel=paths.lessons_questioner_dir_rel,
         runs_dir=paths.runs_dir,
-        pending_dir=paths.pending_dir,
-        skip_report=paths.pending_dir / "questioner_findings.skip_report.log",
-        channel=paths.questioner_findings,
-        repo_lock_file=paths.author_lock_file,
+        state=state,
+        channel=QUESTIONER_FINDINGS,
         repo_lock_wait_seconds=repo_lock_wait_seconds(),
         log_prefix=_LOG_PREFIX,
         author_prompt=paths.learning_dir / "author" / "questioner" / "prompt.md",
@@ -137,7 +135,6 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: QuestionerAuthorConfi
     """Spawn the curator to author the batch and self-report."""
     from defender.learning.author import curator_engine
 
-    cfg.pending_dir.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — the host-side queue dir, never a box-writable or model-authored tree
     stage_salt = uuid.uuid4().hex
     return curator_engine.run_curator_stage(
         wiring=StageWiring.for_batch(
@@ -145,7 +142,7 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: QuestionerAuthorConfi
             batch_id=batch_id, label="questioner_curator",
         ),
         ctx=StageContext(
-            learning_run_dir=cfg.pending_dir,
+            learning_run_dir=cfg.state.stage_dir(AUTHOR_DRAIN_LABEL),
             user=build_questioner_user_prompt(findings, batch_id, cfg, salt=stage_salt),
             request_limit=author_request_limit(),
             wall_clock_timeout=cfg.author_timeout,
@@ -164,7 +161,7 @@ def _write_skip_report_after_rotate(outcome, cfg: QuestionerAuthorConfig) -> Non
     `gate_held` is reported too, though this gate never holds: a row there would reveal a gate
     this config doesn't know it has."""
     _shared.write_disposition_report(
-        cfg.skip_report, cfg.pending_dir, batch_id=outcome.batch_id,
+        cfg.state, cfg.channel, batch_id=outcome.batch_id,
         groups={"skipped": outcome.consumed.get("consumed_skip", []),
                 "gate_held": outcome.gate_held},
     )
@@ -189,7 +186,8 @@ _logger = logging.getLogger(__name__)
 def run_batch(
     *,
     hold_committed: bool = False,
-    paths: LoopPaths = DEFAULT_PATHS,
+    paths: LoopPaths | None = None,
+    state: LearningState | None = None,
     trees: DrainTrees | None = None,
     cfg: QuestionerAuthorConfig | None = None,
     box: Any = None,
@@ -200,7 +198,9 @@ def run_batch(
     if (trees is None) == (cfg is None):
         raise TypeError("run_batch takes exactly one of trees= and cfg=")
     if trees is not None:
-        cfg = build_questioner_config(paths, trees=trees, box=box)
+        if paths is None or state is None:
+            raise TypeError("run_batch with trees= takes paths= and state=")
+        cfg = build_questioner_config(paths, state=state, trees=trees, box=box)
     assert cfg is not None  # narrowed for mypy: exactly one of the two was given
     return drain.run_batch(cfg=cfg, hold_committed=hold_committed, box=box)
 
@@ -209,8 +209,10 @@ def main(argv: list[str]) -> int:
     if len(argv) != 1:
         print("usage: run.py", file=sys.stderr)
         return 64
-    with open_drain_trees(DEFAULT_PATHS, AUTHOR_DRAIN_LABEL) as trees:
-        return run_batch(trees=trees)
+    paths = loop_paths()
+    with LearningState.open(paths) as state, open_drain_trees(
+            paths, AUTHOR_DRAIN_LABEL) as trees:
+        return run_batch(paths=paths, state=state, trees=trees)
 
 
 if __name__ == "__main__":

@@ -115,7 +115,7 @@ def _run(sc, *, fifo: Path | None = None):
 
 
 def _stuck_classes(sc) -> list[str]:
-    return [r.get("fault_class") for r in S.stuck_records(sc.channel)]
+    return [r.get("fault_class") for r in S.stuck_records(sc.paths, sc.channel)]
 
 
 def _plain_os_error(exc: BaseException | None, code: int) -> bool:
@@ -687,7 +687,7 @@ def test_a_before_state_git_cannot_read_raises_out_of_run_batch_before_the_agent
     assert not isinstance(got, drain.RETIRE_SET)
     assert "corpus before-state" in str(got), got
     assert sc.curator.calls == [], "the agent was spawned over a before-state the tick never read"
-    [record] = S.stuck_records(sc.channel)
+    [record] = S.stuck_records(sc.paths, sc.channel)
     assert record.get("fault_class") == "GitProbeError", record
     assert sc.pending_by_id()["f1"].get("attempts") is None
     assert sc.head_files() == []
