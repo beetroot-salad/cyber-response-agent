@@ -126,11 +126,19 @@ def _run_dir(base: Path) -> Path:
     return run
 
 
-def _start_investigation(run_dir: Path, rec: AliasProbeDocker, spec=None) -> None:
-    if spec is None:
-        box_mod.start_box(run_dir, DEFENDER, docker=rec)
-    else:
-        box_mod.start_box(run_dir, DEFENDER, spec=spec, docker=rec)
+def _start_investigation(
+    run_dir: Path, rec: AliasProbeDocker, spec=None, *, tenant_agent: Path | None = None,
+) -> None:
+    kw = {} if spec is None else {"spec": spec}
+    box_mod.start_box(run_dir, DEFENDER, tenant_agent=tenant_agent, docker=rec, **kw)
+
+
+def _tenant_agent(base: Path) -> Path:
+    """A tenant's agent half, as `run.py` always passes one: the production investigation box
+    is never started without it, so a limit gated on its absence must not pass."""
+    agent = base / f"tenant-agent-{uuid.uuid4().hex[:8]}"
+    agent.mkdir(parents=True)
+    return agent
 
 
 def _start_lane(tmp_path: Path, rec: AliasProbeDocker, spec) -> None:
@@ -140,7 +148,9 @@ def _start_lane(tmp_path: Path, rec: AliasProbeDocker, spec) -> None:
     src.mkdir(parents=True, exist_ok=True)
     box_mod.start_box(
         box_mod.BoxRequest(
-            name="r-1188-lane",
+            # The name `drains._drain_box_request` gives a drain box, so a limit keyed on the
+            # lane's name must not pass.
+            name="defender-drain-1188",
             mounts=(box_mod.Mount(source=src, target=src, writable=True),),
             workdir=src, env={}, spec=spec,
         ),
@@ -153,13 +163,17 @@ def _stock(spec):
     return dataclasses.replace(spec, rootfs="python:3.11-slim")
 
 
-def test_the_investigation_box_launches_with_the_read_cap_as_its_file_size_limit(tmp_path):
+@pytest.mark.parametrize("with_tenant", [True, False], ids=["tenant-agent", "no-tenant-agent"])
+def test_the_investigation_box_launches_with_the_read_cap_as_its_file_size_limit(
+    with_tenant, tmp_path,
+):
     """O1/O2 (M1), investigation lane: `start_box(run_dir, defender_dir)` with no spec — the
     env-resolved default every investigation gets — issues a `docker run` carrying
     `--ulimit fsize=READ_LIMIT:READ_LIMIT`, once, soft equal to hard, in bytes, before the
-    image."""
+    image. With and without the tenant's agent half: `run.py` always passes one."""
     rec = AliasProbeDocker()
-    _start_investigation(_run_dir(tmp_path), rec)
+    agent = _tenant_agent(tmp_path) if with_tenant else None
+    _start_investigation(_run_dir(tmp_path), rec, tenant_agent=agent)
     _assert_one_fsize_option(_create_argv(rec), DEFAULT_FSIZE, "investigation lane")
 
 
@@ -187,7 +201,7 @@ def test_the_investigation_box_carries_the_limit_its_spec_names(limit, tmp_path)
     a constant — `start_box(..., spec=BoxSpec(file_size_limit=X))` renders `fsize=X:X`."""
     rec = AliasProbeDocker()
     spec = box_mod.BoxSpec(file_size_limit=limit)
-    _start_investigation(_run_dir(tmp_path), rec, spec)
+    _start_investigation(_run_dir(tmp_path), rec, spec, tenant_agent=_tenant_agent(tmp_path))
     _assert_one_fsize_option(_create_argv(rec), f"fsize={limit}:{limit}", "investigation lane")
 
 
@@ -319,7 +333,11 @@ def _spec(runtime: str, limit: int | None = None):
 
 @contextlib.contextmanager
 def _investigation_box(run_dir: Path, spec) -> Iterator[object]:
-    box = box_mod.start_box(run_dir, DEFENDER, spec=spec, docker=box_mod._docker)
+    # With a tenant agent half, as `run.py` always starts one.
+    agent = _tenant_agent(run_dir.parent)
+    box = box_mod.start_box(
+        run_dir, DEFENDER, spec=spec, tenant_agent=agent, docker=box_mod._docker,
+    )
     try:
         # A startup fault under DEFENDER_ALLOW_UNSANDBOXED=1 degrades to the host executor,
         # where every negative below would be measuring the host instead of the box.
@@ -337,7 +355,7 @@ def _lane_box(base: Path, spec) -> Iterator[tuple[object, Path]]:
     tree = base / "lane-rw"
     tree.mkdir(parents=True)
     request = box_mod.BoxRequest(
-        name=f"r-1188-lane-{uuid.uuid4().hex[:8]}",
+        name=f"defender-drain-1188-{uuid.uuid4().hex[:8]}",
         mounts=(
             box_mod.Mount(source=DEFENDER, target=DEFENDER, writable=False),
             box_mod.Mount(source=tree, target=tree, writable=True),
@@ -548,6 +566,7 @@ def test_a_live_investigation_box_cannot_write_past_the_read_cap(runtime, base):
     with _investigation_box(run_dir, _spec(runtime)) as box:
         _assert_rlimit_is(box, run_dir, READ_LIMIT)
         _assert_sparse_extension_is_bounded(box, run_dir, READ_LIMIT)
+        _assert_the_box_cannot_lift_it(box, run_dir, READ_LIMIT)
 
 
 @requires_box_daemon
@@ -559,6 +578,7 @@ def test_a_live_lane_box_cannot_write_past_the_read_cap(runtime, base):
     with _lane_box(base, _spec(runtime)) as (box, tree):
         _assert_rlimit_is(box, tree, READ_LIMIT)
         _assert_sparse_extension_is_bounded(box, tree, READ_LIMIT)
+        _assert_the_box_cannot_lift_it(box, tree, READ_LIMIT)
 
 
 @requires_box_daemon
