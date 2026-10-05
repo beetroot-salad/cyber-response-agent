@@ -1,6 +1,7 @@
 """#1188 — the box file-size cap: M1 (`--ulimit fsize=L:L` on both box `docker run` argvs),
-M2 (the box cannot lift it) and M3 (proved on a live box, under both runtimes, through the exec
-path the agent's commands take) — plus core dumps off on both argvs.
+M2 (the box cannot lift it) and M3 (proved on a live box, under both runtimes: an investigation
+box through the exec path the agent's commands take, and a lane box built the way a drain
+builds one) — plus core dumps off on both argvs.
 
 The obligations, from the design comment on #1188:
 
@@ -17,13 +18,14 @@ And from the review of #1198, which settled two more points:
 * NO KNOB. The cap is not a `BoxSpec` field: it is always `_io.READ_LIMIT`, in bytes (Docker's
   unit, C3), read from `_io` rather than restated as a second literal. The field existed only
   so tests could set a small limit; without it a -1, 0 or oversized limit cannot be configured
-  at all. Pinned twice: no `BoxSpec` field moves the rendered cap, and moving the read cap
-  before the box package loads moves both argvs.
+  at all. Pinned twice: `BoxSpec` refuses the old keyword and names no file-size field, and
+  moving the read cap before the box package loads moves both argvs.
 * CORE DUMPS OFF. Both argvs carry `--ulimit core=0:0` (two tokens, once, before the image).
   The kernel kills an over-cap writer with SIGXFSZ, whose default action dumps core, and a
   core file lands in the dying process's cwd — a run dir, or a drain lane's writable tree: a
   file on a host-read tree that no command in the box chose to write. Pinned on both argvs and,
-  live, by `getrlimit(RLIMIT_CORE) == (0, 0)` in the box.
+  live, by `getrlimit(RLIMIT_CORE) == (0, 0)` in the box (the live `core*` scan beside it
+  cannot fail on most hosts; see `_assert_a_writer_the_cap_kills_leaves_no_core`).
 
 So the interface pinned here: both argvs carry `--ulimit fsize=<L>:<L>` with L =
 `_io.READ_LIMIT`, then `--ulimit core=0:0` (test_1092's hand-written argv pins that order,
@@ -43,6 +45,15 @@ kernel property (every apparent-size change is judged against `RLIMIT_FSIZE`), n
 Every negative in them was seen failing by hand under runc against a box with no fsize limit
 (C3 for truncate/ftruncate/write/lift; `fallocate -l` and `posix_fallocate` a MiB past the
 cap land whole).
+
+THE TWO LIVE BOXES. The investigation box is `start_box(run_dir, DEFENDER, ...)`, and its
+commands go through `BoxExecutor.run_parsed`, as the agent's do. The lane box is the lead-author
+drain's: `drains._drain_box_request` over a throwaway git worktree (test_1178's shape), so it
+mounts that worktree read-only and its `skills/` read-write, and nothing of this checkout — a
+startup sentinel planted at a mount source lands in the throwaway tree. That worktree carries
+no `defender` package for the in-box runner to import, so lane commands are plain
+`docker exec` (`sh -c`, `python3 -c`), as test_1178 drives its box; the cap is the container's,
+so every process `docker exec` starts holds it.
 
 WHICH JOB RUNS THE LIVE TESTS. Like #771's mechanism confirmations they carry no
 `@pytest.mark.live` (the gate's `-m "not live"` would deselect them and the `box-dood` job never
@@ -72,8 +83,13 @@ import pytest
 from pydantic import ValidationError
 
 from defender._io import READ_LIMIT
+from defender.learning.core import drains
+from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.runtime import bash_exec, box as box_mod
+from defender.runtime.box._image import HASH_INPUTS
+from defender.tests._declared869 import commit_all, init_git
 from defender.tests._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
+from defender.tests._lead_author_1134 import write
 from defender.tests.e2e._spec771 import AliasProbeDocker
 
 pytestmark = pytest.mark.e2e
@@ -150,10 +166,10 @@ def _run_dir(base: Path) -> Path:
 
 
 def _start_investigation(
-    run_dir: Path, rec: AliasProbeDocker, spec=None, *, tenant_agent: Path | None = None,
+    run_dir: Path, rec: AliasProbeDocker, *, tenant_agent: Path | None = None,
 ) -> None:
-    kw = {} if spec is None else {"spec": spec}
-    box_mod.start_box(run_dir, DEFENDER, tenant_agent=tenant_agent, docker=rec, **kw)
+    """No `spec=`: the env-resolved default every investigation gets."""
+    box_mod.start_box(run_dir, DEFENDER, tenant_agent=tenant_agent, docker=rec)
 
 
 def _tenant_agent(base: Path) -> Path:
@@ -186,13 +202,14 @@ def _stock(spec):
     return dataclasses.replace(spec, rootfs="python:3.11-slim")
 
 
-def _both_argvs(tmp_path: Path, spec=None) -> tuple[list[str], list[str]]:
-    """The investigation box's and a lane box's create argvs for `spec` (the env-resolved
-    default when None), the investigation one with a tenant agent half."""
+def _both_argvs(tmp_path: Path) -> tuple[list[str], list[str]]:
+    """The investigation box's and a lane box's create argvs, each on the env-resolved
+    default spec (what `BoxRequest` resolves too), the investigation one with a tenant agent
+    half."""
     inv = AliasProbeDocker()
-    _start_investigation(_run_dir(tmp_path), inv, spec, tenant_agent=_tenant_agent(tmp_path))
+    _start_investigation(_run_dir(tmp_path), inv, tenant_agent=_tenant_agent(tmp_path))
     lane = AliasProbeDocker()
-    _start_lane(tmp_path, lane, _stock(spec or box_mod.BoxSpec.from_env(os.environ)))
+    _start_lane(tmp_path, lane, _stock(box_mod.BoxSpec.from_env(os.environ)))
     return _create_argv(inv), _create_argv(lane)
 
 
@@ -247,32 +264,17 @@ def test_a_lane_box_launches_with_core_dumps_off(tmp_path):
     )
 
 
-#: A byte count no default holds: if any `BoxSpec` field takes it and moves the rendered cap,
-#: that field is a file-size knob, whatever it is called.
-_KNOB_PROBE = 1_048_583
-
-
-def test_the_box_spec_has_no_knob_for_the_file_size_cap(tmp_path):
-    """No knob: the cap is always `READ_LIMIT`, so no `BoxSpec` keyword sets it. The named
-    field is refused (`BoxSpec` forbids unknown keywords); no field is named for it; and no
-    field that accepts a byte count moves the cap either launch path renders — so the knob
-    cannot come back under another name."""
+def test_the_box_spec_has_no_knob_for_the_file_size_cap():
+    """No knob: the cap is always `READ_LIMIT`, so `BoxSpec` takes no keyword that sets it.
+    The field the cap was rendered from is refused (`BoxSpec` forbids unknown keywords), and no
+    field is named for a file size. Both are NAME checks: a knob brought back under an
+    unrelated name would pass them."""
     with pytest.raises(ValidationError, match="file_size_limit"):
         box_mod.BoxSpec(file_size_limit=L)
     names = [f.name for f in dataclasses.fields(box_mod.BoxSpec)]
     assert not [n for n in names if "fsize" in n or "file_size" in n], (
         f"BoxSpec names a file-size field: {names}"
     )
-    for field in dataclasses.fields(box_mod.BoxSpec):
-        try:
-            spec = box_mod.BoxSpec(**{"rootfs": "python:3.11-slim", field.name: _KNOB_PROBE})
-        except ValidationError:
-            continue    # strict: a field that refuses an int cannot carry a byte count
-        inv, lane = _both_argvs(tmp_path / field.name, spec)
-        assert _ulimits(inv, "fsize") == _ulimits(lane, "fsize") == [FSIZE], (
-            f"BoxSpec.{field.name}={_KNOB_PROBE} moved the box's file-size cap: "
-            f"investigation {_ulimits(inv, 'fsize')}, lane {_ulimits(lane, 'fsize')}"
-        )
 
 
 #: Run in a FRESH interpreter: the read cap is moved before the box package is first imported,
@@ -339,12 +341,15 @@ def _need_runtime(runtime: str) -> None:
 
 @pytest.fixture
 def base(tmp_path: Path) -> Iterator[Path]:
-    """Where every live tree in a test hangs: `tmp_path` on a native daemon, a fresh dir under
-    the shared anchor under DooD (removed afterwards; the box writes as root, so best-effort)."""
-    if _DOOD_ANCHOR is None:
-        yield tmp_path
-        return
-    root = _DOOD_ANCHOR / f"t1188-{uuid.uuid4().hex}"
+    """Where every live tree in a test hangs: below `tmp_path` on a native daemon, a fresh dir
+    under the shared anchor under DooD. Removed afterwards on both (best-effort: the box writes
+    as root). Each live test leaves files of real blocks up to the cap behind — in-cap writes
+    and allocations, an over-cap writer's stub — which pytest's basetemp would otherwise keep
+    for three sessions."""
+    root = (
+        tmp_path / "live" if _DOOD_ANCHOR is None
+        else _DOOD_ANCHOR / f"t1188-{uuid.uuid4().hex}"
+    )
     root.mkdir(parents=True)
     try:
         yield root
@@ -352,55 +357,118 @@ def base(tmp_path: Path) -> Iterator[Path]:
         shutil.rmtree(root, ignore_errors=True)
 
 
+@dataclasses.dataclass(frozen=True)
+class _Ran:
+    """One command's outcome, whichever way it reached the box. A command a signal killed has
+    `rc` = the negated signal number."""
+
+    rc: int
+    out: str
+    err: str
+
+
+@dataclasses.dataclass(frozen=True)
+class _AgentExec:
+    """The investigation box, reached the way the agent's commands reach it: `bash_exec.parse`,
+    then `run_parsed` (a `docker exec` of the in-box runner per call). Every command runs with
+    its cwd on `tree`. A bare binary the kernel kills comes back as the negated signal number
+    (the runner's `Popen.returncode`)."""
+
+    box: box_mod.BoxExecutor
+    tree: Path
+
+    def sh(self, command: str) -> _Ran:
+        res = self.box.run_parsed(bash_exec.parse(command), command=command, cwd=self.tree,
+                                  timeout=EXEC_TIMEOUT)
+        return _Ran(res.rc, res.out.decode("utf-8", "replace"),
+                    res.err.decode("utf-8", "replace"))
+
+    def probe(self, *args: str) -> _Ran:
+        # From a file on the tree: the agent's path takes a command line, not a program.
+        script = self.tree / "_probe_1188.py"
+        if not script.exists():
+            script.write_text(_PROBE, encoding="utf-8")
+        return self.sh(" ".join(["python3", str(script), *args]))
+
+
+@dataclasses.dataclass(frozen=True)
+class _DockerExec:
+    """A lane box, reached by plain `docker exec` with its cwd on `tree`, as test_1178 drives
+    one (the drain worktree has no `defender` package for the in-box runner). A command a
+    signal kills exits 128 + the signal, through `sh` or bare (seen under runc: `dd` past an
+    fsize limit exits 153 both ways); that is reported as `_AgentExec` reports it."""
+
+    name: str
+    tree: Path
+
+    def _run(self, *argv: str) -> _Ran:
+        done = box_mod._docker(["docker", "exec", "-w", str(self.tree), self.name, *argv])
+        rc = done.returncode
+        return _Ran(-(rc - 128) if rc > 128 else rc, done.stdout, done.stderr)
+
+    def sh(self, command: str) -> _Ran:
+        return self._run("sh", "-c", command)
+
+    def probe(self, *args: str) -> _Ran:
+        return self._run("python3", "-c", _PROBE, *args)
+
+
+_Exec = _AgentExec | _DockerExec
+
+
 @contextlib.contextmanager
-def _investigation_box(run_dir: Path, runtime: str) -> Iterator[object]:
-    # With a tenant agent half, as `run.py` always starts one.
-    agent = _tenant_agent(run_dir.parent)
+def _investigation_box(base: Path, runtime: str) -> Iterator[_AgentExec]:
+    """A REAL investigation box on a fresh run dir, with a tenant agent half as `run.py`
+    always starts one; the run dir is the writable tree the cap must hold on."""
+    run_dir = _run_dir(base)
     box = box_mod.start_box(
-        run_dir, DEFENDER, spec=box_mod.BoxSpec(runtime=runtime), tenant_agent=agent,
-        docker=box_mod._docker,
+        run_dir, DEFENDER, spec=box_mod.BoxSpec(runtime=runtime),
+        tenant_agent=_tenant_agent(base), docker=box_mod._docker,
     )
     try:
         # A startup fault under DEFENDER_ALLOW_UNSANDBOXED=1 degrades to the host executor,
         # where every negative below would be measuring the host instead of the box.
         assert box.sandboxed, "start_box returned the unsandboxed host fallback, not a box"
-        yield box
+        yield _AgentExec(box, run_dir)
     finally:
         box_mod.stop_box(box)
+
+
+def _drain_worktree(base: Path) -> Path:
+    """A throwaway git worktree in test_1178's shape: a committed seed under
+    `defender/skills/`, then the files the box image's name is a function of copied into
+    `defender/`, so the drain request resolves the image this checkout's CI built."""
+    wt = init_git(base / "wt")
+    write(wt / "defender" / "skills" / "seed-1188.md", "seed\n")
+    commit_all(wt, "seed")
+    for name in HASH_INPUTS:
+        shutil.copyfile(DEFENDER / name, wt / "defender" / name)
+    assert box_mod.image_tag(wt / "defender") == box_mod.image_tag(DEFENDER)
+    return wt
 
 
 @contextlib.contextmanager
-def _lane_box(base: Path, runtime: str) -> Iterator[tuple[object, Path]]:
-    """A REAL lane box in test_665_box_live's run-cycle shape: this tree mounted read-only (so
-    the exec entrypoint imports and the rootfs resolves to this tree's image through the
-    production path) and one writable tree, the mount the cap must hold on."""
-    tree = base / "lane-rw"
-    tree.mkdir(parents=True)
-    request = box_mod.BoxRequest(
-        name=f"defender-drain-1188-{uuid.uuid4().hex[:8]}",
-        # The repo root, not `DEFENDER`: a lane box plants a startup sentinel at every mount's
-        # source, and a transient file inside the live `defender/` tree races any concurrent
-        # test that copies it (seen in CI: test_1080's copytree hit a vanished sentinel).
-        mounts=(
-            box_mod.Mount(source=REPO_ROOT, target=REPO_ROOT, writable=False),
-            box_mod.Mount(source=tree, target=tree, writable=True),
-        ),
-        workdir=REPO_ROOT, env={}, spec=box_mod.BoxSpec(runtime=runtime),
+def _lane_box(base: Path, runtime: str) -> Iterator[_DockerExec]:
+    """A REAL lane box, requested the way the lead-author drain requests one
+    (`drains._drain_box_request` over a throwaway worktree: the worktree read-only, its
+    `skills/` read-write) with only the runtime changed. The writable tree the cap must hold on
+    is read off the request, so it is the one production mounts."""
+    wt = _drain_worktree(base)
+    paths = LoopPaths(repo_root=wt, state_dir=base / "state")
+    request = drains._drain_box_request(
+        wt, f"t1188-{uuid.uuid4().hex[:8]}", LEAD_AUTHOR_DRAIN_LABEL, paths,
     )
+    request = dataclasses.replace(
+        request, spec=dataclasses.replace(request.spec, runtime=runtime),
+    )
+    writable = [Path(m.source) for m in request.mounts if m.writable]
+    assert len(writable) == 1, f"the lead-author drain box mounts {writable} writable, not one"
     box = box_mod.start_box(request, docker=box_mod._docker)
     try:
         assert box.sandboxed, "start_box returned the unsandboxed host fallback, not a box"
-        yield box, tree
+        yield _DockerExec(box.name, writable[0])
     finally:
         box_mod.stop_box(box)
-
-
-def _exec(box, command: str, cwd: Path):
-    """The REAL exec transport the agent's commands take: `bash_exec.parse`, then
-    `run_parsed` (a `docker exec` per call). A bare binary the kernel kills comes back as
-    the negated signal number (the in-box runner's `Popen.returncode`)."""
-    return box.run_parsed(bash_exec.parse(command), command=command, cwd=cwd,
-                          timeout=EXEC_TIMEOUT)
 
 
 #: One in-box probe, one mode per call. Every outcome is reported as DATA (exception class and
@@ -467,17 +535,13 @@ print(json.dumps(out))
 '''
 
 
-def _probe(box, tree: Path, mode: str, target: Path, n: int) -> dict:
-    script = tree / "_probe_1188.py"
-    if not script.exists():
-        script.write_text(_PROBE, encoding="utf-8")
-    command = f"python3 {script} {mode} {target} {n}"
-    res = _exec(box, command, tree)
+def _probe(x: _Exec, mode: str, target: Path, n: int) -> dict:
+    res = x.probe(mode, str(target), str(n))
     assert res.rc == 0, (
         f"the {mode} probe did not run to completion in the box (rc={res.rc}): "
-        f"{res.err.decode('utf-8', 'replace')!r} — a broken probe, not a refusal"
+        f"{res.err!r} — a broken probe, not a refusal"
     )
-    return json.loads(res.out.decode("utf-8", "replace").strip().splitlines()[-1])
+    return json.loads(res.out.strip().splitlines()[-1])
 
 
 def _host_size(path: Path) -> int:
@@ -489,10 +553,10 @@ def _host_size(path: Path) -> int:
         return 0
 
 
-def _assert_rlimit_is_the_cap(box, tree: Path) -> None:
+def _assert_rlimit_is_the_cap(x: _Exec) -> None:
     """O2: the limit every exec'd process holds, read where it applies — `getrlimit` inside the
     box, in bytes, soft and hard both equal to the read cap."""
-    seen = _probe(box, tree, "getrlimit", tree / "unused", 0)
+    seen = _probe(x, "getrlimit", x.tree / "unused", 0)
     assert seen["fsize"] == [L, L], (
         f"RLIMIT_FSIZE inside the box is {seen['fsize']}, expected [{L}, {L}]"
     )
@@ -510,32 +574,33 @@ def _assert_host_takes_a_sparse_tib(tree: Path) -> None:
         probe.unlink(missing_ok=True)
 
 
-def _assert_sparse_extension_is_bounded(box, tree: Path) -> None:
+def _assert_sparse_extension_is_bounded(x: _Exec) -> None:
     """O1/O2: a sparse extension past the cap — by the `truncate` binary and by Python's
-    `os.ftruncate`, both started through the exec path — is refused, and the host sees no file
-    on the writable tree whose apparent size exceeds the cap. Each refusal is paired with the
-    same primitive, same directory, extending to UNDER the cap, which succeeds."""
+    `os.ftruncate`, both started in the box — is refused, and the host sees no file on the
+    writable tree whose apparent size exceeds the cap. Each refusal is paired with the same
+    primitive, same directory, extending to UNDER the cap, which succeeds."""
+    tree = x.tree
     _assert_host_takes_a_sparse_tib(tree)
 
     big, small = tree / "sparse-big", tree / "sparse-small"
-    refused = _exec(box, f"truncate -s 1T {big}", tree)
+    refused = x.sh(f"truncate -s 1T {big}")
     assert refused.rc != 0, "`truncate -s 1T` succeeded inside the box"
     assert _host_size(big) <= L, (
         f"the host sees a {_host_size(big)}-byte file the box truncated to 1 TiB (cap {L})"
     )
-    allowed = _exec(box, f"truncate -s {L // 2} {small}", tree)
+    allowed = x.sh(f"truncate -s {L // 2} {small}")
     assert allowed.rc == 0, (
         f"control: `truncate` under the cap failed (rc={allowed.rc}): {allowed.err!r}"
     )
     assert _host_size(small) == L // 2, "control: the in-cap truncate did not land"
 
     big_fd, small_fd = tree / "ftruncate-big", tree / "ftruncate-small"
-    over = _probe(box, tree, "ftruncate", big_fd, ONE_TIB)
+    over = _probe(x, "ftruncate", big_fd, ONE_TIB)
     assert over["ftruncate"] == f"OSError:{errno.EFBIG}", (
         f"os.ftruncate(fd, 1 << 40) in the box: {over['ftruncate']} (expected EFBIG)"
     )
     assert _host_size(big_fd) <= L, f"the host sees {_host_size(big_fd)} bytes"
-    under = _probe(box, tree, "ftruncate", small_fd, L // 2)
+    under = _probe(x, "ftruncate", small_fd, L // 2)
     assert under["ftruncate"] == "ok", f"control: in-cap ftruncate refused: {under}"
     assert _host_size(small_fd) == L // 2, "control: the in-cap ftruncate did not land"
 
@@ -554,71 +619,83 @@ def _assert_host_takes_an_allocation_past_the_cap(tree: Path) -> None:
         probe.unlink(missing_ok=True)
 
 
-def _assert_allocation_is_bounded(box, tree: Path) -> None:
+def _assert_allocation_is_bounded(x: _Exec) -> None:
     """O1/O2: an ALLOCATION past the cap — the `fallocate` binary and Python's
     `os.posix_fallocate` (glibc's, which falls back to writing where the filesystem cannot
-    allocate), both through the exec path — is refused, and the host sees no file over the
+    allocate), both started in the box — is refused, and the host sees no file over the
     cap. Each primitive is tried a MiB past the cap first and at 1 TiB only once that was
     refused: an allocation that is NOT refused really takes the blocks. Control for each: the
     same primitive, same directory, allocating half the cap, lands at exactly that size."""
+    tree = x.tree
     _assert_host_takes_an_allocation_past_the_cap(tree)
 
     for size, name in ((PAST, "fallocate-past"), (ONE_TIB, "fallocate-tib")):
-        refused = _exec(box, f"fallocate -l {size} {tree / name}", tree)
+        refused = x.sh(f"fallocate -l {size} {tree / name}")
         assert refused.rc != 127, f"there is no `fallocate` in the box image: {refused.err!r}"
         assert refused.rc != 0, f"`fallocate -l {size}` succeeded inside the box"
         assert _host_size(tree / name) <= L, (
             f"the host sees a {_host_size(tree / name)}-byte file the box allocated (cap {L})"
         )
     small = tree / "fallocate-small"
-    allowed = _exec(box, f"fallocate -l {L // 2} {small}", tree)
+    allowed = x.sh(f"fallocate -l {L // 2} {small}")
     assert allowed.rc == 0, (
         f"control: `fallocate` under the cap failed (rc={allowed.rc}): {allowed.err!r}"
     )
     assert _host_size(small) == L // 2, "control: the in-cap fallocate did not land"
 
     for size, name in ((PAST, "posix-fallocate-past"), (ONE_TIB, "posix-fallocate-tib")):
-        over = _probe(box, tree, "posix_fallocate", tree / name, size)
+        over = _probe(x, "posix_fallocate", tree / name, size)
         assert over["posix_fallocate"] == f"OSError:{errno.EFBIG}", (
             f"os.posix_fallocate(fd, 0, {size}) in the box: {over['posix_fallocate']} "
             "(expected EFBIG)"
         )
         assert _host_size(tree / name) <= L, f"the host sees {_host_size(tree / name)} bytes"
     small = tree / "posix-fallocate-small"
-    under = _probe(box, tree, "posix_fallocate", small, L // 2)
+    under = _probe(x, "posix_fallocate", small, L // 2)
     assert under["posix_fallocate"] == "ok", f"control: in-cap posix_fallocate refused: {under}"
     assert _host_size(small) == L // 2, "control: the in-cap posix_fallocate did not land"
 
 
-def _expected(size: int) -> bytes:
-    block = bytes(range(256)) * 256
-    return (block * (size // len(block) + 1))[:size]
+#: The probe's write pattern, restated host-side: the probe writes it from the start of the
+#: file again at every `len(BLOCK)` boundary, so byte i of what it wrote is `BLOCK[i % 65536]`.
+BLOCK = bytes(range(256)) * 256
 
 
-def _assert_real_write_stops_at_the_cap(box, tree: Path) -> None:
+def _assert_holds_the_pattern(path: Path, size: int) -> None:
+    """`path` is exactly `size` bytes of the probe's pattern — read one block at a time, so the
+    check holds no more memory for a file at the cap than for an empty one."""
+    seen = 0
+    with path.open("rb") as fh:
+        while chunk := fh.read(len(BLOCK)):
+            assert chunk == BLOCK[:len(chunk)], (
+                f"control: the in-cap write did not land byte for byte (block at {seen})"
+            )
+            seen += len(chunk)
+    assert seen == size, f"control: the in-cap write landed {seen} bytes, not {size}"
+
+
+def _assert_real_write_stops_at_the_cap(x: _Exec) -> None:
     """O1/O2: a REAL write past the cap — data, not a hole — onto the writable tree (never
     `/tmp`, whose 64m tmpfs would answer ENOSPC first) stops: EFBIG in the box, and the host
     sees at most `L` bytes. Control on the same tree: a write under the cap lands with exactly
     the bytes written."""
-    past = tree / "write-past"
-    over = _probe(box, tree, "write", past, PAST)
+    past = x.tree / "write-past"
+    over = _probe(x, "write", past, PAST)
     assert over["errno"] == errno.EFBIG, f"a write past the cap was not refused: {over}"
     assert over["written"] <= L, f"the box wrote {over['written']} bytes (cap {L})"
     assert _host_size(past) <= L, f"the host sees {_host_size(past)} bytes (cap {L})"
 
-    within = tree / "write-within"
-    under = _probe(box, tree, "write", within, L // 2)
+    within = x.tree / "write-within"
+    under = _probe(x, "write", within, L // 2)
     assert under == {"written": L // 2, "errno": None}, f"control: {under}"
-    assert within.read_bytes() == _expected(L // 2), (
-        "control: the in-cap write did not land on the host byte for byte"
-    )
+    _assert_holds_the_pattern(within, L // 2)
 
 
-def _assert_the_box_cannot_lift_it(box, tree: Path) -> None:
+def _assert_the_box_cannot_lift_it(x: _Exec) -> None:
     """O3 (M2): a process in the box cannot raise the limit — not to unlimited, not by one byte
     of hard limit, not through the shell's `ulimit -H -f unlimited` — and the limit it holds
     afterwards is unchanged. Control in the same process: lowering it succeeds."""
-    seen = _probe(box, tree, "lift", tree / "unused", L)
+    seen = _probe(x, "lift", x.tree / "unused", L)
     assert seen["before"] == [L, L], f"the box did not start at the cap: {seen}"
     assert seen["unlimited"] != "ok", "setrlimit(RLIMIT_FSIZE, unlimited) succeeded in the box"
     assert seen["hard_plus_one"] != "ok", "the box raised its hard file-size limit past L"
@@ -629,42 +706,43 @@ def _assert_the_box_cannot_lift_it(box, tree: Path) -> None:
     assert seen["lowered"] == [L // 2, L], f"control: lowering did not take: {seen}"
 
 
-def _assert_the_box_cannot_make_a_file_past_the_cap(box, tree: Path) -> None:
-    _assert_rlimit_is_the_cap(box, tree)
-    _assert_sparse_extension_is_bounded(box, tree)
-    _assert_allocation_is_bounded(box, tree)
-    _assert_real_write_stops_at_the_cap(box, tree)
-    _assert_the_box_cannot_lift_it(box, tree)
+def _assert_the_box_cannot_make_a_file_past_the_cap(x: _Exec) -> None:
+    _assert_rlimit_is_the_cap(x)
+    _assert_sparse_extension_is_bounded(x)
+    _assert_allocation_is_bounded(x)
+    _assert_real_write_stops_at_the_cap(x)
+    _assert_the_box_cannot_lift_it(x)
 
 
-def _assert_a_writer_the_cap_kills_leaves_no_core(box, tree: Path) -> None:
+def _assert_a_writer_the_cap_kills_leaves_no_core(x: _Exec) -> None:
     """A writer that does NOT ignore SIGXFSZ (`dd`, a bare binary) writes past the cap with its
     cwd on the writable tree and is killed by the signal — the positive control that a dump
-    was due — and the host sees no `core*` file anywhere in the tree afterwards. The file it
-    was writing stops at the cap.
+    was due — and the file it was writing stops at the cap.
 
-    Only discriminating where the host's `kernel.core_pattern` is a plain path: the kernel
-    then writes the core into the dying process's cwd, gated by RLIMIT_CORE. A pipe pattern
-    (apport, systemd-coredump — the dev box's and Ubuntu runners') hands the core to a host
-    helper whatever the limit (and whether gVisor writes cores at all is not probed here);
-    there this check is green with or without the flag, and `RLIMIT_CORE == (0, 0)` is what
-    pins the flag."""
+    The `core*` scan after it CANNOT FAIL on most hosts, with or without `core=0:0`: a pipe
+    `kernel.core_pattern` (apport, systemd-coredump — the dev box's and Ubuntu runners') hands
+    the core to a host helper, an absolute-path pattern (`/var/crash/core.%p`) writes it
+    outside the tree, and gVisor (runsc) writes no host core at all. It can fail only under
+    runc on a host whose pattern is a relative path. The check that fails without the flag is
+    `RLIMIT_CORE == (0, 0)`, in `_assert_core_dumps_are_off`."""
     writer = "xfsz-writer"    # relative: the core, if any, would land beside it
-    killed = _exec(box, f"dd if=/dev/zero of={writer} bs=1M count={PAST >> 20}", tree)
+    killed = x.sh(f"dd if=/dev/zero of={writer} bs=1M count={PAST >> 20}")
     assert killed.rc == -signal.SIGXFSZ, (
         f"control: the over-cap writer was not killed by SIGXFSZ (rc={killed.rc}): "
         f"{killed.err!r}"
     )
-    assert _host_size(tree / writer) <= L, f"the host sees {_host_size(tree / writer)} bytes"
-    cores = sorted(str(p.relative_to(tree)) for p in tree.rglob("core*"))
+    assert _host_size(x.tree / writer) <= L, (
+        f"the host sees {_host_size(x.tree / writer)} bytes"
+    )
+    cores = sorted(str(p.relative_to(x.tree)) for p in x.tree.rglob("core*"))
     assert cores == [], f"a writer the cap killed left core file(s) on the writable tree: {cores}"
 
 
-def _assert_core_dumps_are_off(box, tree: Path) -> None:
+def _assert_core_dumps_are_off(x: _Exec) -> None:
     """Every exec'd process holds RLIMIT_CORE = (0, 0): no core, and a hard limit of 0 leaves
     the soft one nowhere to rise (raising the hard one needs CAP_SYS_RESOURCE, which O3's
     lift attempts show the box lacks)."""
-    seen = _probe(box, tree, "getrlimit", tree / "unused", 0)
+    seen = _probe(x, "getrlimit", x.tree / "unused", 0)
     assert seen["core"] == [0, 0], (
         f"RLIMIT_CORE inside the box is {seen['core']}, expected [0, 0]"
     )
@@ -678,41 +756,40 @@ def test_a_live_investigation_box_cannot_make_a_file_past_the_read_cap(runtime, 
     run-dir bind a sparse extension (`truncate -s 1T`, `ftruncate`), an allocation
     (`fallocate`, `posix_fallocate`) and a real write past it are each refused with the host
     seeing nothing over the cap, while the same primitive under it lands; and nothing in the
-    box can raise it."""
+    box can raise it. Commands go through `run_parsed`, as the agent's do."""
     _need_runtime(runtime)
-    run_dir = _run_dir(base)
-    with _investigation_box(run_dir, runtime) as box:
-        _assert_the_box_cannot_make_a_file_past_the_cap(box, run_dir)
+    with _investigation_box(base, runtime) as x:
+        _assert_the_box_cannot_make_a_file_past_the_cap(x)
 
 
 @requires_box_daemon
 @RUNTIMES
 def test_a_live_lane_box_cannot_make_a_file_past_the_read_cap(runtime, base):
-    """O1/O2/O3, lane path (`BoxRequest`), under each runtime: the same cap, the same refusals
-    and the same controls on the lane box's writable mount."""
+    """O1/O2/O3, lane path, under each runtime: a box requested as the lead-author drain
+    requests one holds the same cap, with the same refusals and the same controls, on the
+    `skills/` tree it mounts read-write."""
     _need_runtime(runtime)
-    with _lane_box(base, runtime) as (box, tree):
-        _assert_the_box_cannot_make_a_file_past_the_cap(box, tree)
+    with _lane_box(base, runtime) as x:
+        _assert_the_box_cannot_make_a_file_past_the_cap(x)
 
 
 @requires_box_daemon
 @RUNTIMES
 def test_a_live_investigation_box_dumps_no_core(runtime, base):
-    """Core dumps off, investigation lane, under each runtime: a writer the cap kills leaves
-    no core in the run dir, and every exec'd process holds RLIMIT_CORE = (0, 0)."""
+    """Core dumps off, investigation lane, under each runtime: every exec'd process holds
+    RLIMIT_CORE = (0, 0), and a writer the cap kills leaves no core in the run dir."""
     _need_runtime(runtime)
-    run_dir = _run_dir(base)
-    with _investigation_box(run_dir, runtime) as box:
-        _assert_a_writer_the_cap_kills_leaves_no_core(box, run_dir)
-        _assert_core_dumps_are_off(box, run_dir)
+    with _investigation_box(base, runtime) as x:
+        _assert_a_writer_the_cap_kills_leaves_no_core(x)
+        _assert_core_dumps_are_off(x)
 
 
 @requires_box_daemon
 @RUNTIMES
 def test_a_live_lane_box_dumps_no_core(runtime, base):
-    """Core dumps off, lane path, under each runtime: the same on the lane box's writable
-    mount."""
+    """Core dumps off, lane path, under each runtime: the same on the drain box's writable
+    `skills/` tree."""
     _need_runtime(runtime)
-    with _lane_box(base, runtime) as (box, tree):
-        _assert_a_writer_the_cap_kills_leaves_no_core(box, tree)
-        _assert_core_dumps_are_off(box, tree)
+    with _lane_box(base, runtime) as x:
+        _assert_a_writer_the_cap_kills_leaves_no_core(x)
+        _assert_core_dumps_are_off(x)

@@ -15,10 +15,14 @@ capability its own tests need. A shared marker would flatten three different rea
 one wrong one.
 
 It also answers the two questions the live-box suites ask before starting a box: which
-runtimes the daemon registers (`docker_runtimes`, probed once per process however many cases
-ask), and, under DooD, where a bind source must live for the daemon to see it
-(`dood_anchor`). Both had been near-copied between `e2e/test_540_box_boundary` and
-`e2e/test_1188_box_fsize`.
+runtimes the daemon registers (`docker_runtimes`), and, under DooD, where a bind source must
+live for the daemon to see it (`dood_anchor`). Both had been near-copied between
+`e2e/test_540_box_boundary` and `e2e/test_1188_box_fsize`.
+
+The three daemon probes are each asked once per process (`functools.cache`): several suites
+ask at import and one parametrized over runtimes asks per case, and every ask is a `docker`
+subprocess with a 30s timeout. A probe that raises is not cached, so it raises again for the
+next caller rather than being remembered as an answer.
 
 Underscore-prefixed so pytest does not collect it; it defines no tests.
 """
@@ -32,6 +36,7 @@ from pathlib import Path
 _DEFENDER = Path(__file__).resolve().parents[1]
 
 
+@functools.cache
 def daemon_reachable() -> bool:
     """A docker daemon answers `version`. Never raises — an absent binary is a `False`."""
     try:
@@ -43,6 +48,7 @@ def daemon_reachable() -> bool:
         return False
 
 
+@functools.cache
 def is_dood() -> bool:
     """Docker-outside-of-Docker: a reachable daemon whose root dir is not OUR root dir.
 
@@ -64,16 +70,18 @@ def is_dood() -> bool:
 
 @functools.cache
 def docker_runtimes() -> frozenset[str]:
-    """The runtimes the daemon registers (`docker info` Runtimes), asked once per process: a
-    suite parametrized over runtimes would otherwise pay one `docker info` per case. Empty
-    when the daemon cannot say. Never raises."""
-    try:
-        probe = subprocess.run(
-            ["docker", "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}} {{end}}"],
-            capture_output=True, text=True, encoding="utf-8", timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return frozenset()
+    """The runtimes the daemon registers (`docker info` Runtimes). Empty when the daemon
+    answers non-zero.
+
+    RAISES when `docker` cannot be run or does not answer in time, and that is the point: an
+    empty set here skips every runtime-gated live test, so a `docker info` that timed out once
+    under load would otherwise turn those suites green while they test nothing. Every caller
+    asks only after `daemon_reachable()`, so a raise is a daemon that stopped answering, and it
+    fails where it was asked: collection for a module-level gate, the case for a per-case one."""
+    probe = subprocess.run(
+        ["docker", "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}} {{end}}"],
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
     return frozenset(probe.stdout.split()) if probe.returncode == 0 else frozenset()
 
 
