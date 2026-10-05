@@ -9,6 +9,7 @@ This module is the drain itself: acquire the lock, build the handoffs, run, veri
 from __future__ import annotations
 
 import argparse
+import contextlib
 import functools
 import logging
 import string
@@ -25,7 +26,6 @@ from uuid import uuid4
 if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.learning.author import shared as _author_shared
 from defender import _corpus
 from defender import _git
 from defender import _scaffold_rules
@@ -34,6 +34,7 @@ from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config
 from defender.learning.core.lane_trees import DrainTrees, TreeFor, open_drain_trees
 from defender.learning.core import persist as _loop_persist
+from defender.learning.core.state import LEAD_QUEUE_LOCK, TRY_ONCE, LearningState
 from defender.learning._prompt import stage_user_message, structured_json_body
 from defender.learning.leads import lead_neighbors
 from defender._claim_git import ClaimGit
@@ -79,19 +80,15 @@ from defender.learning.leads.lead_extraction import (  # noqa: F401  (re-exporte
 )
 from ._handoff import (
     LEAD_AUTHOR_PROMPT,
-    QUEUE_LOCK_FILE,
     QUEUE_LOCK_SKIP_RC,
     _DRAFT_README_NAMES,
     _draft_contradicts_skill,
     _lift_threshold,
     _templates_by_identity,
-    acquire_queue_lock,
     build_handoff,
     build_system_draft_handoffs,
     discover_system_drafts,
     invoke_agent,
-    queue_lock_file,
-    release_queue_lock,
 )
 from ._rules import (
     _NO_MINTED,
@@ -114,7 +111,6 @@ from ._rules import (
     _verify_skills_state,
 )
 from defender.learning.leads._lead_spine import (
-    PENDING_DIR,
     _loop_commit_body,
     _spawn_author_agent,
     _verify_corpus_scope,
@@ -164,7 +160,10 @@ DoneSink = Callable[[str | None], None]
 
 @model(frozen=True)
 class LeadAuthorDeps:
+    #: The repo trees' spelling (`repo_root`, `skills_dir`); the state tree is `state`'s.
     paths: _loop_config.LoopPaths
+    #: The learning state handle: the queue lock and the pitfalls queue are reached through it.
+    state: LearningState
     #: The declared systems (adapter glob ∪ committed marker), resolved once before the agent
     #: is spawned and never re-derived by a consumer.
     systems: frozenset[str]
@@ -173,8 +172,6 @@ class LeadAuthorDeps:
     synthesize: Callable[..., list[Path]]
     build_handoff: Callable[..., list[dict]]
     discover_system_drafts: Callable[[], list[Path]]
-    acquire_queue_lock: Callable[[], Any]
-    release_queue_lock: Callable[[Any], None]
     #: The lane's held `skills/` mount (`lane_skills`): every host read and write of the catalog
     #: and the system skills goes through it or its view (#1134). Lives only as long as the
     #: `DrainTrees` it came from.
@@ -191,7 +188,7 @@ class LeadAuthorDeps:
 
 
 def build_lead_author_deps(
-    paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS, *, trees: DrainTrees,
+    paths: _loop_config.LoopPaths, *, state: LearningState, trees: DrainTrees,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> LeadAuthorDeps:
     """The lane's seams over `paths`, reading and writing `skills/` through `trees`, the lane's
@@ -203,6 +200,7 @@ def build_lead_author_deps(
     systems = declared_systems(paths.repo_root)
     return LeadAuthorDeps(
         paths=paths,
+        state=state,
         systems=systems,
         invoke_agent=functools.partial(invoke_agent, repo_root=paths.repo_root),
         extract=extract,
@@ -215,8 +213,6 @@ def build_lead_author_deps(
             discover_system_drafts, skills=skills.view(), where=paths.skills_dir,
             systems=systems,
         ),
-        acquire_queue_lock=functools.partial(acquire_queue_lock, paths),
-        release_queue_lock=release_queue_lock,
         skills=skills,
         tree_for=trees.tree_for,
         git_timeout=git_timeout,
@@ -227,7 +223,8 @@ def run(
     run_dir: Path,
     *,
     label: _loop_config.DrainLabel,
-    paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS,
+    paths: _loop_config.LoopPaths | None = None,
+    state: LearningState | None = None,
     deps: LeadAuthorDeps | None = None,
     box: Any = None,
     on_done: DoneSink | None = None,
@@ -244,7 +241,7 @@ def run(
     queue lock, and closed when the run ends; with `deps`, a label that does not mount
     `deps.paths.skills_dir` is refused (#1134). The label is used first, on both paths, so a
     non-member raises before the queue lock or any of the run (#1179 O1')."""
-    writable = label.writable_trees(deps.paths if deps is not None else paths)
+    writable = label.writable_trees(deps.paths if deps is not None else paths)  # type: ignore[arg-type]
     if not run_dir.is_dir():
         _logger.critical(f"run_dir not found: {run_dir}")
         return 2
@@ -258,28 +255,27 @@ def run(
             raise LeadAuthorError(
                 f"refused: the {str(label)!r} lane does not mount {deps.paths.skills_dir}"
             )
-        queue_lock = deps.acquire_queue_lock()
-        if queue_lock is None:
-            return QUEUE_LOCK_SKIP_RC
-        try:
+        with deps.state.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as locked:
+            if not locked:
+                return QUEUE_LOCK_SKIP_RC
             return _run_locked(run_dir, deps, box=box, on_done=sink)
-        finally:
-            deps.release_queue_lock(queue_lock)
 
-    queue_lock = acquire_queue_lock(paths)
-    if queue_lock is None:
-        return QUEUE_LOCK_SKIP_RC
-    try:
-        with open_drain_trees(paths, label) as trees:
-            deps = build_lead_author_deps(paths, trees=trees)
-            return _run_locked(run_dir, deps, box=box, on_done=sink)
-    finally:
-        release_queue_lock(queue_lock)
+    if paths is None:
+        raise TypeError("run takes paths= (or deps=)")
+    with contextlib.ExitStack() as owned:
+        if state is None:
+            state = owned.enter_context(LearningState.open(paths))
+        with state.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as locked:
+            if not locked:
+                return QUEUE_LOCK_SKIP_RC
+            with open_drain_trees(paths, label) as trees:
+                deps = build_lead_author_deps(paths, state=state, trees=trees)
+                return _run_locked(run_dir, deps, box=box, on_done=sink)
 
 
 def run_under_held_queue_lock(
-    run_dir: Path, *, paths: _loop_config.LoopPaths, trees: DrainTrees, box: Any = None,
-    on_done: DoneSink, git_timeout: float = GIT_TIMEOUT_SECONDS,
+    run_dir: Path, *, paths: _loop_config.LoopPaths, state: LearningState, trees: DrainTrees,
+    box: Any = None, on_done: DoneSink, git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> int:
     """`run` for a caller that already holds the per-author queue lock (the drain holds it for
     its whole tick, since it defers the done sentinel) and the lane's held mounts, `trees` (the
@@ -288,7 +284,8 @@ def run_under_held_queue_lock(
         _logger.critical(f"run_dir not found: {run_dir}")
         return 2
     return _run_locked(
-        run_dir, build_lead_author_deps(paths, trees=trees, git_timeout=git_timeout), box=box,
+        run_dir, build_lead_author_deps(paths, state=state, trees=trees, git_timeout=git_timeout),
+        box=box,
         on_done=on_done,
     )
 
@@ -333,7 +330,7 @@ def _run_locked(
     if not collected_marker.is_file():
         failures = collect_general_failures(executed, run_dir, catalog=catalog)
         if failures:
-            _loop_persist.append_pitfalls(failures, paths=deps.paths)
+            _loop_persist.append_pitfalls(failures, state=deps.state)
             # Both numbers: a large gap between failures and this run's distinct mistakes
             # signals a looping lead. (The curation threshold merges across the whole queue.)
             distinct = len(_loop_persist.merge_pitfalls(failures))
@@ -514,7 +511,8 @@ def main(argv: list[str]) -> int:
                         f"+ {names['RAW_MARKER']}/")
     args = p.parse_args(argv)
     # By hand this serves the lead-author lane's own queue under its lock, so it names that lane.
-    return run(args.run_dir, label=_loop_config.LEAD_AUTHOR_DRAIN_LABEL)
+    return run(
+        args.run_dir, label=_loop_config.LEAD_AUTHOR_DRAIN_LABEL, paths=_loop_config.loop_paths())
 
 
 
@@ -534,9 +532,7 @@ __all__ = [
     "LeadAuthorError",
     "Mapping",
     "MappingProxyType",
-    "PENDING_DIR",
     "Path",
-    "QUEUE_LOCK_FILE",
     "QUEUE_LOCK_SKIP_RC",
     "REPO_ROOT",
     "SKILLS_DIR",
@@ -593,7 +589,6 @@ __all__ = [
     "_verify_corpus_scope",
     "_verify_skills_state",
     "_write_state",
-    "acquire_queue_lock",
     "done_sentinel_text",
     "queue_lock_file",
     "answered_identities",
@@ -612,7 +607,6 @@ __all__ = [
     "lead_neighbors",
     "lead_render",
     "main",
-    "release_queue_lock",
     "write_done_sentinel",
     "run",
     "run_under_held_queue_lock",

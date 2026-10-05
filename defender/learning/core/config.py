@@ -173,9 +173,8 @@ class LoopPaths(DefenderPaths):
 
     @property
     def findings_lock_file(self) -> Path:
-        """The findings queue's append-role lock (`findings.append_lock`), exposed because the
-        live-run appender (`persist.append_findings`) reaches it off `paths` rather than a
-        channel. The drain-role lock is a separate `QueueChannel` field (#719)."""
+        """The findings queue's append-role lock (`findings.append_lock`). The drain-role lock is
+        a separate `QueueChannel` field (#719)."""
         return self.pending_dir / ".findings.lock"
 
     @property
@@ -213,10 +212,6 @@ def _env_state_dir() -> Path | None:
     if not raw:
         return None
     return Path(raw).resolve()
-
-
-def learning_state_root() -> Path:
-    return _env_state_dir() or (REPO_ROOT / "defender" / "learning")
 
 
 

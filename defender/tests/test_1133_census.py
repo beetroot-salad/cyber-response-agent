@@ -139,7 +139,8 @@ PATH_SEAMS = frozenset({
 #: The `_io` writers beneath the seams (plus any `rooted_*` and any private `_io._<name>`),
 #: rev 2's held-root core among them.
 CORE = frozenset({"hold", "hold_new"})
-IO_WRITERS = frozenset({"open_nofollow_fd", "open_unnamed", "open_unnamed_at", "sweep_staged",
+IO_WRITERS = frozenset({"move_at", "open_lock_at", "open_nofollow_fd", "open_unnamed",
+                        "open_unnamed_at", "sweep_staged",
                         *CORE})
 _IO = "defender._io"
 RAW_OS = frozenset({

@@ -12,7 +12,6 @@ finding never costs the other worlds theirs.
 
 from __future__ import annotations
 
-import json
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
@@ -20,19 +19,14 @@ from typing import Any
 
 import yaml
 
-from defender._io import (
-    ENTRY_FILE, Bound, bind, guarded_mkdir, read_jsonl_rows_report, write_guarded)
-from defender._run_paths import artifact_file
+from defender._io import ENTRY_FILE, Bound, bind
 from defender._yaml import safe_load as _yaml_safe_load
 from defender._text import is_content_less
 from defender._vocab import normalized_judge_outcome
 from defender._episode_paths import LAYOUT
-from defender.learning.core.config import (
-    QUEUEABLE_FINDING_TYPES,
-    learning_state_root,
-    loop_paths,
-)
-from defender.learning.core.persist import derive_alert_rule_key, queue_lock
+from defender.learning.core.config import QUEUEABLE_FINDING_TYPES
+from defender.learning.core.persist import derive_alert_rule_key
+from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS, Channel, LearningState
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.judge.family import is_gradable_row
 from defender.learning.judge.render import episode_alert
@@ -41,31 +35,6 @@ from defender.learning.judge.run import SUBJECT_DEFENDER, SUBJECT_WORLD, cites_s
 
 #: Outcomes whose episode is never a defender failure to author from.
 _UNQUEUEABLE_VERDICTS = frozenset({"discard", "corpus-contradiction"})
-
-
-def _queue_paths_for(channel: Any, queue_dir: Path | None) -> tuple[Path, Path]:
-    """One channel's `(file, append_lock)`, relocated under `queue_dir` when given.
-
-    Names come from the `QueueChannel` the drain reads through, so a rename cannot leave the
-    appender writing files nothing reads; only the directory is overridable."""
-    if queue_dir is None:
-        return channel.file, channel.append_lock
-    queue_dir = Path(queue_dir)
-    return queue_dir / channel.file.name, queue_dir / channel.append_lock.name
-
-
-def _queue_paths(queue_dir: Path | None) -> tuple[Path, Path]:
-    """The defender findings queue's file and its append lock.
-
-    Resolved per call (not the import-frozen `DEFAULT_PATHS`) so the environment's state root
-    wins. Never derived from `episode_dir`, or rows could land where no drain reads.
-    """
-    return _queue_paths_for(loop_paths().findings, queue_dir)
-
-
-def _questioner_queue_paths(queue_dir: Path | None) -> tuple[Path, Path]:
-    """The questioner channel's file and its own append lock, resolved as `_queue_paths`."""
-    return _queue_paths_for(loop_paths().questioner_findings, queue_dir)
 
 
 def _validate_row(row: dict[str, Any], *, episode_dir: Path | None = None) -> None:
@@ -157,74 +126,44 @@ def _validate_world_row(row: dict[str, Any], *, episode_dir: Path | None = None)
 
 
 def _append_validated_rows(
-    rows: list[dict[str, Any]], *, pending_file: Path, lock_file: Path,
+    rows: list[dict[str, Any]], *, state: LearningState, channel: Channel,
     dedup_key: str | None = None,
 ) -> tuple[int, int]:
-    """The one write under one lock hold that every channel appender shares. Rows must already
-    be validated.
+    """The one write that every channel appender shares. Rows must already be validated.
 
-    The malformed count is taken inside the same hold, so a concurrent appender cannot tear the
-    read that measures tearing.
+    The malformed count is taken inside the same lock hold as the write, so a concurrent
+    appender cannot tear the read that measures tearing. An empty pass takes no lock and makes
+    nothing: it must not create the queue (its count is best-effort for that reason).
 
     `dedup_key` makes the append idempotent on that field, checked against this channel's own
     file only — an id consumed on the defender channel must not suppress a world row."""
-    if not rows:
-        # No lock and no mkdir: a pass that enqueued nothing must not create the queue. The
-        # count is best-effort here for that reason.
-        return 0, read_jsonl_rows_report(pending_file)[1]
-    # Anchored at the state root, not the queue dir itself: with `base=path` no component is
-    # judged and the guard degenerates into a plain `mkdir(parents=True)`.
-    guarded_mkdir(pending_file.parent, base=_queue_trust_root(pending_file))
-    with queue_lock(lock_file):
-        # A torn trailing row must not be concatenated onto; a leading newline (below) closes
-        # its line without touching its bytes.
-        existing, malformed = read_jsonl_rows_report(pending_file)
-        to_write = rows
-        if dedup_key is not None:
-            # String ids only on both sides: an unhashable id off the shared file would raise
-            # `TypeError` inside the lock. Every id minted here is a string, and a non-string
-            # id can only fail to suppress a write, which is the safe direction.
-            seen = {r[dedup_key] for r in existing
-                    if isinstance(r, dict) and isinstance(r.get(dedup_key), str)}
-            to_write = [r for r in rows
-                        if not (isinstance(r.get(dedup_key), str) and r[dedup_key] in seen)]
-        if not to_write:
-            return 0, malformed
-        text = "".join(json.dumps(row) + "\n" for row in to_write)
-        if artifact_file(pending_file) and pending_file.stat().st_size > 0:
-            with pending_file.open("rb") as fh:
-                fh.seek(-1, 2)
-                if fh.read(1) != b"\n":
-                    text = "\n" + text
-        write_guarded(pending_file, text, mode="append")
-    return len(to_write), malformed
+    return state.append(channel, rows, dedup_key=dedup_key)
 
 
 def append_rows(episode_dir: Path, rows: list[dict[str, Any]], *,
-                queue_dir: Path | None = None) -> int:
+                state: LearningState) -> int:
     """How many of `rows` were appended. See `append_rows_report` for the rest of the answer."""
-    return append_rows_report(episode_dir, rows, queue_dir=queue_dir)[0]
+    return append_rows_report(episode_dir, rows, state=state)[0]
 
 
 def append_rows_report(episode_dir: Path, rows: list[dict[str, Any]], *,
-                       queue_dir: Path | None = None) -> tuple[int, int]:
+                       state: LearningState) -> tuple[int, int]:
     """Append `rows` to the defender findings channel; return `(appended, malformed lines seen
     on the queue)`. `episode_dir` is only for refusal text; the queue is never derived from it."""
     rows = list(rows)
     for row in rows:
         _validate_row(row, episode_dir=episode_dir)
-    pending_file, lock_file = _queue_paths(queue_dir)
-    return _append_validated_rows(rows, pending_file=pending_file, lock_file=lock_file)
+    return _append_validated_rows(rows, state=state, channel=FINDINGS)
 
 
 def append_world_rows(episode_dir: Path, rows: list[dict[str, Any]], *,
-                      queue_dir: Path | None = None) -> int:
+                      state: LearningState) -> int:
     """How many of `rows` were appended to the questioner channel."""
-    return append_world_rows_report(episode_dir, rows, queue_dir=queue_dir)[0]
+    return append_world_rows_report(episode_dir, rows, state=state)[0]
 
 
 def append_world_rows_report(episode_dir: Path, rows: list[dict[str, Any]], *,
-                             queue_dir: Path | None = None) -> tuple[int, int]:
+                             state: LearningState) -> tuple[int, int]:
     """Append `rows` to the questioner findings channel; return `(appended, malformed lines
     seen on the queue)`.
 
@@ -233,18 +172,9 @@ def append_world_rows_report(episode_dir: Path, rows: list[dict[str, Any]], *,
     validated = list(rows)
     for row in validated:
         _validate_world_row(row, episode_dir=episode_dir)
-    pending_file, lock_file = _questioner_queue_paths(queue_dir)
     sanitized = [{**row, "judge_outcome": None} for row in validated]
-    return _append_validated_rows(sanitized, pending_file=pending_file, lock_file=lock_file,
+    return _append_validated_rows(sanitized, state=state, channel=QUESTIONER_FINDINGS,
                                   dedup_key="finding_id")
-
-
-def _queue_trust_root(pending_file: Path) -> Path:
-    """The tree `guarded_mkdir` is anchored at: the learning state root for a queue inside it,
-    else the queue dir's parent (the most that can be claimed about a caller-chosen location)."""
-    state_root = learning_state_root()
-    queue_dir = pending_file.parent
-    return state_root if state_root in queue_dir.parents else queue_dir.parent
 
 
 def _resolving_citations(finding: dict[str, Any]) -> list[str]:
@@ -392,11 +322,11 @@ def draws_on_disk(view: Bound, label: str) -> dict[int, dict[str, Any]]:
     return draws_on_disk_report(view, label)[0]
 
 
-def enqueue(episode_dir: Path, grade: Any, *, queue_dir: Path | None = None,
+def enqueue(episode_dir: Path, grade: Any, *, state: LearningState,
             drawn: dict[str, dict[int, dict[str, Any]]] | None = None,
             family_drawn: dict[int, dict[str, Any]] | None = None) -> int:
     """How many defender rows this pass enqueued (`enqueue_report` has the rest)."""
-    return enqueue_report(episode_dir, grade, queue_dir=queue_dir, drawn=drawn,
+    return enqueue_report(episode_dir, grade, state=state, drawn=drawn,
                           family_drawn=family_drawn).appended
 
 
@@ -555,7 +485,7 @@ def _add_row(  # noqa: PLR0913 — the sink dispatch's own inputs
 
 
 def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — one pass over one set of findings; splitting it would re-derive `graded_labels`/`alert_rule_key` per lane
-    episode_dir: Path, grade: Any, *, queue_dir: Path | None = None,
+    episode_dir: Path, grade: Any, *, state: LearningState,
     drawn: dict[str, dict[int, dict[str, Any]]] | None = None,
     family_drawn: dict[int, dict[str, Any]] | None = None,
 ) -> EnqueueReport:
@@ -571,12 +501,12 @@ def enqueue_report(  # noqa: C901, PLR0912, PLR0915 — one pass over one set of
     episode_dir = Path(episode_dir)
     # One root handle for the pass's reads: the alert, and any draws read back from disk.
     with bind(episode_dir) as view:
-        return _enqueue_report(view, episode_dir, grade, queue_dir=queue_dir, drawn=drawn,
+        return _enqueue_report(view, episode_dir, grade, state=state, drawn=drawn,
                                family_drawn=family_drawn)
 
 
 def _enqueue_report(  # noqa: C901, PLR0912, PLR0915 — see `enqueue_report`
-    view: Bound, episode_dir: Path, grade: Any, *, queue_dir: Path | None,
+    view: Bound, episode_dir: Path, grade: Any, *, state: LearningState,
     drawn: dict[str, dict[int, dict[str, Any]]] | None,
     family_drawn: dict[int, dict[str, Any]] | None,
 ) -> EnqueueReport:
@@ -727,9 +657,9 @@ def _enqueue_report(  # noqa: C901, PLR0912, PLR0915 — see `enqueue_report`
         defender_appended, defender_malformed = 0, 0
     else:
         defender_appended, defender_malformed = append_rows_report(
-            episode_dir, defender_rows, queue_dir=queue_dir)
+            episode_dir, defender_rows, state=state)
     world_appended, world_malformed = append_world_rows_report(
-        episode_dir, world_rows_out, queue_dir=queue_dir)
+        episode_dir, world_rows_out, state=state)
     reported_world_rows = [{**row, "judge_outcome": None} for row in world_rows_out]
     return EnqueueReport(
         appended=defender_appended,

@@ -16,9 +16,6 @@ from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender._claim_git import ClaimGit
 from defender.learning.leads.path_validation import SKILLS_REL
 
-
-PENDING_DIR = _loop_config.DEFAULT_PATHS.lead_pending_dir
-
 _logger = logging.getLogger(__name__)
 
 
@@ -33,7 +30,6 @@ def _spawn_author_agent(
     salt: str,
     box=None,
 ) -> int:
-    PENDING_DIR.mkdir(parents=True, exist_ok=True)
     from defender.learning.leads import lead_author_engine
     # Every knob is read at spawn: each is env-backed, and a default would freeze it at import.
     return lead_author_engine.run_author_stage(
