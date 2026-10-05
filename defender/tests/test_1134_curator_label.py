@@ -50,7 +50,7 @@ from defender.learning.author import _config as author_config
 from defender.learning.author import shared as author_shared
 from defender.learning.author.lessons import run as lessons_run
 from defender.learning.author.questioner import run as questioner_run
-from defender.learning.core import drains, lane_trees
+from defender.learning.core import config, drains, lane_trees
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL,
     LEAD_AUTHOR_DRAIN_LABEL,
@@ -435,13 +435,19 @@ def test_a_hold_fault_at_the_open_propagates_out_of_the_seam(tmp_path, monkeypat
 
 
 def _spy_paths(repo: Path, state: Path, seen: list[list[str]], *,
-               fault: BaseException | None = None) -> LoopPaths:
+               fault: BaseException | None = None, extra_mount: Path | None = None) -> LoopPaths:
     """A `LoopPaths` (the seam's `paths`) that records, each time `runs_dir` is asked for
     (the builders read it after the open; `author_lock_file`, which they used to read, is the
     state handle's now), what this process holds under the repo; with `fault`, raises it after
-    recording. A class per call."""
+    recording; with `extra_mount`, the paths carry a third mount for the author label to hold
+    (`extra_mount_dir`, which the caller adds to the label's tree list). A class per call."""
 
     class Spy(LoopPaths):
+        @property
+        def extra_mount_dir(self) -> Path:
+            assert extra_mount is not None
+            return extra_mount
+
         @property
         def runs_dir(self) -> Path:  # type: ignore[override]
             seen.append(sorted(descriptors_under(self.repo_root)))
@@ -456,12 +462,14 @@ def _held_roots(paths: LoopPaths) -> list[str]:
     return sorted(os.path.realpath(p) for p in AUTHOR_DRAIN_LABEL.writable_trees(paths))
 
 
+@pytest.mark.parametrize("extra", [False, True], ids=["label-mounts", "a-third-mount"])
 def test_the_trigger_holds_the_labels_mounts_only_while_the_batch_runs(
-    tmp_path, monkeypatch, caplog,
+    tmp_path, monkeypatch, caplog, extra,
 ):
     """`_maybe_trigger_author(..., label=AUTHOR)` over a queue the gate holds: while the curator's
     batch runs (seen from inside its config build) this process holds exactly the roots of
-    `AUTHOR_DRAIN_LABEL.writable_trees(paths)` of the paths it was HANDED; once the seam returns it holds nothing under the repo; and no handle
+    `AUTHOR_DRAIN_LABEL.writable_trees(paths)` of the paths it was HANDED (a third mount the
+    label's list adds is held too); once the seam returns it holds nothing under the repo; and no handle
     was used after a close (no `Bad file descriptor` in the log of a batch whose gate read the
     corpus through it).
 
@@ -472,8 +480,14 @@ def test_the_trigger_holds_the_labels_mounts_only_while_the_batch_runs(
     w = world(tmp_path)
     put(w.corpus_dir / "seeded.md", "---\nsource_finding_ids:\n- f0\n---\nbody\n")
     w.commit()
+    extra_mount = w.repo / "defender" / "extra-mount" if extra else None
+    if extra_mount is not None:
+        extra_mount.mkdir()
+        monkeypatch.setitem(
+            config._WRITABLE_TREE_ATTRS, AUTHOR_DRAIN_LABEL,
+            (*config._WRITABLE_TREE_ATTRS[AUTHOR_DRAIN_LABEL], "extra_mount_dir"))
     seen: list[list[str]] = []
-    paths = _spy_paths(w.repo, tmp_path / "state", seen)
+    paths = _spy_paths(w.repo, tmp_path / "state", seen, extra_mount=extra_mount)
     _held_queue(paths)
     w.trees.close()
     assert descriptors_under(w.repo) == []
@@ -482,7 +496,7 @@ def test_the_trigger_holds_the_labels_mounts_only_while_the_batch_runs(
 
     assert seen, "the curator's batch never built its config"
     assert all(held == _held_roots(paths) for held in seen), (seen, _held_roots(paths))
-    assert len(_held_roots(paths)) == 2
+    assert len(_held_roots(paths)) == (3 if extra else 2)
     assert descriptors_under(w.repo) == [], "a held root outlived the seam"
     assert "held_reason" in pending(paths.findings)[0]
     bad = [r.getMessage() for r in caplog.records if "Bad file descriptor" in r.getMessage()]

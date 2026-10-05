@@ -117,335 +117,357 @@ summary:
 tests:
   - file: "defender/tests/e2e/test_922_spine.py"
     test: "test_922_graded_episode_reaches_the_corpus_through_the_family_partition"
+    fixture-only: true
     reaches:
       - "queue_dir= (J.mod('learning.judge').grade_episode) via graded_episode"
     asserts:
       - old: "assert record['episode_outcome'] == 'gradable'"
-        new: null
+        new: same
       - old: "assert record['enqueued_rows'] == len(queued) == 2, f'the graded episode did not put its rows on the shared queue: {queued}'"
-        new: null
+        new: same
       - old: "assert {r['direction'] for r in D.pending(channel)} == {'family'}, \"the spine's producer is the family judge; a non-family row here means the drive is not exercising the partition this demand is about\""
-        new: null
+        new: same
       - old: "assert rc == 0, 'author_drain did not complete its batch'"
-        new: null
+        new: same
       - old: "assert len(agent.calls) == 1, f'the findings curator ran {len(agent.calls)} times, not once'"
-        new: null
+        new: same
       - old: "assert authored == queued, f\"the curator was handed {authored}, not the graded episode's rows {queued} — the family partition did not admit them for authoring\""
-        new: null
+        new: same
       - old: "assert head_after != head_before, 'the corpus author opened no commit'"
-        new: null
+        new: same
       - old: "assert len(lessons) == 1, f'the corpus gained {len(lessons)} documents, not one'"
-        new: null
+        new: same
       - old: "assert {r['finding_id'] for r in D.pending(channel)} == set(queued), \"the committed rows left the queue before the batch's PR — `hold_committed=True` is what keeps them there for the next tick to retire\""
-        new: null
+        new: same
       - old: "assert drive_author_drain(paths, TriggerRecorder(second))[0] == 0"
-        new: null
+        new: same
       - old: "assert second.calls == [], 'the second tick authored the same findings again — the corpus attribution the first tick wrote is not being read back'"
-        new: null
+        new: same
       - old: "assert set(consumed) == set(queued), f'the rows did not rotate off the queue as consumed: {sorted(consumed)}'"
-        new: null
+        new: same
       - old: "assert all((r['consumed_category'] == 'consumed_idempotent' for r in consumed.values()))"
-        new: null
+        new: same
       - old: "assert D.pending(channel) == [], 'the authored rows are still queued'"
-        new: null
+        new: same
       - old: "assert D.git(paths.repo_root, 'rev-parse', 'HEAD').stdout.strip() == head_after, 'the second tick opened a second commit for findings already in the corpus'"
-        new: null
+        new: same
       - old: "assert fid in body, f'the committed lesson does not attribute {fid}'"
-        new: null
+        new: same
   - file: "defender/tests/e2e/test_922_spine.py"
     test: "test_922_author_drain_triggers_exactly_the_findings_curator"
     reaches:
       - "queue_dir= (J.mod('learning.judge').grade_episode) via graded_episode"
     asserts:
       - old: "assert rc == 0"
-        new: null
+        new: same
       - old: "assert sorted(trigger.modules) == ['author', 'questioner_curator'], f'author_drain triggered {trigger.modules} — it is still discovering its curators by iterating the direction table, so the retired observation channels are still drained'"
-        new: null
+        new: same
       - old: "assert call['pending_file'] == paths.findings.file, f\"the findings trigger names {call['pending_file']}, not the findings queue\""
-        new: null
+        new: "assert call['pending_file'] == str(paths.findings.file), f\"the findings trigger names {call['pending_file']}, not the findings queue\""
       - old: "assert call['threshold_env'] == 'LEARNING_AUTHOR_THRESHOLD'"
-        new: null
+        new: same
       - old: "assert call['pending_label'] == 'pending'"
-        new: null
+        new: same
   - file: "defender/tests/e2e/test_922_spine.py"
     test: "test_922_the_drain_box_gets_exactly_the_lessons_corpus_writable"
+    fixture-only: true
     reaches:
       - "queue_dir= (J.mod('learning.judge').grade_episode) via graded_episode"
     asserts:
       - old: "assert rc == 0"
-        new: null
+        new: same
       - old: "assert writable_sources(request) == {paths.lessons_dir, paths.lessons_questioner_dir}, f\"the drain box's writable mounts are {sorted(map(str, writable_sources(request)))} — the mount set is still derived from the direction table, so a retired corpus is still handed to the batch as a writable bind\""
-        new: null
+        new: same
       - old: "assert readonly_sources(request) == {paths.repo_root}, f'the drain box lost its read-only worktree mount: {request.mounts}'"
-        new: null
+        new: same
       - old: "assert B.mount_for(request, retired) is None, f'{retired} is still bound into the drain box'"
-        new: null
+        new: same
   - file: "defender/tests/e2e/test_922_spine.py"
     test: "test_922_a_full_findings_queue_alone_wakes_the_drain"
+    fixture-only: true
     reaches:
       - "queue_dir= (J.mod('learning.judge').grade_episode) via graded_episode"
     asserts:
       - old: "assert rc == 0"
-        new: null
+        new: same
       - old: "assert 'author' in trigger.modules, \"the findings queue alone did not wake the drain — the surviving channel's own threshold no longer answers the wake gate\""
-        new: null
+        new: same
       - old: "assert writable_sources(rec.only_request()) == {paths.lessons_dir, paths.lessons_questioner_dir}"
-        new: null
+        new: same
       - old: "assert not (paths.pending_dir / name).exists(), 'this control is about a findings-only queue; an observation queue exists'"
-        new: null
+        new: same
   - file: "defender/tests/learning/test_loop.py"
     test: "test_rotate_queue_locked_preserves_concurrent_appends"
+    renamed-to: "test_rotate_preserves_concurrent_appends"
     reaches:
       - "rotate_queue_locked"
     asserts:
       - old: "assert {s['finding_id'] for s in survivors} == {'r/1', 'r/2'}"
-        new: null
+        new: same
       - old: "assert held_row['held_reason'] == 'no_ground_truth'"
-        new: null
+        new: same
       - old: "assert consumed_rows[0]['consumed_commit'] == 'abc123'"
-        new: null
+        new: same
       - old: "assert 'consumed_at' in consumed_rows[0]"
-        new: null
+        new: same
   - file: "defender/tests/learning/test_loop.py"
     test: "test_enqueue_for_authoring_writes_marker"
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "assert spec == {'run_id': 'case-a', 'run_dir': str(run_dir.resolve())}"
-        new: null
+        new: "assert spec == {'case_id': 'case-a', 'run_dir': str(run_dir.resolve())}"
   - file: "defender/tests/learning/test_loop.py"
     test: "test_author_drain_triggers_all_curators"
+    fixture-only: true
     reaches:
       - "trigger_author (lambda implementor)"
     asserts:
       - old: "assert triggered == ['author', 'questioner_curator']"
-        new: null
+        new: same
   - file: "defender/tests/learning/test_loop.py"
     test: "test_lead_author_drain_runs_lead_author_then_clears_marker"
+    fixture-only: true
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "assert [rd for _, rd in seen] == [run_dir.resolve()]"
-        new: null
+        new: same
       - old: "assert str(seen[0][0]).startswith('/tmp/wt-')"
-        new: null
+        new: same
       - old: "assert not (paths.author_queue_dir / 'case-b.json').exists()"
-        new: null
+        new: same
       - old: "assert branch.events == ['lease-check', 'start', 'finish', 'cleanup']"
-        new: null
+        new: same
   - file: "defender/tests/learning/test_loop.py"
     test: "test_lead_author_drain_runs_pitfalls_after_markers"
+    fixture-only: true
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "assert order == ['marker', 'pitfalls']"
-        new: null
+        new: same
   - file: "defender/tests/learning/test_loop.py"
     test: "test_lead_author_drain_marks_artifact_missing"
+    fixture-only: true
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "assert seen == [run_dir.resolve()]"
-        new: null
+        new: same
       - old: "assert not (paths.author_queue_dir / 'case-gone.json').exists()"
-        new: null
+        new: same
       - old: "assert json.loads(failed.read_text())['failed'] == 'artifact-missing'"
-        new: null
+        new: same
   - file: "defender/tests/learning/test_loop.py"
     test: "test_lead_author_drain_dead_letters_an_unservable_marker"
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "assert seen == [run_dir.resolve()], 'the healthy request in the same pass was not served'"
-        new: null
+        new: same
       - old: "assert not (paths.author_queue_dir / 'case-broken.json').exists()"
-        new: null
+        new: same
       - old: "assert not (paths.author_queue_dir / 'inflight' / 'case-broken.json').exists(), 'the unservable marker was left claimed — the next tick reclaims and re-fails on it'"
-        new: null
+        new: same
       - old: "assert json.loads(failed.read_text())['failed'].startswith('unreadable')"
-        new: null
+        new: same
       - old: "assert drains._has_lead_author_work(paths) is False, 'the queue still reports work on a request nothing can ever serve'"
-        new: null
+        new: "assert drains._has_lead_author_work(state_for_paths(paths)) is False, 'the queue still reports work on a request nothing can ever serve'"
   - file: "defender/tests/learning/test_loop.py"
     test: "test_lead_author_drain_skips_when_lease_held"
+    fixture-only: true
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "assert rc == 0"
-        new: null
+        new: same
       - old: "assert seen == []"
-        new: null
+        new: same
       - old: "assert 'start' not in branch.events"
-        new: null
+        new: same
       - old: "assert (paths.author_queue_dir / 'case-lease.json').exists()"
-        new: null
+        new: same
   - file: "defender/tests/learning/test_loop.py"
     test: "test_lead_author_drain_singleton_lock_distinct_from_lessons"
+    fixture-only: true
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "assert rc == 0"
-        new: null
+        new: same
       - old: "assert seen == [run_dir.resolve()]"
-        new: null
+        new: same
   - file: "defender/tests/learning/test_loop.py"
     test: "test_lead_author_drain_quarantines_poison_run_dir"
+    fixture-only: true
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "assert seen == [good.resolve()]"
-        new: null
+        new: same
       - old: "assert not (paths.author_queue_dir / 'case-poison.json').exists()"
-        new: null
+        new: same
       - old: "assert json.loads(failed.read_text())['failed'].startswith('lead-author-error')"
-        new: null
+        new: same
   - file: "defender/tests/learning/test_loop.py"
     test: "test_lead_author_drain_quarantines_on_nonzero_rc"
+    fixture-only: true
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "assert not (paths.author_queue_dir / 'case-rc.json').exists()"
-        new: null
+        new: same
       - old: "assert json.loads(failed.read_text())['failed'].startswith('lead-author-error')"
-        new: null
+        new: same
   - file: "defender/tests/learning/test_loop.py"
     test: "test_lead_author_drain_bounded_retry_then_quarantine"
+    fixture-only: true
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "assert not marker.exists()"
-        new: null
+        new: same
       - old: "assert json.loads(failed.read_text())['failed'].startswith('transient-exhausted')"
-        new: null
+        new: same
       - old: "assert marker.exists()"
-        new: null
+        new: same
       - old: "assert json.loads(marker.read_text())['attempts'] == expected"
-        new: null
+        new: same
       - old: "assert not failed.exists()"
-        new: null
+        new: same
   - file: "defender/tests/learning/test_loop.py"
     test: "test_lead_author_drain_opens_distinct_lead_author_pr"
+    fixture-only: true
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "assert rc == 0"
-        new: null
+        new: same
       - old: "assert forge.open_calls[0]['head'].startswith('lead-author/')"
-        new: null
+        new: same
       - old: "assert not forge.open_calls[0]['head'].startswith('lessons/')"
-        new: null
+        new: same
       - old: "assert forge.list_calls == ['lead-author/']"
-        new: null
+        new: same
   - file: "defender/tests/learning/test_loop.py"
     test: "test_lead_author_drain_delivers_a_retained_branch_on_the_next_tick"
+    fixture-only: true
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "assert drains.lead_author_drain(paths, run_lead_author=_author, branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub) == 0"
-        new: null
+        new: same
       - old: "assert len(forge.open_calls) == 1"
-        new: null
+        new: same
       - old: "assert [json.loads(r.read_text())['branch'] for r in records] == [head]"
-        new: null
+        new: same
       - old: "assert not (paths.author_queue_dir / 'case-pr.json').exists(), 'the served run was re-queued'"
-        new: null
+        new: same
       - old: "assert _real(work, 'rev-parse', '--verify', f'refs/heads/{head}').returncode == 0"
-        new: null
+        new: same
       - old: "assert drains.lead_author_drain(paths, run_lead_author=_author, branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub) == 0"
-        new: null
+        new: same
       - old: "assert len(served) == 1, \"the retained batch's run was served again\""
-        new: null
+        new: same
       - old: "assert [c['head'] for c in forge.open_calls] == [head, head]"
-        new: null
+        new: same
       - old: "assert forge.head_calls == [head], 'delivery must look for an open PR before opening one'"
-        new: null
+        new: same
       - old: "assert list(paths.pending_delivery_dir.glob('*.json')) == []"
-        new: null
+        new: same
       - old: "assert head in remote, 'the retained branch never reached origin'"
-        new: null
+        new: same
       - old: "assert f'delivered retained branch {head}: opened PR https://github.com/o/r/pull/78' in err"
-        new: null
+        new: same
   - file: "defender/tests/learning/test_loop.py"
     test: "test_lead_author_drain_resets_worktree_between_markers"
+    fixture-only: true
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "assert clean_at_entry['case-a-poison'] is True"
-        new: null
+        new: same
       - old: "assert clean_at_entry['case-b-good'] is True"
-        new: null
+        new: same
       - old: "assert end.stdout.strip() == ''"
-        new: null
+        new: same
       - old: "assert (paths.author_queue_dir / 'failed' / 'case-a-poison.json').exists()"
-        new: null
+        new: same
       - old: "assert not (paths.author_queue_dir / 'case-b-good.json').exists()"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_corpus.py"
     test: "test_nothing_lands_outside_the_declared_write_set"
+    fixture-only: true
     reaches:
       - "queue_dir= (judge_mod.grade_episode)"
     asserts:
       - old: "assert new == set(), f'the pass wrote artifacts outside the declared set: {sorted(map(str, new))}'"
-        new: null
+        new: same
       - old: "assert queue_files <= {paths.findings.file.name, W.QUESTIONER_QUEUE_FILENAME, paths.findings.append_lock.name, W.questioner_channel(paths).append_lock.name, paths.findings.consumed.name, W.questioner_channel(paths).consumed.name, '.lock'}, f'the queue directory gained {sorted(queue_files)}'"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_family.py"
     test: "test_the_family_reply_admits_a_family_level_finding"
+    fixture-only: true
     reaches:
       - "queue_dir= (grade)"
     asserts:
       - old: "assert rows, 'the family finding reached no queue row'"
-        new: null
+        new: same
       - old: "assert rows[0]['world'] is None, f\"a family finding is stamped world={rows[0]['world']!r}\""
-        new: null
+        new: same
       - old: "assert rows[0]['subject'] == W.SUBJECT_WORLD"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_family.py"
     test: "test_the_family_call_emits_no_defender_finding"
+    fixture-only: true
     reaches:
       - "queue_dir= (grade)"
     asserts:
       - old: "assert judge.family_prompts, f'no family call was made at all, so the absence below proves nothing: {judge.agent_ids}'"
-        new: null
+        new: same
       - old: "assert from_family == [], f'the family call produced defender queue rows: {from_family}'"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_ladder.py"
     test: "test_a_measured_nothing_world_withholds_its_defender_findings"
+    fixture-only: true
     reaches:
       - "queue_dir= (grade)"
     asserts:
       - old: "assert row['withheld_reason'] == 'measured_nothing', f\"withheld_reason is {row.get('withheld_reason')!r}\""
-        new: null
+        new: same
       - old: "assert 'b' in set(result.withheld_worlds)"
-        new: null
+        new: same
       - old: "assert [r for r in W.queue_rows(paths.findings) if r.get('subject') == W.SUBJECT_DEFENDER] == [], 'a defender finding for a world that measured nothing reached the queue'"
-        new: null
+        new: same
       - old: "assert len(result.withheld_findings) == 1, f'expected exactly one withheld finding, got {result.withheld_findings!r}'"
-        new: null
+        new: same
       - old: "assert withheld['world'] == 'b'"
-        new: null
+        new: same
       - old: "assert withheld['reason'] == 'measured_nothing'"
-        new: null
+        new: same
       - old: "assert withheld['finding']['claim'] == W.finding()['claim'], \"the withheld finding's own content did not survive — only its bucket/reason did\""
-        new: null
+        new: same
       - old: "assert on_disk == result.withheld_findings, \"judge.yaml's own withheld_findings disagrees with what grade_episode returned\""
-        new: null
+        new: same
   - file: "defender/tests/test_1007_ladder.py"
     test: "test_a_mechanical_world_finding_is_told_from_a_model_drawn_one_by_provenance"
+    fixture-only: true
     reaches:
       - "queue_dir= (grade)"
     asserts:
       - old: "assert sorted((r['provenance'] for r in rows)) == ['mechanical', 'model'], f'the two same-bucket findings collapsed to {rows} — the open vocabulary means the bucket cannot tell an arithmetic finding from a drawn one'"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_ladder.py"
     test: "test_an_episode_killed_before_the_sibling_ran_withholds_with_episode_incomplete"
+    fixture-only: true
     reaches:
       - "queue_dir= (grade)"
     asserts:
       - old: "assert [r for r in W.queue_rows(paths.findings) if r.get('subject') == W.SUBJECT_DEFENDER] == [], 'an unfinished episode still accused the defender'"
-        new: null
+        new: same
       - old: "assert row['withheld_reason'] == 'episode_incomplete', f\"world {label} reads {row.get('withheld_reason')!r} on an episode with no served row at all\""
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_world_row_refused_at_the_defender_appender"
     reaches:
@@ -453,31 +475,32 @@ tests:
       - "queue_dir= (enqueue.append_world_rows)"
     asserts:
       - old: "assert W.queue_rows(paths.findings) == [], 'the refused world row still landed'"
-        new: null
+        new: same
       - old: "assert [r['subject'] for r in W.queue_rows(W.questioner_channel(paths))] == [W.SUBJECT_WORLD]"
-        new: null
+        new: same
       - old: "with pytest.raises(W.refusals())"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_defender_row_still_reaches_the_findings_channel"
+    fixture-only: true
     reaches:
       - "queue_dir= (enqueue.append_rows)"
     asserts:
       - old: "assert appended == 1"
-        new: null
+        new: same
       - old: "assert [r['finding_id'] for r in landed] == [f'{W.EPISODE_ID}/b/0/0']"
-        new: null
+        new: same
       - old: "assert landed[0]['type'] == 'lead-set'"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_a_defender_row_with_direction_world_is_refused_at_the_appender_too"
     reaches:
       - "queue_dir= (enqueue.append_rows)"
     asserts:
       - old: "assert W.queue_rows(paths.findings) == [], 'the disagreeing row still landed'"
-        new: null
+        new: same
       - old: "with pytest.raises(W.refusals())"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_a_world_row_type_is_not_gated_against_the_defender_vocabulary"
     reaches:
@@ -485,503 +508,533 @@ tests:
       - "queue_dir= (enqueue.append_world_rows)"
     asserts:
       - old: "assert novel not in cfg.QUEUEABLE_FINDING_TYPES"
-        new: null
+        new: same
       - old: "assert [r['type'] for r in W.queue_rows(W.questioner_channel(paths))] == [novel]"
-        new: null
+        new: same
       - old: "with pytest.raises(W.refusals())"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_a_defender_family_row_is_gated_exactly_as_today"
     reaches:
       - "queue_dir= (enqueue.append_rows)"
     asserts:
       - old: "assert enqueue.append_rows(tmp_path, [queue_row()], queue_dir=paths.pending_dir) == 1"
-        new: null
+        new: "assert enqueue.append_rows(tmp_path, [queue_row()], state=W.learning_state(paths)) == 1"
       - old: "assert landed['direction'] == 'family'"
-        new: null
+        new: same
       - old: "assert len(to_author) + len(held) + len(consumed) == 1"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_a_world_queue_row_is_a_full_finding_row_plus_four_fields"
+    fixture-only: true
     reaches:
       - "queue_dir= (enqueue.append_world_rows)"
     asserts:
       - old: "assert landed['direction'] == W.SUBJECT_WORLD"
-        new: null
+        new: same
       - old: "assert landed['run_id'] == W.EPISODE_ID"
-        new: null
+        new: same
       - old: "assert key in landed, f'the world row is missing the finding-row key {key!r}'"
-        new: null
+        new: same
       - old: "assert key in landed, f'the world row is missing {key!r}'"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_two_appends_of_one_finding_id_land_once"
+    fixture-only: true
     reaches:
       - "queue_dir= (enqueue.append_world_rows)"
     asserts:
       - old: "assert [r['finding_id'] for r in rows] == [f'{W.EPISODE_ID}/b/0/0'], f'one finding id landed twice: {rows}'"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_a_world_bucket_spelled_like_a_defender_bucket_is_admitted_and_read_by_subject"
+    fixture-only: true
     reaches:
       - "queue_dir= (enqueue.append_rows)"
       - "queue_dir= (enqueue.append_world_rows)"
     asserts:
       - old: "assert parsed.findings[0].subject == W.SUBJECT_WORLD"
-        new: null
+        new: same
       - old: "assert parsed.findings[0].bucket == 'lead-set'"
-        new: null
+        new: same
       - old: "assert len(W.queue_rows(W.questioner_channel(paths))) == 1"
-        new: null
+        new: same
       - old: "assert len(W.queue_rows(paths.findings)) == 1"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_a_near_miss_subject_is_refused_with_no_case_fold_and_no_trim"
     reaches:
       - "queue_dir= (enqueue.append_world_rows)"
     asserts:
       - old: "assert W.queue_rows(W.questioner_channel(paths)) == []"
-        new: null
+        new: same
       - old: "with pytest.raises(W.refusals())"
-        new: null
+        new: same
       - old: "with pytest.raises(W.refusals())"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_a_defender_queue_row_carries_its_subject_key"
     reaches:
       - "queue_dir= (enqueue.append_rows)"
     asserts:
       - old: "assert W.queue_rows(paths.findings)[0]['subject'] == W.SUBJECT_DEFENDER"
-        new: null
+        new: same
       - old: "assert len(W.queue_rows(paths.findings)) == 1, 'the subject-less row landed anyway'"
-        new: null
+        new: same
       - old: "with pytest.raises(W.refusals())"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_a_defender_subject_row_cannot_reach_the_questioner_curator"
     reaches:
       - "queue_dir= (enqueue.append_world_rows)"
     asserts:
       - old: "assert W.queue_rows(W.questioner_channel(paths)) == []"
-        new: null
+        new: same
       - old: "with pytest.raises(W.refusals())"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_a_model_supplied_world_is_ignored_and_the_draws_own_directory_wins"
+    fixture-only: true
     reaches:
       - "queue_dir= (judge_mod.grade_episode)"
     asserts:
       - old: "assert {r['world'] for r in rows} == {'b', 'c'}, f\"the model's own `world` value reached the row: {[r['world'] for r in rows]}\""
-        new: null
+        new: same
       - old: "assert row['world'] in row['finding_id'], f\"row {row['finding_id']} is stamped for world {row['world']!r} — the id and the stamp name different worlds\""
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_every_family_level_finding_carries_a_null_world"
+    fixture-only: true
     reaches:
       - "queue_dir= (judge_mod.grade_episode)"
     asserts:
       - old: "assert family_rows, 'the family draw enqueued nothing at all'"
-        new: null
+        new: same
       - old: "assert row['world'] is None, f\"a family finding is stamped world={row['world']!r}\""
-        new: null
+        new: same
       - old: "assert row['source_run_dir'].endswith(ep.name), f\"a family finding's source_run_dir is {row['source_run_dir']!r}, not the episode\""
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_a_family_findings_identity_is_minted_by_the_pass_not_by_the_model"
+    fixture-only: true
     reaches:
       - "queue_dir= (judge_mod.grade_episode)"
     asserts:
       - old: "assert ids, 'no family-keyed row was enqueued'"
-        new: null
+        new: same
       - old: "assert len(set(ids)) == len(ids), f'two family findings share one id: {ids}'"
-        new: null
+        new: same
       - old: "assert episode_id == ep.name, f'{fid} names episode {episode_id!r}'"
-        new: null
+        new: same
       - old: "assert label == 'family', f'{fid} is keyed on world {label!r}, not the family'"
-        new: null
+        new: same
       - old: "assert draw.isdigit(), f\"{fid}'s draw coordinate is {draw!r}\""
-        new: null
+        new: same
       - old: "assert index.isdigit(), f\"{fid}'s finding index is {index!r}\""
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_a_world_row_missing_pattern_holding_system_or_subject_is_refused_at_the_appender"
     reaches:
       - "queue_dir= (enqueue.append_world_rows)"
     asserts:
       - old: "assert W.queue_rows(W.questioner_channel(paths)) == []"
-        new: null
+        new: same
       - old: "assert len(W.queue_rows(W.questioner_channel(paths))) == 1"
-        new: null
+        new: same
       - old: "with pytest.raises(W.refusals())"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_a_re_grade_appends_no_second_mechanical_world_finding"
+    fixture-only: true
     reaches:
       - "queue_dir= (judge_mod.grade_episode)"
     asserts:
       - old: "assert len(mech) == 1, f'a re-grade minted a second mechanical row: {mech}'"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_an_unqueueable_defender_finding_does_not_suppress_the_world_findings"
+    fixture-only: true
     reaches:
       - "queue_dir= (judge_mod.grade_episode)"
     asserts:
       - old: "assert [r for r in W.queue_rows(paths.findings)] == [], 'a discard episode still enqueued a defender row'"
-        new: null
+        new: same
       - old: "assert [r['type'] for r in W.queue_rows(W.questioner_channel(paths)) if r['provenance'] == 'model'] == ['a-world-reading'], 'the discard outcome took the world findings with it'"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_an_ungradable_world_enqueues_nothing_on_either_channel"
+    fixture-only: true
     reaches:
       - "queue_dir= (judge_mod.grade_episode)"
     asserts:
       - old: "assert any(('/b/' in r['finding_id'] for r in W.queue_rows(paths.findings))), 'the control failed — the gradable sibling enqueued nothing either'"
-        new: null
+        new: same
       - old: "assert rows == [], f'an ungradable world enqueued {rows} on {channel.file.name}'"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_a_questioner_queue_row_carries_no_defender_verdict_word"
+    fixture-only: true
     reaches:
       - "queue_dir= (enqueue.append_world_rows)"
     asserts:
       - old: "assert word not in rendered, f'the world row carries the defender verdict word {word!r}: {landed}'"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_a_world_row_reusing_a_consumed_defender_finding_id_still_reaches_its_own_curator"
+    fixture-only: true
     reaches:
       - "queue_dir= (enqueue.append_world_rows)"
     asserts:
       - old: "assert held == 0, f'the row was held, not suppressed: {held}'"
-        new: null
+        new: same
       - old: "assert pending == 1, 'the world row was suppressed by a defender-channel consumption of the same id — the two channels are sharing one id space AND one consumption record'"
-        new: null
+        new: same
   - file: "defender/tests/test_1007_partition.py"
     test: "test_two_episodes_appending_at_once_lose_no_questioner_row"
+    fixture-only: true
     reaches:
       - "queue_dir= (enqueue.append_world_rows)"
     asserts:
       - old: "assert errors == [], f'an appender raised under interleaving: {errors!r}'"
-        new: null
+        new: same
       - old: "assert len(landed) == 24, f'{24 - len(landed)} rows were lost under interleaving'"
-        new: null
+        new: same
   - file: "defender/tests/test_1025_page_borrows.py"
     test: "test_1025_an_ungradable_worlds_mechanical_finding_is_queued_and_the_page_says_so"
+    fixture-only: true
     reaches:
       - "queue_dir= (enqueue.enqueue_report)"
     asserts:
       - old: "assert coord in [r['finding_id'] for r in report.world_rows], report.world_rows"
-        new: null
+        new: same
       - old: "assert row_id in page.ids, page.ids_with('f-')"
-        new: null
+        new: same
       - old: "assert 'world author: enqueued' in group, group"
-        new: null
+        new: same
       - old: "assert 'world ungradable' not in group, group"
-        new: null
+        new: same
       - old: "assert coord in page.text_of(row_id), page.text_of(row_id)"
-        new: null
+        new: same
   - file: "defender/tests/test_1025_page_borrows.py"
     test: "test_1025_route_finding_is_the_rule_enqueue_report_walks"
+    fixture-only: true
     reaches:
       - "queue_dir= (enqueue.enqueue_report)"
     asserts:
       - old: "assert report.appended == 4, report"
-        new: null
+        new: same
       - old: "assert sum((1 for lane in routed.values() if lane == enqueue.ROUTE_DEFENDER)) == 4"
-        new: null
+        new: same
       - old: "assert report.appended == 0, report"
-        new: null
+        new: same
       - old: "assert sum((1 for lane in routed.values() if lane == enqueue.ROUTE_NEVER_ELIGIBLE)) == 4"
-        new: null
+        new: same
       - old: "assert len(report.withheld_findings) == 4, report.withheld_findings"
-        new: null
+        new: same
       - old: "assert coord in world_ids, (coord, lane)"
-        new: null
+        new: same
       - old: "assert coord in withheld_ids, (coord, lane)"
-        new: null
+        new: same
       - old: "assert coord in unqueueable_ids, (coord, lane)"
-        new: null
+        new: same
       - old: "assert lane == enqueue.ROUTE_DEFENDER, (coord, lane)"
-        new: null
+        new: same
       - old: "assert coord not in world_ids | withheld_ids | unqueueable_ids, (coord, lane)"
-        new: null
+        new: same
   - file: "defender/tests/test_1025_page_borrows.py"
     test: "test_1025_a_record_naming_one_world_twice_never_files_its_world_finding_as_a_defender_lesson"
+    fixture-only: true
     reaches:
       - "queue_dir= (enqueue.enqueue_report)"
     asserts:
       - old: "assert report.appended == 0, report"
-        new: null
+        new: same
       - old: "assert not [r for r in report.world_rows if r['finding_id'] == coord], report.world_rows"
-        new: null
+        new: same
       - old: "assert any((line.startswith(coord) and 'ungradable' in line for line in report.unqueueable)), report.unqueueable"
-        new: null
+        new: same
       - old: "assert 'about the world' not in row_file.read_text(encoding='utf-8'), row_file"
-        new: null
+        new: same
   - file: "defender/tests/test_1025_page_borrows.py"
     test: "test_1025_the_fixture_ledger_is_the_passes_own"
+    fixture-only: true
     reaches:
       - "queue_dir= (enqueue.enqueue_report)"
     asserts:
       - old: "assert report.dispositions == doc['dispositions']"
-        new: null
+        new: same
       - old: "assert [w['finding_id'] for w in report.withheld_findings] == [w['finding_id'] for w in doc['withheld_findings']]"
-        new: null
+        new: same
       - old: "assert report.unqueueable == doc['unqueueable_findings'] == []"
-        new: null
+        new: same
       - old: "assert report.dispositions == E.block_defender_lane(E.sample_grade(), 'discard')['dispositions']"
-        new: null
+        new: same
   - file: "defender/tests/test_1025_page_borrows.py"
     test: "test_1025_a_record_naming_one_world_twice_renders_exactly_what_the_pass_filed"
+    fixture-only: true
     reaches:
       - "queue_dir= (enqueue.enqueue_report)"
     asserts:
       - old: "assert len(withheld) == 4, report.dispositions"
-        new: null
+        new: same
       - old: "assert report.appended == 4, report"
-        new: null
+        new: same
       - old: "assert 'record: 4 enqueued · page found: 4' in acct, acct"
-        new: null
+        new: same
       - old: "assert 'withheld list: 4 entries · 4 matched' in acct, acct"
-        new: null
+        new: same
       - old: "assert 'disagree' not in acct, acct"
-        new: null
+        new: same
       - old: "assert 'withheld' in page.group_of(f'f-{E.WITHHELD_WORLD}-0-{i}').text()"
-        new: null
+        new: same
       - old: "assert 'defender: enqueued' in page.group_of(f'f-{E.GRADED_WORLD}-0-{i}').text()"
-        new: null
+        new: same
       - old: "assert part in three, (part, three)"
-        new: null
+        new: same
   - file: "defender/tests/test_1133_census.py"
     test: "test_o5_no_function_takes_a_path_below_the_episode_dir_but_the_allowlist"
+    fixture-only: true
     reaches:
       - "'_queue_trust_root' (named in a string) via PARAM_ALLOWLIST"
     asserts:
       - old: "assert not extra, report"
-        new: null
+        new: same
       - old: "assert not stale, report"
-        new: null
+        new: same
   - file: "defender/tests/test_1134_census.py"
     test: "test_the_module_touches_its_trees_only_through_the_handle"
+    fixture-only: true
     reaches:
       - "'PENDING_DIR' (named in a string) via ALLOW"
       - "'graveyard_file' (named in a string) via ALLOW"
     asserts:
       - old: "assert not both, f'known gaps also allow-listed: {sorted(both)}'"
-        new: null
+        new: same
   - file: "defender/tests/test_1134_census.py"
     test: "test_the_module_builds_handles_only_at_the_named_openers"
+    fixture-only: true
     reaches:
       - "'PENDING_DIR' (named in a string) via ALLOW"
       - "'graveyard_file' (named in a string) via ALLOW"
     asserts: []   # no assert in its own body: it asserts through a helper
   - file: "defender/tests/test_1134_census.py"
     test: "test_the_allow_list_is_well_formed"
+    fixture-only: true
     reaches:
       - "'PENDING_DIR' (named in a string) via ALLOW"
       - "'graveyard_file' (named in a string) via ALLOW"
     asserts:
       - old: "assert not [a for a, n in anchors.items() if n > 1], 'one entry per anchor; use `count`'"
-        new: null
+        new: same
       - old: "assert all((e.reason in REASONS for e in ALLOW)), [e for e in ALLOW if e.reason not in REASONS]"
-        new: null
+        new: same
       - old: "assert all((e.count >= 1 and e.why for e in ALLOW))"
-        new: null
+        new: same
       - old: "assert {e.module for e in ALLOW} <= set(C.OPENER_MODULES)"
-        new: null
+        new: same
       - old: "assert all((e.kind in C.KINDS for e in (*ALLOW, *KNOWN_GAPS)))"
-        new: null
+        new: same
       - old: "assert all((e.kind == 'construct' for e in ALLOW if e.module not in C.D6_MODULES)), 'a scan-B-only module is judged on `construct` alone'"
-        new: null
+        new: same
       - old: "assert all(((e.kind == 'listing') == (e.reason == B2) for e in ALLOW)), 'B2 names a sanctioned listing, and a listing has no other reason'"
-        new: null
+        new: same
       - old: "assert dict(by_reason) == ALLOW_COUNT_BY_REASON"
-        new: null
+        new: same
   - file: "defender/tests/test_1134_census.py"
     test: "test_every_construct_entry_is_a_named_opener_or_a_shared_readers_own_bind"
+    fixture-only: true
     reaches:
       - "'PENDING_DIR' (named in a string) via ALLOW"
       - "'graveyard_file' (named in a string) via ALLOW"
     asserts:
       - old: "assert {e.reason for e in construct} == {D3, N_H}"
-        new: null
+        new: same
       - old: "assert {e.module for e in construct if e.reason == N_H} == {CORPUS, SCAFFOLD}"
-        new: null
+        new: same
   - file: "defender/tests/test_1134_census.py"
     test: "test_only_the_named_listers_list_and_the_curator_lists_nothing"
+    fixture-only: true
     reaches:
       - "'PENDING_DIR' (named in a string) via ALLOW"
       - "'graveyard_file' (named in a string) via ALLOW"
     asserts:
       - old: "assert tuple(sorted(C.CURATOR_MODULES)) == tuple(sorted(CURATOR_MODULES))"
-        new: null
+        new: same
       - old: "assert raw == LISTERS"
-        new: null
+        new: same
       - old: "assert not {m for m, _q in raw} & CURATOR_MODULES"
-        new: null
+        new: same
       - old: "assert reached == CURATOR_READS"
-        new: null
+        new: same
       - old: "assert DRAIN not in {m for m, _q in reached}"
-        new: null
+        new: same
       - old: "assert not [e for e in ALLOW if e.module == CORPUS and e.kind == 'listing' and ('.entries()' in e.text)]"
-        new: null
+        new: same
       - old: "assert C.READERS[C.ENTRY_KIND] == C.READERS[C.LIST_TREE] == (0, 'view', 'bound')"
-        new: null
+        new: same
       - old: "assert C.READERS[C.VIEW_AT] == (0, 'held', 'held')"
-        new: null
+        new: same
   - file: "defender/tests/test_1134_census.py"
     test: "test_judge_counts_anchors_and_reports_stale_entries"
+    fixture-only: true
     reaches:
       - "'PENDING_DIR' (named in a string) via ALLOW"
       - "'graveyard_file' (named in a string) via ALLOW"
     asserts:
       - old: "assert [h.text for h in unexpected] == ['twice()', 'once()', 'built()']"
-        new: null
+        new: same
       - old: "assert stale == ['f call: gone() (allowed x1, found x0)']"
-        new: null
+        new: same
       - old: "assert [h.text for h in unexpected] == ['built()']"
-        new: null
+        new: same
       - old: "assert stale == []"
-        new: null
+        new: same
   - file: "defender/tests/test_1134_census.py"
     test: "test_a_d3_fallback_still_asks_tree_for_first"
+    fixture-only: true
     reaches:
       - "'PENDING_DIR' (named in a string) via ALLOW"
       - "'graveyard_file' (named in a string) via ALLOW"
     asserts:
       - old: "assert d3 - TREE_FOR_FALLBACKS == {(DRAIN, '_spawn_repair')}, 'a new D3 entry: is it a fallback behind a `tree_for` miss (add it to TREE_FOR_FALLBACKS), or a checked-in file outside the mounts?'"
-        new: null
+        new: same
       - old: "assert not silent, f'D3 fallbacks that no longer ask `tree_for`: {silent}'"
-        new: null
+        new: same
       - old: "assert not judge(DRAIN, C.census_source(WORKTREE, DRAIN, dropped, tree=TREE))[0], 'the anchors alone cannot see a dropped handle branch'"
-        new: null
+        new: same
       - old: "assert not _asks_tree_for(DRAIN, dropped, '_put_back')"
-        new: null
+        new: same
   - file: "defender/tests/test_1134_census.py"
     test: "test_each_d3_fallback_touch_sits_behind_its_tree_for_miss"
+    fixture-only: true
     reaches:
       - "'PENDING_DIR' (named in a string) via ALLOW"
       - "'graveyard_file' (named in a string) via ALLOW"
     asserts:
       - old: "assert seen == sum((e.count for e in ALLOW if e.reason == D3 and e.kind != 'construct' and ((e.module, e.qualname) in TREE_FOR_FALLBACKS)))"
-        new: null
+        new: same
       - old: "assert not off, off"
-        new: null
+        new: same
   - file: "defender/tests/test_1134_census.py"
     test: "test_a_fallback_moved_off_its_miss_is_caught"
+    fixture-only: true
     reaches:
       - "'PENDING_DIR' (named in a string) via ALLOW"
       - "'graveyard_file' (named in a string) via ALLOW"
     asserts:
       - old: "assert not judge(module, C.census_source(WORKTREE, module, patched, tree=TREE))[0], 'the anchors alone do not see it: this row is what does'"
-        new: null
+        new: same
       - old: "assert _d3_fallback_touches(module, patched)[0], name"
-        new: null
+        new: same
   - file: "defender/tests/test_1134_census.py"
     test: "test_d5_each_inline_write_waiver_sits_on_an_n_e_census_hit"
+    fixture-only: true
     reaches:
       - "'PENDING_DIR' (named in a string) via ALLOW"
       - "'graveyard_file' (named in a string) via ALLOW"
     asserts:
       - old: "assert not bad, bad"
-        new: null
+        new: same
       - old: "assert waived == D5_INLINE_WAIVERS"
-        new: null
+        new: same
   - file: "defender/tests/test_1134_census.py"
     test: "test_an_adversary_regression_is_an_unexpected_hit"
+    fixture-only: true
     reaches:
       - "'PENDING_DIR' (named in a string) via ALLOW"
       - "'graveyard_file' (named in a string) via ALLOW"
     asserts:
       - old: "assert before[anchor] == allowed.get(anchor, 0), f'not clean before the regression: {anchor}'"
-        new: null
+        new: same
       - old: "assert unexpected[anchor] == count, f'{name}: {qualname} {kind} `{text}` not flagged x{count} (got x{unexpected[anchor]}); unexpected: {sorted(unexpected)}'"
-        new: null
+        new: same
       - old: "assert any((s.startswith(f'{qualname} {kind}: {text} (') for s in stale)), (name, stale)"
-        new: null
+        new: same
   - file: "defender/tests/test_1134_curator_label.py"
     test: "test_the_trigger_requires_the_label_and_runs_the_batch_under_its_trees"
     reaches:
       - "trigger_author (5-positional)"
     asserts:
       - old: "assert 'held_reason' not in pending(w.paths.findings)[0]"
-        new: null
+        new: same
       - old: "assert 'held_reason' in row, row"
-        new: null
+        new: same
       - old: "assert stuck_records(w.paths.findings) == []"
-        new: null
+        new: same
       - old: "with pytest.raises(TypeError)"
-        new: null
+        new: same
   - file: "defender/tests/test_1134_curator_label.py"
     test: "test_the_trigger_opens_the_trees_of_the_label_it_is_handed_and_no_other"
     reaches:
       - "trigger_author (5-positional)"
     asserts:
       - old: "assert 'held_reason' not in pending(w.paths.findings)[0]"
-        new: null
+        new: same
       - old: "assert 'held_reason' in row, row"
-        new: null
+        new: same
       - old: "assert stuck_records(paths.findings) == []"
-        new: null
+        new: "assert stuck_records(w.paths.findings) == []"
       - old: "with pytest.raises(FatalConfigError)"
-        new: null
+        new: same
   - file: "defender/tests/test_1134_curator_label.py"
     test: "test_a_hold_fault_at_the_open_propagates_out_of_the_seam"
     reaches:
       - "trigger_author (5-positional)"
     asserts:
       - old: "assert 'held_reason' not in pending(paths.findings)[0]"
-        new: null
+        new: same
       - old: "assert not os.path.lexists(paths.lessons_questioner_dir)"
-        new: null
+        new: same
       - old: "assert descriptors_under(repo) == []"
-        new: null
+        new: same
       - old: "with pytest.raises(FileNotFoundError)"
-        new: null
+        new: same
   - file: "defender/tests/test_1134_curator_label.py"
     test: "test_the_trigger_holds_the_labels_mounts_only_while_the_batch_runs"
     reaches:
       - "trigger_author (5-positional)"
     asserts:
       - old: "assert descriptors_under(w.repo) == []"
-        new: null
+        new: same
       - old: "assert seen, \"the curator's batch never built its config\""
-        new: null
+        new: same
       - old: "assert all((held == _held_roots(paths) for held in seen)), (seen, _held_roots(paths))"
-        new: null
+        new: same
       - old: "assert len(_held_roots(paths)) == (3 if extra else 2)"
-        new: null
+        new: "assert len(_held_roots(paths)) == (3 if extra else 2)"
       - old: "assert descriptors_under(w.repo) == [], 'a held root outlived the seam'"
-        new: null
+        new: same
       - old: "assert 'held_reason' in pending(paths.findings)[0]"
-        new: null
+        new: same
       - old: "assert bad == [], bad"
-        new: null
+        new: same
   - file: "defender/tests/test_1134_curator_label.py"
     test: "test_the_trigger_releases_the_trees_when_the_batch_raises"
     reaches:
       - "trigger_author (5-positional)"
     asserts:
       - old: "assert seen == [_held_roots(paths)], seen"
-        new: null
+        new: same
       - old: "assert descriptors_under(w.repo) == [], 'a held root outlived the raising seam'"
-        new: null
+        new: same
       - old: "assert drains._maybe_trigger_author(*_trigger_args(paths), label=AUTHOR_DRAIN_LABEL) is None"
-        new: null
+        new: same
       - old: "with pytest.raises(RuntimeError, match='the batch blew up')"
-        new: null
+        new: same
   - file: "defender/tests/test_1134_curator_label.py"
     test: "test_below_the_threshold_nothing_is_held"
+    fixture-only: true
     reaches:
       - "trigger_author (5-positional)"
     asserts:
       - old: "assert asked == []"
-        new: null
+        new: same
       - old: "assert seen == []"
-        new: null
+        new: same
       - old: "assert 'held_reason' not in pending(paths.findings)[0]"
-        new: null
+        new: same
       - old: "assert descriptors_under(w.repo) == []"
-        new: null
+        new: same
   - file: "defender/tests/test_773_gap_ledger.py"
     test: "test_a_crash_between_the_commit_and_the_gap_ledger_write_773"
     reaches:
@@ -989,11 +1042,11 @@ tests:
       - "planted folder (JF11): now a refusal; rewrite to an ordinary-failure injector (the gap ledger path)"
     asserts:
       - old: "assert 'bad' in sc.pending_by_id()"
-        new: null
+        new: same
       - old: "assert sc.category_of('bad') is None"
-        new: null
+        new: same
       - old: "with pytest.raises(IsADirectoryError)"
-        new: null
+        new: "with pytest.raises(StateRefused)"
   - file: "defender/tests/test_773_gap_ledger.py"
     test: "test_gap_ledger_append_raises_an_io_error_773"
     reaches:
@@ -1001,72 +1054,72 @@ tests:
       - "planted folder (JF11): now a refusal; rewrite to an ordinary-failure injector (the gap ledger path)"
     asserts:
       - old: "assert sc.consumed() == []"
-        new: null
+        new: same
       - old: "assert 'f1' in sc.pending_by_id()"
-        new: null
+        new: same
       - old: "assert sc.corpus_files() == []"
-        new: null
+        new: same
       - old: "with pytest.raises(IsADirectoryError)"
-        new: null
+        new: "with pytest.raises(StateRefused)"
   - file: "defender/tests/test_773_gap_ledger.py"
     test: "test_producer_reenqueues_a_finding_id_mid_ledger_write_window_773"
     reaches:
       - "queue_dir= (enqueue.append_rows)"
     asserts:
       - old: "assert 'f1' in sc.pending_by_id()"
-        new: null
+        new: same
       - old: "assert appended == 1"
-        new: null
+        new: same
       - old: "assert len([r for r in sc.pending() if r.get('finding_id') == 'f1']) == 2"
-        new: null
+        new: same
       - old: "with pytest.raises(TimeoutError)"
-        new: null
+        new: same
   - file: "defender/tests/test_869_reporting.py"
     test: "test_a_dropped_row_takes_a_terminal_undeclared_category"
     reaches:
       - "graveyard_file"
     asserts:
       - old: "assert consumed['r:l-002:0']['consumed_category'] == 'consumed_unattributable'"
-        new: null
+        new: same
       - old: "assert 'consumed_commit' not in consumed['r:l-002:0']"
-        new: null
+        new: same
       - old: "assert consumed['r:l-000:0']['consumed_category'] == 'consumed_committed'"
-        new: null
+        new: same
       - old: "assert persist.read_pitfalls(paths) == [], 'pending must go empty; the row is terminal'"
-        new: null
+        new: "assert persist.read_pitfalls(state) == [], 'pending must go empty; the row is terminal'"
       - old: "assert 'r:l-002:0' in graveyard, 'the dropped row leaves no durable record, so nothing reaches human review'"
-        new: null
+        new: same
       - old: "assert 'r:l-000:0' not in graveyard"
-        new: null
+        new: same
       - old: "assert repo.is_dir()"
-        new: null
+        new: same
   - file: "defender/tests/test_881_loop_plumbing.py"
     test: "test_881_a_fault_before_the_rotation_in_the_unkeyable_retirement_is_recorded_too"
     reaches:
       - "graveyard_file"
     asserts:
       - old: "assert cfg.invoke_agent.calls == [], 'the tick reached the author; the fault under test is the one BEFORE the gate'"
-        new: null
+        new: same
       - old: "assert list(graveyard.iterdir()) == [], 'nothing can have been graveyarded'"
-        new: null
+        new: "assert h.graveyard(ch) == [], 'nothing can have been graveyarded'"
       - old: "assert h.pending(ch) == rows, 'the row must stay queued — `IsADirectoryError` retires nothing'"
-        new: null
+        new: "assert h.pending(ch) == rows, 'the row must stay queued — `OSError` retires nothing'"
       - old: "assert len(records) == 1, 'a fault the drain cannot retire escaped the tick with no operator signal, because the guard covers the rotation and not the whole retirement'"
-        new: null
+        new: same
       - old: "assert records[0]['fault_class'] == 'IsADirectoryError', f'the record does not name the fault class, or the guard names only the one class the sibling test injects: {records[0]}'"
-        new: null
+        new: "assert records[0]['fault_class'] == 'OSError', f'the record does not name the fault class, or the guard names only the one class the sibling test injects: {records[0]}'"
       - old: "assert records[0]['row_ids'], 'the record names no rows, so the guard was handed the wrong batch — the rows this tick is stuck on are the unkeyable ones'"
-        new: null
+        new: same
       - old: "assert drain.run_batch(cfg=cfg) == 0"
-        new: null
+        new: same
       - old: "assert h.pending(ch) == [], 'the retirement did not clear the row once unobstructed'"
-        new: null
+        new: same
       - old: "assert len(h.graveyard(ch)) == 1, 'the retirement did not graveyard the row'"
-        new: null
+        new: same
       - old: "assert len(h.stuck_records(ch)) == 1, 'an ordinary unkeyable retirement wrote a stuck record; the report then names every bad row rather than every wedged tick'"
-        new: null
+        new: same
       - old: "with pytest.raises(IsADirectoryError)"
-        new: null
+        new: "with pytest.raises(OSError, match='No space left')"
   - file: "defender/tests/test_881_loop_plumbing.py"
     test: "test_881_a_tick_whose_gate_held_the_whole_batch_names_those_rows_when_it_sticks"
     reaches:
@@ -1074,21 +1127,22 @@ tests:
       - "planted folder (JF11): now a refusal; rewrite to an ordinary-failure injector (the held report path)"
     asserts:
       - old: "assert cfg.invoke_agent.calls == [], 'the gate admitted a row, so this is not the held-whole tick the test is about'"
-        new: null
+        new: same
       - old: "assert len(records) == 1, f'the fault left no stuck record: {records}'"
-        new: null
+        new: same
       - old: "assert sorted(records[0]['row_ids']) == ['a/0', 'a/1', 'a/2'], f\"the stuck record names none of the rows the tick is stuck on — the guard was handed the authoring leg's empty batch instead of the rows in flight: {records[0]}\""
-        new: null
+        new: same
       - old: "assert drain.run_batch(cfg=cfg) == 0"
-        new: null
+        new: same
       - old: "assert len(h.stuck_records(ch)) == 1, 'an ordinary holding tick wrote a stuck record; the report then names every tick that declined a row rather than every wedged one'"
-        new: null
+        new: same
       - old: "assert cfg.held_report.is_file(), 'the held report was not written once unobstructed'"
-        new: null
+        new: "assert held_report.is_file(), 'the held report was not written once unobstructed'"
       - old: "with pytest.raises(IsADirectoryError)"
-        new: null
+        new: "with pytest.raises(OSError, match='No space left')"
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_a_manifest_or_record_of_the_wrong_type_degrades_that_row_never_the_page"
+    fixture-only: true
     reaches:
       - "graveyard_file"
       - "graveyard_file via _seed_findings"
@@ -1099,31 +1153,32 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert _channel(view, 'findings')['deadletter'] == [{'id': None, 'reason': '', 'when': None, 'row': {'k': 'v'}}, {'id': 'g-list', 'reason': 'r', 'when': None, 'row': {'value': ['not', 'a', 'mapping']}}]"
-        new: null
+        new: same
       - old: "assert _channel(view, 'findings')['stuck'] == {'fault_class': '', 'row_ids': [], 'consecutive_ticks': 0, 'reason': '', 'recorded_at': None}"
-        new: null
+        new: same
       - old: "assert _channel(view, 'pitfalls')['held'] == {'count': 2, 'ids': ['p-real']}"
-        new: null
+        new: same
       - old: "assert _channel(view, 'pitfalls')['deadletter'][0]['row'] == {'pitfall_id': 'p-nan', 'score': None}"
-        new: null
+        new: same
       - old: "assert 'NaN' not in serialize_queues.dump_contract(view)"
-        new: null
+        new: same
       - old: "assert '0 ticks running' in _rendered(page)"
-        new: null
+        new: same
       - old: "assert '2 held' in _rendered(page)"
-        new: null
+        new: same
       - old: "assert taint['findings'] == 0"
-        new: null
+        new: same
       - old: "assert taint['verdict'] == {}"
-        new: null
+        new: same
       - old: "assert taint['quarantined_at'] is None"
-        new: null
+        new: same
       - old: "assert taint['cause'] is None"
-        new: null
+        new: same
       - old: "assert delivery['at'] is None"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_an_empty_state_root_reads_as_three_idle_channels_and_nothing_set_aside"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1132,15 +1187,16 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert view['state_root'] == str(paths.state_root)"
-        new: null
+        new: same
       - old: "assert view['quarantine'] == {'markers': {'rows': [], 'unreadable': 0}, 'deliveries': {'rows': [], 'unreadable': 0}, 'tainted': {'dir': str(paths.quarantine_dir), 'cap': 10, 'held': 0, 'rows': [], 'unreadable': 0}}"
-        new: null
+        new: same
       - old: "assert _channel(view, name) == {'name': name, 'accent': accent, 'has_stuck_record': flag, 'hold_means': _channel(view, name)['hold_means'], 'depth': {'queued': 0}, 'unreadable': 0, 'held': {'count': 0, 'ids': []}, 'deadletter': [], 'stuck': None}"
-        new: null
+        new: same
       - old: "assert _channel(view, name)['hold_means']"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_one_more_row_moves_exactly_one_number"
+    fixture-only: true
     reaches:
       - "graveyard_file"
       - "graveyard_file via _seed_findings"
@@ -1150,13 +1206,14 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert _channel(after, 'questioner_findings')['deadletter'] == [{'id': 'q-dead', 'reason': 'ceiling', 'when': '2026-09-18T00:00:00+00:00', 'row': {'finding_id': 'q-dead'}}]"
-        new: null
+        new: same
       - old: "assert after['quarantine'] == before['quarantine']"
-        new: null
+        new: same
       - old: "assert ch == _channel(before, ch['name'])"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_the_channels_are_the_serializers_own_literal_three_in_order"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1165,9 +1222,10 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert [ch['name'] for ch in view['channels']] == ['findings', 'questioner_findings', 'pitfalls']"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_each_channel_carries_its_accent_and_whether_a_stuck_record_exists_for_it"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1176,11 +1234,12 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert accents == {'findings': 'defender', 'questioner_findings': 'learning', 'pitfalls': 'oracle'}"
-        new: null
+        new: same
       - old: "assert flags == {'findings': True, 'questioner_findings': True, 'pitfalls': False}"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_queue_depth_is_the_readable_rows_of_the_pending_file"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1189,13 +1248,14 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert _channel(view, 'findings')['depth'] == {'queued': 4}"
-        new: null
+        new: same
       - old: "assert _channel(view, 'questioner_findings')['depth'] == {'queued': 2}"
-        new: null
+        new: same
       - old: "assert _channel(view, 'pitfalls')['depth'] == {'queued': 3}"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_unreadable_sums_a_channels_three_sidecars_counting_each_once"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1204,13 +1264,14 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert _channel(view, 'findings')['unreadable'] == 3"
-        new: null
+        new: same
       - old: "assert _channel(view, 'questioner_findings')['unreadable'] == 0"
-        new: null
+        new: same
       - old: "assert _channel(view, 'pitfalls')['unreadable'] == 0"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_findings_holds_are_every_row_carrying_held_reason_however_empty"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1219,11 +1280,12 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert held['ids'] == ['f-2', 'f-3']"
-        new: null
+        new: same
       - old: "assert held['count'] == len(held['ids'])"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_pitfalls_holds_are_rows_the_curator_was_offered_and_declined"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1232,11 +1294,12 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert held['ids'] == ['p-2']"
-        new: null
+        new: same
       - old: "assert held['count'] == len(held['ids'])"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_questioner_holds_use_the_same_marker_as_findings"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1245,9 +1308,10 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert held == {'count': 1, 'ids': ['q-2']}"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_each_lane_says_what_its_own_hold_means"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1256,23 +1320,24 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert means['findings'] == means['questioner_findings']"
-        new: null
+        new: same
       - old: "assert 'person' in means['findings']"
-        new: null
+        new: same
       - old: "assert 'retries' in means['findings']"
-        new: null
+        new: same
       - old: "assert 'person' not in means['pitfalls']"
-        new: null
+        new: same
       - old: "assert 'every tick' in means['pitfalls']"
-        new: null
+        new: same
       - old: "assert 'ceiling' in means['pitfalls']"
-        new: null
+        new: same
       - old: "assert f\"2 held</b> · {means['findings']}\" in body"
-        new: null
+        new: same
       - old: "assert f\"1 held</b> · {means['pitfalls']}\" in body"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_dead_letters_are_newest_first_and_normalised_field_by_field"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1281,9 +1346,10 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert _channel(view, 'findings')['deadletter'] == EXPECTED_FINDINGS_DEADLETTER"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_a_curator_drop_reads_as_a_dead_letter_with_no_attempts_in_the_contract"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1292,11 +1358,12 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert entry == {'id': 'p-9', 'reason': 'undeclared-system:evil', 'when': None, 'row': {'pitfall_id': 'p-9', 'system': 'evil', 'occurrences': 2}}"
-        new: null
+        new: same
       - old: "assert set(entry) == {'id', 'reason', 'when', 'row'}"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_a_channel_with_no_graveyard_file_lists_no_dead_letters"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1305,9 +1372,10 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert _channel(view, 'questioner_findings')['deadletter'] == []"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_stuck_is_the_last_record_of_the_report_with_its_own_time"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1316,13 +1384,14 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert _channel(view, 'findings')['stuck'] == STUCK_LAST"
-        new: null
+        new: same
       - old: "assert _channel(view, 'findings')['stuck']['consecutive_ticks'] == 1"
-        new: null
+        new: same
       - old: "assert set(STUCK_LAST) == {'fault_class', 'row_ids', 'consecutive_ticks', 'reason', 'recorded_at'}"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_stuck_is_null_when_the_report_exists_but_holds_no_record"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1331,11 +1400,12 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert ch['stuck'] is None"
-        new: null
+        new: same
       - old: "assert ch['has_stuck_record'] is True"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_the_pitfalls_lane_has_no_stuck_record_and_says_so_structurally"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1344,11 +1414,12 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert ch['stuck'] is None"
-        new: null
+        new: same
       - old: "assert ch['has_stuck_record'] is False"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_the_findings_lane_records_stuck_ticks_even_before_it_has_written_one"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1357,11 +1428,12 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert ch['has_stuck_record'] is True"
-        new: null
+        new: same
       - old: "assert ch['stuck'] is None"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_failed_markers_from_both_queue_dirs_are_listed_and_told_apart"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1370,9 +1442,10 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert view['quarantine']['markers']['rows'] == EXPECTED_MARKERS"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_pending_deliveries_are_listed_newest_first"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1381,9 +1454,10 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert view['quarantine']['deliveries']['rows'] == EXPECTED_DELIVERIES"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_tainted_manifests_are_listed_newest_first_with_the_verdict_kept"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1392,9 +1466,10 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert view['quarantine']['tainted']['rows'] == EXPECTED_TAINTED"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_each_set_aside_list_counts_its_own_unreadable_files"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1403,13 +1478,13 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert q['markers']['unreadable'] == 2"
-        new: null
+        new: same
       - old: "assert q['deliveries']['unreadable'] == 1"
-        new: null
+        new: same
       - old: "assert q['tainted']['unreadable'] == 1"
-        new: null
+        new: same
       - old: "assert [ch['unreadable'] for ch in view['channels']] == [3, 0, 0]"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_held_is_the_writers_count_of_archives_not_of_readable_manifests"
     reaches:
@@ -1420,15 +1495,16 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert len(tainted['rows']) == 2"
-        new: null
+        new: same
       - old: "assert tainted['held'] == 4"
-        new: null
+        new: same
       - old: "assert tainted['held'] == quarantine.held_archives(qdir)"
-        new: null
+        new: same
       - old: "assert '4 / 10' in _rendered(build.render_queues(serialize_queues.build_view(paths)))"
-        new: null
+        new: "assert '4 / 10' in _rendered(build.render_queues(_build(paths)))"
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_the_page_names_the_quarantine_directory_because_it_is_not_under_the_state_root"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1437,15 +1513,16 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert view['quarantine']['tainted']['dir'] == str(paths.quarantine_dir)"
-        new: null
+        new: same
       - old: "assert paths.quarantine_dir == AuthorBranch(repo_root=paths.repo_root).quarantine_dir"
-        new: null
+        new: same
       - old: "assert not str(paths.quarantine_dir).startswith(str(paths.state_root))"
-        new: null
+        new: same
       - old: "assert html.escape(str(paths.quarantine_dir), quote=True) in _rendered(build.render_queues(view))"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_the_near_cap_warning_shows_at_two_slots_left_and_never_on_an_empty_directory"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1454,17 +1531,18 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert 'class=\"cap\">2 / 10</span>' in page_for(10)"
-        new: null
+        new: same
       - old: "assert 'class=\"cap near\">2 / 4</span>' in page_for(4)"
-        new: null
+        new: same
       - old: "assert 'class=\"cap near\">2 / 2</span>' in page_for(2)"
-        new: null
+        new: same
       - old: "assert 'class=\"cap\">0 / 2</span>' in page_for(2)"
-        new: null
+        new: same
       - old: "assert '.q-group h3 .cap.near' in build.QUEUES_CSS"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_an_unreadable_sidecar_or_directory_is_counted_not_fatal"
+    fixture-only: true
     reaches:
       - "graveyard_file"
       - "graveyard_file via _seed_findings"
@@ -1474,19 +1552,20 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert findings['deadletter'] == []"
-        new: null
+        new: same
       - old: "assert findings['unreadable'] == 2"
-        new: null
+        new: same
       - old: "assert tainted == {'dir': str(paths.quarantine_dir), 'cap': 10, 'held': None, 'rows': [], 'unreadable': 1}"
-        new: null
+        new: same
       - old: "assert '? / 10' in _rendered(page)"
-        new: null
+        new: same
       - old: "assert '1 unreadable file skipped' in _rendered(page)"
-        new: null
+        new: same
       - old: "assert '2 unreadable lines skipped' in _rendered(page)"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_the_taint_cap_defaults_to_ten"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1495,7 +1574,7 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert view['quarantine']['tainted']['cap'] == 10"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_the_taint_cap_follows_its_environment_variable"
     reaches:
@@ -1506,9 +1585,10 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert serialize_queues.build_view(paths)['quarantine']['tainted']['cap'] == 3"
-        new: null
+        new: "assert _build(paths)['quarantine']['tainted']['cap'] == 3"
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_build_view_says_which_state_root_it_read_and_carries_no_timestamp"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1517,11 +1597,12 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert view['state_root'] == str(paths.state_root)"
-        new: null
+        new: same
       - old: "assert 'generated_at' not in view"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_stamped_view_takes_the_paths_it_is_handed"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1530,13 +1611,14 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert stamped['state_root'] == str(paths.state_root)"
-        new: null
+        new: same
       - old: "assert stamped['quarantine']['tainted']['dir'] == str(paths.quarantine_dir)"
-        new: null
+        new: same
       - old: "assert stamped['generated_at']"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_the_page_embeds_the_view_it_was_handed_unchanged"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1545,9 +1627,10 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert _embedded_data(build.render_queues(view)) == view"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_a_row_that_looks_like_a_script_tag_opens_no_script_tag"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1556,21 +1639,22 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert SCRIPT_PAYLOAD in json.dumps(view), 'the fixture lost its payload'"
-        new: null
+        new: same
       - old: "assert SCRIPT_PAYLOAD not in json.dumps(quiet)"
-        new: null
+        new: same
       - old: "assert loud_page.count('<script') == quiet_page.count('<script')"
-        new: null
+        new: same
       - old: "assert loud_page.count('</script') == quiet_page.count('</script')"
-        new: null
+        new: same
       - old: "assert SCRIPT_PAYLOAD not in loud_page"
-        new: null
+        new: same
       - old: "assert 'alert(1)' in loud_page, \"the row's own content never reached the page\""
-        new: null
+        new: same
       - old: "assert _embedded_data(loud_page) == view"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_the_page_renders_every_dead_letter_and_hold_it_carries"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1579,27 +1663,28 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert 'no id' in body"
-        new: null
+        new: same
       - old: "assert 'No dead letters' in body"
-        new: null
+        new: same
       - old: "assert '2 held' in body"
-        new: null
+        new: same
       - old: "assert 'queued</span><span class=\"qt-val\">4</span>' in body"
-        new: null
+        new: same
       - old: "assert 'dead</span><span class=\"qt-val n-warn\">4</span>' in body"
-        new: null
+        new: same
       - old: "assert ch['name'] in body"
-        new: null
+        new: same
       - old: "assert html.escape(entry['reason'], quote=True) in body"
-        new: null
+        new: same
       - old: "assert rid in body"
-        new: null
+        new: same
       - old: "assert entry['id'] in body"
-        new: null
+        new: same
       - old: "assert html.escape(str(value), quote=True) in body"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_the_page_renders_what_was_set_aside_and_tells_the_two_groups_apart"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1608,31 +1693,32 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert 'Needs a person' in body"
-        new: null
+        new: same
       - old: "assert 'Retrying itself' in body"
-        new: null
+        new: same
       - old: "assert '2 / 10' in body"
-        new: null
+        new: same
       - old: "assert 'no scan recorded' in body"
-        new: null
+        new: same
       - old: "assert '2 unreadable files skipped' in body"
-        new: null
+        new: same
       - old: "assert '1 unreadable file skipped' in body"
-        new: null
+        new: same
       - old: "assert '3 unreadable lines skipped' in body"
-        new: null
+        new: same
       - old: "assert m['identity'] in body"
-        new: null
+        new: same
       - old: "assert html.escape(m['failed'], quote=True).replace('onerror=', 'on\\u200berror=') in body"
-        new: null
+        new: same
       - old: "assert d['branch'] in body"
-        new: null
+        new: same
       - old: "assert t['batch_id'] in body"
-        new: null
+        new: same
       - old: "assert t['taint'] in body"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_the_fault_band_carries_the_class_the_ticks_and_the_time"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1641,15 +1727,16 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert html.escape(stuck['fault_class'], quote=True) in body"
-        new: null
+        new: same
       - old: "assert stuck['recorded_at'] in body"
-        new: null
+        new: same
       - old: "assert '1 tick' in body"
-        new: null
+        new: same
       - old: "assert html.escape(stuck['reason'], quote=True) in body"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_every_attacker_influenced_string_reaches_the_page_escaped"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1658,23 +1745,24 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert '<img src=x onerror=alert(2)>' not in body"
-        new: null
+        new: same
       - old: "assert 'onerror=' not in body"
-        new: null
+        new: same
       - old: "assert '&lt;img src=x on\\u200berror=alert(2)&gt;' in body"
-        new: null
+        new: same
       - old: "assert body.count('<script') == 1"
-        new: null
+        new: same
       - old: "assert body.count('</script') == 1"
-        new: null
+        new: same
       - old: "assert body.count('<img') == 0"
-        new: null
+        new: same
       - old: "assert hostile not in body, hostile"
-        new: null
+        new: same
       - old: "assert html.escape(hostile, quote=True) in body, hostile"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_content_that_spells_a_placeholder_is_content"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1683,17 +1771,18 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert body.count('<details class=\"q-card') == len(view['channels']) + 1"
-        new: null
+        new: same
       - old: "assert page.count('\"state_root\":') == 1"
-        new: null
+        new: same
       - old: "assert '${cards}' in body"
-        new: null
+        new: same
       - old: "assert '${queues_json}' in body"
-        new: null
+        new: same
       - old: "assert _embedded_data(page) == loud"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_a_timestamp_is_escaped_once"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1702,17 +1791,18 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert '&lt;b&gt;2026-0' in body"
-        new: null
+        new: same
       - old: "assert '&amp;lt;' not in body"
-        new: null
+        new: same
       - old: "assert 'since &amp;2026-09-' in body"
-        new: null
+        new: same
       - old: "assert '&amp;amp;' not in body"
-        new: null
+        new: same
       - old: "assert '&lt;i&gt;2026-0' in body"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_the_row_is_rendered_by_the_run_visualizers_own_highlighter"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1721,19 +1811,20 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert visualize_primitives.pretty_json_html(_channel(odd, 'findings')['deadletter'][0]['row']) in body"
-        new: null
+        new: same
       - old: "assert '<span class=\"j-bool\">true</span>' in body"
-        new: null
+        new: same
       - old: "assert '<span class=\"j-null\">null</span>' in body"
-        new: null
+        new: same
       - old: "assert build.esc_untrusted is visualize_primitives.esc_untrusted"
-        new: null
+        new: same
       - old: "assert not hasattr(build, '_esc')"
-        new: null
+        new: same
       - old: "assert not hasattr(build, '_json_pretty')"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_the_last_fault_band_is_on_the_page_only_when_a_channel_is_stuck"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1742,11 +1833,12 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert 'Last fault' in _rendered(build.render_queues(view))"
-        new: null
+        new: same
       - old: "assert 'Last fault' not in _rendered(build.render_queues(calm))"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_the_two_pages_link_to_each_other"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1755,11 +1847,12 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert 'href=\"queues.html\"' in build.render({'groups': {}})"
-        new: null
+        new: same
       - old: "assert 'href=\"lessons.html\"' in build.render_queues(view)"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_main_writes_the_queue_pages_beside_the_lessons_pages"
+    fixture-only: true
     reaches:
       - "graveyard_file via _seed_findings"
       - "graveyard_file via _seed_pitfalls"
@@ -1768,271 +1861,278 @@ tests:
       - "stuck_report_file via _seed_questioner"
     asserts:
       - old: "assert build.main(paths) == 0"
-        new: null
+        new: same
       - old: "assert [ch['name'] for ch in queues['channels']] == ['findings', 'questioner_findings', 'pitfalls']"
-        new: null
+        new: same
       - old: "assert queues['generated_at']"
-        new: null
+        new: same
       - old: "assert Path(queues['state_root']) == paths.state_root"
-        new: null
+        new: same
       - old: "assert [t['batch_id'] for t in queues['quarantine']['tainted']['rows']] == ['b-later', 'a-earlier']"
-        new: null
+        new: same
       - old: "assert _embedded_data((frontend / 'queues.html').read_text(encoding='utf-8')) == queues"
-        new: null
+        new: same
       - old: "assert (frontend / 'lessons.json').is_file()"
-        new: null
+        new: same
       - old: "assert (frontend / 'lessons.html').is_file()"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_retire_stamps_the_dead_letter_it_writes"
+    fixture-only: true
     reaches:
       - "graveyard_file"
     asserts:
       - old: "assert record['deadletter_reason'] == 'the ceiling'"
-        new: null
+        new: same
       - old: "assert record['row'] == {'finding_id': 'a/0', 'run_id': 'a'}"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_retiring_an_unkeyable_row_stamps_its_flat_record"
+    fixture-only: true
     reaches:
       - "graveyard_file"
     asserts:
       - old: "assert 'row' not in record"
-        new: null
+        new: same
       - old: "assert record['run_id'] == 'r9'"
-        new: null
+        new: same
       - old: "assert record['deadletter_reason'] == \"row carries no value under 'finding_id'\""
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_the_curators_dropped_row_carries_the_time_it_was_dropped"
+    fixture-only: true
     reaches:
       - "graveyard_file"
     asserts:
       - old: "assert record['deadletter_reason'] == 'undeclared-system:evil'"
-        new: null
+        new: same
       - old: "assert record['row'] == rows[0]"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_recording_a_stuck_tick_stamps_when_it_was_recorded"
+    fixture-only: true
     reaches:
       - "stuck_report_file"
     asserts:
       - old: "assert record['fault_class'] == 'TimeoutError'"
-        new: null
+        new: same
       - old: "assert record['row_ids'] == ['a/0']"
-        new: null
+        new: same
       - old: "assert record['consecutive_ticks'] == 1"
-        new: null
+        new: same
   - file: "defender/tests/test_903_queue_view.py"
     test: "test_nothing_in_the_tree_still_says_the_graveyard_is_unread"
     reaches:
       - "graveyard_file"
     asserts:
       - old: "assert 'nothing in production reads this back' not in (drain.graveyard_file.__doc__ or '')"
-        new: null
+        new: "assert 'nothing in production reads this back' not in (LearningState.deadletter.__doc__ or '')"
       - old: "assert 'serialize_queues' in (drain.graveyard_file.__doc__ or '')"
-        new: null
+        new: "assert 'queue page' in (LearningState.deadletter.__doc__ or '')"
       - old: "assert stale == []"
-        new: null
+        new: same
   - file: "defender/tests/test_921_enqueue_gate.py"
     test: "test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_and_index"
+    fixture-only: true
     reaches:
       - "queue_dir= (J.mod('learning.judge').grade_episode)"
     asserts:
       - old: "assert len(ids) == len(set(ids)), f'colliding finding ids inside one pass: {ids}'"
-        new: null
+        new: same
       - old: "assert retried == len(ids)"
-        new: null
+        new: same
       - old: "assert again == ids, 'a retried enqueue minted new ids; the guard keys on the id alone, so a fresh id per retry defeats it entirely'"
-        new: null
+        new: same
       - old: "assert len(fresh) == len(set(fresh)) == 8, f'two worlds x two draws x two findings did not mint eight distinct ids: {fresh}'"
-        new: null
+        new: same
   - file: "defender/tests/test_921_enqueue_gate.py"
     test: "test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted"
+    fixture-only: true
     reaches:
       - "queue_dir= (J.mod('learning.judge').grade_episode)"
     asserts:
       - old: "assert Path(record['enqueued_to']) == channel.file, 'the pass wrote somewhere other than the queue it was pointed at, so nothing below is about the torn tail'"
-        new: null
+        new: same
       - old: "assert record['queue_malformed_rows'] == 1, 'the torn trailing line was dropped without a count; a silent skip and a counted skip are the same drain and different evidence, and the count is the only thing that says a writer left a row half-written'"
-        new: null
+        new: same
       - old: "assert unreadable == 1, f'{unreadable} unreadable line(s) on the queue: the torn tail cost more than itself — an appended row was concatenated onto the fragment and lost with it'"
-        new: null
+        new: same
       - old: "assert 'run-adv/0' in ids, 'the adversarial row that was already queued went with the torn tail'"
-        new: null
+        new: same
       - old: "assert len(family_ids) == record['enqueued_rows'], f\"the record claims {record['enqueued_rows']} enqueued rows and {len(family_ids)} are readable; a row of this pass's own was swallowed by the fragment\""
-        new: null
+        new: same
       - old: "assert J.mod('learning.author.drain').run_batch(cfg=D.cfg_for(paths, 'findings', invoke_agent=agent)) == 0"
-        new: null
+        new: same
       - old: "assert D.stuck_records(channel) == [], \"a torn trailing row stuck-recorded the batch; P6's blast radius is every direction riding in that tick, which is the whole reason the reader must skip it\""
-        new: null
+        new: same
       - old: "assert 'run-adv/0' in authored, 'the direction that already works stopped draining because of a torn line written by the direction this issue adds'"
-        new: null
+        new: same
   - file: "defender/tests/test_921_launcher_frame.py"
     test: "test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_counts"
     reaches:
       - "queue_dir= (judge_mod.grade_episode)"
     asserts:
       - old: "assert record['enqueued_rows'] == grade.enqueued_rows"
-        new: null
+        new: same
       - old: "assert record['enqueued_rows'] > 0, 'a gradable episode with findings enqueued nothing'"
-        new: null
+        new: same
       - old: "assert completed, 'the family record carries no per-world rows at all'"
-        new: null
+        new: same
       - old: "assert all((n > 0 for n in completed.values())), 'the family record does not carry a per-world completed-draw count'"
-        new: null
+        new: same
       - old: "assert not (ep2 / 'judge.yaml').exists(), 'the family record was written before the enqueue: its presence would then certify an enqueue that never happened'"
-        new: null
+        new: same
       - old: "with pytest.raises(J.refusals())"
-        new: null
+        new: "with pytest.raises((*J.refusals(), StateRefused))"
   - file: "defender/tests/test_952_consumption_follows_durability.py"
     test: "test_952_m1_the_disposition_applies_sentinels_and_unlinks_before_the_pitfalls_rotation"
     reaches:
       - "'queue_lock' (named in a string) via _bounded"
     asserts:
       - old: "assert branch.events == ['lease-check', 'start', 'cleanup'], 'the push ran ahead of, or despite, an apply that did not complete'"
-        new: null
+        new: same
       - old: "assert _done_sha(run_dir) == SHA"
-        new: null
+        new: same
       - old: "assert author_markers(paths) == []"
-        new: null
+        new: same
       - old: "assert _inflight(paths) == []"
-        new: null
+        new: same
       - old: "assert paths.pitfalls.file.read_bytes() == queue_before"
-        new: null
+        new: same
       - old: "assert not paths.pitfalls.consumed.exists()"
-        new: null
+        new: same
       - old: "assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 1, 'the decline bump ran ahead of the rotation it is ordered behind'"
-        new: null
+        new: same
       - old: "with pytest.raises(TimeoutError)"
-        new: null
+        new: same
   - file: "defender/tests/test_952_consumption_follows_durability.py"
     test: "test_952_o2_the_lessons_lane_failure_line_is_lane_neutral_and_records_delivery"
+    fixture-only: true
     reaches:
       - "trigger_author (lambda implementor)"
     asserts:
       - old: "assert rc == 0"
-        new: null
+        new: same
       - old: "assert 'author' in triggered, 'the tick never ran a curator, so the line below is vacuous'"
-        new: null
+        new: same
       - old: "assert branch.events == ['lease-check', 'start', 'finish', 'cleanup']"
-        new: null
+        new: same
       - old: "assert [r['branch'] for r in _pending_deliveries(paths)] == [f'lessons/{branch.batch_id}']"
-        new: null
+        new: same
       - old: "assert any((line.endswith(expected) for line in err.splitlines())), f\"the lessons lane's line must be the lane-neutral sentence ALONE:\\n{err}\""
-        new: null
+        new: same
       - old: "assert 'inflight' not in err, 'the lessons lane claimed something about markers'"
-        new: null
+        new: same
       - old: "assert 'pitfall' not in err, 'the lessons lane claimed something about pitfall rows'"
-        new: null
+        new: same
       - old: "assert 'consumed' not in err, 'the lessons lane made a claim about consumption'"
-        new: null
+        new: same
       - old: "assert 'work stays queued' not in err"
-        new: null
+        new: same
       - old: "assert 'batch produced no commits' not in err"
-        new: null
+        new: same
   - file: "defender/tests/test_952_consumption_follows_durability.py"
     test: "test_952_m1_the_deferred_rotation_reaches_the_queue_lock_with_a_deadline"
     reaches:
       - "'queue_lock' (named in a string) via _bounded"
     asserts:
       - old: "assert disposition.apply(paths, timeout_seconds=0) == 0"
-        new: null
+        new: "assert disposition.apply(_state1135.state_for_paths(paths), timeout_seconds=0) == 0"
       - old: "assert consumed[COMMITTED_ID]['consumed_category'] == 'consumed_committed'"
-        new: null
+        new: same
       - old: "assert consumed[COMMITTED_ID]['consumed_commit'] == SHA"
-        new: null
+        new: same
       - old: "assert list(rows) == [HELD_ID]"
-        new: null
+        new: same
       - old: "assert rows[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 2"
-        new: null
+        new: same
       - old: "assert paths.pitfalls.file.read_bytes() == queue_before"
-        new: null
+        new: same
       - old: "assert not paths.pitfalls.consumed.exists()"
-        new: null
+        new: same
       - old: "assert paths.pitfalls.file.read_bytes() == queue_before"
-        new: null
+        new: same
       - old: "with pytest.raises(TimeoutError)"
-        new: null
+        new: same
       - old: "with pytest.raises(TimeoutError)"
-        new: null
+        new: same
   - file: "defender/tests/test_952_consumption_follows_durability.py"
     test: "test_952_m1_the_immediate_rotation_is_bounded_under_the_drain_and_unbounded_by_hand"
     reaches:
       - "'queue_lock' (named in a string) via _bounded"
     asserts:
       - old: "assert paths.pitfalls.file.read_bytes() == queue_before"
-        new: null
+        new: same
       - old: "assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_agent_must_not_run, trees=lead_trees(paths)) == 0"
-        new: null
+        new: same
       - old: "assert queue_ids(paths) == []"
-        new: null
+        new: same
       - old: "assert consumed_by_id(paths)['u:l-001:0']['consumed_category'] == 'consumed_unattributable'"
-        new: null
+        new: same
       - old: "with pytest.raises(TimeoutError)"
-        new: null
+        new: same
   - file: "defender/tests/test_952_consumption_follows_durability.py"
     test: "test_952_e_the_lessons_lane_logs_no_retained_summary_on_a_systemic_fault"
     reaches:
       - "trigger_author (lambda implementor)"
     asserts:
       - old: "assert 'author' in triggered, 'the tick never ran a curator, so the negatives are vacuous'"
-        new: null
+        new: same
       - old: "assert 'cleanup' in branch.events"
-        new: null
+        new: same
       - old: "assert 'batch not consumed' not in err, 'the lessons lane logged a summary it never collected'"
-        new: null
+        new: same
       - old: "assert 'inflight' not in err"
-        new: null
+        new: same
       - old: "assert 'pitfall' not in err"
-        new: null
+        new: same
       - old: "assert 'work stays queued' not in err"
-        new: null
+        new: same
       - old: "with pytest.raises(expected_type)"
-        new: null
+        new: same
   - file: "defender/tests/test_952_consumption_follows_durability.py"
     test: "test_952_m1_the_deferred_decline_bump_is_bounded_too"
     reaches:
       - "'queue_lock' (named in a string) via _bounded"
     asserts:
       - old: "assert paths.pitfalls.file.read_bytes() == queue_before"
-        new: null
+        new: same
       - old: "assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 1"
-        new: null
+        new: same
       - old: "assert held_only.apply(paths, timeout_seconds=0) == 0"
-        new: null
+        new: "assert held_only.apply(_state1135.state_for_paths(paths), timeout_seconds=0) == 0"
       - old: "assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 2"
-        new: null
+        new: same
       - old: "assert COMMITTED_ID in _rows_by_id(paths), 'a held-only apply rotated the committed row'"
-        new: null
+        new: same
       - old: "with pytest.raises(TimeoutError)"
-        new: null
+        new: same
   - file: "defender/tests/test_author_atomic.py"
     test: "test_agent_exception_leaves_queue_intact"
     reaches:
       - "acquire_flock"
     asserts:
       - old: "assert rc == 2"
-        new: null
+        new: same
       - old: "assert {r['finding_id'] for r in rows} == {'run-K/0'}, 'queue must survive agent failure'"
-        new: null
+        new: same
       - old: "assert [r.get('attempts') for r in rows] == [1]"
-        new: null
+        new: same
       - old: "assert not tmp_repo.paths.pending_file.with_suffix('.deadletter.jsonl').exists()"
-        new: null
+        new: same
       - old: "assert fh is not None"
-        new: null
+        new: "assert taken, 'the drain lock must be free after the failed tick'"
   - file: "defender/tests/test_author_preflight.py"
     test: "test_lock_refuses_concurrent_run"
     reaches:
       - "acquire_flock"
     asserts:
       - old: "assert fh is not None"
-        new: null
+        new: "assert first"
       - old: "assert third is not None"
-        new: null
+        new: "assert third"
       - old: "assert second is None"
-        new: null
+        new: "assert not second"
   - file: "defender/tests/test_author_shared.py"
     test: "test_flock_or_skip_acquires_then_releases"
     reaches:
@@ -2040,11 +2140,11 @@ tests:
       - "flock_or_skip"
     asserts:
       - old: "assert fh is not None"
-        new: null
+        new: "assert again is True"
       - old: "assert locked is True"
-        new: null
+        new: same
       - old: "assert lock.parent.is_dir()"
-        new: null
+        new: "assert (tmp_path / 'root' / 'sub').is_dir()"
   - file: "defender/tests/test_author_shared.py"
     test: "test_flock_or_skip_yields_false_when_held"
     reaches:
@@ -2052,18 +2152,18 @@ tests:
       - "flock_or_skip"
     asserts:
       - old: "assert holder is not None"
-        new: null
+        new: "assert holder is True"
       - old: "assert locked is False"
-        new: null
+        new: same
   - file: "defender/tests/test_author_shared.py"
     test: "test_flock_or_skip_propagates_non_contention_oserror"
     reaches:
       - "flock_or_skip"
     asserts:
       - old: "assert excinfo.value.errno == errno.ENOLCK"
-        new: null
+        new: same
       - old: "with pytest.raises(OSError, match='No locks available')"
-        new: null
+        new: same
   - file: "defender/tests/test_author_shared.py"
     test: "test_acquire_flock_closes_handle_when_error_propagates"
     reaches:
@@ -2071,30 +2171,30 @@ tests:
       - "acquire_flock"
     asserts:
       - old: "assert opened, 'acquire_flock never opened the lock file'"
-        new: null
+        new: "assert opened, 'the handle never opened the lock file'"
       - old: "assert all((fh.closed for fh in opened)), 'acquire_flock leaked the lock-file handle'"
-        new: null
+        new: "assert all((fh.closed for fh in opened)), 'the handle leaked the lock-file handle'"
       - old: "with pytest.raises(OSError, match='No locks available')"
-        new: null
+        new: same
   - file: "defender/tests/test_drain719_config.py"
     test: "test_new_queue_paths_resolve_under_state_root_not_the_worktree"
     reaches:
       - "graveyard_file"
     asserts:
       - old: "assert paths.state_root == state"
-        new: null
+        new: same
       - old: "assert cfg.corpus_dir.is_relative_to(paths.repo_root), 'the corpus is repo-rooted'"
-        new: null
+        new: same
       - old: "assert drain.run_batch(cfg=fault) == 2"
-        new: null
+        new: same
       - old: "assert drain.graveyard_file(ch).is_file()"
-        new: null
+        new: "assert _graveyard_file(ch).is_file()"
       - old: "assert not (paths.repo_root / 'defender' / 'learning' / '_pending').exists()"
-        new: null
+        new: same
       - old: "assert state in p.parents, f'{name}: {p} is not under the state root'"
-        new: null
+        new: same
       - old: "assert paths.repo_root not in p.parents"
-        new: null
+        new: same
   - file: "defender/tests/test_drain719_config.py"
     test: "test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch"
     reaches:
@@ -2102,17 +2202,17 @@ tests:
       - "stuck_report_file"
     asserts:
       - old: "assert drain.run_batch(cfg=fault) == 2"
-        new: null
+        new: same
       - old: "assert drain.graveyard_file(ch).is_file()"
-        new: null
+        new: "assert _graveyard_file(ch).is_file()"
       - old: "assert ch.drain_lock.exists()"
-        new: null
+        new: same
       - old: "assert drain.run_batch(cfg=clean) == 0, 'the new state files aborted the next batch'"
-        new: null
+        new: same
       - old: "assert drain.run_batch(cfg=stray) == 2, 'a path outside the ignored prefix must be seen'"
-        new: null
+        new: same
       - old: "assert p.is_relative_to(paths.pending_dir), f'{p} is outside the ignored prefix'"
-        new: null
+        new: same
   - file: "defender/tests/test_drain719_guard.py"
     test: "test_a_plain_oserror_from_a_lock_acquisition_is_classified_systemic"
     reaches:
@@ -2120,142 +2220,147 @@ tests:
       - "planted folder (JF11): now a refusal; rewrite to an ordinary-failure injector (the drain lock path)"
     asserts:
       - old: "assert h.pending(ch) == rows"
-        new: null
+        new: same
       - old: "assert h.graveyard(ch) == []"
-        new: null
+        new: same
       - old: "assert h.attempts_of(ch, 'a/0') is None"
-        new: null
+        new: same
       - old: "with pytest.raises(OSError)"
-        new: null
+        new: "with pytest.raises(StateRefused)"
   - file: "defender/tests/test_drain719_locks.py"
     test: "test_rotate_blocks_while_append_lock_held"
+    fixture-only: true
     reaches:
       - "rotate_queue_locked"
     asserts:
       - old: "assert worker.finished_within(20), 'the rotation never completed after release'"
-        new: null
+        new: same
       - old: "assert h.pending(ch) == []"
-        new: null
+        new: same
       - old: "assert not worker.finished_within(1.0), 'the rotation proceeded under a held append lock'"
-        new: null
+        new: same
       - old: "assert h.pending_by_id(ch) == {'a/0': h.row_for('findings', 'a/0')}"
-        new: null
+        new: same
   - file: "defender/tests/test_drain719_locks.py"
     test: "test_the_drain_acquires_its_three_locks_in_one_declared_order"
     reaches:
       - "acquire_flock"
     asserts:
       - old: "assert tuple(drain.LOCK_ORDER) == ('drain_lock', 'repo_lock', 'append_lock')"
-        new: null
+        new: same
       - old: "assert agent.calls == []"
-        new: null
+        new: same
       - old: "assert drain.run_batch(cfg=cfg) == 0"
-        new: null
+        new: same
       - old: "assert repo_fh is not None, 'the skipped tick was still holding the repo lock'"
-        new: null
+        new: "assert took, 'the skipped tick was still holding the repo lock'"
   - file: "defender/tests/test_drain719_retire.py"
     test: "test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact"
     reaches:
       - "graveyard_file"
     asserts:
       - old: "assert ch.file.read_bytes() == before, 'the queue survives a failed retirement write'"
-        new: null
+        new: same
       - old: "with pytest.raises(OSError)"
-        new: null
+        new: same
   - file: "defender/tests/test_frames_680_lifecycle.py"
     test: "test_revert_lesson_driver_holds_shared_author_lock_and_calls_through"
     reaches:
       - "'flock_or_skip' (named in a string)"
     asserts:
       - old: "assert seen == [('lock', paths.author_drain_lock_file), ('revert', 'defender/lessons/bad.md', 'bad')]"
-        new: null
+        new: "assert seen == [('lock-held', True), ('revert', 'defender/lessons/bad.md', 'bad')]"
       - old: "assert revert_lesson.revert('bad', branch=branch, paths=paths) == 0"
-        new: null
+        new: "assert revert_lesson.revert('bad', state=state, branch=branch) == 0"
   - file: "defender/tests/test_orchestrate_thresholds.py"
     test: "test_has_lead_author_work_raises_on_bad_pitfalls_threshold_with_marker_queued"
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "with pytest.raises(FatalConfigError, match='LEARNING_PITFALLS_THRESHOLD')"
-        new: null
+        new: same
   - file: "defender/tests/test_orchestrate_thresholds.py"
     test: "test_lead_author_max_retries_bad_value_raises_fatal_config"
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "with pytest.raises(FatalConfigError, match='LEAD_AUTHOR_MAX_RETRIES')"
-        new: null
+        new: same
   - file: "defender/tests/test_orchestrate_thresholds.py"
     test: "test_lead_author_marker_drain_reraises_fatal_lift_threshold"
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "assert not (failed_dir / f'{run_dir.name}.json').exists()"
-        new: null
+        new: same
       - old: "assert (paths.author_queue_dir / 'inflight' / f'{run_dir.name}.json').exists()"
-        new: null
+        new: same
       - old: "with pytest.raises(FatalConfigError)"
-        new: null
+        new: same
   - file: "defender/tests/test_orchestrate_thresholds.py"
     test: "test_lead_author_drain_unlinks_marker_on_success"
+    fixture-only: true
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "assert not (paths.author_queue_dir / f'{run_dir.name}.json').exists()"
-        new: null
+        new: same
       - old: "assert not (paths.author_queue_dir / 'failed' / f'{run_dir.name}.json').exists()"
-        new: null
+        new: same
   - file: "defender/tests/test_orchestrate_thresholds.py"
     test: "test_lead_author_drain_quarantines_a_plain_failure"
+    fixture-only: true
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "assert not (paths.author_queue_dir / f'{run_dir.name}.json').exists()"
-        new: null
+        new: same
       - old: "assert failed.exists()"
-        new: null
+        new: same
       - old: "assert 'lead-author-error' in json.loads(failed.read_text())['failed']"
-        new: null
+        new: same
   - file: "defender/tests/test_orchestrate_thresholds.py"
     test: "test_lead_author_drain_requeues_a_transient_with_bumped_attempts"
+    fixture-only: true
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "assert marker.exists()"
-        new: null
+        new: same
       - old: "assert not (paths.author_queue_dir / 'failed' / f'{run_dir.name}.json').exists()"
-        new: null
+        new: same
       - old: "assert json.loads(marker.read_text())['attempts'] == 1"
-        new: null
+        new: same
   - file: "defender/tests/test_orchestrate_thresholds.py"
     test: "test_lead_author_drain_bad_lift_threshold_is_fatal_two"
+    fixture-only: true
     reaches:
       - "enqueue_for_authoring"
     asserts:
       - old: "assert rc == 2"
-        new: null
+        new: same
   - file: "defender/tests/test_queue_drains_852.py"
     test: "test_852_f04_requeue_is_create_if_absent_and_leaves_no_staging_file"
     reaches:
       - "requeue_marker"
     asserts:
       - old: "assert markers.requeue_marker(slot, {'case_id': 'case-A', 'run_dir': '/runs/run-1'}) is True"
-        new: null
+        new: "assert state.requeue(claim) is True"
       - old: "assert markers.requeue_marker(slot, {'case_id': 'case-A', 'run_dir': '/runs/stale'}) is False"
-        new: null
+        new: "assert state.requeue(stale) is False"
       - old: "assert json.loads(slot.read_text())['run_dir'] == '/runs/run-1', 'the refused re-queue wrote itself in anyway'"
-        new: null
+        new: "assert json.loads(slot.read_text())['run_dir'] == str(run_dir), 'the refused re-queue wrote itself in anyway'"
       - old: "assert [p.name for p in queue_dir.iterdir()] == ['case-A.json'], 'the re-queue left its staging file in the queue directory'"
-        new: null
+        new: "assert {p.name for p in queue_dir.iterdir()} == {'case-A.json', 'inflight'}, 'the re-queue left its staging file in the queue directory'"
   - file: "defender/tests/test_queue_drains_852.py"
     test: "test_852_f04_a_free_slot_still_takes_the_re_queue"
     reaches:
       - "requeue_marker"
     asserts:
       - old: "assert markers.requeue_marker(slot, spec) is True"
-        new: null
+        new: "assert state.requeue(Claimed(key='row', name='row.json', spec=spec)) is True"
       - old: "assert json.loads(slot.read_text()) == spec"
-        new: null
+        new: same
 via_shared_helpers_only:   # reach a removed name ONLY through a shared test module's helper:
   # the helper is harness (a fixture edit); the test is regression tier unless its own body
   # changes, and then it moves to `tests` with its asserts (JF11).
