@@ -570,6 +570,7 @@ def test_a_box_a_failed_teardown_left_alive_refuses_the_next_curators_run(
     assert _stuck_classes(t.paths, "findings") == ["RuntimeError"]
     assert daemon.names() == [], "a box outlived the batch"
     watch.assert_no_scan_beside_a_box()
+    assert watch.held, "no scan ran once the batch's last box was gone"
     if teardown == "holds":
         assert got is None, got
         assert len(q_curator.calls) == 1

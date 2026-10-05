@@ -1346,6 +1346,7 @@ def test_a_box_a_failed_teardown_left_alive_refuses_the_next_claims_run(
     assert _failed(s)[:1] == ["case-run-0.json"], _failed(s)
     assert daemon.names() == [], "a box outlived the batch"
     watch.assert_no_scan_beside_a_box()
+    assert watch.held, "no scan ran once the batch's last box was gone"
     kept = [x for x in daemon.steps() if x in ("create", "rm") or x.startswith("agent:")]
     if teardown == "holds":
         assert got is None, got
@@ -1387,6 +1388,7 @@ def test_a_claims_teardown_fault_after_a_clean_agent_halts_the_production_drain(
     assert "agent:run-0" in daemon.steps(), "the agent was never reached"
     assert daemon.names() == [], "a box outlived the batch"
     watch.assert_no_scan_beside_a_box()
+    assert watch.held, "no scan ran once the batch's last box was gone"
     if teardown == "holds":
         assert got is None, got
         assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED
