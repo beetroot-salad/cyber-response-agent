@@ -1,28 +1,35 @@
-"""Shared fakes for the #1195 rows (both drain lanes), design amendment 2. NOT a test module.
+"""Shared fakes for the #1195 rows (both drain lanes), design amendment 3. NOT a test module.
 
-The design under test (`gh issue view 1195`, "Design amendment 2 (2026-10-06): one box per
-batch, stopped between agent runs"): the drain creates and checks its one box at batch start, as
-on main (`start_box`), stops it at once, starts it for each agent run and stops it after, and
-removes it at batch end (`stop_box`: `docker rm -f`) before the scan.
+The design under test (`gh issue view 1195`, "Design amendment 3 (2026-10-06): the stop fault
+wins, the box carries its docker, and lanes get a run handle", refining amendment 2): the drain
+creates and checks its one box at batch start, as on main (`start_box`), wraps it in a
+`runtime.box.BoxRuns` handle, stops it at once (`runs.stop()`), hands the lanes the handle, and
+removes the box at batch end (`stop_box`: `docker rm -f`) before the scan.
 
-- `runtime.box.stop_run_box(box, *, docker=_docker)`: `docker stop -t 0 <name>`, then the status
-  must be `exited`, else `BoxFault`. A no-op for `None` and for a box whose `sandboxed` is false;
-  a box with no `sandboxed` at all fails closed (`BoxFault`).
-- `runtime.box.box_for_run(box, *, docker=_docker)`: the spawn sites' `with`, yielding the same
-  box. On enter the status must be `exited` (else a best-effort stop and `BoxFault`, the body
-  never runs), then `docker start`, then the status must be `running` (else the same). On every
-  exit, `stop_run_box`: its fault is raised with nothing in flight, logged under an in-flight
-  exception.
+- `BoxExecutor.docker`: the docker callable the box was created with (`start_box(...,
+  docker=...)` stamps it; `compare=False, repr=False`); every lifecycle call on a sandboxed box
+  uses it, and a sandboxed box without one fails closed (F2).
+- `BoxRuns(box)`: `BoxFault` for an object with no `sandboxed`, or a sandboxed one with no
+  `docker` or `name`; an opt-out handle (no docker calls) for an unsandboxed executor.
+  `.stop()`: `docker stop -t 0`, proven `exited` or `dead` (F4). `.run()`: proven `exited`,
+  `docker start`, proven `running`, yields the executor, and stops it on EVERY exit; a stop
+  fault raises even under an in-flight exception, which becomes its `__context__` (F1).
+- `box_for_run(handle)`: `None` for `None`, the handle's run otherwise; anything else, a raw
+  executor included, is a `BoxFault` (F3, O6).
 
-Every name the design adds is reached at call time (`box_for_run`, `stop_run_box`), so the
-modules importing this one collect before it exists and fail at the row that needs it.
+Every name the design adds is reached at call time (`BoxRuns`, `box_for_run`, the executor's
+`docker` field), so the modules importing this one collect before it exists and fail at the
+row that needs it.
 
-The spawn sites and the drain's post-create stop use the DEFAULT docker seam, so a lane row
-runs with the fake daemon (`FakeDaemon`) installed as the `docker` program first on `PATH`.
-Its host steps write into a `Journal`, which marks each into the daemon's own call log and notes
-which containers were running at that moment: so a row can split the log into run windows
-(between a `docker start` and the next `docker stop`) and see that each holds exactly its spawn,
-and that no host step ran beside a running box. Nothing is patched onto a module.
+The fake daemon (`FakeDaemon`) is callable as a docker seam, so an executor can carry it as its
+`docker`; called so, it can also raise at a chosen call instead of answering (`seam_raises`: no
+binary, a daemon that never answered). A `Tripwire` installed as the `docker` program first on
+`PATH` shows that nothing reaches the real one (`no_path_docker`). `fail_stop` makes a chosen
+`docker stop` fail each of the ways in `STOP_FAULTS`. A lane's host steps write into a `Journal`, which marks each into the
+daemon's own call log and notes which containers were running at that moment: so a row can
+split the log into run windows (between a `docker start` and the next `docker stop`) and see
+that each holds exactly its spawn, and that no host step ran beside a running box. Nothing is
+patched onto a module.
 """
 from __future__ import annotations
 
@@ -75,24 +82,35 @@ BATCH_START_FAULTS = [
     pytest.param("allow_an_alias", AliasBanNotInForce, False, id="link-ban"),
 ]
 
+#: The ways a stop fails to prove the box stopped (`fail_stop`): refused (rc 1, the box keeps
+#: running), answering 0 with the box still running, taking while the status asked after it goes
+#: unanswered, or the docker seam raising at it (no binary; a daemon that never answered).
+STOP_FAULTS = ["refused", "takes-no-effect", "status-unanswered", "seam-OSError",
+               "seam-TimeoutExpired"]
+
 
 # ---------------------------------------------------------------------------------------
 # The design's new names, reached at call time
 # ---------------------------------------------------------------------------------------
 
 
-def box_for_run(box: Any, **seams: Any) -> contextlib.AbstractContextManager[Any]:
-    """`runtime.box.box_for_run(box, **seams)`, imported at call time."""
+def box_for_run(handle: Any) -> contextlib.AbstractContextManager[Any]:
+    """`runtime.box.box_for_run(handle)`, imported at call time."""
     from defender.runtime.box import box_for_run as _box_for_run
 
-    return _box_for_run(box, **seams)
+    return _box_for_run(handle)
 
 
-def stop_run_box(box: Any, **seams: Any) -> None:
-    """`runtime.box.stop_run_box(box, **seams)`, imported at call time."""
-    from defender.runtime.box import stop_run_box as _stop_run_box
+def box_runs_type() -> type:
+    """`runtime.box.BoxRuns`, imported at call time."""
+    from defender.runtime.box import BoxRuns
 
-    _stop_run_box(box, **seams)
+    return BoxRuns
+
+
+def box_runs(box: Any) -> Any:
+    """`runtime.box.BoxRuns(box)`, the lanes' handle on the batch's box."""
+    return box_runs_type()(box)
 
 
 def request(name: str = "defender-drain-t1195", *, writable: Path | None = None,
@@ -108,11 +126,15 @@ def request(name: str = "defender-drain-t1195", *, writable: Path | None = None,
                       spec=BoxSpec(runtime="runc", rootfs=rootfs))
 
 
-def sandboxed(name: str) -> BoxExecutor:
+def sandboxed(name: str, docker: Any = None) -> BoxExecutor:
     """An executor as `start_box` hands one back for a created container: the docker transport,
-    so `sandboxed` is true, named as its container. Nothing is started."""
+    so `sandboxed` is true, named as its container, carrying `docker` as the docker callable it
+    was created with (none given: the field is left at its default). Nothing is started."""
     spec = BoxSpec()
-    return BoxExecutor(spec=spec, transport=_DockerTransport(name, spec), name=name)
+    if docker is None:
+        return BoxExecutor(spec=spec, transport=_DockerTransport(name, spec), name=name)
+    return BoxExecutor(spec=spec, transport=_DockerTransport(name, spec), name=name,
+                       docker=docker)  # type: ignore[call-arg]
 
 
 def chain(exc: BaseException | None) -> list[BaseException]:
@@ -147,6 +169,17 @@ def caught(fn: Callable[[], object]) -> BaseException | None:
 #: The names `FakeDaemon.steps` gives docker calls (anything else in the log is a mark).
 _DOCKER_STEPS = frozenset({"create", "rm", "status", "start", "stop", "inspect", "exec"})
 
+def _step_of(argv: list[str]) -> str:
+    """A docker call's name in `FakeDaemon.steps`: its verb, `create` for `docker run`, and
+    `status` for an inspect of the status."""
+    verb = argv[1] if len(argv) > 1 else ""
+    if verb == "run":
+        return "create"
+    if verb == "inspect" and "-f" in argv and "State.Status" in argv[argv.index("-f") + 1]:
+        return "status"
+    return verb
+
+
 _SHIM = '''#!{python} -S
 import runpy, sys
 sys.argv = [sys.argv[0], {here!r}, *sys.argv[1:]]
@@ -162,13 +195,38 @@ class FakeDaemon:
         self.dir = tmp_path / "daemon1195"
         self.dir.mkdir(parents=True)
         daemon_mod.save(self.dir, daemon_mod.fresh_state())
+        #: The `Tripwire` on `PATH` beside it, when `boxed` installed one.
+        self.tripwire: Tripwire | None = None
+        self._seam_faults: list[tuple[str, str, list[int] | None]] = []
+        self._seam_counts: dict[str, int] = {}
+        self.seam_raised: list[str] = []
 
     # -- the seams -------------------------------------------------------------------
 
     def __call__(self, argv: Any, **_kw: Any) -> subprocess.CompletedProcess:
         argv = [str(a) for a in argv]
+        self._seam_fault(argv)
         rc, out, err = daemon_mod.handle(self.dir, argv)
         return subprocess.CompletedProcess(argv, rc, out, err)
+
+    def _seam_fault(self, argv: list[str]) -> None:
+        """Raise instead of answering, when a `seam_raises` fault is due at this call."""
+        step = _step_of(argv)
+        self._seam_counts[step] = self._seam_counts.get(step, 0) + 1
+        for kind, want, at in self._seam_faults:
+            if want in ("*", step) and (at is None or self._seam_counts[step] in at):
+                self.seam_raised.append(step)
+                if kind == "OSError":
+                    raise FileNotFoundError(2, "No such file or directory", "docker")
+                raise subprocess.TimeoutExpired(cmd=argv, timeout=120)
+
+    def seam_raises(self, kind: str, *, step: str, at: Iterable[int] | None = None) -> None:
+        """Called in process, the daemon raises `kind` instead of answering (`OSError`: no
+        docker binary; `TimeoutExpired`: a daemon that never answered): at the `step` calls (as
+        `steps` names them, or `"*"` for any) numbered `at` (from 1, counted per step from this
+        daemon's creation), else every one. The call never reaches the daemon's log;
+        `seam_raised` lists each step that raised."""
+        self._seam_faults.append((kind, step, None if at is None else list(at)))
 
     def install(self, monkeypatch: Any) -> Path:
         """Put a `docker` program running this daemon first on `PATH`; returns it."""
@@ -196,6 +254,10 @@ class FakeDaemon:
     def hold(self, name: str, status: str) -> None:
         """A container named `name` in `status`, as if a batch start (or a run) had left it."""
         self._edit(lambda s: s["containers"].__setitem__(name, {"status": status, "token": ""}))
+
+    def forget(self, name: str) -> None:
+        """No container named `name` any more, as if something removed it."""
+        self._edit(lambda s: s["containers"].pop(name, None))
 
     def refuse_rm(self, times: int = 1) -> None:
         """The next `times` removals fail and leave the container as it was (-1: every one)."""
@@ -246,6 +308,11 @@ class FakeDaemon:
     def stop_takes_no_effect(self, *, at: Iterable[int] | None = None, times: int = 1) -> None:
         """`docker stop` answers rc 0 and the box keeps running (as `refuse_start` picks)."""
         self._verb_fault("stop", "noop", at, times)
+
+    def stop_leaves_it_dead(self, *, at: Iterable[int] | None = None, times: int = 1) -> None:
+        """`docker stop` takes, and the container is left `dead` rather than `exited` (as
+        `refuse_start` picks): nothing runs in it either way."""
+        self._verb_fault("stop", "dead", at, times)
 
     def refuse_inspect(self, *, at: Iterable[int]) -> None:
         """The `inspect -f` calls numbered `at` (from 1) answer rc 1, as for no such object."""
@@ -321,12 +388,7 @@ class FakeDaemon:
                 continue
             if of is not None and of not in argv:
                 continue
-            verb = argv[1] if len(argv) > 1 else ""
-            if verb == "run":
-                verb = "create"
-            elif verb == "inspect" and "-f" in argv and "State.Status" in argv[argv.index("-f") + 1]:
-                verb = "status"
-            out.append(verb)
+            out.append(_step_of(argv))
         return out
 
     def calls_from_the_first_stop(self, name: str) -> list[str]:
@@ -359,13 +421,52 @@ class FakeDaemon:
         return out
 
 
-def boxed(tmp_path: Path, monkeypatch: Any, name: str) -> tuple[FakeDaemon, BoxExecutor]:
-    """The fake daemon first on `PATH`, holding `name` `exited` (the batch's box after its
-    post-create stop), and the executor `start_box` handed back for it."""
+class Tripwire:
+    """A `docker` program first on `PATH` that records every argv it is handed and answers rc 97:
+    a lifecycle call that falls back on the real docker reaches it, and fails."""
+
+    def __init__(self, tmp_path: Path) -> None:
+        self.dir = tmp_path / "tripwire1195"
+        self.dir.mkdir(parents=True)
+        self.log = self.dir / "argv.log"
+
+    def install(self, monkeypatch: Any) -> Tripwire:
+        bin_dir = self.dir / "bin"
+        bin_dir.mkdir()
+        program = bin_dir / "docker"
+        program.write_text(
+            f"#!{sys.executable} -S\nimport sys\n"
+            f"open({str(self.log)!r}, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "sys.stderr.write('tripwire: the docker on PATH was called\\n')\nsys.exit(97)\n",
+            encoding="utf-8")
+        program.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+        assert shutil.which("docker") == str(program)
+        return self
+
+    def calls(self) -> list[str]:
+        return self.log.read_text(encoding="utf-8").splitlines() if self.log.exists() else []
+
+
+def boxed(tmp_path: Path, monkeypatch: Any, name: str
+          ) -> tuple[FakeDaemon, BoxExecutor, Any]:
+    """The fake daemon holding `name` `exited` (the batch's box after its post-create stop), the
+    executor `start_box` handed back for it, carrying the daemon as its docker, and the lanes'
+    handle on it. A `Tripwire` is the `docker` on `PATH` (`daemon.tripwire`), so a call that
+    does not go through the carried docker fails, and shows."""
     daemon = FakeDaemon(tmp_path)
-    daemon.install(monkeypatch)
+    daemon.tripwire = Tripwire(tmp_path).install(monkeypatch)
     daemon.hold(name, "exited")
-    return daemon, sandboxed(name)
+    box = sandboxed(name, docker=daemon)
+    return daemon, box, box_runs(box)
+
+
+def no_path_docker(daemon: FakeDaemon) -> None:
+    """Nothing reached the `docker` on `PATH` (the daemon's `Tripwire`): every lifecycle call
+    went through the docker the box carries."""
+    assert daemon.tripwire is not None, "no tripwire on PATH, so the check is vacuous"
+    assert daemon.tripwire.calls() == [], (
+        f"a call reached the docker on PATH: {daemon.tripwire.calls()}")
 
 
 class Journal(list):
@@ -420,8 +521,8 @@ class ScanWatch:
 
 class HeldStart:
     """A `start_box=` that registers the request's container, running, with `daemon` (as a
-    real create leaves it) and hands back a sandboxed executor naming it: what the real start
-    does, minus the probes. `events` gets `start_box`."""
+    real create leaves it) and hands back a sandboxed executor naming it and carrying `daemon`
+    as its docker: what the real start does, minus the probes. `events` gets `start_box`."""
 
     def __init__(self, daemon: FakeDaemon, events: list | None = None) -> None:
         self.daemon, self.events = daemon, events
@@ -434,8 +535,22 @@ class HeldStart:
         self.daemon.mark("start_box")
         if self.events is not None:
             self.events.append("start_box")
-        self.boxes.append(sandboxed(req.name))
+        self.boxes.append(sandboxed(req.name, docker=self.daemon))
         return self.boxes[-1]
+
+
+def fail_stop(daemon: FakeDaemon, stop: str, *, at: int, inspect_at: int) -> None:
+    """The `at`-th `docker stop` fails as `stop` (one of `STOP_FAULTS`) names; for
+    `status-unanswered`, the stop takes and the `inspect_at`-th `inspect -f` (the status asked
+    after it) goes unanswered."""
+    if stop == "refused":
+        daemon.refuse_stop(at=[at])
+    elif stop == "takes-no-effect":
+        daemon.stop_takes_no_effect(at=[at])
+    elif stop == "status-unanswered":
+        daemon.refuse_inspect(at=[inspect_at])
+    else:
+        daemon.seam_raises(stop.removeprefix("seam-"), step="stop", at=[at])
 
 
 def plant_image_inputs(repo: Path) -> None:

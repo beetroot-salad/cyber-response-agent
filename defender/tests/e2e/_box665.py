@@ -317,9 +317,9 @@ class FakeBox:
 
     name: str = "box-665"
     request: Any = None
-    #: `False`: no real container stands behind it, so the drain's post-create stop and each
-    #: run's start and stop (#1195 `stop_run_box`/`box_for_run`) ask no daemon about it; `True`
-    #: would send the real docker after a container that does not exist.
+    #: `False`: no real container stands behind it, so the drain's handle on it (#1195
+    #: `BoxRuns`) is the opt-out's: its post-create stop and each run's start and stop ask no
+    #: daemon about it. `True` would make that handle a `BoxFault`: it carries no docker.
     sandboxed: bool = False
 
 

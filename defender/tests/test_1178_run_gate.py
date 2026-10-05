@@ -1,40 +1,44 @@
 """#1178/#1195: the lead-author drain lane starts its one box for each agent run and stops it
 after, and its gate admits only plain files, judged by a no-follow stat.
 
-The design (`gh issue view 1195`, "Design amendment 2 (2026-10-06): one box per batch, stopped
-between agent runs") replaces #1178 amendment 2's freeze (`pause_box`, `thawed`,
-`LeadAuthorDeps.thaw`, `run_pitfalls(thaw=)`). The drain creates and checks the batch's box at
-batch start, as on main, stops it at once (`_run_worktree_batch`: `box_mod.stop_run_box(box)`
-first in the try whose `finally` removes it), and threads that executor down. Each spawn site
-runs its spawn inside `runtime.box.box_for_run(box)`, handing the spawn the same executor:
+The design (`gh issue view 1195`, "Design amendment 3 (2026-10-06): the stop fault wins, the box
+carries its docker, and lanes get a run handle", refining amendment 2) replaces #1178 amendment
+2's freeze (`pause_box`, `thawed`, `LeadAuthorDeps.thaw`, `run_pitfalls(thaw=)`). The drain
+creates and checks the batch's box at batch start, as on main, wraps it in a `runtime.box.BoxRuns`
+handle and stops it at once (`_run_worktree_batch`: `runs.stop()` first in the try whose
+`finally` removes the box), and hands the lanes the handle. Each spawn site runs its spawn
+inside `runtime.box.box_for_run(handle)`, handing the spawn the executor it yields:
 
-- the claim spawn, `lead_author._run_locked`: `with _box.box_for_run(box): rc =
-  deps.invoke_agent(..., box=box)`;
+- the claim spawn, `lead_author._run_locked`: `with _box.box_for_run(box) as run_box: rc =
+  deps.invoke_agent(..., box=run_box)`;
 - the pitfalls spawn, `pitfalls_curator.run_pitfalls`: the same around its `invoke`.
 
-The box is a sandboxed executor over a fake daemon installed as the `docker` program first on
-`PATH` (`_box1195.FakeDaemon`), reached by `box_for_run`'s default seam; the lane's host steps
-log into a `_box1195.Journal`, which marks each into the daemon's call log and notes what was
-running at that moment. A run window is a `docker start` to the next `docker stop`. Groups, each
-driven through a seam, never `monkeypatch.setattr`:
+The box is a sandboxed executor carrying a fake daemon (`_box1195.FakeDaemon`) as its docker;
+every start, stop and removal reaches the daemon through the executor, and a `Tripwire` is the
+`docker` on `PATH` (one production row runs the default docker, the daemon installed there).
+The lane's host steps log into a `_box1195.Journal`, which marks each into the daemon's call
+log and notes what was running at that moment. A run window is a `docker start` to the next
+`docker stop`. Groups, each driven through a seam, never `monkeypatch.setattr`:
 
-- The lanes (O2'', E5'): one window per agent, holding the spawn alone, the spawn handed the
-  very box the lane was handed; the host's steps before the agent and every read the gate makes
-  after it (the lane's `tree_for`, logged) saw nothing running; whatever the box writes during
-  its run is what the gate judges (O1). A run whose start fails (refused, not taking, or a box
-  not `exited` beforehand: E3'), or whose stop fails after a clean agent, runs no gate and
+- The lanes (O2'', E5', O6): one window per agent, holding the spawn alone, the spawn handed
+  the batch's executor (never the handle the lane was handed); the host's steps before the
+  agent and every read the gate makes after it (the lane's `tree_for`, logged) saw nothing
+  running; whatever the box writes during its run is what the gate judges (O1). A run whose
+  start fails (refused, not taking, or a box not `exited` beforehand: E3'), or whose stop fails
+  after a clean agent (refused, without effect, unproven, the seam raising), runs no gate and
   commits nothing (O4). The baseline of strays and the minted drafts' identities are taken
   before the run starts.
-- The drain (O2'', O4, E3'): `_drain_lead_author(..., box=<the batch's stopped box>)` runs one
-  window per agent and none between; a claim's run start or stop fault halts the lane rather
-  than dead-lettering the claim; a pitfalls run's box fault halts it and bumps no pitfalls row;
-  a stop masked under the last claim's failing agent makes the pitfalls tick's run refuse
-  (E3'); so does a run start fault through the DEFAULT claim step and the DEFAULT pitfalls step,
-  and the batch box's docker calls there are exactly `X.REFUSED_FIRST_RUN` (no call outside a
-  run). Through the production `lead_author_drain` over the fake daemon: one create at batch
-  start and its stop before the first claim; a stop fault masked under a failing agent leaves
-  the box running, and the next claim's run refuses it before its agent (with a best-effort
-  stop); a claim's stop fault after a clean agent escapes; nothing is committed or delivered; the
+- The drain (O2'', O4, O5, E3'): `_drain_lead_author(..., box=<the handle>)` hands each lane
+  the handle and runs one window per agent and none between; a claim's run start or stop fault
+  halts the lane rather than dead-lettering the claim; a pitfalls run's box fault halts it and
+  bumps no pitfalls row; a stop fault under a failing agent or curator wins (F1): it escapes at
+  once with the failure as its context, dead-letters no claim and bumps no row, whether a later
+  run follows or none does; a stop fault some layer swallows makes the pitfalls tick's run
+  refuse (E3'); so does a run start fault through the DEFAULT claim step and the DEFAULT
+  pitfalls step, and the batch box's docker calls there are exactly `X.REFUSED_FIRST_RUN` (no
+  call outside a run). Through the production `lead_author_drain` (only `start_box=` bringing
+  the docker): one create at batch start and its stop before the first claim; the F1 rows; a
+  claim's stop fault after a clean agent escapes; nothing is committed or delivered; the
   batch-end `rm -f` removes the box before the scan. A fault creating or checking the box at
   batch start claims no claim, bumps no attempt and dead-letters nothing.
 - The plain-file rule (#1178 D4'', which stands, unchanged): every non-deletion record the gate
@@ -46,17 +50,17 @@ driven through a seam, never `monkeypatch.setattr`:
   or is larger than any read takes. A `tree_for` that places no path refuses rather than
   falling back on the plain path.
 
-`box_for_run`/`stop_run_box` themselves are in `test_1195_box_for_run.py`; the batch's start,
+`BoxRuns`/`box_for_run` themselves are in `test_1195_box_for_run.py`; the batch's start,
 post-create stop and removal in `test_1195_worktree_batch.py`; the real-box row in
 `test_1195_run_box_live.py`; the lessons lane in `test_1195_lessons_run_windows.py`.
 """
 from __future__ import annotations
 
 import dataclasses
-import logging
 import os
 import subprocess
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -68,7 +72,9 @@ from defender._run_paths import RunPaths
 from defender.learning.core import drains, markers, persist
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.leads import lead_author, pitfalls_curator
+from defender.learning.author.shared import AuthorError
 from defender.learning.leads.lead_extraction import LeadAuthorError
+from defender.runtime import box as box_mod
 from defender.runtime.box import BoxFault
 from defender.tests import _box1195 as X
 from defender.tests._claim1175 import claim_git
@@ -213,9 +219,10 @@ def _assert_one_run_holds_exactly_the_agent(  # noqa: PLR0913 — one run's whol
     log: X.Journal, daemon: X.FakeDaemon, spawn: Any, box: Any, *, head_before: str,
     head_after: str,
 ) -> None:
-    """One window, holding the agent and nothing else, the agent handed the very box the lane
-    was handed; every host step before it, and every gate read after it, saw nothing running;
-    the commit (after the gate) landed; the box is stopped."""
+    """One window, holding the agent and nothing else, the agent handed the batch's executor
+    (`box`), never the handle the lane was handed; every host step before it, and every gate
+    read after it, saw nothing running; the commit (after the gate) landed; the box is
+    stopped."""
     log.assert_runs_hold_exactly(["agent"], ("agent",))
     kinds = [e[0] for e in log]
     at = kinds.index("agent")
@@ -223,7 +230,7 @@ def _assert_one_run_holds_exactly_the_agent(  # noqa: PLR0913 — one run's whol
     assert "read" in kinds[at + 1:], f"the gate read nothing after the run: {kinds}"
     assert head_after != head_before, "nothing was committed, so 'committed with no box up' is vacuous"
     assert len(spawn.boxes) == 1, spawn.boxes
-    assert spawn.boxes[0] is box, "the agent was not handed the lane's own box"
+    assert spawn.boxes[0] is box, "the agent was not handed the batch's executor"
     assert daemon.status(NAME) == "exited", "the agent's box was left running"
 
 
@@ -346,10 +353,10 @@ def test_the_lead_author_runs_its_agent_in_a_run_window_of_its_own(tmp_path: Pat
     window starts the box after the host's pre-agent steps, holds the agent alone (handed that
     same box, and seeing it running), and stops it before the gate's first read and the commit.
     HEAD holds the draft; the box is stopped."""
-    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    daemon, box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     log = X.Journal(daemon)
-    got, spawn = _drive_lead(s, log, name=AGENT_NAME, text=VETTED, box=box)
+    got, spawn = _drive_lead(s, log, name=AGENT_NAME, text=VETTED, box=runs)
     assert got == ("returned", 0), got
     head = _git.git_head_sha(s.repo)
     _assert_one_run_holds_exactly_the_agent(log, daemon, spawn, box, head_before=s.head,
@@ -364,11 +371,11 @@ def test_the_lead_author_gate_judges_what_the_box_wrote_during_its_run(
     bytes the gate refuses (`LeadAuthorError`, HEAD unchanged, nothing staged); with valid
     different bytes (the control) those bytes are what HEAD holds. The gate runs after the stop,
     so it sees everything the box did during its run."""
-    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     bytes_out = REFUSED if at_stop == "refused" else VARIANT
     daemon.on_stop(s.at(AGENT_NAME), bytes_out, at=1)
-    got = _run_lead(s, [], name=AGENT_NAME, text=VETTED, box=box)
+    got = _run_lead(s, [], name=AGENT_NAME, text=VETTED, box=runs)
     if at_stop == "variant":
         assert got == ("returned", 0), got
         assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VARIANT
@@ -397,10 +404,10 @@ def test_a_lead_author_path_the_box_wrote_during_its_run_is_judged(
     whose id disagrees with its folder, or a non-`.md` file under `skills/`, is refused (HEAD
     unchanged, nothing staged); an admissible new draft (the control) is judged and committed
     with the rest."""
-    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     daemon.on_stop(s.at(name), text, at=1)
-    got = _run_lead(s, [], name=AGENT_NAME, text=VETTED, box=box)
+    got = _run_lead(s, [], name=AGENT_NAME, text=VETTED, box=runs)
     if says is None:
         assert got == ("returned", 0), got
         assert _git.git_show_file(s.repo, "HEAD", s.rel(name)) == text
@@ -435,11 +442,11 @@ def test_a_lead_author_start_fault_runs_no_agent_and_commits_nothing(
     nothing, HEAD is unchanged, nothing is staged, the run is not recorded done, and the box is
     stopped again. A box found running gets no `docker start` at all. Control:
     `test_the_lead_author_runs_its_agent_in_a_run_window_of_its_own` (a start that holds)."""
-    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     _start_fault(daemon, fault)
     s = _lead_scene(tmp_path)
     log: list = []
-    got, spawn = _drive_lead(s, log, name=AGENT_NAME, text=VETTED, box=box)
+    got, spawn = _drive_lead(s, log, name=AGENT_NAME, text=VETTED, box=runs)
     assert got[:2] == ("raised", "BoxFault"), got
     assert spawn.calls == [], "the agent ran though its box never started"
     assert [e for e in log if e[0] == "read"] == [], "the gate ran though the box never started"
@@ -451,16 +458,17 @@ def test_a_lead_author_start_fault_runs_no_agent_and_commits_nothing(
         assert "start" not in daemon.steps(), "a box found running was started over"
 
 
-#: A run's stop that fails after a clean agent, with nothing in flight: refused, or answering 0
-#: with the box still running. `holds` is the control.
-STOP_FAULTS = ["refused", "takes-no-effect", "holds"]
+#: A run's stop that fails after a clean agent, with nothing in flight (`X.STOP_FAULTS`: refused,
+#: answering 0 with the box still running, its proof unanswered, the seam raising). `holds` is
+#: the control.
+STOP_FAULTS = [*X.STOP_FAULTS, "holds"]
 
 
-def _stop_fault(daemon: X.FakeDaemon, fault: str, *, nth: int = 1) -> None:
-    if fault == "refused":
-        daemon.refuse_stop(at=[nth])
-    elif fault == "takes-no-effect":
-        daemon.stop_takes_no_effect(at=[nth])
+def _stop_fault(daemon: X.FakeDaemon, stop: str) -> None:
+    """The first run's stop fails as `stop` says: the direct drives' box is held `exited`, so
+    its run asks the status before its start (1), after it (2) and after its stop (3)."""
+    if stop != "holds":
+        X.fail_stop(daemon, stop, at=1, inspect_at=3)
 
 
 def _reads_after_the_agent(log: list) -> list[tuple]:
@@ -472,14 +480,15 @@ def _reads_after_the_agent(log: list) -> list[tuple]:
 def test_a_lead_author_stop_fault_after_a_clean_agent_halts_before_the_gate(
         tmp_path: Path, monkeypatch, stop: str):
     """The agent leaves a valid draft and returns 0; then its run's stop fails (nothing in
-    flight). `run` raises `BoxFault`: the gate read nothing after the agent, HEAD is unchanged,
+    flight; refused, without effect, unproven, the seam raising). `run` raises `BoxFault`, never
+    the seam's own exception: the gate read nothing after the agent, HEAD is unchanged,
     nothing is staged, and the run is not recorded done. Control (`holds`): the same agent, the
     stop taking: the gate reads after the run and the draft is committed."""
-    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     _stop_fault(daemon, stop)
     s = _lead_scene(tmp_path)
     log: list = []
-    got, spawn = _drive_lead(s, log, name=AGENT_NAME, text=VETTED, box=box)
+    got, spawn = _drive_lead(s, log, name=AGENT_NAME, text=VETTED, box=runs)
     assert len(spawn.calls) == 1, f"the agent was never reached: {got}"
     if stop == "holds":
         assert got == ("returned", 0), got
@@ -584,10 +593,10 @@ def test_the_pitfalls_tick_runs_its_curator_in_a_run_window_of_its_own(
     reducer surface. One run window starts the box after the tick's first host step, holds the
     curator alone (handed that same box), and stops it before the gate's first read and the
     commit."""
-    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    daemon, box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _pitfalls_scene(tmp_path, monkeypatch, _reducer_rows())
     log = X.Journal(daemon)
-    got, spawn = _drive_pitfalls(s, log, rel=REDUCER_REL, text=REDUCER_VETTED, box=box)
+    got, spawn = _drive_pitfalls(s, log, rel=REDUCER_REL, text=REDUCER_VETTED, box=runs)
     assert got == ("returned", 0), got
     head = _git.git_head_sha(s.repo)
     _assert_one_run_holds_exactly_the_agent(log, daemon, spawn, box, head_before=s.head,
@@ -601,11 +610,11 @@ def test_the_pitfalls_gate_judges_what_the_box_wrote_during_its_run(
     """The box rewrites the reducer surface on its run's way out: refused bytes (a rewritten
     frontmatter block) are refused with HEAD unchanged and nothing staged; valid different bytes
     (the control) are what HEAD holds."""
-    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _pitfalls_scene(tmp_path, monkeypatch, _reducer_rows())
     bytes_out = REDUCER_REFUSED if at_stop == "refused" else REDUCER_VARIANT
     daemon.on_stop(s.at(REDUCER_REL), bytes_out, at=1)
-    got = _run_pitfalls(s, [], rel=REDUCER_REL, text=REDUCER_VETTED, box=box)
+    got = _run_pitfalls(s, [], rel=REDUCER_REL, text=REDUCER_VETTED, box=runs)
     if at_stop == "variant":
         assert got == ("returned", 0), got
         assert _git.git_show_file(s.repo, "HEAD", REDUCER_REL) == REDUCER_VARIANT
@@ -635,10 +644,10 @@ def test_a_pitfalls_path_the_box_wrote_during_its_run_is_judged(
     """The box writes a NEW path beside the curator's vetted reducer edit on its run's way out:
     a path outside the lane's scope or a non-`.md` stray is refused (HEAD unchanged, nothing
     staged); an admissible new `execution.md` (the control) is judged and committed."""
-    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _pitfalls_scene(tmp_path, monkeypatch, _reducer_rows())
     daemon.on_stop(s.at(rel), text, at=1)
-    got = _run_pitfalls(s, [], rel=REDUCER_REL, text=REDUCER_VETTED, box=box)
+    got = _run_pitfalls(s, [], rel=REDUCER_REL, text=REDUCER_VETTED, box=runs)
     if says is None:
         assert got == ("returned", 0), got
         assert _git.git_show_file(s.repo, "HEAD", rel) == text
@@ -657,12 +666,12 @@ def test_a_pitfalls_start_fault_runs_no_curator_and_commits_nothing(
     """The run's start fails: `run_pitfalls` raises `BoxFault`; the curator never ran, the gate
     read nothing, HEAD is unchanged, nothing is staged, every queued row is still queued, and
     the box is stopped again."""
-    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     _start_fault(daemon, fault)
     s = _pitfalls_scene(tmp_path, monkeypatch, _reducer_rows())
     queued = _queued(s)
     log: list = []
-    got, spawn = _drive_pitfalls(s, log, rel=REDUCER_REL, text=REDUCER_VETTED, box=box)
+    got, spawn = _drive_pitfalls(s, log, rel=REDUCER_REL, text=REDUCER_VETTED, box=runs)
     assert got[:2] == ("raised", "BoxFault"), got
     assert spawn.calls == [], "the curator ran though its box never started"
     assert [e for e in log if e[0] == "read"] == [], "the gate ran though the box never started"
@@ -679,12 +688,12 @@ def test_a_pitfalls_stop_fault_after_a_clean_curator_halts_before_the_gate(
     raises `BoxFault`; the gate read nothing after the curator, HEAD is unchanged, nothing is
     staged, and every queued row is still queued. Control (`holds`): the stop taking, the gate
     reads after the run and the edit is committed."""
-    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     _stop_fault(daemon, stop)
     s = _pitfalls_scene(tmp_path, monkeypatch, _reducer_rows())
     queued = _queued(s)
     log: list = []
-    got, spawn = _drive_pitfalls(s, log, rel=REDUCER_REL, text=REDUCER_VETTED, box=box)
+    got, spawn = _drive_pitfalls(s, log, rel=REDUCER_REL, text=REDUCER_VETTED, box=runs)
     assert len(spawn.calls) == 1, f"the curator was never reached: {got}"
     if stop == "holds":
         assert got == ("returned", 0), got
@@ -916,7 +925,7 @@ def test_a_lead_author_stray_the_box_writes_once_started_is_refused(
     lane's baseline of strays was taken before the start, so the rewrite is new. Control: the
     same rewrite already standing before the run is in the baseline, and the claim commits
     (without it)."""
-    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     s = dataclasses.replace(s, head=_commit_stray(s.repo))
     stray = s.repo / STRAY_REL
@@ -924,7 +933,7 @@ def test_a_lead_author_stray_the_box_writes_once_started_is_refused(
         write(stray, STRAY_EDIT)
     else:
         daemon.on_start(stray, STRAY_EDIT, at=1)
-    got = _run_lead(s, [], name=AGENT_NAME, text=VETTED, box=box)
+    got = _run_lead(s, [], name=AGENT_NAME, text=VETTED, box=runs)
     if when == "before-the-run":
         assert got == ("returned", 0), got
         assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED
@@ -942,7 +951,7 @@ def test_a_pitfalls_stray_the_box_writes_once_started_is_refused(
         tmp_path: Path, monkeypatch, when: str):
     """As the lead-author row, for the pitfalls tick: its baseline of strays is taken before its
     run starts."""
-    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _pitfalls_scene(tmp_path, monkeypatch, _reducer_rows())
     s = dataclasses.replace(s, head=_commit_stray(s.repo))
     stray = s.repo / STRAY_REL
@@ -950,7 +959,7 @@ def test_a_pitfalls_stray_the_box_writes_once_started_is_refused(
         write(stray, STRAY_EDIT)
     else:
         daemon.on_start(stray, STRAY_EDIT, at=1)
-    got = _run_pitfalls(s, [], rel=REDUCER_REL, text=REDUCER_VETTED, box=box)
+    got = _run_pitfalls(s, [], rel=REDUCER_REL, text=REDUCER_VETTED, box=runs)
     if when == "before-the-run":
         assert got == ("returned", 0), got
         assert _git.git_show_file(s.repo, "HEAD", REDUCER_REL) == REDUCER_VETTED
@@ -971,12 +980,12 @@ def test_a_draft_minted_this_tick_that_the_box_removes_once_started_is_a_departu
     departure is seen and refused (`LeadAuthorError`, "without attributing it", naming the
     draft), HEAD unchanged. Control: the box leaves the draft, and it is committed with the
     agent's file."""
-    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     minted_name, _text = draft_of(ELASTIC_LEAD)
     if box_does == "removes-it":
         daemon.on_start(s.at(minted_name), remove=True, at=1)
-    got = _run_lead(s, [], name=AGENT_NAME, text=VETTED, box=box)
+    got = _run_lead(s, [], name=AGENT_NAME, text=VETTED, box=runs)
     if box_does == "leaves-it":
         assert got == ("returned", 0), got
         assert _git.git_show_file(s.repo, "HEAD", s.rel(minted_name)) is not None
@@ -1040,25 +1049,38 @@ class Lanes:
     """The drain's two work steps, each driving its REAL lane over the worktree it is handed:
     `run_lead` serves a claim through `lead_author.run` (only the agent and the two tables
     faked), `run_pitfalls` a tick through `run_pitfalls` (only the curator faked), each handed
-    the box the drain handed down. With a `log`, each lane's host steps and gate reads log into
-    it. `pitfalls_ticks` counts the pitfalls ticks."""
+    the box the drain handed down (`handed` records it). With a `log`, each lane's host steps
+    and gate reads log into it. `pitfalls_ticks` counts the pitfalls ticks. With
+    `swallow_claim_box_faults`, a claim's `BoxFault` is swallowed (`swallowed`), as a layer
+    above a spawn may mask it."""
 
     def __init__(self, agent: BoxSeenLeadSpawn, curator: BoxSeenSpawn | None = None, *,
-                 log: list | None = None) -> None:
+                 log: list | None = None, swallow_claim_box_faults: bool = False) -> None:
         self.agent, self.curator, self.log = agent, curator, log
+        self.swallow = swallow_claim_box_faults
         self.pitfalls_ticks = 0
+        self.handed: list[Any] = []
+        self.swallowed: list[BoxFault] = []
 
     def run_lead(self, paths: LoopPaths, run_dir: Path, *, box: Any = None, on_done: Any,
                  **_kw: Any) -> int:
+        self.handed.append(box)
         with lead_trees(paths) as trees:
             deps = _deps(paths, trees, self.agent, [ELASTIC_LEAD])
             if self.log is not None:
                 deps = _journaled_deps(deps, self.log)
-            return lead_author.run(run_dir, label=LEAD, paths=paths, deps=deps, box=box,
-                                   on_done=on_done)
+            try:
+                return lead_author.run(run_dir, label=LEAD, paths=paths, deps=deps, box=box,
+                                       on_done=on_done)
+            except BoxFault as e:
+                if not self.swallow:
+                    raise
+                self.swallowed.append(e)
+                return 0
 
     def run_pitfalls(self, paths: LoopPaths, *, box: Any = None, on_curated: Any,
                      **_kw: Any) -> int:
+        self.handed.append(box)
         self.pitfalls_ticks += 1
         if self.curator is None:
             return 0
@@ -1087,11 +1109,12 @@ def _attempts(paths: LoopPaths) -> list[Any]:
 
 def test_the_lead_drain_runs_one_window_per_agent_and_none_between(tmp_path: Path, monkeypatch):
     """`_drain_lead_author(..., box=<the batch's stopped box>)` serving one claim and one
-    pitfalls tick through the real lanes: exactly two run windows, the claim's agent and the
-    pitfalls curator, each holding its spawn alone, each spawn handed the same box; every host
+    pitfalls tick through the real lanes: each lane handed the handle (F3), and exactly two run
+    windows, the claim's agent and the pitfalls curator, each holding its spawn alone, each
+    spawn handed the batch's executor (O6); every host
     step of either lane (the claim's pre-agent steps and gate, the pitfalls tick's mount and
     gate) saw nothing running; the box is stopped at the end; both lanes committed."""
-    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    daemon, box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     persist.append_pitfalls(_system_rows(), paths=s.paths)
@@ -1108,7 +1131,7 @@ def test_the_lead_drain_runs_one_window_per_agent_and_none_between(tmp_path: Pat
 
     lanes = Lanes(BoxSeenLeadSpawn(author), BoxSeenSpawn(curate), log=log)
 
-    drains._drain_lead_author(s.paths, lanes.run_lead, lanes.run_pitfalls, box=box)
+    drains._drain_lead_author(s.paths, lanes.run_lead, lanes.run_pitfalls, box=runs)
 
     log.assert_runs_hold_exactly(["agent", "curator"], ("agent", "curator"))
     kinds = [e[0] for e in log]
@@ -1116,6 +1139,7 @@ def test_the_lead_drain_runs_one_window_per_agent_and_none_between(tmp_path: Pat
         f"no host step was seen between the runs (vacuous): {kinds}")
     assert [b is box for b in lanes.agent.boxes] == [True], lanes.agent.boxes
     assert [b is box for b in lanes.curator.boxes] == [True], lanes.curator.boxes
+    assert lanes.handed == [runs, runs], f"a lane was handed something but the handle: {lanes.handed}"
     assert daemon.status(NAME) == "exited"
     assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED
     assert _git.git_show_file(s.repo, "HEAD", EXECUTION_REL) == EXECUTION_TEXT
@@ -1128,14 +1152,14 @@ def test_a_claims_run_start_fault_halts_the_lane_and_dead_letters_nothing(
     found running): a `BoxFault` escapes `_drain_lead_author`. The first claim's agent never
     ran, the second claim is never claimed, the pitfalls tick never runs, nothing is committed,
     no claim is dead-lettered, and the box is stopped. Control: the next row."""
-    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     _start_fault(daemon, fault)
     s = _lead_scene(tmp_path)
     _queue_claims(s, "run-0", "run-1")
     lanes = Lanes(BoxSeenLeadSpawn(lambda _rd: write(s.at(AGENT_NAME), VETTED)))
 
     got = X.caught(lambda: drains._drain_lead_author(s.paths, lanes.run_lead, lanes.run_pitfalls,
-                                                     box=box))
+                                                     box=runs))
 
     assert isinstance(got, BoxFault), got
     assert lanes.agent.calls == [], "an agent ran though its box never started"
@@ -1152,7 +1176,7 @@ def test_control_a_claims_agent_fault_dead_letters_that_claim_and_the_next_is_se
     """The first claim's agent fails (`LeadAuthorError`, not a box fault): its run's box is
     stopped on that way out, that claim is dead-lettered, and the second is served in a run
     window of its own and committed."""
-    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    daemon, box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     _queue_claims(s, "run-0", "run-1")
     log = X.Journal(daemon)
@@ -1165,15 +1189,16 @@ def test_control_a_claims_agent_fault_dead_letters_that_claim_and_the_next_is_se
 
     lanes = Lanes(BoxSeenLeadSpawn(author), log=log)
 
-    drains._drain_lead_author(s.paths, lanes.run_lead, lanes.run_pitfalls, box=box)
+    drains._drain_lead_author(s.paths, lanes.run_lead, lanes.run_pitfalls, box=runs)
 
     log.assert_runs_hold_exactly(["agent", "agent"], ("agent",))
+    assert [b is box for b in lanes.agent.boxes] == [True, True], lanes.agent.boxes
     assert _failed(s) == ["case-run-0.json"], _failed(s)
     assert daemon.status(NAME) == "exited"
     assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED
 
 
-@pytest.mark.parametrize("stop", ["refused", "takes-no-effect"])
+@pytest.mark.parametrize("stop", X.STOP_FAULTS)
 def test_a_claims_stop_fault_after_a_clean_agent_halts_the_lane(
         tmp_path: Path, monkeypatch, stop: str):
     """Two claims queued; the first claim's agent leaves a valid draft and returns 0, then its
@@ -1181,14 +1206,14 @@ def test_a_claims_stop_fault_after_a_clean_agent_halts_the_lane(
     claim is never claimed, the pitfalls tick never runs, and no claim is dead-lettered.
     Control: `test_the_lead_drain_runs_one_window_per_agent_and_none_between` (the stop
     taking)."""
-    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     _stop_fault(daemon, stop)
     s = _lead_scene(tmp_path)
     _queue_claims(s, "run-0", "run-1")
     lanes = Lanes(BoxSeenLeadSpawn(lambda _rd: write(s.at(AGENT_NAME), VETTED)))
 
     got = X.caught(lambda: drains._drain_lead_author(s.paths, lanes.run_lead, lanes.run_pitfalls,
-                                                     box=box))
+                                                     box=runs))
 
     assert isinstance(got, BoxFault), got
     assert len(lanes.agent.calls) == 1, lanes.agent.calls
@@ -1216,7 +1241,7 @@ def test_a_pitfalls_box_fault_halts_the_lane_and_bumps_no_pitfalls_row(
     Control (`curator-fails`): the curator fails (rc 1, not a box fault): the tick is retired as
     a batch error, nothing escapes, and every row's attempts is bumped to 1, so the attempts
     read above is live."""
-    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     if where == "start":
         daemon.refuse_start(at=[2])
     elif where == "stop":
@@ -1235,7 +1260,7 @@ def test_a_pitfalls_box_fault_halts_the_lane_and_bumps_no_pitfalls_row(
                   BoxSeenSpawn(curate, rc=1 if where == "curator-fails" else 0))
 
     got = X.caught(lambda: drains._drain_lead_author(s.paths, lanes.run_lead, lanes.run_pitfalls,
-                                                     box=box))
+                                                     box=runs))
 
     attempts = _attempts(s.paths)
     assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED, (
@@ -1261,55 +1286,117 @@ def _run_calls(daemon: X.FakeDaemon) -> list[str]:
 ONE_RUN = ["status", "start", "status", "stop", "status"]
 
 
-@pytest.mark.parametrize("stop", ["refused", "holds"])
-def test_a_masked_stop_in_the_last_claim_makes_the_pitfalls_run_refuse(
-        tmp_path: Path, monkeypatch, caplog, stop: str):
-    """E3' at the claim -> pitfalls boundary: `_drain_lead_author` over the real lanes, one claim
-    and three pitfalls rows at threshold. The claim's agent fails (`LeadAuthorError`, which
-    dead-letters it); with `refused`, its run's stop is refused under that failure, so it is only
-    logged and the box keeps running. The pitfalls tick's run then finds it running and refuses
-    before its curator, with a best-effort stop and no `docker start`: `BoxFault` escapes, the
-    curator is never called, `execution.md` is as committed, and no pitfalls row's attempts
-    change. Nothing touches the box between the claim's run and the tick's.
-
-    Control (`holds`): the claim's stop takes; the pitfalls run starts, the curator runs and its
-    edit is committed."""
-    caplog.set_level(logging.WARNING)
-    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+def _claim_then_pitfalls(tmp_path: Path, monkeypatch: Any
+                         ) -> tuple[X.FakeDaemon, Any, Any, LeadScene, list[Any], str | None]:
+    """One claim queued and three pitfalls rows at threshold, over a stopped box: the daemon,
+    the executor, the handle, the scene, the rows' attempts and `execution.md` at HEAD."""
+    daemon, box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     persist.append_pitfalls(_system_rows(), paths=s.paths)
     _queue_claims(s, "run-0")
-    attempts_before = _attempts(s.paths)
-    execution_before = _git.git_show_file(s.repo, "HEAD", EXECUTION_REL)
+    return (daemon, box, runs, s, _attempts(s.paths),
+            _git.git_show_file(s.repo, "HEAD", EXECUTION_REL))
 
-    def author(_run_dir: Path) -> None:
-        if stop == "refused":
-            daemon.refuse_stop()  # this run's stop, under the agent's own failure: masked
-        raise LeadAuthorError("the agent failed")
+
+#: What the pitfalls curator raises inside its run: `AuthorError` (a `RETIRE_SET` member) and a
+#: crash; either retires the tick's batch, bumping its rows.
+PITFALLS_F1_FAILURES = [
+    pytest.param(lambda: AuthorError("the curator refused"), id="AuthorError"),
+    pytest.param(lambda: RuntimeError("the curator crashed"), id="RuntimeError"),
+]
+
+
+@pytest.mark.parametrize("stop", STOP_FAULTS)
+@pytest.mark.parametrize("failure", PITFALLS_F1_FAILURES)
+def test_a_stop_fault_under_a_failing_curator_halts_the_lane_and_bumps_no_pitfalls_row(
+        tmp_path: Path, monkeypatch, failure: Any, stop: str):
+    """F1, with no later run: `_drain_lead_author` over one claim (whose run holds and commits)
+    and the pitfalls tick, the last run of the batch. The curator raises X inside its run and
+    the run's stop fails (refused, without effect, unproven, the seam raising): a `BoxFault`
+    escapes, never X, with X in its chain (its `__context__`, behind the seam's own exception
+    when the seam raised). No pitfalls row's attempts change, and the curator's edit is not
+    committed. Control (`holds`): X is handled as before: the drain retires the tick's batch as
+    a batch error and bumps every row, so the attempts read is live."""
+    daemon, _box, runs, s, attempts_before, execution_before = _claim_then_pitfalls(
+        tmp_path, monkeypatch)
+    raised = failure()
+
+    def curate(root: Path) -> None:
+        write(root / EXECUTION_REL, EXECUTION_TEXT)
+        if stop != "holds":  # the pitfalls run's stop: the second; its proof, the next status ask
+            X.fail_stop(daemon, stop, at=2, inspect_at=daemon.inspect_count() + 1)
+        raise raised
+
+    lanes = Lanes(BoxSeenLeadSpawn(lambda _rd: write(s.at(AGENT_NAME), VETTED)),
+                  BoxSeenSpawn(curate))
+
+    got = X.caught(lambda: drains._drain_lead_author(s.paths, lanes.run_lead, lanes.run_pitfalls,
+                                                     box=runs))
+
+    assert len(lanes.curator.calls) == 1, "the curator never ran, so the row is vacuous"
+    assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED, (
+        "the claim's own commit did not stand")
+    assert _git.git_show_file(s.repo, "HEAD", EXECUTION_REL) == execution_before, (
+        "the failed curator's edit was committed")
+    X.no_path_docker(daemon)
+    if stop == "holds":
+        assert got is None, got
+        assert _attempts(s.paths) == [1] * len(attempts_before), _attempts(s.paths)
+        return
+    assert isinstance(got, BoxFault), f"the curator's failure outranked its stop fault: {got!r}"
+    if stop.startswith("seam-"):
+        assert daemon.seam_raised == ["stop"], daemon.seam_raised
+        assert raised in X.chain(got), X.chain(got)
+    else:
+        assert got.__context__ is raised, X.chain(got)
+    assert _attempts(s.paths) == attempts_before, "a pitfalls row was bumped for a box fault"
+
+
+@pytest.mark.parametrize("stop", ["refused", "holds"])
+def test_a_swallowed_stop_fault_in_the_last_claim_makes_the_pitfalls_run_refuse(
+        tmp_path: Path, monkeypatch, stop: str):
+    """E3' at the claim -> pitfalls boundary (N11''): `_drain_lead_author` over the real lanes,
+    one claim and three pitfalls rows at threshold, the claim lane swallowing its `BoxFault` as
+    a layer above a spawn may. With `refused`, the claim's agent leaves its draft and returns,
+    and its run's stop is refused: that `BoxFault` is swallowed and the box keeps running. The
+    pitfalls tick's run then finds it running and refuses before its curator, naming the
+    status, with a best-effort stop and no `docker start`: `BoxFault` escapes, the curator is
+    never called, `execution.md` is as committed, and no pitfalls row's attempts change.
+    Nothing touches the box between the claim's run and the tick's.
+
+    Control (`holds`): the claim's stop takes; the pitfalls run starts, the curator runs and its
+    edit is committed."""
+    daemon, _box, runs, s, attempts_before, execution_before = _claim_then_pitfalls(
+        tmp_path, monkeypatch)
+    if stop == "refused":
+        daemon.refuse_stop(at=[1])  # the claim's run's stop
 
     def curate(root: Path) -> None:
         write(root / EXECUTION_REL, EXECUTION_TEXT)
 
-    lanes = Lanes(BoxSeenLeadSpawn(author), BoxSeenSpawn(curate))
+    lanes = Lanes(BoxSeenLeadSpawn(lambda _rd: write(s.at(AGENT_NAME), VETTED)),
+                  BoxSeenSpawn(curate), swallow_claim_box_faults=True)
 
     got = X.caught(lambda: drains._drain_lead_author(s.paths, lanes.run_lead, lanes.run_pitfalls,
-                                                     box=box))
+                                                     box=runs))
 
     assert len(lanes.agent.calls) == 1
-    assert _failed(s) == ["case-run-0.json"], _failed(s)
     assert lanes.pitfalls_ticks == 1
     calls = _run_calls(daemon)
     if stop == "holds":
         assert got is None, got
+        assert lanes.swallowed == []
         assert len(lanes.curator.calls) == 1
         assert _git.git_show_file(s.repo, "HEAD", EXECUTION_REL) == EXECUTION_TEXT
         assert calls == ONE_RUN * 2, calls
         return
+    assert len(lanes.swallowed) == 1, "the claim's stop did not fail, so the row is vacuous"
     assert isinstance(got, BoxFault), f"the lane did not halt on a box left running: {got!r}"
-    assert lanes.curator.calls == [], "the pitfalls curator ran after a masked stop"
+    assert "running" in str(got), got
+    assert lanes.curator.calls == [], "the pitfalls curator ran after a swallowed stop fault"
     assert _git.git_show_file(s.repo, "HEAD", EXECUTION_REL) == execution_before, (
-        "the pitfalls edit was committed after a masked stop")
+        "the pitfalls edit was committed after a swallowed stop fault")
     assert _attempts(s.paths) == attempts_before
     assert calls == [*ONE_RUN, "status", "stop", "status"], (
         f"the pitfalls run did not refuse the running box with a best-effort stop: {calls}")
@@ -1323,14 +1410,16 @@ def test_a_masked_stop_in_the_last_claim_makes_the_pitfalls_run_refuse(
 
 def _held_lead_drain(s: LeadScene, monkeypatch: Any, **seams: Any
                      ) -> tuple[BaseException | None, list[str], list[str], X.ScanWatch]:
-    """`lead_author_drain` with its DEFAULT work steps over the fake daemon on `PATH`, whose
-    first run start is refused; the batch's box started by `HeldStart` (a real create, minus
-    the probes), stopped and removed by the drain's own seams. What it raised, the batch box's
-    docker calls from its post-create stop on, the branch's events and the scan's watch."""
+    """`lead_author_drain` with its DEFAULT work steps over the fake daemon, whose first run
+    start is refused; only `start_box=` injected: `HeldStart` (a real create, minus the probes),
+    whose executor carries the daemon, so the drain's own post-create stop, the runs and the
+    removal reach it through that executor (a `Tripwire` is the `docker` on `PATH`). What it
+    raised, the batch box's docker calls from its post-create stop on, the branch's events and
+    the scan's watch."""
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)  # the agent, if ever reached, calls no model
     X.clear_opt_out(monkeypatch)
     daemon = X.FakeDaemon(s.tmp)
-    daemon.install(monkeypatch)
+    daemon.tripwire = X.Tripwire(s.tmp).install(monkeypatch)
     daemon.refuse_start(at=[1])
     events: list[str] = []
     watch = X.ScanWatch(daemon, events)
@@ -1339,6 +1428,7 @@ def _held_lead_drain(s: LeadScene, monkeypatch: Any, **seams: Any
         s.paths, branch=RepoBranch(s.repo, branch_prefix="lead-author/", events=events),
         start_box=start, scrub=watch, **seams))
     [request] = start.requests
+    X.no_path_docker(daemon)
     return got, daemon.calls_from_the_first_stop(request.name), events, watch
 
 
@@ -1415,33 +1505,42 @@ def test_a_run_start_fault_through_the_default_pitfalls_step_halts_the_lane(
 # ---------------------------------------------------------------------------------------
 
 
-def _production_lead_scene(tmp_path: Path, monkeypatch: Any, *claims: str
-                           ) -> tuple[LeadScene, X.FakeDaemon]:
+def _production_lead_scene(tmp_path: Path, monkeypatch: Any, *claims: str,
+                           path_default: bool = False) -> tuple[LeadScene, X.FakeDaemon]:
     """The lead scene as `lead_author_drain` serves it in production: the box image inputs
-    committed under the repo's `defender/`, `claims` queued, the opt-out unset, and the fake
-    daemon first on `PATH` (the drain's own `start_box`/`stop_box`, its post-create stop and
-    each spawn's run all reach it)."""
+    committed under the repo's `defender/`, `claims` queued, the opt-out unset. The real
+    `start_box` creates the box over the fake daemon, given as its `docker=`
+    (`_production_lead_drain`), with a `Tripwire` the `docker` on `PATH`; with `path_default`,
+    production's own default docker reaches the daemon installed on `PATH`. Either way the
+    post-create stop, each spawn's run and the removal reach the daemon through the executor."""
     X.clear_opt_out(monkeypatch)
     s = _lead_scene(tmp_path)
     X.plant_image_inputs(s.repo)
     s = dataclasses.replace(s, head=commit_all(s.repo, "the box image inputs"))
     _queue_claims(s, *claims)
     daemon = X.FakeDaemon(tmp_path)
-    daemon.install(monkeypatch)
+    if path_default:
+        daemon.install(monkeypatch)
+    else:
+        daemon.tripwire = X.Tripwire(tmp_path).install(monkeypatch)
     return s, daemon
 
 
 def _production_lead_drain(s: LeadScene, daemon: X.FakeDaemon, author: Callable[[Path], None]
                            ) -> tuple[BaseException | None, Lanes, list[str], X.ScanWatch]:
-    """`lead_author_drain` with only the lanes (their agent: `author`), the branch and the scan
-    injected: what it raised, the lanes, the branch's events and the scan's watch."""
+    """`lead_author_drain` with only the lanes (their agent: `author`), the branch, the scan and
+    (unless the daemon is on `PATH`) the real `start_box`'s docker injected: what it raised, the
+    lanes, the branch's events and the scan's watch."""
     lanes = Lanes(BoxSeenLeadSpawn(author))
     events: list[str] = []
     branch = RepoBranch(s.repo, branch_prefix="lead-author/", events=events)
     watch = X.ScanWatch(daemon, events)
+    seams: dict[str, Any] = {}
+    if daemon.tripwire is not None:
+        seams["start_box"] = partial(box_mod.start_box, docker=daemon)
     got = X.caught(lambda: drains.lead_author_drain(
         s.paths, run_lead_author=lanes.run_lead, run_pitfalls=lanes.run_pitfalls, branch=branch,
-        scrub=watch))
+        scrub=watch, **seams))
     return got, lanes, events, watch
 
 
@@ -1450,68 +1549,94 @@ def _kept(daemon: X.FakeDaemon) -> list[str]:
             if x in ("create", "start", "stop", "rm", "scan") or x.startswith("agent:")]
 
 
-@pytest.mark.parametrize("stop", ["refused", "holds"])
-def test_a_masked_stop_fault_makes_the_next_claims_run_refuse(
-        tmp_path: Path, monkeypatch, caplog, stop: str):
-    """`lead_author_drain` as production wires it (its own `start_box`/`stop_box` and each
-    run's start and stop reaching the fake daemon on `PATH`; only the lanes, the branch and the
-    scan injected), two claims queued. The first claim's agent fails (`LeadAuthorError`, which
-    dead-letters that claim); with `refused`, its run's stop fails on the way out, so that stop
-    fault is only logged under the agent's failure and the box keeps running. The second
-    claim's run then finds the box not `exited` and raises `BoxFault` before its agent, with a
-    best-effort stop and no `docker start`: nothing is committed, the pitfalls tick never runs,
-    nothing is delivered, and the second claim is not dead-lettered. The batch-end `rm -f`
-    removes the box, and the tree is scanned only once it is gone.
+#: What the first claim's agent raises inside its run: the gate's own refusal, which
+#: dead-letters the claim, and a crash, dead-lettered the same way.
+LEAD_F1_FAILURES = [
+    pytest.param(lambda: LeadAuthorError("the agent failed"), id="LeadAuthorError"),
+    pytest.param(lambda: RuntimeError("the agent crashed"), id="RuntimeError"),
+]
 
-    Control (`holds`): the stop takes; the second claim is served in a run window of its own
-    and committed, and the batch is delivered. The batch created one box, stopped it before the
-    first claim, and started and stopped it once per agent."""
-    caplog.set_level(logging.WARNING)
-    s, daemon = _production_lead_scene(tmp_path, monkeypatch, "run-0", "run-1")
+
+@pytest.mark.parametrize("follows", ["next-claim", "nothing-follows"])
+@pytest.mark.parametrize("stop", STOP_FAULTS)
+@pytest.mark.parametrize("failure", LEAD_F1_FAILURES)
+def test_a_stop_fault_under_a_failing_agent_halts_the_lead_drain_with_the_failure_as_context(
+        tmp_path: Path, monkeypatch, failure: Any, stop: str, follows: str):
+    """F1 through `lead_author_drain` as production wires it (only `start_box=` bringing the
+    docker; the lanes, the branch and the scan injected). The first claim's agent raises X
+    inside its run, and its run's stop fails (refused, without effect, unproven, the seam
+    raising): a `BoxFault` escapes at once, never X, with X as its `__context__` (behind the
+    seam's own exception when the seam raised). So X is never handled as X: no claim is
+    dead-lettered (the first stays claimed for the next tick's reclaim), nothing is committed or
+    delivered, the pitfalls tick never runs, and no later `docker start` is asked, whether a
+    second claim waits (`next-claim`, whose run would refuse beside the box) or nothing does
+    (`nothing-follows`, where no later run would catch a box left running). The batch-end
+    `rm -f` removes the box, and the tree is scanned only after.
+
+    Control (`holds`): the stop takes; X dead-letters the first claim, the second (if any) is
+    served in a run window of its own and committed, and the batch is delivered."""
+    claims = ("run-0", "run-1") if follows == "next-claim" else ("run-0",)
+    s, daemon = _production_lead_scene(tmp_path, monkeypatch, *claims)
+    raised = failure()
 
     def author(run_dir: Path) -> None:
         daemon.mark(f"agent:{run_dir.name}")
-        if run_dir.name == "run-0":
-            if stop == "refused":
-                daemon.refuse_stop()
-            raise LeadAuthorError("the agent failed")
-        write(s.at(AGENT_NAME), VETTED)
+        if run_dir.name != "run-0":
+            write(s.at(AGENT_NAME), VETTED)
+            return
+        if stop != "holds":  # 1: the post-create stop; 2: this run's; its proof: the next ask
+            X.fail_stop(daemon, stop, at=2, inspect_at=daemon.inspect_count() + 1)
+        raise raised
 
     got, lanes, events, watch = _production_lead_drain(s, daemon, author)
 
-    assert _failed(s)[:1] == ["case-run-0.json"], _failed(s)
     assert len(daemon.created()) == 1, "the batch did not create exactly its one box"
     assert daemon.names() == [], "a box outlived the batch"
     watch.assert_scanned_once_the_box_was_gone()
+    X.no_path_docker(daemon)
     kept = _kept(daemon)
     if stop == "holds":
         assert got is None, got
-        assert kept == ["create", "stop", "start", "agent:run-0", "stop", "start", "agent:run-1",
-                        "stop", "rm", "scan"], kept
-        assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED
-        assert any(e.startswith("finish_batch:") for e in events), events
+        assert _failed(s) == ["case-run-0.json"], _failed(s)
+        if follows == "next-claim":
+            assert kept == ["create", "stop", "start", "agent:run-0", "stop", "start",
+                            "agent:run-1", "stop", "rm", "scan"], kept
+            assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED
+            assert any(e.startswith("finish_batch:") for e in events), events
         return
-    assert isinstance(got, BoxFault), got
+    assert isinstance(got, BoxFault), f"the agent's failure outranked its stop fault: {got!r}"
+    if stop.startswith("seam-"):
+        assert daemon.seam_raised == ["stop"], daemon.seam_raised
+        assert raised in X.chain(got), X.chain(got)
+    else:
+        assert got.__context__ is raised, X.chain(got)
     assert X.POINTER not in str(got), f"a mid-batch box fault got a build pointer: {got}"
-    assert kept == ["create", "stop", "start", "agent:run-0", "stop", "stop", "rm", "scan"], (
-        f"the second claim's run did not refuse the running box with a best-effort stop: {kept}")
-    assert _failed(s) == ["case-run-0.json"], "the second claim was dead-lettered for a box fault"
+    assert _failed(s) == [], "a claim was dead-lettered under a box fault"
+    assert _claim_files(s) == (["case-run-1.json"] if follows == "next-claim" else [],
+                               ["case-run-0.json"]), _claim_files(s)
+    assert kept[:4] == ["create", "stop", "start", "agent:run-0"], kept
+    assert "start" not in kept[4:], f"a later run was started beside the box: {kept}"
+    assert kept[-2:] == ["rm", "scan"], kept
     assert lanes.pitfalls_ticks == 0
-    assert _git.git_head_sha(s.repo) == s.head, "a commit landed beside a running box"
+    assert _git.git_head_sha(s.repo) == s.head, "a commit landed beside a box that would not stop"
     assert not any(e.startswith("finish_batch:") for e in events), events
 
 
+@pytest.mark.parametrize("docker", ["carried", "path-default"])
 @pytest.mark.parametrize("stop", ["refused", "holds"])
 def test_a_claims_stop_fault_after_a_clean_agent_halts_the_production_drain(
-        tmp_path: Path, monkeypatch, stop: str):
+        tmp_path: Path, monkeypatch, stop: str, docker: str):
     """`lead_author_drain` as production wires it, over the fake daemon, one claim queued. Its
     agent leaves a valid draft and succeeds; with `refused`, its run's stop fails, with nothing
     in flight. The claim's `BoxFault` escapes `lead_author_drain`: nothing is committed, nothing
     is delivered, and the claim is not dead-lettered. The batch-end `rm -f` removes the box (no
     container is left), and the tree is scanned only after.
 
-    Control (`holds`): the stop takes; the draft is committed and the batch delivered."""
-    s, daemon = _production_lead_scene(tmp_path, monkeypatch, "run-0")
+    Control (`holds`): the stop takes; the draft is committed and the batch delivered. `carried`:
+    the real `start_box` given the daemon as its docker, nothing reaching the `docker` on `PATH`;
+    `path-default`: production's own default docker, the daemon installed on `PATH`."""
+    s, daemon = _production_lead_scene(tmp_path, monkeypatch, "run-0",
+                                       path_default=docker == "path-default")
 
     def author(run_dir: Path) -> None:
         daemon.mark(f"agent:{run_dir.name}")
@@ -1524,6 +1649,8 @@ def test_a_claims_stop_fault_after_a_clean_agent_halts_the_production_drain(
     assert "agent:run-0" in daemon.steps(), "the agent was never reached"
     assert daemon.names() == [], "a box outlived the batch"
     watch.assert_scanned_once_the_box_was_gone()
+    if docker == "carried":
+        X.no_path_docker(daemon)
     if stop == "holds":
         assert got is None, got
         assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED
@@ -1566,3 +1693,4 @@ def test_a_batch_start_fault_claims_nothing_and_dead_letters_nothing(
     assert _attempts(s.paths) == attempts_before
     assert _git.git_head_sha(s.repo) == s.head
     assert not any(e.startswith("finish_batch:") for e in events), events
+    X.no_path_docker(daemon)

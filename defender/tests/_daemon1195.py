@@ -5,7 +5,8 @@ Standard library only, so the same code answers two callers over the same state:
 - in process, as an injected `docker=` seam (`_box1195.FakeDaemon.__call__` calls `handle`);
 - as a `docker` program first on `PATH` (`FakeDaemon.install`), which runs this file as a
   script, so the box code's DEFAULT seam (`runtime.box._docker`, a real subprocess) reaches it
-  too. The spawn sites' `box_for_run(box)` and the drain's post-create stop use that default.
+  too: a box `start_box` created with no `docker=` carries that default, and every lifecycle
+  call on it (the post-create stop, each run, the batch-end removal) reaches the program.
 
 The folder holds `state.json` (the containers by name, each `{"status", "token"}`, the faults
 still to inject, the per-verb call counts, and the host writes a box makes as it starts or
@@ -26,8 +27,8 @@ the way a daemon does and answers each verb the box code asks.
   running answers rc 1.
 - `start <name>`: `exited` (or `created`) -> `running`. On a container already running it
   answers rc 0 and changes nothing, as docker does (#1195 C3). A paused or dead one is refused.
-- `stop [-t N] <name>`: `running` (or `paused`) -> `exited`; rc 0 and no change on one that
-  is not running.
+- `stop [-t N] <name>`: `running` (or `paused`) -> `exited` (or `dead`, under a `dead` fault);
+  rc 0 and no change on one that is not running.
 - `rm -f <name>`: removes it (rc 0 whether or not it existed, as docker 29 does), unless an
   `rm` fault is pending: then rc 1 and the container stays as it was.
 
@@ -64,7 +65,7 @@ def fresh_state() -> dict:
         "faults": {"rm": 0, "alias_allowed": False, "down": False, "create": False,
                    "sentinel": False,
                    "start": {"refuse": [], "noop": []},
-                   "stop": {"refuse": [], "noop": []},
+                   "stop": {"refuse": [], "noop": [], "dead": []},
                    "inspect": {"refuse": []}},
         "counts": {"start": 0, "stop": 0, "inspect": 0, "boot": 0},
         "on": {"start": [], "stop": []},
@@ -158,7 +159,7 @@ def _run_verb(state: dict, verb: str, name: str) -> tuple[int, str, str]:
         return 0, f"{name}\n", ""
     if box["status"] in ("running", "paused"):
         _box_writes(state["on"]["stop"], n)
-        box["status"] = "exited"
+        box["status"] = "dead" if _due(faults.get("dead", []), n) else "exited"
     return 0, f"{name}\n", ""
 
 

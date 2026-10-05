@@ -1,11 +1,12 @@
-"""#1195 design amendment 2 (2026-10-06) against a real box: the batch's one box, stopped between
+"""#1195 design amendment 3 (2026-10-06) against a real box: the batch's one box, stopped between
 agent runs, keeps nothing a run left running or left in its scratch space, and keeps its link
 ban. Replaces #1178's frozen-box row (`test_1178_frozen_box.py`).
 
 The box is created the way the lead-author drain creates one, by the real `start_box` over the
 real `_drain_box_request` (the worktree read-only, `defender/skills` read-write) on a temp git
-worktree, then stopped at once (`stop_run_box`, as `_run_worktree_batch` does). Each run is the
-spawn sites' `box_for_run(box)`:
+worktree, wrapped in the lanes' handle (`runtime.box.BoxRuns`) and stopped at once
+(`runs.stop()`, as `_run_worktree_batch` does), every call through the real docker the executor
+carries. Each run is the spawn sites' `box_for_run(handle)`, which yields the executor:
 
 - run 1 leaves a writer loop running inside the box, appending to a file under `skills/`, and
   leaves a marker in `/tmp` and in `/dev/shm`. During run 1 the file grows, the writer is in the
@@ -14,8 +15,8 @@ spawn sites' `box_for_run(box)`:
 - during run 2 (the same container, started again) the file still does not grow, no process
   carries the writer's command, and neither marker is there; `ln -s` and `ln` in the writable
   mount are still refused, while an ordinary create there succeeds;
-- `box_for_run` refuses a box someone started outside a run: its body never runs, and the box
-  is stopped again;
+- `box_for_run` refuses a box someone started outside a run, naming its status: its body never
+  runs, and the box is stopped again;
 - the batch-end `stop_box` leaves no container holding the name, and the file run 1's writer
   left is what the production committer commits.
 
@@ -119,8 +120,8 @@ def _leave_a_writer(box: box_mod.BoxExecutor, target: Path) -> None:
     assert started.returncode == 0, started.stderr
 
 
-def _one_run(box: box_mod.BoxExecutor, ran: list[bool]) -> None:
-    with X.box_for_run(box):
+def _one_run(runs: object, ran: list[bool]) -> None:
+    with X.box_for_run(runs):
         ran.append(True)
 
 
@@ -140,11 +141,13 @@ def test_a_stopped_box_keeps_nothing_a_run_left_and_keeps_its_link_ban(  # noqa:
     box = box_mod.start_box(request)
     try:
         assert box.sandboxed, "start_box handed back a host executor"
-        X.stop_run_box(box)
+        assert box.docker is not None, "start_box handed back an executor that carries no docker"
+        runs = X.box_runs(box)
+        runs.stop()
         assert _status(box.name) == "exited", "the post-create stop left the box up"
 
-        with X.box_for_run(box) as run_box:
-            assert run_box is box, "a run handed its spawn some other box"
+        with X.box_for_run(runs) as run_box:
+            assert run_box is box, "a run handed its spawn something but the batch's executor"
             _leave_a_writer(box, left)
             for marker in MARKERS:
                 rc, out = _exec(box, "sh", "-c", f"printf m > {marker}")
@@ -158,7 +161,7 @@ def test_a_stopped_box_keeps_nothing_a_run_left_and_keeps_its_link_ban(  # noqa:
         assert _held_still(left), "a writer run 1 left wrote after run 1's stop"
         judged = left.read_text(encoding="utf-8")
 
-        with X.box_for_run(box):
+        with X.box_for_run(runs):
             assert _status(box.name) == "running", "run 2 did not start the box"
             assert _held_still(left), "run 1's writer wrote during run 2"
             assert _writers(box) == 0, "run 1's writer is still in the box's process table"
@@ -176,8 +179,9 @@ def test_a_stopped_box_keeps_nothing_a_run_left_and_keeps_its_link_ban(  # noqa:
         assert box_mod._docker(["docker", "start", box.name]).returncode == 0
         assert _status(box.name) == "running"
         ran: list[bool] = []
-        got = X.caught(lambda: _one_run(box, ran))
+        got = X.caught(lambda: _one_run(runs, ran))
         assert isinstance(got, BoxFault), got
+        assert "running" in str(got), f"the refusal does not name the status it saw: {got}"
         assert ran == [], "a run's spawn ran in a box someone else had started"
         assert _status(box.name) == "exited", "the refused run left the box up"
     finally:
