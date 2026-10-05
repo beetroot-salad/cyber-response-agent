@@ -229,7 +229,11 @@ def request_identity(spec: dict, stem: str) -> str:
 @dataclass(frozen=True)
 class PendingDelivery:
     """One batch whose commit is on a local branch and whose push or PR has not yet landed:
-    its record's id (the file name's stem), the branch and the batch id."""
+    its record's id (the file name's stem), the branch and the batch id.
+
+    @owns branch @owns batch_id — the one reader of a delivery record's fields is
+    `LearningState.deliveries`, the only constructor of this type; a caller that needs either
+    value takes it from the `PendingDelivery` it is handed and never re-parses the record."""
 
     id: str
     branch: str
@@ -646,7 +650,11 @@ class LearningState:
     # -- requests -------------------------------------------------------------------------------
 
     def enqueue_curation(self, case_id: str, spec: dict) -> None:
-        """File the curation request for `case_id`, replacing any earlier one: a repeat
+        """@owns run_dir — a curation request's run folder, as the claim hands it back (`Claimed.
+        spec`); the writer is `run_common.enqueue_curation`, which passes it here as the request's
+        one source of truth.
+
+        File the curation request for `case_id`, replacing any earlier one: a repeat
         investigation of one case coalesces onto one request, and the later run wins. Lock-free
         and atomic (a staged replace), so the end-of-run enqueue never waits on a drain."""
         name = f"{_QUEUE}/{case_id}.json"
