@@ -10,9 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from defender.learning.core.config import loop_paths
-from defender.learning.core.state import LearningState
-
-STATE_DIR_ENV = "DEFENDER_LEARNING_STATE_DIR"
+from defender.learning.core.state import STATE_DIR_ENV, LearningState
 
 
 def set_state_dir(monkeypatch, root: Path) -> Path:

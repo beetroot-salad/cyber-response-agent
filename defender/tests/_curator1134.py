@@ -51,6 +51,7 @@ from typing import Any
 from defender._io import Bound, Held, NotPlainEntry, RecordRead, hold, open_unnamed_at
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
+from defender.tests._state1135 import state_for_paths as open_state  # noqa: F401 — re-export: this module's tests open their handle through it
 from defender.tests._tree_listing_1134 import RealOs, fd_path, last_component
 
 #: The type `DrainTrees.tree_for` has (bound): a working-copy path to `(held mount, name)`, or
@@ -84,15 +85,6 @@ def seamed_trees(paths: LoopPaths, os_: Any) -> DrainTrees:
     (EACCES, EIO, ENOSPC) reaches the drain."""
     make_mount_points(paths)
     return DrainTrees.open(AUTHOR_DRAIN_LABEL.writable_trees(paths), os_=os_)
-
-
-def open_state(paths: LoopPaths) -> Any:
-    """The learning-state handle over `paths`' root, made first if missing (#1135: production never
-    creates the root; a test world does)."""
-    from defender.learning.core.state import LearningState
-
-    paths.state_root.mkdir(parents=True, exist_ok=True)
-    return LearningState.open(paths)
 
 
 def author_cfg(paths: LoopPaths, *, trees: DrainTrees | None = None, manifest_seed: str | None = None,

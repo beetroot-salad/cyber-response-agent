@@ -298,12 +298,6 @@ def _refusal_reason(exc: BaseException) -> str | None:
     return None
 
 
-def _read_refusal(reason: str | None) -> bool:
-    """Whether a refused `Bound` read's reason is a refusal by shape (`_read_reason` folds a link,
-    hard link, FIFO and linked folder into `ALIAS_READ_REFUSAL`, an ENOTDIR into its strerror)."""
-    return reason in (ALIAS_READ_REFUSAL, _NOT_A_FOLDER_REASON)
-
-
 # ---------------------------------------------------------------------------------------------
 # The handle
 # ---------------------------------------------------------------------------------------------
@@ -389,34 +383,36 @@ class LearningState:
             refused = StateRefused(self._abs(name), reason)
         raise refused
 
+    def _raise_if_unread(self, name: str, reason: str | None) -> None:
+        """Raise for a `Bound` read or stat of `name` refused with `reason` (`None`: it was not).
+        A refusal by shape (`_read_reason` folds a link, hard link, FIFO and linked folder into
+        `ALIAS_READ_REFUSAL`, an ENOTDIR into its strerror) is `StateRefused`; any other (EIO,
+        EACCES, over the read bound) is an ordinary `OSError`, never an empty read."""
+        if reason is None:
+            return
+        if reason in (ALIAS_READ_REFUSAL, _NOT_A_FOLDER_REASON):
+            raise StateRefused(self._abs(name), reason)
+        raise OSError(f"{self._abs(name)}: {reason}")
+
     def _read(self, name: str) -> tuple[str | None, bool]:
         """`(text, present)` of the plain file at `name`: `(None, False)` when absent. A refusal
         by shape is `StateRefused`; any other refused read (EIO, EACCES, over the read bound) is
         an ordinary `OSError`, never an empty read."""
         rec = self._view.read(name, errors="replace")
-        if rec.reason is not None:
-            if _read_refusal(rec.reason):
-                raise StateRefused(self._abs(name), rec.reason)
-            raise OSError(f"{self._abs(name)}: {rec.reason}")
+        self._raise_if_unread(name, rec.reason)
         return rec.text, not rec.absent
 
     def _read_rows(self, name: str) -> tuple[list[dict], int, str | None]:
         """`(rows, malformed, text)` of the JSONL file at `name` (absent: no rows, no text)."""
         rows, malformed, rec = self._view.read_jsonl(name)
-        if rec.reason is not None:
-            if _read_refusal(rec.reason):
-                raise StateRefused(self._abs(name), rec.reason)
-            raise OSError(f"{self._abs(name)}: {rec.reason}")
+        self._raise_if_unread(name, rec.reason)
         return rows, malformed, rec.text
 
     def _judge(self, name: str) -> None:
         """Refuse unless `name` is absent or a plain, single-linked file (no read, no open: a FIFO
         cannot block it)."""
         st = stat_entry(self._view, name)
-        if st.reason is not None:
-            if _read_refusal(st.reason):
-                raise StateRefused(self._abs(name), st.reason)
-            raise OSError(f"{self._abs(name)}: {st.reason}")
+        self._raise_if_unread(name, st.reason)
         if st.st is not None and not is_plain_entry(st.st):
             raise StateRefused(self._abs(name), "a link, hard link or other non-plain entry")
 
@@ -693,10 +689,7 @@ class LearningState:
         name is judged when it is opened, so a planted one halts there); a folder that is absent
         holds none, and a refused one is `StateRefused`. Foreign names are never opened."""
         listed = self._view.under(folder).entries()
-        if listed.reason is not None:
-            if _read_refusal(listed.reason):
-                raise StateRefused(self._abs(folder), listed.reason)
-            raise OSError(f"{self._abs(folder)}: {listed.reason}")
+        self._raise_if_unread(folder, listed.reason)
         return sorted(n for n in (listed.entries or {}) if n.endswith(".json"))
 
     def has_requests(self) -> bool:
@@ -731,10 +724,7 @@ class LearningState:
             claimed_name = f"{_INFLIGHT}/{name}"
             if not orphan:
                 slot = stat_entry(self._view, claimed_name)
-                if slot.reason is not None:
-                    if _read_refusal(slot.reason):
-                        raise StateRefused(self._abs(claimed_name), slot.reason)
-                    raise OSError(f"{self._abs(claimed_name)}: {slot.reason}")
+                self._raise_if_unread(claimed_name, slot.reason)
                 if not slot.absent:
                     _logger.info(
                         f"{label}: {name} waits a pass — a request of that name is already "
