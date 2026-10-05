@@ -28,11 +28,13 @@ driven through a seam, never `monkeypatch.setattr`:
 - The drain (O2'', O4, E3'): `_drain_lead_author(..., box=<the batch's stopped box>)` runs one
   window per agent and none between; a claim's run start or stop fault halts the lane rather
   than dead-lettering the claim; a pitfalls run's box fault halts it and bumps no pitfalls row;
-  so does a run start fault through the DEFAULT claim step and the DEFAULT pitfalls step.
-  Through the production `lead_author_drain` over the fake daemon: one create at batch start
-  and its stop before the first claim; a stop fault masked under a failing agent leaves the box
-  running, and the next claim's run refuses it before its agent (with a best-effort stop); a
-  claim's stop fault after a clean agent escapes; nothing is committed or delivered; the
+  a stop masked under the last claim's failing agent makes the pitfalls tick's run refuse
+  (E3'); so does a run start fault through the DEFAULT claim step and the DEFAULT pitfalls step,
+  and the batch box's docker calls there are exactly `X.REFUSED_FIRST_RUN` (no call outside a
+  run). Through the production `lead_author_drain` over the fake daemon: one create at batch
+  start and its stop before the first claim; a stop fault masked under a failing agent leaves
+  the box running, and the next claim's run refuses it before its agent (with a best-effort
+  stop); a claim's stop fault after a clean agent escapes; nothing is committed or delivered; the
   batch-end `rm -f` removes the box before the scan. A fault creating or checking the box at
   batch start claims no claim, bumps no attempt and dead-letters nothing.
 - The plain-file rule (#1178 D4'', which stands, unchanged): every non-deletion record the gate
@@ -1250,17 +1252,81 @@ def test_a_pitfalls_box_fault_halts_the_lane_and_bumps_no_pitfalls_row(
     assert attempts == attempts_before, f"a pitfalls row was bumped for a box fault: {attempts}"
 
 
+def _run_calls(daemon: X.FakeDaemon) -> list[str]:
+    """The daemon's starts, stops and status asks, in order (the direct drives' box)."""
+    return [x for x in daemon.steps() if x in ("status", "start", "stop")]
+
+
+#: One run that holds: its check, its start and proof, its stop and proof.
+ONE_RUN = ["status", "start", "status", "stop", "status"]
+
+
+@pytest.mark.parametrize("stop", ["refused", "holds"])
+def test_a_masked_stop_in_the_last_claim_makes_the_pitfalls_run_refuse(
+        tmp_path: Path, monkeypatch, caplog, stop: str):
+    """E3' at the claim -> pitfalls boundary: `_drain_lead_author` over the real lanes, one claim
+    and three pitfalls rows at threshold. The claim's agent fails (`LeadAuthorError`, which
+    dead-letters it); with `refused`, its run's stop is refused under that failure, so it is only
+    logged and the box keeps running. The pitfalls tick's run then finds it running and refuses
+    before its curator, with a best-effort stop and no `docker start`: `BoxFault` escapes, the
+    curator is never called, `execution.md` is as committed, and no pitfalls row's attempts
+    change. Nothing touches the box between the claim's run and the tick's.
+
+    Control (`holds`): the claim's stop takes; the pitfalls run starts, the curator runs and its
+    edit is committed."""
+    caplog.set_level(logging.WARNING)
+    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    s = _lead_scene(tmp_path)
+    monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
+    persist.append_pitfalls(_system_rows(), paths=s.paths)
+    _queue_claims(s, "run-0")
+    attempts_before = _attempts(s.paths)
+    execution_before = _git.git_show_file(s.repo, "HEAD", EXECUTION_REL)
+
+    def author(_run_dir: Path) -> None:
+        if stop == "refused":
+            daemon.refuse_stop()  # this run's stop, under the agent's own failure: masked
+        raise LeadAuthorError("the agent failed")
+
+    def curate(root: Path) -> None:
+        write(root / EXECUTION_REL, EXECUTION_TEXT)
+
+    lanes = Lanes(BoxSeenLeadSpawn(author), BoxSeenSpawn(curate))
+
+    got = X.caught(lambda: drains._drain_lead_author(s.paths, lanes.run_lead, lanes.run_pitfalls,
+                                                     box=box))
+
+    assert len(lanes.agent.calls) == 1
+    assert _failed(s) == ["case-run-0.json"], _failed(s)
+    assert lanes.pitfalls_ticks == 1
+    calls = _run_calls(daemon)
+    if stop == "holds":
+        assert got is None, got
+        assert len(lanes.curator.calls) == 1
+        assert _git.git_show_file(s.repo, "HEAD", EXECUTION_REL) == EXECUTION_TEXT
+        assert calls == ONE_RUN * 2, calls
+        return
+    assert isinstance(got, BoxFault), f"the lane did not halt on a box left running: {got!r}"
+    assert lanes.curator.calls == [], "the pitfalls curator ran after a masked stop"
+    assert _git.git_show_file(s.repo, "HEAD", EXECUTION_REL) == execution_before, (
+        "the pitfalls edit was committed after a masked stop")
+    assert _attempts(s.paths) == attempts_before
+    assert calls == [*ONE_RUN, "status", "stop", "status"], (
+        f"the pitfalls run did not refuse the running box with a best-effort stop: {calls}")
+    assert daemon.status(NAME) == "exited"
+
+
 # ---------------------------------------------------------------------------------------
 # O4 through the DEFAULT work steps: a run start fault reached by the real claim and tick
 # ---------------------------------------------------------------------------------------
 
 
 def _held_lead_drain(s: LeadScene, monkeypatch: Any, **seams: Any
-                     ) -> tuple[BaseException | None, X.FakeDaemon, list[str], X.ScanWatch]:
+                     ) -> tuple[BaseException | None, list[str], list[str], X.ScanWatch]:
     """`lead_author_drain` with its DEFAULT work steps over the fake daemon on `PATH`, whose
     first run start is refused; the batch's box started by `HeldStart` (a real create, minus
-    the probes), stopped and removed by the drain's own seams. What it raised, the daemon, the
-    branch's events and the scan's watch."""
+    the probes), stopped and removed by the drain's own seams. What it raised, the batch box's
+    docker calls from its post-create stop on, the branch's events and the scan's watch."""
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)  # the agent, if ever reached, calls no model
     X.clear_opt_out(monkeypatch)
     daemon = X.FakeDaemon(s.tmp)
@@ -1268,10 +1334,12 @@ def _held_lead_drain(s: LeadScene, monkeypatch: Any, **seams: Any
     daemon.refuse_start(at=[1])
     events: list[str] = []
     watch = X.ScanWatch(daemon, events)
+    start = X.HeldStart(daemon)
     got = X.caught(lambda: drains.lead_author_drain(
         s.paths, branch=RepoBranch(s.repo, branch_prefix="lead-author/", events=events),
-        start_box=X.HeldStart(daemon), scrub=watch, **seams))
-    return got, daemon, events, watch
+        start_box=start, scrub=watch, **seams))
+    [request] = start.requests
+    return got, daemon.calls_from_the_first_stop(request.name), events, watch
 
 
 @pytest.mark.parametrize("first", ["box-faults", "nothing-to-author"])
@@ -1288,7 +1356,10 @@ def test_a_run_start_fault_through_the_default_claim_step_halts_the_lane(
     Control (`nothing-to-author`): the first claim's run dir executed no lead, so its serve
     returns without an agent; the second claim is then served, and its default step reaches its
     run's start (the one start). So one start in the row above means the second claim never got
-    that far."""
+    that far.
+
+    Either way the batch box's docker calls are exactly `X.REFUSED_FIRST_RUN`: no claim's
+    default step asks the daemon anything outside its run."""
     s = _lead_scene(tmp_path)
     leads = {"claim-0": WAZUH_LEAD if first == "box-faults" else None, "claim-1": ELASTIC_LEAD}
     for name, lead in leads.items():
@@ -1296,11 +1367,11 @@ def test_a_run_start_fault_through_the_default_claim_step_halts_the_lane(
         markers.enqueue_case_for_curation(f"case-{name}", _run_dir(tmp_path / name, *rows),
                                           s.paths)
 
-    got, daemon, events, watch = _held_lead_drain(s, monkeypatch)
+    got, calls, events, watch = _held_lead_drain(s, monkeypatch)
 
     assert isinstance(got, BoxFault), got
     assert X.POINTER not in str(got), f"a mid-batch box fault got a build pointer: {got}"
-    assert daemon.steps().count("start") == 1, f"a start was asked after a box fault: {daemon.steps()}"
+    assert calls == X.REFUSED_FIRST_RUN, f"a default step called docker outside its run: {calls}"
     assert _failed(s) == [], "a claim was dead-lettered for a box that would not start"
     assert _git.git_head_sha(s.repo) == s.head
     assert not any(e.startswith("finish_batch:") for e in events), events
@@ -1321,17 +1392,18 @@ def test_a_run_start_fault_through_the_default_pitfalls_step_halts_the_lane(
     `run_pitfalls` and its default curator spawn), no claim queued and three pitfalls rows at
     threshold: the tick's run start is refused before its curator, and the `BoxFault` escapes
     `lead_author_drain`. No pitfalls row's attempts change, nothing is committed or delivered,
-    and the box is removed before the scan. Control for the attempts read:
+    and the box is removed before the scan; the batch box's docker calls are exactly
+    `X.REFUSED_FIRST_RUN` (nothing outside the tick's run). Control for the attempts read:
     `test_a_pitfalls_box_fault_halts_the_lane_and_bumps_no_pitfalls_row[curator-fails]`."""
     s = _lead_scene(tmp_path)
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     persist.append_pitfalls(_system_rows(), paths=s.paths)
     attempts_before = _attempts(s.paths)
 
-    got, daemon, events, watch = _held_lead_drain(s, monkeypatch)
+    got, calls, events, watch = _held_lead_drain(s, monkeypatch)
 
     assert isinstance(got, BoxFault), got
-    assert daemon.steps().count("start") == 1, daemon.steps()
+    assert calls == X.REFUSED_FIRST_RUN, f"the default step called docker outside its run: {calls}"
     assert _attempts(s.paths) == attempts_before, "a pitfalls row was bumped for a box fault"
     assert _git.git_head_sha(s.repo) == s.head
     assert not any(e.startswith("finish_batch:") for e in events), events

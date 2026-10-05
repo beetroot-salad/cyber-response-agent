@@ -60,6 +60,12 @@ IMAGE_INPUTS = ("box.Dockerfile", "uv.lock", "pyproject.toml")
 #: The pointer main's batch-start unwind appends to a `BoxFault` (`_unwind_worktree_start_fault`).
 POINTER = "origin/main @ "
 
+#: A batch box's docker calls from its post-create stop on (`FakeDaemon.calls_from_the_first_stop`)
+#: when the batch's first run's start is refused: the stop and its proof; the run's check
+#: (`exited`), the refused start and its proof; the best-effort stop and its proof; the batch-end
+#: removal. Nothing between the post-create stop and the run's check: no call outside a run.
+REFUSED_FIRST_RUN = ["stop", "status", "status", "start", "status", "stop", "status", "rm"]
+
 #: What makes the real `start_box` fail at batch start (the `FakeDaemon` knob), and how main
 #: surfaces it: a `BoxFault` with the cut commit appended (`pointed`), or a link ban as
 #: `AliasBanNotInForce`, unpointed.
@@ -137,6 +143,9 @@ def caught(fn: Callable[[], object]) -> BaseException | None:
 # ---------------------------------------------------------------------------------------
 # A fake daemon, in process and as a `docker` program on PATH
 # ---------------------------------------------------------------------------------------
+
+#: The names `FakeDaemon.steps` gives docker calls (anything else in the log is a mark).
+_DOCKER_STEPS = frozenset({"create", "rm", "status", "start", "stop", "inspect", "exec"})
 
 _SHIM = '''#!{python} -S
 import runpy, sys
@@ -319,6 +328,14 @@ class FakeDaemon:
                 verb = "status"
             out.append(verb)
         return out
+
+    def calls_from_the_first_stop(self, name: str) -> list[str]:
+        """The docker calls naming `name`, as `steps` names them (marks left out), from its first
+        `docker stop` on: for a drained batch, its post-create stop, then every status ask,
+        start, stop and removal after it. A row compares the whole sequence, so a call outside a
+        run (an extra stop and its proof between two runs) shows."""
+        calls = [s for s in self.steps(of=name) if s in _DOCKER_STEPS]
+        return calls[calls.index("stop"):] if "stop" in calls else calls
 
     def created(self) -> list[str]:
         """The name of every container a `docker run` asked for, in order."""
