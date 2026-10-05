@@ -11,7 +11,11 @@ Algorithm:
      working tree.
   2. Collect identifiers removed by `-`-side lines:
        - `def NAME(` / `class NAME`, except a def nested in a function body (resolved
-         against the base tree's AST): invisible outside its scope, it can strand nothing
+         against the base tree's AST): invisible outside its scope, it can strand nothing;
+         nor a method of a class whose every base is defined outside the file (an override
+         of that base's API, e.g. a test double's `Path.with_suffix`: the name belongs to the
+         base, and a repo base still binds it, which step 4 sees). The cost: a new,
+         repo-specific method on such a class is not collected
        - top-level `NAME =` (uppercase constants)
        - removed `from ... import NAME` targets
   3. Skip identifiers under 8 chars with no underscore, and common stdlib symbols.
@@ -332,25 +336,36 @@ _DIFF_FILE_HEADER = re.compile(r"^diff --git a/(.*?) b/(.*)$")
 
 
 def _function_local_defs(repo_root: Path, diff_base: str, path: str) -> set[str]:
-    """Names bound by a `def`/`class` inside a function body in the base version of `path`,
-    minus any bound at module or class scope in the same file.
+    """Names in the base version of `path` whose removal strands nothing, minus any bound at
+    module or class scope in the same file some other way: a `def`/`class` inside a function
+    body, and a method of a class whose every base is defined outside the file.
 
-    A function-local name is invisible outside its scope, so removing it strands nothing, and
-    it is often an ordinary word used elsewhere as prose. Read off the base tree's AST because
-    the diff's `-` line cannot say what scope it sat in (a nested `def` and a method are both
-    indented four)."""
+    A function-local name is invisible outside its scope, and it is often an ordinary word
+    used elsewhere as prose. A method overriding an outside base's API is that base's name,
+    not the file's: deleting a test double's `with_suffix` would otherwise condemn every
+    `Path.with_suffix` call. Read off the base tree's AST because the diff's `-` line cannot
+    say what scope it sat in (a nested `def` and a method are both indented four)."""
     try:
         text = _git(["show", f"{diff_base}:{path}"], cwd=repo_root)
         tree = ast.parse(text)
     except (GitError, SyntaxError, ValueError):
         return set()
+    file_classes = {n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
     local: set[str] = set()
     scoped: set[str] = set()
 
+    def overrides_outside_base(cls: ast.ClassDef) -> bool:
+        bases = [b for b in cls.bases if not (isinstance(b, ast.Name) and b.id == "object")]
+        return bool(bases) and not any(
+            isinstance(b, ast.Name) and b.id in file_classes for b in bases)
+
     def walk(node: ast.AST, in_function: bool) -> None:
+        overriding = isinstance(node, ast.ClassDef) and overrides_outside_base(node)
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                (local if in_function else scoped).add(child.name)
+                strands_nothing = in_function or (
+                    overriding and not isinstance(child, ast.ClassDef))
+                (local if strands_nothing else scoped).add(child.name)
                 walk(child, in_function or not isinstance(child, ast.ClassDef))
             else:
                 walk(child, in_function)

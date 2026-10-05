@@ -82,9 +82,9 @@ def test_state_refused_is_a_systemic_fault_no_oserror_arm_holds(tmp_path: Path, 
     author/drain.RETIRE_SET. So run_or_dead_letter re-raises it and never dead-letters or
     quarantines it (the on_dead_letter callback is never called); _run_curator_module lets it
     propagate instead of logging "crashed (continuing)"; _run_stage returns 2 with a CRITICAL line
-    whose text names the refused record. The narrowing to StateRefused happens only at
-    _drain_one_curator, RF4's recorder catches and _tick's arm (#30-#32); everywhere else it is
-    just another systemic fault.
+    whose text names the refused record. It is not an `Exception` either (#1199), so no broad arm
+    absorbs it and none needs a re-raise of its own; only _tick's arm still names it, to record
+    nothing for it (#30-#32). Everywhere else it is just another systemic fault.
 
     The refusal is a real one: the handle's read of a findings queue that is a planted symlink."""
     # rejected: a StateRefused subclassing OSError (every `except OSError` arm would catch it;
