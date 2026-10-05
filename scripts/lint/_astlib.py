@@ -349,8 +349,8 @@ def _partial_owner_member(
 def _binding_pairs(stmt: ast.AST) -> list[tuple[str, ast.expr]]:
     """`(name, value)` for each name `stmt` binds to a traceable value: `x = v`, every name
     of `a = b = v`, `x: T = v`, and a flat literal unpack `a, b = v1, v2` (or the list form)
-    elementwise. A call result unpacked (`a, b = f()`) or a starred target is untraceable and
-    yields nothing.
+    elementwise. A call result unpacked (`a, b = f()`), a starred element, or a nested target
+    (`a, (b, c) = ...`) is not traced and yields nothing.
 
     Only tag SOURCES come from here; nothing untags. Tagging is per scope, not per line, so
     untagging on a rebind would hide a join made before it (`t = accept_tenant(...);
@@ -371,7 +371,8 @@ def _binding_pairs(stmt: ast.AST) -> list[tuple[str, ast.expr]]:
             isinstance(target, (ast.Tuple, ast.List))
             and isinstance(stmt.value, (ast.Tuple, ast.List))
             and len(target.elts) == len(stmt.value.elts)
-            and not any(isinstance(e, ast.Starred) for e in (*target.elts, *stmt.value.elts))
+            and all(isinstance(t, ast.Name) for t in target.elts)
+            and not any(isinstance(v, ast.Starred) for v in stmt.value.elts)
         ):
             pairs.extend((t.id, v) for t, v in zip(target.elts, stmt.value.elts)
                          if isinstance(t, ast.Name))
