@@ -841,6 +841,11 @@ def test_ordinary_io_errors_are_not_converted_to_refusals(tmp_path: Path):
     answer = state.requeue(claims[0])
     assert answer is False, f"a requeue into an occupied slot answered {answer!r}"
     assert fresher.read_bytes() == body, "the requeue overwrote the fresher request"
+    # Settle case-x before the next pass: its unreleased claim is an orphan the next pass must
+    # serve first (R14), and the fresher re-ask would be served after it — neither is what the
+    # vanished-request check below is about.
+    state.done(claims[0])
+    fresher.unlink()
 
     S.seed_request(paths, "case-p", tmp_path / "runs" / "run-p")
     S.seed_request(paths, "case-q", tmp_path / "runs" / "run-q")
