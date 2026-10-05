@@ -87,3 +87,34 @@ def test_the_layout_lint_reports_a_module_too_deep_to_parse(tmp_path):
     findings = _lint().scan(root, allow_list=[])
     shown = [f.display for f in findings]
     assert any("hooks/deep.py" in d and "RecursionError" in d for d in shown), shown
+
+
+def _package_copy(tmp_path):
+    root = tmp_path / "defender"
+    shutil.copytree(H.PACKAGE, root / "run_repository",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    return root
+
+
+def test_the_layout_lint_reports_a_module_that_parses_but_is_too_deep_to_walk(tmp_path):
+    root = _package_copy(tmp_path)
+    deep = root / "hooks" / "deep.py"
+    deep.parent.mkdir(parents=True)
+    deep.write_text("x = " + "+".join(["1"] * 1500) + "\n", encoding="utf-8")
+    findings = _lint().scan(root, allow_list=[])
+    shown = [f.display for f in findings]
+    assert any("hooks/deep.py" in d and "too deeply" in d for d in shown), shown
+
+
+@pytest.mark.parametrize("state", ["missing", "empty"])
+def test_the_layout_lint_with_no_layout_universe_is_a_finding(tmp_path, state):
+    """No `_layout.py`, or one binding nothing, gates no name: the sweep reports it rather than
+    passing everything."""
+    root = _package_copy(tmp_path)
+    layout = root / "run_repository" / "_layout.py"
+    if state == "missing":
+        layout.unlink()
+    else:
+        layout.write_text("", encoding="utf-8")
+    findings = _lint().scan(root, allow_list=[])
+    assert any("_layout.py" in f.display for f in findings), [f.display for f in findings]

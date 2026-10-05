@@ -238,7 +238,7 @@ class _Module:
     def imported(self, name: str) -> str | None:
         """What a module-level import binds `name` to, absolute and canonical."""
         dotted = self.env.imports.get(name)
-        return canonical(_absolute(dotted, self.package)) if dotted else None
+        return canonical(_astlib.absolute_module(dotted, self.package)) if dotted else None
 
 
 def _module_name(rel: str) -> str:
@@ -246,27 +246,6 @@ def _module_name(rel: str) -> str:
     if parts and parts[-1] == "__init__":
         parts.pop()
     return ".".join(("defender", *parts))
-
-
-def _package_of(rel: str) -> str:
-    return ".".join(("defender", *Path(rel).parent.parts))
-
-
-def _absolute(dotted: str, package: str) -> str:
-    """`_astlib`'s relative spelling (`..run_repository.RunPaths`) made absolute against the
-    importing module's `package`; an absolute one unchanged."""
-    level = len(dotted) - len(dotted.lstrip("."))
-    if not level:
-        return dotted
-    base = package
-    for _ in range(level - 1):
-        base = base.rpartition(".")[0]
-    rest = dotted[level:]
-    return f"{base}.{rest}" if rest else base
-
-
-def _resolve_from(package: str, node: ast.ImportFrom) -> str:
-    return _absolute("." * node.level + (node.module or ""), package)
 
 
 def _module_facts(rel: str, tree: ast.Module) -> _Module:
@@ -283,7 +262,7 @@ def _module_facts(rel: str, tree: ast.Module) -> _Module:
             values[node.targets[0].id] = node.value
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             values[node.target.id] = node.annotation if node.value is None else node.value
-    return _Module(_module_name(rel), _package_of(rel), _astlib.module_env(tree), classes,
+    return _Module(_module_name(rel), _astlib.package_of(rel), _astlib.module_env(tree), classes,
                    functions, values)
 
 
@@ -308,9 +287,9 @@ class _Program:
                 path = self.root / cand
                 if path.is_file():
                     try:
-                        tree = ast.parse(path.read_text(encoding="utf-8"))
-                    except (SyntaxError, UnicodeDecodeError, ValueError, RecursionError, MemoryError):
-                        break
+                        tree = _astlib.parse_source(path.read_text(encoding="utf-8"), cand.as_posix())
+                    except (_astlib.ScanBlind, OSError, UnicodeDecodeError):
+                        break  # the sweep reports the file itself; here it only types nothing
                     found = _module_facts(cand.as_posix(), tree)
                     break
         self._cache[dotted] = found
@@ -366,7 +345,7 @@ def _annotation_type(node: ast.expr | None, mod: _Module, prog: _Program,
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         try:
             node = ast.parse(node.value, mode="eval").body
-        except SyntaxError:
+        except (SyntaxError, ValueError, RecursionError, MemoryError):
             return None
         return _annotation_type(node, mod, prog, local_classes)
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
@@ -425,7 +404,7 @@ def _name_origin(node: ast.expr, mod: _Module,
     if local_classes and head in local_classes:
         return canonical(f"{local_classes[head]}.{rest}" if rest else local_classes[head])
     origin = _astlib.origin(node, mod.env)
-    return canonical(_absolute(origin, mod.package)) if origin else None
+    return canonical(_astlib.absolute_module(origin, mod.package)) if origin else None
 
 
 def _dataclass_fields(cls: ast.ClassDef) -> dict[str, ast.expr]:
@@ -689,7 +668,7 @@ class _Scanner:
         self.uses.append(_Use(scope, name, getattr(node, "lineno", 0)))
 
     def _import(self, node: ast.ImportFrom, scope: str) -> None:
-        source = canonical(_resolve_from(self.package, node))
+        source = canonical(_astlib.absolute_from(self.package, node))
         if not source.startswith("defender"):
             return
         for a in node.names:
@@ -741,11 +720,16 @@ def _own_nodes(body: list[ast.stmt]) -> Iterator[ast.AST]:
 def layout_names(root: Path) -> frozenset[str]:
     """The swept tree's layout universe: every public name `run_repository/_layout.py` binds at
     module level, in any form (assignment, tuple unpack, annotated, a `for` target, inside an
-    `if`, a def or a class)."""
-    path = root / "run_repository" / "_layout.py"
-    if not path.is_file():
-        return frozenset()
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    `if`, a def or a class). ScanBlind when there is none to read — the file is missing,
+    unreadable or binds nothing: an empty universe gates no name, so a lint that ran on it
+    would pass everything (fail closed, as #1134's census does)."""
+    rel = "run_repository/_layout.py"
+    path = root / rel
+    try:
+        tree = _astlib.parse_source(path.read_text(encoding="utf-8"), rel)
+    except (OSError, UnicodeDecodeError) as exc:
+        raise _astlib.ScanBlind(f"{rel}: the layout universe cannot be read under {root} "
+                                f"({exc.__class__.__name__}) — nothing would be gated") from None
     names: set[str] = set()
     stack: list[ast.AST] = list(tree.body)
     while stack:
@@ -768,7 +752,11 @@ def layout_names(root: Path) -> frozenset[str]:
             names |= {n.id for n in ast.walk(t) if isinstance(n, ast.Name)}
         for field in ("body", "orelse", "finalbody", "handlers"):
             stack.extend(getattr(node, field, []) or [])
-    return frozenset(n for n in names if not n.startswith("_")) - HELPERS
+    universe = frozenset(n for n in names if not n.startswith("_")) - HELPERS
+    if not universe:
+        raise _astlib.ScanBlind(f"{rel}: binds no public layout name under {root} — nothing "
+                                "would be gated")
+    return universe
 
 
 def sweep_files(root: Path) -> list[Path]:
@@ -810,7 +798,10 @@ def scan(root: Path = DEFENDER, *,
     """The whole sweep of `root`, judged against `allow_list` (`None` means `ALLOW_LIST`)."""
     root = Path(root)
     entries = list(ALLOW_LIST if allow_list is None else allow_list)
-    layout = layout_names(root)
+    try:
+        layout = layout_names(root)
+    except _astlib.ScanBlind as exc:
+        return [Finding(None, str(exc))]
     prog = _Program(root)
     findings: list[Finding] = []
     uses: dict[tuple[str, str, str], list[_Use]] = collections.defaultdict(list)
@@ -820,14 +811,17 @@ def scan(root: Path = DEFENDER, *,
         if row == "owners":
             continue
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except (SyntaxError, UnicodeDecodeError, ValueError, RecursionError,
-                MemoryError) as exc:
-            findings.append(Finding(None, f"{rel}: cannot be read or parsed "
-                                          f"({exc.__class__.__name__}) — an unread module is "
-                                          "not certified clean"))
+            tree = _astlib.parse_source(path.read_text(encoding="utf-8"), rel)
+            with _astlib.scan_guard(rel):
+                found = _Scanner(rel, tree, prog, layout).scan()
+        except _astlib.ScanBlind as exc:
+            findings.append(Finding(None, str(exc)))
             continue
-        for use in _Scanner(rel, tree, prog, layout).scan():
+        except (OSError, UnicodeDecodeError) as exc:
+            findings.append(Finding(None, f"{rel}: cannot be read ({exc.__class__.__name__}) "
+                                          "— an unread module is not certified clean"))
+            continue
+        for use in found:
             if not _exempt(rel, row, use, layout):
                 uses[(rel, use.function, use.name)].append(use)
     seen: collections.Counter[tuple[str, str, str]] = collections.Counter()

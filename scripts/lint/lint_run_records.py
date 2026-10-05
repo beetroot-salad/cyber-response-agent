@@ -41,7 +41,10 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from _astlib import PARTIAL_OWNER_ATTRS, ScanBlind, module_env, owner_derived, read_and_parse
+from _astlib import (
+    PARTIAL_OWNER_ATTRS, ScanBlind, absolute_from, module_env, owner_derived, package_of,
+    read_and_parse, scan_guard,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
@@ -392,17 +395,6 @@ def _owner_record_names() -> frozenset[str]:
 OWNER_RECORD_NAMES: frozenset[str] = _owner_record_names()
 
 
-def _resolved_from(package: str, node: ast.ImportFrom) -> str:
-    """The absolute module a from-import names, its relative dots resolved against `package`
-    (the importing module's own package)."""
-    if not node.level:
-        return node.module or ""
-    base = package
-    for _ in range(node.level - 1):
-        base = base.rpartition(".")[0]
-    return f"{base}.{node.module}" if node.module else base
-
-
 def _scan_import_pass(rel: str, tree: ast.Module, lines: list[str]) -> list[Finding]:
     """(c) No module outside the owners may hold a record name.
 
@@ -432,10 +424,10 @@ def _scan_import_pass(rel: str, tree: ast.Module, lines: list[str]) -> list[Find
                      f"HOLD a record name; ask the owner for the path or its relative form",
         ))
 
-    package = ".".join(("defender", *Path(rel).parent.parts))
+    package = package_of(rel)
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            module = _resolved_from(package, node)
+            module = absolute_from(package, node)
             # `from defender import _episode_paths` binds the module, not a name in it; record
             # it as well as `import x.y`, or the attribute arm below never sees it.
             for alias in node.names:
@@ -482,14 +474,16 @@ def scan(root: Path = DEFENDER, *, allow_list: dict[str, int] | None = None) -> 
             continue
         try:
             text, tree = read_and_parse(path, rel)
+            lines = text.splitlines()
+            with scan_guard(rel):
+                found = [*_scan_literal_pass(rel, tree, lines, whole, parts),
+                         *_scan_accessor_pass(rel, tree, lines, accessor_names),
+                         *_scan_import_pass(rel, tree, lines)]
         except ScanBlind as exc:
             findings.append(Finding(fingerprint=f"{rel}::<unparseable>",
                                     display=f"{rel}: {exc}"))
             continue
-        lines = text.splitlines()
-        findings.extend(_scan_literal_pass(rel, tree, lines, whole, parts))
-        findings.extend(_scan_accessor_pass(rel, tree, lines, accessor_names))
-        findings.extend(_scan_import_pass(rel, tree, lines))
+        findings.extend(found)
     return findings
 
 

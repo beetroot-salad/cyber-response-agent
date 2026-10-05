@@ -34,7 +34,8 @@ from __future__ import annotations
 
 import ast
 import builtins
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -64,15 +65,60 @@ def read_and_parse(path: Path, rel: str) -> tuple[str, ast.Module]:
             f"{rel}: could not be read ({exc.__class__.__name__}: {exc}) — it is inside this "
             f"gate's scan scope, so skipping it would shrink the scanned corpus silently."
         ) from exc
+    return text, parse_source(text, rel)
+
+
+def parse_source(text: str, rel: str) -> ast.Module:
+    """`text` parsed, or ScanBlind: a syntax error, a NUL byte (a ``ValueError`` before 3.12),
+    or nesting too deep for the parser (``RecursionError``/``MemoryError``) — each a file this
+    gate never examined, which it must report rather than crash on or skip."""
     try:
-        tree = ast.parse(text)
-    except SyntaxError as exc:
+        return ast.parse(text)
+    except (SyntaxError, ValueError, RecursionError, MemoryError) as exc:
         raise ScanBlind(
             f"{rel}: could not be parsed ({exc.__class__.__name__}: {exc}) — it is inside this "
             f"gate's scan scope, so it was never examined. Fix the syntax and re-run; a file "
             f"this gate cannot parse is a file it cannot clear."
-        ) from exc
-    return text, tree
+        ) from None
+
+
+@contextmanager
+def scan_guard(rel: str) -> Iterator[None]:
+    """Around a gate's walk of one parsed file: a tree nested too deep for a recursive walk
+    (``RecursionError``/``MemoryError``) is ScanBlind naming the file, never a bare traceback
+    out of the sweep — the walk's half of what `parse_source` guarantees for the parse."""
+    try:
+        yield
+    except (RecursionError, MemoryError) as exc:
+        raise ScanBlind(
+            f"{rel}: nested too deeply to scan ({exc.__class__.__name__}) — it is inside this "
+            f"gate's scan scope, so it was never examined; a file this gate cannot walk is a "
+            f"file it cannot clear."
+        ) from None
+
+
+def package_of(rel: str, *, root: str = "defender") -> str:
+    """The package a module at `rel` (a path under the `root` package's folder) belongs to."""
+    return ".".join((root, *Path(rel).parent.parts))
+
+
+def absolute_module(dotted: str, package: str) -> str:
+    """`dotted`, a module spelled absolutely or with leading dots (`..run_repository.RunPaths`,
+    as `origin` and a relative from-import spell it), made absolute against the importing
+    module's `package`. The one relative-import resolver the gates share."""
+    level = len(dotted) - len(dotted.lstrip("."))
+    if not level:
+        return dotted
+    base = package
+    for _ in range(level - 1):
+        base = base.rpartition(".")[0]
+    rest = dotted[level:]
+    return f"{base}.{rest}" if rest else base
+
+
+def absolute_from(package: str, node: ast.ImportFrom) -> str:
+    """The absolute module a from-import names, its relative dots resolved against `package`."""
+    return absolute_module("." * node.level + (node.module or ""), package)
 
 
 def read_source(path: Path, rel: str) -> str:
