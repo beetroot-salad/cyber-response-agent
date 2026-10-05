@@ -176,15 +176,21 @@ def _good_stem(stem: str) -> bool:
 def _read_one(episodes: _io.Bound, name: str, *, path: str, stem: str,
               tenant_id: str | None) -> tuple[RunId, dict[str, RunId]] | None:
     """One record off `episodes`, read no-follow and no further than the cap plus one byte
-    (H5); `None` when it is absent. Any refused or corrupt read is `RunRefused` naming it."""
-    answer = episodes.read(name, max_bytes=_RECORD_CAP + 1)
+    (H5); `None` when it is absent. The cap is judged on the bytes, before anything is decoded,
+    then the bytes are decoded once, as strict UTF-8. Any refused or corrupt read is
+    `RunRefused` naming it."""
+    answer = episodes.read_raw(name, max_bytes=_RECORD_CAP + 1)
     if answer.absent:
         return None
-    if answer.text is None:
+    if answer.data is None:
         raise _corrupt(path, f"it cannot be read: {answer.reason}")
-    if len(answer.text.encode("utf-8")) > _RECORD_CAP:
+    if len(answer.data) > _RECORD_CAP:
         raise _corrupt(path, f"it is over {_RECORD_CAP} bytes")
-    return _parse_episode_record(answer.text, path=path, stem=stem, tenant_id=tenant_id)
+    try:
+        text = answer.data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _corrupt(path, f"it is not UTF-8 text: {exc}") from None
+    return _parse_episode_record(text, path=path, stem=stem, tenant_id=tenant_id)
 
 
 def _read_records(runs: _io.Bound, *, where: str, tenant_id: str | None,
@@ -363,17 +369,24 @@ def record_episode_runs(tenant: Tenant, episode_id: str, source_run_id: RunId,
                 pass  # recorded meanwhile: judged against its bytes below
             except OSError as exc:
                 raise RunRefused(f"{path} could not be written: {exc.strerror or exc}") from None
-        existing = view.under(EPISODES_DIRNAME).read(name, max_bytes=_RECORD_CAP + 1)
-        if existing.absent:
-            raise RunRefused(f"{path} was created by another writer and is gone again — "
-                             "nothing was recorded; retry the episode's setup")
-        if existing.text is None:
-            raise RunRefused(f"{path} exists but cannot be read ({existing.reason}) — it is "
-                             "not judged against this episode's record")
-        if existing.text != text:
-            raise RunRefused(f"{path} already records episode {quoted(episode_id)} with "
-                             "different content; an episode id is spent once recorded — remove "
-                             "the file by hand only if that episode never started")
+        _judge_existing(view.under(EPISODES_DIRNAME).read_raw(
+            name, max_bytes=_RECORD_CAP + 1), text, path=path, episode_id=episode_id)
+
+
+def _judge_existing(existing: _io.BytesRead, text: str, *, path: Path,
+                    episode_id: str) -> None:
+    """The writer's verdict on the record already at its name: byte-identical to `text` is the
+    idempotent retry (no write); anything else refuses, naming why."""
+    if existing.absent:
+        raise RunRefused(f"{path} was created by another writer and is gone again — "
+                         "nothing was recorded; retry the episode's setup")
+    if existing.data is None:
+        raise RunRefused(f"{path} exists but cannot be read ({existing.reason}) — it is "
+                         "not judged against this episode's record")
+    if existing.data != text.encode("utf-8"):
+        raise RunRefused(f"{path} already records episode {quoted(episode_id)} with "
+                         "different content; an episode id is spent once recorded — remove "
+                         "the file by hand only if that episode never started")
 
 
 def _refuse_taken_arms(arms: Mapping[str, RunId], records: Mapping[str, Mapping[str, RunId]],
