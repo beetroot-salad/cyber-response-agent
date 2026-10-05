@@ -797,8 +797,8 @@ def _author_batch(
 
     # The box runs for the spawn only, and is stopped before any host step reads what it
     # wrote (#1195).
-    with box_mod.box_for_run(cfg.box):
-        result = cfg.invoke_agent(to_author, batch_id, cfg)
+    with box_mod.box_for_run(cfg.box) as box:
+        result = cfg.invoke_agent(to_author, batch_id, replace(cfg, box=box))
     tree = _settle_tree(cfg, state, honoured_deletions=None)
     _git_read(
         "agent report",
@@ -877,8 +877,8 @@ def _spawn_repair(cfg: CorpusAuthorConfig, bad: list[PairVerdict], batch_id: str
     resolved inside `invoke_repair`."""
     if cfg.repair_prompt is not None and not cfg.repair_prompt.is_file():
         raise FatalConfigError(f"repair prompt {cfg.repair_prompt} is not a readable file")
-    with box_mod.box_for_run(cfg.box):
-        cfg.invoke_repair(bad, batch_id, cfg)
+    with box_mod.box_for_run(cfg.box) as box:
+        cfg.invoke_repair(bad, batch_id, replace(cfg, box=box))
 
 
 def _handle_retire(
@@ -947,20 +947,19 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
         except BaseException as e:
             # Clean up on every fault, member or not: a stuck tick leaves the same edits a
             # retiring one does, and leaving them wedges the channel.
-            if isinstance(e, box_mod.BoxFault):
-                # A box whose stop failed may still be writing while the undo runs, and
-                # the undo's own fault (a folder swapped for a link: ELOOP) must not replace
-                # this one: an `OSError` is contained above `run_batch`, and the box fault
-                # must halt the batch (#1195 D3a, O4).
-                try:
-                    _undo_agent_edits(cfg, state.snapshot, state.baseline_stray,
-                                      state.head_before)
-                except Exception as undo_fault:  # noqa: BLE001 — the box fault outranks it
-                    log.error(f"undo after a box fault failed: {undo_fault!r} "
-                              "(the box fault follows)", exc_info=undo_fault)
-                raise
-            _undo_agent_edits(cfg, state.snapshot, state.baseline_stray, state.head_before)
-            if not isinstance(e, RETIRE_SET):
+            box_fault = isinstance(e, box_mod.BoxFault)
+            try:
+                _undo_agent_edits(cfg, state.snapshot, state.baseline_stray, state.head_before)
+            except Exception as undo_fault:
+                # A box whose stop failed may still be writing while the undo runs, and the
+                # undo's own fault (a folder swapped for a link: ELOOP) must not replace the box
+                # fault: an `OSError` is contained above `run_batch`, and the box fault must
+                # halt the batch (#1195 D3a, O4). Any other fault keeps today's precedence.
+                if not box_fault:
+                    raise
+                log.error(f"undo after a box fault failed: {undo_fault!r} "
+                          "(the box fault follows)", exc_info=undo_fault)
+            if box_fault or not isinstance(e, RETIRE_SET):
                 raise
             return _handle_retire(cfg, e, to_author, key, log)
 

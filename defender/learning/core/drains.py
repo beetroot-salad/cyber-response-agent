@@ -211,6 +211,16 @@ def _has_lead_author_work(paths: LoopPaths) -> bool:
     return pitfalls_lane_is_open(merge_pitfalls(read_pitfalls(paths)), threshold)
 
 
+#: The faults `_drain_one_curator` lets out of a curator rather than containing to its channel:
+#: a `RETIRE_SET` fault; a `BoxFault`, since a box that won't start or stop halts the batch as it
+#: halts the lead-author lane (#1195 O4, O5); and an interrupt, since swallowing it would record
+#: Ctrl-C as a curator fault, run the sibling curator, and go on to commit, push and open a PR
+#: for the batch the operator asked to stop.
+_HALTING: tuple[type[BaseException], ...] = (
+    *drain.RETIRE_SET, box_mod.BoxFault, KeyboardInterrupt,
+)
+
+
 def _drain_one_curator(
     paths: LoopPaths, trigger_author: Callable[..., None], channel: QueueChannel,
     threshold_env: str, module_name: str, pending_label: str, *, box: Any,
@@ -229,20 +239,10 @@ def _drain_one_curator(
     recorded_before = drain.stuck_record_count(channel)
     try:
         trigger_author(paths, channel.file, threshold_env, module_name, pending_label, box=box)
-    except drain.RETIRE_SET:
-        raise
-    # A box that won't start or stop halts the batch, as it halts the lead-author lane (#1195
-    # O4); the next run's start would refuse beside a box left running anyway (E3').
-    except box_mod.BoxFault:
-        raise
-    # An interrupt leaves at once; swallowing it would record Ctrl-C as a curator fault, run
-    # the sibling curator, and go on to commit, push and open a PR for the batch the operator
-    # asked to stop.
-    #
     # `SystemExit` is contained, since it is not an interrupt: escaping would skip the sibling
     # curator and unwind past `finish_batch`, discarding the first curator's authored lessons
     # with nothing recorded on either channel.
-    except KeyboardInterrupt:
+    except _HALTING:
         raise
     except (Exception, SystemExit) as e:  # noqa: BLE001 — every other fault class is recorded, never silently swallowed
         already = drain.stuck_record_count(channel) > recorded_before
@@ -705,6 +705,8 @@ def _run_worktree_batch(
     # startup fault must unwind the worktree and branch already minted.
     try:
         box = start_box(_drain_box_request(wt, batch_id, label, paths))
+        # The lanes' handle: the box is reachable only inside a run window (#1195).
+        runs = box_mod.BoxRuns(box)
     except BaseException as e:
         _unwind_worktree_start_fault(e, wt, branch)
         raise
@@ -722,8 +724,8 @@ def _run_worktree_batch(
         try:
             # Stopped before the batch's first host step; inside this `try`, so a stop that
             # fails still gets the batch-end removal.
-            box_mod.stop_run_box(box)
-            disposition = do_work(wt_paths, box=box)
+            runs.stop()
+            disposition = do_work(wt_paths, box=runs)
             work_ok = True
         finally:
             box_mod.stop_and_scrub(

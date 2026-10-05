@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar, Protocol, runtime_checkable
@@ -100,6 +100,12 @@ class BoxExecutor:
     spec: BoxSpec = field(default_factory=BoxSpec)
     transport: Transport = _unattached
     name: str = ""
+    #: The docker callable this box was created with (#1195): every lifecycle call on it — its
+    #: stops, starts and removal — goes through the same daemon. `None` for the unsandboxed
+    #: fallback, which has no container.
+    docker: Callable[..., subprocess.CompletedProcess] | None = field(
+        default=None, compare=False, repr=False,
+    )
 
     @property
     def sandboxed(self) -> bool:

@@ -645,8 +645,8 @@ def run_pitfalls(
 
     # The box runs for the spawn only, and is stopped before the gate reads what it wrote
     # (#1195).
-    with _box.box_for_run(box):
-        rc = (invoke or _invoke_pitfalls_agent)(handoffs, repo_root=repo_root, box=box)
+    with _box.box_for_run(box) as run_box:
+        rc = (invoke or _invoke_pitfalls_agent)(handoffs, repo_root=repo_root, box=run_box)
     if rc != 0:
         # Raised, not returned: a returned rc goes uninspected. `AuthorError` is in the drain's
         # retire set, so a repeatedly failing batch reaches the bounded retirement.
