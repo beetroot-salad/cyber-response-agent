@@ -252,9 +252,8 @@ def test_a_batch_handed_a_non_member_raises_before_any_batch_work(tmp_path: Path
     nothing is held.
 
     The positive control, each member over a fresh drive with the same retained record: the
-    batch delivers it (one `deliver`, the record removed), asks `has_work`, its work's one agent
-    run starts one box (#1195: the batch itself starts none), and that box mounts the member's
-    trees writable.
+    batch delivers it (one `deliver`, the record removed), asks `has_work`, starts one box, and
+    that box mounts the member's trees writable.
 
     Catches: a string, a name or a look-alike coerced into a member at the batch entry, and a
     batch that only meets the label late (inside `_open_batch` after the delivery pushed and
@@ -289,7 +288,7 @@ def test_a_batch_handed_a_non_member_raises_before_any_batch_work(tmp_path: Path
         rec = B.BoxLifecycleRecorder()
         branch = _DeliveringBranch(root / "wt", events=rec.events)
         retained = _retain(root, branch)
-        B.drive_worktree_batch(root, rec, do_work=_one_agent_run, has_work=has_work,
+        B.drive_worktree_batch(root, rec, do_work=lambda *_a, **_k: None, has_work=has_work,
                                branch=branch, label=member)
         assert branch.delivered == ["retained-1"]
         assert not retained.exists()
@@ -297,15 +296,6 @@ def test_a_batch_handed_a_non_member_raises_before_any_batch_work(tmp_path: Path
         request = rec.only_request()
         [leaf] = [Path(m.source) for m in request.mounts if not m.writable]
         assert _writable(request) == [leaf / rel for rel in rels]
-
-
-def _one_agent_run(_wt_paths: LoopPaths, *, box: Any = None) -> None:
-    """A work step with one agent run of the batch's box source, as a lane's spawn site enters
-    one: the lane's box request reaches `start_box=` only there (#1195)."""
-    from defender.runtime.box import box_for_run
-
-    with box_for_run(box):
-        pass
 
 
 class _DeliveringBranch(B.RecordingBranch):

@@ -259,8 +259,7 @@ def test_the_questioner_queue_alone_wakes_the_drain(tmp_path):
     """The questioner queue over threshold wakes the drain ON ITS OWN.
 
     Observably true: with the defender findings queue EMPTY and the questioner queue over
-    threshold, one tick runs — a batch is started, its box source handed down (#1195: a box is
-    started only for an agent run), and the questioner curator is triggered. The
+    threshold, one tick runs — a box is created and the questioner curator is triggered. The
     wake gate reads `_curator_queue_checks`, which is NAMED not derived; a second channel that
     is triggered but not listed there is a channel the drain never wakes for.
 
@@ -278,9 +277,7 @@ def test_the_questioner_queue_alone_wakes_the_drain(tmp_path):
     assert rc == 0
     assert W.QUESTIONER_CURATOR_MODULE in trigger.modules, (
         f"the questioner queue alone did not wake the drain: {trigger.modules}")
-    assert len([e for e in rec.events if str(e).startswith("start_batch")]) == 1, (
-        f"no batch was started for the questioner-only tick: {rec.events}")
-    assert trigger.calls[-1]["box"] is not None, "the questioner-only tick handed down no box"
+    assert rec.only_request() is not None, "no box was created for the questioner-only tick"
 
 
 def test_the_author_drain_triggers_exactly_its_two_named_curators(tmp_path):
@@ -448,9 +445,8 @@ def test_an_unrecognized_drain_label_gets_no_box_at_all(tmp_path):
 def test_one_author_drain_tick_opens_one_branch_and_one_pr_for_both_corpora(tmp_path):
     """One tick, one worktree, one box, one branch and one PR lease — covering both corpora.
 
-    Observably true: a tick with both queues over threshold starts exactly one batch, hands
-    both curators its one box source (one container name; #1195 starts a box per agent run
-    under it), and finishes exactly one batch, while triggering two curators. The tick is
+    Observably true: a tick with both queues over threshold starts exactly one batch, creates
+    exactly one box, and finishes exactly one batch, while triggering two curators. The tick is
     ONE UNIT (A2), and the shared drain lock is what keeps two curators from holding one
     worktree at once.
 
@@ -470,9 +466,7 @@ def test_one_author_drain_tick_opens_one_branch_and_one_pr_for_both_corpora(tmp_
     finishes = [e for e in rec.events if str(e).startswith("finish_batch")]
     assert len(starts) == 1, f"one tick started {len(starts)} batches: {rec.events}"
     assert len(finishes) <= 1, f"one tick finished {len(finishes)} batches: {rec.events}"
-    sources = [c["box"] for c in trigger.calls]
-    assert sources[0] is not None, "the tick handed its curators no box source"
-    assert all(b is sources[0] for b in sources), "the curators were handed different boxes"
+    assert len(rec.requests) == 1, f"one tick created {len(rec.requests)} boxes"
     assert len(trigger.modules) == 2
 
 

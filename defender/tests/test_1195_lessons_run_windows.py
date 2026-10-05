@@ -1,50 +1,55 @@
-"""#1195 amendment (2026-10-06), the lessons drain: one box per agent run.
+"""#1195 design amendment 2 (2026-10-06), the lessons drain: one box per batch, stopped between
+agent runs.
 
-`author_drain` (the lessons and lessons-questioner channels, which share one tick) no longer
-starts a box for the batch, nor freezes one. The `box` threaded down to each curator is the
-batch's `BoxSource`; each box-using spawn runs inside a box of its own:
+`author_drain` (the lessons and lessons-questioner channels, which share one tick) creates and
+checks its box at batch start, as on main, and stops it at once. The `box` threaded down to each
+curator is that executor; each box-using spawn runs inside `box_for_run(box)`, which starts the
+box for the spawn and stops it after:
 
-- `_author_batch`: `with box_mod.box_for_run(cfg.box) as box: result = cfg.invoke_agent(
-  to_author, batch_id, replace(cfg, box=box))`;
+- `_author_batch`: `with box_mod.box_for_run(cfg.box): result = cfg.invoke_agent(to_author,
+  batch_id, cfg)`;
 - `_spawn_repair`: the same for `cfg.invoke_repair`.
 
-So no capture, settle, agent-report check, judge, restore, commit or rotation runs while a box
-of the batch is up (O2'), and nothing a spawn leaves running outlives its run (O3'). A box that
-won't start or won't come down halts the batch with `BoxFault` (O4, E5: `_drain_one_curator`
-re-raises it; D3a: it outranks the undo's own fault). One container name serves the whole batch,
-so a box a failed teardown left alive refuses the next run's start (E2).
+So no host step of the lane (capture, settle, agent-report check, judge, restore, commit,
+rotation, the undo, the next curator's gate) runs while the box is running, except inside a
+spawn's window (O2''); nothing a spawn leaves running outlives its run (O3', O1); a box that
+won't start or stop halts the batch with `BoxFault` (O4, D3: `_drain_one_curator` re-raises it;
+D3a: it outranks the undo's own fault); a stop fault some layer swallows is caught by the next
+run's check before its start (E3').
 
 Every curator scene is `_spec773`'s: a real repo, queue, gate, settle, judge, restore, commit
 and rotation; only the spawns, the verifier and the key source are fakes, entering through the
-config. Box starts and stops enter through a `BoxSource`'s seams (`_box1195.Runs`, a recorded
-pair; `SimBox`, a simulated box with processes), or, for the production rows, through the real
-`start_box`/`stop_box` over a fake daemon on `PATH` (`_box1195.FakeDaemon`). Never
-`monkeypatch.setattr`.
+config. The box is a sandboxed executor over a fake daemon installed as the `docker` program
+first on `PATH` (`_box1195.FakeDaemon`), which the spawn sites' `box_for_run` and the drain's
+own start, stop and removal reach; the lane's host steps log into a `_box1195.Journal`, which
+notes what was running at each. Never `monkeypatch.setattr`.
 
 Tests -> obligations:
 
-- Wiring, O2'/E4: `test_each_spawn_runs_in_a_box_of_its_own_and_no_host_step_runs_beside_one`
-  (both channels, judged clean and repaired), `test_one_tick_runs_one_box_per_agent_run_across_both_curators`,
-  `test_the_pre_state_is_captured_before_the_box_starts`,
-  `test_a_failing_spawns_box_is_removed_before_the_undo_runs`.
-- Wiring through the production drain (no box at batch start, one real box per run, none
-  after the last, E3's batch-end probe): `test_the_production_drain_runs_one_real_box_per_agent_run_and_leaves_none`.
-- E2: `test_a_box_a_failed_teardown_left_alive_refuses_the_next_curators_run` (and the
-  batch-end teardown removes that box under the escaping fault, before any scan), with its
-  `holds` control.
-- O4 (E5): `test_a_box_fault_from_the_first_curators_step_halts_the_drain` (+ its control),
+- O2''/E5', wiring: `test_each_spawn_runs_in_its_own_window_and_no_host_step_beside_a_running_box`
+  (both channels, judged clean and repaired; the spawn handed the same executor),
+  `test_one_tick_runs_one_window_per_spawn_across_both_curators`,
+  `test_the_pre_state_is_captured_before_the_run_starts`,
+  `test_a_failing_spawns_box_is_stopped_before_the_undo_runs`.
+- E1'/E4' through the production drain (one create, a stop before the first curator, one
+  window per spawn, `rm -f` before the scan):
+  `test_the_production_drain_runs_one_box_stopped_between_its_agent_runs`.
+- E3': `test_a_masked_stop_fault_makes_the_next_curators_run_refuse` (with its `holds` control).
+- O4, batch start: `test_a_batch_start_fault_charges_no_curator_row_and_writes_no_stuck_record`
+  (create, sentinel, link ban; main's pointer, or `AliasBanNotInForce` as itself).
+- O4 (D3): `test_a_box_fault_from_the_first_curators_step_halts_the_drain` (+ its control),
   `test_a_box_fault_in_the_first_curator_halts_the_tick_before_the_second` (the spawn, a start
-  fault, a link-ban failure at a start, a teardown fault; each also in the repair's run),
+  refused or unproven, a stop refused or unproven; each also in the repair's run),
   `test_a_box_fault_in_the_second_curator_halts_the_drain`,
   `test_control_a_non_box_fault_in_the_first_curator_is_contained_and_the_second_runs` (N4; a
-  `SystemExit` among them, its run's box still removed),
-  `test_a_box_fault_through_the_default_curator_step_halts_the_drain` (`trigger_author=None`),
-  `test_a_box_fault_escapes_author_drain_with_nothing_delivered` (+ its control),
-  `test_the_escaping_box_fault_names_the_cut_commit_not_the_first_curators_commit` (E6).
+  `SystemExit` among them, its run's box still stopped),
+  `test_a_run_start_fault_through_the_default_curator_step_halts_the_drain`
+  (`trigger_author=None`), `test_a_box_fault_escapes_author_drain_with_nothing_delivered` (+ its
+  control).
 - D3a: `test_a_box_fault_outranks_an_undo_fault_and_the_second_curator_never_runs`, with
   `test_control_an_undo_fault_still_replaces_a_non_box_fault`.
 - O1/O3': `test_a_process_left_in_the_box_cannot_change_a_judged_lesson` (rewrite, symlink),
-  `test_control_with_one_box_for_the_batch_the_process_races_the_commit`,
+  `test_control_a_process_that_outlived_its_run_would_race_the_commit`,
   `test_what_the_box_writes_during_its_own_run_is_what_is_judged`.
 """
 from __future__ import annotations
@@ -53,7 +58,6 @@ import dataclasses
 import errno
 import logging
 import os
-import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -63,11 +67,11 @@ import pytest
 from defender import _git, _io
 from defender._git import GitError
 from defender._io import NotPlainEntry
-from defender.learning.core import drains
 from defender.learning.core import config as author_config
+from defender.learning.core import drains
 from defender.learning.core.config import FatalConfigError, LoopPaths, StageAbort
 from defender.runtime import providers
-from defender.runtime.box import AliasBanNotInForce, BoxFault
+from defender.runtime.box import BoxExecutor, BoxFault
 from defender.runtime.verbs import RegistryError
 from defender.tests import _box1195 as X
 from defender.tests import _spec773 as S
@@ -79,18 +83,17 @@ from defender.tests._curator1134 import (
     questioner_cfg,
 )
 from defender.tests._spec791 import loop_paths
-from defender.tests.e2e import _box665 as B
 from defender.tests.e2e.test_922_spine import RepoBranch
 
 CHANNELS = ["lessons", "questioner"]
 
-#: The spawns: each must run inside a box of its own, and nothing else may.
+#: The spawns: each must run inside a window of its own, and nothing else may.
 SPAWN_KINDS = ("agent", "repair")
 
 #: The repair's rewrite of `a.md`: new bytes, so the judge's memo re-judges it on pass 2.
 REPAIRED = S.lesson("f1", body="the lesson, repaired")
 
-#: The container name the recorded sources ask for (the drain's is `defender-drain-<batch id>`).
+#: The container the direct drives' box names (the drain's is `defender-drain-<batch id>`).
 NAME = "defender-drain-l1195"
 
 
@@ -118,7 +121,7 @@ def _placing(log: list, tree_for: Callable[..., Any],
              before: Callable[[], object] | None = None) -> Callable[..., Any]:
     """The lane's real `tree_for`, logging `("tree_for", path)` for each path asked of it: the
     settle's put-back of a non-`.md` stray, and the commit's placement of every path it stages.
-    `before` runs first on each call (the simulated box's turn, in the O1 rows)."""
+    `before` runs first on each call (a process's turn, in the O1 rows)."""
 
     def placed(path: Any) -> Any:
         log.append(("tree_for", str(path)))
@@ -164,9 +167,11 @@ def _queued(paths: LoopPaths) -> tuple[bytes | None, ...]:
     return tuple(q.read_bytes() if q.exists() else None for q in _queue_files(paths))
 
 
-def _state(repo: Path, paths: LoopPaths) -> Callable[[], tuple]:
-    """What a run's `enter`/`exit` carry: HEAD and both queues' bytes."""
-    return lambda: (_git.git_head_sha(repo), _queued(paths))
+def _after_each_spawn(log: list) -> list[list[tuple]]:
+    """The log split at its spawns: before the first, between each pair, after the last."""
+    cuts = [i for i, e in enumerate(log) if e[0] in SPAWN_KINDS]
+    bounds = [-1, *cuts, len(log)]
+    return [list(log[bounds[i] + 1:bounds[i + 1]]) for i in range(len(bounds) - 1)]
 
 
 # ---------------------------------------------------------------------------------------
@@ -232,15 +237,15 @@ def _wire(  # noqa: PLR0913 — one config, every seam a row varies
 class Tick:
     """One author-drain tick's worktree: the lessons scene's repo, with a questioner queue
     beside the findings one, and each curator's config (`cfgs`, by module name). `trigger` is
-    the drain's `trigger_author` seam: it logs `("trigger", module)`, runs `on_trigger(module)`,
-    and runs that curator the way `drains._maybe_trigger_author` does, handing it the box the
-    drain handed down."""
+    the drain's `trigger_author` seam: it logs `("trigger", module)`, marks the daemon's log
+    `trigger:<module>` when given one, and runs that curator the way
+    `drains._maybe_trigger_author` does, handing it the box the drain handed down."""
 
     sc: S.Scene
     log: list
     cfgs: dict[str, Any]
     triggered: list[tuple[str, Any]] = dataclasses.field(default_factory=list)
-    on_trigger: Callable[[str], object] | None = None
+    daemon: X.FakeDaemon | None = None
 
     @property
     def paths(self) -> LoopPaths:
@@ -250,17 +255,14 @@ class Tick:
                 module_name: str, _pending_label: str, *, box: Any = None) -> None:
         self.log.append(("trigger", module_name))
         self.triggered.append((module_name, box))
-        if self.on_trigger is not None:
-            self.on_trigger(module_name)
+        if self.daemon is not None:
+            self.daemon.mark(f"trigger:{module_name}")
         cfg = self.cfgs[module_name]
         drains._run_curator_module(
             module_name, lambda mod: mod.run_batch(hold_committed=True, cfg=cfg, box=box))
 
     def modules(self) -> list[str]:
         return [m for m, _ in self.triggered]
-
-    def state(self) -> Callable[[], tuple]:
-        return _state(self.sc.repo, self.paths)
 
 
 def _tick(  # noqa: PLR0913 — one tick's two curators, every seam a row varies
@@ -287,35 +289,28 @@ def _stuck_classes(paths: LoopPaths, channel: str) -> list[str]:
     return [r.get("fault_class") for r in S.stuck_records(getattr(paths, channel))]
 
 
-def _segments(log: list, wins: list[tuple[int, int]]) -> list[list[tuple]]:
-    """The log split around the runs: before the first, between each pair, after the last."""
-    bounds = [-1, *[i for w in wins for i in w], len(log)]
-    return [log[bounds[i] + 1:bounds[i + 1]] for i in range(0, len(bounds), 2)]
-
-
 # ---------------------------------------------------------------------------------------
-# Wiring: each spawn in a box of its own; no host step beside a live box
+# Wiring: each spawn in a window of its own; no host step beside a running box
 # ---------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("repair", [False, True], ids=["judged-clean", "repaired"])
 @pytest.mark.parametrize("channel", CHANNELS)
-def test_each_spawn_runs_in_a_box_of_its_own_and_no_host_step_runs_beside_one(
-        tmp_path: Path, channel: str, repair: bool):
-    """Through the channel's `run_batch(cfg=..., box=<a source>)`: the curator leaves `a.md`
-    (citing f1), `b.md` (citing f2) and a non-`.md` stray, and skips f3. With every verdict GOOD,
-    one run holds the curator spawn and nothing else. With `a.md` BAD then GOOD and `b.md` BAD
-    throughout, a second run holds the repair spawn (which rewrites `a.md` and leaves a stray of
-    its own) and nothing else.
+def test_each_spawn_runs_in_its_own_window_and_no_host_step_beside_a_running_box(
+        tmp_path: Path, monkeypatch, channel: str, repair: bool):
+    """Through the channel's `run_batch(cfg=..., box=<the batch's stopped box>)`: the curator
+    leaves `a.md` (citing f1), `b.md` (citing f2) and a non-`.md` stray, and skips f3. With every
+    verdict GOOD, one window (a `docker start` to the next `docker stop`) holds the curator spawn
+    and nothing else. With `a.md` BAD then GOOD and `b.md` BAD throughout, a second window holds
+    the repair spawn (which rewrites `a.md` and leaves a stray of its own) and nothing else.
 
-    Each spawn is handed, as its config's `box`, the box its own run started (a fresh one per
-    run, each from the source's request), and every box is removed by the end. Every host step
-    is seen with no box up: the gate and the key source before the first run; the settle's
-    put-back of each spawn's stray, the report reads, the corpus reads and the judge after each;
-    the restore of the unapproved `b.md`, the commit's placements and the post-rotation hook
-    after the last. HEAD and both queues are unchanged across each run, and both moved by the
-    end of the tick."""
-    log: list = []
+    Each spawn saw the box running and was handed, as its config's `box`, the very executor the
+    tick was handed. Every host step saw nothing running: the gate and the key source before the
+    first spawn; the settle's put-back of each spawn's stray, the report reads, the corpus reads
+    and the judge after each; the restore of the unapproved `b.md`, the commit's placements and
+    the post-rotation hook after the last. The box is stopped at the end."""
+    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    log = X.Journal(daemon)
     curator = S.FakeCurator(
         writes={"a.md": S.lesson("f1"), "b.md": S.lesson("f2"), "stray.txt": "not a lesson\n"},
         committed=["f1", "f2"], consumed_skip=[{"finding_id": "f3", "reason": "dup"}],
@@ -323,36 +318,30 @@ def test_each_spawn_runs_in_a_box_of_its_own_and_no_host_step_runs_beside_one(
     sc = _channel_scene(tmp_path, channel, rows=_rows(channel, "f1", "f2", "f3"), curator=curator)
     fixer = S.FakeRepair(writes={"a.md": REPAIRED, "repair-stray.txt": "not a lesson\n"})
     verdicts = {"a.md": ["BAD", "GOOD"], "b.md": "BAD"} if repair else {}
-    runs = X.Runs(log, state=_state(sc.repo, sc.paths))
     sc.cfg = _wire(sc.cfg, log, curator=curator, verifier=_verifier(log, verdicts), repair=fixer)
     queued_before = _queued(sc.paths)
-    source = runs.source(NAME)
 
-    assert sc.run(box=source) == 0
+    assert sc.run(box=box) == 0
 
     spawns = ["agent", "repair"] if repair else ["agent"]
-    wins = X.assert_each_run_holds_exactly(log, spawns, SPAWN_KINDS)
-    assert len(runs.boxes) == len(spawns), runs.boxes
-    assert curator.calls[-1]["cfg"].box is runs.boxes[0], (
-        "the curator was not handed the box its own run started")
+    log.assert_runs_hold_exactly(spawns, SPAWN_KINDS)
+    assert curator.calls[-1]["cfg"].box is box, "the curator was not handed the box itself"
     if repair:
-        assert fixer.calls[-1]["cfg"].box is runs.boxes[1], (
-            "the repair was not handed the box its own run started")
-    assert [r.name for r in runs.requests] == [NAME] * len(spawns)
-    assert runs.alive == [], "a box outlived its run"
+        assert fixer.calls[-1]["cfg"].box is box, "the repair was not handed the box itself"
     assert fixer.spawned == (1 if repair else 0)
-    segments = _segments(log, wins)
+    assert daemon.status(NAME) == "exited", "the box was left running"
+    segments = _after_each_spawn(log)
     before, after_spawn, after_last = segments[0], segments[1], segments[-1]
     assert {"gate", "key"} <= set(_kinds(before)), _kinds(before)
     stray = ("tree_for", str(sc.corpus / "stray.txt"))
-    assert stray in after_spawn, "the settle after the curator spawn ran beside a live box"
+    assert stray in after_spawn, "the settle after the curator spawn was not seen"
     assert {"report", "read", "judge"} <= set(_kinds(after_spawn)), _kinds(after_spawn)
-    assert ("tree_for", str(sc.corpus / "a.md")) in after_last, "the commit ran beside a box"
+    assert ("tree_for", str(sc.corpus / "a.md")) in after_last, "the commit was not seen"
     assert "post_rotate" in _kinds(after_last)
     if repair:
         assert ("tree_for", str(sc.corpus / "repair-stray.txt")) in after_last
         assert "judge" in _kinds(after_last)
-        assert ("unlink", "b.md") in after_last, "the restore of b.md ran beside a box"
+        assert ("unlink", "b.md") in after_last, "the restore of b.md was not seen"
         assert sc.head_text(_rel(sc, "a.md")) == REPAIRED
         assert sc.head_text(_rel(sc, "b.md")) is None
     else:
@@ -362,31 +351,27 @@ def test_each_spawn_runs_in_a_box_of_its_own_and_no_host_step_runs_beside_one(
     assert _queued(sc.paths) != queued_before
 
 
-def test_one_tick_runs_one_box_per_agent_run_across_both_curators(tmp_path: Path):
-    """The design's key flow, through `_drain_curators(..., box=<the batch's source>)` and both
-    real curators: each curator is handed the source itself (no box is up when either is
-    triggered), and exactly three runs follow — the lessons curator, its repair, the questioner
-    curator — each holding its spawn alone, each a fresh box from the one request (one container
-    name per batch). No box is up between them or after the last. HEAD holds both curators'
-    lessons."""
-    log: list = []
+def test_one_tick_runs_one_window_per_spawn_across_both_curators(tmp_path: Path, monkeypatch):
+    """The design's key flow, through `_drain_curators(..., box=<the batch's stopped box>)` and
+    both real curators: each curator is handed the box itself (nothing running when either is
+    triggered), and exactly three windows follow — the lessons curator, its repair, the
+    questioner curator — each holding its spawn alone, each handed that same box. Nothing runs
+    between them or after the last. HEAD holds both curators' lessons."""
+    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    log = X.Journal(daemon)
     curator = S.FakeCurator(writes={"a.md": S.lesson("f1")})
     q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")})
     t = _tick(tmp_path, log, curator=curator, q_curator=q_curator,
               verifier=_verifier(log, {"a.md": ["BAD", "GOOD"]}),
               repair=S.FakeRepair(writes={"a.md": REPAIRED}), journal=True)
-    runs = X.Runs(log, state=t.state())
-    source = runs.source(NAME)
 
-    drains._drain_curators(t.paths, t.trigger, box=source)
+    drains._drain_curators(t.paths, t.trigger, box=box)
 
     assert t.modules() == ["author", "questioner_curator"]
-    assert all(b is source for _, b in t.triggered), "a curator was handed something but the source"
-    X.assert_each_run_holds_exactly(log, ["agent", "repair", "agent"], SPAWN_KINDS)
-    assert len({id(b) for b in runs.boxes}) == 3
-    assert [r.name for r in runs.requests] == [NAME] * 3
-    assert q_curator.calls[-1]["cfg"].box is runs.boxes[2]
-    assert runs.alive == []
+    assert all(b is box for _, b in t.triggered), "a curator was handed something but the box"
+    log.assert_runs_hold_exactly(["agent", "repair", "agent"], SPAWN_KINDS)
+    assert q_curator.calls[-1]["cfg"].box is box
+    assert daemon.status(NAME) == "exited"
     assert t.sc.head_text(_rel(t.sc, "a.md")) == REPAIRED
     assert t.sc.head_text(_questioner_rel(t, "q.md")) == S.lesson("w1")
 
@@ -399,12 +384,14 @@ STRAY_EDIT = "rewritten by the box\n"
 
 @pytest.mark.parametrize("when", ["once-started", "before-the-run"])
 @pytest.mark.parametrize("channel", CHANNELS)
-def test_the_pre_state_is_captured_before_the_box_starts(tmp_path: Path, channel: str, when: str):
-    """The box rewrites a committed file outside the corpus as soon as it is up: the settle
-    refuses the tick (an `AuthorError` naming it, which retires: rc 2, f1 bumped, a stuck record
-    naming the stray), HEAD unchanged, the stray put back. The baseline of strays was captured
-    before the box started, so the rewrite is new. Control: the same rewrite already standing
+def test_the_pre_state_is_captured_before_the_run_starts(tmp_path: Path, monkeypatch,
+                                                         channel: str, when: str):
+    """The box rewrites a committed file outside the corpus as soon as its run starts: the
+    settle refuses the tick (an `AuthorError` naming it, which retires: rc 2, f1 bumped, a stuck
+    record naming the stray), HEAD unchanged, the stray put back. The baseline of strays was
+    captured before the start, so the rewrite is new. Control: the same rewrite already standing
     before the run is in the baseline, and the tick commits."""
+    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
     curator = S.FakeCurator(writes={"a.md": S.lesson("f1")})
     sc = _channel_scene(tmp_path, channel, rows=_rows(channel, "f1"), curator=curator)
     stray = sc.repo / STRAY_REL
@@ -414,12 +401,11 @@ def test_the_pre_state_is_captured_before_the_box_starts(tmp_path: Path, channel
     sc.base_sha = sc.head_sha()
     if when == "before-the-run":
         put(stray, STRAY_EDIT)
-    log: list = []
-    runs = X.Runs(log, on_start=(lambda _b: put(stray, STRAY_EDIT))
-                  if when == "once-started" else None)
-    sc.cfg = _wire(sc.cfg, log, curator=curator, journal=False)
+    else:
+        daemon.on_start(stray, STRAY_EDIT, at=1)
+    sc.cfg = _wire(sc.cfg, [], curator=curator, journal=False)
 
-    rc = sc.run(box=runs.source(NAME))
+    rc = sc.run(box=box)
 
     assert curator.calls, "the curator never ran, so the baseline was never compared"
     if when == "before-the-run":
@@ -434,12 +420,13 @@ def test_the_pre_state_is_captured_before_the_box_starts(tmp_path: Path, channel
     assert stray.read_text() == "committed\n"
 
 
-def test_a_failing_spawns_box_is_removed_before_the_undo_runs(tmp_path: Path):
-    """The lessons spawn leaves `a.md` and raises `RuntimeError`: its run still removes the box on
-    that way out (the run holds the spawn alone), and the undo's removal of `a.md` through the
-    corpus mount runs after, with no box up. The contained fault lets the questioner curator run,
-    in a box of its own."""
-    log: list = []
+def test_a_failing_spawns_box_is_stopped_before_the_undo_runs(tmp_path: Path, monkeypatch):
+    """The lessons spawn leaves `a.md` and raises `RuntimeError`: its run still stops the box on
+    that way out (its window holds the spawn alone), and the undo's removal of `a.md` through
+    the corpus mount runs after, with nothing running. The contained fault lets the questioner
+    curator run, in a window of its own."""
+    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    log = X.Journal(daemon)
 
     def boom(*_a: Any) -> None:
         raise RuntimeError("the agent crashed")
@@ -447,43 +434,41 @@ def test_a_failing_spawns_box_is_removed_before_the_undo_runs(tmp_path: Path):
     curator = S.FakeCurator(writes={"a.md": S.lesson("f1")}, also=boom)
     q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")})
     t = _tick(tmp_path, log, curator=curator, q_curator=q_curator, journal=True)
-    runs = X.Runs(log, state=t.state())
 
-    drains._drain_curators(t.paths, t.trigger, box=runs.source(NAME))
+    drains._drain_curators(t.paths, t.trigger, box=box)
 
-    wins = X.assert_each_run_holds_exactly(log, ["agent", "agent"], SPAWN_KINDS)
-    first_exit, second_enter = wins[0][1], wins[1][0]
+    log.assert_runs_hold_exactly(["agent", "agent"], SPAWN_KINDS)
     undo = [i for i, e in enumerate(log) if e == ("unlink", "a.md")]
+    spawns = [i for i, e in enumerate(log) if e[0] == "agent"]
     assert undo, "the undo never removed the failed spawn's lesson through the corpus mount"
-    assert all(first_exit < i < second_enter for i in undo), "the undo ran beside a live box"
-    assert runs.alive == []
+    assert all(spawns[0] < i < spawns[1] for i in undo), "the undo was not between the runs"
     assert t.sc.head_text(_questioner_rel(t, "q.md")) == S.lesson("w1")
 
 
 # ---------------------------------------------------------------------------------------
-# The production drain: real start/stop over a fake daemon
+# The production drain: the real start, stop and removal over the fake daemon
 # ---------------------------------------------------------------------------------------
 
 
 def _production_tick(tmp_path: Path, monkeypatch, daemon: X.FakeDaemon, *,  # noqa: PLR0913 — one tick, every fake a row varies
                      curator: S.FakeCurator, q_curator: S.FakeCurator,
                      verifier: S.FakeVerifier | None = None,
-                     repair: S.FakeRepair | None = None) -> Tick:
+                     repair: S.FakeRepair | None = None, log: list | None = None) -> Tick:
     """A tick `author_drain` serves as production wires it: both thresholds at 1, the image
     inputs committed under the repo's `defender/`, the fake daemon first on `PATH` (so the
-    drain's own `start_box`/`stop_box` and its source's status probe all reach it), and the
-    trigger marking the daemon's log as each curator is triggered."""
+    drain's own `start_box`/`stop_box`, its post-create stop and each spawn's run all reach it),
+    and the trigger marking the daemon's log as each curator is triggered."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "1")
     X.clear_opt_out(monkeypatch)
-    t = _tick(tmp_path, [], curator=curator, q_curator=q_curator, verifier=verifier,
-              repair=repair)
+    t = _tick(tmp_path, log if log is not None else [], curator=curator, q_curator=q_curator,
+              verifier=verifier, repair=repair)
     X.plant_image_inputs(t.sc.repo)
     S.git(t.sc.repo, "add", "-A", "--", "defender")
     S.git(t.sc.repo, "commit", "-q", "-m", "the box image inputs")
     t.sc.base_sha = t.sc.head_sha()
     daemon.install(monkeypatch)
-    t.on_trigger = lambda module: daemon.mark(f"trigger:{module}")
+    t.daemon = daemon
     return t
 
 
@@ -493,13 +478,14 @@ def _author_drain(t: Tick, events: list[str], **seams: Any) -> int:
     return drains.author_drain(t.paths, trigger_author=t.trigger, branch=branch, **seams)
 
 
-def test_the_production_drain_runs_one_real_box_per_agent_run_and_leaves_none(
+def test_the_production_drain_runs_one_box_stopped_between_its_agent_runs(
         tmp_path: Path, monkeypatch):
-    """`author_drain` with its own `start_box`/`stop_box`: the daemon creates no container
-    before the first curator is triggered; for each spawn (the lessons curator, its repair, the
-    questioner curator) exactly one container is created, under the batch's one name, the spawn
-    runs, and it is removed; after the last removal the batch-end teardown asks the name's
-    status, and no container is left. Both curators committed and the batch was delivered."""
+    """`author_drain` with its own `start_box`/`stop_box`: the daemon creates one container, at
+    batch start, under the batch's name, and it is stopped before the first curator is
+    triggered. For each spawn (the lessons curator, its repair, the questioner curator) one
+    window starts it, holds the spawn alone, and stops it. After the last window the batch-end
+    `docker rm -f` removes it, then the tree is scanned. Both curators committed and the batch
+    was delivered; the spawn was handed the drain's own executor."""
     daemon = X.FakeDaemon(tmp_path)
     curator = S.FakeCurator(writes={"a.md": S.lesson("f1")},
                             also=lambda *_a: daemon.mark("curator"))
@@ -510,53 +496,54 @@ def test_the_production_drain_runs_one_real_box_per_agent_run_and_leaves_none(
                          verifier=S.FakeVerifier(verdicts={"a.md": ["BAD", "GOOD"]}),
                          repair=repair)
     events: list[str] = []
+    watch = X.ScanWatch(daemon, events)
 
-    assert _author_drain(t, events) == 0
+    assert _author_drain(t, events, scrub=watch) == 0
 
     batch_id = next(e.split(":", 1)[1] for e in events if e.startswith("start_batch:"))
     name = f"defender-drain-{batch_id}"
-    kept = [s for s in daemon.steps() if s in ("create", "rm") or ":" in s
+    assert daemon.created() == [name], "the batch did not create exactly its one box"
+    kept = [s for s in daemon.steps() if s in ("create", "start", "stop", "rm", "scan") or ":" in s
             or s in ("curator", "repair", "questioner")]
-    assert kept == ["trigger:author", "create", "curator", "rm", "create", "repair", "rm",
-                    "trigger:questioner_curator", "create", "questioner", "rm"], kept
-    assert daemon.created() == [name] * 3
-    steps = daemon.steps(of=name)
-    last_rm = len(steps) - 1 - steps[::-1].index("rm")
-    assert "status" in steps[last_rm + 1:], f"no batch-end teardown asked the status: {steps}"
-    assert daemon.names() == [], "a box outlived the batch"
+    assert kept == ["create", "stop", "trigger:author", "start", "curator", "stop", "start",
+                    "repair", "stop", "trigger:questioner_curator", "start", "questioner",
+                    "stop", "rm", "scan"], kept
+    assert daemon.windows() == [["curator"], ["repair"], ["questioner"]], daemon.steps()
+    watch.assert_scanned_once_the_box_was_gone()
     handed = curator.calls[-1]["cfg"].box
     assert handed.sandboxed, handed
     assert handed.name == name, handed
+    assert repair.calls[-1]["cfg"].box is handed
+    assert q_curator.calls[-1]["cfg"].box is handed
     assert any(e.startswith("finish_batch:") for e in events), events
     assert t.sc.head_text(_rel(t.sc, "a.md")) == REPAIRED
     assert t.sc.head_text(_questioner_rel(t, "q.md")) == S.lesson("w1")
 
 
 # ---------------------------------------------------------------------------------------
-# E2: a box a failed teardown left alive refuses the next run's start
+# E3': a masked stop fault is caught at the next run's start
 # ---------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("teardown", ["refused", "holds"])
-def test_a_box_a_failed_teardown_left_alive_refuses_the_next_curators_run(
-        tmp_path: Path, monkeypatch, caplog, teardown: str):
-    """`author_drain` as production wires it, over the fake daemon. The lessons curator's spawn
-    leaves `a.md` and crashes (`RuntimeError`, contained to its channel); with `refused`, the
-    removal of its box fails on the way out, so that teardown fault is only logged under the
-    crash, and the box stays running. The questioner curator's start then meets the batch's name
-    still running and raises `BoxFault` before its spawn: the questioner never runs, nothing is
-    committed, nothing is delivered, and the fault escapes `author_drain`. The batch-end teardown
-    still runs under that fault: it removes the box the first run left, so none outlives the
-    batch, and the tree is scanned, if at all, only once it is gone.
+@pytest.mark.parametrize("stop", ["refused", "holds"])
+def test_a_masked_stop_fault_makes_the_next_curators_run_refuse(
+        tmp_path: Path, monkeypatch, caplog, stop: str):
+    """`author_drain` as production wires it. The lessons curator's spawn leaves `a.md` and
+    crashes (`RuntimeError`, contained to its channel); with `refused`, its run's stop fails on
+    the way out, so that stop fault is only logged under the crash, and the box keeps running.
+    The questioner curator's run then finds the box not `exited` and refuses before its spawn,
+    stopping it best-effort: the questioner never runs, nothing is committed, nothing is
+    delivered, and the fault escapes `author_drain`. The batch-end `rm -f` removes the box, and
+    the tree is scanned only after.
 
-    Control (`holds`): the same crash with the removal taking; the questioner gets a fresh box,
+    Control (`holds`): the same crash with the stop taking; the questioner's run starts, it
     commits, and the batch is delivered."""
     caplog.set_level(logging.WARNING)
     daemon = X.FakeDaemon(tmp_path)
 
     def crash(*_a: Any) -> None:
-        if teardown == "refused":
-            daemon.refuse_rm(1)
+        if stop == "refused":
+            daemon.refuse_stop()
         raise RuntimeError("the agent crashed")
 
     curator = S.FakeCurator(writes={"a.md": S.lesson("f1")}, also=crash)
@@ -568,21 +555,57 @@ def test_a_box_a_failed_teardown_left_alive_refuses_the_next_curators_run(
 
     assert len(curator.calls) == 1
     assert _stuck_classes(t.paths, "findings") == ["RuntimeError"]
-    assert daemon.names() == [], "a box outlived the batch"
-    watch.assert_no_scan_beside_a_box()
-    assert watch.held, "no scan ran once the batch's last box was gone"
-    if teardown == "holds":
+    assert len(daemon.created()) == 1
+    watch.assert_scanned_once_the_box_was_gone()
+    if stop == "holds":
         assert got is None, got
         assert len(q_curator.calls) == 1
         assert t.sc.head_text(_questioner_rel(t, "q.md")) == S.lesson("w1")
         assert any(e.startswith("finish_batch:") for e in events), events
         return
     assert isinstance(got, BoxFault), got
-    assert q_curator.calls == [], "the questioner ran beside the box the first run left alive"
-    assert t.sc.head_sha() == t.sc.base_sha, "a commit landed beside a live box"
+    assert X.POINTER not in str(got), f"a mid-batch box fault got a build pointer: {got}"
+    assert q_curator.calls == [], "the questioner ran beside the box the first run left running"
+    assert t.sc.head_sha() == t.sc.base_sha, "a commit landed beside a running box"
     assert not any(e.startswith("finish_batch:") for e in events), events
     assert _stuck_classes(t.paths, "questioner_findings") == ["BoxFault"]
-    assert len(daemon.created()) == 1, "a second box was created beside the live one"
+    steps = daemon.steps()
+    tail = steps[steps.index("trigger:questioner_curator"):]
+    assert "start" not in tail, f"the questioner's run started a running box: {tail}"
+    assert "stop" in tail[:tail.index("rm")], f"no best-effort stop on the refusal: {tail}"
+
+
+# ---------------------------------------------------------------------------------------
+# O4 at batch start: a fault creating or checking the box charges no curator row
+# ---------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize(("knob", "kind", "pointed"), X.BATCH_START_FAULTS)
+def test_a_batch_start_fault_charges_no_curator_row_and_writes_no_stuck_record(
+        tmp_path: Path, monkeypatch, knob: str, kind: type, pointed: bool):
+    """`author_drain` as production wires it; the batch's box cannot be created, or a check at
+    its creation fails: the fault escapes before any curator (as on main: a `BoxFault` naming
+    `origin/main @ <cut commit>`, a link ban as `AliasBanNotInForce`). No curator is triggered,
+    neither channel gets a stuck record, neither queue moves, f1 is not bumped, and nothing is
+    committed or delivered."""
+    daemon = X.FakeDaemon(tmp_path)
+    t = _production_tick(tmp_path, monkeypatch, daemon,
+                         curator=S.FakeCurator(writes={"a.md": S.lesson("f1")}),
+                         q_curator=S.FakeCurator(writes={"q.md": S.lesson("w1")}))
+    getattr(daemon, knob)()
+    queued = _queued(t.paths)
+    events: list[str] = []
+
+    got = X.caught(lambda: _author_drain(t, events))
+
+    assert isinstance(got, kind), got
+    assert (f"{X.POINTER}{t.sc.base_sha}" in str(got)) is pointed, got
+    assert t.modules() == [], "a curator was triggered though the box never came up"
+    assert _stuck_classes(t.paths, "findings") == []
+    assert _stuck_classes(t.paths, "questioner_findings") == []
+    assert _queued(t.paths) == queued, "a queue moved for a box that never came up"
+    assert t.sc.pending_by_id()["f1"].get("attempts") is None
+    assert t.sc.head_sha() == t.sc.base_sha
+    assert not any(e.startswith("finish_batch:") for e in events), events
 
 
 # ---------------------------------------------------------------------------------------
@@ -593,56 +616,63 @@ def test_a_box_a_failed_teardown_left_alive_refuses_the_next_curators_run(
 def _ambient_verifier_key(monkeypatch: Any) -> None:
     """The findings channel's own forward check sources the verifier key before its first spawn
     (`_verifier_key_preflight`); an ambient key answers it, so the default step goes on to its
-    box start. Sourcing is all it does: no model is called before the box is up."""
+    run's start. Sourcing is all it does: no model is called before the box is up."""
     var = providers.provider_for(author_config.verifier_model()).api_key_var
     monkeypatch.setenv(var, "sk-test-1195")
 
 
 @pytest.mark.parametrize("queued", ["both", "questioner-only"])
-def test_a_box_fault_through_the_default_curator_step_halts_the_drain(
+def test_a_run_start_fault_through_the_default_curator_step_halts_the_drain(
         tmp_path: Path, monkeypatch, queued: str):
-    """`author_drain` with its DEFAULT `trigger_author` (`_maybe_trigger_author` driving each
-    channel's real `run_batch` over its real config) and a `start_box` that refuses every box:
-    with both queues at threshold, the findings curator's run cannot start, and the `BoxFault`
-    escapes `author_drain`. Only one box was ever asked for: the questioner curator is not
-    served, its queue is as it was, and nothing is recorded against its rows; f1 is not
-    bumped; nothing is committed or delivered.
+    """`author_drain` with every default (`_maybe_trigger_author` driving each channel's real
+    `run_batch` over its real config, the real `start_box`/`stop_box`) over the fake daemon,
+    whose first `docker start` is refused: with both queues at threshold, the findings curator's
+    run cannot start, and the `BoxFault` escapes `author_drain`. Only one start was ever asked
+    for: the questioner curator is not served, its queue is as it was, and nothing is recorded
+    against its rows; f1 is not bumped; nothing is committed or delivered; the box is removed.
 
     Control (`questioner-only`): the findings queue empty, so the questioner curator is served
-    first: its default step reaches the box start too (one request), and halts the same way.
-    So one request in the row above means the questioner never got that far."""
+    first: its default step reaches its run's start too (one start), and halts the same way. So
+    one start in the row above means the questioner never got that far."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "1")
+    X.clear_opt_out(monkeypatch)
     _ambient_verifier_key(monkeypatch)
     sc = S.build_scene(tmp_path, rows=[S.finding_row("f1", run_id="f1")] if queued == "both" else [])
     S.seed(sc.paths.questioner_findings, [S.world_row("w1")])
+    X.plant_image_inputs(sc.repo)
+    S.git(sc.repo, "add", "-A", "--", "defender")
+    S.git(sc.repo, "commit", "-q", "-m", "the box image inputs")
+    sc.base_sha = sc.head_sha()
+    daemon = X.FakeDaemon(tmp_path)
+    daemon.install(monkeypatch)
+    daemon.refuse_start(at=[1])
     q_before = sc.paths.questioner_findings.file.read_bytes()
-    fault = BoxFault("the daemon refused the create")
-    start = X.StartFault(fault)
     events: list[str] = []
+    watch = X.ScanWatch(daemon, events)
 
     got = X.caught(lambda: drains.author_drain(
-        sc.paths, branch=RepoBranch(sc.repo, events=events), **start.drain_seams()))
+        sc.paths, branch=RepoBranch(sc.repo, events=events), scrub=watch))
 
     assert isinstance(got, BoxFault), got
-    assert X.carries(got, fault), X.chain(got)
-    assert len(start.requests) == 1, f"{len(start.requests)} box(es) asked for after a box fault"
+    assert daemon.steps().count("start") == 1, f"a start was asked after a box fault: {daemon.steps()}"
     assert not any(e.startswith("finish_batch:") for e in events), events
     assert sc.head_sha() == sc.base_sha, "a commit landed after a box fault"
+    watch.assert_scanned_once_the_box_was_gone()
     if queued == "questioner-only":
         assert _stuck_classes(sc.paths, "questioner_findings") == ["BoxFault"]
         return
-    assert sc.paths.questioner_findings.file.read_bytes() == q_before, (
-        "the questioner's queue moved after the findings curator's box fault")
     assert _stuck_classes(sc.paths, "findings") == ["BoxFault"], (
         "the box fault was not the findings curator's own")
+    assert sc.paths.questioner_findings.file.read_bytes() == q_before, (
+        "the questioner's queue moved after the findings curator's box fault")
     assert _stuck_classes(sc.paths, "questioner_findings") == [], (
         "the questioner curator was served after the findings curator's box fault")
     assert sc.pending_by_id()["f1"].get("attempts") is None, "f1 was bumped for a box fault"
 
 
 # ---------------------------------------------------------------------------------------
-# O4 (E5): a box fault in either curator halts the tick
+# O4 (D3): a box fault in either curator halts the tick
 # ---------------------------------------------------------------------------------------
 
 
@@ -678,49 +708,68 @@ def test_a_box_fault_from_the_first_curators_step_halts_the_drain(tmp_path: Path
 
 #: Where a `BoxFault` comes from, in the curator that faults:
 #: - `spawn`: the spawn itself raises it, after leaving its lesson;
-#: - `start`: its run's start (the box would not come up), before the spawn;
-#: - `alias-ban`: its run's start finds the link ban not in force (`AliasBanNotInForce`, which the
-#:   source surfaces as a `BoxFault` chained to it);
-#: - `stop`: its run's teardown, after the spawn returned;
-#: - `repair-spawn` / `repair-start` / `repair-stop`: the same in the repair's run (the lessons
-#:   verdict BAD on pass 1, so the repair runs; its run is the second).
-FIRST_CURATOR_SOURCES = ["spawn", "start", "alias-ban", "stop", "repair-spawn", "repair-start",
-                         "repair-stop"]
-SECOND_CURATOR_SOURCES = ["spawn", "start", "alias-ban", "stop"]
+#: - `start`: its run's `docker start` is refused, before the spawn;
+#: - `start-unproven`: the start answers 0 and the box stays stopped;
+#: - `stop`: its run's stop is refused after the spawn returned;
+#: - `stop-unproven`: the stop answers 0 and the box keeps running;
+#: - `repair-…`: the same in the repair's run (the lessons verdict BAD on pass 1, so the repair
+#:   runs; its run is the second).
+FIRST_CURATOR_SOURCES = ["spawn", "start", "start-unproven", "stop", "stop-unproven",
+                         "repair-spawn", "repair-start", "repair-stop"]
+SECOND_CURATOR_SOURCES = ["spawn", "start", "stop"]
 
 
 @dataclasses.dataclass
 class Faulted:
-    """A tick one of whose curators meets a box fault, its fakes, its recorded box seams, and
-    the exception injected."""
+    """A tick one of whose curators meets a box fault, its fakes, the daemon and its box, and
+    the exception injected (`None` for a fault the daemon makes)."""
 
     t: Tick
     curator: S.FakeCurator
     q_curator: S.FakeCurator
     verifier: S.FakeVerifier
     repair: S.FakeRepair
-    runs: X.Runs
-    fault: BaseException
+    daemon: X.FakeDaemon
+    box: BoxExecutor | None
+    fault: BaseException | None
+
+
+def _set_daemon_fault(daemon: X.FakeDaemon, kind: str, nth: int) -> None:
+    """The `nth` start or stop (from 1) faults as `kind` says."""
+    if kind == "start":
+        daemon.refuse_start(at=[nth])
+    elif kind == "start-unproven":
+        daemon.start_takes_no_effect(at=[nth])
+    elif kind == "stop":
+        daemon.refuse_stop(at=[nth])
+    elif kind == "stop-unproven":
+        daemon.stop_takes_no_effect(at=[nth])
 
 
 def _box_fault_scene(  # noqa: PLR0913 — one tick, every fault a row varies
-        tmp_path: Path, source: str, *, in_curator: str = "author",
+        tmp_path: Path, monkeypatch: Any, source: str, *, in_curator: str = "author",
         seed_corpus: dict[str, str] | None = None, plant: Callable[..., None] | None = None,
-        log: list | None = None,
+        log: list | None = None, stops_before: int = 0,
 ) -> Faulted:
     """A tick whose lessons curator leaves `a.md` (citing f1) and whose questioner curator leaves
     `q.md` (citing w1), each committing it unless something faults. The curator `in_curator`
     meets a box fault from `source` (`FIRST_CURATOR_SOURCES`), after running `plant` (the box's
-    own act) in its spawn."""
+    own act) in its spawn. `stops_before`: the stops the daemon answers before the first run's
+    (the drain's post-create stop, through `author_drain`, which starts a box of its own: then
+    the daemon holds nothing to begin with, and `box` is `None`)."""
+    if stops_before:
+        daemon, box = X.FakeDaemon(tmp_path), None
+        daemon.install(monkeypatch)
+    else:
+        daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
     log = log if log is not None else []
-    fault: BaseException = (AliasBanNotInForce("the alias ban is not in force under runsc")
-                            if source == "alias-ban"
-                            else BoxFault(f"the box failed ({source})"))
+    fault: BaseException | None = BoxFault(f"the box failed ({source})") if source.endswith("spawn") else None
 
     def act(rows: Any, batch_id: str, cfg: Any) -> None:
         if plant is not None:
             plant(rows, batch_id, cfg)
         if source == "spawn":
+            assert fault is not None
             raise fault
 
     first = in_curator == "author"
@@ -736,20 +785,17 @@ def _box_fault_scene(  # noqa: PLR0913 — one tick, every fault a row varies
     # follows the lessons curator's single run.
     nth = 2 if (repairing or not first) else 1
     kind = source.removeprefix("repair-")
-    runs = X.Runs(log, start_faults={nth: fault} if kind in ("start", "alias-ban") else None,
-                  stop_faults={nth: fault} if kind == "stop" else None)
+    _set_daemon_fault(daemon, kind, nth + (stops_before if kind.startswith("stop") else 0))
     return Faulted(t=t, curator=curator, q_curator=q_curator, verifier=verifier, repair=repair,
-                   runs=runs, fault=fault)
+                   daemon=daemon, box=box, fault=fault)
 
 
-def _assert_is_the_box_fault(got: BaseException, f: Faulted) -> None:
-    """The drain's `BoxFault` is the injected one, or — for a link-ban failure — a `BoxFault`
-    chained to it; either may come re-raised with the cut commit appended (E6)."""
-    if isinstance(f.fault, BoxFault):
-        assert X.carries(got, f.fault), (got, X.chain(got))
-        return
+def _assert_is_the_box_fault(got: BaseException | None, f: Faulted) -> None:
+    """The drain's `BoxFault` is the injected one, or one the daemon's fault made."""
     assert isinstance(got, BoxFault), got
-    assert f.fault in X.chain(got), (got, X.chain(got))
+    if f.fault is not None:
+        assert got is f.fault, (got, X.chain(got))
+    assert X.POINTER not in str(got), f"a mid-batch box fault got a build pointer: {got}"
 
 
 def _assert_halted_after_the_first_curator(t: Tick, q_curator: S.FakeCurator,
@@ -777,23 +823,23 @@ def _assert_halted_in_the_second_curator(t: Tick) -> None:
 
 @pytest.mark.parametrize("source", FIRST_CURATOR_SOURCES)
 def test_a_box_fault_in_the_first_curator_halts_the_tick_before_the_second(
-        tmp_path: Path, source: str):
+        tmp_path: Path, monkeypatch, source: str):
     """Through `_drain_curators` and both real curators: a box fault in the lessons curator —
-    from its spawn, its run's start (a box that won't come up, or a link ban not in force), its
-    run's teardown, or the same in the repair's run — escapes the drain as a `BoxFault`. The
-    questioner curator is never triggered, nothing is committed, f1 is not bumped and its stuck
-    record names `BoxFault`; the curator's lesson is undone. A start fault runs no spawn; after a
-    fault in the repair's run, nothing is judged again; every box that started was stopped."""
-    f = _box_fault_scene(tmp_path, source)
+    from its spawn, its run's start (refused, or not taking) or its run's stop (refused, or not
+    taking), or the same in the repair's run — escapes the drain as a `BoxFault`. The questioner
+    curator is never triggered, nothing is committed, f1 is not bumped and its stuck record names
+    `BoxFault`; the curator's lesson is undone. A start fault runs no spawn; after a fault in the
+    repair's run, nothing is judged again; every start was followed by a stop."""
+    f = _box_fault_scene(tmp_path, monkeypatch, source)
     t = f.t
     q_queued = _queued(t.paths)[1]
 
-    got = X.caught(lambda: drains._drain_curators(t.paths, t.trigger, box=f.runs.source(NAME)))
+    got = X.caught(lambda: drains._drain_curators(t.paths, t.trigger, box=f.box))
 
     _assert_is_the_box_fault(got, f)
     _assert_halted_after_the_first_curator(t, f.q_curator, q_queued)
     kind = source.removeprefix("repair-")
-    assert len(f.curator.calls) == (0 if source in ("start", "alias-ban") else 1)
+    assert len(f.curator.calls) == (0 if source.startswith("start") else 1)
     assert not (t.sc.corpus / "a.md").exists(), "the curator's lesson was not undone"
     if source.startswith("repair-"):
         assert len(f.repair.calls) == (0 if kind == "start" else 1)
@@ -801,31 +847,32 @@ def test_a_box_fault_in_the_first_curator_halts_the_tick_before_the_second(
             "the tree was judged again after the repair's box fault")
     else:
         assert f.repair.calls == []
-    assert len(f.runs.stopped) == len(f.runs.boxes), "a box that started was never stopped"
+    steps = f.daemon.steps()
+    assert steps.count("stop") >= steps.count("start"), f"a start was never stopped: {steps}"
 
 
 @pytest.mark.parametrize("source", SECOND_CURATOR_SOURCES)
-def test_a_box_fault_in_the_second_curator_halts_the_drain(tmp_path: Path, source: str):
+def test_a_box_fault_in_the_second_curator_halts_the_drain(tmp_path: Path, monkeypatch,
+                                                           source: str):
     """The same faults in the questioner curator, which runs second: its `BoxFault` escapes
     `_drain_curators` too, so `finish_batch` is never reached. The lessons curator's commit
     stands; the questioner's lesson is undone, w1 is not bumped and its stuck record names
     `BoxFault`."""
-    f = _box_fault_scene(tmp_path, source, in_curator="questioner_curator")
+    f = _box_fault_scene(tmp_path, monkeypatch, source, in_curator="questioner_curator")
 
-    got = X.caught(lambda: drains._drain_curators(f.t.paths, f.t.trigger,
-                                                  box=f.runs.source(NAME)))
+    got = X.caught(lambda: drains._drain_curators(f.t.paths, f.t.trigger, box=f.box))
 
     _assert_is_the_box_fault(got, f)
     _assert_halted_in_the_second_curator(f.t)
-    assert len(f.q_curator.calls) == (0 if source in ("start", "alias-ban") else 1)
+    assert len(f.q_curator.calls) == (0 if source == "start" else 1)
 
 
 #: Faults that are not box faults, raised by the lessons spawn after it leaves its lesson. All but
 #: `GitError` are non-retiring, contained by `_drain_one_curator` (N4: `StageAbort`,
 #: `FatalConfigError`, `RegistryError` keep their behaviour); `GitError` retires inside its own
 #: tick (f1 bumped). Either way the second curator runs. `SystemExit` (a spawn calling
-#: `sys.exit`) is neither an `Exception` nor an interrupt, and is contained too: its run's box
-#: must still come down before the second curator's run starts.
+#: `sys.exit`) is neither an `Exception` nor an interrupt, and `_drain_one_curator` contains it
+#: too (as on main): its run's box must still be stopped before the second curator's run starts.
 CONTAINED_FAULTS = [RuntimeError, StageAbort, FatalConfigError, RegistryError, GitError,
                     SystemExit]
 
@@ -836,27 +883,26 @@ def _not_a_box_fault(cls: type[BaseException], message: str) -> BaseException:
 
 @pytest.mark.parametrize("fault", CONTAINED_FAULTS, ids=lambda c: c.__name__)
 def test_control_a_non_box_fault_in_the_first_curator_is_contained_and_the_second_runs(
-        tmp_path: Path, fault: type[BaseException]):
+        tmp_path: Path, monkeypatch, fault: type[BaseException]):
     """The lessons spawn leaves `a.md` and raises a fault that is not a box fault: handled as
-    before (its run's box removed, whatever the class). `_drain_curators` returns, the questioner curator runs (in a box of its own) and
-    commits, and the findings channel's stuck record names the fault (f1 bumped only by the
-    retiring `GitError`)."""
-    log: list = []
+    before, its run's box stopped whatever the class. `_drain_curators` returns, the questioner
+    curator runs (in a window of its own) and commits, and the findings channel's stuck record
+    names the fault (f1 bumped only by the retiring `GitError`)."""
+    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
 
     def boom(*_a: Any) -> None:
         raise _not_a_box_fault(fault, "not a box fault")
 
     curator = S.FakeCurator(writes={"a.md": S.lesson("f1")}, also=boom)
     q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")})
-    t = _tick(tmp_path, log, curator=curator, q_curator=q_curator)
-    runs = X.Runs(log)
+    t = _tick(tmp_path, [], curator=curator, q_curator=q_curator)
 
-    drains._drain_curators(t.paths, t.trigger, box=runs.source(NAME))
+    drains._drain_curators(t.paths, t.trigger, box=box)
 
     assert t.modules() == ["author", "questioner_curator"]
     assert len(q_curator.calls) == 1
-    assert len(runs.boxes) == 2, runs.boxes
-    assert runs.alive == []
+    assert daemon.steps().count("start") == 2, daemon.steps()
+    assert daemon.status(NAME) == "exited", "a run left the box running"
     assert t.sc.head_text(_questioner_rel(t, "q.md")) == S.lesson("w1")
     assert t.sc.head_text(_rel(t.sc, "a.md")) is None
     assert _stuck_classes(t.paths, "findings") == [fault.__name__]
@@ -898,21 +944,20 @@ def _undo_fault_logged(caplog: Any) -> bool:
 
 @pytest.mark.parametrize("source", ["spawn", "stop"])
 def test_a_box_fault_outranks_an_undo_fault_and_the_second_curator_never_runs(
-        tmp_path: Path, caplog, source: str):
+        tmp_path: Path, monkeypatch, caplog, source: str):
     """The box swaps the corpus folder `sub/` (holding a committed lesson) for a link, then a box
-    fault follows (the spawn raises `BoxFault`, or its run's teardown does with nothing else in
+    fault follows (the spawn raises `BoxFault`, or its run's stop is refused with nothing else in
     flight). The undo's write-back of `sub/lesson.md` raises `OSError(ELOOP)`; with a `BoxFault`
     in flight that is logged and suppressed, so the `BoxFault` escapes `_drain_curators` rather
     than an `OSError` that `_run_curator_module` would swallow. The questioner curator never runs,
     nothing commits, f1 is not bumped, and its stuck record names `BoxFault`. Control: the next
     row."""
     caplog.set_level(logging.WARNING)
-    f = _box_fault_scene(tmp_path, source, seed_corpus=SEEDED_SUB,
+    f = _box_fault_scene(tmp_path, monkeypatch, source, seed_corpus=SEEDED_SUB,
                          plant=_swap_sub_for_a_link(tmp_path / "outside" / "moved-sub"))
     q_queued = _queued(f.t.paths)[1]
 
-    got = X.caught(lambda: drains._drain_curators(f.t.paths, f.t.trigger,
-                                                  box=f.runs.source(NAME)))
+    got = X.caught(lambda: drains._drain_curators(f.t.paths, f.t.trigger, box=f.box))
 
     _assert_is_the_box_fault(got, f)
     _assert_halted_after_the_first_curator(f.t, f.q_curator, q_queued)
@@ -928,11 +973,12 @@ UNDO_CONTROL_FAULTS = [S.author_error, RuntimeError, GitError, StageAbort, Fatal
 @pytest.mark.parametrize("in_flight", UNDO_CONTROL_FAULTS,
                          ids=lambda c: "AuthorError" if c is S.author_error else c.__name__)
 def test_control_an_undo_fault_still_replaces_a_non_box_fault(
-        tmp_path: Path, in_flight: Callable[[str], Exception]):
+        tmp_path: Path, monkeypatch, in_flight: Callable[[str], Exception]):
     """The same swap, with the curator raising a fault that is not a box fault (retiring or not,
     systemic or not): the undo's `OSError(ELOOP)` still replaces it (#1134 O5.3), is recorded
     stuck as `OSError` with f1 not bumped, and `_run_curator_module` contains it, so
     `_drain_curators` returns and the questioner curator runs and commits."""
+    _daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
 
     def plant_then_fail(rows: Any, batch_id: str, cfg: Any) -> None:
         _swap_sub_for_a_link(tmp_path / "outside" / "moved-sub")(rows, batch_id, cfg)
@@ -944,7 +990,7 @@ def test_control_an_undo_fault_still_replaces_a_non_box_fault(
     q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")})
     t = _tick(tmp_path, [], curator=curator, q_curator=q_curator, seed_corpus=SEEDED_SUB)
 
-    drains._drain_curators(t.paths, t.trigger, box=X.Runs().source(NAME))
+    drains._drain_curators(t.paths, t.trigger, box=box)
 
     assert _stuck_classes(t.paths, "findings") == ["OSError"]
     assert t.sc.pending_by_id()["f1"].get("attempts") is None
@@ -956,13 +1002,11 @@ def test_control_an_undo_fault_still_replaces_a_non_box_fault(
 # O4 through the lane: the box fault escapes `author_drain`, so nothing is delivered
 # ---------------------------------------------------------------------------------------
 
-#: `(source, the curator it faults in)`: the first curator's spawn, start, link ban and
-#: teardown, the repair's teardown, a teardown fault over an undo that faults too, and the
-#: second curator's teardown.
+#: `(source, the curator it faults in)`: the first curator's spawn, start and stop, the
+#: repair's stop, a stop fault over an undo that faults too, and the second curator's stop.
 LANE_FAULTS = [
     pytest.param("spawn", "author", id="spawn"),
     pytest.param("start", "author", id="start"),
-    pytest.param("alias-ban", "author", id="alias-ban"),
     pytest.param("stop", "author", id="stop"),
     pytest.param("repair-stop", "author", id="repair-stop"),
     pytest.param("stop-over-an-undo-fault", "author", id="stop-over-an-undo-fault"),
@@ -970,31 +1014,39 @@ LANE_FAULTS = [
 ]
 
 
-def _lane(t: Tick, runs: X.Runs) -> tuple[Callable[[], int], list[str]]:
-    rec = B.BoxLifecycleRecorder()
-    branch = RepoBranch(t.sc.repo, events=rec.events)
+def _lane(t: Tick, daemon: X.FakeDaemon) -> tuple[Callable[[], int], list[str], X.ScanWatch]:
+    """`author_drain` over the tick's worktree, its box started by `HeldStart` over `daemon`
+    and its post-create stop, runs and removal reaching the daemon on `PATH`."""
+    events: list[str] = []
+    branch = RepoBranch(t.sc.repo, events=events)
+    watch = X.ScanWatch(daemon, events)
+    t.daemon = daemon
 
     def run() -> int:
         return drains.author_drain(t.paths, trigger_author=t.trigger, branch=branch,
-                                   start_box=runs.start, stop_box=runs.stop, scrub=rec.scrub)
+                                   start_box=X.HeldStart(daemon), scrub=watch)
 
-    return run, rec.events
+    return run, events, watch
 
 
 def test_control_author_drain_delivers_a_batch_with_no_box_fault(tmp_path: Path, monkeypatch):
-    """The lane rows' control: the same tick, nothing faults. No box is started before the
-    first curator is triggered; each curator's spawn gets a box of its own; both curators commit
-    and `finish_batch` delivers the batch."""
+    """The lane rows' control: the same tick, nothing faults. The box is created at batch start
+    and stopped before the first curator is triggered; each curator's spawn gets a window of its
+    own; both curators commit, the box is removed before the scan, and `finish_batch` delivers
+    the batch."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-    log: list = []
+    daemon = X.FakeDaemon(tmp_path)
+    daemon.install(monkeypatch)
+    log = X.Journal(daemon)
     t = _tick(tmp_path, log, curator=S.FakeCurator(writes={"a.md": S.lesson("f1")}),
               q_curator=S.FakeCurator(writes={"q.md": S.lesson("w1")}))
-    run, events = _lane(t, X.Runs(log))
+    run, events, watch = _lane(t, daemon)
 
     assert run() == 0
-    kinds = _kinds(log)
-    assert kinds.index("trigger") < kinds.index("enter"), f"a box started before any curator: {kinds}"
-    X.assert_each_run_holds_exactly(log, ["agent", "agent"], SPAWN_KINDS)
+    steps = daemon.steps()
+    assert steps.index("start_box") < steps.index("stop") < steps.index("trigger:author"), steps
+    log.assert_runs_hold_exactly(["agent", "agent"], SPAWN_KINDS)
+    watch.assert_scanned_once_the_box_was_gone()
     assert t.modules() == ["author", "questioner_curator"]
     assert any(e.startswith("finish_batch:") for e in events), events
     assert t.sc.head_text(_rel(t.sc, "a.md")) == S.lesson("f1")
@@ -1004,26 +1056,27 @@ def test_control_author_drain_delivers_a_batch_with_no_box_fault(tmp_path: Path,
 @pytest.mark.parametrize(("source", "in_curator"), LANE_FAULTS)
 def test_a_box_fault_escapes_author_drain_with_nothing_delivered(
         tmp_path: Path, monkeypatch, source: str, in_curator: str):
-    """`author_drain` over the real worktree (the trigger, the branch and the box seams
-    injected): a box fault in either curator escapes `author_drain` as a `BoxFault` carrying the
-    injected one. The tree is scanned and the worktree cleaned up, but `finish_batch` (push and
-    PR) never runs. In the first curator: the second is never triggered, nothing is committed,
-    f1 is not bumped. In the second: its lesson is undone and w1 not bumped. Control: the row
-    above."""
+    """`author_drain` over the real worktree (the trigger, the branch, the batch start and the
+    scan injected): a box fault in either curator escapes `author_drain` as a `BoxFault`, with no
+    build pointer. The box is removed, then the tree is scanned, and the worktree cleaned up,
+    but `finish_batch` (push and PR) never runs. In the first curator: the second is never
+    triggered, nothing is committed, f1 is not bumped. In the second: its lesson is undone and
+    w1 not bumped. Control: the row above."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     undo_fault = source == "stop-over-an-undo-fault"
     f = _box_fault_scene(
-        tmp_path, "stop" if undo_fault else source, in_curator=in_curator,
+        tmp_path, monkeypatch, "stop" if undo_fault else source, in_curator=in_curator,
         seed_corpus=SEEDED_SUB if undo_fault else None,
-        plant=_swap_sub_for_a_link(tmp_path / "outside" / "moved-sub") if undo_fault else None)
+        plant=_swap_sub_for_a_link(tmp_path / "outside" / "moved-sub") if undo_fault else None,
+        stops_before=1)
     q_queued = _queued(f.t.paths)[1]
-    run, events = _lane(f.t, f.runs)
+    run, events, watch = _lane(f.t, f.daemon)
 
     got = X.caught(run)
 
     _assert_is_the_box_fault(got, f)
     assert not any(e.startswith("finish_batch:") for e in events), events
-    assert any(e.startswith("scrub:") for e in events), events
+    watch.assert_scanned_once_the_box_was_gone()
     assert "cleanup" in events, events
     if in_curator == "author":
         _assert_halted_after_the_first_curator(f.t, f.q_curator, q_queued)
@@ -1031,78 +1084,47 @@ def test_a_box_fault_escapes_author_drain_with_nothing_delivered(
         _assert_halted_in_the_second_curator(f.t)
 
 
-def test_the_escaping_box_fault_names_the_cut_commit_not_the_first_curators_commit(
-        tmp_path: Path, monkeypatch):
-    """The lessons curator commits (HEAD moves past the commit the worktree was cut from); the
-    questioner curator's start then faults. The `BoxFault` escaping `author_drain` names
-    `origin/main @ <the cut commit>`, never the lessons commit."""
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-    f = _box_fault_scene(tmp_path, "start", in_curator="questioner_curator")
-    cut = f.t.sc.base_sha
-    run, events = _lane(f.t, f.runs)
-
-    got = X.caught(run)
-
-    assert isinstance(got, BoxFault), got
-    assert got.__cause__ is f.fault, X.chain(got)
-    head = f.t.sc.head_sha()
-    assert head != cut, "the lessons curator never committed, so the row is vacuous"
-    pointer = re.search(r"origin/main @ ([0-9a-f]{7,40})", str(got))
-    assert pointer, str(got)
-    assert cut.startswith(pointer.group(1)), (pointer.group(1), cut)
-    assert not head.startswith(pointer.group(1)), "the pointer names the lessons commit"
-    assert not any(e.startswith("finish_batch:") for e in events), events
-
-
 # ---------------------------------------------------------------------------------------
-# O1 / O3': a process the spawn left in its box dies with the box
+# O1 / O3': a process the spawn left in its box dies with its run
 # ---------------------------------------------------------------------------------------
 
 
-class SimBox:
-    """A box as the lane drives it, simulated as a `BoxSource`'s start/stop pair, with the
-    processes a spawn leaves in it. Each start is a fresh box; each stop removes the box and every
-    process in it, as the design does. With `per_batch`, a stop removes nothing: one box for the
-    whole batch, the design this replaced (the race control).
+class LeftProcess:
+    """A process the spawn leaves in the box, simulated over the fake daemon: it lives while the
+    container keeps running in the boot it was started in, and dies with the run's stop (a
+    later start is a fresh boot, as a stopped container's processes do not come back). With
+    `outlives_its_run` it acts regardless (the control: what a process that survived would do).
 
-    A process gets its turn whenever the host asks a placement (`cfg.tree_for`), which the tick
-    first does for the commit, after the judge: the schedule on which a live process beats the
-    commit. `turns_after_removal` counts the turns that came after a removal took a process
-    with it. With `act_at_stop`, the processes also get a turn on the run's way out, while the
-    box is still up."""
+    It gets its turn whenever the host asks a placement (`cfg.tree_for`), which the tick first
+    does for the commit, after the judge: the schedule on which a live process beats the
+    commit. `turns` counts the turns it was given; `acts` what it did."""
 
-    def __init__(self, *, per_batch: bool = False, act_at_stop: bool = False) -> None:
-        self.per_batch, self.act_at_stop = per_batch, act_at_stop
-        self.up = False
-        self.processes: list[Callable[[], None]] = []
+    def __init__(self, daemon: X.FakeDaemon, *, outlives_its_run: bool = False) -> None:
+        self.daemon, self.outlives = daemon, outlives_its_run
+        self.boot: int | None = None
+        self.act: Callable[[], None] | None = None
         self.acts: list[str] = []
-        self.removed_with_processes = 0
-        self.turns_after_removal = 0
-        self.starts = 0
+        self.turns = 0
 
-    def start(self, request: Any, *_a: Any, **_kw: Any) -> X.RunBox:
-        self.starts += 1
-        self.up = True
-        return X.RunBox(name=request.name, n=self.starts)
+    def leave(self, act: Callable[[], None]) -> None:
+        """Started by the spawn: in the box's current boot, which must be running."""
+        assert self.daemon.status(NAME) == "running", "the spawn ran with no box running"
+        self.boot = self.daemon.boots()
+        self.act = act
 
-    def stop(self, _box: Any, *_a: Any, **_kw: Any) -> None:
-        if self.act_at_stop:
-            self.turn()
-        if self.per_batch:
-            return
-        if self.processes:
-            self.removed_with_processes += 1
-        self.processes.clear()
-        self.up = False
+    def alive(self) -> bool:
+        if self.act is None:
+            return False
+        if self.outlives:
+            return True
+        return self.daemon.status(NAME) == "running" and self.daemon.boots() == self.boot
 
     def turn(self) -> None:
-        if self.removed_with_processes:
-            self.turns_after_removal += 1
-        for process in list(self.processes):
-            process()
-
-    def source(self) -> Any:
-        return X.box_source(X.request(NAME), start_box=self.start, stop_box=self.stop)
+        if self.act is None or self.acts:
+            return
+        self.turns += 1
+        if self.alive():
+            self.act()
 
 
 #: What the spawn leaves at `a.md`, and what the verifier judges.
@@ -1110,93 +1132,96 @@ SPAWNED = S.lesson("f1", body="the lesson the verifier judged")
 #: What the process left in the box writes there: it cites f1 too, so it would pass every rule
 #: the commit applies without a verifier.
 EVIL = S.lesson("f1", body="rewritten by a process the spawn left behind")
-#: What the process writes while its run's box is still up: judged like anything else.
+#: What the box writes while its run's box is still up: judged like anything else.
 VARIANT = S.lesson("f1", body="rewritten while the box was still up")
 
 
-def _leave_a_writer(box: SimBox, writes: str, outside: Path) -> Callable[..., None]:
-    """The spawn's last act: leave a process in the box that, once, replaces `a.md` with
-    `EVIL` (`rewrite`), or with a symlink to an outside file holding it (`symlink`), or rewrites
-    it to `VARIANT` (`variant`)."""
+def _leave_a_writer(process: LeftProcess, writes: str, outside: Path) -> Callable[..., None]:
+    """The spawn's last act: leave a process in the box that, once, replaces `a.md` with `EVIL`
+    (`rewrite`), or with a symlink to an outside file holding it (`symlink`)."""
 
     def leave(_rows: Any, _batch_id: str, cfg: Any) -> None:
         at = cfg.corpus_dir / "a.md"
 
-        def writer() -> None:
-            if box.acts:
-                return
+        def act() -> None:
             if writes == "symlink":
                 target = outside / "evil.md"
                 put(target, EVIL)
                 plant_link(at, target)
             else:
-                put(at, VARIANT if writes == "variant" else EVIL)
-            box.acts.append(writes)
+                put(at, EVIL)
+            process.acts.append(writes)
 
-        assert box.up, "the spawn ran with no box up"
-        box.processes.append(writer)
+        process.leave(act)
 
     return leave
 
 
-def _o1_tick(tmp_path: Path, box: SimBox, writes: str) -> tuple[Tick, S.FakeVerifier]:
-    curator = S.FakeCurator(writes={"a.md": SPAWNED},
-                            also=_leave_a_writer(box, writes, tmp_path / "outside"))
+def _o1_tick(tmp_path: Path, process: LeftProcess, writes: str | None
+             ) -> tuple[Tick, S.FakeVerifier]:
+    leave = _leave_a_writer(process, writes, tmp_path / "outside") if writes else None
+    curator = S.FakeCurator(writes={"a.md": SPAWNED}, also=leave)
     verifier = S.FakeVerifier()
     t = _tick(tmp_path, [], curator=curator, q_curator=S.FakeCurator(), verifier=verifier,
-              q_rows=(), on_place=box.turn)
+              q_rows=(), on_place=process.turn)
     return t, verifier
 
 
 @pytest.mark.parametrize("writes", ["rewrite", "symlink"])
-def test_a_process_left_in_the_box_cannot_change_a_judged_lesson(tmp_path: Path, writes: str):
-    """`_drain_curators(..., box=<a source over the simulated box>)`: the spawn leaves `a.md` and
-    a process that would replace it (new bytes, or a symlink) at the commit's placement, after
-    the judge. The spawn's run removed its box, and the process with it, so the process never
-    acts and HEAD holds the bytes the verifier judged, as a plain file. Control: the next row,
-    where the same process wins with one box for the batch."""
-    box = SimBox()
-    t, verifier = _o1_tick(tmp_path, box, writes)
+def test_a_process_left_in_the_box_cannot_change_a_judged_lesson(tmp_path: Path, monkeypatch,
+                                                                 writes: str):
+    """`_drain_curators(..., box=<the batch's stopped box>)`: the spawn leaves `a.md` and a
+    process that would replace it (new bytes, or a symlink) at the commit's placement, after the
+    judge. The spawn's run stopped the box, and the process with it, so the process never acts
+    and HEAD holds the bytes the verifier judged, as a plain file. Control: the next row, where
+    the same process acts if it outlives its run."""
+    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    process = LeftProcess(daemon)
+    t, verifier = _o1_tick(tmp_path, process, writes)
 
-    drains._drain_curators(t.paths, t.trigger, box=box.source())
+    drains._drain_curators(t.paths, t.trigger, box=box)
 
     assert verifier.texts_for("a.md") == [SPAWNED]
-    assert box.removed_with_processes == 1, "no process was left in the box, so the row is vacuous"
-    assert box.turns_after_removal >= 1, "the process never had a turn after its run, so the row is vacuous"
-    assert box.acts == [], "a process outlived its run's box"
+    assert process.act is not None, "no process was left in the box, so the row is vacuous"
+    assert process.turns >= 1, "the process never had a turn after its run, so the row is vacuous"
+    assert process.acts == [], "a process outlived its run's stop"
     assert t.sc.head_text(_rel(t.sc, "a.md")) == SPAWNED
-    assert X.head_mode(t.sc.repo, _rel(t.sc, "a.md")) == "100644"
+    assert _git.git(["ls-tree", "HEAD", "--", _rel(t.sc, "a.md")],  # lint-oracle: ok — reads HEAD as a git user would
+                    cwd=t.sc.repo).split(" ", 1)[0] == "100644"
 
 
 @pytest.mark.parametrize("writes", ["rewrite", "symlink"])
-def test_control_with_one_box_for_the_batch_the_process_races_the_commit(
-        tmp_path: Path, writes: str):
-    """The same tick with one box for the batch (a stop removes nothing): the process acts at the
-    commit's placement, after the judge, and HEAD holds what it wrote (a symlink commits as one),
-    which the verifier never saw. The race per-run removal closes is real against this
-    machinery."""
-    box = SimBox(per_batch=True)
-    t, verifier = _o1_tick(tmp_path, box, writes)
+def test_control_a_process_that_outlived_its_run_would_race_the_commit(
+        tmp_path: Path, monkeypatch, writes: str):
+    """The same tick with a process that survives its run: it acts at the commit's placement,
+    after the judge, and HEAD holds what it wrote (a symlink commits as one), which the verifier
+    never saw. The race the run's stop closes is real against this machinery."""
+    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    process = LeftProcess(daemon, outlives_its_run=True)
+    t, verifier = _o1_tick(tmp_path, process, writes)
 
-    drains._drain_curators(t.paths, t.trigger, box=box.source())
+    drains._drain_curators(t.paths, t.trigger, box=box)
 
     assert verifier.texts_for("a.md") == [SPAWNED]
-    assert box.acts == [writes]
+    assert process.acts == [writes]
+    mode = _git.git(["ls-tree", "HEAD", "--", _rel(t.sc, "a.md")],  # lint-oracle: ok — reads HEAD as a git user would
+                    cwd=t.sc.repo).split(" ", 1)[0]
     if writes == "symlink":
-        assert X.head_mode(t.sc.repo, _rel(t.sc, "a.md")) == "120000"
+        assert mode == "120000"
     else:
         assert t.sc.head_text(_rel(t.sc, "a.md")) == EVIL
 
 
-def test_what_the_box_writes_during_its_own_run_is_what_is_judged(tmp_path: Path):
-    """The process acts on its run's way out, while the box is still up: the settle and the judge
-    come after the box is removed, so the verifier judges what it wrote, and that is what HEAD
+def test_what_the_box_writes_during_its_own_run_is_what_is_judged(tmp_path: Path, monkeypatch):
+    """The box rewrites `a.md` on its run's way out, while it is still up: the settle and the
+    judge come after the stop, so the verifier judges what it wrote, and that is what HEAD
     holds."""
-    box = SimBox(act_at_stop=True)
-    t, verifier = _o1_tick(tmp_path, box, "variant")
+    daemon, box = X.boxed(tmp_path, monkeypatch, NAME)
+    process = LeftProcess(daemon)
+    t, verifier = _o1_tick(tmp_path, process, None)
+    daemon.on_stop(t.sc.corpus / "a.md", VARIANT, at=1)
 
-    drains._drain_curators(t.paths, t.trigger, box=box.source())
+    drains._drain_curators(t.paths, t.trigger, box=box)
 
-    assert box.acts == ["variant"]
     assert verifier.texts_for("a.md") == [VARIANT]
     assert t.sc.head_text(_rel(t.sc, "a.md")) == VARIANT

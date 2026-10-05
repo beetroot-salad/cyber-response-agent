@@ -317,9 +317,9 @@ class FakeBox:
 
     name: str = "box-665"
     request: Any = None
-    #: `False`: no real container stands behind it, so a box source's batch-end teardown
-    #: (#1195 `BoxSource.teardown`) asks no daemon about it; `True` would send the real docker
-    #: after a container that does not exist.
+    #: `False`: no real container stands behind it, so the drain's post-create stop and each
+    #: run's start and stop (#1195 `stop_run_box`/`box_for_run`) ask no daemon about it; `True`
+    #: would send the real docker after a container that does not exist.
     sandboxed: bool = False
 
 

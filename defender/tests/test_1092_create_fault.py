@@ -370,18 +370,13 @@ def test_the_drain_lanes_missing_image_fault_names_the_cut_commit_and_a_checkout
         with pytest.raises(BoxFault) as e:
             _run_worktree_batch(
                 loop_paths(tmp_path), branch, label=AUTHOR_DRAIN_LABEL, has_work=lambda p: True,
-                do_work=_one_agent_run, start_box=starter, stop_box=rec.stop_box,
+                do_work=lambda *a, **k: None, start_box=starter, stop_box=rec.stop_box,
                 scrub=rec.scrub,
             )
         assert "cleanup" in rec.events, rec.events
         assert len(starter.requests) == 1
         assert not Path(starter.requests[0].workdir).exists(), "the worktree survived cleanup"
         return str(e.value), branch, starter
-
-    def _one_agent_run(_wt_paths, *, box=None):
-        # #1195: the drain starts no box at batch start; the lane's first agent run does.
-        with box_mod.box_for_run(box):
-            pass
 
     message, branch, starter = drive(NoSuchImageDocker())
     wt = Path(starter.requests[0].workdir)

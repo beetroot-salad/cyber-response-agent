@@ -1,39 +1,53 @@
-"""Shared fakes for the #1195 box-per-run rows (both drain lanes). NOT a test module.
+"""Shared fakes for the #1195 rows (both drain lanes), design amendment 2. NOT a test module.
 
-The design under test (`gh issue view 1195`, amendment 2026-10-06): every agent run of a drain
-lane gets its own box, started just before the run and removed just after it, through
-`runtime.box.BoxSource(request, *, start_box=, stop_box=, docker=)`:
+The design under test (`gh issue view 1195`, "Design amendment 2 (2026-10-06): one box per
+batch, stopped between agent runs"): the drain creates and checks its one box at batch start, as
+on main (`start_box`), stops it at once, starts it for each agent run and stops it after, and
+removes it at batch end (`stop_box`: `docker rm -f`) before the scan.
 
-- `.run()` is a context manager: `start_box(request)`, yield the executor, `stop_box(executor)`
-  on every exit; a teardown `BoxFault` is raised with nothing in flight and logged under an
-  in-flight exception; every start failure surfaces as a `BoxFault` (`AliasBanNotInForce`
-  chained as its `__cause__`).
-- `.teardown()` is the batch-end proof the box is gone: no docker call unless a run produced a
-  sandboxed executor; otherwise the container's status, and `docker rm -f` unless it is absent.
-- `runtime.box.box_for_run(source)` yields `None` for `None`, else `source.run()`'s executor.
+- `runtime.box.stop_run_box(box, *, docker=_docker)`: `docker stop -t 0 <name>`, then the status
+  must be `exited`, else `BoxFault`. A no-op for `None` and for a box whose `sandboxed` is false;
+  a box with no `sandboxed` at all fails closed (`BoxFault`).
+- `runtime.box.box_for_run(box, *, docker=_docker)`: the spawn sites' `with`, yielding the same
+  box. On enter the status must be `exited` (else a best-effort stop and `BoxFault`, the body
+  never runs), then `docker start`, then the status must be `running` (else the same). On every
+  exit, `stop_run_box`: its fault is raised with nothing in flight, logged under an in-flight
+  exception.
 
-Every name the design adds is reached at call time (`box_source`, `box_for_run`), so the
+Every name the design adds is reached at call time (`box_for_run`, `stop_run_box`), so the
 modules importing this one collect before it exists and fail at the row that needs it.
 
-Fakes enter through the seams only (`start_box=`, `stop_box=`, `docker=`, a `docker` program
-first on `PATH`); none is patched onto a module.
+The spawn sites and the drain's post-create stop use the DEFAULT docker seam, so a lane row
+runs with the fake daemon (`FakeDaemon`) installed as the `docker` program first on `PATH`.
+Its host steps write into a `Journal`, which marks each into the daemon's own call log and notes
+which containers were running at that moment: so a row can split the log into run windows
+(between a `docker start` and the next `docker stop`) and see that each holds exactly its spawn,
+and that no host step ran beside a running box. Nothing is patched onto a module.
 """
 from __future__ import annotations
 
 import contextlib
-import dataclasses
 import json
 import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
-from defender import _git
+import pytest
+
 from defender.runtime import box as box_mod
-from defender.runtime.box import BoxExecutor, BoxFault, BoxRequest, BoxSpec, Mount, _DockerTransport
+from defender.runtime.box import (
+    AliasBanNotInForce,
+    BoxExecutor,
+    BoxFault,
+    BoxRequest,
+    BoxSpec,
+    Mount,
+    _DockerTransport,
+)
 from defender.tests import _daemon1195 as daemon_mod
 
 DEFENDER = Path(__file__).resolve().parents[1]
@@ -43,24 +57,36 @@ DEFENDER = Path(__file__).resolve().parents[1]
 #: from these under `<wt>/defender`.
 IMAGE_INPUTS = ("box.Dockerfile", "uv.lock", "pyproject.toml")
 
+#: The pointer main's batch-start unwind appends to a `BoxFault` (`_unwind_worktree_start_fault`).
+POINTER = "origin/main @ "
+
+#: What makes the real `start_box` fail at batch start (the `FakeDaemon` knob), and how main
+#: surfaces it: a `BoxFault` with the cut commit appended (`pointed`), or a link ban as
+#: `AliasBanNotInForce`, unpointed.
+BATCH_START_FAULTS = [
+    pytest.param("refuse_create", BoxFault, True, id="create"),
+    pytest.param("refuse_sentinel", BoxFault, True, id="sentinel"),
+    pytest.param("allow_an_alias", AliasBanNotInForce, False, id="link-ban"),
+]
+
 
 # ---------------------------------------------------------------------------------------
 # The design's new names, reached at call time
 # ---------------------------------------------------------------------------------------
 
 
-def box_source(request: BoxRequest, **seams: Any) -> Any:
-    """`runtime.box.BoxSource(request, **seams)`, imported at call time."""
-    from defender.runtime.box import BoxSource
-
-    return BoxSource(request, **seams)
-
-
-def box_for_run(source: Any) -> contextlib.AbstractContextManager[Any]:
-    """`runtime.box.box_for_run(source)`, imported at call time."""
+def box_for_run(box: Any, **seams: Any) -> contextlib.AbstractContextManager[Any]:
+    """`runtime.box.box_for_run(box, **seams)`, imported at call time."""
     from defender.runtime.box import box_for_run as _box_for_run
 
-    return _box_for_run(source)
+    return _box_for_run(box, **seams)
+
+
+def stop_run_box(box: Any, **seams: Any) -> None:
+    """`runtime.box.stop_run_box(box, **seams)`, imported at call time."""
+    from defender.runtime.box import stop_run_box as _stop_run_box
+
+    _stop_run_box(box, **seams)
 
 
 def request(name: str = "defender-drain-t1195", *, writable: Path | None = None,
@@ -77,16 +103,10 @@ def request(name: str = "defender-drain-t1195", *, writable: Path | None = None,
 
 
 def sandboxed(name: str) -> BoxExecutor:
-    """An executor as `start_box` hands one back for a started container: the docker transport,
+    """An executor as `start_box` hands one back for a created container: the docker transport,
     so `sandboxed` is true, named as its container. Nothing is started."""
     spec = BoxSpec()
     return BoxExecutor(spec=spec, transport=_DockerTransport(name, spec), name=name)
-
-
-def head_mode(repo: Path, rel: str) -> str:
-    """The git mode `rel` is committed with at HEAD (`100644`, `100755`, `120000` a link)."""
-    # The code under test runs no `ls-tree`; this reads HEAD as a git user would.
-    return _git.git(["ls-tree", "HEAD", "--", rel], cwd=repo).split(" ", 1)[0]  # lint-oracle: ok — not the code under test's query
 
 
 def chain(exc: BaseException | None) -> list[BaseException]:
@@ -98,9 +118,9 @@ def chain(exc: BaseException | None) -> list[BaseException]:
     return out
 
 
-def carries(got: BaseException, fault: BaseException) -> bool:
-    """`got` is `fault`, or a `BoxFault` raised from it (the drain re-raises a `BoxFault` escaping
-    its work with the cut commit appended, chained to the original)."""
+def carries(got: BaseException | None, fault: BaseException) -> bool:
+    """`got` is `fault`, or a `BoxFault` raised from it (main's batch-start unwind re-raises a
+    `BoxFault` with the cut commit appended, chained to the original)."""
     return got is fault or (isinstance(got, BoxFault) and got.__cause__ is fault)
 
 
@@ -115,142 +135,10 @@ def caught(fn: Callable[[], object]) -> BaseException | None:
 
 
 # ---------------------------------------------------------------------------------------
-# A recorded start/stop pair
-# ---------------------------------------------------------------------------------------
-
-
-@dataclasses.dataclass(eq=False)
-class RunBox:
-    """What a recorded start hands back, one per start: identity is what a row asserts on.
-    `sandboxed` is false unless asked, so the batch-end teardown asks no daemon about it."""
-
-    name: str
-    n: int
-    sandboxed: bool = False
-
-
-class Runs:
-    """An injectable `start_box`/`stop_box` pair, logging into a shared `log`.
-
-    `start(request)` logs `("enter", *state())`, raises the start fault configured for this
-    start (`start_faults`, by ordinal from 1) if any, else hands back a fresh `RunBox` named as
-    the request and runs `on_start` (the box's first act, once up). `stop(box)` runs `on_stop`
-    (the box's last act, still up), logs `("exit", *state())`, then raises the stop fault
-    configured for this stop if any, leaving that box up; else the box is down.
-
-    `state` is the row's snapshot (HEAD, the queues): a commit or a rotation made while a box
-    was up shows as a change between an `enter` and its `exit`."""
-
-    def __init__(self, log: list | None = None, *,  # noqa: PLR0913 — one seam pair, every fault a row varies
-                 state: Callable[[], tuple] = tuple,
-                 start_faults: dict[int, BaseException] | None = None,
-                 stop_faults: dict[int, BaseException] | None = None,
-                 on_start: Callable[[RunBox], object] | None = None,
-                 on_stop: Callable[[RunBox], object] | None = None,
-                 sandboxed: bool = False) -> None:
-        self.log = log if log is not None else []
-        self.state = state
-        self.start_faults = dict(start_faults or {})
-        self.stop_faults = dict(stop_faults or {})
-        self.on_start, self.on_stop = on_start, on_stop
-        self.sandboxed = sandboxed
-        self.requests: list[Any] = []
-        self.boxes: list[RunBox] = []
-        self.stopped: list[Any] = []
-        self.down: list[RunBox] = []
-
-    def start(self, request: Any, *_a: Any, **_kw: Any) -> RunBox:
-        self.requests.append(request)
-        self.log.append(("enter", *self.state()))
-        fault = self.start_faults.get(len(self.requests))
-        if fault is not None:
-            raise fault
-        box = RunBox(name=getattr(request, "name", ""), n=len(self.requests),
-                     sandboxed=self.sandboxed)
-        self.boxes.append(box)
-        if self.on_start is not None:
-            self.on_start(box)
-        return box
-
-    def stop(self, box: Any, *_a: Any, **_kw: Any) -> None:
-        self.stopped.append(box)
-        if self.on_stop is not None:
-            self.on_stop(box)
-        self.log.append(("exit", *self.state()))
-        fault = self.stop_faults.get(len(self.stopped))
-        if fault is not None:
-            raise fault
-        self.down.append(box)
-
-    @property
-    def alive(self) -> list[RunBox]:
-        """Boxes started and not (successfully) stopped."""
-        return [b for b in self.boxes if not any(d is b for d in self.down)]
-
-    def source(self, name: str = "defender-drain-t1195") -> Any:
-        """A `BoxSource` over this pair, for a request named `name`."""
-        return box_source(request(name), start_box=self.start, stop_box=self.stop)
-
-
-class StartFault:
-    """A `start_box=` that records each request it is handed and refuses every one with
-    `fault`: a box that will not come up, for the rows driving a lane's DEFAULT work step."""
-
-    def __init__(self, fault: BaseException) -> None:
-        self.fault = fault
-        self.requests: list[Any] = []
-
-    def __call__(self, request: Any, *_a: Any, **_kw: Any) -> Any:
-        self.requests.append(request)
-        raise self.fault
-
-    def drain_seams(self) -> dict[str, Any]:
-        """A drain's box seams with this start: no box comes up, so nothing is stopped, and
-        no scan is wanted."""
-        return {"start_box": self, "stop_box": lambda *_a, **_kw: None,
-                "scrub": lambda *_a, **_kw: None}
-
-
-def windows(log: list) -> list[tuple[int, int]]:
-    """Each run's `(enter, exit)` indices in `log`, in order: no run inside another, and every
-    run that was entered has exited."""
-    kinds = [e[0] for e in log]
-    out: list[tuple[int, int]] = []
-    start: int | None = None
-    for i, kind in enumerate(kinds):
-        if kind == "enter":
-            assert start is None, f"a box was started inside another's run: {kinds}"
-            start = i
-        elif kind == "exit":
-            assert start is not None, f"a box was stopped that was never started: {kinds}"
-            out.append((start, i))
-            start = None
-    assert start is None, f"a box was started and never stopped: {kinds}"
-    return out
-
-
-def assert_each_run_holds_exactly(log: list, spawns: list[str],
-                                  spawn_kinds: tuple[str, ...]) -> list[tuple[int, int]]:
-    """One run per spawn, in order, each holding its spawn and nothing else (no host step while
-    a box is up); no spawn outside a run; the state the same at each run's exit as at its entry
-    (no commit, no rotation beside a live box). Returns the windows."""
-    kinds = [e[0] for e in log]
-    wins = windows(log)
-    assert [kinds[a + 1:b] for a, b in wins] == [[s] for s in spawns], (
-        f"each run must hold exactly its spawn: {kinds}")
-    assert sum(k in spawn_kinds for k in kinds) == len(spawns), (
-        f"a spawn ran outside a box of its own: {kinds}")
-    for a, b in wins:
-        assert log[b][1:] == log[a][1:], (
-            f"the state moved while a box was up (a commit or a rotation beside it): {kinds}")
-    return wins
-
-
-# ---------------------------------------------------------------------------------------
 # A fake daemon, in process and as a `docker` program on PATH
 # ---------------------------------------------------------------------------------------
 
-_SHIM = '''#!{python}
+_SHIM = '''#!{python} -S
 import runpy, sys
 sys.argv = [sys.argv[0], {here!r}, *sys.argv[1:]]
 runpy.run_path({module!r}, run_name="__main__")
@@ -286,12 +174,19 @@ class FakeDaemon:
         assert shutil.which("docker") == str(program)
         return program
 
-    # -- faults -----------------------------------------------------------------------
+    # -- state and faults ---------------------------------------------------------------
+
+    def _edit(self, fn: Callable[[dict], object]) -> None:
+        state = daemon_mod.load(self.dir)
+        fn(state)
+        daemon_mod.save(self.dir, state)
 
     def _fault(self, key: str, value: Any) -> None:
-        state = daemon_mod.load(self.dir)
-        state["faults"][key] = value
-        daemon_mod.save(self.dir, state)
+        self._edit(lambda s: s["faults"].__setitem__(key, value))
+
+    def hold(self, name: str, status: str) -> None:
+        """A container named `name` in `status`, as if a batch start (or a run) had left it."""
+        self._edit(lambda s: s["containers"].__setitem__(name, {"status": status, "token": ""}))
 
     def refuse_rm(self, times: int = 1) -> None:
         """The next `times` removals fail and leave the container as it was (-1: every one)."""
@@ -306,14 +201,73 @@ class FakeDaemon:
         """Every `docker run` fails (rc 125), as a daemon that cannot create the box does."""
         self._fault("create", True)
 
+    def refuse_sentinel(self) -> None:
+        """Every mount answers bytes other than the sentinel the host planted."""
+        self._fault("sentinel", True)
+
     def go_down(self) -> None:
         self._fault("down", True)
 
-    def hold(self, name: str, status: str) -> None:
-        """A container named `name` in `status`, as if a run had left it."""
-        state = daemon_mod.load(self.dir)
-        state["containers"][name] = {"status": status, "token": ""}
-        daemon_mod.save(self.dir, state)
+    def _verb_fault(self, verb: str, kind: str, at: Iterable[int] | None, times: int) -> None:
+        def edit(state: dict) -> None:
+            if at is not None:
+                ordinals: list = list(at)
+            elif times < 0:
+                ordinals = ["*"]
+            else:
+                done = state["counts"][verb]
+                ordinals = list(range(done + 1, done + 1 + times))
+            state["faults"][verb][kind] += ordinals
+
+        self._edit(edit)
+
+    def refuse_start(self, *, at: Iterable[int] | None = None, times: int = 1) -> None:
+        """`docker start` fails (rc 1, the box stays as it was): the starts numbered `at`
+        (from 1), else the next `times` (-1: every one)."""
+        self._verb_fault("start", "refuse", at, times)
+
+    def start_takes_no_effect(self, *, at: Iterable[int] | None = None, times: int = 1) -> None:
+        """`docker start` answers rc 0 and changes nothing (as `refuse_start` picks)."""
+        self._verb_fault("start", "noop", at, times)
+
+    def refuse_stop(self, *, at: Iterable[int] | None = None, times: int = 1) -> None:
+        """`docker stop` fails (rc 1, the box keeps running), as `refuse_start` picks."""
+        self._verb_fault("stop", "refuse", at, times)
+
+    def stop_takes_no_effect(self, *, at: Iterable[int] | None = None, times: int = 1) -> None:
+        """`docker stop` answers rc 0 and the box keeps running (as `refuse_start` picks)."""
+        self._verb_fault("stop", "noop", at, times)
+
+    def refuse_inspect(self, *, at: Iterable[int]) -> None:
+        """The `inspect -f` calls numbered `at` (from 1) answer rc 1, as for no such object."""
+        self._verb_fault("inspect", "refuse", at, 0)
+
+    def inspect_count(self) -> int:
+        """How many `inspect -f` calls the daemon has answered so far."""
+        return int(daemon_mod.load(self.dir)["counts"]["inspect"])
+
+    def _on(self, verb: str, path: Path, text: str | None, *, link: Path | None,  # noqa: PLR0913 — one action, every shape a row picks
+            remove: bool, at: int | None) -> None:
+        action: dict[str, Any] = {"path": str(path), "at": at}
+        if remove:
+            action["remove"] = True
+        elif link is not None:
+            action["link"] = str(link)
+        else:
+            action["text"] = text
+        self._edit(lambda s: s["on"][verb].append(action))
+
+    def on_start(self, path: Path, text: str | None = None, *, link: Path | None = None,
+                 remove: bool = False, at: int | None = None) -> None:
+        """The box's first act once a start takes (the `at`-th, else every one): `text` at
+        `path` through its mount, a symlink there to `link`, or (`remove`) the entry there
+        taken away."""
+        self._on("start", path, text, link=link, remove=remove, at=at)
+
+    def on_stop(self, path: Path, text: str | None = None, *, link: Path | None = None,
+                remove: bool = False, at: int | None = None) -> None:
+        """The box's last act while still up, as a stop takes (as `on_start` picks)."""
+        self._on("stop", path, text, link=link, remove=remove, at=at)
 
     # -- observations -----------------------------------------------------------------
 
@@ -323,6 +277,15 @@ class FakeDaemon:
 
     def names(self) -> list[str]:
         return sorted(daemon_mod.load(self.dir)["containers"])
+
+    def running(self) -> list[str]:
+        return sorted(n for n, b in daemon_mod.load(self.dir)["containers"].items()
+                      if b["status"] == "running")
+
+    def boots(self) -> int:
+        """How many starts took (a container went from stopped to running): a process lives
+        only as long as the boot it was started in."""
+        return int(daemon_mod.load(self.dir)["counts"]["boot"])
 
     def mark(self, label: str) -> None:
         """A test's own step, written into the call log between the docker calls."""
@@ -335,10 +298,13 @@ class FakeDaemon:
         return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()
                 if line]
 
+    def docker_calls(self) -> list[list[str]]:
+        return [c for c in self.calls() if c[0] == "docker"]
+
     def steps(self, *, of: str | None = None) -> list[str]:
         """The log as one sequence: each mark, and each docker call as `create`, `rm`,
-        `status` (an inspect of the status) or its verb. With `of`, only the calls naming that
-        container, and the marks."""
+        `status` (an inspect of the status), `start`, `stop` or its verb. With `of`, only the
+        calls naming that container, and the marks."""
         out: list[str] = []
         for argv in self.calls():
             if argv[0] != "docker":
@@ -358,6 +324,61 @@ class FakeDaemon:
         """The name of every container a `docker run` asked for, in order."""
         return [a[a.index("--name") + 1] for a in self.calls() if a[:2] == ["docker", "run"]]
 
+    def windows(self) -> list[list[str]]:
+        """The marks inside each run window: from a `docker start` to the next `docker stop`."""
+        out: list[list[str]] = []
+        current: list[str] | None = None
+        for step in self.steps():
+            if step == "start":
+                current = []
+            elif step == "stop":
+                if current is not None:
+                    out.append(current)
+                current = None
+            elif current is not None and step not in ("status", "inspect"):
+                current.append(step)
+        if current is not None:
+            out.append(current)
+        return out
+
+
+def boxed(tmp_path: Path, monkeypatch: Any, name: str) -> tuple[FakeDaemon, BoxExecutor]:
+    """The fake daemon first on `PATH`, holding `name` `exited` (the batch's box after its
+    post-create stop), and the executor `start_box` handed back for it."""
+    daemon = FakeDaemon(tmp_path)
+    daemon.install(monkeypatch)
+    daemon.hold(name, "exited")
+    return daemon, sandboxed(name)
+
+
+class Journal(list):
+    """A lane's shared log: every entry a host seam or a spawn appends is also marked into the
+    daemon's call log (by its kind, `entry[0]`), and the containers running at that moment are
+    noted (`seen`, parallel to the entries)."""
+
+    def __init__(self, daemon: FakeDaemon) -> None:
+        super().__init__()
+        self.daemon = daemon
+        self.seen: list[list[str]] = []
+
+    def append(self, entry: Any) -> None:
+        super().append(entry)
+        self.seen.append(self.daemon.running())
+        self.daemon.mark(str(entry[0]))
+
+    def assert_runs_hold_exactly(self, spawns: list[str], spawn_kinds: tuple[str, ...]) -> None:
+        """One run window per spawn, in order, each holding its spawn and nothing else; every
+        spawn saw the box running (the positive control) and every other step saw nothing
+        running (no host step beside a running box)."""
+        kinds = [str(e[0]) for e in self]
+        assert self.daemon.windows() == [[s] for s in spawns], (
+            f"each run must hold exactly its spawn: {self.daemon.steps()}")
+        for kind, running in zip(kinds, self.seen, strict=True):
+            if kind in spawn_kinds:
+                assert running, f"a spawn ran with no box running: {kinds}"
+            else:
+                assert running == [], f"{kind!r} ran beside a running box {running}: {kinds}"
+
 
 class ScanWatch:
     """A `scrub=` seam over a `FakeDaemon`: for each tree it is asked to walk it records which
@@ -374,10 +395,30 @@ class ScanWatch:
         if self.events is not None:
             self.events.append(f"scrub:{tree}")
 
-    def assert_no_scan_beside_a_box(self) -> None:
-        """Every scan ran with no container left: after the batch-end removal, never beside a
-        box of the batch."""
-        assert all(h == [] for h in self.held), f"a tree was scanned beside a live box: {self.held}"
+    def assert_scanned_once_the_box_was_gone(self) -> None:
+        """The tree was scanned, and only after the batch-end removal: no container was left."""
+        assert self.held, "the tree was never scanned"
+        assert all(h == [] for h in self.held), f"a tree was scanned beside a box: {self.held}"
+
+
+class HeldStart:
+    """A `start_box=` that registers the request's container, running, with `daemon` (as a
+    real create leaves it) and hands back a sandboxed executor naming it: what the real start
+    does, minus the probes. `events` gets `start_box`."""
+
+    def __init__(self, daemon: FakeDaemon, events: list | None = None) -> None:
+        self.daemon, self.events = daemon, events
+        self.requests: list[Any] = []
+        self.boxes: list[BoxExecutor] = []
+
+    def __call__(self, req: Any, *_a: Any, **_kw: Any) -> BoxExecutor:
+        self.requests.append(req)
+        self.daemon.hold(req.name, "running")
+        self.daemon.mark("start_box")
+        if self.events is not None:
+            self.events.append("start_box")
+        self.boxes.append(sandboxed(req.name))
+        return self.boxes[-1]
 
 
 def plant_image_inputs(repo: Path) -> None:
