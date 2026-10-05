@@ -225,8 +225,8 @@ def test_run_at_is_documented_and_used_only_by_eval_fixture_and_tooling_callers(
 
 
 def test_run_under_is_an_internal_helper_and_no_caller_outside_the_owner_uses_it(base, run_dir):
-    """`Run.under` is an internal helper `Run.for_tenant` is built on, and no caller outside the
-    owner's own module reaches it.
+    """`Run.under` is an internal helper `Run.for_tenant` (and the runs repository's `open_run`)
+    is built on, and no caller outside the owner package reaches it.
 
     NEGATIVE. Positive control inline: `Run.for_tenant` IS reached and resolves the same
     directory `under` would have.
@@ -240,7 +240,9 @@ def test_run_under_is_an_internal_helper_and_no_caller_outside_the_owner_uses_it
     hits = []
     for py in sorted(DEFENDER.rglob("*.py")):
         rel = py.relative_to(DEFENDER).as_posix()
-        if rel.startswith(("tests/", ".venv/")) or rel == f"{S.HANDLE_MODULE}.py":
+        # The owner is the runs repository package as a whole (#1105 D1.5): its `open_run`
+        # builds the handle with `Run.under` once it has judged the record (DV-2).
+        if rel.startswith(("tests/", ".venv/", "run_repository/")):
             continue
         try:
             _text, tree = astlib.read_and_parse(py, rel)

@@ -560,8 +560,12 @@ def test_1105_the_old_modules_are_gone_and_no_live_file_imports_them():
     old_import = re.compile(
         r"(?m)^\s*(from\s+defender\.(_run_paths|_run_handle)\b|import\s+defender\."
         r"(_run_paths|_run_handle)\b|from\s+defender\s+import\s+.*\b(_run_paths|_run_handle)\b)")
+    # This spec's own directory spells the old paths to pin their absence (owner ruling,
+    # 2026-10-05: excluded here as in test_1105_no_live_file_names_the_old_module_paths).
     candidates = [line for line in _git("grep", "-l", "-E", "_run_(paths|handle)", "--",
-                                        "*.py", ":!experiments").stdout.splitlines() if line]
+                                        "*.py", ":!experiments",
+                                        ":!defender/tests/tenant_1105_run_repository"
+                                        ).stdout.splitlines() if line]
     offenders: list[str] = []
     for rel in candidates:
         text = (H.WORKTREE / rel).read_text(encoding="utf-8")

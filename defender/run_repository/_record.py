@@ -75,6 +75,14 @@ def _record_name(episode_id: str) -> str:
     return f"{episode_id}{_RECORD_SUFFIX}"
 
 
+def episode_record_path(runs_base: Path, episode_id: str) -> Path:
+    """Where episode `episode_id`'s record lives under the runs folder `runs_base`: the one
+    accessor that owns the record's name (`run-records-kinds.tsv`'s `episode_runs_record`).
+    The repository's own reads and writes go through its held folder, by the same relative
+    name; this is the path its refusals name."""
+    return Path(runs_base) / EPISODES_DIRNAME / _record_name(_admit_episode_id(episode_id))
+
+
 def _episode_record_text(episode_id: str, tenant_id: str, source_run_id: RunId,
                  runs: Mapping[str, RunId]) -> str:
     """@owns episode record text — the one canonical serialisation of a record (D3.2, MF-16):
@@ -251,8 +259,8 @@ def episode_runs(tenant: Tenant, episode_id: str, *, io: Any = _io) -> dict[str,
         _lookup.check_tenant_record(view, tenant)
         name = _record_name(episode_id)
         read = _read_one(view.under(EPISODES_DIRNAME), name,
-                         path=f"{tenant.runs}/{EPISODES_DIRNAME}/{name}", stem=episode_id,
-                         tenant_id=tenant.id)
+                         path=str(episode_record_path(tenant.runs, episode_id)),
+                         stem=episode_id, tenant_id=tenant.id)
     return {} if read is None else read[1]
 
 
@@ -347,7 +355,7 @@ def record_episode_runs(tenant: Tenant, episode_id: str, source_run_id: RunId,
         raise RunRefused(f"episode {quoted(episode_id)}'s record would be over "
                          f"{_RECORD_CAP} bytes")
     name = _record_name(episode_id)
-    path = f"{tenant.runs}/{EPISODES_DIRNAME}/{name}"
+    path = episode_record_path(tenant.runs, episode_id)
     with _lookup.held_runs(tenant, io) as held:
         if held is None:
             raise _lookup.refuse_absent(tenant)

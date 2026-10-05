@@ -273,7 +273,8 @@ UNSCANNED_TREES = ("defender/skills", "scripts", "experiments")
 class Accessor:
     """One row of the kinds table and the single accessor that owns its name.
 
-    `owner` is "run" (`RunPaths`), "episode" (`EpisodePaths`) or "tenant" (`_tenant`); `attr`
+    `owner` is "run" (`RunPaths`), "episode" (`EpisodePaths`), "tenant" (`_tenant`) or
+    "repository" (the runs repository's record module, #1105); `attr`
     is the accessor's name on that owner; `args` are the components a composing accessor takes,
     in call order, as the concrete values this suite drives it with.
     """
@@ -351,6 +352,8 @@ ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
     Accessor("episode_runs", "episode", "sibling_run_dir", (EPISODE_ID, LABEL), composing=True),
     Accessor("archive_proj", "episode", "world_dir", (LABEL,), composing=True),
     Accessor("tenant", "tenant", "record_path"),
+    # #1105 D3: the episode -> runs record, owned by the runs repository's record module.
+    Accessor("episode_runs_record", "repository", "episode_record_path", (EPISODE_ID,)),
     Accessor("tenant_row", "tenant_row", "row"),
 )
 
@@ -421,6 +424,8 @@ def resolve(acc: Accessor, *, run_dir: Path, runs_base: Path | None = None,
         return tenant().record_path(runs_base)
     if acc.owner == "tenant_row":
         return tenant()._TenantPaths(data_root, tenant_id).row
+    if acc.owner == "repository":
+        return getattr(mod("run_repository._record"), acc.attr)(runs_base, *values)
     owner = RunPaths(run_dir) if acc.owner == "run" else EpisodePaths(episode_dir)
     member = getattr(owner, acc.attr)
     if acc.attr in UPWARD_ACCESSORS:
