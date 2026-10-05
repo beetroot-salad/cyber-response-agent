@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from defender.run_repository import RunPaths
 from defender.learning.author.verify_forward.shared import VerdictError
 
 HERE = Path(__file__).resolve().parent
@@ -16,6 +15,9 @@ def load_run_context(run_id: str, *, runs_dir: Path) -> tuple[str, str]:
     A missing file or disposition raises `VerdictError`, like an unreadable verifier reply, so
     the drain gives it the same retry-once-then-BAD ending rather than letting an exit escape
     the fan-out and leave the row stuck."""
+    # The layout import lives here, inside this deferred_legacy reader (#1105 D7, FR-1).
+    from defender.run_repository import RunPaths
+
     run_dir = runs_dir / run_id
     paths = RunPaths(run_dir)
     investigation = paths.investigation

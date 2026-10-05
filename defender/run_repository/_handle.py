@@ -267,7 +267,11 @@ class Run:
     documents: _RecordHandleGroup
     observability: _RecordHandleGroup
     session: _RecordHandleGroup
-    #: The address's tenant half — present on a `for_tenant`/`under` handle, absent on `at`.
+    #: The address (frozen, `_ADDRESS`): the run folder and the runs base holding it (`None`
+    #: on a `Run.at` handle), and the tenant half — present on a `for_tenant`/`under` handle,
+    #: absent on `at`.
+    run_dir: Path
+    runs_base: Path | None
     tenant_id: str
 
     def __init__(

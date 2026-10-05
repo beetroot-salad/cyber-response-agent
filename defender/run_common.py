@@ -18,9 +18,9 @@ if str(REPO_ROOT) not in sys.path:
 
 from defender import _io, _provenance, _tenant  # noqa: E402
 from defender._io import guarded_mkdir  # noqa: E402
-from defender.run_repository import Run, case_ref  # noqa: E402
-from defender._run_id import mint_run_id, refuse_bad_run_id  # noqa: E402
-from defender.run_repository import RunPaths, artifact_dir  # noqa: E402
+from defender.run_repository import (  # noqa: E402
+    Run, RunId, RunPaths, RunRefused, artifact_dir, case_ref, episode_sibling_ids,
+)
 from defender.scripts.visualize._page_failed import VisualizeFailed  # noqa: E402
 
 _logger = logging.getLogger(__name__)
@@ -76,11 +76,16 @@ def materialize_run(
     when different), so resuming needs no ordering of checks and follows no planted link.
     `world` is a fork's `ResumeWorld`, handed in by the launcher — never derived from paths.
 
-    Order: the runs base is the tenant's own (`<data root>/<T>/runs`) or, for a fork, its
-    episode's `runs/`; then the runs-base record, then `Run.for_tenant` as the race backstop.
+    Order (#1105 D3.7): the run id is admitted (the `_tenant.json` collision guard, then
+    `RunId`, then the sidecar clause); the runs base is the tenant's own (`<data root>/<T>/runs`)
+    or, for a fork, its episode's `runs/`, and a link or non-directory there is refused before
+    anything is created in it; then the runs-base record; then, for a pinned id outside a fork,
+    the claimed-id check against the episode records; then `Run.for_tenant` as the race
+    backstop.
     """
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
+    pinned = run_id is not None
     run_id = _admit_run_id(alert, run_id)
     if world is not None:
         from defender._episode_paths import EpisodePaths
@@ -88,11 +93,14 @@ def materialize_run(
         runs_base = EpisodePaths(world.episode_dir).runs
     else:
         runs_base = tenant.runs
+    _refuse_unusable_runs_base(runs_base)
     # The runs base is the host-controlled trust root; nothing above it is judged.
     guarded_mkdir(runs_base, base=runs_base)
     # The tenant record comes before the provenance stamp (which must match it) and before the
     # box exists. Unlike the stamp, its failures propagate: a forged tenant is worse than no run.
     tenant_record = _tenant.ensure_runs_base_record(runs_base, tenant.id)
+    if pinned and world is None:
+        _refuse_claimed_run_id(runs_base, run_id)
     run = Run.for_tenant(tenant_record.tenant_id, run_id, runs_base=runs_base)
     run_dir = run.run_dir
     paths = RunPaths(run_dir)
@@ -133,14 +141,51 @@ def _admit_run_id(alert: Path, run_id: str | None) -> str:
         collision = _tenant.refuse_colliding_run_id(run_id)
         if collision is not None:
             sys.exit(str(collision))
-    # The same admission rule as the handle's constructors, for minted and pinned ids alike.
+    # `RunId` is the admission rule for minted and pinned ids alike: the handle's grammar and
+    # case stability, plus the 206-byte bound every sidecar write beside the run needs.
     try:
-        if run_id is None:
-            run_id = mint_run_id(_alert_label(alert))
-        refuse_bad_run_id(run_id)
-    except ValueError as bad:
+        admitted = (RunId.mint(_alert_label(alert)) if run_id is None
+                    else RunId.parse(run_id))
+    except RunRefused as bad:
         sys.exit(f"invalid run id: {bad}")
-    return run_id
+    # The sidecar clause (D2.1): a run folder is never named like a host-only sidecar file.
+    if RunPaths.sidecar_owner(str(admitted)) is not None:
+        sys.exit(f"invalid run id: {str(admitted)!r} is shaped like a host-only sidecar file "
+                 "beside a run folder, not a run")
+    return str(admitted)
+
+
+def _refuse_unusable_runs_base(runs_base: Path) -> None:
+    """`TenantRefused` when the runs base is a link (dangling or not) or not a directory
+    (#1105 OP-2), judged by a no-follow hold of it before anything is created or read inside
+    it. Absent is fine: the caller creates it."""
+    try:
+        _io.hold(runs_base, follow=False).close()
+    except FileNotFoundError:
+        return
+    except OSError as bad:
+        raise _tenant.TenantRefused(
+            f"the runs folder {runs_base} is unusable — it is a link, which is never followed, "
+            f"or not a directory ({bad.strerror or bad})") from None
+
+
+def _refuse_claimed_run_id(runs_base: Path, run_id: str) -> None:
+    """Exit when an episode record in the runs base claims the pinned `run_id`: that id names
+    a sibling, not a run of its own (#1105 D3.7). Read through a no-follow hold of the runs
+    base, with no tenant compare (the record step has already judged `_tenant.json`), so a
+    record naming another tenant still claims — the fail-safe direction. A corrupt record, or
+    anything else in `_episodes` that is not a record, refuses every pinned id."""
+    try:
+        with _io.hold(runs_base, follow=False) as held:
+            claimed = episode_sibling_ids(held.view())
+    except RunRefused as bad:
+        sys.exit(str(bad))
+    except OSError as bad:
+        raise _tenant.TenantRefused(
+            f"the runs folder {runs_base} could not be held: {bad.strerror or bad}") from None
+    if RunId.parse(run_id) in claimed:
+        sys.exit(f"run id {run_id!r} is claimed by an episode record in {runs_base} — it "
+                 "names an episode's sibling run; pick a fresh id")
 
 
 def _sidecars(run: Run) -> tuple[Path, ...]:

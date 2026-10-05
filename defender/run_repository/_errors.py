@@ -29,3 +29,17 @@ def quoted(text: object) -> str:
     if len(text) <= _QUOTE_LIMIT:
         return repr(text)
     return f"{text[:_QUOTE_LIMIT]!r}…(+{len(text) - _QUOTE_LIMIT} chars)"
+
+
+def shown(text: object) -> str:
+    """`text` as a refusal shows a name inside a path: verbatim when it is printable and short,
+    else `quoted`. Keeps an ordinary path copy-pasteable while a hostile name read off disk
+    still cannot break the message's one line."""
+    text = str(text)
+    return text if text.isprintable() and len(text) <= _QUOTE_LIMIT else quoted(text)
+
+
+def escaped(text: object) -> str:
+    """`text` with every character `str.isprintable` rejects escaped repr-style, nothing else
+    changed: for passing on another refusal's message, which may carry text read off disk."""
+    return "".join(ch if ch.isprintable() else repr(ch)[1:-1] for ch in str(text))

@@ -102,6 +102,12 @@ SCRUB_VERDICT_SUFFIX = ".scrub-verdict.json"
 ACCOUNTING_FAILURES_SUFFIX = ".accounting_failures.json"
 #: The case-ticket write's receipt: a host record the box must neither plant nor block (#1107).
 TICKET_WRITE_SUFFIX = ".ticket-write.json"
+#: The four host-only sidecars, each `<run id><suffix>` beside the run folder in the runs base.
+_SIDECAR_SUFFIXES = (RUN_END_SIDECAR_SUFFIX, SCRUB_VERDICT_SUFFIX, ACCOUNTING_FAILURES_SUFFIX,
+                     TICKET_WRITE_SUFFIX)
+#: The tail a sidecar write's staged file carries before its rename (`_io.staged_leaf`:
+#: `.staged-` and lowercase hex digits; one or more, #1105 DV-5).
+_STAGED_TAIL = re.compile(r"\.staged-[0-9a-f]+\Z")
 
 #: The sessions directory is a sibling of the runs base, never a child.
 SESSIONS_DIRNAME = "sessions"
@@ -320,6 +326,19 @@ class RunPaths:
     def __post_init__(self) -> None:
         # Coerce, so callers holding the directory as text (env var, argv) still work.
         object.__setattr__(self, "run_dir", Path(self.run_dir))
+
+    @staticmethod
+    def sidecar_owner(name: str) -> str | None:
+        """The run id a sidecar file named `name` belongs to — `<id>` of `<id><suffix>`, or of
+        the staged `<id><suffix>.staged-<hex>` a sidecar write creates first — or `None` when
+        `name` is not shaped like a sidecar. The one statement of the sidecar clause (#1105
+        D2.1, MF-21): run setup and `open_run` refuse an id it answers for, and the runs
+        repository's listings take a regular file it answers for as a known sidecar."""
+        bare = name[: m.start()] if (m := _STAGED_TAIL.search(name)) else name
+        for suffix in _SIDECAR_SUFFIXES:
+            if bare.endswith(suffix) and len(bare) > len(suffix):
+                return bare[: -len(suffix)]
+        return None
 
     # -- content the run produced -----------------------------------------------------------
 

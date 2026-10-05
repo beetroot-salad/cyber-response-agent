@@ -43,7 +43,8 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender._io import append_jsonl, read_jsonl_rows  # noqa: E402
-from defender.run_repository import RunPaths, _PAYLOAD_SHAPES  # noqa: E402
+from defender.run_repository import RunPaths  # noqa: E402
+from defender.run_repository._layout import _PAYLOAD_SHAPES  # noqa: E402
 from defender.hooks.record_lead import LEAD_ID_RE, NOT_CLAIMED, claim_lead  # noqa: E402
 from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     HARNESS_PROVENANCE,

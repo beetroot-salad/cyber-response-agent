@@ -10,7 +10,7 @@ from typing import Any
 from defender._clock import now_iso  # noqa: F401 — re-export: core.config stays the loop's import surface
 from defender._env import env_int, env_str
 from defender._env import FatalConfigError  # noqa: F401 — re-export; enrolled as stage-fatal in core/faults.py
-from defender.run_repository import WIRE_LOG_NAMES, RunPaths  # noqa: F401 — RunPaths re-exported
+from defender.run_repository import WIRE_LOG_NAMES
 from defender._paths import DefenderPaths  # noqa: F401 — LoopPaths' base class + re-export
 
 

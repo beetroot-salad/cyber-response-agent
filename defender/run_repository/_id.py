@@ -42,9 +42,11 @@ def _admit(text: str) -> str:
     except ValueError:
         # Today's rule decides; its own message quotes the text whole, so the refusal names
         # the clause that failed and quotes the text the bounded way.
-        clause = (f"allowed: {RUN_ID_ALLOWED}" if not is_valid_run_id(text)
-                  else CASE_STABLE_REQUIRED)
-        raise RunRefused(f"{quoted(text)} is not a valid run id ({clause})") from None
+        if not is_valid_run_id(text):
+            raise RunRefused(f"{quoted(text)} is not a valid run id (allowed: "
+                             f"{RUN_ID_ALLOWED})") from None
+        raise RunRefused(f"{quoted(text)} is not case-stable ({CASE_STABLE_REQUIRED}) — use "
+                         f"{quoted(text.casefold())}") from None
     size = len(text.encode("utf-8"))
     if size > RUN_ID_MAX_BYTES:
         raise RunRefused(f"{quoted(text)} is not a valid run id: {size} bytes, over the "
@@ -71,7 +73,7 @@ class RunId:
     __slots__ = ("_text",)
     _text: str
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> NoReturn:
+    def __new__(cls, *args: Any, **kwargs: Any) -> RunId:  # noqa: PYI034 — it never returns
         raise RunRefused("a RunId is built only by RunId.parse or RunId.mint")
 
     def __init_subclass__(cls, **kwargs: Any) -> NoReturn:
