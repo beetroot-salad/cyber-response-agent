@@ -109,6 +109,7 @@ jobs:
 
       - name: Paused runsc rm -f, then a retry
         run: |
+          set +e
           docker pull -q python:3.11-slim
           for i in 1 2 3 4 5 6 7 8; do
             n=p-$i
