@@ -299,7 +299,7 @@ def test_acquire_flock_closes_handle_when_error_propagates(tmp_path: Path, monke
     def _no_locks(_fd, _op):
         raise OSError(errno.ENOLCK, "No locks available")
 
-    monkeypatch.setattr(state_mod, "open_lock_at", _tracking_open)
+    monkeypatch.setattr(state_mod, "open_lock_at", _tracking_open)  # lint-monkeypatch: ok — an fd-leak spy on the module-level lock opener; the handle has no seam for it
     monkeypatch.setattr(_flock.fcntl, "flock", _no_locks)
     with pytest.raises(OSError, match="No locks available"), state.lock(_role(), wait=TRY_ONCE):
         pass

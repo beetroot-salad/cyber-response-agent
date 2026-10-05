@@ -109,7 +109,7 @@ def test_survival_partial_write_rollback(tmp_repo, helpers):
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=partial_then_raise)) == 2
     assert _commit_count(tmp_repo) == commits_before
     assert queued_ids() == {"run-P/0"}
-    assert not tmp_repo.cfg.channel.consumed.exists()
+    assert not tmp_repo.paths.findings.consumed.exists()
 
     assert tmp_repo.run_git("status", "--porcelain").stdout.strip() == "", (
         "the half-written lesson must be rolled back by the drain itself (#719)"
@@ -145,7 +145,7 @@ def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=committed_but_clean)) == 2
     assert _rows_without_attempts(tmp_repo.paths.pending_file.read_text()) == pre
     assert _attempts(tmp_repo.paths.pending_file.read_text()) == [1] * len(pre)
-    assert not tmp_repo.cfg.channel.consumed.exists()
+    assert not tmp_repo.paths.findings.consumed.exists()
 
     def dirty_but_no_commit(findings, batch_id, cfg):
         (tmp_repo.paths.lessons_dir / "orphan.md").write_text("uncommitted\n")
@@ -158,7 +158,7 @@ def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
     # Second abort in the same test, so the lifetime count is at 2 — it does not reset
     # between ticks (#719).
     assert _attempts(tmp_repo.paths.pending_file.read_text()) == [2] * len(pre)
-    assert not tmp_repo.cfg.channel.consumed.exists()
+    assert not tmp_repo.paths.findings.consumed.exists()
 
     tmp_repo.run_git("reset", "--hard", "--quiet")
     tmp_repo.run_git("clean", "-fdq")
@@ -240,7 +240,7 @@ def test_survival_idempotent_redrain(tmp_repo, helpers):
     assert a.run_batch(hold_committed=True, cfg=replace(tmp_repo.cfg, invoke_agent=must_not_author)) == 0
     assert tmp_repo.run_git("rev-parse", "HEAD").stdout.strip() == head_after_tick1
     assert tmp_repo.paths.pending_file.read_text().strip() == ""
-    consumed = tmp_repo.cfg.channel.consumed.read_text()
+    consumed = tmp_repo.paths.findings.consumed.read_text()
     assert "run-I/0" in consumed
     assert "consumed_idempotent" in consumed
 

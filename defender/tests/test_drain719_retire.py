@@ -13,7 +13,7 @@ established seam — never `monkeypatch.setattr`.
 from __future__ import annotations
 
 import ast
-import errno
+import dataclasses
 from pathlib import Path
 
 import pytest
@@ -21,7 +21,7 @@ import pytest
 import _drain719 as h
 from _drain719 import drain  # the not-yet-written target, via the suite's own shim
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
-from defender.learning.core.state import FINDINGS, LearningState
+from defender.learning.core.state import FINDINGS
 from defender.tests import _state1135
 
 
@@ -194,10 +194,7 @@ def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(
     h.seed(ch, [h.row_for("findings", "a/0")])
     before = ch.file.read_bytes()
 
-    def _disk_full(self, channel, entries):
-        raise OSError(errno.ENOSPC, "no space left on device")
-
-    monkeypatch.setattr(LearningState, "deadletter", _disk_full)
+    from defender.tests.test_881_loop_plumbing import _StateWhoseDiskIsFull
 
     cfg = h.cfg_for(
         paths,
@@ -205,6 +202,7 @@ def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(
         max_attempts=1,
         invoke_agent=h.raising(author_shared.AuthorError("triggers a retirement")),
     )
+    cfg = dataclasses.replace(cfg, state=_StateWhoseDiskIsFull.over(cfg.state, "deadletter"))
     with pytest.raises(OSError):  # noqa: PT011 - the OS-level append failure's exact subclass is platform-dependent; the point is that it propagates uncaught
         drain.run_batch(cfg=cfg)
     assert ch.file.read_bytes() == before, "the queue survives a failed retirement write"
@@ -263,7 +261,7 @@ def test_exactly_one_function_rewrites_a_pending_file(tmp_path: Path):
                 continue
             for call in ast.walk(node):
                 if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
-                        and call.func.attr == "_write" and call.args):
+                        and call.func.attr == "_write" and call.args):  # lint-ast-resolve: ok — a census of one private method's spelling, which has no alias
                     continue
                 target = call.args[0]
                 replaces = any(isinstance(a, ast.Constant) and a.value == "replace"

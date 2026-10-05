@@ -90,16 +90,16 @@ class StateRefused(Exception):  # noqa: N818 — named for the refusal it report
 # Record names
 # ---------------------------------------------------------------------------------------------
 
-def _under(folder: str, name: str) -> str:
+def _join_record(folder: str, name: str) -> str:
     """`name` below `folder`, as a root-relative record name."""
     return f"{folder}/{name}"
 
 
 _QUEUE = "author-queue"
-_INFLIGHT = _under(_QUEUE, "inflight")
-_FAILED = _under(_QUEUE, "failed")
+_INFLIGHT = _join_record(_QUEUE, "inflight")
+_FAILED = _join_record(_QUEUE, "failed")
 _DELIVERY = "_pending_delivery"
-_DELIVERY_FAILED = _under(_DELIVERY, "failed")
+_DELIVERY_FAILED = _join_record(_DELIVERY, "failed")
 _PENDING = "_pending"
 _PENDING_LEADS = "_pending_leads"
 _PENDING_PITFALLS = "_pending_pitfalls"
@@ -121,8 +121,8 @@ class LockRole:
 REPO_LOCK = LockRole("repo", "_author.lock", _flock.SLOW_POLL)
 AUTHOR_DRAIN_LOCK = LockRole("author-drain", ".author-drain.lock", _flock.FAST_POLL)
 LEAD_AUTHOR_DRAIN_LOCK = LockRole("lead-author-drain", ".lead-author-drain.lock", _flock.FAST_POLL)
-LEAD_QUEUE_LOCK = LockRole("lead-queue", _under(_PENDING_LEADS, ".lock"), _flock.FAST_POLL)
-CURATOR_DRAIN_LOCK = LockRole("curator-drain", _under(_PENDING, ".lock"), _flock.FAST_POLL)
+LEAD_QUEUE_LOCK = LockRole("lead-queue", _join_record(_PENDING_LEADS, ".lock"), _flock.FAST_POLL)
+CURATOR_DRAIN_LOCK = LockRole("curator-drain", _join_record(_PENDING, ".lock"), _flock.FAST_POLL)
 
 
 @dataclass(frozen=True)
@@ -162,35 +162,35 @@ class Channel:
 
 FINDINGS = Channel(
     name="findings",
-    queue=_under(_PENDING, "findings.jsonl"),
-    consumed=_under(_PENDING, "consumed.jsonl"),
-    deadletter=_under(_PENDING, "findings.deadletter.jsonl"),
-    stuck=_under(_PENDING, "findings.stuck.jsonl"),
-    append_lock=_under(_PENDING, ".findings.lock"),
+    queue=_join_record(_PENDING, "findings.jsonl"),
+    consumed=_join_record(_PENDING, "consumed.jsonl"),
+    deadletter=_join_record(_PENDING, "findings.deadletter.jsonl"),
+    stuck=_join_record(_PENDING, "findings.stuck.jsonl"),
+    append_lock=_join_record(_PENDING, ".findings.lock"),
     drain_role=CURATOR_DRAIN_LOCK,
     id_key="finding_id",
     reads_on_append=True,
-    report=_under(_PENDING, "findings.held_report.log"),
+    report=_join_record(_PENDING, "findings.held_report.log"),
 )
 QUESTIONER_FINDINGS = Channel(
     name="questioner_findings",
-    queue=_under(_PENDING, "questioner_findings.jsonl"),
-    consumed=_under(_PENDING, "questioner_consumed.jsonl"),
-    deadletter=_under(_PENDING, "questioner_findings.deadletter.jsonl"),
-    stuck=_under(_PENDING, "questioner_findings.stuck.jsonl"),
-    append_lock=_under(_PENDING, ".questioner_findings.lock"),
+    queue=_join_record(_PENDING, "questioner_findings.jsonl"),
+    consumed=_join_record(_PENDING, "questioner_consumed.jsonl"),
+    deadletter=_join_record(_PENDING, "questioner_findings.deadletter.jsonl"),
+    stuck=_join_record(_PENDING, "questioner_findings.stuck.jsonl"),
+    append_lock=_join_record(_PENDING, ".questioner_findings.lock"),
     drain_role=CURATOR_DRAIN_LOCK,
     id_key="finding_id",
     reads_on_append=True,
-    report=_under(_PENDING, "questioner_findings.skip_report.log"),
+    report=_join_record(_PENDING, "questioner_findings.skip_report.log"),
 )
 PITFALLS = Channel(
     name="pitfalls",
-    queue=_under(_PENDING_PITFALLS, "pitfalls.jsonl"),
-    consumed=_under(_PENDING_PITFALLS, "pitfalls.consumed.jsonl"),
-    deadletter=_under(_PENDING_PITFALLS, "pitfalls.deadletter.jsonl"),
-    stuck=_under(_PENDING_PITFALLS, "pitfalls.stuck.jsonl"),
-    append_lock=_under(_PENDING_PITFALLS, ".pitfalls.lock"),
+    queue=_join_record(_PENDING_PITFALLS, "pitfalls.jsonl"),
+    consumed=_join_record(_PENDING_PITFALLS, "pitfalls.consumed.jsonl"),
+    deadletter=_join_record(_PENDING_PITFALLS, "pitfalls.deadletter.jsonl"),
+    stuck=_join_record(_PENDING_PITFALLS, "pitfalls.stuck.jsonl"),
+    append_lock=_join_record(_PENDING_PITFALLS, ".pitfalls.lock"),
     drain_role=None,
     id_key="pitfall_id",
     reads_on_append=False,

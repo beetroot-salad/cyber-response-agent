@@ -124,11 +124,11 @@
       },
       "learning_state": {
         "writers": [
-          "defender/learning/core/markers.py::enqueue_case_for_curation",
-          "defender/learning/core/markers.py::rewrite_marker",
-          "defender/learning/core/markers.py::requeue_marker",
-          "defender/learning/core/markers.py::claim_markers",
-          "defender/learning/core/markers.py::quarantine_marker",
+          "defender/learning/core/state.py::LearningState.enqueue_curation",
+          "defender/learning/core/state.py::LearningState.stamp",
+          "defender/learning/core/state.py::LearningState.requeue",
+          "defender/learning/core/state.py::LearningState.claim",
+          "defender/learning/core/state.py::LearningState.quarantine",
           "defender/learning/core/drains.py::_record_pending_delivery",
           "defender/learning/core/drains.py::_requeue_or_drop",
           "defender/learning/core/drains.py::_deliver_pending",
