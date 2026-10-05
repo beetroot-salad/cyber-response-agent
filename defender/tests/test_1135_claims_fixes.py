@@ -34,7 +34,7 @@ def test_rotate_keeps_an_empty_keyless_row_and_a_row_that_is_only_a_subset(tmp_p
     assert rows == [{}, {"a": 1}]
 
 
-def test_read_window_reports_a_read_time_timeout_instead_of_a_busy_channel(tmp_path, monkeypatch):
+def test_read_window_reports_a_read_time_timeout_instead_of_a_busy_channel(tmp_path):
     """Only the lock's own deadline means "an appender holds it"; a TimeoutError out of the read
     inside the window is an ordinary I/O fault and must reach the caller."""
     import pytest
@@ -42,12 +42,14 @@ def test_read_window_reports_a_read_time_timeout_instead_of_a_busy_channel(tmp_p
     paths = make_paths(tmp_path)
     state = LearningState.open(paths)
 
-    def slow_read(self, channel):
-        raise TimeoutError("read timed out")
+    class SlowRead(LearningState):
+        def rows_report(self, channel):
+            raise TimeoutError("read timed out")
 
-    monkeypatch.setattr(LearningState, "rows_report", slow_read)
+    slow = SlowRead.__new__(SlowRead)
+    slow.__dict__.update(state.__dict__)  # shares the real handle's descriptor
     with pytest.raises(TimeoutError, match="read timed out"):
-        state.read_window(FINDINGS, timeout=1)
+        slow.read_window(FINDINGS, timeout=1)
 
 
 def test_releasing_a_claim_or_a_delivery_survives_an_ordinary_unlink_failure(tmp_path, monkeypatch):
@@ -66,6 +68,6 @@ def test_releasing_a_claim_or_a_delivery_survives_an_ordinary_unlink_failure(tmp
     def denied(self, name):
         raise PermissionError(errno.EACCES, "denied")
 
-    monkeypatch.setattr(type(state._held), "unlink", denied)
+    monkeypatch.setattr(type(state._held), "unlink", denied)  # lint-monkeypatch: ok — the core's unlink has no seam; an ordinary EACCES cannot be planted as root
     state.done(claim)
     state.delivered(PendingDelivery("a-b1", "a/b1", "b1"))
