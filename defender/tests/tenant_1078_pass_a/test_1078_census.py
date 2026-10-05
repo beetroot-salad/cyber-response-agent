@@ -8,6 +8,9 @@ census is a floor, never a proof of absence below it.
 """
 from __future__ import annotations
 
+import functools
+
+import pytest
 from pathlib import Path
 
 from defender.tests.tenant_1078_pass_a import _census_1078 as C
@@ -24,6 +27,7 @@ def _plant(root: Path, rel: str, text: str) -> Path:
 # O1 — every run names its tenant; code holds no default and no literal
 # ======================================================================================
 
+@pytest.mark.gate
 def test_o1_no_default_tenant_census():
     """DEFAULT_TENANT_ID appears nowhere in defender/ production code nor under scripts/lint/,
     and no production module outside evals/ and the tests passes a string literal (such as
@@ -94,6 +98,18 @@ def test_census_for_tenant_literals_beyond_keyword_arguments(tmp_path):
 # O2 — only create_tenant writes a row
 # ======================================================================================
 
+@functools.cache
+def _real_o2_writers() -> tuple[str, ...]:
+    """The O2 census over the real tree, scanned once per process (three tests read it)."""
+    return tuple(C.o2_row_writers(C.o2_scope(), root=C.REPO_ROOT))
+
+
+@functools.cache
+def _real_u6_writes() -> tuple[str, ...]:
+    """The U6 census over the real tree, scanned once per process (two tests read it)."""
+    return tuple(C.u6_defender_tree_writes(C.u6_scope(), root=C.REPO_ROOT))
+
+
 def _row_writers_allowed() -> set[str]:
     """`defender/_tenant.py::create_tenant` and any private helper of `_tenant.py` that only
     `create_tenant` calls (its own write, split out)."""
@@ -106,6 +122,7 @@ def _writer_fn(entry: str) -> tuple[str, str]:
     return rel, rest.rsplit(":", 1)[0]
 
 
+@pytest.mark.gate
 def test_o2_row_single_writer_census(tmp_path):
     """A writer census over production code finds no writer of the row name or of
     TenantPaths.row other than create_tenant.
@@ -129,16 +146,17 @@ def test_o2_row_single_writer_census(tmp_path):
                                                 ("defender/by_accessor.py", "forge")}, planted
 
     allowed = _row_writers_allowed()
-    rogue = [e for e in C.o2_row_writers(C.o2_scope(), root=C.REPO_ROOT)
+    rogue = [e for e in _real_o2_writers()
              if _writer_fn(e) not in {("defender/_tenant.py", fn) for fn in allowed}]
     assert rogue == [], "the tenant row has a production writer besides create_tenant:\n  " + \
         "\n  ".join(rogue)
 
 
+@pytest.mark.gate
 def test_o2_census_finds_create_tenant():
     """The same writer census reports create_tenant as the row's writer (the census's
     positive control)."""
-    writers = {_writer_fn(e) for e in C.o2_row_writers(C.o2_scope(), root=C.REPO_ROOT)}
+    writers = {_writer_fn(e) for e in _real_o2_writers()}
     allowed = {("defender/_tenant.py", fn) for fn in _row_writers_allowed()}
     assert writers & allowed, (
         "the census finds no write of the tenant row in create_tenant — either create_tenant "
@@ -184,6 +202,7 @@ def _unclassified(entries: list[str]) -> list[str]:
     return bad
 
 
+@pytest.mark.gate
 def test_u6_defender_tree_writer_census(tmp_path, monkeypatch):
     """A writer census over production code finds no write of tenant data into the
     box-mounted defender/ tree except the queue page (build.py:543-546) and the shared-corpus
@@ -200,7 +219,7 @@ def test_u6_defender_tree_writer_census(tmp_path, monkeypatch):
     assert [e.split("::")[1] for e in C.u6_defender_tree_writes([rogue], root=tmp_path)] == \
         ["leak"]
 
-    found = C.u6_defender_tree_writes(C.u6_scope(), root=C.REPO_ROOT)
+    found = _real_u6_writes()
     assert _unclassified(found) == [], (
         "a production write into defender/ that C55 never classified:\n  "
         + "\n  ".join(_unclassified(found)))
@@ -215,9 +234,10 @@ def test_u6_defender_tree_writer_census(tmp_path, monkeypatch):
         f"the run-page mirror resolves inside the box-mounted defender/ tree: {mirror}")
 
 
+@pytest.mark.gate
 def test_u6_census_finds_queue_page():
     """The same census reports build.py's queue-page write (its positive control)."""
-    found = C.u6_defender_tree_writes(C.u6_scope(), root=C.REPO_ROOT)
+    found = _real_u6_writes()
     queue = [e for e in found if e.startswith("defender/learning/frontend/build.py::main::")
              and ("'queues.json'" in e or "'queues.html'" in e)]
     assert len(queue) == 2, f"the census does not see the queue page's two writes: {found}"

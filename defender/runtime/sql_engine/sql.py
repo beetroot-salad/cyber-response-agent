@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from __future__ import annotations
 
 import argparse
@@ -10,10 +8,6 @@ import shutil
 import sys
 import tempfile
 import unicodedata
-from pathlib import Path
-
-if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
-    sys.path.insert(0, _root)
 
 from defender._io import json_safe, use_utf8_stdio
 
@@ -707,7 +701,6 @@ def main() -> int:
     )
     args = parser.parse_args()
     return _run(args.sql, args.rows, args.names)
-
 
 if __name__ == "__main__":  # lint-log-setup: ok — a model tool — its stderr is read back by the model as plain text
     raise SystemExit(main())

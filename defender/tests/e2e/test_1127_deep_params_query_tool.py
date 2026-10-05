@@ -67,6 +67,7 @@ from defender._io import (  # noqa: E402
 from defender._run_paths import RunPaths  # noqa: E402
 from defender.runtime import session_store  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
+from defender import _query_rules  # noqa: E402
 from defender.scripts.gather_tools import record_query as rq  # noqa: E402
 from defender.tests._verb_authorization_632 import (  # noqa: E402
     DONE,
@@ -400,7 +401,7 @@ def test_a_too_deep_call_pydantic_accepts_never_reaches_the_verb(tmp_path, shape
 
     assert [(c.verb, c.params) for c in rec.calls] == [("query", shallow)], \
         "the verb was called for the too-deep call, or not for the shallow one"
-    assert [row["query_id"] for row in r.own_rows] == [rq.ABOVE_GUARD_QUERY_ID, "elastic.query"]
+    assert [row["query_id"] for row in r.own_rows] == [_query_rules.ABOVE_GUARD_QUERY_ID, "elastic.query"]
 
 
 @pytest.mark.parametrize("form", ["dict", "text"])
@@ -529,7 +530,7 @@ def test_a_too_deep_call_to_a_withheld_verb_is_a_schema_rejection_not_a_denial(t
 
     assert denied_verbs(r).count("esql") == 1, \
         f"expected the shallow call's one denial record, got {denied_verbs(r)}"
-    denied_needle = f'"query_id": {json.dumps(rq.DENIED_QUERY_ID)}'
+    denied_needle = f'"query_id": {json.dumps(_query_rules.DENIED_QUERY_ID)}'
     assert sum(denied_needle in line for line in own_raw_lines(r)) == 1, \
         "the deep call wrote a `∅.denied` row (or the shallow one did not)"
     rejections = _above_guard(r)
@@ -719,7 +720,7 @@ def test_a_too_deep_call_neither_reuses_a_seq_nor_rewrites_a_sidecar(tmp_path, s
         q("elastic", "query", {"native_query": "FROM b"}), DONE], watch=True)
 
     assert [(row["seq"], row["query_id"]) for row in r.own_rows] == [
-        (0, "elastic.query"), (1, rq.ABOVE_GUARD_QUERY_ID), (2, "elastic.query")]
+        (0, "elastic.query"), (1, _query_rules.ABOVE_GUARD_QUERY_ID), (2, "elastic.query")]
     assert [c.params["native_query"] for c in rec.calls] == ["FROM a", "FROM b"]
 
     prefix = f"gather_raw/{LEAD}/"

@@ -25,7 +25,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 
 from defender import _git
 from defender._paths import DefenderPaths
-from defender.learning.leads.lead_extraction import LeadAuthorError
+from defender.learning.leads._errors import LeadAuthorError
 from defender.runtime.verbs import RegistryError, RosterRead, is_system_name, read_roster
 
 #: From `DefenderPaths` rather than re-spelled, so the resolver and the gates agree on where

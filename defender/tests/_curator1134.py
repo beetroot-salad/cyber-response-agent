@@ -67,7 +67,7 @@ def make_mount_points(paths: LoopPaths) -> None:
     """Make each of the author label's mount points under `paths` that is missing (a drain
     working copy always has both; a fixture repo may lack `lessons-questioner/`). An empty folder
     is invisible to `git status`, so this changes no fixture's tree as git sees it."""
-    for mount in paths.drain_writable_trees(AUTHOR_DRAIN_LABEL):
+    for mount in AUTHOR_DRAIN_LABEL.writable_trees(paths):
         mount.mkdir(parents=True, exist_ok=True)
 
 
@@ -83,7 +83,7 @@ def seamed_trees(paths: LoopPaths, os_: Any) -> DrainTrees:
     of each mount then goes through that seam. How a fault no root process can make for real
     (EACCES, EIO, ENOSPC) reaches the drain."""
     make_mount_points(paths)
-    return DrainTrees.open(paths.drain_writable_trees(AUTHOR_DRAIN_LABEL), os_=os_)
+    return DrainTrees.open(AUTHOR_DRAIN_LABEL.writable_trees(paths), os_=os_)
 
 
 def author_cfg(paths: LoopPaths, *, trees: DrainTrees | None = None, manifest_seed: str | None = None,

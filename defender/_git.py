@@ -105,14 +105,17 @@ def git_ok(
 
 def git_status(
     cwd: Path, *, pathspec: Path | str | None = None, timeout: float | None = None,
-    no_renames: bool = False, env: Mapping[str, str] | None = None,
+    no_renames: bool = False, env: Mapping[str, str] | None = None, untracked: str = "all",
 ) -> list[tuple[str, str]]:
     """The working tree's status as `(XY, path)` records.
 
     `no_renames` turns off rename detection, for callers counting changed paths: otherwise
     `git mv a b` is one `R  b` record and `a` is dropped; with it, `D  a` and `A  b`.
+
+    `untracked` is `--untracked-files`: `"no"` lists tracked paths only, and then git walks no
+    folder for new files, so it opens no worktree `.gitignore` (#1175).
     """
-    args = ["status", "--porcelain", "--untracked-files=all", "-z"]
+    args = ["status", "--porcelain", f"--untracked-files={untracked}", "-z"]
     if no_renames:
         args.append("--no-renames")
     if pathspec is not None:
@@ -135,6 +138,24 @@ def git_status(
     return records
 
 
+def git_untracked(
+    cwd: Path, pathspec: str, *, exclude_from: Path, timeout: float | None = None,
+    env: Mapping[str, str] | None = None,
+) -> list[str]:
+    """Every untracked file under `pathspec`, repo-relative, filtered by the ignore rules in
+    `exclude_from` alone (`ls-files --others`, no `--exclude-standard`).
+
+    No ignore file in the worktree is opened or obeyed, so one the caller does not trust can
+    neither hide a name nor block the call (#1175). Run from the repo top: the patterns
+    evaluate relative to it."""
+    out = _run(
+        ["ls-files", "--others", "-z", "--full-name", f"--exclude-from={exclude_from}",
+         "--", pathspec],
+        cwd=cwd, timeout=timeout, env=env,
+    ).stdout
+    return [p for p in out.split("\0") if p]
+
+
 def git_show_head(cwd: Path, path: str) -> str | None:
     """`path`'s content at HEAD, or `None` when HEAD does not carry it.
 
@@ -149,12 +170,15 @@ def git_head_sha(cwd: Path, *, timeout: float | None = None) -> str:
     return git(["rev-parse", "HEAD"], cwd=cwd, timeout=timeout)
 
 
-def git_show_file(cwd: Path, rev: str, path: str) -> str | None:
+def git_show_file(
+    cwd: Path, rev: str, path: str, *, timeout: float | None = None,
+    env: Mapping[str, str] | None = None,
+) -> str | None:
     """The text a path carries at `rev`, or `None` when it is not there.
 
     Not `git()`, which strips output: a stripped trailing newline would read as an edit when
     compared against the working tree."""
-    proc = _run(["show", f"{rev}:{path}"], cwd=cwd, check=False)
+    proc = _run(["show", f"{rev}:{path}"], cwd=cwd, check=False, timeout=timeout, env=env)
     if proc.returncode != 0:
         return None
     return proc.stdout

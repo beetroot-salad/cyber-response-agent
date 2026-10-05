@@ -21,6 +21,7 @@ from __future__ import annotations
 import ast
 import copy
 import dataclasses
+import functools
 import json
 import os
 import pickle
@@ -29,6 +30,7 @@ import subprocess
 import sys
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -81,8 +83,18 @@ def _functions_by_node(tree: ast.Module) -> dict[int, str]:
     return owner
 
 
-def _parse(path: Path) -> ast.Module:
-    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+@functools.cache
+def _loaded_at(path: Path, stamp: tuple[int, int]) -> tuple[ast.Module, Any, dict[int, str]]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return tree, _AST.module_env(tree), _functions_by_node(tree)
+
+
+def _loaded(path: Path) -> tuple[ast.Module, Any, dict[int, str]]:
+    """`(tree, resolver env, def-scope map)` of `path`, built once per process and file state:
+    every census here walks the same production files, and the env/scope builds are whole-tree
+    walks. The trees are only read."""
+    st = path.stat()
+    return _loaded_at(path, (st.st_mtime_ns, st.st_size))
 
 
 # ======================================================================================
@@ -111,10 +123,8 @@ def _tenant_constructions(files: Iterable[Path]) -> list[tuple[str, str, str]]:
     `(file, enclosing function, shape)`."""
     found = []
     for path in files:
-        tree = _parse(path)
+        tree, env, scope = _loaded(path)
         rel = _rel(path)
-        env = _AST.module_env(tree)
-        scope = _functions_by_node(tree)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -155,6 +165,7 @@ def _planted_type_call(tenant):
 '''
 
 
+@pytest.mark.gate
 def test_1120_tenant_is_constructed_only_inside_accept_tenant(
         data_root: Path, tmp_path: Path) -> None:
     """An AST census of defender/ (excluding tests/) and scripts/ finds exactly one
@@ -228,10 +239,8 @@ def _resolve_calls(files: Iterable[Path]) -> list[tuple[str, str]]:
     not seen."""
     calls = []
     for path in files:
-        tree = _parse(path)
+        tree, env, scope = _loaded(path)
         rel = _rel(path)
-        env = _AST.module_env(tree)
-        scope = _functions_by_node(tree)
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and (
                     _AST.callee(node, env) == _RESOLVER
@@ -324,14 +333,12 @@ def _call_graph(files: Iterable[Path], root: Path = H.REPO_ROOT) -> dict[str, se
     and a re-export under another module's name are not followed."""
     graph: dict[str, set[str]] = {}
     for path in files:
-        tree = _parse(path)
+        tree, env, scope = _loaded(path)
         module = _module_of(path, root)
-        env = _AST.module_env(tree)
         top_defs = {n.name for n in tree.body
                     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
         for name in top_defs:
             graph.setdefault(f"{module}.{name}", set())
-        scope = _functions_by_node(tree)
         for node in ast.walk(tree):
             owner = scope.get(id(node), "") if isinstance(node, ast.Call) else ""
             if not owner:
@@ -441,6 +448,7 @@ _VULTURE_BASELINE = H.REPO_ROOT / "scripts" / "lint" / "lint_vulture_baseline.js
 _NEW_TENANT_FINDING = re.compile(r"defender/_tenant\.py:\d+: unused property '(\w+)'")
 
 
+@pytest.mark.gate
 def test_1120_s8_tenant_layout_members_with_no_production_reader(data_root: Path) -> None:
     """Tenant carries all nine D1 path properties (dir, runs, sessions, episodes, learning,
     worktrees, knowledge, settings, agent) and the row file's path property, each a Path on an

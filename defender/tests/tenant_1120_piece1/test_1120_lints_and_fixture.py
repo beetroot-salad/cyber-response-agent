@@ -23,6 +23,7 @@ process — over trees built in the test. Nothing is written into the checkout. 
 from __future__ import annotations
 
 import ast
+import functools
 import os
 import re
 import shutil
@@ -30,7 +31,9 @@ import subprocess
 import sys
 import textwrap
 import uuid
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -40,7 +43,7 @@ from defender.scripts import tenant as tenant_py
 from defender.tests import _dispositions995 as D995
 from defender.tests import _spec1077 as S
 from defender.tests import _tenants1106 as T1106
-from defender.tests._by_path import LINT_DIR, import_lint_lib, load_lint_gate, load_module
+from defender.tests._by_path import LINT_DIR, cached_source, import_lint_lib, load_lint_gate, load_module
 from defender.tests._repo import seed_repo
 from defender.tests.tenant_1120_piece1 import _spec1120 as H
 
@@ -102,6 +105,7 @@ SETTINGS_LOADER_MODULES = (
 )
 
 
+@pytest.mark.gate
 def test_1120_run_records_lint_owns_tenant_record_locations_but_not_knowledge_settings_or_agent(
         tmp_path: Path) -> None:
     """Run over a swept module whose functions take a parameter annotated as Tenant,
@@ -360,7 +364,7 @@ def test_1120_the_fixture_tenant_carries_the_labs_grants_and_lead_zero_outside_d
 
 
 def _spells_the_fixture(path: Path) -> bool:
-    text = path.read_text(encoding="utf-8", errors="replace")
+    text = cached_source(path)
     return "tenant-fixture" in text or re.search(
         r"""["']tenant["']\s*\+\s*["']-fixture["']""", text) is not None
 
@@ -509,6 +513,7 @@ VIOLATIONS = [
 ]
 
 
+@pytest.mark.gate
 def test_1120_the_census_lint_and_check_folder_agree_on_a_violating_folder(
         tmp_path: Path) -> None:
     """For each of a folder missing settings/, one with a symlink in agent/ reaching outside
@@ -613,28 +618,35 @@ def _removed_imports(node: ast.ImportFrom) -> list[list[str]]:
             if hit and owner]
 
 
+def _node_findings(node: ast.AST, rel: str, env: Callable[[], Any],
+                   prose: Callable[[], set[int]]) -> list[str]:
+    """What one syntax node spells of the removed surface (`env`/`prose` are built on demand)."""
+    line = getattr(node, "lineno", 0)
+    if isinstance(node, ast.ImportFrom) and node.module:
+        return [f"{rel}:{line}: imports {hit}" for hit in _removed_imports(node)]
+    if isinstance(node, ast.Attribute):
+        if node.attr in REMOVED_NAMES:
+            return [f"{rel}:{line}: .{node.attr}"]
+        if node.attr in REMOVED_MODULE_ATTRS and _is_tenants_module(node.value, env()):
+            return [f"{rel}:{line}: _tenants.{node.attr}"]
+        if node.attr in RETIRED_HELPERS:
+            return [f"{rel}:{line}: .{node.attr} (resolves the lab via the removed resolver)"]
+        if node.attr in RETIRED_LAB_CONSTANTS:
+            return [f"{rel}:{line}: .{node.attr} (the retired lab's path)"]
+    elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+        hits = _spelled(node.value)
+        if hits and id(node) not in prose():
+            return [f"{rel}:{line}: {hit}" for hit in hits]
+    return []
+
+
 def _py_findings(path: Path, rel: str) -> list[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=rel)
-    env = _AST.module_env(tree)
-    prose = _bare_strings(tree)
-    out = []
-    for node in ast.walk(tree):
-        line = getattr(node, "lineno", 0)
-        if isinstance(node, ast.ImportFrom) and node.module:
-            out += [f"{rel}:{line}: imports {hit}" for hit in _removed_imports(node)]
-        elif isinstance(node, ast.Attribute):
-            if node.attr in REMOVED_NAMES:
-                out.append(f"{rel}:{line}: .{node.attr}")
-            elif node.attr in REMOVED_MODULE_ATTRS and _is_tenants_module(node.value, env):
-                out.append(f"{rel}:{line}: _tenants.{node.attr}")
-            elif node.attr in RETIRED_HELPERS:
-                out.append(f"{rel}:{line}: .{node.attr} (resolves the lab via the removed resolver)")
-            elif node.attr in RETIRED_LAB_CONSTANTS:
-                out.append(f"{rel}:{line}: .{node.attr} (the retired lab's path)")
-        elif (isinstance(node, ast.Constant) and isinstance(node.value, str)
-              and id(node) not in prose):
-            out += [f"{rel}:{line}: {hit}" for hit in _spelled(node.value)]
-    return out
+    # The import env and the prose set each cost a whole-tree walk; build them only when a
+    # node that needs one turns up (almost no file has such a node).
+    env = functools.cache(lambda: _AST.module_env(tree))
+    prose = functools.cache(lambda: _bare_strings(tree))
+    return [f for node in ast.walk(tree) for f in _node_findings(node, rel, env, prose)]
 
 
 def _spelled(text: str) -> list[str]:
@@ -669,6 +681,7 @@ def lab_reach_census(root: Path, *, exclude: tuple[Path, ...] = ()) -> list[str]
     return found
 
 
+@pytest.mark.gate
 def test_1120_no_test_lint_or_ci_file_reads_knowledge_tenants(tmp_path: Path) -> None:
     """Narrowed per H2 (human), then widened when the lab was retired (human, PR #1157: #1158
     folded in): no file under defender/tests/, scripts/lint/ or .github/workflows/ reaches the

@@ -14,6 +14,7 @@ import logging
 import string
 import sys
 from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager
 from defender._model import model
 from defender._run_paths import RunPaths
 from pathlib import Path
@@ -35,7 +36,10 @@ from defender.learning.core.lane_trees import DrainTrees, TreeFor, open_drain_tr
 from defender.learning.core import persist as _loop_persist
 from defender.learning._prompt import stage_user_message, structured_json_body
 from defender.learning.leads import lead_neighbors
+from defender._claim_git import ClaimGit
+from defender.learning.author._config import GIT_TIMEOUT_SECONDS
 from defender.learning.leads import lead_render
+from defender.runtime import box as _box
 from defender.runtime.verbs import engine_for
 
 from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)
@@ -177,10 +181,18 @@ class LeadAuthorDeps:
     skills: Held
     #: The lane's `DrainTrees.tree_for`, for the post-agent rules, which hold git-status names.
     tree_for: TreeFor
+    #: The bound on each git call over the worktree (the run's `ClaimGit`, #1175): one that
+    #: overruns raises `GitOverran`, a systemic `GitError`.
+    git_timeout: float = GIT_TIMEOUT_SECONDS
+    #: Lets the box run for the agent's spawn only (#1178): the drain holds it frozen, so every
+    #: other step of the claim — the mint, the gate, the commit — runs beside a box that writes
+    #: nothing.
+    thaw: Callable[[Any], AbstractContextManager[None]] = _box.thawed
 
 
 def build_lead_author_deps(
     paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS, *, trees: DrainTrees,
+    git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> LeadAuthorDeps:
     """The lane's seams over `paths`, reading and writing `skills/` through `trees`, the lane's
     held mounts (`open_drain_trees`): `trees` must hold `paths.skills_dir` itself, else
@@ -207,13 +219,14 @@ def build_lead_author_deps(
         release_queue_lock=release_queue_lock,
         skills=skills,
         tree_for=trees.tree_for,
+        git_timeout=git_timeout,
     )
 
 
 def run(
     run_dir: Path,
     *,
-    label: str,
+    label: _loop_config.DrainLabel,
     paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS,
     deps: LeadAuthorDeps | None = None,
     box: Any = None,
@@ -229,7 +242,9 @@ def run(
     `label` is the drain lane whose mount list grants `skills/` (the CLI passes
     `LEAD_AUTHOR_DRAIN_LABEL`): without `deps`, the held trees are opened for it here, under the
     queue lock, and closed when the run ends; with `deps`, a label that does not mount
-    `deps.paths.skills_dir` is refused (#1134)."""
+    `deps.paths.skills_dir` is refused (#1134). The label is used first, on both paths, so a
+    non-member raises before the queue lock or any of the run (#1179 O1')."""
+    writable = label.writable_trees(deps.paths if deps is not None else paths)
     if not run_dir.is_dir():
         _logger.critical(f"run_dir not found: {run_dir}")
         return 2
@@ -239,9 +254,9 @@ def run(
     # tick about to skip on a contended lock should neither pay for it nor fail on a tree the
     # resolver can't read yet.
     if deps is not None:
-        if deps.paths.skills_dir not in deps.paths.drain_writable_trees(label):
+        if deps.paths.skills_dir not in writable:
             raise LeadAuthorError(
-                f"refused: the {label!r} lane does not mount {deps.paths.skills_dir}"
+                f"refused: the {str(label)!r} lane does not mount {deps.paths.skills_dir}"
             )
         queue_lock = deps.acquire_queue_lock()
         if queue_lock is None:
@@ -264,7 +279,7 @@ def run(
 
 def run_under_held_queue_lock(
     run_dir: Path, *, paths: _loop_config.LoopPaths, trees: DrainTrees, box: Any = None,
-    on_done: DoneSink,
+    on_done: DoneSink, git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> int:
     """`run` for a caller that already holds the per-author queue lock (the drain holds it for
     its whole tick, since it defers the done sentinel) and the lane's held mounts, `trees` (the
@@ -273,7 +288,8 @@ def run_under_held_queue_lock(
         _logger.critical(f"run_dir not found: {run_dir}")
         return 2
     return _run_locked(
-        run_dir, build_lead_author_deps(paths, trees=trees), box=box, on_done=on_done,
+        run_dir, build_lead_author_deps(paths, trees=trees, git_timeout=git_timeout), box=box,
+        on_done=on_done,
     )
 
 
@@ -328,7 +344,8 @@ def _run_locked(
         _write_state(collected_marker, _loop_config.now_iso() + "\n")
 
     repo_root = deps.paths.repo_root
-    baseline_stray = _author_shared.changes_outside(repo_root, SKILLS_REL)
+    git = ClaimGit(repo_root, SKILLS_REL, timeout=deps.git_timeout)
+    baseline_stray = git.changed_outside_corpus()
 
     if synth:
         catalog = lead_neighbors.load_lane_catalog(deps.skills.view(), where=skills_dir)
@@ -342,18 +359,17 @@ def _run_locked(
         f"{len(pending_drafts)} pending system-skill draft(s)"
     )
 
-    rc = deps.invoke_agent(run_dir, handoffs, pending_drafts, box=box)
+    with deps.thaw(box):
+        rc = deps.invoke_agent(run_dir, handoffs, pending_drafts, box=box)
     if rc != 0:
         _logger.critical(f"lead-author spawn exited rc={rc}; see the trace under {run_dir} (drain will quarantine)")
         return 2
 
     changed = _verify_skills_state(
         repo_root, baseline_stray, systems=deps.systems, minted=minted, tree_for=deps.tree_for,
+        git=git,
     )
-    sha = _author_shared.commit_corpus(
-        repo_root, repo_root / "defender" / "skills",
-        _loop_commit_message(run_dir, changed),
-    )
+    sha = git.commit(changed, _loop_commit_message(run_dir, changed))
     on_done(sha)
     _logger.info(f"done; commit_made={sha is not None} commit={(sha or 'none')[:12]}")
     return 0

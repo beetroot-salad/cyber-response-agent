@@ -11,6 +11,7 @@ not yet say it; that is a doc the implementer rewrites, not a test to loosen.
 from __future__ import annotations
 
 import ast
+import os
 import re
 from pathlib import Path
 
@@ -93,7 +94,11 @@ _SKIP_DOC_DIRS = {".spec-flow", "spec-flow", "experiments", "node_modules", ".ve
 
 def _docs_naming_setup() -> list[Path]:
     out = []
-    for p in sorted(REPO.rglob("*.md")):
+    found = []
+    for cur, dirs, files in os.walk(REPO):  # prune skipped trees: .venv/node_modules are huge
+        dirs[:] = [d for d in dirs if d not in _SKIP_DOC_DIRS]
+        found += [Path(cur) / f for f in files if f.endswith(".md")]
+    for p in sorted(found):
         rel = p.relative_to(REPO)
         if _SKIP_DOC_DIRS & set(rel.parts):
             continue
@@ -356,8 +361,6 @@ def test_s7_j57_autouse_data_root_isolation(which, tmp_path_factory):
     under this worker's pytest base temp (so two workers — two base temps — cannot share one),
     fresh and empty, distinct between the two cases, and it is the root `resolve_data_root()`
     returns."""
-    import os
-
     raw = os.environ.get(H.DATA_ROOT_ENV)
     assert raw, f"{H.DATA_ROOT_ENV} is unset in a test that did not ask for isolation"
     root = Path(raw)

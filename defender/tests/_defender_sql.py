@@ -1,4 +1,5 @@
-"""One spawn of `scripts/gather_tools/sql.py`, for every test that runs it as a PROCESS.
+"""One spawn of the sql engine (`runtime/sql_engine/sql.py`), for every test that runs it as a
+PROCESS.
 
 Three files drove the tool this way, each with its own spelling of the argv, its own
 timeout (none, 60 s, 120 s) and its own choice of bytes-or-text stdin — so a change to the
@@ -6,10 +7,10 @@ tool's CLI contract (a new required flag, a stdin encoding rule) had three easy-
 call sites instead of one (#1058). This is the one.
 
 `bin/defender-sql` is the shim a lead types, and it is deliberately bypassed here: it
-re-execs into `$DEFENDER_DIR/.venv/bin/python3`, so driving it would test the venv layout
-as much as the tool. `tests/e2e/test_query_tool_611.py` drives the shim with `DEFENDER_DIR`
-set; this helper drives the program the shim ends in, with the interpreter the tests run
-under.
+execs `$DEFENDER_DIR/.venv/bin/python3`, so driving it would test the venv layout as much as
+the tool. `tests/e2e/test_query_tool_611.py` drives the shim with `DEFENDER_DIR` set; this
+helper runs the module the shim runs (`SQL_ARGV`, the same `-P -m` form, this checkout's root
+first on `PYTHONPATH`), with the interpreter the tests run under.
 
 The exit codes are LITERALS, deliberately not read off the tool: they are the contract
 `skills/gather/defender-sql.md` teaches the lead (`1` = query error, `2` = payload never
@@ -20,6 +21,7 @@ tool they would follow any renumbering and pin nothing.
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -28,7 +30,19 @@ import pytest
 
 from defender.tests._by_path import DEFENDER
 
-SQL_PY: Path = DEFENDER / "scripts" / "gather_tools" / "sql.py"
+#: The engine's source file (read as text by the census tests, loaded by `_sql_warm`).
+SQL_PY: Path = DEFENDER / "runtime" / "sql_engine" / "sql.py"
+#: How the shim starts it: as a module, the working directory kept off `sys.path`.
+SQL_ARGV: tuple[str, ...] = (sys.executable, "-P", "-m", "defender.runtime.sql_engine.sql")
+
+
+def sql_env(env: dict[str, str] | None = None) -> dict[str, str]:
+    """`env` (default: this process's) with this checkout's root first on `PYTHONPATH`, as the
+    shim puts it."""
+    out = dict(os.environ if env is None else env)
+    root = str(DEFENDER.parent)
+    out["PYTHONPATH"] = os.pathsep.join(p for p in (root, out.get("PYTHONPATH")) if p)
+    return out
 
 EXIT_OK = 0
 EXIT_QUERY_ERROR = 1
@@ -58,9 +72,9 @@ def run_sql_py(
     """`cat <payload> | defender-sql '<query>'` as a lead types it: `args` is the argv after
     the program, `stdin` the payload text. Text mode, UTF-8 both ways, output captured."""
     proc = subprocess.run(
-        [sys.executable, str(SQL_PY), *args],
+        [*SQL_ARGV, *args],
         input=stdin, capture_output=True, text=True, encoding="utf-8",
-        timeout=timeout, env=env, cwd=cwd,
+        timeout=timeout, env=sql_env(env), cwd=cwd,
     )
     if proc.returncode == EXIT_NO_RUNTIME and not _DUCKDB_INSTALLED:
         pytest.skip(f"duckdb is not installed in {sys.executable} (the `runtime` extra)")

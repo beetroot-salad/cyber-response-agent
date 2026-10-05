@@ -41,6 +41,7 @@ from defender.tests._dispositions995 import (
     planted_tree,
     write_table,
 )
+from defender.tests._by_path import cached_source
 from defender.tests._repo import HOSTILE_NAMES, plant_named_dirs, seed_repo
 from defender.tests import _tenants1106 as T1106
 
@@ -871,7 +872,7 @@ def test_no_module_under_defender_writes_the_disposition_table():
         parts = path.parts
         if ".venv" in parts or "tests" in parts:
             continue
-        text = path.read_text(encoding="utf-8", errors="replace")
+        text = cached_source(path)
         if rel not in text:
             continue
         referencing.append(str(path.relative_to(REPO_ROOT)))

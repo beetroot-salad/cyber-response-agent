@@ -40,6 +40,7 @@ Underscore-prefixed so pytest does not collect it; it defines no tests.
 from __future__ import annotations
 
 import ast
+import functools
 import re
 from collections.abc import Iterable, Iterator
 from pathlib import Path
@@ -139,8 +140,16 @@ def _rel(path: Path, root: Path) -> str:
     return path.resolve().relative_to(Path(root).resolve()).as_posix()
 
 
-def _parse(path: Path) -> ast.Module:
+@functools.cache
+def _parse_at(path: Path, stamp: tuple[int, int]) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8", errors="replace"), filename=str(path))
+
+
+def _parse(path: Path) -> ast.Module:
+    """The parsed module, once per process and file state: the censuses all walk the same
+    production files, and nothing here mutates a tree."""
+    st = path.stat()
+    return _parse_at(path, (st.st_mtime_ns, st.st_size))
 
 
 # ======================================================================================

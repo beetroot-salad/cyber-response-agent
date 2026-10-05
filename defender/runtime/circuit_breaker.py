@@ -1,13 +1,12 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from pathlib import Path
 
 from defender._clock import now_iso
-from defender._io import TEXT_READ_ERRORS
+from defender._io import TEXT_READ_ERRORS, load_json_artifact, read_text_utf8
 from defender._run_paths import RunPaths
 from defender.hooks._run_dir import update_json_locked
 
@@ -75,15 +74,15 @@ def _load(run_dir: Path) -> dict:
         return _blank()
     if p.is_symlink():
         return {**_blank(), "_unreadable": True}
-    # `TEXT_READ_ERRORS` includes `UnicodeDecodeError`: the box can write non-UTF-8 bytes
-    # here, and the callers have no `try`.
+    # `TEXT_READ_ERRORS` includes `UnicodeDecodeError` (the box can write non-UTF-8 bytes here,
+    # and the callers have no `try`) and the bounded read's size refusal (#1174 O10).
     try:
-        text = p.read_text(encoding="utf-8")
+        text = read_text_utf8(p)
     except TEXT_READ_ERRORS:
         return {**_blank(), "_unreadable": True}
-    try:
-        doc = json.loads(text or "{}")
-    except json.JSONDecodeError:
+    # Nesting is judged before decoding: a deep document would raise `RecursionError`.
+    doc, reason = load_json_artifact(text or "{}")
+    if reason is not None:
         return {**_blank(), "_unreadable": True}
     # Valid JSON of the wrong shape is corrupted too; readers would raise on it.
     if not isinstance(doc, dict):

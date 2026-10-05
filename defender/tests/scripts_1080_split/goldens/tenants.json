@@ -1,0 +1,3905 @@
+{
+ "_meta": {
+  "base": "80888efb",
+  "how": "each `_observe_*` of test_1080_writeback_tenants_and_views.py (the code the tests run) executed at the base under SPEC1080_AT_BASE=1, every case in a fresh tmp dir and data root, values normalized by its `_norm`"
+ },
+ "s180": {
+  "run_dir_section": [
+   "## Run dir \u2014 `<TMP>/runs/r1080`",
+   "- ## heading-looking",
+   "- .hidden",
+   "- __pycache__",
+   "- a\\nb## Forged heading",
+   "- back`tick",
+   "- bad-\\udcff\\udcfe-utf8",
+   "- bell\\x07tab\\there",
+   "- esc\\x1b[31mred",
+   "- nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+   "- plain.txt",
+   "- sp ace",
+   "- sub\\ndir dir/",
+   "- x\\ry",
+   "- \u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9x",
+   "- \\u202eRTL"
+  ]
+ },
+ "s181": {
+  "present": {
+   "run_dir_section": [
+    "## Run dir \u2014 `<TMP>/runs/r1080`",
+    "- alert.json",
+    "- leads dir/",
+    "- report.md"
+   ]
+  },
+  "absent": {
+   "run_dir_section": [
+    "## Run dir \u2014 `<TMP>/runs/r1080`",
+    "- alert.json",
+    "- leads dir/",
+    "- report.md"
+   ]
+  },
+  "empty": {
+   "run_dir_section": [
+    "## Run dir \u2014 `<TMP>/runs/r1080`",
+    "- alert.json",
+    "- leads dir/",
+    "- report.md"
+   ]
+  },
+  "symlinked": {
+   "run_dir_section": [
+    "## Run dir \u2014 `<TMP>/runs/r1080`",
+    "- alert.json",
+    "- leads dir/",
+    "- report.md"
+   ]
+  },
+  "dangling_link": {
+   "run_dir_section": [
+    "## Run dir \u2014 `<TMP>/runs/r1080`",
+    "- alert.json",
+    "- leads dir/",
+    "- report.md"
+   ]
+  }
+ },
+ "s182": {
+  "empty": {
+   "adapters": [
+    "## Adapters \u2014 `defender/scripts/adapters/`",
+    "- (none declared)"
+   ],
+   "query_templates": [
+    "## Gather query templates \u2014 `defender/skills/gather/queries/`",
+    "- change-mgmt/ \u2014 3 established, 0 draft",
+    "- cmdb/ \u2014 3 established, 0 draft",
+    "- elastic/ \u2014 15 established, 0 draft",
+    "- host-state/ \u2014 4 established, 0 draft",
+    "- identity/ \u2014 3 established, 1 draft"
+   ]
+  },
+  "duplicate": {
+   "adapters": [
+    "## Adapters \u2014 `defender/scripts/adapters/`",
+    "- cmdb  (a system dispatched via the query tool; do not Read the adapter source)",
+    "- cmdb  (a system dispatched via the query tool; do not Read the adapter source)",
+    "- elastic  (a system dispatched via the query tool; do not Read the adapter source)"
+   ],
+   "query_templates": [
+    "## Gather query templates \u2014 `defender/skills/gather/queries/`",
+    "- change-mgmt/ \u2014 3 established, 0 draft",
+    "- cmdb/ \u2014 3 established, 0 draft",
+    "- elastic/ \u2014 15 established, 0 draft",
+    "- host-state/ \u2014 4 established, 0 draft",
+    "- identity/ \u2014 3 established, 1 draft"
+   ]
+  },
+  "no_query_templates": {
+   "adapters": [
+    "## Adapters \u2014 `defender/scripts/adapters/`",
+    "- ticket  (a system dispatched via the query tool; do not Read the adapter source)"
+   ],
+   "query_templates": [
+    "## Gather query templates \u2014 `defender/skills/gather/queries/`",
+    "- change-mgmt/ \u2014 3 established, 0 draft",
+    "- cmdb/ \u2014 3 established, 0 draft",
+    "- elastic/ \u2014 15 established, 0 draft",
+    "- host-state/ \u2014 4 established, 0 draft",
+    "- identity/ \u2014 3 established, 1 draft"
+   ]
+  },
+  "hyphen_and_underscore": {
+   "adapters": [
+    "## Adapters \u2014 `defender/scripts/adapters/`",
+    "- change-mgmt  (a system dispatched via the query tool; do not Read the adapter source)",
+    "- change_mgmt  (a system dispatched via the query tool; do not Read the adapter source)"
+   ],
+   "query_templates": [
+    "## Gather query templates \u2014 `defender/skills/gather/queries/`",
+    "- change-mgmt/ \u2014 3 established, 0 draft",
+    "- cmdb/ \u2014 3 established, 0 draft",
+    "- elastic/ \u2014 15 established, 0 draft",
+    "- host-state/ \u2014 4 established, 0 draft",
+    "- identity/ \u2014 3 established, 1 draft"
+   ]
+  },
+  "path_separator": {
+   "adapters": [
+    "## Adapters \u2014 `defender/scripts/adapters/`",
+    "- ../escape  (a system dispatched via the query tool; do not Read the adapter source)",
+    "- a/b  (a system dispatched via the query tool; do not Read the adapter source)"
+   ],
+   "query_templates": [
+    "## Gather query templates \u2014 `defender/skills/gather/queries/`",
+    "- change-mgmt/ \u2014 3 established, 0 draft",
+    "- cmdb/ \u2014 3 established, 0 draft",
+    "- elastic/ \u2014 15 established, 0 draft",
+    "- host-state/ \u2014 4 established, 0 draft",
+    "- identity/ \u2014 3 established, 1 draft"
+   ]
+  },
+  "non_ascii": {
+   "adapters": [
+    "## Adapters \u2014 `defender/scripts/adapters/`",
+    "- syst\u00e8me  (a system dispatched via the query tool; do not Read the adapter source)",
+    "- \u691c\u77e5  (a system dispatched via the query tool; do not Read the adapter source)"
+   ],
+   "query_templates": [
+    "## Gather query templates \u2014 `defender/skills/gather/queries/`",
+    "- change-mgmt/ \u2014 3 established, 0 draft",
+    "- cmdb/ \u2014 3 established, 0 draft",
+    "- elastic/ \u2014 15 established, 0 draft",
+    "- host-state/ \u2014 4 established, 0 draft",
+    "- identity/ \u2014 3 established, 1 draft"
+   ]
+  },
+  "unsorted": {
+   "adapters": [
+    "## Adapters \u2014 `defender/scripts/adapters/`",
+    "- change-mgmt  (a system dispatched via the query tool; do not Read the adapter source)",
+    "- cmdb  (a system dispatched via the query tool; do not Read the adapter source)",
+    "- identity  (a system dispatched via the query tool; do not Read the adapter source)"
+   ],
+   "query_templates": [
+    "## Gather query templates \u2014 `defender/skills/gather/queries/`",
+    "- change-mgmt/ \u2014 3 established, 0 draft",
+    "- cmdb/ \u2014 3 established, 0 draft",
+    "- elastic/ \u2014 15 established, 0 draft",
+    "- host-state/ \u2014 4 established, 0 draft",
+    "- identity/ \u2014 3 established, 1 draft"
+   ]
+  }
+ },
+ "s172": {
+  "unset": {
+   "ceiling": {
+    "returns": 8192
+   },
+   "render": {
+    "returns": "{\"rows\": [{\"i\": 0, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 1, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 2, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 3, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 4, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 5, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 6, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 7, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 8, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 9, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 10, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 11, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 12, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 13, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 14, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 15, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 16, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 17, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 18, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 19, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 20, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 21, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 22, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 23, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 24, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 25, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 26, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 27, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 28, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 29, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 30, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 31, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 32, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 33, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 34, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 35, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 36, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 37, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 38, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 39, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}]}"
+   }
+  },
+  "empty": {
+   "ceiling": {
+    "raises": "FatalConfigError",
+    "message": "DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES must be an integer; got ''"
+   },
+   "render": {
+    "raises": "FatalConfigError",
+    "message": "DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES must be an integer; got ''"
+   }
+  },
+  "zero": {
+   "ceiling": {
+    "returns": 0
+   },
+   "render": {
+    "returns": "[record_query] 1600 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n\"<<ELIDED 108 of 108 chars>>\""
+   }
+  },
+  "negative": {
+   "ceiling": {
+    "returns": -1
+   },
+   "render": {
+    "returns": "[record_query] 1600 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n\"<<ELIDED 108 of 108 chars>>\""
+   }
+  },
+  "padded": {
+   "ceiling": {
+    "returns": 4096
+   },
+   "render": {
+    "returns": "{\"rows\": [{\"i\": 0, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 1, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 2, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 3, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 4, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 5, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 6, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 7, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 8, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 9, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 10, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 11, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 12, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 13, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 14, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 15, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 16, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 17, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 18, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 19, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 20, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 21, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 22, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 23, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 24, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 25, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 26, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 27, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 28, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 29, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 30, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 31, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 32, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 33, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 34, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 35, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 36, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 37, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 38, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 39, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}]}"
+   }
+  },
+  "plus_sign": {
+   "ceiling": {
+    "returns": 64
+   },
+   "render": {
+    "returns": "[record_query] 1600 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n\"{\\\"rows\\\": [\\\"<<ELIDED 40 of 40 ele<<ELIDED 77 of 109 chars>>\""
+   }
+  },
+  "underscored": {
+   "ceiling": {
+    "returns": 1024
+   },
+   "render": {
+    "returns": "[record_query] 1600 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n{\"rows\": [{\"i\": 0, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 1, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 2, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 3, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 4, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 5, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 6, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 7, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 8, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 9, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 10, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 11, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 12, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 13, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 14, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 15, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 16, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 17, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 18, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 19, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 20, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 21, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 22, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, \"<<ELIDED 17 of 40 elements \\u2014 dropped from THIS VIEW only; the payload on disk has all 40>>\"]}"
+   }
+  },
+  "float": {
+   "ceiling": {
+    "raises": "FatalConfigError",
+    "message": "DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES must be an integer; got '1.5'"
+   },
+   "render": {
+    "raises": "FatalConfigError",
+    "message": "DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES must be an integer; got '1.5'"
+   }
+  },
+  "exponent": {
+   "ceiling": {
+    "raises": "FatalConfigError",
+    "message": "DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES must be an integer; got '1e3'"
+   },
+   "render": {
+    "raises": "FatalConfigError",
+    "message": "DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES must be an integer; got '1e3'"
+   }
+  },
+  "hex": {
+   "ceiling": {
+    "raises": "FatalConfigError",
+    "message": "DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES must be an integer; got '0x10'"
+   },
+   "render": {
+    "raises": "FatalConfigError",
+    "message": "DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES must be an integer; got '0x10'"
+   }
+  },
+  "non_numeric": {
+   "ceiling": {
+    "raises": "FatalConfigError",
+    "message": "DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES must be an integer; got 'eight kilobytes'"
+   },
+   "render": {
+    "raises": "FatalConfigError",
+    "message": "DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES must be an integer; got 'eight kilobytes'"
+   }
+  },
+  "non_ascii_digits": {
+   "ceiling": {
+    "returns": 4096
+   },
+   "render": {
+    "returns": "{\"rows\": [{\"i\": 0, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 1, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 2, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 3, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 4, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 5, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 6, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 7, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 8, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 9, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 10, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 11, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 12, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 13, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 14, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 15, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 16, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 17, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 18, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 19, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 20, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 21, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 22, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 23, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 24, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 25, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 26, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 27, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 28, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 29, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 30, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 31, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 32, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 33, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 34, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 35, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 36, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 37, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 38, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 39, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}]}"
+   }
+  },
+  "oversized": {
+   "ceiling": {
+    "returns": {
+     "int": "9999999999999999999999999999999999999999"
+    }
+   },
+   "render": {
+    "returns": "{\"rows\": [{\"i\": 0, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 1, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 2, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 3, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 4, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 5, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 6, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 7, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 8, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 9, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 10, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 11, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 12, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 13, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 14, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 15, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 16, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 17, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 18, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 19, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 20, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 21, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 22, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 23, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 24, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 25, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 26, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 27, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 28, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 29, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 30, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 31, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 32, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 33, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 34, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 35, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 36, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 37, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 38, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 39, \"v\": \"xxxxxxxxxxxxxxxxxxxx\"}]}"
+   }
+  },
+  "past_the_digit_limit": {
+   "ceiling": {
+    "raises": "FatalConfigError",
+    "message": "DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES must be an integer; got '99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999'"
+   },
+   "render": {
+    "raises": "FatalConfigError",
+    "message": "DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES must be an integer; got '99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999'"
+   }
+  }
+ },
+ "s173": {
+  "text_one_under": {
+   "render": {
+    "returns": "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+   }
+  },
+  "text_at": {
+   "render": {
+    "returns": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+   }
+  },
+  "text_one_over": {
+   "render": {
+    "returns": "[record_query] 65 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\nttttttttttttttttttttttttttttttttttttttt<<ELIDED 26 of 65 chars>>"
+   }
+  },
+  "json_one_under": {
+   "render": {
+    "returns": "{\"v\": \"jjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjj\"}"
+   }
+  },
+  "json_at": {
+   "render": {
+    "returns": "{\"v\": \"jjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjj\"}"
+   }
+  },
+  "json_one_over": {
+   "render": {
+    "returns": "[record_query] 65 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n\"{\\\"<<ELIDED>>\\\": \\\"<<ELIDED 1 of 1 <<ELIDED 76 of 108 chars>>\""
+   }
+  },
+  "envelope_at": {
+   "render": {
+    "returns": "{\"total\": 3, \"returned\": 3, \"rows\": [\"aaaaaaaaaa\", \"bbbbbbbbbb\", \"cccccccccc\"]}"
+   }
+  },
+  "envelope_one_over": {
+   "render": {
+    "returns": "[record_query] 79 bytes. The SERVER returned everything it had \u2014 nothing was capped upstream, and the payload's own counts are exact.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n\"{\\\"total\\\": 3, \\\"returned\\\": 3, \\\"rows\\\": [\\\"<<EL<<ELIDED 91 of 133 chars>>\""
+   }
+  },
+  "multibyte_across_the_cut": {
+   "render": {
+    "returns": "[record_query] 90 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\naaaaaaaaaaaaaaa<<ELIDED 75 of 90 chars>>"
+   }
+  },
+  "multibyte_at_the_cut_json": {
+   "render": {
+    "returns": "[record_query] 49 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n\"{\\\"<<ELIDED<<ELIDED 98 of 108 chars>>\""
+   }
+  },
+  "ceiling_smaller_than_a_character": {
+   "render": {
+    "returns": "[record_query] 4 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42"
+   }
+  },
+  "ceiling_zero": {
+   "render": {
+    "returns": "[record_query] 4 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42"
+   }
+  },
+  "ceiling_negative": {
+   "render": {
+    "returns": "[record_query] 8 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n\"<<ELIDED 108 of 108 chars>>\""
+   }
+  },
+  "through_the_variable": {
+   "render": {
+    "returns": "[record_query] 200 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\nvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv<<ELIDED 127 of 200 chars>>"
+   }
+  }
+ },
+ "s174": {
+  "empty": {
+   "render": {
+    "returns": ""
+   }
+  },
+  "plain_text": {
+   "render": {
+    "returns": "[record_query] 460 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\nplain words, not JSON. plain words, n<<ELIDED 423 of 460 chars>>"
+   }
+  },
+  "deeply_nested": {
+   "render": {
+    "returns": "[record_query] 276 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n\"{\\\"k\\\": [\\\"<<ELIDED 1 of 1 elements<<ELIDED 71 of 103 chars>>\""
+   }
+  },
+  "nested_past_the_parser": {
+   "render": {
+    "raises": "RecursionError",
+    "message": "maximum recursion depth exceeded while decoding a JSON array from a unicode string"
+   }
+  },
+  "leaf_at_the_string_bound": {
+   "render": {
+    "returns": "[record_query] 920 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n{\"<<ELIDED>>\": \"<<ELIDED 2 of 2 fields \\u2014 dropped from THIS VIEW only; the payload on disk has all 2>>\"}"
+   }
+  },
+  "leaf_one_over_the_string_bound": {
+   "render": {
+    "returns": "[record_query] 921 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n{\"a\": \"sssssssssssssssssssssssssssssssssssssssssssssssss<<ELIDED 552 of 601 chars>>\", \"pad\": \"pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp\"}"
+   }
+  },
+  "invalid_utf8_as_surrogates": {
+   "render": {
+    "returns": "[record_query] 42 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n\"<<ELIDED 108 of 108 chars>>\""
+   }
+  },
+  "escaped_lone_surrogate": {
+   "render": {
+    "returns": "[record_query] 41 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n\"<<ELIDED 108 of 108 chars>>\""
+   }
+  },
+  "scalar_number": {
+   "render": {
+    "returns": "[record_query] 100 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n\"<<ELIDED 100 of 100 chars>>\""
+   }
+  },
+  "scalar_string": {
+   "render": {
+    "returns": "[record_query] 102 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n\"<<ELIDED 102 of 102 chars>>\""
+   }
+  },
+  "scalar_null": {
+   "render": {
+    "returns": "[record_query] 4 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n\"<<ELIDED 4 of 4 chars>>\""
+   }
+  },
+  "top_level_list": {
+   "render": {
+    "returns": "[record_query] 890 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n\"[\\\"<<ELIDED 200 of 200 elements \\\\u<<ELIDED 69 of 102 chars>>\""
+   }
+  },
+  "ten_thousand_items": {
+   "render": {
+    "returns": {
+     "len": 8506,
+     "sha256": "40973a8cf0b095acf3395bc10aec57aecada691d5a39eb26dae7094f3eea23be",
+     "head": "[record_query] 307780 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n[{\"i\": 0, \"host\": \"h-0\"}, {\"i\": 1, \"host\": \"h-1\"}, {\"i\": 2, \"host\": \"h-2\"},",
+     "tail": "282\"}, {\"i\": 283, \"host\": \"h-283\"}, {\"i\": 284, \"host\": \"h-284\"}, {\"i\": 285, \"host\": \"h-285\"}, \"<<ELIDED 9714 of 10000 elements \\u2014 dropped from THIS VIEW only; the payload on disk has all 10000>>\"]"
+    }
+   }
+  },
+  "wide_flat_object": {
+   "render": {
+    "returns": "[record_query] 5180 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n{\"field_0\": 0, \"field_1\": 1, \"field_2\": 2, \"field_3\": 3, \"field_4\": 4, \"field_5\": 5, \"field_6\": 6, \"field_7\": 7, \"field_8\": 8, \"<<ELIDED>>\": \"<<ELIDED 291 of 300 fields \\u2014 dropped from THIS VIEW only; the payload on disk has all 300>>\"}"
+   }
+  },
+  "wide_row": {
+   "render": {
+    "returns": "[record_query] 1922 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n{\"columns\": [\"a\"], \"values\": [[0, 1, 2, 3, 4, 5, 6, \"<<ELIDED 393 of 400 cells \\u2014 dropped from THIS VIEW only; the payload on disk has all 400>>\"]]}"
+   }
+  }
+ },
+ "s_case_mapping_read_at_run_start": {
+  "record_good": {
+   "mapping": {
+    "dict": [
+     [
+      "source",
+      {
+       "dict": [
+        [
+         "signature",
+         "rule.id"
+        ],
+        [
+         "summary",
+         "rule.description"
+        ],
+        [
+         "event_time",
+         "timestamp"
+        ]
+       ]
+      }
+     ],
+     [
+      "open",
+      {
+       "dict": [
+        [
+         "key",
+         "{case_id}"
+        ],
+        [
+         "summary",
+         "{summary}"
+        ],
+        [
+         "description",
+         "Opened from alert {case_id} (rule {signature})."
+        ],
+        [
+         "status",
+         "open"
+        ],
+        [
+         "reporter",
+         "defender"
+        ],
+        [
+         "labels",
+         [
+          "sig:{signature}",
+          "evt:{event_time}"
+         ]
+        ]
+       ]
+      }
+     ],
+     [
+      "comment",
+      {
+       "dict": [
+        [
+         "author",
+         "defender-1080"
+        ],
+        [
+         "body",
+         "[{signature}] {disposition} \u2014 {cause}\n\n{narrative}"
+        ]
+       ]
+      }
+     ],
+     [
+      "released",
+      {
+       "dict": [
+        [
+         "status",
+         "closed"
+        ]
+       ]
+      }
+     ]
+    ]
+   }
+  },
+  "record_bad": {
+   "error": "CaseTicketError",
+   "message": "case-history mapping's `open.status` and `released.status` are both 'open' \u2014 every case would open already released"
+  },
+  "query_tool_good": [
+   true,
+   false
+  ],
+  "query_tool_bad": [
+   false,
+   false
+  ],
+  "applier_good": {
+   "returns": [
+    "ticket/C-1: patches `comments` on a case it does not also move to the released status ('closed') \u2014 an unreleased case serves no comments (#767), so the sibling could never observe this difference"
+   ]
+  },
+  "applier_bad": {
+   "returns": [
+    "ticket/C-1: patches `comments`, but the case-history mapping cannot say which status releases them (case-history mapping's `open.status` and `released.status` are both 'open' \u2014 every case would open already released)"
+   ]
+  }
+ },
+ "s187": {
+  "absent": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping not readable: the tenant's settings/systems/case-history/mapping.yaml: No such file or directory"
+   },
+   "held_on_run_tenant": {
+    "refused": "TenantRefused",
+    "message": "a required settings file is missing: <DATA_ROOT>/playground/knowledge/settings/systems/case-history/mapping.yaml"
+   }
+  },
+  "empty": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping is not a mapping: the tenant's settings/systems/case-history/mapping.yaml"
+   },
+   "held_on_run_tenant": {
+    "error": "CaseTicketError",
+    "message": "case-history mapping is not a mapping: the tenant's settings/systems/case-history/mapping.yaml"
+   }
+  },
+  "whitespace_only": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping <DATA_ROOT>/playground/knowledge/settings/systems/case-history/mapping.yaml is not valid YAML: while scanning for the next token\nfound character '\\t' that cannot start any token\n  in \"<unicode string>\", line 2, column 1:\n    \t \n    ^"
+   },
+   "held_on_run_tenant": {
+    "error": "CaseTicketError",
+    "message": "case-history mapping <DATA_ROOT>/playground/knowledge/settings/systems/case-history/mapping.yaml is not valid YAML: while scanning for the next token\nfound character '\\t' that cannot start any token\n  in \"<unicode string>\", line 2, column 1:\n    \t \n    ^"
+   }
+  },
+  "bom_prefixed": {
+   "load_case_mapping": {
+    "returns": {
+     "dict": [
+      [
+       "source",
+       {
+        "dict": [
+         [
+          "signature",
+          "rule.id"
+         ],
+         [
+          "summary",
+          "rule.description"
+         ],
+         [
+          "event_time",
+          "timestamp"
+         ]
+        ]
+       }
+      ],
+      [
+       "open",
+       {
+        "dict": [
+         [
+          "key",
+          "{case_id}"
+         ],
+         [
+          "summary",
+          "{summary}"
+         ],
+         [
+          "description",
+          "Opened from alert {case_id} (rule {signature})."
+         ],
+         [
+          "status",
+          "open"
+         ],
+         [
+          "reporter",
+          "defender"
+         ],
+         [
+          "labels",
+          [
+           "sig:{signature}",
+           "evt:{event_time}"
+          ]
+         ]
+        ]
+       }
+      ],
+      [
+       "comment",
+       {
+        "dict": [
+         [
+          "author",
+          "defender-1080"
+         ],
+         [
+          "body",
+          "[{signature}] {disposition} \u2014 {cause}\n\n{narrative}"
+         ]
+        ]
+       }
+      ],
+      [
+       "released",
+       {
+        "dict": [
+         [
+          "status",
+          "closed"
+         ]
+        ]
+       }
+      ]
+     ]
+    }
+   },
+   "held_on_run_tenant": {
+    "mapping": {
+     "dict": [
+      [
+       "source",
+       {
+        "dict": [
+         [
+          "signature",
+          "rule.id"
+         ],
+         [
+          "summary",
+          "rule.description"
+         ],
+         [
+          "event_time",
+          "timestamp"
+         ]
+        ]
+       }
+      ],
+      [
+       "open",
+       {
+        "dict": [
+         [
+          "key",
+          "{case_id}"
+         ],
+         [
+          "summary",
+          "{summary}"
+         ],
+         [
+          "description",
+          "Opened from alert {case_id} (rule {signature})."
+         ],
+         [
+          "status",
+          "open"
+         ],
+         [
+          "reporter",
+          "defender"
+         ],
+         [
+          "labels",
+          [
+           "sig:{signature}",
+           "evt:{event_time}"
+          ]
+         ]
+        ]
+       }
+      ],
+      [
+       "comment",
+       {
+        "dict": [
+         [
+          "author",
+          "defender-1080"
+         ],
+         [
+          "body",
+          "[{signature}] {disposition} \u2014 {cause}\n\n{narrative}"
+         ]
+        ]
+       }
+      ],
+      [
+       "released",
+       {
+        "dict": [
+         [
+          "status",
+          "closed"
+         ]
+        ]
+       }
+      ]
+     ]
+    }
+   }
+  },
+  "non_utf8": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping <DATA_ROOT>/playground/knowledge/settings/systems/case-history/mapping.yaml is not UTF-8: 'utf-8' codec can't decode byte 0xe9 in position 309: invalid continuation byte"
+   },
+   "held_on_run_tenant": {
+    "error": "CaseTicketError",
+    "message": "case-history mapping <DATA_ROOT>/playground/knowledge/settings/systems/case-history/mapping.yaml is not UTF-8: 'utf-8' codec can't decode byte 0xe9 in position 309: invalid continuation byte"
+   }
+  },
+  "at_the_bound": {
+   "load_case_mapping": {
+    "returns": {
+     "dict": [
+      [
+       "source",
+       {
+        "dict": [
+         [
+          "signature",
+          "rule.id"
+         ],
+         [
+          "summary",
+          "rule.description"
+         ],
+         [
+          "event_time",
+          "timestamp"
+         ]
+        ]
+       }
+      ],
+      [
+       "open",
+       {
+        "dict": [
+         [
+          "key",
+          "{case_id}"
+         ],
+         [
+          "summary",
+          "{summary}"
+         ],
+         [
+          "description",
+          "Opened from alert {case_id} (rule {signature})."
+         ],
+         [
+          "status",
+          "open"
+         ],
+         [
+          "reporter",
+          "defender"
+         ],
+         [
+          "labels",
+          [
+           "sig:{signature}",
+           "evt:{event_time}"
+          ]
+         ]
+        ]
+       }
+      ],
+      [
+       "comment",
+       {
+        "dict": [
+         [
+          "author",
+          "defender-1080"
+         ],
+         [
+          "body",
+          "[{signature}] {disposition} \u2014 {cause}\n\n{narrative}"
+         ]
+        ]
+       }
+      ],
+      [
+       "released",
+       {
+        "dict": [
+         [
+          "status",
+          "closed"
+         ]
+        ]
+       }
+      ]
+     ]
+    }
+   },
+   "held_on_run_tenant": {
+    "mapping": {
+     "dict": [
+      [
+       "source",
+       {
+        "dict": [
+         [
+          "signature",
+          "rule.id"
+         ],
+         [
+          "summary",
+          "rule.description"
+         ],
+         [
+          "event_time",
+          "timestamp"
+         ]
+        ]
+       }
+      ],
+      [
+       "open",
+       {
+        "dict": [
+         [
+          "key",
+          "{case_id}"
+         ],
+         [
+          "summary",
+          "{summary}"
+         ],
+         [
+          "description",
+          "Opened from alert {case_id} (rule {signature})."
+         ],
+         [
+          "status",
+          "open"
+         ],
+         [
+          "reporter",
+          "defender"
+         ],
+         [
+          "labels",
+          [
+           "sig:{signature}",
+           "evt:{event_time}"
+          ]
+         ]
+        ]
+       }
+      ],
+      [
+       "comment",
+       {
+        "dict": [
+         [
+          "author",
+          "defender-1080"
+         ],
+         [
+          "body",
+          "[{signature}] {disposition} \u2014 {cause}\n\n{narrative}"
+         ]
+        ]
+       }
+      ],
+      [
+       "released",
+       {
+        "dict": [
+         [
+          "status",
+          "closed"
+         ]
+        ]
+       }
+      ]
+     ]
+    }
+   }
+  },
+  "one_byte_over": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping not readable: the tenant's settings/systems/case-history/mapping.yaml: larger than 1048576 bytes"
+   },
+   "held_on_run_tenant": {
+    "error": "CaseTicketError",
+    "message": "case-history mapping not readable: the tenant's settings/systems/case-history/mapping.yaml: larger than 1048576 bytes"
+   }
+  },
+  "symlink_out_of_the_tenant_folder": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping not readable: the tenant's settings/systems/case-history/mapping.yaml: Too many levels of symbolic links"
+   },
+   "held_on_run_tenant": {
+    "refused": "TenantRefused",
+    "message": "a required settings file must be a regular file: <DATA_ROOT>/playground/knowledge/settings/systems/case-history/mapping.yaml"
+   }
+  },
+  "directory": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping not readable: the tenant's settings/systems/case-history/mapping.yaml: not a plain, single-linked regular file"
+   },
+   "held_on_run_tenant": {
+    "refused": "TenantRefused",
+    "message": "a required settings file must be a regular file: <DATA_ROOT>/playground/knowledge/settings/systems/case-history/mapping.yaml"
+   }
+  },
+  "fifo": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping not readable: the tenant's settings/systems/case-history/mapping.yaml: not a plain, single-linked regular file"
+   },
+   "held_on_run_tenant": {
+    "refused": "TenantRefused",
+    "message": "a required settings file must be a regular file: <DATA_ROOT>/playground/knowledge/settings/systems/case-history/mapping.yaml"
+   }
+  }
+ },
+ "s188": {
+  "list": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping is not a mapping: the tenant's settings/systems/case-history/mapping.yaml"
+   },
+   "release_predicate": null
+  },
+  "scalar": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping is not a mapping: the tenant's settings/systems/case-history/mapping.yaml"
+   },
+   "release_predicate": null
+  },
+  "null_tilde": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping is not a mapping: the tenant's settings/systems/case-history/mapping.yaml"
+   },
+   "release_predicate": null
+  },
+  "null_word": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping is not a mapping: the tenant's settings/systems/case-history/mapping.yaml"
+   },
+   "release_predicate": null
+  },
+  "comment_only": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping is not a mapping: the tenant's settings/systems/case-history/mapping.yaml"
+   },
+   "release_predicate": null
+  },
+  "duplicate_top_level_key": {
+   "load_case_mapping": {
+    "returns": {
+     "dict": [
+      [
+       "source",
+       {
+        "dict": [
+         [
+          "signature",
+          "rule.id"
+         ],
+         [
+          "summary",
+          "rule.description"
+         ],
+         [
+          "event_time",
+          "timestamp"
+         ]
+        ]
+       }
+      ],
+      [
+       "open",
+       {
+        "dict": [
+         [
+          "key",
+          "{case_id}"
+         ],
+         [
+          "summary",
+          "{summary}"
+         ],
+         [
+          "description",
+          "Opened from alert {case_id} (rule {signature})."
+         ],
+         [
+          "status",
+          "open"
+         ],
+         [
+          "reporter",
+          "defender"
+         ],
+         [
+          "labels",
+          [
+           "sig:{signature}",
+           "evt:{event_time}"
+          ]
+         ]
+        ]
+       }
+      ],
+      [
+       "comment",
+       {
+        "dict": [
+         [
+          "author",
+          "someone-else"
+         ],
+         [
+          "body",
+          "{case_id}"
+         ]
+        ]
+       }
+      ],
+      [
+       "released",
+       {
+        "dict": [
+         [
+          "status",
+          "closed"
+         ]
+        ]
+       }
+      ]
+     ]
+    }
+   },
+   "release_predicate": {
+    "returns": "closed"
+   }
+  },
+  "duplicate_nested_key": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping's `open.status` and `released.status` are both 'open' \u2014 every case would open already released"
+   },
+   "release_predicate": null
+  },
+  "unknown_keys": {
+   "load_case_mapping": {
+    "returns": {
+     "dict": [
+      [
+       "source",
+       {
+        "dict": [
+         [
+          "signature",
+          "rule.id"
+         ],
+         [
+          "summary",
+          "rule.description"
+         ],
+         [
+          "event_time",
+          "timestamp"
+         ]
+        ]
+       }
+      ],
+      [
+       "open",
+       {
+        "dict": [
+         [
+          "key",
+          "{case_id}"
+         ],
+         [
+          "summary",
+          "{summary}"
+         ],
+         [
+          "description",
+          "Opened from alert {case_id} (rule {signature})."
+         ],
+         [
+          "status",
+          "open"
+         ],
+         [
+          "reporter",
+          "defender"
+         ],
+         [
+          "labels",
+          [
+           "sig:{signature}",
+           "evt:{event_time}"
+          ]
+         ]
+        ]
+       }
+      ],
+      [
+       "comment",
+       {
+        "dict": [
+         [
+          "author",
+          "defender-1080"
+         ],
+         [
+          "body",
+          "[{signature}] {disposition} \u2014 {cause}\n\n{narrative}"
+         ]
+        ]
+       }
+      ],
+      [
+       "released",
+       {
+        "dict": [
+         [
+          "status",
+          "closed"
+         ]
+        ]
+       }
+      ],
+      [
+       "escalate",
+       {
+        "dict": [
+         [
+          "to",
+          "nobody"
+         ]
+        ]
+       }
+      ],
+      [
+       "extra",
+       1
+      ]
+     ]
+    }
+   },
+   "release_predicate": {
+    "returns": "closed"
+   }
+  },
+  "open_status_an_integer": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping's `open.status` must be a non-empty string"
+   },
+   "release_predicate": null
+  },
+  "open_status_a_template": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping's `open.status` must be a literal, not a template: '{signature}' \u2014 nothing rendered from an alert may move a case along its lifecycle"
+   },
+   "release_predicate": null
+  },
+  "released_a_scalar": {
+   "load_case_mapping": {
+    "returns": {
+     "dict": [
+      [
+       "source",
+       {
+        "dict": [
+         [
+          "signature",
+          "rule.id"
+         ],
+         [
+          "summary",
+          "rule.description"
+         ],
+         [
+          "event_time",
+          "timestamp"
+         ]
+        ]
+       }
+      ],
+      [
+       "open",
+       {
+        "dict": [
+         [
+          "key",
+          "{case_id}"
+         ],
+         [
+          "summary",
+          "{summary}"
+         ],
+         [
+          "description",
+          "Opened from alert {case_id} (rule {signature})."
+         ],
+         [
+          "status",
+          "open"
+         ],
+         [
+          "reporter",
+          "defender"
+         ],
+         [
+          "labels",
+          [
+           "sig:{signature}",
+           "evt:{event_time}"
+          ]
+         ]
+        ]
+       }
+      ],
+      [
+       "comment",
+       {
+        "dict": [
+         [
+          "author",
+          "defender-1080"
+         ],
+         [
+          "body",
+          "[{signature}] {disposition} \u2014 {cause}\n\n{narrative}"
+         ]
+        ]
+       }
+      ],
+      [
+       "released",
+       "closed"
+      ]
+     ]
+    }
+   },
+   "release_predicate": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping has no `released` section (released.status required)"
+   }
+  },
+  "comment_author_a_list": {
+   "load_case_mapping": {
+    "returns": {
+     "dict": [
+      [
+       "source",
+       {
+        "dict": [
+         [
+          "signature",
+          "rule.id"
+         ],
+         [
+          "summary",
+          "rule.description"
+         ],
+         [
+          "event_time",
+          "timestamp"
+         ]
+        ]
+       }
+      ],
+      [
+       "open",
+       {
+        "dict": [
+         [
+          "key",
+          "{case_id}"
+         ],
+         [
+          "summary",
+          "{summary}"
+         ],
+         [
+          "description",
+          "Opened from alert {case_id} (rule {signature})."
+         ],
+         [
+          "status",
+          "open"
+         ],
+         [
+          "reporter",
+          "defender"
+         ],
+         [
+          "labels",
+          [
+           "sig:{signature}",
+           "evt:{event_time}"
+          ]
+         ]
+        ]
+       }
+      ],
+      [
+       "comment",
+       {
+        "dict": [
+         [
+          "author",
+          [
+           "a",
+           "b"
+          ]
+         ],
+         [
+          "body",
+          "[{signature}] {disposition} \u2014 {cause}\n\n{narrative}"
+         ]
+        ]
+       }
+      ],
+      [
+       "released",
+       {
+        "dict": [
+         [
+          "status",
+          "closed"
+         ]
+        ]
+       }
+      ]
+     ]
+    }
+   },
+   "release_predicate": {
+    "returns": "closed"
+   }
+  },
+  "comment_missing": {
+   "load_case_mapping": {
+    "returns": {
+     "dict": [
+      [
+       "source",
+       {
+        "dict": [
+         [
+          "signature",
+          "rule.id"
+         ],
+         [
+          "summary",
+          "rule.description"
+         ],
+         [
+          "event_time",
+          "timestamp"
+         ]
+        ]
+       }
+      ],
+      [
+       "open",
+       {
+        "dict": [
+         [
+          "key",
+          "{case_id}"
+         ],
+         [
+          "summary",
+          "{summary}"
+         ],
+         [
+          "description",
+          "Opened from alert {case_id} (rule {signature})."
+         ],
+         [
+          "status",
+          "open"
+         ],
+         [
+          "reporter",
+          "defender"
+         ],
+         [
+          "labels",
+          [
+           "sig:{signature}",
+           "evt:{event_time}"
+          ]
+         ]
+        ]
+       }
+      ],
+      [
+       "released",
+       {
+        "dict": [
+         [
+          "status",
+          "closed"
+         ]
+        ]
+       }
+      ]
+     ]
+    }
+   },
+   "release_predicate": {
+    "returns": "closed"
+   }
+  },
+  "anchor_and_alias": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: line 18: the document reuses a node by alias (*b); write the value out in full"
+   },
+   "release_predicate": null
+  },
+  "merge_key": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: line 7: the document reuses a node by alias (*b); write the value out in full"
+   },
+   "release_predicate": null
+  },
+  "python_object_tag": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: could not determine a constructor for the tag 'tag:yaml.org,2002:python/object/apply:os.getcwd'\n  in \"<unicode string>\", line 19, column 7:\n    hook: !!python/object/apply:os.getcwd []\n          ^"
+   },
+   "release_predicate": null
+  },
+  "python_name_tag": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: could not determine a constructor for the tag 'tag:yaml.org,2002:python/name:os.system'\n  in \"<unicode string>\", line 19, column 7:\n    hook: !!python/name:os.system\n          ^"
+   },
+   "release_predicate": null
+  },
+  "invalid_yaml": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: while parsing a flow sequence\n  in \"<unicode string>\", line 1, column 7:\n    open: [unclosed\n          ^\nexpected ',' or ']', but got '<stream end>'\n  in \"<unicode string>\", line 2, column 1:\n    \n    ^"
+   },
+   "release_predicate": null
+  },
+  "tab_indented": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: while scanning for the next token\nfound character '\\t' that cannot start any token\n  in \"<unicode string>\", line 2, column 1:\n    \tstatus: open\n    ^"
+   },
+   "release_predicate": null
+  },
+  "two_documents": {
+   "load_case_mapping": {
+    "raises": "CaseTicketError",
+    "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: expected a single document in the stream\n  in \"<unicode string>\", line 1, column 1:\n    source:\n    ^\nbut found another document\n  in \"<unicode string>\", line 19, column 1:\n    ---\n    ^"
+   },
+   "release_predicate": null
+  }
+ },
+ "s_ticket_post_step": {
+  "rc": 0,
+  "refused": null,
+  "order": [
+   "preflight",
+   "materialize",
+   "lifecycle",
+   "enqueue",
+   "visualize"
+  ],
+  "calls": [
+   [
+    "--context",
+    "ctx-t1080-case-history",
+    "exec",
+    "bastion-t1080",
+    "curl",
+    "-sS",
+    "-X",
+    "POST",
+    "--max-time",
+    "10",
+    "-H",
+    "Accept: application/json",
+    "-H",
+    "Content-Type: application/json",
+    "-d",
+    "{\"key\": \"r1080\", \"summary\": \"spec 1107\", \"description\": \"Opened from alert r1080 (rule r-1107).\", \"status\": \"open\", \"reporter\": \"defender\", \"labels\": [\"sig:r-1107\", \"evt:2026-09-28T00:00:00Z\"]}",
+    "-w",
+    "\n%{http_code}",
+    "http://case-history-t1080:8080/tickets"
+   ],
+   [
+    "--context",
+    "ctx-t1080-case-history",
+    "exec",
+    "bastion-t1080",
+    "curl",
+    "-sS",
+    "-X",
+    "GET",
+    "--max-time",
+    "10",
+    "-H",
+    "Accept: application/json",
+    "-w",
+    "\n%{http_code}",
+    "http://case-history-t1080:8080/tickets/r1080"
+   ],
+   [
+    "--context",
+    "ctx-t1080-case-history",
+    "exec",
+    "bastion-t1080",
+    "curl",
+    "-sS",
+    "-X",
+    "POST",
+    "--max-time",
+    "10",
+    "-H",
+    "Accept: application/json",
+    "-H",
+    "Content-Type: application/json",
+    "-d",
+    "{\"author\": \"defender-1080\", \"body\": \"[r-1107] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+    "-w",
+    "\n%{http_code}",
+    "http://case-history-t1080:8080/tickets/r1080/comments"
+   ]
+  ],
+  "posts": 1,
+  "receipts": [
+   [
+    "r1080.ticket-write.json",
+    "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+   ]
+  ]
+ },
+ "s189": {
+  "control": {
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"key\": \"r1080\", \"summary\": \"spec 1080 rule\", \"description\": \"Opened from alert r1080 (rule r-1080).\", \"status\": \"open\", \"reporter\": \"defender\", \"labels\": [\"sig:r-1080\", \"evt:2026-10-03T00:00:00Z\"]}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1080] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     "r1080.ticket-write.json",
+     "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  },
+  "no_alert": {
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[unknown] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     "r1080.ticket-write.json",
+     "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  },
+  "no_report": {
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"key\": \"r1080\", \"summary\": \"spec 1080 rule\", \"description\": \"Opened from alert r1080 (rule r-1080).\", \"status\": \"open\", \"reporter\": \"defender\", \"labels\": [\"sig:r-1080\", \"evt:2026-10-03T00:00:00Z\"]}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"No disposition could be recorded for this case: report.md was missing or carried no parsable disposition to record.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     "r1080.ticket-write.json",
+     "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  },
+  "alert_not_json": {
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[unknown] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     "r1080.ticket-write.json",
+     "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  },
+  "markup": {
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"key\": \"r1080\", \"summary\": \"<script>alert(1)</script> **bold** `tick`\", \"description\": \"Opened from alert r1080 (rule r-<b>1</b>).\", \"status\": \"open\", \"reporter\": \"defender\", \"labels\": [\"sig:r-<b>1</b>\", \"evt:2026-10-03T00:00:00Z\"]}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-<b>1</b>] benign \\u2014 the disposition was recorded without a challenge review\\n\\n<script>alert(1)</script>\\n# Heading\\n**bold** [l](http://x)\\n| a | b |\\n| --- | --- |\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     "r1080.ticket-write.json",
+     "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  },
+  "very_long_body": {
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"key\": \"r1080\", \"summary\": \"spec 1080 rule\", \"description\": \"Opened from alert r1080 (rule r-1080).\", \"status\": \"open\", \"reporter\": \"defender\", \"labels\": [\"sig:r-1080\", \"evt:2026-10-03T00:00:00Z\"]}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1080] benign \\u2014 the disposition was recorded without a challenge review\\n\\nEvidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line with \\u00e9 and \\u4e2d\\u6587 and \\ud83d\\ude42. Evidence line wit\\u2026\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     "r1080.ticket-write.json",
+     "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  },
+  "newline_in_single_line_fields": {
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"key\": \"r1080\", \"summary\": \"line one\\nline two\", \"description\": \"Opened from alert r1080 (rule r-1\\nforged: x).\", \"status\": \"open\", \"reporter\": \"defender\", \"labels\": [\"sig:r-1\\nforged: x\", \"evt:2026-10-03T00:00:00Z\\n\"]}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1\\nforged: x] benign \\u2014 first line\\nsecond line\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     "r1080.ticket-write.json",
+     "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  },
+  "non_ascii": {
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"key\": \"r1080\", \"summary\": \"\\u691c\\u77e5 \\u2014 \\ud83d\\ude42\", \"description\": \"Opened from alert r1080 (rule r\\u00e8gle-\\u00fc).\", \"status\": \"open\", \"reporter\": \"defender\", \"labels\": [\"sig:r\\u00e8gle-\\u00fc\", \"evt:2026-10-03T00:00:00Z\"]}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r\\u00e8gle-\\u00fc] benign \\u2014 caused by \\u00fc and \\u4e2d\\u6587\\n\\n\\u00c9valuation: \\u7d50\\u8ad6 \\ud83d\\ude42\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     "r1080.ticket-write.json",
+     "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  },
+  "control_characters": {
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"key\": \"r1080\", \"summary\": \"bell\\u0007\", \"description\": \"Opened from alert r1080 (rule r\\u001b[31m).\", \"status\": \"open\", \"reporter\": \"defender\", \"labels\": [\"sig:r\\u001b[31m\", \"evt:2026-10-03T00:00:00Z\"]}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r\\u001b[31m] benign \\u2014 the disposition was recorded without a challenge review\\n\\nesc \\u001b[2J and nul-free\\n vt\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     "r1080.ticket-write.json",
+     "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  }
+ },
+ "s190": {
+  "space": {
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/run%20with%20space"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1080] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/run%20with%20space/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     "run with space.ticket-write.json",
+     "{\n  \"key\": \"run with space\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/run with space\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  },
+  "non_ascii": {
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r%C3%BCn-%C3%B1ame-%E6%A4%9C"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1080] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r%C3%BCn-%C3%B1ame-%E6%A4%9C/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     "r\u00fcn-\u00f1ame-\u691c.ticket-write.json",
+     "{\n  \"key\": \"r\\u00fcn-\\u00f1ame-\\u691c\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r\\u00fcn-\\u00f1ame-\\u691c\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  },
+  "leading_dot": {
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/.hidden-run"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1080] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/.hidden-run/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     ".hidden-run.ticket-write.json",
+     "{\n  \"key\": \".hidden-run\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/.hidden-run\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  },
+  "receipt_name_at_255_bytes": {
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1080] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": []
+  },
+  "receipt_name_past_255_bytes": {
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1080] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": []
+  },
+  "percent_and_hash": {
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/run%252F%231"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1080] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/run%252F%231/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     "run%2F#1.ticket-write.json",
+     "{\n  \"key\": \"run%2F#1\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/run%2F#1\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  },
+  "earlier_receipt": {
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1080] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     "r1080.ticket-write.json",
+     "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  }
+ },
+ "s214": {
+  "second_invocation": {
+   "steps": [
+    {
+     "posts": 1,
+     "receipts": [
+      [
+       "r1080.ticket-write.json",
+       "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+      ]
+     ]
+    },
+    {
+     "posts": 2,
+     "receipts": [
+      [
+       "r1080.ticket-write.json",
+       "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+      ]
+     ]
+    }
+   ],
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1080] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1080] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "link_target": null
+  },
+  "empty_receipt": {
+   "steps": [
+    {
+     "posts": 1,
+     "receipts": [
+      [
+       "r1080.ticket-write.json",
+       "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+      ]
+     ]
+    }
+   ],
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1080] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "link_target": null
+  },
+  "half_written_receipt": {
+   "steps": [
+    {
+     "posts": 1,
+     "receipts": [
+      [
+       "r1080.ticket-write.json",
+       "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+      ]
+     ]
+    }
+   ],
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1080] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "link_target": null
+  },
+  "receipt_is_a_link": {
+   "steps": [
+    {
+     "posts": 1,
+     "receipts": [
+      [
+       "r1080.ticket-write.json",
+       {
+        "link": "<TMP>/elsewhere.json"
+       }
+      ]
+     ]
+    }
+   ],
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1080] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "link_target": "{}\n"
+  }
+ },
+ "s215": {
+  "killed_after_the_store_accepted": {
+   "first": {
+    "exit": -9,
+    "posts": 1,
+    "receipts": []
+   },
+   "second": {
+    "calls": [
+     [
+      "--context",
+      "ctx-t1080-case-history",
+      "exec",
+      "bastion-t1080",
+      "curl",
+      "-sS",
+      "-X",
+      "GET",
+      "--max-time",
+      "10",
+      "-H",
+      "Accept: application/json",
+      "-w",
+      "\n%{http_code}",
+      "http://case-history-t1080:8080/tickets/r1080"
+     ],
+     [
+      "--context",
+      "ctx-t1080-case-history",
+      "exec",
+      "bastion-t1080",
+      "curl",
+      "-sS",
+      "-X",
+      "POST",
+      "--max-time",
+      "10",
+      "-H",
+      "Accept: application/json",
+      "-H",
+      "Content-Type: application/json",
+      "-d",
+      "{\"author\": \"defender-1080\", \"body\": \"[r-1080] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+      "-w",
+      "\n%{http_code}",
+      "http://case-history-t1080:8080/tickets/r1080/comments"
+     ]
+    ],
+    "posts": 1,
+    "receipts": [
+     [
+      "r1080.ticket-write.json",
+      "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+     ]
+    ]
+   }
+  },
+  "receipt_write_failed_after_the_store_accepted": {
+   "first": {
+    "exit": null,
+    "posts": 1,
+    "receipt_is_dir": true
+   },
+   "second": {
+    "calls": [
+     [
+      "--context",
+      "ctx-t1080-case-history",
+      "exec",
+      "bastion-t1080",
+      "curl",
+      "-sS",
+      "-X",
+      "GET",
+      "--max-time",
+      "10",
+      "-H",
+      "Accept: application/json",
+      "-w",
+      "\n%{http_code}",
+      "http://case-history-t1080:8080/tickets/r1080"
+     ],
+     [
+      "--context",
+      "ctx-t1080-case-history",
+      "exec",
+      "bastion-t1080",
+      "curl",
+      "-sS",
+      "-X",
+      "POST",
+      "--max-time",
+      "10",
+      "-H",
+      "Accept: application/json",
+      "-H",
+      "Content-Type: application/json",
+      "-d",
+      "{\"author\": \"defender-1080\", \"body\": \"[r-1080] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+      "-w",
+      "\n%{http_code}",
+      "http://case-history-t1080:8080/tickets/r1080/comments"
+     ]
+    ],
+    "posts": 1,
+    "receipts": [
+     [
+      "r1080.ticket-write.json",
+      "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+     ]
+    ]
+   }
+  }
+ },
+ "s216": {
+  "preflight_refused": {
+   "rc": 3,
+   "refused": null,
+   "order": [
+    "preflight"
+   ],
+   "calls": [],
+   "posts": 0,
+   "receipts": []
+  },
+  "open_step_failed_then_aborted": {
+   "rc": 0,
+   "refused": null,
+   "order": [
+    "preflight",
+    "materialize",
+    "lifecycle",
+    "enqueue",
+    "visualize"
+   ],
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"key\": \"r1080\", \"summary\": \"spec 1107\", \"description\": \"Opened from alert r1080 (rule r-1107).\", \"status\": \"open\", \"reporter\": \"defender\", \"labels\": [\"sig:r-1107\", \"evt:2026-09-28T00:00:00Z\"]}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ]
+   ],
+   "posts": 0,
+   "receipts": [
+    [
+     "r1080.ticket-write.json",
+     "{\n  \"key\": \"r1080\",\n  \"status\": \"error\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": false,\n  \"reason\": \"could not read the case back (404: {\\\"detail\\\": \\\"no such ticket\\\"})\"\n}\n"
+    ]
+   ]
+  },
+  "open_skipped_no_alert_then_aborted": {
+   "rc": 0,
+   "refused": null,
+   "order": [
+    "preflight",
+    "materialize",
+    "lifecycle",
+    "enqueue",
+    "visualize"
+   ],
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ]
+   ],
+   "posts": 0,
+   "receipts": [
+    [
+     "r1080.ticket-write.json",
+     "{\n  \"key\": \"r1080\",\n  \"status\": \"error\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": false,\n  \"reason\": \"could not read the case back (404: {\\\"detail\\\": \\\"no such ticket\\\"})\"\n}\n"
+    ]
+   ]
+  },
+  "open_ok_then_aborted": {
+   "rc": 0,
+   "refused": null,
+   "order": [
+    "preflight",
+    "materialize",
+    "lifecycle",
+    "enqueue",
+    "visualize"
+   ],
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"key\": \"r1080\", \"summary\": \"spec 1107\", \"description\": \"Opened from alert r1080 (rule r-1107).\", \"status\": \"open\", \"reporter\": \"defender\", \"labels\": [\"sig:r-1107\", \"evt:2026-09-28T00:00:00Z\"]}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"Investigation ended without a verdict (exit: aborted) \\u2014 the environment appears unreachable or the investigation could not complete automatically. Escalate for manual review; this ticket is left open.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     "r1080.ticket-write.json",
+     "{\n  \"key\": \"r1080\",\n  \"status\": \"escalated\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  }
+ },
+ "s217": {
+  "mapping_edited": {
+   "rc": 0,
+   "refused": null,
+   "order": [
+    "preflight",
+    "materialize",
+    "lifecycle",
+    "enqueue",
+    "visualize"
+   ],
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"key\": \"r1080\", \"summary\": \"spec 1107\", \"description\": \"Opened from alert r1080 (rule r-1107).\", \"status\": \"open\", \"reporter\": \"defender\", \"labels\": [\"sig:r-1107\", \"evt:2026-09-28T00:00:00Z\"]}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1107] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     "r1080.ticket-write.json",
+     "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  },
+  "mapping_removed": {
+   "rc": 0,
+   "refused": null,
+   "order": [
+    "preflight",
+    "materialize",
+    "lifecycle",
+    "enqueue",
+    "visualize"
+   ],
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"key\": \"r1080\", \"summary\": \"spec 1107\", \"description\": \"Opened from alert r1080 (rule r-1107).\", \"status\": \"open\", \"reporter\": \"defender\", \"labels\": [\"sig:r-1107\", \"evt:2026-09-28T00:00:00Z\"]}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1107] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     "r1080.ticket-write.json",
+     "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  },
+  "mapping_made_invalid": {
+   "rc": 0,
+   "refused": null,
+   "order": [
+    "preflight",
+    "materialize",
+    "lifecycle",
+    "enqueue",
+    "visualize"
+   ],
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"key\": \"r1080\", \"summary\": \"spec 1107\", \"description\": \"Opened from alert r1080 (rule r-1107).\", \"status\": \"open\", \"reporter\": \"defender\", \"labels\": [\"sig:r-1107\", \"evt:2026-09-28T00:00:00Z\"]}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1107] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     "r1080.ticket-write.json",
+     "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  },
+  "ticket_config_edited": {
+   "rc": 0,
+   "refused": null,
+   "order": [
+    "preflight",
+    "materialize",
+    "lifecycle",
+    "enqueue",
+    "visualize"
+   ],
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"key\": \"r1080\", \"summary\": \"spec 1107\", \"description\": \"Opened from alert r1080 (rule r-1107).\", \"status\": \"open\", \"reporter\": \"defender\", \"labels\": [\"sig:r-1107\", \"evt:2026-09-28T00:00:00Z\"]}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1107] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     "r1080.ticket-write.json",
+     "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  },
+  "ticket_config_removed": {
+   "rc": 0,
+   "refused": null,
+   "order": [
+    "preflight",
+    "materialize",
+    "lifecycle",
+    "enqueue",
+    "visualize"
+   ],
+   "calls": [
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"key\": \"r1080\", \"summary\": \"spec 1107\", \"description\": \"Opened from alert r1080 (rule r-1107).\", \"status\": \"open\", \"reporter\": \"defender\", \"labels\": [\"sig:r-1107\", \"evt:2026-09-28T00:00:00Z\"]}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "GET",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080"
+    ],
+    [
+     "--context",
+     "ctx-t1080-case-history",
+     "exec",
+     "bastion-t1080",
+     "curl",
+     "-sS",
+     "-X",
+     "POST",
+     "--max-time",
+     "10",
+     "-H",
+     "Accept: application/json",
+     "-H",
+     "Content-Type: application/json",
+     "-d",
+     "{\"author\": \"defender-1080\", \"body\": \"[r-1107] benign \\u2014 the disposition was recorded without a challenge review\\n\\nDisposition recorded by the close gate. outcome=stands.\"}",
+     "-w",
+     "\n%{http_code}",
+     "http://case-history-t1080:8080/tickets/r1080/comments"
+    ]
+   ],
+   "posts": 1,
+   "receipts": [
+    [
+     "r1080.ticket-write.json",
+     "{\n  \"key\": \"r1080\",\n  \"status\": \"commented\",\n  \"url\": \"http://case-history-t1080:8080/tickets/r1080\",\n  \"ok\": true,\n  \"reason\": null\n}\n"
+    ]
+   ]
+  }
+ },
+ "s_orient_workspace_map": {
+  "workspace": "## Workspace\n# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<REPO>/defender`\n- REPO_ROOT: `<REPO>`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n- advisory (SKILL.md)\n- change-mgmt (SKILL.md)\n- cmdb (SKILL.md)\n- connect (SKILL.md)\n- elastic (SKILL.md)\n- gather (SKILL.md)\n- handbook (SKILL.md)\n- host-state (SKILL.md)\n- identity (SKILL.md)\n- invlang (SKILL.md)\n- tacit-knowledge (SKILL.md)\n- threat-intel (SKILL.md)\n- ticket (SKILL.md)\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- change-mgmt/ \u2014 3 established, 0 draft\n- cmdb/ \u2014 3 established, 0 draft\n- elastic/ \u2014 15 established, 0 draft\n- host-state/ \u2014 4 established, 0 draft\n- identity/ \u2014 3 established, 1 draft"
+ },
+ "s022": {
+  "this_checkout": "## Workspace\n# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<REPO>/defender`\n- REPO_ROOT: `<REPO>`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n- advisory (SKILL.md)\n- change-mgmt (SKILL.md)\n- cmdb (SKILL.md)\n- connect (SKILL.md)\n- elastic (SKILL.md)\n- gather (SKILL.md)\n- handbook (SKILL.md)\n- host-state (SKILL.md)\n- identity (SKILL.md)\n- invlang (SKILL.md)\n- tacit-knowledge (SKILL.md)\n- threat-intel (SKILL.md)\n- ticket (SKILL.md)\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- change-mgmt/ \u2014 3 established, 0 draft\n- cmdb/ \u2014 3 established, 0 draft\n- elastic/ \u2014 15 established, 0 draft\n- host-state/ \u2014 4 established, 0 draft\n- identity/ \u2014 3 established, 1 draft",
+  "another_checkout": "## Workspace\n# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<TMP>/box/checkout/defender`\n- REPO_ROOT: `<TMP>/box/checkout`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n- advisory (SKILL.md)\n- change-mgmt (SKILL.md)\n- cmdb (SKILL.md)\n- connect (SKILL.md)\n- elastic (SKILL.md)\n- gather (SKILL.md)\n- handbook (SKILL.md)\n- host-state (SKILL.md)\n- identity (SKILL.md)\n- invlang (SKILL.md)\n- tacit-knowledge (SKILL.md)\n- threat-intel (SKILL.md)\n- ticket (SKILL.md)\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- change-mgmt/ \u2014 3 established, 0 draft\n- cmdb/ \u2014 3 established, 0 draft\n- elastic/ \u2014 15 established, 0 draft\n- host-state/ \u2014 4 established, 0 draft\n- identity/ \u2014 3 established, 1 draft"
+ },
+ "s047": {
+  "skills_absent": {
+   "map": "# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<TMP>/checkout/defender`\n- REPO_ROOT: `<TMP>/checkout`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- (no queries dir)\n\n",
+   "workspace": "## Workspace\n# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<TMP>/checkout/defender`\n- REPO_ROOT: `<TMP>/checkout`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- (no queries dir)"
+  },
+  "skills_empty": {
+   "map": "# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<TMP>/checkout/defender`\n- REPO_ROOT: `<TMP>/checkout`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- (no queries dir)\n\n",
+   "workspace": "## Workspace\n# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<TMP>/checkout/defender`\n- REPO_ROOT: `<TMP>/checkout`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- (no queries dir)"
+  },
+  "skills_link": {
+   "map": "# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<TMP>/checkout/defender`\n- REPO_ROOT: `<TMP>/checkout`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n- advisory (SKILL.md)\n- change-mgmt (SKILL.md)\n- cmdb (SKILL.md)\n- connect (SKILL.md)\n- elastic (SKILL.md)\n- gather (SKILL.md)\n- handbook (SKILL.md)\n- host-state (SKILL.md)\n- identity (SKILL.md)\n- invlang (SKILL.md)\n- tacit-knowledge (SKILL.md)\n- threat-intel (SKILL.md)\n- ticket (SKILL.md)\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- change-mgmt/ \u2014 3 established, 0 draft\n- cmdb/ \u2014 3 established, 0 draft\n- elastic/ \u2014 15 established, 0 draft\n- host-state/ \u2014 4 established, 0 draft\n- identity/ \u2014 3 established, 1 draft\n\n",
+   "workspace": "## Workspace\n# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<TMP>/checkout/defender`\n- REPO_ROOT: `<TMP>/checkout`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n- advisory (SKILL.md)\n- change-mgmt (SKILL.md)\n- cmdb (SKILL.md)\n- connect (SKILL.md)\n- elastic (SKILL.md)\n- gather (SKILL.md)\n- handbook (SKILL.md)\n- host-state (SKILL.md)\n- identity (SKILL.md)\n- invlang (SKILL.md)\n- tacit-knowledge (SKILL.md)\n- threat-intel (SKILL.md)\n- ticket (SKILL.md)\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- change-mgmt/ \u2014 3 established, 0 draft\n- cmdb/ \u2014 3 established, 0 draft\n- elastic/ \u2014 15 established, 0 draft\n- host-state/ \u2014 4 established, 0 draft\n- identity/ \u2014 3 established, 1 draft"
+  },
+  "adapters_absent": {
+   "map": "# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<TMP>/checkout/defender`\n- REPO_ROOT: `<TMP>/checkout`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n- advisory (SKILL.md)\n- change-mgmt (SKILL.md)\n- cmdb (SKILL.md)\n- connect (SKILL.md)\n- elastic (SKILL.md)\n- gather (SKILL.md)\n- handbook (SKILL.md)\n- host-state (SKILL.md)\n- identity (SKILL.md)\n- invlang (SKILL.md)\n- tacit-knowledge (SKILL.md)\n- threat-intel (SKILL.md)\n- ticket (SKILL.md)\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- change-mgmt/ \u2014 3 established, 0 draft\n- cmdb/ \u2014 3 established, 0 draft\n- elastic/ \u2014 15 established, 0 draft\n- host-state/ \u2014 4 established, 0 draft\n- identity/ \u2014 3 established, 1 draft\n\n",
+   "workspace": "## Workspace\n# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<TMP>/checkout/defender`\n- REPO_ROOT: `<TMP>/checkout`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n- advisory (SKILL.md)\n- change-mgmt (SKILL.md)\n- cmdb (SKILL.md)\n- connect (SKILL.md)\n- elastic (SKILL.md)\n- gather (SKILL.md)\n- handbook (SKILL.md)\n- host-state (SKILL.md)\n- identity (SKILL.md)\n- invlang (SKILL.md)\n- tacit-knowledge (SKILL.md)\n- threat-intel (SKILL.md)\n- ticket (SKILL.md)\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- change-mgmt/ \u2014 3 established, 0 draft\n- cmdb/ \u2014 3 established, 0 draft\n- elastic/ \u2014 15 established, 0 draft\n- host-state/ \u2014 4 established, 0 draft\n- identity/ \u2014 3 established, 1 draft"
+  },
+  "adapters_empty": {
+   "map": "# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<TMP>/checkout/defender`\n- REPO_ROOT: `<TMP>/checkout`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n- advisory (SKILL.md)\n- change-mgmt (SKILL.md)\n- cmdb (SKILL.md)\n- connect (SKILL.md)\n- elastic (SKILL.md)\n- gather (SKILL.md)\n- handbook (SKILL.md)\n- host-state (SKILL.md)\n- identity (SKILL.md)\n- invlang (SKILL.md)\n- tacit-knowledge (SKILL.md)\n- threat-intel (SKILL.md)\n- ticket (SKILL.md)\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- change-mgmt/ \u2014 3 established, 0 draft\n- cmdb/ \u2014 3 established, 0 draft\n- elastic/ \u2014 15 established, 0 draft\n- host-state/ \u2014 4 established, 0 draft\n- identity/ \u2014 3 established, 1 draft\n\n",
+   "workspace": "## Workspace\n# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<TMP>/checkout/defender`\n- REPO_ROOT: `<TMP>/checkout`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n- advisory (SKILL.md)\n- change-mgmt (SKILL.md)\n- cmdb (SKILL.md)\n- connect (SKILL.md)\n- elastic (SKILL.md)\n- gather (SKILL.md)\n- handbook (SKILL.md)\n- host-state (SKILL.md)\n- identity (SKILL.md)\n- invlang (SKILL.md)\n- tacit-knowledge (SKILL.md)\n- threat-intel (SKILL.md)\n- ticket (SKILL.md)\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- change-mgmt/ \u2014 3 established, 0 draft\n- cmdb/ \u2014 3 established, 0 draft\n- elastic/ \u2014 15 established, 0 draft\n- host-state/ \u2014 4 established, 0 draft\n- identity/ \u2014 3 established, 1 draft"
+  },
+  "adapters_link": {
+   "map": "# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<TMP>/checkout/defender`\n- REPO_ROOT: `<TMP>/checkout`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n- advisory (SKILL.md)\n- change-mgmt (SKILL.md)\n- cmdb (SKILL.md)\n- connect (SKILL.md)\n- elastic (SKILL.md)\n- gather (SKILL.md)\n- handbook (SKILL.md)\n- host-state (SKILL.md)\n- identity (SKILL.md)\n- invlang (SKILL.md)\n- tacit-knowledge (SKILL.md)\n- threat-intel (SKILL.md)\n- ticket (SKILL.md)\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- change-mgmt/ \u2014 3 established, 0 draft\n- cmdb/ \u2014 3 established, 0 draft\n- elastic/ \u2014 15 established, 0 draft\n- host-state/ \u2014 4 established, 0 draft\n- identity/ \u2014 3 established, 1 draft\n\n",
+   "workspace": "## Workspace\n# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<TMP>/checkout/defender`\n- REPO_ROOT: `<TMP>/checkout`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n- advisory (SKILL.md)\n- change-mgmt (SKILL.md)\n- cmdb (SKILL.md)\n- connect (SKILL.md)\n- elastic (SKILL.md)\n- gather (SKILL.md)\n- handbook (SKILL.md)\n- host-state (SKILL.md)\n- identity (SKILL.md)\n- invlang (SKILL.md)\n- tacit-knowledge (SKILL.md)\n- threat-intel (SKILL.md)\n- ticket (SKILL.md)\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- change-mgmt/ \u2014 3 established, 0 draft\n- cmdb/ \u2014 3 established, 0 draft\n- elastic/ \u2014 15 established, 0 draft\n- host-state/ \u2014 4 established, 0 draft\n- identity/ \u2014 3 established, 1 draft"
+  },
+  "query_templates_absent": {
+   "map": "# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<TMP>/checkout/defender`\n- REPO_ROOT: `<TMP>/checkout`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n- advisory (SKILL.md)\n- change-mgmt (SKILL.md)\n- cmdb (SKILL.md)\n- connect (SKILL.md)\n- elastic (SKILL.md)\n- gather (SKILL.md)\n- handbook (SKILL.md)\n- host-state (SKILL.md)\n- identity (SKILL.md)\n- invlang (SKILL.md)\n- tacit-knowledge (SKILL.md)\n- threat-intel (SKILL.md)\n- ticket (SKILL.md)\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- (no queries dir)\n\n",
+   "workspace": "## Workspace\n# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<TMP>/checkout/defender`\n- REPO_ROOT: `<TMP>/checkout`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n- advisory (SKILL.md)\n- change-mgmt (SKILL.md)\n- cmdb (SKILL.md)\n- connect (SKILL.md)\n- elastic (SKILL.md)\n- gather (SKILL.md)\n- handbook (SKILL.md)\n- host-state (SKILL.md)\n- identity (SKILL.md)\n- invlang (SKILL.md)\n- tacit-knowledge (SKILL.md)\n- threat-intel (SKILL.md)\n- ticket (SKILL.md)\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- (no queries dir)"
+  },
+  "query_templates_empty": {
+   "map": "# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<TMP>/checkout/defender`\n- REPO_ROOT: `<TMP>/checkout`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n- advisory (SKILL.md)\n- change-mgmt (SKILL.md)\n- cmdb (SKILL.md)\n- connect (SKILL.md)\n- elastic (SKILL.md)\n- gather (SKILL.md)\n- handbook (SKILL.md)\n- host-state (SKILL.md)\n- identity (SKILL.md)\n- invlang (SKILL.md)\n- tacit-knowledge (SKILL.md)\n- threat-intel (SKILL.md)\n- ticket (SKILL.md)\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- (queries dir is present but holds no readable template)\n\n",
+   "workspace": "## Workspace\n# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<TMP>/checkout/defender`\n- REPO_ROOT: `<TMP>/checkout`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n- advisory (SKILL.md)\n- change-mgmt (SKILL.md)\n- cmdb (SKILL.md)\n- connect (SKILL.md)\n- elastic (SKILL.md)\n- gather (SKILL.md)\n- handbook (SKILL.md)\n- host-state (SKILL.md)\n- identity (SKILL.md)\n- invlang (SKILL.md)\n- tacit-knowledge (SKILL.md)\n- threat-intel (SKILL.md)\n- ticket (SKILL.md)\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- (queries dir is present but holds no readable template)"
+  },
+  "query_templates_link": {
+   "map": "# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<TMP>/checkout/defender`\n- REPO_ROOT: `<TMP>/checkout`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n- advisory (SKILL.md)\n- change-mgmt (SKILL.md)\n- cmdb (SKILL.md)\n- connect (SKILL.md)\n- elastic (SKILL.md)\n- gather (SKILL.md)\n- handbook (SKILL.md)\n- host-state (SKILL.md)\n- identity (SKILL.md)\n- invlang (SKILL.md)\n- tacit-knowledge (SKILL.md)\n- threat-intel (SKILL.md)\n- ticket (SKILL.md)\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- change-mgmt/ \u2014 3 established, 0 draft\n- cmdb/ \u2014 3 established, 0 draft\n- elastic/ \u2014 15 established, 0 draft\n- host-state/ \u2014 4 established, 0 draft\n- identity/ \u2014 3 established, 1 draft\n\n",
+   "workspace": "## Workspace\n# Workspace map\n\nGenerated at run start. Use this in place of `ls`/`find`/`grep` for the paths below \u2014 they are the canonical surfaces.\n\n## Absolute roots\n- DEFENDER_DIR: `<TMP>/checkout/defender`\n- REPO_ROOT: `<TMP>/checkout`\n- RUN_DIR: `<TMP>/runs/r1080`\n\n## Run dir \u2014 `<TMP>/runs/r1080`\n- alert.json\n- leads dir/\n- report.md\n\n## System skills \u2014 `defender/skills/`\n- advisory (SKILL.md)\n- change-mgmt (SKILL.md)\n- cmdb (SKILL.md)\n- connect (SKILL.md)\n- elastic (SKILL.md)\n- gather (SKILL.md)\n- handbook (SKILL.md)\n- host-state (SKILL.md)\n- identity (SKILL.md)\n- invlang (SKILL.md)\n- tacit-knowledge (SKILL.md)\n- threat-intel (SKILL.md)\n- ticket (SKILL.md)\n\n## Adapters \u2014 `defender/scripts/adapters/`\n- cmdb  (a system dispatched via the query tool; do not Read the adapter source)\n- elastic  (a system dispatched via the query tool; do not Read the adapter source)\n\n## Gather query templates \u2014 `defender/skills/gather/queries/`\n- change-mgmt/ \u2014 3 established, 0 draft\n- cmdb/ \u2014 3 established, 0 draft\n- elastic/ \u2014 15 established, 0 draft\n- host-state/ \u2014 4 established, 0 draft\n- identity/ \u2014 3 established, 1 draft"
+  }
+ },
+ "s183": {
+  "does_not_exist": {
+   "run_dir_section": [
+    "## Run dir \u2014 `<TMP>/runs/r1080`",
+    "- (not yet materialized)"
+   ],
+   "message_zero_workspace_head": [
+    "## Workspace",
+    "# Workspace map"
+   ]
+  },
+  "is_a_file": {
+   "run_dir_section": [
+    "## Run dir \u2014 `<TMP>/runs/r1080`",
+    "- (not yet materialized)"
+   ],
+   "message_zero_workspace_head": [
+    "## Workspace",
+    "# Workspace map"
+   ]
+  },
+  "link_to_nowhere": {
+   "run_dir_section": [
+    "## Run dir \u2014 `<TMP>/runs/r1080`",
+    "- (not yet materialized)"
+   ],
+   "message_zero_workspace_head": [
+    "## Workspace",
+    "# Workspace map"
+   ]
+  },
+  "link_to_a_dir": {
+   "run_dir_section": [
+    "## Run dir \u2014 `<TMP>/runs/r1080`",
+    "- alert.json",
+    "- leads dir/",
+    "- report.md"
+   ],
+   "message_zero_workspace_head": [
+    "## Workspace",
+    "# Workspace map"
+   ]
+  }
+ },
+ "s184": {
+  "space": {
+   "defender_dir": "<TMP>/with space/checkout/defender",
+   "roots": [
+    "## Absolute roots",
+    "- DEFENDER_DIR: `<TMP>/with space/checkout/defender`",
+    "- REPO_ROOT: `<TMP>/with space/checkout`",
+    "- RUN_DIR: `<TMP>/runs/r1080`"
+   ],
+   "headings": [
+    "## Workspace",
+    "## Absolute roots",
+    "## Run dir \u2014 `<TMP>/runs/r1080`",
+    "## System skills \u2014 `defender/skills/`",
+    "## Adapters \u2014 `defender/scripts/adapters/`",
+    "## Gather query templates \u2014 `defender/skills/gather/queries/`"
+   ]
+  },
+  "non_ascii": {
+   "defender_dir": "<TMP>/\u00fcn\u00efc\u00f8d\u00e9-\u691c/checkout/defender",
+   "roots": [
+    "## Absolute roots",
+    "- DEFENDER_DIR: `<TMP>/\u00fcn\u00efc\u00f8d\u00e9-\u691c/checkout/defender`",
+    "- REPO_ROOT: `<TMP>/\u00fcn\u00efc\u00f8d\u00e9-\u691c/checkout`",
+    "- RUN_DIR: `<TMP>/runs/r1080`"
+   ],
+   "headings": [
+    "## Workspace",
+    "## Absolute roots",
+    "## Run dir \u2014 `<TMP>/runs/r1080`",
+    "## System skills \u2014 `defender/skills/`",
+    "## Adapters \u2014 `defender/scripts/adapters/`",
+    "## Gather query templates \u2014 `defender/skills/gather/queries/`"
+   ]
+  },
+  "symlinked_parent": {
+   "defender_dir": "<TMP>/real/checkout/defender",
+   "roots": [
+    "## Absolute roots",
+    "- DEFENDER_DIR: `<TMP>/real/checkout/defender`",
+    "- REPO_ROOT: `<TMP>/real/checkout`",
+    "- RUN_DIR: `<TMP>/runs/r1080`"
+   ],
+   "headings": [
+    "## Workspace",
+    "## Absolute roots",
+    "## Run dir \u2014 `<TMP>/runs/r1080`",
+    "## System skills \u2014 `defender/skills/`",
+    "## Adapters \u2014 `defender/scripts/adapters/`",
+    "## Gather query templates \u2014 `defender/skills/gather/queries/`"
+   ]
+  }
+ },
+ "s205": {
+  "renders": [
+   "[record_query] 15200 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n\"{\\\"rows\\\": [\\\"<<ELI<<ELIDED 96 of 112 chars>>\"",
+   {
+    "len": 15200,
+    "sha256": "b3d2ec556b46a67c1d4309a4a5d8e899e942f4019e7796813a2cda2f6e1de1da",
+    "head": "{\"rows\": [{\"i\": 0, \"v\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 1, \"v\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 2, \"v\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 3, \"v\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 4, \"v\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 5, \"v\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 6, \"v\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 7, \"v\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}",
+    "tail": ": 296, \"v\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 297, \"v\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 298, \"v\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 299, \"v\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}]}"
+   },
+   {
+    "len": 8486,
+    "sha256": "cde5865d256f34f0f9b82f987b4237eb723387f4594c8618f437739af9897fec",
+    "head": "[record_query] 15200 bytes.\n[record_query] this VIEW is bounded and does not show all of it. Each region it dropped is marked `<<ELIDED \u2026>>` exactly where it was dropped \u2014 those elements are absent from THIS TEXT ONLY and are present in full on disk. Read counts off the payload's own fields, or compute them over the file.\n{\"rows\": [{\"i\": 0, \"v\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 1, \"v\": \"xx",
+    "tail": ": 158, \"v\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}, {\"i\": 159, \"v\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}, \"<<ELIDED 140 of 300 elements \\u2014 dropped from THIS VIEW only; the payload on disk has all 300>>\"]}"
+   }
+  ],
+  "captures": [
+   [
+    [
+     "cmdb",
+     "http://cmdb-t1080:8080/hosts/h-1",
+     "GET"
+    ]
+   ],
+   [
+    [
+     "cmdb",
+     "http://cmdb-t1080:8080/hosts/h-2",
+     "GET"
+    ]
+   ]
+  ],
+  "rows": [
+   [
+    "q-one",
+    {
+     "dict": [
+      [
+       "lead_id",
+       "l-001"
+      ],
+      [
+       "seq",
+       0
+      ],
+      [
+       "system",
+       "cmdb"
+      ],
+      [
+       "verb",
+       "get-host"
+      ],
+      [
+       "query_id",
+       "cmdb.get-host"
+      ],
+      [
+       "params",
+       {
+        "dict": [
+         [
+          "host",
+          "h-1"
+         ]
+        ]
+       }
+      ],
+      [
+       "raw_command",
+       ""
+      ],
+      [
+       "payload_path",
+       "gather_raw/l-001/0.json"
+      ],
+      [
+       "exit_code",
+       0
+      ],
+      [
+       "error_class",
+       null
+      ],
+      [
+       "payload_status",
+       "ok"
+      ],
+      [
+       "payload_digest",
+       "15 bytes, 1 line(s)"
+      ],
+      [
+       "payload_sha256",
+       "cde192d2fa2954e54826bd95af55ab4c1d2e672315abba3e8fed6fb3d6fc2301"
+      ],
+      [
+       "system_key",
+       ""
+      ]
+     ]
+    },
+    null
+   ],
+   [
+    "q-one",
+    {
+     "dict": [
+      [
+       "lead_id",
+       "l-001"
+      ],
+      [
+       "seq",
+       1
+      ],
+      [
+       "system",
+       "cmdb"
+      ],
+      [
+       "verb",
+       "get-host"
+      ],
+      [
+       "query_id",
+       "cmdb.get-host"
+      ],
+      [
+       "params",
+       {
+        "dict": [
+         [
+          "host",
+          "h-1"
+         ]
+        ]
+       }
+      ],
+      [
+       "raw_command",
+       ""
+      ],
+      [
+       "payload_path",
+       "gather_raw/l-001/1.json"
+      ],
+      [
+       "exit_code",
+       0
+      ],
+      [
+       "error_class",
+       null
+      ],
+      [
+       "payload_status",
+       "ok"
+      ],
+      [
+       "payload_digest",
+       "15 bytes, 1 line(s)"
+      ],
+      [
+       "payload_sha256",
+       "cde192d2fa2954e54826bd95af55ab4c1d2e672315abba3e8fed6fb3d6fc2301"
+      ],
+      [
+       "system_key",
+       ""
+      ]
+     ]
+    },
+    "[record_query] REPEAT \u2014 this is the same request you ran at seq 0, and it returned the same payload byte for byte. It will keep returning this payload however many times you send it; the result is structural, not a transient to retry through. Change the approach, not the retry count."
+   ],
+   [
+    "q-two",
+    {
+     "dict": [
+      [
+       "lead_id",
+       "l-001"
+      ],
+      [
+       "seq",
+       0
+      ],
+      [
+       "system",
+       "cmdb"
+      ],
+      [
+       "verb",
+       "get-host"
+      ],
+      [
+       "query_id",
+       "cmdb.get-host"
+      ],
+      [
+       "params",
+       {
+        "dict": [
+         [
+          "host",
+          "h-1"
+         ]
+        ]
+       }
+      ],
+      [
+       "raw_command",
+       ""
+      ],
+      [
+       "payload_path",
+       "gather_raw/l-001/0.json"
+      ],
+      [
+       "exit_code",
+       0
+      ],
+      [
+       "error_class",
+       null
+      ],
+      [
+       "payload_status",
+       "ok"
+      ],
+      [
+       "payload_digest",
+       "15 bytes, 1 line(s)"
+      ],
+      [
+       "payload_sha256",
+       "cde192d2fa2954e54826bd95af55ab4c1d2e672315abba3e8fed6fb3d6fc2301"
+      ],
+      [
+       "system_key",
+       ""
+      ]
+     ]
+    },
+    null
+   ]
+  ]
+ }
+}

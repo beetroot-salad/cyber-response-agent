@@ -247,7 +247,7 @@ def _noop_start_box(request, **_kw):
     the worktree/branch/queue mechanics, not the (separately spec'd) box lifecycle."""
     from types import SimpleNamespace
 
-    return SimpleNamespace(name=request.name)
+    return SimpleNamespace(name=request.name, sandboxed=False)
 
 
 def _noop_stop_box(_box, **_kw):

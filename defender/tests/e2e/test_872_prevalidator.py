@@ -352,7 +352,10 @@ def test_a_shallow_acyclic_payload_whose_node_count_exceeds_the_budget_is_refuse
     serialization is trivial — and k=28 is kept for the half only it can prove: that the walk
     TERMINATES instead of visiting 2**k nodes, plus parity of the death that follows.
     """
-    child = f'''
+    # The k=16 refusal probe rides in the gated k=28 child (printed and flushed BEFORE the
+    # 2**28 run that may abort it), so the harness is imported once per arm, not three times.
+    # The un-gated k=28 child is the parity baseline and stays separate.
+    gated_child = f'''
 import json
 from defender.tests.e2e import _toon872 as T
 
@@ -367,15 +370,22 @@ print(json.dumps({{
     "dumps_calls": spy.dumps_calls,
     "raised": out.error is not None,
     "content_is_wire": T.framed_content(out.dispatched.text()) == T.wire_text(value),
-}}))
+}}), flush=True)
+del value, spy, out
+
+value = {{"leaf": 1}}
+for _ in range(28):
+    value = {{"a": value, "b": value}}
+T.agent_run(toolset=T.foreign_toolset(value), capabilities=True)
 '''
-    outcome = run_isolated(child, timeout=90.0)
-    assert not outcome.timed_out, (
+    gated_bomb = run_isolated(gated_child, timeout=90.0, mem_limit_mb=DOOMED_CHILD_MEM_LIMIT_MB)
+    assert not gated_bomb.timed_out, (
         "the walk did not terminate on the expansion bomb — a validator with no node budget "
-        "visits 2**16 nodes before it decides anything"
+        "visits 2**16 nodes before it decides anything, and 2**28 at the k=28 arm"
     )
-    assert outcome.returncode == 0, f"the child died: {outcome.stderr[-800:]}"
-    result = json.loads(outcome.stdout.strip().splitlines()[-1])
+    first = [ln for ln in gated_bomb.stdout.splitlines() if ln.startswith("{")]
+    assert first, f"the k=16 probe never reported: {gated_bomb.stderr[-800:]}"
+    result = json.loads(first[0])
     assert result["dumps_calls"] == 0, "the expansion bomb reached the encoder"
     assert result["raised"] is False
     assert result["content_is_wire"] is True
@@ -383,19 +393,14 @@ print(json.dumps({{
     # The k=28 arm: the walk must TERMINATE rather than visit 2**28 nodes. The process then
     # dies serializing a payload no serializer can hold — so what is asserted is termination
     # (not a hang) and PARITY of that death, never survival.
-    bomb = (
+    plain_child = (
         "from defender.tests.e2e import _toon872 as T\n"
         'value = {"leaf": 1}\n'
         "for _ in range(28):\n"
         '    value = {"a": value, "b": value}\n'
-        "T.agent_run(toolset=T.foreign_toolset(value), capabilities=%s)\n"
+        "T.agent_run(toolset=T.foreign_toolset(value), capabilities=False)\n"
     )
-    gated_bomb = run_isolated(bomb % "True", timeout=90.0, mem_limit_mb=DOOMED_CHILD_MEM_LIMIT_MB)
-    plain_bomb = run_isolated(bomb % "False", timeout=90.0, mem_limit_mb=DOOMED_CHILD_MEM_LIMIT_MB)
-    assert not gated_bomb.timed_out, (
-        "the guarded walk did not terminate on a 2**28-node payload — the node budget is not "
-        "bounding the walk's own cost, which is the half a smaller k cannot prove"
-    )
+    plain_bomb = run_isolated(plain_child, timeout=90.0, mem_limit_mb=DOOMED_CHILD_MEM_LIMIT_MB)
     assert not plain_bomb.timed_out, "the un-gated arm hung, so the comparison below is unsound"
     assert (gated_bomb.returncode == 0) == (plain_bomb.returncode == 0), (
         "the gate changed whether a 2**28-node payload takes the process down; it is "
@@ -557,15 +562,15 @@ def test_every_input_class_kills_or_survives_the_run_identically_with_and_withou
     harvest is now guarded and its own failure is reported as `text_raised`, so a real change
     in what the gate does to a process still fails this test while a probe artefact cannot.
 
-    Each arm runs in its own child interpreter, because the point of the demand is what a
+    Each arm runs in its own child interpreter (the whole battery in it), because the point of the demand is what a
     PROCESS does and because a SIGSEGV in the test process is not a test result.
     """
     battery = {
+        "brace in key, row position": 'value = {"rows": [{"}": i, "z": i} for i in range(20)]}',
         "benign dict rows": 'value = {"rows": [{"a": i, "b": "pad-%d" % i} for i in range(40)]}',
         "plain string": 'value = "a plain string"',
         "non-str mapping key": 'value = {1: "x"}',
         "surrogate mapping key": 'value = {"\\ud800": "x"}',
-        "brace in key, row position": 'value = {"rows": [{"}": i, "z": i} for i in range(20)]}',
         "circular container": 'value = {"self": None}\nvalue["self"] = value',
         "deep acyclic container": (
             'value = {"leaf": 1}\n'
@@ -573,51 +578,64 @@ def test_every_input_class_kills_or_survives_the_run_identically_with_and_withou
             '    value = {"n": value}'
         ),
     }
-    by_label = {}
-    for label, build in battery.items():
-        arms = {}
-        for gated in (True, False):
-            child = (
-                "import json, sys\n"
-                "sys.setrecursionlimit(100000)\n"
-                "from defender.tests.e2e import _toon872 as T\n"
-                f"{build}\n"
-                f"out = T.agent_run(toolset=T.foreign_toolset(value), capabilities={gated})\n"
-                # HARVESTED DEFENSIVELY, and this is load-bearing: `texts()` SERIALIZES the
-                # tool return, so on an unserializable payload the probe itself raises — in
-                # the un-gated arm only, because the gated arm's text is already a plain
-                # framed `str` with nothing left to serialize. Harvesting it bare made this
-                # test report a divergence it had created: the RUN reached the same outcome in
-                # both arms (neither delivers), and only the measurement died.
-                "try:\n"
-                "    text, text_raised = (out.dispatched.texts() or [None])[0], False\n"
-                "except BaseException:\n"
-                "    text, text_raised = None, True\n"
-                "print(json.dumps({'raised': out.error is not None,\n"
-                "                  'type': type(out.error).__name__ if out.error else None,\n"
-                "                  'text_raised': text_raised,\n"
-                "                  'text': text}))\n"
-            )
-            arms[gated] = run_isolated(child, timeout=120.0)
-
-        by_label[label] = arms
-        gated_out, plain_out = arms[True], arms[False]
-        assert not gated_out.timed_out, f"{label} hung with the gate"
-        assert not plain_out.timed_out, f"{label} hung without the gate"
-
-        assert gated_out.signalled == plain_out.signalled, (
-            f"{label}: the gate changed whether the process was killed by a signal"
+    # ONE child per arm runs the whole battery (the harness import and first-run warm-up cost
+    # ~2.5 s per interpreter, which 14 children paid 14 times). Each class prints its result
+    # line as it finishes, so a class that kills the child is the first one missing. The parity claim is unchanged:
+    # per class, both arms complete or die at the same class, and a completed class agrees.
+    def child_for(gated: bool) -> str:
+        return (
+            "import json, sys\n"
+            "sys.setrecursionlimit(100000)\n"
+            "from defender.tests.e2e import _toon872 as T\n"
+            f"BATTERY = {battery!r}\n"
+            "for label, build in BATTERY.items():\n"
+            "    ns = {}\n"
+            "    exec(build, ns)\n"
+            "    value = ns['value']\n"
+            f"    out = T.agent_run(toolset=T.foreign_toolset(value), capabilities={gated})\n"
+            # HARVESTED DEFENSIVELY, and this is load-bearing: `texts()` SERIALIZES the
+            # tool return, so on an unserializable payload the probe itself raises — in
+            # the un-gated arm only, because the gated arm's text is already a plain
+            # framed `str` with nothing left to serialize. Harvesting it bare made this
+            # test report a divergence it had created: the RUN reached the same outcome in
+            # both arms (neither delivers), and only the measurement died.
+            "    try:\n"
+            "        text, text_raised = (out.dispatched.texts() or [None])[0], False\n"
+            "    except BaseException:\n"
+            "        text, text_raised = None, True\n"
+            "    print(json.dumps({'label': label, 'raised': out.error is not None,\n"
+            "                      'type': type(out.error).__name__ if out.error else None,\n"
+            "                      'text_raised': text_raised,\n"
+            "                      'text': text}), flush=True)\n"
         )
-        assert (gated_out.returncode == 0) == (plain_out.returncode == 0), (
+
+    arms = {gated: run_isolated(child_for(gated), timeout=240.0) for gated in (True, False)}
+    gated_out, plain_out = arms[True], arms[False]
+    assert not gated_out.timed_out, "the battery hung with the gate"
+    assert not plain_out.timed_out, "the battery hung without the gate"
+    assert gated_out.signalled == plain_out.signalled, (
+        "the gate changed whether the process was killed by a signal"
+    )
+    assert (gated_out.returncode == 0) == (plain_out.returncode == 0), (
+        "the gate changed whether the battery survived"
+    )
+
+    def results(outcome) -> dict:
+        rows = (json.loads(line) for line in outcome.stdout.splitlines() if line.startswith("{"))
+        return {r["label"]: r for r in rows}
+
+    g_res, p_res = results(gated_out), results(plain_out)
+    for label in battery:
+        assert (label in g_res) == (label in p_res), (
             f"{label}: the gate changed whether the run survived"
         )
-        if gated_out.returncode == 0 and plain_out.returncode == 0:
-            g = json.loads(gated_out.stdout.strip().splitlines()[-1])
-            p = json.loads(plain_out.stdout.strip().splitlines()[-1])
+        if label in g_res:
+            g, p = g_res[label], p_res[label]
             assert g["raised"] == p["raised"], f"{label}: the gate changed whether it raised"
-            assert g["type"] == p["type"], (
-                f"{label}: the gate changed the class of the failure"
-            )
+            assert g["type"] == p["type"], f"{label}: the gate changed the class of the failure"
+    brace = "brace in key, row position"
+    assert brace in g_res, "a `}`-in-key payload stopped delivering with the gate"
+    assert brace in p_res, "a `}`-in-key payload stopped delivering without the gate"
 
     # THE PROBED STDERR DIVERGENCE DOES NOT EXIST, and asserting it made this test depend on a
     # panic being ABSENT from an arm that also emits it. Executed over a 2x2 — {benign,
@@ -629,20 +647,19 @@ def test_every_input_class_kills_or_survives_the_run_identically_with_and_withou
     # So the honest statement is the ABSENCE of a gate-attributable stderr difference, and the
     # demand that actually carries O9 is the model-visible one: the text is identical.
     #
-    # Read off the battery's own `}`-in-key arms: they already ran this payload both ways in
-    # their own interpreters and harvested the text, so two more children would re-measure it.
-    brace_arms = by_label["brace in key, row position"]
-    gated, plain = brace_arms[True], brace_arms[False]
-    assert gated.returncode == 0, "a `}`-in-key payload stopped delivering with the gate"
-    assert plain.returncode == 0, "a `}`-in-key payload stopped delivering without the gate"
-    assert ("panicked at" in gated.stderr) == ("panicked at" in plain.stderr), (
+    # Read off the battery's own `}`-in-key class: it already ran this payload both ways and
+    # harvested the text, so two more children would re-measure it.
+    # Whole-process stderr, as the one-class-per-child form compared it: the ambient panic fires
+    # once per process before any class runs, so a per-class chunk would drop it and compare
+    # something the original never did. (A later `deserialization.rs` panic IS gated-only on this
+    # payload today; that was invisible to the original comparison too, and is left as it was.)
+    assert ("panicked at" in gated_out.stderr) == ("panicked at" in plain_out.stderr), (
         "a Rust panic line became gate-attributable — it is ambient to this harness today, so "
         "an asymmetry here is a real change in what the gate does to the process"
     )
     # The gate ALWAYS frames, so raw stdout differs by construction (and by run id). What must
     # match is the framed CONTENT against the un-gated text — the bytes the model reads.
-    g_text = json.loads(gated.stdout.strip().splitlines()[-1])
-    p_text = json.loads(plain.stdout.strip().splitlines()[-1])
+    g_text, p_text = g_res[brace], p_res[brace]
     assert not g_text["text_raised"], "harvesting the gated arm's text raised"
     assert not p_text["text_raised"], "harvesting the un-gated arm's text raised"
     assert framed_content(g_text["text"]) == p_text["text"], (

@@ -15,7 +15,7 @@ import pytest
 
 def _load(tmp_lessons: Path):
     """A FRESH module per call — each test rebinds the two corpus constants."""
-    mod = load_module(DEFENDER / "scripts" / "lessons" / "lessons_fm.py")
+    mod = load_module(DEFENDER / "runtime" / "lessons_engine" / "lessons_fm.py")
     mod.REPO_ROOT = tmp_lessons.parent
     mod.LESSONS_DIR = tmp_lessons
     return mod

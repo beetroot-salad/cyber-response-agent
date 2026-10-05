@@ -76,13 +76,14 @@ from typing import Any
 
 import pytest
 
+from defender.tests._claim1175 import claim_git
 from defender import _git, _scaffold_rules
 from defender._env import FatalConfigError
 from defender._io import NotPlainEntry
 from defender._tree_listing import entry_kind
 from defender.learning.core import drains, markers
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
-from defender.learning.core.lane_trees import DrainTrees, kind_at, read_at, view_at
+from defender.learning.core.lane_trees import DrainTrees, kind_at, open_drain_trees, read_at, view_at
 from defender.learning.leads import lead_author, lead_neighbors, lead_render, pitfalls_curator
 from defender.learning.leads._lead_spine import lane_skills
 from defender.learning.leads.draft_synthesis import (
@@ -130,6 +131,7 @@ from defender.tests._spec791 import (
 )
 from defender.tests._tree_listing_1134 import descriptors_under
 from defender.tests.test_1111_rooted_io import census, in_time
+from defender.tests.test_1134_mount_list import UNKNOWN_LABELS
 
 LEAD = LEAD_AUTHOR_DRAIN_LABEL
 
@@ -1362,7 +1364,7 @@ def test_a_hold_fault_at_the_open_propagates_out_of_the_seam(tmp_path: Path, sea
 def _lessons(paths: LoopPaths) -> None:
     """The author drain's two corpora, made in the leaf, so its trees can be opened there (the
     refusal under test is then the lane's, not the open's)."""
-    for tree in paths.drain_writable_trees(AUTHOR_DRAIN_LABEL):
+    for tree in AUTHOR_DRAIN_LABEL.writable_trees(paths):
         tree.mkdir(parents=True, exist_ok=True)
 
 
@@ -1433,55 +1435,24 @@ def test_the_deps_hold_the_trees_skills_mount_and_route_tree_for_through_the_tre
     assert paths.skills_dir / "elastic/_draft/linked.md" not in found
 
 
-class MovedMountPaths(LoopPaths):
-    """`LoopPaths` whose lead drain mounts a tree that does not hold `skills/`."""
-
-    def drain_writable_trees(self, label: str) -> tuple[Path, ...]:
-        if label == LEAD_AUTHOR_DRAIN_LABEL:
-            return (self.repo_root / "moved-skills",)
-        return super().drain_writable_trees(label)
-
-
-class MountAboveSkillsPaths(LoopPaths):
-    """`LoopPaths` whose lead drain mounts `defender/`, a tree ABOVE `skills/` that holds it."""
-
-    def drain_writable_trees(self, label: str) -> tuple[Path, ...]:
-        if label == LEAD_AUTHOR_DRAIN_LABEL:
-            return (self.defender_dir,)
-        return super().drain_writable_trees(label)
-
-
-class OtherLanePaths(LoopPaths):
-    """`LoopPaths` granting the `skills/` mount to a label of its own, `other_lane`."""
-
-    def drain_writable_trees(self, label: str) -> tuple[Path, ...]:
-        if label == "other_lane":
-            return (self.skills_dir,)
-        return super().drain_writable_trees(label)
-
-
 def _refusing_trees(tmp_path: Path) -> dict[str, Callable[[], tuple[LoopPaths, DrainTrees]]]:
     """Each way the lane's trees can fail to hold `skills/` exactly, as `(paths, open trees)`:
-    the author drain's label, an unknown one, a mount list whose lead mount is moved or lies
-    above `skills/`, and trees holding only a folder below `skills/`."""
+    the author member's trees, and trees whose one mount is moved off `skills/`, lies above it
+    (`defender/`) or below it. Since #1179's amendment a member answers its own trees, so the
+    wrong mount sets are opened directly (`DrainTrees.open`)."""
     repo = _worktree(tmp_path)
     plain = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     _lessons(plain)
     (repo / "moved-skills").mkdir()
-    moved = MovedMountPaths(repo_root=repo, state_dir=tmp_path / "state")
-    above = MountAboveSkillsPaths(repo_root=repo, state_dir=tmp_path / "state")
     return {
-        "author_label": lambda: (plain, DrainTrees.open(
-            plain.drain_writable_trees(AUTHOR_DRAIN_LABEL))),
-        "unknown_label": lambda: (plain, DrainTrees.open(
-            plain.drain_writable_trees("no_such_drain"))),
-        "moved_mount": lambda: (moved, DrainTrees.open(moved.drain_writable_trees(LEAD))),
-        "mount_above": lambda: (above, DrainTrees.open(above.drain_writable_trees(LEAD))),
+        "author_label": lambda: (plain, open_drain_trees(plain, AUTHOR_DRAIN_LABEL)),
+        "moved_mount": lambda: (plain, DrainTrees.open((repo / "moved-skills",))),
+        "mount_above": lambda: (plain, DrainTrees.open((plain.defender_dir,))),
         "mount_below": lambda: (plain, DrainTrees.open((plain.skills_dir / "gather",))),
     }
 
 
-REFUSALS = ("author_label", "unknown_label", "moved_mount", "mount_above", "mount_below")
+REFUSALS = ("author_label", "moved_mount", "mount_above", "mount_below")
 
 
 @pytest.mark.parametrize("how", REFUSALS)
@@ -1511,70 +1482,73 @@ def test_trees_that_do_not_hold_skills_exactly_are_refused(tmp_path: Path, how: 
     assert [r["pitfall_id"] for r in persist.read_pitfalls(paths)] == ["r:l-000:0"]
 
 
-def test_trees_the_mount_list_grants_skills_to_are_taken_whatever_the_label(tmp_path: Path):
-    """The control for the refusals: a label the mount list grants `skills/` to (here
-    `other_lane`, under a `LoopPaths` saying so) gets deps whose `skills` is that trees' mount,
-    and `run_pitfalls` serves its empty queue under them."""
+def test_trees_holding_skills_exactly_are_taken_whatever_opened_them(tmp_path: Path):
+    """The control for the refusals: trees holding exactly `skills/`, opened directly
+    (`DrainTrees.open`, not through the lead member), get deps whose `skills` is that trees'
+    mount, and `run_pitfalls` serves its empty queue under them."""
     repo = _worktree(tmp_path)
-    paths = OtherLanePaths(repo_root=repo, state_dir=tmp_path / "state")
-    with opened(paths, "other_lane") as trees:
+    paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    with DrainTrees.open((paths.skills_dir,)) as trees:
         deps = lead_author.build_lead_author_deps(paths, trees=trees)
         assert deps.skills is trees.mount(paths.skills_dir)
         assert pitfalls_curator.run_pitfalls(paths=paths, trees=trees) == 0
 
 
-@pytest.mark.parametrize("label", [AUTHOR_DRAIN_LABEL, "no_such_drain"])
-def test_run_consults_the_label_it_is_given(tmp_path: Path, label: str):
-    """`run(label=...)` with deps: refused unless the label's mount list holds the deps'
-    `skills_dir` (the label is consulted on this path too), before the queue lock or any of the
-    run; without deps it opens that label's trees, so the same label is refused there, again
-    before any of the run is served. The control is the lead label, on the same deps."""
+#: Non-members (#1179 O1'), as `test_1134_mount_list.UNKNOWN_LABELS` spells them: the members'
+#: values and names as strings, a look-alike enum's members, `.value` carriers, near misses.
+#: Each raises `AttributeError` at its first use; the author member, which is a label, is
+#: refused for holding no `skills/` (`LeadAuthorError`).
+NON_MEMBERS = list(UNKNOWN_LABELS)
+
+
+def _refusal_for(label: object) -> type[Exception]:
+    return LeadAuthorError if label is AUTHOR_DRAIN_LABEL else AttributeError
+
+
+@pytest.mark.parametrize("label", [AUTHOR_DRAIN_LABEL, *NON_MEMBERS], ids=repr)
+def test_run_consults_the_label_it_is_given(tmp_path: Path, label: object):
+    """`run(label=...)` with deps: refused unless the label's trees hold the deps' `skills_dir`
+    (the author member: `LeadAuthorError`), and a non-member raises at its first use
+    (`AttributeError`), either way before the queue lock or any of the run; without deps it
+    opens that label's trees, so the same label is refused there, again before any of the run
+    is served. The control is the lead member, on the same deps."""
     paths, _repo = _lifetime_paths(tmp_path)
     _lessons(paths)
     run_dir = _run_dir(tmp_path)
     spawn = LeadAuthorSpawn()
+    refusal = _refusal_for(label)
     with opened(paths) as trees:
         deps = _deps(paths, trees, spawn, [ELASTIC_LEAD])
-        with pytest.raises(LeadAuthorError):
-            lead_author.run(run_dir, label=label, paths=paths, deps=deps)
+        with pytest.raises(refusal):
+            lead_author.run(run_dir, label=label, paths=paths, deps=deps)  # type: ignore[arg-type]
         assert not (run_dir / "lead_author").exists()
-        with pytest.raises(LeadAuthorError):
-            lead_author.run(run_dir, label=label, paths=paths)
+        with pytest.raises(refusal):
+            lead_author.run(run_dir, label=label, paths=paths)  # type: ignore[arg-type]
         assert not (run_dir / "lead_author").exists()
         assert spawn.calls == []
         assert lead_author.run(run_dir, label=LEAD, paths=paths, deps=deps) == 0
     assert spawn.calls, "the control never reached the agent"
 
 
-@pytest.mark.parametrize("how", ["moved_mount", "mount_above"])
-def test_run_without_deps_refuses_a_lead_mount_that_is_not_skills(tmp_path: Path, how: str):
-    """`run(label=LEAD, paths=...)` with no deps, under a mount list whose lead mount is moved
-    or lies above `skills/`: the trees it opens hold no `skills/` mount point, so the deps are
-    refused (`LeadAuthorError`) and nothing of the run is served."""
-    paths, trees = _refusing_trees(tmp_path)[how]()
-    trees.close()
-    run_dir = _run_dir(tmp_path)
-    with pytest.raises(LeadAuthorError):
-        lead_author.run(run_dir, label=LEAD, paths=paths)
-    assert not (run_dir / "lead_author").exists()
-
-
-@pytest.mark.parametrize("label", [AUTHOR_DRAIN_LABEL, "no_such_drain"])
-def test_the_drain_seams_consult_the_label(tmp_path: Path, label: str):
+@pytest.mark.parametrize("label", [AUTHOR_DRAIN_LABEL, *NON_MEMBERS], ids=repr)
+def test_the_drain_seams_consult_the_label(tmp_path: Path, label: object):
     """`_invoke_lead_author` / `_invoke_pitfalls` open the trees of the label they are handed:
-    the author drain's (its two corpora present in the leaf) or an unknown one (nothing held)
-    holds no `skills/`, so each refuses with `LeadAuthorError` and serves nothing. The lead
-    label's control is in `test_the_seams_and_entry_points_refuse_...`."""
+    the author member's (its two corpora present in the leaf) hold no `skills/`, so each refuses
+    with `LeadAuthorError`; a non-member raises at its first use (`AttributeError`). Either way
+    nothing is served and nothing is left held. The lead member's control is in
+    `test_the_seams_and_entry_points_refuse_...`."""
     paths, repo = _lifetime_paths(tmp_path)
     _lessons(paths)
     run_dir = _run_dir(tmp_path)
+    refusal = _refusal_for(label)
 
-    with pytest.raises(LeadAuthorError):
-        drains._invoke_lead_author(paths, run_dir, label=label, on_done=lambda _s: None)
+    with pytest.raises(refusal):
+        drains._invoke_lead_author(paths, run_dir, label=label,  # type: ignore[arg-type]
+                                   on_done=lambda _s: None)
     assert not (run_dir / "lead_author").exists()
-    with pytest.raises(LeadAuthorError):
-        drains._invoke_pitfalls(paths, label=label, on_curated=lambda _d: None,
-                                lock_wait_seconds=0)
+    with pytest.raises(refusal):
+        drains._invoke_pitfalls(paths, label=label,  # type: ignore[arg-type]
+                                on_curated=lambda _d: None, lock_wait_seconds=0)
     assert descriptors_under(repo) == []
 
 
@@ -1598,7 +1572,7 @@ def _rule_calls(s: Scene) -> dict[str, Callable[..., Any]]:
         "_departed_drafts": lambda **extra: lead_author._departed_drafts(s.repo, {}, [], **extra),
         "_covers_rule": lambda **extra: lead_author._covers_rule(s.repo, {}, [], **extra),
         "_verify_skills_state": lambda **extra: lead_author._verify_skills_state(
-            s.repo, [], systems=DECLARED, **extra),
+            s.repo, [], systems=DECLARED, **extra, git=claim_git(s.repo)),
         "_readable_pair": lambda **extra: pitfalls_curator._readable_pair(
             s.repo, pitfalls_curator.REDUCER_REL, **extra),
         "_pitfalls_content_rule": lambda **extra: pitfalls_curator._pitfalls_content_rule(
@@ -1607,7 +1581,7 @@ def _rule_calls(s: Scene) -> dict[str, Callable[..., Any]]:
             s.repo, " M", pitfalls_curator.REDUCER_REL, systems=DECLARED, reducer_offered=True,
             **extra),
         "_verify_pitfalls_state": lambda **extra: pitfalls_curator._verify_pitfalls_state(
-            s.repo, [], systems=DECLARED, reducer_offered=True, **extra),
+            s.repo, [], systems=DECLARED, reducer_offered=True, **extra, git=claim_git(s.repo)),
     }
 
 

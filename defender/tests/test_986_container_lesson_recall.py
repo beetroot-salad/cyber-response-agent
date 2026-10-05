@@ -6,7 +6,7 @@ against the baseline record returns the lesson absent from the pushed set.
 
 The lesson-side reason, from the design's own probes:
 
-  * `_best_match` (`scripts/lessons/lessons_frontier.py:472`) pairs `frontier_nodes` with the
+  * `_best_match` (`runtime/lessons_engine/lessons_frontier.py:472`) pairs `frontier_nodes` with the
     frontier's OPEN slots and `observed_nodes` with its SETTLED cells (C7);
   * `is_ident_open("soc-playground")` is `False` (C6) — a concrete ident is never an open slot;
   * the lesson's only selector is `frontier_nodes: [{type: compute, slot: ident}]`, so once
@@ -95,7 +95,7 @@ def _lessons() -> tuple:
 
 
 def _recall(text: str, *, top_k: int | None = None) -> list[str]:
-    from defender.scripts.lessons import lessons_frontier
+    from defender.runtime.lessons_engine import lessons_frontier
 
     kw = {} if top_k is None else {"top_k": top_k}
     return [

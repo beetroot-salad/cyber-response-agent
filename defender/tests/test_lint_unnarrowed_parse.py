@@ -370,6 +370,7 @@ def real_tree_findings():
     return _GATE._scan(_GATE.DEFENDER)
 
 
+@pytest.mark.gate
 def test_the_motivating_findings_are_in_the_shipped_baseline(real_tree_findings):
     """A gate that does not fire on the defect it exists for is not landed. One of #878's four
     motivating sites is still open and still reported — the positive control that this gate
@@ -397,6 +398,7 @@ def test_the_motivating_findings_are_in_the_shipped_baseline(real_tree_findings)
         assert fixed not in fingerprints, f"{fixed} was re-widened after #878 narrowed it"
 
 
+@pytest.mark.gate
 def test_the_readers_of_a_laundered_value_are_not_reported(real_tree_findings):
     """The deliberate half-coverage, pinned so a later widening is a decision rather than a
     drift. The gate fires at the SEAM; the readers that subscript `_run_dir`'s laundered dict

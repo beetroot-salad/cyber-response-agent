@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Grep defender lesson FRONTMATTER (only) + enumerate viable tags.
 
 Plan-time discovery primitive for the defender orchestrator (SKILL §Lessons)
@@ -33,28 +32,16 @@ text. Exit 0 always (no match = no output); a bad regex exits 2.
 """
 from __future__ import annotations
 
+import argparse
+import re
 import sys
 from pathlib import Path
 
-if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
-    sys.path.insert(0, _root)
-
-# The only `defender.*` import allowed above the guard: `_venv` is stdlib-only, while other
-# modules may import pydantic or PyYAML, which the bare launching interpreter lacks.
-# `test_corpus_fold_seed.test_c2c` pins this ordering.
-from defender.scripts._venv import reexec_into_venv
-
-if __name__ == "__main__":
-    reexec_into_venv(__file__)
-
-import argparse
-import re
-
 from defender._frontmatter import FrontmatterError, split_frontmatter
+from defender._git import REPO_ROOT
 from defender._tsv import flatten_cell
-from defender.scripts.lessons._lessons_common import as_list, iter_lessons, use_utf8_stdio
+from defender.runtime.lessons_engine._lessons_common import as_list, iter_lessons, use_utf8_stdio
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
 LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
 
 DIMENSIONS = ("source_signature", "telemetry_source", "attack_phase")
@@ -142,7 +129,6 @@ def main(argv: list[str]) -> int:
     if ns.show:
         return cmd_show(ns.show)
     return cmd_grep(ns.patterns)
-
 
 if __name__ == "__main__":  # lint-log-setup: ok — a model tool — its stderr is read back by the model as plain text
     sys.exit(main(sys.argv))

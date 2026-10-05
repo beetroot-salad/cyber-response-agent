@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from defender import _git
 from defender._paths import PATHS, DefenderPaths
 
 REPO_ROOT = PATHS.repo_root
@@ -88,7 +87,3 @@ def _is_in_scope(path: str) -> bool:
         or _is_system_skill_md(path)
         or _is_system_skill_draft(path)
     )
-
-
-def _porcelain_records(repo_root: Path) -> list[tuple[str, str]]:
-    return _git.git_status(repo_root)

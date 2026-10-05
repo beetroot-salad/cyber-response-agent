@@ -219,7 +219,7 @@ def test_run_under_is_an_internal_helper_and_no_caller_outside_the_owner_uses_it
     directory `under` would have.
     """
     import ast
-    from defender.tests._by_path import DEFENDER, import_lint_lib
+    from defender.tests._by_path import DEFENDER, cached_parse, import_lint_lib
     astlib = import_lint_lib("_astlib")
     # RESOLVED, not grepped: `.under(` is also `_io.Bound.under`, an unrelated method five
     # modules reach — a spelling match reports them and says nothing about `Run.under`.
@@ -230,7 +230,7 @@ def test_run_under_is_an_internal_helper_and_no_caller_outside_the_owner_uses_it
         if rel.startswith(("tests/", ".venv/")) or rel == f"{S.HANDLE_MODULE}.py":
             continue
         try:
-            _text, tree = astlib.read_and_parse(py, rel)
+            _text, tree = cached_parse(py, rel)
         except astlib.ScanBlind:
             hits.append(f"{rel} (unparseable)")
             continue

@@ -23,6 +23,7 @@ There is no `verb_class` field: every shipped verb is read-class and the project
 """
 from __future__ import annotations
 
+import functools
 import warnings
 from collections.abc import Mapping
 from defender._model import model
@@ -131,7 +132,8 @@ class RunGrants:
 def run_grants(settings_dir: Path) -> RunGrants:
     """Load `settings_dir`'s table and project the run's grants from it. @owns RunGrants
 
-    Uncached, so each run in a process reads its own (possibly edited) table. A missing or
+    Each call reads the file, so each run in a process sees its own (possibly edited) table;
+    only the parse of text already seen is reused (`load_dispositions`). A missing or
     malformed table raises `DispositionError`; an absent table is not a deny-all.
     """
     from defender.runtime.lead_zero._spec import correlation_grant, correlation_system
@@ -161,10 +163,14 @@ def require_gather_query(grants: RunGrants) -> None:
         )
 
 
-def _systems_block(path: Path) -> Mapping[object, object]:
-    """Read the file and return its `dispositions:` mapping, or raise."""
-    data = _yaml.load_reviewed_mapping(
-        path, what="verb-disposition table", known=("dispositions",), error=DispositionError,
+#: What every refusal of an unreadable or malformed table calls the file.
+_TABLE_WHAT = "verb-disposition table"
+
+
+def _systems_block(path: Path, text: str) -> Mapping[object, object]:
+    """Parse `text`, read from `path`, and return its `dispositions:` mapping, or raise."""
+    data = _yaml.parse_reviewed_mapping(
+        text, path, what=_TABLE_WHAT, known=("dispositions",), error=DispositionError,
     )
     systems = data.get("dispositions")
     if systems is not None and not isinstance(systems, Mapping):
@@ -198,7 +204,22 @@ def load_dispositions(path: Path) -> tuple[Disposition, ...]:
     coherent-looking subset. Every refusal names the offending system or pair.
     """
     path = Path(path)
-    systems = _systems_block(path)
+    out = _validated_rows(path, _yaml.read_reviewed_text(path, what=_TABLE_WHAT,
+                                                         error=DispositionError))
+    # Outside the cache: the warning is owed on every load, a cached one included.
+    _warn_unhealth_checkable(path, out)
+    return out
+
+
+@functools.lru_cache(maxsize=64)
+def _validated_rows(path: Path, text: str) -> tuple[Disposition, ...]:
+    """`load_dispositions`' parse and validation of `text`, the table read from `path`.
+
+    Memoized on `(path, text)` — the exact text parsed, so an edited table is never answered
+    from a stale entry, and `path` because every refusal names it. A refusal raises and so is
+    never stored: the next load of the same text parses again and raises the same error. The
+    rows are frozen, and the tuple shares nothing a caller could mutate."""
+    systems = _systems_block(path, text)
     rows: list[Disposition] = []
     for system, verbs in sorted(systems.items(), key=lambda kv: str(kv[0])):
         if not isinstance(system, str) or not is_system_name(system):
@@ -215,7 +236,6 @@ def load_dispositions(path: Path) -> tuple[Disposition, ...]:
             rows.append(_disposition_row(path, system, verb_name, body))
     out = tuple(rows)
     _refuse_incoherent_narrowing(path, out)
-    _warn_unhealth_checkable(path, out)
     return out
 
 

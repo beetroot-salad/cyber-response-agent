@@ -1,60 +1,30 @@
 
 from __future__ import annotations
 
-import fcntl
-import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from defender._io import TEXT_READ_ERRORS, locked_for_rewrite
+from defender._io import locked_for_read, locked_for_rewrite, locked_json_read, locked_json_update
 
 
 def update_json_locked(
-    path: Path, mutate: Callable[[dict], Any], *, default: Callable[[], dict] = dict
+    path: Path, mutate: Callable[[dict], Any], *, default: Callable[[], dict] = dict,
+    os_: Any = os,
 ) -> dict:
-    """Locked read-modify-write through `_io.locked_for_rewrite`, which refuses a planted
-    symlink before taking the lock.
-
-    An undecodable, unparseable, or non-dict document falls back to `default()`, so `mutate`
-    always receives a dict."""
-    path = Path(path)
-    with locked_for_rewrite(path) as f:
-        try:
-            raw = f.read()
-        except UnicodeDecodeError:
-            raw = ""
-        try:
-            state = json.loads(raw) if raw else default()
-        except json.JSONDecodeError:
-            state = default()
-        if not isinstance(state, dict):
-            state = default()
-        mutate(state)
-        f.seek(0)
-        f.truncate()
-        f.write(json.dumps(state, indent=2))
-    return state
+    """Locked read-modify-write of the run-state JSON at `path` through
+    `_io.locked_json_update`: a planted link or other non-plain entry is refused before the
+    lock, and content unusable as state (too big, undecodable, not JSON, too deep, not an
+    object) starts over from `default()`, so `mutate` always receives a dict; any other read
+    fault propagates and nothing is written (#1174). `os_` is the seam, for opener and read
+    alike."""
+    return locked_json_update(locked_for_rewrite(Path(path), os_=os_), mutate, default=default,
+                              os_=os_)
 
 
-def read_json_locked(path: Path) -> dict:
-    """The document at `path` as a dict — `{}` for absent, symlinked, unreadable, unparseable,
-    or non-dict. Narrowed here so no reader has to handle a non-dict `json.loads` result."""
-    path = Path(path)
-    if not path.is_file():
-        return {}
-    # `is_file()` follows links; a symlink at the state's name is a planted alias, not state.
-    if path.is_symlink():
-        return {}
-    # `TEXT_READ_ERRORS` also covers `UnicodeDecodeError` from non-UTF-8 bytes.
-    try:
-        with open(path, encoding="utf-8") as f:
-            fcntl.flock(f, fcntl.LOCK_SH)
-            raw = f.read()
-    except TEXT_READ_ERRORS:
-        return {}
-    try:
-        doc = json.loads(raw) if raw else {}
-    except json.JSONDecodeError:
-        return {}
-    return doc if isinstance(doc, dict) else {}
+def read_json_locked(path: Path, *, os_: Any = os) -> dict:
+    """The document at `path` as a dict — `{}` for absent, linked or otherwise non-plain,
+    unreadable, too big, unparseable, or non-dict — under a shared lock, creating nothing
+    (`_io.locked_json_read`, #1174 O8). Narrowed here so no reader has to handle a non-dict."""
+    return locked_json_read(locked_for_read(Path(path), os_=os_), os_=os_)

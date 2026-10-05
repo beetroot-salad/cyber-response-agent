@@ -358,7 +358,7 @@ def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, capsys)
     """A corpus file lane 1 leaves behind after refusing is not committed by lane 2.
 
     J3 — the BETWEEN-LANE half of resolve-before-spawn, named in no design sentence and found
-    by phase C: `_discard_worktree_changes` (`git reset --hard` + `git clean -fdq`) runs in a
+    by phase C: `ClaimGit.reset` (`git reset --hard` + `git clean -fdqx` over skills/) runs in a
     `finally` after every lead-author marker and after the pitfalls leg, and `commit_corpus`
     stages the WHOLE `defender/skills` pathspec rather than the rule's own `changed` list — so
     a change that removes or narrows that `finally` changes what lane 2 can commit. Both lanes

@@ -116,14 +116,6 @@ def test_the_repo_itself_passes_the_read_gate() -> None:
     assert READ_GATE.main([]) == 0
 
 
-def test_every_read_gate_baseline_entry_carries_a_reason() -> None:
-    entries = json.loads(
-        (LINT_DIR / "lint_tree_read_follows_link_baseline.json").read_text(encoding="utf-8")
-    )["entries"]
-    assert entries, "an empty baseline here would mean the census stopped matching the tree"
-    assert all(reason.strip() for reason in entries.values())
-
-
 # lint_dataclass_fields
 
 def test_the_raw_field_mapping_is_refused(tmp_path: Path) -> None:

@@ -26,7 +26,7 @@ from defender import _git
 from defender._corpus import QueryTemplate, is_established
 from defender._paths import adapters_under
 from defender.learning.leads.declared_systems import declared_systems_over, read_adapters
-from defender.learning.leads.lead_extraction import LeadAuthorError
+from defender.learning.leads._errors import LeadAuthorError
 from defender.runtime import lead_zero as lead_zero_mod
 from defender.runtime.lead_zero._spec import correlation_grant
 from defender.runtime.lead_zero_config import LeadZeroConfigError, lead_zero_config_path

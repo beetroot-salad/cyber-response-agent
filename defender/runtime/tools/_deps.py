@@ -27,7 +27,7 @@ from ..agent_definition import ResolvedRoots
 from ..agent_role import AgentRole
 
 from defender._env import env_int
-from defender.scripts.gather_tools.payload_view import (
+from defender.runtime.payload_view import (
     passthrough_max_bytes as _capture_view_cap,
 )
 from defender.hooks.record_lesson_load import (

@@ -56,8 +56,7 @@ def matches(got: dict, want: dict) -> bool:
     return got["reason"] == reason
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c["id"] for c in CASES])
-def test_a_frozen_baseline_replay_certifies_every_unenumerated_shape(case):
+def test_a_frozen_baseline_replay_certifies_every_unenumerated_shape():
     """A corpus of command texts was run through the gate AT THE BASE COMMIT and its whole
     decision recorded - allow, reason identity, and the pipelines - then replayed after the
     change: every shape outside the enumerated set reaches an identical decision, and every
@@ -70,21 +69,28 @@ def test_a_frozen_baseline_replay_certifies_every_unenumerated_shape(case):
     space (claims c9, x12) - which is how three of the five live divergences in this change
     survived every previous review round.
     """
-    got = base.decision_record(case["command"], case["policy"])
-    if not case["member"]:
-        assert got == case["baseline"], (
-            f"{case['id']}: {case['command']!r} is not in the enumerated verdict-change set, "
-            f"and its decision moved.\n  recorded at the base commit: {case['baseline']}\n"
-            f"  now: {got}\n"
-            "Either the refactor changed a verdict nobody enumerated, or the set is short a "
-            "member and D2's list has to say so BEFORE the code is written."
-        )
-    else:
-        assert matches(got, case["after"]), (
-            f"{case['id']}: {case['command']!r} is member {case['member']} of the enumerated "
-            f"set and must reach the decision this spec demands.\n  demanded: {case['after']}\n"
-            f"  now: {got}\n  (recorded at the base commit: {case['baseline']})"
-        )
+    failures: list[str] = []
+    for case in CASES:
+        got = base.decision_record(case["command"], case["policy"])
+        if not case["member"]:
+            if got != case["baseline"]:
+                failures.append(
+                    f"{case['id']}: {case['command']!r} is not in the enumerated verdict-change "
+                    f"set, and its decision moved.\n  recorded at the base commit: "
+                    f"{case['baseline']}\n  now: {got}\n"
+                    "Either the refactor changed a verdict nobody enumerated, or the set is short "
+                    "a member and D2's list has to say so BEFORE the code is written."
+                )
+        elif not matches(got, case["after"]):
+            failures.append(
+                f"{case['id']}: {case['command']!r} is member {case['member']} of the "
+                f"enumerated set and must reach the decision this spec demands.\n"
+                f"  demanded: {case['after']}\n  now: {got}\n"
+                f"  (recorded at the base commit: {case['baseline']})"
+            )
+    assert not failures, f"{len(failures)} of {len(CASES)} replayed cases moved:\n" + "\n".join(
+        failures
+    )
 
 
 def test_the_recorded_baseline_predates_the_change_it_certifies():

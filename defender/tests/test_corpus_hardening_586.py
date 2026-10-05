@@ -98,7 +98,7 @@ def test_the_real_lessons_cli_survives_a_c_locale_over_the_real_corpus(tmp_path)
     REAL entrypoint. This is the command ``SKILL.md`` §Lessons tells the defender to run at PLAN:
     before the fix it exited 1 partway through the corpus, having emitted a truncated listing."""
     proc = subprocess.run(
-        [sys.executable, str(WORKSPACE_ROOT / "defender/scripts/lessons/lessons_fm.py")],
+        [str(WORKSPACE_ROOT / "defender/bin/defender-lessons")],
         capture_output=True, text=True, env=C_LOCALE_ENV,
     )
 

@@ -33,15 +33,6 @@ from _box665 import ScriptedTransport  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 SALT = "s665mnt"
-from defender.learning.core.config import REPO_ROOT  # noqa: E402
-
-PINNED = REPO_ROOT / "defender" / "scripts" / "lessons" / "defender-lessons"
-
-
-
-
-
-
 
 
 def _anchor_covered(req, anchor) -> bool:
