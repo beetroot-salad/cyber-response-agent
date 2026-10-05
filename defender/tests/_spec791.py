@@ -71,9 +71,10 @@ RETIRED_PACKAGE = "defender.learning.pipeline.oracle"
 # DELETED, not merely dead, so there is no baseline entry left to carry a reason. Deletion is the
 # strongest form of what this demand asks for, and a name that resolves to nothing cannot be
 # asserted about — the surviving sibling is what still has to carry its attribution.
-RETIRED_DEAD_SYMBOLS = (
-    "enqueue_for_authoring",  # the authoring-queue write the curation request replaced
-)
+#: Empty since #1135: the one symbol it held (the authoring-queue write the curation request
+#: replaced) lived in `core/markers.py`, which that change deleted outright — a symbol that no
+#: longer exists has no dead-code record to name.
+RETIRED_DEAD_SYMBOLS: tuple[str, ...] = ()
 # The projected-telemetry writer bullet 3 deletes, as the project profile's shared-root
 # census spells it. A census row naming a symbol that resolves to nothing reads exactly
 # like a row nobody wrote, and this file seeds the next change's grounding pass.
@@ -188,6 +189,7 @@ def loop_paths(tmp_path: Path):
 
     repo = tmp_path / "repo"
     (repo / "defender").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "state").mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
     return LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
 
 
@@ -433,7 +435,7 @@ def plant_alert(tmp_path: Path, *, name: str = "alert.json",
 
 
 def author_markers(paths) -> list[str]:
-    q = paths.author_queue_dir
+    q = paths.state_root / "author-queue"
     return sorted(p.name for p in q.glob("*.json")) if q.is_dir() else []
 
 

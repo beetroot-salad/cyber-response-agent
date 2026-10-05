@@ -27,6 +27,7 @@ import pytest
 from defender.tests import _drain719 as D
 from defender.tests import _judge_921 as J
 from defender.tests import _tenants1106 as T1106  # noqa: E402
+from defender.tests import _state1135
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +38,7 @@ def _tmp_roots(tmp_path, monkeypatch):
     # this test's own and not the checkout's real `learning/_pending/`. Isolation belongs
     # here rather than in the appender: a production path that picks a different queue when
     # an env var is unset is a pass whose rows can land where no drain reads.
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _vocab():
@@ -115,19 +116,20 @@ def test_921_every_surface_tests_membership_through_the_shipped_normalizer(tmp_p
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        runs_base=tmp_path / "defender-runs", draws=1)
+        runs_base=tmp_path / "defender-runs", draws=1,
+        state=_state1135.env_state())
     enqueue = J.mod("learning.judge.enqueue")
     row = dict(D.finding_row("ep-1/b/0/0", run_id="ep-1", direction="family"),
                type="lead-set", subject="defender", judge_outcome=variant,
                subject_anchor="l-001", subject_topic="topic",
                source_run_dir="episodes/ep-1/worlds/b")
-    assert enqueue.append_rows(ep, [row]) == 1, (
+    assert enqueue.append_rows(ep, [row], state=_state1135.env_state()) == 1, (
         "the appender refused a case variant the shipped normalizer admits")
 
     # 3. the gate's routing
     paths = D.make_paths(tmp_path / "gate")
-    channel = D.channel_of(paths, "findings")
-    D.seed(channel, [dict(row, finding_id="ep-1/b/0/1")])
+    channel = D.channel_of("findings")
+    D.seed(paths, channel, [dict(row, finding_id="ep-1/b/0/1")])
     agent = D.recording(D.committing("variant"))
     assert J.mod("learning.author.drain").run_batch(
         cfg=D.cfg_for(paths, "findings", invoke_agent=agent)) == 0
@@ -243,7 +245,8 @@ def test_921_the_three_judge_write_sinks_are_the_only_ones_and_land_on_distinct_
     # callers write and the count below is over the whole write surface.
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc(findings=[]))),
-        runs_base=tmp_path / "defender-runs", draws=2)
+        runs_base=tmp_path / "defender-runs", draws=2,
+        state=_state1135.env_state())
     after = {p.relative_to(ep) for p in ep.rglob("*") if p.is_file()}
     created = sorted(after - before)
 
@@ -291,7 +294,8 @@ def test_921_the_wire_log_holding_the_framed_prompt_is_not_reachable_from_a_box(
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        runs_base=tmp_path / "defender-runs", draws=1)
+        runs_base=tmp_path / "defender-runs", draws=1,
+        state=_state1135.env_state())
     traces = J.wire_logs(ep)
     assert traces, "the judge left no wire log at all; there is nothing to deny"
 

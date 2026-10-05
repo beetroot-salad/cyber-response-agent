@@ -137,6 +137,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from defender.learning.core.state import PITFALLS
 from defender.learning.leads.lead_extraction import ExecutedLead
 from defender._query_rules import BASH_SHIM_QUERY_ID
 from defender.tests._declared869 import (  # noqa: F401 — re-exported substrate
@@ -340,17 +341,17 @@ def by_surface(handoffs: list[dict]) -> dict[str, list[dict]]:
 def queue_ids(paths) -> list[str]:
     """The ids still pending, in file order — the observable FK-7's held rows live in."""
     from defender.learning.core import persist
+    from defender.tests import _state1135
 
-    return [str(r["pitfall_id"]) for r in persist.read_pitfalls(paths)]
+    return [str(r["pitfall_id"]) for r in persist.read_pitfalls(_state1135.state_for_paths(paths))]
 
 
 def consumed_by_id(paths) -> dict[str, dict]:
-    return {str(r["pitfall_id"]): r for r in read_rows(paths.pitfalls.consumed)}
+    return {str(r["pitfall_id"]): r for r in read_rows(paths.state_root / PITFALLS.consumed)}
 
 
 def graveyard_by_id(paths) -> dict[str, dict]:
-    from defender.learning.author import drain
-
     return {
-        str(r["pitfall_id"]): r for r in read_rows(drain.graveyard_file(paths.pitfalls))
+        str(r["pitfall_id"]): r
+        for r in read_rows(paths.state_root / PITFALLS.deadletter)
     }

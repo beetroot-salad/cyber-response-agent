@@ -47,6 +47,7 @@ from defender.tests.e2e._replay_harness import GOLDEN_AB3, materialize  # noqa: 
 from defender.tests.e2e.test_pitfalls_input_823 import _reduce, _run  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, q  # noqa: E402
 from defender.tests import _tenants1106 as T1106  # noqa: E402
+from defender.tests import _state1135
 from defender.tests._lead_author_1134 import lead_trees  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -107,9 +108,9 @@ def test_e2e_a_failed_reducer_pipe_becomes_a_reducer_handoff(tmp_path: Path, mon
     write_reducer_surface(repo)
     commit_all(repo, "seed the reducer surface")
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    persist.append_pitfalls(collected, paths=paths)
+    persist.append_pitfalls(collected, state=_state1135.state_for_paths(paths))
 
-    records = persist.merge_pitfalls(persist.read_pitfalls(paths))
+    records = persist.merge_pitfalls(persist.read_pitfalls(_state1135.state_for_paths(paths)))
     assert [r["occurrences"] for r in records] == [3]
 
     # the curation tick: the handoff names the surface, and the commit carries it

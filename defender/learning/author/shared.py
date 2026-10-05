@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import contextlib
 import json
 import random
 import re
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from uuid import uuid4
 from typing import Any
@@ -12,7 +11,7 @@ from typing import Any
 
 from defender import _yaml
 
-from defender import _flock, _git
+from defender import _git
 from defender._io import Bound, Held
 from defender.learning._prompt import stage_user_message, structured_json_body
 from defender._text import is_content_less
@@ -20,6 +19,7 @@ from defender._untrusted import wrap
 from defender._clock import now_iso
 from defender._corpus import PROVENANCE_KEYS, iter_lessons
 from defender.learning.core.lane_trees import KIND_ABSENT, DrainTrees, kind_at
+from defender.learning.core.state import Channel, LearningState
 
 
 
@@ -43,75 +43,6 @@ def lane_corpus(trees: DrainTrees, corpus_dir: Path) -> Held:
             f"refused: the lane's held trees {[str(m) for m in trees.mounts]} hold no mount at "
             f"{corpus_dir}"
         ) from None
-
-
-def acquire_repo_lock(lock_file: Path, *, timeout_seconds: int) -> Any:
-    """The whole-repo authoring lock. Raises on expiry — a caller that got no lock must not
-    proceed to commit, and `author/drain.py`'s retire decision keys on this exception."""
-    fh = _flock.open_lock(lock_file)
-    try:
-        taken = _flock.take(fh, timeout_seconds=timeout_seconds, poll=_flock.SLOW_POLL)
-    except BaseException:
-        fh.close()
-        raise
-    if not taken:
-        fh.close()
-        raise TimeoutError(
-            f"repo lock {lock_file} held by another author for >{timeout_seconds}s"
-        )
-    return fh
-
-
-def acquire_flock(path: Path) -> Any | None:
-    """Take it now or answer `None` — the "another tick holds it, skip" acquisition."""
-    fh = _flock.open_lock(path)
-    try:
-        taken = _flock.take(fh, timeout_seconds=0)
-    except BaseException:
-        fh.close()
-        raise
-    if not taken:
-        fh.close()
-        return None
-    return fh
-
-
-def acquire_flock_within(path: Path, *, timeout_seconds: int) -> Any | None:
-    """Retried until a deadline; `None` once it expires.
-
-    The drain's wait on a channel's append lock. Giving up instantly would make an ordinary
-    append look permanent; blocking would let one stuck appender hold the repo lock, and so
-    every channel's tick, indefinitely. `None` rather than raising: a busy channel isn't a
-    fault."""
-    fh = _flock.open_lock(path)
-    try:
-        taken = _flock.take(fh, timeout_seconds=timeout_seconds)
-    except BaseException:
-        fh.close()
-        raise
-    if not taken:
-        fh.close()
-        return None
-    return fh
-
-
-#: The repo lock and the channel locks release identically; the second name matches
-#: `acquire_repo_lock`.
-release_flock = _flock.release
-release_repo_lock = _flock.release
-
-
-@contextlib.contextmanager
-def flock_or_skip(path: Path) -> Iterator[bool]:
-    fh = acquire_flock(path)
-    try:
-        yield fh is not None
-    finally:
-        release_flock(fh)
-
-
-
-
 
 
 def without_consumed_category(rec: dict) -> dict:
@@ -324,9 +255,9 @@ def invoke_repair(pairs: list[Any], batch_id: str, cfg: Any) -> dict:
     module, so a top-level import would cycle."""
     from defender.learning.author import curator_engine
     from defender.learning.author import drain as _drain
-    from defender.learning.core.config import StageContext, StageWiring, author_request_limit
+    from defender.learning.core.config import (
+        AUTHOR_DRAIN_LABEL, StageContext, StageWiring, author_request_limit)
 
-    cfg.pending_dir.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — the host-side queue dir, mirrors lessons_run.invoke_agent's own call
     stage_salt = uuid4().hex
     # `repair_prompt=None` means `repair.md` beside this channel's curator prompt.
     prompt_path = cfg.repair_prompt if cfg.repair_prompt is not None else (
@@ -338,7 +269,7 @@ def invoke_repair(pairs: list[Any], batch_id: str, cfg: Any) -> dict:
             batch_id=batch_id, label="repair",
         ),
         ctx=StageContext(
-            learning_run_dir=cfg.pending_dir,
+            learning_run_dir=cfg.state.stage_dir(AUTHOR_DRAIN_LABEL),
             user=_drain.build_repair_user_prompt(pairs, cfg, salt=stage_salt),
             request_limit=author_request_limit(),
             wall_clock_timeout=cfg.author_timeout,
@@ -471,7 +402,7 @@ def build_curator_user_prompt(
 
 
 def write_disposition_report(
-    report: Path, pending_dir: Path, *, batch_id: str, groups: dict[str, list[dict]],
+    state: LearningState, channel: Channel, *, batch_id: str, groups: dict[str, list[dict]],
 ) -> None:
     """One line per tick naming what the tick declined, under one label per reason.
 
@@ -483,9 +414,7 @@ def write_disposition_report(
     """
     if not any(groups.values()):
         return
-    pending_dir.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — the host-side `_pending` state root, outside every box mount; the report beside it is appended by the host alone
     counts = " ".join(f"{label}={len(rows)}" for label, rows in groups.items())
     ids = " ".join(
         f"{label}_ids={[r.get('finding_id') for r in rows]}" for label, rows in groups.items())
-    with report.open("a", encoding="utf-8") as fh:
-        fh.write(f"{now_iso()} batch={batch_id} {counts} {ids}\n")
+    state.disposition_report(channel, f"{now_iso()} batch={batch_id} {counts} {ids}\n")

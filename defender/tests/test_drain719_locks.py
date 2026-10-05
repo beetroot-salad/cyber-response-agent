@@ -19,8 +19,10 @@ from pathlib import Path
 
 import _drain719 as h
 from _drain719 import drain  # the not-yet-written target, via the suite's own shim
-from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
-from defender.learning.core import drains, persist  # type: ignore[import-not-found]
+from defender.learning.core.state import (
+    AUTHOR_DRAIN_LOCK, FINDINGS, REPO_LOCK, TRY_ONCE, LearningState,
+)
+from defender.learning.core import drains  # type: ignore[import-not-found]
 
 
 def _judge_doc(n: int) -> dict:
@@ -39,11 +41,11 @@ def _judge_doc(n: int) -> dict:
     }
 
 
-# D1 — QueueChannel carries its own lock topology
+# D1 — a channel carries its own lock topology
 
 
 def test_every_channel_declares_its_lock_topology(tmp_path: Path):
-    """D1 gives every `QueueChannel` both roles as fields, and a channel no drain holds
+    """D1 gives every channel (`state.Channel`) both roles as fields, and a channel no drain holds
     exclusively carries `None` for the drain role rather than a dangling path (P64: branch on
     `None`, take no exclusive lock).
 
@@ -54,19 +56,20 @@ def test_every_channel_declares_its_lock_topology(tmp_path: Path):
     paths = h.make_paths(tmp_path)
 
     for name in h.AUTHOR_CHANNELS:
-        ch = h.channel_of(paths, name)
-        assert ch.drain_lock is not None
-        assert ch.drain_lock != ch.append_lock
-        h.seed(ch, [h.row_for(name, "x/0" if name != "findings" else "run-T/0")])
+        ch = h.channel_of(name)
+        assert ch.drain_role is not None
+        assert ch.drain_role.file != ch.append_lock
+        h.seed(paths, ch, [h.row_for(name, "x/0" if name != "findings" else "run-T/0")])
         h.write_source_refs(paths, "run-T")
         agent = h.recording(h.skipping())
-        with h.Holder(ch.drain_lock, blocking_discipline=False):
+        with h.Holder(paths.state_root / ch.drain_role.file, blocking_discipline=False):
             assert drain.run_batch(cfg=h.cfg_for(paths, name, invoke_agent=agent)) == 0
         assert agent.calls == [], f"{name}: the declared drain lock did not exclude the tick"
 
-    pit = h.channel_of(paths, "pitfalls")
-    assert pit.drain_lock is None, "a channel no drain holds exclusively carries None"
-    assert pit.append_lock == paths.pitfalls_pending_dir / ".pitfalls.lock"
+    pit = h.channel_of("pitfalls")
+    assert pit.drain_role is None, "a channel no drain holds exclusively carries None"
+    assert Path(pit.append_lock).parent == Path(pit.queue).parent
+    assert Path(pit.append_lock).name == h.APPEND_LOCK_NAMES_TODAY["pitfalls"]
 
 
 
@@ -99,23 +102,21 @@ def test_rotate_blocks_while_append_lock_held(tmp_path: Path):
     when the lock is released it completes."""
     paths = h.make_paths(tmp_path)
     h.write_source_refs(paths, "a")
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "a/0")])
+    ch = h.channel_of("findings")
+    h.seed(paths, ch, [h.row_for("findings", "a/0")])
 
     def rotate():
-        persist.rotate_queue_locked(
-            pending_file=ch.file, consumed_file=ch.consumed, lock_file=ch.append_lock,
-            id_key=ch.id_key, held=[], consumed=[h.row_for("findings", "a/0")],
-            commit_sha=None,
+        LearningState.open(paths).rotate(
+            FINDINGS, [], [h.row_for("findings", "a/0")], None,
         )
 
     worker = h.Background(rotate)
-    with h.Holder(ch.append_lock):
+    with h.Holder(paths.state_root / ch.append_lock):
         worker._thread.start()
         assert not worker.finished_within(1.0), "the rotation proceeded under a held append lock"
-        assert h.pending_by_id(ch) == {"a/0": h.row_for("findings", "a/0")}
+        assert h.pending_by_id(paths, ch) == {"a/0": h.row_for("findings", "a/0")}
     assert worker.finished_within(20), "the rotation never completed after release"
-    assert h.pending(ch) == []
+    assert h.pending(paths, ch) == []
 
 
 def test_retire_blocks_while_append_lock_held(tmp_path: Path):
@@ -124,19 +125,21 @@ def test_retire_blocks_while_append_lock_held(tmp_path: Path):
     the retire seam must be excluded by the same append lock rotation is."""
     paths = h.make_paths(tmp_path)
     h.write_source_refs(paths, "a")
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "a/0")])
+    ch = h.channel_of("findings")
+    h.seed(paths, ch, [h.row_for("findings", "a/0")])
 
     worker = h.Background(
-        lambda: drain.retire(channel=ch, batch_ids=["a/0"], reason="excluded", max_attempts=1)
+        lambda: drain.retire(
+            LearningState.open(paths), channel=FINDINGS, batch_ids=["a/0"], reason="excluded",
+            max_attempts=1)
     )
-    with h.Holder(ch.append_lock):
+    with h.Holder(paths.state_root / ch.append_lock):
         worker._thread.start()
         assert not worker.finished_within(1.0), "the retire seam proceeded under a held lock"
-        assert h.graveyard(ch) == [], "not even the graveyard append happened"
+        assert h.graveyard(paths, ch) == [], "not even the graveyard append happened"
     assert worker.finished_within(20)
-    assert h.pending(ch) == []
-    assert len(h.graveyard(ch)) == 1
+    assert h.pending(paths, ch) == []
+    assert len(h.graveyard(paths, ch)) == 1
 
 
 def test_every_channels_read_batch_happens_under_the_append_lock(tmp_path: Path):
@@ -151,15 +154,15 @@ def test_every_channels_read_batch_happens_under_the_append_lock(tmp_path: Path)
     paths = h.make_paths(tmp_path)
     h.write_source_refs(paths, "run-R")
     for name in h.AUTHOR_CHANNELS:
-        ch = h.channel_of(paths, name)
+        ch = h.channel_of(name)
         rid = "run-R/0" if name == "findings" else "r/0"
-        h.seed(ch, [h.row_for(name, rid)])
+        h.seed(paths, ch, [h.row_for(name, rid)])
         agent = h.recording(h.committing(f"lock-{name}"))
         cfg = h.cfg_for(paths, name, invoke_agent=agent, repo_lock_wait_seconds=1)
-        with h.Holder(ch.append_lock):
+        with h.Holder(paths.state_root / ch.append_lock):
             assert drain.run_batch(cfg=cfg) == 0
         assert agent.calls == [], f"{name}: the read proceeded without the append lock"
-        assert h.pending_by_id(ch), f"{name}: the queue was rewritten anyway"
+        assert h.pending_by_id(paths, ch), f"{name}: the queue was rewritten anyway"
 
 
 def test_the_drains_nonblocking_acquisition_excludes_a_real_blocking_appender_through_run_batch(
@@ -180,19 +183,19 @@ def test_the_drains_nonblocking_acquisition_excludes_a_real_blocking_appender_th
     The control is the same config with nothing held: it authors normally, so the exclusion
     assertion is not passing merely because the tick never worked."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
     h.write_source_refs(paths, "a")
 
-    h.seed(ch, rows)
+    h.seed(paths, ch, rows)
     blocked = h.recording(h.committing("blocked"))
     cfg = h.cfg_for(
         paths, "findings", invoke_agent=blocked, repo_lock_wait_seconds=1
     )
-    with h.Holder(ch.append_lock, blocking_discipline=True):
+    with h.Holder(paths.state_root / ch.append_lock, blocking_discipline=True):
         assert drain.run_batch(cfg=cfg) == 0
     assert blocked.calls == [], "the drain proceeded past a real blocking appender"
-    assert h.pending(ch) == rows, "the queue was rewritten while an appender held the lock"
+    assert h.pending(paths, ch) == rows, "the queue was rewritten while an appender held the lock"
 
     free = h.recording(h.committing("free"))
     control = h.cfg_for(
@@ -200,7 +203,7 @@ def test_the_drains_nonblocking_acquisition_excludes_a_real_blocking_appender_th
     )
     assert drain.run_batch(cfg=control) == 0
     assert len(free.calls) == 1, "the control tick did not author, so the exclusion proves nothing"
-    assert h.pending(ch) == []
+    assert h.pending(paths, ch) == []
 
 
 def test_the_drains_append_lock_wait_ends_at_the_configured_repo_lock_deadline(tmp_path: Path):
@@ -215,22 +218,22 @@ def test_the_drains_append_lock_wait_ends_at_the_configured_repo_lock_deadline(t
     own — which fails for a drain that never waits, one that waits forever, and one that waits a
     hard-coded constant."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
     h.write_source_refs(paths, "a")
     observed = {}
 
     for deadline in (1, 2):
-        h.seed(ch, rows)
+        h.seed(paths, ch, rows)
         agent = h.recording(h.committing("never"))
         cfg = h.cfg_for(
             paths, "findings", invoke_agent=agent, repo_lock_wait_seconds=deadline
         )
-        with h.Holder(ch.append_lock):
+        with h.Holder(paths.state_root / ch.append_lock):
             rc, seconds = h.elapsed(lambda cfg=cfg: drain.run_batch(cfg=cfg))
         assert rc == 0
         assert agent.calls == []
-        assert h.pending(ch) == rows
+        assert h.pending(paths, ch) == rows
         observed[deadline] = seconds
 
     assert 0.8 <= observed[1] < 2.5, f"the 1s deadline was not what ended the wait: {observed}"
@@ -254,17 +257,16 @@ def test_the_drain_acquires_its_three_locks_in_one_declared_order(tmp_path: Path
     which is what an order that took the repo lock first would fail."""
     paths = h.make_paths(tmp_path)
     h.write_source_refs(paths, "a")
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "a/0")])
+    ch = h.channel_of("findings")
+    h.seed(paths, ch, [h.row_for("findings", "a/0")])
     assert tuple(drain.LOCK_ORDER) == ("drain_lock", "repo_lock", "append_lock")
 
     agent = h.recording(h.committing("ordered"))
     cfg = h.cfg_for(paths, "findings", invoke_agent=agent, repo_lock_wait_seconds=1)
-    with h.Holder(ch.drain_lock, blocking_discipline=False):
+    with h.Holder(paths.state_root / ch.drain_role.file, blocking_discipline=False):
         assert drain.run_batch(cfg=cfg) == 0
-        repo_fh = author_shared.acquire_flock(paths.author_lock_file)
-        assert repo_fh is not None, "the skipped tick was still holding the repo lock"
-        author_shared.release_flock(repo_fh)
+        with LearningState.open(paths).lock(REPO_LOCK, wait=TRY_ONCE) as took:
+            assert took, "the skipped tick was still holding the repo lock"
     assert agent.calls == []
 
 
@@ -277,21 +279,21 @@ def test_a_bare_module_invocation_beside_a_live_drain_skips_its_tick(tmp_path: P
     Observed at the queue: the second invocation authors nothing, rewrites nothing, and leaves
     no `.tmp` artifact behind."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
     h.write_source_refs(paths, "a")
-    h.seed(ch, rows)
-    tmp_name = ch.file.with_name(ch.file.name + ".tmp")
+    h.seed(paths, ch, rows)
+    tmp_name = (paths.state_root / ch.queue).with_name((paths.state_root / ch.queue).name + ".tmp")
 
     agent = h.recording(h.committing("second"))
-    with h.Holder(ch.drain_lock, blocking_discipline=False):
+    with h.Holder(paths.state_root / ch.drain_role.file, blocking_discipline=False):
         rc, seconds = h.elapsed(
             lambda: drain.run_batch(cfg=h.cfg_for(paths, "findings", invoke_agent=agent))
         )
     assert rc == 0
     assert seconds < 10, "the second invocation waited instead of skipping"
     assert agent.calls == []
-    assert h.pending(ch) == rows
+    assert h.pending(paths, ch) == rows
     assert not tmp_name.exists()
 
 
@@ -303,7 +305,7 @@ def test_second_author_drain_invocation_returns_without_blocking(tmp_path: Path)
     paths = h.make_paths(tmp_path)
     triggered: list[str] = []
 
-    with h.Holder(paths.author_drain_lock_file, blocking_discipline=False):
+    with h.Holder(paths.state_root / AUTHOR_DRAIN_LOCK.file, blocking_discipline=False):
         rc, seconds = h.elapsed(
             lambda: drains.author_drain(
                 paths, trigger_author=lambda *a, **k: triggered.append(a)

@@ -63,6 +63,7 @@ from defender._io import bind
 from defender.run_repository import RunPaths
 from defender.tests import _judge_921 as J
 from defender.tests._spec791 import PROJECT_PROFILE
+from defender.tests import _state1135
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -73,7 +74,7 @@ def _tmp_roots(tmp_path, monkeypatch):
     own tree — never the checkout's runs base or its real `learning/_pending/`."""
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _judge():
@@ -111,7 +112,8 @@ def _refused():
 def _grade(ep: Path, tmp_path: Path):
     """The real grading pass over `ep`, through its own seams — never a live provider."""
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    return _judge().grade_episode(ep, judge=judge, runs_base=tmp_path / "defender-runs")
+    return _judge().grade_episode(ep, judge=judge, runs_base=tmp_path / "defender-runs",
+                                   state=_state1135.env_state())
 
 
 def _passthrough(label: str) -> dict:

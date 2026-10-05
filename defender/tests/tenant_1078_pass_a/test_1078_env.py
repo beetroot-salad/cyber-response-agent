@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests import _state1135
 from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
 from defender._episode_handle import Episode  # noqa: E402
@@ -384,20 +385,20 @@ def test_pass_a_marker_consumed_by_the_pre_c_lead_author_drain(tmp_path, monkeyp
 
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "state")
     state = S791.loop_paths(tmp_path)
     run_dir = _fresh_run(root, "r1")
     assert run_dir == H.runs_dir(root, TENANT) / "r1"
     S791.populate_run_dir(run_dir, disposition="benign")
     scrub_mod.scrub(run_dir)
     assert H.run_common().enqueue_curation(run_dir, run_dir / "alert.json") is True
-    body = json.loads(next(state.author_queue_dir.glob("*.json")).read_text(encoding="utf-8"))
+    body = json.loads(next((state.state_root / "author-queue").glob("*.json")).read_text(encoding="utf-8"))
     assert Path(body["run_dir"]) == run_dir.resolve()
 
     served: list[Path] = []
     rc = H.mod("learning.core.drains").lead_author_drain(
         state,
-        run_lead_author=lambda _paths, rd, *, box=None, **_kw: served.append(rd),
+        run_lead_author=lambda _paths, _state, rd, *, box=None, **_kw: served.append(rd),
         run_pitfalls=lambda *_a, **_kw: 0,
         branch=S791.SpecBranch(tmp_path / "worktrees"),
         start_box=S791.noop_start_box, stop_box=S791.noop_stop_box, scrub=S791.noop_scrub,

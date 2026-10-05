@@ -123,7 +123,7 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
         "learning/leads/lead_author/__init__.py", "learning/ops/trace_lesson.py", _CLI,
     ),
     "helpers-only": (
-        "learning/branch/ledger.py", "learning/judge/enqueue.py", "learning/judge/run.py",
+        "learning/branch/ledger.py", "learning/judge/run.py",
     ),
 }
 

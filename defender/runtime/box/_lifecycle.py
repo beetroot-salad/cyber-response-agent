@@ -12,7 +12,7 @@ import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 
-from defender._io import sweep_staged, write_guarded
+from defender._io import READ_LIMIT, sweep_staged, write_guarded
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender.run_repository import RUN_LAYOUT
 from defender.runtime.box_codec import (
@@ -31,7 +31,7 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
 )
 from ._spec import ALIAS_PROFILE_PATH, BoxExecutor, BoxRequest, BoxSpec, Mount
 from ._alias import _probe_alias_ban
-from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
+from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._spec import DEFAULT_SPEC, _HostTransport
 from ._spec import _DockerTransport
 
@@ -42,6 +42,17 @@ _logger = logging.getLogger(__name__)
 #: view never depends on where the operator keeps the data root. Read-only; the tenant's
 #: `settings/` half, and its knowledge folder's `.git`, are never mounted.
 TENANT_AGENT_TARGET = Path("/tenant/agent")
+
+
+#: The `docker run` flags every box starts with (#1188). `fsize`: no process in the box can make
+#: a file, sparse or real, larger than a host whole-file read takes in (`_io.READ_LIMIT`, bytes,
+#: soft = hard; the box holds no `CAP_SYS_RESOURCE` to raise it). `core=0`: the kernel kills an
+#: over-limit writer with SIGXFSZ, whose default action dumps core into the writer's cwd, which
+#: is a run dir or a drain's writable tree.
+_BOX_ULIMITS: tuple[str, ...] = (
+    "--ulimit", f"fsize={READ_LIMIT}:{READ_LIMIT}",
+    "--ulimit", "core=0:0",
+)
 
 
 def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus its tenant's half
@@ -75,6 +86,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         "--read-only",
         "--pull=never",
         "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
+        *_BOX_ULIMITS,
         "--mount", f"type=bind,source={run_src},target={run_dir}",
         "--mount", f"type=bind,source={defender_src},target={defender_dir},readonly",
     ]
@@ -208,6 +220,7 @@ def _render_argv(
         "--read-only",
         "--pull=never",
         "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
+        *_BOX_ULIMITS,
     ]
     for m in request.mounts:
         if mounts and not _covered(Path(m.source), mounts):
@@ -384,11 +397,9 @@ def start_box(
 def stop_box(box: BoxExecutor, *, docker: DockerFn = _docker) -> None:
     if not box.name:
         return
-    proc = _call(docker, ["docker", "rm", "-f", box.name])
-    if proc.returncode != 0:
-        raise BoxFault(
-            f"could not tear down the box {box.name}: {(proc.stderr or '').strip()}"
-        )
+    reason = _remove_container(docker, box.name)
+    if reason is not None:
+        raise BoxFault(f"could not tear down the box {box.name}: {reason}")
 
 
 #: The container states in which nothing in the box runs: frozen, or no longer running at all

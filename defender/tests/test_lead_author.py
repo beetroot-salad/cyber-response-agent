@@ -19,10 +19,12 @@ from pathlib import Path
 import pytest
 
 from defender.tests._claim1175 import claim_git
+from defender.learning.author import shared as author_shared
 from defender.learning.leads import lead_author  # type: ignore[import-not-found]
 from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
 from defender.tests._repo import query_template, seed_skills_repo
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
+from defender.learning.core.state import LEAD_QUEUE_LOCK, PITFALLS, TRY_ONCE
 from defender.tests._lead_author_1134 import lane_tree_for, lead_deps, repo_skills, skills_view
 
 
@@ -328,7 +330,9 @@ def _claude_should_not_be_called(*args, **kwargs):
 
 
 def test_run_missing_run_dir(tmp_path: Path):
-    assert lead_author.run(tmp_path / "nope", label=LEAD_AUTHOR_DRAIN_LABEL) == 2
+    assert lead_author.run(
+        tmp_path / "nope", label=LEAD_AUTHOR_DRAIN_LABEL, paths=LoopPaths(repo_root=tmp_path),
+    ) == 2
 
 
 def test_run_held_queue_lock_reports_a_skip_not_a_serve(run_dir: Path):
@@ -338,12 +342,10 @@ def test_run_held_queue_lock_reports_a_skip_not_a_serve(run_dir: Path):
     reads that rc as "served, unlink the marker". The whole claimed batch was deleted with no
     work done and no dead letter. The agent still must not be spawned; what changed is that
     the caller can now tell the two apart."""
-    deps = _deps(
-        run_dir.parent,
-        acquire_queue_lock=lambda: None,
-        invoke_agent=_claude_should_not_be_called,
-    )
-    rc = lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
+    deps = _deps(run_dir.parent, invoke_agent=_claude_should_not_be_called)
+    with deps.state.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as held:
+        assert held, "the test could not take the queue lock it means to hold"
+        rc = lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
     assert rc == lead_author.QUEUE_LOCK_SKIP_RC
     assert rc != 0
 
@@ -354,8 +356,6 @@ def test_run_done_sentinel_short_circuits(run_dir: Path):
     (state / "done").write_text("ok")
     deps = _deps(
         run_dir.parent,
-        acquire_queue_lock=lambda: object(),
-        release_queue_lock=lambda fh: None,
         invoke_agent=_claude_should_not_be_called,
     )
     assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
@@ -988,7 +988,7 @@ def test_verify_skills_state_ignores_baseline_stray(tmp_git_repo: Path):
     """A pre-existing stray captured in baseline_stray isn't blamed on the agent."""
     (tmp_git_repo / "defender" / "other").mkdir(parents=True)
     (tmp_git_repo / "defender" / "other" / "preexisting.md").write_text("x")
-    baseline = lead_author._author_shared.changes_outside(
+    baseline = author_shared.changes_outside(
         tmp_git_repo, lead_author.SKILLS_REL
     )
     assert "defender/other/preexisting.md" in baseline
@@ -1032,8 +1032,6 @@ def test_run_loop_commits_agent_edits(tmp_git_repo: Path, tmp_path: Path):
         invoke_agent=fake_agent,
         build_handoff=lambda rd, ex, jl=None, **_: [{"query_id": "wazuh.newthing"}],
         discover_system_drafts=lambda: [],
-        acquire_queue_lock=lambda: object(),
-        release_queue_lock=lambda fh: None,
     )
     head_before = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
     assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
@@ -1068,8 +1066,6 @@ def test_run_raises_and_skips_commit_on_scope_violation(tmp_git_repo: Path, tmp_
         invoke_agent=fake_agent,
         build_handoff=lambda rd, ex, jl=None, **_: [{"query_id": "x.y"}],
         discover_system_drafts=lambda: [],
-        acquire_queue_lock=lambda: object(),
-        release_queue_lock=lambda fh: None,
     )
     head_before = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
     with pytest.raises(lead_author.LeadAuthorError):
@@ -1091,8 +1087,6 @@ def test_run_returns_rc2_on_nonzero_agent_exit(tmp_git_repo: Path, tmp_path: Pat
         invoke_agent=lambda rd, handoffs, pending, **_kw: 124,
         build_handoff=lambda rd, ex, jl=None, **_: [{"query_id": "x.y"}],
         discover_system_drafts=lambda: [],
-        acquire_queue_lock=lambda: object(),
-        release_queue_lock=lambda fh: None,
     )
     head_before = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
     assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 2
@@ -1134,8 +1128,6 @@ def test_run_loop_clears_drafts_on_discard_and_promote(tmp_git_repo: Path, tmp_p
         invoke_agent=fake_agent,
         build_handoff=lambda rd, ex, jl=None, **_: [{"query_id": "wazuh.newthing"}],
         discover_system_drafts=lambda: [],
-        acquire_queue_lock=lambda: object(),
-        release_queue_lock=lambda fh: None,
     )
     assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
     assert not promoted_draft.exists()
@@ -1169,8 +1161,6 @@ def test_run_quarantines_half_promote(tmp_git_repo: Path, tmp_path: Path):
         invoke_agent=fake_agent,
         build_handoff=lambda rd, ex, jl=None, **_: [{"query_id": "wazuh.newthing"}],
         discover_system_drafts=lambda: [],
-        acquire_queue_lock=lambda: object(),
-        release_queue_lock=lambda fh: None,
     )
     head_before = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
     with pytest.raises(lead_author.LeadAuthorError, match="half-promote"):
@@ -1211,8 +1201,6 @@ def test_run_refuses_a_bare_discard_of_a_draft_it_minted_this_tick(
 
     deps = replace(
         lead_deps(LoopPaths(repo_root=repo, state_dir=tmp_path / "st")),
-        acquire_queue_lock=lambda: object(),
-        release_queue_lock=lambda fh: None,
         invoke_agent=fake_agent,
     )
     head_before = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
@@ -1424,8 +1412,6 @@ def test_run_collects_general_failure_before_early_return(tmp_git_repo: Path, tm
     paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
     deps = replace(
         lead_deps(paths),
-        acquire_queue_lock=lambda: object(),
-        release_queue_lock=lambda fh: None,
         invoke_agent=lambda *a, **k: 0,
     )
     run_dir = tmp_path / "run-xyz"
@@ -1434,7 +1420,7 @@ def test_run_collects_general_failure_before_early_return(tmp_git_repo: Path, tm
     _write_query(run_dir, "l-001", 0, "elastic.esql", payload_status="error")
 
     assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
-    queue = deps.paths.pitfalls.file
+    queue = deps.paths.state_root / PITFALLS.queue
     rows = [json.loads(ln) for ln in queue.read_text().splitlines()]
     assert [r["query_id"] for r in rows] == ["elastic.esql"]
     assert rows[0]["error_class"] == "agent-fixable"
@@ -1460,8 +1446,6 @@ def test_run_reloads_catalog_after_mint_so_minted_draft_resolves(
     seen: dict = {}
     deps = replace(
         lead_deps(paths),
-        acquire_queue_lock=lambda: object(),
-        release_queue_lock=lambda fh: None,
         invoke_agent=lambda rd, handoffs, pending, **_kw: seen.update(handoffs=handoffs) or 0,
     )
     run_dir = tmp_path / "run-mint"

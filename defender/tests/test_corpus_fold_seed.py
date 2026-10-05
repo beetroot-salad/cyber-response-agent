@@ -45,7 +45,7 @@ import pytest
 
 import defender.learning.author.shared as _shared  # noqa: E402
 from defender.learning.author.shared import build_curator_user_prompt  # noqa: E402
-from defender.tests._curator1134 import author_trees, corpus_view  # noqa: E402
+from defender.tests._curator1134 import author_trees, corpus_view, open_state  # noqa: E402
 
 from defender.tests.test_curator_manifest import (  # noqa: E402
     _actor_lesson,
@@ -566,13 +566,14 @@ def test_e1_the_author_config_can_pin_the_manifest_seed(tmp_path):
     rows = [{"id": "f/1", "text": "a finding"}]
 
     paths = LoopPaths(repo_root=tmp_path)
-    pinned = build_author_config(paths, trees=author_trees(paths), manifest_seed="fixed-eval-seed")
+    pinned = build_author_config(paths, state=open_state(paths), trees=author_trees(paths),
+                                manifest_seed="fixed-eval-seed")
     a = _prompt_manifest(build_user_prompt(rows, "batch-one", pinned))
     b = _prompt_manifest(build_user_prompt(rows, "batch-two", pinned))
     assert a == b
     assert a == _shared.build_corpus_manifest(corpus, seed="fixed-eval-seed")
 
-    unpinned = build_author_config(paths, trees=author_trees(paths))
+    unpinned = build_author_config(paths, state=open_state(paths), trees=author_trees(paths))
     c = _prompt_manifest(build_user_prompt(rows, "batch-one", unpinned))
     d = _prompt_manifest(build_user_prompt(rows, "batch-two", unpinned))
     assert c != d

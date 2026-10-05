@@ -325,6 +325,7 @@ def configured_layout(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
     may touch. Environment steering through the resolver the shipped code already reads.
     """
     base, src, root = _configured_layout_947(tmp_path, monkeypatch)
+    (tmp_path / "learning-state").mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
     monkeypatch.setenv(STATE_DIR_ENV, str(tmp_path / "learning-state"))
     return base, src, root
 
@@ -741,23 +742,19 @@ def loop_paths(tmp_path: Path, *, repo_root: Path | None = None):
     cfg = mod("learning.core.config")
     root = repo_root if repo_root is not None else tmp_path / "repo"
     (root / "defender").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "learning-state").mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
     return cfg.LoopPaths(repo_root=root, state_dir=tmp_path / "learning-state")
 
 
-def questioner_channel(paths: Any):
-    """`paths.questioner_findings` — the second channel, named off the paths object.
-
-    Reached through the attribute rather than by composing `_pending/questioner_findings.jsonl`
-    here, because the channel is a `QueueChannel` carrying its own lock topology and id key: a
-    test that spelled the filename would go green against a channel whose locks were wrong.
-    """
-    return paths.questioner_findings
+def learning_state(paths: Any):
+    """A `LearningState` handle over `paths`' state root (#1135) — what every verb taking `state=` wants."""
+    return mod("learning.core.state").LearningState.open(paths)
 
 
-def queue_rows(channel: Any) -> list[dict]:
-    """Every row on a channel's file, in written order. Missing file reads as no rows, which is
-    the honest answer for a pass that enqueued nothing."""
-    path = Path(channel.file)
+def queue_rows(paths: Any, channel: Any) -> list[dict]:
+    """Every row on a state `Channel`'s queue under `paths`' state root, in written order.
+    Missing file reads as no rows, which is the honest answer for a pass that enqueued nothing."""
+    path = paths.state_root / channel.queue
     if not path.is_file():
         return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
@@ -823,7 +820,7 @@ __all__ = [
     "base_world", "capture_call", "captured_row", "configured_layout", "elastic_ctx",
     "elastic_overlay", "estate", "estate_calls", "episode", "family_doc", "finding", "loop_paths", "mod",
     "outside_untrusted_frames", "overlay", "provenance_record", "queue_rows",
-    "questioner_channel", "questioner_lesson", "questioner_lesson_raw",
+    "questioner_lesson", "questioner_lesson_raw",
     "reachability_block", "read_yaml", "refusals",
     "replay_entry", "reply_document", "reply_text", "report_text", "review_doc",
     "reviewed_world", "runs_base", "samples_document", "served_row", "sibling_run_dir", "sym",

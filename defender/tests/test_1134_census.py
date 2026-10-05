@@ -343,35 +343,13 @@ ALLOW: tuple[Allowed, ...] = (
     # --- learning/author/drain.py -------------------------------------------------------------
     Allowed(DRAIN, "_put_back", "attr", "target.unlink()", D3,
             _MISS + "; `kind_at` answered it from that path, and only a file is unlinked"),
-    Allowed(DRAIN, "retire", "call", "read_jsonl_rows(channel.file)", N_E, "the channel's queue"),
-    Allowed(DRAIN, "_bump_rows", "call",
-            "append_jsonl(graveyard_file(channel), [{key: rec[key], 'attempts': rec[counter_key], 'deadletter_reason': reason, **retirement_stamp(), 'row': {k: v for k, v in rec.items() if k != counter_key}} for rec in retired])",
-            N_E, "the channel's graveyard sidecar"),
-    Allowed(DRAIN, "_tick", "call", "read_jsonl_rows_report(channel.file)", N_E, "the channel's queue"),
     Allowed(DRAIN, "_spawn_repair", "attr", "cfg.repair_prompt.is_file()", D3,
             "the checked-in repair prompt under learning/author/, outside every mount"),
-    Allowed(DRAIN, "_append_gap_record", "call",
-            "append_jsonl(cfg.pending_dir / GAP_LEDGER_NAME, [record])", N_E, "the gap ledger in _pending/"),
     Allowed(DRAIN, "_resolves_inside_runs_dir", "attr", "runs_dir.resolve()", N_D,
             "containment check of a queue row's run id under the host runs dir"),
     Allowed(DRAIN, "_resolves_inside_runs_dir", "attr", "(runs_dir / source_id).resolve()", N_D,
             "containment check of a queue row's run id under the host runs dir"),
-    Allowed(DRAIN, "_retire_unkeyable", "call",
-            "append_jsonl(graveyard_file(channel), [{**row, 'attempts': int(row.get('attempts') or 0) + 1, 'deadletter_reason': reason, **retirement_stamp()} for row in rows])",
-            N_E, "the channel's graveyard sidecar"),
-    Allowed(DRAIN, "stuck_record_count", "attr", "path.is_file()", N_E, "the channel's stuck report"),
-    Allowed(DRAIN, "stuck_record_count", "call", "read_jsonl_rows(path)", N_E, "the channel's stuck report"),
-    Allowed(DRAIN, "_record_stuck", "call", "read_jsonl_rows(path)", N_E, "the channel's stuck report"),
-    Allowed(DRAIN, "_record_stuck", "call",
-            "append_jsonl(path, [{'fault_class': fault_class, 'row_ids': ids, 'consecutive_ticks': consecutive, 'reason': str(exc), 'recorded_at': now_iso()}])",
-            N_E, "the channel's stuck report"),
     # --- learning/author/shared.py ------------------------------------------------------------
-    Allowed(SHARED, "invoke_repair", "attr", "cfg.pending_dir.mkdir(parents=True, exist_ok=True)", N_E,
-            "the host-side _pending/ queue dir"),
-    Allowed(SHARED, "write_disposition_report", "attr", "pending_dir.mkdir(parents=True, exist_ok=True)",
-            N_E, "the host-side _pending/ queue dir"),
-    Allowed(SHARED, "write_disposition_report", "attr", "report.open('a', encoding='utf-8')", N_E,
-            "the held report in _pending/"),
     # --- _corpus.py: the shared readers' own Path form ----------------------------------------
     Allowed(CORPUS, "_viewed", "construct", "bind(Path(tree))", N_H, _VIEWED),
     Allowed(CORPUS, "iter_lesson_paths", "construct", "_viewed(corpus)", N_H, _VIEWED),
@@ -405,12 +383,7 @@ ALLOW: tuple[Allowed, ...] = (
     Allowed(EXTRACTION, "extract_from_joined", "attr", "q.raw_ref.is_file()", N_E,
             "a raw payload in the run dir"),
     # --- learning/leads/pitfalls_curator.py ---------------------------------------------------
-    Allowed(PITFALLS, "_graveyard_dropped_rows", "call",
-            "append_jsonl(_author_drain.graveyard_file(paths.pitfalls), entries)", N_E,
-            "the pitfalls queue's graveyard sidecar"),
     # --- learning/leads/_lead_spine.py --------------------------------------------------------
-    Allowed(SPINE, "_spawn_author_agent", "attr", "PENDING_DIR.mkdir(parents=True, exist_ok=True)", N_E,
-            "the host-side lead-pending state dir"),
     Allowed(SPINE, "_require_committable_entry", "call", "is_plain_entry(got.st)", N_D,
             "#1178's plain-file rule judges a stat result `stat_entry` took through the held "
             "view; it opens nothing"),
@@ -510,14 +483,10 @@ ALLOW: tuple[Allowed, ...] = (
             "the run dir's source_refs (`RunPaths(runs_dir / run_id).source_refs`)"),
     Allowed(LESSONS_RUN, "disposition_for", "attr", "refs.read_text(encoding='utf-8')", N_E,
             "the run dir's source_refs (`RunPaths(runs_dir / run_id).source_refs`)"),
-    Allowed(LESSONS_RUN, "invoke_agent", "attr", "cfg.pending_dir.mkdir(parents=True, exist_ok=True)",
-            N_E, "the host-side _pending/ queue dir"),
-    Allowed(LESSONS_RUN, "main", "construct", "open_drain_trees(DEFAULT_PATHS, AUTHOR_DRAIN_LABEL)",
+    Allowed(LESSONS_RUN, "main", "construct", "open_drain_trees(paths, AUTHOR_DRAIN_LABEL)",
             D3, "the CLI's own trees over the live checkout, for its lane's label: " + _OPENER),
-    Allowed(QUESTIONER_RUN, "invoke_agent", "attr",
-            "cfg.pending_dir.mkdir(parents=True, exist_ok=True)", N_E, "the host-side _pending/ queue dir"),
     Allowed(QUESTIONER_RUN, "main", "construct",
-            "open_drain_trees(DEFAULT_PATHS, AUTHOR_DRAIN_LABEL)", D3,
+            "open_drain_trees(paths, AUTHOR_DRAIN_LABEL)", D3,
             "the CLI's own trees over the live checkout, for its lane's label: " + _OPENER),
     # --- scan B only: the lane seams and the eval harness (`construct`) -------------------------
     Allowed(DRAINS, "_invoke_lead_author", "construct", "open_drain_trees(paths, label)", D3,
@@ -546,7 +515,7 @@ KNOWN_GAPS: tuple[Gap, ...] = ()
 
 #: The allow-list's size by reason at this base — a guard against an entry slipping in
 #: unannounced (update it with the table, and say why in the commit).
-ALLOW_COUNT_BY_REASON = {N_E: 25, D3: 23, N_D: 15, N_H: 9, B2: 17, N_A: 4}
+ALLOW_COUNT_BY_REASON = {N_E: 9, D3: 23, N_D: 15, N_H: 9, B2: 17, N_A: 4}
 
 
 def judge(
@@ -1243,12 +1212,9 @@ D5_BASELINE_KEPT = frozenset({
     "learning/leads/lead_author/__init__.py:_write_state",  # N-e: run-dir state
 })
 
-#: The inline `# lint-unguarded-tree-write: ok` waivers in scan A: all still fire, all N-e.
-D5_INLINE_WAIVERS = frozenset({
-    (DRAIN, "_bump_rows"), (DRAIN, "_append_gap_record"), (DRAIN, "_retire_unkeyable"),
-    (DRAIN, "_record_stuck"), (SHARED, "invoke_repair"), (SHARED, "write_disposition_report"),
-    (QUESTIONER_RUN, "invoke_agent"), (PITFALLS, "_graveyard_dropped_rows"),
-})
+#: The inline `# lint-unguarded-tree-write: ok` waivers in scan A. #1135 moved every queue-sidecar
+#: and `_pending` write onto the state handle, so none is left (each used to be an N-e line).
+D5_INLINE_WAIVERS: frozenset[tuple[str, str]] = frozenset()
 
 
 def _baseline(name: str) -> dict[str, str]:
@@ -1273,7 +1239,7 @@ def test_d5_the_write_lint_baseline_keeps_only_live_scan_a_waivers_each_with_its
 
 
 def test_d5_each_inline_write_waiver_sits_on_an_n_e_census_hit():
-    """The waivers kept in scan A are exactly the eight queue-sidecar and `_pending` lines, and
+    """The waivers kept in scan A (none since #1135 moved the queue writes onto the handle), and
     each waived line is inside a census hit the table allow-lists as `N-e` — no waiver covers a
     touch of a mount."""
     allow = {e.anchor: e.reason for e in ALLOW}
@@ -1321,7 +1287,7 @@ _PUT_BACK_TAIL = (
     "        if kind == ENTRY_FILE:\n            target.unlink()\n        return\n" + _PUT_BACK_HANDLE)
 _RESTORE_WRITE = "        if name not in unchanged:\n            cfg.corpus.write(name, pre, mode=\"replace\")\n"
 _SNAPSHOT_TAIL = "        cfg.corpus.write(name, pre, mode=\"replace\")\n\n\ndef _append_terminal_block("
-_IO_IMPORT_TAIL = "    read_jsonl_rows_report,\n)\n"
+_IO_IMPORT_TAIL = "    NotPlainEntry,\n)\n"
 _RUN_LOCKED_CATALOG = "lead_neighbors.load_lane_catalog(deps.skills.view(), where=skills_dir)"
 #: `_snapshot_corpus`'s return: the before-state, git's blobs at `head` (C1).
 _BEFORE_STATE = (
@@ -1363,7 +1329,7 @@ REGRESSIONS: dict[str, Regression] = {
     # v1 s5 H3 (02-settle-restores-plain-write) and s5v2 R14: the settle's restores check the
     # mount, then write the corpus folder's spelling by the plain path.
     "s5-H3-settle-restores-plain-write": Regression(DRAIN, (
-        (_IO_IMPORT_TAIL, "    read_jsonl_rows_report,\n    write_guarded,\n)\n", 1),
+        (_IO_IMPORT_TAIL, "    NotPlainEntry,\n    write_guarded,\n)\n", 1),
         (_RESTORE_WRITE,
          "        if name not in unchanged:\n            target = cfg.corpus_dir / name\n"
          "            target.parent.mkdir(parents=True, exist_ok=True)\n"
@@ -1378,7 +1344,7 @@ REGRESSIONS: dict[str, Regression] = {
         ("_restore_from_snapshot", "call", "write_guarded(target, pre)", 1))),
     # v1 s5 H3b (02b-settle-restores-legacy-guarded-write): the same through the legacy seams.
     "s5-H3b-settle-restores-legacy-guarded-write": Regression(DRAIN, (
-        (_IO_IMPORT_TAIL, "    read_jsonl_rows_report,\n    guarded_mkdir,\n    write_guarded,\n)\n", 1),
+        (_IO_IMPORT_TAIL, "    NotPlainEntry,\n    guarded_mkdir,\n    write_guarded,\n)\n", 1),
         (_RESTORE_WRITE,
          "        if name not in unchanged:\n            target = cfg.corpus_dir / name\n"
          "            guarded_mkdir(target.parent, base=cfg.corpus_dir)\n"
@@ -1405,7 +1371,7 @@ REGRESSIONS: dict[str, Regression] = {
     # v1 s5 H5 (07-handle-rebuilt-from-path) and s5v2 R15: the corpus handle rebuilt from
     # `cfg.corpus_dir`, the spelling.
     "s5-H5-handle-rebuilt-from-path": Regression(DRAIN, (
-        (_IO_IMPORT_TAIL, "    read_jsonl_rows_report,\n    hold,\n)\n", 1),
+        (_IO_IMPORT_TAIL, "    NotPlainEntry,\n    hold,\n)\n", 1),
         ("return _read_or_empty(self.cfg.corpus.view(), ",
          "return _read_or_empty(hold(self.cfg.corpus_dir).view(), ", 1),
         ("if not (_cited_ids(cfg.corpus.view(), ", "if not (_cited_ids(hold(cfg.corpus_dir).view(), ", 1),
@@ -1615,10 +1581,10 @@ REGRESSIONS: dict[str, Regression] = {
     "s5v2-05b-harness-opens-the-live-checkout": Regression(HARNESS, (
         ("    from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LoopPaths\n",
          "    from defender.learning.core.config import AUTHOR_DRAIN_LABEL, DEFAULT_PATHS, LoopPaths\n", 1),
-        ("    with open_drain_trees(paths, AUTHOR_DRAIN_LABEL) as trees:\n"
-         "        cfg = author.build_author_config(paths, ",
-         "    with open_drain_trees(DEFAULT_PATHS, AUTHOR_DRAIN_LABEL) as trees:\n"
-         "        cfg = author.build_author_config(DEFAULT_PATHS, ", 1),
+        ("    with LearningState.open(paths) as state, open_drain_trees(paths, AUTHOR_DRAIN_LABEL) as trees:\n"
+         "        cfg = author.build_author_config(\n            paths, ",
+         "    with LearningState.open(paths) as state, open_drain_trees(DEFAULT_PATHS, AUTHOR_DRAIN_LABEL) as trees:\n"
+         "        cfg = author.build_author_config(\n            DEFAULT_PATHS, ", 1),
     ), (("run_author", "construct", "open_drain_trees(DEFAULT_PATHS, AUTHOR_DRAIN_LABEL)", 1),),
         (("run_author", "construct", "open_drain_trees(paths, AUTHOR_DRAIN_LABEL)"),)),
     # --- the v2 lead-author step's adversary (scratchpad s6v2-adv-patches/*.delta.diff) ---------

@@ -49,6 +49,7 @@ from defender.tests import _spec1077 as S1077
 from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as P
 from defender.tests.tenant_1120_piece1 import _spec1120 as H
+from defender.tests import _state1135
 
 #: The launcher's episodes knob (J44; the refusal stays until D12).
 EPISODES_BASE_ENV = "DEFENDER_EPISODES_BASE"
@@ -706,7 +707,7 @@ def test_1120_every_run_tenant_reader_takes_the_accepted_tenant(
     # about faked): it resolves the source run's tenant once and reads it through RunTenant for
     # its door, read side and siblings, each of which is started with the accepted id.
     monkeypatch.delenv(T.RUNS_BASE_ENV, raising=False)
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
     monkeypatch.setenv(EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     src = _source_under(data_root, H.TID)
     episode_dir = (tmp_path / "episodes-root").resolve() / T.EPISODE_ID

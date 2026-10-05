@@ -19,7 +19,8 @@ import pytest
 from defender.learning.core import cli  # type: ignore[import-not-found]
 from defender.learning.core import drains  # type: ignore[import-not-found]
 from defender.learning.core import faults  # type: ignore[import-not-found]
-from defender.learning.core import markers  # type: ignore[import-not-found]
+from defender.learning.core.state import FINDINGS
+from defender.tests import _state1135
 from defender.learning.core.config import (  # type: ignore[import-not-found]
     FatalConfigError,
     RunUnprocessable,
@@ -31,16 +32,23 @@ from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 
 
 
+def _paths(tmp_path) -> LoopPaths:
+    """`LoopPaths` over `tmp_path` with its learning state root made (never created lazily)."""
+    paths = LoopPaths(repo_root=tmp_path)
+    paths.state_root.mkdir(parents=True, exist_ok=True)
+    return paths
+
+
 def test_has_curator_work_raises_on_bad_threshold(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "high")
     with pytest.raises(FatalConfigError):
-        drains._has_curator_work(LoopPaths(repo_root=tmp_path))
+        drains._has_curator_work(_state1135.state_for_paths(LoopPaths(repo_root=tmp_path)))
 
 
 def test_has_lead_author_work_raises_on_bad_pitfalls_threshold(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "high")
     with pytest.raises(FatalConfigError):
-        drains._has_lead_author_work(LoopPaths(repo_root=tmp_path))
+        drains._has_lead_author_work(_state1135.state_for_paths(LoopPaths(repo_root=tmp_path)))
 
 
 def test_has_lead_author_work_raises_on_bad_pitfalls_threshold_with_marker_queued(
@@ -52,12 +60,13 @@ def test_has_lead_author_work_raises_on_bad_pitfalls_threshold_with_marker_queue
     later inside run_pitfalls, where _drain_pitfalls' broad `except Exception` swallows it
     (exit 0, not the contracted exit 2). The gate reads the threshold up front (#435)."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "high")
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = _paths(tmp_path)
     run_dir = tmp_path / "run-x"
     run_dir.mkdir()
-    markers.enqueue_for_authoring(run_dir, paths)
+    state = _state1135.state_for_paths(paths)
+    _state1135.enqueue_run(state, run_dir)
     with pytest.raises(FatalConfigError, match="LEARNING_PITFALLS_THRESHOLD"):
-        drains._has_lead_author_work(paths)
+        drains._has_lead_author_work(state)
 
 
 def test_lead_author_max_retries_bad_value_raises_fatal_config(tmp_path, monkeypatch):
@@ -66,24 +75,25 @@ def test_lead_author_max_retries_bad_value_raises_fatal_config(tmp_path, monkeyp
     enrolled alongside StageAbort so _run_stage maps it to the contracted exit 2 — not a
     raw ValueError that escapes the catch as an uncontracted exit-1 traceback (#435)."""
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "high")
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = _paths(tmp_path)
     run_dir = tmp_path / "run-x"
     run_dir.mkdir()
-    markers.enqueue_for_authoring(run_dir, paths)
+    state = _state1135.state_for_paths(paths)
+    _state1135.enqueue_run(state, run_dir)
     with pytest.raises(FatalConfigError, match="LEAD_AUTHOR_MAX_RETRIES"):
-        drains._drain_lead_author_markers(paths, lambda _p, _rd, *, box=None, **_kw: None)
+        drains._drain_lead_author_markers(paths, state, lambda _p, _s, _rd, *, box=None, **_kw: None)
 
 
 
 def test_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "high")
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = _paths(tmp_path)
     assert cli._run_stage(lambda: drains.author_drain(paths=paths)) == 2
 
 
 def test_lead_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "high")
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = _paths(tmp_path)
     assert cli._run_stage(lambda: drains.lead_author_drain(paths=paths)) == 2
 
 
@@ -97,7 +107,7 @@ def test_drains_skip_cleanly_with_valid_threshold_and_empty_queues(tmp_path, mon
         "LEARNING_AUTHOR_ACTOR_ENV_THRESHOLD",
     ):
         monkeypatch.delenv(sibling, raising=False)
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = _paths(tmp_path)
     assert cli._run_stage(lambda: drains.author_drain(paths=paths)) == 0
     assert cli._run_stage(lambda: drains.lead_author_drain(paths=paths)) == 0
 
@@ -106,7 +116,7 @@ def test_drains_skip_cleanly_with_valid_threshold_and_empty_queues(tmp_path, mon
     # a mount point always exists in a checkout: this tmp tree gets one.
     empty.skills_dir.mkdir(parents=True)
     assert drains._invoke_pitfalls(
-        empty, on_curated=lambda _d: None, lock_wait_seconds=0, label=LEAD_AUTHOR_DRAIN_LABEL) == 0
+        empty, _state1135.state_for_paths(empty), on_curated=lambda _d: None, lock_wait_seconds=0, label=LEAD_AUTHOR_DRAIN_LABEL) == 0
 
 
 
@@ -192,36 +202,37 @@ def test_lead_author_marker_drain_reraises_fatal_lift_threshold(tmp_path, monkey
     FatalConfigError. _drain_lead_author_markers must RE-RAISE it (systemic) rather than
     quarantine the marker (the broad-guard disposition for per-item failures)."""
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "high")
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = _paths(tmp_path)
     run_dir = tmp_path / "run-x"
     run_dir.mkdir()
-    markers.enqueue_for_authoring(run_dir, paths)
+    state = _state1135.state_for_paths(paths)
+    _state1135.enqueue_run(state, run_dir)
 
-    def _run_lead_author(_paths, _run_dir, *, box=None, **_kw):
+    def _run_lead_author(_paths, _state, _run_dir, *, box=None, **_kw):
         lead_author._lift_threshold()
 
     with pytest.raises(FatalConfigError):
-        drains._drain_lead_author_markers(paths, _run_lead_author)
+        drains._drain_lead_author_markers(paths, state, _run_lead_author)
 
-    failed_dir = paths.author_queue_dir / "failed"
+    failed_dir = paths.state_root / "author-queue" / "failed"
     assert not (failed_dir / f"{run_dir.name}.json").exists()
     # #791: claim-and-serve is atomic (the marker moves into `inflight/` before it is
     # served, so a re-ask landing on the same path mid-serve is never destroyed) — a
     # systemic re-raise leaves it there, claimed but not quarantined, rather than at the
     # top-level path it started at.
-    assert (paths.author_queue_dir / "inflight" / f"{run_dir.name}.json").exists()
+    assert (paths.state_root / "author-queue" / "inflight" / f"{run_dir.name}.json").exists()
 
 
 def test_drain_pitfalls_reraises_fatal_config_error(tmp_path):
     """Defense-in-depth (no current trigger): _drain_pitfalls' broad guard swallows a
     curation hiccup, but a FatalConfigError must propagate to exit 2, not be swallowed."""
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = _paths(tmp_path)
 
-    def _run_pitfalls(_paths, *, box=None, **_kw):
+    def _run_pitfalls(_paths, _state, *, box=None, **_kw):
         raise FatalConfigError("systemic")
 
     with pytest.raises(FatalConfigError):
-        drains._drain_pitfalls(paths, _run_pitfalls)
+        drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), _run_pitfalls)
 
 
 
@@ -230,33 +241,35 @@ def test_lead_author_drain_unlinks_marker_on_success(tmp_path, monkeypatch):
     """A clean lead-author run drains the marker: success makes `if drained:` unlink it, so
     it is neither left queued (re-authored every tick) nor quarantined."""
     monkeypatch.delenv("LEAD_AUTHOR_MAX_RETRIES", raising=False)
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = _paths(tmp_path)
     run_dir = tmp_path / "run-ok"
     run_dir.mkdir()
-    markers.enqueue_for_authoring(run_dir, paths)
+    state = _state1135.state_for_paths(paths)
+    _state1135.enqueue_run(state, run_dir)
 
-    drains._drain_lead_author_markers(paths, lambda _p, _rd, *, box=None, **_kw: None)
+    drains._drain_lead_author_markers(paths, state, lambda _p, _s, _rd, *, box=None, **_kw: None)
 
-    assert not (paths.author_queue_dir / f"{run_dir.name}.json").exists()
-    assert not (paths.author_queue_dir / "failed" / f"{run_dir.name}.json").exists()
+    assert not (paths.state_root / "author-queue" / f"{run_dir.name}.json").exists()
+    assert not (paths.state_root / "author-queue" / "failed" / f"{run_dir.name}.json").exists()
 
 
 def test_lead_author_drain_quarantines_a_plain_failure(tmp_path, monkeypatch):
     """A plain (non-systemic) failure is dead-lettered: the marker moves to failed/ with a
     lead-author-error reason and is NOT unlinked as if it had succeeded."""
     monkeypatch.delenv("LEAD_AUTHOR_MAX_RETRIES", raising=False)
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = _paths(tmp_path)
     run_dir = tmp_path / "run-boom"
     run_dir.mkdir()
-    markers.enqueue_for_authoring(run_dir, paths)
+    state = _state1135.state_for_paths(paths)
+    _state1135.enqueue_run(state, run_dir)
 
-    def _run_lead_author(_paths, _run_dir, *, box=None, **_kw):
+    def _run_lead_author(_paths, _state, _run_dir, *, box=None, **_kw):
         raise RuntimeError("poison run dir")
 
-    drains._drain_lead_author_markers(paths, _run_lead_author)
+    drains._drain_lead_author_markers(paths, state, _run_lead_author)
 
-    assert not (paths.author_queue_dir / f"{run_dir.name}.json").exists()
-    failed = paths.author_queue_dir / "failed" / f"{run_dir.name}.json"
+    assert not (paths.state_root / "author-queue" / f"{run_dir.name}.json").exists()
+    failed = paths.state_root / "author-queue" / "failed" / f"{run_dir.name}.json"
     assert failed.exists()
     assert "lead-author-error" in json.loads(failed.read_text())["failed"]
 
@@ -267,19 +280,20 @@ def test_lead_author_drain_requeues_a_transient_with_bumped_attempts(tmp_path, m
     regression guard for the `propagate=(_LeadAuthorRetry,)` wiring — drop that argument and
     the transient is silently quarantined instead of retried."""
     monkeypatch.delenv("LEAD_AUTHOR_MAX_RETRIES", raising=False)
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = _paths(tmp_path)
     run_dir = tmp_path / "run-transient"
     run_dir.mkdir()
-    markers.enqueue_for_authoring(run_dir, paths)
+    state = _state1135.state_for_paths(paths)
+    _state1135.enqueue_run(state, run_dir)
 
-    def _run_lead_author(_paths, _run_dir, *, box=None, **_kw):
+    def _run_lead_author(_paths, _state, _run_dir, *, box=None, **_kw):
         raise drains._LeadAuthorRetry("rc=None transient")
 
-    drains._drain_lead_author_markers(paths, _run_lead_author)
+    drains._drain_lead_author_markers(paths, state, _run_lead_author)
 
-    marker = paths.author_queue_dir / f"{run_dir.name}.json"
+    marker = paths.state_root / "author-queue" / f"{run_dir.name}.json"
     assert marker.exists()
-    assert not (paths.author_queue_dir / "failed" / f"{run_dir.name}.json").exists()
+    assert not (paths.state_root / "author-queue" / "failed" / f"{run_dir.name}.json").exists()
     assert json.loads(marker.read_text())["attempts"] == 1
 
 
@@ -287,12 +301,12 @@ def test_drain_pitfalls_swallows_a_plain_curation_error(tmp_path):
     """The dead-letter branch of _drain_pitfalls: a plain curation hiccup must not wedge the
     drain — it is logged and swallowed, so the call returns normally (the systemic StageAbort
     path is the sibling reraise test)."""
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = _paths(tmp_path)
 
-    def _run_pitfalls(_paths, *, box=None, **_kw):
+    def _run_pitfalls(_paths, _state, *, box=None, **_kw):
         raise RuntimeError("curation hiccup")
 
-    drains._drain_pitfalls(paths, _run_pitfalls)
+    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), _run_pitfalls)
 
 
 
@@ -393,15 +407,16 @@ def test_lead_author_drain_bad_lift_threshold_is_fatal_two(tmp_path, monkeypatch
     lead_author_drain stage to the contracted exit 2 (not a quarantine, not exit 0)."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "5")
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "high")
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = _paths(tmp_path)
     run_dir = tmp_path / "run-x"
     run_dir.mkdir()
-    markers.enqueue_for_authoring(run_dir, paths)
+    state = _state1135.state_for_paths(paths)
+    _state1135.enqueue_run(state, run_dir)
 
     wt = tmp_path / "wt"
     wt.mkdir()
 
-    def _run_lead_author(_paths, _run_dir, *, box=None, **_kw):
+    def _run_lead_author(_paths, _state, _run_dir, *, box=None, **_kw):
         lead_author._lift_threshold()
 
     rc = cli._run_stage(
@@ -497,8 +512,8 @@ def test_run_stage_maps_giterror_to_exit_2():
 
 
 def _seed_queue(paths: LoopPaths, lines: list[str]) -> None:
-    paths.pending_file.parent.mkdir(parents=True, exist_ok=True)
-    paths.pending_file.write_text("".join(line + "\n" for line in lines), encoding="utf-8")
+    (paths.state_root / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
+    (paths.state_root / FINDINGS.queue).write_text("".join(line + "\n" for line in lines), encoding="utf-8")
 
 
 def _row(fid: str, **extra) -> str:
@@ -558,21 +573,21 @@ def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
       that only guarded `json.loads` greens here and then raises `AttributeError` on
       `row.get(...)` on every tick, a class no drain guard names.
     """
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = _paths(tmp_path)
     held = [_row(f"h/{i}", held_reason=_HELD_REASONS[i % len(_HELD_REASONS)]) for i in range(5)]
 
     _seed_queue(paths, held)
-    assert drains._pending_queue_counts(paths.pending_file)[0] == 0, (
+    assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS)[0] == 0, (
         "five rows the gate has already held were counted as pending work"
     )
 
     _seed_queue(paths, [_row(f"h/{i}") for i in range(5)])
-    assert drains._pending_queue_counts(paths.pending_file)[0] == 5, (
+    assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS)[0] == 5, (
         "the same five rows without `held_reason` are authorable and must be counted"
     )
 
     _seed_queue(paths, [_row("legacy/0", held_reason=_UNRECOGNISED_HOLD)])
-    assert drains._pending_queue_counts(paths.pending_file)[0] == 0, (
+    assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS)[0] == 0, (
         f"a row held for {_UNRECOGNISED_HOLD!r} was counted as pending work; the count is "
         "reading the reason's prose rather than the field, so any hold whose wording it "
         "does not recognise — a legacy row, a reworded gate — reads as authorable"
@@ -580,7 +595,7 @@ def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
 
     for wordless in ("", None):
         _seed_queue(paths, [_row(f"legacy/{i}", held_reason=wordless) for i in range(5)])
-        assert drains._pending_queue_counts(paths.pending_file) == (0, 5), (
+        assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS) == (0, 5), (
             f"five rows stamped held_reason={wordless!r} were counted as pending work; the "
             "count is testing whether the reason is TRUTHY rather than whether the field is "
             "there, so a holder that had no wording to give leaves its rows waking the drain "
@@ -588,7 +603,7 @@ def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
         )
 
     _seed_queue(paths, ["", _row("h/0"), "   ", ""])
-    assert drains._pending_queue_counts(paths.pending_file)[0] == 1, "a blank line is not a row"
+    assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS)[0] == 1, "a blank line is not a row"
 
     # One held row (0) + five lines that are not rows (5) + one authorable row (1). The four
     # JSON-but-not-an-object lines are the ones a `json.loads`-only reader lets through.
@@ -597,7 +612,7 @@ def test_881_pending_queue_count_measures_rows_the_drain_could_author(tmp_path):
         "[1,2]", "null", '"x"', "3", "{not json at all",
         _row("c/0"),
     ])
-    assert drains._pending_queue_counts(paths.pending_file)[0] == 6, (
+    assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS)[0] == 6, (
         "a line that is not a row is work for the drain's unkeyable retirement and must be "
         "counted — whether it failed to parse at all, or parsed to a list, a null, a string "
         "or a number, none of which is a row"
@@ -620,24 +635,24 @@ def test_881_a_deferred_row_still_counts_as_work(tmp_path, monkeypatch):
     still count zero, or "count everything" would satisfy the first half.
     """
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = _paths(tmp_path)
 
     _seed_queue(paths, [_row(f"fb/{i}", deferrals=1) for i in range(5)])
-    assert drains._pending_queue_counts(paths.pending_file)[0] == 5, (
+    assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS)[0] == 5, (
         "a deferred row was subtracted from the wake gate; the next tick may still land it, "
         "so it is work and the drain must still wake for it"
     )
-    assert drains._has_curator_work(paths) is True, (
+    assert drains._has_curator_work(_state1135.state_for_paths(paths)) is True, (
         "five deferred rows left the wake gate shut, so they are never retried — queued and "
         "invisible"
     )
 
     # The control: the permanent hold on the same address still counts for nothing.
     _seed_queue(paths, [_row(f"h/{i}", held_reason=_HELD_REASONS[0]) for i in range(5)])
-    assert drains._pending_queue_counts(paths.pending_file)[0] == 0, (
+    assert drains._pending_queue_counts(_state1135.state_for_paths(paths), FINDINGS)[0] == 0, (
         "a permanent hold counted as work, so the count now subtracts nothing at all"
     )
-    assert drains._has_curator_work(paths) is False
+    assert drains._has_curator_work(_state1135.state_for_paths(paths)) is False
 
 
 def test_881_the_author_wake_gate_does_not_fire_for_rows_it_would_only_hold_again(
@@ -662,32 +677,32 @@ def test_881_the_author_wake_gate_does_not_fire_for_rows_it_would_only_hold_agai
     what number the counts are being judged against.
     """
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = _paths(tmp_path)
     held = [_row(f"h/{i}", held_reason=_HELD_REASONS[i % len(_HELD_REASONS)]) for i in range(5)]
 
     _seed_queue(paths, held)
-    assert drains._has_curator_work(paths) is False, (
+    assert drains._has_curator_work(_state1135.state_for_paths(paths)) is False, (
         "the wake gate fired for five rows the gate has already held; the drain will take "
         "the repo lock, hold them again and write nothing, on every tick, forever"
     )
 
     _seed_queue(paths, [_row(f"c/{i}") for i in range(5)])
-    assert drains._has_curator_work(paths) is True, (
+    assert drains._has_curator_work(_state1135.state_for_paths(paths)) is True, (
         "five authorable rows must still wake the drain"
     )
 
     _seed_queue(paths, [*held, _row("c/0")])
-    assert drains._has_curator_work(paths) is False, (
+    assert drains._has_curator_work(_state1135.state_for_paths(paths)) is False, (
         "one authorable row beside five held ones is one row of work, not six"
     )
 
     _seed_queue(paths, [*held, *(_row(f"c/{i}") for i in range(5))])
-    assert drains._has_curator_work(paths) is True, (
+    assert drains._has_curator_work(_state1135.state_for_paths(paths)) is True, (
         "five authorable rows are five rows of work however many held ones sit beside them"
     )
 
     _seed_queue(paths, [_row(f"legacy/{i}", held_reason=_UNRECOGNISED_HOLD) for i in range(5)])
-    assert drains._has_curator_work(paths) is False, (
+    assert drains._has_curator_work(_state1135.state_for_paths(paths)) is False, (
         f"the wake gate fired for five rows held for {_UNRECOGNISED_HOLD!r}; it is reading "
         "the reason's wording rather than the field, so the legacy rows this defect strands "
         "— held by a writer that no longer exists — pin it open exactly as before"

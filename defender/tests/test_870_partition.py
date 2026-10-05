@@ -36,6 +36,7 @@ from defender.learning.core import drains, persist
 from defender.learning.core.config import LoopPaths
 from defender.learning.leads import pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
+from defender.tests import _state1135
 from defender.tests._declared870 import (
     PITFALLS_SECTION,
     REDUCER_REL,
@@ -82,7 +83,7 @@ def _shim_batch(paths, n: int = 3) -> list[str]:
     """N rows behind ONE reducer mistake — the l-003 shape, which is what a real reducer
     batch looks like. Appended through the production appender, into the real queue file."""
     rows = [shim_row(f"r:l-003:{i}") for i in range(n)]
-    persist.append_pitfalls(rows, paths=paths)
+    persist.append_pitfalls(rows, state=_state1135.state_for_paths(paths))
     return [r["pitfall_id"] for r in rows]
 
 
@@ -175,7 +176,7 @@ def test_a_no_edit_reducer_tick_holds_its_rows(scene):
 
     # The second conjunct alone: a handoff WAS emitted, a commit DID land, and the reducer
     # literal is absent from its changed set.
-    persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], paths=paths)
+    persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], state=_state1135.state_for_paths(paths))
     taught_elsewhere = Spawn(curate_execution_md("elastic"))
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=taught_elsewhere,
                                          trees=lead_trees(paths)) == 0
@@ -222,7 +223,7 @@ def test_an_unoffered_reducer_edit_is_refused(scene):
     The positive control is the same curator, the same edit, one shim row added to the queue.
     """
     repo, paths = scene
-    persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], paths=paths)
+    persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], state=_state1135.state_for_paths(paths))
     head_before = git(repo, "rev-parse", "HEAD").stdout.strip()
     overreach = Spawn(edits(curate_execution_md("elastic"), curate_reducer_surface()))
 
@@ -278,7 +279,7 @@ def test_a_perpetually_declined_hold_retires_at_the_ceiling(scene, monkeypatch):
                                              trees=lead_trees(paths)) == 0
         assert queue_ids(paths) == ids, f"the hold did not survive tick {tick}"
         assert [
-            r.get(pitfalls_curator.OFFERS_DECLINED_KEY) for r in persist.read_pitfalls(paths)
+            r.get(pitfalls_curator.OFFERS_DECLINED_KEY) for r in persist.read_pitfalls(_state1135.state_for_paths(paths))
         ] == [tick] * len(ids), f"the declined offer was not counted on tick {tick}"
         assert graveyard_by_id(paths) == {}, f"the row retired early, on tick {tick}"
 
@@ -319,13 +320,13 @@ def test_a_faulting_tick_does_not_spend_the_offer_budget(scene, monkeypatch):
     _repo, paths = scene
     ids = _shim_batch(paths, n=1)
 
-    def _faulting(_paths, box=None, **_kw):
+    def _faulting(_paths, _state, box=None, **_kw):
         raise ImportError("the curator module vanished mid-tick")
 
     for tick in (1, 2):
-        drains._drain_pitfalls(paths, _faulting)
+        drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), _faulting)
         assert queue_ids(paths) == ids, f"the faulting tick {tick} retired the row early"
-    rows = persist.read_pitfalls(paths)
+    rows = persist.read_pitfalls(_state1135.state_for_paths(paths))
     assert [r.get("attempts") for r in rows] == [2], "the fault counter did not move"
     assert [r.get(pitfalls_curator.OFFERS_DECLINED_KEY) for r in rows] == [None], (
         "a tick that never offered the row spent its offer budget"
@@ -338,7 +339,7 @@ def test_a_faulting_tick_does_not_spend_the_offer_budget(scene, monkeypatch):
                                              trees=lead_trees(paths)) == 0
         assert queue_ids(paths) == ids, f"the row retired on decline {tick} of 3"
         assert [
-            r.get(pitfalls_curator.OFFERS_DECLINED_KEY) for r in persist.read_pitfalls(paths)
+            r.get(pitfalls_curator.OFFERS_DECLINED_KEY) for r in persist.read_pitfalls(_state1135.state_for_paths(paths))
         ] == [tick]
         assert graveyard_by_id(paths) == {}
 
@@ -391,7 +392,7 @@ def test_no_row_leaves_the_queue_without_a_record(scene):
          pitfall_row("r:l-002:0", "", digest="exit=1; a systemless non-shim row"),
          pitfall_row("r:l-003:0", "../evil"),
          shim_row("r:l-004:0")],
-        paths=paths,
+        state=_state1135.state_for_paths(paths),
     )
     every_id = {"r:l-000:0", "r:l-001:0", "r:l-002:0", "r:l-003:0", "r:l-004:0"}
     spawn = Spawn(edits(curate_execution_md("elastic"), curate_reducer_surface()))
@@ -439,7 +440,7 @@ def test_the_commit_carries_exactly_what_the_rule_admitted(scene):
     """
     repo, paths = scene
     _shim_batch(paths, n=1)
-    persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], paths=paths)
+    persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], state=_state1135.state_for_paths(paths))
     spawn = Spawn(edits(curate_execution_md("elastic"), curate_reducer_surface()))
 
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths)) == 0
@@ -456,7 +457,7 @@ def test_the_commit_carries_exactly_what_the_rule_admitted(scene):
     # The correction, executed: a newly-dirty non-`.md` file under the corpus refuses the
     # whole tick rather than riding it.
     persist.append_pitfalls([shim_row("r2:l-009:0", digest="exit=1; a second mistake")],
-                            paths=paths)
+                            state=_state1135.state_for_paths(paths))
     stray = Spawn(edits(
         curate_reducer_surface("a second lesson"),
         lambda root: write(root / "defender" / "skills" / "gather" / "notes.txt", "dirt\n"),
@@ -515,8 +516,8 @@ def test_a_reducer_only_tick_reports_what_it_taught(scene, capsys):
 
 def _leg(paths, spawn):
     """`_invoke_pitfalls`' shape, so the drain drives the REAL curation leg."""
-    return lambda p, box=None, **_kw: pitfalls_curator.run_pitfalls(paths=p, invoke=spawn, box=box,
-                                                                    trees=lead_trees(p))
+    return lambda p, st, box=None, **_kw: pitfalls_curator.run_pitfalls(
+        paths=p, state=st, invoke=spawn, box=box, trees=lead_trees(p))
 
 
 def test_two_curation_ticks_land_distinctly_in_every_shared_sink(scene):
@@ -538,13 +539,13 @@ def test_two_curation_ticks_land_distinctly_in_every_shared_sink(scene):
     """
     repo, paths = scene
     first = _shim_batch(paths, n=2)
-    drains._drain_pitfalls(paths, _leg(paths, Spawn(curate_reducer_surface("a LIST, not JSON"))))
+    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), _leg(paths, Spawn(curate_reducer_surface("a LIST, not JSON"))))
     sha_one = git(repo, "rev-parse", "HEAD").stdout.strip()
 
     second = [shim_row("r2:l-004:0", digest="exit=1; Parser Error: at or near \"@timestamp\"")]
-    persist.append_pitfalls(second, paths=paths)
+    persist.append_pitfalls(second, state=_state1135.state_for_paths(paths))
     drains._drain_pitfalls(
-        paths, _leg(paths, Spawn(curate_reducer_surface("quote @timestamp"))),
+        paths, _state1135.state_for_paths(paths), _leg(paths, Spawn(curate_reducer_surface("quote @timestamp"))),
     )
     sha_two = git(repo, "rev-parse", "HEAD").stdout.strip()
     assert sha_one != sha_two, "the second tick committed nothing, so nothing is being shared"
@@ -581,16 +582,16 @@ def test_a_committed_batch_is_not_re_bumped(scene, monkeypatch):
     repo, paths = scene
     monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "3")
     persist.append_pitfalls(
-        [shim_row("r:l-003:0"), pitfall_row("r:l-000:0", "elastic")], paths=paths,
+        [shim_row("r:l-003:0"), pitfall_row("r:l-000:0", "elastic")], state=_state1135.state_for_paths(paths),
     )
 
-    def _half_done(p, box=None, **_kw):
+    def _half_done(p, st, box=None, **_kw):
         persist.rotate_pitfalls(
-            ["r:l-003:0"], "deadbeef", paths=p, category="consumed_committed",
+            ["r:l-003:0"], "deadbeef", state=st, category="consumed_committed",
         )
         raise ImportError("the curator module vanished mid-tick")
 
-    drains._drain_pitfalls(paths, _half_done)
+    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), _half_done)
 
     consumed, graveyard = consumed_by_id(paths), graveyard_by_id(paths)
     entry = consumed.get("r:l-003:0", {})
@@ -598,6 +599,6 @@ def test_a_committed_batch_is_not_re_bumped(scene, monkeypatch):
     assert "attempts" not in entry, "a durably taught row was re-bumped"
     assert "r:l-003:0" not in graveyard
 
-    still_queued = {r["pitfall_id"]: r for r in persist.read_pitfalls(paths)}
+    still_queued = {r["pitfall_id"]: r for r in persist.read_pitfalls(_state1135.state_for_paths(paths))}
     assert set(still_queued) == {"r:l-000:0"}
     assert still_queued["r:l-000:0"]["attempts"] == 1

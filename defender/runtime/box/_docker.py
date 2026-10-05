@@ -225,6 +225,24 @@ def _start_token(docker: DockerFn, name: str) -> str | None:
     return None if not token or token == _NO_LABEL else token
 
 
+def _remove_container(docker: DockerFn, name: str) -> str | None:
+    """Remove the container `name`, paused or not: `None` once it is gone, else why not.
+
+    Under runsc a PAUSED container's `rm -f` kills it but answers "PID … is zombie and can not
+    be killed" and leaves it behind (#1202). `docker wait` then proves it exited, and a second
+    `rm -f` removes it. Never thaws the box to remove it (#1178). The one removal step every
+    site uses: `stop_box` and both reaps."""
+    argv = ["docker", "rm", "-f", name]
+    first = _call(docker, argv)
+    if first.returncode == 0:
+        return None
+    _call(docker, ["docker", "wait", name])
+    second = _call(docker, argv)
+    if second.returncode == 0:
+        return None
+    return f"{(first.stderr or '').strip()}; after waiting: {(second.stderr or '').strip()}"
+
+
 def _reap_stale_before_create(docker: DockerFn, name: str) -> None:
     """The pre-create sweep. Unlike `_reap_on_fault` it may raise: no fault is being carried,
     so an unreachable daemon should abort the start.
@@ -243,7 +261,7 @@ def _reap_stale_before_create(docker: DockerFn, name: str) -> None:
             "lane still writing its artifacts. If it is a leak, "
             f"`docker rm -f {name}` clears it."
         )
-    _call(docker, ["docker", "rm", "-f", name])
+    _remove_container(docker, name)
 
 
 def _reap_on_fault(docker: DockerFn, name: str, *, owned_token: str | None = None) -> None:
@@ -255,7 +273,7 @@ def _reap_on_fault(docker: DockerFn, name: str, *, owned_token: str | None = Non
     with contextlib.suppress(BoxFault):
         if owned_token is not None and _start_token(docker, name) != owned_token:
             return
-        _call(docker, ["docker", "rm", "-f", name])
+        _remove_container(docker, name)
 
 
 def _own_container_ids(

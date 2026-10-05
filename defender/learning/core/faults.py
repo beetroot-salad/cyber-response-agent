@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from defender._git import GitError
 from defender.learning.core.config import FatalConfigError, StageAbort
+from defender.learning.core.state import StateRefused
 from defender.runtime import box as box_mod
 from defender.runtime.verbs import RegistryError
 
@@ -17,8 +18,13 @@ from defender.runtime.verbs import RegistryError
 # `RegistryError`: an unreadable adapters directory (raised as
 # `declared_systems.AdaptersUnreadable`). Dead-lettering it would bump every queued row's
 # `attempts` each tick until the whole queue was graveyarded for a fault no retry clears.
+#
+# `StateRefused`: a link, hard link, FIFO or folder planted below the learning state root. Only a
+# host actor can plant one, so it is a deployment fault no item caused: retrying, retiring or
+# quarantining an item would not clear it, and `_run_stage` stops the tick naming the entry.
 SYSTEMIC_FAULTS: tuple[type[BaseException], ...] = (
     StageAbort, FatalConfigError, GitError, box_mod.BoxFault, box_mod.RunTainted, RegistryError,
+    StateRefused,
 )
 
 

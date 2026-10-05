@@ -31,6 +31,7 @@ from pathlib import Path
 
 
 from defender._episode_handle import Episode
+from defender.tests import _state1135
 from defender.tests import _world_1007 as W
 
 
@@ -166,7 +167,8 @@ def test_a_missing_sample_sets_sample_unavailable_and_refuses_shape_invention(
                           samples={W.ALERTS_PATTERN: dict(W.SAMPLE_DOCUMENT)})
     judge = W.FakeJudge(W.reply_document(findings=[W.world_finding(bucket="shape-invention")]))
 
-    result = judge_mod.grade_episode(ep, judge=judge, runs_base=ep.parent / "runs-base")
+    result = judge_mod.grade_episode(ep, judge=judge, runs_base=ep.parent / "runs-base",
+                                     state=_state1135.env_state())
 
     row = {r["world"]: r for r in result.worlds}["b"]
     assert row["sample_unavailable"] is True, (
@@ -191,7 +193,8 @@ def test_a_present_sample_admits_a_shape_invention_finding(tmp_path, monkeypatch
     ep = rendered_episode(tmp_path, monkeypatch)
     judge = W.FakeJudge(W.reply_document(findings=[W.world_finding(bucket="shape-invention")]))
 
-    result = judge_mod.grade_episode(ep, judge=judge, runs_base=ep.parent / "runs-base")
+    result = judge_mod.grade_episode(ep, judge=judge, runs_base=ep.parent / "runs-base",
+                                     state=_state1135.env_state())
 
     row = {r["world"]: r for r in result.worlds}["b"]
     assert row["sample_unavailable"] is False
@@ -222,7 +225,8 @@ def test_a_corrupt_or_absent_samples_file_sets_sample_unavailable_for_every_patt
         ep = rendered_episode(tmp_path / label, monkeypatch)
         prepare(ep)
 
-        result = judge_mod.grade_episode(ep, judge=W.FakeJudge(W.reply_document()), runs_base=ep.parent / "runs-base")
+        result = judge_mod.grade_episode(ep, judge=W.FakeJudge(W.reply_document()), runs_base=ep.parent / "runs-base",
+                                     state=_state1135.env_state())
 
         row = {r["world"]: r for r in result.worlds}["b"]
         assert row["sample_unavailable"] is True, (
@@ -289,7 +293,8 @@ def test_a_case_differing_overlay_pattern_misses_the_sample_and_refuses_the_find
         bucket="shape-invention", pattern=W.EVENTS_PATTERN.upper(),
         evidence=[f"samples.yaml#{W.EVENTS_PATTERN.upper()}"])]))
 
-    result = judge_mod.grade_episode(ep, judge=judge, runs_base=ep.parent / "runs-base")
+    result = judge_mod.grade_episode(ep, judge=judge, runs_base=ep.parent / "runs-base",
+                                     state=_state1135.env_state())
 
     row = {r["world"]: r for r in result.worlds}["b"]
     assert row["sample_unavailable"] is True, (
@@ -322,7 +327,8 @@ def test_a_finding_citing_an_unavailable_sample_is_refused_whatever_its_bucket(
         W.world_finding(bucket="another-unlisted-bucket", evidence=["review.yaml#worlds"]),
     ]))
 
-    result = judge_mod.grade_episode(ep, judge=judge, runs_base=ep.parent / "runs-base")
+    result = judge_mod.grade_episode(ep, judge=judge, runs_base=ep.parent / "runs-base",
+                                     state=_state1135.env_state())
 
     buckets = [f["bucket"] for f in {r["world"]: r for r in result.worlds}["b"]["world_findings"]]
     assert "a-bucket-nobody-listed" not in buckets, (
@@ -364,7 +370,8 @@ def test_a_two_pattern_world_names_each_patterns_sample_availability_independent
                         evidence=[f"{W.SAMPLES_NAME}#{W.ALERTS_PATTERN}"]),
     ]))
 
-    result = judge_mod.grade_episode(ep, judge=judge, runs_base=ep.parent / "runs-base")
+    result = judge_mod.grade_episode(ep, judge=judge, runs_base=ep.parent / "runs-base",
+                                     state=_state1135.env_state())
     prompt = render_prompt(ep)
 
     row = {r["world"]: r for r in result.worlds}["b"]

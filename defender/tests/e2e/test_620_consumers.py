@@ -44,6 +44,7 @@ from defender.learning import lead_repository  # noqa: E402
 from defender.learning.leads.draft_synthesis import _draft_basename  # noqa: E402
 from defender.learning.core import persist as _persist  # noqa: E402
 from defender.learning.core.config import LoopPaths  # noqa: E402
+from defender.learning.core.state import LearningState  # noqa: E402
 from defender.learning.leads import (  # noqa: E402
     draft_synthesis,
     lead_author,
@@ -570,13 +571,15 @@ def test_benign_body_renders_in_one_intact_fence_positive_control(tmp_path):
 def _seed_pitfalls(paths, *, system: str, digest: str, n: int = 2) -> None:
     """``n`` queued pitfalls, each a distinct mistake: the digest is suffixed per row because
     #840 collapses rows sharing one into a single record, and the threshold counts records."""
-    _persist.append_pitfalls(
-        [{"schema_version": 1, "pitfall_id": f"r:l-{i:03d}:0", "source_run": "r",
-          "system": system, "query_id": f"{system}.esql", "goal": "g",
-          "executed_query": "FROM bad", "stderr_digest": f"{digest} #{i}",
-          "error_class": "agent-fixable"} for i in range(n)],
-        paths=paths,
-    )
+    paths.state_root.mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
+    with LearningState.open(paths) as state:
+        _persist.append_pitfalls(
+            [{"schema_version": 1, "pitfall_id": f"r:l-{i:03d}:0", "source_run": "r",
+              "system": system, "query_id": f"{system}.esql", "goal": "g",
+              "executed_query": "FROM bad", "stderr_digest": f"{digest} #{i}",
+              "error_class": "agent-fixable"} for i in range(n)],
+            state=state,
+        )
 
 
 def test_attacker_digest_cannot_forge_execution_md_sections(tmp_path):
@@ -806,7 +809,7 @@ def test_pitfall_for_a_system_without_execution_md_does_not_dead_end(tmp_path, m
     exec_md = repo / "defender" / "skills" / "host-state" / "execution.md"
     assert not exec_md.exists(), "precondition: host-state has no execution.md"
 
-    def synthesizing_curator(handoffs, *, repo_root, box=None):
+    def synthesizing_curator(handoffs, *, state, repo_root, box=None):
         assert handoffs[0]["system"] == "host-state"
         assert handoffs[0]["path"] == "defender/skills/host-state/execution.md"
         p = repo_root / "defender" / "skills" / "host-state" / "execution.md"

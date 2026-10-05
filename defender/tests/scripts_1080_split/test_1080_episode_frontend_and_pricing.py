@@ -39,9 +39,9 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests.scripts_1080_split import _spec1080 as S
+from defender.tests import _state1135
 
 GOLDEN = "pages"
 
@@ -60,7 +60,7 @@ def _tmp_roots(tmp_path, monkeypatch):
     inside `tmp_path`, so no episode this file builds or launches lands in the checkout."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 # --------------------------------------------------------------------------------------

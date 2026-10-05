@@ -30,6 +30,7 @@ from pydantic import AfterValidator, TypeAdapter, ValidationError
 
 # `JudgeRefused` lives in `_errors.py` to avoid an import cycle; re-exported here.
 from defender._model import model  # noqa: E402
+from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS, LearningState  # noqa: E402
 from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
 from defender._episode_handle import Episode  # noqa: E402
@@ -384,7 +385,7 @@ def _default_judge_seam(episode_dir: Path) -> Any:
 
 def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration surface
     episode_dir: Path, *, runs_base: Path, judge: Any = None,
-    draws: int | None = None, git_show: Any = None, queue_dir: Path | None = None,
+    state: LearningState, draws: int | None = None, git_show: Any = None,
 ) -> EpisodeGrade:
     """#1078 D4/J48 (design correction R-A3): `runs_base` is a REQUIRED keyword — no tool
     falls back to a default base or skips its check when it has none. It threads into both the
@@ -396,7 +397,7 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
     resolved_judge = judge if judge is not None else _default_judge_seam(episode_dir)
     try:
         return _grade_episode(episode_dir, judge=resolved_judge, runs_base=runs_base,
-                              draws=draws, git_show=git_show, queue_dir=queue_dir)
+                              draws=draws, git_show=git_show, state=state)
     except JudgeRefused:
         raise
     # Every input-driven failure arrives as `JudgeRefused`, which is what the launcher catches:
@@ -408,7 +409,7 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
 
 def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestration, kept whole
     episode_dir: Path, *, judge: Any, runs_base: Path | None, draws: int | None,
-    git_show: Any, queue_dir: Path | None,
+    git_show: Any, state: LearningState,
 ) -> EpisodeGrade:
     # An existing grade short-circuits; a not-graded stamp does not, so a repaired episode can
     # still be graded.
@@ -425,12 +426,12 @@ def _grade_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestrati
     with episode:
         return _grade_bound_episode(
             episode.view(), episode, judge=judge, runs_base=runs_base, draws=draws,
-            git_show=git_show, queue_dir=queue_dir)
+            git_show=git_show, state=state)
 
 
 def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_grade_episode`
     bound: Bound, episode: Episode, *, judge: Any, runs_base: Path | None, draws: int | None,
-    git_show: Any, queue_dir: Path | None,
+    git_show: Any, state: LearningState,
 ) -> EpisodeGrade:
     episode_dir = episode.dir
     review = family_mod.read_review_record(bound) or {}
@@ -565,16 +566,14 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_gra
 
     verdict_word = episode_outcome if episode_outcome != "gradable" else grade.verdict_word
 
-    pending_file, _lock_file = enqueue_mod._queue_paths(queue_dir)
-    questioner_file, _questioner_lock = enqueue_mod._questioner_queue_paths(queue_dir)
-    enqueued_to = str(pending_file)
-    world_enqueued_to = str(questioner_file)
+    enqueued_to = state.describe(FINDINGS)
+    world_enqueued_to = state.describe(QUESTIONER_FINDINGS)
     # Always called: a blocked outcome closes only the defender lane (`enqueue_report` reads
     # `verdict_word`), never the world lane. Passed as a mapping to avoid re-validating and
     # copying every world row in a new `FamilyGrade`.
     report = enqueue_mod.enqueue_report(
         episode_dir, {"verdict_word": verdict_word, "worlds": grade.worlds},
-        queue_dir=queue_dir, drawn=per_world_draws, family_drawn=family_documents)
+        state=state, drawn=per_world_draws, family_drawn=family_documents)
     enqueued_rows = report.appended
     queue_malformed_rows = report.queue_malformed_rows
     world_queue_malformed_rows = report.world_queue_malformed_rows

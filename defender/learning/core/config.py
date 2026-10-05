@@ -18,21 +18,6 @@ from defender._paths import DefenderPaths  # noqa: F401 — LoopPaths' base clas
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-@model(frozen=True)
-class QueueChannel:
-    """One file-backed queue, with its lock topology and row key as data.
-
-    `append_lock` excludes concurrent appenders (and the drain's read/rotate/retire window)
-    from each other; `drain_lock` is the non-blocking one-drainer-per-channel gate. A channel
-    no drain holds exclusively (`pitfalls`, drained inside the lead-author tick) has `None`."""
-
-    file: Path
-    consumed: Path
-    append_lock: Path
-    drain_lock: Path | None
-    id_key: str
-
-
 def provenance_field(id_key: str) -> str:
     """The corpus frontmatter list a lesson cites its source queue rows under.
 
@@ -114,98 +99,11 @@ class LoopPaths(DefenderPaths):
         return self.state_root / "runs"
 
     @property
-    def pending_dir(self) -> Path:
-        return self.state_root / "_pending"
-
-    @property
-    def lead_pending_dir(self) -> Path:
-        return self.state_root / "_pending_leads"
-
-    @property
-    def pitfalls_pending_dir(self) -> Path:
-        return self.state_root / "_pending_pitfalls"
-
-    @property
-    def pitfalls(self) -> QueueChannel:
-        return QueueChannel(
-            file=self.pitfalls_pending_dir / "pitfalls.jsonl",
-            consumed=self.pitfalls_pending_dir / "pitfalls.consumed.jsonl",
-            append_lock=self.pitfalls_pending_dir / ".pitfalls.lock",
-            # No drain-role lock: the pitfalls queue is drained inside the lead-author tick,
-            # which nothing else contends for, so one file serves the append role alone.
-            drain_lock=None,
-            id_key="pitfall_id",
-        )
-
-    @property
-    def author_lock_file(self) -> Path:
-        return self.state_root / "_author.lock"
-
-    @property
-    def author_queue_dir(self) -> Path:
-        return self.state_root / "author-queue"
-
-    @property
-    def author_drain_lock_file(self) -> Path:
-        return self.state_root / ".author-drain.lock"
-
-    @property
-    def lead_author_drain_lock_file(self) -> Path:
-        return self.state_root / ".lead-author-drain.lock"
-
-    @property
-    def pending_delivery_dir(self) -> Path:
-        """One record per drain batch that committed but whose push or PR failed: the
-        commit is on a local branch, and the next tick of that lane delivers it before
-        serving anything new."""
-        return self.state_root / "_pending_delivery"
-
-    @property
     def quarantine_dir(self) -> Path:
         """Where `quarantine.preserve_tainted_tree` archives a tainted worktree. Follows
         `worktree_base`, not `state_root`: a copied state dir carries none of this host's
         tainted trees. `AuthorBranch.quarantine_dir` is the same path on the writer's side."""
         return self.worktree_base / QUARANTINE_DIRNAME
-
-    @property
-    def pending_file(self) -> Path:
-        return self.pending_dir / "findings.jsonl"
-
-    @property
-    def findings_lock_file(self) -> Path:
-        """The findings queue's append-role lock (`findings.append_lock`), exposed because the
-        live-run appender (`persist.append_findings`) reaches it off `paths` rather than a
-        channel. The drain-role lock is a separate `QueueChannel` field (#719)."""
-        return self.pending_dir / ".findings.lock"
-
-    @property
-    def findings(self) -> QueueChannel:
-        return QueueChannel(
-            file=self.pending_file,
-            consumed=self.pending_dir / "consumed.jsonl",
-            append_lock=self.findings_lock_file,
-            drain_lock=self.pending_dir / ".lock",
-            id_key="finding_id",
-        )
-
-    @property
-    def questioner_findings_file(self) -> Path:
-        return self.pending_dir / "questioner_findings.jsonl"
-
-    @property
-    def questioner_findings(self) -> QueueChannel:
-        """The second queue channel: `subject: world` rows, questioner-authored.
-
-        Shares `drain_lock` (`_pending/.lock`) with `findings`, so two curators never hold one
-        worktree at once. Its own `append_lock` and `consumed` file, so an appender on one
-        channel never blocks the other."""
-        return QueueChannel(
-            file=self.questioner_findings_file,
-            consumed=self.pending_dir / "questioner_consumed.jsonl",
-            append_lock=self.pending_dir / ".questioner_findings.lock",
-            drain_lock=self.pending_dir / ".lock",
-            id_key="finding_id",
-        )
 
 
 def _env_state_dir() -> Path | None:
@@ -213,10 +111,6 @@ def _env_state_dir() -> Path | None:
     if not raw:
         return None
     return Path(raw).resolve()
-
-
-def learning_state_root() -> Path:
-    return _env_state_dir() or (REPO_ROOT / "defender" / "learning")
 
 
 

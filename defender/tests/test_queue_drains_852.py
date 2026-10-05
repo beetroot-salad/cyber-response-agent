@@ -30,7 +30,8 @@ import pytest
 
 import _drain719 as h
 from _drain719 import drain
-from defender.learning.core import drains, markers
+from defender.learning.core import drains
+from defender.learning.core.state import LEAD_QUEUE_LOCK, Claimed
 from defender.learning.leads import lead_author
 from defender.tests._spec791 import (
     SpecBranch,
@@ -42,6 +43,7 @@ from defender.tests._spec791 import (
     noop_stop_box,
 )
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
+from defender.tests import _state1135
 
 
 # F-02 — the corpus commit is pathspec-wide; attribution is what bounds it
@@ -88,10 +90,10 @@ def test_852_f02_a_forward_bad_lesson_is_not_swept_into_a_mixed_batch_commit(tmp
     the corpus is restored (both files gone, nothing committed) -> the batch is bumped and
     stays queued for the next tick."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     for run_id in ("run-G", "run-B"):
         h.write_source_refs(paths, run_id)
-    h.seed(ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
+    h.seed(paths, ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
 
     def curate(rows, batch_id, cfg):
         _write_corpus_file(cfg.corpus_dir, "vouched", "source_finding_ids", ["run-G/0"])
@@ -114,9 +116,9 @@ def test_852_f02_a_forward_bad_lesson_is_not_swept_into_a_mixed_batch_commit(tmp
     assert not (cfg.corpus_dir / "vouched.md").exists(), \
         "the tick faulted but its batch-mate's edit was not restored away with it"
     assert _commits(paths.repo_root) == 1, "a commit landed on a faulted tick"
-    assert sorted(h.pending_by_id(ch)) == ["run-B/0", "run-G/0"], \
+    assert sorted(h.pending_by_id(paths, ch)) == ["run-B/0", "run-G/0"], \
         "the batch left the queue on a tick that committed nothing"
-    assert h.attempts_of(ch, "run-G/0") == 1
+    assert h.attempts_of(paths, ch, "run-G/0") == 1
 
 
 def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
@@ -136,10 +138,10 @@ def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
     `tests/test_773_gap_ledger.py`, against the drain-computed `consumed_forward_bad`/
     `deferred` groups."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     for run_id in ("run-G", "run-B"):
         h.write_source_refs(paths, run_id)
-    h.seed(ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
+    h.seed(paths, ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
 
     def curate(rows, batch_id, cfg):
         _write_corpus_file(cfg.corpus_dir, "vouched", "source_finding_ids", ["run-G/0"])
@@ -153,9 +155,9 @@ def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
     assert drain.run_batch(cfg=cfg) == 0
 
     assert _head_files(paths.repo_root) == ["defender/lessons/vouched.md"]
-    assert list(h.pending_by_id(ch)) == ["run-B/0"]
-    assert "attempts" not in h.pending_by_id(ch)["run-B/0"]
-    assert "held_reason" not in h.pending_by_id(ch)["run-B/0"], (
+    assert list(h.pending_by_id(paths, ch)) == ["run-B/0"]
+    assert "attempts" not in h.pending_by_id(paths, ch)["run-B/0"]
+    assert "held_reason" not in h.pending_by_id(paths, ch)["run-B/0"], (
         "a row this tick never mentioned was stamped with a hold reason it was never given"
     )
 
@@ -179,10 +181,10 @@ def test_852_f02_a_modified_file_that_claims_a_new_source_still_needs_a_voucher(
     for a reason that has nothing to do with attribution. Checked by deletion: with the gate
     call removed, this test fails."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     for run_id in ("run-G", "run-B"):
         h.write_source_refs(paths, run_id)
-    h.seed(ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
+    h.seed(paths, ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
 
     seeded = h.cfg_for(paths, "findings")
     old = _write_corpus_file(seeded.corpus_dir, "old-fact", "source_finding_ids", ["run-A/0"])
@@ -207,16 +209,23 @@ def test_852_f02_a_modified_file_that_claims_a_new_source_still_needs_a_voucher(
     assert drain.run_batch(cfg=cfg) == 2, "the rejected fold rode in on its batch-mate"
     assert _commits(paths.repo_root) == 2
     assert "run-B/0" not in old.read_text(encoding="utf-8"), "the rejected fold survived"
-    assert sorted(h.pending_by_id(ch)) == ["run-B/0", "run-G/0"]
+    assert sorted(h.pending_by_id(paths, ch)) == ["run-B/0", "run-G/0"]
 
 
 # F-03 — a skip is not a serve
 
 
+def _enqueue(paths, case_id: str, run_dir: Path) -> None:
+    """The curation request the investigation's tail files (`run_common.enqueue_curation`'s own
+    body), through the handle."""
+    _state1135.state_for_paths(paths).enqueue_curation(
+        case_id, {"case_id": case_id, "run_dir": str(run_dir.resolve())})
+
+
 def _queued_run(tmp_path: Path, case_id: str, name: str, paths) -> Path:
     run_dir = tmp_path / "runs" / name
     run_dir.mkdir(parents=True, exist_ok=True)
-    markers.enqueue_case_for_curation(case_id, run_dir, paths)
+    _enqueue(paths, case_id, run_dir)
     return run_dir
 
 
@@ -254,10 +263,10 @@ def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path)
     _queued_run(tmp_path, "case-1", "run-1", paths)
     _queued_run(tmp_path, "case-2", "run-2", paths)
 
-    # The lock file is resolved off `paths` (#952 M5: `paths.lead_pending_dir / ".lock"`),
+    # The lock file is resolved off `paths` (#952 M5: `(paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"`),
     # so the drain and a by-hand `run(run_dir, paths=p)` contend on the SAME file for the
     # same `paths` — `lead_author.QUEUE_LOCK_FILE` is that path's DEFAULT_PATHS spelling.
-    queue_lock = paths.lead_pending_dir / ".lock"
+    queue_lock = (paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"
     queue_lock.parent.mkdir(parents=True, exist_ok=True)
     holder = queue_lock.open("a+")
     try:
@@ -270,14 +279,14 @@ def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path)
     assert rc == 0
     assert author_markers(paths) == ["case-1.json", "case-2.json"], \
         "a request nothing served was deleted from the queue"
-    assert list((paths.author_queue_dir / "inflight").glob("*.json")) == [], \
+    assert list((paths.state_root / "author-queue" / "inflight").glob("*.json")) == [], \
         "a claimed request was left stranded in inflight/ by a pass that served nothing"
-    assert not (paths.author_queue_dir / "failed").exists(), \
+    assert not (paths.state_root / "author-queue" / "failed").exists(), \
         "a skip was dead-lettered — it is not a failure of the request"
     for name in ("case-1.json", "case-2.json"):
-        assert "attempts" not in marker_body(paths.author_queue_dir / name), \
+        assert "attempts" not in marker_body(paths.state_root / "author-queue" / name), \
             "a skip spent one of the request's three retries"
-    assert drains._has_lead_author_work(paths) is True, \
+    assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is True, \
         "the queue went quiet on work that is still queued"
 
 
@@ -293,10 +302,10 @@ def test_852_f03_the_skip_rc_is_distinct_from_a_completed_serve(tmp_path: Path):
     run_dir.mkdir(parents=True)
     paths = loop_paths(tmp_path)
 
-    # Held at the file `run(run_dir, paths=paths)` locks — `paths.lead_pending_dir / ".lock"`
+    # Held at the file `run(run_dir, paths=paths)` locks — `(paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"`
     # (#952 M5) — not at the DEFAULT_PATHS constant, which is a different file for a
     # `LoopPaths` rooted under `tmp_path`.
-    queue_lock = paths.lead_pending_dir / ".lock"
+    queue_lock = (paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"
     queue_lock.parent.mkdir(parents=True, exist_ok=True)
     holder = queue_lock.open("a+")
     try:
@@ -335,18 +344,18 @@ def test_852_f04_a_transient_retry_does_not_clobber_a_fresher_request(tmp_path: 
 
     served: list[Path] = []
 
-    def serve(_paths, run_dir, *, box=None, **_kw):
+    def serve(_paths, _state, run_dir, *, box=None, **_kw):
         served.append(run_dir)
         if len(served) == 1:
             # The operator re-investigates the case while the lane is curating it...
-            markers.enqueue_case_for_curation("case-A", second, paths)
+            _enqueue(paths, "case-A", second)
             # ...and the agent spawn then hits the transient the drain retries on.
             raise drains._LeadAuthorRetry("lead-author hit a swallowed transient (rc=None)")
 
     _drain(paths, tmp_path, run_lead_author=serve)
 
     assert author_markers(paths) == ["case-A.json"]
-    body = marker_body(paths.author_queue_dir / "case-A.json")
+    body = marker_body(paths.state_root / "author-queue" / "case-A.json")
     assert Path(body["run_dir"]).resolve() == second.resolve(), (
         "the retry replaced the fresher curation request with the stale run dir — the case "
         "will be re-served off the run the operator already superseded"
@@ -367,23 +376,35 @@ def test_852_f04_requeue_is_create_if_absent_and_leaves_no_staging_file(tmp_path
 
     The staging half is not decoration: the re-queue writes through a temp file so the slot
     goes from absent to fully-written in one step, and a temp file left behind in a directory
-    the drain globs is a marker-shaped object nothing owns."""
-    queue_dir = tmp_path / "author-queue"
-    queue_dir.mkdir()
-    slot = queue_dir / "case-A.json"
+    the drain globs is a marker-shaped object nothing owns.
 
-    assert markers.requeue_marker(slot, {"case_id": "case-A", "run_dir": "/runs/run-1"}) is True
-    assert markers.requeue_marker(slot, {"case_id": "case-A", "run_dir": "/runs/stale"}) is False
-    assert json.loads(slot.read_text())["run_dir"] == "/runs/run-1", \
+    #1135: the primitive is the handle's `requeue` verb over a claim (`markers.requeue_marker`
+    took a bare path and is gone), so the free slot is the one a claim just freed."""
+    state = _state1135.state_over(tmp_path / "state")
+    run_dir = tmp_path / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    state.enqueue_curation("case-A", {"case_id": "case-A", "run_dir": str(run_dir)})
+    [claim] = list(state.claim("case_id"))
+    queue_dir = tmp_path / "state" / "author-queue"
+    slot = queue_dir / "case-A.json"
+    assert not slot.exists(), "the claim left the slot occupied"
+
+    assert state.requeue(claim) is True
+    stale = Claimed(key="case-A", name="case-A.json",
+                    spec={"case_id": "case-A", "run_dir": "/runs/stale"})
+    assert state.requeue(stale) is False
+    assert json.loads(slot.read_text())["run_dir"] == str(run_dir), \
         "the refused re-queue wrote itself in anyway"
-    assert [p.name for p in queue_dir.iterdir()] == ["case-A.json"], \
+    assert {p.name for p in queue_dir.iterdir()} == {"case-A.json", "inflight"}, \
         "the re-queue left its staging file in the queue directory"
+
 
 
 @pytest.mark.parametrize("spec", [{"case_id": "c"}, {"run_id": "r", "attempts": 2}])
 def test_852_f04_a_free_slot_still_takes_the_re_queue(tmp_path: Path, spec: dict):
     """The ordinary case, under both row shapes the queue carries: nothing else landed, so
     the request goes back exactly as it was handed over."""
-    slot = tmp_path / "queue" / "row.json"
-    assert markers.requeue_marker(slot, spec) is True
+    state = _state1135.state_over(tmp_path / "state")
+    slot = tmp_path / "state" / "author-queue" / "row.json"
+    assert state.requeue(Claimed(key="row", name="row.json", spec=spec)) is True
     assert json.loads(slot.read_text()) == spec

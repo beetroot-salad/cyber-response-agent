@@ -36,11 +36,12 @@ from defender.learning.author.verify_forward.checks import (
     CheckContext,
     _run_findings,
 )
+from defender.learning.core.config import LoopPaths
 from defender.learning.leads import lead_author, pitfalls_curator
 from defender.runtime.agent_definition import RunScope, bind
 from defender.runtime.box import BoxResult
 from defender.runtime.tools import _tool_bash, _tool_read_file
-from defender.tests._curator1134 import corpus_view
+from defender.tests._curator1134 import corpus_view, open_state
 from defender.tests._repo import seed_adapter_stubs
 
 
@@ -199,7 +200,6 @@ def _findings_prompt(tmp_path: Path, *, hostile="TRANSCRIPT-BODY", salt="5a" * 1
         "case-1",
         "adversarial",
         runs,
-        tmp_path / "pending",
         tmp_path / "corpus",
         ROOT,
         0,
@@ -285,6 +285,7 @@ def _pitfalls_prompt(
     def call(*, spawn, salt):
         return pitfalls_curator._invoke_pitfalls_agent(
             [{"system": "test", "stderr_digest": hostile}],
+            state=open_state(LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "state")),
             repo_root=tmp_path,
             spawn=spawn,
             salt=salt,

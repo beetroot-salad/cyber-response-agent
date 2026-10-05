@@ -76,6 +76,7 @@ from defender.tests.test_1017_row_schema import (  # noqa: E402
 )
 from defender.tests.test_denial_gather_632 import DENIED_PAIR, _registry  # noqa: E402
 from defender.tests._lead_author_1134 import repo_skills  # noqa: E402
+from defender.tests import _state1135
 
 pytestmark = pytest.mark.e2e
 
@@ -100,7 +101,7 @@ def judge_roots(tmp_path, monkeypatch):
     binding (ruff F811) — the `test_984` idiom. `setenv`, never `setattr`."""
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 DENIED_LEAD = "l-002"
@@ -736,7 +737,8 @@ def _prompt_for_world_b(ep: Path, base: Path) -> str:
     """Drive the REAL episode-grading pass and hand back the prompt the model seam was shown
     for world `b`'s first draw."""
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    J.mod("learning.judge").grade_episode(ep, judge=judge, runs_base=base)
+    J.mod("learning.judge").grade_episode(
+        ep, judge=judge, runs_base=base, state=_state1135.env_state())
     return judge.prompts[judge.agent_ids.index("judge:b:0")]
 
 
@@ -899,7 +901,8 @@ def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, jud
 def _grade(ep: Path, base: Path):
     """The real grading pass over `ep`, through its own seams."""
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    return J.mod("learning.judge").grade_episode(ep, judge=judge, runs_base=base)
+    return J.mod("learning.judge").grade_episode(
+        ep, judge=judge, runs_base=base, state=_state1135.env_state())
 
 
 def test_a_real_denial_in_a_sibling_world_is_that_worlds_refused_ledger_row(tmp_path):

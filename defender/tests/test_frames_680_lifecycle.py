@@ -17,7 +17,6 @@ from types import SimpleNamespace
 
 
 from defender.learning.core.config import StageContext, StageWiring  # noqa: E402
-from defender.learning.author import shared as author_shared
 from defender.learning.core import config
 from defender.runtime.box import BoxResult
 from defender.runtime.tools import _format_bash_result, _tool_bash, _tool_read_file
@@ -268,31 +267,28 @@ def test_revert_lesson_driver_holds_shared_author_lock_and_calls_through(
     tmp_path,
 ):
     """The operator driver still crosses the shared author lock before reverting."""
+    from defender.learning.core.config import LoopPaths
+    from defender.learning.core.state import AUTHOR_DRAIN_LOCK, TRY_ONCE, LearningState
     from defender.learning.ops import revert_lesson
-    from unittest.mock import patch
 
+    paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=tmp_path / "state")
+    paths.state_root.mkdir(parents=True)
     seen = []
 
-    class HeldLock:
-        def __enter__(self):
-            return True
-
-        def __exit__(self, exc_type, exc, traceback):
-            return False
-
-    def fake_lock(path):
-        seen.append(("lock", path))
-        return HeldLock()
-
     def fake_revert(rel, lesson_name):
+        # Observed from a SECOND handle on the same root: the driver holds the lock now.
+        with LearningState.open(paths) as other, other.lock(AUTHOR_DRAIN_LOCK, wait=TRY_ONCE) as taken:
+            seen.append(("lock-held", not taken))
         seen.append(("revert", rel, lesson_name))
         return "https://example.invalid/pr/680"
 
-    paths = SimpleNamespace(author_drain_lock_file=tmp_path / "author-drain.lock")
     branch = SimpleNamespace(revert_lesson_pr=fake_revert)
-    with patch.object(author_shared, "flock_or_skip", fake_lock):
-        assert revert_lesson.revert("bad", branch=branch, paths=paths) == 0
+    with LearningState.open(paths) as state:
+        assert revert_lesson.revert("bad", state=state, branch=branch) == 0
     assert seen == [
-        ("lock", paths.author_drain_lock_file),
+        ("lock-held", True),
         ("revert", "defender/lessons/bad.md", "bad"),
     ]
+    # ...and released again once the driver returns.
+    with LearningState.open(paths) as after, after.lock(AUTHOR_DRAIN_LOCK, wait=TRY_ONCE) as taken:
+        assert taken

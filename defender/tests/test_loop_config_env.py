@@ -34,7 +34,7 @@ def _reads_env(node: ast.AST) -> bool:
 
     Direct reads only — a module-level call to a local helper that reads env inside
     (`state_dir=_env_state_dir()` on DEFAULT_PATHS) is not traced through. That one is a
-    path, not a knob, and `learning_state_root()` is its live accessor."""
+    path, not a knob, and `LearningState.open(paths)` is its live accessor."""
     for sub in ast.walk(node):
         if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name):
             if sub.func.id in _ENV_READERS:

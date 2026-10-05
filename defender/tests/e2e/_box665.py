@@ -440,6 +440,7 @@ def loop_paths(tmp_path: Path):
 
     repo = tmp_path / "repo"
     (repo / "defender").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "state").mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
     return LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
 
 
@@ -450,10 +451,13 @@ def drive_worktree_batch(tmp_path, rec, *, do_work, has_work=None, branch=None,
 
     paths = loop_paths(tmp_path)
     branch = branch or RecordingBranch(tmp_path / "wt", events=rec.events)
-    return _run_worktree_batch(
-        paths, branch, label=label, has_work=has_work or (lambda p: True), do_work=do_work,
-        start_box=rec.start_box, stop_box=rec.stop_box, scrub=rec.scrub, **kw,
-    )
+    from defender.learning.core.state import LearningState
+
+    with LearningState.open(paths) as state:
+        return _run_worktree_batch(
+            paths, state, branch, label=label, has_work=has_work or (lambda p: True),
+            do_work=do_work, start_box=rec.start_box, stop_box=rec.stop_box, scrub=rec.scrub, **kw,
+        )
 
 
 def _path_matches(value, needle: str) -> bool:

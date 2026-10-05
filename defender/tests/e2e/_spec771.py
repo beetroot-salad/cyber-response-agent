@@ -72,7 +72,7 @@ from defender.tests.e2e._box665 import (  # noqa: F401
     _cp,
     requires_live_box,
 )
-from defender.tests._docker import daemon_reachable, is_dood
+from defender.tests._docker import daemon_reachable, docker_runtimes, is_dood
 
 DEFENDER = Path(__file__).resolve().parents[2]
 REPO_ROOT = DEFENDER.parent
@@ -183,13 +183,9 @@ def ban_dependency_files() -> dict[str, Path]:
 # --oci-seccomp". That state is exactly what the ban fault exists to report, and skipping on
 # it would let the suite go green on a host where the ban is not in force.
 def _runtime_registered() -> bool:
-    probe = subprocess.run(
-        ["docker", "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}} {{end}}"],
-        capture_output=True, text=True, encoding="utf-8", timeout=30,
-    )
-    if probe.returncode != 0:
-        return False
-    return box_mod.BoxSpec.from_env(os.environ).runtime in set(probe.stdout.split())
+    # The shared, once-per-process Runtimes probe: a daemon that answers non-zero registers
+    # nothing (False); one that cannot be asked raises, as this probe always has.
+    return box_mod.BoxSpec.from_env(os.environ).runtime in docker_runtimes()
 
 
 def _real_box_skip_reason() -> str | None:

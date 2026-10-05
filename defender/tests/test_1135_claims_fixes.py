@@ -1,0 +1,172 @@
+"""#1135 claims-adversary findings, each pinned by a test that fails without its fix."""
+
+from __future__ import annotations
+
+from defender.learning.core.state import FINDINGS, LearningState
+from defender.tests._drain719 import make_paths
+
+
+def test_rotate_keeps_a_keyless_row_appended_after_the_batch_read(tmp_path):
+    """A keyless row the batch handled leaves the queue; a different keyless row appended after
+    the batch's read stays (it carries no id to have been "handled" by)."""
+    paths = make_paths(tmp_path)
+    state = LearningState.open(paths)
+    state.append(FINDINGS, [{"x": 1}])
+    state.append(FINDINGS, [{"x": 2}, {"finding_id": "k"}])
+
+    state.rotate(FINDINGS, [], [{"x": 1}], None, drop=[{"x": 1}])
+
+    rows, _bad = state.rows_report(FINDINGS)
+    assert rows == [{"x": 2}, {"finding_id": "k"}]
+
+
+def test_rotate_keeps_an_empty_keyless_row_and_a_row_that_is_only_a_subset(tmp_path):
+    """A dropped keyless row removes only the queued row equal to it: not an empty row, and not a
+    different row whose fields happen to be a subset."""
+    paths = make_paths(tmp_path)
+    state = LearningState.open(paths)
+    state.append(FINDINGS, [{"a": 1, "b": 2}])
+    state.append(FINDINGS, [{}, {"a": 1}])
+
+    state.rotate(FINDINGS, [], [{"a": 1, "b": 2, "consumed_category": "consumed_retired"}], None,
+                 drop=[{"a": 1, "b": 2}])
+
+    rows, _bad = state.rows_report(FINDINGS)
+    assert rows == [{}, {"a": 1}]
+
+
+def test_read_window_reports_a_read_time_timeout_instead_of_a_busy_channel(tmp_path):
+    """Only the lock's own deadline means "an appender holds it"; a TimeoutError out of the read
+    inside the window is an ordinary I/O fault and must reach the caller."""
+    import pytest
+
+    paths = make_paths(tmp_path)
+    state = LearningState.open(paths)
+
+    class SlowRead(LearningState):
+        def rows_report(self, channel):
+            raise TimeoutError("read timed out")
+
+    slow = SlowRead.__new__(SlowRead)
+    slow.__dict__.update(state.__dict__)  # shares the real handle's descriptor
+    with pytest.raises(TimeoutError, match="read timed out"):
+        slow.read_window(FINDINGS, timeout=1)
+
+
+def test_releasing_a_claim_or_a_delivery_survives_an_ordinary_unlink_failure(tmp_path, monkeypatch):
+    """`done` and `delivered` are best-effort, as the unlinks they replaced were: an ordinary
+    failure leaves the record for the next pass and does not abort the apply or the delivery."""
+    import errno
+
+    from defender.learning.core.state import PendingDelivery
+
+    paths = make_paths(tmp_path)
+    state = LearningState.open(paths)
+    (tmp_path / "r").mkdir()
+    state.enqueue_curation("case-1", {"case_id": "case-1", "run_dir": str((tmp_path / "r").resolve())})
+    [claim] = list(state.claim("case_id"))
+
+    def denied(self, name):
+        raise PermissionError(errno.EACCES, "denied")
+
+    monkeypatch.setattr(type(state._held), "unlink", denied)  # lint-monkeypatch: ok — the core's unlink has no seam; an ordinary EACCES cannot be planted as root
+    state.done(claim)
+    state.delivered(PendingDelivery("a-b1", "a/b1", "b1"))
+
+
+# ---------------------------------------------------------------------------------------------
+# #1199 review: dissolved, not patched
+# ---------------------------------------------------------------------------------------------
+
+
+def test_rotate_drops_a_keyless_row_that_already_carried_attempts(tmp_path):
+    """A keyless row is dropped by its content as the batch read it, never by guessing which of a
+    stamped copy's fields were stamps: a row that arrived carrying `attempts` (an operator
+    re-queuing a flat dead letter) leaves like any other."""
+    paths = make_paths(tmp_path)
+    state = LearningState.open(paths)
+    read = [{"x": 1, "attempts": 2}, {"y": 1}]
+    state.append(FINDINGS, read)
+
+    state.rotate(FINDINGS, [], [{**r, "consumed_category": "consumed_retired"} for r in read],
+                 None, drop=read)
+
+    rows, _bad = state.rows_report(FINDINGS)
+    assert rows == []
+
+
+def test_a_refusal_is_not_an_exception_so_no_broad_arm_absorbs_it():
+    """`except Exception` never catches a refusal: only an arm that names it does."""
+    from defender.learning.core.state import StateRefused
+
+    assert issubclass(StateRefused, BaseException)
+    assert not issubclass(StateRefused, Exception)
+
+
+def _curator_world(tmp_path):
+    paths = make_paths(tmp_path)
+    return paths, LearningState.open(paths)
+
+
+def test_a_refusal_met_recording_a_contained_curator_fault_carries_no_displaced_fault(tmp_path):
+    """The curator's own fault is contained, not displaced: a refusal met while recording it is
+    raised outside the containing arm, so the stage runner has no `...it displaced` to report."""
+    import os
+
+    import pytest
+
+    from defender.learning.core import drains
+    from defender.learning.core.state import StateRefused
+
+    paths, state = _curator_world(tmp_path)
+    outside = tmp_path / "outside.jsonl"
+    outside.write_text("", encoding="utf-8")
+
+    def trigger_author(*_a, **_k):
+        os.symlink(outside, paths.state_root / "_pending" / "findings.stuck.jsonl")
+        raise ValueError("the curator failed")
+
+    (paths.state_root / "_pending").mkdir(exist_ok=True)
+    with pytest.raises(StateRefused) as raised:
+        drains._drain_one_curator(paths, state, trigger_author, FINDINGS,
+                                  "LEARNING_AUTHOR_THRESHOLD", "author", "pending", box=None)
+    assert raised.value.__context__ is None
+    assert outside.read_text(encoding="utf-8") == ""
+
+
+def test_an_ordinary_failure_recording_a_contained_curator_fault_does_not_escape(tmp_path, caplog):
+    """The containing frame must not raise on a non-retiring fault, the recording's own included:
+    an ordinary I/O failure while recording is logged, and the sibling curator still gets its turn."""
+    import errno
+    import logging
+
+    from defender.learning.core import drains
+
+    paths, state = _curator_world(tmp_path)
+
+    class FullDisk(LearningState):
+        def stuck_append(self, channel, record):
+            raise OSError(errno.ENOSPC, "no space left")
+
+    full = FullDisk.__new__(FullDisk)
+    full.__dict__.update(state.__dict__)  # shares the real handle's descriptor
+
+    def trigger_author(*_a, **_k):
+        raise ValueError("the curator failed")
+
+    caplog.set_level(logging.ERROR)
+    drains._drain_one_curator(paths, full, trigger_author, FINDINGS,
+                              "LEARNING_AUTHOR_THRESHOLD", "author", "pending", box=None)
+    assert any("NOT written" in r.getMessage() for r in caplog.records)
+
+
+def test_a_lane_is_named_only_by_its_member(tmp_path):
+    """`stage_dir` takes a `DrainLabel` member; the member's value as a string is not a lane."""
+    import pytest
+
+    from defender.learning.core.config import AUTHOR_DRAIN_LABEL
+
+    state = LearningState.open(make_paths(tmp_path))
+    assert state.stage_dir(AUTHOR_DRAIN_LABEL).name == "_pending"
+    with pytest.raises(ValueError, match="unknown drain lane"):
+        state.stage_dir("author_drain")  # type: ignore[arg-type]

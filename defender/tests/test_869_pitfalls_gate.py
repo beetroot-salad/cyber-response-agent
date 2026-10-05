@@ -18,6 +18,7 @@ from defender.tests._claim1175 import claim_git
 from defender import _git
 from defender.learning.core import persist
 from defender.learning.core.config import LoopPaths
+from defender.learning.core.state import LearningState
 from defender.learning.leads import pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.learning.leads.path_validation import _is_in_scope
@@ -163,8 +164,10 @@ def test_a_declared_system_with_no_skill_md_is_admitted(tmp_path, monkeypatch, c
     assert not marker_file(repo, "ticket").exists()
 
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    paths.state_root.mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
     persist.append_pitfalls(
-        [pitfall_row("r:l-000:0", "ticket"), pitfall_row("r:l-001:0", "ticket")], paths=paths,
+        [pitfall_row("r:l-000:0", "ticket"), pitfall_row("r:l-001:0", "ticket")],
+        state=LearningState.open(paths),
     )
     spawn = Spawn(lambda root: write(
         marker_file(root, "ticket"), "# ticket\n## Common pitfalls\n- use the key, not the id\n",
@@ -175,7 +178,7 @@ def test_a_declared_system_with_no_skill_md_is_admitted(tmp_path, monkeypatch, c
     assert spawn.systems_seen == ["ticket"]
     assert spawn.handoffs[0]["path"] == "defender/skills/ticket/execution.md"
     assert "defender/skills/ticket/execution.md" in head_files(repo)
-    assert persist.read_pitfalls(paths) == []
+    assert persist.read_pitfalls(LearningState.open(paths)) == []
     assert not skill_md(repo, "ticket").exists()
     assert "execution.md pitfalls" in git(repo, "log", "--oneline", "-1").stdout
     assert loop_log(capsys)

@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import hashlib
 import itertools
-import json
 import logging
 import uuid
 from collections.abc import Callable
@@ -53,9 +52,6 @@ from defender._io import (
     Bound,
     Held,
     NotPlainEntry,
-    append_jsonl,
-    read_jsonl_rows,
-    read_jsonl_rows_report,
 )
 from defender._untrusted import wrap
 from defender.learning._prompt import stage_user_message
@@ -64,11 +60,19 @@ from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
 from defender.learning.author.verify_forward.checks import CheckContext
 from defender.learning.author.verify_forward.engine import _run_verify_pydantic
 from defender.learning.author.verify_forward.shared import VerdictError
-from defender.learning.core import config, persist
+from defender.learning.core import config
 from defender.learning.core.config import (
     FatalConfigError,
-    QueueChannel,
     provenance_field,
+)
+from defender.learning.core.state import (
+    REPO_LOCK,
+    TRY_ONCE,
+    Channel,
+    LearningState,
+    StateRefused,
+    canonical_row,
+    retirement_stamp,
 )
 from defender._tree_listing import entry_kind
 from defender.learning.core.lane_trees import TreeFor, kind_at
@@ -77,8 +81,6 @@ AuthorError = author_shared.AuthorError
 
 _logger = logging.getLogger(__name__)
 
-#: The forward-check gap ledger, under the host-side pending dir.
-GAP_LEDGER_NAME = "findings.forward_bad.jsonl"
 #: Reasoning prefix on the BAD recorded for a pair whose check failed twice.
 ERROR_PREFIX = "forward_check_error: "
 #: Header of the commit-message block naming terminal findings. Advisory; the gap ledger is
@@ -210,33 +212,6 @@ def _assert_no_unmerged(cfg: CorpusAuthorConfig) -> None:
 LOCK_ORDER: tuple[str, ...] = ("drain_lock", "repo_lock", "append_lock")
 
 
-def graveyard_file(channel: QueueChannel) -> Path:
-    """The channel's retirement record. Advisory: the queue rewrite is authoritative. Read only
-    by the queue page (`frontend/serialize_queues.py`); the drains never read it back."""
-    return channel.file.with_suffix(".deadletter.jsonl")
-
-
-def retirement_stamp() -> dict[str, str]:
-    """@owns retired_at — when a graveyard record was written, on every writer's record.
-
-    Shared by every dead-letter writer (`_bump_rows`, `_retire_unkeyable`, the pitfalls
-    curator's `_graveyard_dropped_rows`); the queue page sorts and places records by it."""
-    return {"retired_at": now_iso()}
-
-
-def stuck_report_file(channel: QueueChannel) -> Path:
-    """The channel's stuck-row record: the visible trace of a fault outside `RETIRE_SET`, whose
-    row stays queued. One record per non-retiring tick, naming the fault class, the stalled
-    rows and how many consecutive ticks they have been stuck.
-
-    A row can be both graveyarded and queued: `_retire_unkeyable` and `retire` append dead
-    letters before the rotation that removes the rows, releasing the append lock in between, so
-    a rotation that times out against an appender (or a crash) in that window leaves the row in
-    both, plus a duplicate dead letter each later stuck tick. Keyless rows are named by a
-    content fingerprint (`_stuck_row_ids`)."""
-    return channel.file.with_suffix(".stuck.jsonl")
-
-
 @model(frozen=True)
 class RetireOutcome:
     #: id -> the attempt count the row now carries, for every row in the batch.
@@ -263,8 +238,9 @@ class DrainOutcome:
 
 
 def retire(
+    state: LearningState,
     *,
-    channel: QueueChannel,
+    channel: Channel,
     batch_ids: list[str],
     reason: str,
     max_attempts: int,
@@ -292,28 +268,22 @@ def retire(
     repo lock (the corpus drain; the pitfalls leg via `PitfallsDisposition.apply`): that lock
     serialises every channel, so an unbounded wait would let one wedged appender stall them
     all. Expiry raises `TimeoutError`; the batch is not bumped and the tick surfaces as stuck."""
-    ids = {str(i) for i in batch_ids}
     key = channel.id_key
 
-    with persist.queue_lock(channel.append_lock, timeout_seconds=timeout_seconds):
-        named = [
-            row for row in read_jsonl_rows(channel.file)
-            if isinstance(row.get(key), str) and row[key] in ids
-        ]
-        bumped = _bump_rows(
-            channel, named, counter_key=counter_key, max_attempts=max_attempts, reason=reason,
-        )
+    bumped = state.retire_rows(
+        channel, batch_ids,
+        lambda named: _bump_rows(
+            state, channel, named, counter_key=counter_key, max_attempts=max_attempts,
+            reason=reason,
+        ),
+        timeout=timeout_seconds,
+    )
     survivors, retired = bumped.survivors, bumped.retired
 
-    persist.rotate_queue_locked(
-        pending_file=channel.file,
-        consumed_file=channel.consumed,
-        lock_file=channel.append_lock,
-        id_key=key,
-        held=survivors,
-        consumed=[{**rec, "consumed_category": "consumed_retired"} for rec in retired],
-        commit_sha=None,
-        timeout_seconds=timeout_seconds,
+    state.rotate(
+        channel, survivors,
+        [{**rec, "consumed_category": "consumed_retired"} for rec in retired],
+        None, timeout=timeout_seconds,
     )
     return RetireOutcome(
         bumped={rec[key]: rec[counter_key] for rec in [*survivors, *retired]},
@@ -330,7 +300,7 @@ class _Bumped:
 
 
 def _bump_rows(
-    channel: QueueChannel, rows: list[dict], *, counter_key: str, max_attempts: int, reason: str,
+    state: LearningState, channel: Channel, rows: list[dict], *, counter_key: str, max_attempts: int, reason: str,
 ) -> _Bumped:
     """Bump `counter_key` on every row and partition at the ceiling, graveyarding the rows that
     crossed it. Shared by fault retirement (`attempts`) and the deferral fold (`deferrals`)."""
@@ -342,8 +312,8 @@ def _bump_rows(
         rec = {**row, counter_key: count}
         (retired if count >= max_attempts else survivors).append(rec)
     if retired:
-        append_jsonl(  # lint-unguarded-tree-write: ok — learning_queue sidecar, host-side, outside every box mount
-            graveyard_file(channel),
+        state.deadletter(
+            channel,
             [
                 {
                     key: rec[key],
@@ -352,8 +322,9 @@ def _bump_rows(
                     "attempts": rec[counter_key],
                     "deadletter_reason": reason,
                     **retirement_stamp(),
-                    # Nested rather than spread, so a graveyard entry has one shape on every
-                    # channel and is readable without knowing its queue.
+                    # Nested rather than spread, so a `_bump_rows` entry has one shape on every
+                    # channel and is readable without knowing its queue (`_retire_unkeyable`
+                    # spreads its row flat; the queue page reads both shapes).
                     "row": {k: v for k, v in rec.items() if k != counter_key},
                 }
                 for rec in retired
@@ -382,55 +353,43 @@ def run_batch(
     log = channel_logger(cfg)
     channel = cfg.channel
 
-    drain_fh = None
-    if channel.drain_lock is not None:
-        drain_fh = author_shared.acquire_flock(channel.drain_lock)
-        if drain_fh is None:
+    state = cfg.state
+    with contextlib.ExitStack() as locks:
+        if channel.drain_role is not None and not locks.enter_context(
+                state.lock(channel.drain_role, wait=TRY_ONCE)):
             log.info("drain lock held by another process — skipping this tick")
             return 0
-    try:
         try:
-            repo_fh = author_shared.acquire_repo_lock(
-                cfg.repo_lock_file, timeout_seconds=cfg.repo_lock_wait_seconds
-            )
+            locks.enter_context(state.lock(REPO_LOCK, wait=cfg.repo_lock_wait_seconds))
         except TimeoutError as e:
             log.warning(f"repo lock unavailable: {e}; queue intact")
             return 0
         try:
+            author_shared.assert_clean_corpus_dir(
+                cfg.repo_root, cfg.corpus_dir, cfg.corpus_dir_rel, corpus=cfg.corpus,
+            )
+        except AuthorError as e:
+            log.critical(f"{e}")
+            # An already-dirty corpus at tick start is recorded as stuck, not skipped
+            # silently.
             try:
-                author_shared.assert_clean_corpus_dir(
-                    cfg.repo_root, cfg.corpus_dir, cfg.corpus_dir_rel, corpus=cfg.corpus,
-                )
-            except AuthorError as e:
-                log.critical(f"{e}")
-                # An already-dirty corpus at tick start is recorded as stuck, not skipped
-                # silently.
-                try:
-                    _record_stuck(channel, e, [])
-                except Exception as unrecorded:  # noqa: BLE001 — never replaces `e`
-                    log.error(f"stuck record NOT written: {unrecorded!r} (the fault itself follows)")
-                return 2
-            return _tick(cfg=cfg, hold_committed=hold_committed, log=log)
-        finally:
-            author_shared.release_repo_lock(repo_fh)
-    finally:
-        author_shared.release_flock(drain_fh)
+                _record_stuck(state, channel, e, [])
+            except Exception as unrecorded:  # noqa: BLE001 — never replaces `e`
+                log.error(f"stuck record NOT written: {unrecorded!r} (the fault itself follows)")
+            return 2
+        return _tick(cfg=cfg, hold_committed=hold_committed, log=log)
 
 
 def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
     channel = cfg.channel
     key = channel.id_key
 
-    append_fh = author_shared.acquire_flock_within(
-        channel.append_lock, timeout_seconds=cfg.repo_lock_wait_seconds
-    )
-    if append_fh is None:
+    state = cfg.state
+    window = state.read_window(channel, timeout=cfg.repo_lock_wait_seconds)
+    if window is None:
         log.info("append lock held by an appender past the deadline — skipping this tick")
         return 0
-    try:
-        batch, unreadable = read_jsonl_rows_report(channel.file)
-    finally:
-        author_shared.release_flock(append_fh)
+    batch, unreadable = window
     if not batch and not unreadable:
         log.info("queue empty — nothing to author")
         return 0
@@ -456,7 +415,7 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
     # `TimeoutError` (outside `RETIRE_SET`), which must still leave a stuck record.
     stuck_rows = unkeyable
     try:
-        _retire_unkeyable(channel, unkeyable, log, cfg.repo_lock_wait_seconds)
+        _retire_unkeyable(state, channel, unkeyable, log, cfg.repo_lock_wait_seconds)
         # The gate reads per-row fields the queue's own key check cannot vouch for
         # (`run_id`, `direction`), so it is a live source of non-retiring faults.
         stuck_rows = keyed
@@ -481,13 +440,14 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
             to_author=to_author,
         )
     except BaseException as e:
-        if not isinstance(e, RETIRE_SET):
+        if not isinstance(e, (*RETIRE_SET, StateRefused)):
             # The recorder must never replace the fault it records (a full disk would surface
             # the writer's `OSError` instead). `Exception`, not `BaseException`, so an
             # interrupt mid-record still leaves at once. Logged rather than swallowed: the
-            # record is a stuck row's only external trace.
+            # record is a stuck row's only external trace. A refusal writes nothing at all: a
+            # planted entry stops the tick, and nothing is recorded after it.
             try:
-                _record_stuck(channel, e, stuck_rows)
+                _record_stuck(state, channel, e, stuck_rows)
             except Exception as unrecorded:  # noqa: BLE001 — see above; never replaces `e`
                 log.error(f"stuck record NOT written: {unrecorded!r} (the fault itself follows)")
         raise
@@ -882,6 +842,7 @@ def _handle_retire(
     channel = cfg.channel
     log.critical(f"{e}")
     outcome = retire(
+        cfg.state,
         channel=channel,
         batch_ids=[row[key] for row in to_author],
         reason=str(e),
@@ -894,7 +855,7 @@ def _handle_retire(
     survivors = [row for row in to_author if row[key] not in outcome.retired]
     if survivors:
         try:
-            _record_stuck(channel, e, survivors)
+            _record_stuck(cfg.state, channel, e, survivors)
         except Exception as unrecorded:  # noqa: BLE001 — never replaces `e`
             log.error(f"stuck record NOT written: {unrecorded!r} (the fault itself follows)")
     return 2
@@ -908,7 +869,7 @@ def _fold_deferrals(
 
     @owns deferrals — the one function that increments a queued row's `deferrals` counter."""
     bumped = _bump_rows(
-        cfg.channel, [all_rows[fid] for fid in sorted(deferred_ids)],
+        cfg.state, cfg.channel, [all_rows[fid] for fid in sorted(deferred_ids)],
         counter_key="deferrals", max_attempts=cfg.max_attempts, reason=DEFERRED_CEILING_REASON,
     )
     return bumped.survivors, [
@@ -958,21 +919,18 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
 
     deferred_held, deferred_consumed = _fold_deferrals(cfg, deferred_ids, all_rows)
 
-    persist.rotate_queue_locked(
-        pending_file=channel.file,
-        consumed_file=channel.consumed,
-        lock_file=channel.append_lock,
-        id_key=key,
-        held=[*held, *_flatten(cfg.buckets, bucket_held), *held_committed, *deferred_held],
-        consumed=[
+    cfg.state.rotate(
+        channel,
+        [*held, *_flatten(cfg.buckets, bucket_held), *held_committed, *deferred_held],
+        [
             *consumed_pre,
             *rotated_committed,
             *_flatten(cfg.buckets, bucket_consumed),
             *terminal_rows,
             *deferred_consumed,
         ],
-        commit_sha=commit_sha,
-        timeout_seconds=cfg.repo_lock_wait_seconds,
+        commit_sha,
+        timeout=cfg.repo_lock_wait_seconds,
     )
     if cfg.post_rotate is not None:
         cfg.post_rotate(
@@ -1084,9 +1042,7 @@ def _append_gap_record(
         ],
         "recorded_at": now_iso(),
     }
-    append_jsonl(  # lint-unguarded-tree-write: ok — learning_queue sidecar, host-side, outside every box mount
-        cfg.pending_dir / GAP_LEDGER_NAME, [record],
-    )
+    cfg.state.gap_record(record)
 
 
 def _flatten(buckets: tuple[BucketSpec, ...], rows: dict[str, list[dict]]) -> list[dict]:
@@ -1230,7 +1186,6 @@ def _attempt_pair(
         source_id=source_id,
         direction=str(row.get("direction") or "adversarial"),
         runs_dir=cfg.runs_dir,
-        pending=cfg.channel.file,
         corpus_dir=cfg.corpus_dir,
         repo_root=cfg.repo_root,
         check_index=idx,
@@ -1277,14 +1232,14 @@ def build_repair_user_prompt(
 
 
 def _retire_unkeyable(
-    channel: QueueChannel, rows: list[dict], log, timeout_seconds: int
+    state: LearningState, channel: Channel, rows: list[dict], log, timeout_seconds: int
 ) -> None:
     """Retire rows with no id under the channel's key at once, on their own rotation; their
     well-formed batch-mates are authored this tick.
 
-    Not left to the closing rotation: a keyless row can't be matched by id, so that rotation
-    would remove it via `None` in the processed set — swallowing any keyless row appended
-    meanwhile, with no graveyard entry — and it never runs on a retiring or stuck tick.
+    Not left to the closing rotation, which never runs on a retiring or stuck tick. A keyless
+    row can't be matched by id, so this rotation names the rows as read (`drop`) and `rotate`
+    removes exactly those, keeping any other keyless row appended meanwhile.
 
     The record is flat (row content at top level, not nested under `row` as `retire` writes
     it), since there is no id to reference; consumers must branch on the presence of `row`."""
@@ -1292,20 +1247,15 @@ def _retire_unkeyable(
         return
     reason = f"row carries no value under {channel.id_key!r}"
     log.warning(f"{len(rows)} unkeyable row(s) retired: {reason}")
-    append_jsonl(  # lint-unguarded-tree-write: ok — learning_queue sidecar, host-side, outside every box mount
-        graveyard_file(channel),
+    state.deadletter(
+        channel,
         [{**row, "attempts": int(row.get("attempts") or 0) + 1,
           "deadletter_reason": reason, **retirement_stamp()} for row in rows],
     )
-    persist.rotate_queue_locked(
-        pending_file=channel.file,
-        consumed_file=channel.consumed,
-        lock_file=channel.append_lock,
-        id_key=channel.id_key,
-        held=[],
-        consumed=[{**row, "consumed_category": "consumed_retired"} for row in rows],
-        commit_sha=None,
-        timeout_seconds=timeout_seconds,
+    state.rotate(
+        channel, [],
+        [{**row, "consumed_category": "consumed_retired"} for row in rows],
+        None, drop=rows, timeout=timeout_seconds,
     )
 
 
@@ -1318,7 +1268,7 @@ def _row_id(row: dict, key: str) -> str | None:
     return rid if isinstance(rid, str) and rid else None
 
 
-def _stuck_row_ids(channel: QueueChannel, rows: list[dict]) -> list[str]:
+def _stuck_row_ids(channel: Channel, rows: list[dict]) -> list[str]:
     """@owns row_ids — how a stuck record names the rows a tick is stuck on.
 
     A row's own id where it has one; otherwise a prefixed fingerprint of its canonical JSON,
@@ -1330,42 +1280,38 @@ def _stuck_row_ids(channel: QueueChannel, rows: list[dict]) -> list[str]:
         if rid is not None:
             named.append(rid)
             continue
-        digest = hashlib.sha256(
-            json.dumps(row, sort_keys=True, default=str).encode("utf-8")
-        ).hexdigest()
+        digest = hashlib.sha256(canonical_row(row).encode("utf-8")).hexdigest()
         named.append(f"unkeyed:{digest[:16]}")
     return sorted(named)
 
 
-def record_stuck(channel: QueueChannel, exc: BaseException, rows: list[dict]) -> None:
+def record_stuck(
+    state: LearningState, channel: Channel, exc: BaseException, rows: list[dict],
+) -> None:
     """Record this fault on the channel's stuck report (the public entry point, used by
     `drains._drain_one_curator`)."""
-    _record_stuck(channel, exc, rows)
+    _record_stuck(state, channel, exc, rows)
 
 
-def stuck_record_count(channel: QueueChannel) -> int:
-    """How many records the channel's stuck report holds right now.
-
-    Lets a second frame ask whether this tick's fault is already recorded: `_record_stuck`
-    folds `consecutive_ticks` only when fault class and row ids both match, so two records per
-    tick with different row sets would reset the count to 1 forever. Asked of the file rather
-    than marked on the exception, because a raiser may reuse one exception instance across
-    ticks.
-    """
-    path = stuck_report_file(channel)
-    return len(read_jsonl_rows(path)) if path.is_file() else 0
-
-
-def _record_stuck(channel: QueueChannel, exc: BaseException, rows: list[dict]) -> None:
+def _record_stuck(
+    state: LearningState, channel: Channel, exc: BaseException, rows: list[dict],
+) -> None:
     """@owns recorded_at — the operator signal for a stuck tick, and when it was written.
+
+    The stuck report is the visible trace of a fault outside `RETIRE_SET`, whose row stays
+    queued: one record per non-retiring tick, naming the fault class, the stalled rows and how
+    many consecutive ticks they have been stuck. A row can be both graveyarded and queued:
+    `_retire_unkeyable` and `retire` append dead letters before the rotation that removes the
+    rows, releasing the append lock in between, so a rotation that times out against an
+    appender (or a crash) in that window leaves the row in both, plus a duplicate dead letter
+    each later stuck tick. Keyless rows are named by a content fingerprint (`_stuck_row_ids`).
 
     The file is append-only and never cleared, so the stamp is what lets the queue page say
     "last faulted at". The count is per tick, not per row: a non-retiring row must stay
     byte-identical, so the last record is read back instead."""
     fault_class = type(exc).__name__
     ids = _stuck_row_ids(channel, rows)
-    path = stuck_report_file(channel)
-    previous = read_jsonl_rows(path)
+    previous = state.stuck_rows(channel)
     consecutive = 1
     # An empty id list is a row set too: the faulting phase had no rows in flight (e.g. the
     # gate held the whole batch). Consecutive such ticks with one fault class are the same
@@ -1375,16 +1321,13 @@ def _record_stuck(channel: QueueChannel, exc: BaseException, rows: list[dict]) -
         same_ids = sorted(str(i) for i in (last.get("row_ids") or [])) == ids
         if last.get("fault_class") == fault_class and same_ids:
             consecutive = int(last.get("consecutive_ticks") or 0) + 1
-    append_jsonl(  # lint-unguarded-tree-write: ok — learning_queue sidecar, host-side, outside every box mount
-        path,
-        [{
-            "fault_class": fault_class,
-            "row_ids": ids,
-            "consecutive_ticks": consecutive,
-            "reason": str(exc),
-            "recorded_at": now_iso(),
-        }],
-    )
+    state.stuck_append(channel, {
+        "fault_class": fault_class,
+        "row_ids": ids,
+        "consecutive_ticks": consecutive,
+        "reason": str(exc),
+        "recorded_at": now_iso(),
+    })
 
 
 def _snapshot_corpus(

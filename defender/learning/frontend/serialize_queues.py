@@ -21,21 +21,24 @@ from __future__ import annotations
 import datetime as _dt
 from collections.abc import Callable
 from defender._model import model
-from pathlib import Path
 
 from defender._clock import z_seconds
-from defender._io import (
-    TEXT_READ_ERRORS,
-    load_json_artifact,
-    read_jsonl_rows_report,
-    read_text_utf8,
-)
-from defender.learning.author import drain
-from defender.learning.core.config import LoopPaths, QueueChannel, loop_paths
-from defender.learning.core.markers import FAILED_MARKER_DIRNAME
+from pathlib import Path
+
+from defender._io import TEXT_READ_ERRORS, load_json_artifact, read_text_utf8
+from defender.learning.core.config import LoopPaths
 from defender.learning.core.quarantine import held_archives, quarantine_cap
 from defender.learning.frontend.serialize import _json_safe, dump_contract
 from defender.learning.core.pitfalls_disposition import OFFERS_DECLINED_KEY
+from defender.learning.core.state import (
+    FINDINGS,
+    PITFALLS,
+    QUESTIONER_FINDINGS,
+    STATE_ROOT,
+    Channel,
+    LearningState,
+    StateRefused,
+)
 
 __all__ = ["build_view", "stamped_view", "dump_contract"]
 
@@ -80,24 +83,24 @@ class _ChannelSpec:
     #: What a hold means in this lane, as the page says it (the lanes' holds end differently).
     hold_means: str
     is_held: Callable[[dict], bool]
-    channel: Callable[[LoopPaths], QueueChannel]
+    channel: Channel
 
 
 _CHANNELS: tuple[_ChannelSpec, ...] = (
     _ChannelSpec(
         "findings", "defender", True,
         "held until a person moves them — nothing retries a hold",
-        _held_by_reason, lambda p: p.findings,
+        _held_by_reason, FINDINGS,
     ),
     _ChannelSpec(
         "questioner_findings", "learning", True,
         "held until a person moves them — nothing retries a hold",
-        _held_by_reason, lambda p: p.questioner_findings,
+        _held_by_reason, QUESTIONER_FINDINGS,
     ),
     _ChannelSpec(
         "pitfalls", "oracle", False,
         "declined by the curator — offered again every tick, retired at the offer ceiling",
-        _held_by_declined_offer, lambda p: p.pitfalls,
+        _held_by_declined_offer, PITFALLS,
     ),
 )
 
@@ -139,26 +142,23 @@ def _stuck(record: dict) -> dict:
     }
 
 
-def _rows(path: Path) -> tuple[list[dict], int]:
-    """The canonical tolerant reader, plus: a sidecar that cannot be read at all counts as one
-    unreadable rather than aborting the page."""
+def _channel_view(spec: _ChannelSpec, state: LearningState) -> dict:
+    channel = spec.channel
     try:
-        return read_jsonl_rows_report(path)
-    except TEXT_READ_ERRORS:
-        return [], 1
-
-
-def _channel_view(spec: _ChannelSpec, channel: QueueChannel) -> dict:
-    rows, unreadable = _rows(channel.file)
+        rows, unreadable = state.rows_report(channel)
+    except (StateRefused, OSError):
+        # The page is the operator's tool for seeing a fault, so a queue it cannot read is one
+        # unreadable entry, never a page that does not build (E2).
+        rows, unreadable = [], 1
     # Counted by the lane's marker alone (matching the drain's wake gate); only string ids are
     # listed, but a held row without one is still counted.
     held_rows = [r for r in rows if spec.is_held(r)]
     held_ids = [r[channel.id_key] for r in held_rows if isinstance(r.get(channel.id_key), str)]
-    graveyard, dead_unreadable = _rows(drain.graveyard_file(channel))
+    graveyard, dead_unreadable = state.deadletter_rows(channel)
     unreadable += dead_unreadable
     stuck: dict | None = None
     if spec.has_stuck_record:
-        records, stuck_unreadable = _rows(drain.stuck_report_file(channel))
+        records, stuck_unreadable = state.stuck_report(channel)
         unreadable += stuck_unreadable
         stuck = _stuck(records[-1]) if records else None
     return {
@@ -174,11 +174,43 @@ def _channel_view(spec: _ChannelSpec, channel: QueueChannel) -> dict:
     }
 
 
+def _markers(state: LearningState) -> dict:
+    """Both failed-request folders: the lead-author claim and the pending-delivery scan each
+    quarantine into one."""
+    rows: list[dict] = []
+    unreadable = 0
+    for queue, (found, bad) in (
+        ("lead_author", state.failed_requests()),  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+        ("delivery", state.failed_deliveries()),
+    ):
+        unreadable += bad
+        rows += [
+            {"queue": queue, "identity": stem, "failed": _str(spec.get("failed")),
+             "run_dir": _opt_str(spec.get("run_dir"))}
+            for stem, spec in found
+        ]
+    rows.sort(key=lambda r: (r["queue"], r["identity"]))
+    return {"rows": rows, "unreadable": unreadable}
+
+
+def _deliveries(state: LearningState) -> dict:
+    found, unreadable = state.delivery_rows()
+    rows = [
+        {"branch": _str(spec.get("branch")), "batch_id": _str(spec.get("batch_id")),
+         "label": _str(spec.get("label")), "at": _opt_str(spec.get("at")),
+         "reason": _str(spec.get("reason"))}
+        for _stem, spec in found
+    ]
+    rows.sort(key=lambda r: r["at"] or "", reverse=True)
+    return {"rows": rows, "unreadable": unreadable}
+
+
 def _json_files(directory: Path) -> tuple[list[tuple[Path, dict]], int]:
     """Every readable `*.json` mapping directly under `directory`, plus how many were not.
 
-    An unlistable directory counts as one unreadable — listed with `iterdir` because
-    `Path.glob` swallows the `PermissionError` and answers "empty"."""
+    For the tainted-worktree archive, which lives off the worktree base and is no state-tree
+    record (N6). An unlistable directory counts as one unreadable — listed with `iterdir`
+    because `Path.glob` swallows the `PermissionError` and answers "empty"."""
     try:
         if not directory.is_dir():
             return [], 0
@@ -198,38 +230,6 @@ def _json_files(directory: Path) -> tuple[list[tuple[Path, dict]], int]:
             continue
         out.append((path, value))
     return out, unreadable
-
-
-def _markers(paths: LoopPaths) -> dict:
-    """Both failed-marker directories: `quarantine_marker` writes under its caller's queue dir,
-    and it has two callers (the lead-author claim and the pending-delivery scan)."""
-    rows: list[dict] = []
-    unreadable = 0
-    for queue, directory in (
-        ("lead_author", paths.author_queue_dir / FAILED_MARKER_DIRNAME),  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
-        ("delivery", paths.pending_delivery_dir / FAILED_MARKER_DIRNAME),
-    ):
-        found, bad = _json_files(directory)
-        unreadable += bad
-        rows += [
-            {"queue": queue, "identity": path.stem, "failed": _str(spec.get("failed")),
-             "run_dir": _opt_str(spec.get("run_dir"))}
-            for path, spec in found
-        ]
-    rows.sort(key=lambda r: (r["queue"], r["identity"]))
-    return {"rows": rows, "unreadable": unreadable}
-
-
-def _deliveries(paths: LoopPaths) -> dict:
-    found, unreadable = _json_files(paths.pending_delivery_dir)
-    rows = [
-        {"branch": _str(spec.get("branch")), "batch_id": _str(spec.get("batch_id")),
-         "label": _str(spec.get("label")), "at": _opt_str(spec.get("at")),
-         "reason": _str(spec.get("reason"))}
-        for _path, spec in found
-    ]
-    rows.sort(key=lambda r: r["at"] or "", reverse=True)
-    return {"rows": rows, "unreadable": unreadable}
 
 
 def _tainted(paths: LoopPaths) -> dict:
@@ -266,23 +266,28 @@ def _tainted(paths: LoopPaths) -> dict:
     }
 
 
-def build_view(paths: LoopPaths) -> dict:  # lint-dup: ok — serialize.build_view builds the lessons page from the corpus; this builds the queue page from the state root. Same name by design: build.py calls each by module.
-    """The contract, pure over the filesystem under `paths`; no clock (see `stamped_view`)."""
+def build_view(paths: LoopPaths, state: LearningState) -> dict:  # lint-dup: ok — serialize.build_view builds the lessons page from the corpus; this builds the queue page from the state root. Same name by design: build.py calls each by module.
+    """The contract, pure over the filesystem under `paths`; no clock (see `stamped_view`).
+    `state` is the handle on the state root; `paths` locates the tainted-worktree archive."""
     return {
-        "state_root": str(paths.state_root),
-        "channels": [_channel_view(spec, spec.channel(paths)) for spec in _CHANNELS],
+        "state_root": state.describe(STATE_ROOT),
+        "channels": [_channel_view(spec, state) for spec in _CHANNELS],
         "quarantine": {
-            "markers": _markers(paths),
-            "deliveries": _deliveries(paths),
+            "markers": _markers(state),
+            "deliveries": _deliveries(state),
             "tainted": _tainted(paths),
         },
     }
 
 
-def stamped_view(paths: LoopPaths | None = None) -> dict:  # lint-dup: ok — serialize.stamped_view stamps the lessons view; this stamps the queue view. Same name by design, see build_view.
-    """`build_view` plus the build time. With no `paths`, the state root is resolved now
-    (`loop_paths()`, not the import-time constant), so a root set after import is honoured."""
-    view = build_view(paths if paths is not None else loop_paths())
+def stamped_view(paths: LoopPaths, state: LearningState | None = None) -> dict:  # lint-dup: ok — serialize.stamped_view stamps the lessons view; this stamps the queue view. Same name by design, see build_view.
+    """`build_view` plus the build time. The caller resolved `paths` (the page build's entry
+    point does, at call time rather than import); with no `state` the handle is opened on them
+    here, so a missing root stops the build instead of producing an empty page."""
+    if state is None:
+        with LearningState.open(paths) as opened:
+            view = build_view(paths, opened)
+    else:
+        view = build_view(paths, state)
     view["generated_at"] = z_seconds(_dt.datetime.now(_dt.UTC))
     return view
-

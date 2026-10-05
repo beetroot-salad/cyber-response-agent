@@ -54,12 +54,13 @@ from defender import _git
 from defender._git import GitError
 from defender._io import append_jsonl
 from defender.learning.author.branch import BranchError
-from defender.learning.core import drains, markers, persist
+from defender.learning.core import drains, persist
 from defender.learning.core.config import LoopPaths
 from defender.learning.leads import lead_author, pitfalls_curator
 from defender.learning.leads.lead_extraction import ExecutedLead
 from defender.learning.leads.pitfalls_curator import PitfallsDisposition
 from defender.runtime import box as box_mod
+from defender.tests import _state1135
 from defender.tests._declared869 import seed_executed_query
 from defender.tests._declared870 import (
     Spawn,
@@ -85,6 +86,7 @@ from defender.tests._spec791 import (
 )
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.tests._lead_author_1134 import lead_deps, lead_trees
+from defender.learning.core.state import FINDINGS, LEAD_QUEUE_LOCK, PITFALLS
 
 
 # --- substrate -------------------------------------------------------------------------------
@@ -158,7 +160,7 @@ class _Branch(SpecBranch):
 def _queued_run(tmp_path: Path, case_id: str, name: str, paths: LoopPaths) -> Path:
     run_dir = tmp_path / "runs" / name
     run_dir.mkdir(parents=True, exist_ok=True)
-    markers.enqueue_case_for_curation(case_id, run_dir, paths)
+    _state1135.enqueue_case(_state1135.state_for_paths(paths), case_id, run_dir)
     return run_dir
 
 
@@ -171,9 +173,9 @@ def _seed_pitfalls(paths: LoopPaths) -> bytes:
             pitfall_row(COMMITTED_ID, "elastic"),
             shim_row(HELD_ID, **{pitfalls_curator.OFFERS_DECLINED_KEY: 1}),
         ],
-        paths=paths,
+        state=_state1135.state_for_paths(paths),
     )
-    return paths.pitfalls.file.read_bytes()
+    return (paths.state_root / PITFALLS.queue).read_bytes()
 
 
 def _disposition(sha: str | None = SHA) -> PitfallsDisposition:
@@ -186,7 +188,7 @@ def _serving(served: list[Path], *, done: bool = True, before=None):
     seam. `on_done` is keyword-REQUIRED so a drain that stopped passing it fails here, at the
     seam, rather than silently serving without one."""
 
-    def serve(_paths, run_dir, *, box=None, on_done):
+    def serve(_paths, _state, run_dir, *, box=None, on_done):
         served.append(run_dir)
         if before is not None:
             before()
@@ -200,7 +202,7 @@ def _curating(curated: list[PitfallsDisposition], disposition: PitfallsDispositi
     """A `run_pitfalls` fake that simulates a curation: it hands its partition to the drain
     through `on_curated` and returns 0, exactly as the real curator does in deferred mode."""
 
-    def curate(_paths, *, box=None, on_curated):
+    def curate(_paths, _state, *, box=None, on_curated):
         curated.append(disposition)
         on_curated(disposition)
         return 0
@@ -224,7 +226,7 @@ def _tainting(_tree, **_kw):
 
 
 def _rows_by_id(paths: LoopPaths) -> dict[str, dict]:
-    return {str(r["pitfall_id"]): r for r in persist.read_pitfalls(paths)}
+    return {str(r["pitfall_id"]): r for r in persist.read_pitfalls(_state1135.state_for_paths(paths))}
 
 
 def _done(run_dir: Path) -> Path:
@@ -241,16 +243,16 @@ def _done_sha(run_dir: Path) -> str:
 
 
 def _inflight(paths: LoopPaths) -> list[str]:
-    d = paths.author_queue_dir / "inflight"
+    d = paths.state_root / "author-queue" / "inflight"
     return sorted(p.name for p in d.glob("*.json")) if d.is_dir() else []
 
 
 def _inflight_attempts(paths: LoopPaths, case: str) -> int:
-    return int(marker_body(paths.author_queue_dir / "inflight" / f"{case}.json").get("attempts", 0))
+    return int(marker_body(paths.state_root / "author-queue" / "inflight" / f"{case}.json").get("attempts", 0))
 
 
 def _pending_deliveries(paths: LoopPaths) -> list[dict]:
-    d = paths.pending_delivery_dir
+    d = paths.state_root / "_pending_delivery"
     return [json.loads(p.read_text(encoding="utf-8")) for p in sorted(d.glob("*.json"))] \
         if d.is_dir() else []
 
@@ -315,21 +317,21 @@ def _assert_nothing_consumed(
     the consumed ledger, no `done` sentinel exists for the run, and the wake gate still sees
     the work."""
     assert _inflight(paths) == [f"{case}.json"], "the served marker left inflight/"
-    assert Path(marker_body(paths.author_queue_dir / "inflight" / f"{case}.json")["run_dir"]) \
+    assert Path(marker_body(paths.state_root / "author-queue" / "inflight" / f"{case}.json")["run_dir"]) \
         == run_dir.resolve()
     assert author_markers(paths) == [], "the claim was handed back to the top level"
-    assert not (paths.author_queue_dir / "failed").exists(), "the served run was dead-lettered"
-    assert paths.pitfalls.file.read_bytes() == queue_before, (
+    assert not (paths.state_root / "author-queue" / "failed").exists(), "the served run was dead-lettered"
+    assert (paths.state_root / PITFALLS.queue).read_bytes() == queue_before, (
         "the pitfalls queue changed on a tick that consumed nothing (a rotation, or a bumped "
         f"`{pitfalls_curator.OFFERS_DECLINED_KEY}`)"
     )
     assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 1
-    assert not paths.pitfalls.consumed.exists(), "a row reached the consumed ledger"
+    assert not (paths.state_root / PITFALLS.consumed).exists(), "a row reached the consumed ledger"
     assert not _done(run_dir).exists(), (
         "the done sentinel was written under the shared run dir — the reclaimed marker will "
         "be served as 'already processed' next tick and unlinked anyway"
     )
-    assert drains._has_lead_author_work(paths) is True, "the queue went quiet on retained work"
+    assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is True, "the queue went quiet on retained work"
 
 
 def _assert_consumed(paths: LoopPaths, run_dir: Path, *, done: bool = True) -> None:
@@ -478,7 +480,7 @@ def test_952_o1_consumption_happens_before_the_push_and_is_not_undone_by_its_fai
     assert curated == [_disposition()]
     assert branch.events == ["lease-check", "start", "finish", "cleanup"]
     _assert_consumed(paths, run_dir)
-    assert drains._has_lead_author_work(paths) is False, "consumed work still wakes the lane"
+    assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is False, "consumed work still wakes the lane"
     records = _pending_deliveries(paths)
     assert [r["branch"] for r in records] == [f"lead-author/{branch.batch_id}"]
     assert records[0]["batch_id"] == branch.batch_id
@@ -546,7 +548,7 @@ def test_952_m1_the_disposition_applies_sentinels_and_unlinks_before_the_pitfall
     curated: list[PitfallsDisposition] = []
     branch = _Branch(tmp_path / "worktrees")
 
-    with _held(paths.pitfalls.append_lock) as holder, pytest.raises(TimeoutError):
+    with _held(paths.state_root / PITFALLS.append_lock) as holder, pytest.raises(TimeoutError):
         _bounded(
             lambda: _tick(
                 paths, branch=branch,
@@ -563,8 +565,8 @@ def test_952_m1_the_disposition_applies_sentinels_and_unlinks_before_the_pitfall
     assert author_markers(paths) == []
     assert _inflight(paths) == []
     # From the rotation on: not applied.
-    assert paths.pitfalls.file.read_bytes() == queue_before
-    assert not paths.pitfalls.consumed.exists()
+    assert (paths.state_root / PITFALLS.queue).read_bytes() == queue_before
+    assert not (paths.state_root / PITFALLS.consumed).exists()
     assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 1, \
         "the decline bump ran ahead of the rotation it is ordered behind"
 
@@ -702,7 +704,7 @@ def test_952_o7_each_lane_delivers_only_its_own_records(tmp_path: Path):
     assert _tick(paths, branch=failing, run_lead_author=_serving([]), run_pitfalls=_no_curation) == 0
     assert len(_pending_deliveries(paths)) == 1
 
-    append_jsonl(paths.pending_file, [{"finding_id": f"f{i}"} for i in range(5)])
+    append_jsonl(paths.state_root / FINDINGS.queue, [{"finding_id": f"f{i}"} for i in range(5)])
     lessons = _Branch(tmp_path / "worktrees", prefix="lessons/", deliver_fail=BranchError("no"))
     rc = drains.author_drain(
         paths, trigger_author=lambda *_a, **_kw: None, branch=lessons,
@@ -748,10 +750,10 @@ def test_952_o8_a_batch_that_never_passes_the_scrub_is_quarantined_at_the_ceilin
     assert len(served) == 3, "the run was served past the ceiling"
     assert _inflight(paths) == []
     assert not _done(run_dir).exists()
-    failed = marker_body(paths.author_queue_dir / "failed" / "case-1.json")
+    failed = marker_body(paths.state_root / "author-queue" / "failed" / "case-1.json")
     assert failed["failed"] == "served 3 time(s) without being recorded done"
     assert Path(failed["run_dir"]) == run_dir.resolve()
-    assert drains._has_lead_author_work(paths) is False
+    assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is False
 
 
 # --- O6 — a fresher same-case request survives a failed push --------------------------------
@@ -773,7 +775,7 @@ def test_952_o6_a_failed_push_neither_destroys_nor_supersedes_a_fresher_request(
 
     def re_ask() -> None:
         # The operator re-investigates the case while the lane is curating it...
-        markers.enqueue_case_for_curation("case-A", second, paths)
+        _state1135.enqueue_case(_state1135.state_for_paths(paths), "case-A", second)
 
     failing = _Branch(tmp_path / "worktrees", fail=BranchError("push rejected"))
     assert _tick(
@@ -783,14 +785,14 @@ def test_952_o6_a_failed_push_neither_destroys_nor_supersedes_a_fresher_request(
     assert served == [first.resolve()]
 
     assert author_markers(paths) == ["case-A.json"]
-    fresher = marker_body(paths.author_queue_dir / "case-A.json")
+    fresher = marker_body(paths.state_root / "author-queue" / "case-A.json")
     assert Path(fresher["run_dir"]) == second.resolve(), (
         "the failed push replaced the fresher curation request with the stale run dir"
     )
     assert "attempts" not in fresher
     assert _inflight(paths) == [], "the consumed claim was left in inflight/"
     assert _done_sha(first) == SHA
-    assert not (paths.author_queue_dir / "failed").exists()
+    assert not (paths.state_root / "author-queue" / "failed").exists()
 
     landing = _Branch(tmp_path / "worktrees")
     assert _tick(
@@ -801,7 +803,7 @@ def test_952_o6_a_failed_push_neither_destroys_nor_supersedes_a_fresher_request(
     assert landing.events == ["deliver", "lease-check", "start", "finish", "cleanup"]
     assert author_markers(paths) == []
     assert _inflight(paths) == []
-    assert drains._has_lead_author_work(paths) is False
+    assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is False
 
 
 # --- O2 — the lessons lane's failure line makes no claim about markers or pitfalls ------------
@@ -817,13 +819,13 @@ def test_952_o2_the_lessons_lane_failure_line_is_lane_neutral_and_records_delive
     was or was not consumed (this lane consumes its rows inside the serve, so any such claim
     would be false here), and none of the old "work stays queued" wording."""
     paths = loop_paths(tmp_path)
-    append_jsonl(paths.pending_file, [{"finding_id": f"f{i}"} for i in range(5)])
+    append_jsonl(paths.state_root / FINDINGS.queue, [{"finding_id": f"f{i}"} for i in range(5)])
     branch = _Branch(tmp_path / "worktrees", prefix="lessons/", fail=BranchError("push rejected"))
     triggered: list[str] = []
 
     rc = drains.author_drain(
         paths,
-        trigger_author=lambda _p, _f, _env, module, *_a, **_kw: triggered.append(module),
+        trigger_author=lambda _p, _s, _f, _env, module, *_a, **_kw: triggered.append(module),
         branch=branch,
         start_box=noop_start_box, stop_box=noop_stop_box, scrub=noop_scrub,
     )
@@ -863,14 +865,12 @@ def _lead(**kw) -> ExecutedLead:
 
 def _curator_deps(repo: Path, state: Path, **overrides):
     """Production lead-author deps over a seeded, committed skills tree, with the two tables
-    bypassed (their own suite) and the queue lock stubbed (the drain's, under M5)."""
+    bypassed (their own suite)."""
     deps = lead_deps(LoopPaths(repo_root=repo, state_dir=state))
     seams = dict(
         extract=lambda _rd: ([], [_lead()]),
         synthesize=lambda executed, skills=None, where=None, catalog=None, systems=None: [],
         discover_system_drafts=lambda: [],
-        acquire_queue_lock=lambda: object(),
-        release_queue_lock=lambda _fh: None,
     )
     seams.update(overrides)
     return replace(deps, **seams)
@@ -1050,7 +1050,7 @@ def _three_way_batch(paths: LoopPaths) -> None:
             shim_row("h:l-003:0"),
             pitfall_row("u:l-001:0", "newsys"),
         ],
-        paths=paths,
+        state=_state1135.state_for_paths(paths),
     )
 
 
@@ -1094,7 +1094,7 @@ def test_952_m4_run_pitfalls_hands_its_partition_to_on_curated_and_consumes_noth
     assert consumed["u:l-001:0"]["consumed_category"] == "consumed_unattributable"
     assert graveyard_by_id(paths)["u:l-001:0"]["deadletter_reason"] == "undeclared-system:newsys"
 
-    assert captured[0].apply(paths, timeout_seconds=5) == 0
+    assert captured[0].apply(_state1135.state_for_paths(paths), timeout_seconds=5) == 0
     consumed = consumed_by_id(paths)
     assert consumed["c:l-000:0"]["consumed_category"] == "consumed_committed"
     assert consumed["c:l-000:0"]["consumed_commit"] == sha
@@ -1164,22 +1164,22 @@ def test_952_m1_the_deferred_rotation_reaches_the_queue_lock_with_a_deadline(tmp
     queue_before = _seed_pitfalls(paths)
     disposition = _disposition()
 
-    with _held(paths.pitfalls.append_lock) as holder:
+    with _held(paths.state_root / PITFALLS.append_lock) as holder:
         with pytest.raises(TimeoutError):
-            _bounded(lambda: disposition.apply(paths, timeout_seconds=0), holder=holder)
-        assert paths.pitfalls.file.read_bytes() == queue_before
-        assert not paths.pitfalls.consumed.exists()
+            _bounded(lambda: disposition.apply(_state1135.state_for_paths(paths), timeout_seconds=0), holder=holder)
+        assert (paths.state_root / PITFALLS.queue).read_bytes() == queue_before
+        assert not (paths.state_root / PITFALLS.consumed).exists()
 
         with pytest.raises(TimeoutError):
             _bounded(
                 lambda: persist.rotate_pitfalls(
-                    [COMMITTED_ID], SHA, paths=paths, timeout_seconds=0,
+                    [COMMITTED_ID], SHA, state=_state1135.state_for_paths(paths), timeout_seconds=0,
                 ),
                 holder=holder,
             )
-        assert paths.pitfalls.file.read_bytes() == queue_before
+        assert (paths.state_root / PITFALLS.queue).read_bytes() == queue_before
 
-    assert disposition.apply(paths, timeout_seconds=0) == 0
+    assert disposition.apply(_state1135.state_for_paths(paths), timeout_seconds=0) == 0
     consumed = consumed_by_id(paths)
     assert consumed[COMMITTED_ID]["consumed_category"] == "consumed_committed"
     assert consumed[COMMITTED_ID]["consumed_commit"] == SHA
@@ -1198,10 +1198,10 @@ def test_952_m1_the_immediate_rotation_is_bounded_under_the_drain_and_unbounded_
     `TimeoutError`; the same call with no wait — the by-hand default — is the unbounded wait
     it always was, so it is driven with the lock FREE as the positive control."""
     paths = LoopPaths(repo_root=pitfalls_repo, state_dir=tmp_path / "state")
-    persist.append_pitfalls([pitfall_row("u:l-001:0", "newsys")], paths=paths)
-    queue_before = paths.pitfalls.file.read_bytes()
+    persist.append_pitfalls([pitfall_row("u:l-001:0", "newsys")], state=_state1135.state_for_paths(paths))
+    queue_before = (paths.state_root / PITFALLS.queue).read_bytes()
 
-    with _held(paths.pitfalls.append_lock) as holder, pytest.raises(TimeoutError):
+    with _held(paths.state_root / PITFALLS.append_lock) as holder, pytest.raises(TimeoutError):
         _bounded(
             lambda: pitfalls_curator.run_pitfalls(
                 paths=paths, invoke=_agent_must_not_run, lock_wait_seconds=0,
@@ -1209,7 +1209,7 @@ def test_952_m1_the_immediate_rotation_is_bounded_under_the_drain_and_unbounded_
             ),
             holder=holder,
         )
-    assert paths.pitfalls.file.read_bytes() == queue_before
+    assert (paths.state_root / PITFALLS.queue).read_bytes() == queue_before
 
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_agent_must_not_run,
                                          trees=lead_trees(paths)) == 0
@@ -1229,7 +1229,7 @@ def test_952_m5_the_drain_holds_the_queue_lock_across_the_serve(tmp_path: Path):
     CLI's own path — answers `QUEUE_LOCK_SKIP_RC` while the tick is running.
 
     The positive control is the same call, the same `paths`, outside any tick: it does not
-    skip. Both halves are the same file — `paths.lead_pending_dir / ".lock"` — which is the
+    skip. Both halves are the same file — `(paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"` — which is the
     contract's deviation (b): the lock is resolved off `paths`, so the drain and a by-hand run
     over the same state contend on one file rather than on `DEFAULT_PATHS`' constant.
 
@@ -1260,7 +1260,7 @@ def test_952_m5_the_drain_holds_the_queue_lock_across_the_serve(tmp_path: Path):
 
     # Positive control: the lock the tick held IS the file a by-hand run locks. Held here the
     # way a second process would hold it, the same call skips; released, it does not.
-    with _held(paths.lead_pending_dir / ".lock"):
+    with _held((paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"):
         assert lead_author.run(by_hand, label=LEAD_AUTHOR_DRAIN_LABEL,
                                paths=paths) == lead_author.QUEUE_LOCK_SKIP_RC
         assert not (by_hand / "lead_author").exists(), "a skipped by-hand run wrote state"
@@ -1280,7 +1280,7 @@ def test_952_m5_a_tick_started_under_a_held_queue_lock_claims_nothing(tmp_path: 
     served: list[Path] = []
     branch = _Branch(tmp_path / "worktrees")
 
-    with _held(paths.lead_pending_dir / ".lock"):
+    with _held((paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"):
         rc = _tick(
             paths, branch=branch, run_pitfalls=_no_curation,
             run_lead_author=_serving(served),
@@ -1291,7 +1291,7 @@ def test_952_m5_a_tick_started_under_a_held_queue_lock_claims_nothing(tmp_path: 
     assert author_markers(paths) == ["case-1.json", "case-2.json"]
     assert _inflight(paths) == [], "a skipped tick claimed a marker"
     for name in ("case-1.json", "case-2.json"):
-        assert "attempts" not in marker_body(paths.author_queue_dir / name), \
+        assert "attempts" not in marker_body(paths.state_root / "author-queue" / name), \
             "a skip spent one of the request's attempts"
     assert "start" not in branch.events, "a skipped tick minted a batch"
     err = capsys.readouterr().err
@@ -1326,8 +1326,8 @@ def test_952_m5_the_drain_enters_the_curator_past_its_own_lock(tmp_path: Path):
         (d / "gather_raw").mkdir(parents=True)
     captured: list[str | None] = []
 
-    with _held(paths.lead_pending_dir / ".lock"):
-        drains._invoke_lead_author(paths, drained, on_done=captured.append,
+    with _held((paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"):
+        drains._invoke_lead_author(paths, _state1135.state_for_paths(paths), drained, on_done=captured.append,
                                    label=LEAD_AUTHOR_DRAIN_LABEL)
         assert (drained / "lead_author" / "pitfalls_collected").is_file(), \
             "the curator never ran past the lock the drain is supposed to have exempted it from"
@@ -1360,7 +1360,7 @@ def test_952_a_the_production_adapter_forwards_on_done_to_the_curator(tmp_path: 
     seed_executed_query(run_dir, query_id="nosuch.verb", system="nosuch", verb="verb")
     captured: list[str | None] = []
 
-    drains._invoke_lead_author(paths, run_dir, on_done=captured.append,
+    drains._invoke_lead_author(paths, _state1135.state_for_paths(paths), run_dir, on_done=captured.append,
                                label=LEAD_AUTHOR_DRAIN_LABEL)
 
     assert captured == [None], "the production adapter did not hand the record to on_done"
@@ -1404,7 +1404,7 @@ def test_952_c_the_queue_lock_is_held_through_curation_and_finish_batch(tmp_path
     def probe() -> int:
         return lead_author.run(by_hand, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths)
 
-    def curate(_paths, *, box=None, on_curated):
+    def curate(_paths, _state, *, box=None, on_curated):
         in_curation.append(probe())
         return 0
 
@@ -1454,8 +1454,8 @@ def test_952_d_a_failed_sentinel_write_leaves_the_claim_in_inflight(tmp_path: Pa
     assert _inflight(paths) == ["case-1.json"], \
         "the claim was unlinked ahead of a sentinel write that then failed"
     assert author_markers(paths) == []
-    assert paths.pitfalls.file.read_bytes() == queue_before
-    assert not paths.pitfalls.consumed.exists()
+    assert (paths.state_root / PITFALLS.queue).read_bytes() == queue_before
+    assert not (paths.state_root / PITFALLS.consumed).exists()
     assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 1
 
 
@@ -1469,7 +1469,7 @@ def test_952_e_the_lessons_lane_logs_no_retained_summary_on_a_systemic_fault(
     lane that collected no disposition says nothing about markers or pitfall rows on any of
     them. The fault propagates as on the lead-author lane."""
     paths = loop_paths(tmp_path)
-    append_jsonl(paths.pending_file, [{"finding_id": f"f{i}"} for i in range(5)])
+    append_jsonl(paths.state_root / FINDINGS.queue, [{"finding_id": f"f{i}"} for i in range(5)])
     triggered: list[str] = []
     if fault == "git_error_from_finish_batch":
         expected_type: type[BaseException] = GitError
@@ -1486,7 +1486,7 @@ def test_952_e_the_lessons_lane_logs_no_retained_summary_on_a_systemic_fault(
     with pytest.raises(expected_type):
         drains.author_drain(
             paths,
-            trigger_author=lambda _p, _f, _env, module, *_a, **_kw: triggered.append(module),
+            trigger_author=lambda _p, _s, _f, _env, module, *_a, **_kw: triggered.append(module),
             branch=branch, start_box=noop_start_box, stop_box=noop_stop_box, scrub=scrub,
         )
 
@@ -1514,12 +1514,12 @@ def test_952_f_the_retained_summary_counts_each_kind_at_asymmetric_counts(
     persist.append_pitfalls(
         [*(pitfall_row(pid, "elastic") for pid in committed),
          shim_row(HELD_ID, **{pitfalls_curator.OFFERS_DECLINED_KEY: 1})],
-        paths=paths,
+        state=_state1135.state_for_paths(paths),
     )
-    queue_before = paths.pitfalls.file.read_bytes()
+    queue_before = (paths.state_root / PITFALLS.queue).read_bytes()
     served: list[Path] = []
 
-    def serve(_paths, run_dir, *, box=None, on_done):
+    def serve(_paths, _state, run_dir, *, box=None, on_done):
         served.append(run_dir)
         if run_dir.name == "run-1":
             on_done(SHA)  # run-2 is the clean path that hands over no record
@@ -1537,7 +1537,7 @@ def test_952_f_the_retained_summary_counts_each_kind_at_asymmetric_counts(
     assert served == [run_1.resolve(), run_2.resolve()]
     assert curated == [disposition]
     assert _inflight(paths) == ["case-1.json", "case-2.json"]
-    assert paths.pitfalls.file.read_bytes() == queue_before
+    assert (paths.state_root / PITFALLS.queue).read_bytes() == queue_before
     assert not _done(run_1).exists()
     assert not _done(run_2).exists()
     err = capsys.readouterr().err
@@ -1558,7 +1558,7 @@ def test_952_g_a_held_only_deferred_tick_defers_the_decline_bump(pitfalls_repo: 
     batches retire the row with its lesson never taught. So the held-only disposition is
     handed over with the bump unapplied; applying it is what counts the decline."""
     paths = LoopPaths(repo_root=pitfalls_repo, state_dir=tmp_path / "state")
-    persist.append_pitfalls([shim_row("h:l-003:0")], paths=paths)
+    persist.append_pitfalls([shim_row("h:l-003:0")], state=_state1135.state_for_paths(paths))
     head_before = _git.git_head_sha(pitfalls_repo)
     spawn = Spawn(None)
     captured: list[PitfallsDisposition] = []
@@ -1575,7 +1575,7 @@ def test_952_g_a_held_only_deferred_tick_defers_the_decline_bump(pitfalls_repo: 
     assert consumed_by_id(paths) == {}
     assert graveyard_by_id(paths) == {}
 
-    assert captured[0].apply(paths, timeout_seconds=5) == 0
+    assert captured[0].apply(_state1135.state_for_paths(paths), timeout_seconds=5) == 0
     assert _rows_by_id(paths)["h:l-003:0"][pitfalls_curator.OFFERS_DECLINED_KEY] == 1
     assert queue_ids(paths) == ["h:l-003:0"]
 
@@ -1590,11 +1590,11 @@ def test_952_m1_the_deferred_decline_bump_is_bounded_too(tmp_path: Path):
     queue_before = _seed_pitfalls(paths)
     held_only = PitfallsDisposition(committed_ids=(), sha=None, held_ids=(HELD_ID,))
 
-    with _held(paths.pitfalls.append_lock) as holder, pytest.raises(TimeoutError):
-        _bounded(lambda: held_only.apply(paths, timeout_seconds=0), holder=holder)
-    assert paths.pitfalls.file.read_bytes() == queue_before
+    with _held(paths.state_root / PITFALLS.append_lock) as holder, pytest.raises(TimeoutError):
+        _bounded(lambda: held_only.apply(_state1135.state_for_paths(paths), timeout_seconds=0), holder=holder)
+    assert (paths.state_root / PITFALLS.queue).read_bytes() == queue_before
     assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 1
 
-    assert held_only.apply(paths, timeout_seconds=0) == 0
+    assert held_only.apply(_state1135.state_for_paths(paths), timeout_seconds=0) == 0
     assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 2
     assert COMMITTED_ID in _rows_by_id(paths), "a held-only apply rotated the committed row"

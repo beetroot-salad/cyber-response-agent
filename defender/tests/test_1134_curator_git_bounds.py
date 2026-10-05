@@ -252,7 +252,7 @@ def _subcommand(args: Sequence[str]) -> str:
 
 
 def _stuck_classes(sc: Any) -> list[str | None]:
-    return [r.get("fault_class") for r in S.stuck_records(sc.channel)]
+    return [r.get("fault_class") for r in S.stuck_records(sc.paths, sc.channel)]
 
 
 def _warnings(caplog: Any) -> list[str]:
