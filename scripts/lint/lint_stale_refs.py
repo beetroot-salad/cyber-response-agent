@@ -12,10 +12,11 @@ Algorithm:
   2. Collect identifiers removed by `-`-side lines:
        - `def NAME(` / `class NAME`, except a def nested in a function body (resolved
          against the base tree's AST): invisible outside its scope, it can strand nothing;
-         nor a method of a class whose every base is defined outside the file (an override
+         nor a method of a class whose every base comes from outside the repo (an override
          of that base's API, e.g. a test double's `Path.with_suffix`: the name belongs to the
-         base, and a repo base still binds it, which step 4 sees). The cost: a new,
-         repo-specific method on such a class is not collected
+         base). A base defined in the file or imported from a repo module keeps its class's
+         methods collected. The cost: a new, repo-specific method on a class whose only bases
+         are foreign is not collected
        - top-level `NAME =` (uppercase constants)
        - removed `from ... import NAME` targets
   3. Skip identifiers under 8 chars with no underscore, and common stdlib symbols.
@@ -338,7 +339,7 @@ _DIFF_FILE_HEADER = re.compile(r"^diff --git a/(.*?) b/(.*)$")
 def _function_local_defs(repo_root: Path, diff_base: str, path: str) -> set[str]:
     """Names in the base version of `path` whose removal strands nothing, minus any bound at
     module or class scope in the same file some other way: a `def`/`class` inside a function
-    body, and a method of a class whose every base is defined outside the file.
+    body, and a method of a class whose every base comes from outside the repo.
 
     A function-local name is invisible outside its scope, and it is often an ordinary word
     used elsewhere as prose. A method overriding an outside base's API is that base's name,
@@ -350,14 +351,22 @@ def _function_local_defs(repo_root: Path, diff_base: str, path: str) -> set[str]
         tree = ast.parse(text)
     except (GitError, SyntaxError, ValueError):
         return set()
-    file_classes = {n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+    # A base is the repo's when the file defines it or imports it from a repo module (relative,
+    # or whose top-level package is a folder or module at the repo root).
+    repo_names = {n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom):
+            top = (n.module or "").split(".")[0]
+            if n.level or (top and ((repo_root / top).is_dir()
+                                    or (repo_root / f"{top}.py").is_file())):
+                repo_names.update(a.asname or a.name for a in n.names)
     local: set[str] = set()
     scoped: set[str] = set()
 
     def overrides_outside_base(cls: ast.ClassDef) -> bool:
         bases = [b for b in cls.bases if not (isinstance(b, ast.Name) and b.id == "object")]
         return bool(bases) and not any(
-            isinstance(b, ast.Name) and b.id in file_classes for b in bases)
+            isinstance(b, ast.Name) and b.id in repo_names for b in bases)
 
     def walk(node: ast.AST, in_function: bool) -> None:
         overriding = isinstance(node, ast.ClassDef) and overrides_outside_base(node)
