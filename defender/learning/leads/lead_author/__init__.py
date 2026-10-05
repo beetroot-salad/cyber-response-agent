@@ -354,9 +354,10 @@ def _run_locked(
         f"{len(pending_drafts)} pending system-skill draft(s)"
     )
 
-    # The spawn's own box, removed before the gate reads what it wrote (#1195).
-    with _box.box_for_run(box) as run_box:
-        rc = deps.invoke_agent(run_dir, handoffs, pending_drafts, box=run_box)
+    # The box runs for the spawn only, and is stopped before the gate reads what it wrote
+    # (#1195).
+    with _box.box_for_run(box):
+        rc = deps.invoke_agent(run_dir, handoffs, pending_drafts, box=box)
     if rc != 0:
         _logger.critical(f"lead-author spawn exited rc={rc}; see the trace under {run_dir} (drain will quarantine)")
         return 2

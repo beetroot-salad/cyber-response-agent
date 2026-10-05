@@ -127,8 +127,8 @@ from ._lifecycle import (
     _render_argv,
     _start_boxed,
     _start_boxed_request,
-    BoxSource,
     box_for_run,
+    stop_run_box,
     start_box,
     stop_and_scrub,
     stop_box,
@@ -140,8 +140,8 @@ from ._lifecycle import (
 
 __all__ = [
     "TENANT_AGENT_TARGET",
-    "BoxSource",
     "box_for_run",
+    "stop_run_box",
     "ALIAS_PROFILE_PATH",
     "AliasBanNotInForce",
     "BANNED_SHAPES",

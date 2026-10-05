@@ -31,7 +31,7 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
 )
 from ._spec import ALIAS_PROFILE_PATH, BoxExecutor, BoxRequest, BoxSpec, Mount
 from ._alias import _probe_alias_ban
-from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _container_status, _covered, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
+from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._spec import DEFAULT_SPEC, _HostTransport
 from ._spec import _DockerTransport
 
@@ -391,87 +391,95 @@ def stop_box(box: BoxExecutor, *, docker: DockerFn = _docker) -> None:
         )
 
 
-class BoxSource:
-    """One drain batch's box, started for each agent run and removed after it (#1195).
+def _container_to_run(box: object) -> str | None:
+    """The container `box` names when there is one to start and stop, else `None` (no box, or
+    the unsandboxed fallback). A box that cannot say whether it is sandboxed is a `BoxFault`: an
+    unknown box is never assumed safe."""
+    if box is None:
+        return None
+    sandboxed = getattr(box, "sandboxed", None)
+    if sandboxed is None:
+        raise BoxFault(f"cannot tell whether {box!r} is a sandboxed box; refusing to run beside it")
+    if not sandboxed:
+        return None
+    name = getattr(box, "name", None)
+    if not name:
+        raise BoxFault(f"the sandboxed box {box!r} names no container")
+    return str(name)
 
-    Every run reuses the request's one container name, so a box whose teardown failed and that
-    is still alive makes the next run's start refuse (`_reap_stale_before_create`): a host step
-    that follows a run's own teardown never runs beside a box of the batch, whichever layer
-    swallowed the earlier teardown fault. Under the unsandboxed opt-out a refused start falls
-    back to no box, and the guarantee goes with it (N12)."""
 
-    def __init__(
-        self,
-        request: BoxRequest,
-        *,
-        start_box: Callable[[BoxRequest], BoxExecutor] = start_box,
-        stop_box: Callable[[BoxExecutor], None] = stop_box,
-        docker: DockerFn = _docker,
-    ) -> None:
-        self.request = request
-        self._start_box = start_box
-        self._stop_box = stop_box
-        self._docker = docker
-        #: The last sandboxed box a run started: what the batch-end teardown must prove gone.
-        self._sandboxed: BoxExecutor | None = None
+def _status(docker: DockerFn, name: str) -> str | None:
+    return _inspect_field(docker, name, "{{.State.Status}}")
 
-    @property
-    def name(self) -> str:
-        return self.request.name
 
-    @contextlib.contextmanager
-    def run(self) -> Iterator[BoxExecutor]:
-        """One agent run's box: started, handed to the body, removed on every exit. A start
-        failure of any kind is a `BoxFault` (a link-ban failure included, chained to it), so it
-        halts the batch like any other box fault. A teardown fault is raised when nothing is in
-        flight, and logged under an in-flight exception, which then propagates."""
-        try:
-            box = self._start_box(self.request)
-        except BoxFault:
-            raise
-        except Exception as e:  # noqa: BLE001 — every start failure is a box fault (O4)
-            raise BoxFault(f"could not start the box {self.name}: {e}") from e
-        if getattr(box, "sandboxed", False):
-            self._sandboxed = box
-        in_flight = True
-        try:
-            yield box
-            in_flight = False
-        finally:
-            try:
-                self._stop_box(box)
-            except BoxFault as e:
-                if not in_flight:
-                    raise
-                _logger.error(
-                    f"teardown of the box {self.name} failed under an in-flight failure: {e} — "
-                    "the box may still be alive; the next run's start refuses beside it",
-                )
-
-    def teardown(self) -> None:
-        """The batch-end proof that no box of this batch is alive, before the scan. No docker
-        call when no run started a sandboxed box (none ran, or the opt-out). Otherwise the name's
-        status is asked: absent is done, anything else is removed, and a failure either way is a
-        `BoxFault` — never a guess from `rm -f`'s exit code for a missing container."""
-        if self._sandboxed is None:
-            return
-        if _container_status(self._docker, self.name) is None:
-            return
-        self._stop_box(self._sandboxed)
+def stop_run_box(box: object, *, docker: DockerFn = _docker) -> None:
+    """Stop the batch's box, proven (#1195): `docker stop -t 0` kills every process in it, an
+    agent's leftovers included, and `docker inspect` must then report it `exited`, else
+    `BoxFault`. A no-op when there is no container to stop."""
+    name = _container_to_run(box)
+    if name is None:
+        return
+    proc = _call(docker, ["docker", "stop", "-t", "0", name])
+    status = _status(docker, name)
+    if status != "exited":
+        raise BoxFault(
+            f"could not stop the box {name} (stop rc={proc.returncode}: "
+            f"{(proc.stderr or '').strip()}; status {status!r})"
+        )
 
 
 @contextlib.contextmanager
-def box_for_run(source: BoxSource | None) -> Iterator[BoxExecutor | None]:
-    """The spawn sites' `with`: one run of `source`'s box, or no box when there is no source."""
-    if source is None:
-        yield None
-        return
-    with source.run() as box:
+def box_for_run(box: object, *, docker: DockerFn = _docker) -> Iterator[object]:
+    """One agent run in the batch's box (#1195): the box runs for the `with` body only and is
+    stopped on every exit, so no process an agent leaves outlives its run, and no host step of
+    the batch runs beside one.
+
+    The start is refused unless the box is proven stopped first: `docker start` on a running
+    box succeeds and does nothing, so a stop fault some layer swallowed is caught here, before
+    the next agent runs. A refused or unproven start stops the box best-effort before the
+    refusal unwinds through host steps. A stop fault on exit is raised when nothing is in
+    flight, and logged under an in-flight exception, which propagates. A no-op when there is no
+    container to run."""
+    name = _container_to_run(box)
+    if name is None:
         yield box
+        return
+    try:
+        status = _status(docker, name)
+        if status != "exited":
+            raise BoxFault(
+                f"refusing to start the box {name} for an agent run: it is {status!r}, not "
+                "stopped — an earlier run's stop did not hold"
+            )
+        proc = _call(docker, ["docker", "start", name])
+        status = _status(docker, name)
+        if status != "running":
+            raise BoxFault(
+                f"could not start the box {name} (start rc={proc.returncode}: "
+                f"{(proc.stderr or '').strip()}; status {status!r})"
+            )
+    except BaseException:
+        with contextlib.suppress(BoxFault):
+            stop_run_box(box, docker=docker)
+        raise
+    in_flight = True
+    try:
+        yield box
+        in_flight = False
+    finally:
+        try:
+            stop_run_box(box, docker=docker)
+        except BoxFault as e:
+            if not in_flight:
+                raise
+            _logger.error(
+                f"stopping the box {name} failed under an in-flight failure: {e} — it may "
+                "still be running; the next run's start refuses beside it",
+            )
 
 
 def stop_and_scrub(
-    box: BoxExecutor | BoxSource,
+    box: BoxExecutor,
     tree: Path,
     *,
     stop_box: Callable[..., None],
