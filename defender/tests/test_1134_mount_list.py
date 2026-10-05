@@ -932,10 +932,12 @@ class CheckoutBranch(B.RecordingBranch):
 class WorkStep:
     """The lane's work-step seam (`trigger_author=` for the author lane, `run_lead_author=` for
     the lead lane). It records the `LoopPaths` the lane hands its work step, and on the first
-    call opens `open_drain_trees(that paths, label)` while the box is up, the place A3 puts the
-    drain's trees. It records the mounts, the descriptors held under the leaf, and what a write
-    through each `mount(m)` left at `m / PROBE`. It answers nothing and asserts nothing: both
-    lanes contain a work-step fault, so a fault is recorded for the test to report."""
+    call opens `open_drain_trees(that paths, label)`, the place A3 puts the drain's trees, and
+    enters one agent run of the box source it is handed, as a lane's spawn does: the lane's box
+    request reaches `start_box=` only there (#1195). It records the mounts, the descriptors held
+    under the leaf, and what a write through each `mount(m)` left at `m / PROBE`. It answers
+    nothing and asserts nothing: both lanes contain a work-step fault, so a fault is recorded for
+    the test to report."""
 
     def __init__(self, label: str) -> None:
         self.label = label
@@ -945,12 +947,14 @@ class WorkStep:
         self.landed: dict[Path, bytes] = {}
         self.fault: str | None = None
 
-    def __call__(self, paths: LoopPaths, *_args: Any, **_kw: Any) -> None:
+    def __call__(self, paths: LoopPaths, *_args: Any, box: Any = None, **_kw: Any) -> None:
+        from defender.runtime.box import box_for_run
+
         self.received.append(paths)
         if self.mounts is not None:
             return
         try:
-            with open_drain_trees(paths, self.label) as trees:
+            with open_drain_trees(paths, self.label) as trees, box_for_run(box):
                 self.mounts = trees.mounts
                 self.held = held_roots(paths.repo_root)
                 for m in trees.mounts:

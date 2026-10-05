@@ -910,7 +910,11 @@ def test_the_drain_scrub_survives_a_crashed_do_work(tmp_path):
     boom = RuntimeError("do_work exploded")
 
     def crashing_do_work(wt_paths, *, box=None):
-        raise boom
+        # The drain starts no box itself (#1195): the work's agent run does, and crashes in it.
+        from defender.runtime.box import box_for_run
+
+        with box_for_run(box):
+            raise boom
 
     # No `branch=`: `drive_worktree_batch` already defaults to a RecordingBranch over the
     # recorder's own event log, which is what makes the branch events and the box events

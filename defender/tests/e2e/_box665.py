@@ -317,9 +317,9 @@ class FakeBox:
 
     name: str = "box-665"
     request: Any = None
-    #: `False`: no real container stands behind it, so the lead lane's freeze (#1178
-    #: `pause_box`/`thawed`) has nothing to pause; `True` would send the real docker after
-    #: a container that does not exist.
+    #: `False`: no real container stands behind it, so a box source's batch-end teardown
+    #: (#1195 `BoxSource.teardown`) asks no daemon about it; `True` would send the real docker
+    #: after a container that does not exist.
     sandboxed: bool = False
 
 

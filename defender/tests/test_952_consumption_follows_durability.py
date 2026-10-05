@@ -208,6 +208,38 @@ def _curating(curated: list[PitfallsDisposition], disposition: PitfallsDispositi
     return curate
 
 
+def _sandboxed_start(request, **_kw):
+    """A `start_box` handing back a sandboxed executor named for the request, starting nothing."""
+    spec = box_mod.BoxSpec()
+    return box_mod.BoxExecutor(spec=spec, transport=box_mod._DockerTransport(request.name, spec),
+                               name=request.name)
+
+
+def _in_a_run(serve):
+    """`serve`, after one agent run of the box source it is handed (#1195: a lane's spawn
+    site enters one)."""
+
+    def served_in_a_run(paths, run_dir, *, box=None, on_done):
+        with box_mod.box_for_run(box):
+            pass
+        return serve(paths, run_dir, box=box, on_done=on_done)
+
+    return served_in_a_run
+
+
+def _no_docker_on_path(monkeypatch, tmp_path: Path) -> None:
+    """A `PATH` holding only `git`: no docker binary answers."""
+    import shutil
+
+    git = shutil.which("git")
+    assert git is not None, "these rows drive real git"
+    bin_dir = tmp_path / "bin-git-only"
+    bin_dir.mkdir()
+    (bin_dir / "git").symlink_to(git)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    assert shutil.which("docker") is None
+
+
 def _no_curation(*_a, **_kw) -> int:
     return 0
 
@@ -361,7 +393,7 @@ def _assert_consumed(paths: LoopPaths, run_dir: Path, *, done: bool = True) -> N
 
 @pytest.mark.parametrize("fault", ["run_tainted_from_scrub", "box_fault_from_teardown"])
 def test_952_o1_a_batch_whose_tree_never_passes_the_scrub_consumes_nothing(
-    tmp_path: Path, capsys, fault: str,
+    tmp_path: Path, capsys, monkeypatch, fault: str,
 ):
     """O1, the exits BEFORE the apply. The scrub's `RunTainted` and a box fault from the
     teardown both mean the curators' commits are not sound to deliver — so a tick that served
@@ -378,21 +410,23 @@ def test_952_o1_a_batch_whose_tree_never_passes_the_scrub_consumes_nothing(
     served: list[Path] = []
     curated: list[PitfallsDisposition] = []
     branch = _Branch(tmp_path / "worktrees")
-    scrub, stop_box = noop_scrub, noop_stop_box
+    scrub, start_box, serve = noop_scrub, noop_start_box, _serving(served)
     if fault == "run_tainted_from_scrub":
         expected_type: type[BaseException] = box_mod.RunTainted
         scrub = _tainting
     else:
         expected_type = box_mod.BoxFault
-
-        def stop_box(_box, **_kw):
-            raise box_mod.BoxFault("docker stop hung")
+        # #1195: the batch-end teardown is the box source's, and it asks the daemon only once a
+        # run started a sandboxed box. The serve's agent run starts one; at batch end no docker
+        # answers, so the teardown cannot prove the box gone.
+        start_box, serve = _sandboxed_start, _in_a_run(serve)
+        _no_docker_on_path(monkeypatch, tmp_path)
 
     with pytest.raises(expected_type):
         drains.lead_author_drain(
-            paths, run_lead_author=_serving(served),
+            paths, run_lead_author=serve,
             run_pitfalls=_curating(curated, _disposition()), branch=branch,
-            start_box=noop_start_box, stop_box=stop_box, scrub=scrub,
+            start_box=start_box, stop_box=noop_stop_box, scrub=scrub,
         )
 
     assert served == [run_dir.resolve()]
