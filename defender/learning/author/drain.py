@@ -72,6 +72,7 @@ from defender.learning.core.config import (
 )
 from defender._tree_listing import entry_kind
 from defender.learning.core.lane_trees import TreeFor, kind_at
+from defender.runtime import box as box_mod
 
 AuthorError = author_shared.AuthorError
 
@@ -794,7 +795,8 @@ def _author_batch(
     key = cfg.channel.id_key
     batch_ids = {row[key] for row in to_author}
 
-    result = cfg.invoke_agent(to_author, batch_id, cfg)
+    with cfg.thaw(cfg.box):
+        result = cfg.invoke_agent(to_author, batch_id, cfg)
     tree = _settle_tree(cfg, state, honoured_deletions=None)
     _git_read(
         "agent report",
@@ -873,7 +875,8 @@ def _spawn_repair(cfg: CorpusAuthorConfig, bad: list[PairVerdict], batch_id: str
     resolved inside `invoke_repair`."""
     if cfg.repair_prompt is not None and not cfg.repair_prompt.is_file():
         raise FatalConfigError(f"repair prompt {cfg.repair_prompt} is not a readable file")
-    cfg.invoke_repair(bad, batch_id, cfg)
+    with cfg.thaw(cfg.box):
+        cfg.invoke_repair(bad, batch_id, cfg)
 
 
 def _handle_retire(
@@ -942,6 +945,18 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
         except BaseException as e:
             # Clean up on every fault, member or not: a stuck tick leaves the same edits a
             # retiring one does, and leaving them wedges the channel.
+            if isinstance(e, box_mod.BoxFault):
+                # A box that could not be frozen may still be writing while the undo runs, and
+                # the undo's own fault (a folder swapped for a link: ELOOP) must not replace
+                # this one: an `OSError` is contained above `run_batch` and the sibling
+                # curator would run beside the live box (#1195 D3a).
+                try:
+                    _undo_agent_edits(cfg, state.snapshot, state.baseline_stray,
+                                      state.head_before)
+                except Exception as undo_fault:  # noqa: BLE001 — the box fault outranks it
+                    log.error(f"undo after a box fault failed: {undo_fault!r} "
+                              "(the box fault follows)", exc_info=undo_fault)
+                raise
             _undo_agent_edits(cfg, state.snapshot, state.baseline_stray, state.head_before)
             if not isinstance(e, RETIRE_SET):
                 raise

@@ -217,8 +217,9 @@ def _drain_one_curator(
     """Run one curator, containing its fault to its own channel.
 
     `trigger_author` is a caller-supplied seam whose exception discipline can't be assumed, so
-    the isolation lives here. A `RETIRE_SET` fault propagates; anything else is recorded on
-    this channel's stuck report and swallowed, so the sibling curator still runs."""
+    the isolation lives here. A `RETIRE_SET` fault or a `BoxFault` (#1195) propagates; anything
+    else is recorded on this channel's stuck report and swallowed, so the sibling curator still
+    runs."""
     from defender._io import read_jsonl_rows
 
     # `run_batch` already records non-`RETIRE_SET` faults before re-raising. A second record
@@ -228,6 +229,10 @@ def _drain_one_curator(
     try:
         trigger_author(paths, channel.file, threshold_env, module_name, pending_label, box=box)
     except drain.RETIRE_SET:
+        raise
+    # A box that could not be shown frozen (or running, before a spawn) halts the batch: the
+    # sibling curator's host steps must not run beside it (#1195).
+    except box_mod.BoxFault:
         raise
     # An interrupt leaves at once; swallowing it would record Ctrl-C as a curator fault, run
     # the sibling curator, and go on to commit, push and open a PR for the batch the operator
@@ -253,13 +258,17 @@ def _drain_curators(
     trigger_author: Callable[..., None],
     *,
     box: Any = None,
+    pause: Callable[[Any], None] = box_mod.pause_box,
 ) -> None:
     # The same two channels the wake gate (`_curator_queue_checks`) answers for. Both curators
     # share one tick — worktree, box, branch, PR lease — and `_drain_one_curator` contains each
     # one's non-retiring fault, so it never stops the other or its commit. A `RETIRE_SET` fault
     # propagates, so one in the first curator can cost the second its turn. This frame must not
-    # raise on a non-retiring fault, or `finish_batch` is never reached and neither curator's
-    # work is committed.
+    # raise on any other fault but a `BoxFault`, or `finish_batch` is never reached and neither
+    # curator's work is committed. The box is frozen before either curator and stays frozen
+    # except while an agent runs in it (each spawn's `thawed`); a box that cannot be shown so
+    # halts the batch, and its `BoxFault` propagates (#1195).
+    pause(box)
     _drain_one_curator(paths, trigger_author, paths.findings, "LEARNING_AUTHOR_THRESHOLD",
                        "author", "pending", box=box)
     _drain_one_curator(paths, trigger_author, paths.questioner_findings,
