@@ -42,12 +42,16 @@ Tests -> obligations:
   `test_the_default_thaw_runs_no_curator_in_a_box_it_cannot_show_running`,
   `test_the_default_seams_hold_the_box_frozen_except_around_each_spawn`.
 - D3 / O2: `test_a_box_fault_from_the_first_curators_step_halts_the_drain` (+ its control),
-  `test_a_box_fault_in_the_first_curator_halts_the_tick_before_the_second` (spawn, re-freeze,
-  unproven thaw) and
-  `test_control_a_non_box_fault_in_the_first_curator_is_contained_and_the_second_runs`.
+  `test_a_box_fault_in_the_first_curator_halts_the_tick_before_the_second` (spawn, re-freeze
+  after a spawn that returned or raised, unproven thaw, and each in the repair window),
+  `test_a_box_fault_in_the_second_curator_halts_the_drain`, and
+  `test_control_a_non_box_fault_in_the_first_curator_is_contained_and_the_second_runs` (N4).
+- D2 / O3 on the fault path: `test_a_failing_spawn_is_refrozen_before_the_undo_runs`.
 - D3a / O2: `test_a_box_fault_outranks_an_undo_fault_and_the_second_curator_never_runs`, with
-  `test_control_an_undo_fault_still_replaces_a_non_box_fault`.
-- O2 through the lane: `test_a_box_fault_escapes_author_drain_with_nothing_delivered`.
+  `test_control_an_undo_fault_still_replaces_a_non_box_fault` (every other in-flight class,
+  the systemic ones included).
+- O2 through the lane: `test_a_box_fault_escapes_author_drain_with_nothing_delivered` (either
+  curator), with `test_control_author_drain_delivers_a_batch_with_no_box_fault`.
 - O1: `test_a_process_left_in_the_box_cannot_change_a_judged_lesson`,
   `test_control_with_no_freeze_the_process_races_the_commit` (the race is real),
   `test_what_the_box_writes_before_the_refreeze_is_what_is_judged`.
@@ -73,7 +77,9 @@ from defender import _git, _io
 from defender._io import NotPlainEntry
 from defender.learning.author import _config as author_config
 from defender.learning.core import drains
+from defender._git import GitError
 from defender.learning.core.config import FatalConfigError, LoopPaths, StageAbort
+from defender.runtime.verbs import RegistryError
 from defender.runtime import box as box_mod
 from defender.runtime.box import BoxFault
 from defender.tests import _spec773 as S
@@ -169,31 +175,34 @@ class Thaw:
     bytes of both channels' queue files), so a commit or a rotation made while thawed shows as a
     change between the two. `enter_fault` is raised on the way in (the box could not be shown
     running); `on_enter` runs once in (the box's first writes); `on_exit` runs on the way out,
-    still thawed (the box's last writes); `refreeze_fault` is raised after the body, as the
-    re-freeze failing does."""
+    still thawed (the box's last writes); `refreeze_fault` is raised after the body, whether it
+    returned or raised, as the re-freeze failing does. With `nth`, the two faults are raised by
+    the `nth` thaw this seam hands out (from 1) and no other: the repair's is the second."""
 
-    def __init__(self, log: list, repo: Path, queues: tuple[Path, ...] = (), *,
+    def __init__(self, log: list, repo: Path, queues: tuple[Path, ...] = (), *,  # noqa: PLR0913 — one seam, every fault a row varies
                  on_enter: Callable[[], object] | None = None,
                  on_exit: Callable[[], object] | None = None,
                  enter_fault: BaseException | None = None,
-                 refreeze_fault: BaseException | None = None) -> None:
+                 refreeze_fault: BaseException | None = None,
+                 nth: int | None = None) -> None:
         self.log, self.repo, self.queues = log, repo, queues
         self.on_enter, self.on_exit = on_enter, on_exit
         self.enter_fault, self.refreeze_fault = enter_fault, refreeze_fault
+        self.nth = nth
         self.boxes: list[Any] = []
 
     def __call__(self, box: Any) -> contextlib.AbstractContextManager[None]:
         self.boxes.append(box)
-        return self._held()
+        return self._held(self.nth is None or len(self.boxes) == self.nth)
 
     def _state(self) -> tuple[str, tuple[bytes | None, ...]]:
         return (_git.git_head_sha(self.repo),
                 tuple(q.read_bytes() if q.exists() else None for q in self.queues))
 
     @contextlib.contextmanager
-    def _held(self):
+    def _held(self, faults: bool):
         self.log.append(("enter", *self._state()))
-        if self.enter_fault is not None:
+        if faults and self.enter_fault is not None:
             raise self.enter_fault
         if self.on_enter is not None:
             self.on_enter()
@@ -203,7 +212,7 @@ class Thaw:
             if self.on_exit is not None:
                 self.on_exit()
             self.log.append(("exit", *self._state()))
-            if self.refreeze_fault is not None:
+            if faults and self.refreeze_fault is not None:
                 raise self.refreeze_fault
 
 
@@ -725,30 +734,68 @@ def test_a_box_fault_from_the_first_curators_step_halts_the_drain(tmp_path: Path
     assert calls == ["author"], "the second curator ran after a box fault"
 
 
-def _box_fault_scene(tmp_path: Path, source: str, fault: BoxFault, *,
-                     seed_corpus: dict[str, str] | None = None,
-                     plant: Callable[..., None] | None = None) -> tuple[Tick, S.FakeCurator, S.FakeCurator, Thaw | None]:
-    """A tick whose lessons curator leaves `a.md` (after running `plant`, the box's own act), and
-    whose `source` raises `fault`: the curator spawn itself (`spawn`), the thaw's re-freeze after
-    it (`refreeze`), or the thaw's way in (`thaw-unproven`). The questioner curator holds a
-    queued row it would commit; its thaw (when one is injected) holds."""
-    log: list = []
+#: Where a `BoxFault` comes from, in the curator that faults:
+#: - `spawn`: the curator spawn itself raises it, after leaving its lesson;
+#: - `refreeze`: the thaw's re-freeze, after the spawn returned;
+#: - `thaw-unproven`: the thaw's way in, before the spawn;
+#: - `refreeze-over-a-failing-spawn`: the spawn raises `RuntimeError` and the re-freeze on that way
+#:   out fails too (a thaw that re-freezes only on success loses this one);
+#: - `repair-spawn` / `repair-refreeze` / `repair-unproven`: the same three in the repair window
+#:   (the lessons verdict BAD on pass 1, so the repair runs; its thaw is the second).
+FIRST_CURATOR_SOURCES = ["spawn", "refreeze", "thaw-unproven", "refreeze-over-a-failing-spawn",
+                         "repair-spawn", "repair-refreeze", "repair-unproven"]
+SECOND_CURATOR_SOURCES = ["spawn", "refreeze", "thaw-unproven", "refreeze-over-a-failing-spawn"]
 
-    def after_write(rows: Any, batch_id: str, cfg: Any) -> None:
+
+@dataclasses.dataclass
+class Faulted:
+    """A tick one of whose curators meets a `BoxFault`, and its fakes. `thaw` is the faulting
+    curator's (`None` when the fault is the spawn's own and no thaw is injected)."""
+
+    t: Tick
+    curator: S.FakeCurator
+    q_curator: S.FakeCurator
+    verifier: S.FakeVerifier
+    repair: S.FakeRepair
+    thaw: Thaw | None
+
+
+def _box_fault_scene(  # noqa: PLR0913 — one tick, every fault a row varies
+        tmp_path: Path, source: str, fault: BoxFault, *, in_curator: str = "author",
+        seed_corpus: dict[str, str] | None = None, plant: Callable[..., None] | None = None,
+) -> Faulted:
+    """A tick whose lessons curator leaves `a.md` (citing f1) and whose questioner curator leaves
+    `q.md` (citing w1), each committing it unless something faults. The curator `in_curator`
+    meets `fault` from `source` (`FIRST_CURATOR_SOURCES`), after running `plant` (the box's own
+    act) in its spawn. The other curator's thaw, when one is injected, holds."""
+    log: list = []
+    spawn_fault = {"spawn": fault,
+                   "refreeze-over-a-failing-spawn": RuntimeError("the agent crashed")}.get(source)
+
+    def act(rows: Any, batch_id: str, cfg: Any) -> None:
         if plant is not None:
             plant(rows, batch_id, cfg)
-        if source == "spawn":
-            raise fault
+        if spawn_fault is not None:
+            raise spawn_fault
 
-    curator = S.FakeCurator(writes={"a.md": S.lesson("f1")}, also=after_write)
-    q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")})
-    t = _tick(tmp_path, log, curator=curator, q_curator=q_curator, seed_corpus=seed_corpus)
+    first = in_curator == "author"
+    curator = S.FakeCurator(writes={"a.md": S.lesson("f1")}, also=act if first else None)
+    q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")}, also=None if first else act)
+    repairing = source.startswith("repair-")
+    verifier = S.FakeVerifier(verdicts={"a.md": ["BAD", "GOOD"]} if repairing else {})
+    repair = S.FakeRepair(writes={"a.md": REPAIRED}, raise_after_writes=True,
+                          raises=fault if source == "repair-spawn" else None)
+    t = _tick(tmp_path, log, curator=curator, q_curator=q_curator, verifier=verifier,
+              repair=repair, seed_corpus=seed_corpus)
     thaw = None
-    if source in ("refreeze", "thaw-unproven"):
-        thaw = Thaw(log, t.sc.repo, refreeze_fault=fault if source == "refreeze" else None,
-                    enter_fault=fault if source == "thaw-unproven" else None)
-        t.with_thaws(thaw, Thaw(log, t.sc.repo))
-    return t, curator, q_curator, thaw
+    if source not in ("spawn", "repair-spawn"):
+        unproven = source.endswith("unproven")
+        thaw = Thaw(log, t.sc.repo, enter_fault=fault if unproven else None,
+                    refreeze_fault=None if unproven else fault, nth=2 if repairing else None)
+        holding = Thaw(log, t.sc.repo)
+        t.with_thaws(*((thaw, holding) if first else (holding, thaw)))
+    return Faulted(t=t, curator=curator, q_curator=q_curator, verifier=verifier, repair=repair,
+                   thaw=thaw)
 
 
 def _assert_halted_after_the_first_curator(t: Tick, q_curator: S.FakeCurator,
@@ -762,16 +809,31 @@ def _assert_halted_after_the_first_curator(t: Tick, q_curator: S.FakeCurator,
     assert _stuck_classes(t.paths, "questioner_findings") == []
 
 
-@pytest.mark.parametrize("source", ["spawn", "refreeze", "thaw-unproven"])
+def _assert_halted_in_the_second_curator(t: Tick) -> None:
+    """The first curator committed (the control inside the row); the second's box fault left no
+    commit, no bumped row and its own stuck record, and its lesson undone."""
+    assert t.modules() == ["author", "questioner_curator"]
+    assert t.sc.head_text(_rel(t.sc, "a.md")) == S.lesson("f1"), "the first curator never committed"
+    assert t.sc.head_text(_questioner_rel(t, "q.md")) is None, "a commit landed after a box fault"
+    assert not (t.paths.lessons_questioner_dir / "q.md").exists(), "the lesson was not undone"
+    assert S.pending_by_id(t.paths.questioner_findings)["w1"].get("attempts") is None
+    assert _stuck_classes(t.paths, "questioner_findings") == ["BoxFault"]
+    assert _stuck_classes(t.paths, "findings") == []
+
+
+@pytest.mark.parametrize("source", FIRST_CURATOR_SOURCES)
 def test_a_box_fault_in_the_first_curator_halts_the_tick_before_the_second(
         tmp_path: Path, source: str):
-    """Through `_drain_curators` and both real curators: a `BoxFault` from the lessons curator's
-    spawn, from its thaw's re-freeze after the spawn, or from a thaw that cannot be proven
-    before the spawn, escapes the drain (the same object). The questioner curator is never
-    triggered, nothing is committed, f1 is not bumped and its stuck record names `BoxFault`; the
-    curator's lesson is undone. With the thaw unproven, the curator is never called."""
+    """Through `_drain_curators` and both real curators: a `BoxFault` in the lessons curator, from
+    its spawn, its thaw's re-freeze (after a spawn that returned or one that raised), a thaw that
+    cannot be proven before the spawn, or the same three in the repair window, escapes the drain
+    (the same object). The questioner curator is never triggered, nothing is committed, f1 is
+    not bumped and its stuck record names `BoxFault`; the curator's lesson is undone. With a
+    thaw unproven, its spawn is never called; after a repair-window fault, nothing is judged
+    again."""
     fault = BoxFault("the box did not report paused after the spawn")
-    t, curator, q_curator, thaw = _box_fault_scene(tmp_path, source, fault)
+    f = _box_fault_scene(tmp_path, source, fault)
+    t = f.t
     q_queued = _queued(t.paths)[1]
     box = B.FakeBox(name="box-1195")
 
@@ -779,24 +841,57 @@ def test_a_box_fault_in_the_first_curator_halts_the_tick_before_the_second(
         drains._drain_curators(t.paths, t.trigger, box=box)
 
     assert got.value is fault
-    _assert_halted_after_the_first_curator(t, q_curator, q_queued)
-    assert len(curator.calls) == (0 if source == "thaw-unproven" else 1)
+    _assert_halted_after_the_first_curator(t, f.q_curator, q_queued)
+    assert len(f.curator.calls) == (0 if source == "thaw-unproven" else 1)
     assert not (t.sc.corpus / "a.md").exists(), "the curator's lesson was not undone"
-    if thaw is not None:
-        assert thaw.boxes == [box]
+    if source.startswith("repair-"):
+        assert len(f.repair.calls) == (0 if source == "repair-unproven" else 1)
+        assert f.verifier.texts_for("a.md") == [S.lesson("f1")], (
+            "the tree was judged again after the repair's box fault")
+    else:
+        assert f.repair.calls == []
+    if f.thaw is not None:
+        assert f.thaw.boxes == [box] * (2 if source.startswith("repair-") else 1)
 
 
-@pytest.mark.parametrize("fault", [RuntimeError, StageAbort, FatalConfigError],
-                         ids=lambda c: c.__name__)
+@pytest.mark.parametrize("source", SECOND_CURATOR_SOURCES)
+def test_a_box_fault_in_the_second_curator_halts_the_drain(tmp_path: Path, source: str):
+    """The same faults in the questioner curator, which runs second: its `BoxFault` escapes
+    `_drain_curators` too (the same object), so `finish_batch` is never reached. The lessons
+    curator's commit stands; the questioner's lesson is undone, w1 is not bumped and its stuck
+    record names `BoxFault`."""
+    fault = BoxFault("the box did not report paused after the questioner's spawn")
+    f = _box_fault_scene(tmp_path, source, fault, in_curator="questioner_curator")
+
+    with pytest.raises(BoxFault) as got:
+        drains._drain_curators(f.t.paths, f.t.trigger, box=B.FakeBox(name="box-1195"))
+
+    assert got.value is fault
+    _assert_halted_in_the_second_curator(f.t)
+    assert len(f.q_curator.calls) == (0 if source == "thaw-unproven" else 1)
+
+
+#: Faults that are not box faults, raised by the lessons spawn after it leaves its lesson. All but
+#: `GitError` are non-retiring, contained by `_drain_one_curator` (N4: `StageAbort`,
+#: `FatalConfigError`, `RegistryError` keep their behaviour); `GitError` retires inside its own
+#: tick (f1 bumped). Either way the second curator runs.
+CONTAINED_FAULTS = [RuntimeError, StageAbort, FatalConfigError, RegistryError, GitError]
+
+
+def _not_a_box_fault(cls: type[Exception], message: str) -> Exception:
+    return S.git_error(message) if cls is GitError else cls(message)
+
+
+@pytest.mark.parametrize("fault", CONTAINED_FAULTS, ids=lambda c: c.__name__)
 def test_control_a_non_box_fault_in_the_first_curator_is_contained_and_the_second_runs(
         tmp_path: Path, fault: type[Exception]):
-    """The lessons spawn leaves `a.md` and raises a non-retiring fault that is not a box fault:
-    contained as before (N4). `_drain_curators` returns, the questioner curator runs and
-    commits, and the findings channel's stuck record names the fault."""
+    """The lessons spawn leaves `a.md` and raises a fault that is not a box fault: handled as
+    before. `_drain_curators` returns, the questioner curator runs and commits, and the findings
+    channel's stuck record names the fault (f1 bumped only by the retiring `GitError`)."""
     log: list = []
 
     def boom(*_a: Any) -> None:
-        raise fault("not a box fault")
+        raise _not_a_box_fault(fault, "not a box fault")
 
     curator = S.FakeCurator(writes={"a.md": S.lesson("f1")}, also=boom)
     q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")})
@@ -809,6 +904,34 @@ def test_control_a_non_box_fault_in_the_first_curator_is_contained_and_the_secon
     assert t.sc.head_text(_questioner_rel(t, "q.md")) == S.lesson("w1")
     assert t.sc.head_text(_rel(t.sc, "a.md")) is None
     assert _stuck_classes(t.paths, "findings") == [fault.__name__]
+    assert t.sc.pending_by_id()["f1"].get("attempts") == (1 if fault is GitError else None)
+
+
+def test_a_failing_spawn_is_refrozen_before_the_undo_runs(tmp_path: Path):
+    """The lessons spawn leaves `a.md` and raises `RuntimeError`: its thaw still exits on that
+    way out (the window holds the spawn alone), and the undo's removal of `a.md` through the
+    corpus mount runs after the exit, frozen. The contained fault lets the questioner curator
+    run, in a window of its own."""
+    log: list = []
+
+    def boom(*_a: Any) -> None:
+        raise RuntimeError("the agent crashed")
+
+    curator = S.FakeCurator(writes={"a.md": S.lesson("f1")}, also=boom)
+    q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")})
+    t = _tick(tmp_path, log, curator=curator, q_curator=q_curator, journal=True)
+    thaw = Thaw(log, t.sc.repo)
+    t.with_thaws(thaw, thaw)
+
+    drains._drain_curators(t.paths, t.trigger, box=B.FakeBox(name="box-1195"))
+
+    windows = _assert_each_thaw_holds_exactly_its_spawn(log, ["agent", "agent"])
+    first_exit, second_enter = windows[0][1], windows[1][0]
+    undo = [i for i, e in enumerate(log) if e == ("unlink", "a.md")]
+    assert undo, "the undo never removed the failed spawn's lesson through the corpus mount"
+    assert all(first_exit < i < second_enter for i in undo), (
+        "the undo ran beside a thawed box")
+    assert t.sc.head_text(_questioner_rel(t, "q.md")) == S.lesson("w1")
 
 
 # ---------------------------------------------------------------------------------------
@@ -856,32 +979,38 @@ def test_a_box_fault_outranks_an_undo_fault_and_the_second_curator_never_runs(
     row."""
     caplog.set_level(logging.WARNING)
     fault = BoxFault("the box did not report paused after the spawn")
-    t, _curator, q_curator, _thaw = _box_fault_scene(
-        tmp_path, source, fault, seed_corpus=SEEDED_SUB,
-        plant=_swap_sub_for_a_link(tmp_path / "outside" / "moved-sub"))
-    q_queued = _queued(t.paths)[1]
+    f = _box_fault_scene(tmp_path, source, fault, seed_corpus=SEEDED_SUB,
+                         plant=_swap_sub_for_a_link(tmp_path / "outside" / "moved-sub"))
+    q_queued = _queued(f.t.paths)[1]
 
     with pytest.raises(BoxFault) as got:
-        drains._drain_curators(t.paths, t.trigger, box=B.FakeBox(name="box-1195"))
+        drains._drain_curators(f.t.paths, f.t.trigger, box=B.FakeBox(name="box-1195"))
 
     assert got.value is fault
-    _assert_halted_after_the_first_curator(t, q_curator, q_queued)
+    _assert_halted_after_the_first_curator(f.t, f.q_curator, q_queued)
     assert _undo_fault_logged(caplog), "the undo's own fault was swallowed without a trace"
 
 
-@pytest.mark.parametrize("in_flight", ["AuthorError", "RuntimeError"])
-def test_control_an_undo_fault_still_replaces_a_non_box_fault(tmp_path: Path, in_flight: str):
-    """The same swap, with the curator raising a fault that is not a box fault (`AuthorError`, a
-    retiring one; `RuntimeError`, a non-retiring one): the undo's `OSError(ELOOP)` still
-    replaces it (#1134 O5.3), is recorded stuck as `OSError` with f1 not bumped, and
-    `_run_curator_module` contains it, so `_drain_curators` returns and the questioner curator
-    runs and commits."""
+#: In-flight faults that are not box faults, over the same undo fault: the retiring
+#: `AuthorError` and `GitError`, and the non-retiring rest, the systemic ones among them.
+UNDO_CONTROL_FAULTS = [S.author_error, RuntimeError, GitError, StageAbort, FatalConfigError,
+                       RegistryError]
+
+
+@pytest.mark.parametrize("in_flight", UNDO_CONTROL_FAULTS,
+                         ids=lambda c: "AuthorError" if c is S.author_error else c.__name__)
+def test_control_an_undo_fault_still_replaces_a_non_box_fault(
+        tmp_path: Path, in_flight: Callable[[str], Exception]):
+    """The same swap, with the curator raising a fault that is not a box fault (retiring or not,
+    systemic or not): the undo's `OSError(ELOOP)` still replaces it (#1134 O5.3), is recorded
+    stuck as `OSError` with f1 not bumped, and `_run_curator_module` contains it, so
+    `_drain_curators` returns and the questioner curator runs and commits."""
 
     def plant_then_fail(rows: Any, batch_id: str, cfg: Any) -> None:
         _swap_sub_for_a_link(tmp_path / "outside" / "moved-sub")(rows, batch_id, cfg)
-        if in_flight == "AuthorError":
+        if in_flight is S.author_error:
             raise S.author_error("refused after the swap")
-        raise RuntimeError("failed after the swap")
+        raise _not_a_box_fault(in_flight, "failed after the swap")
 
     curator = S.FakeCurator(writes={"a.md": S.lesson("f1")}, also=plant_then_fail)
     q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")})
@@ -899,24 +1028,19 @@ def test_control_an_undo_fault_still_replaces_a_non_box_fault(tmp_path: Path, in
 # O2 through the lane: the box fault escapes `do_work`, so nothing is delivered
 # ---------------------------------------------------------------------------------------
 
+#: `(source, the curator it faults in)`: each first-curator source, the repair window's
+#: re-freeze, a re-freeze over an undo that faults too, and the second curator's re-freeze.
+LANE_FAULTS = [
+    pytest.param("spawn", "author", id="spawn"),
+    pytest.param("refreeze", "author", id="refreeze"),
+    pytest.param("refreeze-over-a-failing-spawn", "author", id="refreeze-over-a-failing-spawn"),
+    pytest.param("repair-refreeze", "author", id="repair-refreeze"),
+    pytest.param("refreeze-over-an-undo-fault", "author", id="refreeze-over-an-undo-fault"),
+    pytest.param("refreeze", "questioner_curator", id="second-curator-refreeze"),
+]
 
-@pytest.mark.parametrize("source", ["control", "spawn", "refreeze", "refreeze-over-an-undo-fault"])
-def test_a_box_fault_escapes_author_drain_with_nothing_delivered(
-        tmp_path: Path, monkeypatch, source: str):
-    """`author_drain` over the real worktree (the trigger, the branch and the box lifecycle
-    injected): a `BoxFault` from the lessons curator (its spawn, its thaw's re-freeze, or that
-    re-freeze over an undo that faults too) escapes `author_drain` (the same object). The box is
-    torn down and the tree scrubbed, the worktree cleaned up, but `finish_batch` (push and PR)
-    never runs; the questioner curator is never triggered, nothing is committed, and f1 is not
-    bumped. Control: no fault, and the batch is delivered with both curators' lessons."""
-    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-    fault = BoxFault("the box did not report paused after the spawn")
-    undo_fault = source == "refreeze-over-an-undo-fault"
-    t, _curator, q_curator, _thaw = _box_fault_scene(
-        tmp_path, "refreeze" if undo_fault else source, fault,
-        seed_corpus=SEEDED_SUB if undo_fault else None,
-        plant=_swap_sub_for_a_link(tmp_path / "outside" / "moved-sub") if undo_fault else None)
-    q_queued = _queued(t.paths)[1]
+
+def _run_author_drain(t: Tick) -> tuple[Callable[[], int], list[str]]:
     rec = B.BoxLifecycleRecorder()
     branch = RepoBranch(t.sc.repo, events=rec.events)
 
@@ -924,21 +1048,56 @@ def test_a_box_fault_escapes_author_drain_with_nothing_delivered(
         return drains.author_drain(t.paths, trigger_author=t.trigger, branch=branch,
                                    start_box=rec.start_box, stop_box=rec.stop_box, scrub=rec.scrub)
 
-    if source == "control":
-        assert run() == 0
-        assert t.modules() == ["author", "questioner_curator"]
-        assert any(e.startswith("finish_batch:") for e in rec.events), rec.events
-        assert t.sc.head_text(_rel(t.sc, "a.md")) == S.lesson("f1")
-        assert t.sc.head_text(_questioner_rel(t, "q.md")) == S.lesson("w1")
-        return
+    return run, rec.events
+
+
+def test_control_author_drain_delivers_a_batch_with_no_box_fault(tmp_path: Path, monkeypatch):
+    """The lane rows' control: the same tick, nothing faults, both injected thaws hold. Both
+    curators commit and `finish_batch` delivers the batch."""
+    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
+    log: list = []
+    t = _tick(tmp_path, log, curator=S.FakeCurator(writes={"a.md": S.lesson("f1")}),
+              q_curator=S.FakeCurator(writes={"q.md": S.lesson("w1")}))
+    t.with_thaws(Thaw(log, t.sc.repo), Thaw(log, t.sc.repo))
+    run, events = _run_author_drain(t)
+
+    assert run() == 0
+    assert t.modules() == ["author", "questioner_curator"]
+    assert any(e.startswith("finish_batch:") for e in events), events
+    assert t.sc.head_text(_rel(t.sc, "a.md")) == S.lesson("f1")
+    assert t.sc.head_text(_questioner_rel(t, "q.md")) == S.lesson("w1")
+
+
+@pytest.mark.parametrize(("source", "in_curator"), LANE_FAULTS)
+def test_a_box_fault_escapes_author_drain_with_nothing_delivered(
+        tmp_path: Path, monkeypatch, source: str, in_curator: str):
+    """`author_drain` over the real worktree (the trigger, the branch and the box lifecycle
+    injected): a `BoxFault` in either curator escapes `author_drain` (the same object). The box
+    is torn down and the tree scrubbed, the worktree cleaned up, but `finish_batch` (push and PR)
+    never runs. In the first curator: the second is never triggered, nothing is committed, f1 is
+    not bumped. In the second: its lesson is undone and w1 not bumped. Control: the row above."""
+    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
+    fault = BoxFault("the box did not report paused after the spawn")
+    undo_fault = source == "refreeze-over-an-undo-fault"
+    f = _box_fault_scene(
+        tmp_path, "refreeze" if undo_fault else source, fault, in_curator=in_curator,
+        seed_corpus=SEEDED_SUB if undo_fault else None,
+        plant=_swap_sub_for_a_link(tmp_path / "outside" / "moved-sub") if undo_fault else None)
+    q_queued = _queued(f.t.paths)[1]
+    run, events = _run_author_drain(f.t)
+
     with pytest.raises(BoxFault) as got:
         run()
+
     assert got.value is fault
-    assert not any(e.startswith("finish_batch:") for e in rec.events), rec.events
-    assert any(e.startswith("stop:") for e in rec.events), rec.events
-    assert any(e.startswith("scrub:") for e in rec.events), rec.events
-    assert "cleanup" in rec.events, rec.events
-    _assert_halted_after_the_first_curator(t, q_curator, q_queued)
+    assert not any(e.startswith("finish_batch:") for e in events), events
+    assert any(e.startswith("stop:") for e in events), events
+    assert any(e.startswith("scrub:") for e in events), events
+    assert "cleanup" in events, events
+    if in_curator == "author":
+        _assert_halted_after_the_first_curator(f.t, f.q_curator, q_queued)
+    else:
+        _assert_halted_in_the_second_curator(f.t)
 
 
 # ---------------------------------------------------------------------------------------
