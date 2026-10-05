@@ -31,7 +31,7 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
 )
 from ._spec import ALIAS_PROFILE_PATH, BoxExecutor, BoxRequest, BoxSpec, Mount
 from ._alias import _probe_alias_ban
-from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
+from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._spec import DEFAULT_SPEC, _HostTransport
 from ._spec import _DockerTransport
 
@@ -382,21 +382,11 @@ def start_box(
 
 
 def stop_box(box: BoxExecutor, *, docker: DockerFn = _docker) -> None:
-    """Remove the box's container, paused or not. Never thaws it first (#1178).
-
-    Under runsc a paused container's first `rm -f` kills it but answers non-zero ("PID … is
-    zombie and can not be killed") and leaves it behind; a second `rm -f` removes it (8/8 on
-    the CI runner, #1198). So one retry, and a box still there after it is a `BoxFault`."""
     if not box.name:
         return
-    argv = ["docker", "rm", "-f", box.name]
-    proc = _call(docker, argv)
-    if proc.returncode != 0:
-        proc = _call(docker, argv)
-    if proc.returncode != 0:
-        raise BoxFault(
-            f"could not tear down the box {box.name}: {(proc.stderr or '').strip()}"
-        )
+    reason = _remove_container(docker, box.name)
+    if reason is not None:
+        raise BoxFault(f"could not tear down the box {box.name}: {reason}")
 
 
 #: The container states in which nothing in the box runs: frozen, or no longer running at all
