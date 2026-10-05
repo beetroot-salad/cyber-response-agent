@@ -44,6 +44,17 @@ _logger = logging.getLogger(__name__)
 TENANT_AGENT_TARGET = Path("/tenant/agent")
 
 
+#: The `docker run` flags every box starts with (#1188). `fsize`: no process in the box can make
+#: a file, sparse or real, larger than a host whole-file read takes in (`_io.READ_LIMIT`, bytes,
+#: soft = hard; the box holds no `CAP_SYS_RESOURCE` to raise it). `core=0`: the kernel kills an
+#: over-limit writer with SIGXFSZ, whose default action dumps core into the writer's cwd, which
+#: is a run dir or a drain's writable tree.
+_BOX_ULIMITS: tuple[str, ...] = (
+    "--ulimit", f"fsize={READ_LIMIT}:{READ_LIMIT}",
+    "--ulimit", "core=0:0",
+)
+
+
 def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus its tenant's half
     name: str, run_dir: Path, defender_dir: Path, spec: BoxSpec,
     mounts: Sequence[tuple[Path, Path]] = (), start_token: str = "",
@@ -195,17 +206,6 @@ def _start_boxed(
         )
         raise
     return BoxExecutor(spec=spec, transport=_DockerTransport(name, spec), name=name)
-
-
-#: The `docker run` flags every box starts with (#1188). `fsize`: no process in the box can make
-#: a file, sparse or real, larger than a host whole-file read takes in (`_io.READ_LIMIT`, bytes,
-#: soft = hard; the box holds no `CAP_SYS_RESOURCE` to raise it). `core=0`: the kernel kills an
-#: over-limit writer with SIGXFSZ, whose default action dumps core into the writer's cwd, which
-#: is a run dir or a drain's writable tree.
-_BOX_ULIMITS: tuple[str, ...] = (
-    "--ulimit", f"fsize={READ_LIMIT}:{READ_LIMIT}",
-    "--ulimit", "core=0:0",
-)
 
 
 def _render_argv(
