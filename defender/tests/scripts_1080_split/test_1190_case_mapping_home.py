@@ -327,10 +327,12 @@ def test_1080_the_case_mapping_is_read_at_run_start_from_the_tenants_home(tmp_pa
 _COLD_IMPORT = r"""
 import importlib, json, sys
 order, case_mod, settings_mod = json.loads(sys.argv[1]), sys.argv[2], sys.argv[3]
+importers = json.loads(sys.argv[4])
 seen = []
 for name in order:
     importlib.import_module(name)
-    seen.append([name, case_mod in sys.modules, settings_mod in sys.modules])
+    seen.append([name, case_mod in sys.modules, settings_mod in sys.modules,
+                 sorted(m for m in importers if m in sys.modules)])
 print(json.dumps(seen))
 """
 
@@ -343,22 +345,49 @@ def test_case_mapping_module_is_imported_by_the_run_tenant_record_and_itself_imp
     All 24 orders, each in a fresh interpreter (PYTHONPATH this checkout); the case-mapping
     module is the one under `defender/runtime/` defining `load_case_mapping`. In every order the
     run-tenant record's import has loaded the case-mapping module, and the case-mapping
-    module's import has loaded `runtime/tenant_settings`."""
+    module's import has loaded `runtime/tenant_settings`. The edge runs one way: importing the
+    case-mapping module first loads none of its three importers, so a back-edge that every
+    order happens to survive (case mapping importing the run-tenant record) still fails."""
     case_mod = S.dotted(S.home_of("load_case_mapping", home=S.RUNTIME))
     run_tenant, settings = "defender.runtime.run_tenant", "defender.runtime.tenant_settings"
     modules = (case_mod, run_tenant, "defender.runtime.query_tool",
                "defender.learning.branch.estate.applier")
     orders = list(itertools.permutations(modules))
-    results = _children([["-c", _COLD_IMPORT, json.dumps(order), case_mod, settings]
+    importers = json.dumps(modules[1:])
+    results = _children([["-c", _COLD_IMPORT, json.dumps(order), case_mod, settings, importers]
                          for order in orders])
     failed = [(order[0], r.returncode, r.stderr.decode(errors="replace")[-600:])
               for order, r in zip(orders, results, strict=True) if r.returncode != 0]
     assert not failed, f"a first-import order fails: {failed[:3]}"
     for order, r in zip(orders, results, strict=True):
+        steps = json.loads(r.stdout)
         seen = {name: (case_loaded, settings_loaded)
-                for name, case_loaded, settings_loaded in json.loads(r.stdout)}
+                for name, case_loaded, settings_loaded, _ in steps}
         assert seen[run_tenant][0], f"{order}: run_tenant did not load {case_mod}"
         assert seen[case_mod][1], f"{order}: {case_mod} did not load {settings}"
+        if order[0] == case_mod:
+            assert steps[0][3] == [], f"{case_mod} imports its importers back: {steps[0][3]}"
+
+
+def test_1190_the_whole_case_ticket_module_moved_to_one_runtime_home():
+    """Pure whole-file move (design, decided: no split). Every module-level name the base
+    `scripts/case_history/case_ticket.py` defined is defined in the ONE home under
+    `defender/runtime/` (the module defining `load_case_mapping`), and none of them is defined
+    anywhere under `defender/scripts/case_history/`. The home has no module-level `__getattr__`,
+    which could serve a name from another module by a string import the AST census cannot see.
+
+    Since every name lives in the home, the env-read sweep of the home covers all of the
+    case-ticket code. Positive control: the census is non-empty and includes names from both
+    halves (the mapping loader and the comment payloads)."""
+    base = S.base_inventory()["py_names"]["defender/scripts/case_history/case_ticket.py"]
+    assert {"load_case_mapping", "case_record_to_comment", "WIRE_BOUND_BYTES"} <= set(base)
+    home = S.home_of("load_case_mapping", home=S.RUNTIME)
+    missing = [n for n in base if home not in S.definitions(n)]
+    assert not missing, f"names of the base module not defined in {home}: {missing}"
+    left = {n: [d for d in S.definitions(n) if S.under(d, "defender/scripts/case_history")]
+            for n in base}
+    assert not {n: d for n, d in left.items() if d}, f"split back into scripts/: {left}"
+    assert "__getattr__" not in S.module_level_names((S.REPO_ROOT / home).read_bytes(), home)
 
 
 # ======================================================================================
