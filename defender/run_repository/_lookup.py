@@ -74,6 +74,13 @@ def _hold_fault(exc: OSError) -> str:
     return f"cannot be opened ({exc.strerror or exc})"
 
 
+def tenant_refusal(message: str, cls: type[TenantRefused] = TenantRefused) -> TenantRefused:
+    """A tenant refusal the package raises, its message `escaped` as every `RunRefused`'s is,
+    so the runs folder's own path cannot break its one line. `TenantRefused` is the tenant
+    module's, so it is escaped here, at the package's one place that builds it."""
+    return cls(escaped(message))
+
+
 @contextmanager
 def held_runs(tenant: Tenant, io: Any) -> Iterator[_io.Held | None]:
     """`tenant.runs`, held open no-follow for the block, or `None` when it is absent (the one
@@ -86,7 +93,7 @@ def held_runs(tenant: Tenant, io: Any) -> Iterator[_io.Held | None]:
         yield None
         return
     except OSError as exc:
-        raise TenantRefused(f"the runs folder {escaped(runs)} {_hold_fault(exc)}") from None
+        raise tenant_refusal(f"the runs folder {runs} {_hold_fault(exc)}") from None
     try:
         yield held
     finally:
@@ -96,7 +103,7 @@ def held_runs(tenant: Tenant, io: Any) -> Iterator[_io.Held | None]:
 def refuse_absent(tenant: Tenant) -> TenantRefused:
     """The refusal for a function that needs the runs folder to exist (`open_run`, the
     writer): run setup creates it, with its tenant record, and nothing here does."""
-    return TenantRefused(f"the runs folder {escaped(tenant.runs)} is absent — run setup creates it, "
+    return tenant_refusal(f"the runs folder {tenant.runs} is absent — run setup creates it, "
                          "with its tenant record")
 
 
@@ -118,15 +125,15 @@ def check_tenant_record(view: _io.Bound, tenant: Tenant) -> None:
     """`read_tenant`'s verdict on the held folder's `_tenant.json`, then an exact compare of
     its `tenant_id` with `tenant.id`. Every failure is `TenantRefused` naming the record, never
     a raw error, and never carrying a run id of the folder (NF-8)."""
-    path = escaped(record_path(Path(tenant.runs)))
+    path = record_path(Path(tenant.runs))
     try:
         record = read_tenant(Path(tenant.runs), io=_HeldRecordIO(view))
     except TenantRefused as exc:
-        raise type(exc)(escaped(exc)) from None
+        raise tenant_refusal(str(exc), type(exc)) from None
     except (RecursionError, ValueError, TypeError, OSError) as exc:
-        raise TenantRefused(f"{path} could not be judged: {escaped(exc)}") from None
+        raise tenant_refusal(f"{path} could not be judged: {exc}") from None
     if record.tenant_id != tenant.id:
-        raise TenantRefused(f"{path} names the tenant {quoted(record.tenant_id)}, not "
+        raise tenant_refusal(f"{path} names the tenant {quoted(record.tenant_id)}, not "
                             f"{quoted(tenant.id)}")
 
 
@@ -145,7 +152,7 @@ class Listing:
 
 def entry_path(folder: Path | str, name: str) -> str:
     """`<folder>/<name>` as a refusal shows it: a hostile name read off disk is quoted."""
-    return f"{escaped(folder)}/{shown(name)}"
+    return f"{folder}/{shown(name)}"
 
 
 def _parses(text: str) -> RunId | None:
@@ -164,7 +171,7 @@ def list_entries(view: _io.Bound, folder: Path, *, io: Any) -> Listing:
     answer = view.entries()
     if answer.entries is None:
         why = "it is gone" if answer.absent else answer.reason
-        raise TenantRefused(f"the runs folder {escaped(folder)} could not be listed: {escaped(why)}")
+        raise tenant_refusal(f"the runs folder {folder} could not be listed: {why}")
     runs: list[RunId] = []
     sidecars: set[str] = set()
     sidecar_ids: set[RunId] = set()
@@ -221,7 +228,7 @@ def open_run(tenant: Tenant, run_id: RunId, *, io: Any = _io) -> Run:
         view = held.view()
         check_tenant_record(view, tenant)
         entry = io.stat_entry(view, name)
-        path = escaped(Path(tenant.runs) / name)
+        path = Path(tenant.runs) / name
         if entry.st is None:
             raise RunRefused(f"{path} is absent" if entry.absent
                              else f"{path} could not be judged: {entry.reason}")
@@ -303,12 +310,12 @@ class BoundRuns:
 
     def require_open(self, doing: str) -> None:
         if self._state != "open":
-            raise RunRefused(f"bound_runs over {escaped(self._tenant.runs)}: {doing} outside its "
+            raise RunRefused(f"bound_runs over {self._tenant.runs}: {doing} outside its "
                              "with block")
 
     def __enter__(self) -> BoundRuns:
         if self._state != "new":
-            raise RunRefused(f"bound_runs over {escaped(self._tenant.runs)} is single use; enter a "
+            raise RunRefused(f"bound_runs over {self._tenant.runs} is single use; enter a "
                              "fresh one")
         self._state = "open"
         try:

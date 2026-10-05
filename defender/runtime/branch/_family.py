@@ -37,6 +37,9 @@ from defender._run_id import (
     is_case_stable_id,
     is_valid_run_id,
 )
+from defender._world_label import (
+    RESERVED_WORLD_LABELS, is_reserved_world_label, reserved_label_fault,
+)
 from defender._vocab import (
     DISPOSITION_ENUM,
     DISPOSITION_VALUES,
@@ -597,54 +600,11 @@ def check_manifest_digest(view: Bound, recorded: str) -> None:
 # identity: one gate, before anything is staged
 # ---------------------------------------------------------------------------------------
 
-#: Labels no world may claim. `base` names the family's shared capture (a world using it would
-#: append live rows into the recording its siblings replay); `family` would give a per-world judge
-#: draw the family-level call's agent id `judge:family:<n>`, interleaving two streams in one
-#: wire log.
-RESERVED_WORLD_LABELS: frozenset[str] = frozenset({"base", "family"})
-
-#: `family_<digits>` too, defensively: the colon fold that names a wire-log file is not obviously
-#: injective across `judge:<world>:<n>` and `judge:family:<n>`, so the whole near-miss shape is
-#: refused.
-_RESERVED_FAMILY_DRAW_LABEL = re.compile(r"\Afamily_\d+\Z", re.IGNORECASE)
-
-
-def is_reserved_world_label(label: str) -> bool:
-    """The membership test for the reserved namespace (the set, case-folded, and the
-    `family_<digits>` shape). Other gates, such as the judge's, ask this rather than re-deriving
-    the fold."""
-    return (label.casefold() in RESERVED_WORLD_LABELS
-            or _RESERVED_FAMILY_DRAW_LABEL.match(label) is not None)
-
-
 def refuse_reserved_world_label(label: str, *, at: str) -> None:
     """Refuse a reserved label; called wherever a world is parsed, not only by the launcher.
-
-    The shape arm runs first so `family_1` is refused for the rule that actually matched it.
-    """
-    where = f"{at} " if at else ""
-    if _RESERVED_FAMILY_DRAW_LABEL.match(label):
-        raise FamilyError(
-            f"{where}world label {label!r} matches family_<n> — the colon fold that names a "
-            "wire log file is not injective, and this label's own agent id would fold to the "
-            "same stem as one of the family call's draws")
-    if is_reserved_world_label(label):
-        raise FamilyError(
-            f"{where}world label {label!r} is the reserved name of the family's own base "
-            "capture or the family-level judge call — a world claiming it would append its "
-            "live rows into the recording its siblings replay, or collide with the family "
-            "call's own agent id")
-
-
-def refuse_bad_world_label(label: str, *, at: str) -> None:
-    """Refuse a label the family model never admits as a world label: a reserved one, or one
-    that cannot name a view. Both rules, as one `FamilyError`; the episode record's writer
-    (`run_repository`) judges its labels here too."""
-    refuse_reserved_world_label(label, at=at)
-    try:
-        refuse_unnameable_world(label)
-    except ViewNameError as bad:
-        raise FamilyError(f"world label {label!r} cannot name a view: {bad}") from bad
+    The rule and its words are `_world_label.reserved_label_fault`'s."""
+    if (why := reserved_label_fault(label, at=at)) is not None:
+        raise FamilyError(why)
 
 
 def check_identities(family: Family) -> None:  # noqa: C901 — one gate over the whole manifest, kept together
@@ -672,7 +632,11 @@ def check_identities(family: Family) -> None:  # noqa: C901 — one gate over th
         label = world.world_id
         # Defense in depth: `parse_world` already refuses this, but a `Family` can be built
         # directly.
-        refuse_bad_world_label(label, at="")
+        refuse_reserved_world_label(label, at="")
+        try:
+            refuse_unnameable_world(label)
+        except ViewNameError as bad:
+            raise FamilyError(f"world label {label!r} cannot name a view: {bad}") from bad
         # The label must also name a run: each sibling's run dir is `{episode_id}-{label}`. The
         # view and run-id grammars overlap but neither contains the other (the view rule admits
         # `wörld`, `a+b`, `a:b`), and the label is model-authored, so one off the run-id grammar

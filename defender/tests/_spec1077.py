@@ -80,12 +80,12 @@ HANDLE_MODULE = "run_repository._handle"
 TENANT_MODULE = "_tenant"
 EPISODE_MODULE = "_episode_paths"
 #: The owner modules by their path under `defender/` (#1105 D1.5): every file of the runs
-#: repository package — which absorbed the layout (`_layout.py`, was `run_repository/_layout.py`) and the
-#: handle (`_handle.py`, was `run_repository/_handle.py`) — plus the two owners that stay outside it.
-RUN_REPOSITORY_FILES = tuple(
-    f"run_repository/{name}" for name in (
-        "__init__.py", "_layout.py", "_handle.py", "_lookup.py", "_record.py", "_id.py",
-        "_errors.py"))
+#: repository package — which absorbed the layout (`_layout.py`, formerly the flat-tier
+#: run-path module) and the handle (`_handle.py`, formerly the flat-tier run-handle module) —
+#: plus the two owners that stay outside it. The package's files are read off disk, so a
+#: module it gains is an owner without a list edit.
+RUN_REPOSITORY_FILES = tuple(sorted(
+    f"run_repository/{p.name}" for p in (DEFENDER / "run_repository").glob("*.py")))
 OWNER_MODULE_FILES = (*RUN_REPOSITORY_FILES, "_episode_paths.py", "_tenant.py")
 
 

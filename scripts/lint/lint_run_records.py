@@ -51,17 +51,20 @@ PAGE = DEFENDER / "docs" / "run-records.md"
 BEGIN_MARK = "<!-- generated: run-records kinds table — edit run-records-kinds.tsv and run scripts/lint/lint_run_records.py --render -->"  # noqa: E501
 END_MARK = "<!-- end generated -->"
 
+#: The runs repository package's folder under `defender/`: every module in it is an owner
+#: (#1105 D1.5, which absorbed the layout and the handle), read off disk, so a module the
+#: package gains is an owner the day it lands rather than when a list is edited.
+OWNER_PACKAGE = "run_repository"
+#: The two owners outside the package.
+_OWNER_FLAT_MODULES = ("_episode_paths.py", "_tenant.py")
+
 #: The owner modules by their path under `defender/`, the exempt set everything below is
-#: defined relative to: every file of the runs repository package (#1105 D1.5, which absorbed
-#: the layout and the handle) plus the two owners outside it. Matched by path, never by
-#: basename — a package submodule's basename (`__init__.py`, `_handle.py`) would otherwise
-#: exempt every same-named file in the sweep. Must equal
-#: `defender.tests._spec1077.OWNER_MODULE_FILES`.
+#: defined relative to. Matched by path, never by basename — a package submodule's basename
+#: (`__init__.py`, `_handle.py`) would otherwise exempt every same-named file in the sweep.
+#: Equals `defender.tests._spec1077.OWNER_MODULE_FILES`, which reads the same folder.
 OWNER_MODULES: frozenset[str] = frozenset({
-    *(f"run_repository/{name}" for name in (
-        "__init__.py", "_layout.py", "_handle.py", "_lookup.py", "_record.py", "_id.py",
-        "_errors.py")),
-    "_episode_paths.py", "_tenant.py",
+    *(f"{OWNER_PACKAGE}/{p.name}" for p in (DEFENDER / OWNER_PACKAGE).glob("*.py")),
+    *_OWNER_FLAT_MODULES,
 })
 
 #: The sweep set. Never shrinks below this.
@@ -200,7 +203,7 @@ def _accessor_names() -> frozenset[str]:
 
 
 def _is_owner_module(rel: str) -> bool:
-    return rel in OWNER_MODULES
+    return rel.startswith(f"{OWNER_PACKAGE}/") or rel in _OWNER_FLAT_MODULES
 
 
 def _record_shaped(text: str, whole: frozenset[str], parts: frozenset[str]) -> bool:

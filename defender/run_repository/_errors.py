@@ -17,7 +17,14 @@ _QUOTE_LIMIT = 120
 
 class RunRefused(Exception):  # noqa: N818 — the design's name (#1105 OP-5), as `TenantRefused`
     """The repository refused: a bad run id, an unexpected entry in a runs folder, a corrupt
-    episode record, or a write it will not make. The message names the path and the fault."""
+    episode record, or a write it will not make. The message names the path and the fault.
+
+    The message is `escaped` when the refusal is built, so no path or name spliced into it —
+    the runs folder's own path included — can break its one line, whichever site raised it
+    (an escaped message escapes to itself, so a re-built or unpickled refusal is unchanged)."""
+
+    def __init__(self, message: object = "") -> None:
+        super().__init__(escaped(message))
 
 
 def quoted(text: object) -> str:

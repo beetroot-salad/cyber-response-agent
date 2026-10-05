@@ -175,7 +175,7 @@ class _ReadVanished(OSError):
 
 def _read_plain_fd(
     os_: Any, fd: int, size: int, *, binary: bool, errors: str = "strict",
-    limit: int | None = READ_LIMIT,
+    limit: int | None = READ_LIMIT, budget: int | None = None,
 ) -> str | bytes:
     """The one place a whole file's bytes are read (#1174): every whole-file read in `_io`
     comes here, the guarded readers, the canonical wrappers and the locked JSON routines.
@@ -191,7 +191,15 @@ def _read_plain_fd(
     whatever `fstat` said, so a file that grew, or a procfs file reporting `st_size` 0, reads
     in full. Text is decoded as UTF-8 under `errors`, then given universal newlines exactly as
     `Path.read_text` would (translated only when a `\\r` is there). The descriptor stays the
-    caller's to close."""
+    caller's to close.
+
+    With `budget`, the read is a PREFIX instead: no more than `budget` bytes are taken off the
+    file, by reads asking only for what is left of it, and neither `limit` nor `size` applies —
+    so a caller tells a file over its cap from one within it without reading it whole. A prefix
+    is byte-faithful: its text is decoded but newlines are NOT translated, because its caller
+    judges bytes (a size bound, a byte compare against what it would write)."""
+    if budget is not None:
+        return _read_prefix(os_, fd, budget, binary=binary, errors=errors)
     if limit is not None and size > limit:
         raise _too_large(limit)
     buf = bytearray()
@@ -210,6 +218,18 @@ def _read_plain_fd(
     if "\r" in text:
         text = text.replace("\r\n", "\n").replace("\r", "\n")
     return text
+
+
+def _read_prefix(os_: Any, fd: int, budget: int, *, binary: bool, errors: str) -> str | bytes:
+    """`_read_plain_fd`'s prefix mode: at most `budget` bytes, `_ReadVanished` for an `ENOENT`
+    from a `read`, text decoded as UTF-8 under `errors` with no newline translation."""
+    buf = bytearray()
+    try:
+        while len(buf) < budget and (chunk := os_.read(fd, budget - len(buf))):
+            buf += chunk
+    except FileNotFoundError:
+        raise _ReadVanished(errno.ENOENT, _VANISHED) from None
+    return bytes(buf) if binary else buf.decode("utf-8", errors)
 
 
 def _read_followed(path: Path, *, limit: int | None, errors: str) -> str:
@@ -583,25 +603,12 @@ def _read_leaf(
 ) -> str | bytes:
     """The whole of the plain file `leaf` (the open decides), or the exception that stopped it:
     `FileNotFoundError` when absent at the open, else a member of `TEXT_READ_ERRORS` (the read
-    step's refusals among them, :func:`_read_plain_fd`). With `max_bytes` (text only), no more
-    than that many bytes are taken off the file, by unbuffered reads, and they are decoded as
-    one text: a prefix, which the whole-file step and its limit do not govern."""
+    step's refusals among them, :func:`_read_plain_fd`). With `max_bytes`, the read step's
+    byte-faithful prefix of at most that many bytes."""
     fd, st = _open_leaf_stat(os_, dir_fd, leaf, os.O_RDONLY, where)
-    if max_bytes is not None:
-        try:
-            data = bytearray()
-            while len(data) < max_bytes:
-                chunk = os_.read(fd, max_bytes - len(data))
-                if not chunk:
-                    break
-                data += chunk
-        except FileNotFoundError:
-            raise _ReadVanished(errno.ENOENT, _VANISHED) from None
-        finally:
-            os_.close(fd)
-        return bytes(data).decode("utf-8", errors)
     try:
-        return _read_plain_fd(os_, fd, st.st_size, binary=binary, errors=errors)
+        return _read_plain_fd(os_, fd, st.st_size, binary=binary, errors=errors,
+                              budget=max_bytes)
     finally:
         os_.close(fd)
 
@@ -711,7 +718,8 @@ class Bound:
              max_bytes: int | None = None) -> RecordRead:
         """The file at `name`, as a `RecordRead`. `max_bytes` bounds the bytes taken off the
         file: a caller that asks for its cap plus one byte tells an over-cap file from one
-        within the cap without reading it whole. Without it the read is whole."""
+        within the cap without reading it whole, and its text keeps the file's newlines as they
+        are (`_read_plain_fd`'s prefix mode). Without it the read is whole."""
         spelling, parts = _parse_name(name)
         if errors not in _ERRORS_VALUES:
             raise ValueError("errors must be 'strict' or 'replace'")
