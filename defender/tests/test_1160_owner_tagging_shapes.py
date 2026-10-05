@@ -6,29 +6,35 @@ instance. The tagging behind it (`scripts/lint/_astlib.py`: `_partial_locals`, `
 on any later rebinding, so these escaped in silence:
 
 * O1 — the join is reported whatever binding shape put the owner in the name: an annotated
-  local, a literal tuple/list unpack, a multi-target assign, a carrier alias (`rt2 = rt`), a
-  cross-module carrier factory (`resolve_tenant`, `run_tenant_for`), and a same-module factory
-  (a top-level def annotated `-> Tenant` / `-> RunTenant`, in either the Name or the
-  `_tenant.Tenant` attribute form). Full owners too: `p: RunPaths = RunPaths(d)`.
+  local (tagged from its value, whatever the annotation says), a literal tuple/list unpack
+  (elementwise, in any position), a multi-target assign (every target), a carrier alias
+  (`rt2 = rt`), a cross-module carrier factory (`resolve_tenant`, `run_tenant_for`), and a
+  same-module factory (a top-level def annotated `-> Tenant` / `-> RunTenant` — Name,
+  `_tenant.Tenant` or aliased-import form), each factory both chained off the call and bound
+  to a local. Full owners too: `p: RunPaths = RunPaths(d)`. Annotations resolve by origin: a
+  module's own class merely named `Tenant` makes no factory. Starred, nested and
+  length-mismatched unpacks are untraced and do not crash the scan.
 * O2 — tags are sticky: a join made while a name held an owner stays reported after the name
-  is rebound (`= None`, an annotated rebind, a tuple rebind).
+  is rebound — to a constant, an annotated or unpacked constant, a call, a name, an attribute.
 * O3 — the census: every public top-level function in the sweep annotated `-> Tenant` /
   `-> RunTenant` sits in `_astlib._PARTIAL_OWNER_FACTORIES` or in the carrier-factory table.
   The design doc leaves that table's name open; these tests fix it as
   `_astlib._CARRIER_FACTORIES`, a dict of factory origin -> carrier class origin
   (`"defender.runtime.run_tenant.resolve_tenant": "defender.runtime.run_tenant.RunTenant"`),
-  beside `_PARTIAL_OWNER_FACTORIES`.
+  beside `_PARTIAL_OWNER_FACTORIES`. The tables are the route to tagging, not a list beside
+  it: an entry added to a fresh copy of each makes its callers' joins reported.
 * O4 — the knowledge halves stay clean through every new shape: joins onto
   `tenant.settings` / `.knowledge` / `.agent` and `run_tenant.settings`. A call-result unpack
-  (`a, b = f()`) is not traced, and a parameter, local or nested def that shadows a
-  module-level factory is not the factory.
+  (`a, b = f()`) is not traced, and a parameter, local, nested def or closed-over enclosing
+  parameter that shadows a module-level factory (`_g` or `_f`) is not the factory.
 * O5 — the live sweep stays at 0 findings with an empty allow-list. Pinned already by
   `test_1077_gate.py::test_gate_passes_with_an_empty_allow_list` (gate-marked, run by CI's
   `lint` job); not repeated here.
 
-Every cell is a function of its own in ONE planted module, scanned once through the 1120 suite's
-`_scan_planted` (`lint_run_records.scan` over a tmp tree, the way CI drives the gate), so a
-finding is attributed to its cell with `_in(displays, fn)`. A reported cell asserts the JOIN
+Every cell is a function of its own in a planted module (`PLANTED`, plus `OWN_CLASS`,
+`UNTRACED` and `TABLE_ROUTE` for the shapes that need a module of their own), each scanned once
+through the 1120 suite's `_scan_planted` (`lint_run_records.scan` over a tmp tree, the way CI
+drives the gate), so a finding is attributed to its cell with `_in(displays, fn)`. A reported cell asserts the JOIN
 finding specifically: `p: RunPaths = RunPaths(d); p.gather_raw / x` was reported today as
 "unresolvable accessor use", an outcome that disappears by design and is NOT pinned here. Every
 clean cell runs beside the `control` join (`EpisodePaths(ep).runs / x`, reported) and beside a
@@ -38,7 +44,10 @@ emptiness cannot pass because the arm or the tagging is dead.
 from __future__ import annotations
 
 import ast
+import re
+import sys
 import textwrap
+import uuid
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -46,7 +55,13 @@ from typing import Any
 import pytest
 
 from defender.tests import _spec1077 as S
-from defender.tests._by_path import cached_parse, import_lint_lib
+from defender.tests._by_path import (
+    LINT_DIR,
+    cached_parse,
+    import_lint_lib,
+    load_lint_gate,
+    load_module,
+)
 from defender.tests.tenant_1120_piece1.test_1120_lints_and_fixture import (
     JOIN_FINDING,
     _in,
@@ -70,6 +85,7 @@ PLANTED = textwrap.dedent(f"""\
     from defender._episode_paths import EpisodePaths
     from defender._run_paths import RunPaths
     from defender._tenant import Tenant, accept_tenant
+    from defender._tenant import Tenant as T
     from defender.runtime import run_tenant as run_tenant_mod
     from defender.runtime.run_tenant import RunTenant, resolve_tenant, run_tenant_for
 
@@ -83,6 +99,10 @@ PLANTED = textwrap.dedent(f"""\
 
 
     def _h(root: Path) -> _tenant.Tenant:
+        ...
+
+
+    def _k(root: Path) -> T:
         ...
 
 
@@ -165,6 +185,53 @@ PLANTED = textwrap.dedent(f"""\
         return p.gather_raw / x
 
 
+    def owner_multi_target_last(d: Path, x: str) -> Path:
+        p = q = RunPaths(d)
+        return q.gather_raw / x
+
+
+    def owner_list_unpack(d: Path, x: str) -> Path:
+        [p, n] = [RunPaths(d), 1]
+        return p.gather_raw / x
+
+
+    def ann_assign_tenant_loose_annotation(root: Path, tid: str, x: str) -> Path:
+        t: object = {_ACCEPT}
+        return t.runs / x
+
+
+    def ann_assign_run_paths_loose_annotation(d: Path, x: str) -> Path:
+        p: object = RunPaths(d)
+        return p.gather_raw / x
+
+
+    def tuple_unpack_second(root: Path, tid: str, x: str) -> Path:
+        n, t = 1, {_ACCEPT}
+        return t.runs / x
+
+
+    def local_carrier_factory_chain(root: Path, x: str) -> Path:
+        return _f(root).tenant.runs / x
+
+
+    def carrier_factory_for_local(t: Tenant, root: Path, x: str) -> Path:
+        rt = run_tenant_for(t, defender_dir=root, dispatches_lead_zero=False)
+        return rt.tenant.runs / x
+
+
+    def carrier_factory_resolve_chain(root: Path, tid: str, x: str) -> Path:
+        return {_RESOLVE}.tenant.runs / x
+
+
+    def local_tenant_factory_local(root: Path, x: str) -> Path:
+        t = _g(root)
+        return t.runs / x
+
+
+    def aliased_annotation_factory(root: Path, x: str) -> Path:
+        return _k(root).runs / x
+
+
     # ---- O2: a join made before a rebinding stays reported --------------------------------
 
     def sticky_tenant(root: Path, tid: str, x: str) -> Path:
@@ -198,6 +265,48 @@ PLANTED = textwrap.dedent(f"""\
         p = RunPaths(d)
         out = p.gather_raw / x
         p, n = None, 0
+        return out
+
+
+    def sticky_tenant_rebound_to_call(root: Path, tid: str, other, x: str) -> Path:
+        t = {_ACCEPT}
+        out = t.runs / x
+        t = other(root)
+        return out
+
+
+    def sticky_tenant_rebound_to_name(root: Path, tid: str, q, x: str) -> Path:
+        t = {_ACCEPT}
+        out = t.runs / x
+        t = q
+        return out
+
+
+    def sticky_tenant_rebound_to_attribute(root: Path, tid: str, obj, x: str) -> Path:
+        t = {_ACCEPT}
+        out = t.runs / x
+        t = obj.attr
+        return out
+
+
+    def sticky_run_paths_rebound_to_call(d: Path, other, x: str) -> Path:
+        p = RunPaths(d)
+        out = p.gather_raw / x
+        p = other(d)
+        return out
+
+
+    def sticky_run_paths_rebound_to_name(d: Path, q, x: str) -> Path:
+        p = RunPaths(d)
+        out = p.gather_raw / x
+        p = q
+        return out
+
+
+    def sticky_run_paths_rebound_to_attribute(d: Path, obj, x: str) -> Path:
+        p = RunPaths(d)
+        out = p.gather_raw / x
+        p = obj.attr
         return out
 
 
@@ -274,6 +383,32 @@ PLANTED = textwrap.dedent(f"""\
         def _g(r: Path) -> Path:
             ...
         return _g(root).runs / x
+
+
+    def shadowed_in_closure(_g, y: str):
+        def shadowed_in_closure_inner(x: str) -> Path:
+            return _g(x).runs / y
+        return shadowed_in_closure_inner
+
+
+    def shadowed_carrier_by_parameter(_f, x: str, y: str) -> Path:
+        return _f(x).tenant.runs / y
+
+
+    def shadowed_carrier_by_local(root: Path, other, x: str) -> Path:
+        _f = other
+        return _f(root).tenant.runs / x
+
+
+    def shadowed_carrier_by_nested_def(root: Path, x: str) -> Path:
+        def _f(r: Path) -> Path:
+            ...
+        return _f(root).tenant.runs / x
+
+
+    def tuple_unpack_untagged_neighbour(root: Path, tid: str, pair, x: str) -> Path:
+        t, n = {_ACCEPT}, pair(root)
+        return n.runs / x
     """)
 
 #: O1 — each must carry the JOIN finding.
@@ -283,12 +418,27 @@ REPORTED = (
     "local_tenant_factory_attribute_annotation", "tuple_unpack", "list_unpack",
     "multi_target_first", "multi_target_last", "carrier_alias", "ann_assign_run_paths",
     "owner_tuple_unpack", "owner_multi_target",
+    # The full-owner side through every shape the partial side takes.
+    "owner_multi_target_last", "owner_list_unpack",
+    # The tag comes from the VALUE: an annotation that names no owner still tags.
+    "ann_assign_tenant_loose_annotation", "ann_assign_run_paths_loose_annotation",
+    # Elementwise: the owner sits second in the unpack.
+    "tuple_unpack_second",
+    # Each factory in each position: chained off the call, and bound to a local first.
+    "local_carrier_factory_chain", "carrier_factory_for_local", "carrier_factory_resolve_chain",
+    "local_tenant_factory_local",
+    # By origin, not spelling: `-> T` with `from defender._tenant import Tenant as T`.
+    "aliased_annotation_factory",
 )
 
-#: O2 — the join precedes a rebinding of the owner's name in the same scope.
+#: O2 — the join precedes a rebinding of the owner's name in the same scope: to a constant, an
+#: annotated or unpacked constant, a call, another name, an attribute.
 STICKY = (
     "sticky_tenant", "sticky_run_paths", "sticky_carrier_parameter",
     "sticky_tenant_annotated_rebind", "sticky_run_paths_unpack_rebind",
+    "sticky_tenant_rebound_to_call", "sticky_tenant_rebound_to_name",
+    "sticky_tenant_rebound_to_attribute", "sticky_run_paths_rebound_to_call",
+    "sticky_run_paths_rebound_to_name", "sticky_run_paths_rebound_to_attribute",
 )
 
 #: O4 — clean cell -> its reported twin: the same binding shape joined onto an owned member,
@@ -312,6 +462,14 @@ CLEAN = {
     "shadowed_by_parameter": "local_tenant_factory_chain",
     "shadowed_by_local": "local_tenant_factory_chain",
     "shadowed_by_nested_def": "local_tenant_factory_chain",
+    # A closure over an enclosing parameter named `_g` calls that parameter.
+    "shadowed_in_closure_inner": "local_tenant_factory_chain",
+    # The same three shadows of the carrier factory `_f`.
+    "shadowed_carrier_by_parameter": "local_carrier_factory_chain",
+    "shadowed_carrier_by_local": "local_carrier_factory_chain",
+    "shadowed_carrier_by_nested_def": "local_carrier_factory_chain",
+    # Elementwise: the unpack's other element is a call result, so its name stays untagged.
+    "tuple_unpack_untagged_neighbour": "tuple_unpack",
 }
 
 
@@ -326,14 +484,15 @@ def _joins(displays: list[str], fn: str) -> list[str]:
     return [d for d in _in(displays, fn) if JOIN_FINDING in d]
 
 
-def _assert_control_live(displays: list[str]) -> None:
-    assert _joins(displays, "control"), "the join arm is not live:\n" + "\n".join(displays)
+def _assert_control_live(displays: list[str], control: str = "control") -> None:
+    assert _joins(displays, control), "the join arm is not live:\n" + "\n".join(displays)
 
 
-def _assert_planted(fn: str) -> None:
+def _assert_planted(fn: str, source: str = PLANTED) -> None:
     # A misspelt cell name would make `_in` empty: a reported cell would fail for no reason,
-    # and a clean cell would pass vacuously.
-    assert f"\ndef {fn}(" in PLANTED, f"{fn} is not a function of the planted module"
+    # and a clean cell would pass vacuously. Nested defs count (`shadowed_in_closure_inner`).
+    assert re.search(rf"^\s*def {re.escape(fn)}\(", source, re.MULTILINE), (
+        f"{fn} is not a function of the planted module")
 
 
 @pytest.mark.parametrize("cell", REPORTED)
@@ -371,6 +530,221 @@ def test_knowledge_halves_and_untraced_shapes_stay_clean(displays: list[str], ce
     assert _in(displays, cell) == [], (
         f"{cell}() is reported, while it must stay clean (its twin {twin}() is the reported "
         f"form): {_in(displays, cell)}")
+
+
+# ======================================================================================
+# O1 / M3 — a class merely NAMED `Tenant` is not the owner: annotations resolve by origin.
+# ======================================================================================
+
+#: A module that defines its own `Tenant`. `_m() -> Tenant` names that local class, so `_m` is
+#: no factory; `_n() -> _tenant.Tenant` in the same module is, which proves same-module factory
+#: recognition is live here.
+OWN_CLASS = textwrap.dedent("""\
+    from pathlib import Path
+
+    from defender import _tenant
+    from defender._episode_paths import EpisodePaths
+
+
+    class Tenant:
+        ...
+
+
+    def _m() -> Tenant:
+        ...
+
+
+    def _n() -> _tenant.Tenant:
+        ...
+
+
+    def own_class_control(ep: Path, x: str) -> Path:
+        return EpisodePaths(ep).runs / x
+
+
+    def real_class_factory_chain(x: str) -> Path:
+        return _n().runs / x
+
+
+    def own_class_factory_chain(x: str) -> Path:
+        return _m().runs / x
+    """)
+
+
+@pytest.fixture(scope="module")
+def own_class_displays(tmp_path_factory: pytest.TempPathFactory) -> list[str]:
+    return _scan_planted(tmp_path_factory.mktemp("own_tenant_class_1160"),
+                         "runtime/own_tenant_class_1160.py", OWN_CLASS)
+
+
+def test_a_factory_of_a_local_class_named_tenant_is_not_a_tenant_factory(
+        own_class_displays: list[str]) -> None:
+    """A same-module def annotated with the module's OWN `class Tenant` is not a factory of the
+    accepted `Tenant`: `_m().runs / x` stays clean, beside the live control and a same-module
+    factory of the real `Tenant` (`_n() -> _tenant.Tenant`) whose join is reported."""
+    for fn in ("own_class_control", "real_class_factory_chain", "own_class_factory_chain"):
+        _assert_planted(fn, OWN_CLASS)
+    _assert_control_live(own_class_displays, "own_class_control")
+    assert _joins(own_class_displays, "real_class_factory_chain"), (
+        "same-module factory recognition is not live in this module: "
+        f"{own_class_displays}")
+    assert _in(own_class_displays, "own_class_factory_chain") == [], (
+        "a def returning a local class that is merely named `Tenant` is treated as a factory: "
+        f"{_in(own_class_displays, 'own_class_factory_chain')}")
+
+
+# ======================================================================================
+# O1 / M1 — untraceable unpacks: the scan completes and nothing is tagged.
+# ======================================================================================
+
+UNTRACED = textwrap.dedent(f"""\
+    from pathlib import Path
+
+    from defender._episode_paths import EpisodePaths
+    from defender._tenant import accept_tenant
+
+
+    def untraced_control(ep: Path, x: str) -> Path:
+        return EpisodePaths(ep).runs / x
+
+
+    def flat_unpack_twin(root: Path, tid: str, x: str) -> Path:
+        a, b = {_ACCEPT}, 1
+        return a.runs / x
+
+
+    def starred_unpack(root: Path, tid: str, x: str) -> Path:
+        a, *rest = {_ACCEPT}, 1, 2
+        return a.runs / x
+
+
+    def nested_unpack(root: Path, tid: str, x: str) -> Path:
+        (a, (b, c)) = ({_ACCEPT}, (1, 2))
+        return a.runs / x
+
+
+    def length_mismatch_unpack(root: Path, tid: str, x: str) -> Path:
+        a, b = {_ACCEPT}, 1, 2
+        return a.runs / x
+    """)
+
+#: Starred, nested, and length-mismatched unpacks (the last parses; it raises only at run time).
+UNTRACED_CELLS = ("starred_unpack", "nested_unpack", "length_mismatch_unpack")
+
+
+@pytest.fixture(scope="module")
+def untraced_displays(tmp_path_factory: pytest.TempPathFactory) -> list[str]:
+    """The scan over the untraceable shapes — it must complete, not raise."""
+    return _scan_planted(tmp_path_factory.mktemp("untraced_unpacks_1160"),
+                         "runtime/untraced_unpacks_1160.py", UNTRACED)
+
+
+@pytest.mark.parametrize("cell", UNTRACED_CELLS)
+def test_an_untraceable_unpack_scans_cleanly_and_tags_nothing(
+        untraced_displays: list[str], cell: str) -> None:
+    """Only a flat literal unpack against a same-length literal value is traced (M1): a starred,
+    nested or length-mismatched unpack neither crashes the scan nor tags its names — beside the
+    live control and the flat unpack of the same value, which is reported."""
+    _assert_planted(cell, UNTRACED)
+    _assert_control_live(untraced_displays, "untraced_control")
+    assert _joins(untraced_displays, "flat_unpack_twin"), (
+        f"the flat unpack is not tagged in this module: {untraced_displays}")
+    assert _in(untraced_displays, cell) == [], (
+        f"{cell}() tags a name the design leaves untraced: {_in(untraced_displays, cell)}")
+
+
+# ======================================================================================
+# O1 / O3 — a factory table entry is the route to tagging its callers.
+# ======================================================================================
+
+#: Origins no real module has, entered into a fresh copy of `_astlib`'s tables.
+_FAKE_PARTIAL = {"defender.fake_factories_1160.make_tenant": TENANT}
+_FAKE_CARRIER = {"defender.fake_factories_1160.make_run_tenant": RUN_TENANT}
+
+TABLE_ROUTE = textwrap.dedent("""\
+    from pathlib import Path
+
+    from defender._episode_paths import EpisodePaths
+    from defender.fake_factories_1160 import make_run_tenant, make_tenant
+
+
+    def table_route_control(ep: Path, x: str) -> Path:
+        return EpisodePaths(ep).runs / x
+
+
+    def via_partial_table(root: Path, x: str) -> Path:
+        t = make_tenant(root)
+        return t.runs / x
+
+
+    def via_partial_table_chain(root: Path, x: str) -> Path:
+        return make_tenant(root).runs / x
+
+
+    def via_carrier_table(root: Path, x: str) -> Path:
+        rt = make_run_tenant(root)
+        return rt.tenant.runs / x
+
+
+    def via_carrier_table_chain(root: Path, x: str) -> Path:
+        return make_run_tenant(root).tenant.runs / x
+    """)
+
+TABLE_ROUTE_CELLS = (
+    "via_partial_table", "via_partial_table_chain", "via_carrier_table", "via_carrier_table_chain")
+
+
+def _gate_with_tables(partial: dict[str, str], carrier: dict[str, str]) -> Any:
+    """A fresh `lint_run_records` bound to a fresh `_astlib` whose factory tables also hold
+    `partial` / `carrier`.
+
+    The copy is loaded under its own name and stands in for `_astlib` only while the gate copy
+    runs its `from _astlib import ...`; then the shared module (the one `import_lint_lib`
+    hands every other gate and suite) is put back, untouched — its tables are never written."""
+    tag = uuid.uuid4().hex
+    lib = load_module(LINT_DIR / "_astlib.py", name=f"_astlib_1160_{tag}")
+    lib._PARTIAL_OWNER_FACTORIES.update(partial)
+    lib._CARRIER_FACTORIES.update(carrier)
+    shared = sys.modules.get("_astlib")
+    sys.modules["_astlib"] = lib
+    try:
+        gate = load_lint_gate("lint_run_records", name=f"lint_run_records_1160_{tag}")
+    finally:
+        if shared is None:
+            del sys.modules["_astlib"]
+        else:
+            sys.modules["_astlib"] = shared
+    assert gate.module_env is lib.module_env, "the gate copy is not bound to the table copy"
+    return gate
+
+
+@pytest.fixture(scope="module")
+def table_route(tmp_path_factory: pytest.TempPathFactory) -> tuple[list[str], list[str]]:
+    """`(stock displays, displays with the fake entries tabled)` over the same planted tree."""
+    root = tmp_path_factory.mktemp("table_route_1160")
+    stock = _scan_planted(root, "runtime/table_route_1160.py", TABLE_ROUTE)
+    tabled = [f.display for f in _gate_with_tables(_FAKE_PARTIAL, _FAKE_CARRIER).scan(root)]
+    shared = import_lint_lib("_astlib")
+    leaked = ({*_FAKE_PARTIAL} & {*shared._PARTIAL_OWNER_FACTORIES}) | (
+        {*_FAKE_CARRIER} & {*getattr(shared, "_CARRIER_FACTORIES", {})})
+    assert not leaked, f"the fake entries leaked into the shared _astlib: {leaked}"
+    return stock, tabled
+
+
+@pytest.mark.parametrize("cell", TABLE_ROUTE_CELLS)
+def test_a_factory_table_entry_is_what_tags_its_callers(
+        table_route: tuple[list[str], list[str]], cell: str) -> None:
+    """O3's tables are the route, not a list beside it: a call to an origin entered in
+    `_PARTIAL_OWNER_FACTORIES` (-> Tenant) or `_CARRIER_FACTORIES` (-> RunTenant) tags its
+    result, so the join is reported — bound to a local or chained off the call — while the
+    same tree under the stock tables reports nothing there."""
+    stock, tabled = table_route
+    _assert_planted(cell, TABLE_ROUTE)
+    _assert_control_live(stock, "table_route_control")
+    _assert_control_live(tabled, "table_route_control")
+    assert _in(stock, cell) == [], f"{cell}() is reported with no table entry: {_in(stock, cell)}"
+    assert _joins(tabled, cell), (
+        f"{cell}() is not reported once its factory is tabled; its findings: {_in(tabled, cell)}")
 
 
 # ======================================================================================
