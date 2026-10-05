@@ -93,7 +93,7 @@ import uuid
 from pathlib import Path
 
 import pytest
-from defender.tests._docker import daemon_reachable, is_dood
+from defender.tests._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
 
 pytest.importorskip("pydantic_ai")
 
@@ -120,36 +120,14 @@ EXEC_TIMEOUT = 60.0
 
 
 
-def _docker_runtimes() -> frozenset[str]:
-    probe = subprocess.run(
-        ["docker", "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}} {{end}}"],
-        capture_output=True, text=True, encoding="utf-8", timeout=30,
-    )
-    return frozenset(probe.stdout.split()) if probe.returncode == 0 else frozenset()
-
-
 _NO_DAEMON = not daemon_reachable()
 _DOOD = (not _NO_DAEMON) and is_dood()
 # What `_box` will actually ask for: `start_box` resolves the F1 lever when no spec is passed.
 _LEVERED_RUNTIME = BoxSpec.from_env(os.environ).runtime
 
 
-def _dood_anchor() -> Path | None:
-    """Where run dirs must live under DooD, or None if the topology is unobservable here.
-
-    A bind SOURCE has to lie on a path this container shares with the daemon, and pytest's
-    `tmp_path` is a private `/tmp` that does not. The repo tree does — `defender_dir` is bound
-    out of it — so the runs base goes under the gitignored `.defender-runs/` beside it. If
-    even the repo is uncovered, `start_box` would refuse (C46) and there is nothing here to
-    observe, so the caller skips instead of asserting into the dark."""
-    mounts = box_mod._shared_mounts(box_mod._docker)
-    if not mounts or not box_mod._covered(DEFENDER, mounts):
-        return None
-    return DEFENDER.parent / ".defender-runs"
-
-
-_DOOD_ANCHOR = _dood_anchor() if _DOOD else None
-_RUNTIME_ABSENT = (not _NO_DAEMON) and _LEVERED_RUNTIME not in _docker_runtimes()
+_DOOD_ANCHOR = dood_anchor() if _DOOD else None
+_RUNTIME_ABSENT = (not _NO_DAEMON) and _LEVERED_RUNTIME not in docker_runtimes()
 
 requires_box = pytest.mark.skipif(
     _NO_DAEMON or (_DOOD and _DOOD_ANCHOR is None) or _RUNTIME_ABSENT,
@@ -176,7 +154,7 @@ def runs_base(tmp_path: Path):
 
     `tmp_path` on a native daemon — a private per-test tree, as before. Under DooD that tree
     is invisible to the daemon, so the base moves under the repo's gitignored
-    `.defender-runs/` (see `_dood_anchor`), still one fresh directory per test and still
+    `.defender-runs/` (see `_docker.dood_anchor`), still one fresh directory per test and still
     removed afterwards. It is deliberately NOT the run dir's parent-as-mount: the runs base
     stays unmounted either way, which is what `test_another_runs_run_dir_is_absent` and
     `test_box_env_contains_exactly_the_allowlist` assert against."""
@@ -896,7 +874,7 @@ def test_boundary_holds_under_both_runc_and_runsc(run_dir, sibling_run, tmp_path
     connection leaves, under either runtime. v1 is not gated on gVisor — the
     mount list and `--network=none` are delivered by any Docker host — so
     nothing here may depend on a runsc-only hardening (M15)."""
-    if runtime not in _docker_runtimes():
+    if runtime not in docker_runtimes():
         pytest.skip(f"the {runtime!r} runtime is not registered with this daemon "
                     "(`docker info` Runtimes) — the parity claim is untestable here")
 

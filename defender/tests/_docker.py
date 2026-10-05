@@ -14,12 +14,22 @@ one adds a shared-mount coverage condition — and each reason string names the 
 capability its own tests need. A shared marker would flatten three different reasons into
 one wrong one.
 
+It also answers the two questions the live-box suites ask before starting a box: which
+runtimes the daemon registers (`docker_runtimes`, probed once per process however many cases
+ask), and, under DooD, where a bind source must live for the daemon to see it
+(`dood_anchor`). Both had been near-copied between `e2e/test_540_box_boundary` and
+`e2e/test_1188_box_fsize`.
+
 Underscore-prefixed so pytest does not collect it; it defines no tests.
 """
 from __future__ import annotations
 
+import functools
 import subprocess
 from pathlib import Path
+
+#: The tree the live suites bind into their boxes; its parent is the repo root.
+_DEFENDER = Path(__file__).resolve().parents[1]
 
 
 def daemon_reachable() -> bool:
@@ -50,3 +60,37 @@ def is_dood() -> bool:
     )
     root = probe.stdout.strip()
     return probe.returncode == 0 and bool(root) and not Path(root).exists()
+
+
+@functools.cache
+def docker_runtimes() -> frozenset[str]:
+    """The runtimes the daemon registers (`docker info` Runtimes), asked once per process: a
+    suite parametrized over runtimes would otherwise pay one `docker info` per case. Empty
+    when the daemon cannot say. Never raises."""
+    try:
+        probe = subprocess.run(
+            ["docker", "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}} {{end}}"],
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return frozenset()
+    return frozenset(probe.stdout.split()) if probe.returncode == 0 else frozenset()
+
+
+def dood_anchor() -> Path | None:
+    """Where a live box's bind sources must live under DooD, or None if the topology is
+    unobservable here.
+
+    A bind SOURCE has to lie on a path this container shares with the daemon, and pytest's
+    `tmp_path` is a private `/tmp` that does not. The repo tree does — the defender dir is
+    bound out of it — so the anchor is the gitignored `.defender-runs/` beside it. If even
+    the repo is uncovered, `start_box` would refuse (C46) and there is nothing to observe, so
+    the caller skips instead of asserting into the dark. Only meaningful under DooD
+    (`is_dood()`); the box package is imported here, not at module top, so the suites that
+    only ask `daemon_reachable` do not pay for it."""
+    from defender.runtime import box as box_mod
+
+    mounts = box_mod._shared_mounts(box_mod._docker)
+    if not mounts or not box_mod._covered(_DEFENDER, mounts):
+        return None
+    return _DEFENDER.parent / ".defender-runs"
