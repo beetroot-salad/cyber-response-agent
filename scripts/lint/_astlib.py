@@ -119,9 +119,10 @@ class ModuleEnv:
     scope_of: dict[ast.AST, ModuleEnv] = field(
         default_factory=dict, compare=False, repr=False
     )
-    #: Names directly bound, in this scope's own statements, to a name-owner instance — an
+    #: Names bound, in this scope's own statements, to a name-owner instance — an
     #: `Owner(...)` construction, a chained alias of one, or a parameter annotated with an
-    #: owner class. See `owner_derived`.
+    #: owner class. Sticky: a later rebinding never untags (see `_binding_pairs`). See
+    #: `owner_derived`.
     owner_locals: frozenset[str] = field(default_factory=frozenset, compare=False, repr=False)
     #: Names directly bound to a PARTIAL owner instance (an accepted `Tenant`), keyed to its
     #: class's origin; and names bound to a CARRIER of one (a `RunTenant`). See
@@ -129,6 +130,11 @@ class ModuleEnv:
     partial_owner_locals: Mapping[str, str] = field(
         default_factory=dict, compare=False, repr=False)
     carrier_locals: Mapping[str, str] = field(default_factory=dict, compare=False, repr=False)
+    #: The module's own top-level functions annotated to return a partial owner or a carrier
+    #: (`def _episode_tenant(...) -> RunTenant`), keyed to that class's origin, minus any name
+    #: this scope rebinds. `callee` cannot name a same-module def, so a call to one is matched
+    #: here by name.
+    factory_defs: Mapping[str, str] = field(default_factory=dict, compare=False, repr=False)
 
 
 def _scope_bindings(scope: ast.AST) -> tuple[dict[str, str], set[str]]:
@@ -231,10 +237,21 @@ PARTIAL_OWNER_ATTRS: dict[str, frozenset[str]] = {
 #: a `Tenant`, so an unannotated local bound to its result is one.
 _PARTIAL_OWNER_FACTORIES: dict[str, str] = {"defender._tenant.accept_tenant": _TENANT}
 
+#: Calls, reached from another module, that RETURN a carrier (a `RunTenant`): named, not
+#: inferred, since a gate scans one module at a time. A new public function annotated
+#: `-> RunTenant` (or `-> Tenant`, for the table above) belongs here;
+#: `test_1160_owner_tagging_shapes` fails until it is. Same-module factories need no entry —
+#: `ModuleEnv.factory_defs` reads their return annotations.
+_RUN_TENANT = "defender.runtime.run_tenant.RunTenant"
+_CARRIER_FACTORIES: dict[str, str] = {
+    "defender.runtime.run_tenant.resolve_tenant": _RUN_TENANT,
+    "defender.runtime.run_tenant.run_tenant_for": _RUN_TENANT,
+}
+
 #: Classes one of whose members IS a partial owner instance: `RunTenant.tenant` is the run's
 #: accepted `Tenant`, so `run_tenant.tenant.learning` is reached through the owner.
 _PARTIAL_OWNER_CARRIERS: dict[str, dict[str, str]] = {
-    "defender.runtime.run_tenant.RunTenant": {"tenant": _TENANT},
+    _RUN_TENANT: {"tenant": _TENANT},
 }
 
 #: The owner modules' module-level singletons — stateless layout values a caller imports rather
@@ -274,25 +291,46 @@ def _is_subhandle_call(node: ast.expr, owners: set[str], env: ModuleEnv) -> bool
     )
 
 
+def _call_returns(node: ast.Call, env: ModuleEnv) -> str | None:
+    """The partial-owner or carrier class origin a call returns, or None: a construction
+    (`Tenant(...)`, `RunTenant(...)`), a named factory from another module, or a same-module
+    def annotated with one of those classes (`env.factory_defs`)."""
+    called = callee(node, env)
+    if called in PARTIAL_OWNER_ATTRS or called in _PARTIAL_OWNER_CARRIERS:
+        return called
+    if called in _PARTIAL_OWNER_FACTORIES:
+        return _PARTIAL_OWNER_FACTORIES[called]
+    if called in _CARRIER_FACTORIES:
+        return _CARRIER_FACTORIES[called]
+    if isinstance(node.func, ast.Name):
+        return env.factory_defs.get(node.func.id)
+    return None
+
+
+def _carrier_of(node: ast.expr, carriers: Mapping[str, str], env: ModuleEnv) -> str | None:
+    """The carrier class origin `node` evaluates to, or None: a local tagged as one, or a
+    call returning one."""
+    if isinstance(node, ast.Name):
+        return carriers.get(node.id)
+    if isinstance(node, ast.Call):
+        returned = _call_returns(node, env)
+        return returned if returned in _PARTIAL_OWNER_CARRIERS else None
+    return None
+
+
 def _partial_owner_of(
     node: ast.expr, partials: Mapping[str, str], carriers: Mapping[str, str], env: ModuleEnv,
 ) -> str | None:
     """The class origin of the partial owner instance `node` evaluates to, or None: a
     construction or a factory call, a local tagged as one, or a carrier's member
-    (`run_tenant.tenant`)."""
+    (`run_tenant.tenant`, `resolve_tenant(...).tenant`)."""
     if isinstance(node, ast.Call):
-        called = callee(node, env)
-        if called in PARTIAL_OWNER_ATTRS:
-            return called
-        return _PARTIAL_OWNER_FACTORIES.get(called or "")
+        returned = _call_returns(node, env)
+        return returned if returned in PARTIAL_OWNER_ATTRS else None
     if isinstance(node, ast.Name):
         return partials.get(node.id)
     if isinstance(node, ast.Attribute):
-        carrier = None
-        if isinstance(node.value, ast.Name):
-            carrier = carriers.get(node.value.id)
-        elif isinstance(node.value, ast.Call):
-            carrier = callee(node.value, env)
+        carrier = _carrier_of(node.value, carriers, env)
         return _PARTIAL_OWNER_CARRIERS.get(carrier or "", {}).get(node.attr)
     return None
 
@@ -308,14 +346,48 @@ def _partial_owner_member(
     return owner is not None and node.attr in PARTIAL_OWNER_ATTRS[owner]
 
 
+def _binding_pairs(stmt: ast.AST) -> list[tuple[str, ast.expr]]:
+    """`(name, value)` for each name `stmt` binds to a traceable value: `x = v`, every name
+    of `a = b = v`, `x: T = v`, and a flat literal unpack `a, b = v1, v2` (or the list form)
+    elementwise. A call result unpacked (`a, b = f()`) or a starred target is untraceable and
+    yields nothing.
+
+    Only tag SOURCES come from here; nothing untags. Tagging is per scope, not per line, so
+    untagging on a rebind would hide a join made before it (`t = accept_tenant(...);
+    out = t.runs / x; t = None`). The accepted costs: a reused name (`for t in things`) keeps
+    its tag and may report a join it should not, and a name rebound to an unknown value no
+    longer reaches the "unresolvable accessor use" arm."""
+    if isinstance(stmt, ast.AnnAssign):
+        if stmt.value is not None and isinstance(stmt.target, ast.Name):
+            return [(stmt.target.id, stmt.value)]
+        return []
+    if not isinstance(stmt, ast.Assign):
+        return []
+    pairs: list[tuple[str, ast.expr]] = []
+    for target in stmt.targets:
+        if isinstance(target, ast.Name):
+            pairs.append((target.id, stmt.value))
+        elif (
+            isinstance(target, (ast.Tuple, ast.List))
+            and isinstance(stmt.value, (ast.Tuple, ast.List))
+            and len(target.elts) == len(stmt.value.elts)
+            and not any(isinstance(e, ast.Starred) for e in (*target.elts, *stmt.value.elts))
+        ):
+            pairs.extend((t.id, v) for t, v in zip(target.elts, stmt.value.elts)
+                         if isinstance(t, ast.Name))
+    return pairs
+
+
 def _partial_locals(
     scope: ast.AST, imports: dict[str, str], consts: dict[str, str], defines: frozenset[str],
-    inherited: tuple[Mapping[str, str], Mapping[str, str]],
+    inherited: tuple[Mapping[str, str], Mapping[str, str]], factory_defs: Mapping[str, str],
 ) -> tuple[dict[str, str], dict[str, str]]:
     """`(partial owner locals, carrier locals)` bound in `scope`'s own statements: a parameter
-    annotated with a partial owner or a carrier class, or a local assigned a partial owner
-    instance (`t = accept_tenant(...)`, `t = run_tenant.tenant`) or a carrier construction."""
-    probe_env = ModuleEnv(imports=imports, consts=consts, defines=defines, scope_of={})
+    annotated with a partial owner or a carrier class, or a local bound (any shape
+    `_binding_pairs` traces) to a partial owner instance (`t = accept_tenant(...)`,
+    `t = run_tenant.tenant`) or a carrier (`rt = resolve_tenant(...)`, `rt2 = rt`)."""
+    probe_env = ModuleEnv(imports=imports, consts=consts, defines=defines, scope_of={},
+                          factory_defs=factory_defs)
     partials = dict(inherited[0])
     carriers = dict(inherited[1])
     if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -333,19 +405,13 @@ def _partial_locals(
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
                 continue
-            if (
-                isinstance(child, ast.Assign) and len(child.targets) == 1
-                and isinstance(child.targets[0], ast.Name)
-            ):
-                target = child.targets[0].id
-                partials.pop(target, None)
-                carriers.pop(target, None)
-                owner = _partial_owner_of(child.value, partials, carriers, probe_env)
+            for target, value in _binding_pairs(child):
+                owner = _partial_owner_of(value, partials, carriers, probe_env)
+                carrier = _carrier_of(value, carriers, probe_env)
                 if owner is not None:
                     partials[target] = owner
-                elif (isinstance(child.value, ast.Call)
-                      and callee(child.value, probe_env) in _PARTIAL_OWNER_CARRIERS):
-                    carriers[target] = callee(child.value, probe_env) or ""
+                elif carrier is not None:
+                    carriers[target] = carrier
             walk(child)
 
     walk(scope)
@@ -356,13 +422,16 @@ def _owner_locals(
     scope: ast.AST, imports: dict[str, str], consts: dict[str, str],
     defines: frozenset[str], inherited: frozenset[str],
     partials: Mapping[str, str] | None = None, carriers: Mapping[str, str] | None = None,
+    factory_defs: Mapping[str, str] | None = None,
 ) -> frozenset[str]:
-    """Names bound, in `scope`'s own statements (never a nested def), to a name-owner
-    instance: an `Owner(...)` construction, a chained alias of one (`x = y` with `y` tagged,
-    or `x = owner.attr`, so a join onto it is still caught), or — in a function scope — a
-    parameter annotated with an owner class. `inherited` is the enclosing scope's tagged
-    names this scope has not shadowed."""
-    probe_env = ModuleEnv(imports=imports, consts=consts, defines=defines, scope_of={})
+    """Names bound, in `scope`'s own statements (never a nested def) and in any shape
+    `_binding_pairs` traces, to a name-owner instance: an `Owner(...)` construction, a
+    chained alias of one (`x = y` with `y` tagged, or `x = owner.attr`, so a join onto it is
+    still caught), or — in a function scope — a parameter annotated with an owner class.
+    `inherited` is the enclosing scope's tagged names this scope has not shadowed. Sticky: a
+    later rebinding never untags (see `_binding_pairs`)."""
+    probe_env = ModuleEnv(imports=imports, consts=consts, defines=defines, scope_of={},
+                          factory_defs=factory_defs or {})
     owners: set[str] = set(inherited)
     partials = partials or {}
     carriers = carriers or {}
@@ -390,15 +459,9 @@ def _owner_locals(
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
                 continue
-            if (
-                isinstance(child, ast.Assign) and len(child.targets) == 1
-                and isinstance(child.targets[0], ast.Name)
-            ):
-                target = child.targets[0].id
-                if is_owner_expr(child.value):
+            for target, value in _binding_pairs(child):
+                if is_owner_expr(value):
                     owners.add(target)
-                else:
-                    owners.discard(target)  # rebound to something that is not owner-derived
             walk(child)
 
     walk(scope)
@@ -431,18 +494,22 @@ def _child_env(func: ast.AST, parent: ModuleEnv) -> ModuleEnv:
     defines = frozenset((set(parent.defines) | bound) - set(local_imports))
     consts = {n: v for n, v in parent.consts.items() if n not in bound}
     inherited = frozenset(n for n in parent.owner_locals if n not in bound)
+    factory_defs = {n: o for n, o in parent.factory_defs.items() if n not in bound}
     partials, carriers = _partial_locals(
         func, imports, consts, defines,
         ({n: o for n, o in parent.partial_owner_locals.items() if n not in bound},
-         {n: o for n, o in parent.carrier_locals.items() if n not in bound}))
+         {n: o for n, o in parent.carrier_locals.items() if n not in bound}),
+        factory_defs)
     return ModuleEnv(
         imports=imports,
         consts=consts,
         defines=defines,
         scope_of=parent.scope_of,
-        owner_locals=_owner_locals(func, imports, consts, defines, inherited, partials, carriers),
+        owner_locals=_owner_locals(
+            func, imports, consts, defines, inherited, partials, carriers, factory_defs),
         partial_owner_locals=partials,
         carrier_locals=carriers,
+        factory_defs=factory_defs,
     )
 
 
@@ -454,6 +521,24 @@ def _tag(node: ast.AST, env: ModuleEnv, scope_of: dict[ast.AST, ModuleEnv]) -> N
         # class body, so a method's enclosing scope is the module (or enclosing function).
         # Class-body bindings are therefore invisible — accepted, and rare in this tree.
         _tag(child, _child_env(child, env) if isinstance(child, _SCOPES) else env, scope_of)
+
+
+def _factory_defs(
+    tree: ast.AST, imports: dict[str, str], consts: dict[str, str], defines: frozenset[str],
+) -> dict[str, str]:
+    """The module's top-level functions whose return annotation names a partial owner or a
+    carrier class (`-> RunTenant`, `-> _tenant.Tenant`), keyed to that class's origin."""
+    probe_env = ModuleEnv(imports=imports, consts=consts, defines=defines, scope_of={})
+    found: dict[str, str] = {}
+    for node in getattr(tree, "body", []):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not isinstance(node.returns, (ast.Name, ast.Attribute)):
+            continue
+        returned = _origin(node.returns, probe_env)
+        if returned in PARTIAL_OWNER_ATTRS or returned in _PARTIAL_OWNER_CARRIERS:
+            found[node.name] = returned
+    return found
 
 
 def module_env(tree: ast.AST) -> ModuleEnv:
@@ -474,16 +559,18 @@ def module_env(tree: ast.AST) -> ModuleEnv:
     imports, bound = _scope_bindings(tree)
     defines = frozenset(bound)
     consts = _module_consts(tree)
-    partials, carriers = _partial_locals(tree, imports, consts, defines, ({}, {}))
+    factory_defs = _factory_defs(tree, imports, consts, defines)
+    partials, carriers = _partial_locals(tree, imports, consts, defines, ({}, {}), factory_defs)
     root = ModuleEnv(
         imports=imports,
         consts=consts,
         defines=defines,
         scope_of=scope_of,
         owner_locals=_owner_locals(
-            tree, imports, consts, defines, frozenset(), partials, carriers),
+            tree, imports, consts, defines, frozenset(), partials, carriers, factory_defs),
         partial_owner_locals=partials,
         carrier_locals=carriers,
+        factory_defs=factory_defs,
     )
     _tag(tree, root, scope_of)
     return root
