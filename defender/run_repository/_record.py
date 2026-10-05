@@ -33,7 +33,8 @@ from defender._run_id import (
 from defender._tenant import Tenant
 from defender._world_label import reserved_label_fault, world_view_fault
 from defender.run_repository import _lookup
-from defender.run_repository._errors import RunRefused, quoted, shown
+from defender._shown import quoted, shown
+from defender.run_repository._errors import RunRefused
 from defender.run_repository._id import RunId
 from defender.run_repository._layout import RunPaths
 
@@ -282,9 +283,9 @@ def _admit_label(label: object, folded: dict[str, str]) -> str:
     view, distinct from every label before it under case folding). Exactly a `str`."""
     if type(label) is not str:
         raise RunRefused(f"a label must be exactly a str, not {type(label).__name__}")
-    if reserved_label_fault(label) is not None or world_view_fault(label) is not None:
+    if (why := reserved_label_fault(label) or world_view_fault(label)) is not None:
         raise RunRefused(f"label {quoted(label)} is not a world label the family model "
-                         "admits (reserved, or it cannot name a view)") from None
+                         f"admits: {why}")
     if (key := label.casefold()) in folded:
         raise RunRefused(f"labels {quoted(folded[key])} and {quoted(label)} are one label "
                          "wherever the filesystem folds case")
@@ -295,12 +296,11 @@ def _admit_label(label: object, folded: dict[str, str]) -> str:
 def _admit_runs(episode_id: str, source: RunId,
                 items: Sequence[tuple[object, RunId]]) -> dict[str, RunId]:
     """The arms, if every one is a sibling this episode may record: a label the family model
-    admits, an arm shaped `<episode_id>-<label>` and not like a sidecar, no id twice, none the
-    source."""
+    admits, an arm shaped `<episode_id>-<label>` and not like a sidecar, none the source. No
+    id can come twice: arms are `<episode_id>-<label>` and the labels are distinct even folded."""
     if not items:
         raise RunRefused(f"episode {quoted(episode_id)} records no runs")
     folded: dict[str, str] = {}
-    labels_of: dict[RunId, str] = {}
     arms: dict[str, RunId] = {}
     for raw_label, run_id in items:
         label = _admit_label(raw_label, folded)
@@ -309,12 +309,8 @@ def _admit_runs(episode_id: str, source: RunId,
         if str(run_id) != f"{episode_id}-{label}":
             raise RunRefused(f"arm {quoted(str(run_id))} for label {quoted(label)} is not "
                              f"{quoted(f'{episode_id}-{label}')}")
-        if run_id in labels_of:
-            raise RunRefused(f"labels {quoted(labels_of[run_id])} and {quoted(label)} both "
-                             f"claim {quoted(str(run_id))}")
         if run_id == source:
             raise RunRefused(f"arm {quoted(str(run_id))} is the source run itself")
-        labels_of[run_id] = label
         arms[label] = run_id
     return arms
 
@@ -368,6 +364,12 @@ def record_episode_runs(tenant: Tenant, episode_id: str, source_run_id: RunId,
             except OSError as exc:
                 raise RunRefused(f"{path} could not be written: {exc.strerror or exc}") from None
         existing = view.under(EPISODES_DIRNAME).read(name, max_bytes=_RECORD_CAP + 1)
+        if existing.absent:
+            raise RunRefused(f"{path} was created by another writer and is gone again — "
+                             "nothing was recorded; retry the episode's setup")
+        if existing.text is None:
+            raise RunRefused(f"{path} exists but cannot be read ({existing.reason}) — it is "
+                             "not judged against this episode's record")
         if existing.text != text:
             raise RunRefused(f"{path} already records episode {quoted(episode_id)} with "
                              "different content; an episode id is spent once recorded — remove "

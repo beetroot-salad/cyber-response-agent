@@ -29,7 +29,8 @@ from defender._run_id import (
     CASE_STABLE_REQUIRED, RUN_ID_ALLOWED, _utc_now, is_valid_run_id, mint_run_id,
     refuse_bad_run_id,
 )
-from defender.run_repository._errors import RunRefused, quoted
+from defender._shown import quoted
+from defender.run_repository._errors import RunRefused
 
 #: The bound on a run id's bytes (D12.3): 255 - 25 - 24. See the module docstring.
 RUN_ID_MAX_BYTES = 206

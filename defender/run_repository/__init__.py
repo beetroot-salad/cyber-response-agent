@@ -92,7 +92,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> Any:  # lint-dup: ok — a PEP 562 module hook, a name Python fixes; runtime/permission's serves its own package
     home = _HOMES.get(name)
     if home is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

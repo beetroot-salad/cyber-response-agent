@@ -111,9 +111,8 @@ def test_duplicate_helper_baseline_drops_the_five_pair_exclusive_names(tmp_path:
     # with #832's payload_view.py in-memory reducer helper, merged into main concurrently),
     # taking it to 15. #1107 deleted the ticket adapter's CLI and with it `_config_path` (the
     # config-file locator the adapters now take from the run's tenant record), which retired
-    # that entry: 14. #1105's runs-repository door added `__getattr__` (a PEP 562 module hook,
-    # a name Python fixes, colliding with runtime/permission's own): 15.
-    assert len(entries) == 15, f"baseline is {len(entries)} entries, expected 15"
+    # that entry: 14.
+    assert len(entries) == 14, f"baseline is {len(entries)} entries, expected 14"
 
     proc = subprocess.run(
         ["python3", "scripts/lint/lint_duplicate_helpers.py"],

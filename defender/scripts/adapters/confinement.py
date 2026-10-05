@@ -217,8 +217,6 @@ def confine_index(
 
 # the world-view namespace
 
-#: Punctuation an Elasticsearch index or alias name cannot carry (whitespace is checked
-#: separately). `:` is absent: legal in the cross-cluster expression `remote:logs-*`.
 #: The namespace every world view lives in, as a prefix. A suffixed view (`logs-*` ->
 #: `logs-w-a`) would still match `logs-*`, so the base run and unstaged siblings would read the
 #: world's staged documents. `world_view` checks the disjointness per name.

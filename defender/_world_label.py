@@ -21,7 +21,8 @@ RESERVED_WORLD_LABELS: frozenset[str] = frozenset({"base", "family"})
 #: refused.
 _RESERVED_FAMILY_DRAW_LABEL = re.compile(r"\Afamily_\d+\Z", re.IGNORECASE)
 
-#: Characters an index or alias name cannot hold (whitespace is refused too).
+#: Punctuation an index or alias name cannot carry (whitespace is checked separately). `:` is
+#: absent: legal in the cross-cluster expression `remote:logs-*`.
 _ILLEGAL_IN_NAME = frozenset('\\/*?"<>|,')
 
 

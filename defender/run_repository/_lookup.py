@@ -29,7 +29,8 @@ from typing import Any
 from defender import _io
 from defender._tenant import TENANT_RECORD_NAME, Tenant, TenantRefused, read_tenant, record_path
 from defender.run_repository import _record
-from defender.run_repository._errors import RunRefused, escaped, quoted, shown
+from defender._shown import escaped, quoted, shown
+from defender.run_repository._errors import RunRefused
 from defender.run_repository._handle import Run
 from defender.run_repository._id import RunId
 from defender.run_repository._layout import RunPaths
