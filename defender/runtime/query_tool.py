@@ -176,7 +176,7 @@ def _release_predicate(tenant: Any) -> Any:
     "nothing released", so no comment is served (fail closed), rather than refusing the query as
     infra and charging the `ticket` breaker for a config defect. The warning is logged because
     otherwise a broken mapping looks like a store with no comments."""
-    from defender.scripts.case_history import case_ticket
+    from defender.runtime import case_ticket
 
     try:
         return case_ticket.release_predicate(tenant.ticket_mapping).is_released

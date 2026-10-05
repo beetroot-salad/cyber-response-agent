@@ -75,7 +75,7 @@ def unservable(patches: Mapping, mapping: Any | None) -> list[str]:
     }
     if not with_comments:
         return []
-    from defender.scripts.case_history import case_ticket
+    from defender.runtime import case_ticket
 
     if mapping is None:
         return [f"{_TICKET_SYSTEM}/{entity}: patches `comments`, but no tenant record "

@@ -80,7 +80,7 @@ from defender._io import guarded_mkdir, read_plain_bytes, write_guarded  # noqa:
 from defender._tenants import SETTINGS_HALF, TENANT_ID_FILE, template_dir  # noqa: E402
 from defender.runtime import run_tenant  # noqa: E402
 from defender.runtime.verb_dispositions import DispositionError, dispositions_path  # noqa: E402
-from defender.scripts.case_history import case_ticket  # noqa: E402
+from defender.runtime import case_ticket  # noqa: E402
 
 #: How long one git call of `check`'s committed read may take: each is a local lookup of one
 #: path, so a call still running is blocked (a FIFO where git expects a file), not slow.

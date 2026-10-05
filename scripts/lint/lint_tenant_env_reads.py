@@ -10,7 +10,8 @@ box and the CI job, and which a model-writable tree can influence. This lint is 
 that rule: in the four swept trees an environment LOOKUP is a finding.
 
 THE FOUR TREES (repo-relative): `defender/scripts/adapters/`, `defender/learning/branch/estate/`
-with `defender/learning/branch/staging.py`, `defender/scripts/case_history/`, and
+with `defender/learning/branch/staging.py`, `defender/scripts/case_history/` with
+`defender/runtime/case_ticket.py`, and
 `defender/runtime/lead_zero/` with `defender/runtime/lead_zero_config.py`. The allow-list is EMPTY
 — there is no baseline file and no suppression comment; a read that is genuinely not a setting
 moves out of the tree or is handed in by the caller.
@@ -64,6 +65,7 @@ SWEPT: tuple[str, ...] = (
     "defender/learning/branch/estate",
     "defender/learning/branch/staging.py",
     "defender/scripts/case_history",
+    "defender/runtime/case_ticket.py",
     "defender/runtime/lead_zero",
     "defender/runtime/lead_zero_config.py",
 )

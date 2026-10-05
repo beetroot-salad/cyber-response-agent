@@ -25,8 +25,8 @@ from defender.runtime.tenant_settings import (
     SystemConfig,
 )
 from defender.scripts.adapters.faults import ConfigFault
-from defender.scripts.case_history import case_ticket
-from defender.scripts.case_history.case_ticket import CaseMapping, CaseTicketError
+from defender.runtime import case_ticket
+from defender.runtime.case_ticket import CaseMapping, CaseTicketError
 
 if TYPE_CHECKING:
     from defender.runtime.lead_zero import CorrelationDispatch
