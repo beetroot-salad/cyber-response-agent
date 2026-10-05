@@ -78,6 +78,7 @@ from defender.tests._roster1035 import (
     run_as_nobody,
 )
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
+from defender.learning.core.state import PITFALLS
 
 #: The phrase O5 keeps: `test_hardening_772.py` matches the resolver's absent-directory
 #: message on it through `bind`, and M2 unifies BOTH cannot-read arms onto it.
@@ -549,7 +550,7 @@ def test_an_unsearchable_adapters_directory_is_not_a_successful_pitfalls_tick(
     )
     assert CONTINUING not in verdict.log, f"the drain seam swallowed the fault: {verdict.log!r}"
     assert len(persist.read_pitfalls(open_state(paths))) == 2, "the queue was rotated on a failed tick"
-    assert not paths.pitfalls.consumed.exists(), "rows were stamped consumed on a failed tick"
+    assert not (paths.state_root / PITFALLS.consumed).exists(), "rows were stamped consumed on a failed tick"
 
     with handed_to_nobody(repo, adapters, 0o755):
         control = run_as_nobody(probe, expected=LeadAuthorError)

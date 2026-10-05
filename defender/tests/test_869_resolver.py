@@ -54,6 +54,7 @@ from defender.tests._declared869 import (
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.tests import _state1135
 from defender.tests._lead_author_1134 import lead_trees
+from defender.learning.core.state import PITFALLS
 
 
 def _adapter_half_of(repo: Path) -> set[str]:
@@ -548,7 +549,7 @@ def test_a_resolver_failure_is_not_a_successful_tick(tmp_path, capsys, monkeypat
             paths, _state1135.state_for_paths(paths), on_curated=lambda _d: None, label=LEAD_AUTHOR_DRAIN_LABEL)
 
     assert len(persist.read_pitfalls(_state1135.state_for_paths(paths))) == 2
-    assert not paths.pitfalls.consumed.exists()
+    assert not (paths.state_root / PITFALLS.consumed).exists()
     assert "(continuing)" not in loop_log(capsys)
 
 
@@ -665,7 +666,7 @@ def test_the_adapter_half_resolution_point_is_its_own_call(tmp_path, monkeypatch
         pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths))
     assert spawn.calls == [], "the curator ran against a tree whose adapter half is empty"
     assert len(persist.read_pitfalls(_state1135.state_for_paths(paths))) == 2
-    assert not paths.pitfalls.consumed.exists()
+    assert not (paths.state_root / PITFALLS.consumed).exists()
 
     # (3) FK-5's filter and its per-refusal line, on this path
     hostile = seed_tree(

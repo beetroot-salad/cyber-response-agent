@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from defender._episode_handle import Episode
+from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
 from defender.tests import _world_1007 as W
 from defender.tests._state1135 import env_state
 
@@ -194,7 +195,7 @@ def test_a_measured_nothing_world_withholds_its_defender_findings(tmp_path, monk
     assert row["withheld_reason"] == "measured_nothing", (
         f"withheld_reason is {row.get('withheld_reason')!r}")
     assert "b" in set(result.withheld_worlds)
-    assert [r for r in W.queue_rows(paths.findings)
+    assert [r for r in W.queue_rows(paths, FINDINGS)
             if r.get("subject") == W.SUBJECT_DEFENDER] == [], (
         "a defender finding for a world that measured nothing reached the queue")
 
@@ -623,7 +624,7 @@ def test_a_mechanical_world_finding_is_told_from_a_model_drawn_one_by_provenance
     # that is not what this cell is about. The claim is that two findings ON ONE WORLD carrying
     # one bucket both survive, so the family row is filtered out by the field that distinguishes
     # it rather than by loosening the assertion to a subset check.
-    rows = [r for r in W.queue_rows(W.questioner_channel(paths))
+    rows = [r for r in W.queue_rows(paths, QUESTIONER_FINDINGS)
             if r.get("type") == W.MECHANICAL_WORLD_BUCKET and r.get("world") == "b"]
     assert sorted(r["provenance"] for r in rows) == ["mechanical", "model"], (
         f"the two same-bucket findings collapsed to {rows} — the open vocabulary means the "
@@ -653,7 +654,7 @@ def test_an_episode_killed_before_the_sibling_ran_withholds_with_episode_incompl
         assert row["withheld_reason"] == "episode_incomplete", (
             f"world {label} reads {row.get('withheld_reason')!r} on an episode with no served "
             "row at all")
-    assert [r for r in W.queue_rows(paths.findings)
+    assert [r for r in W.queue_rows(paths, FINDINGS)
             if r.get("subject") == W.SUBJECT_DEFENDER] == [], (
         "an unfinished episode still accused the defender")
 

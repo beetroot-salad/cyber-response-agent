@@ -98,6 +98,7 @@ from defender.tests._drain_trees_1134 import PAYLOAD
 from defender.tests.e2e import _box665 as B
 from defender.tests.test_1111_rooted_io import HOST_BYTES, census
 from defender.tests._tree_listing_1134 import descriptors_under, put_plain
+from defender.learning.core.state import FINDINGS
 
 # ---------------------------------------------------------------------------------------
 # The labels and their trees
@@ -1058,7 +1059,7 @@ def test_the_author_lane_mounts_its_leafs_two_corpora_and_its_work_step_holds_th
     step disagree about the trees."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     d = start_drive(tmp_path, AUTHOR, kind, prefix)
-    put_plain(d.paths.pending_file, b'{"finding_id": "f-1"}\n')
+    put_plain(d.paths.state_root / FINDINGS.queue, b'{"finding_id": "f-1"}\n')
 
     rc = drains.author_drain(d.paths, trigger_author=d.step, branch=d.branch,
                              start_box=d.rec.start_box, stop_box=d.rec.stop_box,

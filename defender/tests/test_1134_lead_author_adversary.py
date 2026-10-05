@@ -88,6 +88,7 @@ from defender.tests.test_1134_lead_author_handle import (
     marked_template,
     said_for,
 )
+from defender.learning.core.state import PITFALLS
 
 LEAD = LEAD_AUTHOR_DRAIN_LABEL
 
@@ -585,7 +586,7 @@ def test_run_pitfalls_checks_its_trees_before_it_reads_its_queue(
     else:
         paths, trees = _refusing_trees(tmp_path)[how]()
     persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], state=_state1135.state_for_paths(paths))
-    queue = paths.pitfalls.file
+    queue = paths.state_root / PITFALLS.queue
     spawn = Spawn()
 
     with trees, kernel_watch(reads=[queue], opens=[queue]) as events:

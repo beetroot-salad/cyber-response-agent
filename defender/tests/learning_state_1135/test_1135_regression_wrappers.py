@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from defender.learning import judge as judge_mod
+from defender.learning.core.state import FINDINGS
 from defender.tests import _drain719 as D
 from defender.tests import _judge_921 as J
 from defender.tests.e2e.test_922_spine import TriggerRecorder, drive_author_drain
@@ -42,7 +43,7 @@ def test_1135_the_e2e_spine_replay_reaches_the_corpus_unchanged(tmp_path: Path, 
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     monkeypatch.setenv(ENV, str(paths.state_root))
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
-    channel = paths.findings
+    channel = FINDINGS
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
@@ -56,10 +57,10 @@ def test_1135_the_e2e_spine_replay_reaches_the_corpus_unchanged(tmp_path: Path, 
 
     # hop 1: the judge's record says how many rows it enqueued, and the queue carries them
     assert record.get("episode_outcome") == "gradable", f"the episode graded {record.get('episode_outcome')!r}"
-    queued = _finding_ids(D.pending(channel))
+    queued = _finding_ids(D.pending(paths, channel))
     assert record.get("enqueued_rows") == len(queued) == 2, \
         f"the graded episode did not put its rows on the shared queue: {queued}"
-    assert {r["direction"] for r in D.pending(channel)} == {"family"}, \
+    assert {r["direction"] for r in D.pending(paths, channel)} == {"family"}, \
         "the spine's producer is the family judge; a non-family row means the partition is not driven"
     assert _finding_ids(S.rows_of(state.rows(S.coined("FINDINGS")))) == queued, \
         "the handle does not read the rows the grade enqueued"
@@ -81,19 +82,19 @@ def test_1135_the_e2e_spine_replay_reaches_the_corpus_unchanged(tmp_path: Path, 
     assert len(lessons) == 1, f"the corpus gained {len(lessons)} documents, not one"
     body = lessons[0].read_text(encoding="utf-8")
     assert all(fid in body for fid in queued), f"the committed lesson does not attribute {queued}"
-    assert set(_finding_ids(D.pending(channel))) == set(queued), \
+    assert set(_finding_ids(D.pending(paths, channel))) == set(queued), \
         "the committed rows left the queue before the batch's PR (hold_committed=True keeps them)"
 
     # hop 4: a second tick reads the corpus back and rotates the rows off as consumed_idempotent
     second = D.recording(D.committing("must-not-run-twice"))
     assert drive_author_drain(paths, TriggerRecorder(second))[0] == 0, "the second tick failed"
     assert second.calls == [], "the second tick authored the same findings again"
-    consumed = {r["finding_id"]: r for r in D.consumed(channel)}
+    consumed = {r["finding_id"]: r for r in D.consumed(paths, channel)}
     assert set(consumed) == set(queued), \
         f"the rows did not rotate off the queue as consumed: {sorted(consumed)}"
     assert all(r.get("consumed_category") == "consumed_idempotent" for r in consumed.values()), \
         f"the rotation's categories are {[r.get('consumed_category') for r in consumed.values()]}"
-    assert D.pending(channel) == [], "the authored rows are still queued"
+    assert D.pending(paths, channel) == [], "the authored rows are still queued"
     assert D.git(paths.repo_root, "rev-parse", "HEAD").stdout.strip() == head_after, \
         "the second tick opened a second commit for findings already in the corpus"
 
@@ -104,16 +105,16 @@ def test_1135_the_drains_append_lock_wait_ends_at_the_configured_deadline(tmp_pa
     replaces acquire_flock_within keeps it (X4, executed at the base). The same contention is
     driven at two configured deadlines over a built state root, and each give-up tracks its own."""
     paths = S.built_paths(tmp_path, repo_root=D.make_repo(tmp_path))
-    channel = D.channel_of(paths, "findings")
+    channel = D.channel_of("findings")
     rows = [D.row_for("findings", "a/0")]
     D.write_source_refs(paths, "a")
     # The append lock by today's record name (R14); the handle exposes no append-lock role.
-    append_lock = channel.file.parent / D.APPEND_LOCK_NAMES_TODAY["findings"]
+    append_lock = (paths.state_root / channel.queue).parent / D.APPEND_LOCK_NAMES_TODAY["findings"]
     caplog.set_level(logging.INFO)
     observed: dict[int, float] = {}
 
     for deadline in (1, 4):
-        D.seed(channel, rows)
+        D.seed(paths, channel, rows)
         agent = D.recording(D.committing("never"))
         cfg = D.cfg_for(paths, "findings", invoke_agent=agent, repo_lock_wait_seconds=deadline)
         caplog.clear()
@@ -129,7 +130,7 @@ def test_1135_the_drains_append_lock_wait_ends_at_the_configured_deadline(tmp_pa
         assert any("skipping" in r.getMessage() for r in caplog.records), \
             f"the {deadline}s expiry did not log the skipped tick"
         assert agent.calls == [], "the curator ran although the read window never opened"
-        assert D.pending(channel) == rows, "the skipped tick changed the queue"
+        assert D.pending(paths, channel) == rows, "the skipped tick changed the queue"
         observed[deadline] = answer["seconds"]  # type: ignore[assignment]
 
     assert 0.8 <= observed[1] < 3.0, f"the 1s deadline was not what ended the wait: {observed}"

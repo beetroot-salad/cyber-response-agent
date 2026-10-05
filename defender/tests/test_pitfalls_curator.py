@@ -37,6 +37,7 @@ from defender.learning.core.config import LoopPaths  # type: ignore[import-not-f
 from defender.tests._repo import seed_skills_repo
 from defender.tests._curator1134 import open_state
 from defender.tests._lead_author_1134 import lane_tree_for, lead_trees
+from defender.learning.core.state import LEAD_QUEUE_LOCK, PITFALLS
 
 
 
@@ -212,7 +213,7 @@ def test_run_pitfalls_at_threshold_commits_and_rotates(tmp_git_repo: Path, tmp_p
     log = _run_git(tmp_git_repo, "log", "--oneline", "-1").stdout
     assert "execution.md pitfalls" in log
     assert persist.read_pitfalls(state) == []
-    consumed = [json.loads(ln) for ln in paths.pitfalls.consumed.read_text().splitlines()]
+    consumed = [json.loads(ln) for ln in (paths.state_root / PITFALLS.consumed).read_text().splitlines()]
     assert {c["pitfall_id"] for c in consumed} == {"r:l-000:0", "r:l-001:0"}
 
 
@@ -361,7 +362,8 @@ def test_invoke_pitfalls_agent_wires_engine_kwargs_and_pending_anchor(tmp_path: 
     assert cap["trace_name"].startswith("pitfalls.")
     assert cap["label"].endswith(":pitfalls")
     assert cap["repo_root"] == tmp_path
-    assert cap["learning_run_dir"] == LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "state").lead_pending_dir
+    state_root = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "state").state_root
+    assert cap["learning_run_dir"] == (state_root / LEAD_QUEUE_LOCK.file).parent
 
 
 def test_invoke_pitfalls_agent_config_fault_propagates(tmp_path: Path, monkeypatch):

@@ -34,6 +34,7 @@ from defender.tests._declared869 import (
 )
 from defender.tests._curator1134 import open_state
 from defender.tests._lead_author_1134 import lane_tree_for, lead_trees
+from defender.learning.core.state import PITFALLS
 
 DECLARED = frozenset({"elastic"})
 
@@ -170,7 +171,7 @@ def test_a_dropped_row_is_never_labelled_committed(tmp_path, monkeypatch):
     state = open_state(paths)
     pitfalls_curator.run_pitfalls(paths=paths, state=state, invoke=spawn, trees=lead_trees(paths))
 
-    consumed = {r["pitfall_id"]: r for r in read_rows(paths.pitfalls.consumed)}
+    consumed = {r["pitfall_id"]: r for r in read_rows(paths.state_root / PITFALLS.consumed)}
     assert set(consumed) == {"r:l-000:0", "r:l-001:0", "r:l-002:0"}
     assert "defender/skills/elastic/execution.md" in head_files(repo)
 
@@ -205,13 +206,13 @@ def test_a_dropped_row_takes_a_terminal_undeclared_category(tmp_path, monkeypatc
     state = open_state(paths)
     pitfalls_curator.run_pitfalls(paths=paths, state=state, invoke=spawn, trees=lead_trees(paths))
 
-    consumed = {r["pitfall_id"]: r for r in read_rows(paths.pitfalls.consumed)}
+    consumed = {r["pitfall_id"]: r for r in read_rows(paths.state_root / PITFALLS.consumed)}
     assert consumed["r:l-002:0"]["consumed_category"] == "consumed_unattributable"
     assert "consumed_commit" not in consumed["r:l-002:0"]
     assert consumed["r:l-000:0"]["consumed_category"] == "consumed_committed"
 
     assert persist.read_pitfalls(state) == [], "pending must go empty; the row is terminal"
-    graveyard = {r.get("pitfall_id") for r in read_rows(paths.pitfalls.file.with_suffix(".deadletter.jsonl"))}
+    graveyard = {r.get("pitfall_id") for r in read_rows(paths.state_root / PITFALLS.deadletter)}
     assert "r:l-002:0" in graveyard, (
         "the dropped row leaves no durable record, so nothing reaches human review"
     )
@@ -248,7 +249,7 @@ def test_an_empty_declared_set_refuses_the_lane(tmp_path, monkeypatch, capsys):
 
     assert spawn.calls == [], "the curator must not be spawned against an empty set"
     assert len(persist.read_pitfalls(state)) == 2
-    assert not paths.pitfalls.consumed.exists()
+    assert not (paths.state_root / PITFALLS.consumed).exists()
     assert head_files(repo), "the fixture never committed anything"
     assert "execution.md" not in " ".join(head_files(repo))
     assert loop_log(capsys).strip(), "the refusal must be loud"
@@ -282,7 +283,7 @@ def test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record(tmp_pa
     state = open_state(paths)
     run_dir = tmp_path / "run-x"
     (run_dir / "gather_raw").mkdir(parents=True)
-    write(paths.author_queue_dir / "case-1.json",
+    write(paths.state_root / "author-queue" / "case-1.json",
           json.dumps({"case_id": "case-1", "run_dir": str(run_dir)}) + "\n")
 
     calls: list[Path] = []
@@ -297,10 +298,10 @@ def test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record(tmp_pa
         drains._drain_lead_author_markers(paths, state, refusing_lane)
 
     assert len(calls) == 1, f"the refusal was retried: {len(calls)} invocations"
-    assert not (paths.author_queue_dir / "case-1.json").exists()
-    assert not list((paths.author_queue_dir / "inflight").glob("*.json"))
+    assert not (paths.state_root / "author-queue" / "case-1.json").exists()
+    assert not list((paths.state_root / "author-queue" / "inflight").glob("*.json"))
 
-    failed = paths.author_queue_dir / "failed" / "case-1.json"
+    failed = paths.state_root / "author-queue" / "failed" / "case-1.json"
     assert failed.is_file()
     record = json.loads(failed.read_text())
     assert "mcpsys" in record["failed"]

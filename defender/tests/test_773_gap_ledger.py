@@ -15,7 +15,7 @@ import shutil
 import pytest
 
 from defender.tests import _spec773 as S
-from defender.learning.core.state import StateRefused
+from defender.learning.core.state import FINDINGS, StateRefused
 
 LESSON = "defender/lessons/l1.md"
 LESSON2 = "defender/lessons/l2.md"
@@ -175,7 +175,7 @@ def test_the_gap_ledger_is_written_under_the_host_side_pending_dir_773(tmp_path)
     state = tmp_path / "state"
     sc = _refused(tmp_path, state_dir=state)
     assert sc.run() == 0
-    ledger = sc.paths.pending_dir / S.GAP_LEDGER_NAME
+    ledger = (sc.paths.state_root / FINDINGS.queue).parent / S.GAP_LEDGER_NAME
     assert ledger.is_file()
     assert state in ledger.parents
     assert sc.repo not in ledger.parents
@@ -245,7 +245,7 @@ def test_the_gap_record_is_written_before_the_queue_rotates_773(tmp_path):
     held: dict = {}
 
     def grab_the_append_lock(rows, batch_id, cfg):
-        holder = S.Holder(sc.channel.append_lock)
+        holder = S.Holder(sc.paths.state_root / sc.channel.append_lock)
         holder.__enter__()
         held["holder"] = holder
 
@@ -269,7 +269,7 @@ def test_ledger_append_and_rotation_observed_mid_sequence_by_a_reader_773(tmp_pa
     held: dict = {}
 
     def grab_the_append_lock(rows, batch_id, cfg):
-        holder = S.Holder(sc.channel.append_lock)
+        holder = S.Holder(sc.paths.state_root / sc.channel.append_lock)
         holder.__enter__()
         held["holder"] = holder
 
@@ -298,7 +298,7 @@ def test_a_crash_between_the_ledger_append_and_the_rotation_replayed_on_a_later_
     held: dict = {}
 
     def grab_the_append_lock(rows, batch_id, cfg):
-        holder = S.Holder(sc.channel.append_lock)
+        holder = S.Holder(sc.paths.state_root / sc.channel.append_lock)
         holder.__enter__()
         held["holder"] = holder
 
@@ -333,8 +333,8 @@ def test_a_crash_between_the_commit_and_the_gap_ledger_write_773(tmp_path):
         ),
         verifier=S.FakeVerifier(verdicts={"l1.md": "BAD"}),
     )
-    sc.paths.pending_dir.mkdir(parents=True, exist_ok=True)
-    (sc.paths.pending_dir / S.GAP_LEDGER_NAME).mkdir()
+    (sc.paths.state_root / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
+    ((sc.paths.state_root / FINDINGS.queue).parent / S.GAP_LEDGER_NAME).mkdir()
     with pytest.raises(StateRefused):
         sc.run()
     assert "bad" in sc.pending_by_id()
@@ -350,8 +350,8 @@ def test_gap_ledger_append_raises_an_io_error_773(tmp_path):
     obligation names outright. A retry loop inside the repo lock is the wrong place to be
     patient. The I/O fault is real: the ledger path is a directory."""
     sc = _refused(tmp_path)
-    sc.paths.pending_dir.mkdir(parents=True, exist_ok=True)
-    (sc.paths.pending_dir / S.GAP_LEDGER_NAME).mkdir()
+    (sc.paths.state_root / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
+    ((sc.paths.state_root / FINDINGS.queue).parent / S.GAP_LEDGER_NAME).mkdir()
     with pytest.raises(StateRefused):
         sc.run()
     assert sc.consumed() == []
@@ -375,7 +375,7 @@ def test_producer_reenqueues_a_finding_id_mid_ledger_write_window_773(tmp_path):
     held: dict = {}
 
     def grab_the_append_lock(rows, batch_id, cfg):
-        holder = S.Holder(sc.channel.append_lock)
+        holder = S.Holder(sc.paths.state_root / sc.channel.append_lock)
         holder.__enter__()
         held["holder"] = holder
 

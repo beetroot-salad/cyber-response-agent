@@ -42,6 +42,7 @@ from defender.tests._spec791 import (
     satisfy_entrypoint_keys,
 )
 from defender.tests.learning_state_1135 import _spec1135 as S
+from defender.learning.core.state import FINDINGS, LEAD_QUEUE_LOCK, PITFALLS, QUESTIONER_FINDINGS
 
 ENV = "DEFENDER_LEARNING_STATE_DIR"
 
@@ -127,11 +128,11 @@ def test_e1_a_refused_curation_request_costs_the_investigation_nothing(tmp_path:
     if at == "queue-folder":
         target = tmp_path / "outside" / "queue"
         target.mkdir(parents=True)
-        planted = S.plant(paths.author_queue_dir, "symlink", target=target)
-        named = paths.author_queue_dir.name
+        planted = S.plant(paths.state_root / "author-queue", "symlink", target=target)
+        named = (paths.state_root / "author-queue").name
     else:
         target = S.outside(tmp_path, "record.json", json.dumps({"case_id": LEAKED}) + "\n")
-        planted = S.plant(paths.author_queue_dir / f"{case_id}.json", "symlink", target=target)
+        planted = S.plant(paths.state_root / "author-queue" / f"{case_id}.json", "symlink", target=target)
         named = f"{case_id}.json"
     link_text = os.readlink(planted)
     outside_before = S.tree_snapshot(tmp_path / "outside")
@@ -167,7 +168,7 @@ def test_e1_a_refused_curation_request_costs_the_investigation_nothing(tmp_path:
         run_common.enqueue_curation(run_dir, run_dir / "alert.json"))) is None, \
         "the unplanted enqueue raised"
     assert answered == [True], f"the unplanted enqueue answered {answered!r}"
-    assert S.entry_kind(paths.author_queue_dir / f"{case_id}.json") == "file", \
+    assert S.entry_kind(paths.state_root / "author-queue" / f"{case_id}.json") == "file", \
         "the unplanted request is not at author-queue/<case_id>.json (R14)"
     assert S.LearningState.open(paths).has_requests(), \
         "the handle does not see the request the run-end enqueue wrote"
@@ -189,11 +190,11 @@ def test_e2_the_queue_page_counts_a_refused_sidecar_unreadable(tmp_path: Path):
     quarantining an unreadable delivery record is the drain's verb, never the page's. Each page
     build, before and after the plant, leaves the tree byte for byte as it found it."""
     paths = S.built_paths(tmp_path)
-    S.write_jsonl(paths.findings.file, [{"finding_id": "ep-1/b/0/0", "run_id": "ep-1"}])
-    graveyard = paths.questioner_findings.file.with_suffix(".deadletter.jsonl")
+    S.write_jsonl(paths.state_root / FINDINGS.queue, [{"finding_id": "ep-1/b/0/0", "run_id": "ep-1"}])
+    graveyard = paths.state_root / QUESTIONER_FINDINGS.deadletter
     S.write_jsonl(graveyard, [{"finding_id": "ep-2/c/0/0", "row": {"finding_id": "ep-2/c/0/0"},
                                "deadletter_reason": "retired", "attempts": 3}])
-    torn = paths.pending_delivery_dir / "lessons-1135torn.json"
+    torn = paths.state_root / "_pending_delivery" / "lessons-1135torn.json"
     torn.parent.mkdir(parents=True)
     torn.write_text('{"branch": "lessons/1135torn", "pr_ur', encoding="utf-8")
     seeded = S.tree_snapshot(tmp_path)
@@ -206,7 +207,7 @@ def test_e2_the_queue_page_counts_a_refused_sidecar_unreadable(tmp_path: Path):
 
     target = S.outside(tmp_path, "graveyard.jsonl", json.dumps(
         {"finding_id": LEAKED, "row": {"finding_id": LEAKED}, "deadletter_reason": LEAKED}) + "\n")
-    planted = S.plant(paths.findings.file.with_suffix(".deadletter.jsonl"), "symlink",
+    planted = S.plant(paths.state_root / FINDINGS.deadletter, "symlink",
                       target=target)
     on_disk = S.tree_snapshot(tmp_path)
 
@@ -256,7 +257,7 @@ def test_e3_a_refused_findings_queue_leaves_the_launch_unaffected(tmp_path: Path
         paths = S.built_paths(tmp_path)
         root = paths.state_root
         target = S.outside(tmp_path, "findings.jsonl", json.dumps({"finding_id": LEAKED}) + "\n")
-        planted = S.plant(paths.findings.file, "symlink", target=target)
+        planted = S.plant(paths.state_root / FINDINGS.queue, "symlink", target=target)
     else:
         root = tmp_path / "absent" / "learning-state"
     runs_base = _judge_roots(tmp_path, monkeypatch, root)
@@ -327,8 +328,8 @@ def test_1135_the_failed_folder_is_a_planted_entry_when_the_page_lists_failed_re
     (E2); the other channels and the other failed records show normally, and building the page
     changes nothing on disk."""
     paths = S.built_paths(tmp_path)
-    S.write_jsonl(paths.findings.file, [{"finding_id": "ep-1/b/0/0", "run_id": "ep-1"}])
-    delivered = paths.pending_delivery_dir / "failed" / "delivery-1135.json"
+    S.write_jsonl(paths.state_root / FINDINGS.queue, [{"finding_id": "ep-1/b/0/0", "run_id": "ep-1"}])
+    delivered = paths.state_root / "_pending_delivery" / "failed" / "delivery-1135.json"
     delivered.parent.mkdir(parents=True)
     delivered.write_text(json.dumps({"failed": "push refused", "run_dir": "/runs/r"}) + "\n",
                          encoding="utf-8")
@@ -338,7 +339,7 @@ def test_1135_the_failed_folder_is_a_planted_entry_when_the_page_lists_failed_re
     elsewhere.mkdir(parents=True)
     (elsewhere / f"{LEAKED}.json").write_text(
         json.dumps({"case_id": LEAKED, "failed": LEAKED}) + "\n", encoding="utf-8")
-    planted = S.plant(paths.author_queue_dir / "failed", "symlink", target=elsewhere)
+    planted = S.plant(paths.state_root / "author-queue" / "failed", "symlink", target=elsewhere)
     on_disk = S.tree_snapshot(tmp_path)
 
     page: dict = {}
@@ -388,10 +389,10 @@ def test_describe_strings_keep_every_display_reader_coherent(tmp_path: Path, mon
     findings = state.describe(S.coined("FINDINGS"))
     questioner = state.describe(S.coined("QUESTIONER_FINDINGS"))
     assert isinstance(findings, str), f"describe(FINDINGS) is not a string: {findings!r}"
-    assert findings == os.path.realpath(paths.findings.file), \
+    assert findings == os.path.realpath(paths.state_root / FINDINGS.queue), \
         f"describe(FINDINGS) is not the queue's absolute path string: {findings!r}"
     assert isinstance(questioner, str), f"describe(QUESTIONER_FINDINGS) is not a string: {questioner!r}"
-    assert questioner == os.path.realpath(paths.questioner_findings.file), \
+    assert questioner == os.path.realpath(paths.state_root / QUESTIONER_FINDINGS.queue), \
         f"describe(QUESTIONER_FINDINGS) is not the queue's absolute path string: {questioner!r}"
 
     assert record.get("enqueued_to") == findings, \
@@ -402,7 +403,7 @@ def test_describe_strings_keep_every_display_reader_coherent(tmp_path: Path, mon
     assert record.get("enqueued_rows", 0) >= 1, f"the grade enqueued {record.get('enqueued_rows')!r} rows"
     assert len(read_back) == record["enqueued_rows"], \
         f"reading enqueued_to back finds {len(read_back)} rows, the grade says {record['enqueued_rows']}"
-    assert read_back == S.jsonl_rows(paths.findings.file), \
+    assert read_back == S.jsonl_rows(paths.state_root / FINDINGS.queue), \
         "enqueued_to does not name the queue the grade appended to"
 
     shown = visualize_episode.build_page(ep)
@@ -428,7 +429,7 @@ def test_pitfalls_curator_on_a_non_default_root_writes_nothing_under_the_default
     """run_pitfalls driven on a handle over a non-default root writes nothing under the default
     root: the pitfalls stage's learning_run_dir is the held root's _pending_leads (from
     stage_dir), and no folder, trace or budget.json appears under
-    DEFAULT_PATHS.lead_pending_dir.
+    the default root's `_pending_leads/`.
 
     Only the model is out of reach (JF12): the real spawn (`_spawn_author_agent`, F32) runs its
     own folder preparation, and the stage stops at the model's key sourcing, because the
@@ -436,12 +437,12 @@ def test_pitfalls_curator_on_a_non_default_root_writes_nothing_under_the_default
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", "no-such-model-1135")
     paths = S.built_paths(tmp_path, repo_root=seed_skills_repo(tmp_path / "repo"))
-    S.write_jsonl(paths.pitfalls.file, [{
+    S.write_jsonl(paths.state_root / PITFALLS.queue, [{
         "schema_version": 1, "pitfall_id": "r:l-000:0", "source_run": "r", "system": "elastic",
         "query_id": "elastic.esql", "goal": "g", "executed_query": "bad pipe",
         "stderr_digest": "exit=1; mismatched input", "error_class": "agent-fixable",
     }])
-    default = config.DEFAULT_PATHS.lead_pending_dir
+    default = (config.DEFAULT_PATHS.state_root / LEAD_QUEUE_LOCK.file).parent
     default_kind = S.entry_kind(default)
     default_before = S.tree_snapshot(default)
 
@@ -462,7 +463,7 @@ def test_pitfalls_curator_on_a_non_default_root_writes_nothing_under_the_default
 
     assert len(spawned) == 1, f"the pitfalls stage was spawned {len(spawned)} times (escaped {escaped!r})"
     stage_dir = Path(spawned[0]["learning_run_dir"])
-    assert stage_dir.resolve() == paths.lead_pending_dir.resolve(), \
+    assert stage_dir.resolve() == (paths.state_root / LEAD_QUEUE_LOCK.file).parent.resolve(), \
         f"the pitfalls stage's learning_run_dir is {stage_dir}, not the held root's _pending_leads"
     assert isinstance(escaped, FatalConfigError), \
         f"the stage did not stop at the model, the one thing out of reach: {escaped!r}"

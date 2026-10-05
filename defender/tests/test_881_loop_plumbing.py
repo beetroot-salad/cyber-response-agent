@@ -106,12 +106,12 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
     demand.
     """
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     legacy = h.row_for("findings", "a/0")
     family = h.row_for("findings", "f/0", direction="family", judge_outcome="not-a-word")
     authorable = h.row_for("findings", "z/0")
     h.write_source_refs(paths, "z")
-    h.seed(ch, [legacy, family, authorable])
+    h.seed(paths, ch, [legacy, family, authorable])
     agent = h.recording(h.committing("881-o3"))
     cfg = h.cfg_for(paths, "findings", invoke_agent=agent)
     report = paths.state_root / FINDINGS.report
@@ -121,7 +121,7 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
         "the tick did not author exactly the one authorable row, so it is not the mixed "
         "batch this test is about"
     )
-    assert {r["finding_id"]: r.get("held_reason") for r in h.pending(ch)} == {
+    assert {r["finding_id"]: r.get("held_reason") for r in h.pending(paths, ch)} == {
         "a/0": "no_ground_truth(direction='adversarial', disposition=None)",
         "f/0": "no_family_ground_truth(judge_outcome='not-a-word')",
     }, "the tick did not hold the two rows this test is about"
@@ -147,7 +147,7 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
 
     # A second HOLDING tick: the report is a ledger, so it grows by a line and keeps the one
     # it had. `"w"` instead of `"a"` fails here and nowhere else.
-    h.seed(ch, [h.row_for("findings", "b/0")])
+    h.seed(paths, ch, [h.row_for("findings", "b/0")])
     assert drain.run_batch(cfg=cfg) == 0
     second_tick = report.read_text(encoding="utf-8")
     assert "b/0" in second_tick, "the second tick's hold is not named in the report"
@@ -160,10 +160,10 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
     )
 
     # The paired control: a tick that holds nothing writes nothing.
-    h.seed(ch, [h.row_for("findings", "c/0")])
+    h.seed(paths, ch, [h.row_for("findings", "c/0")])
     h.write_source_refs(paths, "c")
     assert drain.run_batch(cfg=cfg) == 0
-    assert h.pending(ch) == [], "the row was not authored on the tick that could author it"
+    assert h.pending(paths, ch) == [], "the row was not authored on the tick that could author it"
     assert report.read_text(encoding="utf-8") == second_tick, (
         "a tick that held nothing appended to the held report anyway; a report that grows "
         "on every tick names nothing"
@@ -264,7 +264,7 @@ def _tick_meeting_an_appender_at_the_unkeyable_retirement(
     takes it in `tests/test_952_consumption_follows_durability.py`) where the caller's subject
     is what the expiry leaves behind, not the wait.
     """
-    appender = h.Holder(ch.append_lock)
+    appender = h.Holder(paths.state_root / ch.append_lock)
 
     def _an_appender_arrives() -> None:
         # Synchronous, and it must be: `Holder.__enter__` returns only once the appender
@@ -340,22 +340,22 @@ def test_881_a_contended_append_lock_in_the_unkeyable_retirement_leaves_a_stuck_
     ordinary bad data, which is the one thing it must not be.
     """
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     rows = [_unkeyable("a/0")]
-    h.seed(ch, rows)
+    h.seed(paths, ch, rows)
 
     escaped = _tick_meeting_an_appender_at_the_unkeyable_retirement(paths, ch)
 
     assert isinstance(escaped, TimeoutError), f"the tick ended as {escaped!r}"
-    assert str(ch.append_lock) in str(escaped), (
+    assert str(paths.state_root / ch.append_lock) in str(escaped), (
         f"the timeout was not the append lock's: {escaped}"
     )
-    assert h.pending(ch) == rows, "the queue was rewritten by a rotation that never ran"
-    assert len(h.graveyard(ch)) == 1, (
+    assert h.pending(paths, ch) == rows, "the queue was rewritten by a rotation that never ran"
+    assert len(h.graveyard(paths, ch)) == 1, (
         "the graveyard should hold the one row the retirement wrote before the rotation "
-        f"expired, not {h.graveyard(ch)}"
+        f"expired, not {h.graveyard(paths, ch)}"
     )
-    records = h.stuck_records(ch)
+    records = h.stuck_records(paths, ch)
     assert len(records) == 1, (
         "a fault the drain cannot retire escaped the tick with no operator signal: the row "
         "is queued, nothing was graveyarded, and the channel is silently wedged"
@@ -376,9 +376,9 @@ def test_881_a_contended_append_lock_in_the_unkeyable_retirement_leaves_a_stuck_
         invoke_agent=h.recording(h.committing("881-o4-control")),
     )
     assert drain.run_batch(cfg=uncontended) == 0
-    assert h.pending(ch) == [], "the uncontended retirement did not clear the row"
-    assert len(h.graveyard(ch)) == 2, "the uncontended retirement did not graveyard the row"
-    assert len(h.stuck_records(ch)) == 1, (
+    assert h.pending(paths, ch) == [], "the uncontended retirement did not clear the row"
+    assert len(h.graveyard(paths, ch)) == 2, "the uncontended retirement did not graveyard the row"
+    assert len(h.stuck_records(paths, ch)) == 1, (
         "an ordinary unkeyable retirement wrote a stuck record; the report then names every "
         "bad row rather than every wedged tick"
     )
@@ -410,9 +410,9 @@ def test_881_a_fault_before_the_rotation_in_the_unkeyable_retirement_is_recorded
     rather than merely loud.
     """
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     rows = [_unkeyable("a/0")]
-    h.seed(ch, rows)
+    h.seed(paths, ch, rows)
     full = _StateWhoseDiskIsFull.over(LearningState.open(paths), "deadletter")
     cfg = h.cfg_for(
         paths, "findings", repo_lock_wait_seconds=1, state=full,
@@ -425,9 +425,9 @@ def test_881_a_fault_before_the_rotation_in_the_unkeyable_retirement_is_recorded
     assert cfg.invoke_agent.calls == [], (  # type: ignore[attr-defined]
         "the tick reached the author; the fault under test is the one BEFORE the gate"
     )
-    assert h.graveyard(ch) == [], "nothing can have been graveyarded"
-    assert h.pending(ch) == rows, "the row must stay queued — `OSError` retires nothing"
-    records = h.stuck_records(ch)
+    assert h.graveyard(paths, ch) == [], "nothing can have been graveyarded"
+    assert h.pending(paths, ch) == rows, "the row must stay queued — `OSError` retires nothing"
+    records = h.stuck_records(paths, ch)
     assert len(records) == 1, (
         "a fault the drain cannot retire escaped the tick with no operator signal, because "
         "the guard covers the rotation and not the whole retirement"
@@ -444,9 +444,9 @@ def test_881_a_fault_before_the_rotation_in_the_unkeyable_retirement_is_recorded
     # The paired control: unobstructed, the same retirement is ordinary work.
     full.full = False
     assert drain.run_batch(cfg=cfg) == 0
-    assert h.pending(ch) == [], "the retirement did not clear the row once unobstructed"
-    assert len(h.graveyard(ch)) == 1, "the retirement did not graveyard the row"
-    assert len(h.stuck_records(ch)) == 1, (
+    assert h.pending(paths, ch) == [], "the retirement did not clear the row once unobstructed"
+    assert len(h.graveyard(paths, ch)) == 1, "the retirement did not graveyard the row"
+    assert len(h.stuck_records(paths, ch)) == 1, (
         "an ordinary unkeyable retirement wrote a stuck record; the report then names every "
         "bad row rather than every wedged tick"
     )
@@ -476,13 +476,13 @@ def test_881_stuck_unkeyable_ticks_fold_by_row_content_and_not_by_an_empty_id_li
     than the row.
     """
     same = h.make_paths(tmp_path / "same")
-    same_ch = h.channel_of(same, "findings")
-    h.seed(same_ch, [_unkeyable("a/0")])
+    same_ch = h.channel_of("findings")
+    h.seed(same, same_ch, [_unkeyable("a/0")])
     for tick in (1, 2):
         escaped = _tick_meeting_an_appender_at_the_unkeyable_retirement(same, same_ch,
                                                                         lock_wait=0)
         assert isinstance(escaped, TimeoutError), f"tick {tick} ended as {escaped!r}"
-    records = h.stuck_records(same_ch)
+    records = h.stuck_records(same, same_ch)
     assert [r["fault_class"] for r in records] == ["TimeoutError", "TimeoutError"]
     assert [r["consecutive_ticks"] for r in records] == [1, 2], (
         "the same unkeyable row stuck across two ticks did not fold, so a queue that has "
@@ -490,7 +490,7 @@ def test_881_stuck_unkeyable_ticks_fold_by_row_content_and_not_by_an_empty_id_li
     )
 
     different = h.make_paths(tmp_path / "different")
-    diff_ch = h.channel_of(different, "findings")
+    diff_ch = h.channel_of("findings")
     poison = [
         _unkeyable("a/0", subject="the holding system was never re-queried"),
         _unkeyable("a/1", subject="the lead was closed on a stale enrichment"),
@@ -500,11 +500,11 @@ def test_881_stuck_unkeyable_ticks_fold_by_row_content_and_not_by_an_empty_id_li
         "from a content-keyed one"
     )
     for row in poison:
-        h.seed(diff_ch, [row])
+        h.seed(different, diff_ch, [row])
         escaped = _tick_meeting_an_appender_at_the_unkeyable_retirement(different, diff_ch,
                                                                         lock_wait=0)
         assert isinstance(escaped, TimeoutError), f"{row['subject']!r} ended as {escaped!r}"
-    records = h.stuck_records(diff_ch)
+    records = h.stuck_records(different, diff_ch)
     assert [r["consecutive_ticks"] for r in records] == [1, 1], (
         "two ticks over DIFFERENT unkeyable rows from the SAME run folded into one rising "
         "count; a keyless row contributes no id, so neither an ids-only key nor one built "
@@ -548,13 +548,13 @@ def test_881_a_queue_of_only_unreadable_lines_is_cleared_by_the_tick_it_wakes(tm
     model call on nothing.
     """
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
-    ch.file.parent.mkdir(parents=True, exist_ok=True)
-    ch.file.write_text('{not json at all\n[1,2]\nnull\n', encoding="utf-8")
+    ch = h.channel_of("findings")
+    (paths.state_root / ch.queue).parent.mkdir(parents=True, exist_ok=True)
+    (paths.state_root / ch.queue).write_text('{not json at all\n[1,2]\nnull\n', encoding="utf-8")
     cfg = h.cfg_for(paths, "findings", invoke_agent=h.recording(h.committing("881-o2-junk")))
 
     assert drain.run_batch(cfg=cfg) == 0
-    assert ch.file.read_text(encoding="utf-8") == "", (
+    assert (paths.state_root / ch.queue).read_text(encoding="utf-8") == "", (
         "the tick returned on the empty batch and left the unreadable lines queued; the wake "
         "gate counts them as work, so it will fire on the same bytes on every pass forever"
     )
@@ -577,14 +577,14 @@ def test_881_unreadable_lines_beside_a_real_row_do_not_take_it_with_them(tmp_pat
     Without this the sibling above is satisfied by a tick that simply truncates the queue,
     which would delete every queued finding the moment one appender tore a line."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     keep = h.row_for("findings", "a/0")
-    ch.file.parent.mkdir(parents=True, exist_ok=True)
-    ch.file.write_text(json.dumps(keep) + "\n{torn\n", encoding="utf-8")
+    (paths.state_root / ch.queue).parent.mkdir(parents=True, exist_ok=True)
+    (paths.state_root / ch.queue).write_text(json.dumps(keep) + "\n{torn\n", encoding="utf-8")
     cfg = h.cfg_for(paths, "findings", invoke_agent=h.recording(h.committing("881-o2-mixed")))
 
     assert drain.run_batch(cfg=cfg) == 0
-    survivors = h.pending(ch)
+    survivors = h.pending(paths, ch)
     assert [r["finding_id"] for r in survivors] == ["a/0"], (
         "the rotation that dropped the unreadable line took the readable row with it"
     )
@@ -616,9 +616,9 @@ def test_881_a_tick_whose_gate_held_the_whole_batch_names_those_rows_when_it_sti
     tick that holds anything.
     """
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     held = [h.row_for("findings", f"a/{i}") for i in range(3)]
-    h.seed(ch, held)
+    h.seed(paths, ch, held)
     full = _StateWhoseDiskIsFull.over(LearningState.open(paths), "disposition_report")
     cfg = h.cfg_for(paths, "findings", state=full,
                     invoke_agent=h.recording(h.committing("881-o4-rotate")))
@@ -630,7 +630,7 @@ def test_881_a_tick_whose_gate_held_the_whole_batch_names_those_rows_when_it_sti
     assert cfg.invoke_agent.calls == [], (  # type: ignore[attr-defined]
         "the gate admitted a row, so this is not the held-whole tick the test is about"
     )
-    records = h.stuck_records(ch)
+    records = h.stuck_records(paths, ch)
     assert len(records) == 1, f"the fault left no stuck record: {records}"
     assert sorted(records[0]["row_ids"]) == ["a/0", "a/1", "a/2"], (
         "the stuck record names none of the rows the tick is stuck on — the guard was "
@@ -640,7 +640,7 @@ def test_881_a_tick_whose_gate_held_the_whole_batch_names_those_rows_when_it_sti
     # The control: unobstructed, the same tick holds the same rows and records nothing more.
     full.full = False
     assert drain.run_batch(cfg=cfg) == 0
-    assert len(h.stuck_records(ch)) == 1, (
+    assert len(h.stuck_records(paths, ch)) == 1, (
         "an ordinary holding tick wrote a stuck record; the report then names every tick "
         "that declined a row rather than every wedged one"
     )

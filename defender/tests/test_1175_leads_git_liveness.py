@@ -126,6 +126,7 @@ from defender.tests._spec791 import (
     noop_stop_box,
 )
 from defender.tests.test_1134_curator_git_bounds import _Shim, _within
+from defender.learning.core.state import PITFALLS
 
 LEAD = LEAD_AUTHOR_DRAIN_LABEL
 
@@ -366,7 +367,7 @@ def _pitfalls_scene(tmp: Path, monkeypatch: pytest.MonkeyPatch, *,
     wt = _worktree(tmp / "worktrees", committed=committed)
     persist.append_pitfalls([pitfall_row(PID, "elastic")], state=state_for_paths(paths))
     return _Scene(tmp, paths, wt, _Branch(tmp / "worktrees", wt), [],
-                  paths.pitfalls.file.read_bytes())
+                  (paths.state_root / PITFALLS.queue).read_bytes())
 
 
 def _tick(sc: _Scene, *, run_lead_author: Any = None, run_pitfalls: Any = None,
@@ -445,12 +446,12 @@ def _stalled(shim: _Shim) -> list[str]:
 
 
 def _inflight(paths: LoopPaths) -> dict[str, dict]:
-    d = paths.author_queue_dir / "inflight"
+    d = paths.state_root / "author-queue" / "inflight"
     return {p.name: marker_body(p) for p in sorted(d.glob("*.json"))} if d.is_dir() else {}
 
 
 def _failed(paths: LoopPaths) -> list[dict]:
-    d = paths.author_queue_dir / "failed"
+    d = paths.state_root / "author-queue" / "failed"
     return [json.loads(p.read_text(encoding="utf-8")) for p in sorted(d.glob("*.json"))] \
         if d.is_dir() else []
 
@@ -513,7 +514,7 @@ def _assert_lead_served(sc: _Scene, changes: set[str]) -> None:
 
 def _assert_rows_untouched(sc: _Scene) -> None:
     assert sc.queue_before is not None
-    assert sc.paths.pitfalls.file.read_bytes() == sc.queue_before, "a queued row was rewritten"
+    assert (sc.paths.state_root / PITFALLS.queue).read_bytes() == sc.queue_before, "a queued row was rewritten"
     assert consumed_by_id(sc.paths) == {}
     assert graveyard_by_id(sc.paths) == {}
 
@@ -1098,7 +1099,7 @@ def test_t5b_a_cleanup_overrun_after_a_clean_claim_ends_the_tick(tmp_path, monke
     assert _inflight(sc.paths) == {"case-a.json": {
         "case_id": "case-a", "run_dir": str(run_a.resolve()), "attempts": 1}}, _inflight(sc.paths)
     assert author_markers(sc.paths) == ["case-b.json"]
-    assert marker_body(sc.paths.author_queue_dir / "case-b.json") == {
+    assert marker_body(sc.paths.state_root / "author-queue" / "case-b.json") == {
         "case_id": "case-b", "run_dir": str(run_b.resolve())}
     assert _failed(sc.paths) == []
     assert _done_sha(run_a) is None

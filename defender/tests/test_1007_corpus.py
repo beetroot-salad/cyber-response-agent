@@ -47,6 +47,7 @@ from defender.tests.e2e.test_922_spine import (
     readonly_sources,
     writable_sources,
 )
+from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
 
 pytestmark = pytest.mark.e2e
 
@@ -272,8 +273,8 @@ def test_the_questioner_queue_alone_wakes_the_drain(tmp_path):
     defender finding happens to wake the drain, and the corpus updates at random.
     """
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
-    D.seed(W.questioner_channel(paths), [world_queue_row()])
-    assert D.pending(paths.findings) == []
+    D.seed(paths, QUESTIONER_FINDINGS, [world_queue_row()])
+    assert D.pending(paths, FINDINGS) == []
 
     trigger = TwoLaneRecorder(D.recording(D.committing("questioner-lesson")))
     rc, rec = drive(paths, trigger)
@@ -297,8 +298,8 @@ def test_the_author_drain_triggers_exactly_its_two_named_curators(tmp_path):
     walk, a directory scan — and a third curator appears with no diff to point at.
     """
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
-    D.seed(paths.findings, [defender_queue_row()])
-    D.seed(W.questioner_channel(paths), [world_queue_row()])
+    D.seed(paths, FINDINGS, [defender_queue_row()])
+    D.seed(paths, QUESTIONER_FINDINGS, [world_queue_row()])
 
     trigger = TwoLaneRecorder(D.recording(D.committing("lesson")))
     rc, _rec = drive(paths, trigger)
@@ -309,9 +310,9 @@ def test_the_author_drain_triggers_exactly_its_two_named_curators(tmp_path):
         f"one tick triggered {trigger.modules} — the drain's curator set is not the two "
         "literals it names")
     by_module = {c["module_name"]: c for c in trigger.calls}
-    assert by_module[W.DEFENDER_CURATOR_MODULE]["pending_file"] == paths.findings.file
+    assert by_module[W.DEFENDER_CURATOR_MODULE]["pending_file"] == paths.state_root / FINDINGS.queue
     assert by_module[W.QUESTIONER_CURATOR_MODULE]["pending_file"] == (
-        W.questioner_channel(paths).file)
+        paths.state_root / QUESTIONER_FINDINGS.queue)
 
 
 def test_a_full_findings_queue_alone_still_wakes_the_drain(tmp_path):
@@ -328,8 +329,8 @@ def test_a_full_findings_queue_alone_still_wakes_the_drain(tmp_path):
     empty, which is most of the time.
     """
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
-    D.seed(paths.findings, [defender_queue_row()])
-    assert D.pending(W.questioner_channel(paths)) == []
+    D.seed(paths, FINDINGS, [defender_queue_row()])
+    assert D.pending(paths, QUESTIONER_FINDINGS) == []
 
     trigger = TwoLaneRecorder(D.recording(D.committing("family-lesson")),
                               run=(W.DEFENDER_CURATOR_MODULE,))
@@ -362,7 +363,7 @@ def test_the_drain_still_decides_its_channels_without_a_direction_table(tmp_path
               for channel, knob in drains._curator_queue_checks()]
 
     assert sorted(f.name for f, _knob in checks) == sorted(
-        [paths.findings.file.name, W.QUESTIONER_QUEUE_FILENAME]), (
+        [(paths.state_root / FINDINGS.queue).name, W.QUESTIONER_QUEUE_FILENAME]), (
         f"the wake gate answers for {[f.name for f, _k in checks]}")
     assert len({knob for _f, knob in checks}) == 2, (
         "the two channels share one threshold knob, so neither can be tuned alone")
@@ -461,8 +462,8 @@ def test_one_author_drain_tick_opens_one_branch_and_one_pr_for_both_corpora(tmp_
     commits on the same worktree.
     """
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
-    D.seed(paths.findings, [defender_queue_row()])
-    D.seed(W.questioner_channel(paths), [world_queue_row()])
+    D.seed(paths, FINDINGS, [defender_queue_row()])
+    D.seed(paths, QUESTIONER_FINDINGS, [world_queue_row()])
 
     trigger = TwoLaneRecorder(D.recording(D.committing("lesson")))
     rc, rec = drive(paths, trigger)
@@ -491,14 +492,14 @@ def test_each_curator_consumes_its_own_channel_and_is_scoped_to_its_own_corpus(t
     """
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
     curator = W.mod("learning.author.questioner.run")
-    D.seed(paths.findings, [defender_queue_row()])
-    D.seed(W.questioner_channel(paths), [world_queue_row()])
+    D.seed(paths, FINDINGS, [defender_queue_row()])
+    D.seed(paths, QUESTIONER_FINDINGS, [world_queue_row()])
 
     trigger = TwoLaneRecorder(D.recording(D.committing("questioner-lesson")),
                               run=(W.QUESTIONER_CURATOR_MODULE,))
     drive(paths, trigger)
 
-    assert D.pending(paths.findings), (
+    assert D.pending(paths, FINDINGS), (
         "the defender queue was consumed by a tick in which only the questioner curator ran")
     cfg = curator.build_questioner_config(
         paths, state=W.learning_state(paths), trees=author_trees(paths))
@@ -547,8 +548,8 @@ def test_a_faulting_curator_leaves_the_others_commit_and_consumed_markers_intact
     an operator can read.
     """
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
-    D.seed(paths.findings, [defender_queue_row()])
-    D.seed(W.questioner_channel(paths), [world_queue_row()])
+    D.seed(paths, FINDINGS, [defender_queue_row()])
+    D.seed(paths, QUESTIONER_FINDINGS, [world_queue_row()])
     head_before = D.git(paths.repo_root, "rev-parse", "HEAD").stdout.strip()
 
     def faulting_tick(stem):
@@ -576,8 +577,8 @@ def test_a_faulting_curator_leaves_the_others_commit_and_consumed_markers_intact
     assert list(paths.lessons_dir.glob("*.md")), (
         "the defender corpus lost its authored document to the other curator's fault")
 
-    landed = D.pending_by_id(paths.findings)
-    consumed = {r.get(paths.findings.id_key) for r in D.consumed(paths.findings)}
+    landed = D.pending_by_id(paths, FINDINGS)
+    consumed = {r.get(FINDINGS.id_key) for r in D.consumed(paths, FINDINGS)}
     assert "ep-1/b/0/1" not in landed, (
         f"the defender curator authored, committed and rotated, and its row is still queued: "
         f"{landed} — the next tick authors the same lesson again")
@@ -585,15 +586,15 @@ def test_a_faulting_curator_leaves_the_others_commit_and_consumed_markers_intact
         f"the defender curator's consumed markers do not name its landed row: {consumed} — its "
         "commit is on HEAD and nothing records that the row behind it was retired")
 
-    stranded = D.pending_by_id(W.questioner_channel(paths))
+    stranded = D.pending_by_id(paths, QUESTIONER_FINDINGS)
     assert "ep-1/b/0/0" in stranded, (
         f"the FAULTING curator's row was consumed anyway: {stranded} — a fault after "
         "consumption and before authoring retires a finding no lesson was ever written from, "
         "which is the failure per-curator consumption exists to prevent")
-    assert not D.consumed(W.questioner_channel(paths)), (
+    assert not D.consumed(paths, QUESTIONER_FINDINGS), (
         "the faulting lane wrote consumed markers for rows it never authored")
 
-    stuck = D.stuck_records(W.questioner_channel(paths))
+    stuck = D.stuck_records(paths, QUESTIONER_FINDINGS)
     assert stuck, (
         f"a {fault_class.__name__} took the questioner curator out of a tick that then committed "
         "and pushed, and left no durable record of it — A2's third clause is 'and IS RECORDED'; "
@@ -602,7 +603,7 @@ def test_a_faulting_curator_leaves_the_others_commit_and_consumed_markers_intact
         f"the stuck record names {[r.get('fault_class') for r in stuck]} rather than "
         f"{fault_class.__name__!r} — a record that cannot say WHICH fault stopped the lane "
         "cannot tell an outage from a bug")
-    assert not D.stuck_records(paths.findings), (
+    assert not D.stuck_records(paths, FINDINGS), (
         "the SURVIVING lane carries a stuck record — the fault was recorded against the curator "
         "that landed its work")
 
@@ -711,10 +712,10 @@ def test_nothing_lands_outside_the_declared_write_set(tmp_path, monkeypatch):
            if p not in allowed and p.parts[0] not in ("served", "worlds", "draws", "wire_logs")}
     assert new == set(), (
         f"the pass wrote artifacts outside the declared set: {sorted(map(str, new))}")
-    queue_files = {p.name for p in paths.pending_dir.glob("*") if p.is_file()}
-    assert queue_files <= {paths.findings.file.name, W.QUESTIONER_QUEUE_FILENAME,
-                           paths.findings.append_lock.name,
-                           W.questioner_channel(paths).append_lock.name,
-                           paths.findings.consumed.name,
-                           W.questioner_channel(paths).consumed.name, ".lock"}, (
+    queue_files = {p.name for p in (paths.state_root / FINDINGS.queue).parent.glob("*") if p.is_file()}
+    assert queue_files <= {(paths.state_root / FINDINGS.queue).name, W.QUESTIONER_QUEUE_FILENAME,
+                           (paths.state_root / FINDINGS.append_lock).name,
+                           (paths.state_root / QUESTIONER_FINDINGS.append_lock).name,
+                           (paths.state_root / FINDINGS.consumed).name,
+                           (paths.state_root / QUESTIONER_FINDINGS.consumed).name, ".lock"}, (
         f"the queue directory gained {sorted(queue_files)}")

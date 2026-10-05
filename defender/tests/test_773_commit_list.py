@@ -613,7 +613,7 @@ def test_git_status_call_the_check_steps_paths_are_derived_from_fails_773(tmp_pa
         sc.run()
     shutil.move(str(sc.repo / ".git-gone"), str(sc.repo / ".git"))
     assert "attempts" not in sc.pending_by_id()["f1"]
-    assert S.stuck_records(sc.channel)
+    assert S.stuck_records(sc.paths, sc.channel)
 
 
 def test_a_git_read_inside_the_new_check_step_that_loses_the_index_lock_race_773(tmp_path):

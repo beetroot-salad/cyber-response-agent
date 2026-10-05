@@ -99,15 +99,15 @@ def test_921_family_row_is_not_held_as_no_ground_truth(tmp_path):
     where the row ends up rather than about which function was called.
     """
     paths = D.make_paths(tmp_path)
-    channel = D.channel_of(paths, "findings")
-    D.seed(channel, [_family_row()])
+    channel = D.channel_of("findings")
+    D.seed(paths, channel, [_family_row()])
     cfg = D.cfg_for(paths, "findings", invoke_agent=D.committing("family-lesson"))
 
     assert J.mod("learning.author.drain").run_batch(cfg=cfg) == 0
-    assert D.pending(channel) == [], (
+    assert D.pending(paths, channel) == [], (
         "the family row is still queued; without a gate of its own it is held forever as "
         "no_ground_truth")
-    assert [r["finding_id"] for r in D.consumed(channel)] == ["ep-1/b/0/0"]
+    assert [r["finding_id"] for r in D.consumed(paths, channel)] == ["ep-1/b/0/0"]
 
 
 def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings(tmp_path):
@@ -120,9 +120,9 @@ def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings
     partition is written as a second gate downstream of the first.
     """
     paths = D.make_paths(tmp_path)
-    channel = D.channel_of(paths, "findings")
+    channel = D.channel_of("findings")
     D.write_source_refs(paths, "run-adv", disposition="benign")
-    D.seed(channel, [
+    D.seed(paths, channel, [
         D.finding_row("run-adv/0", run_id="run-adv", direction="adversarial"),
         _family_row("ep-1/b/0/0"),
         D.finding_row("run-held/0", run_id="run-held", direction="adversarial"),
@@ -134,7 +134,7 @@ def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings
     authored = {r["finding_id"] for r in agent.calls[0]["rows"]}
     assert authored == {"run-adv/0", "ep-1/b/0/0"}, (
         f"the two populations did not route independently: {sorted(authored)}")
-    still_held = {r["finding_id"] for r in D.pending(channel)}
+    still_held = {r["finding_id"] for r in D.pending(paths, channel)}
     assert still_held == {"run-held/0"}, (
         "the adversarial row with no ground truth stopped being held, or the family row was "
         "held with it")
@@ -143,8 +143,8 @@ def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings
 def test_921_gate_family_authors_a_survived_row(tmp_path):
     """A family row whose `judge_outcome` is `survived` is admitted for authoring."""
     paths = D.make_paths(tmp_path)
-    channel = D.channel_of(paths, "findings")
-    D.seed(channel, [_family_row(judge_outcome="survived")])
+    channel = D.channel_of("findings")
+    D.seed(paths, channel, [_family_row(judge_outcome="survived")])
     agent = D.recording(D.committing("survived"))
 
     assert J.mod("learning.author.drain").run_batch(
@@ -162,8 +162,8 @@ def test_921_gate_family_skips_caught_and_undecidable(tmp_path):
     skip cannot pass on a gate that admits nothing.
     """
     paths = D.make_paths(tmp_path)
-    channel = D.channel_of(paths, "findings")
-    D.seed(channel, [
+    channel = D.channel_of("findings")
+    D.seed(paths, channel, [
         _family_row("ep-1/b/0/0", judge_outcome="caught"),
         _family_row("ep-1/c/0/0", judge_outcome="undecidable"),
         _family_row("ep-1/b/0/1", judge_outcome="survived"),
@@ -174,8 +174,8 @@ def test_921_gate_family_skips_caught_and_undecidable(tmp_path):
         cfg=D.cfg_for(paths, "findings", invoke_agent=agent)) == 0
     assert agent.calls, "the positive control failed: the `survived` row authored nothing"
     assert [r["finding_id"] for r in agent.calls[0]["rows"]] == ["ep-1/b/0/1"]
-    assert D.pending(channel) == [], "a skipped row was HELD instead; a hold is forever"
-    assert {r["finding_id"] for r in D.consumed(channel)} == {
+    assert D.pending(paths, channel) == [], "a skipped row was HELD instead; a hold is forever"
+    assert {r["finding_id"] for r in D.consumed(paths, channel)} == {
         "ep-1/b/0/0", "ep-1/c/0/0", "ep-1/b/0/1"}
 
 
@@ -188,14 +188,14 @@ def test_921_gate_family_is_idempotent_over_a_replayed_batch(tmp_path):
     still authors, so idempotency cannot pass on a gate that has stopped authoring at all.
     """
     paths = D.make_paths(tmp_path)
-    channel = D.channel_of(paths, "findings")
+    channel = D.channel_of("findings")
     drain = J.mod("learning.author.drain")
 
-    D.seed(channel, [_family_row("ep-1/b/0/0")])
+    D.seed(paths, channel, [_family_row("ep-1/b/0/0")])
     first = D.recording(D.committing("once"))
     assert drain.run_batch(cfg=D.cfg_for(paths, "findings", invoke_agent=first)) == 0
 
-    D.seed(channel, [_family_row("ep-1/b/0/0"), _family_row("ep-1/b/0/1")])
+    D.seed(paths, channel, [_family_row("ep-1/b/0/0"), _family_row("ep-1/b/0/1")])
     second = D.recording(D.committing("twice"))
     assert drain.run_batch(cfg=D.cfg_for(paths, "findings", invoke_agent=second)) == 0
     assert second.calls, "the positive control failed: the NEW row authored nothing either"
@@ -325,15 +325,15 @@ def test_921_enqueue_refuses_a_row_that_would_key_error_the_shared_gate(tmp_path
 
     # The blast radius the refusal exists to prevent, on the real channel.
     paths = D.make_paths(tmp_path / "blast")
-    channel = D.channel_of(paths, "findings")
+    channel = D.channel_of("findings")
     D.write_source_refs(paths, "run-adv", disposition="benign")
     unkeyable = _family_row("ep-1/b/0/9")
     unkeyable.pop("run_id")
-    D.seed(channel, [D.finding_row("run-adv/0", run_id="run-adv"), unkeyable])
+    D.seed(paths, channel, [D.finding_row("run-adv/0", run_id="run-adv"), unkeyable])
     with pytest.raises(KeyError):
         J.mod("learning.author.drain").run_batch(
             cfg=D.cfg_for(paths, "findings", invoke_agent=D.committing("blast")))
-    stuck = D.stuck_records(channel)
+    stuck = D.stuck_records(paths, channel)
     assert stuck, "the tick recorded nothing stuck at all"
     assert set(stuck[-1]["row_ids"]) >= {"run-adv/0"}, (
         "the well-formed adversarial row did not ride the malformed one into stuck.jsonl; "
@@ -521,10 +521,11 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
     from defender._io import read_jsonl_rows_report
 
     paths = D.make_paths(tmp_path)
-    channel = D.channel_of(paths, "findings")
+    channel = D.channel_of("findings")
     D.write_source_refs(paths, "run-adv", disposition="benign")
-    D.seed(channel, [D.finding_row("run-adv/0", run_id="run-adv", direction="adversarial")])
-    with channel.file.open("a", encoding="utf-8") as fh:
+    D.seed(paths, channel, [D.finding_row("run-adv/0", run_id="run-adv", direction="adversarial")])
+    queue = paths.state_root / channel.queue
+    with queue.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(_family_row("ep-1/b/9/9"))[:120])   # NO newline: the tail is TORN
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
@@ -535,7 +536,7 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
         runs_base=tmp_path / "defender-runs", draws=1, state=LearningState.open(paths))
 
     record = J.judge_record(ep)
-    assert Path(record["enqueued_to"]) == channel.file, (
+    assert Path(record["enqueued_to"]) == queue, (
         "the pass wrote somewhere other than the queue it was pointed at, so nothing below is "
         "about the torn tail")
     assert record["queue_malformed_rows"] == 1, (
@@ -543,7 +544,7 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
         "are the same drain and different evidence, and the count is the only thing that says "
         "a writer left a row half-written")
 
-    rows, unreadable = read_jsonl_rows_report(channel.file)
+    rows, unreadable = read_jsonl_rows_report(queue)
     assert unreadable == 1, (
         f"{unreadable} unreadable line(s) on the queue: the torn tail cost more than itself — "
         "an appended row was concatenated onto the fragment and lost with it")
@@ -560,7 +561,7 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
     agent = D.recording(D.committing("torn-tail"))
     assert J.mod("learning.author.drain").run_batch(
         cfg=D.cfg_for(paths, "findings", invoke_agent=agent)) == 0
-    assert D.stuck_records(channel) == [], (
+    assert D.stuck_records(paths, channel) == [], (
         "a torn trailing row stuck-recorded the batch; P6's blast radius is every direction "
         "riding in that tick, which is the whole reason the reader must skip it")
     authored = {r["finding_id"] for call in agent.calls for r in call["rows"]}

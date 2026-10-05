@@ -59,7 +59,7 @@ from defender.learning.core.config import (
 )
 from defender._tree_listing import entry_kind
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
-from defender.learning.core.state import FINDINGS
+from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
 from defender.tests._by_path import import_lint_lib
 from defender.tests._state1135 import state_for_paths
 from defender.tests._curator1134 import (
@@ -290,7 +290,7 @@ def test_cfg_tree_for_maps_both_corpora_to_their_own_mounts_and_nothing_else(tmp
 def _held_queue(paths: LoopPaths) -> None:
     """One adversarial finding with no ground truth written: the pre-author gate holds it, so a
     tick serves it without spawning any agent."""
-    seed(paths.findings, [finding_row("f1", run_id="no-ground-truth")])
+    seed(paths, FINDINGS, [finding_row("f1", run_id="no-ground-truth")])
 
 
 def _trigger_args(paths: LoopPaths) -> tuple:
@@ -307,13 +307,13 @@ def test_the_trigger_requires_the_label_and_runs_the_batch_under_its_trees(tmp_p
 
     with pytest.raises(TypeError):
         drains._maybe_trigger_author(*_trigger_args(w.paths))
-    assert "held_reason" not in pending(w.paths.findings)[0]
+    assert "held_reason" not in pending(w.paths, FINDINGS)[0]
 
     drains._maybe_trigger_author(*_trigger_args(w.paths), label=AUTHOR_DRAIN_LABEL)
 
-    [row] = pending(w.paths.findings)
+    [row] = pending(w.paths, FINDINGS)
     assert "held_reason" in row, row
-    assert stuck_records(w.paths.findings) == []
+    assert stuck_records(w.paths, FINDINGS) == []
 
 
 def test_the_trigger_opens_the_trees_of_the_label_it_is_handed_and_no_other(tmp_path, monkeypatch):
@@ -333,18 +333,18 @@ def test_the_trigger_opens_the_trees_of_the_label_it_is_handed_and_no_other(tmp_
 
     with pytest.raises(FatalConfigError):
         drains._maybe_trigger_author(*_trigger_args(w.paths), label=LEAD_AUTHOR_DRAIN_LABEL)
-    assert "held_reason" not in pending(w.paths.findings)[0]
+    assert "held_reason" not in pending(w.paths, FINDINGS)[0]
     for non_member in UNKNOWN_LABELS:
         with pytest.raises(AttributeError):
             drains._maybe_trigger_author(*_trigger_args(w.paths), label=non_member)
-        assert "held_reason" not in pending(w.paths.findings)[0]
+        assert "held_reason" not in pending(w.paths, FINDINGS)[0]
         assert descriptors_under(w.repo) == []
 
     drains._maybe_trigger_author(*_trigger_args(w.paths), label=AUTHOR_DRAIN_LABEL)
 
-    [row] = pending(w.paths.findings)
+    [row] = pending(w.paths, FINDINGS)
     assert "held_reason" in row, row
-    assert stuck_records(w.paths.findings) == []
+    assert stuck_records(w.paths, FINDINGS) == []
 
 
 def _drive_author_drain(paths: LoopPaths, repo: Path) -> int:
@@ -372,10 +372,10 @@ def test_author_drains_real_default_seam_carries_the_label_to_the_open(tmp_path,
     rc = _drive_author_drain(w.paths, w.repo)
 
     assert rc == 0
-    [row] = pending(w.paths.findings)
+    [row] = pending(w.paths, FINDINGS)
     assert "held_reason" in row, row
-    assert stuck_records(w.paths.findings) == []
-    assert stuck_records(w.paths.questioner_findings) == []
+    assert stuck_records(w.paths, FINDINGS) == []
+    assert stuck_records(w.paths, QUESTIONER_FINDINGS) == []
     assert descriptors_under(w.repo) == []
 
 
@@ -395,18 +395,18 @@ def test_a_missing_corpus_mount_is_a_hold_fault_each_curator_records_stuck(tmp_p
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     assert not paths.lessons_questioner_dir.exists()
     _held_queue(paths)
-    seed(paths.questioner_findings, [{"schema_version": 1, "finding_id": "w1",
+    seed(paths, QUESTIONER_FINDINGS, [{"schema_version": 1, "finding_id": "w1",
                                       "subject": "world", "type": "lead-set",
                                       "finding": "a world finding"}])
 
     rc = _drive_author_drain(paths, repo)
 
     assert rc == 0
-    assert [r["fault_class"] for r in stuck_records(paths.findings)] == ["FileNotFoundError"]
-    assert [r["fault_class"] for r in stuck_records(paths.questioner_findings)] == [
+    assert [r["fault_class"] for r in stuck_records(paths, FINDINGS)] == ["FileNotFoundError"]
+    assert [r["fault_class"] for r in stuck_records(paths, QUESTIONER_FINDINGS)] == [
         "FileNotFoundError"]
     assert not os.path.lexists(paths.lessons_questioner_dir), "a missing mount point was made"
-    [row] = pending(paths.findings)
+    [row] = pending(paths, FINDINGS)
     assert "held_reason" not in row, row
     assert row.get("attempts") is None, row
     assert descriptors_under(repo) == []
@@ -424,7 +424,7 @@ def test_a_hold_fault_at_the_open_propagates_out_of_the_seam(tmp_path, monkeypat
     with pytest.raises(FileNotFoundError):
         drains._maybe_trigger_author(*_trigger_args(paths), label=AUTHOR_DRAIN_LABEL)
 
-    assert "held_reason" not in pending(paths.findings)[0]
+    assert "held_reason" not in pending(paths, FINDINGS)[0]
     assert not os.path.lexists(paths.lessons_questioner_dir)
     assert descriptors_under(repo) == []
 
@@ -498,7 +498,7 @@ def test_the_trigger_holds_the_labels_mounts_only_while_the_batch_runs(
     assert all(held == _held_roots(paths) for held in seen), (seen, _held_roots(paths))
     assert len(_held_roots(paths)) == (3 if extra else 2)
     assert descriptors_under(w.repo) == [], "a held root outlived the seam"
-    assert "held_reason" in pending(paths.findings)[0]
+    assert "held_reason" in pending(paths, FINDINGS)[0]
     bad = [r.getMessage() for r in caplog.records if "Bad file descriptor" in r.getMessage()]
     assert bad == [], bad
 
@@ -556,7 +556,7 @@ def test_below_the_threshold_nothing_is_held(tmp_path, monkeypatch):
 
     assert asked == []
     assert seen == []
-    assert "held_reason" not in pending(paths.findings)[0]
+    assert "held_reason" not in pending(paths, FINDINGS)[0]
     assert descriptors_under(w.repo) == []
 
 

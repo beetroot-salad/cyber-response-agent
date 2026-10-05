@@ -19,10 +19,9 @@ from pathlib import Path
 
 import pytest
 
-from defender.learning.core.state import QUESTIONER_FINDINGS
+from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS, LearningState
 from defender.tests import _world_1007 as W
 from defender.tests._curator1134 import author_trees
-from defender.learning.core.state import LearningState
 
 
 #: A pointer the FAMILY-level call is actually shown. Its default evidence is
@@ -125,9 +124,9 @@ def test_world_row_refused_at_the_defender_appender(tmp_path):
     with pytest.raises(W.refusals()):
         enqueue.append_rows(tmp_path, [world_row()], state=W.learning_state(paths))
 
-    assert W.queue_rows(paths.findings) == [], "the refused world row still landed"
+    assert W.queue_rows(paths, FINDINGS) == [], "the refused world row still landed"
     enqueue.append_world_rows(tmp_path, [world_row()], state=W.learning_state(paths))
-    assert [r["subject"] for r in W.queue_rows(W.questioner_channel(paths))] == [W.SUBJECT_WORLD]
+    assert [r["subject"] for r in W.queue_rows(paths, QUESTIONER_FINDINGS)] == [W.SUBJECT_WORLD]
 
 
 def test_defender_row_still_reaches_the_findings_channel(tmp_path):
@@ -146,7 +145,7 @@ def test_defender_row_still_reaches_the_findings_channel(tmp_path):
     appended = enqueue.append_rows(tmp_path, [queue_row()], state=W.learning_state(paths))
 
     assert appended == 1
-    landed = W.queue_rows(paths.findings)
+    landed = W.queue_rows(paths, FINDINGS)
     assert [r["finding_id"] for r in landed] == [f"{W.EPISODE_ID}/b/0/0"]
     assert landed[0]["type"] == "lead-set"
 
@@ -177,7 +176,7 @@ def test_a_defender_row_with_direction_world_is_refused_at_the_appender_too(tmp_
         enqueue.append_rows(
             tmp_path, [queue_row(direction=W.SUBJECT_WORLD)], state=W.learning_state(paths))
 
-    assert W.queue_rows(paths.findings) == [], "the disagreeing row still landed"
+    assert W.queue_rows(paths, FINDINGS) == [], "the disagreeing row still landed"
 
 
 def test_a_world_row_type_is_not_gated_against_the_defender_vocabulary(tmp_path):
@@ -201,7 +200,7 @@ def test_a_world_row_type_is_not_gated_against_the_defender_vocabulary(tmp_path)
 
     enqueue.append_world_rows(tmp_path, [world_row(type=novel)], state=W.learning_state(paths))
 
-    assert [r["type"] for r in W.queue_rows(W.questioner_channel(paths))] == [novel]
+    assert [r["type"] for r in W.queue_rows(paths, QUESTIONER_FINDINGS)] == [novel]
     with pytest.raises(W.refusals()):
         enqueue.append_rows(tmp_path, [queue_row(type=novel)], state=W.learning_state(paths))
 
@@ -313,7 +312,7 @@ def test_a_defender_family_row_is_gated_exactly_as_today(tmp_path):
     paths = W.loop_paths(tmp_path)
 
     assert enqueue.append_rows(tmp_path, [queue_row()], state=W.learning_state(paths)) == 1
-    landed = W.queue_rows(paths.findings)[0]
+    landed = W.queue_rows(paths, FINDINGS)[0]
     to_author, held, consumed = author._gate_findings(
         [landed], author.build_author_config(paths, trees=author_trees(paths), state=LearningState.open(paths)))
 
@@ -331,27 +330,25 @@ def test_the_questioner_channel_declares_its_own_append_lock_and_shares_the_drai
     """The questioner channel gets its OWN append lock and consumed file, and SHARES the drain
     lock with the findings channel.
 
-    Observably true: `paths.questioner_findings` is a `QueueChannel` whose `file`, `consumed`
-    and `append_lock` are distinct from the findings channel's, and whose `drain_lock` is the
-    byte-identical path. Sharing the drain lock is what keeps two curators from holding one
-    worktree at once; a per-channel drain lock would give that up for nothing, and — because
-    `LoopPaths.findings` hardcodes a DIRECTORY-level `.lock` name — a channel that "declares its
-    own" at the same pending dir resolves to the same file anyway.
+    Observably true: `QUESTIONER_FINDINGS`'s `queue`, `consumed` and `append_lock` are distinct
+    from the findings channel's, and its drain role is the findings channel's, so its lock file
+    is the byte-identical path. Sharing the drain lock is what keeps two curators from holding
+    one worktree at once; a per-channel drain lock would give that up for nothing.
 
     What failure looks like: a second channel whose drain lock is genuinely separate. Two
     curators then enter one worktree concurrently and the batch's commit races itself.
     """
     paths = W.loop_paths(tmp_path)
-    findings, questioner = paths.findings, W.questioner_channel(paths)
+    root, findings, questioner = paths.state_root, FINDINGS, QUESTIONER_FINDINGS
 
-    assert questioner.file.name == W.QUESTIONER_QUEUE_FILENAME
-    assert questioner.file != findings.file
-    assert questioner.consumed != findings.consumed
-    assert questioner.append_lock != findings.append_lock, (
+    assert (root / questioner.queue).name == W.QUESTIONER_QUEUE_FILENAME
+    assert root / questioner.queue != root / findings.queue
+    assert root / questioner.consumed != root / findings.consumed
+    assert root / questioner.append_lock != root / findings.append_lock, (
         "the two channels share an append lock, so an appender on one blocks the other")
-    assert questioner.drain_lock == findings.drain_lock, (
-        f"the questioner channel's drain lock is {questioner.drain_lock} — a separate lock "
-        "gives up the mutual exclusion that keeps two curators out of one worktree")
+    assert root / questioner.drain_role.file == root / findings.drain_role.file, (
+        f"the questioner channel's drain lock is {root / questioner.drain_role.file} — a separate "
+        "lock gives up the mutual exclusion that keeps two curators out of one worktree")
     assert questioner.id_key == "finding_id"
 
 
@@ -372,7 +369,7 @@ def test_a_world_queue_row_is_a_full_finding_row_plus_four_fields(tmp_path):
 
     enqueue.append_world_rows(tmp_path, [world_row()], state=W.learning_state(paths))
 
-    landed = W.queue_rows(W.questioner_channel(paths))[0]
+    landed = W.queue_rows(paths, QUESTIONER_FINDINGS)[0]
     for key in queue_row():
         assert key in landed, f"the world row is missing the finding-row key {key!r}"
     assert landed["direction"] == W.SUBJECT_WORLD
@@ -396,7 +393,7 @@ def test_two_appends_of_one_finding_id_land_once(tmp_path):
     enqueue.append_world_rows(tmp_path, [world_row()], state=W.learning_state(paths))
     enqueue.append_world_rows(tmp_path, [world_row()], state=W.learning_state(paths))
 
-    rows = W.queue_rows(W.questioner_channel(paths))
+    rows = W.queue_rows(paths, QUESTIONER_FINDINGS)
     assert [r["finding_id"] for r in rows] == [f"{W.EPISODE_ID}/b/0/0"], (
         f"one finding id landed twice: {rows}")
 
@@ -468,8 +465,8 @@ def test_a_world_bucket_spelled_like_a_defender_bucket_is_admitted_and_read_by_s
     enqueue.append_world_rows(tmp_path, [world_row(type="lead-set")],
                               state=W.learning_state(paths))
     enqueue.append_rows(tmp_path, [queue_row(type="lead-set")], state=W.learning_state(paths))
-    assert len(W.queue_rows(W.questioner_channel(paths))) == 1
-    assert len(W.queue_rows(paths.findings)) == 1
+    assert len(W.queue_rows(paths, QUESTIONER_FINDINGS)) == 1
+    assert len(W.queue_rows(paths, FINDINGS)) == 1
 
 
 def test_a_near_miss_subject_is_refused_with_no_case_fold_and_no_trim(tmp_path):
@@ -494,7 +491,7 @@ def test_a_near_miss_subject_is_refused_with_no_case_fold_and_no_trim(tmp_path):
         with pytest.raises(W.refusals()):
             enqueue.append_world_rows(tmp_path, [world_row(subject=near)],
                                       state=W.learning_state(paths))
-    assert W.queue_rows(W.questioner_channel(paths)) == []
+    assert W.queue_rows(paths, QUESTIONER_FINDINGS) == []
 
 
 # ---------------------------------------------------------------------------------------
@@ -518,7 +515,7 @@ def test_a_defender_queue_row_carries_its_subject_key(tmp_path):
 
     enqueue.append_rows(tmp_path, [queue_row()], state=W.learning_state(paths))
 
-    assert W.queue_rows(paths.findings)[0]["subject"] == W.SUBJECT_DEFENDER
+    assert W.queue_rows(paths, FINDINGS)[0]["subject"] == W.SUBJECT_DEFENDER
     # REQUIRED, not merely carried: a row that reached the appender without one would
     # otherwise land and read as a defender row by default, which is the inference this key
     # exists to remove. Without this half the assertion above passes on an appender that
@@ -527,7 +524,7 @@ def test_a_defender_queue_row_carries_its_subject_key(tmp_path):
     bare.pop("subject")
     with pytest.raises(W.refusals()):
         enqueue.append_rows(tmp_path, [bare], state=W.learning_state(paths))
-    assert len(W.queue_rows(paths.findings)) == 1, "the subject-less row landed anyway"
+    assert len(W.queue_rows(paths, FINDINGS)) == 1, "the subject-less row landed anyway"
 
 
 def test_a_defender_subject_row_cannot_reach_the_questioner_curator(tmp_path):
@@ -549,7 +546,7 @@ def test_a_defender_subject_row_cannot_reach_the_questioner_curator(tmp_path):
     with pytest.raises(W.refusals()):
         enqueue.append_world_rows(tmp_path, [queue_row()], state=W.learning_state(paths))
 
-    assert W.queue_rows(W.questioner_channel(paths)) == []
+    assert W.queue_rows(paths, QUESTIONER_FINDINGS) == []
 
 
 def test_a_model_supplied_world_is_ignored_and_the_draws_own_directory_wins(
@@ -572,7 +569,7 @@ def test_a_model_supplied_world_is_ignored_and_the_draws_own_directory_wins(
     judge_mod.grade_episode(ep, judge=judge, state=W.learning_state(paths),
                             runs_base=ep.parent / "runs-base")
 
-    rows = [r for r in W.queue_rows(W.questioner_channel(paths)) if r["provenance"] == "model"]
+    rows = [r for r in W.queue_rows(paths, QUESTIONER_FINDINGS) if r["provenance"] == "model"]
     assert {r["world"] for r in rows} == {"b", "c"}, (
         f"the model's own `world` value reached the row: {[r['world'] for r in rows]}")
     for row in rows:
@@ -603,7 +600,7 @@ def test_every_family_level_finding_carries_a_null_world(tmp_path, monkeypatch):
     judge_mod.grade_episode(ep, judge=judge, state=W.learning_state(paths),
                             runs_base=ep.parent / "runs-base")
 
-    family_rows = [r for r in W.queue_rows(W.questioner_channel(paths))
+    family_rows = [r for r in W.queue_rows(paths, QUESTIONER_FINDINGS)
                    if "family" in r["finding_id"]]
     assert family_rows, "the family draw enqueued nothing at all"
     for row in family_rows:
@@ -636,7 +633,7 @@ def test_a_family_findings_identity_is_minted_by_the_pass_not_by_the_model(
     judge_mod.grade_episode(ep, judge=judge, state=W.learning_state(paths),
                             runs_base=ep.parent / "runs-base")
 
-    ids = [r["finding_id"] for r in W.queue_rows(W.questioner_channel(paths))
+    ids = [r["finding_id"] for r in W.queue_rows(paths, QUESTIONER_FINDINGS)
            if "/family/" in r["finding_id"]]
     assert ids, "no family-keyed row was enqueued"
     for fid in ids:
@@ -699,9 +696,9 @@ def test_a_world_row_missing_pattern_holding_system_or_subject_is_refused_at_the
         row.pop(missing)
         with pytest.raises(W.refusals()):
             enqueue.append_world_rows(tmp_path, [row], state=W.learning_state(paths))
-    assert W.queue_rows(W.questioner_channel(paths)) == []
+    assert W.queue_rows(paths, QUESTIONER_FINDINGS) == []
     enqueue.append_world_rows(tmp_path, [world_row()], state=W.learning_state(paths))
-    assert len(W.queue_rows(W.questioner_channel(paths))) == 1
+    assert len(W.queue_rows(paths, QUESTIONER_FINDINGS)) == 1
 
 
 def test_a_re_grade_appends_no_second_mechanical_world_finding(tmp_path, monkeypatch):
@@ -735,7 +732,7 @@ def test_a_re_grade_appends_no_second_mechanical_world_finding(tmp_path, monkeyp
     judge_mod.grade_episode(ep, judge=W.FakeJudge(W.reply_document()),
                             state=W.learning_state(paths), runs_base=ep.parent / "runs-base")
 
-    mech = [r for r in W.queue_rows(W.questioner_channel(paths))
+    mech = [r for r in W.queue_rows(paths, QUESTIONER_FINDINGS)
             if r.get("provenance") == "mechanical"]
     assert len(mech) == 1, f"a re-grade minted a second mechanical row: {mech}"
 
@@ -763,9 +760,9 @@ def test_an_unqueueable_defender_finding_does_not_suppress_the_world_findings(
     judge_mod.grade_episode(ep, judge=judge, state=W.learning_state(paths),
                             runs_base=ep.parent / "runs-base")
 
-    assert [r for r in W.queue_rows(paths.findings)] == [], (
+    assert [r for r in W.queue_rows(paths, FINDINGS)] == [], (
         "a discard episode still enqueued a defender row")
-    assert [r["type"] for r in W.queue_rows(W.questioner_channel(paths))
+    assert [r["type"] for r in W.queue_rows(paths, QUESTIONER_FINDINGS)
             if r["provenance"] == "model"] == ["a-world-reading"], (
         "the discard outcome took the world findings with it")
 
@@ -795,11 +792,11 @@ def test_an_ungradable_world_enqueues_nothing_on_either_channel(tmp_path, monkey
     judge_mod.grade_episode(ep, judge=judge, state=W.learning_state(paths),
                             runs_base=ep.parent / "runs-base")
 
-    for channel in (paths.findings, W.questioner_channel(paths)):
-        rows = [r for r in W.queue_rows(channel) if r.get("world") == "c" or "/c/" in
+    for channel in (FINDINGS, QUESTIONER_FINDINGS):
+        rows = [r for r in W.queue_rows(paths, channel) if r.get("world") == "c" or "/c/" in
                 r.get("finding_id", "")]
-        assert rows == [], f"an ungradable world enqueued {rows} on {channel.file.name}"
-    assert any("/b/" in r["finding_id"] for r in W.queue_rows(paths.findings)), (
+        assert rows == [], f"an ungradable world enqueued {rows} on {channel.queue}"
+    assert any("/b/" in r["finding_id"] for r in W.queue_rows(paths, FINDINGS)), (
         "the control failed — the gradable sibling enqueued nothing either")
 
 
@@ -819,7 +816,7 @@ def test_a_questioner_queue_row_carries_no_defender_verdict_word(tmp_path):
 
     enqueue.append_world_rows(tmp_path, [world_row()], state=W.learning_state(paths))
 
-    landed = W.queue_rows(W.questioner_channel(paths))[0]
+    landed = W.queue_rows(paths, QUESTIONER_FINDINGS)[0]
     rendered = json.dumps(landed)
     for word in ("caught", "survived", "undecidable"):
         assert word not in rendered, (
@@ -844,8 +841,8 @@ def test_a_world_row_reusing_a_consumed_defender_finding_id_still_reaches_its_ow
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
     shared_id = f"{W.EPISODE_ID}/b/0/0"
-    paths.pending_dir.mkdir(parents=True, exist_ok=True)
-    paths.findings.consumed.write_text(
+    (paths.state_root / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
+    (paths.state_root / FINDINGS.consumed).write_text(
         json.dumps(queue_row(finding_id=shared_id,
                              consumed_category="consumed_idempotent")) + "\n",
         encoding="utf-8")
@@ -894,7 +891,7 @@ def test_two_episodes_appending_at_once_lose_no_questioner_row(tmp_path):
         t.join(timeout=20)
 
     assert errors == [], f"an appender raised under interleaving: {errors!r}"
-    landed = W.queue_rows(W.questioner_channel(paths))
+    landed = W.queue_rows(paths, QUESTIONER_FINDINGS)
     assert len(landed) == 24, f"{24 - len(landed)} rows were lost under interleaving"
 
 
@@ -912,15 +909,15 @@ def test_a_malformed_line_on_either_channel_is_skipped_and_counted_never_silentl
     """
     io_mod = W.mod("_io")
     paths = W.loop_paths(tmp_path)
-    paths.pending_dir.mkdir(parents=True, exist_ok=True)
-    channel = W.questioner_channel(paths)
-    channel.file.write_text(
+    (paths.state_root / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
+    channel = paths.state_root / QUESTIONER_FINDINGS.queue
+    channel.write_text(
         json.dumps(world_row()) + "\n{not json\n" + json.dumps(world_row(finding_id="x/2")) + "\n",
         encoding="utf-8")
     ledger = tmp_path / "served.jsonl"
     ledger.write_text(json.dumps(W.served_row()) + "\ntorn{\n", encoding="utf-8")
 
-    queue_rows, queue_bad = io_mod.read_jsonl_rows_report(channel.file)
+    queue_rows, queue_bad = io_mod.read_jsonl_rows_report(channel)
     ledger_rows, ledger_bad = io_mod.read_jsonl_rows_report(ledger)
 
     assert (len(queue_rows), queue_bad) == (2, 1), (

@@ -525,7 +525,7 @@ def test_curator_reports_no_commits_but_leaves_dirty_corpus_edits_773(tmp_path):
     assert "l1.md" not in sc.corpus_files()
     reported = " ".join(
         [r.get("deadletter_reason", "") for r in sc.graveyard()]
-        + [r.get("reason", "") for r in S.stuck_records(sc.channel)]
+        + [r.get("reason", "") for r in S.stuck_records(sc.paths, sc.channel)]
     )
     assert "reported no commits but left edits" in reported
 
@@ -557,7 +557,7 @@ def test_curator_reports_committed_but_leaves_the_corpus_clean_773(tmp_path):
     assert sc.category_of("f1") is None
     reported = " ".join(
         [r.get("deadletter_reason", "") for r in sc.graveyard()]
-        + [r.get("reason", "") for r in S.stuck_records(sc.channel)]
+        + [r.get("reason", "") for r in S.stuck_records(sc.paths, sc.channel)]
     )
     assert "reported committed" in reported and "unchanged" in reported  # noqa: PT018 — locked spec test (#773), suppressed not split
 
@@ -912,7 +912,7 @@ def test_stage_abort_from_inside_the_verdict_step_is_not_folded_into_the_retire_
     with pytest.raises(type(S.stage_abort())):
         sc.run()
     assert "attempts" not in sc.pending_by_id()["f1"]
-    assert [r["fault_class"] for r in S.stuck_records(sc.channel)] == ["StageAbort"]
+    assert [r["fault_class"] for r in S.stuck_records(sc.paths, sc.channel)] == ["StageAbort"]
 
 
 def test_stage_abort_and_fatal_config_error_propagate_out_of_the_per_pair_handler_773(

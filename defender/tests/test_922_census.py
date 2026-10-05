@@ -38,6 +38,7 @@ from defender.runtime.verb_dispositions import (
     load_dispositions,
 )
 from defender.tests._curator1134 import open_state
+from defender.learning.core.state import FINDINGS
 
 #: The names a table row may carry that are NOT roles, mapped to the role whose registered
 #: definition actually makes their calls. One entry since #999: the turn-zero correlation lead
@@ -315,7 +316,7 @@ def test_922_the_eval_harness_seeds_the_same_queue_file_the_drain_reads():
         (scenario / "findings.jsonl").write_text("", encoding="utf-8")
         harness.materialize(scenario, tmp)
 
-        expected = LoopPaths(repo_root=tmp).findings.file
+        expected = LoopPaths(repo_root=tmp).state_root / FINDINGS.queue
         assert expected.is_file(), (
             f"the eval harness materialized a tree whose findings queue is not at {expected} — "
             "the harness seeds a path the curator it then runs does not read")

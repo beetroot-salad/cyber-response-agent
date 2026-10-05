@@ -31,7 +31,8 @@ like.
     members an `except AuthorError` spelling would silently drop, reverting decision 1
     paths 3 and 4 — which is what the membership oracle exists to catch.
   - `BucketSpec(name, disposition, reason_field, formatter)` — D4's bucket as data.
-* `QueueChannel` gains `append_lock: Path`, `drain_lock: Path | None`, `id_key: str` (D1/D3).
+* a queue channel carries its append lock, its drain lock (or none) and its `id_key` (D1/D3) —
+  today `state.Channel`'s `append_lock`, `drain_role`, `id_key`.
 * `CorpusAuthorConfig` gains `max_attempts: int`, `gate`, `buckets`, `post_rotate` (D3/D4/D7,
   ceiling bound once at config build). `post_rotate` is D7's optional hook — lessons populates
   it with `write_held_report` and the other directions leave it unset — and it is also the ONLY
@@ -83,7 +84,9 @@ except ImportError as _missing_target:  # pragma: no cover — the pre-implement
 
 from defender.learning.author.lessons import run as lessons_run  # type: ignore[import-not-found]
 from defender import _flock as _lockfile  # type: ignore[import-not-found]
-from defender.learning.core.state import LearningState  # type: ignore[import-not-found]
+from defender.learning.core.state import (  # type: ignore[import-not-found]
+    FINDINGS, PITFALLS, QUESTIONER_FINDINGS, Channel, LearningState,
+)
 from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
 
 #: The channels one folded drain body serves. `pitfalls` is the other queue but is drained by
@@ -203,8 +206,9 @@ def make_paths(tmp_path: Path, *, state_dir: Path | None = None) -> LoopPaths:
     return paths
 
 
-def channel_of(paths: LoopPaths, name: str):
-    return getattr(paths, name)
+def channel_of(name: str) -> Channel:
+    """The state handle's channel called `name`."""
+    return {c.name: c for c in (FINDINGS, QUESTIONER_FINDINGS, PITFALLS)}[name]
 
 
 def cfg_for(paths: LoopPaths, name: str, **overrides):
@@ -280,9 +284,10 @@ def write_source_refs(paths: LoopPaths, run_id: str, disposition: str = "benign"
     )
 
 
-def seed(channel, rows: list[dict]) -> None:
-    channel.file.parent.mkdir(parents=True, exist_ok=True)
-    with channel.file.open("w") as fh:
+def seed(paths: LoopPaths, channel: Channel, rows: list[dict]) -> None:
+    queue = paths.state_root / channel.queue
+    queue.parent.mkdir(parents=True, exist_ok=True)
+    with queue.open("w") as fh:
         for row in rows:
             fh.write(json.dumps(row) + "\n")
 
@@ -293,28 +298,28 @@ def read_rows(path: Path) -> list[dict]:
     return [json.loads(ln) for ln in path.read_text().splitlines() if ln.strip()]
 
 
-def pending(channel) -> list[dict]:
-    return read_rows(channel.file)
+def pending(paths: LoopPaths, channel: Channel) -> list[dict]:
+    return read_rows(paths.state_root / channel.queue)
 
 
-def pending_by_id(channel) -> dict[str, dict]:
-    return {r[channel.id_key]: r for r in pending(channel) if channel.id_key in r}
+def pending_by_id(paths: LoopPaths, channel: Channel) -> dict[str, dict]:
+    return {r[channel.id_key]: r for r in pending(paths, channel) if channel.id_key in r}
 
 
-def graveyard(channel) -> list[dict]:
-    return read_rows(channel.file.with_suffix(".deadletter.jsonl"))
+def graveyard(paths: LoopPaths, channel: Channel) -> list[dict]:
+    return read_rows(paths.state_root / channel.deadletter)
 
 
-def stuck_records(channel) -> list[dict]:
-    return read_rows(channel.file.with_suffix(".stuck.jsonl"))
+def stuck_records(paths: LoopPaths, channel: Channel) -> list[dict]:
+    return read_rows(paths.state_root / channel.stuck)
 
 
-def consumed(channel) -> list[dict]:
-    return read_rows(channel.consumed)
+def consumed(paths: LoopPaths, channel: Channel) -> list[dict]:
+    return read_rows(paths.state_root / channel.consumed)
 
 
-def attempts_of(channel, rid: str) -> int | None:
-    row = pending_by_id(channel).get(rid)
+def attempts_of(paths: LoopPaths, channel: Channel, rid: str) -> int | None:
+    row = pending_by_id(paths, channel).get(rid)
     return None if row is None else row.get("attempts")
 
 

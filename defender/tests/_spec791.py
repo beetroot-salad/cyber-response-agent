@@ -435,7 +435,7 @@ def plant_alert(tmp_path: Path, *, name: str = "alert.json",
 
 
 def author_markers(paths) -> list[str]:
-    q = paths.author_queue_dir
+    q = paths.state_root / "author-queue"
     return sorted(p.name for p in q.glob("*.json")) if q.is_dir() else []
 
 

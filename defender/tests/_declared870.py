@@ -137,6 +137,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from defender.learning.core.state import PITFALLS
 from defender.learning.leads.lead_extraction import ExecutedLead
 from defender._query_rules import BASH_SHIM_QUERY_ID
 from defender.tests._declared869 import (  # noqa: F401 — re-exported substrate
@@ -346,11 +347,11 @@ def queue_ids(paths) -> list[str]:
 
 
 def consumed_by_id(paths) -> dict[str, dict]:
-    return {str(r["pitfall_id"]): r for r in read_rows(paths.pitfalls.consumed)}
+    return {str(r["pitfall_id"]): r for r in read_rows(paths.state_root / PITFALLS.consumed)}
 
 
 def graveyard_by_id(paths) -> dict[str, dict]:
     return {
         str(r["pitfall_id"]): r
-        for r in read_rows(paths.pitfalls.file.with_suffix(".deadletter.jsonl"))
+        for r in read_rows(paths.state_root / PITFALLS.deadletter)
     }

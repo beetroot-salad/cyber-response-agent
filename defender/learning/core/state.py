@@ -27,8 +27,8 @@ path-returning verb is `stage_dir`, the escape that hands the stage harness its 
 #1142 gives that harness its own handle.
 
 @owns the record names of the learning state tree — the folder and file names below are the one
-spelling of what lives where; `config.LoopPaths` spells the same names as paths for the tests'
-oracles.
+spelling of what lives where; the tests derive the paths they check from these constants
+(`paths.state_root / FINDINGS.queue`), so a rename here moves their oracles with it.
 """
 from __future__ import annotations
 
@@ -147,7 +147,8 @@ class Channel:
 
     `append_lock` excludes concurrent appenders (and the drain's read, rotate and retire
     windows); `drain_role` is the non-blocking one-drainer-per-channel gate, `None` for a channel
-    no drain holds exclusively (the pitfalls queue is drained inside the lead-author tick).
+    no drain holds exclusively (the pitfalls queue is drained inside the lead-author tick). Both
+    roles live on the channel since #719.
     `reads_on_append` is the judge channels' append (a dedup and torn-tail read under the lock);
     the pitfalls channel appends without reading."""
 

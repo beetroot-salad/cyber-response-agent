@@ -163,7 +163,7 @@ tests:
       - old: "assert sorted(trigger.modules) == ['author', 'questioner_curator'], f'author_drain triggered {trigger.modules} — it is still discovering its curators by iterating the direction table, so the retired observation channels are still drained'"
         new: same
       - old: "assert call['pending_file'] == paths.findings.file, f\"the findings trigger names {call['pending_file']}, not the findings queue\""
-        new: "assert call['pending_file'] == str(paths.findings.file), f\"the findings trigger names {call['pending_file']}, not the findings queue\""
+        new: "assert call['pending_file'] == str(paths.state_root / FINDINGS.queue), f\"the findings trigger names {call['pending_file']}, not the findings queue\""
       - old: "assert call['threshold_env'] == 'LEARNING_AUTHOR_THRESHOLD'"
         new: same
       - old: "assert call['pending_label'] == 'pending'"
@@ -973,7 +973,7 @@ tests:
       - old: "assert 'held_reason' in row, row"
         new: same
       - old: "assert stuck_records(paths.findings) == []"
-        new: "assert stuck_records(w.paths.findings) == []"
+        new: "assert stuck_records(w.paths, FINDINGS) == []"
       - old: "with pytest.raises(FatalConfigError)"
         new: same
   - file: "defender/tests/test_1134_curator_label.py"
@@ -1101,9 +1101,9 @@ tests:
       - old: "assert cfg.invoke_agent.calls == [], 'the tick reached the author; the fault under test is the one BEFORE the gate'"
         new: same
       - old: "assert list(graveyard.iterdir()) == [], 'nothing can have been graveyarded'"
-        new: "assert h.graveyard(ch) == [], 'nothing can have been graveyarded'"
+        new: "assert h.graveyard(paths, ch) == [], 'nothing can have been graveyarded'"
       - old: "assert h.pending(ch) == rows, 'the row must stay queued — `IsADirectoryError` retires nothing'"
-        new: "assert h.pending(ch) == rows, 'the row must stay queued — `OSError` retires nothing'"
+        new: "assert h.pending(paths, ch) == rows, 'the row must stay queued — `OSError` retires nothing'"
       - old: "assert len(records) == 1, 'a fault the drain cannot retire escaped the tick with no operator signal, because the guard covers the rotation and not the whole retirement'"
         new: same
       - old: "assert records[0]['fault_class'] == 'IsADirectoryError', f'the record does not name the fault class, or the guard names only the one class the sibling test injects: {records[0]}'"
@@ -2188,7 +2188,7 @@ tests:
       - old: "assert drain.run_batch(cfg=fault) == 2"
         new: same
       - old: "assert drain.graveyard_file(ch).is_file()"
-        new: "assert _graveyard_file(ch).is_file()"
+        new: "assert _graveyard_file(paths, ch).is_file()"
       - old: "assert not (paths.repo_root / 'defender' / 'learning' / '_pending').exists()"
         new: same
       - old: "assert state in p.parents, f'{name}: {p} is not under the state root'"
@@ -2204,7 +2204,7 @@ tests:
       - old: "assert drain.run_batch(cfg=fault) == 2"
         new: same
       - old: "assert drain.graveyard_file(ch).is_file()"
-        new: "assert _graveyard_file(ch).is_file()"
+        new: "assert _graveyard_file(paths, ch).is_file()"
       - old: "assert ch.drain_lock.exists()"
         new: same
       - old: "assert drain.run_batch(cfg=clean) == 0, 'the new state files aborted the next batch'"

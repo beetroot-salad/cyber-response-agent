@@ -148,7 +148,7 @@ def _drain_scene(tmp_path: Path, claims: int) -> LoopPaths:
     for i in range(claims):
         run_dir = tmp_path / f"run-{i}"
         (run_dir / "gather_raw").mkdir(parents=True)
-        write(paths.author_queue_dir / f"case-{i}.json",
+        write(paths.state_root / "author-queue" / f"case-{i}.json",
               json.dumps({"case_id": f"case-{i}", "run_dir": str(run_dir)}) + "\n")
     return paths
 
@@ -1154,7 +1154,7 @@ def test_the_drains_default_seams_hold_the_box_frozen_except_around_each_agent(
     s = _lead_scene(tmp_path)
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))
-    write(s.paths.author_queue_dir / "case-0.json",
+    write(s.paths.state_root / "author-queue" / "case-0.json",
           json.dumps({"case_id": "case-0", "run_dir": str(s.run_dir)}) + "\n")
     shim = DockerShim(tmp_path, monkeypatch)
 

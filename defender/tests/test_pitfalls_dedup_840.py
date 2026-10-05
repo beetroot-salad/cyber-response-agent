@@ -283,9 +283,9 @@ def test_an_empty_append_leaves_the_queue_untouched(paths):
     """The rewrite must not fire on a no-op append — a run with no agent-fixable failure is
     the common case, and it has no business rewriting another run's queue."""
     persist.append_pitfalls([_row("r:l-001:0")], state=_state1135.state_for_paths(paths))
-    before = paths.pitfalls.file.read_text(encoding="utf-8")
+    before = (paths.state_root / PITFALLS.queue).read_text(encoding="utf-8")
     assert persist.append_pitfalls([], state=_state1135.state_for_paths(paths)) == 0
-    assert paths.pitfalls.file.read_text(encoding="utf-8") == before
+    assert (paths.state_root / PITFALLS.queue).read_text(encoding="utf-8") == before
 
 
 # O3's repair — the threshold now counts distinct mistakes, so clearing it means the channel
@@ -442,5 +442,5 @@ def test_every_duplicate_row_behind_a_curated_record_rotates(paths, monkeypatch)
     assert len(calls[0][0]["failures"]) == 1, "the curator saw the duplicates"
     assert _pending(paths) == []
     consumed = [json.loads(ln) for ln in
-                paths.pitfalls.consumed.read_text(encoding="utf-8").splitlines()]
+                (paths.state_root / PITFALLS.consumed).read_text(encoding="utf-8").splitlines()]
     assert sorted(c["pitfall_id"] for c in consumed) == [f"r:l-003:{i}" for i in range(4)]

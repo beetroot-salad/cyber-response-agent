@@ -214,13 +214,13 @@ def test_lead_author_marker_drain_reraises_fatal_lift_threshold(tmp_path, monkey
     with pytest.raises(FatalConfigError):
         drains._drain_lead_author_markers(paths, state, _run_lead_author)
 
-    failed_dir = paths.author_queue_dir / "failed"
+    failed_dir = paths.state_root / "author-queue" / "failed"
     assert not (failed_dir / f"{run_dir.name}.json").exists()
     # #791: claim-and-serve is atomic (the marker moves into `inflight/` before it is
     # served, so a re-ask landing on the same path mid-serve is never destroyed) — a
     # systemic re-raise leaves it there, claimed but not quarantined, rather than at the
     # top-level path it started at.
-    assert (paths.author_queue_dir / "inflight" / f"{run_dir.name}.json").exists()
+    assert (paths.state_root / "author-queue" / "inflight" / f"{run_dir.name}.json").exists()
 
 
 def test_drain_pitfalls_reraises_fatal_config_error(tmp_path):
@@ -249,8 +249,8 @@ def test_lead_author_drain_unlinks_marker_on_success(tmp_path, monkeypatch):
 
     drains._drain_lead_author_markers(paths, state, lambda _p, _s, _rd, *, box=None, **_kw: None)
 
-    assert not (paths.author_queue_dir / f"{run_dir.name}.json").exists()
-    assert not (paths.author_queue_dir / "failed" / f"{run_dir.name}.json").exists()
+    assert not (paths.state_root / "author-queue" / f"{run_dir.name}.json").exists()
+    assert not (paths.state_root / "author-queue" / "failed" / f"{run_dir.name}.json").exists()
 
 
 def test_lead_author_drain_quarantines_a_plain_failure(tmp_path, monkeypatch):
@@ -268,8 +268,8 @@ def test_lead_author_drain_quarantines_a_plain_failure(tmp_path, monkeypatch):
 
     drains._drain_lead_author_markers(paths, state, _run_lead_author)
 
-    assert not (paths.author_queue_dir / f"{run_dir.name}.json").exists()
-    failed = paths.author_queue_dir / "failed" / f"{run_dir.name}.json"
+    assert not (paths.state_root / "author-queue" / f"{run_dir.name}.json").exists()
+    failed = paths.state_root / "author-queue" / "failed" / f"{run_dir.name}.json"
     assert failed.exists()
     assert "lead-author-error" in json.loads(failed.read_text())["failed"]
 
@@ -291,9 +291,9 @@ def test_lead_author_drain_requeues_a_transient_with_bumped_attempts(tmp_path, m
 
     drains._drain_lead_author_markers(paths, state, _run_lead_author)
 
-    marker = paths.author_queue_dir / f"{run_dir.name}.json"
+    marker = paths.state_root / "author-queue" / f"{run_dir.name}.json"
     assert marker.exists()
-    assert not (paths.author_queue_dir / "failed" / f"{run_dir.name}.json").exists()
+    assert not (paths.state_root / "author-queue" / "failed" / f"{run_dir.name}.json").exists()
     assert json.loads(marker.read_text())["attempts"] == 1
 
 
@@ -512,8 +512,8 @@ def test_run_stage_maps_giterror_to_exit_2():
 
 
 def _seed_queue(paths: LoopPaths, lines: list[str]) -> None:
-    paths.pending_file.parent.mkdir(parents=True, exist_ok=True)
-    paths.pending_file.write_text("".join(line + "\n" for line in lines), encoding="utf-8")
+    (paths.state_root / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
+    (paths.state_root / FINDINGS.queue).write_text("".join(line + "\n" for line in lines), encoding="utf-8")
 
 
 def _row(fid: str, **extra) -> str:

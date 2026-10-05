@@ -392,7 +392,7 @@ def test_pass_a_marker_consumed_by_the_pre_c_lead_author_drain(tmp_path, monkeyp
     S791.populate_run_dir(run_dir, disposition="benign")
     scrub_mod.scrub(run_dir)
     assert H.run_common().enqueue_curation(run_dir, run_dir / "alert.json") is True
-    body = json.loads(next(state.author_queue_dir.glob("*.json")).read_text(encoding="utf-8"))
+    body = json.loads(next((state.state_root / "author-queue").glob("*.json")).read_text(encoding="utf-8"))
     assert Path(body["run_dir"]) == run_dir.resolve()
 
     served: list[Path] = []

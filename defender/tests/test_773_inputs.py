@@ -457,7 +457,7 @@ def test_a_tick_whose_corpus_is_already_dirty_when_it_starts_773(tmp_path):
     assert sc.curator.calls == []
     reported = " ".join(
         [r.get("deadletter_reason", "") for r in sc.graveyard()]
-        + [r.get("reason", "") for r in S.stuck_records(sc.channel)]
+        + [r.get("reason", "") for r in S.stuck_records(sc.paths, sc.channel)]
     )
     assert "left-behind.md" in reported or "dirty" in reported.lower()
 

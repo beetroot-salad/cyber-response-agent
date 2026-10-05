@@ -88,7 +88,7 @@ def test_the_pending_delivery_record_writes_the_labels_value(tmp_path: Path, lab
 
     drains._record_pending_delivery(state_for_paths(paths), branch, "batch-7", label=label, reason="push failed")
 
-    [record] = sorted(paths.pending_delivery_dir.glob("*.json"))
+    [record] = sorted((paths.state_root / "_pending_delivery").glob("*.json"))
     doc = json.loads(record.read_text(encoding="utf-8"))
     assert doc["label"] == VALUES[label]
     assert type(doc["label"]) is str
@@ -322,7 +322,7 @@ def _retain(root: Path, branch: Any) -> Path:
     paths = B.loop_paths(root)
     drains._record_pending_delivery(state_for_paths(paths), branch, "retained-1", label=AUTHOR_DRAIN_LABEL,
                                     reason="push rejected")
-    [record] = sorted(paths.pending_delivery_dir.glob("*.json"))
+    [record] = sorted((paths.state_root / "_pending_delivery").glob("*.json"))
     return record
 
 
@@ -346,7 +346,7 @@ def test_each_lanes_batch_writes_its_own_label_into_both_records(tmp_path: Path,
     branch = _DeliveringBranch(root / "wt", events=rec.events, fail_push=True)
     assert B.drive_worktree_batch(root, rec, do_work=lambda *_a, **_k: None, branch=branch,
                                   label=label) == 0
-    [record] = sorted(B.loop_paths(root).pending_delivery_dir.glob("*.json"))
+    [record] = sorted((B.loop_paths(root).state_root / "_pending_delivery").glob("*.json"))
     assert json.loads(record.read_text(encoding="utf-8"))["label"] == VALUES[label]
 
     root = tmp_path / "taint"

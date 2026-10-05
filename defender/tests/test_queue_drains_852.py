@@ -31,7 +31,7 @@ import pytest
 import _drain719 as h
 from _drain719 import drain
 from defender.learning.core import drains
-from defender.learning.core.state import Claimed
+from defender.learning.core.state import LEAD_QUEUE_LOCK, Claimed
 from defender.learning.leads import lead_author
 from defender.tests._spec791 import (
     SpecBranch,
@@ -90,10 +90,10 @@ def test_852_f02_a_forward_bad_lesson_is_not_swept_into_a_mixed_batch_commit(tmp
     the corpus is restored (both files gone, nothing committed) -> the batch is bumped and
     stays queued for the next tick."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     for run_id in ("run-G", "run-B"):
         h.write_source_refs(paths, run_id)
-    h.seed(ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
+    h.seed(paths, ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
 
     def curate(rows, batch_id, cfg):
         _write_corpus_file(cfg.corpus_dir, "vouched", "source_finding_ids", ["run-G/0"])
@@ -116,9 +116,9 @@ def test_852_f02_a_forward_bad_lesson_is_not_swept_into_a_mixed_batch_commit(tmp
     assert not (cfg.corpus_dir / "vouched.md").exists(), \
         "the tick faulted but its batch-mate's edit was not restored away with it"
     assert _commits(paths.repo_root) == 1, "a commit landed on a faulted tick"
-    assert sorted(h.pending_by_id(ch)) == ["run-B/0", "run-G/0"], \
+    assert sorted(h.pending_by_id(paths, ch)) == ["run-B/0", "run-G/0"], \
         "the batch left the queue on a tick that committed nothing"
-    assert h.attempts_of(ch, "run-G/0") == 1
+    assert h.attempts_of(paths, ch, "run-G/0") == 1
 
 
 def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
@@ -138,10 +138,10 @@ def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
     `tests/test_773_gap_ledger.py`, against the drain-computed `consumed_forward_bad`/
     `deferred` groups."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     for run_id in ("run-G", "run-B"):
         h.write_source_refs(paths, run_id)
-    h.seed(ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
+    h.seed(paths, ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
 
     def curate(rows, batch_id, cfg):
         _write_corpus_file(cfg.corpus_dir, "vouched", "source_finding_ids", ["run-G/0"])
@@ -155,9 +155,9 @@ def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
     assert drain.run_batch(cfg=cfg) == 0
 
     assert _head_files(paths.repo_root) == ["defender/lessons/vouched.md"]
-    assert list(h.pending_by_id(ch)) == ["run-B/0"]
-    assert "attempts" not in h.pending_by_id(ch)["run-B/0"]
-    assert "held_reason" not in h.pending_by_id(ch)["run-B/0"], (
+    assert list(h.pending_by_id(paths, ch)) == ["run-B/0"]
+    assert "attempts" not in h.pending_by_id(paths, ch)["run-B/0"]
+    assert "held_reason" not in h.pending_by_id(paths, ch)["run-B/0"], (
         "a row this tick never mentioned was stamped with a hold reason it was never given"
     )
 
@@ -181,10 +181,10 @@ def test_852_f02_a_modified_file_that_claims_a_new_source_still_needs_a_voucher(
     for a reason that has nothing to do with attribution. Checked by deletion: with the gate
     call removed, this test fails."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     for run_id in ("run-G", "run-B"):
         h.write_source_refs(paths, run_id)
-    h.seed(ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
+    h.seed(paths, ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
 
     seeded = h.cfg_for(paths, "findings")
     old = _write_corpus_file(seeded.corpus_dir, "old-fact", "source_finding_ids", ["run-A/0"])
@@ -209,7 +209,7 @@ def test_852_f02_a_modified_file_that_claims_a_new_source_still_needs_a_voucher(
     assert drain.run_batch(cfg=cfg) == 2, "the rejected fold rode in on its batch-mate"
     assert _commits(paths.repo_root) == 2
     assert "run-B/0" not in old.read_text(encoding="utf-8"), "the rejected fold survived"
-    assert sorted(h.pending_by_id(ch)) == ["run-B/0", "run-G/0"]
+    assert sorted(h.pending_by_id(paths, ch)) == ["run-B/0", "run-G/0"]
 
 
 # F-03 — a skip is not a serve
@@ -263,10 +263,10 @@ def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path)
     _queued_run(tmp_path, "case-1", "run-1", paths)
     _queued_run(tmp_path, "case-2", "run-2", paths)
 
-    # The lock file is resolved off `paths` (#952 M5: `paths.lead_pending_dir / ".lock"`),
+    # The lock file is resolved off `paths` (#952 M5: `(paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"`),
     # so the drain and a by-hand `run(run_dir, paths=p)` contend on the SAME file for the
     # same `paths` — `lead_author.QUEUE_LOCK_FILE` is that path's DEFAULT_PATHS spelling.
-    queue_lock = paths.lead_pending_dir / ".lock"
+    queue_lock = (paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"
     queue_lock.parent.mkdir(parents=True, exist_ok=True)
     holder = queue_lock.open("a+")
     try:
@@ -279,12 +279,12 @@ def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path)
     assert rc == 0
     assert author_markers(paths) == ["case-1.json", "case-2.json"], \
         "a request nothing served was deleted from the queue"
-    assert list((paths.author_queue_dir / "inflight").glob("*.json")) == [], \
+    assert list((paths.state_root / "author-queue" / "inflight").glob("*.json")) == [], \
         "a claimed request was left stranded in inflight/ by a pass that served nothing"
-    assert not (paths.author_queue_dir / "failed").exists(), \
+    assert not (paths.state_root / "author-queue" / "failed").exists(), \
         "a skip was dead-lettered — it is not a failure of the request"
     for name in ("case-1.json", "case-2.json"):
-        assert "attempts" not in marker_body(paths.author_queue_dir / name), \
+        assert "attempts" not in marker_body(paths.state_root / "author-queue" / name), \
             "a skip spent one of the request's three retries"
     assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is True, \
         "the queue went quiet on work that is still queued"
@@ -302,10 +302,10 @@ def test_852_f03_the_skip_rc_is_distinct_from_a_completed_serve(tmp_path: Path):
     run_dir.mkdir(parents=True)
     paths = loop_paths(tmp_path)
 
-    # Held at the file `run(run_dir, paths=paths)` locks — `paths.lead_pending_dir / ".lock"`
+    # Held at the file `run(run_dir, paths=paths)` locks — `(paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"`
     # (#952 M5) — not at the DEFAULT_PATHS constant, which is a different file for a
     # `LoopPaths` rooted under `tmp_path`.
-    queue_lock = paths.lead_pending_dir / ".lock"
+    queue_lock = (paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"
     queue_lock.parent.mkdir(parents=True, exist_ok=True)
     holder = queue_lock.open("a+")
     try:
@@ -355,7 +355,7 @@ def test_852_f04_a_transient_retry_does_not_clobber_a_fresher_request(tmp_path: 
     _drain(paths, tmp_path, run_lead_author=serve)
 
     assert author_markers(paths) == ["case-A.json"]
-    body = marker_body(paths.author_queue_dir / "case-A.json")
+    body = marker_body(paths.state_root / "author-queue" / "case-A.json")
     assert Path(body["run_dir"]).resolve() == second.resolve(), (
         "the retry replaced the fresher curation request with the stale run dir — the case "
         "will be re-served off the run the operator already superseded"

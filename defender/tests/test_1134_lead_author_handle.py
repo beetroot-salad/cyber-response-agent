@@ -1141,7 +1141,7 @@ class PlantingBranch(SpecBranch):
 
 
 def _failed(paths: LoopPaths) -> list[dict]:
-    failed = paths.author_queue_dir / "failed"
+    failed = paths.state_root / "author-queue" / "failed"
     return [json.loads(p.read_text()) for p in sorted(failed.glob("*.json"))] \
         if failed.is_dir() else []
 

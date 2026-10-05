@@ -24,7 +24,7 @@ from defender.learning.leads import lead_author  # type: ignore[import-not-found
 from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
 from defender.tests._repo import query_template, seed_skills_repo
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
-from defender.learning.core.state import LEAD_QUEUE_LOCK, TRY_ONCE
+from defender.learning.core.state import LEAD_QUEUE_LOCK, PITFALLS, TRY_ONCE
 from defender.tests._lead_author_1134 import lane_tree_for, lead_deps, repo_skills, skills_view
 
 
@@ -1420,7 +1420,7 @@ def test_run_collects_general_failure_before_early_return(tmp_git_repo: Path, tm
     _write_query(run_dir, "l-001", 0, "elastic.esql", payload_status="error")
 
     assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
-    queue = deps.paths.pitfalls.file
+    queue = deps.paths.state_root / PITFALLS.queue
     rows = [json.loads(ln) for ln in queue.read_text().splitlines()]
     assert [r["query_id"] for r in rows] == ["elastic.esql"]
     assert rows[0]["error_class"] == "agent-fixable"

@@ -128,8 +128,8 @@ def test_921_every_surface_tests_membership_through_the_shipped_normalizer(tmp_p
 
     # 3. the gate's routing
     paths = D.make_paths(tmp_path / "gate")
-    channel = D.channel_of(paths, "findings")
-    D.seed(channel, [dict(row, finding_id="ep-1/b/0/1")])
+    channel = D.channel_of("findings")
+    D.seed(paths, channel, [dict(row, finding_id="ep-1/b/0/1")])
     agent = D.recording(D.committing("variant"))
     assert J.mod("learning.author.drain").run_batch(
         cfg=D.cfg_for(paths, "findings", invoke_agent=agent)) == 0

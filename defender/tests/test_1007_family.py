@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from defender.tests import _world_1007 as W
+from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
 from defender.tests._state1135 import env_state
 
 
@@ -121,7 +122,7 @@ def test_the_family_reply_admits_a_family_level_finding(tmp_path, monkeypatch):
 
     grade(ep, judge, state=W.learning_state(paths))
 
-    rows = [r for r in W.queue_rows(W.questioner_channel(paths))
+    rows = [r for r in W.queue_rows(paths, QUESTIONER_FINDINGS)
             if r["type"] == "undiscriminating-family"]
     assert rows, "the family finding reached no queue row"
     assert rows[0]["world"] is None, f"a family finding is stamped world={rows[0]['world']!r}"
@@ -198,7 +199,7 @@ def test_the_family_call_emits_no_defender_finding(tmp_path, monkeypatch):
     assert judge.family_prompts, (
         f"no family call was made at all, so the absence below proves nothing: "
         f"{judge.agent_ids}")
-    from_family = [r for r in W.queue_rows(paths.findings) if "/family/" in r["finding_id"]]
+    from_family = [r for r in W.queue_rows(paths, FINDINGS) if "/family/" in r["finding_id"]]
     assert from_family == [], (
         f"the family call produced defender queue rows: {from_family}")
 

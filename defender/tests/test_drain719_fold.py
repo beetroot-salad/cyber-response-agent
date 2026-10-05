@@ -210,7 +210,8 @@ def test_curator_no_longer_re_exports_the_shared_git_helpers(tmp_path: Path):
 
 def test_the_three_do_not_fold_comments_record_their_reversal(tmp_path: Path):
     """A4: D1 overturns three written in-code decisions the design never named — the
-    `findings_lock_file` docstring in `core/config.py`, the same text on `AuthorConfig` in
+    findings append-lock docstring in `core/config.py` (since #1135 the lock topology is
+    `state.Channel`'s, so `core/state.py` carries the record), the same text on `AuthorConfig` in
     `lessons/run.py`, and the "NOT unified here" note in `author/_config.py`. D1 is still
     right, but an implementer hitting "the code says don't" needs the authority written down,
     so the reversal has to be recorded where the prohibition was.
@@ -220,11 +221,16 @@ def test_the_three_do_not_fold_comments_record_their_reversal(tmp_path: Path):
     here, so deleting the tail and leaving the premise standing passed. Each site now bans every
     half it carries."""
     import defender.learning.core.config as core_config  # type: ignore[import-not-found]
+    import defender.learning.core.state as core_state  # type: ignore[import-not-found]
     import defender.learning.author._config as author_config  # type: ignore[import-not-found]
 
     sites = {
         "core/config.py": (
             Path(core_config.__file__),
+            ("do not fold this into the channel", "Two locks, two jobs"),
+        ),
+        "core/state.py": (
+            Path(core_state.__file__),
             ("do not fold this into the channel", "Two locks, two jobs"),
         ),
         "lessons/run.py": (Path(lessons_run.__file__), ("Two locks, two jobs",)),
@@ -234,7 +240,10 @@ def test_the_three_do_not_fold_comments_record_their_reversal(tmp_path: Path):
         text = path.read_text(encoding="utf-8")
         for prohibition in prohibitions:
             assert prohibition not in text, f"{label} still states: {prohibition!r}"
-        assert "#719" in text, f"{label} does not record what overturned it"
+        # `core/config.py` no longer holds the lock docstring (#1135 moved the topology to
+        # `core/state.py`, which records it), so only its bans still apply.
+        if label != "core/config.py":
+            assert "#719" in text, f"{label} does not record what overturned it"
 
 
 def test_surviving_baseline_reasons_no_longer_cite_the_curator_lessons_split(tmp_path: Path):

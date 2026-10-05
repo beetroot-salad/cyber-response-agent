@@ -32,6 +32,7 @@ from pathlib import Path
 from defender.tests._stage_args import as_curator_stage_args  # noqa: E402
 from defender._io import read_jsonl_rows
 from defender.tests._repo import head_message, seed_repo
+from defender.learning.core.state import FINDINGS
 
 
 
@@ -96,11 +97,11 @@ def test_survival_partial_write_rollback(tmp_repo, helpers):
     actually happens."""
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-P", "benign")
-    helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-P/0", run_id="run-P")
+    helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-P/0", run_id="run-P")
     commits_before = _commit_count(tmp_repo)
 
     def queued_ids() -> set[str]:
-        return {r["finding_id"] for r in read_jsonl_rows(tmp_repo.paths.pending_file)}
+        return {r["finding_id"] for r in read_jsonl_rows(tmp_repo.paths.state_root / FINDINGS.queue)}
 
     def partial_then_raise(findings, batch_id, cfg):
         _write_lesson(tmp_repo, "half", "run-P/0")
@@ -109,7 +110,7 @@ def test_survival_partial_write_rollback(tmp_repo, helpers):
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=partial_then_raise)) == 2
     assert _commit_count(tmp_repo) == commits_before
     assert queued_ids() == {"run-P/0"}
-    assert not tmp_repo.paths.findings.consumed.exists()
+    assert not (tmp_repo.paths.state_root / FINDINGS.consumed).exists()
 
     assert tmp_repo.run_git("status", "--porcelain").stdout.strip() == "", (
         "the half-written lesson must be rolled back by the drain itself (#719)"
@@ -123,7 +124,7 @@ def test_survival_partial_write_rollback(tmp_repo, helpers):
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=succeed)) == 0
     assert _commit_count(tmp_repo) == commits_before + 1
     assert _head_files(tmp_repo) == ["defender/lessons/full.md"]
-    assert tmp_repo.paths.pending_file.read_text().strip() == ""
+    assert (tmp_repo.paths.state_root / FINDINGS.queue).read_text().strip() == ""
 
 
 
@@ -135,17 +136,17 @@ def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
     the CONSISTENT state (committed=[id] + dirty corpus) commits and rotates out."""
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-X", "benign")
-    helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-X/0", run_id="run-X")
-    pre = _rows_without_attempts(tmp_repo.paths.pending_file.read_text())
+    helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-X/0", run_id="run-X")
+    pre = _rows_without_attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text())
 
     def committed_but_clean(findings, batch_id, cfg):
         return {"committed": ["run-X/0"], "held_forward_bad": [],
                 "consumed_skip": [], "commit_message": "m"}
 
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=committed_but_clean)) == 2
-    assert _rows_without_attempts(tmp_repo.paths.pending_file.read_text()) == pre
-    assert _attempts(tmp_repo.paths.pending_file.read_text()) == [1] * len(pre)
-    assert not tmp_repo.paths.findings.consumed.exists()
+    assert _rows_without_attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text()) == pre
+    assert _attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text()) == [1] * len(pre)
+    assert not (tmp_repo.paths.state_root / FINDINGS.consumed).exists()
 
     def dirty_but_no_commit(findings, batch_id, cfg):
         (tmp_repo.paths.lessons_dir / "orphan.md").write_text("uncommitted\n")
@@ -154,11 +155,11 @@ def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
                 "commit_message": None}
 
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=dirty_but_no_commit)) == 2
-    assert _rows_without_attempts(tmp_repo.paths.pending_file.read_text()) == pre
+    assert _rows_without_attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text()) == pre
     # Second abort in the same test, so the lifetime count is at 2 — it does not reset
     # between ticks (#719).
-    assert _attempts(tmp_repo.paths.pending_file.read_text()) == [2] * len(pre)
-    assert not tmp_repo.paths.findings.consumed.exists()
+    assert _attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text()) == [2] * len(pre)
+    assert not (tmp_repo.paths.state_root / FINDINGS.consumed).exists()
 
     tmp_repo.run_git("reset", "--hard", "--quiet")
     tmp_repo.run_git("clean", "-fdq")
@@ -170,7 +171,7 @@ def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
 
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=consistent)) == 0
     assert _head_files(tmp_repo) == ["defender/lessons/ok.md"]
-    assert tmp_repo.paths.pending_file.read_text().strip() == ""
+    assert (tmp_repo.paths.state_root / FINDINGS.queue).read_text().strip() == ""
 
 
 
@@ -182,8 +183,8 @@ def test_survival_scope_gate_strays(tmp_repo, helpers):
     commits the lesson (pathspec-scoped — the stray does not ride into the commit)."""
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-S", "benign")
-    helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-S/0", run_id="run-S")
-    pre = _rows_without_attempts(tmp_repo.paths.pending_file.read_text())
+    helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-S/0", run_id="run-S")
+    pre = _rows_without_attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text())
 
     def writes_new_stray(findings, batch_id, cfg):
         (tmp_repo.root / "scratch.txt").write_text("oops")
@@ -192,8 +193,8 @@ def test_survival_scope_gate_strays(tmp_repo, helpers):
                 "consumed_skip": [], "commit_message": "defender: lesson in-scope"}
 
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=writes_new_stray)) == 2
-    assert _rows_without_attempts(tmp_repo.paths.pending_file.read_text()) == pre
-    assert _attempts(tmp_repo.paths.pending_file.read_text()) == [1] * len(pre)
+    assert _rows_without_attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text()) == pre
+    assert _attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text()) == [1] * len(pre)
 
     tmp_repo.run_git("reset", "--hard", "--quiet")
     tmp_repo.run_git("clean", "-fdq")
@@ -209,7 +210,7 @@ def test_survival_scope_gate_strays(tmp_repo, helpers):
     head_files = _head_files(tmp_repo)
     assert head_files == ["defender/lessons/in-scope.md"]
     assert "sibling_draft.md" not in head_files
-    assert tmp_repo.paths.pending_file.read_text().strip() == ""
+    assert (tmp_repo.paths.state_root / FINDINGS.queue).read_text().strip() == ""
 
 
 
@@ -221,7 +222,7 @@ def test_survival_idempotent_redrain(tmp_repo, helpers):
     control: tick 1 authored + committed the lesson exactly once."""
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-I", "benign")
-    helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-I/0", run_id="run-I")
+    helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-I/0", run_id="run-I")
     commits_before = _commit_count(tmp_repo)
 
     def author_and_commit(findings, batch_id, cfg):
@@ -232,15 +233,15 @@ def test_survival_idempotent_redrain(tmp_repo, helpers):
     assert a.run_batch(hold_committed=True, cfg=replace(tmp_repo.cfg, invoke_agent=author_and_commit)) == 0
     assert _commit_count(tmp_repo) == commits_before + 1
     head_after_tick1 = tmp_repo.run_git("rev-parse", "HEAD").stdout.strip()
-    assert "run-I/0" in tmp_repo.paths.pending_file.read_text()
+    assert "run-I/0" in (tmp_repo.paths.state_root / FINDINGS.queue).read_text()
 
     def must_not_author(findings, batch_id, cfg):
         raise AssertionError("re-authored an already-committed finding")
 
     assert a.run_batch(hold_committed=True, cfg=replace(tmp_repo.cfg, invoke_agent=must_not_author)) == 0
     assert tmp_repo.run_git("rev-parse", "HEAD").stdout.strip() == head_after_tick1
-    assert tmp_repo.paths.pending_file.read_text().strip() == ""
-    consumed = tmp_repo.paths.findings.consumed.read_text()
+    assert (tmp_repo.paths.state_root / FINDINGS.queue).read_text().strip() == ""
+    consumed = (tmp_repo.paths.state_root / FINDINGS.consumed).read_text()
     assert "run-I/0" in consumed
     assert "consumed_idempotent" in consumed
 
@@ -255,7 +256,7 @@ def test_survival_agent_no_git(tmp_repo, helpers):
     the agent committed nothing."""
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-G", "benign")
-    helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-G/0", run_id="run-G")
+    helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-G/0", run_id="run-G")
     commits_before = _commit_count(tmp_repo)
 
     def writes_lesson_no_git(findings, batch_id, cfg):
@@ -266,7 +267,7 @@ def test_survival_agent_no_git(tmp_repo, helpers):
     assert a.run_batch(cfg=replace(tmp_repo.cfg, invoke_agent=writes_lesson_no_git)) == 0
     assert _commit_count(tmp_repo) == commits_before + 1
     assert _head_files(tmp_repo) == ["defender/lessons/noGit.md"]
-    assert tmp_repo.paths.pending_file.read_text().strip() == ""
+    assert (tmp_repo.paths.state_root / FINDINGS.queue).read_text().strip() == ""
 
 
 

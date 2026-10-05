@@ -35,7 +35,8 @@ COINED NAMES LIVE HERE AND NOWHERE ELSE. The design does not spell these, so thi
 if write-code-from-spec names anything differently it renames it HERE (`COINED`), never
 through a `conceptAliases` entry:
   * the channels, as module-level `Channel` values: `FINDINGS`, `QUESTIONER_FINDINGS`,
-    `PITFALLS` (the three `QueueChannel`s `LoopPaths` spells today);
+    `PITFALLS` (the three queues: `_pending/findings.jsonl`, `_pending/questioner_findings.jsonl`,
+    `_pending_pitfalls/pitfalls.jsonl`);
   * the lock roles, as module-level values: `REPO_LOCK` (`_author.lock`, a deadline role),
     `AUTHOR_DRAIN_LOCK` (`.author-drain.lock`, try-once), `LEAD_AUTHOR_DRAIN_LOCK`
     (`.lead-author-drain.lock`, try-once), `LEAD_QUEUE_LOCK` (`_pending_leads/.lock`),
@@ -340,7 +341,7 @@ def seed_request(paths: LoopPaths, case_id: str, run_dir: Path, *, inflight: boo
                  **extra: Any) -> Path:
     """A plain request record at today's name, written by the fixture."""
     run_dir.mkdir(parents=True, exist_ok=True)
-    folder = paths.author_queue_dir / ("inflight" if inflight else "")
+    folder = paths.state_root / "author-queue" / ("inflight" if inflight else "")
     folder.mkdir(parents=True, exist_ok=True)
     rec = folder / f"{case_id}.json"
     rec.write_text(json.dumps(request_body(case_id, run_dir, **extra)) + "\n", encoding="utf-8")
