@@ -21,7 +21,9 @@ Tests -> obligations:
   lanes), `test_each_run_in_the_work_starts_the_drains_own_request_once_and_removes_it`,
   `test_the_batch_end_teardown_removes_a_box_a_run_left_before_the_scan` (a masked run fault:
   the batch delivers only once the box is gone), `test_a_batch_end_teardown_that_cannot_remove_the_box_blocks_the_scan_and_delivery`,
-  `test_a_batch_end_teardown_fault_under_a_failing_work_is_logged_and_the_work_fault_escapes`.
+  `test_a_batch_end_teardown_fault_under_a_failing_work_is_logged_and_the_work_fault_escapes`
+  (the work's own fault, or a `BoxFault`),
+  `test_the_batch_end_teardown_removes_the_box_under_an_escaping_box_fault`.
 - N12: `test_an_unboxed_batch_makes_no_docker_call_at_batch_end` (with its sandboxed control),
   `test_the_opt_out_fallback_makes_no_docker_call_after_its_last_run`.
 - E6 (-> O4): `test_a_box_fault_escaping_the_work_names_the_cut_commit_after_a_batch_commit`
@@ -247,24 +249,64 @@ def test_a_batch_end_teardown_that_cannot_remove_the_box_blocks_the_scan_and_del
     assert daemon.status(start.requests[0].name) == "running"
 
 
+#: What the work raises after its masked run: a fault of its own, or a `BoxFault` (a later
+#: run's start refusing, say). Either way the batch-end teardown still runs.
+WORK_FAULTS = [
+    pytest.param(lambda: RuntimeError("the lane failed after its run"), id="work-fault"),
+    pytest.param(lambda: BoxFault("a later run's box would not start"), id="box-fault"),
+]
+
+
+@pytest.mark.parametrize("make_crash", WORK_FAULTS)
 def test_a_batch_end_teardown_fault_under_a_failing_work_is_logged_and_the_work_fault_escapes(
-        tmp_path: Path, monkeypatch, caplog):
+        tmp_path: Path, monkeypatch, caplog, make_crash: Any):
     """The masked run, then the work fails; the batch-end removal is refused too: the work's own
-    fault escapes (the teardown's is logged, naming the box), nothing is scanned or delivered."""
+    fault escapes (a `BoxFault` with the cut commit added, E6), the teardown's is logged, naming
+    the box, so the teardown was tried, and nothing is scanned or delivered."""
     caplog.set_level(logging.WARNING)
     daemon = X.FakeDaemon(tmp_path)
     daemon.install(monkeypatch)
     events: list[str] = []
-    crash = RuntimeError("the lane failed after its run")
+    crash = make_crash()
     start = DaemonStart(daemon, events)
-    with pytest.raises(RuntimeError) as got:
-        _drive(tmp_path, do_work=_masking_work(events, daemon, refusals=-1, then_raise=crash),
-               start_box=start, stop_box=box_mod.stop_box, events=events)
-    assert got.value is crash
+    got = X.caught(lambda: _drive(
+        tmp_path, do_work=_masking_work(events, daemon, refusals=-1, then_raise=crash),
+        start_box=start, stop_box=box_mod.stop_box, events=events))
+    assert X.carries(got, crash), (got, X.chain(got))
+    assert isinstance(got, type(crash)), got
     assert not any(e.startswith(("scrub:", "finish_batch:")) for e in events), events
     name = start.requests[0].name
     assert any(r.levelno >= logging.ERROR and name in r.getMessage() for r in caplog.records), (
         "the batch-end teardown fault left no trace under the work's own failure")
+
+
+def test_the_batch_end_teardown_removes_the_box_under_an_escaping_box_fault(
+        tmp_path: Path, monkeypatch):
+    """The masked run leaves its box running, then a `BoxFault` escapes the work. The batch-end
+    teardown still runs under it: it asks the status and removes the box, so none outlives the
+    batch, and the tree is scanned, if at all, only once it is gone. The `BoxFault` escapes the
+    drain (with the cut commit added) and nothing is delivered. Control:
+    `test_the_batch_end_teardown_removes_a_box_a_run_left_before_the_scan` (no fault)."""
+    daemon = X.FakeDaemon(tmp_path)
+    daemon.install(monkeypatch)
+    events: list[str] = []
+    crash = BoxFault("a later run's box would not start")
+    start = DaemonStart(daemon, events)
+    watch = X.ScanWatch(daemon, events)
+    got = X.caught(lambda: drains._run_worktree_batch(
+        loop_paths(tmp_path), RecordingBranch(tmp_path / "wt", events=events),
+        label=AUTHOR_DRAIN_LABEL, has_work=lambda _p: True,
+        do_work=_masking_work(events, daemon, refusals=1, then_raise=crash),
+        start_box=start, stop_box=box_mod.stop_box, scrub=watch))
+    assert isinstance(got, BoxFault), got
+    assert X.carries(got, crash), X.chain(got)
+    assert "masked" in events, "the run's removal was not refused, so the row is vacuous"
+    name = start.requests[0].name
+    after_run = daemon.steps(of=name)[daemon.steps(of=name).index("run"):]
+    assert "status" in after_run, f"no batch-end teardown under the box fault: {after_run}"
+    assert daemon.names() == [], "the box the run left outlived the batch"
+    watch.assert_no_scan_beside_a_box()
+    assert not any(e.startswith("finish_batch:") for e in events), events
 
 
 # ---------------------------------------------------------------------------------------

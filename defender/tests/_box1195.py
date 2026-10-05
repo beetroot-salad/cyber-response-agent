@@ -192,6 +192,25 @@ class Runs:
         return box_source(request(name), start_box=self.start, stop_box=self.stop)
 
 
+class StartFault:
+    """A `start_box=` that records each request it is handed and refuses every one with
+    `fault`: a box that will not come up, for the rows driving a lane's DEFAULT work step."""
+
+    def __init__(self, fault: BaseException) -> None:
+        self.fault = fault
+        self.requests: list[Any] = []
+
+    def __call__(self, request: Any, *_a: Any, **_kw: Any) -> Any:
+        self.requests.append(request)
+        raise self.fault
+
+    def drain_seams(self) -> dict[str, Any]:
+        """A drain's box seams with this start: no box comes up, so nothing is stopped, and
+        no scan is wanted."""
+        return {"start_box": self, "stop_box": lambda *_a, **_kw: None,
+                "scrub": lambda *_a, **_kw: None}
+
+
 def windows(log: list) -> list[tuple[int, int]]:
     """Each run's `(enter, exit)` indices in `log`, in order: no run inside another, and every
     run that was entered has exited."""
@@ -338,6 +357,27 @@ class FakeDaemon:
     def created(self) -> list[str]:
         """The name of every container a `docker run` asked for, in order."""
         return [a[a.index("--name") + 1] for a in self.calls() if a[:2] == ["docker", "run"]]
+
+
+class ScanWatch:
+    """A `scrub=` seam over a `FakeDaemon`: for each tree it is asked to walk it records which
+    containers the daemon still holds at that moment (`held`), marks the daemon's log `scan`,
+    and appends `scrub:<tree>` to `events` when given."""
+
+    def __init__(self, daemon: FakeDaemon, events: list | None = None) -> None:
+        self.daemon, self.events = daemon, events
+        self.held: list[list[str]] = []
+
+    def __call__(self, tree: Path, *_a: Any, **_kw: Any) -> None:
+        self.held.append(self.daemon.names())
+        self.daemon.mark("scan")
+        if self.events is not None:
+            self.events.append(f"scrub:{tree}")
+
+    def assert_no_scan_beside_a_box(self) -> None:
+        """Every scan ran with no container left: after the batch-end removal, never beside a
+        box of the batch."""
+        assert all(h == [] for h in self.held), f"a tree was scanned beside a live box: {self.held}"
 
 
 def plant_image_inputs(repo: Path) -> None:

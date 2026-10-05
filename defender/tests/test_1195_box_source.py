@@ -11,7 +11,7 @@ Tests -> obligations:
 - E1 (-> O2', O3'), one start and one stop per run, the stop on every exit:
   `test_a_run_starts_its_box_once_and_removes_it_once`,
   `test_each_run_starts_a_fresh_box_and_none_outlives_its_run`,
-  `test_a_run_removes_its_box_when_the_body_raises` (an exception, an interrupt).
+  `test_a_run_removes_its_box_when_the_body_raises` (an exception, an interrupt, `SystemExit`).
 - E1, teardown-fault precedence: `test_a_teardown_fault_with_nothing_in_flight_is_raised`,
   `test_a_teardown_fault_under_an_in_flight_exception_is_logged_and_the_exception_propagates`.
 - E1/E5 (-> O4), every start failure is a `BoxFault`:
@@ -26,7 +26,9 @@ Tests -> obligations:
   unsandboxed executors), `test_teardown_after_the_box_is_gone_removes_nothing`,
   `test_teardown_removes_a_box_the_daemon_still_holds`,
   `test_teardown_that_cannot_remove_the_box_is_a_box_fault`,
-  `test_teardown_that_cannot_learn_the_status_is_a_box_fault`.
+  `test_teardown_that_cannot_learn_the_status_is_a_box_fault`; and, keyed on any sandboxed run
+  rather than the last one, `test_teardown_after_a_sandboxed_run_then_an_unsandboxed_one_still_asks_and_removes`,
+  `test_a_box_the_opt_out_fell_back_beside_is_removed_at_batch_end`.
 - E2 (-> O2'), through the real `start_box` (and its `_reap_stale_before_create`) over a fake
   daemon: `test_a_box_left_alive_by_a_failed_teardown_refuses_the_next_run_before_its_body`
   (the earlier teardown fault raised, or logged under an in-flight fault), with
@@ -114,14 +116,17 @@ def _body_failures() -> list:
     return [
         pytest.param(lambda: RuntimeError("the agent crashed"), id="exception"),
         pytest.param(KeyboardInterrupt, id="keyboard-interrupt"),
+        # Neither an `Exception` nor an interrupt: a spawn that calls `sys.exit` still leaves
+        # through the run's teardown.
+        pytest.param(lambda: SystemExit(3), id="system-exit"),
         pytest.param(lambda: BoxFault("the agent's own box fault"), id="box-fault"),
     ]
 
 
 @pytest.mark.parametrize("failure", _body_failures())
 def test_a_run_removes_its_box_when_the_body_raises(failure: Any):
-    """The body raises (an `Exception`, an interrupt, a `BoxFault`): the box is stopped, once,
-    after the body, and the body's own exception propagates unchanged."""
+    """The body raises (an `Exception`, an interrupt, a `SystemExit`, a `BoxFault`): the box is
+    stopped, once, after the body, and the body's own exception propagates unchanged."""
     log: list = []
     runs = X.Runs(log)
     source = _source(runs)
@@ -338,6 +343,56 @@ def test_teardown_removes_a_box_the_daemon_still_holds(tmp_path: Path, status: s
     teardown = daemon.calls()[before:]
     assert ["docker", "rm", "-f", NAME] in teardown, teardown
     assert daemon.status(NAME) is None
+
+
+@pytest.mark.parametrize("held", [True, False], ids=["held", "gone"])
+def test_teardown_after_a_sandboxed_run_then_an_unsandboxed_one_still_asks_and_removes(
+        tmp_path: Path, held: bool):
+    """Run 1 hands back a sandboxed box, run 2 an unsandboxed executor (the opt-out's fallback
+    when run 2's start met the name still held, N12). What the batch-end teardown must prove gone
+    is run 1's box, whatever ran after it: `.teardown()` asks the status, and removes the name
+    the daemon still holds (`held`). Control (`gone`): the name is absent, so it asks and
+    removes nothing."""
+    daemon = X.FakeDaemon(tmp_path)
+    made = iter([X.sandboxed(NAME), unboxed_executor()])
+    source = _teardown_source(daemon, starts=lambda: next(made))
+    daemon.hold(NAME, "running")  # run 1's box, which its own stop removes
+    for _ in range(2):
+        with source.run():
+            pass
+    if held:
+        daemon.hold(NAME, "running")
+    before = len(daemon.calls())
+    source.teardown()
+    teardown = daemon.steps()[before:]
+    assert "status" in teardown, f"the teardown never asked the status: {teardown}"
+    assert daemon.status(NAME) is None, "the box a sandboxed run left outlived the batch"
+    assert ("rm" in teardown) is held, teardown
+
+
+def test_a_box_the_opt_out_fell_back_beside_is_removed_at_batch_end(tmp_path: Path, monkeypatch):
+    """Through the REAL `start_box`/`stop_box` over the daemon, with the opt-out set: run 1
+    starts a real box, which its removal leaves running (refused, logged under run 1's crash);
+    run 2's start meets the name still running and falls back to an unsandboxed executor (N12).
+    The batch-end teardown still asks the status and removes run 1's box: none is left."""
+    monkeypatch.setenv(box_mod._ALLOW_UNSANDBOXED, "1")
+    daemon = X.FakeDaemon(tmp_path)
+    source = _real_source(tmp_path, daemon)
+
+    def run_1() -> None:
+        with source.run() as box:
+            assert box.sandboxed, box
+            daemon.refuse_rm(1)
+            raise RuntimeError("the agent crashed")
+
+    X.caught(run_1)
+    assert daemon.status(NAME) == "running", "the fake did not leave run 1's box alive"
+    with source.run() as box:
+        assert not box.sandboxed, "run 2 was not the opt-out's fallback, so the row is vacuous"
+    before = len(daemon.calls())
+    source.teardown()
+    assert "status" in daemon.steps()[before:], "the teardown asked the daemon nothing"
+    assert daemon.names() == [], "the box run 1 left outlived the batch"
 
 
 def test_teardown_that_cannot_remove_the_box_is_a_box_fault(tmp_path: Path):

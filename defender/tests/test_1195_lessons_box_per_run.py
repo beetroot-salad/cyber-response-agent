@@ -29,13 +29,16 @@ Tests -> obligations:
   `test_a_failing_spawns_box_is_removed_before_the_undo_runs`.
 - Wiring through the production drain (no box at batch start, one real box per run, none
   after the last, E3's batch-end probe): `test_the_production_drain_runs_one_real_box_per_agent_run_and_leaves_none`.
-- E2: `test_a_box_a_failed_teardown_left_alive_refuses_the_next_curators_run`, with
-  `test_control_a_teardown_that_holds_lets_the_next_curator_run_and_deliver`.
+- E2: `test_a_box_a_failed_teardown_left_alive_refuses_the_next_curators_run` (and the
+  batch-end teardown removes that box under the escaping fault, before any scan), with its
+  `holds` control.
 - O4 (E5): `test_a_box_fault_from_the_first_curators_step_halts_the_drain` (+ its control),
   `test_a_box_fault_in_the_first_curator_halts_the_tick_before_the_second` (the spawn, a start
   fault, a link-ban failure at a start, a teardown fault; each also in the repair's run),
   `test_a_box_fault_in_the_second_curator_halts_the_drain`,
-  `test_control_a_non_box_fault_in_the_first_curator_is_contained_and_the_second_runs` (N4),
+  `test_control_a_non_box_fault_in_the_first_curator_is_contained_and_the_second_runs` (N4; a
+  `SystemExit` among them, its run's box still removed),
+  `test_a_box_fault_through_the_default_curator_step_halts_the_drain` (`trigger_author=None`),
   `test_a_box_fault_escapes_author_drain_with_nothing_delivered` (+ its control),
   `test_the_escaping_box_fault_names_the_cut_commit_not_the_first_curators_commit` (E6).
 - D3a: `test_a_box_fault_outranks_an_undo_fault_and_the_second_curator_never_runs`, with
@@ -61,7 +64,9 @@ from defender import _git, _io
 from defender._git import GitError
 from defender._io import NotPlainEntry
 from defender.learning.core import drains
+from defender.learning.core import config as author_config
 from defender.learning.core.config import FatalConfigError, LoopPaths, StageAbort
+from defender.runtime import providers
 from defender.runtime.box import AliasBanNotInForce, BoxFault
 from defender.runtime.verbs import RegistryError
 from defender.tests import _box1195 as X
@@ -484,9 +489,8 @@ def _production_tick(tmp_path: Path, monkeypatch, daemon: X.FakeDaemon, *,  # no
 
 def _author_drain(t: Tick, events: list[str], **seams: Any) -> int:
     branch = RepoBranch(t.sc.repo, events=events)
-    return drains.author_drain(t.paths, trigger_author=t.trigger, branch=branch,
-                               scrub=lambda tree, *_a, **_k: events.append(f"scrub:{tree}"),
-                               **seams)
+    seams.setdefault("scrub", lambda tree, *_a, **_k: events.append(f"scrub:{tree}"))
+    return drains.author_drain(t.paths, trigger_author=t.trigger, branch=branch, **seams)
 
 
 def test_the_production_drain_runs_one_real_box_per_agent_run_and_leaves_none(
@@ -541,7 +545,9 @@ def test_a_box_a_failed_teardown_left_alive_refuses_the_next_curators_run(
     removal of its box fails on the way out, so that teardown fault is only logged under the
     crash, and the box stays running. The questioner curator's start then meets the batch's name
     still running and raises `BoxFault` before its spawn: the questioner never runs, nothing is
-    committed, nothing is delivered, and the fault escapes `author_drain`.
+    committed, nothing is delivered, and the fault escapes `author_drain`. The batch-end teardown
+    still runs under that fault: it removes the box the first run left, so none outlives the
+    batch, and the tree is scanned, if at all, only once it is gone.
 
     Control (`holds`): the same crash with the removal taking; the questioner gets a fresh box,
     commits, and the batch is delivered."""
@@ -557,10 +563,13 @@ def test_a_box_a_failed_teardown_left_alive_refuses_the_next_curators_run(
     q_curator = S.FakeCurator(writes={"q.md": S.lesson("w1")})
     t = _production_tick(tmp_path, monkeypatch, daemon, curator=curator, q_curator=q_curator)
     events: list[str] = []
-    got = X.caught(lambda: _author_drain(t, events))
+    watch = X.ScanWatch(daemon, events)
+    got = X.caught(lambda: _author_drain(t, events, scrub=watch))
 
     assert len(curator.calls) == 1
     assert _stuck_classes(t.paths, "findings") == ["RuntimeError"]
+    assert daemon.names() == [], "a box outlived the batch"
+    watch.assert_no_scan_beside_a_box()
     if teardown == "holds":
         assert got is None, got
         assert len(q_curator.calls) == 1
@@ -573,6 +582,62 @@ def test_a_box_a_failed_teardown_left_alive_refuses_the_next_curators_run(
     assert not any(e.startswith("finish_batch:") for e in events), events
     assert _stuck_classes(t.paths, "questioner_findings") == ["BoxFault"]
     assert len(daemon.created()) == 1, "a second box was created beside the live one"
+
+
+# ---------------------------------------------------------------------------------------
+# O4 through the lane's DEFAULT work step (`trigger_author=None`)
+# ---------------------------------------------------------------------------------------
+
+
+def _ambient_verifier_key(monkeypatch: Any) -> None:
+    """The findings channel's own forward check sources the verifier key before its first spawn
+    (`_verifier_key_preflight`); an ambient key answers it, so the default step goes on to its
+    box start. Sourcing is all it does: no model is called before the box is up."""
+    var = providers.provider_for(author_config.verifier_model()).api_key_var
+    monkeypatch.setenv(var, "sk-test-1195")
+
+
+@pytest.mark.parametrize("queued", ["both", "questioner-only"])
+def test_a_box_fault_through_the_default_curator_step_halts_the_drain(
+        tmp_path: Path, monkeypatch, queued: str):
+    """`author_drain` with its DEFAULT `trigger_author` (`_maybe_trigger_author` driving each
+    channel's real `run_batch` over its real config) and a `start_box` that refuses every box:
+    with both queues at threshold, the findings curator's run cannot start, and the `BoxFault`
+    escapes `author_drain`. Only one box was ever asked for: the questioner curator is not
+    served, its queue is as it was, and nothing is recorded against its rows; f1 is not
+    bumped; nothing is committed or delivered.
+
+    Control (`questioner-only`): the findings queue empty, so the questioner curator is served
+    first: its default step reaches the box start too (one request), and halts the same way.
+    So one request in the row above means the questioner never got that far."""
+    monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
+    monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "1")
+    _ambient_verifier_key(monkeypatch)
+    sc = S.build_scene(tmp_path, rows=[S.finding_row("f1", run_id="f1")] if queued == "both" else [])
+    S.seed(sc.paths.questioner_findings, [S.world_row("w1")])
+    q_before = sc.paths.questioner_findings.file.read_bytes()
+    fault = BoxFault("the daemon refused the create")
+    start = X.StartFault(fault)
+    events: list[str] = []
+
+    got = X.caught(lambda: drains.author_drain(
+        sc.paths, branch=RepoBranch(sc.repo, events=events), **start.drain_seams()))
+
+    assert isinstance(got, BoxFault), got
+    assert X.carries(got, fault), X.chain(got)
+    assert len(start.requests) == 1, f"{len(start.requests)} box(es) asked for after a box fault"
+    assert not any(e.startswith("finish_batch:") for e in events), events
+    assert sc.head_sha() == sc.base_sha, "a commit landed after a box fault"
+    if queued == "questioner-only":
+        assert _stuck_classes(sc.paths, "questioner_findings") == ["BoxFault"]
+        return
+    assert sc.paths.questioner_findings.file.read_bytes() == q_before, (
+        "the questioner's queue moved after the findings curator's box fault")
+    assert _stuck_classes(sc.paths, "findings") == ["BoxFault"], (
+        "the box fault was not the findings curator's own")
+    assert _stuck_classes(sc.paths, "questioner_findings") == [], (
+        "the questioner curator was served after the findings curator's box fault")
+    assert sc.pending_by_id()["f1"].get("attempts") is None, "f1 was bumped for a box fault"
 
 
 # ---------------------------------------------------------------------------------------
@@ -757,19 +822,22 @@ def test_a_box_fault_in_the_second_curator_halts_the_drain(tmp_path: Path, sourc
 #: Faults that are not box faults, raised by the lessons spawn after it leaves its lesson. All but
 #: `GitError` are non-retiring, contained by `_drain_one_curator` (N4: `StageAbort`,
 #: `FatalConfigError`, `RegistryError` keep their behaviour); `GitError` retires inside its own
-#: tick (f1 bumped). Either way the second curator runs.
-CONTAINED_FAULTS = [RuntimeError, StageAbort, FatalConfigError, RegistryError, GitError]
+#: tick (f1 bumped). Either way the second curator runs. `SystemExit` (a spawn calling
+#: `sys.exit`) is neither an `Exception` nor an interrupt, and is contained too: its run's box
+#: must still come down before the second curator's run starts.
+CONTAINED_FAULTS = [RuntimeError, StageAbort, FatalConfigError, RegistryError, GitError,
+                    SystemExit]
 
 
-def _not_a_box_fault(cls: type[Exception], message: str) -> Exception:
+def _not_a_box_fault(cls: type[BaseException], message: str) -> BaseException:
     return S.git_error(message) if cls is GitError else cls(message)
 
 
 @pytest.mark.parametrize("fault", CONTAINED_FAULTS, ids=lambda c: c.__name__)
 def test_control_a_non_box_fault_in_the_first_curator_is_contained_and_the_second_runs(
-        tmp_path: Path, fault: type[Exception]):
+        tmp_path: Path, fault: type[BaseException]):
     """The lessons spawn leaves `a.md` and raises a fault that is not a box fault: handled as
-    before. `_drain_curators` returns, the questioner curator runs (in a box of its own) and
+    before (its run's box removed, whatever the class). `_drain_curators` returns, the questioner curator runs (in a box of its own) and
     commits, and the findings channel's stuck record names the fault (f1 bumped only by the
     retiring `GitError`)."""
     log: list = []
