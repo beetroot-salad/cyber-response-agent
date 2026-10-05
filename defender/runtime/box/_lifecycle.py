@@ -12,7 +12,7 @@ import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 
-from defender._io import sweep_staged, write_guarded
+from defender._io import READ_LIMIT, sweep_staged, write_guarded
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender._run_paths import RUN_LAYOUT
 from defender.runtime.box_codec import (
@@ -75,7 +75,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         "--read-only",
         "--pull=never",
         "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
-        *_file_size_ulimit(spec),
+        *_BOX_ULIMITS,
         "--mount", f"type=bind,source={run_src},target={run_dir}",
         "--mount", f"type=bind,source={defender_src},target={defender_dir},readonly",
     ]
@@ -197,11 +197,15 @@ def _start_boxed(
     return BoxExecutor(spec=spec, transport=_DockerTransport(name, spec), name=name)
 
 
-def _file_size_ulimit(spec: BoxSpec) -> list[str]:
-    """The `docker run` flags capping every file the box makes at `spec.file_size_limit` bytes,
-    soft = hard (#1188). Shared by both argv builders so the two lanes cannot disagree."""
-    limit = spec.file_size_limit
-    return ["--ulimit", f"fsize={limit}:{limit}"]
+#: The `docker run` flags every box starts with (#1188). `fsize`: no process in the box can make
+#: a file, sparse or real, larger than a host whole-file read takes in (`_io.READ_LIMIT`, bytes,
+#: soft = hard; the box holds no `CAP_SYS_RESOURCE` to raise it). `core=0`: the kernel kills an
+#: over-limit writer with SIGXFSZ, whose default action dumps core into the writer's cwd, which
+#: is a run dir or a drain's writable tree.
+_BOX_ULIMITS: tuple[str, ...] = (
+    "--ulimit", f"fsize={READ_LIMIT}:{READ_LIMIT}",
+    "--ulimit", "core=0:0",
+)
 
 
 def _render_argv(
@@ -216,7 +220,7 @@ def _render_argv(
         "--read-only",
         "--pull=never",
         "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
-        *_file_size_ulimit(request.spec),
+        *_BOX_ULIMITS,
     ]
     for m in request.mounts:
         if mounts and not _covered(Path(m.source), mounts):
