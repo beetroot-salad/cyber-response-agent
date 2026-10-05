@@ -127,3 +127,80 @@ def test_run_records_owns_any_module_the_package_gains():
     assert not lint._is_owner_module("runtime/run_repository/_lookup.py")
     package = {f"run_repository/{p.name}" for p in (H.PACKAGE).glob("*.py")}
     assert package <= set(lint.OWNER_MODULES), "every file on disk is in the owner set"
+
+
+# -- the second review's findings ---------------------------------------------------------------
+
+
+def test_a_huge_read_bound_allocates_nothing_up_front(tmp_path):
+    """`max_bytes` far past any file's size reads the file, never a `MemoryError`: the prefix
+    read asks for one chunk at a time, not for its whole budget."""
+    (tmp_path / "f.json").write_text("{}", encoding="utf-8")
+    with _io.bind(tmp_path) as bound:
+        assert bound.read("f.json", max_bytes=10 ** 15).text == "{}"
+
+
+def test_a_record_over_the_cap_cut_mid_character_is_refused_as_over(tmp_path):
+    """The cap is judged on the file's size, not on what a prefix decodes to: a record one byte
+    over the cap whose last character is multibyte says it is over, not that it is unreadable."""
+    t = H.tenant(tmp_path / "data")
+    runs = H.runs_folder(t)
+    body = H.record_text("ep", t.id, "r0", {"a": "ep-a"})
+    pad = H.RECORD_CAP - 1 - len(body.encode("utf-8"))
+    raw = (body + " " * pad + "é").encode("utf-8")  # the cap's last byte starts the "é"
+    assert len(raw) == H.RECORD_CAP + 1
+    H.plant_record(runs, "ep", t.id, "r0", {}, raw=raw)
+    with pytest.raises(R.RunRefused) as refused:
+        R.episode_runs(t, "ep")
+    assert f"over {H.RECORD_CAP} bytes" in str(refused.value), str(refused.value)
+
+
+def test_another_tenants_record_is_a_record_mismatch_everywhere(tmp_path):
+    """`_tenant.json` naming another tenant is `TenantRecordMismatch` — what `Run.for_tenant`
+    raises — from the lookups and the listings alike, not a bare `TenantRefused`."""
+    from defender._tenant import TenantRecordMismatch
+    t = H.tenant(tmp_path / "data")
+    runs = H.runs_folder(t)
+    H.make_run(runs, "r0")
+    H.plant_tenant_record(runs, H.U_ID)
+    for call in (lambda: R.open_run(t, R.RunId.parse("r0")), lambda: R.list_run_ids(t),
+                 lambda: R.run_exists(t, R.RunId.parse("r0")), lambda: R.sibling_run_ids(t)):
+        with pytest.raises(TenantRecordMismatch):
+            call()
+
+
+def test_an_absent_runs_folder_refusal_carries_no_stale_error(tmp_path):
+    """The absent folder's refusal is raised outside the open's `except`, so it carries no
+    `FileNotFoundError` as its context (a traceback that blamed the wrong error)."""
+    from defender._tenant import TenantRefused
+    t = H.tenant(tmp_path / "data")
+    with pytest.raises(TenantRefused) as refused:
+        R.open_run(t, R.RunId.parse("r0"))
+    assert refused.value.__context__ is None, repr(refused.value.__context__)
+
+
+@pytest.mark.parametrize(("label", "reason"), [
+    ("base", "reserved name"), ("family_3", "family_<n>"), ("Upper", "upper case"),
+    ("a-b", "carries '-'"), ("a b", "cannot hold")])
+def test_a_refused_label_says_which_rule_it_broke(tmp_path, label, reason):
+    t = H.tenant(tmp_path / "data")
+    runs = H.runs_folder(t)
+    H.make_run(runs, "r0")
+    with pytest.raises(R.RunRefused) as refused:
+        R.record_episode_runs(t, "ep", R.RunId.parse("r0"), {label: R.RunId.parse("ep-a")})
+    assert reason in str(refused.value), str(refused.value)
+
+
+def test_the_writer_names_a_record_that_vanished_or_cannot_be_read():
+    """The writer lost the create race and then judges the record that won: gone again, or
+    unreadable, each refuses saying so (not as 'different content')."""
+    from pathlib import Path
+
+    from defender.run_repository import _record
+    path = Path("/runs/_episodes/ep.json")
+    gone = _io.RecordRead(name="ep.json", text=None, absent=True, reason=None)
+    with pytest.raises(R.RunRefused, match="gone again"):
+        _record._judge_existing(gone, "{}", path=path, episode_id="ep")
+    bad = _io.RecordRead(name="ep.json", text=None, absent=False, reason="not utf-8")
+    with pytest.raises(R.RunRefused, match="cannot be read"):
+        _record._judge_existing(bad, "{}", path=path, episode_id="ep")

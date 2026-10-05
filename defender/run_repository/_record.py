@@ -172,23 +172,28 @@ def _good_stem(stem: str) -> bool:
 
 
 def _read_one(episodes: _io.Bound, name: str, *, path: str, stem: str,
-              tenant_id: str | None) -> tuple[RunId, dict[str, RunId]] | None:
-    """One record off `episodes`, read no-follow and no further than the cap plus one byte
-    (H5); `None` when it is absent. The cap is judged on the bytes, before anything is decoded,
-    then the bytes are decoded once, as strict UTF-8. Any refused or corrupt read is
-    `RunRefused` naming it."""
-    answer = episodes.read_raw(name, max_bytes=_RECORD_CAP + 1)
+              tenant_id: str | None, io: Any) -> tuple[RunId, dict[str, RunId]] | None:
+    """One record off `episodes`, read no-follow (H5); `None` when it is absent. The cap is
+    judged on the file's size, from a no-follow `stat` of the entry, before anything is read;
+    then the record is read as strict UTF-8, newlines kept, never past the cap plus one byte
+    (a record that grew after its `stat` is still refused as over). Any refused or corrupt
+    read is `RunRefused` naming it."""
+    entry = io.stat_entry(episodes, name)
+    if entry.absent:
+        return None
+    if entry.st is None:
+        raise _corrupt(path, f"it cannot be read: {entry.reason}")
+    if entry.st.st_size > _RECORD_CAP:
+        raise _corrupt(path, f"it is over {_RECORD_CAP} bytes")
+    answer = episodes.read(name, max_bytes=_RECORD_CAP + 1)
     if answer.absent:
         return None
-    if answer.data is None:
-        raise _corrupt(path, f"it cannot be read: {answer.reason}")
-    if len(answer.data) > _RECORD_CAP:
+    if answer.text is None:
+        raise _corrupt(path, f"it cannot be read (unreadable, or not UTF-8 text): "
+                             f"{answer.reason}")
+    if len(answer.text.encode("utf-8")) > _RECORD_CAP:
         raise _corrupt(path, f"it is over {_RECORD_CAP} bytes")
-    try:
-        text = answer.data.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise _corrupt(path, f"it is not UTF-8 text: {exc}") from None
-    return _parse_episode_record(text, path=path, stem=stem, tenant_id=tenant_id)
+    return _parse_episode_record(answer.text, path=path, stem=stem, tenant_id=tenant_id)
 
 
 def _read_records(runs: _io.Bound, *, where: str, tenant_id: str | None,
@@ -211,7 +216,7 @@ def _read_records(runs: _io.Bound, *, where: str, tenant_id: str | None,
         if listing.entries[name] != io.ENTRY_FILE or not _good_stem(stem):
             raise RunRefused(f"{path} is not an episode record: only regular files named "
                              f"<episode id>{_RECORD_SUFFIX} belong in {folder}")
-        read = _read_one(episodes, name, path=path, stem=stem, tenant_id=tenant_id)
+        read = _read_one(episodes, name, path=path, stem=stem, tenant_id=tenant_id, io=io)
         if read is None:
             raise RunRefused(f"{path} was listed and then could not be found")
         records[stem] = read[1]
@@ -225,11 +230,11 @@ def episode_sibling_ids(runs: _io.Bound, *, where: str | None = None,
     be a `_io.Bound` (else `TypeError`, before any read); the empty set when it is absent or
     `_episodes` is. It is not closed here: the caller owns it. `where` is how a refusal names
     the runs folder; a caller holding only the `Bound` leaves it out and the view says where it
-    is (`Bound.located`)."""
+    is (`_io.located`)."""
     if not isinstance(runs, _io.Bound):
         raise TypeError(f"episode_sibling_ids reads a Bound runs folder, not "
                         f"{type(runs).__name__}")
-    shown_root = runs.located() if where is None else where
+    shown_root = _io.located(runs) if where is None else where
     records = _read_records(runs, where=shown_root, tenant_id=None, io=io)
     return {run_id for arms in records.values() for run_id in arms.values()}
 
@@ -253,7 +258,7 @@ def episode_runs(tenant: Tenant, episode_id: str, *, io: Any = _io) -> dict[str,
         name = _record_name(episode_id)
         read = _read_one(runs.view.under(EPISODES_DIRNAME), name,
                          path=str(episode_record_path(tenant.runs, episode_id)),
-                         stem=episode_id, tenant_id=tenant.id)
+                         stem=episode_id, tenant_id=tenant.id, io=io)
     return {} if read is None else read[1]
 
 
@@ -337,34 +342,35 @@ def record_episode_runs(tenant: Tenant, episode_id: str, source_run_id: RunId,
                          f"{_RECORD_CAP} bytes")
     name = _record_name(episode_id)
     path = episode_record_path(tenant.runs, episode_id)
-    with hold_runs(tenant, io) as runs:
-        view = runs.require_present().view
-        listing = runs.listing()
-        records = _read_records(view, where=str(runs.folder), tenant_id=tenant.id, io=io)
+    with hold_runs(tenant, io) as held:
+        view = held.require_present().view
+        listing = held.listing()
+        records = _read_records(view, where=str(held.folder), tenant_id=tenant.id, io=io)
         if episode_id not in records:
             _refuse_taken_arms(arms, records, listing, folder=Path(tenant.runs))
             try:
-                runs.write(f"{EPISODES_DIRNAME}/{name}", text, mode="create")
+                held.write(f"{EPISODES_DIRNAME}/{name}", text, mode="create")
                 return
             except FileExistsError:
                 pass  # recorded meanwhile: judged against its bytes below
             except OSError as exc:
                 raise RunRefused(f"{path} could not be written: {exc.strerror or exc}") from None
-        _judge_existing(view.under(EPISODES_DIRNAME).read_raw(
+        _judge_existing(view.under(EPISODES_DIRNAME).read(
             name, max_bytes=_RECORD_CAP + 1), text, path=path, episode_id=episode_id)
 
 
-def _judge_existing(existing: _io.BytesRead, text: str, *, path: Path,
+def _judge_existing(existing: _io.RecordRead, text: str, *, path: Path,
                     episode_id: str) -> None:
     """The writer's verdict on the record already at its name: byte-identical to `text` is the
-    idempotent retry (no write); anything else refuses, naming why."""
+    idempotent retry (no write); anything else refuses, naming why. `existing` is read strict
+    and byte-faithful, so equal text is equal bytes."""
     if existing.absent:
         raise RunRefused(f"{path} was created by another writer and is gone again — "
                          "nothing was recorded; retry the episode's setup")
-    if existing.data is None:
+    if existing.text is None:
         raise RunRefused(f"{path} exists but cannot be read ({existing.reason}) — it is "
                          "not judged against this episode's record")
-    if existing.data != text.encode("utf-8"):
+    if existing.text != text:
         raise RunRefused(f"{path} already records episode {quoted(episode_id)} with "
                          "different content; an episode id is spent once recorded — remove "
                          "the file by hand only if that episode never started")

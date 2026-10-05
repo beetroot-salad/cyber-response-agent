@@ -420,13 +420,6 @@ class RecordRead(_Read):
     text: str | None
 
 
-@dataclasses.dataclass(frozen=True)
-class BytesRead(_Read):
-    """`Bound.read_raw`'s answer: present (`data`, possibly empty), absent or refused."""
-
-    data: bytes | None
-
-
 #: What one entry of a listed directory is, judged without following it: a regular file (hard
 #: links included — `read` refuses those), a real directory, or anything else.
 ENTRY_FILE, ENTRY_DIR, ENTRY_OTHER = "file", "dir", "other"
@@ -727,59 +720,30 @@ class Bound:
              max_bytes: int | None = None) -> RecordRead:
         """The file at `name`, as a `RecordRead`. `max_bytes` bounds the bytes taken off the
         file (`_read_plain_fd`'s prefix mode): its text is the first `max_bytes` bytes decoded,
-        newlines kept as they are. Without it the read is whole. A caller that judges a size
-        cap reads `read_raw` instead, so the cap is measured before any decode."""
+        newlines kept as they are. Without it the read is whole."""
+        spelling, parts = _parse_name(name)
         if errors not in _ERRORS_VALUES:
             raise ValueError("errors must be 'strict' or 'replace'")
-        spelling, data, absent, reason = self._leaf(name, binary=False, errors=errors,
-                                                    max_bytes=max_bytes)
-        assert data is None or isinstance(data, str)
-        return RecordRead(name=spelling, text=data, absent=absent, reason=reason)
-
-    def read_raw(self, name: str | PurePath, *, max_bytes: int | None = None) -> BytesRead:
-        """The file at `name` as raw bytes, a `BytesRead`, with `read`'s walk and refusals:
-        whole, or with `max_bytes` no more than that many bytes taken off it — so a caller asks
-        for its cap plus one byte and judges the length before decoding anything."""
-        spelling, data, absent, reason = self._leaf(name, binary=True, errors="strict",
-                                                    max_bytes=max_bytes)
-        assert data is None or isinstance(data, bytes)
-        return BytesRead(name=spelling, data=data, absent=absent, reason=reason)
-
-    def _leaf(self, name: str | PurePath, *, binary: bool, errors: str,
-              max_bytes: int | None) -> tuple[str, str | bytes | None, bool, str | None]:
-        """`read` and `read_raw`'s one walk: `(spelling, content, absent, reason)`."""
-        spelling, parts = _parse_name(name)
         if max_bytes is not None and (isinstance(max_bytes, bool) or not isinstance(
                 max_bytes, int) or max_bytes < 0):
             raise ValueError("max_bytes must be a non-negative int")
         if self._absent:
-            return spelling, None, True, None
+            return RecordRead(name=spelling, text=None, absent=True, reason=None)
         if self._error is not None:
-            return spelling, None, False, self._error
+            return RecordRead(name=spelling, text=None, absent=False, reason=self._error)
         where = PurePath(*self._prefix, *parts)
         try:
             # A closed root is the dup's `EBADF`, answered as a refusal like any other.
             with self._handle.dup() as root_fd, _descend(
                     self._os, root_fd, self._prefix + parts[:-1], Path(".")) as dir_fd:
-                data = _read_leaf(self._os, dir_fd, parts[-1], Path(where), binary=binary,
+                text = _read_leaf(self._os, dir_fd, parts[-1], Path(where), binary=False,
                                   errors=errors, max_bytes=max_bytes)
         except FileNotFoundError:
-            return spelling, None, True, None
+            return RecordRead(name=spelling, text=None, absent=True, reason=None)
         except TEXT_READ_ERRORS as e:
-            return spelling, None, False, _read_reason(e)
-        return spelling, data, False, None
-
-    def located(self) -> str:
-        """Where this view's folder is, for a refusal to name: the kernel's name for the held
-        descriptor (`/proc/self/fd`, as the `O_PATH` hold already assumes Linux) joined with the
-        view's prefix; `""` when it cannot be told. Description only — nothing is opened, and
-        nothing is trusted, by it."""
-        try:
-            with self._handle.dup() as fd:
-                root = os.readlink(f"/proc/self/fd/{fd}")
-        except OSError:
-            return ""
-        return str(Path(root, *self._prefix))
+            return RecordRead(name=spelling, text=None, absent=False, reason=_read_reason(e))
+        assert isinstance(text, str)
+        return RecordRead(name=spelling, text=text, absent=False, reason=None)
 
     def read_jsonl(self, name: str | PurePath) -> tuple[list[dict], int, RecordRead]:
         rec = self.read(name, errors="replace")
@@ -863,6 +827,19 @@ class Bound:
         _spelling, parts = _parse_name(name)
         return Bound(self._os, self._handle, prefix=self._prefix + parts,
                      absent=self._absent, error=self._error)
+
+
+def located(bound: Bound) -> str:
+    """Where `bound`'s folder is, for a refusal to name: the kernel's name for the held
+    descriptor (`/proc/self/fd`, as the `O_PATH` hold already assumes Linux) joined with the
+    view's prefix; `""` when it cannot be told. Description only — nothing is opened, and
+    nothing is trusted, by it. A function beside `Bound`, as `stat_entry` is (#1133 O3)."""
+    try:
+        with bound._handle.dup() as fd:
+            root = os.readlink(f"/proc/self/fd/{fd}")
+    except OSError:
+        return ""
+    return str(Path(root, *bound._prefix))
 
 
 def stat_entry(bound: Bound, name: str | PurePath) -> StatRead:
