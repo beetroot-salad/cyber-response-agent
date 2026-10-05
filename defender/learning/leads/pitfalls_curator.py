@@ -550,7 +550,7 @@ OFFERS_DECLINED_KEY = _disposition.OFFERS_DECLINED_KEY
 PitfallsDisposition = _disposition.PitfallsDisposition
 
 
-def run_pitfalls(
+def run_pitfalls(  # noqa: PLR0913, C901 — one tick's whole injection surface
     *,
     paths: _loop_config.LoopPaths | None = None,
     state: LearningState | None = None,

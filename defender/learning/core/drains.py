@@ -210,6 +210,10 @@ def _has_lead_author_work(state: LearningState) -> bool:
     return pitfalls_lane_is_open(merge_pitfalls(read_pitfalls(state)), threshold)
 
 
+#: What a curator's containment re-raises untouched: the retirement faults and the handle's refusal.
+_RERAISE: tuple[type[BaseException], ...] = (*drain.RETIRE_SET, StateRefused)
+
+
 def _drain_one_curator(
     paths: LoopPaths, state: LearningState, trigger_author: Callable[..., None],
     channel: Channel, threshold_env: str, module_name: str, pending_label: str, *, box: Any,
@@ -228,7 +232,7 @@ def _drain_one_curator(
     try:
         trigger_author(
             paths, state, channel, threshold_env, module_name, pending_label, box=box)
-    except (*drain.RETIRE_SET, StateRefused):
+    except _RERAISE:
         raise
     # An interrupt leaves at once; swallowing it would record Ctrl-C as a curator fault, run
     # the sibling curator, and go on to commit, push and open a PR for the batch the operator
@@ -627,7 +631,7 @@ def _unwind_worktree_start_fault(e: BaseException, wt: Path, branch: AuthorBranc
         raise box_mod.BoxFault(f"{e}\n\n{pointer}") from e
 
 
-def _run_worktree_batch(
+def _run_worktree_batch(  # noqa: PLR0913, C901 — one batch, kept whole
     paths: LoopPaths,
     state: LearningState,
     branch: AuthorBranch,

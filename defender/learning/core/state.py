@@ -31,6 +31,7 @@ import errno
 import json
 import logging
 import os
+from functools import partial
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -84,11 +85,16 @@ class StateRefused(Exception):  # noqa: N818 — named for the refusal it report
 # Record names
 # ---------------------------------------------------------------------------------------------
 
+def _under(folder: str, name: str) -> str:
+    """`name` below `folder`, as a root-relative record name."""
+    return f"{folder}/{name}"
+
+
 _QUEUE = "author-queue"
-_INFLIGHT = f"{_QUEUE}/inflight"
-_FAILED = f"{_QUEUE}/failed"
+_INFLIGHT = _under(_QUEUE, "inflight")
+_FAILED = _under(_QUEUE, "failed")
 _DELIVERY = "_pending_delivery"
-_DELIVERY_FAILED = f"{_DELIVERY}/failed"
+_DELIVERY_FAILED = _under(_DELIVERY, "failed")
 _PENDING = "_pending"
 _PENDING_LEADS = "_pending_leads"
 _PENDING_PITFALLS = "_pending_pitfalls"
@@ -110,8 +116,8 @@ class LockRole:
 REPO_LOCK = LockRole("repo", "_author.lock", _flock.SLOW_POLL)
 AUTHOR_DRAIN_LOCK = LockRole("author-drain", ".author-drain.lock", _flock.FAST_POLL)
 LEAD_AUTHOR_DRAIN_LOCK = LockRole("lead-author-drain", ".lead-author-drain.lock", _flock.FAST_POLL)
-LEAD_QUEUE_LOCK = LockRole("lead-queue", f"{_PENDING_LEADS}/.lock", _flock.FAST_POLL)
-CURATOR_DRAIN_LOCK = LockRole("curator-drain", f"{_PENDING}/.lock", _flock.FAST_POLL)
+LEAD_QUEUE_LOCK = LockRole("lead-queue", _under(_PENDING_LEADS, ".lock"), _flock.FAST_POLL)
+CURATOR_DRAIN_LOCK = LockRole("curator-drain", _under(_PENDING, ".lock"), _flock.FAST_POLL)
 
 
 @dataclass(frozen=True)
@@ -151,35 +157,35 @@ class Channel:
 
 FINDINGS = Channel(
     name="findings",
-    queue=f"{_PENDING}/findings.jsonl",
-    consumed=f"{_PENDING}/consumed.jsonl",
-    deadletter=f"{_PENDING}/findings.deadletter.jsonl",
-    stuck=f"{_PENDING}/findings.stuck.jsonl",
-    append_lock=f"{_PENDING}/.findings.lock",
+    queue=_under(_PENDING, "findings.jsonl"),
+    consumed=_under(_PENDING, "consumed.jsonl"),
+    deadletter=_under(_PENDING, "findings.deadletter.jsonl"),
+    stuck=_under(_PENDING, "findings.stuck.jsonl"),
+    append_lock=_under(_PENDING, ".findings.lock"),
     drain_role=CURATOR_DRAIN_LOCK,
     id_key="finding_id",
     reads_on_append=True,
-    report=f"{_PENDING}/findings.held_report.log",
+    report=_under(_PENDING, "findings.held_report.log"),
 )
 QUESTIONER_FINDINGS = Channel(
     name="questioner_findings",
-    queue=f"{_PENDING}/questioner_findings.jsonl",
-    consumed=f"{_PENDING}/questioner_consumed.jsonl",
-    deadletter=f"{_PENDING}/questioner_findings.deadletter.jsonl",
-    stuck=f"{_PENDING}/questioner_findings.stuck.jsonl",
-    append_lock=f"{_PENDING}/.questioner_findings.lock",
+    queue=_under(_PENDING, "questioner_findings.jsonl"),
+    consumed=_under(_PENDING, "questioner_consumed.jsonl"),
+    deadletter=_under(_PENDING, "questioner_findings.deadletter.jsonl"),
+    stuck=_under(_PENDING, "questioner_findings.stuck.jsonl"),
+    append_lock=_under(_PENDING, ".questioner_findings.lock"),
     drain_role=CURATOR_DRAIN_LOCK,
     id_key="finding_id",
     reads_on_append=True,
-    report=f"{_PENDING}/questioner_findings.skip_report.log",
+    report=_under(_PENDING, "questioner_findings.skip_report.log"),
 )
 PITFALLS = Channel(
     name="pitfalls",
-    queue=f"{_PENDING_PITFALLS}/pitfalls.jsonl",
-    consumed=f"{_PENDING_PITFALLS}/pitfalls.consumed.jsonl",
-    deadletter=f"{_PENDING_PITFALLS}/pitfalls.deadletter.jsonl",
-    stuck=f"{_PENDING_PITFALLS}/pitfalls.stuck.jsonl",
-    append_lock=f"{_PENDING_PITFALLS}/.pitfalls.lock",
+    queue=_under(_PENDING_PITFALLS, "pitfalls.jsonl"),
+    consumed=_under(_PENDING_PITFALLS, "pitfalls.consumed.jsonl"),
+    deadletter=_under(_PENDING_PITFALLS, "pitfalls.deadletter.jsonl"),
+    stuck=_under(_PENDING_PITFALLS, "pitfalls.stuck.jsonl"),
+    append_lock=_under(_PENDING_PITFALLS, ".pitfalls.lock"),
     drain_role=None,
     id_key="pitfall_id",
     reads_on_append=False,
@@ -237,7 +243,10 @@ class RootRecord:
 
 STATE_ROOT = RootRecord()
 
-_LANES: dict[str, str] = {"author_drain": _PENDING, "lead_author_drain": _PENDING_LEADS}
+_LANES: dict[str, str] = {
+    "author_drain": _PENDING,
+    "lead_author_drain": _PENDING_LEADS,  # lint-run-records: ok — the lane's own name (`DrainLabel`)
+}
 
 
 def retirement_stamp() -> dict[str, str]:
@@ -337,7 +346,7 @@ class LearningState:
         folder = _LANES.get(str(lane))
         if folder is None:
             raise ValueError(f"unknown drain lane {lane!r}; known: {sorted(_LANES)}")
-        self._guarded(folder, lambda: self._held.mkdir(folder))
+        self._guarded(folder, lambda: self._held.mkdir(folder))  # lint-unguarded-tree-write: ok — a descriptor-level mkdir below the held root (no link followed)
         return self._root / folder
 
     # -- the refusal rule -----------------------------------------------------------------------
@@ -662,7 +671,7 @@ class LearningState:
         return bool(self._json_names(_QUEUE)) or bool(self._json_names(_INFLIGHT))
 
     def claim(
-        self, identity_key: str, *, label: str = "lead_author_drain", noun: str = "lead-author",
+        self, identity_key: str, *, label: str = "lead_author_drain", noun: str = "lead-author",  # lint-run-records: ok — the lane's own name
         extra: str = "",
     ) -> Iterator[Claimed]:
         """Claim every queued request and yield the servable ones, orphans first.
@@ -696,8 +705,8 @@ class LearningState:
                         "claimed in this one")
                     continue
                 try:
-                    self._guarded(f"{_QUEUE}/{name}", lambda n=name: move_at(
-                        self._held, f"{_QUEUE}/{n}", f"{_INFLIGHT}/{n}"))
+                    self._guarded(f"{_QUEUE}/{name}", partial(
+                        move_at, self._held, f"{_QUEUE}/{name}", f"{_INFLIGHT}/{name}"))
                 except FileNotFoundError:
                     continue
             spec, reason = self._claim_spec(claimed_name)
