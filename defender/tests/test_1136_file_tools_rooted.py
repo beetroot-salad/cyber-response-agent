@@ -203,6 +203,40 @@ def test_a_write_over_a_hard_link_is_a_retry_and_the_host_file_is_unchanged(tool
 
 
 # ---------------------------------------------------------------------------------------------
+# a symlink at the name, pointing INSIDE the allowed tree
+
+
+def test_read_file_refuses_a_symlink_at_the_name(tmp_path):
+    """`run/link.txt -> run/notes.txt`: the gate resolves the link to a run-dir file and admits
+    it, so only the read can refuse following it. The file under its own name reads as today."""
+    deps, run = _main(tmp_path)
+    (run / "notes.txt").write_text("plain notes\n", encoding="utf-8")
+    os.symlink(run / "notes.txt", run / "link.txt")
+
+    assert "plain notes" in _tool_read_file(deps, "notes.txt")
+    _refused(lambda: _tool_read_file(deps, "link.txt"))
+
+
+def test_write_file_over_a_symlink_at_the_name_is_a_retry_and_leaves_both(tmp_path):
+    """`lessons/link.md -> lessons/real.md`: a writable lesson name the gate admits. Today the
+    guarded write refuses the link by raising out of the tool. It must be a retry; the lesson
+    the link points at is unchanged and the link itself still stands."""
+    deps, corpus = _curator(tmp_path)
+    real = corpus / "real.md"
+    real.write_text("ORIGINAL lesson\n", encoding="utf-8")
+    link = corpus / "link.md"
+    os.symlink(real, link)
+    before = _snapshot(real)
+
+    _refused(lambda: _tool_write_file(deps, "defender/lessons/link.md", "REDIRECTED\n"))
+    assert _snapshot(real) == before, "the refused write reached the linked lesson"
+    assert os.path.islink(link), "the refusal replaced the planted link"
+
+    _tool_write_file(deps, "defender/lessons/real.md", "REWRITTEN\n")
+    assert real.read_text(encoding="utf-8") == "REWRITTEN\n"
+
+
+# ---------------------------------------------------------------------------------------------
 # a symlinked holding folder that points INSIDE the allowed tree
 
 
