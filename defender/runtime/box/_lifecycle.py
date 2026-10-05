@@ -31,7 +31,7 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
 )
 from ._spec import ALIAS_PROFILE_PATH, BoxExecutor, BoxRequest, BoxSpec, Mount
 from ._alias import _probe_alias_ban
-from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
+from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _container_status, _covered, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._spec import DEFAULT_SPEC, _HostTransport
 from ._spec import _DockerTransport
 
@@ -391,85 +391,87 @@ def stop_box(box: BoxExecutor, *, docker: DockerFn = _docker) -> None:
         )
 
 
-#: The container states in which nothing in the box runs: frozen, or no longer running at all
-#: (a box that exited or died writes nothing, the scrub's own rule).
-_FROZEN_STATES = frozenset({"paused", "exited", "dead"})
+class BoxSource:
+    """One drain batch's box, started for each agent run and removed after it (#1195).
 
+    Every run reuses the request's one container name, so a box whose teardown failed and that
+    is still alive makes the next run's start refuse (`_reap_stale_before_create`): a host step
+    that follows a run's own teardown never runs beside a box of the batch, whichever layer
+    swallowed the earlier teardown fault. Under the unsandboxed opt-out a refused start falls
+    back to no box, and the guarantee goes with it (N12)."""
 
-def _container_to_hold(box: object) -> str | None:
-    """The container `box` names when there is one to freeze, else `None` (no box, or the
-    unsandboxed fallback: nothing to freeze). A box that cannot say whether it is sandboxed is a
-    `BoxFault`: an unknown box is never assumed safe."""
-    if box is None:
-        return None
-    sandboxed = getattr(box, "sandboxed", None)
-    if sandboxed is None:
-        raise BoxFault(f"cannot tell whether {box!r} is a sandboxed box; refusing to run beside it")
-    if not sandboxed:
-        return None
-    name = getattr(box, "name", None)
-    if not name:
-        raise BoxFault(f"the sandboxed box {box!r} names no container to freeze")
-    return str(name)
+    def __init__(
+        self,
+        request: BoxRequest,
+        *,
+        start_box: Callable[[BoxRequest], BoxExecutor] = start_box,
+        stop_box: Callable[[BoxExecutor], None] = stop_box,
+        docker: DockerFn = _docker,
+    ) -> None:
+        self.request = request
+        self._start_box = start_box
+        self._stop_box = stop_box
+        self._docker = docker
+        #: The last sandboxed box a run started: what the batch-end teardown must prove gone.
+        self._sandboxed: BoxExecutor | None = None
 
+    @property
+    def name(self) -> str:
+        return self.request.name
 
-def _status(docker: DockerFn, name: str) -> str | None:
-    return _inspect_field(docker, name, "{{.State.Status}}")
+    @contextlib.contextmanager
+    def run(self) -> Iterator[BoxExecutor]:
+        """One agent run's box: started, handed to the body, removed on every exit. A start
+        failure of any kind is a `BoxFault` (a link-ban failure included, chained to it), so it
+        halts the batch like any other box fault. A teardown fault is raised when nothing is in
+        flight, and logged under an in-flight exception, which then propagates."""
+        try:
+            box = self._start_box(self.request)
+        except BoxFault:
+            raise
+        except Exception as e:  # noqa: BLE001 — every start failure is a box fault (O4)
+            raise BoxFault(f"could not start the box {self.name}: {e}") from e
+        if getattr(box, "sandboxed", False):
+            self._sandboxed = box
+        in_flight = True
+        try:
+            yield box
+            in_flight = False
+        finally:
+            try:
+                self._stop_box(box)
+            except BoxFault as e:
+                if not in_flight:
+                    raise
+                _logger.error(
+                    f"teardown of the box {self.name} failed under an in-flight failure: {e} — "
+                    "the box may still be alive; the next run's start refuses beside it",
+                )
 
-
-def pause_box(box: object, *, docker: DockerFn = _docker) -> None:
-    """Freeze every process in `box`, proven (#1178): `docker pause`, then `docker inspect` must
-    report the container paused, exited or dead, else `BoxFault`. An "already paused" answer is
-    fine when the status agrees. A no-op when there is no container to freeze."""
-    name = _container_to_hold(box)
-    if name is None:
-        return
-    proc = _call(docker, ["docker", "pause", name])
-    status = _status(docker, name)
-    if status not in _FROZEN_STATES:
-        raise BoxFault(
-            f"could not freeze the box {name} (pause rc={proc.returncode}: "
-            f"{(proc.stderr or '').strip()}; status {status!r})"
-        )
+    def teardown(self) -> None:
+        """The batch-end proof that no box of this batch is alive, before the scan. No docker
+        call when no run started a sandboxed box (none ran, or the opt-out). Otherwise the name's
+        status is asked: absent is done, anything else is removed, and a failure either way is a
+        `BoxFault` — never a guess from `rm -f`'s exit code for a missing container."""
+        if self._sandboxed is None:
+            return
+        if _container_status(self._docker, self.name) is None:
+            return
+        self._stop_box(self._sandboxed)
 
 
 @contextlib.contextmanager
-def thawed(box: object, *, docker: DockerFn = _docker) -> Iterator[None]:
-    """Let `box` run for the `with` body only, and freeze it again on every exit (#1178): the
-    lane's box is frozen except while an agent runs in it.
-
-    The body runs only once the box is proven running (`docker unpause`, then `docker inspect`),
-    else `BoxFault`, after a best-effort re-freeze. On exit — a return or any exception, an interrupt included — the box is
-    frozen again by `pause_box`; a box that cannot be re-frozen is a `BoxFault` that outranks the
-    body's own exception, since the host's next step must not run beside it. A no-op when there is
-    no container to hold."""
-    name = _container_to_hold(box)
-    if name is None:
-        yield
+def box_for_run(source: BoxSource | None) -> Iterator[BoxExecutor | None]:
+    """The spawn sites' `with`: one run of `source`'s box, or no box when there is no source."""
+    if source is None:
+        yield None
         return
-    try:
-        proc = _call(docker, ["docker", "unpause", name])
-        status = _status(docker, name)
-        if status != "running":
-            raise BoxFault(
-                f"could not thaw the box {name} (unpause rc={proc.returncode}: "
-                f"{(proc.stderr or '').strip()}; status {status!r})"
-            )
-    except BaseException:
-        # A thaw that could not be proven may still have unpaused the box: freeze it again
-        # before the refusal unwinds through host steps (the claim's cleanup), best-effort —
-        # the refusal is the fault that matters.
-        with contextlib.suppress(BoxFault):
-            pause_box(box, docker=docker)
-        raise
-    try:
-        yield
-    finally:
-        pause_box(box, docker=docker)
+    with source.run() as box:
+        yield box
 
 
 def stop_and_scrub(
-    box: BoxExecutor,
+    box: BoxExecutor | BoxSource,
     tree: Path,
     *,
     stop_box: Callable[..., None],

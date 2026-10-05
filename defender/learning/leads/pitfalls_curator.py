@@ -6,10 +6,8 @@ import logging
 import re
 import sys
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from functools import partial
 from pathlib import Path
-from typing import Any
 
 from uuid import uuid4
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
@@ -559,7 +557,6 @@ def run_pitfalls(
     on_curated: Callable[[PitfallsDisposition], None] | None = None,
     lock_wait_seconds: int | None = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
-    thaw: Callable[[Any], AbstractContextManager[None]] = _box.thawed,
 ) -> int:
     """One curation tick over the pitfalls queue.
 
@@ -646,9 +643,9 @@ def run_pitfalls(
         f"{[h['path'] for h in handoffs]}"
     )
 
-    # The box runs for the curator's spawn only; the drain holds it frozen otherwise (#1178).
-    with thaw(box):
-        rc = (invoke or _invoke_pitfalls_agent)(handoffs, repo_root=repo_root, box=box)
+    # The spawn's own box, removed before the gate reads what it wrote (#1195).
+    with _box.box_for_run(box) as run_box:
+        rc = (invoke or _invoke_pitfalls_agent)(handoffs, repo_root=repo_root, box=run_box)
     if rc != 0:
         # Raised, not returned: a returned rc goes uninspected. `AuthorError` is in the drain's
         # retire set, so a repeatedly failing batch reaches the bounded retirement.

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from defender._model import model
 from pathlib import Path
 from typing import Any
@@ -11,7 +10,6 @@ from defender.learning.author import shared as _shared
 from defender.learning.author.verify_forward.checks import ForwardCheck
 from defender.learning.core.config import QueueChannel, source_first_party_key
 from defender.learning.core.lane_trees import TreeFor
-from defender.runtime import box as _box
 
 #: How long one curator git call over the worktree may take, in seconds, before the tick treats
 #: it as a git failure (`CorpusAuthorConfig.git_timeout`). Each is a local status, lookup or
@@ -105,7 +103,3 @@ class CorpusAuthorConfig:
     invoke_repair: Callable[..., dict] = _shared.invoke_repair
     #: Resolves the verifier key in the drain's preflight, only when `forward_check` is set.
     source_key: Callable[..., object] = source_first_party_key
-    #: Lets the box run for the curator and repair spawns only (#1195): the drain holds it
-    #: frozen, so the capture, settle, judge, restore, commit and rotation run beside a box
-    #: that writes nothing.
-    thaw: Callable[[Any], AbstractContextManager[None]] = _box.thawed

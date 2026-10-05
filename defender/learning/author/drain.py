@@ -795,8 +795,9 @@ def _author_batch(
     key = cfg.channel.id_key
     batch_ids = {row[key] for row in to_author}
 
-    with cfg.thaw(cfg.box):
-        result = cfg.invoke_agent(to_author, batch_id, cfg)
+    # The spawn's own box, removed before any host step reads what it wrote (#1195).
+    with box_mod.box_for_run(cfg.box) as box:
+        result = cfg.invoke_agent(to_author, batch_id, replace(cfg, box=box))
     tree = _settle_tree(cfg, state, honoured_deletions=None)
     _git_read(
         "agent report",
@@ -875,8 +876,8 @@ def _spawn_repair(cfg: CorpusAuthorConfig, bad: list[PairVerdict], batch_id: str
     resolved inside `invoke_repair`."""
     if cfg.repair_prompt is not None and not cfg.repair_prompt.is_file():
         raise FatalConfigError(f"repair prompt {cfg.repair_prompt} is not a readable file")
-    with cfg.thaw(cfg.box):
-        cfg.invoke_repair(bad, batch_id, cfg)
+    with box_mod.box_for_run(cfg.box) as box:
+        cfg.invoke_repair(bad, batch_id, replace(cfg, box=box))
 
 
 def _handle_retire(
@@ -946,10 +947,10 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
             # Clean up on every fault, member or not: a stuck tick leaves the same edits a
             # retiring one does, and leaving them wedges the channel.
             if isinstance(e, box_mod.BoxFault):
-                # A box that could not be frozen may still be writing while the undo runs, and
+                # A box whose teardown failed may still be writing while the undo runs, and
                 # the undo's own fault (a folder swapped for a link: ELOOP) must not replace
-                # this one: an `OSError` is contained above `run_batch` and the sibling
-                # curator would run beside the live box (#1195 D3a).
+                # this one: an `OSError` is contained above `run_batch`, and the box fault
+                # must halt the batch (#1195 D3a, O4).
                 try:
                     _undo_agent_edits(cfg, state.snapshot, state.baseline_stray,
                                       state.head_before)

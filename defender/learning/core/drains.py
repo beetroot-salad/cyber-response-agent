@@ -65,9 +65,9 @@ def _invoke_lead_author(
     on_done: Callable[[str | None], None], git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> None:
     """The lead-author lane's default work step for one claim. `label` is the lane's (bound in by
-    `lead_author_drain`): the held roots of its writable mounts are opened here, with the box up,
-    and closed when the claim's serve returns or raises (#1134 A3). A fault holding them
-    propagates as itself, never as a swallowed transient."""
+    `lead_author_drain`): the held roots of its writable mounts are opened here, before its
+    agent's box starts, and closed when the claim's serve returns or raises (#1134 A3). A fault
+    holding them propagates as itself, never as a swallowed transient."""
     from defender.learning.leads.lead_extraction import LeadAuthorError
 
     _logger.info("step=lead-author")
@@ -100,9 +100,10 @@ def _maybe_trigger_author(
 ) -> None:
     """The author lane's default work step for one curator. `label` is the lane's (bound in by
     `author_drain`): when the curator's queue is at threshold, the held roots of the lane's
-    writable mounts are opened here, with the box up, and closed when the curator's batch
-    returns or raises (#1134 A3). Each curator opens its own. A fault holding them propagates
-    out of this step (to `_drain_one_curator`'s stuck record), never as a swallowed crash."""
+    writable mounts are opened here, before any agent's box starts, and closed when the
+    curator's batch returns or raises (#1134 A3). Each curator opens its own. A fault holding
+    them propagates out of this step (to `_drain_one_curator`'s stuck record), never as a
+    swallowed crash."""
     threshold = env_int(threshold_env, 5)
     # Held is logged beside authorable: the count is authorable rows, not queue depth, so
     # without it a queue of permanent holds would log `pending=0` with no explanation.
@@ -230,8 +231,8 @@ def _drain_one_curator(
         trigger_author(paths, channel.file, threshold_env, module_name, pending_label, box=box)
     except drain.RETIRE_SET:
         raise
-    # A box that could not be shown frozen (or running, before a spawn) halts the batch: the
-    # sibling curator's host steps must not run beside it (#1195).
+    # A box that won't start or come down halts the batch, as it halts the lead-author lane
+    # (#1195 O4); the next run's own start would refuse beside a leftover box anyway (E2).
     except box_mod.BoxFault:
         raise
     # An interrupt leaves at once; swallowing it would record Ctrl-C as a curator fault, run
@@ -258,17 +259,15 @@ def _drain_curators(
     trigger_author: Callable[..., None],
     *,
     box: Any = None,
-    pause: Callable[[Any], None] = box_mod.pause_box,
 ) -> None:
     # The same two channels the wake gate (`_curator_queue_checks`) answers for. Both curators
     # share one tick — worktree, box, branch, PR lease — and `_drain_one_curator` contains each
     # one's non-retiring fault, so it never stops the other or its commit. A `RETIRE_SET` fault
     # propagates, so one in the first curator can cost the second its turn. This frame must not
     # raise on any other fault but a `BoxFault`, or `finish_batch` is never reached and neither
-    # curator's work is committed. The box is frozen before either curator and stays frozen
-    # except while an agent runs in it (each spawn's `thawed`); a box that cannot be shown so
-    # halts the batch, and its `BoxFault` propagates (#1195).
-    pause(box)
+    # curator's work is committed. `box` is the batch's `BoxSource`: each agent run starts its
+    # own box and removes it, and a box that won't start or come down halts the batch, its
+    # `BoxFault` propagating (#1195).
     _drain_one_curator(paths, trigger_author, paths.findings, "LEARNING_AUTHOR_THRESHOLD",
                        "author", "pending", box=box)
     _drain_one_curator(paths, trigger_author, paths.questioner_findings,
@@ -503,12 +502,9 @@ def _drain_lead_author(
     box: Any = None,
     lock_wait_seconds: int | None = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
-    pause: Callable[[Any], None] = box_mod.pause_box,
 ) -> BatchDisposition:
-    # The box is frozen before the lane's first step and stays frozen except while an agent
-    # runs in it (each spawn's `thawed`), so no host step of the tick runs beside a live box
-    # (#1178).
-    pause(box)
+    # `box` is the batch's `BoxSource`: each agent run starts its own box and removes it, so
+    # no host step of the tick runs beside a process an agent left behind (#1195).
     served = _drain_lead_author_markers(paths, run_lead_author, box=box, git_timeout=git_timeout)
     pitfalls = _drain_pitfalls(
         paths, run_pitfalls, box=box, lock_wait_seconds=lock_wait_seconds,
@@ -657,23 +653,43 @@ def _open_batch(
         return None
 
 
-def _unwind_worktree_start_fault(e: BaseException, wt: Path, branch: AuthorBranch) -> None:
-    """Destroy the worktree after a box-start fault. A `BoxFault`'s remedy may name a build
-    command relative to this about-to-be-deleted worktree, so it is re-raised with a durable
-    pointer: the commit the worktree was cut from, plus "run the build from it" only when the
-    fault carries a build remedy (a name collision or unreachable daemon isn't fixed by a
-    build). Otherwise returns and the caller re-raises `e` unchanged; non-`BoxFault` unwinds
-    spawn no git."""
-    cut_sha: str | None = None
-    if isinstance(e, box_mod.BoxFault):
-        with contextlib.suppress(Exception):
-            cut_sha = _git.git_head_sha(wt)
+def _cut_commit(wt: Path) -> str | None:
+    """The commit the batch worktree was cut from, read once at the batch's start: by the time a
+    box fault escapes, HEAD may be one of the batch's own commits. `None` when git can't say."""
     with contextlib.suppress(Exception):
-        branch.cleanup(wt)
-    if isinstance(e, box_mod.BoxFault) and cut_sha:
-        pointer = f"origin/main @ {cut_sha} — check out that commit"
-        pointer += " and run the build from it." if box_mod.carries_build_remedy(e) else "."
-        raise box_mod.BoxFault(f"{e}\n\n{pointer}") from e
+        return _git.git_head_sha(wt)
+    return None
+
+
+def _with_cut_pointer(e: box_mod.BoxFault, cut_sha: str | None) -> box_mod.BoxFault:
+    """`e` with a durable pointer to where to build from. A `BoxFault`'s remedy may name a build
+    command relative to the batch worktree, which is deleted on the way out, so the pointer
+    names the commit the worktree was cut from, plus "run the build from it" only when the
+    fault carries a build remedy (a name collision or unreachable daemon isn't fixed by a
+    build). `e` itself when there is no cut commit to name."""
+    if not cut_sha:
+        return e
+    pointer = f"origin/main @ {cut_sha} — check out that commit"
+    pointer += " and run the build from it." if box_mod.carries_build_remedy(e) else "."
+    return box_mod.BoxFault(f"{e}\n\n{pointer}")
+
+
+def _batch_source(
+    paths: LoopPaths, branch: AuthorBranch, batch_id: str, wt: Path, label: DrainLabel, *,
+    start_box: Callable[..., Any], stop_box: Callable[..., None],
+) -> box_mod.BoxSource:
+    """The batch's `BoxSource`, built after the worktree and wake checks so each run's box
+    mounts exactly this batch's needs. A fault building it unwinds the worktree and branch
+    already minted."""
+    try:
+        return box_mod.BoxSource(
+            _drain_box_request(wt, batch_id, label, paths),
+            start_box=start_box, stop_box=stop_box,
+        )
+    except BaseException:
+        with contextlib.suppress(Exception):
+            branch.cleanup(wt)
+        raise
 
 
 def _run_worktree_batch(
@@ -687,8 +703,13 @@ def _run_worktree_batch(
     stop_box: Callable[..., None] = box_mod.stop_box,
     scrub: Callable[[Path], None] = box_mod.scrub,
 ) -> int:
-    """One batch: deliver what an earlier tick retained, then worktree, box, `do_work`,
-    scrub, consume, `finish_batch`, cleanup.
+    """One batch: deliver what an earlier tick retained, then worktree, `do_work`, scrub,
+    consume, `finish_batch`, cleanup.
+
+    The batch starts no box. `do_work` is handed the batch's `BoxSource`, and each agent run in
+    it starts its own box and removes it (#1195); the batch-end teardown proves no box of the
+    batch is left before the scan. A `BoxFault` escaping is re-raised naming the commit the
+    worktree was cut from.
 
     `do_work` may return a `BatchDisposition` (the lead-author lane does; the lessons lane
     returns `None`), applied once the tree has passed the scrub. A push or PR that then fails
@@ -703,13 +724,9 @@ def _run_worktree_batch(
         return 0
     batch_id, wt = opened
 
-    # Started after the worktree and wake checks, so it mounts exactly this batch's needs. A
-    # startup fault must unwind the worktree and branch already minted.
-    try:
-        box = start_box(_drain_box_request(wt, batch_id, label, paths))
-    except BaseException as e:
-        _unwind_worktree_start_fault(e, wt, branch)
-        raise
+    cut_sha = _cut_commit(wt)
+    source = _batch_source(paths, branch, batch_id, wt, label,
+                           start_box=start_box, stop_box=stop_box)
 
     wt_paths = paths.with_repo_root(wt)
     pr = None
@@ -717,21 +734,24 @@ def _run_worktree_batch(
     consumed = False
     delivered = True
     try:
-        # Tear down and scan on any exit from do_work (`stop_and_scrub` owns the ordering and
-        # exception preference). The scan precedes consumption and finish_batch's push; a
-        # failed teardown blocks all three.
+        # Prove no box is left and scan on any exit from do_work (`stop_and_scrub` owns the
+        # ordering and exception preference). The scan precedes consumption and finish_batch's
+        # push; a failed teardown blocks all three.
         work_ok = False
         try:
-            disposition = do_work(wt_paths, box=box)
+            disposition = do_work(wt_paths, box=source)
             work_ok = True
         finally:
             box_mod.stop_and_scrub(
-                box, wt, stop_box=stop_box, scrub_tree=scrub, in_flight=not work_ok,
+                source, wt, stop_box=lambda s: s.teardown(), scrub_tree=scrub,
+                in_flight=not work_ok,
             )
         if disposition is not None:
             disposition.apply(paths)
         consumed = True
         pr, delivered = _land_batch(paths, branch, batch_id, wt, label)
+    except box_mod.BoxFault as e:
+        raise _with_cut_pointer(e, cut_sha) from e
     except box_mod.RunTainted as taint:
         # The `finally` destroys this tree, which is the only copy of what the box planted
         # (nothing was consumed or pushed), so preserve it for a human. An except clause
