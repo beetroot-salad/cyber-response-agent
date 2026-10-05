@@ -28,7 +28,7 @@ from defender._episode_paths import EpisodePaths
 from defender.run_repository import artifact_file
 from pydantic import ValidationInfo, field_validator
 
-from defender.scripts.gather_tools.record_query import _json_safe_params, _request_key
+from defender._query_rules import _json_safe_params, _request_key
 
 #: What produced a served payload. Any other value is a writer inventing a decision class.
 BASE = "base"
@@ -102,7 +102,7 @@ def _is_json(text: str) -> bool:
 def request_key(system: str, verb: str, params: Any) -> str:
     """The canonical identity of one question.
 
-    Delegates to `record_query._request_key` so this table and `executed_queries.jsonl` key the
+    Delegates to `_query_rules._request_key` so this table and `executed_queries.jsonl` key the
     same `(system, verb, params)` identically and can be joined.
     """
     return _request_key(system, verb, params)

@@ -12,7 +12,11 @@ runs every rule that needs no data root: it never resolves `DEFENDER_DATA_ROOT`,
 `defender_dir`/`box_mounted` containment (that belongs to a process that mounts), and
 grammar-checks `agent/.tenant-id` only when present (M8). Exit status (N17): 0 clean, 1 a
 finding or a refusal, 2 a usage error (`<id>` and `--folder` are mutually exclusive, exactly one
-required). A finding prints through `[tenant.py] …`, never a traceback.
+required). A finding prints through `[tenant.py] …`, never a traceback. A census that cannot be
+taken is still a finding, exit 1 (#1159 O2): its line says the folder's table was not checked
+against the running checkout and gives the census's own cause, which names the side that failed
+— this machine's git, or the running checkout (#1159 O1). Everything that needs no census is
+still judged (#1159 review).
 
 Driven as the operator runs it, as a process. The tests about WHICH tree the census comes from
 run the command out of a tmp COPY of this checkout (`_spec1120.tmp_checkout`) carrying one more
@@ -45,12 +49,24 @@ EXTRA_SYSTEM = "extra"
 EXTRA_PAIR = "extra.verb"
 EXTRA_ADAPTER = 'VERBS = {"verb": None}\n'
 
-#: An adapter whose source the cold roster read cannot parse (M6: a non-zero exit naming it).
-BROKEN_SYSTEM = "broken"
-BROKEN_ADAPTER = "VERBS = {\n    'verb': (\n"
+BROKEN_SYSTEM = H.BROKEN_SYSTEM
+BROKEN_ADAPTER = H.BROKEN_ADAPTER
 
 #: The learning-state knob whose overlap with the data root `resolve_data_root` refuses.
 OVERLAP_ENV = H.LEARNING_STATE_ENV
+
+#: #1159: what `check` says when the census cannot be taken — the folder's table went unjudged
+#: against the running checkout. A statement of what was not checked, never a verdict on the
+#: folder: the folder's own findings print beside it.
+CENSUS_NOT_TAKEN = "was not checked against the running checkout's adapters"
+
+#: The census's own causes (#1159 O1), each naming the side that failed: this machine's git,
+#: or the running checkout's adapters or its committed system markers.
+GIT_ABSENT_CAUSE = "git is not available on PATH on this machine"
+GIT_UNRUNNABLE_CAUSE = "git cannot be run on this machine"
+ADAPTER_CAUSE = "have an adapter the cold verb reader saw no verb in"
+MARKERS_CAUSE = "cannot resolve its declared systems"
+HEAD_CAUSE = "is not resolvable at HEAD"
 
 
 # ======================================================================================
@@ -92,6 +108,35 @@ def _check_id(root: Path, *extra: str, **kw: Any):
 def _check_folder(folder: Path, **kw: Any):
     """`tenant.py check --folder <folder>` with `DEFENDER_DATA_ROOT` unset."""
     return H.check(tenant_py, None, "--folder", str(folder), **kw)
+
+
+def _unparseable_mapping(folder: Path) -> Path:
+    """Break `folder`'s case-history mapping.yaml so it does not parse — a finding about the
+    folder that needs no census. Returns the file."""
+    mapping = folder / "settings" / "systems" / "case-history" / "mapping.yaml"
+    mapping.write_text("fields: {unclosed: [\n", encoding="utf-8")
+    return mapping
+
+
+def _census_blind_line(proc: subprocess.CompletedProcess, *, folder: Path, cause: str,
+                       names: tuple[str, ...] = (), also: tuple[str, ...] = ()) -> tuple[str, str]:
+    """#1159: `proc` is a `check` over `folder` whose census could not be taken. It exits
+    EXACTLY 1 (O2) naming each of `also`, and exactly ONE line says `folder`'s table was not
+    checked against the running checkout: that line names the table, then gives the census's
+    `cause` (O1: the cause names the side that failed) and each of `names` after the framing.
+    Returns `(output, the census line)`."""
+    text = H.assert_refused(proc, CENSUS_NOT_TAKEN, *also)
+    lines = [ln for ln in text.splitlines() if CENSUS_NOT_TAKEN in ln]
+    assert len(lines) == 1, f"the census line is not printed exactly once:\n{text}"
+    line = lines[0]
+    table = verb_dispositions.dispositions_path(folder / "settings")
+    assert str(table) in line or str(table.resolve()) in line, (
+        f"the census line does not name the table it left unchecked, {table}:\n{line}")
+    framing = line.index(CENSUS_NOT_TAKEN)
+    for said in (cause, *names):
+        assert said in line[framing:], (
+            f"the census line does not give {said!r} after its framing (#1159 O1):\n{line}")
+    return text, line
 
 
 @pytest.fixture(scope="module")
@@ -212,19 +257,25 @@ def test_1120_check_takes_the_census_from_the_code_it_runs(
 def test_1120_check_exits_non_zero_naming_an_adapter_module_that_fails_to_import(
         tmp_path: Path) -> None:
     """An adapter module the census cannot read (a source that does not parse) makes `tenant.py
-    check` exit non-zero naming the module's system, never 0 over a census that silently lacks
-    it (M6). Run out of a tmp copy of the checkout holding broken_adapter.py. The positive
-    control: the same copy without that module checks the same folder clean."""
+    check` exit EXACTLY 1 naming the module's system, never 0 over a census that silently lacks
+    it (M6; #1159 O2: a census-blind check is a finding, exit 1, no other code). Run out of a
+    tmp copy of the checkout holding broken_adapter.py, over a sound folder. The census line
+    says the folder's table was not checked, and its cause names the side that failed (#1159
+    O1): the adapter the cold reader saw nothing in, under the tmp COPY's root (the running
+    checkout, whose path is neither the cwd the command starts in nor the folder's). A folder
+    whose mapping.yaml does not parse still has that finding printed beside it (O2). The
+    positive control: the same copy without that module checks the same folder clean."""
     checkout = H.tmp_checkout(tmp_path / "checkout")
     folder = _folder(tmp_path, "tenant")
     script = _copy_script(checkout)
     H.assert_clean(H.run_script(script, "check", "--folder", str(folder), root=None))
     H.add_adapter(checkout, BROKEN_SYSTEM, BROKEN_ADAPTER)
-    proc = H.run_script(script, "check", "--folder", str(folder), root=None)
-    H.assert_ran(proc)
-    text = H.output(proc)
-    assert proc.returncode != 0, f"check exited 0 over a census missing a broken adapter:\n{text}"
-    assert BROKEN_SYSTEM in text, f"the failure does not name the broken adapter:\n{text}"
+    blind = {"folder": folder, "cause": ADAPTER_CAUSE,
+             "names": (BROKEN_SYSTEM, str(checkout.resolve()))}
+    _census_blind_line(H.run_script(script, "check", "--folder", str(folder), root=None), **blind)
+    mapping = _unparseable_mapping(folder)
+    _census_blind_line(H.run_script(script, "check", "--folder", str(folder), root=None),
+                       **blind, also=(str(mapping),))
 
 
 def test_1120_s6_defender_dir_env_names_another_tree(
@@ -795,6 +846,24 @@ def _git_absent(tmp_path: Path, _knowledge: Path):
     return {"PATH": str(bare)}, r"(?<![.\w/])git(?![\w/])", lambda: None
 
 
+def _git_unrunnable(tmp_path: Path, _knowledge: Path):
+    """The only `git` on PATH is a file nobody may execute: starting it raises PermissionError,
+    not FileNotFoundError (#1159 review: it crashed `check` with a traceback). Root too — exec
+    needs at least one execute bit whoever runs it."""
+    bin_dir = tmp_path / "bin-with-unrunnable-git"
+    bin_dir.mkdir()
+    (bin_dir / "git").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (bin_dir / "git").chmod(0o644)
+    probe = subprocess.run(  # noqa: S603 — the test's own interpreter
+        [sys.executable, "-c", "import subprocess\ntry:\n    subprocess.run(['git'])\n"
+         "except PermissionError:\n    raise SystemExit(0)\nraise SystemExit(1)"],
+        env=H.tenant_env(None, PATH=str(bin_dir)), capture_output=True, text=True, check=False)
+    assert probe.returncode == 0, (
+        f"precondition: starting git on the reduced PATH does not raise PermissionError:\n"
+        f"{probe.stdout}{probe.stderr}")
+    return {"PATH": str(bin_dir)}, re.escape("git cannot be run"), lambda: None
+
+
 def _chown_tree(top: Path, uid: int) -> None:
     os.lchown(top, uid, uid)
     for parent, dirs, files in os.walk(top):
@@ -834,6 +903,7 @@ def _without(text: str, *spans: str) -> str:
 
 GIT_CANNOT_ANSWER: list[Any] = [
     pytest.param(_git_absent, id="git:absent"),
+    pytest.param(_git_unrunnable, id="git:not-executable"),
     pytest.param(_owned_by_another_uid, id="git:dubious-ownership", marks=pytest.mark.skipif(
         os.geteuid() != 0,
         reason="a clone owned by another uid needs root to chown; CI runs non-root")),
@@ -868,3 +938,126 @@ def test_1120_check_fails_closed_when_git_cannot_say_the_tenant_id_is_committed(
         repair()
     H.assert_clean(_check_id(root))
     H.assert_clean(_check_folder(knowledge))
+
+
+
+
+# ======================================================================================
+# #1159 (human, 2026-10-03; reshaped after review): a census that cannot be taken stays a
+# finding — exit EXACTLY 1 (O2) — and its line says what went unjudged (the folder's table,
+# against the running checkout) and gives the census's own cause, which names the side that
+# failed (O1): this machine's git, or the running checkout. Never a verdict on the folder:
+# everything that needs no census — the settings parse, the table loading, the lead-zero
+# agreement, V16 — is still judged and printed. The broken-adapter cell is
+# test_1120_check_exits_non_zero_naming_an_adapter_module_that_fails_to_import.
+# ======================================================================================
+
+#: The two ways this machine's git fails the census, each with the census's cause and V16's
+#: reason on its own line.
+GIT_FAILS: list[Any] = [
+    pytest.param(_git_absent, GIT_ABSENT_CAUSE, "git is not available on PATH", id="git:absent"),
+    pytest.param(_git_unrunnable, GIT_UNRUNNABLE_CAUSE, "git cannot be run",
+                 id="git:not-executable"),
+]
+
+
+@pytest.mark.parametrize(("fault", "cause", "unverified_reason"), GIT_FAILS)
+def test_1159_check_says_this_machines_git_failed_and_exits_1(
+        tmp_path: Path, fault: GitFault, cause: str, unverified_reason: str) -> None:
+    """With git absent from PATH, or present but not executable (PermissionError, which once
+    crashed `check` with a traceback), the census cannot read the running checkout's committed
+    system markers. Over a SOUND plain folder, `tenant.py check --folder` exits exactly 1 with
+    the census line alone, its cause naming this machine's git (#1159 O1; K1: a plain folder is
+    exempt from V16). Over a SOUND clone committing acme's id (K2), `check --folder
+    <knowledge>` and `check acme` each exit exactly 1 printing BOTH the census line and, on a
+    line of its own, V16's "cannot verify .tenant-id is committed" with git's reason (O2). The
+    positive control: git back on PATH, the plain folder checks clean."""
+    folder = _folder(tmp_path, "tenant")
+    root = tmp_path / "data"
+    knowledge = H.cloned_tenant(tmp_path / "src", root)
+    H.plant_row(root)
+    env, _reason, _repair = fault(tmp_path, knowledge)
+
+    text, _line = _census_blind_line(_check_folder(folder, **env), folder=folder, cause=cause)
+    assert H.CANNOT_VERIFY_TENANT_ID not in text, (
+        f"a plain folder (no git work tree) is exempt from the committed-.tenant-id rule:\n{text}")
+
+    for proc in (_check_folder(knowledge, **env), _check_id(root, **env)):
+        text, _line = _census_blind_line(proc, folder=knowledge, cause=cause,
+                                         also=(H.CANNOT_VERIFY_TENANT_ID,))
+        unverified = [ln for ln in text.splitlines() if H.CANNOT_VERIFY_TENANT_ID in ln]
+        assert len(unverified) == 1, f"V16's line is not printed once (#1159 O2):\n{text}"
+        assert CENSUS_NOT_TAKEN not in unverified[0], (
+            f"V16's line is not its own line beside the census line (#1159 O2):\n{text}")
+        assert unverified_reason in unverified[0], (
+            f"V16's line does not give git's reason ({unverified_reason!r}):\n{text}")
+
+    H.assert_clean(_check_folder(folder))
+
+
+def _unparseable_table(folder: Path) -> str:
+    table = verb_dispositions.dispositions_path(folder / "settings")
+    text = table.read_text(encoding="utf-8")
+    table.write_text(text.replace("  cmdb:", "<<<<<<< HEAD\n  cmdb:", 1), encoding="utf-8")
+    return str(table)
+
+
+def _absent_lead_zero_template(folder: Path) -> str:
+    return _lead_zero_disagreement(folder)[1]
+
+
+def _mapping_fault(folder: Path) -> str:
+    return str(_unparseable_mapping(folder))
+
+
+#: Faults in the folder that no census is needed to find (#1159 review: a census that could not
+#: be taken once skipped the table and lead-zero checks with it).
+NO_CENSUS_FAULTS = [
+    pytest.param(_unparseable_table, id="verb-grants.yaml-unparseable"),
+    pytest.param(_absent_lead_zero_template, id="lead-zero-template-absent"),
+    pytest.param(_mapping_fault, id="mapping.yaml-unparseable"),
+]
+
+
+def _findings_of(text: str) -> set[str]:
+    return {ln for ln in text.splitlines() if ln.startswith("[tenant.py] ")}
+
+
+@pytest.mark.parametrize("fault", NO_CENSUS_FAULTS)
+def test_1159_a_census_not_taken_still_judges_what_needs_none(
+        tmp_path: Path, fault: Callable[[Path], str]) -> None:
+    """A folder with a fault no census is needed to find — its verb-grants.yaml does not parse,
+    its lead-zero.yaml names a template the running catalog lacks, or its case-history
+    mapping.yaml does not parse. Checked with the census taken, `check --folder` exits 1 naming
+    the fault. Checked with no git on PATH (census not taken), it exits exactly 1 printing
+    EVERY finding the sighted check printed, plus the census line and nothing else: losing
+    the census costs only the judgement that needs it. The oracle is the same command with git
+    on PATH, never the census re-run in the test. The positive control: the folder before the
+    fault checks clean."""
+    folder = _folder(tmp_path, "tenant")
+    H.assert_clean(_check_folder(folder))
+    named = fault(folder)
+    sighted = _findings_of(H.assert_refused(_check_folder(folder), named))
+    env, _reason, _repair = _git_absent(tmp_path, folder)
+    text, line = _census_blind_line(_check_folder(folder, **env), folder=folder,
+                                    cause=GIT_ABSENT_CAUSE, also=(named,))
+    assert _findings_of(text) - {line} == sighted, (
+        "with the census not taken, check does not print exactly the findings that need no "
+        "census:\nsighted:\n" + "\n".join(sorted(sighted)) + f"\nblind:\n{text}")
+
+
+def test_1159_check_names_the_running_checkout_when_head_cannot_be_resolved(
+        tmp_path: Path) -> None:
+    """The running checkout is a copy whose `.git` is gone, so its declared systems are not
+    resolvable at HEAD. `check --folder` over a sound folder exits EXACTLY 1, and the census
+    line's cause names the running checkout (the tmp COPY's root) as the side that failed and
+    says HEAD did not resolve — never a generic "census unavailable" (#1159 O1). The positive
+    control: the same copy before `.git` was removed checks the folder clean."""
+    checkout = H.tmp_checkout(tmp_path / "checkout")
+    folder = _folder(tmp_path, "tenant")
+    script = _copy_script(checkout)
+    H.assert_clean(H.run_script(script, "check", "--folder", str(folder), root=None))
+    shutil.rmtree(checkout / ".git")
+    _census_blind_line(H.run_script(script, "check", "--folder", str(folder), root=None),
+                       folder=folder, cause=MARKERS_CAUSE,
+                       names=(HEAD_CAUSE, str(checkout.resolve())))

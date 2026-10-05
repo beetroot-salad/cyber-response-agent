@@ -80,5 +80,6 @@ def test_a_baselined_site_passes_and_a_missing_scope_is_exit_2(tmp_path):
     assert _GATE.main([], scope=tmp_path / "absent", baseline_path=baseline) == 2
 
 
+@pytest.mark.gate
 def test_the_real_tree_is_clean():
     assert _GATE.main([]) == 0

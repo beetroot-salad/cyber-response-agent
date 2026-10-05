@@ -851,7 +851,7 @@ demands:
      cites: [PB3]}
   - {id: d_an_unrecognized_drain_label_never_mounts_the_defender_corpus, kind: negative, form: test,
      minted_from: "F-F half 2, minted at §7 out of what was a `handoff.drops` entry: `_drain_box_request` is a two-way if/else, so a naive THIRD drain label falls into the `else` and mounts the DEFENDER corpus rw — a silent misroute of the same failure class as a silent widen (P-B's red flag)",
-     discharged_by: test_an_unrecognized_drain_label_mounts_no_lesson_corpus_writable,
+     discharged_by: test_an_unrecognized_drain_label_gets_no_box_at_all,
      binds: [_drain_box_request, drain_box_rw_set, "lessons_questioner_dir.access[drain-box]",
              "interacts(_drain_box_request->drain_box_rw_set)"]}
 

@@ -78,7 +78,7 @@ from defender.runtime.branch._family import (
 from defender.runtime.circuit_breaker import DENIED_ERROR_CLASS, INFRA_ERROR_CLASS
 from defender.runtime.run_end import RunEnd, parse_record
 from defender.runtime.verbs import is_system_name
-from defender.scripts.gather_tools.record_query import (
+from defender._query_rules import (
     ABOVE_GUARD_QUERY_ID,
     BASH_SHIM_QUERY_ID,
     DENIED_QUERY_ID,

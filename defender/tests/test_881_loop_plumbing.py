@@ -239,7 +239,9 @@ class _QueueFileThatLetsAnAppenderIn(type(Path())):
         return derived
 
 
-def _tick_meeting_an_appender_at_the_unkeyable_retirement(paths, ch) -> BaseException | None:
+def _tick_meeting_an_appender_at_the_unkeyable_retirement(
+    paths, ch, *, lock_wait: int = 1,
+) -> BaseException | None:
     """One real `run_batch` whose unkeyable retirement — and only that — meets a held append
     lock. Returns whatever escaped the tick.
 
@@ -247,8 +249,10 @@ def _tick_meeting_an_appender_at_the_unkeyable_retirement(paths, ch) -> BaseExce
     foreground, from inside the drain's own call stack, in the window the retirement opens
     between releasing the lock and asking for it again (see
     `_QueueFileThatLetsAnAppenderIn`). By the time the rotation runs the lock is held, so its
-    bounded wait is the only thing that can expire. `repo_lock_wait_seconds=1` is that
-    deadline, as in `tests/test_drain719_hardening.py`.
+    bounded wait is the only thing that can expire. `repo_lock_wait_seconds=lock_wait` is that
+    deadline: 1 by default, as in `tests/test_drain719_hardening.py`; 0 (one try, as the drain
+    takes it in `tests/test_952_consumption_follows_durability.py`) where the caller's subject
+    is what the expiry leaves behind, not the wait.
     """
     appender = h.Holder(ch.append_lock)
 
@@ -262,7 +266,7 @@ def _tick_meeting_an_appender_at_the_unkeyable_retirement(paths, ch) -> BaseExce
         ch, file=_QueueFileThatLetsAnAppenderIn.over(ch.file, _an_appender_arrives)
     )
     cfg = h.cfg_for(
-        paths, "findings", channel=watched, repo_lock_wait_seconds=1,
+        paths, "findings", channel=watched, repo_lock_wait_seconds=lock_wait,
         invoke_agent=h.recording(h.committing("881-o4")),
     )
     tick = h.Background(lambda: drain.run_batch(cfg=cfg))
@@ -466,7 +470,8 @@ def test_881_stuck_unkeyable_ticks_fold_by_row_content_and_not_by_an_empty_id_li
     same_ch = h.channel_of(same, "findings")
     h.seed(same_ch, [_unkeyable("a/0")])
     for tick in (1, 2):
-        escaped = _tick_meeting_an_appender_at_the_unkeyable_retirement(same, same_ch)
+        escaped = _tick_meeting_an_appender_at_the_unkeyable_retirement(same, same_ch,
+                                                                        lock_wait=0)
         assert isinstance(escaped, TimeoutError), f"tick {tick} ended as {escaped!r}"
     records = h.stuck_records(same_ch)
     assert [r["fault_class"] for r in records] == ["TimeoutError", "TimeoutError"]
@@ -487,7 +492,8 @@ def test_881_stuck_unkeyable_ticks_fold_by_row_content_and_not_by_an_empty_id_li
     )
     for row in poison:
         h.seed(diff_ch, [row])
-        escaped = _tick_meeting_an_appender_at_the_unkeyable_retirement(different, diff_ch)
+        escaped = _tick_meeting_an_appender_at_the_unkeyable_retirement(different, diff_ch,
+                                                                        lock_wait=0)
         assert isinstance(escaped, TimeoutError), f"{row['subject']!r} ended as {escaped!r}"
     records = h.stuck_records(diff_ch)
     assert [r["consecutive_ticks"] for r in records] == [1, 1], (

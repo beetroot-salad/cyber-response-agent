@@ -25,7 +25,7 @@ import os
 import sys
 from pathlib import Path
 
-# Hand-rolled rather than `scripts/_venv.reexec_into_venv`: this must run before any
+# Hand-rolled rather than `_venv.reexec_into_venv`: this must run before any
 # `defender.*` import, and reaching that helper is one.
 _DEFENDER_DIR = Path(__file__).resolve().parent
 _VENV_PY = _DEFENDER_DIR / ".venv" / "bin" / "python3"

@@ -36,6 +36,7 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -330,26 +331,32 @@ def test_s7_j16_create_lane_complete_or_absent(tmp_path):
     # (4) the crash
     crash_root = tmp_path / "crash"
     env = H.setup_env(None)
-    torn: list[str] = []
-    for lane, kills in (("record", 24), ("row", 8)):
-        for kill in range(kills):
-            root = crash_root / f"{lane}-{kill}"
-            root.mkdir(parents=True)
-            child = subprocess.Popen(  # noqa: S603 — fixed argv, the test's own interpreter
-                [sys.executable, "-c", _CRASH_CHILD[lane], str(root)], env=env,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            try:
-                assert child.stdout.readline().strip() == "ready", child.stderr.read()
-                time.sleep(random.uniform(0.02, 0.25))
-                if child.poll() is not None:
-                    pytest.fail(f"the {lane} create-lane child died on its own: "
-                                f"{child.stderr.read()}")
-                child.send_signal(signal.SIGKILL)
-            finally:
-                child.wait(timeout=30)
-                child.stdout.close()
-                child.stderr.close()
-            torn += [f"{lane} kill {kill}: {b}" for b in _crash_leftovers(root)]
+    def crash_one(lane: str, kill: int) -> list[str]:
+        root = crash_root / f"{lane}-{kill}"
+        root.mkdir(parents=True)
+        child = subprocess.Popen(  # noqa: S603 — fixed argv, the test's own interpreter
+            [sys.executable, "-c", _CRASH_CHILD[lane], str(root)], env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            ready = child.stdout.readline().strip()
+            if ready != "ready":
+                return [f"{lane} kill {kill}: child did not say ready: {child.stderr.read()}"]
+            time.sleep(random.uniform(0.02, 0.25))
+            if child.poll() is not None:
+                return [f"{lane} kill {kill}: the create-lane child died on its own: "
+                        f"{child.stderr.read()}"]
+            child.send_signal(signal.SIGKILL)
+        finally:
+            child.wait(timeout=30)
+            child.stdout.close()
+            child.stderr.close()
+        return [f"{lane} kill {kill}: {b}" for b in _crash_leftovers(root)]
+
+    # The 32 kills are independent (own dir, own child), so they run a few at a time: each is
+    # mostly interpreter start-up and a sleep.
+    jobs = [(lane, kill) for lane, kills in (("record", 24), ("row", 8)) for kill in range(kills)]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        torn = [entry for found in pool.map(lambda j: crash_one(*j), jobs) for entry in found]
     assert torn == [], "a crash left a torn or stray entry:\n" + "\n".join(torn)
 
 

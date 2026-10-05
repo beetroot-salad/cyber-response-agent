@@ -1,0 +1,688 @@
+{
+ "_meta": {
+  "base": "80888efb",
+  "how": "At 80888efb, by the group's capture script: the four path-scoped gates' own scans over a tmp tree holding every base defender/scripts module with the test's plant appended in place; the env-read lint's _swept_files over the checkout; the lint scope lists' and tree-read list's dead entries; baseline keys and spec-flow profile rows naming defender/scripts paths; _pointers1080.dead_scripts_pointers over the checkout; defender's tracked top-level folders; each staying command's --help usage block run from a tmp working directory; ci.yml's run: lines invoking them.",
+  "python": "3.11.15"
+ },
+ "plant_reported_at_base": {
+  "defender/scripts/_venv.py": [
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/adapters/_stub_transport.py": [
+   "env_reads",
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/adapters/change_mgmt_adapter.py": [
+   "env_reads",
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/adapters/cmdb_adapter.py": [
+   "env_reads",
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/adapters/confinement.py": [
+   "env_reads",
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/adapters/elastic_adapter.py": [
+   "env_reads",
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/adapters/esql_text.py": [
+   "env_reads",
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/adapters/faults.py": [
+   "env_reads",
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/adapters/host_state_adapter.py": [
+   "env_reads",
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/adapters/identity_adapter.py": [
+   "env_reads",
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/adapters/tacit_knowledge_adapter.py": [
+   "env_reads",
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/adapters/threat_intel_adapter.py": [
+   "env_reads",
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/adapters/ticket_adapter.py": [
+   "env_reads",
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/box_image.py": [
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/case_history/case_ticket.py": [
+   "env_reads",
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/case_history/ticket_writer.py": [
+   "env_reads",
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/gather_tools/payload_view.py": [
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/gather_tools/record_query.py": [
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/gather_tools/sql.py": [
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/lessons/_lessons_common.py": [
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/lessons/lessons_fm.py": [
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/lessons/lessons_frontier.py": [
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/policy_cli.py": [
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/pricing.py": [
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/tacit_cli.py": [
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/tenant.py": [
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/visualize/_mirror_write.py": [
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/visualize/_page_failed.py": [
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/visualize/visualize_data.py": [
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/visualize/visualize_episode.py": [
+   "run_records",
+   "tree_read",
+   "tree_write"
+  ],
+  "defender/scripts/visualize/visualize_messages.py": [
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/visualize/visualize_primitives.py": [
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/visualize/visualize_run.py": [
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/visualize/visualize_runtime.py": [
+   "run_records",
+   "tree_write"
+  ],
+  "defender/scripts/workspace_map.py": [
+   "run_records",
+   "tree_write"
+  ]
+ },
+ "env_swept_at_base": [
+  "defender/learning/branch/estate/applier.py",
+  "defender/learning/branch/estate/lookups.py",
+  "defender/learning/branch/estate/registry.py",
+  "defender/learning/branch/estate/stagers/dispatch.py",
+  "defender/learning/branch/estate/stagers/elastic.py",
+  "defender/learning/branch/staging.py",
+  "defender/runtime/lead_zero/__init__.py",
+  "defender/runtime/lead_zero/_agreement.py",
+  "defender/runtime/lead_zero/_capture.py",
+  "defender/runtime/lead_zero/_items.py",
+  "defender/runtime/lead_zero/_render.py",
+  "defender/runtime/lead_zero/_spec.py",
+  "defender/runtime/lead_zero_config.py",
+  "defender/scripts/adapters/_stub_transport.py",
+  "defender/scripts/adapters/change_mgmt_adapter.py",
+  "defender/scripts/adapters/cmdb_adapter.py",
+  "defender/scripts/adapters/confinement.py",
+  "defender/scripts/adapters/elastic_adapter.py",
+  "defender/scripts/adapters/esql_text.py",
+  "defender/scripts/adapters/faults.py",
+  "defender/scripts/adapters/host_state_adapter.py",
+  "defender/scripts/adapters/identity_adapter.py",
+  "defender/scripts/adapters/tacit_knowledge_adapter.py",
+  "defender/scripts/adapters/threat_intel_adapter.py",
+  "defender/scripts/adapters/ticket_adapter.py",
+  "defender/scripts/case_history/case_ticket.py",
+  "defender/scripts/case_history/ticket_writer.py"
+ ],
+ "scope_dead_at_base": {
+  "lint_ci_hygiene.py::PATH_ALLOWLIST": [
+   "defender/learning/actor-settings.json"
+  ],
+  "lint_ci_hygiene.py::EXCLUDED_PREFIXES": [
+   "defender/skills/gather/queries/host-query/",
+   "defender/skills/gather/queries/stub-cmdb/",
+   "defender/skills/gather/queries/stub-iam/",
+   "defender/skills/gather/queries/wazuh/",
+   "defender/skills/host-query/",
+   "defender/skills/stub-cmdb/",
+   "defender/skills/stub-iam/",
+   "defender/skills/wazuh/"
+  ],
+  "lint_shippable_surface.py::EXCLUDED_FILES": [
+   "defender/learning/actor-settings.json"
+  ],
+  "lint_tree_read_follows_link.py::LINT_TREE_READER_MODULES": [
+   "runtime/branch.py"
+  ]
+ },
+ "tree_read_listed_at_base": [
+  "_provenance.py",
+  "learning/branch/archive.py",
+  "learning/branch/capture.py",
+  "learning/branch/cli.py",
+  "learning/branch/episode.py",
+  "learning/branch/ledger.py",
+  "learning/branch/questioner/__init__.py",
+  "learning/branch/review.py",
+  "learning/branch/staging.py",
+  "learning/branch/timing.py",
+  "learning/core/persist.py",
+  "learning/judge/__init__.py",
+  "learning/judge/enqueue.py",
+  "learning/judge/family.py",
+  "learning/judge/render.py",
+  "learning/lead_repository.py",
+  "run_common.py",
+  "runtime/branch.py",
+  "runtime/branch/_family.py",
+  "scripts/visualize/visualize_episode.py"
+ ],
+ "tree_read_dead_at_base": [
+  "runtime/branch.py"
+ ],
+ "baseline_keys_naming_scripts": {
+  "lint_unnarrowed_parse_baseline.json": [
+   "defender/scripts/adapters/_stub_transport.py:_request:unnarrowed-parse",
+   "defender/scripts/adapters/host_state_adapter.py:container_inspect:unnarrowed-parse"
+  ],
+  "lint_vulture_baseline.json": [
+   "defender/scripts/case_history/case_ticket.py: unused function 'alert_event_time' (60% confidence)",
+   "defender/scripts/case_history/case_ticket.py: unused function 'signature_label' (60% confidence)",
+   "defender/scripts/case_history/case_ticket.py: unused function 'ticket_created' (60% confidence)",
+   "defender/scripts/case_history/case_ticket.py: unused function 'ticket_event_time' (60% confidence)",
+   "defender/scripts/gather_tools/record_query.py: unused function 'derive_system' (60% confidence)",
+   "defender/scripts/tenant.py: unused attribute 'dont_write_bytecode' (60% confidence)"
+  ]
+ },
+ "profile_rows_naming_scripts": [
+  {
+   "resource": "ticket_store",
+   "side": "writers",
+   "sink": "defender/scripts/case_history/ticket_writer.py::open_case_ticket",
+   "defined_at_base": true
+  },
+  {
+   "resource": "ticket_store",
+   "side": "writers",
+   "sink": "defender/scripts/case_history/ticket_writer.py::record_case_ticket",
+   "defined_at_base": true
+  },
+  {
+   "resource": "ticket_store",
+   "side": "readers",
+   "sink": "defender/scripts/adapters/ticket_adapter.py::list_tickets",
+   "defined_at_base": true
+  },
+  {
+   "resource": "ticket_store",
+   "side": "readers",
+   "sink": "defender/scripts/adapters/ticket_adapter.py::get_ticket",
+   "defined_at_base": true
+  },
+  {
+   "resource": "ticket_store",
+   "side": "readers",
+   "sink": "defender/scripts/adapters/ticket_adapter.py::case_opened_at",
+   "defined_at_base": true
+  },
+  {
+   "resource": "ticket_store",
+   "side": "readers",
+   "sink": "defender/scripts/adapters/ticket_adapter.py::health_check",
+   "defined_at_base": true
+  },
+  {
+   "resource": "wire_log",
+   "side": "readers",
+   "sink": "defender/scripts/visualize/visualize_messages.py::load_messages",
+   "defined_at_base": true
+  },
+  {
+   "resource": "session_store",
+   "side": "readers",
+   "sink": "defender/scripts/visualize/visualize_run.py::render_page",
+   "defined_at_base": true
+  },
+  {
+   "resource": "run_dir",
+   "side": "writers",
+   "sink": "defender/scripts/case_history/ticket_writer.py::_write_receipt",
+   "defined_at_base": true
+  },
+  {
+   "resource": "run_dir",
+   "side": "writers",
+   "sink": "defender/scripts/visualize/visualize_run.py::publish_page",
+   "defined_at_base": true
+  },
+  {
+   "resource": "run_dir",
+   "side": "readers",
+   "sink": "defender/scripts/visualize/visualize_runtime.py::_review_records",
+   "defined_at_base": true
+  },
+  {
+   "resource": "run_dir",
+   "side": "readers",
+   "sink": "defender/scripts/visualize/visualize_runtime.py::_read_role_traces",
+   "defined_at_base": true
+  },
+  {
+   "resource": "run_dir",
+   "side": "readers",
+   "sink": "defender/scripts/visualize/visualize_run.py::_gate_badge_html",
+   "defined_at_base": true
+  },
+  {
+   "resource": "episode_dir",
+   "side": "readers",
+   "sink": "defender/scripts/visualize/visualize_episode.py::load_episode",
+   "defined_at_base": true
+  },
+  {
+   "resource": "elastic_corpus",
+   "side": "readers",
+   "sink": "defender/scripts/adapters/elastic_adapter.py::query",
+   "defined_at_base": true
+  },
+  {
+   "resource": "elastic_corpus",
+   "side": "readers",
+   "sink": "defender/scripts/adapters/elastic_adapter.py::alerts",
+   "defined_at_base": true
+  },
+  {
+   "resource": "elastic_corpus",
+   "side": "readers",
+   "sink": "defender/scripts/adapters/elastic_adapter.py::esql",
+   "defined_at_base": true
+  },
+  {
+   "resource": "elastic_corpus",
+   "side": "readers",
+   "sink": "defender/scripts/adapters/confinement.py::confine_index",
+   "defined_at_base": true
+  },
+  {
+   "resource": "elastic_corpus",
+   "side": "readers",
+   "sink": "defender/scripts/adapters/confinement.py::is_world_view",
+   "defined_at_base": true
+  },
+  {
+   "resource": "tenant_knowledge",
+   "side": "readers",
+   "sink": "defender/scripts/adapters/_stub_transport.py::_config_path",
+   "defined_at_base": false
+  },
+  {
+   "resource": "tenant_knowledge",
+   "side": "readers",
+   "sink": "defender/scripts/adapters/elastic_adapter.py::config_path",
+   "defined_at_base": false
+  },
+  {
+   "resource": "tenant_knowledge",
+   "side": "readers",
+   "sink": "defender/scripts/case_history/case_ticket.py::_mapping_path",
+   "defined_at_base": true
+  },
+  {
+   "resource": "tenant_settings",
+   "side": "readers",
+   "sink": "defender/scripts/adapters/_stub_transport.py::load_config",
+   "defined_at_base": true
+  },
+  {
+   "resource": "tenant_settings",
+   "side": "readers",
+   "sink": "defender/scripts/adapters/_stub_transport.py::_config_path",
+   "defined_at_base": false
+  },
+  {
+   "resource": "tenant_settings",
+   "side": "readers",
+   "sink": "defender/scripts/adapters/elastic_adapter.py::config_from",
+   "defined_at_base": false
+  },
+  {
+   "resource": "tenant_settings",
+   "side": "readers",
+   "sink": "defender/scripts/adapters/elastic_adapter.py::config_path",
+   "defined_at_base": false
+  },
+  {
+   "resource": "tenant_settings",
+   "side": "readers",
+   "sink": "defender/scripts/adapters/elastic_adapter.py::load_config",
+   "defined_at_base": true
+  },
+  {
+   "resource": "tenant_settings",
+   "side": "readers",
+   "sink": "defender/scripts/case_history/case_ticket.py::load_case_mapping",
+   "defined_at_base": true
+  },
+  {
+   "resource": "tenant_settings",
+   "side": "readers",
+   "sink": "defender/scripts/case_history/ticket_writer.py::_load_config",
+   "defined_at_base": false
+  },
+  {
+   "resource": "run_mirror",
+   "side": "writers",
+   "sink": "defender/scripts/visualize/visualize_run.py::mirror_page",
+   "defined_at_base": true
+  },
+  {
+   "resource": "run_mirror",
+   "side": "writers",
+   "sink": "defender/scripts/visualize/visualize_run.py::_mirror",
+   "defined_at_base": true
+  },
+  {
+   "resource": "run_mirror",
+   "side": "writers",
+   "sink": "defender/scripts/visualize/_mirror_write.py::write_page",
+   "defined_at_base": true
+  }
+ ],
+ "dead_pointer_debt": [
+  [
+   "defender/_run_paths.py",
+   "scripts/workspace_map"
+  ],
+  [
+   "defender/docs/lead-author-refinement.md",
+   "defender/scripts/adapters/wazuh_adapter.py"
+  ],
+  [
+   "defender/docs/learning-architecture-redesign.md",
+   "scripts/lessons/lessons_env_retrieve.py"
+  ],
+  [
+   "defender/docs/learning-loop-actor-learning.md",
+   "defender/scripts/lessons/lessons_actor_index.py"
+  ],
+  [
+   "defender/docs/lessons-actor-schema-v2.md",
+   "defender/scripts/lessons/lessons_actor_index.py"
+  ],
+  [
+   "defender/docs/lessons-success-scoring.md",
+   "defender/scripts/lessons/lessons_env_retrieve.py"
+  ],
+  [
+   "defender/learning/loop.py",
+   "scripts/_venv.reexec_into_venv"
+  ],
+  [
+   "defender/run.py",
+   "scripts/_venv.reexec_into_venv"
+  ],
+  [
+   "defender/scripts/tenant.py",
+   "scripts/_venv.reexec_into_venv"
+  ],
+  [
+   "defender/tests/e2e/test_665_box_live.py",
+   "defender/scripts/lessons/defender-lessons"
+  ],
+  [
+   "defender/tests/e2e/test_922_renderer.py",
+   "scripts/visualize/visualize_judge.py"
+  ],
+  [
+   "defender/tests/tenant_1107_settings/test_1107_census_lint.py",
+   "defender/scripts/adapters/flagged_1107.py"
+  ],
+  [
+   "defender/tests/tenant_1107_settings/test_1107_census_lint.py",
+   "defender/scripts/adapters/hands_env_1107.py"
+  ],
+  [
+   "defender/tests/tenant_1107_settings/test_1107_census_lint.py",
+   "defender/scripts/adapters/helper_1107.py"
+  ],
+  [
+   "defender/tests/tenant_1107_settings/test_1107_census_lint.py",
+   "defender/scripts/adapters/pass_1107.py"
+  ],
+  [
+   "defender/tests/tenant_1107_settings/test_1107_census_lint.py",
+   "defender/scripts/adapters/planted_1107.py"
+  ],
+  [
+   "defender/tests/tenant_1107_settings/test_1107_census_lint.py",
+   "defender/scripts/case_history/planted_1107.py"
+  ],
+  [
+   "defender/tests/tenant_1107_settings/test_1107_record.py",
+   "defender/scripts/adapters/loud.py"
+  ],
+  [
+   "defender/tests/tenant_1107_settings/test_1107_record.py",
+   "defender/scripts/adapters/quiet.py"
+  ],
+  [
+   "defender/tests/test_1134_lead_author_handle.py",
+   "defender/scripts/adapters/wazuh_adapter.py"
+  ],
+  [
+   "defender/tests/test_1134_lead_author_handle.py",
+   "defender/scripts/linked.py"
+  ],
+  [
+   "defender/tests/test_1134_lead_author_handle.py",
+   "defender/scripts/nothing.py"
+  ],
+  [
+   "defender/tests/test_869_boundary.py",
+   "scripts/adapters/mcpsys_adapter.py"
+  ],
+  [
+   "defender/tests/test_869_resolver.py",
+   "scripts/adapters/newsys_adapter.py"
+  ],
+  [
+   "defender/tests/test_meta_json_retirement_647.py",
+   "scripts/setup_run.py"
+  ],
+  [
+   "defender/tests/test_meta_json_retirement_647.py",
+   "scripts/testing/gather_only.py"
+  ],
+  [
+   "defender/tests/test_permission.py",
+   "scripts/adapters/elastic_adapter"
+  ],
+  [
+   "docs/dense-investigation-format.md",
+   "scripts/invlang/queries.py"
+  ],
+  [
+   "docs/dense-investigation-format.md",
+   "scripts/invlang/run.sh"
+  ],
+  [
+   "docs/investigation-language.md",
+   "scripts/handlers/_output_parser.py"
+  ],
+  [
+   "docs/investigation-language.md",
+   "scripts/handlers/analyze.py"
+  ],
+  [
+   "docs/investigation-language.md",
+   "scripts/handlers/gather.py"
+  ],
+  [
+   "playground-v2/.env.example",
+   "scripts/install_soar_workflow.py"
+  ],
+  [
+   "playground-v2/CLAUDE.md",
+   "scripts/install_detection_rules.py"
+  ],
+  [
+   "playground-v2/docs/runbook.md",
+   "scripts/install_detection_rules.py"
+  ],
+  [
+   "playground-v2/docs/runbook.md",
+   "scripts/install_soar_workflow.py"
+  ],
+  [
+   "playground-v2/soar/workflows/README.md",
+   "scripts/install_soar_workflow.py"
+  ],
+  [
+   "scripts/lint/lint_unaccounted_selection_baseline.json",
+   "scripts/lint/lint_unaccounted_fence_scan.py"
+  ],
+  [
+   "spec-flow/bin/spec-graph",
+   "scripts/check_actors.py"
+  ],
+  [
+   "spec-flow/bin/spec-graph",
+   "scripts/check_binds.py"
+  ],
+  [
+   "spec-flow/bin/spec-graph",
+   "scripts/check_calls.py"
+  ],
+  [
+   "spec-flow/bin/spec-graph",
+   "scripts/check_claims.py"
+  ],
+  [
+   "spec-flow/bin/spec-graph",
+   "scripts/check_frontiers.py"
+  ],
+  [
+   "spec-flow/bin/spec-graph",
+   "scripts/check_gate.py"
+  ],
+  [
+   "spec-flow/bin/spec-graph",
+   "scripts/check_lint.py"
+  ],
+  [
+   "spec-flow/bin/spec-graph",
+   "scripts/check_stub.py"
+  ],
+  [
+   "spec-flow/bin/spec-graph",
+   "scripts/trace.py"
+  ],
+  [
+   "spec-flow/skills/init/SKILL.md",
+   "scripts/spec_graph/_config.py"
+  ]
+ ],
+ "defender_top_level_dirs_at_base": [
+  "api",
+  "bin",
+  "docs",
+  "evals",
+  "examples",
+  "fixtures",
+  "fixtures-e2e",
+  "hooks",
+  "learning",
+  "lessons",
+  "lessons-actor",
+  "lessons-environment",
+  "lessons-questioner",
+  "runtime",
+  "scripts",
+  "skills",
+  "tests"
+ ],
+ "staying_command_runs": {
+  "tenant.py by path": {
+   "rc": 0,
+   "usage": "usage: tenant.py [-h] {scaffold,setup,check,migrate} ..."
+  },
+  "policy_cli via bin/defender-policy": {
+   "rc": 0,
+   "usage": "usage: defender-policy [-h] {show,explain} ..."
+  },
+  "policy_cli by module": {
+   "rc": 0,
+   "usage": "usage: defender-policy [-h] {show,explain} ..."
+  },
+  "tacit_cli by module": {
+   "rc": 0,
+   "usage": "usage: tacit_cli [-h] [--defender-dir DEFENDER_DIR] [--as-of YYYY-MM-DD] {check,show}"
+  },
+  "box_image.py by path, bare interpreter": {
+   "rc": 0,
+   "usage": "usage: box_image.py [-h] {tag,build} ..."
+  }
+ },
+ "ci_staying_runs": [
+  "python3 defender/scripts/box_image.py build",
+  "python3 defender/scripts/box_image.py build",
+  "python3 defender/scripts/box_image.py build",
+  "defender/.venv/bin/python -m defender.scripts.tacit_cli check"
+ ]
+}

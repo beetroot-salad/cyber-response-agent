@@ -194,16 +194,10 @@ def _record_manual_row(
 
 
 def _breaker_failures(run_dir: Path) -> int:
-    path = RunPaths(run_dir).circuit_breaker
-    if not path.is_file():
-        return 0
-    try:
-        state = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return 0
-    # Valid JSON of the wrong shape (corrupted or planted) must degrade only this read, not
-    # item 1's whole resolution.
-    if not isinstance(state, dict):
+    # Read through the breaker's own reader (bounded, nesting-guarded, shape-checked, #1174
+    # O10). Unusable state must degrade only this read, not item 1's whole resolution.
+    state = circuit_breaker._load(run_dir)
+    if state.get("_unreadable"):
         return 0
     systems = state.get("systems")
     if not isinstance(systems, dict):

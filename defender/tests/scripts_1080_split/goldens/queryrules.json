@@ -1,0 +1,3820 @@
+{
+ "_meta": {
+  "base": "80888efb",
+  "how": "defender.scripts.gather_tools.record_query at the base (with the unmoved learning/runtime readers) run over test_1080_query_rules.py's own input tables and tmp fixture builders; fixture runs written by the base writer are frozen here as run-relative files; relative payload operands resolved with the working directory pinned to the fixture root."
+ },
+ "constants": {
+  "PARAMS_NESTING_LIMIT": 32,
+  "RESERVED_QUERY_ID_PREFIX": "\u2205.",
+  "ABOVE_GUARD_QUERY_ID": "\u2205.above-repeat-guard",
+  "BASH_SHIM_QUERY_ID": "\u2205.bash-shim",
+  "DENIED_QUERY_ID": "\u2205.denied",
+  "REPEAT_TRIP_QUERY_ID": "\u2205.repeat-trip"
+ },
+ "patterns": {
+  "_ADAPTER_RE": "(?:^|/)(\\w+)_adapter\\.py$",
+  "hook_ADAPTER_RE": "scripts/adapters/\\w+_adapter\\.py\\b"
+ },
+ "reserved_probe": {
+  "above_guard": true,
+  "bash_shim": true,
+  "denied": true,
+  "repeat_trip": true,
+  "unknown_sentinel": true,
+  "prefix_alone": true,
+  "empty_set_alone": false,
+  "no_dot": false,
+  "mid_id": false,
+  "leading_space": false,
+  "latin_o_stroke": false,
+  "diameter_sign": false,
+  "near_miss_system_id": false,
+  "empty": false
+ },
+ "awkward": {
+  "nan": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       "NaN"
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": \"NaN\"}]"
+   }
+  },
+  "inf": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       "Infinity"
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": \"Infinity\"}]"
+   }
+  },
+  "neg_inf": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       "-Infinity"
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": \"-Infinity\"}]"
+   }
+  },
+  "neg_zero": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       {
+        "float": "-0.0"
+       }
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": -0.0}]"
+   }
+  },
+  "pos_zero": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       {
+        "float": "0.0"
+       }
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": 0.0}]"
+   }
+  },
+  "nan_in_list": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       [
+        "NaN",
+        1,
+        "-Infinity"
+       ]
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": [\"NaN\", 1, \"-Infinity\"]}]"
+   }
+  },
+  "huge_int": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       {
+        "int": "18446744073709551616"
+       }
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": 18446744073709551616}]"
+   }
+  },
+  "huge_neg_int": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       {
+        "int": "-1000000000000000000000000000000"
+       }
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": -1000000000000000000000000000000}]"
+   }
+  },
+  "int_past_2_53": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       {
+        "int": "9007199254740993"
+       }
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": 9007199254740993}]"
+   }
+  },
+  "int_one": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       1
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": 1}]"
+   }
+  },
+  "float_one": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       {
+        "float": "1.0"
+       }
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": 1.0}]"
+   }
+  },
+  "bool_true": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       true
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": true}]"
+   }
+  },
+  "bool_false": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       false
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": false}]"
+   }
+  },
+  "bytes": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       "b'\\x00\\xffab'"
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": \"b'\\\\x00\\\\xffab'\"}]"
+   }
+  },
+  "bytearray": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       "bytearray(b'ab')"
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": \"bytearray(b'ab')\"}]"
+   }
+  },
+  "set_ints": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       [
+        1,
+        2,
+        3
+       ]
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": [1, 2, 3]}]"
+   }
+  },
+  "set_mixed": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       [
+        "1",
+        "a",
+        1,
+        null
+       ]
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": [\"1\", \"a\", 1, null]}]"
+   }
+  },
+  "frozenset": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       [
+        "a",
+        "b"
+       ]
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": [\"a\", \"b\"]}]"
+   }
+  },
+  "tuple": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       [
+        1,
+        "a",
+        null
+       ]
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": [1, \"a\", null]}]"
+   }
+  },
+  "nested_tuple": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       [
+        [
+         1,
+         2
+        ],
+        [
+         3,
+         [
+          4
+         ]
+        ]
+       ]
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": [[1, 2], [3, [4]]]}]"
+   }
+  },
+  "date": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       "2026-01-02"
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": \"2026-01-02\"}]"
+   }
+  },
+  "datetime_naive": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       "2026-01-02T03:04:05.000000"
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": \"2026-01-02T03:04:05.000000\"}]"
+   }
+  },
+  "datetime_aware": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       "2026-01-02T01:04:05.000006Z"
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": \"2026-01-02T01:04:05.000006Z\"}]"
+   }
+  },
+  "time": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       "01:02:03.000000"
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": \"01:02:03.000000\"}]"
+   }
+  },
+  "decimal": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       "1.10"
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": \"1.10\"}]"
+   }
+  },
+  "path_abs": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       "/var/log/x.json"
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": \"/var/log/x.json\"}]"
+   }
+  },
+  "path_rel": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       "rel/x.json"
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": \"rel/x.json\"}]"
+   }
+  },
+  "int_vs_str_keys": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "1",
+       "a"
+      ],
+      [
+       "2",
+       "b"
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"1\": \"a\", \"2\": \"b\"}]"
+   }
+  },
+  "colliding_keys_int_first": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "1",
+       "str"
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"1\": \"str\"}]"
+   }
+  },
+  "colliding_keys_str_first": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "1",
+       "int"
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"1\": \"int\"}]"
+   }
+  },
+  "odd_keys": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "true",
+       1
+      ],
+      [
+       "null",
+       2
+      ],
+      [
+       "1.5",
+       3
+      ],
+      [
+       "NaN",
+       4
+      ],
+      [
+       "2026-01-02",
+       5
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"1.5\": 3, \"2026-01-02\": 5, \"NaN\": 4, \"null\": 2, \"true\": 1}]"
+   }
+  },
+  "order_ab": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "a",
+       1
+      ],
+      [
+       "b",
+       2
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"a\": 1, \"b\": 2}]"
+   }
+  },
+  "order_ba": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "b",
+       2
+      ],
+      [
+       "a",
+       1
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"a\": 1, \"b\": 2}]"
+   }
+  },
+  "nested_order": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "z",
+       {
+        "dict": [
+         [
+          "b",
+          1
+         ],
+         [
+          "a",
+          2
+         ]
+        ]
+       }
+      ],
+      [
+       "y",
+       [
+        {
+         "dict": [
+          [
+           "d",
+           1
+          ],
+          [
+           "c",
+           2
+          ]
+         ]
+        }
+       ]
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"y\": [{\"c\": 2, \"d\": 1}], \"z\": {\"a\": 2, \"b\": 1}}]"
+   }
+  },
+  "unicode_value": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       "\u00fc\u200b\u2028"
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": \"\\u00fc\\u200b\\u2028\"}]"
+   }
+  },
+  "lone_surrogate": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       "\ud800"
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {\"x\": \"\\ud800\"}]"
+   }
+  },
+  "empty_params": {
+   "safe": {
+    "returns": {
+     "dict": []
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {}]"
+   }
+  },
+  "params_none": {
+   "safe": {
+    "returns": null
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {}]"
+   }
+  },
+  "params_list": {
+   "safe": {
+    "returns": [
+     1,
+     2
+    ]
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {}]"
+   }
+  },
+  "params_str": {
+   "safe": {
+    "returns": "not-a-map"
+   },
+   "key": {
+    "returns": "[\"elastic\", \"query\", {}]"
+   }
+  },
+  "system_none": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       1
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[null, \"query\", {\"x\": 1}]"
+   }
+  },
+  "system_int": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       1
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[1, \"query\", {\"x\": 1}]"
+   }
+  },
+  "verb_none": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       1
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", null, {\"x\": 1}]"
+   }
+  },
+  "verb_int": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "x",
+       1
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"elastic\", 2, {\"x\": 1}]"
+   }
+  },
+  "system_verb_non_ascii": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "q",
+       "\u00fc"
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"\\u00e9lastic\", \"requ\\u00eate\", {\"q\": \"\\u00fc\"}]"
+   }
+  },
+  "system_verb_cjk": {
+   "safe": {
+    "returns": {
+     "dict": [
+      [
+       "q",
+       "\u5024"
+      ]
+     ]
+    }
+   },
+   "key": {
+    "returns": "[\"\\u65e5\\u672c\", \"\\u691c\\u7d22\", {\"q\": \"\\u5024\"}]"
+   }
+  },
+  "system_empty": {
+   "safe": {
+    "returns": {
+     "dict": []
+    }
+   },
+   "key": {
+    "returns": "[\"\", \"\", {}]"
+   }
+  }
+ },
+ "nesting": {
+  "dict/under": {
+   "returns": {
+    "dict": [
+     [
+      "k",
+      {
+       "dict": [
+        [
+         "k",
+         {
+          "dict": [
+           [
+            "k",
+            {
+             "dict": [
+              [
+               "k",
+               {
+                "dict": [
+                 [
+                  "k",
+                  {
+                   "dict": [
+                    [
+                     "k",
+                     {
+                      "dict": [
+                       [
+                        "k",
+                        {
+                         "dict": [
+                          [
+                           "k",
+                           {
+                            "dict": [
+                             [
+                              "k",
+                              {
+                               "dict": [
+                                [
+                                 "k",
+                                 {
+                                  "dict": [
+                                   [
+                                    "k",
+                                    {
+                                     "dict": [
+                                      [
+                                       "k",
+                                       {
+                                        "dict": [
+                                         [
+                                          "k",
+                                          {
+                                           "dict": [
+                                            [
+                                             "k",
+                                             {
+                                              "dict": [
+                                               [
+                                                "k",
+                                                {
+                                                 "dict": [
+                                                  [
+                                                   "k",
+                                                   {
+                                                    "dict": [
+                                                     [
+                                                      "k",
+                                                      {
+                                                       "dict": [
+                                                        [
+                                                         "k",
+                                                         {
+                                                          "dict": [
+                                                           [
+                                                            "k",
+                                                            {
+                                                             "dict": [
+                                                              [
+                                                               "k",
+                                                               {
+                                                                "dict": [
+                                                                 [
+                                                                  "k",
+                                                                  {
+                                                                   "dict": [
+                                                                    [
+                                                                     "k",
+                                                                     {
+                                                                      "dict": [
+                                                                       [
+                                                                        "k",
+                                                                        {
+                                                                         "dict": [
+                                                                          [
+                                                                           "k",
+                                                                           {
+                                                                            "dict": [
+                                                                             [
+                                                                              "k",
+                                                                              {
+                                                                               "dict": [
+                                                                                [
+                                                                                 "k",
+                                                                                 {
+                                                                                  "dict": [
+                                                                                   [
+                                                                                    "k",
+                                                                                    {
+                                                                                     "dict": [
+                                                                                      [
+                                                                                       "k",
+                                                                                       {
+                                                                                        "dict": [
+                                                                                         [
+                                                                                          "k",
+                                                                                          {
+                                                                                           "dict": [
+                                                                                            [
+                                                                                             "k",
+                                                                                             {
+                                                                                              "dict": [
+                                                                                               [
+                                                                                                "k",
+                                                                                                1
+                                                                                               ]
+                                                                                              ]
+                                                                                             }
+                                                                                            ]
+                                                                                           ]
+                                                                                          }
+                                                                                         ]
+                                                                                        ]
+                                                                                       }
+                                                                                      ]
+                                                                                     ]
+                                                                                    }
+                                                                                   ]
+                                                                                  ]
+                                                                                 }
+                                                                                ]
+                                                                               ]
+                                                                              }
+                                                                             ]
+                                                                            ]
+                                                                           }
+                                                                          ]
+                                                                         ]
+                                                                        }
+                                                                       ]
+                                                                      ]
+                                                                     }
+                                                                    ]
+                                                                   ]
+                                                                  }
+                                                                 ]
+                                                                ]
+                                                               }
+                                                              ]
+                                                             ]
+                                                            }
+                                                           ]
+                                                          ]
+                                                         }
+                                                        ]
+                                                       ]
+                                                      }
+                                                     ]
+                                                    ]
+                                                   }
+                                                  ]
+                                                 ]
+                                                }
+                                               ]
+                                              ]
+                                             }
+                                            ]
+                                           ]
+                                          }
+                                         ]
+                                        ]
+                                       }
+                                      ]
+                                     ]
+                                    }
+                                   ]
+                                  ]
+                                 }
+                                ]
+                               ]
+                              }
+                             ]
+                            ]
+                           }
+                          ]
+                         ]
+                        }
+                       ]
+                      ]
+                     }
+                    ]
+                   ]
+                  }
+                 ]
+                ]
+               }
+              ]
+             ]
+            }
+           ]
+          ]
+         }
+        ]
+       ]
+      }
+     ]
+    ]
+   }
+  },
+  "dict/at": {
+   "returns": {
+    "dict": [
+     [
+      "k",
+      {
+       "dict": [
+        [
+         "k",
+         {
+          "dict": [
+           [
+            "k",
+            {
+             "dict": [
+              [
+               "k",
+               {
+                "dict": [
+                 [
+                  "k",
+                  {
+                   "dict": [
+                    [
+                     "k",
+                     {
+                      "dict": [
+                       [
+                        "k",
+                        {
+                         "dict": [
+                          [
+                           "k",
+                           {
+                            "dict": [
+                             [
+                              "k",
+                              {
+                               "dict": [
+                                [
+                                 "k",
+                                 {
+                                  "dict": [
+                                   [
+                                    "k",
+                                    {
+                                     "dict": [
+                                      [
+                                       "k",
+                                       {
+                                        "dict": [
+                                         [
+                                          "k",
+                                          {
+                                           "dict": [
+                                            [
+                                             "k",
+                                             {
+                                              "dict": [
+                                               [
+                                                "k",
+                                                {
+                                                 "dict": [
+                                                  [
+                                                   "k",
+                                                   {
+                                                    "dict": [
+                                                     [
+                                                      "k",
+                                                      {
+                                                       "dict": [
+                                                        [
+                                                         "k",
+                                                         {
+                                                          "dict": [
+                                                           [
+                                                            "k",
+                                                            {
+                                                             "dict": [
+                                                              [
+                                                               "k",
+                                                               {
+                                                                "dict": [
+                                                                 [
+                                                                  "k",
+                                                                  {
+                                                                   "dict": [
+                                                                    [
+                                                                     "k",
+                                                                     {
+                                                                      "dict": [
+                                                                       [
+                                                                        "k",
+                                                                        {
+                                                                         "dict": [
+                                                                          [
+                                                                           "k",
+                                                                           {
+                                                                            "dict": [
+                                                                             [
+                                                                              "k",
+                                                                              {
+                                                                               "dict": [
+                                                                                [
+                                                                                 "k",
+                                                                                 {
+                                                                                  "dict": [
+                                                                                   [
+                                                                                    "k",
+                                                                                    {
+                                                                                     "dict": [
+                                                                                      [
+                                                                                       "k",
+                                                                                       {
+                                                                                        "dict": [
+                                                                                         [
+                                                                                          "k",
+                                                                                          {
+                                                                                           "dict": [
+                                                                                            [
+                                                                                             "k",
+                                                                                             {
+                                                                                              "dict": [
+                                                                                               [
+                                                                                                "k",
+                                                                                                {
+                                                                                                 "dict": [
+                                                                                                  [
+                                                                                                   "k",
+                                                                                                   1
+                                                                                                  ]
+                                                                                                 ]
+                                                                                                }
+                                                                                               ]
+                                                                                              ]
+                                                                                             }
+                                                                                            ]
+                                                                                           ]
+                                                                                          }
+                                                                                         ]
+                                                                                        ]
+                                                                                       }
+                                                                                      ]
+                                                                                     ]
+                                                                                    }
+                                                                                   ]
+                                                                                  ]
+                                                                                 }
+                                                                                ]
+                                                                               ]
+                                                                              }
+                                                                             ]
+                                                                            ]
+                                                                           }
+                                                                          ]
+                                                                         ]
+                                                                        }
+                                                                       ]
+                                                                      ]
+                                                                     }
+                                                                    ]
+                                                                   ]
+                                                                  }
+                                                                 ]
+                                                                ]
+                                                               }
+                                                              ]
+                                                             ]
+                                                            }
+                                                           ]
+                                                          ]
+                                                         }
+                                                        ]
+                                                       ]
+                                                      }
+                                                     ]
+                                                    ]
+                                                   }
+                                                  ]
+                                                 ]
+                                                }
+                                               ]
+                                              ]
+                                             }
+                                            ]
+                                           ]
+                                          }
+                                         ]
+                                        ]
+                                       }
+                                      ]
+                                     ]
+                                    }
+                                   ]
+                                  ]
+                                 }
+                                ]
+                               ]
+                              }
+                             ]
+                            ]
+                           }
+                          ]
+                         ]
+                        }
+                       ]
+                      ]
+                     }
+                    ]
+                   ]
+                  }
+                 ]
+                ]
+               }
+              ]
+             ]
+            }
+           ]
+          ]
+         }
+        ]
+       ]
+      }
+     ]
+    ]
+   }
+  },
+  "dict/past": {
+   "raises": "ParamsTooDeep",
+   "message": "params nest deeper than 32 levels, the most a stored call can carry"
+  },
+  "list/under": {
+   "returns": {
+    "dict": [
+     [
+      "k",
+      [
+       [
+        [
+         [
+          [
+           [
+            [
+             [
+              [
+               [
+                [
+                 [
+                  [
+                   [
+                    [
+                     [
+                      [
+                       [
+                        [
+                         [
+                          [
+                           [
+                            [
+                             [
+                              [
+                               [
+                                [
+                                 [
+                                  [
+                                   [
+                                    1
+                                   ]
+                                  ]
+                                 ]
+                                ]
+                               ]
+                              ]
+                             ]
+                            ]
+                           ]
+                          ]
+                         ]
+                        ]
+                       ]
+                      ]
+                     ]
+                    ]
+                   ]
+                  ]
+                 ]
+                ]
+               ]
+              ]
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   }
+  },
+  "list/at": {
+   "returns": {
+    "dict": [
+     [
+      "k",
+      [
+       [
+        [
+         [
+          [
+           [
+            [
+             [
+              [
+               [
+                [
+                 [
+                  [
+                   [
+                    [
+                     [
+                      [
+                       [
+                        [
+                         [
+                          [
+                           [
+                            [
+                             [
+                              [
+                               [
+                                [
+                                 [
+                                  [
+                                   [
+                                    [
+                                     1
+                                    ]
+                                   ]
+                                  ]
+                                 ]
+                                ]
+                               ]
+                              ]
+                             ]
+                            ]
+                           ]
+                          ]
+                         ]
+                        ]
+                       ]
+                      ]
+                     ]
+                    ]
+                   ]
+                  ]
+                 ]
+                ]
+               ]
+              ]
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   }
+  },
+  "list/past": {
+   "raises": "ParamsTooDeep",
+   "message": "params nest deeper than 32 levels, the most a stored call can carry"
+  },
+  "mix/under": {
+   "returns": {
+    "dict": [
+     [
+      "k",
+      [
+       {
+        "dict": [
+         [
+          "k",
+          [
+           {
+            "dict": [
+             [
+              "k",
+              [
+               {
+                "dict": [
+                 [
+                  "k",
+                  [
+                   {
+                    "dict": [
+                     [
+                      "k",
+                      [
+                       {
+                        "dict": [
+                         [
+                          "k",
+                          [
+                           {
+                            "dict": [
+                             [
+                              "k",
+                              [
+                               {
+                                "dict": [
+                                 [
+                                  "k",
+                                  [
+                                   {
+                                    "dict": [
+                                     [
+                                      "k",
+                                      [
+                                       {
+                                        "dict": [
+                                         [
+                                          "k",
+                                          [
+                                           {
+                                            "dict": [
+                                             [
+                                              "k",
+                                              [
+                                               {
+                                                "dict": [
+                                                 [
+                                                  "k",
+                                                  [
+                                                   {
+                                                    "dict": [
+                                                     [
+                                                      "k",
+                                                      [
+                                                       {
+                                                        "dict": [
+                                                         [
+                                                          "k",
+                                                          [
+                                                           {
+                                                            "dict": [
+                                                             [
+                                                              "k",
+                                                              [
+                                                               {
+                                                                "dict": [
+                                                                 [
+                                                                  "k",
+                                                                  1
+                                                                 ]
+                                                                ]
+                                                               }
+                                                              ]
+                                                             ]
+                                                            ]
+                                                           }
+                                                          ]
+                                                         ]
+                                                        ]
+                                                       }
+                                                      ]
+                                                     ]
+                                                    ]
+                                                   }
+                                                  ]
+                                                 ]
+                                                ]
+                                               }
+                                              ]
+                                             ]
+                                            ]
+                                           }
+                                          ]
+                                         ]
+                                        ]
+                                       }
+                                      ]
+                                     ]
+                                    ]
+                                   }
+                                  ]
+                                 ]
+                                ]
+                               }
+                              ]
+                             ]
+                            ]
+                           }
+                          ]
+                         ]
+                        ]
+                       }
+                      ]
+                     ]
+                    ]
+                   }
+                  ]
+                 ]
+                ]
+               }
+              ]
+             ]
+            ]
+           }
+          ]
+         ]
+        ]
+       }
+      ]
+     ]
+    ]
+   }
+  },
+  "mix/at": {
+   "returns": {
+    "dict": [
+     [
+      "k",
+      [
+       {
+        "dict": [
+         [
+          "k",
+          [
+           {
+            "dict": [
+             [
+              "k",
+              [
+               {
+                "dict": [
+                 [
+                  "k",
+                  [
+                   {
+                    "dict": [
+                     [
+                      "k",
+                      [
+                       {
+                        "dict": [
+                         [
+                          "k",
+                          [
+                           {
+                            "dict": [
+                             [
+                              "k",
+                              [
+                               {
+                                "dict": [
+                                 [
+                                  "k",
+                                  [
+                                   {
+                                    "dict": [
+                                     [
+                                      "k",
+                                      [
+                                       {
+                                        "dict": [
+                                         [
+                                          "k",
+                                          [
+                                           {
+                                            "dict": [
+                                             [
+                                              "k",
+                                              [
+                                               {
+                                                "dict": [
+                                                 [
+                                                  "k",
+                                                  [
+                                                   {
+                                                    "dict": [
+                                                     [
+                                                      "k",
+                                                      [
+                                                       {
+                                                        "dict": [
+                                                         [
+                                                          "k",
+                                                          [
+                                                           {
+                                                            "dict": [
+                                                             [
+                                                              "k",
+                                                              [
+                                                               {
+                                                                "dict": [
+                                                                 [
+                                                                  "k",
+                                                                  [
+                                                                   1
+                                                                  ]
+                                                                 ]
+                                                                ]
+                                                               }
+                                                              ]
+                                                             ]
+                                                            ]
+                                                           }
+                                                          ]
+                                                         ]
+                                                        ]
+                                                       }
+                                                      ]
+                                                     ]
+                                                    ]
+                                                   }
+                                                  ]
+                                                 ]
+                                                ]
+                                               }
+                                              ]
+                                             ]
+                                            ]
+                                           }
+                                          ]
+                                         ]
+                                        ]
+                                       }
+                                      ]
+                                     ]
+                                    ]
+                                   }
+                                  ]
+                                 ]
+                                ]
+                               }
+                              ]
+                             ]
+                            ]
+                           }
+                          ]
+                         ]
+                        ]
+                       }
+                      ]
+                     ]
+                    ]
+                   }
+                  ]
+                 ]
+                ]
+               }
+              ]
+             ]
+            ]
+           }
+          ]
+         ]
+        ]
+       }
+      ]
+     ]
+    ]
+   }
+  },
+  "mix/past": {
+   "raises": "ParamsTooDeep",
+   "message": "params nest deeper than 32 levels, the most a stored call can carry"
+  },
+  "top_list/under": {
+   "returns": [
+    [
+     [
+      [
+       [
+        [
+         [
+          [
+           [
+            [
+             [
+              [
+               [
+                [
+                 [
+                  [
+                   [
+                    [
+                     [
+                      [
+                       [
+                        [
+                         [
+                          [
+                           [
+                            [
+                             [
+                              [
+                               [
+                                [
+                                 [
+                                  1
+                                 ]
+                                ]
+                               ]
+                              ]
+                             ]
+                            ]
+                           ]
+                          ]
+                         ]
+                        ]
+                       ]
+                      ]
+                     ]
+                    ]
+                   ]
+                  ]
+                 ]
+                ]
+               ]
+              ]
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ]
+  },
+  "top_list/at": {
+   "returns": [
+    [
+     [
+      [
+       [
+        [
+         [
+          [
+           [
+            [
+             [
+              [
+               [
+                [
+                 [
+                  [
+                   [
+                    [
+                     [
+                      [
+                       [
+                        [
+                         [
+                          [
+                           [
+                            [
+                             [
+                              [
+                               [
+                                [
+                                 [
+                                  [
+                                   1
+                                  ]
+                                 ]
+                                ]
+                               ]
+                              ]
+                             ]
+                            ]
+                           ]
+                          ]
+                         ]
+                        ]
+                       ]
+                      ]
+                     ]
+                    ]
+                   ]
+                  ]
+                 ]
+                ]
+               ]
+              ]
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ]
+  },
+  "top_list/past": {
+   "raises": "ParamsTooDeep",
+   "message": "params nest deeper than 32 levels, the most a stored call can carry"
+  },
+  "dict/past/named_field": {
+   "raises": "ParamsTooDeep",
+   "message": "discriminator.envelope.params nest deeper than 32 levels, the most a stored call can carry"
+  },
+  "mix/at/named_field": {
+   "returns": {
+    "dict": [
+     [
+      "k",
+      [
+       {
+        "dict": [
+         [
+          "k",
+          [
+           {
+            "dict": [
+             [
+              "k",
+              [
+               {
+                "dict": [
+                 [
+                  "k",
+                  [
+                   {
+                    "dict": [
+                     [
+                      "k",
+                      [
+                       {
+                        "dict": [
+                         [
+                          "k",
+                          [
+                           {
+                            "dict": [
+                             [
+                              "k",
+                              [
+                               {
+                                "dict": [
+                                 [
+                                  "k",
+                                  [
+                                   {
+                                    "dict": [
+                                     [
+                                      "k",
+                                      [
+                                       {
+                                        "dict": [
+                                         [
+                                          "k",
+                                          [
+                                           {
+                                            "dict": [
+                                             [
+                                              "k",
+                                              [
+                                               {
+                                                "dict": [
+                                                 [
+                                                  "k",
+                                                  [
+                                                   {
+                                                    "dict": [
+                                                     [
+                                                      "k",
+                                                      [
+                                                       {
+                                                        "dict": [
+                                                         [
+                                                          "k",
+                                                          [
+                                                           {
+                                                            "dict": [
+                                                             [
+                                                              "k",
+                                                              [
+                                                               {
+                                                                "dict": [
+                                                                 [
+                                                                  "k",
+                                                                  [
+                                                                   1
+                                                                  ]
+                                                                 ]
+                                                                ]
+                                                               }
+                                                              ]
+                                                             ]
+                                                            ]
+                                                           }
+                                                          ]
+                                                         ]
+                                                        ]
+                                                       }
+                                                      ]
+                                                     ]
+                                                    ]
+                                                   }
+                                                  ]
+                                                 ]
+                                                ]
+                                               }
+                                              ]
+                                             ]
+                                            ]
+                                           }
+                                          ]
+                                         ]
+                                        ]
+                                       }
+                                      ]
+                                     ]
+                                    ]
+                                   }
+                                  ]
+                                 ]
+                                ]
+                               }
+                              ]
+                             ]
+                            ]
+                           }
+                          ]
+                         ]
+                        ]
+                       }
+                      ]
+                     ]
+                    ]
+                   }
+                  ]
+                 ]
+                ]
+               }
+              ]
+             ]
+            ]
+           }
+          ]
+         ]
+        ]
+       }
+      ]
+     ]
+    ]
+   }
+  },
+  "wide_shallow": {
+   "returns": {
+    "sha256": "b0271a3ebb600c71909240c31d18887bf67dacf7d7ac4766482bda213a341425",
+    "chars": 167790
+   }
+  },
+  "wide_shallow_lists": {
+   "returns": {
+    "sha256": "89ef1703afd3cf85f8a1f95a93d0e41623e45ca28e595015d15c25130bd53f9c",
+    "chars": 50680
+   }
+  },
+  "far_past": {
+   "raises": "ParamsTooDeep",
+   "message": "params nest deeper than 32 levels, the most a stored call can carry"
+  },
+  "scalar": {
+   "returns": 7
+  }
+ },
+ "query_ids": {
+  "s162/none": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": null
+  },
+  "s162/empty": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s162/space": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s162/spaces": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s162/tab": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s162/ideographic_space": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s162/sentinel_above_guard": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": true
+  },
+  "s162/sentinel_bash_shim": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": true
+  },
+  "s162/sentinel_denied": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": true
+  },
+  "s162/sentinel_repeat_trip": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": true
+  },
+  "s162/prefix_plus_text": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": true
+  },
+  "s162/prefix_alone": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": true
+  },
+  "s162/empty_set_no_dot": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s162/prefix_mid_id": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s162/leading_space": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s162/space_after_dot": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s162/well_formed": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.hunt-creds"
+   },
+   "reserved": false
+  },
+  "s162/no_verb_fallback": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.ad-hoc"
+   },
+   "reserved": false
+  },
+  "s163/slash": {
+   "reject": "invalid query_id 'elastic.a/b': no '/', '\\', '..', NUL, newline or '#' \u2014 it becomes a catalog path segment and a markdown span the offline collectors render. Coin a `{system}.{kebab-name}` id.",
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/backslash": {
+   "reject": "invalid query_id 'elastic.a\\\\b': no '/', '\\', '..', NUL, newline or '#' \u2014 it becomes a catalog path segment and a markdown span the offline collectors render. Coin a `{system}.{kebab-name}` id.",
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/dotdot": {
+   "reject": "invalid query_id 'elastic.a..b': no '/', '\\', '..', NUL, newline or '#' \u2014 it becomes a catalog path segment and a markdown span the offline collectors render. Coin a `{system}.{kebab-name}` id.",
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/nul": {
+   "reject": "invalid query_id 'elastic.a\\x00b': no '/', '\\', '..', NUL, newline or '#' \u2014 it becomes a catalog path segment and a markdown span the offline collectors render. Coin a `{system}.{kebab-name}` id.",
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/newline": {
+   "reject": "invalid query_id 'elastic.a\\nb': no '/', '\\', '..', NUL, newline or '#' \u2014 it becomes a catalog path segment and a markdown span the offline collectors render. Coin a `{system}.{kebab-name}` id.",
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/cr": {
+   "reject": "invalid query_id 'elastic.a\\rb': no '/', '\\', '..', NUL, newline or '#' \u2014 it becomes a catalog path segment and a markdown span the offline collectors render. Coin a `{system}.{kebab-name}` id.",
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/hash": {
+   "reject": "invalid query_id 'elastic.a#b': no '/', '\\', '..', NUL, newline or '#' \u2014 it becomes a catalog path segment and a markdown span the offline collectors render. Coin a `{system}.{kebab-name}` id.",
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/traversal": {
+   "reject": "invalid query_id '../elastic.x': no '/', '\\', '..', NUL, newline or '#' \u2014 it becomes a catalog path segment and a markdown span the offline collectors render. Coin a `{system}.{kebab-name}` id.",
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/division_slash": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/fraction_slash": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/fullwidth_solidus": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/fullwidth_reverse_solidus": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/two_dot_leader": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/fullwidth_full_stops": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/fullwidth_number_sign": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/line_separator": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/paragraph_separator": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/next_line": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/vertical_tab": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/form_feed": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/zero_width_space": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s163/nbsp": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s164/exact": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.hunt"
+   },
+   "reserved": false
+  },
+  "s164/title_case": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s164/upper_case": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s164/fullwidth_letter": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s164/cyrillic_ie": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s164/nfd_vs_nfc_system": {
+   "reject": null,
+   "recorded": {
+    "returns": "caf\u00e9.get"
+   },
+   "reserved": false
+  },
+  "s164/nfc_matches_nfc_system": {
+   "reject": null,
+   "recorded": {
+    "returns": "caf\u00e9.hunt"
+   },
+   "reserved": false
+  },
+  "s164/kelvin_sign": {
+   "reject": null,
+   "recorded": {
+    "returns": "kafka.get"
+   },
+   "reserved": false
+  },
+  "s164/trailing_dot_no_segment": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s164/no_separator": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s164/double_dot_separator": {
+   "reject": "invalid query_id 'elastic..hunt': no '/', '\\', '..', NUL, newline or '#' \u2014 it becomes a catalog path segment and a markdown span the offline collectors render. Coin a `{system}.{kebab-name}` id.",
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s164/trailing_dot_after_segment": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s164/extra_segment": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s164/prefix_with_extra_segment": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s164/hyphen_system_underscore_id": {
+   "reject": null,
+   "recorded": {
+    "returns": "change-mgmt.get"
+   },
+   "reserved": false
+  },
+  "s164/underscore_system_hyphen_id": {
+   "reject": null,
+   "recorded": {
+    "returns": "change_mgmt.get"
+   },
+   "reserved": false
+  },
+  "s164/hyphen_both": {
+   "reject": null,
+   "recorded": {
+    "returns": "change-mgmt.hunt"
+   },
+   "reserved": false
+  },
+  "s164/system_suffix": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s164/system_prefix_only": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s164/foreign_system": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s164/space_before_dot": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s165/leading_hyphen": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s165/leading_underscore": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s165/all_digits": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.123"
+   },
+   "reserved": false
+  },
+  "s165/trailing_newline": {
+   "reject": "invalid query_id 'elastic.hunt\\n': no '/', '\\', '..', NUL, newline or '#' \u2014 it becomes a catalog path segment and a markdown span the offline collectors render. Coin a `{system}.{kebab-name}` id.",
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s165/arabic_indic_digits": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s165/fullwidth_digits": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s165/non_ascii_letter": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s165/single_char": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.x"
+   },
+   "reserved": false
+  },
+  "s165/single_hyphen": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s165/single_digit": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.7"
+   },
+   "reserved": false
+  },
+  "s165/upper_segment": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.Hunt_Creds-2"
+   },
+   "reserved": false
+  },
+  "s165/inner_space": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  },
+  "s165/ten_thousand": {
+   "reject": null,
+   "recorded": {
+    "returns": {
+     "sha256": "179390f0ab644babef925b459340835792f6eb1f377a077ab0b8154620e9bcbb",
+     "chars": 10010
+    }
+   },
+   "reserved": false
+  },
+  "s165/ten_thousand_plus_hyphen": {
+   "reject": null,
+   "recorded": {
+    "returns": "elastic.esql"
+   },
+   "reserved": false
+  }
+ },
+ "derive_system": {
+  "shim": {
+   "returns": "elastic"
+  },
+  "shim_hyphenated": {
+   "returns": "change-mgmt"
+  },
+  "shim_underscore": {
+   "returns": "change_mgmt"
+  },
+  "shim_upper": {
+   "returns": "Elastic"
+  },
+  "shim_empty_name": {
+   "returns": null
+  },
+  "shim_sql": {
+   "returns": "sql"
+  },
+  "shim_lessons": {
+   "returns": "lessons"
+  },
+  "shim_invlang": {
+   "returns": null
+  },
+  "shim_policy": {
+   "returns": "policy"
+  },
+  "shim_with_slash": {
+   "returns": null
+  },
+  "shim_with_equals": {
+   "returns": null
+  },
+  "shim_then_adapter": {
+   "returns": "cmdb"
+  },
+  "abs_path": {
+   "returns": "elastic"
+  },
+  "rel_path": {
+   "returns": "elastic"
+  },
+  "dot_slash": {
+   "returns": "elastic"
+  },
+  "bare_file": {
+   "returns": "elastic"
+  },
+  "python3_path": {
+   "returns": "change-mgmt"
+  },
+  "python_path": {
+   "returns": "cmdb"
+  },
+  "env_prefix_then_shim": {
+   "returns": "elastic"
+  },
+  "env_prefix_naming_adapter": {
+   "returns": null
+  },
+  "env_prefix_naming_shim": {
+   "returns": null
+  },
+  "hyphen_stem": {
+   "returns": null
+  },
+  "underscore_stem": {
+   "returns": "change-mgmt"
+  },
+  "upper_stem": {
+   "returns": "Elastic"
+  },
+  "upper_suffix": {
+   "returns": null
+  },
+  "empty_stem": {
+   "returns": null
+  },
+  "underscore_only_stem": {
+   "returns": "-"
+  },
+  "bak_suffix": {
+   "returns": null
+  },
+  "trailing_slash": {
+   "returns": null
+  },
+  "trailing_newline": {
+   "returns": "elastic"
+  },
+  "invlang_adapter_file": {
+   "returns": null
+  },
+  "non_ascii_stem": {
+   "returns": "\u00e9lastic"
+  },
+  "module_form": {
+   "returns": null
+  },
+  "sh_c_string": {
+   "returns": "elastic query"
+  },
+  "cat": {
+   "returns": null
+  },
+  "jq": {
+   "returns": null
+  },
+  "ls": {
+   "returns": null
+  },
+  "empty_argv": {
+   "returns": null
+  }
+ },
+ "registry_filenames": {
+  "plain": "elastic",
+  "underscore": "change-mgmt",
+  "hyphen": "change-mgmt",
+  "upper": "Elastic",
+  "empty_stem": "",
+  "underscore_only": "-"
+ },
+ "hook_stage": {
+  "shim": true,
+  "shim_hyphenated": true,
+  "shim_underscore": true,
+  "shim_upper": true,
+  "shim_empty_name": true,
+  "shim_sql": false,
+  "shim_lessons": false,
+  "shim_invlang": false,
+  "shim_policy": false,
+  "shim_with_slash": true,
+  "shim_with_equals": true,
+  "shim_then_adapter": false,
+  "abs_path": true,
+  "rel_path": true,
+  "dot_slash": false,
+  "bare_file": false,
+  "python3_path": true,
+  "python_path": false,
+  "env_prefix_then_shim": false,
+  "env_prefix_naming_adapter": false,
+  "env_prefix_naming_shim": false,
+  "hyphen_stem": false,
+  "underscore_stem": false,
+  "upper_stem": false,
+  "upper_suffix": false,
+  "empty_stem": false,
+  "underscore_only_stem": false,
+  "bak_suffix": false,
+  "trailing_slash": false,
+  "trailing_newline": false,
+  "invlang_adapter_file": false,
+  "non_ascii_stem": false,
+  "module_form": false,
+  "sh_c_string": false,
+  "cat": false,
+  "jq": false,
+  "ls": false,
+  "empty_argv": false
+ },
+ "hook_decisions": {
+  "python3_rel_adapter": {
+   "allow": false,
+   "reason": "Blocked: data-source adapters are not runnable from bash. Reach the system through the `query` tool instead \u2014 `query(system=\u2026, verb=\u2026, params={\u2026}, query_id=\u2026)`; it validates the verb's params against the registry, captures the payload to the queries table, and hands you the path. To aggregate that payload afterwards: `cat <ABSOLUTE payload path> | defender-sql '<SQL>'`."
+  },
+  "bare_rel_adapter": {
+   "allow": false,
+   "reason": "Blocked: data-source adapters are not runnable from bash. Reach the system through the `query` tool instead \u2014 `query(system=\u2026, verb=\u2026, params={\u2026}, query_id=\u2026)`; it validates the verb's params against the registry, captures the payload to the queries table, and hands you the path. To aggregate that payload afterwards: `cat <ABSOLUTE payload path> | defender-sql '<SQL>'`."
+  },
+  "abs_adapter": {
+   "allow": false,
+   "reason": "Blocked: data-source adapters are not runnable from bash. Reach the system through the `query` tool instead \u2014 `query(system=\u2026, verb=\u2026, params={\u2026}, query_id=\u2026)`; it validates the verb's params against the registry, captures the payload to the queries table, and hands you the path. To aggregate that payload afterwards: `cat <ABSOLUTE payload path> | defender-sql '<SQL>'`."
+  },
+  "shim": {
+   "allow": false,
+   "reason": "Blocked: data-source adapters are not runnable from bash. Reach the system through the `query` tool instead \u2014 `query(system=\u2026, verb=\u2026, params={\u2026}, query_id=\u2026)`; it validates the verb's params against the registry, captures the payload to the queries table, and hands you the path. To aggregate that payload afterwards: `cat <ABSOLUTE payload path> | defender-sql '<SQL>'`."
+  },
+  "adapter_outside_scripts_adapters": {
+   "allow": false,
+   "reason": "Blocked: this command is not permitted for this agent (read-only viewers and the agent's declared capabilities only)."
+  },
+  "piped_adapter": {
+   "allow": false,
+   "reason": "Blocked: data-source adapters are not runnable from bash. Reach the system through the `query` tool instead \u2014 `query(system=\u2026, verb=\u2026, params={\u2026}, query_id=\u2026)`; it validates the verb's params against the registry, captures the payload to the queries table, and hands you the path. To aggregate that payload afterwards: `cat <ABSOLUTE payload path> | defender-sql '<SQL>'`."
+  },
+  "non_adapter": {
+   "allow": false,
+   "reason": "Blocked: this command is not permitted for this agent (read-only viewers and the agent's declared capabilities only)."
+  }
+ },
+ "operands": {
+  "absolute": {
+   "system": "elastic",
+   "derive_system": null
+  },
+  "relative": {
+   "system": "elastic",
+   "derive_system": null
+  },
+  "relative_dot_slash": {
+   "system": "cmdb",
+   "derive_system": null
+  },
+  "dotdot_back_in": {
+   "system": "elastic",
+   "derive_system": null
+  },
+  "dotdot_back_in_from_run": {
+   "system": "l2sys",
+   "derive_system": null
+  },
+  "relative_dotdot_back_in": {
+   "system": "cmdb",
+   "derive_system": null
+  },
+  "dotdot_leaving": {
+   "system": "",
+   "derive_system": null
+  },
+  "dotdot_leaving_to_other_run": {
+   "system": "",
+   "derive_system": null
+  },
+  "symlink_in": {
+   "system": "elastic",
+   "derive_system": null
+  },
+  "symlink_out": {
+   "system": "",
+   "derive_system": null
+  },
+  "symlinked_lead_folder": {
+   "system": "l2sys",
+   "derive_system": null
+  },
+  "other_run": {
+   "system": "",
+   "derive_system": null
+  },
+  "lead_folder_as_directory": {
+   "system": "",
+   "derive_system": null
+  },
+  "payload_named_directory": {
+   "system": "dirsys",
+   "derive_system": null
+  },
+  "gather_raw_itself": {
+   "system": "",
+   "derive_system": null
+  },
+  "nonexistent_with_row": {
+   "system": "nofile",
+   "derive_system": null
+  },
+  "nonexistent_no_row": {
+   "system": "",
+   "derive_system": null
+  },
+  "nonexistent_lead_folder": {
+   "system": "",
+   "derive_system": null
+  },
+  "non_numeric_stem": {
+   "system": "",
+   "derive_system": null
+  },
+  "stem_with_space": {
+   "system": "cmdb",
+   "derive_system": null
+  },
+  "stem_plus": {
+   "system": "cmdb",
+   "derive_system": null
+  },
+  "stem_underscore_digits": {
+   "system": "tensys",
+   "derive_system": null
+  },
+  "stem_leading_zero": {
+   "system": "cmdb",
+   "derive_system": null
+  },
+  "stem_negative": {
+   "system": "negsys",
+   "derive_system": null
+  },
+  "stem_arabic_indic_digit": {
+   "system": "cmdb",
+   "derive_system": null
+  },
+  "stem_hex": {
+   "system": "",
+   "derive_system": null
+  },
+  "suffix_txt": {
+   "system": "",
+   "derive_system": null
+  },
+  "suffix_upper": {
+   "system": "",
+   "derive_system": null
+  },
+  "too_deep": {
+   "system": "",
+   "derive_system": null
+  },
+  "too_shallow": {
+   "system": "",
+   "derive_system": null
+  },
+  "invalid_lead_folder_with_row": {
+   "system": "badlead",
+   "derive_system": null
+  },
+  "invalid_lead_folder_no_row": {
+   "system": "",
+   "derive_system": null
+  },
+  "row_with_empty_system": {
+   "system": "",
+   "derive_system": null
+  },
+  "row_with_spaced_system": {
+   "system": "spaced",
+   "derive_system": null
+  },
+  "first_operand_without_row_then_row": {
+   "system": "l2sys",
+   "derive_system": null
+  },
+  "two_rows_first_wins": {
+   "system": "l2sys",
+   "derive_system": null
+  },
+  "empty_system_row_then_row": {
+   "system": "cmdb",
+   "derive_system": null
+  },
+  "no_operands": {
+   "system": "",
+   "derive_system": null
+  },
+  "_bare_run_without_a_table": ""
+ },
+ "stored_run": {
+  "files": {
+   "executed_queries.jsonl": "{\"lead_id\": \"l-1\", \"seq\": 0, \"system\": \"elastic\", \"verb\": \"query\", \"query_id\": \"elastic.hunt\", \"params\": {\"index\": \"logs-*\", \"size\": 10, \"ids\": [1, 2], \"by\": {\"1\": \"a\", \"2\": \"b\"}}, \"raw_command\": \"elastic query\", \"payload_path\": \"gather_raw/l-1/0.json\", \"exit_code\": 0, \"error_class\": null, \"payload_status\": \"ok\", \"payload_digest\": \"34 bytes, 1 line(s)\", \"payload_sha256\": \"2b5ac22347fe3015cf1000bd96c0261abe3f89147a700e0695efd5e57a75a302\", \"system_key\": \"\"}\n{\"lead_id\": \"l-1\", \"seq\": 1, \"system\": \"cmdb\", \"verb\": \"get-host\", \"query_id\": \"cmdb.get-host\", \"params\": {\"host\": \"canary-1\", \"threshold\": \"Infinity\", \"zero\": -0.0, \"since\": \"2026-01-02\"}, \"raw_command\": \"cmdb get-host\", \"payload_path\": \"gather_raw/l-1/1.json\", \"exit_code\": 0, \"error_class\": null, \"payload_status\": \"ok\", \"payload_digest\": \"37 bytes, 1 line(s)\", \"payload_sha256\": \"6c6a6e475d0570a7d9c16569e7a06cd91d6725df75c9102fc127df04457065fc\", \"system_key\": \"\"}\n{\"lead_id\": \"l-2\", \"seq\": 0, \"system\": \"elastic\", \"verb\": \"esql\", \"query_id\": \"elastic.esql\", \"params\": {\"z\": {\"b\": 1, \"a\": 2}, \"tags\": [\"x\", \"y\"], \"nan\": \"NaN\"}, \"raw_command\": \"elastic esql\", \"payload_path\": \"gather_raw/l-2/0.json\", \"exit_code\": 0, \"error_class\": null, \"payload_status\": \"ok\", \"payload_digest\": \"45 bytes, 1 line(s)\", \"payload_sha256\": \"2d8d9e361eb8790f0e88b19ab18325231bc57f82acc469ab4601a22c31246ffe\", \"system_key\": \"\"}\n{\"lead_id\": \"l-2\", \"seq\": 1, \"system\": \"identity\", \"verb\": \"user\", \"query_id\": \"identity.user\", \"params\": {\"user\": \"\\u00fc\\u200b\", \"flags\": [true, 1, 1.0]}, \"raw_command\": \"identity user\", \"payload_path\": \"gather_raw/l-2/1.json\", \"exit_code\": 0, \"error_class\": null, \"payload_status\": \"ok\", \"payload_digest\": \"13 bytes, 1 line(s)\", \"payload_sha256\": \"39368fd03ae21d4abadd71ff4e8c146590c54dc33cc12bac498d3c58788e7cec\", \"system_key\": \"\"}\n",
+   "gather_raw/l-1/0.json": "{\"hits\": [{\"host\": \"h1\", \"n\": 1}]}",
+   "gather_raw/l-1/1.json": "{\"owner\": \"estate\", \"role\": \"canary\"}",
+   "gather_raw/l-1.lead.json": "{\"goal\": \"goal of l-1\", \"what_to_summarize\": []}\n",
+   "gather_raw/l-2/0.json": "{\"columns\": [{\"name\": \"a\"}], \"values\": [[1]]}",
+   "gather_raw/l-2/1.json": "{\"user\": \"u\"}",
+   "gather_raw/l-2.lead.json": "{\"goal\": \"goal of l-2\", \"what_to_summarize\": []}\n"
+  },
+  "keys": [
+   "[\"elastic\", \"query\", {\"by\": {\"1\": \"a\", \"2\": \"b\"}, \"ids\": [1, 2], \"index\": \"logs-*\", \"size\": 10}]",
+   "[\"cmdb\", \"get-host\", {\"host\": \"canary-1\", \"since\": \"2026-01-02\", \"threshold\": \"Infinity\", \"zero\": -0.0}]",
+   "[\"elastic\", \"esql\", {\"nan\": \"NaN\", \"tags\": [\"x\", \"y\"], \"z\": {\"a\": 2, \"b\": 1}}]",
+   "[\"identity\", \"user\", {\"flags\": [true, 1, 1.0], \"user\": \"\\u00fc\\u200b\"}]"
+  ],
+  "replay": {
+   "keys": [
+    "[\"elastic\", \"query\", {\"by\": {\"1\": \"a\", \"2\": \"b\"}, \"ids\": [1, 2], \"index\": \"logs-*\", \"size\": 10}]",
+    "[\"cmdb\", \"get-host\", {\"host\": \"canary-1\", \"since\": \"2026-01-02\", \"threshold\": \"Infinity\", \"zero\": -0.0}]",
+    "[\"elastic\", \"esql\", {\"nan\": \"NaN\", \"tags\": [\"x\", \"y\"], \"z\": {\"a\": 2, \"b\": 1}}]",
+    "[\"identity\", \"user\", {\"flags\": [true, 1, 1.0], \"user\": \"\\u00fc\\u200b\"}]"
+   ],
+   "guard_threshold_2": [
+    {
+     "type": "RepeatTrip",
+     "first_seq": 0,
+     "occurrence": 2
+    },
+    {
+     "type": "RepeatTrip",
+     "first_seq": 1,
+     "occurrence": 2
+    },
+    {
+     "type": "RepeatTrip",
+     "first_seq": 0,
+     "occurrence": 2
+    },
+    {
+     "type": "RepeatTrip",
+     "first_seq": 1,
+     "occurrence": 2
+    }
+   ],
+   "prime": {
+    "primed": 4,
+    "duplicates": 0,
+    "failed": 0,
+    "sentinels": 0,
+    "unreadable": 0
+   },
+   "served": [
+    "{\"hits\": [{\"host\": \"h1\", \"n\": 1}]}",
+    "{\"owner\": \"estate\", \"role\": \"canary\"}",
+    "{\"columns\": [{\"name\": \"a\"}], \"values\": [[1]]}",
+    "{\"user\": \"u\"}"
+   ],
+   "ledger_keys": [
+    "[\"elastic\", \"query\", {\"by\": {\"1\": \"a\", \"2\": \"b\"}, \"ids\": [1, 2], \"index\": \"logs-*\", \"size\": 10}]",
+    "[\"cmdb\", \"get-host\", {\"host\": \"canary-1\", \"since\": \"2026-01-02\", \"threshold\": \"Infinity\", \"zero\": -0.0}]",
+    "[\"elastic\", \"esql\", {\"nan\": \"NaN\", \"tags\": [\"x\", \"y\"], \"z\": {\"a\": 2, \"b\": 1}}]",
+    "[\"identity\", \"user\", {\"flags\": [true, 1, 1.0], \"user\": \"\\u00fc\\u200b\"}]"
+   ],
+   "row_keys": [
+    "[\"elastic\", \"query\", {\"by\": {\"1\": \"a\", \"2\": \"b\"}, \"ids\": [1, 2], \"index\": \"logs-*\", \"size\": 10}]",
+    "[\"cmdb\", \"get-host\", {\"host\": \"canary-1\", \"since\": \"2026-01-02\", \"threshold\": \"Infinity\", \"zero\": -0.0}]",
+    "[\"elastic\", \"esql\", {\"nan\": \"NaN\", \"tags\": [\"x\", \"y\"], \"z\": {\"a\": 2, \"b\": 1}}]",
+    "[\"identity\", \"user\", {\"flags\": [true, 1, 1.0], \"user\": \"\\u00fc\\u200b\"}]"
+   ],
+   "resumed_row": {
+    "dict": [
+     [
+      "lead_id",
+      "l-1"
+     ],
+     [
+      "seq",
+      2
+     ],
+     [
+      "system",
+      "elastic"
+     ],
+     [
+      "verb",
+      "query"
+     ],
+     [
+      "query_id",
+      "elastic.hunt"
+     ],
+     [
+      "params",
+      {
+       "dict": [
+        [
+         "index",
+         "logs-*"
+        ],
+        [
+         "size",
+         10
+        ],
+        [
+         "ids",
+         [
+          1,
+          2
+         ]
+        ],
+        [
+         "by",
+         {
+          "dict": [
+           [
+            "1",
+            "a"
+           ],
+           [
+            "2",
+            "b"
+           ]
+          ]
+         }
+        ]
+       ]
+      }
+     ],
+     [
+      "raw_command",
+      "elastic query"
+     ],
+     [
+      "payload_path",
+      "gather_raw/l-1/2.json"
+     ],
+     [
+      "exit_code",
+      0
+     ],
+     [
+      "error_class",
+      null
+     ],
+     [
+      "payload_status",
+      "ok"
+     ],
+     [
+      "payload_digest",
+      "34 bytes, 1 line(s)"
+     ],
+     [
+      "payload_sha256",
+      "2b5ac22347fe3015cf1000bd96c0261abe3f89147a700e0695efd5e57a75a302"
+     ],
+     [
+      "system_key",
+      ""
+     ]
+    ]
+   },
+   "resumed_trip": {
+    "type": "RepeatTrip",
+    "first_seq": 0,
+    "occurrence": 3
+   }
+  }
+ },
+ "reserved_run": {
+  "files": {
+   "executed_queries.jsonl": "{\"lead_id\": \"l-1\", \"seq\": 0, \"system\": \"elastic\", \"verb\": \"query\", \"query_id\": \"elastic.query\", \"params\": {\"q\": \"x\"}, \"raw_command\": \"elastic query\", \"payload_path\": \"gather_raw/l-1/0.json\", \"exit_code\": 0, \"error_class\": null, \"payload_status\": \"ok\", \"payload_digest\": \"13 bytes, 1 line(s)\", \"payload_sha256\": \"5fc2d84c83980bdfdb622431503d60a4e21a961fe19252f171944fa6956f91c7\", \"system_key\": \"\"}\n{\"lead_id\": \"l-1\", \"seq\": 1, \"system\": \"elastic\", \"verb\": \"query\", \"query_id\": \"\\u2205.above-repeat-guard\", \"params\": {\"q\": \"x\"}, \"raw_command\": \"elastic query\", \"payload_path\": \"gather_raw/l-1/1.json\", \"exit_code\": 64, \"error_class\": \"agent-fixable\", \"payload_status\": \"error\", \"payload_digest\": \"exit=64; refused\", \"payload_sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\", \"system_key\": \"\"}\n{\"lead_id\": \"l-1\", \"seq\": 2, \"system\": \"elastic\", \"verb\": \"query\", \"query_id\": \"\\u2205.above-repeat-guard\", \"params\": {\"q\": \"x\"}, \"raw_command\": \"elastic query\", \"payload_path\": \"gather_raw/l-1/2.json\", \"exit_code\": 2, \"error_class\": \"infra\", \"payload_status\": \"error\", \"payload_digest\": \"exit=2; refused\", \"payload_sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\", \"system_key\": \"\"}\n{\"lead_id\": \"l-1\", \"seq\": 3, \"system\": \"ticket\", \"verb\": \"get-ticket\", \"query_id\": \"\\u2205.denied\", \"params\": {\"q\": \"x\"}, \"raw_command\": \"ticket get-ticket\", \"payload_path\": \"gather_raw/l-1/3.json\", \"exit_code\": 77, \"error_class\": \"denied\", \"payload_status\": \"error\", \"payload_digest\": \"exit=77; refused\", \"payload_sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\", \"system_key\": \"\"}\n{\"lead_id\": \"l-1\", \"seq\": 4, \"system\": \"elastic\", \"verb\": \"query\", \"query_id\": \"\\u2205.repeat-trip\", \"params\": {\"q\": \"x\"}, \"raw_command\": \"elastic query\", \"payload_path\": \"gather_raw/l-1/4.json\", \"exit_code\": 64, \"error_class\": \"agent-fixable\", \"payload_status\": \"error\", \"payload_digest\": \"exit=64; refused\", \"payload_sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\", \"system_key\": \"\"}\n{\"lead_id\": \"l-1\", \"seq\": 5, \"system\": \"\", \"verb\": \"bash\", \"query_id\": \"\\u2205.bash-shim\", \"params\": {\"command\": \"defender-sql 'x'\"}, \"raw_command\": \" bash\", \"payload_path\": \"gather_raw/l-1/5.json\", \"exit_code\": 1, \"error_class\": \"agent-fixable\", \"payload_status\": \"error\", \"payload_digest\": \"exit=1; refused\", \"payload_sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\", \"system_key\": \"\"}\n{\"lead_id\": \"l-1\", \"seq\": 6, \"system\": \"elastic\", \"verb\": \"query\", \"query_id\": \"elastic.bash-shim\", \"params\": {\"q\": \"x\"}, \"raw_command\": \"elastic query\", \"payload_path\": \"gather_raw/l-1/6.json\", \"exit_code\": 1, \"error_class\": \"agent-fixable\", \"payload_status\": \"error\", \"payload_digest\": \"exit=1; refused\", \"payload_sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\", \"system_key\": \"\"}\n{\"lead_id\": \"l-1\", \"seq\": 7, \"system\": \"elastic\", \"verb\": \"query\", \"query_id\": \"\\u2205.future-kind\", \"params\": {\"q\": \"x\"}, \"raw_command\": \"elastic query\", \"payload_path\": \"gather_raw/l-1/7.json\", \"exit_code\": 64, \"error_class\": \"agent-fixable\", \"payload_status\": \"error\", \"payload_digest\": \"exit=64; refused\", \"payload_sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\", \"system_key\": \"\"}\n{\"lead_id\": \"l-1\", \"seq\": 8, \"system\": \"elastic\", \"verb\": \"query\", \"query_id\": \"\\u2205bash-shim\", \"params\": {\"q\": \"x\"}, \"raw_command\": \"elastic query\", \"payload_path\": \"gather_raw/l-1/8.json\", \"exit_code\": 1, \"error_class\": \"agent-fixable\", \"payload_status\": \"error\", \"payload_digest\": \"exit=1; refused\", \"payload_sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\", \"system_key\": \"\"}\n{\"lead_id\": \"l-2\", \"seq\": 0, \"system\": \"ticket\", \"verb\": \"get-ticket\", \"query_id\": \"\\u2205.denied\", \"params\": {\"q\": \"x\"}, \"raw_command\": \"ticket get-ticket\", \"payload_path\": \"gather_raw/l-2/0.json\", \"exit_code\": 77, \"error_class\": \"denied\", \"payload_status\": \"error\", \"payload_digest\": \"exit=77; refused\", \"payload_sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\", \"system_key\": \"\"}\n{\"lead_id\": \"l-3\", \"seq\": 0, \"system\": \"cmdb\", \"verb\": \"get-host\", \"query_id\": \"\\u2205.bash-shim\", \"params\": {\"q\": \"x\"}, \"raw_command\": \"cmdb get-host\", \"payload_path\": \"gather_raw/l-3/0.json\", \"exit_code\": 1, \"error_class\": \"agent-fixable\", \"payload_status\": \"error\", \"payload_digest\": \"exit=1; refused\", \"payload_sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\", \"system_key\": \"\"}\n",
+   "gather_raw/l-1/0.json": "{\"hits\": []}",
+   "gather_raw/l-1/1.json": "",
+   "gather_raw/l-1/2.json": "",
+   "gather_raw/l-1/3.json": "",
+   "gather_raw/l-1/4.json": "",
+   "gather_raw/l-1/5.json": "",
+   "gather_raw/l-1/6.json": "",
+   "gather_raw/l-1/7.json": "",
+   "gather_raw/l-1/8.json": "",
+   "gather_raw/l-1.lead.json": "{\"goal\": \"goal of l-1\", \"what_to_summarize\": []}\n",
+   "gather_raw/l-2/0.json": "",
+   "gather_raw/l-2.lead.json": "{\"goal\": \"goal of l-2\", \"what_to_summarize\": []}\n",
+   "gather_raw/l-3/0.json": ""
+  },
+  "classified": {
+   "leads": [
+    {
+     "lead_id": "l-1",
+     "orphan": false,
+     "queries": [
+      [
+       0,
+       "elastic.query"
+      ],
+      [
+       6,
+       "elastic.bash-shim"
+      ],
+      [
+       8,
+       "\u2205bash-shim"
+      ]
+     ],
+     "sentinels": [
+      [
+       1,
+       "\u2205.above-repeat-guard"
+      ],
+      [
+       2,
+       "\u2205.above-repeat-guard"
+      ],
+      [
+       3,
+       "\u2205.denied"
+      ],
+      [
+       4,
+       "\u2205.repeat-trip"
+      ],
+      [
+       5,
+       "\u2205.bash-shim"
+      ],
+      [
+       7,
+       "\u2205.future-kind"
+      ]
+     ],
+     "refused": [
+      {
+       "dict": [
+        [
+         "kind",
+         "rejected-before-dispatch"
+        ],
+        [
+         "system",
+         "elastic"
+        ],
+        [
+         "external",
+         false
+        ]
+       ]
+      },
+      {
+       "dict": [
+        [
+         "kind",
+         "adapter-fault"
+        ],
+        [
+         "system",
+         "elastic"
+        ],
+        [
+         "external",
+         true
+        ]
+       ]
+      },
+      {
+       "dict": [
+        [
+         "kind",
+         "denied"
+        ],
+        [
+         "system",
+         "ticket"
+        ],
+        [
+         "verb",
+         "get-ticket"
+        ],
+        [
+         "external",
+         true
+        ]
+       ]
+      },
+      {
+       "dict": [
+        [
+         "kind",
+         "repeat-refused"
+        ],
+        [
+         "system",
+         "elastic"
+        ],
+        [
+         "external",
+         false
+        ]
+       ]
+      },
+      {
+       "dict": [
+        [
+         "kind",
+         "reducer-failed"
+        ],
+        [
+         "system",
+         ""
+        ],
+        [
+         "external",
+         false
+        ]
+       ]
+      },
+      {
+       "dict": [
+        [
+         "kind",
+         "refused"
+        ],
+        [
+         "system",
+         "elastic"
+        ],
+        [
+         "external",
+         false
+        ]
+       ]
+      }
+     ],
+     "rendered": "[kind=rejected-before-dispatch system=elastic external=false, kind=adapter-fault system=elastic external=true, kind=denied system=ticket verb=get-ticket external=true, kind=repeat-refused system=elastic external=false, kind=reducer-failed system= external=false, kind=refused system=elastic external=false]",
+     "rows": [
+      {
+       "seq": 0,
+       "query_id": "elastic.query",
+       "is_sentinel": false,
+       "error_class": null,
+       "is_reducer_row": false,
+       "pitfall_owner": "elastic"
+      },
+      {
+       "seq": 1,
+       "query_id": "\u2205.above-repeat-guard",
+       "is_sentinel": true,
+       "error_class": "agent-fixable",
+       "is_reducer_row": false,
+       "pitfall_owner": "elastic"
+      },
+      {
+       "seq": 2,
+       "query_id": "\u2205.above-repeat-guard",
+       "is_sentinel": true,
+       "error_class": "infra",
+       "is_reducer_row": false,
+       "pitfall_owner": "elastic"
+      },
+      {
+       "seq": 3,
+       "query_id": "\u2205.denied",
+       "is_sentinel": true,
+       "error_class": "denied",
+       "is_reducer_row": false,
+       "pitfall_owner": "ticket"
+      },
+      {
+       "seq": 4,
+       "query_id": "\u2205.repeat-trip",
+       "is_sentinel": true,
+       "error_class": "agent-fixable",
+       "is_reducer_row": false,
+       "pitfall_owner": "elastic"
+      },
+      {
+       "seq": 5,
+       "query_id": "\u2205.bash-shim",
+       "is_sentinel": true,
+       "error_class": "agent-fixable",
+       "is_reducer_row": true,
+       "pitfall_owner": "\u2205.bash-shim"
+      },
+      {
+       "seq": 6,
+       "query_id": "elastic.bash-shim",
+       "is_sentinel": false,
+       "error_class": "agent-fixable",
+       "is_reducer_row": false,
+       "pitfall_owner": "elastic"
+      },
+      {
+       "seq": 7,
+       "query_id": "\u2205.future-kind",
+       "is_sentinel": true,
+       "error_class": "agent-fixable",
+       "is_reducer_row": false,
+       "pitfall_owner": "elastic"
+      },
+      {
+       "seq": 8,
+       "query_id": "\u2205bash-shim",
+       "is_sentinel": false,
+       "error_class": "agent-fixable",
+       "is_reducer_row": false,
+       "pitfall_owner": "elastic"
+      }
+     ]
+    },
+    {
+     "lead_id": "l-2",
+     "orphan": false,
+     "queries": [],
+     "sentinels": [
+      [
+       0,
+       "\u2205.denied"
+      ]
+     ],
+     "refused": [
+      {
+       "dict": [
+        [
+         "kind",
+         "denied"
+        ],
+        [
+         "system",
+         "ticket"
+        ],
+        [
+         "verb",
+         "get-ticket"
+        ],
+        [
+         "external",
+         true
+        ]
+       ]
+      }
+     ],
+     "rendered": "[kind=denied system=ticket verb=get-ticket external=true]",
+     "rows": [
+      {
+       "seq": 0,
+       "query_id": "\u2205.denied",
+       "is_sentinel": true,
+       "error_class": "denied",
+       "is_reducer_row": false,
+       "pitfall_owner": "ticket"
+      }
+     ]
+    },
+    {
+     "lead_id": "l-3",
+     "orphan": true,
+     "queries": [],
+     "sentinels": [
+      [
+       0,
+       "\u2205.bash-shim"
+      ]
+     ],
+     "refused": [
+      {
+       "dict": [
+        [
+         "kind",
+         "reducer-failed"
+        ],
+        [
+         "system",
+         "cmdb"
+        ],
+        [
+         "external",
+         false
+        ]
+       ]
+      }
+     ],
+     "rendered": "[kind=reducer-failed system=cmdb external=false]",
+     "rows": [
+      {
+       "seq": 0,
+       "query_id": "\u2205.bash-shim",
+       "is_sentinel": true,
+       "error_class": "agent-fixable",
+       "is_reducer_row": true,
+       "pitfall_owner": "\u2205.bash-shim"
+      }
+     ]
+    }
+   ],
+   "extracted": [
+    [
+     "l-1",
+     0,
+     "elastic.query",
+     false,
+     false
+    ],
+    [
+     "l-1",
+     1,
+     "\u2205.above-repeat-guard",
+     true,
+     false
+    ],
+    [
+     "l-1",
+     2,
+     "\u2205.above-repeat-guard",
+     true,
+     false
+    ],
+    [
+     "l-1",
+     3,
+     "\u2205.denied",
+     true,
+     false
+    ],
+    [
+     "l-1",
+     4,
+     "\u2205.repeat-trip",
+     true,
+     false
+    ],
+    [
+     "l-1",
+     5,
+     "\u2205.bash-shim",
+     true,
+     true
+    ],
+    [
+     "l-1",
+     6,
+     "elastic.bash-shim",
+     false,
+     false
+    ],
+    [
+     "l-1",
+     7,
+     "\u2205.future-kind",
+     true,
+     false
+    ],
+    [
+     "l-1",
+     8,
+     "\u2205bash-shim",
+     false,
+     false
+    ],
+    [
+     "l-2",
+     0,
+     "\u2205.denied",
+     true,
+     false
+    ],
+    [
+     "l-3",
+     0,
+     "\u2205.bash-shim",
+     true,
+     true
+    ]
+   ]
+  }
+ },
+ "roundtrip": {
+  "live_key": "[\"elastic\", \"query\", {\"by\": {\"1\": \"a\", \"2\": [\"b\", 3]}, \"ids\": [3, 1, 2], \"plain\": \"x\"}]",
+  "stored_params": {
+   "dict": [
+    [
+     "ids",
+     [
+      3,
+      1,
+      2
+     ]
+    ],
+    [
+     "by",
+     {
+      "dict": [
+       [
+        "1",
+        "a"
+       ],
+       [
+        "2",
+        [
+         "b",
+         3
+        ]
+       ]
+      ]
+     }
+    ],
+    [
+     "plain",
+     "x"
+    ]
+   ]
+  },
+  "read_back_params": {
+   "dict": [
+    [
+     "ids",
+     [
+      3,
+      1,
+      2
+     ]
+    ],
+    [
+     "by",
+     {
+      "dict": [
+       [
+        "1",
+        "a"
+       ],
+       [
+        "2",
+        [
+         "b",
+         3
+        ]
+       ]
+      ]
+     }
+    ],
+    [
+     "plain",
+     "x"
+    ]
+   ]
+  },
+  "learning_row_key": "[\"elastic\", \"query\", {\"by\": {\"1\": \"a\", \"2\": [\"b\", 3]}, \"ids\": [3, 1, 2], \"plain\": \"x\"}]",
+  "learning_record_key": "[\"elastic\", \"query\", {\"by\": {\"1\": \"a\", \"2\": [\"b\", 3]}, \"ids\": [3, 1, 2], \"plain\": \"x\"}]",
+  "rule_over_raw_record": "[\"elastic\", \"query\", {\"by\": {\"1\": \"a\", \"2\": [\"b\", 3]}, \"ids\": [3, 1, 2], \"plain\": \"x\"}]",
+  "guard": {
+   "type": "RepeatTrip",
+   "first_seq": 0,
+   "occurrence": 2
+  }
+ },
+ "repeat": {
+  "first_row": {
+   "dict": [
+    [
+     "lead_id",
+     "l-7"
+    ],
+    [
+     "seq",
+     0
+    ],
+    [
+     "system",
+     "cmdb"
+    ],
+    [
+     "verb",
+     "get-host"
+    ],
+    [
+     "query_id",
+     "cmdb.hunt"
+    ],
+    [
+     "params",
+     {
+      "dict": [
+       [
+        "host",
+        "h1"
+       ],
+       [
+        "ports",
+        [
+         22,
+         443
+        ]
+       ],
+       [
+        "by",
+        {
+         "dict": [
+          [
+           "1",
+           "x"
+          ]
+         ]
+        }
+       ]
+      ]
+     }
+    ],
+    [
+     "raw_command",
+     "cmdb get-host"
+    ],
+    [
+     "payload_path",
+     "gather_raw/l-7/0.json"
+    ],
+    [
+     "exit_code",
+     0
+    ],
+    [
+     "error_class",
+     null
+    ],
+    [
+     "payload_status",
+     "ok"
+    ],
+    [
+     "payload_digest",
+     "19 bytes, 1 line(s)"
+    ],
+    [
+     "payload_sha256",
+     "9553eb872809939f54aa857736fa23f57d3acdfae8b64c6bbcd6ffd5f98e1dda"
+    ],
+    [
+     "system_key",
+     ""
+    ]
+   ]
+  },
+  "rows_read": [
+   {
+    "dict": [
+     [
+      "lead_id",
+      "l-7"
+     ],
+     [
+      "seq",
+      0
+     ],
+     [
+      "system",
+      "cmdb"
+     ],
+     [
+      "verb",
+      "get-host"
+     ],
+     [
+      "query_id",
+      "cmdb.hunt"
+     ],
+     [
+      "params",
+      {
+       "dict": [
+        [
+         "host",
+         "h1"
+        ],
+        [
+         "ports",
+         [
+          22,
+          443
+         ]
+        ],
+        [
+         "by",
+         {
+          "dict": [
+           [
+            "1",
+            "x"
+           ]
+          ]
+         }
+        ]
+       ]
+      }
+     ],
+     [
+      "raw_command",
+      "cmdb get-host"
+     ],
+     [
+      "payload_path",
+      "gather_raw/l-7/0.json"
+     ],
+     [
+      "exit_code",
+      0
+     ],
+     [
+      "error_class",
+      null
+     ],
+     [
+      "payload_status",
+      "ok"
+     ],
+     [
+      "payload_digest",
+      "19 bytes, 1 line(s)"
+     ],
+     [
+      "payload_sha256",
+      "9553eb872809939f54aa857736fa23f57d3acdfae8b64c6bbcd6ffd5f98e1dda"
+     ],
+     [
+      "system_key",
+      ""
+     ]
+    ]
+   }
+  ],
+  "seen_at_threshold_2": {
+   "type": "RepeatTrip",
+   "first_seq": 0,
+   "occurrence": 2
+  },
+  "default_after_one": null,
+  "note": "[record_query] REPEAT \u2014 this is the same request you ran at seq 0, and it returned the same payload byte for byte. It will keep returning this payload however many times you send it; the result is structural, not a transient to retry through. Change the approach, not the retry count.",
+  "other_lead": null,
+  "other_params": null,
+  "second_row": {
+   "dict": [
+    [
+     "lead_id",
+     "l-7"
+    ],
+    [
+     "seq",
+     1
+    ],
+    [
+     "system",
+     "cmdb"
+    ],
+    [
+     "verb",
+     "get-host"
+    ],
+    [
+     "query_id",
+     "cmdb.hunt"
+    ],
+    [
+     "params",
+     {
+      "dict": [
+       [
+        "host",
+        "h1"
+       ],
+       [
+        "ports",
+        [
+         22,
+         443
+        ]
+       ],
+       [
+        "by",
+        {
+         "dict": [
+          [
+           "1",
+           "x"
+          ]
+         ]
+        }
+       ]
+      ]
+     }
+    ],
+    [
+     "raw_command",
+     "cmdb get-host"
+    ],
+    [
+     "payload_path",
+     "gather_raw/l-7/1.json"
+    ],
+    [
+     "exit_code",
+     0
+    ],
+    [
+     "error_class",
+     null
+    ],
+    [
+     "payload_status",
+     "ok"
+    ],
+    [
+     "payload_digest",
+     "19 bytes, 1 line(s)"
+    ],
+    [
+     "payload_sha256",
+     "9553eb872809939f54aa857736fa23f57d3acdfae8b64c6bbcd6ffd5f98e1dda"
+    ],
+    [
+     "system_key",
+     ""
+    ]
+   ]
+  },
+  "default_after_two": {
+   "type": "RepeatTrip",
+   "first_seq": 0,
+   "occurrence": 3
+  }
+ }
+}

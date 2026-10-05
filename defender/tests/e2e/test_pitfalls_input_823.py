@@ -69,6 +69,7 @@ from defender.learning.leads.lead_author import build_handoff
 from defender.learning.leads.lead_extraction import collect_general_failures
 from defender.runtime.box_codec import BoxResult
 from defender.runtime.query_tool import resolve_query_id
+from defender import _query_rules
 from defender.scripts.gather_tools import record_query
 from defender.tests.e2e._replay_harness import (
     GOLDEN_AB3,
@@ -88,11 +89,8 @@ from defender.tests.e2e.test_query_tool_611 import (
 )
 
 # THE SURFACE UNDER TEST — none of it exists on this base (RED by construction)
-from defender.scripts.gather_tools.record_query import (  # noqa: E402
-    BASH_SHIM_QUERY_ID,
-    REPEAT_TRIP_QUERY_ID,
-    SHIM_COMMAND_MAX_CHARS,
-)
+from defender.scripts.gather_tools.record_query import SHIM_COMMAND_MAX_CHARS
+from defender._query_rules import BASH_SHIM_QUERY_ID, REPEAT_TRIP_QUERY_ID
 from defender.tests._lead_author_1134 import repo_skills  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -392,8 +390,8 @@ def test_a_model_cannot_forge_a_sentinel_query_id(tmp_path):
     was never refused, or routing an arbitrary failing query into the pitfalls residue with
     unbounded model-authored `params` — past the very cap this issue added — or hiding a real
     catalog failure from the lead-author."""
-    for forged in (BASH_SHIM_QUERY_ID, REPEAT_TRIP_QUERY_ID, record_query.ABOVE_GUARD_QUERY_ID):
-        assert record_query.is_reserved_query_id(forged)
+    for forged in (BASH_SHIM_QUERY_ID, REPEAT_TRIP_QUERY_ID, _query_rules.ABOVE_GUARD_QUERY_ID):
+        assert _query_rules.is_reserved_query_id(forged)
         assert resolve_query_id("elastic", "query", forged) == "elastic.query", (
             f"a model-supplied {forged!r} reached a real row"
         )

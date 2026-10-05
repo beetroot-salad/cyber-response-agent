@@ -51,7 +51,7 @@ from defender.learning.judge.enqueue import (
 from defender.learning.judge.render import episode_alert
 from defender.learning.judge.run import SUBJECT_DEFENDER, SUBJECT_WORLD
 from defender.runtime.branch._family import BASE_ROLE, episode_token_for
-from defender.scripts import pricing
+from defender._pricing import UnknownModel, model_key, usage_cost
 from defender.scripts.visualize.visualize_primitives import (
     ASSETS,
     CSS,
@@ -506,14 +506,14 @@ class _WireLogs:
 def _priced(model: Any, usage: Any) -> float | None:
     """This response row's bill, or `None` when it does not price: no `usage` mapping, no
     `model`, an unknown model, or non-numeric token counts (wire logs are box-writable)."""
-    # An empty `model` is unpriced here, unlike `pricing.model_key`'s absorbed case: billing an
+    # An empty `model` is unpriced here, unlike `model_key`'s absorbed case: billing an
     # unnamed model at some rate would invent a figure.
     if not (isinstance(usage, dict) and isinstance(model, str) and model):
         return None
     try:
-        cost = pricing.usage_cost(model, usage)
-        pricing.model_key(model)
-    except (pricing.UnknownModel, TypeError, ValueError, OverflowError):
+        cost = usage_cost(model, usage)
+        model_key(model)
+    except (UnknownModel, TypeError, ValueError, OverflowError):
         # `OverflowError`: a 400-digit token count overflows before `_finite` sees it.
         return None
     # Usage blocks are box-writable: reject negative, NaN or infinite costs.

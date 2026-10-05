@@ -6,7 +6,8 @@ no-follow from the record's trust root") and its implementation-start addendum (
 keeps #1078's complete-or-absent lane). The seam is four `defender._io` functions whose names
 and signatures the design fixes: `rooted_read(root, name, *, binary=False)`,
 `rooted_mkdir(root, folder_name)`, `rooted_write(root, name, text, *, mode, stage_name=,
-open_unnamed=)` and `rooted_locked_for_rewrite(root, name, *, binary=False)`. Each takes a
+open_unnamed=)` and `rooted_locked_for_rewrite(root, name)` (yielding the locked record's
+descriptor and its `fstat`, #1174 amendment 2). Each takes a
 trust root, whose spelling is followed, and a name relative to it, which never is. The handle
 (`RecordHandle`, `Run.record`, `ArchivedWorld`) reaches them through its `io=` seam.
 
@@ -68,6 +69,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -89,7 +91,7 @@ DEADLINE = 3.0
 
 #: The design's M1 seam. A member op makes these `_io` calls and no others.
 ROOTED_OPS = frozenset({"rooted_read", "rooted_write", "rooted_mkdir",
-                        "rooted_locked_for_rewrite"})
+                        "rooted_locked_for_rewrite", "locked_json_update"})
 
 #: Today's write-once members (`create`; a second write is refused). Not #1111's to change.
 WRITE_ONCE = frozenset({"alert", "provenance", "run_end", "leads"})
@@ -959,7 +961,9 @@ def test_o8_a_write_crosses_the_io_seam_as_rooted_calls_carrying_root_name_mode_
     - Exactly one writing call, on the record's relative name. `write` is
       `rooted_write(mode="create")` for a write-once record and `mode="replace"` otherwise,
       with the given text. `append` is ONE `rooted_write(mode="append")` whose text is the
-      whole batch as JSONL. `update` is `rooted_locked_for_rewrite` in text mode.
+      whole batch as JSONL. `update` is ONE `rooted_locked_for_rewrite` opener on the name,
+      handed to ONE `locked_json_update` (#1174 amendment 2: the `_io` op that reads, changes
+      and rewrites the record; the handle never reads the file itself).
     - Before it, a `rooted_mkdir` on the same root: for a record in a subfolder, of that
       folder. The folder's spelling for a root-level record is left to the implementation.
     - The two schema-gated documents first read their current text with `rooted_read` of the
@@ -976,7 +980,8 @@ def test_o8_a_write_crosses_the_io_seam_as_rooted_calls_carrying_root_name_mode_
     ops = [op for op, _ in calls]
     assert set(ops) <= ROOTED_OPS, f"{m}.{m.verb} reached {ops}: a path-based `_io` seam"
     root = tree.root(m)
-    assert all(Path(a["root"]) == root for _, a in calls), f"{m}: not all on {root}: {calls}"
+    assert all(Path(a["root"]) == root for _, a in calls if "root" in a), (
+        f"{m}: not all on {root}: {calls}")
 
     writer = "rooted_locked_for_rewrite" if m.verb == "update" else "rooted_write"
     at = [i for i, op in enumerate(ops) if op == writer]
@@ -991,7 +996,9 @@ def test_o8_a_write_crosses_the_io_seam_as_rooted_calls_carrying_root_name_mode_
         assert a["text"].endswith("\n")
         assert [json.loads(line) for line in a["text"].splitlines()] == rows(m, "seam")
     else:
-        assert a["binary"] is False
+        updates = [a for op, a in calls if op == "locked_json_update"]
+        assert len(updates) == 1, f"{m}.update: {ops}"
+        assert ops.index("rooted_locked_for_rewrite") < ops.index("locked_json_update"), ops
 
     mkdirs = [i for i, op in enumerate(ops) if op == "rooted_mkdir"]
     assert mkdirs, f"{m}: no rooted_mkdir made its holding folder: {ops}"
@@ -1446,24 +1453,29 @@ def test_rooted_write_refuses_an_unknown_mode_and_writes_nothing(scratch):
 
 # -- rooted_locked_for_rewrite -----------------------------------------------------------
 
+def _rewrite(fd: int, text: str) -> None:
+    os.lseek(fd, 0, os.SEEK_SET)
+    os.ftruncate(fd, 0)
+    os.write(fd, text.encode())
+
+
 def test_rooted_locked_for_rewrite_yields_the_record_locked_at_position_0(scratch):
-    """The locked read-modify-write: the record at position 0 with its current text, under an
-    exclusive `flock` that a second open cannot take until the block exits. What the block
-    writes persists."""
+    """The locked read-modify-write: the record's descriptor at position 0 and its `fstat`,
+    under an exclusive `flock` that a second open cannot take until the block exits. What the
+    block writes persists."""
     target = scratch.real_folders()
     target.write_text('{"k": 1}', encoding="utf-8")
-    with _io.rooted_locked_for_rewrite(scratch.root, DEEP) as f:
-        assert f.tell() == 0
-        assert f.read() == '{"k": 1}'
+    with _io.rooted_locked_for_rewrite(scratch.root, DEEP) as (fd, st):
+        assert os.lseek(fd, 0, os.SEEK_CUR) == 0
+        assert st.st_size == len('{"k": 1}')
+        assert os.read(fd, 100) == b'{"k": 1}'
         other = os.open(target, os.O_RDONLY)
         try:
             with pytest.raises(BlockingIOError):
                 fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
         finally:
             os.close(other)
-        f.seek(0)
-        f.truncate()
-        f.write('{"k": 2}')
+        _rewrite(fd, '{"k": 2}')
     assert target.read_text(encoding="utf-8") == '{"k": 2}'
     other = os.open(target, os.O_RDONLY)
     try:
@@ -1472,15 +1484,16 @@ def test_rooted_locked_for_rewrite_yields_the_record_locked_at_position_0(scratc
         os.close(other)
 
 
-def test_rooted_locked_for_rewrite_creates_a_missing_record_and_reads_bytes_in_binary(scratch):
+def test_rooted_locked_for_rewrite_creates_a_missing_record_and_reads_its_bytes(scratch):
     target = scratch.real_folders()
-    with _io.rooted_locked_for_rewrite(scratch.root, DEEP) as f:
-        assert f.read() == ""
+    with _io.rooted_locked_for_rewrite(scratch.root, DEEP) as (fd, st):
+        assert st.st_size == 0
+        assert os.read(fd, 10) == b""
     assert target.is_file()
     assert os.lstat(target).st_nlink == 1
     target.write_bytes(b"\x00raw")
-    with _io.rooted_locked_for_rewrite(scratch.root, "a/b/rec.json", binary=True) as f:
-        assert f.read() == b"\x00raw"
+    with _io.rooted_locked_for_rewrite(scratch.root, "a/b/rec.json") as (fd, _st):
+        assert os.read(fd, 10) == b"\x00raw"
 
 
 @pytest.mark.parametrize(("kind", "folder"), list(_seam_plants()))
@@ -1512,8 +1525,8 @@ def test_rooted_locked_for_rewrite_follows_the_roots_own_spelling(scratch):
     target.write_text("{}", encoding="utf-8")
     alias = scratch.tmp / "alias"
     alias.symlink_to(scratch.root, target_is_directory=True)
-    with _io.rooted_locked_for_rewrite(alias, DEEP) as f:
-        assert f.read() == "{}"
+    with _io.rooted_locked_for_rewrite(alias, DEEP) as (fd, _st):
+        assert os.read(fd, 10) == b"{}"
 
 
 @pytest.mark.parametrize("name", BAD_NAMES)
@@ -1577,10 +1590,8 @@ def seam_op(s: Scratch, op: str, **kw: Any) -> Callable[[], Any]:
         return lambda: _io.rooted_write(s.root, DEEP, f"{op} landed\n", mode=op, **kw)
 
     def lock() -> None:
-        with _io.rooted_locked_for_rewrite(s.root, DEEP, **kw) as f:
-            f.seek(0)
-            f.truncate()
-            f.write("lock landed\n")
+        with _io.rooted_locked_for_rewrite(s.root, DEEP, **kw) as (fd, _st):
+            _rewrite(fd, "lock landed\n")
 
     return lock
 
@@ -1975,9 +1986,8 @@ def test_the_handles_alert_write_leaves_no_alert_or_a_whole_one_when_killed(tmp_
     env = dict(os.environ)
     env["PYTHONPATH"] = f"{S.REPO_ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}".rstrip(os.pathsep)
     body = b"A" * (ALERT_BODY_BYTES - 1) + b"\n"
-    torn: list[str] = []
-    whole = 0
-    for kill in range(ALERT_KILLS):
+
+    def one_kill(kill: int) -> tuple[list[str], int]:
         root = tmp_path / f"kill-{kill}"
         root.mkdir()
         # A file, not a pipe: reading a live child's stderr pipe for a failure message would
@@ -2004,7 +2014,13 @@ def test_the_handles_alert_write_leaves_no_alert_or_a_whole_one_when_killed(tmp_
             if child.stdout is not None:
                 child.stdout.close()
         bad, landed = _alert_leftovers(root, body)
-        torn += [f"kill {kill}: {b}" for b in bad]
-        whole += landed
+        return [f"kill {kill}: {b}" for b in bad], landed
+
+    # Each kill is its own child in its own run dir, so they run side by side: sixteen start-ups
+    # one after another were the whole cost of this test.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        outcomes = list(pool.map(one_kill, range(ALERT_KILLS)))
+    torn = [line for lines, _ in outcomes for line in lines]
+    whole = sum(landed for _, landed in outcomes)
     assert torn == [], "a kill left a torn or stray alert:\n" + "\n".join(torn)
     assert whole > 0, "the child wrote no whole alert, so the kills observed nothing"

@@ -1039,7 +1039,7 @@ def test_a_ledger_reopened_from_disk_replays_the_family_recording(tmp_path):
 def test_two_spellings_of_one_question_are_one_key(tmp_path):
     """    Params built in a different order are the SAME key, so they cost one adapter call.
 
-    `request_key` sorts, the way `record_query._request_key` does and for the same reason: two
+    `request_key` sorts, the way `_query_rules._request_key` does and for the same reason: two
     spellings of one question would otherwise split one memo into two, and the pair would see
     the estate twice at two different moments."""
     ledger_path = tmp_path / SERVED_FILE

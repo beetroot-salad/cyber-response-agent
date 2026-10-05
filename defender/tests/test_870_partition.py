@@ -532,7 +532,7 @@ def test_two_curation_ticks_land_distinctly_in_every_shared_sink(scene):
     instead of appending to it — or re-stamped the first tick's rows with its own sha — would
     be green in every per-tick test here.
 
-    The drain's own `_discard_worktree_changes` runs between the two, so the second tick reads
+    The drain's own `ClaimGit.reset` runs between the two, so the second tick reads
     exactly the committed state the first one left, which is what makes this two ticks rather
     than one long one.
     """

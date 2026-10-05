@@ -24,6 +24,7 @@ from defender.runtime.circuit_breaker import (
 )
 from defender.scripts.adapters import elastic_adapter as ea
 from defender.scripts.adapters.faults import UpstreamFault
+from defender import _query_rules
 from defender.scripts.gather_tools import record_query as rq
 
 LEAD = "l-001"
@@ -65,7 +66,7 @@ def _row(
 
 
 def _above(seq: int, **kw) -> dict:
-    return _row(seq, query_id=rq.ABOVE_GUARD_QUERY_ID, **kw)
+    return _row(seq, query_id=_query_rules.ABOVE_GUARD_QUERY_ID, **kw)
 
 
 # ITEM 2 — the hardcoded `@timestamp` descending sort.

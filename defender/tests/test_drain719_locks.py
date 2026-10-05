@@ -220,7 +220,7 @@ def test_the_drains_append_lock_wait_ends_at_the_configured_repo_lock_deadline(t
     h.write_source_refs(paths, "a")
     observed = {}
 
-    for deadline in (1, 4):
+    for deadline in (1, 2):
         h.seed(ch, rows)
         agent = h.recording(h.committing("never"))
         cfg = h.cfg_for(
@@ -233,8 +233,10 @@ def test_the_drains_append_lock_wait_ends_at_the_configured_repo_lock_deadline(t
         assert h.pending(ch) == rows
         observed[deadline] = seconds
 
-    assert 0.8 <= observed[1] < 3.0, f"the 1s deadline was not what ended the wait: {observed}"
-    assert 3.2 <= observed[4] < 8.0, f"the 4s deadline was not what ended the wait: {observed}"
+    assert 0.8 <= observed[1] < 2.5, f"the 1s deadline was not what ended the wait: {observed}"
+    assert 1.8 <= observed[2] < 4.0, f"the 2s deadline was not what ended the wait: {observed}"
+    # Each give-up tracks its own deadline: a hard-coded wait gives both the same length.
+    assert observed[2] - observed[1] >= 0.6, f"the wait did not follow the deadline: {observed}"
 
 
 

@@ -24,7 +24,10 @@
       "defender/learning",
       "defender/evals",
       "defender/scripts",
-      "defender/run.py"
+      "defender/run.py",
+      "defender/_venv.py",
+      "defender/_query_rules.py",
+      "defender/_pricing.py"
     ],
     "entrypointStems": [
       "loop",
@@ -378,7 +381,7 @@
           "reexec_into_venv",
           "_VENV_PY"
         ],
-        "note": "DECLARED BY #1092's GROUNDING (base b016749c). The environment a granted program runs under inside a box: `BOX_ENV_ALLOWLIST` (runtime/box_codec.py, MOVED THERE BY #1096 from box/_spec.py, which now re-exports it along with `_BOX_MARK_ENV` — the owner is the stdlib module the in-box entrypoint imports, so the entrypoint's per-exec closure does not pay for the `box` package door) is the ONE key set, rendered onto `docker run --env` by BOTH argv builders (`_create_argv` indexes `env_pairs[key]` for every allowlist key with NO default — a key added to the allowlist and not to `infra_env`/`_LOCALE_ENV` is a KeyError on every two-arg start; `_render_env` merges locale defaults, then the caller's allowlisted keys VALUE-BLIND, then the derived infra keys which win), inherited by every `docker exec`, and re-filtered from `os.environ` by the entrypoint (`bash_exec.py::_run_box_entrypoint`) before any command runs. The two HOST lanes are writers of the same shape and are listed because the allowlist governs them too: `_host_fallback_env` copies every allowlisted key out of `request.env` and `run_env` inherits the operator's whole `os.environ` — so a key that joins the allowlist reaches the unsandboxed lane through those two copies whenever the caller or the shell carries it. The READERS the static walk cannot see are the three granted shell shims (`bin/defender-sql:9-10`, `bin/defender-invlang:7-8`, `bin/defender-lessons:8-9`; `bin/defender-policy:9-10` ungranted) — each `exec`s `${DEFENDER_DIR}/.venv/bin/python3` when it is executable, else bare `python3` — and `scripts/_venv.py::reexec_into_venv`, which `os.execv`s into `defender/.venv/bin/python3` when that path `is_file()`; both are cross-process edges classified by hand in #1092's brief."
+        "note": "DECLARED BY #1092's GROUNDING (base b016749c). The environment a granted program runs under inside a box: `BOX_ENV_ALLOWLIST` (runtime/box_codec.py, MOVED THERE BY #1096 from box/_spec.py, which now re-exports it along with `_BOX_MARK_ENV` — the owner is the stdlib module the in-box entrypoint imports, so the entrypoint's per-exec closure does not pay for the `box` package door) is the ONE key set, rendered onto `docker run --env` by BOTH argv builders (`_create_argv` indexes `env_pairs[key]` for every allowlist key with NO default — a key added to the allowlist and not to `infra_env`/`_LOCALE_ENV` is a KeyError on every two-arg start; `_render_env` merges locale defaults, then the caller's allowlisted keys VALUE-BLIND, then the derived infra keys which win), inherited by every `docker exec`, and re-filtered from `os.environ` by the entrypoint (`bash_exec.py::_run_box_entrypoint`) before any command runs. The two HOST lanes are writers of the same shape and are listed because the allowlist governs them too: `_host_fallback_env` copies every allowlisted key out of `request.env` and `run_env` inherits the operator's whole `os.environ` — so a key that joins the allowlist reaches the unsandboxed lane through those two copies whenever the caller or the shell carries it. The READERS the static walk cannot see are the three granted shell shims (`bin/defender-sql:9-10`, `bin/defender-invlang:7-8`, `bin/defender-lessons:8-9`; `bin/defender-policy:9-10` ungranted) — each `exec`s `${DEFENDER_DIR}/.venv/bin/python3` when it is executable, else bare `python3` — and `_venv.py::reexec_into_venv`, which `os.execv`s into `defender/.venv/bin/python3` when that path `is_file()`; both are cross-process edges classified by hand in #1092's brief."
       },
       "tenant_root": {
         "writers": [
@@ -546,6 +549,23 @@
           "_accounting_failure_path("
         ],
         "note": "DECLARED BY #1105 rev 4's GROUNDING (base 80888efb). The four host-only sidecars beside each run folder in its runs base, `<runs_base>/<run_id><suffix>`: `.run-end.json` (13 bytes), `.scrub-verdict.json` (19), `.accounting_failures.json` (25), `.ticket-write.json` (18) — suffix constants at run_repository/_layout.py:100-104, composed only by `RunPaths.run_end_sidecar/scrub_verdict/accounting_failures/ticket_write(runs_base)` (run_repository/_layout.py:445-455), which the four path helpers wrap (`run_end.sidecar_path` :76-81, `scrub.verdict_path` :117-119, `ticket_writer.receipt_path` :301-306, `budget_enforcer._accounting_failure_path` :137-139). Writers: `write_guarded` in REPLACE mode (run_end.py:89, scrub.py:126, ticket_writer.py:332) and `write_atomic` (budget_enforcer.py:183, :194); replace mode first creates `<leaf>.staged-<16 hex>` beside the target (`_io.staged_leaf`, _io.py:905-908; replace branch :1128-1142), so the longest name a side-file write puts on disk is the run id plus 49 bytes — the census behind #1105 rev 4's 206-byte `RunId` bound (NAME_MAX 255 - 49), executed at 80888efb: at 206 bytes all four writes land, at 207 the accounting write fails ENAMETOOLONG, from 219 all four fail. Removers (listed with the writers): run setup's `_clear_stale_sidecars` (run_common.py:153-162; `sys.exit('cannot clear a stale sidecar at ...')` on failure, which is today's exit for a pinned id of 231-255 bytes) and `ticket_writer.clear_receipt`. Readers: run setup's `_setup_state` (a sidecar beside an existing run dir refuses reuse), `Run._exit_class` (rooted read of the run-end sidecar), `accounting_failure_state`, `scrub.tree_verified`, the archive's `_single_files`, the launcher's `_scrub_ran` and the page's `render_ticket_line`; run.py `main` reads the scrub verdict at :608 (hand-classified, not a row: a row named `main` ties to every `main` in the tree). The sidecar NAMES pass `refuse_bad_run_id` (executed), so #1105 rev 4 adds a sidecar clause: `open_run` and run setup refuse an id ending in one of the four suffixes or shaped like a staged sidecar (`<…><suffix>.staged-<hex>`, MF-21); under P2 a sidecar-named or staged-sidecar directory makes both listings refuse, a sidecar file is accepted and not listed, and `run_exists` answers occupancy for it. FLOOR (hand-classified, not rows): `learning/core/quarantine.py::_tree_verdict` (:53) and `learning/author/branch.py::AuthorBranch.cleanup` (:179) apply `scrub.verdict_path` to a LEARNING worktree, not a run, so they name a sidecar beside a worktree; `Run`'s runs-base members (`run_repository/_handle.py:286-316`) reach these paths by group name. #1105 PR 1 moves `run_repository/_handle.py` to `defender/run_repository/_handle.py`: rewrite the `Run._exit_class` row in that commit."
+      },
+      "run_mirror": {
+        "writers": [
+          "defender/scripts/visualize/visualize_run.py::mirror_page",
+          "defender/scripts/visualize/visualize_run.py::_mirror",
+          "defender/scripts/visualize/_mirror_write.py::write_page"
+        ],
+        "readers": [],
+        "grep": [
+          "run-visualizations",
+          "DEFENDER_RUN_VISUALIZATIONS_DIR",
+          "MIRROR_DIR_NAME",
+          "MIRROR_DIR_ENV",
+          "mirror_root",
+          "_MIRROR_WRITER"
+        ],
+        "note": "DECLARED BY #1080's GROUNDING (base 80888efb). The dev-only run-page mirror: `<main checkout>/run-visualizations/<run_id>/runtime.html` (`visualize_run.mirror_page` composes `RunPaths(mirror_root() / run_id).runtime_html`). The root resolves, in order: the `DEFENDER_RUN_VISUALIZATIONS_DIR` override; else the main checkout reached from `_DEFENDER_DIR.parent`, where `_DEFENDER_DIR = Path(__file__).resolve().parents[2]` (visualize_run.py:62) — a FILE-DEPTH anchor, so a move of visualize_run.py to another depth silently re-roots the default; else `start` itself. Under pytest the default is refused (`MirrorRootRefused`) and the conftest sets the override for every test, so no test exercises the default anchor. Writer paths: in-process `_mirror_write.write_page` when no privilege drop is needed, else a child `[sys.executable, '-I', <_mirror_write.py path>, <dest>]` run as the mirror folder's owner (visualize_run.py:141-144); the child path comes from `_mirror_write.__file__` (visualize_run.py:68) and the module must stay stdlib-only. No code reads it back: the operator opens the pages. Caller chain: `run_common.py:252` (lazy import inside try → `VisualizeFailed`, never the run's exit code) → `visualize_run.publish_page` → `mirror_page`. Under #1080's 2026-10-04 scope cut visualize/* stays in scripts/: its move into the reports module is parked with #1105 (after #1105's rev 4); update these addresses in the commit that moves them."
       }
     }
   },

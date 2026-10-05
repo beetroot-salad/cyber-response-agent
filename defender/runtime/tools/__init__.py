@@ -45,9 +45,9 @@ from defender._untrusted import wrap_fresh
 from defender._artifact_schema import _utf8_len
 from defender._env import FatalConfigError, env_int
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE
-from defender.scripts.gather_tools import sql as defender_sql
+from defender.runtime.sql_engine import sql as defender_sql
 from defender.scripts.gather_tools import record_query
-from defender.scripts.gather_tools.payload_view import (
+from defender.runtime.payload_view import (
     passthrough_max_bytes as _capture_view_cap,
 )
 from defender.hooks.record_lesson_load import (

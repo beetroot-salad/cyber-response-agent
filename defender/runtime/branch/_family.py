@@ -44,7 +44,7 @@ from defender._vocab import (
     normalized_disposition,
 )
 from defender.scripts.adapters.confinement import ViewNameError, refuse_unnameable_world
-from defender.scripts.gather_tools.record_query import ParamsTooDeep, _json_safe_params
+from defender._query_rules import ParamsTooDeep, _json_safe_params
 
 #: The base world's role: the control every other world is compared against. Exactly one world
 #: claims it.
@@ -636,6 +636,17 @@ def refuse_reserved_world_label(label: str, *, at: str) -> None:
             "call's own agent id")
 
 
+def refuse_bad_world_label(label: str, *, at: str) -> None:
+    """Refuse a label the family model never admits as a world label: a reserved one, or one
+    that cannot name a view. Both rules, as one `FamilyError`; the episode record's writer
+    (`run_repository`) judges its labels here too."""
+    refuse_reserved_world_label(label, at=at)
+    try:
+        refuse_unnameable_world(label)
+    except ViewNameError as bad:
+        raise FamilyError(f"world label {label!r} cannot name a view: {bad}") from bad
+
+
 def check_identities(family: Family) -> None:  # noqa: C901 — one gate over the whole manifest, kept together
     """One gate over every identity rule, before anything is staged.
 
@@ -661,11 +672,7 @@ def check_identities(family: Family) -> None:  # noqa: C901 — one gate over th
         label = world.world_id
         # Defense in depth: `parse_world` already refuses this, but a `Family` can be built
         # directly.
-        refuse_reserved_world_label(label, at="")
-        try:
-            refuse_unnameable_world(label)
-        except ViewNameError as bad:
-            raise FamilyError(f"world label {label!r} cannot name a view: {bad}") from bad
+        refuse_bad_world_label(label, at="")
         # The label must also name a run: each sibling's run dir is `{episode_id}-{label}`. The
         # view and run-id grammars overlap but neither contains the other (the view rule admits
         # `wörld`, `a+b`, `a:b`), and the label is model-authored, so one off the run-id grammar

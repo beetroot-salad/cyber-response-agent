@@ -76,13 +76,10 @@ from defender.tests.test_1134_lead_author_handle import (
     SKILL_MD_NAME,
     TEMPLATE_NAME,
     WAZUH_LEAD,
-    MovedMountPaths,
-    OtherLanePaths,
     _deps,
     _lead,
     _refusing_trees,
     _run_dir,
-    _unresolved_run,
     _worktree,
     bare_skills,
     content_verdict,
@@ -92,8 +89,6 @@ from defender.tests.test_1134_lead_author_handle import (
 )
 
 LEAD = LEAD_AUTHOR_DRAIN_LABEL
-#: `OtherLanePaths`' label: a drain the mount list grants `skills/` to that is not the lead's.
-OTHER = "other_lane"
 
 
 def _head_mode(repo: Path, rel: str) -> str:
@@ -474,57 +469,11 @@ def test_the_runs_catalog_loads_go_through_the_deps_held_mount(tmp_path: Path, r
     assert rc == 0
 
 
+# E7 (the label looked up in a mount list rather than compared to one constant) is dissolved by
+# #1179's amendment: the member answers its own trees, so there is no list apart from it to
+# consult, and a non-member raises at first use (`test_1134_lead_author_handle.py`'s
+# `test_run_consults_the_label_it_is_given` and `test_the_drain_seams_consult_the_label`).
 # ---------------------------------------------------------------------------------------
-# E7: the label is looked up in the mount list, never compared to one constant
-# ---------------------------------------------------------------------------------------
-
-
-def test_run_with_deps_refuses_the_lead_label_when_its_mount_list_lacks_skills(tmp_path: Path):
-    """E7, `run(label=LEAD_AUTHOR_DRAIN_LABEL, deps=...)` whose `deps.paths` is a `LoopPaths`
-    whose lead drain mounts a tree that is not `skills/` (`MovedMountPaths`): refused
-    (`LeadAuthorError` naming the `skills/` the label's lane does not mount) before any of the
-    claim runs. The
-    control, the same deps over the plain `LoopPaths`, serves the claim.
-
-    Catches: `run` checking the label against the lead constant (a second label table)
-    instead of asking `deps.paths.drain_writable_trees(label)` for `skills_dir`."""
-    repo = _worktree(tmp_path)
-    plain = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    (repo / "moved-skills").mkdir()
-    moved = MovedMountPaths(repo_root=repo, state_dir=tmp_path / "state")
-    run_dir = _unresolved_run(tmp_path)
-    collected = run_dir / "lead_author" / "pitfalls_collected"
-
-    with lead_trees(plain) as trees:
-        deps = _deps(plain, trees, LeadAuthorSpawn(), [])
-        got = outcome(lambda: lead_author.run(
-            run_dir, label=LEAD, paths=moved, deps=dataclasses.replace(deps, paths=moved)))
-        assert raised(got, "LeadAuthorError", str(plain.skills_dir)), got
-        assert not collected.exists(), "the refused claim ran"
-        assert lead_author.run(run_dir, label=LEAD, paths=plain, deps=deps) == 0
-
-    assert collected.is_file(), "the control's claim did not run"
-
-
-def test_the_drain_seams_serve_a_label_the_mount_list_grants_skills_to(tmp_path: Path):
-    """E7, the seams: `_invoke_lead_author` and `_invoke_pitfalls` with a label that is not the
-    lead constant but whose mount list holds `skills/` (`OtherLanePaths`, `other_lane`) serve
-    it: the lead claim runs to its done hook (nothing to hand the agent), and the pitfalls
-    tick serves its empty queue (rc 0). (Their refusal of labels that mount no `skills/` is
-    `test_the_drain_seams_consult_the_label`.)
-
-    Catches: a seam that refuses every label but the lead constant, or opens the lead
-    constant's mounts whatever label it was handed."""
-    repo = _worktree(tmp_path)
-    paths = OtherLanePaths(repo_root=repo, state_dir=tmp_path / "state")
-    run_dir = _unresolved_run(tmp_path)
-    done: list[str | None] = []
-
-    drains._invoke_lead_author(paths, run_dir, label=OTHER, on_done=done.append)
-    assert done == [None]
-    assert (run_dir / "lead_author" / "pitfalls_collected").is_file()
-    assert drains._invoke_pitfalls(paths, label=OTHER, on_curated=lambda _d: None,
-                                   lock_wait_seconds=0) == 0
 
 
 # ---------------------------------------------------------------------------------------

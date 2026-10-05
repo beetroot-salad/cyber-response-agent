@@ -1304,6 +1304,7 @@ def quarantine_a_tainted_tree(
     established BETWEEN the walk and the preserve step — `verdict=None` removes any verdict the
     walk left (an unjudged tree, which is the fail-closed arm's whole condition), and a dict
     writes that verdict where the scan would have. Neither touches what the manifest must say."""
+    from defender.learning.core.config import AUTHOR_DRAIN_LABEL
     from defender.learning.core.quarantine import preserve_tainted_tree
     from defender.runtime import scrub as scrub_mod
 
@@ -1317,7 +1318,7 @@ def quarantine_a_tainted_tree(
             write_verdict(tree, verdict)
         archive = preserve_tainted_tree(
             tree, quarantine_dir, batch_id=batch_id, branch=f"lessons-{batch_id}",
-            label="[771]", taint=taint)
+            label=AUTHOR_DRAIN_LABEL, taint=taint)
     else:
         raise AssertionError("the planted symlink did not taint the tree — the drive is vacuous")
     manifest = quarantine_dir / f"{batch_id}.json"

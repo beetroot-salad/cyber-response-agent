@@ -1,0 +1,638 @@
+{
+ "_meta": {
+  "base": "80888efb",
+  "how": "the group's two test files run at base 80888efb with SPEC1080_AT_BASE=1 (the locator resolves each moved name to its base definition) under a recording plugin: each test's observation of the base code over its fixed inputs (driven replay runs, shadow checkouts, tmp layouts) is frozen here; the by-path page is the base's `python visualize_run.py <run_dir>` record over driven_run, which the plugin checked equal to the base's in-process publish; paths scrubbed by _scrub/_normalize_page"
+ },
+ "by_path_base": {
+  "finished_rc": 0,
+  "finished_record": true,
+  "pointer_missing_rc": 1,
+  "pointer_missing_record": false
+ },
+ "by_path_page_tests_survive_as_in_process_calls": {
+  "finished": {
+   "returns": "skipped"
+  },
+  "finished_record": true,
+  "pointer_missing": {
+   "raises": "VisualizeFailed",
+   "message": "the page for <RUN_DIR> could not be rendered"
+  },
+  "pointer_missing_record": false
+ },
+ "s019": {
+  "relative_to_main_checkout": "run-visualizations"
+ },
+ "s020": {
+  "access": {
+   "untraversable_folders": [],
+   "writer_world_readable": true
+  },
+  "lands": {
+   "publish": "copied",
+   "copy_is_the_record": true,
+   "made_by_the_writer_uid": true,
+   "direct_child_rc": 0
+  },
+  "unwritable": {
+   "publish": "failed",
+   "record": true,
+   "warnings": 1,
+   "folder_untouched": true
+  }
+ },
+ "s038": {
+  "payload_passthrough_cap": [
+   {
+    "returns": 8192
+   },
+   {
+    "returns": 100
+   },
+   {
+    "returns": 0
+   },
+   {
+    "raises": "FatalConfigError",
+    "message": "DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES must be an integer; got 'not-a-number'"
+   }
+  ],
+  "sql_box_marker": [
+   {
+    "rc": 69,
+    "stdout": "",
+    "stderr": "defender-sql: duckdb is not installed (cd defender && uv pip install --python .venv/bin/python -e '.[runtime]').\n"
+   },
+   {
+    "rc": 69,
+    "stdout": "",
+    "stderr": "defender-sql: duckdb is not installed in this box image (run `python3 defender/scripts/box_image.py build` to rebuild it).\n"
+   }
+  ],
+  "venv_box_marker": {
+   "unset-at-import-set-at-call": "RETURNED",
+   "set-at-import-unset-at-call": "PLANTED-VENV-RAN"
+  },
+  "mirror_override": [
+   "<TMP>/first",
+   "<TMP>/second"
+  ]
+ },
+ "s045": {
+  "control": {
+   "frontend_build": "imports",
+   "run_end": {
+    "raises": null,
+    "record": true
+   },
+   "episode": {
+    "page": true,
+    "warnings": 0
+   }
+  },
+  "styles.css": {
+   "frontend_build": {
+    "raises": "FileNotFoundError",
+    "cause": null,
+    "names_asset": true
+   },
+   "run_end": {
+    "raises": "VisualizeFailed",
+    "message": "the renderer could not be loaded",
+    "cause": "FileNotFoundError",
+    "names_asset": true,
+    "record": false
+   },
+   "episode": {
+    "page": false,
+    "warnings": 1
+   }
+  },
+  "runtime.js": {
+   "frontend_build": {
+    "raises": "FileNotFoundError",
+    "cause": null,
+    "names_asset": true
+   },
+   "run_end": {
+    "raises": "VisualizeFailed",
+    "message": "the renderer could not be loaded",
+    "cause": "FileNotFoundError",
+    "names_asset": true,
+    "record": false
+   },
+   "episode": {
+    "page": true,
+    "warnings": 0
+   }
+  },
+  "episode.css": {
+   "frontend_build": "imports",
+   "run_end": {
+    "raises": null,
+    "record": true
+   },
+   "episode": {
+    "page": false,
+    "warnings": 1
+   }
+  }
+ },
+ "s064": {
+  "well-formed": {
+   "root": "<TMP>/main/run-visualizations",
+   "publish": "copied",
+   "warnings": [],
+   "landed": [
+    "main/run-visualizations/r-1080/runtime.html"
+   ],
+   "landed_bytes_are_the_page": true
+  },
+  "pointer-without-gitdir-prefix": {
+   "root": "<TMP>/trees/wt/run-visualizations",
+   "publish": "copied",
+   "warnings": [
+    "mirroring under <TMP>/trees/wt: <TMP>/trees/wt/.git is not a gitdir pointer",
+    "mirroring under <TMP>/trees/wt: <TMP>/trees/wt/.git is not a gitdir pointer"
+   ],
+   "landed": [
+    "trees/wt/run-visualizations/r-1080/runtime.html"
+   ],
+   "landed_bytes_are_the_page": true
+  },
+  "pointer-to-a-missing-folder": {
+   "root": "<TMP>/trees/wt/run-visualizations",
+   "publish": "copied",
+   "warnings": [
+    "mirroring under <TMP>/trees/wt: [Errno 2] No such file or directory: '<TMP>/main/.git/worktrees/gone/commondir'",
+    "mirroring under <TMP>/trees/wt: [Errno 2] No such file or directory: '<TMP>/main/.git/worktrees/gone/commondir'"
+   ],
+   "landed": [
+    "trees/wt/run-visualizations/r-1080/runtime.html"
+   ],
+   "landed_bytes_are_the_page": true
+  },
+  "main-checkout-without-defender": {
+   "root": "<TMP>/trees/wt/run-visualizations",
+   "publish": "copied",
+   "warnings": [
+    "mirroring under <TMP>/trees/wt: <TMP>/main (from <TMP>/trees/wt/.git) holds no defender/",
+    "mirroring under <TMP>/trees/wt: <TMP>/main (from <TMP>/trees/wt/.git) holds no defender/"
+   ],
+   "landed": [
+    "trees/wt/run-visualizations/r-1080/runtime.html"
+   ],
+   "landed_bytes_are_the_page": true
+  }
+ },
+ "s065": {
+  "missing": {
+   "publish": "copied",
+   "record": true,
+   "warnings": 0,
+   "untouched": true
+  },
+  "not-writable": {
+   "publish": "failed",
+   "record": true,
+   "warnings": 1,
+   "untouched": true
+  },
+  "a-regular-file": {
+   "publish": "failed",
+   "record": true,
+   "warnings": 1,
+   "untouched": true
+  },
+  "owned-by-another-user": {
+   "publish": "failed",
+   "record": true,
+   "warnings": 1,
+   "untouched": true
+  }
+ },
+ "s066": {
+  "untouched": {
+   "run_end": {
+    "raises": null,
+    "record": true
+   },
+   "warnings": 0,
+   "copy_landed": true,
+   "mirror_writer_is_the_shadows_own": true
+  },
+  "absent": {
+   "run_end": {
+    "raises": "VisualizeFailed",
+    "message": "the renderer could not be loaded",
+    "cause": "ImportError",
+    "names_asset": false,
+    "record": false
+   },
+   "warnings": 0,
+   "copy_landed": false,
+   "mirror_writer_is_the_shadows_own": null
+  },
+  "directory": {
+   "run_end": {
+    "raises": "VisualizeFailed",
+    "message": "the renderer could not be loaded",
+    "cause": "ImportError",
+    "names_asset": false,
+    "record": false
+   },
+   "warnings": 0,
+   "copy_landed": false,
+   "mirror_writer_is_the_shadows_own": null
+  }
+ },
+ "s066_unreadable_as_root": {
+  "in_process": {
+   "run_end": {
+    "raises": null,
+    "record": true
+   },
+   "warnings": 0,
+   "copy_landed": true,
+   "mirror_writer_is_the_shadows_own": true
+  },
+  "dropped_child": {
+   "run_end": {
+    "raises": null,
+    "record": true
+   },
+   "warnings": 1,
+   "copy_landed": false,
+   "mirror_writer_is_the_shadows_own": true
+  }
+ },
+ "s067": {
+  "nonzero": {
+   "publish": "failed",
+   "record": true,
+   "dest_is_earlier": true,
+   "strays": []
+  },
+  "killed": {
+   "returncode": -9,
+   "dest_is_earlier": true,
+   "strays": []
+  },
+  "completed": {
+   "returncode": 0,
+   "dest_is_new": true,
+   "strays": []
+  }
+ },
+ "s068": {
+  "imports": [
+   "__future__",
+   "errno",
+   "os",
+   "pathlib",
+   "sys",
+   "tempfile"
+  ]
+ },
+ "s130": {
+  "main_checkout": {
+   "root": "<TMP>/main/run-visualizations",
+   "publish": "copied",
+   "warnings": [],
+   "landed": [
+    "main/run-visualizations/r-1080/runtime.html"
+   ],
+   "landed_bytes_are_the_page": true
+  },
+  "linked_worktree": {
+   "root": "<TMP>/main/run-visualizations",
+   "publish": "copied",
+   "warnings": [],
+   "landed": [
+    "main/run-visualizations/r-1080/runtime.html"
+   ],
+   "landed_bytes_are_the_page": true
+  },
+  "unpacked_tree": {
+   "root": "<TMP>/tree/run-visualizations",
+   "publish": "copied",
+   "warnings": [],
+   "landed": [
+    "tree/run-visualizations/r-1080/runtime.html"
+   ],
+   "landed_bytes_are_the_page": true
+  }
+ },
+ "s175": {
+  "empty": {
+   "calls": [
+    {
+     "root": {
+      "raises": "MirrorRootRefused"
+     },
+     "publish": "failed"
+    }
+   ],
+   "landed": [],
+   "warnings": 1
+  },
+  "relative": {
+   "calls": [
+    {
+     "root": {
+      "path": "rel/pages"
+     },
+     "publish": "copied"
+    }
+   ],
+   "landed": [
+    "rel/pages/r-1080/runtime.html"
+   ],
+   "warnings": 0
+  },
+  "trailing-slash": {
+   "calls": [
+    {
+     "root": {
+      "path": "<TMP>/pages"
+     },
+     "publish": "copied"
+    }
+   ],
+   "landed": [
+    "pages/r-1080/runtime.html"
+   ],
+   "warnings": 0
+  },
+  "tilde": {
+   "calls": [
+    {
+     "root": {
+      "path": "~/pages"
+     },
+     "publish": "copied"
+    }
+   ],
+   "landed": [
+    "~/pages/r-1080/runtime.html"
+   ],
+   "warnings": 0
+  },
+  "under-a-missing-parent": {
+   "calls": [
+    {
+     "root": {
+      "path": "<TMP>/missing/deeper/pages"
+     },
+     "publish": "copied"
+    }
+   ],
+   "landed": [
+    "missing/deeper/pages/r-1080/runtime.html"
+   ],
+   "warnings": 0
+  },
+  "a-regular-file": {
+   "calls": [
+    {
+     "root": {
+      "path": "<TMP>/afile"
+     },
+     "publish": "failed"
+    }
+   ],
+   "landed": [],
+   "warnings": 1
+  },
+  "a-symlink": {
+   "calls": [
+    {
+     "root": {
+      "path": "<TMP>/link"
+     },
+     "publish": "copied"
+    }
+   ],
+   "landed": [
+    "target/r-1080/runtime.html"
+   ],
+   "warnings": 0
+  },
+  "changed-between-calls": {
+   "calls": [
+    {
+     "root": {
+      "path": "<TMP>/first"
+     },
+     "publish": "copied"
+    },
+    {
+     "root": {
+      "path": "<TMP>/second"
+     },
+     "publish": "copied"
+    }
+   ],
+   "landed": [
+    "first/r-1080/runtime.html",
+    "second/r-1080/runtime.html"
+   ],
+   "warnings": 0
+  }
+ },
+ "s176": {
+  "finished": {
+   "outcome": {
+    "returns": "skipped"
+   },
+   "record": true,
+   "page": {
+    "sha256": "4f3addec76568164a6a8744d2e8275e40b0222cddc99e0d42c4dbc045791be89",
+    "chars": 88577
+   }
+  },
+  "no-report": {
+   "outcome": {
+    "returns": "skipped"
+   },
+   "record": true,
+   "page": {
+    "sha256": "167c8279dd1dd93a9679633629d4638c516f0d3f74581eff1f527447e755600d",
+    "chars": 87228
+   }
+  },
+  "no-investigation": {
+   "outcome": {
+    "returns": "skipped"
+   },
+   "record": true,
+   "page": {
+    "sha256": "2456279b5325f13ed988bf52ad21fc2e9918636cdb6d5d8746a3c7d578730a61",
+    "chars": 66877
+   }
+  },
+  "died-before-its-session-store": {
+   "outcome": {
+    "raises": "VisualizeFailed",
+    "message": "the page for <CASE>/run could not be rendered"
+   },
+   "record": false,
+   "page": null
+  },
+  "empty": {
+   "outcome": {
+    "raises": "VisualizeFailed",
+    "message": "the page for <CASE>/run could not be rendered"
+   },
+   "record": false,
+   "page": null
+  },
+  "relative": {
+   "outcome": {
+    "returns": "skipped"
+   },
+   "record": true,
+   "page": {
+    "sha256": "1bd7d4a7ecec0f842a87dde4ac986d974ed8134dd381f982df9d3a0e053c87ec",
+    "chars": 88573
+   }
+  },
+  "symlinked": {
+   "outcome": {
+    "returns": "skipped"
+   },
+   "record": true,
+   "page": {
+    "sha256": "18a0b8ca420dc1c832a58cea28f375c75aa626e132364c6602a8b5a4fc1c6f52",
+    "chars": 88579
+   }
+  },
+  "space-and-non-ascii-name": {
+   "outcome": {
+    "returns": "skipped"
+   },
+   "record": true,
+   "page": {
+    "sha256": "67c92a5a53ab9fd44d5c11fb662a32c25c913c1a5c506bbab0481721220ed4bd",
+    "chars": 88603
+   }
+  },
+  "regular-file": {
+   "outcome": {
+    "raises": "ValueError",
+    "message": "<CASE>/run is not an existing directory"
+   },
+   "record": false,
+   "page": null
+  }
+ },
+ "s177": {
+  "esc_untrusted": {
+   "markup": "&lt;b on\u200bmouseover=alert(1)&gt;HOSTILE-MARKUP&lt;/b&gt;",
+   "script-close": "&lt;/script&gt;&lt;script&gt;alert(&#x27;HOSTILE-SCRIPT&#x27;)&lt;/script&gt;",
+   "attribute-quote": "&quot; on\u200berror=&quot;alert(1)&quot; data-x=&#x27;HOSTILE-QUOTE&#x27;",
+   "already-escaped": "&amp;lt;b&amp;gt;HOSTILE-ESCAPED&amp;amp;amp;&amp;lt;/b&amp;gt;",
+   "nul": "HOSTILE-NUL\u0000after",
+   "rtl-override": "HOSTILE-RTL\u202eevil",
+   "lone-surrogate": "HOSTILE-SURROGATE\ud800after",
+   "ten-megabytes": {
+    "sha256": "12b435f9b29834af9f5b89785c98b57bf586415051b8bffc3616d5a6ba1da1d2",
+    "chars": 10000024
+   }
+  },
+  "combined": {
+   "outcome": {
+    "returns": "skipped"
+   },
+   "record": true,
+   "raw_in_page": {
+    "markup": false,
+    "script-close": false,
+    "attribute-quote": false,
+    "already-escaped": false
+   },
+   "rendered_markers": {
+    "markup": 2,
+    "script-close": 2,
+    "attribute-quote": 2,
+    "already-escaped": 2
+   }
+  },
+  "control-characters": {
+   "outcome": {
+    "returns": "skipped"
+   },
+   "record": true,
+   "raw_in_page": {
+    "nul": true,
+    "rtl-override": true
+   },
+   "rendered_markers": {
+    "nul": 2,
+    "rtl-override": 2
+   },
+   "page": {
+    "sha256": "4a7b6dc3d4a7127452943785a98bb73d76a0eb66198f5064ddb01764f456c5ae",
+    "chars": 88655
+   }
+  },
+  "lone-surrogate-bytes": {
+   "outcome": {
+    "raises": "VisualizeFailed",
+    "message": "the page for <RUN_DIR> could not be rendered"
+   },
+   "record": false,
+   "page": null
+  },
+  "ten-megabytes": {
+   "outcome": {
+    "returns": "skipped"
+   },
+   "record": true,
+   "page": {
+    "sha256": "fa47fe6468f3e738e7eb275792285434dbdb7d8f4718f3bdb864d6c4894d5ad1",
+    "chars": 20088631
+   }
+  }
+ },
+ "s207": {
+  "publish": [
+   "copied",
+   "copied"
+  ],
+  "mirror_holds_only_this_run": true,
+  "run_folder_listing": [
+   "runtime.html"
+  ],
+  "copy_is_the_second_record": true,
+  "second_differs_from_first": true,
+  "copy_carries_the_change": true
+ },
+ "s_run_end_publishes_page": {
+  "record_name": "runtime.html",
+  "render": {
+   "rc": 0,
+   "runtime_html": false,
+   "warnings": [
+    {
+     "message": "the run page was not saved",
+     "exc": "VisualizeFailed",
+     "exc_message": "the page for <RUN_DIR> could not be rendered",
+     "cause": "AttributeError"
+    }
+   ]
+  },
+  "load": {
+   "rc": 0,
+   "runtime_html": false,
+   "warnings": [
+    {
+     "message": "the run page was not saved",
+     "exc": "VisualizeFailed",
+     "exc_message": "the renderer could not be loaded",
+     "cause": "ModuleNotFoundError"
+    }
+   ]
+  }
+ }
+}

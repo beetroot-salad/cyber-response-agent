@@ -25,7 +25,7 @@ from pydantic.dataclasses import is_pydantic_dataclass
 from defender.run_common import run_env
 from defender.runtime import box as box_mod
 from defender.runtime.box import BOX_ENV_ALLOWLIST, BoxRequest, BoxSpec, Mount
-from defender.tests._defender_sql import EXIT_NO_RUNTIME, SQL_PY
+from defender.tests._defender_sql import EXIT_NO_RUNTIME, SQL_ARGV
 from defender.tests._spec1092 import (
     DEFENDER,
     REPO_ROOT,
@@ -147,9 +147,8 @@ def test_reexec_into_venv_does_not_exec_when_defender_box_is_set_and_does_otherw
     """`reexec_into_venv`, with a venv interpreter present beside its own tree, does not exec
     when `DEFENDER_BOX` is set and does exec into it when the variable is unset."""
     tree = tmp_path / "defender"
-    scripts = tree / "scripts"
-    scripts.mkdir(parents=True)
-    shutil.copy(DEFENDER / "scripts" / "_venv.py", scripts / "_venv.py")
+    tree.mkdir(parents=True)
+    shutil.copy(DEFENDER / "_venv.py", tree / "_venv.py")
     venv_bin = tree / ".venv" / "bin"
     venv_bin.mkdir(parents=True)
     stub = venv_bin / "python3"
@@ -157,7 +156,7 @@ def test_reexec_into_venv_does_not_exec_when_defender_box_is_set_and_does_otherw
     stub.chmod(0o755)
     code = (
         "import sys\n"
-        f"sys.path.insert(0, {str(scripts)!r})\n"
+        f"sys.path.insert(0, {str(tree)!r})\n"
         "import _venv\n"
         "_venv.reexec_into_venv('lessons_fm.py')\n"
         "print('NO-EXEC')\n"
@@ -180,7 +179,7 @@ def test_reexec_into_venv_does_not_exec_when_defender_box_is_set_and_does_otherw
 
 # ---- d28 -------------------------------------------------------------------------------------
 def test_defender_sqls_missing_duckdb_message_names_the_image_build_when_marked_and_the_venv_line_otherwise(tmp_path):
-    """`defender-sql`'s missing-`duckdb` branch (`scripts/gather_tools/sql.py`) exits
+    """`defender-sql`'s missing-`duckdb` branch (`runtime/sql_engine/sql.py`) exits
     `EXIT_NO_RUNTIME` on both lanes; with `DEFENDER_BOX` set its message names the box image
     build (`box_image.py build`) and never `uv pip install --python .venv/bin/python` or the
     venv (the path O5 closes and a box cannot write), and with `DEFENDER_BOX` unset today's
@@ -201,7 +200,7 @@ def test_defender_sqls_missing_duckdb_message_names_the_image_build_when_marked_
         if marked:
             env["DEFENDER_BOX"] = "1"
         return subprocess.run(
-            [sys.executable, str(SQL_PY), "SELECT 1"], input="{}", env=env,
+            [*SQL_ARGV, "SELECT 1"], input="{}", env=env,
             capture_output=True, text=True, encoding="utf-8", timeout=120,
         )
 

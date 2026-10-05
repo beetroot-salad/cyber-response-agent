@@ -34,9 +34,8 @@ from defender.run_repository._errors import RunRefused, quoted, shown
 from defender.run_repository._id import RunId
 from defender.run_repository._layout import RunPaths
 from defender.runtime.branch._family import (
-    FamilyError, refuse_bad_episode_id, refuse_reserved_world_label,
+    FamilyError, refuse_bad_episode_id, refuse_bad_world_label,
 )
-from defender.scripts.adapters.confinement import ViewNameError, refuse_unnameable_world
 
 #: The record folder, directly in the tenant's runs folder. A leading `_` is never a run id
 #: (`RunId.parse` refuses it), so no run folder can share its name.
@@ -285,9 +284,8 @@ def _admit_label(label: object, folded: dict[str, str]) -> str:
     if type(label) is not str:
         raise RunRefused(f"a label must be exactly a str, not {type(label).__name__}")
     try:
-        refuse_reserved_world_label(label, at="")
-        refuse_unnameable_world(label)
-    except (FamilyError, ViewNameError):
+        refuse_bad_world_label(label, at="")
+    except FamilyError:
         raise RunRefused(f"label {quoted(label)} is not a world label the family model "
                          "admits (reserved, or it cannot name a view)") from None
     if (key := label.casefold()) in folded:

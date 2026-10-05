@@ -881,7 +881,7 @@ demands:
         refinement block BEFORE the repeating findings block and one that opens a slot on each
         row's differing target: `slots` identical at all six (J15). THIS IS THE UNCOVERED SEAM
         AND IT IS RECORDED AS ONE. `frontier_from_text` is also the reader behind
-        `scripts/lessons/lessons_frontier.py`, one of N3's two subprocess re-exec entry points
+        `runtime/lessons_engine/lessons_frontier.py` (scripts/lessons/ before #1080), one of N3's two subprocess re-exec entry points
         (see `handoff.deferred`), so the waiver covers the out-of-process reader too — the
         unobservability is a property of the reduction, not of the process it runs in.
     rejected:

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Retrieve defender lessons by frontier containment — what the investigation has not settled.
 
 The signature lane (`runtime/orient.py`) greps `source_signature:.*<rule.id>` once, before the
@@ -21,26 +20,14 @@ truthful selector to write.
 """
 from __future__ import annotations
 
+import argparse
 import sys
 from dataclasses import field, replace
 from pathlib import Path
 
-if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
-    sys.path.insert(0, _root)
-
-# The only `defender.*` import allowed above the guard: `_venv` is stdlib-only, while other
-# modules may import pydantic or PyYAML, which the bare launching interpreter lacks.
-# `test_corpus_fold_seed.test_c2c` pins this ordering.
-from defender.scripts._venv import reexec_into_venv
-
-if __name__ == "__main__":
-    reexec_into_venv(__file__)
-
-import argparse
-
 from defender._corpus import PROVENANCE_KEYS
 from defender._model import model
-from defender.scripts.lessons._lessons_common import (
+from defender.runtime.lessons_engine._lessons_common import (
     as_list,
     iter_lessons,
     resolve_corpus,
@@ -60,8 +47,8 @@ from defender.skills.invlang.validate import (
     is_open_slot,
 )
 from defender import _yaml
+from defender._git import REPO_ROOT
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CORPUS = REPO_ROOT / "defender" / "lessons"
 CORPUS_NAME = DEFAULT_CORPUS.name
 

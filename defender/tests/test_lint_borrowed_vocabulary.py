@@ -210,6 +210,7 @@ def test_the_real_tree_passes_the_ratchet(gate):
     assert gate.main([]) == 0
 
 
+@pytest.mark.gate
 def test_no_disposition_site_is_baselined(gate):
     """#785's own claim, stated as the property rather than as "the baseline is empty": every
     borrow of the run vocabulary is folded, and the one deliberate exemption — the write gate,

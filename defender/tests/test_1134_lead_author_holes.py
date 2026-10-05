@@ -50,6 +50,7 @@ from typing import Any
 
 import pytest
 
+from defender.tests._claim1175 import claim_git
 from defender._io import ALIAS_READ_REFUSAL
 from defender._scaffold_rules import check_system_skill
 from defender.learning.author import shared as _author_shared
@@ -699,7 +700,7 @@ FOLLOWS = [
            lambda s: place(s, TEMPLATE_NAME, marked_template("wazuh.probe"), "plain"),
            lambda c: _put(c, TEMPLATE_NAME, BAD_TEMPLATE),
            lambda s, tf: lead_author._verify_skills_state(
-               s.repo, _strays(s), systems=DECLARED, tree_for=tf),
+               s.repo, _strays(s), systems=DECLARED, tree_for=tf, git=claim_git(s.repo)),
            lane=lambda got: got[0] == "returned" and got[1] == [f"{SKILLS_REL}{TEMPLATE_NAME}"],
            copy=lambda got: raised(got, "LeadAuthorError", CONTENT_CASES[1].bad_says)),
     Follow("_pitfalls_rule",
@@ -714,7 +715,7 @@ FOLLOWS = [
            _seed_reducer_edit,
            _rewrite_reducer_frontmatter,
            lambda s, tf: pitfalls_curator._verify_pitfalls_state(
-               s.repo, _strays(s), systems=DECLARED, reducer_offered=True, tree_for=tf),
+               s.repo, _strays(s), systems=DECLARED, reducer_offered=True, tree_for=tf, git=claim_git(s.repo)),
            lane=lambda got: got == ("returned", [pitfalls_curator.REDUCER_REL]),
            copy=lambda got: raised(got, "LeadAuthorError", "frontmatter")),
 ]

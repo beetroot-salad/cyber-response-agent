@@ -9,7 +9,7 @@ code's own wherever the code already owns one; the two new ones are marked NEW.
 
 * `lead_extraction.collect_general_failures(executed, run_dir, *, catalog_dir, catalog)` —
   signature UNCHANGED. M5′ adds ONE branch: a lead whose `query_id` is EXACTLY
-  `record_query.BASH_SHIM_QUERY_ID` emits a row whose `system` is `""`, whatever the lead was
+  `_query_rules.BASH_SHIM_QUERY_ID` emits a row whose `system` is `""`, whatever the lead was
   attributed to, and that branch runs BEFORE the systemless guard at `lead_extraction.py:111`.
   The `error_class != "agent-fixable"` guard still runs FIRST, so an infra-classed reduce
   never enqueues (N9). Nothing else about the four guards moves (C22).
@@ -138,7 +138,7 @@ from pathlib import Path
 from typing import Any
 
 from defender.learning.leads.lead_extraction import ExecutedLead
-from defender.scripts.gather_tools.record_query import BASH_SHIM_QUERY_ID
+from defender._query_rules import BASH_SHIM_QUERY_ID
 from defender.tests._declared869 import (  # noqa: F401 — re-exported substrate
     ADAPTERS_REL,
     CATALOG_REL,

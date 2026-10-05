@@ -1,0 +1,990 @@
+{
+ "_meta": {
+  "base": "80888efb",
+  "how": "capture_lessons.py imported test_1080_lessons_engine and ran each observe_* (copies of the base tree's defender/ code over the module's fixture corpora, the real tree's shim for s021, orient through its shim= seam, the frontier library in process) under SPEC1080_AT_BASE=1, normalised by the module's norm()",
+  "revised": "2026-10-04, post-review (human): the shims run their engines as modules. Four values re-observed: s060.{link-outside,copy-outside}, tree variable unset, for --tags and the listing. A shim outside any checkout still resolves no tree, as at the base; python3 now reports the engine module missing (exit 1) instead of the engine file missing (exit 2). Every other value is the base capture, unchanged."
+ },
+ "survival": {
+  "[]": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/falco-one.md\tfalco lesson one\n<TMP>/tree/defender/lessons/sshd-one.md\tsshd lesson one\n<TMP>/tree/defender/lessons/sshd-two.md\tsshd lesson two\n",
+   "err": ""
+  },
+  "[\"telemetry_source:.*\\\\bsshd\\\\b\"]": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/sshd-one.md\tsshd lesson one\n<TMP>/tree/defender/lessons/sshd-two.md\tsshd lesson two\n",
+   "err": ""
+  },
+  "[\"source_signature:.*v2-cross-tier-ssh-pivot\", \"attack_phase:.*persistence\"]": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/sshd-one.md\tsshd lesson one\n<TMP>/tree/defender/lessons/sshd-two.md\tsshd lesson two\n",
+   "err": ""
+  },
+  "[\"lateral\"]": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/sshd-one.md\tsshd lesson one\n",
+   "err": ""
+  },
+  "[\"--tags\"]": {
+   "rc": 0,
+   "out": "source_signature:\n  v2-cross-tier-ssh-pivot          2\n  v2-falco-suspicious-network-tool 2\ntelemetry_source:\n  auditd                           1\n  falco                            1\n  sshd                             2\n  zeek                             1\nattack_phase:\n  execution                        1\n  lateral-movement                 1\n  persistence                      2\n",
+   "err": ""
+  },
+  "[\"--tags\", \"attack_phase\"]": {
+   "rc": 0,
+   "out": "attack_phase:\n  execution                        1\n  lateral-movement                 1\n  persistence                      2\n",
+   "err": ""
+  },
+  "[\"--show\", \"defender/lessons/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "[\"--show\", \"defender/lessons/sshd-one.md\", \"defender/lessons/falco-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n--- <TMP>/tree/defender/lessons/falco-one.md\nname: falco-one\ndescription: falco lesson one\nsource_signature: [v2-falco-suspicious-network-tool]\ntelemetry_source: [falco, zeek]\nattack_phase: [execution]\n",
+   "err": ""
+  },
+  "[\"--help\"]": {
+   "rc": 0,
+   "out": "usage: defender-lessons [-h] [--tags [DIMENSION]] [--show PATH [PATH ...]]\n                        [patterns ...]\n\nGrep defender lesson FRONTMATTER (only) + enumerate viable tags.\n\npositional arguments:\n  patterns              regex(es) matched against frontmatter; ANDed\n\noptions:\n  -h, --help            show this help message and exit\n  --tags [DIMENSION]    enumerate viable tag values (all dimensions, or one\n                        named)\n  --show PATH [PATH ...]\n                        print only the frontmatter block of the given\n                        lesson(s)\n\nfrontmatter-only: the body is never matched or printed.\n",
+   "err": ""
+  }
+ },
+ "box_closure": {
+  "rc": 0,
+  "out": "<TMP>/tree/defender/lessons/sshd-one.md\tsshd lesson one\n<TMP>/tree/defender/lessons/sshd-two.md\tsshd lesson two\n",
+  "blocked modules loaded": [
+   []
+  ]
+ },
+ "s021": {
+  "real [\"--show\", \"<REPO>/knowledge/tenant-fixture/settings/systems/cmdb/config.env\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: <REPO>/knowledge/tenant-fixture/settings/systems/cmdb/config.env\n"
+  },
+  "real [\"--show\", \"<REPO>/defender/pyproject.toml\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: <REPO>/defender/pyproject.toml\n"
+  },
+  "real [\"--show\", \"defender/lessons/../pyproject.toml\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/../pyproject.toml\n"
+  },
+  "real [\"--show\", \"defender/lessons/../../README.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/../../README.md\n"
+  },
+  "real [\"--show\", \"defender/lessons/../skills/invlang/SKILL.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/../skills/invlang/SKILL.md\n"
+  },
+  "copy [\"--show\", \"defender/lessons/link_out_rel.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/link_out_rel.md\n"
+  },
+  "copy [\"--show\", \"defender/lessons/link_out_abs.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/link_out_abs.md\n"
+  },
+  "copy [\"--show\", \"defender/lessons/linkdir/invlang/SKILL.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/linkdir/invlang/SKILL.md\n"
+  },
+  "copy [\"--show\", \"defender/lessons/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  }
+ },
+ "s060": {
+  "link-outside, tree variable unset [\"--tags\"]": {
+   "rc": 1,
+   "out": "",
+   "err": "<PY>: Error while finding module specification for 'defender.runtime.lessons_engine.lessons_fm' (ModuleNotFoundError: No module named 'defender')\n"
+  },
+  "link-outside, tree variable unset []": {
+   "rc": 1,
+   "out": "",
+   "err": "<PY>: Error while finding module specification for 'defender.runtime.lessons_engine.lessons_fm' (ModuleNotFoundError: No module named 'defender')\n"
+  },
+  "copy-outside, tree variable unset [\"--tags\"]": {
+   "rc": 1,
+   "out": "",
+   "err": "<PY>: Error while finding module specification for 'defender.runtime.lessons_engine.lessons_fm' (ModuleNotFoundError: No module named 'defender')\n"
+  },
+  "copy-outside, tree variable unset []": {
+   "rc": 1,
+   "out": "",
+   "err": "<PY>: Error while finding module specification for 'defender.runtime.lessons_engine.lessons_fm' (ModuleNotFoundError: No module named 'defender')\n"
+  },
+  "link-outside, tree variable set [\"--tags\"]": {
+   "rc": 0,
+   "out": "source_signature:\n  v2-cross-tier-ssh-pivot          2\n  v2-falco-suspicious-network-tool 2\ntelemetry_source:\n  auditd                           1\n  falco                            1\n  sshd                             2\n  zeek                             1\nattack_phase:\n  execution                        1\n  lateral-movement                 1\n  persistence                      2\n",
+   "err": ""
+  },
+  "link-outside, tree variable set []": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/falco-one.md\tfalco lesson one\n<TMP>/tree/defender/lessons/sshd-one.md\tsshd lesson one\n<TMP>/tree/defender/lessons/sshd-two.md\tsshd lesson two\n",
+   "err": ""
+  },
+  "host lane, search path [\"--tags\"]": {
+   "rc": 0,
+   "out": "source_signature:\n  v2-cross-tier-ssh-pivot          2\n  v2-falco-suspicious-network-tool 2\ntelemetry_source:\n  auditd                           1\n  falco                            1\n  sshd                             2\n  zeek                             1\nattack_phase:\n  execution                        1\n  lateral-movement                 1\n  persistence                      2\n",
+   "err": ""
+  },
+  "host lane, search path []": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/falco-one.md\tfalco lesson one\n<TMP>/tree/defender/lessons/sshd-one.md\tsshd lesson one\n<TMP>/tree/defender/lessons/sshd-two.md\tsshd lesson two\n",
+   "err": ""
+  },
+  "box lane, search path [\"--tags\"]": {
+   "rc": 0,
+   "out": "source_signature:\n  v2-cross-tier-ssh-pivot          2\n  v2-falco-suspicious-network-tool 2\ntelemetry_source:\n  auditd                           1\n  falco                            1\n  sshd                             2\n  zeek                             1\nattack_phase:\n  execution                        1\n  lateral-movement                 1\n  persistence                      2\n",
+   "err": ""
+  },
+  "box lane, search path []": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/falco-one.md\tfalco lesson one\n<TMP>/tree/defender/lessons/sshd-one.md\tsshd lesson one\n<TMP>/tree/defender/lessons/sshd-two.md\tsshd lesson two\n",
+   "err": ""
+  },
+  "linked checkout path, tree variable unset [\"--tags\"]": {
+   "rc": 0,
+   "out": "source_signature:\n  v2-cross-tier-ssh-pivot          2\n  v2-falco-suspicious-network-tool 2\ntelemetry_source:\n  auditd                           1\n  falco                            1\n  sshd                             2\n  zeek                             1\nattack_phase:\n  execution                        1\n  lateral-movement                 1\n  persistence                      2\n",
+   "err": ""
+  },
+  "linked checkout path, tree variable unset []": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/falco-one.md\tfalco lesson one\n<TMP>/tree/defender/lessons/sshd-one.md\tsshd lesson one\n<TMP>/tree/defender/lessons/sshd-two.md\tsshd lesson two\n",
+   "err": ""
+  }
+ },
+ "s062": {
+  "tags": {
+   "fixed": {
+    "rc": 0,
+    "out": "source_signature:\n  v2-cross-tier-ssh-pivot          2\n  v2-falco-suspicious-network-tool 2\ntelemetry_source:\n  auditd                           1\n  falco                            1\n  sshd                             2\n  zeek                             1\nattack_phase:\n  execution                        1\n  lateral-movement                 1\n  persistence                      2\n",
+    "err": ""
+   },
+   "missing": {
+    "rc": 0,
+    "out": "source_signature:\ntelemetry_source:\nattack_phase:\n",
+    "err": ""
+   },
+   "empty": {
+    "rc": 0,
+    "out": "source_signature:\ntelemetry_source:\nattack_phase:\n",
+    "err": ""
+   },
+   "linked": {
+    "rc": 0,
+    "out": "source_signature:\n  v2-cross-tier-ssh-pivot          2\n  v2-falco-suspicious-network-tool 2\ntelemetry_source:\n  auditd                           1\n  falco                            1\n  sshd                             2\n  zeek                             1\nattack_phase:\n  execution                        1\n  lateral-movement                 1\n  persistence                      2\n",
+    "err": ""
+   },
+   "malformed": {
+    "rc": 0,
+    "out": "source_signature:\n  v2-cross-tier-ssh-pivot          2\n  v2-falco-suspicious-network-tool 2\ntelemetry_source:\n  auditd                           1\n  falco                            1\n  sshd                             2\n  zeek                             1\nattack_phase:\n  execution                        1\n  lateral-movement                 1\n  persistence                      2\n",
+    "err": "warn: skipping badyaml.md (malformed lesson: frontmatter is not valid YAML: while parsing a flow sequence\n  in \"<unicode string>\", line 1, column 7:\n    name: [unclosed\n          ^\nexpected ',' or ']', but got '<stream end>'\n  in \"<unicode string>\", line 1, column 16:\n    name: [unclosed\n                   ^)\nwarn: skipping nofm.md (malformed lesson: missing leading '---' frontmatter fence)\n"
+   }
+  },
+  "orient": {
+   "fixed, signature with hits": {
+    "section": "## Lessons\n### Viable tags\nsource_signature:\n  v2-cross-tier-ssh-pivot          2\n  v2-falco-suspicious-network-tool 2\ntelemetry_source:\n  auditd                           1\n  falco                            1\n  sshd                             2\n  zeek                             1\nattack_phase:\n  execution                        1\n  lateral-movement                 1\n  persistence                      2\n\n### Hits for `source_signature ~ v2-cross-tier-ssh-pivot` (read the bodies whose description fits the lead you're about to write)\n<TMP>/tree-fixed/defender/lessons/sshd-one.md\tsshd lesson one\n<TMP>/tree-fixed/defender/lessons/sshd-two.md\tsshd lesson two",
+    "calls": [
+     [
+      "defender-lessons",
+      "--tags"
+     ],
+     [
+      "defender-lessons",
+      "source_signature:.*v2\\-cross\\-tier\\-ssh\\-pivot"
+     ],
+     [
+      "defender-invlang",
+      "hypothesis-vocabulary",
+      "--signature",
+      "v2-cross-tier-ssh-pivot"
+     ]
+    ],
+    "vocabulary_section": false
+   },
+   "fixed, signature with no hit": {
+    "section": "## Lessons\n### Viable tags\nsource_signature:\n  v2-cross-tier-ssh-pivot          2\n  v2-falco-suspicious-network-tool 2\ntelemetry_source:\n  auditd                           1\n  falco                            1\n  sshd                             2\n  zeek                             1\nattack_phase:\n  execution                        1\n  lateral-movement                 1\n  persistence                      2\n\n_(no lessons matched `source_signature ~ no-such-rule`)_",
+    "calls": [
+     [
+      "defender-lessons",
+      "--tags"
+     ],
+     [
+      "defender-lessons",
+      "source_signature:.*no\\-such\\-rule"
+     ],
+     [
+      "defender-invlang",
+      "hypothesis-vocabulary",
+      "--signature",
+      "no-such-rule"
+     ]
+    ],
+    "vocabulary_section": false
+   },
+   "fixed, no signature": {
+    "section": "## Lessons\n### Viable tags\nsource_signature:\n  v2-cross-tier-ssh-pivot          2\n  v2-falco-suspicious-network-tool 2\ntelemetry_source:\n  auditd                           1\n  falco                            1\n  sshd                             2\n  zeek                             1\nattack_phase:\n  execution                        1\n  lateral-movement                 1\n  persistence                      2",
+    "calls": [
+     [
+      "defender-lessons",
+      "--tags"
+     ]
+    ],
+    "vocabulary_section": false
+   },
+   "missing corpus": {
+    "section": "## Lessons\n### Viable tags\nsource_signature:\ntelemetry_source:\nattack_phase:\n\n_(no lessons matched `source_signature ~ v2-cross-tier-ssh-pivot`)_",
+    "calls": [
+     [
+      "defender-lessons",
+      "--tags"
+     ],
+     [
+      "defender-lessons",
+      "source_signature:.*v2\\-cross\\-tier\\-ssh\\-pivot"
+     ],
+     [
+      "defender-invlang",
+      "hypothesis-vocabulary",
+      "--signature",
+      "v2-cross-tier-ssh-pivot"
+     ]
+    ],
+    "vocabulary_section": false
+   },
+   "empty corpus": {
+    "section": "## Lessons\n### Viable tags\nsource_signature:\ntelemetry_source:\nattack_phase:\n\n_(no lessons matched `source_signature ~ v2-cross-tier-ssh-pivot`)_",
+    "calls": [
+     [
+      "defender-lessons",
+      "--tags"
+     ],
+     [
+      "defender-lessons",
+      "source_signature:.*v2\\-cross\\-tier\\-ssh\\-pivot"
+     ],
+     [
+      "defender-invlang",
+      "hypothesis-vocabulary",
+      "--signature",
+      "v2-cross-tier-ssh-pivot"
+     ]
+    ],
+    "vocabulary_section": false
+   },
+   "linked corpus": {
+    "section": "## Lessons\n### Viable tags\nsource_signature:\n  v2-cross-tier-ssh-pivot          2\n  v2-falco-suspicious-network-tool 2\ntelemetry_source:\n  auditd                           1\n  falco                            1\n  sshd                             2\n  zeek                             1\nattack_phase:\n  execution                        1\n  lateral-movement                 1\n  persistence                      2\n\n### Hits for `source_signature ~ v2-cross-tier-ssh-pivot` (read the bodies whose description fits the lead you're about to write)\n<TMP>/real-corpus-linked/sshd-one.md\tsshd lesson one\n<TMP>/real-corpus-linked/sshd-two.md\tsshd lesson two",
+    "calls": [
+     [
+      "defender-lessons",
+      "--tags"
+     ],
+     [
+      "defender-lessons",
+      "source_signature:.*v2\\-cross\\-tier\\-ssh\\-pivot"
+     ],
+     [
+      "defender-invlang",
+      "hypothesis-vocabulary",
+      "--signature",
+      "v2-cross-tier-ssh-pivot"
+     ]
+    ],
+    "vocabulary_section": false
+   },
+   "malformed corpus": {
+    "section": "## Lessons\n### Viable tags\nsource_signature:\n  v2-cross-tier-ssh-pivot          2\n  v2-falco-suspicious-network-tool 2\ntelemetry_source:\n  auditd                           1\n  falco                            1\n  sshd                             2\n  zeek                             1\nattack_phase:\n  execution                        1\n  lateral-movement                 1\n  persistence                      2\n\n### Hits for `source_signature ~ v2-cross-tier-ssh-pivot` (read the bodies whose description fits the lead you're about to write)\n<TMP>/tree-malformed/defender/lessons/sshd-one.md\tsshd lesson one\n<TMP>/tree-malformed/defender/lessons/sshd-two.md\tsshd lesson two",
+    "calls": [
+     [
+      "defender-lessons",
+      "--tags"
+     ],
+     [
+      "defender-lessons",
+      "source_signature:.*v2\\-cross\\-tier\\-ssh\\-pivot"
+     ],
+     [
+      "defender-invlang",
+      "hypothesis-vocabulary",
+      "--signature",
+      "v2-cross-tier-ssh-pivot"
+     ]
+    ],
+    "vocabulary_section": false
+   },
+   "both lessons calls fail": {
+    "section": "## Lessons\n_(no lessons matched `source_signature ~ v2-cross-tier-ssh-pivot`)_",
+    "calls": [
+     [
+      "defender-lessons",
+      "--tags"
+     ],
+     [
+      "defender-lessons",
+      "source_signature:.*v2\\-cross\\-tier\\-ssh\\-pivot"
+     ],
+     [
+      "defender-invlang",
+      "hypothesis-vocabulary",
+      "--signature",
+      "v2-cross-tier-ssh-pivot"
+     ]
+    ],
+    "vocabulary_section": false
+   },
+   "both lessons calls empty": {
+    "section": "## Lessons\n_(no lessons matched `source_signature ~ v2-cross-tier-ssh-pivot`)_",
+    "calls": [
+     [
+      "defender-lessons",
+      "--tags"
+     ],
+     [
+      "defender-lessons",
+      "source_signature:.*v2\\-cross\\-tier\\-ssh\\-pivot"
+     ],
+     [
+      "defender-invlang",
+      "hypothesis-vocabulary",
+      "--signature",
+      "v2-cross-tier-ssh-pivot"
+     ]
+    ],
+    "vocabulary_section": false
+   },
+   "tags fails, grep real": {
+    "section": "## Lessons\n### Hits for `source_signature ~ v2-cross-tier-ssh-pivot` (read the bodies whose description fits the lead you're about to write)\n<TMP>/tree-fixed/defender/lessons/sshd-one.md\tsshd lesson one\n<TMP>/tree-fixed/defender/lessons/sshd-two.md\tsshd lesson two",
+    "calls": [
+     [
+      "defender-lessons",
+      "--tags"
+     ],
+     [
+      "defender-lessons",
+      "source_signature:.*v2\\-cross\\-tier\\-ssh\\-pivot"
+     ],
+     [
+      "defender-invlang",
+      "hypothesis-vocabulary",
+      "--signature",
+      "v2-cross-tier-ssh-pivot"
+     ]
+    ],
+    "vocabulary_section": false
+   },
+   "tags real, grep fails": {
+    "section": "## Lessons\n### Viable tags\nsource_signature:\n  v2-cross-tier-ssh-pivot          2\n  v2-falco-suspicious-network-tool 2\ntelemetry_source:\n  auditd                           1\n  falco                            1\n  sshd                             2\n  zeek                             1\nattack_phase:\n  execution                        1\n  lateral-movement                 1\n  persistence                      2\n\n_(no lessons matched `source_signature ~ v2-cross-tier-ssh-pivot`)_",
+    "calls": [
+     [
+      "defender-lessons",
+      "--tags"
+     ],
+     [
+      "defender-lessons",
+      "source_signature:.*v2\\-cross\\-tier\\-ssh\\-pivot"
+     ],
+     [
+      "defender-invlang",
+      "hypothesis-vocabulary",
+      "--signature",
+      "v2-cross-tier-ssh-pivot"
+     ]
+    ],
+    "vocabulary_section": false
+   },
+   "no signature, tags fails": {
+    "section": null,
+    "calls": [
+     [
+      "defender-lessons",
+      "--tags"
+     ]
+    ],
+    "vocabulary_section": false
+   },
+   "the shim is missing from the tree": {
+    "section": "## Lessons\n_(no lessons matched `source_signature ~ v2-cross-tier-ssh-pivot`)_",
+    "calls": [
+     [
+      "defender-lessons",
+      "--tags"
+     ],
+     [
+      "defender-lessons",
+      "source_signature:.*v2\\-cross\\-tier\\-ssh\\-pivot"
+     ],
+     [
+      "defender-invlang",
+      "hypothesis-vocabulary",
+      "--signature",
+      "v2-cross-tier-ssh-pivot"
+     ]
+    ],
+    "vocabulary_section": false
+   }
+  }
+ },
+ "s132": {
+  "run folder [\"--show\", \"defender/lessons/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "run folder [\"--show\", \"./defender/lessons/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "run folder [\"--show\", \"<TREE>/defender/lessons/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "run folder [\"--show\", \"defender/lessons//sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "run folder [\"--show\", \"defender/lessons/../lessons/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "run folder [\"--show\", \"defender/skills/../lessons/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "run folder [\"--show\", \"defender/lessons/in-dir/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "run folder [\"--show\", \"<TMP>/tree-link/defender/lessons/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "run folder [\"--show\", \"tree-link-rel/defender/lessons/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "run folder [\"--show\", \"defender/lessons/link_in.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "run folder [\"--show\", \"defender/lessons/../skills/invlang/SKILL.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/../skills/invlang/SKILL.md\n"
+  },
+  "run folder [\"--show\", \"lessons/sshd-one.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: lessons/sshd-one.md\n"
+  },
+  "run folder [\"--show\", \"../defender/lessons/sshd-one.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: ../defender/lessons/sshd-one.md\n"
+  },
+  "run folder [\"--show\", \"defender/lessons/linkdir2/o.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/linkdir2/o.md\n"
+  },
+  "repository root [\"--show\", \"defender/lessons/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "repository root [\"--show\", \"./defender/lessons/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "repository root [\"--show\", \"<TREE>/defender/lessons/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "repository root [\"--show\", \"defender/lessons//sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "repository root [\"--show\", \"defender/lessons/../lessons/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "repository root [\"--show\", \"defender/skills/../lessons/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "repository root [\"--show\", \"defender/lessons/in-dir/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "repository root [\"--show\", \"<TMP>/tree-link/defender/lessons/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "repository root [\"--show\", \"tree-link-rel/defender/lessons/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "repository root [\"--show\", \"defender/lessons/link_in.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "repository root [\"--show\", \"defender/lessons/../skills/invlang/SKILL.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/../skills/invlang/SKILL.md\n"
+  },
+  "repository root [\"--show\", \"lessons/sshd-one.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: lessons/sshd-one.md\n"
+  },
+  "repository root [\"--show\", \"../defender/lessons/sshd-one.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: ../defender/lessons/sshd-one.md\n"
+  },
+  "repository root [\"--show\", \"defender/lessons/linkdir2/o.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/linkdir2/o.md\n"
+  }
+ },
+ "s145": {
+  "[\"--show\", \"defender/lessons/out.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/out.md\n"
+  },
+  "[\"--show\", \"defender/lessons/loop1.md\"]": {
+   "rc": 1,
+   "out": "",
+   "err": {
+    "traceback_last": "RuntimeError: Symlink loop from '<TMP>/tree/defender/lessons/loop1.md'"
+   }
+  },
+  "[\"--show\", \"defender/lessons/self.md\"]": {
+   "rc": 1,
+   "out": "",
+   "err": {
+    "traceback_last": "RuntimeError: Symlink loop from '<TMP>/tree/defender/lessons/self.md'"
+   }
+  },
+  "[\"--show\", \"defender/lessons/dangling.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/dangling.md\n"
+  },
+  "[\"--show\", \"defender/lessons/subdir\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/subdir\n"
+  },
+  "[\"--show\", \"defender/lessons/dir.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/dir.md\n"
+  },
+  "[\"--show\", \"defender/lessons\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons\n"
+  },
+  "[\"--show\", \"defender/lessons/nope.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/nope.md\n"
+  },
+  "[\"--show\", \"defender/lessons/nofm.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: defender/lessons/nofm.md: malformed lesson: missing leading '---' frontmatter fence\n"
+  },
+  "[\"--show\", \"defender/lessons/sshd-one.md\", \"defender/lessons/nope.md\"]": {
+   "rc": 2,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": "error: no such lesson: defender/lessons/nope.md\n"
+  },
+  "[\"--show\", \"defender/lessons/nope.md\", \"defender/lessons/sshd-one.md\"]": {
+   "rc": 2,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": "error: no such lesson: defender/lessons/nope.md\n"
+  },
+  "[\"--show\", \"defender/lessons/sshd-one.md\", \"defender/lessons/out.md\"]": {
+   "rc": 2,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": "error: no such lesson: defender/lessons/out.md\n"
+  },
+  "[\"--show\", \"defender/lessons/sshd-one.md\", \"defender/lessons/loop1.md\"]": {
+   "rc": 1,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": {
+    "traceback_last": "RuntimeError: Symlink loop from '<TMP>/tree/defender/lessons/loop1.md'"
+   }
+  }
+ },
+ "s146": {
+  "[\"--tags\", \"bogus\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: unknown dimension 'bogus'; choose from source_signature, telemetry_source, attack_phase\n"
+  },
+  "[\"--tags\", \"\"]": {
+   "rc": 0,
+   "out": "source_signature:\n  v2-cross-tier-ssh-pivot          2\n  v2-falco-suspicious-network-tool 2\ntelemetry_source:\n  auditd                           1\n  falco                            1\n  sshd                             2\n  zeek                             1\nattack_phase:\n  execution                        1\n  lateral-movement                 1\n  persistence                      2\n",
+   "err": ""
+  },
+  "[\"--tags\", \" \"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: unknown dimension ' '; choose from source_signature, telemetry_source, attack_phase\n"
+  },
+  "[\"--tags\", \"SOURCE_SIGNATURE\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: unknown dimension 'SOURCE_SIGNATURE'; choose from source_signature, telemetry_source, attack_phase\n"
+  },
+  "[\"[\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: bad regex: unterminated character set at position 0\n"
+  },
+  "[\"(a\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: bad regex: missing ), unterminated subpattern at position 0\n"
+  },
+  "[\"*\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: bad regex: nothing to repeat at position 0\n"
+  },
+  "[\".*\"]": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/falco-one.md\tfalco lesson one\n<TMP>/tree/defender/lessons/sshd-one.md\tsshd lesson one\n<TMP>/tree/defender/lessons/sshd-two.md\tsshd lesson two\n",
+   "err": ""
+  },
+  "[\"\"]": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/falco-one.md\tfalco lesson one\n<TMP>/tree/defender/lessons/sshd-one.md\tsshd lesson one\n<TMP>/tree/defender/lessons/sshd-two.md\tsshd lesson two\n",
+   "err": ""
+  },
+  "[\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx": {
+   "rc": 0,
+   "out": "",
+   "err": ""
+  },
+  "[\"((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: bad regex: missing ), unterminated subpattern at position 99\n"
+  },
+  "[\"telemetry_source:.*sshd\", \"(\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: bad regex: missing ), unterminated subpattern at position 0\n"
+  },
+  "[]": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/falco-one.md\tfalco lesson one\n<TMP>/tree/defender/lessons/sshd-one.md\tsshd lesson one\n<TMP>/tree/defender/lessons/sshd-two.md\tsshd lesson two\n",
+   "err": ""
+  },
+  "[\"--show\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "usage: defender-lessons [-h] [--tags [DIMENSION]] [--show PATH [PATH ...]]\n                        [patterns ...]\ndefender-lessons: error: argument --show: expected at least one argument\n"
+  },
+  "[\"--grep\", \"sshd\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "usage: defender-lessons [-h] [--tags [DIMENSION]] [--show PATH [PATH ...]]\n                        [patterns ...]\ndefender-lessons: error: unrecognized arguments: --grep\n"
+  },
+  "[\"--bogus\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "usage: defender-lessons [-h] [--tags [DIMENSION]] [--show PATH [PATH ...]]\n                        [patterns ...]\ndefender-lessons: error: unrecognized arguments: --bogus\n"
+  },
+  "[\"-h\"]": {
+   "rc": 0,
+   "out": "usage: defender-lessons [-h] [--tags [DIMENSION]] [--show PATH [PATH ...]]\n                        [patterns ...]\n\nGrep defender lesson FRONTMATTER (only) + enumerate viable tags.\n\npositional arguments:\n  patterns              regex(es) matched against frontmatter; ANDed\n\noptions:\n  -h, --help            show this help message and exit\n  --tags [DIMENSION]    enumerate viable tag values (all dimensions, or one\n                        named)\n  --show PATH [PATH ...]\n                        print only the frontmatter block of the given\n                        lesson(s)\n\nfrontmatter-only: the body is never matched or printed.\n",
+   "err": ""
+  }
+ },
+ "s147": {
+  "shapes [\"--tags\"]": {
+   "rc": 0,
+   "out": "source_signature:\n  2026-01-02                       1\n  3.5                              1\n  5710                             2\n  True                             1\n  ['nested-a', 'nested-b']         1\n  nested-c                         1\n  scalar-sig                       1\n  {'k': 'v'}                       2\ntelemetry_source:\n  shape-blank-sensor               1\n  shape-bool-sensor                1\n  shape-date-sensor                1\n  shape-dict-sensor                1\n  shape-empty-list-sensor          1\n  shape-float-sensor               1\n  shape-int-sensor                 1\n  shape-list-of-dicts-sensor       1\n  shape-nested-sensor              1\n  shape-null-sensor                1\n  shape-quoted-number-sensor       1\n  shape-scalar-sensor              1\nattack_phase:\n  shape-phase                      12\n",
+   "err": ""
+  },
+  "shapes [\"--tags\", \"source_signature\"]": {
+   "rc": 0,
+   "out": "source_signature:\n  2026-01-02                       1\n  3.5                              1\n  5710                             2\n  True                             1\n  ['nested-a', 'nested-b']         1\n  nested-c                         1\n  scalar-sig                       1\n  {'k': 'v'}                       2\n",
+   "err": ""
+  },
+  "shapes []": {
+   "rc": 0,
+   "out": "<TMP>/shapes/defender/lessons/shape-blank.md\tshape blank\n<TMP>/shapes/defender/lessons/shape-bool.md\tshape bool\n<TMP>/shapes/defender/lessons/shape-date.md\tshape date\n<TMP>/shapes/defender/lessons/shape-dict.md\tshape dict\n<TMP>/shapes/defender/lessons/shape-empty-list.md\tshape empty-list\n<TMP>/shapes/defender/lessons/shape-float.md\tshape float\n<TMP>/shapes/defender/lessons/shape-int.md\tshape int\n<TMP>/shapes/defender/lessons/shape-list-of-dicts.md\tshape list-of-dicts\n<TMP>/shapes/defender/lessons/shape-nested.md\tshape nested\n<TMP>/shapes/defender/lessons/shape-null.md\tshape null\n<TMP>/shapes/defender/lessons/shape-quoted-number.md\tshape quoted-number\n<TMP>/shapes/defender/lessons/shape-scalar.md\tshape scalar\n",
+   "err": ""
+  },
+  "breaks []": {
+   "rc": 0,
+   "out": "<TMP>/breaks/defender/lessons/break-newline.md\tnew line\n<TMP>/breaks/defender/lessons/break-tab.md\ttab here\n",
+   "err": ""
+  },
+  "breaks [\"--show\", \"defender/lessons/break-tab.md\", \"defender/lessons/break-newline.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/breaks/defender/lessons/break-tab.md\nname: break-tab\ndescription: \"tab\\there\"\nsource_signature: [\"tab\\there\"]\ntelemetry_source: [break-tab-sensor]\nattack_phase: [break-tab-phase]\n--- <TMP>/breaks/defender/lessons/break-newline.md\nname: break-newline\ndescription: \"new\\nline\"\nsource_signature: [break-newline-sig]\ntelemetry_source: [\"new\\nline\"]\nattack_phase: [break-newline-phase]\n",
+   "err": ""
+  },
+  "breaks [\"source_signature:.*tab\"]": {
+   "rc": 0,
+   "out": "<TMP>/breaks/defender/lessons/break-tab.md\ttab here\n",
+   "err": ""
+  }
+ },
+ "s185": {
+  "[\"--tags\"]": {
+   "rc": 0,
+   "out": "source_signature:\n  ### Lessons matched against your record as it stands 1\n  -rf                              1\n  .*(?i)[a-z]+(                    1\n  a: b                             1\n  it's \"quoted\"                    1\n  🚨-alert                          1\ntelemetry_source:\n  meta-colon-sensor                1\n  meta-dash-sensor                 1\n  meta-emoji-sensor                1\n  meta-lead-sensor                 1\n  meta-quotes-sensor               1\n  meta-regex-sensor                1\nattack_phase:\n  meta-colon-phase                 1\n  meta-dash-phase                  1\n  meta-emoji-phase                 1\n  meta-lead-phase                  1\n  meta-quotes-phase                1\n  meta-regex-phase                 1\n",
+   "err": ""
+  },
+  "[]": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/meta-colon.md\tcolon: space inside\n<TMP>/tree/defender/lessons/meta-dash.md\t- leading dash\n<TMP>/tree/defender/lessons/meta-emoji.md\temoji 🚨 here\n<TMP>/tree/defender/lessons/meta-lead.md\t### Lessons matched against your record — pushed because this write moved it. Precedent, not evidence: judge each from its `description`, Read only the bodies that fit.\n<TMP>/tree/defender/lessons/meta-quotes.md\the said \"stop\" and it's done\n<TMP>/tree/defender/lessons/meta-regex.md\tregex .*(?i)[a-z]+( in a description\n",
+   "err": ""
+  },
+  "[\".*(?i)[a-z]+(\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: bad regex: global flags not at the start of the expression at position 2\n"
+  },
+  "[\"--show\", \"defender/lessons/meta-quotes.md\", \"defender/lessons/meta-lead.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/meta-quotes.md\nname: meta-quotes\ndescription: \"he said \\\"stop\\\" and it's done\"\nsource_signature: [\"it's \\\"quoted\\\"\"]\ntelemetry_source: [meta-quotes-sensor]\nattack_phase: [meta-quotes-phase]\nfrontier_nodes:\n  - {type: compute, slot: ident}\n--- <TMP>/tree/defender/lessons/meta-lead.md\nname: meta-lead\ndescription: \"### Lessons matched against your record — pushed because this write moved it. Precedent, not evidence: judge each from its `description`, Read only the bodies that fit.\"\nsource_signature: [\"### Lessons matched against your record as it stands\"]\ntelemetry_source: [meta-lead-sensor]\nattack_phase: [meta-lead-phase]\nfrontier_nodes:\n  - {type: compute, slot: ident}\n",
+   "err": ""
+  },
+  "[\"source_signature:.*\\\\.\\\\*\\\\(\\\\?i\\\\)\\\\[a\\\\-z\\\\]\\\\+\\\\(\"]": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/meta-regex.md\tregex .*(?i)[a-z]+( in a description\n",
+   "err": ""
+  },
+  "[\"source_signature:.*it's\\\\ \\\"quoted\\\"\"]": {
+   "rc": 0,
+   "out": "",
+   "err": ""
+  },
+  "[\"source_signature:.*a:\\\\ b\"]": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/meta-colon.md\tcolon: space inside\n",
+   "err": ""
+  },
+  "[\"source_signature:.*\\\\-rf\"]": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/meta-dash.md\t- leading dash\n",
+   "err": ""
+  },
+  "[\"source_signature:.*🚨\\\\-alert\"]": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/meta-emoji.md\temoji 🚨 here\n",
+   "err": ""
+  },
+  "[\"source_signature:.*\\\\#\\\\#\\\\#\\\\ Lessons\\\\ matched\\\\ against\\\\ your\\\\ record\\\\ as\\\\ it\\\\ stands\"]": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/meta-lead.md\t### Lessons matched against your record — pushed because this write moved it. Precedent, not evidence: judge each from its `description`, Read only the bodies that fit.\n",
+   "err": ""
+  },
+  "frontier write block": "### Lessons matched against your record — pushed because this write moved it. Precedent, not evidence: judge each from its `description`, Read only the bodies that fit.\n- <TMP>/tree/defender/lessons/meta-colon.md — matched v-001 compute ident=??\n  attack_phase: [meta-colon-phase]\n  description: 'colon: space inside'\n  name: meta-colon\n  source_signature: ['a: b']\n  telemetry_source: [meta-colon-sensor]\n- <TMP>/tree/defender/lessons/meta-dash.md — matched v-001 compute ident=??\n  attack_phase: [meta-dash-phase]\n  description: '- leading dash'\n  name: meta-dash\n  source_signature: [-rf]\n  telemetry_source: [meta-dash-sensor]\n- <TMP>/tree/defender/lessons/meta-emoji.md — matched v-001 compute ident=??\n  attack_phase: [meta-emoji-phase]\n  description: emoji 🚨 here\n  name: meta-emoji\n  source_signature: [🚨-alert]\n  telemetry_source: [meta-emoji-sensor]\n- <TMP>/tree/defender/lessons/meta-lead.md — matched v-001 compute ident=??\n  attack_phase: [meta-lead-phase]\n  description: '### Lessons matched against your record — pushed because this write moved it. Precedent, not evidence: judge each from its `description`, Read only the bodies that fit.'\n  name: meta-lead\n  source_signature: ['### Lessons matched against your record as it stands']\n  telemetry_source: [meta-lead-sensor]\n- <TMP>/tree/defender/lessons/meta-quotes.md — matched v-001 compute ident=??\n  attack_phase: [meta-quotes-phase]\n  description: he said \"stop\" and it's done\n  name: meta-quotes\n  source_signature: [it's \"quoted\"]\n  telemetry_source: [meta-quotes-sensor]\n- <TMP>/tree/defender/lessons/meta-regex.md — matched v-001 compute ident=??\n  attack_phase: [meta-regex-phase]\n  description: regex .*(?i)[a-z]+( in a description\n  name: meta-regex\n  source_signature: ['.*(?i)[a-z]+(']\n  telemetry_source: [meta-regex-sensor]",
+  "frontier fold block": "### Lessons matched against your record as it stands — your history was folded, and this is what the record matches now. Precedent, not evidence: judge each from its `description`, Read only the bodies that fit.\n- <TMP>/tree/defender/lessons/meta-colon.md — matched v-001 compute ident=??\n  attack_phase: [meta-colon-phase]\n  description: 'colon: space inside'\n  name: meta-colon\n  source_signature: ['a: b']\n  telemetry_source: [meta-colon-sensor]\n- <TMP>/tree/defender/lessons/meta-dash.md — matched v-001 compute ident=??\n  attack_phase: [meta-dash-phase]\n  description: '- leading dash'\n  name: meta-dash\n  source_signature: [-rf]\n  telemetry_source: [meta-dash-sensor]"
+ },
+ "s186": {
+  "zero hits": "",
+  "empty frontier": "",
+  "thousands, top 3": "### Lessons matched against your record — pushed because this write moved it. Precedent, not evidence: judge each from its `description`, Read only the bodies that fit.\n- <TMP>/many/lessons/l0000.md — matched v-001 compute ident=??\n  description: lesson 0\n  name: l0000\n  source_signature: [s0]\n- <TMP>/many/lessons/l0001.md — matched v-001 compute ident=??\n  description: lesson 1\n  name: l0001\n  source_signature: [s1]\n- <TMP>/many/lessons/l0002.md — matched v-001 compute ident=??\n  description: lesson 2\n  name: l0002\n  source_signature: [s2]",
+  "thousands, all": [
+   2000,
+   "l0000",
+   "l1999"
+  ],
+  "one bad lesson, block": "### Lessons matched against your record — pushed because this write moved it. Precedent, not evidence: judge each from its `description`, Read only the bodies that fit.\n- <TMP>/bad/lessons/good-0.md — matched v-001 compute ident=??\n  {description: good 0, name: good-0}\n- <TMP>/bad/lessons/good-1.md — matched v-001 compute ident=??\n  {description: good 1, name: good-1}",
+  "one bad lesson, warnings": [
+   "warn: skipping bad-bytes.md (malformed lesson: 'utf-8' codec can't decode byte 0xff in position 33: invalid start byte)",
+   "warn: skipping bad-yaml.md (malformed lesson: frontmatter is not valid YAML: while parsing a flow sequence\n  in \"<unicode string>\", line 1, column 7:\n    name: [bad-yaml\n          ^\nexpected ',' or ']', but got ':'\n  in \"<unicode string>\", line 2, column 15:\n    frontier_nodes:\n                  ^)",
+   "warn: skipping dangling.md (malformed lesson: refusing to read through a non-plain or aliased entry)",
+   "warn: skipping dir.md (malformed lesson: refusing to read through a non-plain or aliased entry)"
+  ]
+ },
+ "lanes": {
+  "tree [\"--show\", \"defender/lessons/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "tree [\"--show\", \"<TREE>/defender/lessons/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "tree [\"--show\", \"defender/lessons/link_in.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "tree [\"--show\", \"defender/lessons/link_out_rel.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/link_out_rel.md\n"
+  },
+  "tree [\"--show\", \"defender/lessons/link_out_abs.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/link_out_abs.md\n"
+  },
+  "tree [\"--show\", \"defender/lessons/../pyproject.toml\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/../pyproject.toml\n"
+  },
+  "tree [\"--show\", \"defender/lessons/../../README.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/../../README.md\n"
+  },
+  "tree [\"--show\", \"<TREE>/defender/pyproject.toml\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: <TMP>/tree/defender/pyproject.toml\n"
+  },
+  "tree [\"--show\", \"/etc/passwd\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: /etc/passwd\n"
+  },
+  "tree [\"--show\", \"defender/lessons/linkdir/invlang/SKILL.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/linkdir/invlang/SKILL.md\n"
+  },
+  "tree [\"--show\", \"defender/lessons/linkdir2/o.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/linkdir2/o.md\n"
+  },
+  "tree [\"--show\", \"defender/lessons-actor/_TEMPLATE.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons-actor/_TEMPLATE.md\n"
+  },
+  "tree [\"--show\", \"defender/lessons/no-such-lesson.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/no-such-lesson.md\n"
+  },
+  "tree [\"--show\", \"defender/lessons/sshd-one.md\", \"/etc/passwd\"]": {
+   "rc": 2,
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": "error: no such lesson: /etc/passwd\n"
+  },
+  "tree [\"--tags\"]": {
+   "rc": 0,
+   "out": "source_signature:\n  v2-cross-tier-ssh-pivot          2\n  v2-falco-suspicious-network-tool 2\ntelemetry_source:\n  auditd                           1\n  falco                            1\n  sshd                             2\n  zeek                             1\nattack_phase:\n  execution                        1\n  lateral-movement                 1\n  persistence                      2\n",
+   "err": "warn: skipping link_in.md (malformed lesson: refusing to read through a non-plain or aliased entry)\nwarn: skipping link_out_abs.md (malformed lesson: refusing to read through a non-plain or aliased entry)\nwarn: skipping link_out_rel.md (malformed lesson: refusing to read through a non-plain or aliased entry)\n"
+  },
+  "tree [\"--tags\", \"telemetry_source\"]": {
+   "rc": 0,
+   "out": "telemetry_source:\n  auditd                           1\n  falco                            1\n  sshd                             2\n  zeek                             1\n",
+   "err": "warn: skipping link_in.md (malformed lesson: refusing to read through a non-plain or aliased entry)\nwarn: skipping link_out_abs.md (malformed lesson: refusing to read through a non-plain or aliased entry)\nwarn: skipping link_out_rel.md (malformed lesson: refusing to read through a non-plain or aliased entry)\n"
+  },
+  "tree [\"--tags\", \"bogus\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: unknown dimension 'bogus'; choose from source_signature, telemetry_source, attack_phase\n"
+  },
+  "tree [\"source_signature:.*v2-cross-tier-ssh-pivot\"]": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/sshd-one.md\tsshd lesson one\n<TMP>/tree/defender/lessons/sshd-two.md\tsshd lesson two\n",
+   "err": "warn: skipping link_in.md (malformed lesson: refusing to read through a non-plain or aliased entry)\nwarn: skipping link_out_abs.md (malformed lesson: refusing to read through a non-plain or aliased entry)\nwarn: skipping link_out_rel.md (malformed lesson: refusing to read through a non-plain or aliased entry)\n"
+  },
+  "tree [\"--corpus\", \"x\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "usage: defender-lessons [-h] [--tags [DIMENSION]] [--show PATH [PATH ...]]\n                        [patterns ...]\ndefender-lessons: error: unrecognized arguments: --corpus\n"
+  },
+  "tree [\"--bogus\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "usage: defender-lessons [-h] [--tags [DIMENSION]] [--show PATH [PATH ...]]\n                        [patterns ...]\ndefender-lessons: error: unrecognized arguments: --bogus\n"
+  },
+  "tree-linked-corpus [\"--show\", \"defender/lessons/sshd-one.md\"]": {
+   "rc": 0,
+   "out": "--- <TMP>/real-corpus/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "err": ""
+  },
+  "tree-linked-corpus [\"--show\", \"defender/lessons/out.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: defender/lessons/out.md\n"
+  },
+  "tree-linked-corpus [\"--show\", \"<TMP>/corpus-sibling/x.md\"]": {
+   "rc": 2,
+   "out": "",
+   "err": "error: no such lesson: <TMP>/corpus-sibling/x.md\n"
+  }
+ },
+ "wrapper": {
+  "bare [\"--tags\"]": {
+   "rc": 0,
+   "out": "source_signature:\n  v2-cross-tier-ssh-pivot          2\n  v2-falco-suspicious-network-tool 2\ntelemetry_source:\n  auditd                           1\n  falco                            1\n  sshd                             2\n  zeek                             1\nattack_phase:\n  execution                        1\n  lateral-movement                 1\n  persistence                      2\n",
+   "err": ""
+  },
+  "bare []": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/falco-one.md\tfalco lesson one\n<TMP>/tree/defender/lessons/sshd-one.md\tsshd lesson one\n<TMP>/tree/defender/lessons/sshd-two.md\tsshd lesson two\n",
+   "err": ""
+  },
+  "PYTHONPATH names a decoy checkout [\"--tags\"]": {
+   "rc": 0,
+   "out": "source_signature:\n  v2-cross-tier-ssh-pivot          2\n  v2-falco-suspicious-network-tool 2\ntelemetry_source:\n  auditd                           1\n  falco                            1\n  sshd                             2\n  zeek                             1\nattack_phase:\n  execution                        1\n  lateral-movement                 1\n  persistence                      2\n",
+   "err": ""
+  },
+  "PYTHONPATH names a decoy checkout []": {
+   "rc": 0,
+   "out": "<TMP>/tree/defender/lessons/falco-one.md\tfalco lesson one\n<TMP>/tree/defender/lessons/sshd-one.md\tsshd lesson one\n<TMP>/tree/defender/lessons/sshd-two.md\tsshd lesson two\n",
+   "err": ""
+  }
+ },
+ "pushes": {
+  "fold": "RECORD ROW\n\n### Lessons matched against your record as it stands — your history was folded, and this is what the record matches now. Precedent, not evidence: judge each from its `description`, Read only the bodies that fit.\n- <TMP>/defender/lessons/loginuid-held.md — matched v-002 identity attrs.loginuid=-1\n  description: loginuid-held description\n  name: loginuid-held\n  source_signature: [v2-cross-tier-ssh-pivot]\n- <TMP>/defender/lessons/ident-open.md — matched v-001 compute ident=??\n  description: ident-open description\n  name: ident-open\n  source_signature: [v2-cross-tier-ssh-pivot]",
+  "fold has an after-commit action": true,
+  "write return": "\n\n### Lessons matched against your record — pushed because this write moved it. Precedent, not evidence: judge each from its `description`, Read only the bodies that fit.\n- <TMP>/defender/lessons/loginuid-held.md — matched v-002 identity attrs.loginuid=-1\n  description: loginuid-held description\n  name: loginuid-held\n  source_signature: [v2-cross-tier-ssh-pivot]\n- <TMP>/defender/lessons/ident-open.md — matched v-001 compute ident=??\n  description: ident-open description\n  name: ident-open\n  source_signature: [v2-cross-tier-ssh-pivot]"
+ }
+}

@@ -23,7 +23,7 @@ from defender._episode_handle import Episode
 from defender._episode_paths import LAYOUT
 from defender._io import NotPlainEntry, load_json_artifact, read_text_soft
 from defender.learning.lead_repository import QueryRow, load_queries_report
-from defender.scripts.gather_tools.record_query import ParamsTooDeep
+from defender._query_rules import ParamsTooDeep
 
 from .ledger import CAPTURED, LedgerError, ServedCall, payload_text, served_line
 

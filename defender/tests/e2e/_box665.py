@@ -27,6 +27,7 @@ from typing import Any
 
 import pytest
 
+from defender.learning.core.config import AUTHOR_DRAIN_LABEL
 from defender.runtime import box as box_mod
 from defender.runtime.scrub import verdict_path
 from defender.tests._docker import daemon_reachable, is_dood
@@ -316,7 +317,10 @@ class FakeBox:
 
     name: str = "box-665"
     request: Any = None
-    sandboxed: bool = True
+    #: `False`: no real container stands behind it, so the lead lane's freeze (#1178
+    #: `pause_box`/`thawed`) has nothing to pause; `True` would send the real docker after
+    #: a container that does not exist.
+    sandboxed: bool = False
 
 
 class BoxLifecycleRecorder:
@@ -440,7 +444,7 @@ def loop_paths(tmp_path: Path):
 
 
 def drive_worktree_batch(tmp_path, rec, *, do_work, has_work=None, branch=None,
-                         label="author_drain", **kw):
+                         label=AUTHOR_DRAIN_LABEL, **kw):
     """Drive the REAL _run_worktree_batch with the future injectable box seams."""
     from defender.learning.core.drains import _run_worktree_batch
 

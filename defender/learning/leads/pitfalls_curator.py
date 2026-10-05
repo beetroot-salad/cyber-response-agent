@@ -6,8 +6,10 @@ import logging
 import re
 import sys
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 from uuid import uuid4
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
@@ -24,6 +26,8 @@ from defender.learning.core import config as _loop_config
 from defender.learning.core import persist as _loop_persist
 from defender.learning.core import pitfalls_disposition as _disposition
 from defender.learning.core.lane_trees import DrainTrees, TreeFor, kind_at, read_at
+from defender._claim_git import ClaimGit
+from defender.learning.author._config import GIT_TIMEOUT_SECONDS
 from defender.learning.leads._lead_spine import (
     PENDING_DIR,
     _loop_commit_body,
@@ -35,6 +39,7 @@ from defender.learning.leads.declared_systems import (
     ADAPTERS_REL,
     adapter_declared_systems,
 )
+from defender.runtime import box as _box
 from defender.runtime.verbs import is_system_name
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.learning._prompt import stage_user_message, structured_json_body
@@ -415,7 +420,7 @@ def _pitfalls_rule(
 
 def _verify_pitfalls_state(
     repo_root: Path, baseline_stray: list[str], *,
-    systems: frozenset[str], reducer_offered: bool, tree_for: TreeFor,
+    systems: frozenset[str], reducer_offered: bool, tree_for: TreeFor, git: ClaimGit,
 ) -> list[str]:
     """`reducer_offered` is required: either default ("every tick may write the reducer
     surface" or "no tick may") is wrong for a caller that forgot it."""
@@ -425,6 +430,8 @@ def _verify_pitfalls_state(
             _pitfalls_rule, repo_root,
             systems=systems, reducer_offered=reducer_offered, tree_for=tree_for,
         ),
+        tree_for=tree_for,
+        git=git,
     )
 
 
@@ -551,6 +558,8 @@ def run_pitfalls(
     box=None,
     on_curated: Callable[[PitfallsDisposition], None] | None = None,
     lock_wait_seconds: int | None = None,
+    git_timeout: float = GIT_TIMEOUT_SECONDS,
+    thaw: Callable[[Any], AbstractContextManager[None]] = _box.thawed,
 ) -> int:
     """One curation tick over the pitfalls queue.
 
@@ -563,6 +572,9 @@ def run_pitfalls(
     `lock_wait_seconds` bounds every wait on the queue's append lock this tick makes. The drain
     passes its configured wait, since it holds the tick's locks meanwhile; `None` is
     unbounded.
+
+    `git_timeout` bounds every git call over the worktree (the tick's `ClaimGit`, #1175); one
+    that overruns raises `GitOverran`, a systemic `GitError`.
 
     `trees` are the lane's held mounts (the drain's work step opens them for its label): the
     commit gate reads the working copy through them (#1134). Checked before any work: they must
@@ -624,7 +636,8 @@ def run_pitfalls(
             timeout_seconds=lock_wait_seconds,
         )
         return 0
-    baseline_stray = _author_shared.changes_outside(repo_root, SKILLS_REL)
+    git = ClaimGit(repo_root, SKILLS_REL, timeout=git_timeout)
+    baseline_stray = git.changed_outside_corpus()
     # A queue row is one occurrence, so `len(rows)` is the failure count. Surfaces are named
     # rather than systems, since a reducer-only tick has no system names.
     _logger.info(
@@ -633,7 +646,9 @@ def run_pitfalls(
         f"{[h['path'] for h in handoffs]}"
     )
 
-    rc = (invoke or _invoke_pitfalls_agent)(handoffs, repo_root=repo_root, box=box)
+    # The box runs for the curator's spawn only; the drain holds it frozen otherwise (#1178).
+    with thaw(box):
+        rc = (invoke or _invoke_pitfalls_agent)(handoffs, repo_root=repo_root, box=box)
     if rc != 0:
         # Raised, not returned: a returned rc goes uninspected. `AuthorError` is in the drain's
         # retire set, so a repeatedly failing batch reaches the bounded retirement.
@@ -643,14 +658,11 @@ def run_pitfalls(
 
     changed = _verify_pitfalls_state(
         repo_root, baseline_stray, systems=systems, reducer_offered=reducer_offered,
-        tree_for=trees.tree_for,
+        tree_for=trees.tree_for, git=git,
     )
     sha = None
     if changed:
-        sha = _author_shared.commit_corpus(
-            repo_root, repo_root / "defender" / "skills",
-            _pitfalls_commit_message(changed),
-        )
+        sha = git.commit(changed, _pitfalls_commit_message(changed))
     else:
         _logger.info("pitfalls curator made no corpus edits (valid no-edit tick)")
     # After the commit: a reducer row's criterion needs the confirmed edit, which only

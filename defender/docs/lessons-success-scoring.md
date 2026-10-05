@@ -6,7 +6,7 @@
 > this lesson help?" is the forward-check plus `evals/held_out.py`.
 
 Companion to `defender/learning/actor_benign.md` / `actor.md`,
-`defender/scripts/lessons/lessons_env_retrieve.py` / `lessons_actor_index.py`,
+`lessons_env_retrieve.py` / `lessons_actor_index.py`,
 and the task `docs/decisions/benign-actor-success-retrieval.md`. Captures the
 design discussion behind adding a success/usefulness signal to the
 actor-retrieved lesson corpora. The benign (FP) direction —

@@ -38,7 +38,7 @@ from defender._io import (
     write_guarded,
 )
 from defender.run_repository import RunPaths, artifact_dir, artifact_file
-from defender.scripts.gather_tools.record_query import is_reserved_query_id
+from defender._query_rules import is_reserved_query_id
 
 from .. import session_store
 from ._spec import (

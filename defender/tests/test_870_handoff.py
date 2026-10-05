@@ -15,10 +15,11 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._claim1175 import claim_git
 from defender import _git
 from defender.learning.leads import pitfalls_curator
 from defender.learning.leads.lead_extraction import LeadAuthorError, collect_general_failures
-from defender.scripts.gather_tools.record_query import BASH_SHIM_QUERY_ID
+from defender._query_rules import BASH_SHIM_QUERY_ID
 from defender.tests._declared870 import (
     BINDER,
     PITFALLS_SECTION,
@@ -311,7 +312,7 @@ def test_the_pitfalls_content_rule_pins_the_reducer_surfaces_shape(repo, tmp_pat
                                                    tree_for=lane_tree_for(repo)) is None
     assert pitfalls_curator._verify_pitfalls_state(
         repo, baseline_stray=[], systems=DECLARED, reducer_offered=True,
-        tree_for=lane_tree_for(repo),
+        tree_for=lane_tree_for(repo), git=claim_git(repo)
     ) == [REDUCER_REL]
     # The same compliant edit, on a tick whose batch held no reducer row: refused by the OFFER
     # half before the content half ever reads the diff. The document is identical in both
@@ -319,7 +320,7 @@ def test_the_pitfalls_content_rule_pins_the_reducer_surfaces_shape(repo, tmp_pat
     with pytest.raises(LeadAuthorError, match="offered no reducer handoff"):
         pitfalls_curator._verify_pitfalls_state(
             repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
-            tree_for=lane_tree_for(repo),
+            tree_for=lane_tree_for(repo), git=claim_git(repo)
         )
 
     dropped_heading = good.replace(REDUCER_HEADINGS[1] + "\n\nUnnest takes a LIST.\n\n", "")
@@ -388,7 +389,7 @@ def test_the_pitfalls_content_rule_pins_the_reducer_surfaces_shape(repo, tmp_pat
         with pytest.raises(LeadAuthorError):
             pitfalls_curator._verify_pitfalls_state(
                 repo, baseline_stray=[], systems=DECLARED, reducer_offered=True,
-                tree_for=lane_tree_for(repo),
+                tree_for=lane_tree_for(repo), git=claim_git(repo)
             )
         assert what  # names the arm in the traceback when one of them is the failure
 

@@ -20,8 +20,9 @@ from ..agent_role import AgentRole
 from defender._untrusted import wrap_fresh
 from defender._env import FatalConfigError
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE
-from defender.scripts.gather_tools import sql as defender_sql
+from defender.runtime.sql_engine import sql as defender_sql
 from defender.scripts.gather_tools import record_query
+from defender._query_rules import BASH_SHIM_QUERY_ID
 from ._deps import AgentDeps, GatherDeps, _BASH_TIMEOUT_S, _BASH_VERB, _INFRA_EXIT_CODE, _bounded_read, _cap_for, _format_bash_result, _overflow_filter_hint, _read_char_cap
 
 
@@ -81,7 +82,7 @@ def _record_shim_failure(
             verb=_BASH_VERB,
             # Nothing to fingerprint: `system` comes from a path this run wrote, not the model.
             system_key="",
-            query_id=record_query.BASH_SHIM_QUERY_ID,
+            query_id=BASH_SHIM_QUERY_ID,
             params={"command": recorded_command},
             raw_command=recorded_command,
             # Empty but present (`extract_from_joined` drops rows without a sidecar); the

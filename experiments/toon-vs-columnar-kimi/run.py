@@ -13,7 +13,7 @@ sys.path.insert(0, "/workspace")
 import toons  # noqa: E402
 from openai import OpenAI  # noqa: E402
 
-from defender.scripts.gather_tools.payload_view import render  # noqa: E402
+from defender.runtime.payload_view import render  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).parent))
 from build_fixtures import toon_input  # noqa: E402

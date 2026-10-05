@@ -47,11 +47,11 @@ from defender.learning.lead_repository import QueryRow, load_queries
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS
 from defender.scripts.gather_tools import record_query
 from defender.scripts.gather_tools.record_query import (
-    ABOVE_GUARD_QUERY_ID,
     QUERY_ROW_COLUMNS,
     in_rejection_domain,
     rejection_trip,
 )
+from defender._query_rules import ABOVE_GUARD_QUERY_ID
 from defender.tests.learning.test_loop import _qr
 
 LEAD = "l-001"

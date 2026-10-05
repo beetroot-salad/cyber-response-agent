@@ -30,7 +30,7 @@ from defender.run_repository import (
 )
 from defender._text import as_str
 from defender.runtime.circuit_breaker import error_class_for_exit
-from defender.scripts.gather_tools.record_query import is_reserved_query_id
+from defender._query_rules import is_reserved_query_id
 
 if TYPE_CHECKING:
     from defender.skills.invlang.schema import CompanionBody

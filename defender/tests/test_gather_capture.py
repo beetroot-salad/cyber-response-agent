@@ -19,7 +19,7 @@ import json
 
 from defender._io import append_jsonl
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
-from defender.scripts.gather_tools.payload_view import render
+from defender.runtime.payload_view import render
 from defender.scripts.gather_tools.record_query import _next_seq
 
 

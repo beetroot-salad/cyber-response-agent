@@ -8,15 +8,15 @@ overwrote its payload sidecar (C1, C13).
 The design (issue #1127, as amended after the review of PR #1139) answers with a REFUSAL, never
 a cut:
 
-* A — `record_query.PARAMS_NESTING_LIMIT = 32`, a plain product constant rather than the
+* A — `_query_rules.PARAMS_NESTING_LIMIT = 32`, a plain product constant rather than the
   reader's bound less one: far enough under the reader that a line embedding params a few
   levels down (a wire-log record, a ledger row) still reads back. `params_too_deep(value)` stays
   the one public predicate. It walks the Python value the way `_io._json_safe_walk` does — a
   level per `Mapping` or list/tuple/set/frozenset, values not keys — and stops once past the
   limit, so a cyclic value is too deep and the walk terminates.
-* B — the cleaner every params writer goes through (`record_query._json_safe_params`, used by
-  `append_query_row` and by `ServedCall.row()`) raises the typed `record_query.ParamsTooDeep`, a
-  `ValueError`, past the limit — before `append_query_row` persists the seq's payload sidecar,
+* B — the cleaner every params writer goes through (`_query_rules._json_safe_params`, used by
+  `append_query_row` and by `ServedCall.row()`) raises the typed `_query_rules.ParamsTooDeep` (an
+  `Exception`, not a `ValueError`) past the limit — before `append_query_row` persists the seq's payload sidecar,
   and never the `RecursionError` an unbounded walk hits a few thousand levels down.
 
 The arm that matters most is the DIFFERENTIAL: across depths 1..60 and every container kind,
@@ -42,8 +42,9 @@ import yaml
 
 from defender._io import parse_jsonl_row
 from defender.run_repository import RunPaths
-from defender.scripts.gather_tools import record_query as rq
-from defender.scripts.gather_tools.record_query import append_query_row, lead_rows, params_too_deep
+from defender import _query_rules
+from defender.scripts.gather_tools.record_query import append_query_row, lead_rows
+from defender._query_rules import params_too_deep
 
 LEAD = "l-001"
 
@@ -162,10 +163,10 @@ def _sidecars(run_dir: Path) -> list[Path]:
 
 
 def too_deep_error() -> type[BaseException]:
-    """`record_query.ParamsTooDeep`, resolved when an arm needs it, so a missing name fails
+    """`_query_rules.ParamsTooDeep`, resolved when an arm needs it, so a missing name fails
     that arm with a plain message instead of failing every arm at collection."""
-    error = getattr(rq, "ParamsTooDeep", None)
-    assert isinstance(error, type), "record_query.ParamsTooDeep does not exist"
+    error = getattr(_query_rules, "ParamsTooDeep", None)
+    assert isinstance(error, type), "_query_rules.ParamsTooDeep does not exist"
     return error
 
 
@@ -212,7 +213,7 @@ def _write_outcome(run_dir: Path, params: Any) -> str:
 def _cleaner_refuses(params: Any) -> bool:
     """The params cleaner both writers share, asked directly: does it refuse `params`? A
     refusal must be `ParamsTooDeep`; any other raise fails the arm."""
-    err = raised(lambda: rq._json_safe_params(params))
+    err = raised(lambda: _query_rules._json_safe_params(params))
     if err is None:
         return False
     assert_refused_as_too_deep(err, "the params cleaner")
@@ -226,7 +227,7 @@ def test_the_params_limit_is_the_product_constant_32():
     """A: `PARAMS_NESTING_LIMIT = 32` — a product constant, no longer the reader's bound less
     one. That it leaves room for the lines that embed params is pinned on the real wire log
     (`e2e/test_1127_deep_params_query_tool.py`)."""
-    assert rq.PARAMS_NESTING_LIMIT == LIMIT == 32
+    assert _query_rules.PARAMS_NESTING_LIMIT == LIMIT == 32
 
 
 def test_params_too_deep_is_a_typed_domain_error_not_a_value_error_or_an_internal_error():
@@ -244,7 +245,7 @@ def test_params_too_deep_is_a_typed_domain_error_not_a_value_error_or_an_interna
 def test_the_refusal_names_the_field_and_the_limit_in_one_sentence():
     """#1127 review: one sentence, owned by the error, naming the field that was too deep — the
     ledger once blamed `params` when `asked_params` was the deep one."""
-    err = raised(lambda: rq._json_safe_params({"k": dict_chain(LIMIT)}, field="asked_params"))
+    err = raised(lambda: _query_rules._json_safe_params({"k": dict_chain(LIMIT)}, field="asked_params"))
 
     assert isinstance(err, too_deep_error())
     assert getattr(err, "field", None) == "asked_params"
@@ -525,7 +526,7 @@ def test_the_refusal_survives_a_copy_and_a_pickle_unchanged():
     import copy
     import pickle
 
-    err = rq.ParamsTooDeep("asked_params")
+    err = _query_rules.ParamsTooDeep("asked_params")
 
     for clone in (copy.copy(err), pickle.loads(pickle.dumps(err))):
         assert str(clone) == str(err)

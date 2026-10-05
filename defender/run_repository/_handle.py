@@ -197,19 +197,10 @@ class RecordHandle:
     def _do_update(self, patch: dict) -> None:
         root, name = self._address()
         self._mkdir(root, name)
-        with self._io.rooted_locked_for_rewrite(root, name) as f:
-            f.seek(0)
-            raw = f.read()
-            try:
-                current = json.loads(raw) if raw.strip() else {}
-            except ValueError:
-                current = {}
-            if not isinstance(current, dict):
-                current = {}
-            current.update(patch)
-            f.seek(0)
-            f.truncate()
-            f.write(json.dumps(current))
+        # The `_io` op reads, changes and rewrites the record; the handle never reads it
+        # (#1174 amendment 2), and unusable content starts over from `{}`.
+        self._io.locked_json_update(self._io.rooted_locked_for_rewrite(root, name),
+                                    lambda state: state.update(patch), default=dict)
 
     def _do_open(self):
         # Resolve first so the owner's refusals apply to `.open()` as to `.path`.

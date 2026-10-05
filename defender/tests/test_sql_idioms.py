@@ -7,11 +7,12 @@ Errors and then reports an absence it never established.
 
 These guards were written for a judge pipeline that no longer exists and were deleted
 whole with it (`e9e11a48`, #922); 20 of the 23 were never about the judge at all, they
-were about `scripts/gather_tools/sql.py`, which is still the lead's tool. This file is
-those 20, restored against the surfaces that survive and re-driven as a REAL subprocess:
-`sys.executable sql.py '<query>'` with the payload on stdin is what a lead's
-`cat payload.json | defender-sql '...'` actually does, so the exit code, the stdout JSON
-and the stderr hint are all observed the way the lead observes them. `test_sql.py` keeps
+were about the sql engine (`runtime/sql_engine/sql.py`), which is still the lead's tool.
+This file is those 20, restored against the surfaces that survive and re-driven as a REAL
+subprocess: `sys.executable -P -m defender.runtime.sql_engine.sql '<query>'` with the
+payload on stdin is what a lead's `cat payload.json | defender-sql '...'` actually does, so
+the exit code, the stdout JSON and the stderr hint are all observed the way the lead observes
+them. `test_sql.py` keeps
 the in-process harness for the internals (sandbox, column disambiguation); nothing here
 monkeypatches anything.
 
@@ -47,10 +48,10 @@ from defender.tests._defender_sql import (
     EXIT_INPUT_ERROR,
     EXIT_OK,
     EXIT_QUERY_ERROR,
-    SQL_PY,
     assert_query_error,
     run_sql_py,
 )
+from defender.tests._sql_warm import run_sql_warm
 from defender.tests._locale import C_LOCALE_ENV
 
 _DOC = DEFENDER / "skills" / "gather" / "defender-sql.md"
@@ -79,7 +80,7 @@ def _sql(
     payload: str, query: str, env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """`cat <payload.json> | defender-sql '<query>'` as a lead types it."""
-    return run_sql_py(query, stdin=payload, env=env)
+    return run_sql_warm(query, stdin=payload, env=env)
 
 
 def _rows(payload: str, query: str) -> list:
@@ -94,7 +95,7 @@ _ESQL_DECLARED = ("--rows", "values", "--names", "columns")
 
 def _declared(payload: str, query: str, declaration: tuple[str, ...] = _ESQL_DECLARED) -> list:
     """`cat <payload.json> | defender-sql --rows … --names … '<query>'` — the declared form."""
-    proc = run_sql_py(*declaration, query, stdin=payload)
+    proc = run_sql_warm(*declaration, query, stdin=payload)
     assert proc.returncode == EXIT_OK, f"defender-sql failed: {proc.stderr}"
     return json.loads(proc.stdout)
 
@@ -685,12 +686,16 @@ def _unnest_args(text: str) -> set[str]:
     return {re.sub(r"^data\.", "", arg, flags=re.IGNORECASE) for arg in _UNNEST_ARG.findall(text)}
 
 
+#: The engine `bin/defender-sql` runs: its source carries the help epilog and the hints.
+_SQL_ENGINE = DEFENDER / "runtime" / "sql_engine" / "sql.py"
+
+
 def _lead_surfaces() -> list[Path]:
     """Everything a gather lead reads or runs when it writes SQL over a payload: the tool
     itself, and every skill doc — `defender-sql.md`, the adapter contract, the query
     templates, and each system's recorded execution notes, which is where a curator would
     write a recipe down. Enumerated, not hand-listed, so a new doc is censused on arrival."""
-    return [SQL_PY, *sorted(_SKILLS.rglob("*.md"))]
+    return [_SQL_ENGINE, *sorted(_SKILLS.rglob("*.md"))]
 
 
 def test_every_unnest_on_a_lead_facing_surface_names_a_live_shape():
@@ -711,7 +716,7 @@ def test_every_unnest_on_a_lead_facing_surface_names_a_live_shape():
     # them they teach the live shape — a zero above cannot come from reading nothing.
     teaching = {name for name, args in seen.items() if args}
     assert {
-        "scripts/gather_tools/sql.py", "skills/gather/defender-sql.md", "skills/connect/adapter.md",
+        "runtime/sql_engine/sql.py", "skills/gather/defender-sql.md", "skills/connect/adapter.md",
     } <= teaching, teaching
     assert set().union(*seen.values()) == _LIVE_SHAPES
 

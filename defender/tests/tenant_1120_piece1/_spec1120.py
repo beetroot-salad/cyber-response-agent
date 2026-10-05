@@ -131,6 +131,11 @@ SETUP_FUNCTION = "defender.scripts.tenant.setup"
 #: absent, git refusing the clone as dubious ownership, any git error) — beside git's reason.
 CANNOT_VERIFY_TENANT_ID = "cannot verify .tenant-id is committed"
 
+#: An adapter whose source the cold roster read cannot parse, so no census over the checkout
+#: holding it can be taken (M6) — for `check` and the census lint alike.
+BROKEN_SYSTEM = "broken"
+BROKEN_ADAPTER = "VERBS = {\n    'verb': (\n"
+
 
 # ======================================================================================
 # The owner, lazily. ONE place, so a rename is one edit.

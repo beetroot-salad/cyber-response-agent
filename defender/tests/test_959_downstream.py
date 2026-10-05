@@ -34,6 +34,7 @@ from defender.runtime.box_codec import BoxResult  # noqa: E402
 from defender.runtime.permission import files as pfiles  # noqa: E402
 from defender.runtime.tools import _tool_bash  # noqa: E402
 from defender.scripts import policy_cli  # noqa: E402
+from defender import _query_rules  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
 from defender.tests import _baseline_959 as base  # noqa: E402
 from defender.tests import _tenants1106 as T1106  # noqa: E402
@@ -173,7 +174,7 @@ def test_the_audit_rows_system_attribution_derives_from_the_authorised_operand_s
     )
     _tool_bash(deps, f"cat {payload} | defender-sql 'SELECT 1'")
     rows = [json.loads(line) for line in (run / "executed_queries.jsonl").read_text().splitlines()]
-    shim = [r for r in rows if r["query_id"] == record_query.BASH_SHIM_QUERY_ID]
+    shim = [r for r in rows if r["query_id"] == _query_rules.BASH_SHIM_QUERY_ID]
     assert len(shim) == 1, "the shim-failure row never reached the queries table"
     assert shim[0]["system"] == "elastic", (
         "the row's attribution is not the system of the payload the AUTHORISED operand set "

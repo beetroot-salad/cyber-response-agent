@@ -24,7 +24,7 @@ What that ordering buys, and what every test here asserts in its own words:
 * A denied call leaves NO evidence row — full stop, not "when well-formed". The narrowing
   the earlier ordering forced onto every no-evidence-row obligation is WITHDRAWN.
   AMENDED BY #860: "evidence row" means a row a call that REACHED a system wrote. A denied
-  call now leaves exactly one `∅.denied` SENTINEL row (`record_query.DENIED_QUERY_ID`) —
+  call now leaves exactly one `∅.denied` SENTINEL row (`_query_rules.DENIED_QUERY_ID`) —
   writer-only, split onto `JoinedLead.sentinels` and never `.queries`, partitioned out of
   every learning-loop router by its `∅.` prefix like the repeat trip and the shim failure
   before it — so the offline judge can see that the lead tried and was refused. It consumes
@@ -58,7 +58,7 @@ pytest.importorskip("pydantic_ai")
 from defender.runtime import circuit_breaker  # noqa: E402
 from defender.runtime.circuit_breaker import DENIED_ERROR_CLASS  # noqa: E402
 from defender.tests import _tenants1106 as T1106  # noqa: E402
-from defender.scripts.gather_tools.record_query import DENIED_QUERY_ID  # noqa: E402
+from defender._query_rules import DENIED_QUERY_ID
 from defender.tests._verb_authorization_632 import (  # noqa: E402
     DENIED,
     DONE,
@@ -573,10 +573,10 @@ def test_a_denials_sentinel_row_is_a_sentinel_to_every_reader(tmp_path: Path):
     from defender.runtime.query_tool import resolve_query_id
     from defender.scripts.gather_tools.record_query import (
         in_rejection_domain,
-        is_reserved_query_id,
         rejection_budget_trip,
         repeat_trip,
     )
+    from defender._query_rules import is_reserved_query_id
 
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=_registry(rec),

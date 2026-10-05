@@ -35,7 +35,7 @@ import pytest
 from defender._io import read_jsonl_rows
 from defender.runtime import observe
 from defender.runtime.review_roles import REVIEW_AGENT_ID_PREFIX, live_review_stages
-from defender.scripts.pricing import usage_cost
+from defender._pricing import usage_cost
 
 # Through `visualize_data`, which is how every other visualizer test reaches these: the two
 # modules are mutually importing (`visualize_data` re-exports from `visualize_messages` at its

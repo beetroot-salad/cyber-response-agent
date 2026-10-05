@@ -12,7 +12,7 @@ REPO_ROOT = HERE.parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from defender.scripts._venv import reexec_into_venv  # noqa: E402
+from defender._venv import reexec_into_venv  # noqa: E402
 
 if __name__ == "__main__":
     reexec_into_venv(__file__)

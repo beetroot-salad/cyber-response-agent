@@ -25,29 +25,20 @@ from defender._text import as_str
 from defender._untrusted import wrap_fresh
 from defender.learning.branch.redaction import redact_model_visible
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
-from defender.scripts.gather_tools.payload_view import render as _render_payload
+from defender.runtime.payload_view import render as _render_payload
 from defender.runtime.request_ceiling import WRITE_SUMMARY_NOW
 from defender.runtime.tools import DeadEnd
 from defender.scripts.gather_tools.record_query import (
-    ABOVE_GUARD_QUERY_ID,
-    DENIED_QUERY_ID,
     REPEAT_ESCAPE,
-    REPEAT_TRIP_QUERY_ID,
     GatherDeadEnd,
-    ParamsTooDeep,
     RejectionBudgetTrip,
     RepeatTrip,
-    _json_safe_params,  # noqa: F401 — re-export: test_repeat_breaker_807 imports it from here
     append_query_row,
-    call_args_too_deep,
     dead_end_reason,
-    _QID_FORBIDDEN,
-    resolve_query_id,
     lead_rows,
     names_something_readable,
     payload_digest,
     payload_status,
-    # Re-exported under a private name: `_spec771` measures `query_tool._persist_payload`.
     persist_payload as _persist_payload,  # noqa: F401
     raw_command,
     rejection_budget_trip,
@@ -58,6 +49,15 @@ from defender.scripts.gather_tools.record_query import (
     repeat_trip,
     repeat_trip_detail,
     system_fingerprint,
+)
+from defender._query_rules import (
+    ABOVE_GUARD_QUERY_ID,
+    DENIED_QUERY_ID,
+    REPEAT_TRIP_QUERY_ID,
+    ParamsTooDeep,
+    call_args_too_deep,
+    _QID_FORBIDDEN,
+    resolve_query_id,
 )
 
 from . import circuit_breaker

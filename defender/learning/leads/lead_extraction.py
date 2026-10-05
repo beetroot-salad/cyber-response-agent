@@ -10,6 +10,8 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._io import Bound
+# Re-exported: this module is the class's public spelling (`_errors` says why it lives there).
+from defender.learning.leads._errors import LeadAuthorError
 from defender.learning import lead_repository
 from defender.learning.leads import lead_neighbors
 from defender.learning.leads.draft_synthesis import (
@@ -17,11 +19,7 @@ from defender.learning.leads.draft_synthesis import (
     _executed_query,
     answered_identities,
 )
-from defender.scripts.gather_tools.record_query import BASH_SHIM_QUERY_ID
-
-
-class LeadAuthorError(Exception):
-    pass
+from defender._query_rules import BASH_SHIM_QUERY_ID
 
 
 @model(frozen=True)
