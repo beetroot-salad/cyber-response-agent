@@ -1,5 +1,5 @@
-"""Run lookup (#1105 D2): `open_run`, `list_run_ids`, `bound_runs` and `run_exists`, and the
-held runs folder every lookup and record function works through.
+"""Run lookup (#1105 D2): `open_run`, `list_run_ids`, `bound_runs` and `run_exists`, each over
+one `_held.HeldRuns` (the held runs folder every lookup and record function works through).
 
 Each function takes an accepted `Tenant` (anything else is a `TypeError`, before any read) and,
 where it names a run, a `RunId`. The runs folder is always `tenant.runs`: no function takes a
@@ -18,195 +18,30 @@ beside run folders, a sidecar write's staged file included. Each function judges
 """
 from __future__ import annotations
 
-import errno
 import stat
 from collections.abc import Iterator
-from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
 from defender import _io
-from defender._tenant import TENANT_RECORD_NAME, Tenant, TenantRefused, read_tenant, record_path
+from defender._shown import shown
+from defender._tenant import Tenant
 from defender.run_repository import _record
-from defender._shown import escaped, quoted, shown
 from defender.run_repository._errors import RunRefused
 from defender.run_repository._handle import Run
+from defender.run_repository._held import (
+    HeldRuns, hold_runs, refuse_sidecar_id, require_accepted_tenant, require_run_id,
+)
 from defender.run_repository._id import RunId
-from defender.run_repository._layout import RunPaths
-
-# -- the arguments ----------------------------------------------------------------------------
-
-
-def require_accepted_tenant(tenant: object) -> Tenant:
-    """`tenant`, when it is an accepted `Tenant`; else `TypeError` (S2: the tenant is never a
-    bare id, a path or a carrier the repository would have to trust or re-accept)."""
-    if not isinstance(tenant, Tenant):
-        raise TypeError(f"the runs repository takes an accepted Tenant, not "
-                        f"{type(tenant).__name__}")
-    return tenant
-
-
-def require_run_id(run_id: object, *, what: str = "run id") -> RunId:
-    """`run_id`, when it is a `RunId`; else `TypeError` (a `str` included: callers convert at
-    their own edge with `RunId.parse`)."""
-    if not isinstance(run_id, RunId):
-        raise TypeError(f"the {what} must be a RunId, not {type(run_id).__name__}")
-    return run_id
-
-
-def refuse_sidecar_id(run_id: RunId) -> None:
-    """The sidecar clause (D2.1, MF-21) on an id: one shaped like a host-only sidecar file, or
-    like the staged file a sidecar write makes first, never names a run. Judged on the name
-    alone, before anything is read."""
-    if RunPaths.sidecar_owner(str(run_id)) is not None:
-        raise RunRefused(f"{quoted(str(run_id))} is shaped like a host-only sidecar file beside "
-                         "a run folder, not a run")
-
-
-# -- the held runs folder (H1, H2) -------------------------------------------------------------
-
-
-def _hold_fault(exc: OSError) -> str:
-    if exc.errno == errno.ELOOP:
-        return f"is a link, which is never followed ({exc.strerror})"
-    if exc.errno == errno.ENOTDIR:
-        return "is not a directory"
-    return f"cannot be opened ({exc.strerror or exc})"
-
-
-def tenant_refusal(message: str, cls: type[TenantRefused] = TenantRefused) -> TenantRefused:
-    """A tenant refusal the package raises, its message `escaped` as every `RunRefused`'s is,
-    so the runs folder's own path cannot break its one line. `TenantRefused` is the tenant
-    module's, so it is escaped here, at the package's one place that builds it."""
-    return cls(escaped(message))
-
-
-@contextmanager
-def held_runs(tenant: Tenant, io: Any) -> Iterator[_io.Held | None]:
-    """`tenant.runs`, held open no-follow for the block, or `None` when it is absent (the one
-    expected state of the folder itself). Any other refusal of the open is `TenantRefused`
-    naming the folder; the handle is closed when the block ends, however it ends."""
-    runs = Path(tenant.runs)
-    try:
-        held = io.hold(runs, follow=False)
-    except FileNotFoundError:
-        yield None
-        return
-    except OSError as exc:
-        raise tenant_refusal(f"the runs folder {runs} {_hold_fault(exc)}") from None
-    try:
-        yield held
-    finally:
-        held.close()
-
-
-def refuse_absent(tenant: Tenant) -> TenantRefused:
-    """The refusal for a function that needs the runs folder to exist (`open_run`, the
-    writer): run setup creates it, with its tenant record, and nothing here does."""
-    return tenant_refusal(f"the runs folder {tenant.runs} is absent — run setup creates it, "
-                         "with its tenant record")
-
-
-class _HeldRecordIO:
-    """`read_tenant`'s `io=` seam served through the held view (H3): the record is read off
-    the held handle, never by path, so its verdict is about the folder this call holds."""
-
-    def __init__(self, view: _io.Bound) -> None:
-        self._view = view
-
-    def read_guarded(self, _path: Path, **_kwargs: Any) -> tuple[str | None, str | None]:
-        answer = self._view.read(TENANT_RECORD_NAME)
-        if answer.text is not None:
-            return answer.text, None
-        return None, "absent" if answer.absent else answer.reason
-
-
-def check_tenant_record(view: _io.Bound, tenant: Tenant) -> None:
-    """`read_tenant`'s verdict on the held folder's `_tenant.json`, then an exact compare of
-    its `tenant_id` with `tenant.id`. Every failure is `TenantRefused` naming the record, never
-    a raw error, and never carrying a run id of the folder (NF-8)."""
-    path = record_path(Path(tenant.runs))
-    try:
-        record = read_tenant(Path(tenant.runs), io=_HeldRecordIO(view))
-    except TenantRefused as exc:
-        raise tenant_refusal(str(exc), type(exc)) from None
-    except (RecursionError, ValueError, TypeError, OSError) as exc:
-        raise tenant_refusal(f"{path} could not be judged: {exc}") from None
-    if record.tenant_id != tenant.id:
-        raise tenant_refusal(f"{path} names the tenant {quoted(record.tenant_id)}, not "
-                            f"{quoted(tenant.id)}")
-
-
-# -- the folder's entries (H4) -------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class Listing:
-    """What a held runs folder holds, every entry judged: its runs (sorted by text), and the
-    known sidecar files beside them, by name and by the run id each belongs to."""
-
-    runs: tuple[RunId, ...]
-    sidecars: frozenset[str]
-    sidecar_ids: frozenset[RunId]
-
-
-def entry_path(folder: Path | str, name: str) -> str:
-    """`<folder>/<name>` as a refusal shows it: a hostile name read off disk is quoted."""
-    return f"{folder}/{shown(name)}"
-
-
-def _parses(text: str) -> RunId | None:
-    try:
-        return RunId.parse(text)
-    except RunRefused:
-        return None
-
-
-def list_entries(view: _io.Bound, folder: Path, *, io: Any) -> Listing:
-    """Every entry of the held runs folder, judged from its directory entry and never followed
-    (D2.4, H4). Accepted: a run (a real directory whose name `RunId.parse` admits and the
-    sidecar clause passes), `_tenant.json` and `_episodes` (each judged where it is read), and a
-    known sidecar file. Any other entry is `RunRefused` naming it, a legacy run folder off the
-    id rules included; a folder that cannot be listed is `TenantRefused`."""
-    answer = view.entries()
-    if answer.entries is None:
-        why = "it is gone" if answer.absent else answer.reason
-        raise tenant_refusal(f"the runs folder {folder} could not be listed: {why}")
-    runs: list[RunId] = []
-    sidecars: set[str] = set()
-    sidecar_ids: set[RunId] = set()
-    for name in sorted(answer.entries):
-        kind = answer.entries[name]
-        if name in (TENANT_RECORD_NAME, _record.EPISODES_DIRNAME):
-            continue
-        owner = RunPaths.sidecar_owner(name)
-        if kind == io.ENTRY_DIR:
-            run_id = _parses(name) if owner is None else None
-            if run_id is None:
-                raise RunRefused(
-                    f"{entry_path(folder, name)} is a directory that is not a run: its name is "
-                    "off the run-id rules or shaped like a sidecar file — rename or move it")
-            runs.append(run_id)
-        elif kind == io.ENTRY_FILE and owner is not None and (owned := _parses(owner)):
-            sidecars.add(name)
-            sidecar_ids.add(owned)
-        else:
-            raise RunRefused(
-                f"{entry_path(folder, name)} is not a run, a known sidecar file, "
-                f"{TENANT_RECORD_NAME} or {_record.EPISODES_DIRNAME} (a link, a stray file or "
-                "another entry) — move it out of the runs folder")
-    return Listing(tuple(runs), frozenset(sidecars), frozenset(sidecar_ids))
-
-
-def unclaimed_runs(view: _io.Bound, tenant: Tenant, *, io: Any) -> list[RunId]:
-    """The held folder's runs minus every id a good episode record claims (D2's listings)."""
-    listing = list_entries(view, tenant.runs, io=io)
-    claimed = _record.claimed_ids(view, tenant, io=io)
-    return [run_id for run_id in listing.runs if run_id not in claimed]
-
 
 # -- the lookups (H6) ----------------------------------------------------------------------------
+
+
+def _unclaimed(runs: HeldRuns) -> list[RunId]:
+    """The held folder's runs minus every id a good episode record claims (D2's listings)."""
+    claimed = _record.claimed_ids(runs)
+    return [run_id for run_id in runs.listing().runs if run_id not in claimed]
 
 
 def open_run(tenant: Tenant, run_id: RunId, *, io: Any = _io) -> Run:
@@ -223,13 +58,9 @@ def open_run(tenant: Tenant, run_id: RunId, *, io: Any = _io) -> Run:
     run_id = require_run_id(run_id)
     refuse_sidecar_id(run_id)
     name = str(run_id)
-    with held_runs(tenant, io) as held:
-        if held is None:
-            raise refuse_absent(tenant)
-        view = held.view()
-        check_tenant_record(view, tenant)
-        entry = io.stat_entry(view, name)
-        path = Path(tenant.runs) / name
+    with hold_runs(tenant, io) as runs:
+        entry = io.stat_entry(runs.require_present().view, name)
+        path = runs.folder / name
         if entry.st is None:
             raise RunRefused(f"{path} is absent" if entry.absent
                              else f"{path} could not be judged: {entry.reason}")
@@ -243,12 +74,8 @@ def list_run_ids(tenant: Tenant, *, io: Any = _io) -> list[RunId]:
     """The tenant's runs, sorted by text, minus every id a good episode record claims; `[]`
     when the runs folder is absent."""
     tenant = require_accepted_tenant(tenant)
-    with held_runs(tenant, io) as held:
-        if held is None:
-            return []
-        view = held.view()
-        check_tenant_record(view, tenant)
-        return unclaimed_runs(view, tenant, io=io)
+    with hold_runs(tenant, io) as runs:
+        return [] if runs.absent else _unclaimed(runs)
 
 
 def run_exists(tenant: Tenant, run_id: RunId, *, io: Any = _io) -> bool:
@@ -259,12 +86,10 @@ def run_exists(tenant: Tenant, run_id: RunId, *, io: Any = _io) -> bool:
     is not read here."""
     tenant = require_accepted_tenant(tenant)
     run_id = require_run_id(run_id)
-    with held_runs(tenant, io) as held:
-        if held is None:
+    with hold_runs(tenant, io) as runs:
+        if runs.absent:
             return False
-        view = held.view()
-        check_tenant_record(view, tenant)
-        listing = list_entries(view, tenant.runs, io=io)
+        listing = runs.listing()
         return run_id in listing.runs or str(run_id) in listing.sidecars
 
 
@@ -320,16 +145,13 @@ class BoundRuns:
                              "fresh one")
         self._state = "open"
         try:
-            held = self._stack.enter_context(held_runs(self._tenant, self._io))
-            if held is None:
+            runs = self._stack.enter_context(hold_runs(self._tenant, self._io))
+            if runs.absent:
                 self.absent = True
                 return self
-            view = held.view()
-            check_tenant_record(view, self._tenant)
-            runs = Path(self._tenant.runs)
-            self._rows = [(run_id, RunRow(self, run_id, view.under(str(run_id)),
-                                          runs / str(run_id)))
-                          for run_id in unclaimed_runs(view, self._tenant, io=self._io)]
+            self._rows = [(run_id, RunRow(self, run_id, runs.view.under(str(run_id)),
+                                          runs.folder / str(run_id)))
+                          for run_id in _unclaimed(runs)]
         except BaseException:
             self.__exit__()
             raise

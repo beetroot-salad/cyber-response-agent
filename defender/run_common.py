@@ -177,7 +177,7 @@ def _refuse_claimed_run_id(runs_base: Path, run_id: str) -> None:
     anything else in `_episodes` that is not a record, refuses every pinned id."""
     try:
         with _io.hold(runs_base, follow=False) as held:
-            claimed = episode_sibling_ids(held.view())
+            claimed = episode_sibling_ids(held.view(), where=str(runs_base))
     except RunRefused as bad:
         sys.exit(str(bad))
     except OSError as bad:

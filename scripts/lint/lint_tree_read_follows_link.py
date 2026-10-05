@@ -99,6 +99,7 @@ LINT_TREE_READER_MODULES: frozenset[str] = frozenset({
     # as neither was before the move (`Run.at`'s link-following `is_dir()` is today's).
     "run_repository/_lookup.py",
     "run_repository/_record.py",
+    "run_repository/_held.py",
     "run_repository/_id.py",
 })
 

@@ -131,7 +131,7 @@ EXPECTED_DEFERRED_LEGACY = frozenset({
     (_FORWARD, "load_run_context"), (_FORWARD, "expected_disposition")})
 
 _PACKAGE_FILES = ("__init__.py", "_layout.py", "_handle.py", "_lookup.py", "_record.py",
-                  "_id.py", "_errors.py")
+                  "_held.py", "_id.py", "_errors.py")
 #: D7's categories table (design-rev4.md, "Categories, by module"), every module in exactly one
 #: row: the owners plus the 57 non-owner production importers of the layout at 80888efb.
 EXPECTED_CATEGORIES: dict[str, frozenset[str]] = {

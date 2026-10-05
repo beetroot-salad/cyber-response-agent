@@ -2,7 +2,7 @@
 NM-05..NM-07, NM-09; MF-09 reading B / O5.13).
 
 The handle (`_run_handle.py`) and the layout owner (`_run_paths.py`) move into the package as
-`_handle.py` and `_layout.py`; the package's files are pinned to seven names (D1.1); the door
+`_handle.py` and `_layout.py`; the package's files are pinned to eight names (D1.1, plus `_held.py` by owner ruling); the door
 (`__init__.py`) serves the public surface lazily (PEP 562 `__getattr__`), so a layout name loads
 the layout submodule alone and stays importable without pydantic (R4-6, R4-7). No old import
 path is kept (N-m), every live string reference moves with the code (D1.5), and every gate that
@@ -38,9 +38,11 @@ from defender.tests._by_path import import_lint_lib, load_lint_gate
 from defender.tests._import_blocker import run_blocked
 from defender.tests.tenant_1105_run_repository import _spec1105 as H
 
-#: D1.1's seven pinned file names (owner sets, baselines and path-keyed tests name them).
+#: D1.1's pinned file names (owner sets, baselines and path-keyed tests name them): the seven
+#: it named plus `_held.py`, the held runs folder `_lookup` and `_record` both build on (owner
+#: ruling, #1105 PR 1 review: it replaced their import cycle).
 PACKAGE_FILES = ("__init__.py", "_layout.py", "_handle.py", "_lookup.py", "_record.py",
-                 "_id.py", "_errors.py")
+                 "_held.py", "_id.py", "_errors.py")
 #: The 53 public names `defender/_run_paths.py` defines at module level at 80888efb (R4-42).
 LAYOUT_NAMES = frozenset({
     "WIRE_LOG_DIR", "WIRE_LOG", "PROVENANCE", "GATE_METADATA_KEY", "ALERT", "REPORT",
@@ -333,9 +335,9 @@ def test_1105_the_resolve_data_root_census_scans_the_package_and_finds_no_call_i
     assert census._resolve_calls([planted]), "positive control: the planted call is found"
 
 
-def test_1105_the_package_holds_exactly_its_seven_pinned_submodules():
+def test_1105_the_package_holds_exactly_its_seven_pinned_submodules():  # name kept: the spec graph cites it; eight files since the owner's _held.py ruling
     """defender/run_repository/ holds exactly __init__.py, _layout.py, _handle.py, _lookup.py,
-    _record.py, _id.py and _errors.py: the entries of the directory on disk equal those seven
+    _record.py, _held.py, _id.py and _errors.py: the entries of the directory on disk equal those
     names, caches ignored, so a stray lookup.py fails (MF-18); each submodule imports by its
     dotted name; _handle defines Run, RunRecord, RecordHandle, ArchivedWorld and case_ref, and
     _layout defines the 53 public names defender/_run_paths.py defined. The directory is read
@@ -347,7 +349,7 @@ def test_1105_the_package_holds_exactly_its_seven_pinned_submodules():
     assert H.PACKAGE.is_dir(), f"{H.PACKAGE} is not a directory on disk"
     held = {entry.name for entry in H.PACKAGE.iterdir() if entry.name != "__pycache__"}
     assert held == set(PACKAGE_FILES), (
-        f"defender/run_repository/ holds {sorted(held)}, not D1.1's seven "
+        f"defender/run_repository/ holds {sorted(held)}, not D1.1's pinned "
         f"{sorted(PACKAGE_FILES)}")
     assert Path(run_repository.__file__).resolve() == H.PACKAGE / "__init__.py", (
         "the door is defender/run_repository/__init__.py")

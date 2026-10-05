@@ -83,7 +83,8 @@ _VE = "scripts/visualize/visualize_episode.py"
 CATEGORIES: Mapping[str, Sequence[str]] = {
     "owners": (
         "run_repository/__init__.py", "run_repository/_layout.py", "run_repository/_handle.py",
-        "run_repository/_lookup.py", "run_repository/_record.py", "run_repository/_id.py",
+        "run_repository/_lookup.py", "run_repository/_record.py", "run_repository/_held.py",
+        "run_repository/_id.py",
         "run_repository/_errors.py", "_episode_paths.py", "_episode_handle.py", "_tenant.py",
     ),
     # N-a: the running investigation does not migrate; its record writes are #1165.

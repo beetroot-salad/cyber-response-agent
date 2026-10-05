@@ -21,7 +21,6 @@ add the compare.
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -32,15 +31,14 @@ from defender._run_id import (
 )
 from defender._tenant import Tenant
 from defender._world_label import reserved_label_fault, world_view_fault
-from defender.run_repository import _lookup
 from defender._shown import quoted, shown
 from defender.run_repository._errors import RunRefused
+from defender.run_repository._held import (
+    EPISODES_DIRNAME, HeldRuns, Listing, hold_runs, require_accepted_tenant, require_run_id,
+)
 from defender.run_repository._id import RunId
 from defender.run_repository._layout import RunPaths
 
-#: The record folder, directly in the tenant's runs folder. A leading `_` is never a run id
-#: (`RunId.parse` refuses it), so no run folder can share its name.
-EPISODES_DIRNAME = "_episodes"
 #: The largest record the reader accepts and the writer writes, in bytes (D3.4; owner, OP-4).
 _RECORD_CAP = 65536
 #: The longest file name the record may take (NAME_MAX).
@@ -220,50 +218,40 @@ def _read_records(runs: _io.Bound, *, where: str, tenant_id: str | None,
     return records
 
 
-def episode_sibling_ids(runs: _io.Bound, *, io: Any = _io) -> set[RunId]:
+def episode_sibling_ids(runs: _io.Bound, *, where: str | None = None,
+                        io: Any = _io) -> set[RunId]:
     """Every run id any record under `runs/_episodes` claims, with D3.4's file rules and NO
     tenant compare (R1: run setup and PR 2's corpus judge the tenant themselves). `runs` must
     be a `_io.Bound` (else `TypeError`, before any read); the empty set when it is absent or
-    `_episodes` is. It is not closed here: the caller owns it."""
+    `_episodes` is. It is not closed here: the caller owns it. `where` is how a refusal names
+    the runs folder; a caller holding only the `Bound` leaves it out and the view says where it
+    is (`Bound.located`)."""
     if not isinstance(runs, _io.Bound):
         raise TypeError(f"episode_sibling_ids reads a Bound runs folder, not "
                         f"{type(runs).__name__}")
-    records = _read_records(runs, where=_shown_root(runs), tenant_id=None, io=io)
+    shown_root = runs.located() if where is None else where
+    records = _read_records(runs, where=shown_root, tenant_id=None, io=io)
     return {run_id for arms in records.values() for run_id in arms.values()}
 
 
-def _shown_root(runs: _io.Bound) -> str:
-    """Where `runs` is, for a refusal to name: a `Bound` holds its folder by descriptor only,
-    so the kernel's name for that descriptor is asked (Linux's `/proc/self/fd`, as `_io`'s
-    `O_PATH` already assumes). Description only — nothing is opened by it. Empty when it
-    cannot be told, and the refusal then names the record relative to the runs folder."""
-    try:
-        with runs._handle.dup() as fd:  # noqa: SLF001 — the descriptor is the Bound's only address
-            root = os.readlink(f"/proc/self/fd/{fd}")
-    except OSError:
-        return ""
-    return str(Path(root, *runs._prefix))  # noqa: SLF001
-
-
-def claimed_ids(view: _io.Bound, tenant: Tenant, *, io: Any) -> set[RunId]:
+def claimed_ids(runs: HeldRuns) -> set[RunId]:
     """`episode_sibling_ids` over a held runs folder, plus the tenant compare: a record naming
     another tenant is corrupt here (D3.5)."""
-    records = _read_records(view, where=str(tenant.runs), tenant_id=tenant.id, io=io)
+    records = _read_records(runs.view, where=str(runs.folder), tenant_id=runs.tenant.id,
+                            io=runs.io)
     return {run_id for arms in records.values() for run_id in arms.values()}
 
 
 def episode_runs(tenant: Tenant, episode_id: str, *, io: Any = _io) -> dict[str, RunId]:
     """`{label: RunId}` from that episode's own record only; `{}` when it has none (DV-7) or
     the runs folder is absent. Another episode's record is never read."""
-    tenant = _lookup.require_accepted_tenant(tenant)
+    tenant = require_accepted_tenant(tenant)
     episode_id = _admit_episode_id(episode_id)
-    with _lookup.held_runs(tenant, io) as held:
-        if held is None:
+    with hold_runs(tenant, io) as runs:
+        if runs.absent:
             return {}
-        view = held.view()
-        _lookup.check_tenant_record(view, tenant)
         name = _record_name(episode_id)
-        read = _read_one(view.under(EPISODES_DIRNAME), name,
+        read = _read_one(runs.view.under(EPISODES_DIRNAME), name,
                          path=str(episode_record_path(tenant.runs, episode_id)),
                          stem=episode_id, tenant_id=tenant.id)
     return {} if read is None else read[1]
@@ -272,13 +260,9 @@ def episode_runs(tenant: Tenant, episode_id: str, *, io: Any = _io) -> dict[str,
 def sibling_run_ids(tenant: Tenant, *, io: Any = _io) -> set[RunId]:
     """Every run id any of the tenant's good records claims; the empty set when the runs folder
     or `_episodes` is absent. One corrupt record refuses the whole answer (fail closed)."""
-    tenant = _lookup.require_accepted_tenant(tenant)
-    with _lookup.held_runs(tenant, io) as held:
-        if held is None:
-            return set()
-        view = held.view()
-        _lookup.check_tenant_record(view, tenant)
-        return claimed_ids(view, tenant, io=io)
+    tenant = require_accepted_tenant(tenant)
+    with hold_runs(tenant, io) as runs:
+        return set() if runs.absent else claimed_ids(runs)
 
 
 # -- the writer (D3.3) ---------------------------------------------------------------------------
@@ -337,11 +321,11 @@ def record_episode_runs(tenant: Tenant, episode_id: str, source_run_id: RunId,
     The writer's state is the file (MF-16): a byte-identical retry is a no-op; different content
     for a recorded episode is refused, the episode id being spent; nothing it did not create is
     ever removed. A filesystem fault is `RunRefused` naming the path, never a raw `OSError`."""
-    tenant = _lookup.require_accepted_tenant(tenant)
-    source = _lookup.require_run_id(source_run_id, what="source run id")
+    tenant = require_accepted_tenant(tenant)
+    source = require_run_id(source_run_id, what="source run id")
     items = list(runs.items()) if isinstance(runs, Mapping) else None
     for _label, run_id in items or ():
-        _lookup.require_run_id(run_id, what="arm run id")
+        require_run_id(run_id, what="arm run id")
     episode_id = _admit_episode_id(episode_id)
     if items is None:
         raise RunRefused(f"episode {quoted(episode_id)}: runs is not a mapping of label to "
@@ -353,17 +337,14 @@ def record_episode_runs(tenant: Tenant, episode_id: str, source_run_id: RunId,
                          f"{_RECORD_CAP} bytes")
     name = _record_name(episode_id)
     path = episode_record_path(tenant.runs, episode_id)
-    with _lookup.held_runs(tenant, io) as held:
-        if held is None:
-            raise _lookup.refuse_absent(tenant)
-        view = held.view()
-        _lookup.check_tenant_record(view, tenant)
-        listing = _lookup.list_entries(view, tenant.runs, io=io)
-        records = _read_records(view, where=str(tenant.runs), tenant_id=tenant.id, io=io)
+    with hold_runs(tenant, io) as runs:
+        view = runs.require_present().view
+        listing = runs.listing()
+        records = _read_records(view, where=str(runs.folder), tenant_id=tenant.id, io=io)
         if episode_id not in records:
             _refuse_taken_arms(arms, records, listing, folder=Path(tenant.runs))
             try:
-                held.write(f"{EPISODES_DIRNAME}/{name}", text, mode="create")
+                runs.write(f"{EPISODES_DIRNAME}/{name}", text, mode="create")
                 return
             except FileExistsError:
                 pass  # recorded meanwhile: judged against its bytes below
@@ -390,7 +371,7 @@ def _judge_existing(existing: _io.BytesRead, text: str, *, path: Path,
 
 
 def _refuse_taken_arms(arms: Mapping[str, RunId], records: Mapping[str, Mapping[str, RunId]],
-                       listing: _lookup.Listing, *, folder: Path) -> None:
+                       listing: Listing, *, folder: Path) -> None:
     """Refuse an arm another record already claims, or whose name already holds a run or a
     sidecar file in the held listing (H6)."""
     claimed = {run_id: episode for episode, recorded in records.items()

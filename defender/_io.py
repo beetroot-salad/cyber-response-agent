@@ -769,6 +769,18 @@ class Bound:
             return spelling, None, False, _read_reason(e)
         return spelling, data, False, None
 
+    def located(self) -> str:
+        """Where this view's folder is, for a refusal to name: the kernel's name for the held
+        descriptor (`/proc/self/fd`, as the `O_PATH` hold already assumes Linux) joined with the
+        view's prefix; `""` when it cannot be told. Description only — nothing is opened, and
+        nothing is trusted, by it."""
+        try:
+            with self._handle.dup() as fd:
+                root = os.readlink(f"/proc/self/fd/{fd}")
+        except OSError:
+            return ""
+        return str(Path(root, *self._prefix))
+
     def read_jsonl(self, name: str | PurePath) -> tuple[list[dict], int, RecordRead]:
         rec = self.read(name, errors="replace")
         if rec.text is None:
