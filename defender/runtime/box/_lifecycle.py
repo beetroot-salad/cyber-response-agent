@@ -31,7 +31,7 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
 )
 from ._spec import ALIAS_PROFILE_PATH, BoxExecutor, BoxRequest, BoxSpec, Mount
 from ._alias import _probe_alias_ban
-from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
+from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._spec import DEFAULT_SPEC, _HostTransport
 from ._spec import _DockerTransport
 
@@ -397,11 +397,9 @@ def start_box(
 def stop_box(box: BoxExecutor, *, docker: DockerFn = _docker) -> None:
     if not box.name:
         return
-    proc = _call(docker, ["docker", "rm", "-f", box.name])
-    if proc.returncode != 0:
-        raise BoxFault(
-            f"could not tear down the box {box.name}: {(proc.stderr or '').strip()}"
-        )
+    reason = _remove_container(docker, box.name)
+    if reason is not None:
+        raise BoxFault(f"could not tear down the box {box.name}: {reason}")
 
 
 #: The container states in which nothing in the box runs: frozen, or no longer running at all
