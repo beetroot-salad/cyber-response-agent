@@ -391,17 +391,9 @@ def start_box(
 
 
 def stop_box(box: BoxExecutor, *, docker: DockerFn = _docker) -> None:
-    """Remove the box's container, paused or not. Never thaws it first (#1178).
-
-    Under runsc a paused container's first `rm -f` kills it but answers non-zero ("PID … is
-    zombie and can not be killed") and leaves it behind; a second `rm -f` removes it (8/8 on
-    the CI runner, #1198). So one retry, and a box still there after it is a `BoxFault`."""
     if not box.name:
         return
-    argv = ["docker", "rm", "-f", box.name]
-    proc = _call(docker, argv)
-    if proc.returncode != 0:
-        proc = _call(docker, argv)
+    proc = _call(docker, ["docker", "rm", "-f", box.name])
     if proc.returncode != 0:
         raise BoxFault(
             f"could not tear down the box {box.name}: {(proc.stderr or '').strip()}"
