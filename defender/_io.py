@@ -1491,6 +1491,27 @@ def rooted_read(
         return None, f"{spelling}: {_read_reason(e)}"
 
 
+def rooted_read_plain(root: Path, name: str | PurePath, *, os_: Any = os) -> str:
+    """:func:`rooted_read` as a RAISING primitive, with :func:`read_plain`'s contract: the text
+    of the plain file at `name` under `root`, or the exception that stopped it.
+    `FileNotFoundError` means absent: the root, a holding folder or the name. A link at any
+    component below the root, or a non-plain leaf, is the alias refusal (`ELOOP` / `EMLINK`).
+    Undecodable bytes are `UnicodeDecodeError`. A name outside the relative-name grammar is
+    `ValueError`, before any open. For callers that branch on why a read failed, which
+    :func:`rooted_read`'s reason sentence cannot tell them. An alias refusal carries
+    :data:`ALIAS_READ_REFUSAL`, as :func:`read_plain`'s does, not the core's write wording."""
+    _spelling, parts = _parse_name(name)
+    try:
+        with _rooted(os_, root, parts[:-1]) as dir_fd:
+            text = _read_leaf(os_, dir_fd, parts[-1], Path(root, *parts), binary=False)
+    except OSError as e:
+        if e.errno in (errno.ELOOP, errno.EMLINK) and not isinstance(e, FileNotFoundError):
+            raise OSError(e.errno, ALIAS_READ_REFUSAL, str(Path(root, *parts))) from None
+        raise
+    assert isinstance(text, str)
+    return text
+
+
 def rooted_mkdir(root: Path, folder_name: str | PurePath, *, os_: Any = os) -> None:
     """Make `root/<folder_name>`: the root itself if missing, following links (as
     :func:`guarded_mkdir` makes its base), then each missing folder below it, never through a

@@ -12,9 +12,9 @@ if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays 
 
 from pydantic_ai.exceptions import ModelRetry
 
-from defender._io import guarded_mkdir
 from .. import box as box_mod
 from .. import permission
+from ..permission.files import RESOLVE_ERRORS
 from ..agent_role import AgentRole
 
 from defender._untrusted import wrap_fresh
@@ -155,31 +155,56 @@ def _resolve_operand(deps: AgentDeps, path: str) -> Path:
     return p if p.is_absolute() else deps.cwd_anchor / p
 
 
-def _tree_root_for(deps: AgentDeps, p: Path) -> Path:
-    """Which shared tree `p` sits in — the anchor `guarded_mkdir` walks down from.
-
-    The run dir is tried first (it may sit inside the defender dir). Each root is tried raw and
-    resolved, since the write gate compared resolved paths; `p` itself is never resolved, which
-    would collapse the symlink the guard exists to refuse. No match means `p` was reached through
-    a symlink; refused as `ModelRetry` because the operand is model-supplied."""
-    for root in (deps.run_dir, deps.defender_dir):
-        for spelling in (root, _resolved(root)):
-            if p == spelling or spelling in p.parents:
-                return spelling
-    raise ModelRetry(
-        f"{p} is not inside a writable tree; name a path under the run directory or the "
-        f"defender directory (a path that only reaches one through a symlink is refused)"
-    )
-
-
-def _guarded_parents(deps: AgentDeps, p: Path) -> None:
-    """`guarded_mkdir` with its containment `ValueError` surfaced as a `ModelRetry`."""
+def _root_spellings(deps: AgentDeps, root: Path) -> tuple[Path, ...]:
+    """The spellings an operand may reach `root` by: as given, resolved, and, for a root inside
+    the defender tree, the same tail under `deps.defender_dir`'s own spelling. A curator's read
+    confine is stored resolved while its `cwd_anchor` keeps the operator's spelling, so without
+    that last one a relative lesson path under a symlinked repo root would match no root. Every
+    spelling is host-chosen; nothing the model names is resolved here."""
+    spellings = [root]
     try:
-        guarded_mkdir(p.parent, base=_tree_root_for(deps, p))
-    except ValueError as e:
+        resolved, tree = _resolved(root), _resolved(deps.defender_dir)
+    except RESOLVE_ERRORS:
+        return tuple(spellings)
+    spellings.append(resolved)
+    if resolved.is_relative_to(tree):
+        spellings.append(deps.defender_dir / resolved.relative_to(tree))
+    return tuple(spellings)
+
+
+def _rooted_operand(
+    deps: AgentDeps, p: Path, roots: Iterable[Path], *, path: str,
+) -> tuple[Path, str]:
+    """The operand `p` (as `_resolve_operand` spells it) as the trust root it sits in and its
+    POSIX name below that root, for the rooted core: the root is opened following its spelling,
+    and nothing below it is followed.
+
+    The innermost root `p` sits under lexically wins (the run dir may sit inside the defender
+    dir). `p` itself is never resolved, which would collapse the links the core exists to
+    refuse. A `..` component, or no root at all (a path that reaches one only through a
+    symlink), is refused as `ModelRetry`: the operand is model-supplied."""
+    if ".." in p.parts:
         raise ModelRetry(
-            f"{p} does not stay inside the writable tree it names: {e}"
-        ) from None
+            f"{path} has a '..' component; name the file by a path without '..'"
+        )
+    best: Path | None = None
+    for root in roots:
+        for spelling in _root_spellings(deps, Path(root)):
+            if spelling in p.parents and (best is None or len(spelling.parts) > len(best.parts)):
+                best = spelling
+    if best is None:
+        raise ModelRetry(
+            f"{p} is not inside a tree this agent may use; name a path under the run directory "
+            f"or the defender directory (a path that only reaches one through a symlink is "
+            f"refused)"
+        )
+    return best, p.relative_to(best).as_posix()
+
+
+def _write_roots(deps: AgentDeps) -> tuple[Path, ...]:
+    """The trees a file-tool write is rooted in. The write gate decides what may be written;
+    this only names where the walk starts."""
+    return (deps.run_dir, deps.defender_dir)
 
 
 def _is_learning_role(deps: AgentDeps) -> bool:

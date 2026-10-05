@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 
 from defender import _artifact_schema
+from defender._io import rooted_read_plain
 from defender._run_paths import (
     RUN_LAYOUT,
     RunPaths,
@@ -46,16 +47,21 @@ def denylisted(rp: Path) -> bool:
     )
 
 
+def read_roots(
+    policy: AgentPolicy, run_dir: Path, defender_dir: Path
+) -> tuple[Path, ...]:
+    """@owns read_roots: the roots a read must land within, as the caller and the policy
+    spell them (unresolved). A non-empty `policy.read_confine` replaces the `defender_dir`
+    base; `run_dir` and `read_roots` always apply."""
+    base = policy.read_confine if policy.read_confine else (Path(defender_dir),)
+    return (Path(run_dir), *base, *policy.read_roots)
+
+
 def _resolved_read_roots(
     policy: AgentPolicy, run_dir: Path, defender_dir: Path
 ) -> tuple[Path, ...]:
-    """The resolved roots a read must land within. A non-empty `policy.read_confine`
-    replaces the `defender_dir` base; `run_dir` and `read_roots` always apply. May raise
-    from `resolve()`; callers fail closed."""
-    base = policy.read_confine if policy.read_confine else (Path(defender_dir),)
-    return tuple(
-        r.resolve() for r in (Path(run_dir), *base, *policy.read_roots)
-    )
+    """:func:`read_roots`, resolved. May raise from `resolve()`; callers fail closed."""
+    return tuple(r.resolve() for r in read_roots(policy, run_dir, defender_dir))
 
 
 def build_write_allow(root: Path, *, suffix: str = "") -> re.Pattern[str]:
@@ -334,10 +340,14 @@ def decide_write(
         return Decision(True) if reason is None else Decision(False, reason)
     # The append-only baseline is read here so the schema module stays filesystem-free. A read
     # fault denies: falling back to `current=None` would let the write replace the document.
+    # Read through the rooted core off the run dir (`rp` is exactly `<run_dir>/<artifact>`), so
+    # a link or hard link at the name is a read fault and denies, never a baseline.
     current: str | None = None
-    if _artifact_schema.needs_baseline(artifact) and rp.is_file():
+    if _artifact_schema.needs_baseline(artifact):
         try:
-            current = rp.read_text(encoding="utf-8")
+            current = rooted_read_plain(rp.parent, rp.name)
+        except FileNotFoundError:
+            current = None
         except (OSError, UnicodeDecodeError) as e:
             return Decision(
                 False,
