@@ -1,0 +1,89 @@
+"""#1105 PR 1 — fixes from the claims adversary's pass over the shipped prose.
+
+* A refusal names the runs folder escaped, so a folder whose path carries a control character
+  (read back from the kernel, or the accepted tenant's own path) cannot break the message's one
+  line — `_errors.shown`'s promise, which held for the entry name and not for the folder.
+* `lint_run_layout_imports` reports a module too deeply nested to parse as a finding naming it,
+  the same as one that does not decode, instead of dying in `ast.parse` with a bare
+  `RecursionError` and no file name.
+"""
+from __future__ import annotations
+
+import importlib.util
+import shutil
+import sys
+from pathlib import Path
+
+import pytest
+
+from defender import _io
+from defender import run_repository as R
+from defender.tests.tenant_1105_run_repository import _spec1105 as H
+
+_FORGED = "x\nFORGED LINE: all good"
+
+
+def _tenant_under_a_hostile_folder(tmp_path: Path):
+    t = H.tenant(tmp_path / _FORGED)
+    runs = Path(t.runs)
+    runs.mkdir(parents=True)
+    H.plant_tenant_record(runs, t.id)
+    return t, runs
+
+
+def _one_line(exc: BaseException) -> str:
+    text = str(exc)
+    assert "\n" not in text, f"the refusal broke its line: {text!r}"
+    assert "\r" not in text, f"the refusal broke its line: {text!r}"
+    return text
+
+
+def test_a_record_refusal_under_a_folder_with_a_newline_stays_one_line(tmp_path):
+    t, runs = _tenant_under_a_hostile_folder(tmp_path)
+    (runs / "_episodes").mkdir()
+    (runs / "_episodes" / "junk.txt").write_text("x", encoding="utf-8")
+    with pytest.raises(R.RunRefused) as listed:
+        R.list_run_ids(t)
+    assert "junk.txt" in _one_line(listed.value)
+    with _io.hold(runs, follow=False) as held, pytest.raises(R.RunRefused) as path_only:
+        R.episode_sibling_ids(held.view())
+    assert "junk.txt" in _one_line(path_only.value)
+
+
+def test_a_lookup_refusal_under_a_folder_with_a_newline_stays_one_line(tmp_path):
+    t, runs = _tenant_under_a_hostile_folder(tmp_path)
+    (runs / "stray").write_text("x", encoding="utf-8")
+    with pytest.raises(R.RunRefused) as stray:
+        R.list_run_ids(t)
+    _one_line(stray.value)
+    (runs / "stray").unlink()
+    with pytest.raises(R.RunRefused) as absent:
+        R.open_run(t, R.RunId.mint("a"))
+    _one_line(absent.value)
+
+
+def _lint():
+    path = H.WORKTREE / "scripts" / "lint" / "lint_run_layout_imports.py"
+    sys.path.insert(0, str(path.parent))
+    try:
+        spec = importlib.util.spec_from_file_location("_lint_run_layout_imports_1105f", path)
+        assert spec is not None
+        assert spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = mod  # its dataclasses resolve their module by name
+        spec.loader.exec_module(mod)
+        return mod
+    finally:
+        sys.path.remove(str(path.parent))
+
+
+def test_the_layout_lint_reports_a_module_too_deep_to_parse(tmp_path):
+    root = tmp_path / "defender"
+    shutil.copytree(H.PACKAGE, root / "run_repository",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    deep = root / "hooks" / "deep.py"
+    deep.parent.mkdir(parents=True)
+    deep.write_text("x = " + "+".join(["1"] * 20000) + "\n", encoding="utf-8")
+    findings = _lint().scan(root, allow_list=[])
+    shown = [f.display for f in findings]
+    assert any("hooks/deep.py" in d and "RecursionError" in d for d in shown), shown

@@ -333,7 +333,8 @@ class RunPaths:
         the staged `<id><suffix>.staged-<hex>` a sidecar write creates first — or `None` when
         `name` is not shaped like a sidecar. The one statement of the sidecar clause (#1105
         D2.1, MF-21): run setup and `open_run` refuse an id it answers for, and the runs
-        repository's listings take a regular file it answers for as a known sidecar."""
+        repository's listings take a regular file it answers for as a known sidecar when
+        `RunId.parse` admits the owner (any other such file is refused)."""
         bare = name[: m.start()] if (m := _STAGED_TAIL.search(name)) else name
         for suffix in _SIDECAR_SUFFIXES:
             if bare.endswith(suffix) and len(bare) > len(suffix):

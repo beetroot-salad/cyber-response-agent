@@ -13,7 +13,8 @@ P2: an unexpected state raises one named error — `TenantRefused` for the runs 
 `_tenant.json`, `RunRefused` for everything else — naming the path and the fault, at the first
 failed check, before any write. The expected states, and only these, answer normally: an absent
 runs folder (empty answers), an absent `_episodes` (no claims), and the known sidecar files
-beside run folders, a sidecar write's staged file included.
+beside run folders, a sidecar write's staged file included. Each function judges what it reads:
+`open_run` and `run_exists` do not read `_episodes`, so its state does not refuse them.
 """
 from __future__ import annotations
 
@@ -95,7 +96,7 @@ def held_runs(tenant: Tenant, io: Any) -> Iterator[_io.Held | None]:
 def refuse_absent(tenant: Tenant) -> TenantRefused:
     """The refusal for a function that needs the runs folder to exist (`open_run`, the
     writer): run setup creates it, with its tenant record, and nothing here does."""
-    return TenantRefused(f"the runs folder {tenant.runs} is absent — run setup creates it, "
+    return TenantRefused(f"the runs folder {escaped(tenant.runs)} is absent — run setup creates it, "
                          "with its tenant record")
 
 
@@ -117,7 +118,7 @@ def check_tenant_record(view: _io.Bound, tenant: Tenant) -> None:
     """`read_tenant`'s verdict on the held folder's `_tenant.json`, then an exact compare of
     its `tenant_id` with `tenant.id`. Every failure is `TenantRefused` naming the record, never
     a raw error, and never carrying a run id of the folder (NF-8)."""
-    path = record_path(Path(tenant.runs))
+    path = escaped(record_path(Path(tenant.runs)))
     try:
         record = read_tenant(Path(tenant.runs), io=_HeldRecordIO(view))
     except TenantRefused as exc:
@@ -144,7 +145,7 @@ class Listing:
 
 def entry_path(folder: Path | str, name: str) -> str:
     """`<folder>/<name>` as a refusal shows it: a hostile name read off disk is quoted."""
-    return f"{folder}/{shown(name)}"
+    return f"{escaped(folder)}/{shown(name)}"
 
 
 def _parses(text: str) -> RunId | None:
@@ -163,7 +164,7 @@ def list_entries(view: _io.Bound, folder: Path, *, io: Any) -> Listing:
     answer = view.entries()
     if answer.entries is None:
         why = "it is gone" if answer.absent else answer.reason
-        raise TenantRefused(f"the runs folder {folder} could not be listed: {why}")
+        raise TenantRefused(f"the runs folder {escaped(folder)} could not be listed: {escaped(why)}")
     runs: list[RunId] = []
     sidecars: set[str] = set()
     sidecar_ids: set[RunId] = set()
@@ -220,7 +221,7 @@ def open_run(tenant: Tenant, run_id: RunId, *, io: Any = _io) -> Run:
         view = held.view()
         check_tenant_record(view, tenant)
         entry = io.stat_entry(view, name)
-        path = Path(tenant.runs) / name
+        path = escaped(Path(tenant.runs) / name)
         if entry.st is None:
             raise RunRefused(f"{path} is absent" if entry.absent
                              else f"{path} could not be judged: {entry.reason}")
@@ -245,8 +246,9 @@ def list_run_ids(tenant: Tenant, *, io: Any = _io) -> list[RunId]:
 def run_exists(tenant: Tenant, run_id: RunId, *, io: Any = _io) -> bool:
     """Whether a run or a known sidecar file stands at `run_id` in the tenant's runs folder:
     an occupancy answer, so the sidecar clause is not applied to `run_id`. `False` when the
-    folder is absent. The whole listing is judged, so an unexpected entry anywhere refuses;
-    `_episodes` is not read."""
+    folder is absent. The whole listing is judged, so an unexpected entry refuses, save
+    `_tenant.json` and `_episodes`, whose kind is judged only where they are read: `_episodes`
+    is not read here."""
     tenant = require_accepted_tenant(tenant)
     run_id = require_run_id(run_id)
     with held_runs(tenant, io) as held:
@@ -301,12 +303,12 @@ class BoundRuns:
 
     def require_open(self, doing: str) -> None:
         if self._state != "open":
-            raise RunRefused(f"bound_runs over {self._tenant.runs}: {doing} outside its "
+            raise RunRefused(f"bound_runs over {escaped(self._tenant.runs)}: {doing} outside its "
                              "with block")
 
     def __enter__(self) -> BoundRuns:
         if self._state != "new":
-            raise RunRefused(f"bound_runs over {self._tenant.runs} is single use; enter a "
+            raise RunRefused(f"bound_runs over {escaped(self._tenant.runs)} is single use; enter a "
                              "fresh one")
         self._state = "open"
         try:

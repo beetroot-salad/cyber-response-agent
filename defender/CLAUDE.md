@@ -185,7 +185,7 @@ Most gates take a line suppression of the form `# lint-<tag>: ok — <reason>`. 
 | Per-line JSONL through `_io.read_jsonl_rows` / `_io.append_jsonl` | your own append-mode handle or line loop (a torn last line crashes the drain) | `# lint-jsonl-io: ok` |
 | Markdown frontmatter through `_frontmatter.split_frontmatter` / `parse_frontmatter` / `parse_frontmatter_or_none` | your own fence arithmetic | `# lint-frontmatter: ok` |
 | Writes into a box-writable tree (a run dir, the drain worktree) through the alias-refusing `_io.write_guarded` / `guarded_mkdir` / `open_guarded` | a plain write — the model may have planted a symlink there | `# lint-unguarded-tree-write: ok` |
-| Reads out of that same tree through `_layout.artifact_file` / `artifact_dir`, which `lstat` | a plain stat/read/copy, which follows the link the write side refuses | `# lint-tree-read-follows-link: ok` |
+| Reads out of that same tree through `run_repository._layout.artifact_file` / `artifact_dir`, which `lstat` | a plain stat/read/copy, which follows the link the write side refuses | `# lint-tree-read-follows-link: ok` |
 | Prompt sections already `defender._untrusted.wrap`-ed when they reach `stage_user_message` | interpolating a section into the prompt yourself | `# lint-stage-frame: ok` |
 | `encoding="utf-8"` pinned on every text read and write | bare `read_text()` / `open(p)` / `write_text(s)`, which use the ambient locale | `# lint-text-io: ok` |
 | An optional input resolved once at the boundary (see below) | re-coalescing the default in the body | `# lint-default: ok` |

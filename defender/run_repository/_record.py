@@ -30,7 +30,7 @@ from defender import _io
 from defender._run_id import CASE_STABLE_REQUIRED, RUN_ID_ALLOWED
 from defender._tenant import Tenant
 from defender.run_repository import _lookup
-from defender.run_repository._errors import RunRefused, quoted, shown
+from defender.run_repository._errors import RunRefused, escaped, quoted, shown
 from defender.run_repository._id import RunId
 from defender.run_repository._layout import RunPaths
 from defender.runtime.branch._family import (
@@ -192,7 +192,7 @@ def _read_records(runs: _io.Bound, *, where: str, tenant_id: str | None,
     """Every record of `runs/_episodes`, by episode id: `{}` when `_episodes` is absent. Every
     entry there must be a good record (R1); anything else is `RunRefused` naming it. `where` is
     how a refusal names the runs folder (empty: relative)."""
-    folder = f"{where}/{EPISODES_DIRNAME}" if where else EPISODES_DIRNAME
+    folder = f"{escaped(where)}/{EPISODES_DIRNAME}" if where else EPISODES_DIRNAME
     episodes = runs.under(EPISODES_DIRNAME)
     listing = episodes.entries()
     if listing.absent:
@@ -258,7 +258,7 @@ def episode_runs(tenant: Tenant, episode_id: str, *, io: Any = _io) -> dict[str,
         _lookup.check_tenant_record(view, tenant)
         name = _record_name(episode_id)
         read = _read_one(view.under(EPISODES_DIRNAME), name,
-                         path=str(episode_record_path(tenant.runs, episode_id)),
+                         path=escaped(episode_record_path(tenant.runs, episode_id)),
                          stem=episode_id, tenant_id=tenant.id)
     return {} if read is None else read[1]
 
@@ -353,7 +353,7 @@ def record_episode_runs(tenant: Tenant, episode_id: str, source_run_id: RunId,
         raise RunRefused(f"episode {quoted(episode_id)}'s record would be over "
                          f"{_RECORD_CAP} bytes")
     name = _record_name(episode_id)
-    path = episode_record_path(tenant.runs, episode_id)
+    path = escaped(episode_record_path(tenant.runs, episode_id))
     with _lookup.held_runs(tenant, io) as held:
         if held is None:
             raise _lookup.refuse_absent(tenant)
@@ -388,5 +388,5 @@ def _refuse_taken_arms(arms: Mapping[str, RunId], records: Mapping[str, Mapping[
             raise RunRefused(f"arm {quoted(str(run_id))} is already claimed by episode "
                              f"{quoted(claimed[run_id])}'s record")
         if run_id in listing.runs or run_id in listing.sidecar_ids:
-            raise RunRefused(f"arm {quoted(str(run_id))} is taken: {folder}/{run_id} holds a "
+            raise RunRefused(f"arm {quoted(str(run_id))} is taken: {escaped(folder)}/{run_id} holds a "
                              "run or its sidecar files")

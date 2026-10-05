@@ -38,8 +38,9 @@ above (`match`, `except ... as`, tuple targets).
 The allow-list is the only hatch — there is no inline suppression. An entry is
 `(module, enclosing qualified function or "<module>", gated name, count)`; a use beyond its
 count, a use in another function and an unlisted use are findings, and so are a stale entry
-(count above the uses) and a duplicate entry. Decorators, defaults and annotations key under
-the scope that evaluates them; a lambda keys under the def it sits in.
+(count above the uses) and a duplicate entry. Decorators and defaults key under the scope
+that evaluates them; a lambda keys under the def it sits in. An annotation is not a use and is
+not scanned for one (it still types a receiver, above).
 
 Sweep: `defender/` minus `evals/` and `tests/`, every `__pycache__`, hidden directory and venv
 (`venv`, `.venv`, or a directory holding `pyvenv.cfg`). A module that does not parse or decode
@@ -307,7 +308,7 @@ class _Program:
                 if path.is_file():
                     try:
                         tree = ast.parse(path.read_text(encoding="utf-8"))
-                    except (SyntaxError, UnicodeDecodeError, ValueError):
+                    except (SyntaxError, UnicodeDecodeError, ValueError, RecursionError, MemoryError):
                         break
                     found = _module_facts(cand.as_posix(), tree)
                     break
@@ -819,7 +820,8 @@ def scan(root: Path = DEFENDER, *,
             continue
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
-        except (SyntaxError, UnicodeDecodeError, ValueError) as exc:
+        except (SyntaxError, UnicodeDecodeError, ValueError, RecursionError,
+                MemoryError) as exc:
             findings.append(Finding(None, f"{rel}: cannot be read or parsed "
                                           f"({exc.__class__.__name__}) — an unread module is "
                                           "not certified clean"))

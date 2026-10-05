@@ -4,7 +4,7 @@
 
 A run dir is the box's rw bind, so an entry there may be a symlink the model planted. Writes
 into such trees go through alias-refusing primitives; reads must not trust the same directory
-when it is stat'ed and copied. ``defender/_layout.artifact_file`` / ``artifact_dir`` are
+when it is stat'ed and copied. ``defender/run_repository/_layout.artifact_file`` / ``artifact_dir`` are
 the answer — both ``lstat``, so they judge the entry rather than what it points at — and this
 gate makes reaching for them the default.
 
