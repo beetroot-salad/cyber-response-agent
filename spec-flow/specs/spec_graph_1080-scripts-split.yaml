@@ -16,6 +16,9 @@
 # seed_docstring and binds state only what the IN half must do. Structure and gate entries whose boundary is an OUT module are
 # kept (parked demands still bind them) and annotated. Round-2 record: .spec-flow/frontiers/75-resolutions-r2.md; the cut: 95-cut.md.
 #
+# ADOPTED (2026-10-05, the case_ticket follow-up #1190): s090, s187, s188, s217 and s_case_mapping_read_at_run_start are `form: test` again,
+# discharged by defender/tests/scripts_1080_split/test_1190_case_mapping_home.py (see handoff.deferred); 107 demands stay parked.
+#
 # NAME RECONCILIATION (boundary ids unified by role + origin across the three coining passes:
 # grounding's S-ids, extraction's binds, the judge's premise anchors):
 #   S1  run_dir          -> run_dir, plus the run-scoped records it holds: executed_queries
@@ -484,24 +487,8 @@ demands:
     `serialize.py` and the lessons engines import it from there.'
   source: 20-demands.md (extraction ledger), id verbatim
 - id: s_case_mapping_read_at_run_start
-  parked:
-    preserved_test: spec-flow/specs/parked/1080/parked_writeback_tenants_and_views.py::test_1080_the_case_mapping_is_read_at_run_start_from_the_tenants_home
-    preserved_note: 'Moved out of the suite (not collected: the file name does not match test_*.py) by the 2026-10-04 cut author; the clause carries the seed as its outcome until the owner adopts the test into its own spec and restores form: test.'
-    owner: case_ticket follow-up #1190 (new issue, to be filed)
-    cut: 2026-10-04 scope cut (decomposition, human-decided)
-    group: case_ticket
-    reason: 'case_history/case_ticket: its home is F-C (resolved 2026-10-03: under defender/runtime/); half the file
-      is ticket-payload code for write-back; #1105 rev 4 D7 lists it by path. New follow-up (to be filed).'
-    resolutions:
-    - 'F-C (2026-10-03, human): the tenants home (CaseMapping, CaseTicketError, load_case_mapping) is pinned under
-      defender/runtime/; _a_package checks under(where, ''defender/runtime''), so a top-level tenants package no longer
-      passes. Moot under the cut (case_ticket is parked to a new follow-up); the resolution is attached for whoever
-      picks it up.'
   kind: survival
-  form: clause
-  outcome:
-    nl: The run-start record build (`run_tenant`) loads `CaseMapping` through `load_case_mapping` in its new home. A fixture tenant's mapping reads
-      as at the base, and a bad mapping surfaces the moved `CaseTicketError`. `query_tool` and `estate/applier` reach the same module.
+  form: test
   binds:
   - run_tenant
   - query_tool
@@ -511,6 +498,7 @@ demands:
   - CaseTicketError
   - load_case_mapping
   - interacts(run_tenant->case_ticket)
+  discharged_by: test_1080_the_case_mapping_is_read_at_run_start_from_the_tenants_home
   seed_docstring: The run-start record build (`run_tenant`) loads `CaseMapping` through `load_case_mapping` in its new home.
     A fixture tenant's mapping reads as at the base, and a bad mapping surfaces the moved `CaseTicketError`. `query_tool`
     and `estate/applier` reach the same module.
@@ -2601,29 +2589,14 @@ demands:
     (F31.)'
   source: 45-dispositions.md settled premise [87] (single reading, judge-examined)
 - id: s090
-  parked:
-    preserved_test: spec-flow/specs/parked/1080/parked_writeback_tenants_and_views.py::test_case_mapping_module_is_imported_by_the_run_tenant_record_and_itself_imports_the_settings_module
-    preserved_note: 'Moved out of the suite (not collected: the file name does not match test_*.py) by the 2026-10-04 cut author; the clause carries the seed as its outcome until the owner adopts the test into its own spec and restores form: test.'
-    owner: case_ticket follow-up #1190 (new issue, to be filed)
-    cut: 2026-10-04 scope cut (decomposition, human-decided)
-    group: case_ticket
-    reason: 'case_history/case_ticket: its home is F-C (resolved 2026-10-03: under defender/runtime/); half the file
-      is ticket-payload code for write-back; #1105 rev 4 D7 lists it by path. New follow-up (to be filed).'
-    resolutions:
-    - 'F-C (2026-10-03, human): the tenants home (CaseMapping, CaseTicketError, load_case_mapping) is pinned under
-      defender/runtime/; _a_package checks under(where, ''defender/runtime''), so a top-level tenants package no longer
-      passes. Moot under the cut (case_ticket is parked to a new follow-up); the resolution is attached for whoever
-      picks it up.'
   kind: behavior
-  form: clause
-  outcome:
-    nl: 'A cold import of each of the four modules (case mapping, RunTenant, the query tool, the applier) works in every first-import order: no
-      import cycle among the case-mapping module, tenant settings and the run-tenant record, wherever the tenants home sits.'
+  form: test
   binds:
   - interacts(run_tenant->case_ticket)
   - interacts(case_ticket->tenant_settings)
   - interacts(query_tool->case_ticket)
   - interacts(applier->case_ticket)
+  discharged_by: test_case_mapping_module_is_imported_by_the_run_tenant_record_and_itself_imports_the_settings_module
   seed_docstring: 'A cold import of each of the four modules (case mapping, RunTenant, the query tool, the applier) works
     in every first-import order: no import cycle among the case-mapping module, tenant settings and the run-tenant record,
     wherever the tenants home sits.'
@@ -3965,58 +3938,26 @@ demands:
     renders as today; the one bad lesson is handled as today.'
   source: 45-dispositions.md settled premise [186] (single reading, judge-examined)
 - id: s187
-  parked:
-    preserved_test: spec-flow/specs/parked/1080/parked_writeback_tenants_and_views.py::test_case_mapping_file_in_each_state
-    preserved_note: 'Moved out of the suite (not collected: the file name does not match test_*.py) by the 2026-10-04 cut author; the clause carries the seed as its outcome until the owner adopts the test into its own spec and restores form: test.'
-    owner: case_ticket follow-up #1190 (new issue, to be filed)
-    cut: 2026-10-04 scope cut (decomposition, human-decided)
-    group: case_ticket
-    reason: 'case_history/case_ticket: its home is F-C (resolved 2026-10-03: under defender/runtime/); half the file
-      is ticket-payload code for write-back; #1105 rev 4 D7 lists it by path. New follow-up (to be filed).'
-    resolutions:
-    - 'F-C (2026-10-03, human): the tenants home (CaseMapping, CaseTicketError, load_case_mapping) is pinned under
-      defender/runtime/; _a_package checks under(where, ''defender/runtime''), so a top-level tenants package no longer
-      passes. Moot under the cut (case_ticket is parked to a new follow-up); the resolution is attached for whoever
-      picks it up.'
   kind: behavior
-  form: clause
-  outcome:
-    nl: 'Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster and rename; O5 where it applies). A case-mapping
-      file that is absent, empty, whitespace-only, BOM- prefixed, non-UTF-8, very large, a symlink out of the tenant folder or a directory loads,
-      or yields the same CaseTicketError, as today and is held on RunTenant at run start.'
+  form: test
   binds:
   - load_case_mapping
   - CaseTicketError
   - interacts(case_ticket->tenant_settings)
+  discharged_by: test_case_mapping_file_in_each_state
   seed_docstring: 'Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster and rename; O5
     where it applies). A case-mapping file that is absent, empty, whitespace-only, BOM- prefixed, non-UTF-8, very large, a
     symlink out of the tenant folder or a directory loads, or yields the same CaseTicketError, as today and is held on RunTenant
     at run start.'
   source: 45-dispositions.md settled premise [187] (single reading, judge-examined)
 - id: s188
-  parked:
-    preserved_test: spec-flow/specs/parked/1080/parked_writeback_tenants_and_views.py::test_case_mapping_yaml_of_the_wrong_shape
-    preserved_note: 'Moved out of the suite (not collected: the file name does not match test_*.py) by the 2026-10-04 cut author; the clause carries the seed as its outcome until the owner adopts the test into its own spec and restores form: test.'
-    owner: case_ticket follow-up #1190 (new issue, to be filed)
-    cut: 2026-10-04 scope cut (decomposition, human-decided)
-    group: case_ticket
-    reason: 'case_history/case_ticket: its home is F-C (resolved 2026-10-03: under defender/runtime/); half the file
-      is ticket-payload code for write-back; #1105 rev 4 D7 lists it by path. New follow-up (to be filed).'
-    resolutions:
-    - 'F-C (2026-10-03, human): the tenants home (CaseMapping, CaseTicketError, load_case_mapping) is pinned under
-      defender/runtime/; _a_package checks under(where, ''defender/runtime''), so a top-level tenants package no longer
-      passes. Moot under the cut (case_ticket is parked to a new follow-up); the resolution is attached for whoever
-      picks it up.'
   kind: behavior
-  form: clause
-  outcome:
-    nl: 'Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster and rename; O5 where it applies). A mapping that
-      parses as a list, scalar or null, or with duplicate or unknown keys, wrong-typed values, anchors/aliases or a language-object tag is accepted
-      or refused as today.'
+  form: test
   binds:
   - load_case_mapping
   - CaseTicketError
   - interacts(case_ticket->tenant_settings)
+  discharged_by: test_case_mapping_yaml_of_the_wrong_shape
   seed_docstring: 'Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster and rename; O5
     where it applies). A mapping that parses as a list, scalar or null, or with duplicate or unknown keys, wrong-typed values,
     anchors/aliases or a language-object tag is accepted or refused as today.'
@@ -4606,28 +4547,13 @@ demands:
     exits exactly as the pre-move writer did.
   source: 45-dispositions.md settled premise [216] (single reading, judge-examined)
 - id: s217
-  parked:
-    preserved_test: spec-flow/specs/parked/1080/parked_writeback_tenants_and_views.py::test_case_mapping_edited_or_removed_between_run_start_and_the_post_step
-    preserved_note: 'Moved out of the suite (not collected: the file name does not match test_*.py) by the 2026-10-04 cut author; the clause carries the seed as its outcome until the owner adopts the test into its own spec and restores form: test.'
-    owner: case_ticket follow-up #1190 (new issue, to be filed)
-    cut: 2026-10-04 scope cut (decomposition, human-decided)
-    group: case_ticket
-    reason: 'case_history/case_ticket: its home is F-C (resolved 2026-10-03: under defender/runtime/); half the file
-      is ticket-payload code for write-back; #1105 rev 4 D7 lists it by path. New follow-up (to be filed).'
-    resolutions:
-    - 'F-C (2026-10-03, human): the tenants home (CaseMapping, CaseTicketError, load_case_mapping) is pinned under
-      defender/runtime/; _a_package checks under(where, ''defender/runtime''), so a top-level tenants package no longer
-      passes. Moot under the cut (case_ticket is parked to a new follow-up); the resolution is attached for whoever
-      picks it up.'
   kind: behavior
-  form: clause
-  outcome:
-    nl: The post-step uses the case mapping snapshot taken at run start (it is held on RunTenant at run start), not the file as edited or removed
-      afterwards; the ticket system's own config is read when the writer runs, as today. The move changes neither.
+  form: test
   binds:
   - CaseMapping
   - interacts(run_tenant->case_ticket)
   - interacts(ticket_writer->case_ticket)
+  discharged_by: test_case_mapping_edited_or_removed_between_run_start_and_the_post_step
   seed_docstring: The post-step uses the case mapping snapshot taken at run start (it is held on RunTenant at run start),
     not the file as edited or removed afterwards; the ticket system's own config is read when the writer runs, as today. The
     move changes neither.
@@ -10649,6 +10575,17 @@ handoff:
     under spec-flow/specs/parked/1080/.'
   - 'PARKED BY THE 2026-10-04 SCOPE CUT, owner case_ticket follow-up #1190 (new issue, to be filed) (5): s090, s187, s188, s217, s_case_mapping_read_at_run_start.
     Each carries a `parked:` block on its demand; the parked tests are preserved out of collection under spec-flow/specs/parked/1080/.'
+  - 'ADOPTED BY THE CASE_TICKET FOLLOW-UP #1190 (2026-10-05) (5): s090, s187, s188, s217, s_case_mapping_read_at_run_start are form: test
+    again (their `parked:` blocks dropped), discharged by defender/tests/scripts_1080_split/test_1190_case_mapping_home.py with the
+    case-mapping home pinned under defender/runtime/ (F-C) and the write-back found wherever it lives (ticket_writer stays until #1165).
+    The two demands #1190 shares with #1165 (m5_env_read_lint_sweeps_moved_modules, s099) stay parked; #1190''s own env-read net is
+    test_1190_the_env_read_lint_sweeps_the_moved_case_mapping_module_and_the_staying_writer in the same file. #1190''s cells of kept
+    demands are live again through the suite''s tables (case_ticket joined MOVED_HOMES and MODULE_ANCHORS and left OUT_STAYING, OUT_KEYED
+    and O1_EXCEPTIONS, whose test now pins 32 pairs / 33 import statements): d0_scripts_holds_only_entry_points, d1_wrapper_only_delegates,
+    m5_run_records_lint_sweeps_new_homes, m5_baselines_name_no_moved_path, s105,
+    m5_profile_follows_moves, s135, and s095''s tenant.py cell (restored in its test). Its cells of d0_moved_symbols_live_under_their_home,
+    s008, s025 (the CaseTicketError identity across tenant.py and the writer), s053, s204 and s205 stay preserved under pre_cut/ only; the
+    seed_docstrings and cut_edits quoting 35 pairs (37 statements) are the cut''s record.'
   - 'PARKED BY THE 2026-10-04 SCOPE CUT, owner #1165 and the case_ticket follow-up #1190 (2): m5_env_read_lint_sweeps_moved_modules, s099.
     Each carries a `parked:` block on its demand; the parked tests are preserved out of collection under spec-flow/specs/parked/1080/.'
   - 'PARKED BY THE 2026-10-04 SCOPE CUT, owner lessons --tags fix follow-up (new issue, to be filed) (1): cmd_tags_flattens_a_hostile_tag_value.

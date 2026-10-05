@@ -555,7 +555,7 @@ def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
     assert first.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-nf4:8080"
     assert second.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-edited:1"
     assert direct.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-edited:1"
-    case_ticket = S.mod("scripts.case_history.case_ticket")
+    case_ticket = S.mod("runtime.case_ticket")
     assert case_ticket.release_predicate(second.ticket_mapping).is_released({"status": "done"})
     assert not case_ticket.release_predicate(first.ticket_mapping).is_released(
         {"status": "done"})
@@ -859,7 +859,7 @@ def test_s7_mf11_record_parts_read_only(tmp_path):
     root = tmp_path / "tenants"
     S.plant(root, marker="mf11")
     rec = _resolve(root)
-    case_ticket = S.mod("scripts.case_history.case_ticket")
+    case_ticket = S.mod("runtime.case_ticket")
     registry = S.mod("learning.branch.estate.registry")
     ctx = _ctx(rec, tmp_path)
     carried = registry._carrying(ctx, world_id="w-mf11")  # the estate applier's VerbContext copy

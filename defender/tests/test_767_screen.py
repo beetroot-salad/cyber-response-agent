@@ -39,8 +39,8 @@ import json
 
 import pytest
 
+from defender.runtime import case_ticket
 from defender.runtime.ticket_screen import MALFORMED_EXIT
-from defender.scripts.case_history import case_ticket
 from defender.runtime.payload_view import PASSTHROUGH_MAX_BYTES_DEFAULT
 from defender.tests._spec767 import (
     OPEN_STATUS,
@@ -602,7 +602,7 @@ def test_767_a_failed_ticket_read_puts_no_content_in_the_turn(tmp_path, monkeypa
 
 def test_767_release_predicate_lives_in_the_mapper(tmp_path, monkeypatch):
     """d4_predicates_in_mapper — SEAM. `is_released(ticket)` lives in the mapper
-    (`scripts/case_history/case_ticket.py`), and the screen decides through it: changing the
+    (`runtime/case_ticket.py`), and the screen decides through it: changing the
     mapping changes BOTH the predicate's answer and what the screen keeps, with no code edit
     (O5).
 

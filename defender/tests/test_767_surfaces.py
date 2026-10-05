@@ -22,11 +22,11 @@ from pathlib import Path
 import pytest
 
 from defender._paths import PATHS
+from defender.runtime import case_ticket
 from defender.runtime import verb_dispositions
 from defender.runtime.verb_grant import VERB_CLASSES
 from defender.scripts.adapters import confinement
 from defender.scripts.adapters.confinement import ConfinementFault
-from defender.scripts.case_history import case_ticket
 from defender.tests._spec767 import (
     AGENT_AUTHOR,
     COMMENTS_SUFFIX,
@@ -409,7 +409,7 @@ def test_767_a_typed_resolution_reaches_no_reader(tmp_path, monkeypatch):
     (§7 R9/FK05's examined no, on c3's ground), so "no reader" is not "no field"."""
     from defender.tests import test_923_authoring_surfaces as census
 
-    rel = "scripts/case_history/case_ticket.py"
+    rel = "runtime/case_ticket.py"
     assert rel not in census._AUTHORING_SURFACES, (
         "the #923 authoring-surface census still lists the ticket resolution line: after D5 "
         "nothing decodes `resolution`, so it is no longer an authoring surface (N10/c12)"

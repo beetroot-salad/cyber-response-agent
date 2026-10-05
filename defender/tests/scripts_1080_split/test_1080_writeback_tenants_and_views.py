@@ -1,10 +1,12 @@
 """#1080 (group `tenants`) — the write-back home, the tenants home and the two model-facing views.
 
 SCOPE CUT (2026-10-04, human): of this group only the payload view moves (and the first-import
-check covers the cut's IN modules). The case mapping, the write-back and the workspace map stay
-in `scripts/`; their tests are parked with their owners
-(`spec-flow/specs/parked/1080/parked_writeback_tenants_and_views.py`). The list below is the
-group as it was designed.
+check covers the cut's IN modules). The write-back and the workspace map stay in `scripts/`;
+their tests are parked with their owners
+(`spec-flow/specs/parked/1080/parked_writeback_tenants_and_views.py` at dea5cbff). The case
+mapping's were parked with the case_ticket follow-up #1190, which moves it to
+`defender/runtime/case_ticket.py` and adopted them as `test_1190_case_mapping_home.py` beside
+this file. The list below is the group as it was designed.
 
 What moves, and how each test reaches it (homes are FOUND BY SYMBOL, dF0):
 

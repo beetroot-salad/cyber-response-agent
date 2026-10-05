@@ -11,7 +11,10 @@ failing test, not a collection error. Faults are planted in a tmp git copy of th
 SCOPE CUT (2026-10-04, human): only the reshaping half moves (`_spec1080`'s docstring). The O2
 direction tests, the O7 shippable-surface tests and the placement cells of the OUT modules are
 parked with their owners (`spec-flow/specs/parked/1080/parked_placement_census_direction.py`); the
-tables below keep their IN rows, and O1's exception list is the cut's 35 named pairs (E1, E2).
+tables below keep their IN rows, and O1's exception list is the cut's named pairs (E1, E2): 35
+at the cut, 32 since the case_ticket follow-up #1190 moved `case_ticket` under `defender/runtime/`
+and joined its file to the IN rows here (`MODULE_ANCHORS`, and the moved-file tests through
+`_moved_old_py`).
 
 At the base (80888efb) the demands the move must satisfy are red here — the files are still
 under `defender/scripts/`, the old edges still exist, the new homes do not. The tests that pin a
@@ -58,7 +61,8 @@ LESSONS_ENGINE = (
 )
 
 #: One anchor symbol per moved module (base path → a name only it defines), for the scans that
-#: read "every moved module": m2's anchor scan, the engines. E2: the seven modules the cut moves.
+#: read "every moved module": m2's anchor scan, the engines. E2: the seven modules the cut moves,
+#: and `case_ticket`, which the follow-up #1190 moves to `defender/runtime/case_ticket.py`.
 MODULE_ANCHORS = {
     "defender/scripts/gather_tools/payload_view.py": "passthrough_max_bytes",
     "defender/scripts/gather_tools/sql.py": "_load_payload",
@@ -67,6 +71,7 @@ MODULE_ANCHORS = {
     "defender/scripts/lessons/lessons_fm.py": "cmd_tags",
     "defender/scripts/lessons/lessons_frontier.py": "match_lessons",
     "defender/scripts/lessons/_lessons_common.py": "resolve_corpus",
+    "defender/scripts/case_history/case_ticket.py": "load_case_mapping",
 }
 #: record_query is split: its query-rule slice moves (anchored here), its remainder stays.
 RECORD_QUERY_ANCHORS = ("is_reserved_query_id",)
@@ -175,11 +180,11 @@ def test_1080_scripts_holds_only_entry_points():
     and `defender-lessons` engines' wrappers; a file under `scripts/adapters/` (all of its base
     files stay until #1172); or one of the cut's named OUT files that stay with their owners
     (`visualize/`'s eight modules and three assets and `workspace_map.py`, #1105;
-    `case_history/ticket_writer.py` and `gather_tools/record_query.py`, #1165;
-    `case_history/case_ticket.py`, the case_ticket follow-up #1190). The IN files (`_venv.py`,
-    `pricing.py`, `gather_tools/payload_view.py`, `lessons/lessons_frontier.py`,
-    `lessons/_lessons_common.py`) are not left there, and no re-export shim keeps their old
-    `defender.scripts.*` path importable.
+    `case_history/ticket_writer.py` and `gather_tools/record_query.py`, #1165). The IN files
+    (`_venv.py`, `pricing.py`, `gather_tools/payload_view.py`, `lessons/lessons_frontier.py`,
+    `lessons/_lessons_common.py`, and `case_history/case_ticket.py`, which the case_ticket
+    follow-up #1190 moves to `defender/runtime/`) are not left there, and no re-export shim
+    keeps their old `defender.scripts.*` path importable.
 
     Observed: the placement check over every TRACKED file under `defender/scripts/` (any file
     type), the adapters folder against its base files, and a child pinned to this tree asked
@@ -244,9 +249,10 @@ def test_1080_no_module_outside_scripts_imports_a_module_under_it():
     """An AST census over every `.py` under `defender/` and the repo's `scripts/`, excluding
     `tests/` directories, finds no `import` or `from … import` that names `defender.scripts` or
     anything under it. Relative imports are resolved against their package. Under the
-    2026-10-04 scope cut the allowed exceptions are the 35 named (importer, target) pairs (37
+    2026-10-04 scope cut the allowed exceptions are the 32 named (importer, target) pairs (33
     import statements) into the `scripts/` modules the cut leaves where they are, each tagged
-    with the issue that retires it (#1172/#1121, #1165, #1105, the case_ticket follow-up #1190). Any
+    with the issue that retires it (#1172/#1121, #1165, #1105; the case_ticket follow-up #1190
+    retired its 3 pairs when it moved `case_ticket` under `defender/runtime/`). Any
     other import into the folder fails, and an exception whose edge no longer exists is itself a
     finding ([218]); o1_exception_list_is_the_named_edges pins the list.
 
@@ -291,14 +297,15 @@ def test_1080_the_import_census_flags_a_planted_edge_and_exempts_tests(tmp_path)
 
 
 def test_1080_the_o1_exception_list_is_exactly_the_named_edges_and_none_is_stale():
-    """The import census's exception list holds exactly the 35 named (importer, target) pairs
-    the 2026-10-04 scope cut leaves standing — 37 import statements at the base, the 59 base
-    edges less the 22 the cut's moves retire — each tagged with the owner that retires it:
-    #1172/#1121 (20: into `_stub_transport`, `confinement`, `elastic_adapter`, `esql_text` and
-    `faults`), #1165 (6: into `record_query` and `ticket_writer`), #1105 (6: into the
-    `visualize/` modules and `workspace_map`) and the case_ticket follow-up #1190 (3: into
-    `case_ticket`). H4 (i)'s `ticket_writer -> _stub_transport` edge is internal to `scripts/`
-    and is not listed. Every listed pair still exists in the tree, so an entry that outlives the
+    """The import census's exception list holds exactly the 32 named (importer, target) pairs
+    the 2026-10-04 scope cut and the case_ticket follow-up #1190 leave standing — 33 import
+    statements, the 59 base edges less the 22 the cut's moves retire and the 4 that #1190's move
+    of `case_ticket` under `defender/runtime/` retires (`run_tenant`'s two, `query_tool`'s and
+    `estate/applier`'s) — each tagged with the owner that retires it: #1172/#1121 (20: into
+    `_stub_transport`, `confinement`, `elastic_adapter`, `esql_text` and `faults`), #1165 (6:
+    into `record_query` and `ticket_writer`) and #1105 (6: into the `visualize/` modules and
+    `workspace_map`). No pair names `case_ticket` (it is no longer under `scripts/`). H4 (i)'s
+    `ticket_writer -> _stub_transport` edge is internal to `scripts/` and is not listed. Every listed pair still exists in the tree, so an entry that outlives the
     edge it excused is a finding, not a silent widening, and the list can only shrink. A new
     import from outside `scripts/` into `scripts/adapters/` (another importer, or another
     adapters module) planted in a copy of the tree is reported. `scripts/adapters/` keeps all
@@ -310,11 +317,11 @@ def test_1080_the_o1_exception_list_is_exactly_the_named_edges_and_none_is_stale
     """
     exceptions = C.o1_exceptions()
     pairs = [(i, t) for i, t, _ in exceptions]
-    assert len(pairs) == len(set(pairs)) == 35
+    assert len(pairs) == len(set(pairs)) == 32
     owners: dict[str, int] = {}
     for _, _, owner in exceptions:
         owners[owner] = owners.get(owner, 0) + 1
-    assert owners == {"#1172/#1121": 20, "#1165": 6, "#1105": 6, "case_ticket follow-up #1190": 3}
+    assert owners == {"#1172/#1121": 20, "#1165": 6, "#1105": 6}
     assert all(not S.is_test_path(i) and not S.under(i, "defender/scripts")
                for i, _ in pairs)
     assert all(C.is_scripts_target(t) for _, t in pairs)
@@ -467,7 +474,8 @@ def test_1080_no_moved_module_derives_a_path_from_its_own_file_depth():
     sibling `Path(__file__).parent / "assets"` that travels with its module is allowed. Positive
     control: the scan flags a planted `parents[2]`. Under the 2026-10-04 cut "every moved
     module" is the IN set: `_venv`, `pricing`, `payload_view`, the sql engine, the three lessons
-    engine modules and `record_query`'s query-rule slice.
+    engine modules and `record_query`'s query-rule slice — and `case_ticket`, which the
+    case_ticket follow-up #1190 moves under `defender/runtime/`.
 
     Observed: every moved module, found by an anchor symbol it defines (record_query's rule
     slice by its own anchor), scanned for a file-depth anchor; the control plants

@@ -17,9 +17,10 @@ query-id and request-key rules (under their BASE names `_json_safe_params` / `_r
 imports. Everything else stays where it is and is OWNED ELSEWHERE: `adapters/` (faults,
 confinement, esql_text, `_stub_transport`, the eight adapters) by #1172 (with #1121 for the
 Elastic grammar); `record_query`'s guards and writers and `case_history/ticket_writer.py` by
-#1165; `visualize/*` and `workspace_map.py` by #1105; `case_history/case_ticket.py` by a new
-follow-up. The 37 imports into `scripts/` that remain are the O1 census's named exception list
-(`_census1080.O1_EXCEPTIONS`), each tagged with its owner. The tests whose demands were parked
+#1165; `visualize/*` and `workspace_map.py` by #1105; `case_history/case_ticket.py` by the
+follow-up #1190, which moves it whole to `defender/runtime/case_ticket.py` (its adopted tests are
+`test_1190_case_mapping_home.py` here). The 33 imports into `scripts/` that remain are the O1
+census's named exception list (`_census1080.O1_EXCEPTIONS`), each tagged with its owner. The tests whose demands were parked
 with those owners left this directory: they are preserved, not collected, under
 `spec-flow/specs/parked/1080/parked_*.py`, and each demand is a clause naming its preserved test.
 The pinned paths `INTEGRATIONS`, `REPORTS`, `EXIT_CODES` and `VERBS` below go unused by the kept

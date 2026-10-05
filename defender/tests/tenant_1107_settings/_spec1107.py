@@ -149,7 +149,7 @@ def config_fault() -> type:
 
 
 def case_ticket_error() -> type:
-    return mod("scripts.case_history.case_ticket").CaseTicketError
+    return mod("runtime.case_ticket").CaseTicketError
 
 
 def tenant_refused() -> type:
@@ -413,7 +413,7 @@ def with_mapping(fn: Any, *args: Any, mapping: Any, **kw: Any) -> Any:
 def released_status(mapping: Any) -> str:
     """`case_ticket.release_predicate` over a record's `ticket_mapping`, handed POSITIONALLY
     (coined), and the `released.status` it keys on."""
-    return mod("scripts.case_history.case_ticket").release_predicate(mapping).released_status
+    return mod("runtime.case_ticket").release_predicate(mapping).released_status
 
 
 # ======================================================================================

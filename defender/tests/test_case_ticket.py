@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.scripts.case_history import case_ticket
+from defender.runtime import case_ticket
 from defender.tests._tenants1106 import FIXTURE_SETTINGS
 
 #: The mapping the mapper is handed when a test does not plant its own (#1107: the mapper
