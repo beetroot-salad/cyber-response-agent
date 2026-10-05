@@ -404,10 +404,24 @@ def _open_leaf(os_: Any, dir_fd: int, leaf: str, flags: int, where: Path) -> int
 
 def _read_leaf(
     os_: Any, dir_fd: int, leaf: str, where: Path, *, binary: bool, errors: str = "strict",
+    max_bytes: int | None = None,
 ) -> str | bytes:
     """The whole of the plain file `leaf` (the open decides), or the exception that stopped it:
-    `FileNotFoundError` when absent, else a member of `TEXT_READ_ERRORS`."""
+    `FileNotFoundError` when absent, else a member of `TEXT_READ_ERRORS`. With `max_bytes`
+    (text only), no more than that many bytes are taken off the file, by unbuffered reads, and
+    they are decoded as one text."""
     fd = _open_leaf(os_, dir_fd, leaf, os.O_RDONLY, where)
+    if max_bytes is not None:
+        try:
+            data = bytearray()
+            while len(data) < max_bytes:
+                chunk = os_.read(fd, max_bytes - len(data))
+                if not chunk:
+                    break
+                data += chunk
+        finally:
+            os_.close(fd)
+        return bytes(data).decode("utf-8", errors)
     try:
         fh = os_.fdopen(fd, "rb") if binary else os_.fdopen(
             fd, "r", encoding="utf-8", errors=errors)
@@ -515,10 +529,17 @@ class Bound:
 
     # -- the reads ------------------------------------------------------------------------------
 
-    def read(self, name: str | PurePath, *, errors: str = "strict") -> RecordRead:
+    def read(self, name: str | PurePath, *, errors: str = "strict",
+             max_bytes: int | None = None) -> RecordRead:
+        """The file at `name`, as a `RecordRead`. `max_bytes` bounds the bytes taken off the
+        file: a caller that asks for its cap plus one byte tells an over-cap file from one
+        within the cap without reading it whole. Without it the read is whole."""
         spelling, parts = _parse_name(name)
         if errors not in _ERRORS_VALUES:
             raise ValueError("errors must be 'strict' or 'replace'")
+        if max_bytes is not None and (isinstance(max_bytes, bool) or not isinstance(
+                max_bytes, int) or max_bytes < 0):
+            raise ValueError("max_bytes must be a non-negative int")
         if self._absent:
             return RecordRead(name=spelling, text=None, absent=True, reason=None)
         if self._error is not None:
@@ -529,7 +550,7 @@ class Bound:
             with self._handle.dup() as root_fd, _descend(
                     self._os, root_fd, self._prefix + parts[:-1], Path(".")) as dir_fd:
                 text = _read_leaf(self._os, dir_fd, parts[-1], Path(where), binary=False,
-                                  errors=errors)
+                                  errors=errors, max_bytes=max_bytes)
         except FileNotFoundError:
             return RecordRead(name=spelling, text=None, absent=True, reason=None)
         except TEXT_READ_ERRORS as e:
@@ -1529,14 +1550,34 @@ class Held:
                 return False
 
 
-def hold(root: Path, *, os_: Any = os,
+def hold(root: Path, *, os_: Any = os, follow: bool = True,
          open_unnamed: Callable[[int], int] = open_unnamed_at) -> Held:
     """Hold `root` open, following its spelling (the operator's, as :func:`bind`'s). A missing
     root is `FileNotFoundError`, a non-directory `NotADirectoryError`. `open_unnamed` is the
-    unnamed-open seam the held root's creates take (`rooted_write(open_unnamed=)`'s)."""
+    unnamed-open seam the held root's creates take (`rooted_write(open_unnamed=)`'s).
+
+    `follow=False` opens `root` itself no-follow and judges the descriptor as `_step` judges
+    each folder below a root: a link at `root`, dangling or not, is `OSError(ELOOP)` (the
+    linked-folder refusal), anything but a directory `NotADirectoryError`. Its ancestors are
+    still followed, as host configuration. The runs repository holds a tenant's runs folder
+    this way, so a link there is refused rather than listed (#1105 H1)."""
     if _O_PATH is None:  # pragma: no cover — no CI box lacks it
         raise OSError(errno.ENOTSUP, _PLATFORM_FAULT)
-    return Held(os_, os_.open(Path(root), _ROOT_FLAGS), Path(root), open_unnamed=open_unnamed)
+    root = Path(root)
+    if follow:
+        return Held(os_, os_.open(root, _ROOT_FLAGS), root, open_unnamed=open_unnamed)
+    fd = os_.open(root, _STEP_FLAGS)
+    try:
+        st = os_.fstat(fd)
+    except BaseException:
+        os_.close(fd)
+        raise
+    if not stat.S_ISDIR(st.st_mode):
+        os_.close(fd)
+        if stat.S_ISLNK(st.st_mode):
+            raise OSError(errno.ELOOP, _LINKED_FOLDER, str(root))
+        raise NotADirectoryError(errno.ENOTDIR, _NOT_A_FOLDER, str(root))
+    return Held(os_, fd, root, open_unnamed=open_unnamed)
 
 
 def hold_new(parent: Path, name: str, *, os_: Any = os,

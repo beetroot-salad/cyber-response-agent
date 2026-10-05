@@ -71,7 +71,7 @@ def test_the_lstat_helpers_are_not_findings(tmp_path: Path) -> None:
     """`artifact_file`/`artifact_dir` are the answer the gate points at; flagging them would
     make the fix unreachable."""
     assert _run(READ_GATE, tmp_path, {"run_common.py": (
-        "from defender._run_paths import artifact_dir, artifact_file\n"
+        "from defender.run_repository import artifact_dir, artifact_file\n"
         "def go(p):\n"
         "    return artifact_file(p) or artifact_dir(p)\n"
     )}) == 0
@@ -102,7 +102,7 @@ def test_the_marker_clears_a_site_whose_guard_is_on_the_line_above(tmp_path: Pat
     a copy whose `artifact_file` screen is right above it is correct, and says so there."""
     assert _run(READ_GATE, tmp_path, {"run_common.py": (
         "import shutil\n"
-        "from defender._run_paths import artifact_file\n"
+        "from defender.run_repository import artifact_file\n"
         "def go(a, b):\n"
         "    if artifact_file(a):\n"
         "        shutil.copy2(a, b)  # lint-tree-read-follows-link: ok — screened above\n"

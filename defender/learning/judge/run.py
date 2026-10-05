@@ -26,7 +26,7 @@ from defender._model import model
 from pathlib import Path
 from typing import Any, ClassVar
 
-from defender._run_paths import artifact_file
+from defender.run_repository import artifact_file
 from defender._untrusted import message_salt, wrap
 from defender.learning._prompt import stage_user_message, titled_section
 from defender._episode_paths import LAYOUT

@@ -29,7 +29,7 @@ _GATE = load_lint_gate("lint_ungated_artifact_write")
 #: The #964 shape: compose a block, reach the write primitive directly, no schema anywhere.
 _UNGATED_SEED = (
     "from defender._io import write_guarded\n"
-    "from defender._run_paths import RunPaths\n"
+    "from defender.run_repository import RunPaths\n"
     "\n"
     "def seed(run_dir, block):\n"
     "    path = RunPaths(run_dir).investigation\n"
@@ -39,7 +39,7 @@ _UNGATED_SEED = (
 _GATED_SEED = (
     "from defender._artifact_schema import INVESTIGATION_NAME, validate_artifact\n"  # lint-stale-ref: ok — FIXTURE source this gate is run against, not a live import
     "from defender._io import write_guarded\n"
-    "from defender._run_paths import RunPaths\n"
+    "from defender.run_repository import RunPaths\n"
     "\n"
     "def seed(run_dir, block):\n"
     "    path = RunPaths(run_dir).investigation\n"

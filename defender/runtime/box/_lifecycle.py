@@ -13,7 +13,7 @@ from pathlib import Path
 
 from defender._io import sweep_staged, write_guarded
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
-from defender._run_paths import RUN_LAYOUT
+from defender.run_repository import RUN_LAYOUT
 from defender.runtime.box_codec import (
     BOX_ENV_ALLOWLIST,
     _BOX_MARK_ENV,

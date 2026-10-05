@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from defender._clock import parse_iso_utc
-from defender._run_paths import RUN_LAYOUT, RunPaths
+from defender.run_repository import RUN_LAYOUT, RunPaths
 from defender.scripts.pricing import PRICING, usage_cost  # noqa: F401  (re-exported for this module's consumers)
 from defender.scripts.visualize.visualize_primitives import slugify
 

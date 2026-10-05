@@ -298,7 +298,7 @@ def test_the_query_tool_path_is_byte_identical_with_the_gate_installed(
     It is also the positive control `d27` and `d29` name.
     """
     from defender._io import read_jsonl_rows
-    from defender._run_paths import RunPaths
+    from defender.run_repository import RunPaths
 
     def _run(root: Path, toolset):
         run_dir = materialize(root, GOLDEN_AB3)

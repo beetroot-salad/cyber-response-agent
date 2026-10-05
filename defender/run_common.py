@@ -18,9 +18,9 @@ if str(REPO_ROOT) not in sys.path:
 
 from defender import _io, _provenance, _tenant  # noqa: E402
 from defender._io import guarded_mkdir  # noqa: E402
-from defender._run_handle import Run, case_ref  # noqa: E402
+from defender.run_repository import Run, case_ref  # noqa: E402
 from defender._run_id import mint_run_id, refuse_bad_run_id  # noqa: E402
-from defender._run_paths import RunPaths, artifact_dir  # noqa: E402
+from defender.run_repository import RunPaths, artifact_dir  # noqa: E402
 from defender.scripts.visualize._page_failed import VisualizeFailed  # noqa: E402
 
 _logger = logging.getLogger(__name__)

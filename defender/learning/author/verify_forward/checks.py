@@ -5,7 +5,7 @@ from defender._model import complete, model
 from pathlib import Path
 
 from uuid import uuid4
-from defender._run_paths import WIRE_LOG_NAMES
+from defender.run_repository import WIRE_LOG_NAMES
 from defender._untrusted import wrap
 from defender.learning.author.verify_forward import forward
 from defender.learning.author.verify_forward.shared import (

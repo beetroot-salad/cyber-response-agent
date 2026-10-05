@@ -35,7 +35,7 @@ from pathlib import Path
 
 import pytest
 
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.hooks import _run_dir as hooks_run_dir
 
 DEFENDER = Path(__file__).resolve().parents[1]
@@ -579,7 +579,7 @@ def _run_paths_reads(tree: ast.AST, accessors: set[str]) -> set[str]:
 def test_no_accessor_names_a_file_nothing_reads():
     """#647's actual rule, kept executable rather than left as prose in the docstring above.
 
-    Every accessor must be READ off a `RunPaths` value somewhere outside `_run_paths.py` and
+    Every accessor must be READ off a `RunPaths` value somewhere outside `run_repository/_layout.py` and
     outside the tests — that is what `meta.json` had stopped having and why it was deleted.
     Derived with `git grep` from the repo root rather than from a list typed into this file,
     for the reason the module docstring gives: every hand-written census in this change was

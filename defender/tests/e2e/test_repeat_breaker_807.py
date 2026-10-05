@@ -125,7 +125,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender._io import append_jsonl, read_jsonl_rows, write_guarded  # noqa: E402
-from defender._run_paths import RunPaths  # noqa: E402
+from defender.run_repository import RunPaths  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
 from defender.learning.leads import lead_extraction  # noqa: E402
 from defender.runtime import circuit_breaker  # noqa: E402

@@ -40,7 +40,7 @@ import pytest
 import yaml
 
 from defender._io import append_jsonl
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender._text import as_str
 from defender.learning import lead_repository
 from defender.learning.lead_repository import QueryRow, load_queries
@@ -103,7 +103,7 @@ def _searchable_row(seq: int, **overrides) -> dict:
     (`elastic query '...'`) and `payload_path` (`gather_raw/l-001/0.json`) are satisfiable by
     coincidence as negatives, so a render that leaked either would pass a check for the
     fixture's default bytes. The path marker sits in the LEAD-ID segment, the one part of a
-    payload path `_run_paths.contained_payload`'s shape admits free text in, so the marker
+    payload path `_layout.contained_payload`'s shape admits free text in, so the marker
     survives into `raw_ref` — the column a model-facing leak of the path would carry."""
     marked = {
         "raw_command": f"RAWCMD_MARKER_{seq}",

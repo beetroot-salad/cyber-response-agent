@@ -41,7 +41,7 @@ import pytest
 import yaml
 
 from defender._io import parse_jsonl_row
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.scripts.gather_tools import record_query as rq
 from defender.scripts.gather_tools.record_query import append_query_row, lead_rows, params_too_deep
 

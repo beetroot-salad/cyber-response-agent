@@ -355,21 +355,21 @@ def trace_rows(run_dir: Path, role: str) -> list[dict]:
     """One role's trace METADATA rows (the framed raw-reply lines are skipped by the shared
     reader, exactly as every other trace consumer skips them)."""
     from defender._io import read_jsonl_rows
-    from defender._run_paths import RunPaths
+    from defender.run_repository import RunPaths
 
     path = RunPaths(run_dir).review_trace(role)
     return list(read_jsonl_rows(path)) if path.is_file() else []
 
 
 def trace_files(run_dir: Path) -> list[str]:
-    from defender._run_paths import RunPaths
+    from defender.run_repository import RunPaths
     from defender.runtime.challenge_gate import REVIEW_ROLES
 
     return [role for role in REVIEW_ROLES if RunPaths(run_dir).review_trace(role).is_file()]
 
 
 def record(run_dir: Path, turn: int) -> dict:
-    from defender._run_paths import RunPaths
+    from defender.run_repository import RunPaths
 
     return json.loads(RunPaths(run_dir).review_record(turn).read_text(encoding="utf-8"))
 
@@ -443,7 +443,7 @@ def pre_change_inconclusive_dir(tmp_path: Path, *, name: str = "historical") -> 
     failure_kind: null}`, `report.md` with `cause: CAUSE_NOT_REVIEWED` and the priced receipts,
     and NO `wire_logs/` at all — the five Measurement run dirs are this population, and no
     post-change code can produce it, so it is written by hand from the observed bytes."""
-    from defender._run_paths import RunPaths
+    from defender.run_repository import RunPaths
 
     run_dir = tmp_path / name
     (run_dir / "gather_raw").mkdir(parents=True)

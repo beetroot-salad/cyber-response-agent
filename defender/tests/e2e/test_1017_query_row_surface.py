@@ -30,7 +30,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender._io import append_jsonl, read_jsonl_rows  # noqa: E402
-from defender._run_paths import RunPaths  # noqa: E402
+from defender.run_repository import RunPaths  # noqa: E402
 from defender.learning.lead_repository import joined, load_queries  # noqa: E402
 from defender.runtime import lead_zero  # noqa: E402
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS  # noqa: E402

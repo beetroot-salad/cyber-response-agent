@@ -60,7 +60,7 @@ import pytest
 import yaml
 
 from defender._io import bind
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.tests import _judge_921 as J
 from defender.tests._spec791 import PROJECT_PROFILE
 

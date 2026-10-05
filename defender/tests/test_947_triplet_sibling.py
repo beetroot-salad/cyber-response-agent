@@ -421,7 +421,7 @@ def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path
         # it for the post-run page render and reads the run dir off it.
         order.append("materialize")
         run_dir = T.sibling_run_dir(base, "b", stamp=False)
-        return T.sym("_run_handle", "Run").for_tenant(
+        return T.sym("run_repository", "Run").for_tenant(
             tenant.tenant_id, run_dir.name, runs_base=base)
 
     _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,

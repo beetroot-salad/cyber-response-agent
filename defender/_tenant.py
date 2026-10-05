@@ -166,10 +166,11 @@ def _parse_json_record(
 ) -> _R:
     """`text` as a `record` (the runs-base record or the tenant row), or `refusal` naming
     `source`. Keys beyond `fields` are ignored; `TenantId` checks the id as the field is set."""
-    try:
-        obj = json.loads(text)
-    except ValueError as bad:
-        raise refusal(f"{source} is not valid JSON: {bad}") from bad
+    # The nesting-checked decoder, not `json.loads`: a deeply nested record is refused as
+    # corrupt, naming it, rather than escaping as a `RecursionError` (#1105, P2).
+    obj, bad_json = _real_io.load_json_artifact(text)
+    if bad_json is not None:
+        raise refusal(f"{source} is not valid JSON: {bad_json}")
     if not isinstance(obj, dict):
         raise refusal(f"{source} is not a JSON object")
     try:

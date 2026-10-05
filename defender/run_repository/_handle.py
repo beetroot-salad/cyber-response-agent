@@ -1,9 +1,12 @@
 """The file-backed `Run` handle: five sub-collections, a `RunRecord` value object, and a
 per-kind `RecordHandle` every record accessor answers.
 
-`Run.for_tenant(tenant_id, run_id, *, runs_base, io=)` is the constructor application code
-uses. `Run.at(directory)` is the eval/fixture/tooling escape hatch with no runs base.
-`Run.under` is `for_tenant`'s internal helper.
+`Run.for_tenant(tenant_id, run_id, *, runs_base, io=)` is the constructor run setup uses; it
+refuses a runs folder with no tenant record. `Run.at(directory)` is the eval/fixture/tooling
+escape hatch with no runs base. `Run.under` builds the handle with no I/O: `for_tenant` uses it
+after judging the record, and so does the repository's `open_run`, which judged the record
+through its own held runs folder. Outside the package every constructor is gated by
+`scripts/lint/lint_run_layout_imports.py`; application code gets a `Run` from `open_run`.
 
 Every accessor answers a `RecordHandle` (`.path`, `.read`, and the record's own write verb),
 never parsed contents. Asking for `.path` creates nothing; writes create the holding directory
@@ -27,9 +30,10 @@ from typing import Any
 
 from defender import _artifact_schema, _episode_paths, _provenance, _report
 from defender import _io as _real_io
-from defender import _run_paths, _tenant
+from defender import _tenant
 from defender._run_id import refuse_bad_run_id
-from defender._run_paths import RUN_LAYOUT, RunPaths, SessionPaths
+from defender.run_repository import _layout
+from defender.run_repository._layout import RUN_LAYOUT, RunPaths, SessionPaths
 
 #: The five groups, addressed group-then-kind.
 GROUPS = ("tables", "facts", "documents", "observability", "session")
@@ -249,6 +253,11 @@ class RunRecord:
     faults: tuple[str, ...] = ()
 
 
+#: A handle's address: set once in `Run.__init__`, never reassigned or deleted (#1105 O5.13,
+#: the frozen-dataclass convention). The groups and `partial_failures` stay its own state.
+_ADDRESS = frozenset({"run_dir", "runs_base", "tenant_id"})
+
+
 class Run:
     """The file-backed run handle, addressed by `(tenant_id, run_id)`."""
 
@@ -265,16 +274,27 @@ class Run:
         self, run_dir: Path, *, runs_base: Path | None, io: Any = _real_io,
         tenant_id: str | None = None,
     ) -> None:
-        self.run_dir = Path(run_dir)
-        self.runs_base = Path(runs_base) if runs_base is not None else None
+        # The address is frozen once built (#1105 O5.13): `__setattr__` refuses these names.
+        object.__setattr__(self, "run_dir", Path(run_dir))
+        object.__setattr__(self, "runs_base", Path(runs_base) if runs_base is not None else None)
         # The address's tenant, not the stamp's (that is `run.record.tenant_id`; `for_tenant`
         # ensures they agree). A `Run.at` handle has no address and no such attribute.
         if tenant_id is not None:
-            self.tenant_id = tenant_id
+            object.__setattr__(self, "tenant_id", tenant_id)
         self._io = io
         self.partial_failures: tuple[str, ...] = ()
         for group in GROUPS:
             setattr(self, group, _RecordHandleGroup(self, group))
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name in _ADDRESS:
+            raise AttributeError(f"a Run's address is frozen; cannot assign {name!r}")
+        object.__setattr__(self, name, value)
+
+    def __delattr__(self, name: str) -> None:
+        if name in _ADDRESS:
+            raise AttributeError(f"a Run's address is frozen; cannot delete {name!r}")
+        object.__delattr__(self, name)
 
     @property
     def subcollections(self) -> tuple[str, ...]:
@@ -325,24 +345,29 @@ class Run:
     def for_tenant(
         cls, tenant_id: str, run_id: str, *, runs_base: Path, io: Any = _real_io,
     ) -> Run:
-        """The constructor application code uses. Refuses when `tenant_id` disagrees with the
-        tenant record stored at `runs_base`, rather than silently trusting either."""
+        """The constructor run setup uses, once the tenant record exists. Refuses when
+        `runs_base` holds no tenant record (`TenantRefused`, #1105 NH-3), and when `tenant_id`
+        disagrees with the record stored there, rather than silently trusting either."""
         runs_base = Path(runs_base)
-        if io.entry_present(_tenant.record_path(runs_base)):
-            record = _tenant.read_tenant(runs_base, io=io)
-            if record.tenant_id != tenant_id:
-                raise _tenant.TenantRecordMismatch(
-                    f"tenant_id {tenant_id!r} disagrees with the tenant record at "
-                    f"{runs_base} ({record.tenant_id!r}) — for_tenant is an enforcement "
-                    "point, not a migration"
-                )
+        path = _tenant.record_path(runs_base)
+        if not io.entry_present(path):
+            raise _tenant.TenantRefused(
+                f"{path} is absent — a run is built only under a runs folder whose tenant "
+                "record names its tenant")
+        record = _tenant.read_tenant(runs_base, io=io)
+        if record.tenant_id != tenant_id:
+            raise _tenant.TenantRecordMismatch(
+                f"tenant_id {tenant_id!r} disagrees with the tenant record at "
+                f"{runs_base} ({record.tenant_id!r}) — for_tenant is an enforcement "
+                "point, not a migration"
+            )
         return cls.under(runs_base, run_id, io=io, tenant_id=tenant_id)
 
     @classmethod
     def under(
         cls, runs_base: Path, run_id: str, *, io: Any = _real_io, tenant_id: str | None = None,
     ) -> Run:
-        """The internal helper `for_tenant` is built on — not a public front door."""
+        """The no-I/O builder `for_tenant` and `open_run` share — not a public front door."""
         refuse_bad_run_id(run_id)
         runs_base = Path(runs_base)
         return cls(runs_base / run_id, runs_base=runs_base, io=io, tenant_id=tenant_id)
@@ -445,17 +470,17 @@ def case_ref(alert_bytes: bytes) -> str:
 # ArchivedWorld — the archive projection's read-only handle; not a `Run`.
 # ---------------------------------------------------------------------------------------
 
-#: The copied set, each name from its owner: run-dir names from `_run_paths`, the archive's
+#: The copied set, each name from its owner: run-dir names from `_layout`, the archive's
 #: re-homed sidecar names and run-dir pointer from `_episode_paths`.
 _ARCHIVED_WORLD_NAMES: dict[str, str] = {
-    "report": _run_paths.REPORT, "investigation": _run_paths.INVESTIGATION,
-    "provenance": _run_paths.PROVENANCE,
+    "report": _layout.REPORT, "investigation": _layout.INVESTIGATION,
+    "provenance": _layout.PROVENANCE,
     "scrub_verdict": _episode_paths.ARCHIVED_SCRUB_VERDICT_NAME,
     "run_end": _episode_paths.ARCHIVED_RUN_END_NAME,
-    "lessons_loaded": _run_paths.LESSONS_LOADED, "alert": _run_paths.ALERT,
-    "gather_summaries": _run_paths.GATHER_SUMMARIES_DIRNAME,
-    "executed_queries": _run_paths.EXECUTED_QUERIES,
-    "gather_raw": _run_paths.RAW_MARKER, "run_dir_pointer": _episode_paths.RUN_DIR_POINTER_NAME,
+    "lessons_loaded": _layout.LESSONS_LOADED, "alert": _layout.ALERT,
+    "gather_summaries": _layout.GATHER_SUMMARIES_DIRNAME,
+    "executed_queries": _layout.EXECUTED_QUERIES,
+    "gather_raw": _layout.RAW_MARKER, "run_dir_pointer": _episode_paths.RUN_DIR_POINTER_NAME,
 }
 
 

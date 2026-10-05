@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.learning.author.verify_forward.shared import VerdictError
 
 HERE = Path(__file__).resolve().parent

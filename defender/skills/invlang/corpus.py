@@ -11,7 +11,7 @@ from pydantic import SkipValidation
 
 from defender._io import read_text_soft
 from defender._model import model
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 
 from .parser import ParseWarning, parse_dense_companion
 from .schema import (

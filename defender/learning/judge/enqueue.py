@@ -22,7 +22,7 @@ import yaml
 
 from defender._io import (
     ENTRY_FILE, Bound, bind, guarded_mkdir, read_jsonl_rows_report, write_guarded)
-from defender._run_paths import artifact_file
+from defender.run_repository import artifact_file
 from defender._yaml import safe_load as _yaml_safe_load
 from defender._text import is_content_less
 from defender._vocab import normalized_judge_outcome

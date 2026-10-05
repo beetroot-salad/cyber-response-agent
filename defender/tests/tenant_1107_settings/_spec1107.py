@@ -643,7 +643,7 @@ class RunRecorder:
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "alert.json").write_bytes(Path(alert).read_bytes())
         seed_session_store(run_dir)
-        return mod("_run_handle").Run.at(run_dir)
+        return mod("run_repository._handle").Run.at(run_dir)
 
     def lifecycle(self, **kw: Any) -> dict[str, Any]:
         self.order.append("lifecycle")
@@ -713,7 +713,7 @@ def open_step(run_dir: Path, record: Any, *, env: Mapping[str, str],
 
 def receipt_path(run_dir: Path) -> Path:
     """The receipt: a sidecar beside the run dir, keyed by the run's name, out of the box's reach."""
-    return mod("_run_paths").RunPaths(Path(run_dir)).ticket_write(Path(run_dir).parent)
+    return mod("run_repository._layout").RunPaths(Path(run_dir)).ticket_write(Path(run_dir).parent)
 
 
 def receipt(run_dir: Path) -> dict[str, Any] | None:
@@ -739,12 +739,12 @@ def render_page(run_dir: Path, *, update_ticket: bool) -> str:
     """Render the page the way run.py does after teardown — `run_common.visualize`, the default
     `visualize` seam — handing it run.py's own `--update-ticket` flag as an ARGUMENT (PG-2a,
     coined keyword `update_ticket=`), and return the page's HTML."""
-    mod("run_common").visualize(mod("_run_handle").Run.at(Path(run_dir)), update_ticket=update_ticket)
+    mod("run_common").visualize(mod("run_repository._handle").Run.at(Path(run_dir)), update_ticket=update_ticket)
     return page_html(run_dir)
 
 
 def page_html(run_dir: Path) -> str:
-    path = mod("_run_paths").RunPaths(Path(run_dir)).runtime_html
+    path = mod("run_repository._layout").RunPaths(Path(run_dir)).runtime_html
     return path.read_text(encoding="utf-8") if path.is_file() else ""
 
 

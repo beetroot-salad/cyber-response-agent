@@ -19,7 +19,7 @@ from defender._io import (
     read_jsonl_rows_report,
     read_text_utf8,
 )
-from defender._run_paths import (
+from defender.run_repository import (
     RUN_LAYOUT,
     LEAD_ID_RE as _LEAD_ID_RE,
     RunPaths,

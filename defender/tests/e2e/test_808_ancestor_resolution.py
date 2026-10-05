@@ -50,7 +50,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender._run_paths import RunPaths  # noqa: E402
+from defender.run_repository import RunPaths  # noqa: E402
 from defender.scripts.adapters.confinement import ConfinementFault, confine_index  # noqa: E402
 from defender.scripts.adapters.faults import TransportFault  # noqa: E402
 from defender.tests.e2e._lead_zero_808 import (  # noqa: E402

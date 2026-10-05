@@ -70,7 +70,7 @@ def test_the_six_per_name_denies_hold_for_every_role(run_dir, worktree):
     """Each of the six per-name denies — `gather_raw` by shape, `wire_logs/` outright,
     `provenance.json` outright, the case answer key for confined roles, the denylist and the
     payload read cap — refuses for every role."""
-    from defender._run_paths import CASE_ANSWER_KEY_NAMES, RUN_LAYOUT
+    from defender.run_repository import CASE_ANSWER_KEY_NAMES, RUN_LAYOUT
     from defender.runtime import permission
 
     owner = S.RunPaths(run_dir)
@@ -133,7 +133,7 @@ def test_no_deny_predicate_holds_a_record_name_at_all(run_dir, worktree):
     The predicates now ask (`RUN_LAYOUT.gather_raw`, `is_case_answer_key(...)`), so there is
     nothing left to strand.
     """
-    import defender._run_paths as owner_mod
+    import defender.run_repository._layout as owner_mod
     from defender.runtime.permission import files
 
     for name in ("RAW_MARKER", "TICKET_READS_MARKER", "CASE_ANSWER_KEY_NAMES", "PROVENANCE",

@@ -1,0 +1,31 @@
+"""The runs repository's one error type, and the one way its refusals quote a name.
+
+`RunRefused` is every refusal the repository makes that is not the tenant's (#1105 OP-5):
+`RunId`'s, the lookups' and the episode record's. A fault of the tenant's runs folder or its
+`_tenant.json` is `_tenant.TenantRefused` instead (P2). It is a plain `Exception`, not a
+`ValueError`, so neither error's handler ever catches the other.
+
+Pydantic-free: `RunId` imports it, and in-box code may import `RunId` (NM-05).
+"""
+from __future__ import annotations
+
+#: How many characters of a quoted name a refusal carries before it truncates (NF-8): enough
+#: to recognise any real name, short enough that a hostile 10 000-character one cannot flood
+#: the one stderr line run setup exits with.
+_QUOTE_LIMIT = 120
+
+
+class RunRefused(Exception):  # noqa: N818 — the design's name (#1105 OP-5), as `TenantRefused`
+    """The repository refused: a bad run id, an unexpected entry in a runs folder, a corrupt
+    episode record, or a write it will not make. The message names the path and the fault."""
+
+
+def quoted(text: object) -> str:
+    """`text` as a refusal quotes it: repr-style, so a control character, DEL, a C1 control
+    or a line separator is escaped and the message stays one line, and truncated with a
+    marker past `_QUOTE_LIMIT` characters (NF-8). Every refusal in the package that names a
+    caller-supplied or disk-read name goes through here."""
+    text = str(text)
+    if len(text) <= _QUOTE_LIMIT:
+        return repr(text)
+    return f"{text[:_QUOTE_LIMIT]!r}…(+{len(text) - _QUOTE_LIMIT} chars)"

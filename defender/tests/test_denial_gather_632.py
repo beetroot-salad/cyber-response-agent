@@ -127,7 +127,7 @@ def test_a_denial_reaches_the_model_even_when_its_row_cannot_be_written(tmp_path
 
     Observed failing by: the gather loop stopping at one call (the exception ended the lead),
     or the refusal text absent from what the model saw."""
-    from defender._run_paths import RunPaths
+    from defender.run_repository import RunPaths
     from defender.tests._verb_authorization_632 import _Run
     from defender.tests.e2e._replay_harness import GOLDEN_AB3, ReplayFn, Turn, drive, materialize
 

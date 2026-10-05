@@ -24,7 +24,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from defender._io import read_jsonl_rows, read_text_soft
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender._untrusted import wrap_fresh
 from defender.hooks.budget_enforcer import (
     DEFAULT_LIMITS,

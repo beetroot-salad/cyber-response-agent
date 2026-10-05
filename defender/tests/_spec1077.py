@@ -1,7 +1,7 @@
 """Shared machinery for #1077's run-handle spec — NO test scripts.
 
 The change (`spec-flow/specs/spec_graph_1077.yaml`, `70-resolutions.md`): no module outside
-the name owners spells a run or episode record's name. `defender/_run_paths.py::RunPaths` grows
+the name owners spells a run or episode record's name. `defender/run_repository/_layout.py::RunPaths` grows
 from seven accessors to ~twenty, a new `defender/_episode_paths.py::EpisodePaths` owns the
 episode layout, a new `defender/_tenant.py` owns `<runs_base>/_tenant.json`, and a new handle
 module wraps all three: `Run` with five sub-collections (`tables`, `facts`, `documents`,
@@ -73,15 +73,15 @@ NOT_ROOT = pytest.mark.skipif(
 # The coined module names. ONE place, so a rename is one edit.
 # ======================================================================================
 
-#: The handle module. D6(a)'s exempt owner set is `_run_paths.py`, `_episode_paths.py`,
+#: The handle module. D6(a)'s exempt owner set is `run_repository/_layout.py`, `_episode_paths.py`,
 #: `_tenant.py` and "the handle"; the other three are underscore-prefixed private modules
 #: beside `_io.py` and `_provenance.py`, so the handle follows the same convention.
-HANDLE_MODULE = "_run_handle"
+HANDLE_MODULE = "run_repository._handle"
 TENANT_MODULE = "_tenant"
 EPISODE_MODULE = "_episode_paths"
 #: The owner modules by their path under `defender/` (#1105 D1.5): every file of the runs
-#: repository package — which absorbed the layout (`_layout.py`, was `_run_paths.py`) and the
-#: handle (`_handle.py`, was `_run_handle.py`) — plus the two owners that stay outside it.
+#: repository package — which absorbed the layout (`_layout.py`, was `run_repository/_layout.py`) and the
+#: handle (`_handle.py`, was `run_repository/_handle.py`) — plus the two owners that stay outside it.
 RUN_REPOSITORY_FILES = tuple(
     f"run_repository/{name}" for name in (
         "__init__.py", "_layout.py", "_handle.py", "_lookup.py", "_record.py", "_id.py",
@@ -90,7 +90,7 @@ OWNER_MODULE_FILES = (*RUN_REPOSITORY_FILES, "_episode_paths.py", "_tenant.py")
 
 
 def handle() -> Any:
-    """`defender/_run_handle.py` — `Run`, `RunRecord`, `RecordHandle`, `ArchivedWorld`."""
+    """`defender/run_repository/_handle.py` — `Run`, `RunRecord`, `RecordHandle`, `ArchivedWorld`."""
     return mod(HANDLE_MODULE)
 
 
@@ -105,7 +105,7 @@ def episode_paths() -> Any:
 
 
 def run_paths_mod() -> Any:
-    return mod("_run_paths")
+    return mod("run_repository._layout")
 
 
 def RunPaths(run_dir: Path) -> Any:  # noqa: N802 — it is the class's own name
@@ -209,7 +209,7 @@ MEMBER_ACCESSOR: dict[str, str] = {
 #: that would have written JSONL into SQLite. `append` for a JSONL table or trace, `write` for
 #: a whole document or a write-once fact, `update` alone for the two `flock`ed JSON states,
 #: `open` for the session store, `None` for a record nothing in the host writes through the
-#: handle. Mirrors `defender._run_handle.MEMBER_VERB`; that module is the shipped shape, this
+#: handle. Mirrors `defender.run_repository._handle.MEMBER_VERB`; that module is the shipped shape, this
 #: is the spec.
 MEMBER_VERB: dict[str, str | None] = {
     "queries": "append", "policy_denials": "append", "leads": "write", "payloads": "write",

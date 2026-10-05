@@ -202,18 +202,24 @@ def _module_consts(tree: ast.AST) -> dict[str, str]:
 #: The name-owner classes `owner_derived` tags — construction of one, and reads on the instance
 #: it builds, resolved by dotted origin so an alias or a from-import still counts.
 _OWNER_CLASS_ORIGINS = frozenset({
-    "defender._run_paths.RunPaths",
+    # Each owner reached through the runs repository's door (#1105) is spelled twice: the door
+    # (`defender.run_repository.X`, every importer's spelling) and the submodule that defines
+    # it (the package's own imports).
+    "defender.run_repository.RunPaths",
+    "defender.run_repository._layout.RunPaths",
     "defender._episode_paths.EpisodePaths",
     # The file-backed handle: a value reached through `run.facts.<record>` /
     # `run.tables.<table>` is owner-derived like `RunPaths(x).<record>`.
-    "defender._run_handle.Run",
+    "defender.run_repository.Run",
+    "defender.run_repository._handle.Run",
     # The episode handle (#1133): `episode.served_base` / `episode.world(label).draw(n)` are
     # owner-derived like `EpisodePaths(ep).<record>`.
     "defender._episode_handle.Episode",
     "defender._episode_paths.WorldPaths",
     # The session store's owner, built from the runs base since one store spans a run and
     # its resumes and forks.
-    "defender._run_paths.SessionPaths",
+    "defender.run_repository.SessionPaths",
+    "defender.run_repository._layout.SessionPaths",
 })
 
 #: Owners whose members are owner-derived only for a NAMED set (#1120 M5), keyed by class
@@ -241,8 +247,10 @@ _PARTIAL_OWNER_CARRIERS: dict[str, dict[str, str]] = {
 #: than constructs. `RunPaths(d).alert` is a path; `RUN_LAYOUT.alert` is the same record's name
 #: relative to the run dir (the form `_io.Bound`'s readers take). Both are owner-derived.
 _OWNER_VALUE_ORIGINS = frozenset({
-    "defender._run_paths.RUN_LAYOUT",
-    "defender._run_paths.WIRE_LOG_NAMES",
+    "defender.run_repository.RUN_LAYOUT",
+    "defender.run_repository._layout.RUN_LAYOUT",
+    "defender.run_repository.WIRE_LOG_NAMES",
+    "defender.run_repository._layout.WIRE_LOG_NAMES",
     "defender._episode_paths.LAYOUT",
     "defender._episode_paths.WORLD_LEAVES",
 })

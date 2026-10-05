@@ -61,7 +61,7 @@ from pathlib import Path
 import pytest
 
 from defender._io import read_jsonl_rows
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.learning import lead_repository
 from defender.learning.core import config as loop_config
 from defender.learning.leads import draft_synthesis, lead_extraction, lead_neighbors

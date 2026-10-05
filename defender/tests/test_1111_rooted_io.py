@@ -36,7 +36,7 @@ What each section pins:
   rows, `create`'s complete-or-absent lane and its `open_unnamed=` fallback, `replace`'s staged
   name, and the lock.
 
-The member matrix is ENUMERATED from the shipped tables (`_run_handle.GROUP_MEMBERS`,
+The member matrix is ENUMERATED from the shipped tables (`_handle.GROUP_MEMBERS`,
 `MEMBER_VERB`, `ArchivedWorld.members`), and each member's trust root and relative name are
 DERIVED from the path its own accessor builds. A member added later lands in every matrix with
 no code here (O4). `Run.record`'s source reads are enumerated the same way, by recording the
@@ -74,10 +74,10 @@ from typing import Any
 import pytest
 
 from defender import _io
-from defender import _run_handle as H
+from defender.run_repository import _handle as H
 from defender._artifact_schema import INVESTIGATION_FILE_MAX
 from defender._provenance import RunProvenance
-from defender._run_paths import RUN_LAYOUT, RunPaths, SessionPaths
+from defender.run_repository import RUN_LAYOUT, RunPaths, SessionPaths
 from defender.tests import _spec1077 as S
 from defender.tests._create_lane import assert_single_plain, no_unnamed_files
 from defender.tests._umask import umask
@@ -461,7 +461,7 @@ def seam_calls(rec: S.RecordingIo, mark: int) -> list[tuple[str, dict[str, Any]]
 
 def test_o4_the_matrix_is_enumerated_from_the_shipped_tables_and_reaches_every_address_kind():
     """The guard matrices below are parametrized over `RUN_MEMBERS` / `ARCHIVED_MEMBERS`, built
-    from `_run_handle.GROUP_MEMBERS`, `MEMBER_VERB` and `ArchivedWorld.members`, with each
+    from `_handle.GROUP_MEMBERS`, `MEMBER_VERB` and `ArchivedWorld.members`, with each
     member's trust root and relative name derived from its accessor's path. So a member added
     later is guarded with no per-member code.
 
@@ -1924,7 +1924,7 @@ def test_create_with_the_default_open_unnamed_links_an_unnamed_file_and_never_op
 _ALERT_CRASH_CHILD = r"""
 import os, sys
 from pathlib import Path
-from defender._run_handle import Run
+from defender.run_repository import Run
 root = Path(sys.argv[1])
 body = b"A" * (int(sys.argv[2]) - 1) + b"\n"
 print("ready", flush=True)

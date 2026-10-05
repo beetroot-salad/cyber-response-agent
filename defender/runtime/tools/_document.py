@@ -16,7 +16,7 @@ if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays 
 from pydantic_ai.exceptions import ModelRetry
 
 from defender._io import TEXT_READ_ERRORS, read_plain, write_guarded
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from .. import compaction, permission
 
 # The byte ruler the artifact bounds are measured with, so reported "bytes" match what the gate judges.

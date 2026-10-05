@@ -4,7 +4,7 @@
 
 A run dir is the box's rw bind, so an entry there may be a symlink the model planted. Writes
 into such trees go through alias-refusing primitives; reads must not trust the same directory
-when it is stat'ed and copied. ``defender/_run_paths.artifact_file`` / ``artifact_dir`` are
+when it is stat'ed and copied. ``defender/_layout.artifact_file`` / ``artifact_dir`` are
 the answer — both ``lstat``, so they judge the entry rather than what it points at — and this
 gate makes reaching for them the default.
 
@@ -94,6 +94,12 @@ LINT_TREE_READER_MODULES: frozenset[str] = frozenset({
     "learning/judge/render.py",
     # The episode page, rendered from the episode tree through package readers.
     "scripts/visualize/visualize_episode.py",
+    # The runs repository's own readers (#1105 D7): the lookups, the episode record and
+    # `RunId`. Their reads must not follow a link. The moved layout and handle are not listed,
+    # as neither was before the move (`Run.at`'s link-following `is_dir()` is today's).
+    "run_repository/_lookup.py",
+    "run_repository/_record.py",
+    "run_repository/_id.py",
 })
 
 SUPPRESS_MARKERS = ("lint-tree-read-follows-link: ok",)
@@ -154,7 +160,7 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
                         display=(
                             f"{rel}:{node.lineno}: link-following read of a box-writable tree "
                             f"({reason}) in {func_name}() — judge the entry with "
-                            f"defender._run_paths.artifact_file / artifact_dir (both lstat) "
+                            f"defender.run_repository._layout.artifact_file / artifact_dir (both lstat) "
                             f"before admitting or copying it"
                         ),
                     ))
@@ -204,7 +210,7 @@ def main(
         return 2
 
     print(
-        "Judge an entry in a box-writable tree with defender._run_paths.artifact_file / "
+        "Judge an entry in a box-writable tree with defender.run_repository._layout.artifact_file / "
         "artifact_dir (lstat) rather than is_file()/is_dir()/shutil.copy*, which follow a link "
         "and admit its target."
     )

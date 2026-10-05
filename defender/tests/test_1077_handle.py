@@ -3,12 +3,12 @@ and the per-kind `RecordHandle`.
 
 Carries 33 demands of `spec-flow/specs/spec_graph_1077.yaml`, each test named after its
 demand's `discharged_by` pointer and carrying that demand's prose in its docstring. The
-coined names (`_run_handle`, `RecordHandle`, `RunRecord`) and every fixture live in
+coined names (`run_repository._handle`, `RecordHandle`, `RunRecord`) and every fixture live in
 `defender/tests/_spec1077.py`. Two of the 33 are the final §7 rework's: `h54` (decision 20 — the
 bare run id's case fold, which claim RC-3 showed no rule covered) and `h55` (decision 22 — a
 `for_tenant` tenant argument the record at the resolved base disagrees with).
 
-RED AGAINST BASE db1af01a by construction: `defender/_run_handle.py` does not exist, and every
+RED AGAINST BASE db1af01a by construction: `defender/run_repository/_handle.py` does not exist, and every
 test reaches it through `S.handle()` per call, so the failure is the missing module once per
 test rather than a collection error hiding the rest.
 

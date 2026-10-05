@@ -37,7 +37,7 @@ from pathlib import Path
 import pytest
 
 from defender._io import append_jsonl, read_jsonl_rows
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.runtime.verbs import read_roster
 from defender._episode_handle import Episode
 from defender._episode_paths import BASE_FILENAME, SERVED_DIRNAME

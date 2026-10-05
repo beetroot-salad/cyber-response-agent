@@ -9,7 +9,7 @@ from pathlib import Path
 
 from defender._clock import parse_iso_utc
 from defender._io import write_atomic
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.hooks._run_dir import read_json_locked, update_json_locked
 from defender.runtime.agent_role import AgentRole
 

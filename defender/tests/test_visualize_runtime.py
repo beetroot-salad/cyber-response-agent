@@ -21,7 +21,7 @@ import json
 from pathlib import Path
 
 from defender._io import read_jsonl_rows
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.scripts.visualize import visualize_data as d
 from defender.scripts.visualize.visualize_run import render_runtime_page
 

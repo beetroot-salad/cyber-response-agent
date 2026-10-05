@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Run-records name gate: no code outside the four name-owner modules
-(`defender/_run_paths.py`, `defender/_episode_paths.py`, `defender/_tenant.py`,
-`defender/_run_handle.py`) may spell or hold a run or episode record's name, whole or as a
+"""Run-records name gate: no code outside the name-owner modules (every file of the runs
+repository package `defender/run_repository/`, `defender/_episode_paths.py`,
+`defender/_tenant.py`) may spell or hold a run or episode record's name, whole or as a
 composed part, or join a name onto a run or episode root.
 
 Three checks:
@@ -51,13 +51,22 @@ PAGE = DEFENDER / "docs" / "run-records.md"
 BEGIN_MARK = "<!-- generated: run-records kinds table — edit run-records-kinds.tsv and run scripts/lint/lint_run_records.py --render -->"  # noqa: E501
 END_MARK = "<!-- end generated -->"
 
-#: The four owner modules, the exempt set everything below is defined relative to. Must equal
+#: The owner modules by their path under `defender/`, the exempt set everything below is
+#: defined relative to: every file of the runs repository package (#1105 D1.5, which absorbed
+#: the layout and the handle) plus the two owners outside it. Matched by path, never by
+#: basename — a package submodule's basename (`__init__.py`, `_handle.py`) would otherwise
+#: exempt every same-named file in the sweep. Must equal
 #: `defender.tests._spec1077.OWNER_MODULE_FILES`.
-OWNER_MODULES: frozenset[str] = frozenset(
-    {"_run_paths.py", "_episode_paths.py", "_tenant.py", "_run_handle.py"})
+OWNER_MODULES: frozenset[str] = frozenset({
+    *(f"run_repository/{name}" for name in (
+        "__init__.py", "_layout.py", "_handle.py", "_lookup.py", "_record.py", "_id.py",
+        "_errors.py")),
+    "_episode_paths.py", "_tenant.py",
+})
 
 #: The sweep set. Never shrinks below this.
-SWEEP_DIRS: tuple[str, ...] = ("runtime", "learning", "scripts", "evals", "hooks")
+SWEEP_DIRS: tuple[str, ...] = ("runtime", "learning", "scripts", "evals", "hooks",
+                               "run_repository")
 SWEEP_TOP_LEVEL = True
 EXCLUDED_DIRS: tuple[str, ...] = (".venv", "__pycache__", "tests")
 
@@ -83,11 +92,11 @@ def _composed_parts() -> tuple[str, ...]:
     than re-spelled here: this file is not an owner module, and (a) protects these too."""
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
-    from defender import _run_paths  # noqa: PLC0415
+    from defender.run_repository import _layout  # noqa: PLC0415
 
     return (
-        _run_paths.LEAD_CLAIM_SUFFIX, _run_paths.REVIEW_RECORD_PREFIX,
-        _run_paths.TRACE_SUFFIX, _run_paths.REVIEW_TRACE_SUFFIX, _run_paths.SERVED_PREFIX)
+        _layout.LEAD_CLAIM_SUFFIX, _layout.REVIEW_RECORD_PREFIX,
+        _layout.TRACE_SUFFIX, _layout.REVIEW_TRACE_SUFFIX, _layout.SERVED_PREFIX)
 
 
 #: The substring-match set for a composed name, kept narrow: generic bare suffixes (`.json`,
@@ -173,7 +182,7 @@ def _accessor_names() -> frozenset[str]:
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
     from defender._episode_paths import EpisodePaths  # noqa: PLC0415
-    from defender._run_paths import RunPaths, SessionPaths  # noqa: PLC0415
+    from defender.run_repository import RunPaths, SessionPaths  # noqa: PLC0415
 
     partial = (name for owned in PARTIAL_OWNER_ATTRS.values() for name in owned)
     return frozenset(
@@ -182,7 +191,7 @@ def _accessor_names() -> frozenset[str]:
 
 
 def _is_owner_module(rel: str) -> bool:
-    return Path(rel).name in OWNER_MODULES
+    return rel in OWNER_MODULES
 
 
 def _record_shaped(text: str, whole: frozenset[str], parts: frozenset[str]) -> bool:
@@ -339,8 +348,12 @@ _OWNER_NON_RECORD_EXPORTS: frozenset[str] = frozenset({
     "TENANT_RECORD_NAME",
 })
 
+#: The owner modules' dotted names (`defender.run_repository`, `defender._tenant`, ...): arm
+#: (c) matches an import's fully resolved module against these, so an unrelated module that
+#: shares a last segment (`defender.learning._errors`) is not an owner.
 _OWNER_MODULE_NAMES: frozenset[str] = frozenset(
-    m.removesuffix(".py") for m in OWNER_MODULES)
+    "defender." + m.removesuffix(".py").removesuffix("/__init__").replace("/", ".")
+    for m in OWNER_MODULES)
 
 
 def _owner_record_names() -> frozenset[str]:
@@ -354,7 +367,7 @@ def _owner_record_names() -> frozenset[str]:
 
     names: set[str] = set()
     for mod_name in sorted(_OWNER_MODULE_NAMES):
-        mod = importlib.import_module(f"defender.{mod_name}")
+        mod = importlib.import_module(mod_name)
         names |= {
             n for n, v in vars(mod).items()
             if isinstance(v, str) and not n.startswith("_")
@@ -365,6 +378,17 @@ def _owner_record_names() -> frozenset[str]:
 
 #: The names the import arm refuses, read off the owners themselves.
 OWNER_RECORD_NAMES: frozenset[str] = _owner_record_names()
+
+
+def _resolved_from(package: str, node: ast.ImportFrom) -> str:
+    """The absolute module a from-import names, its relative dots resolved against `package`
+    (the importing module's own package)."""
+    if not node.level:
+        return node.module or ""
+    base = package
+    for _ in range(node.level - 1):
+        base = base.rpartition(".")[0]
+    return f"{base}.{node.module}" if node.module else base
 
 
 def _scan_import_pass(rel: str, tree: ast.Module, lines: list[str]) -> list[Finding]:
@@ -396,14 +420,16 @@ def _scan_import_pass(rel: str, tree: ast.Module, lines: list[str]) -> list[Find
                      f"HOLD a record name; ask the owner for the path or its relative form",
         ))
 
+    package = ".".join(("defender", *Path(rel).parent.parts))
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            # `from defender import _run_paths` binds the module, not a name in it; record
+        if isinstance(node, ast.ImportFrom):
+            module = _resolved_from(package, node)
+            # `from defender import _episode_paths` binds the module, not a name in it; record
             # it as well as `import x.y`, or the attribute arm below never sees it.
             for alias in node.names:
-                if alias.name in _OWNER_MODULE_NAMES:
-                    whole_module_aliases[alias.asname or alias.name] = alias.name
-            if node.module.split(".")[-1] not in _OWNER_MODULE_NAMES:
+                if f"{module}.{alias.name}" in _OWNER_MODULE_NAMES:
+                    whole_module_aliases[alias.asname or alias.name] = f"{module}.{alias.name}"
+            if module not in _OWNER_MODULE_NAMES:
                 continue
             for alias in node.names:
                 if alias.name not in OWNER_RECORD_NAMES:
@@ -412,7 +438,7 @@ def _scan_import_pass(rel: str, tree: ast.Module, lines: list[str]) -> list[Find
                        f"imports the record name {alias.name!r} from an owner module")
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name.split(".")[-1] in _OWNER_MODULE_NAMES:
+                if alias.name in _OWNER_MODULE_NAMES:
                     whole_module_aliases[alias.asname or alias.name.split(".")[-1]] = alias.name
 
     for node in ast.walk(tree):
@@ -503,8 +529,8 @@ def main(argv: list[str] | None = None) -> int:
         for f in found:
             print(f"  {f.display}")
         print(
-            "\nNo code outside defender/_run_paths.py, _episode_paths.py, _tenant.py and "
-            "_run_handle.py may spell a run or episode record's name — reach it through the "
+            "\nNo code outside defender/run_repository/, _episode_paths.py and _tenant.py "
+            "may spell a run or episode record's name — reach it through the "
             "owner, or mark a deliberate diagnostic with "
             "`# lint-run-records: ok — <reason>`."
         )

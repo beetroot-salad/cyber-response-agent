@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.runtime.challenge_gate import REVIEW_ROLES
 from defender.scripts.visualize import visualize_data as d
 from defender.scripts.visualize.visualize_primitives import parse_report

@@ -19,7 +19,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender import _provenance  # noqa: E402
 from defender._provenance import RunProvenance  # noqa: E402
-from defender._run_paths import PROVENANCE, RunPaths  # noqa: E402
+from defender.run_repository import PROVENANCE, RunPaths  # noqa: E402
 from defender.runtime import permission  # noqa: E402
 # `env` is imported for its FIXTURE effect — pytest resolves `stamped(env)` through the
 # module namespace — so the shadowing `noqa` below is the import doing its job, not a slip.

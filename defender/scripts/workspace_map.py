@@ -11,7 +11,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
 
 from defender._corpus import iter_query_templates  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
-from defender._run_paths import RUN_LAYOUT  # noqa: E402
+from defender.run_repository import RUN_LAYOUT  # noqa: E402
 
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = DEFENDER_DIR.parent

@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from defender import run_common
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.learning.branch.estate import applier
 from defender.learning.branch.estate.registry import EstateError
 from defender.runtime import run_tenant
@@ -48,7 +48,7 @@ from defender.tests.e2e._replay_harness import (
     materialize,
 )
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
-from defender._run_handle import Run as _Run
+from defender.run_repository import Run as _Run
 from defender.tests.tenant_1107_settings import _spec1107 as S
 
 #: The ticket system's gather grant — the table the screen tests' tenant carries, so the replayed

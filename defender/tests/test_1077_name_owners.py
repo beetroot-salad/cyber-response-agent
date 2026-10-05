@@ -131,7 +131,7 @@ def test_episode_paths_resolves_every_name_d1_enumerates(episode_dir):
 def test_the_two_retired_names_still_resolve_on_the_owner(run_dir):
     """`source_refs` and `ticket_read(seq)` still resolve on the owner, because the answer-key
     set and the payload-cap shape key on those names."""
-    from defender._run_paths import CASE_ANSWER_KEY_NAMES
+    from defender.run_repository import CASE_ANSWER_KEY_NAMES
     owner = S.RunPaths(run_dir)
     assert owner.source_refs == run_dir / "source_refs.yaml"
     assert owner.ticket_read(S.SEQ) == run_dir / "ticket_reads" / f"{S.SEQ}.json"
@@ -421,7 +421,7 @@ def test_lead_id_containing_path_traversal_segment(run_dir):
 def test_run_paths_plain_name_screens_non_plain_files(run_dir):
     """`RunPaths.access[plain_name]`'s plain-file-screen constraint refuses a non-plain-file
     target (a symlink, a directory, a device) the way its declared constraint promises."""
-    from defender._run_paths import plain_file
+    from defender.run_repository import plain_file
     real = run_dir / "report.md"
     real.write_text("# real\n", encoding="utf-8")
     assert plain_file(real), "positive control: an ordinary regular file passes the screen"
@@ -446,7 +446,7 @@ def test_run_paths_plain_name_screens_non_plain_files(run_dir):
 
     body = (
         "import sys\n"
-        "from defender._run_paths import plain_file\n"
+        "from defender.run_repository import plain_file\n"
         "import pathlib\n"
         "assert plain_file(pathlib.Path(sys.argv[1])) is True\n"
         "assert plain_file(pathlib.Path('/dev/null')) is False\n"

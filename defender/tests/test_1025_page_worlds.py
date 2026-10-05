@@ -1083,7 +1083,7 @@ def test_1025_markup_in_lead_params_raw_command_and_resolutions(tmp_path):
     raw sequence nowhere — the page does not reuse `render_runtime_leads_queries`' `esc` path
     unchanged (F16). Positive control: the escaped text is visible in the lead's block.
     """
-    from defender._run_paths import RunPaths
+    from defender.run_repository import RunPaths
 
     ep = E.sample_episode(tmp_path)
     world = ep.world(E.GRADED_WORLD)

@@ -59,7 +59,7 @@ from defender._episode_handle import Episode
 from defender._episode_paths import EpisodePaths
 from defender._io import NotPlainEntry, load_json_artifact
 from defender._paths import PATHS
-from defender._run_paths import RunPaths, artifact_dir, artifact_file
+from defender.run_repository import RunPaths, artifact_dir, artifact_file
 from defender.runtime.run_tenant import RunTenant
 from defender.learning.branch import seams
 from defender.learning.branch import staging as staging_mod

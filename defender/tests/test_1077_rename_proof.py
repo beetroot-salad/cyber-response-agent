@@ -12,10 +12,10 @@ This proves no module NEEDS to: rename every record through the owner, and a rea
 round trip — the writer, the screened readers and the judge's own report reader, spanning six
 modules — still finds every file.
 
-HOW THE RENAME IS DONE, and why not with `monkeypatch`. Patching `_run_paths.ALERT` after
+HOW THE RENAME IS DONE, and why not with `monkeypatch`. Patching `_layout.ALERT` after
 import reaches nothing: a module that did `from ... import ALERT` holds its own reference, the
 owners' derived constants (`SERVED_DIRNAME`, `PRIMING_LOCK_NAME`, `GATHER_RAW_SHAPE`) were
-computed at import, `_episode_paths` took seven names off `_run_paths` at ITS import, and any
+computed at import, `_episode_paths` took seven names off `run_repository._layout` at ITS import, and any
 regex a consumer compiled at module load is already frozen. Every one of those follows
 automatically from a SOURCE rewrite, so that is what this does: a scratch package whose
 entries are symlinks to the real ones, except the owner modules, which are copies with every
@@ -221,10 +221,10 @@ def test_the_rename_keeps_the_shape_it_promises_to_keep(value, want):
 #
 # The lint cannot see the store's path: `"sessions"` and `.db` are deliberately outside its
 # match set (too generic). So the rename is the observer (#1077's session-store leftover, O1):
-# rename the sessions directory, or the store's suffix, in `_run_paths.py` ALONE, and a real
+# rename the sessions directory, or the store's suffix, in `run_repository/_layout.py` ALONE, and a real
 # run must create its store where the owner now says — and a resume must find it there.
 #
-# ONLY those constants move, and only in `_run_paths.py`. Renaming every record as the archive
+# ONLY those constants move, and only in `run_repository/_layout.py`. Renaming every record as the archive
 # proof does would also move the run's alert, which the replay harness's `drive` still hands
 # the driver by its literal name — a failure that is not this rule's.
 
@@ -283,7 +283,7 @@ def _loaded(result: subprocess.CompletedProcess[str], name: str) -> str:
 @pytest.mark.parametrize("names", [("SESSIONS_DIRNAME",), ("SESSION_DB_SUFFIX",)],
                          ids=["sessions-dirname", "session-db-suffix"])
 def test_the_session_store_moves_when_its_owner_renames_it(tmp_path, names):
-    """Rename the sessions directory — or the store's suffix — in `_run_paths.py` alone, and a
+    """Rename the sessions directory — or the store's suffix — in `run_repository/_layout.py` alone, and a
     REAL run (the real driver, its default store factory, its own case pointer) creates its
     store at the owner's new path, and the resume door (`branch.open_source_store`, the store
     factory a resumed run is handed) finds it there.

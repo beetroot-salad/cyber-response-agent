@@ -47,8 +47,8 @@ from defender import _log  # noqa: E402
 from defender import _provenance  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
-from defender._run_handle import Run  # noqa: E402
-from defender._run_paths import RunPaths  # noqa: E402
+from defender.run_repository import Run  # noqa: E402
+from defender.run_repository import RunPaths  # noqa: E402
 from defender import _tenant  # noqa: E402
 from defender._episode_handle import Episode  # noqa: E402
 from defender._episode_paths import LAYOUT  # noqa: E402
@@ -423,7 +423,7 @@ def _screened_source_alert(source_run_dir: Path) -> Path:
     `materialize_run` follows links. Checked before the copy so outside bytes never become
     this run's alert.
     """
-    from defender._run_paths import artifact_file
+    from defender.run_repository import artifact_file
 
     alert = RunPaths(Path(source_run_dir)).alert
     if not artifact_file(alert):

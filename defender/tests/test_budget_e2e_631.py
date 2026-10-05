@@ -37,7 +37,7 @@ from pathlib import Path
 import pytest
 
 from defender._io import read_jsonl_rows
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.hooks.budget_enforcer import (
     BUDGET_REFUSAL_MESSAGE,
     DEFAULT_LIMITS,

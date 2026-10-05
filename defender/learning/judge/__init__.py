@@ -34,7 +34,7 @@ from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
 from defender._episode_handle import Episode  # noqa: E402
 from defender._io import Bound, NotPlainEntry, bind  # noqa: E402
-from defender._run_paths import WIRE_LOG_NAMES  # noqa: E402
+from defender.run_repository import WIRE_LOG_NAMES  # noqa: E402
 from defender._episode_paths import LAYOUT  # noqa: E402
 from defender.learning.judge import enqueue as enqueue_mod  # noqa: E402
 from defender.learning.judge import family as family_mod  # noqa: E402

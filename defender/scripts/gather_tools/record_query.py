@@ -23,7 +23,7 @@ from defender._io import (
     write_guarded,
 )
 from defender._model import model
-from defender._run_paths import LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: `tools_gather` imports the pre-dispatch gate from here
+from defender.run_repository import LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: `tools_gather` imports the pre-dispatch gate from here
 from defender._text import as_int, as_str, is_content_less
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS, error_class_for_exit
 

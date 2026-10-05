@@ -8,7 +8,7 @@ from dataclasses import field
 from defender._model import model
 from pathlib import Path
 
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from typing import Any
 
 import yaml

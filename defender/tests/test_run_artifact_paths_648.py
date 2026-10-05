@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 
 
-from defender._run_paths import contained_payload, resolve_run_bundle
+from defender.run_repository import contained_payload, resolve_run_bundle
 from defender.learning.lead_repository import load_queries, stage_tables
 
 LEAD = "l-001"
