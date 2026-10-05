@@ -356,8 +356,11 @@ def _lane_box(base: Path, spec) -> Iterator[tuple[object, Path]]:
     tree.mkdir(parents=True)
     request = box_mod.BoxRequest(
         name=f"defender-drain-1188-{uuid.uuid4().hex[:8]}",
+        # The repo root, not `DEFENDER`: a lane box plants a startup sentinel at every mount's
+        # source, and a transient file inside the live `defender/` tree races any concurrent
+        # test that copies it (seen in CI: test_1080's copytree hit a vanished sentinel).
         mounts=(
-            box_mod.Mount(source=DEFENDER, target=DEFENDER, writable=False),
+            box_mod.Mount(source=REPO_ROOT, target=REPO_ROOT, writable=False),
             box_mod.Mount(source=tree, target=tree, writable=True),
         ),
         workdir=REPO_ROOT, env={}, spec=spec,
