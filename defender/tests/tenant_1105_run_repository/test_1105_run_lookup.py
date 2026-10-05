@@ -38,6 +38,7 @@ does not exist, so each fails at its own import (`ModuleNotFoundError`).
 from __future__ import annotations
 
 import copy
+import gc
 import inspect
 import json
 import os
@@ -826,25 +827,32 @@ def test_1105_bound_runs_yields_run_id_and_wrapper_rows_in_list_run_ids_order_ov
     os.symlink(t.runs / "r000" / "alert.json", linked)
     order = _ids(list_run_ids(t))
     assert order == ids, f"list_run_ids gave {order[:5]}..."
-    c0 = H.open_fd_count()
-    with bound_runs(t) as runs:
-        held = H.open_fd_count()
-        assert runs.absent is False, f"runs.absent over a good folder is {runs.absent!r}"
-        assert not hasattr(runs, "reason"), "the listing carries a reason"
-        rows = list(runs)
-        assert [str(rid) for rid, _w in rows] == order, "rows come in list_run_ids' order"
-        assert all(H.is_a(rid, RunId) for rid, _w in rows), "each row's id is a RunId"
-        assert H.open_fd_count() == held == c0 + 1, "the block holds exactly one descriptor"
-        (t.runs / "r001" / "alert.json").write_text('{"alert_id": "late"}\n', encoding="utf-8")
-        by_id = {str(rid): w for rid, w in rows}
-        assert json.loads(by_id["r000"].read("alert.json").text) == {"alert_id": "r000"}
-        assert json.loads(by_id["r001"].read("alert.json").text) == {"alert_id": "late"}, (
-            "a row's read is made when called, not at listing")
-        assert by_id["r002"].read("missing.json").absent is True, "an absent member reads absent"
-        err = H.raised(by_id["r199"].read, "alert.json")
-        assert H.is_a(err, RunRefused), f"a linked alert.json read through the row gave {err!r}"
-        assert H.open_fd_count() == c0 + 1, "reading 200 rows holds no descriptor of its own"
-    assert H.open_fd_count() == c0, "the block's descriptor is closed after it"
+    # Owner ruling (CI): the counts are of the whole process, so another test's unscoped
+    # handle (closed on collection, `_io._Handle`) must not be collected mid-count.
+    gc.collect()
+    gc.disable()
+    try:
+        c0 = H.open_fd_count()
+        with bound_runs(t) as runs:
+            held = H.open_fd_count()
+            assert runs.absent is False, f"runs.absent over a good folder is {runs.absent!r}"
+            assert not hasattr(runs, "reason"), "the listing carries a reason"
+            rows = list(runs)
+            assert [str(rid) for rid, _w in rows] == order, "rows come in list_run_ids' order"
+            assert all(H.is_a(rid, RunId) for rid, _w in rows), "each row's id is a RunId"
+            assert H.open_fd_count() == held == c0 + 1, "the block holds exactly one descriptor"
+            (t.runs / "r001" / "alert.json").write_text('{"alert_id": "late"}\n', encoding="utf-8")
+            by_id = {str(rid): w for rid, w in rows}
+            assert json.loads(by_id["r000"].read("alert.json").text) == {"alert_id": "r000"}
+            assert json.loads(by_id["r001"].read("alert.json").text) == {"alert_id": "late"}, (
+                "a row's read is made when called, not at listing")
+            assert by_id["r002"].read("missing.json").absent is True, "an absent member reads absent"
+            err = H.raised(by_id["r199"].read, "alert.json")
+            assert H.is_a(err, RunRefused), f"a linked alert.json read through the row gave {err!r}"
+            assert H.open_fd_count() == c0 + 1, "reading 200 rows holds no descriptor of its own"
+        assert H.open_fd_count() == c0, "the block's descriptor is closed after it"
+    finally:
+        gc.enable()
 
 
 def test_1105_bound_runs_is_single_use_and_refuses_every_read_after_the_block(tmp_path):
