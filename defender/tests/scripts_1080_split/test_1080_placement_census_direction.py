@@ -459,7 +459,11 @@ def test_1080_every_flat_tier_module_at_the_base_keeps_its_name():
     """
     base = S.base_inventory()["flat_tier"]
     assert len(base) == 30
-    assert [f for f in base if not (S.REPO_ROOT / f).is_file()] == []
+    # Owner ruling (merge with #1105 PR 1): the run layout and the run handle moved into
+    # defender/run_repository/ (#1105 D1.1), which retired these two; the rest keep their paths.
+    moved_by_1105 = {f"defender/_run_{kind}.py" for kind in ("paths", "handle")}
+    assert moved_by_1105 <= set(base)
+    assert [f for f in base if f not in moved_by_1105 and not (S.REPO_ROOT / f).is_file()] == []
 
 
 def test_1080_no_moved_module_derives_a_path_from_its_own_file_depth():

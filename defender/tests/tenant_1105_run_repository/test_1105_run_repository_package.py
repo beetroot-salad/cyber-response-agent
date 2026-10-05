@@ -603,7 +603,9 @@ def test_1105_no_live_file_names_the_old_module_paths():
     move in its prose, is not scanned.)"""
     from defender import run_repository
 
-    live = _old_name_hits(".", *(f":!{tree}" for tree in _ARCHIVAL))
+    # Owner ruling (merge of #1080): a suite's goldens/ hold outputs captured at some base
+    # commit, frozen data that may name a file, never code that depends on it (#647's rule).
+    live = _old_name_hits(".", *(f":!{tree}" for tree in _ARCHIVAL), ":!**/goldens/**")
     live += _old_name_hits("defender/docs/run-records.md")
     assert live == [], (f"{len(live)} live references still name the old modules, e.g. "
                         f"{live[:15]}")
@@ -946,7 +948,8 @@ def test_1105_the_meta_json_census_exclude_matches_the_layout_submodule():
     assert _defined_in(RunPaths) == (H.WORKTREE / layout).resolve(), (
         "the excluded file is the one the door's RunPaths is defined in")
     pins = _git("grep", "-n", "-E", r"_run_(paths|handle)\.py", "--", "defender/tests",
-                ":!defender/tests/tenant_1105_run_repository").stdout.splitlines()
+                ":!defender/tests/tenant_1105_run_repository",
+                ":!**/goldens/**").stdout.splitlines()
     assert pins == [], f"existing tests still plant, pin or read a moved file: {pins[:15]}"
 
 

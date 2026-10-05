@@ -5,7 +5,7 @@ SCOPE CUT (2026-10-04, human): the run page, its mirror writer and its assets st
 `scripts/visualize/` (#1105), so this file's run-page tests are parked with #1105
 (`spec-flow/specs/parked/1080/parked_run_page_e2e.py`). What is left is s037's two lazy sites
 that reach the moved lessons engine (`lessons_frontier`): the compaction fold's push and the
-document tool's write return. Neither imports `defender._run_handle` or `defender._run_paths`
+document tool's write return. Neither imports the old run-handle or run-path module
 (E4: #1105 PR1 deletes those modules, so no kept test may import them at module level).
 """
 from __future__ import annotations

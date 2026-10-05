@@ -5,7 +5,7 @@ SCOPE CUT (2026-10-04, human): the page renderers stay in `scripts/visualize/` (
 episode-page, footer and frontend tests are parked with #1105
 (`spec-flow/specs/parked/1080/parked_episode_frontend_and_pricing.py`). Kept here: pricing, the
 lessons-frontier consumers (s052), the location-derived values of the moved modules (m2) and
-the O5 suites' assertions (s043). No kept test imports `defender._run_paths` (E4).
+the O5 suites' assertions (s043). No kept test imports the old run-path module (E4).
 
 The renderers land under `defender/reports/` (M-F (a)) and pricing in the flat tier
 (`S.PRICING`; first pinned under `runtime/providers/`, moved after review); every other home is found by symbol (dF0). Every

@@ -697,14 +697,18 @@ def test_no_module_outside_the_defender_package_imports_run_common():
         # dropping the name to satisfy a textual sweep would take the site the gate exists
         # for out of the gate's scope. The exclusion is the gate script only; its baseline
         # is already covered by the suffix rule above.
-        extra_excludes=("scripts/lint/lint_tree_read_follows_link.py",),
+        # `lint_run_layout_imports` (#1105 D7) names it for the same reason: its allow-list keys
+        # run setup's sanctioned layout uses by file and function.
+        extra_excludes=("scripts/lint/lint_tree_read_follows_link.py",
+                        "scripts/lint/lint_run_layout_imports.py"),
     )
     outside = [h for h in hits if not h.startswith("defender/")]
     assert not outside, (
         "run_common is imported from outside the defender package:\n" + "\n".join(outside)
     )
 
-    caller_hits = live_hits(repo_grep(r"\bmaterialize_run\b"))
+    caller_hits = live_hits(repo_grep(r"\bmaterialize_run\b"),
+                            extra_excludes=("scripts/lint/lint_run_layout_imports.py",))
     outside_callers = [
         h for h in caller_hits
         if not h.startswith("defender/")

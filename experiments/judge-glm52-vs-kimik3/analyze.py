@@ -30,8 +30,8 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.run_repository import WIRE_LOG_DIR  # noqa: E402
-from defender._pricing import PRICING, model_key  # noqa: E402
+from defender._run_paths import WIRE_LOG_DIR  # noqa: E402
+from defender.scripts.pricing import PRICING, model_key  # noqa: E402
 
 # The 262k-context SKU. Not in pricing.PRICING on purpose: that table feeds real accounting
 # and must carry one number per model, the conservative one. This is a what-if applied to
@@ -59,7 +59,7 @@ def trace_path(root: Path, name: str) -> Path | None:
     """The non-empty judge trace `name` names under `root`, or `None`.
 
     `<root>/wire_logs/<name>` FIRST: `_pydantic_stage.run_stage` writes every stage trace through
-    `observe.stage_trace_path` now, which puts it one level down (`run_repository.WIRE_LOG_DIR` — the
+    `observe.stage_trace_path` now, which puts it one level down (`_run_paths.WIRE_LOG_DIR` — the
     read gate refuses the component to every agent). The pre-move root path stays as a fallback
     because this tool is pointed at whatever arm dirs the operator already has on disk; without
     the first candidate a current run reads as "no trace", which `collect` silently skips and
