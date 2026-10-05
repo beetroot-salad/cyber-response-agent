@@ -9,9 +9,9 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender._io import Held
+from defender._io import Held, is_plain_entry, stat_entry
 from defender.learning.core import config as _loop_config
-from defender.learning.core.lane_trees import DrainTrees
+from defender.learning.core.lane_trees import DrainTrees, TreeFor
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender._claim_git import ClaimGit
 from defender.learning.leads.path_validation import SKILLS_REL
@@ -63,6 +63,7 @@ def _verify_corpus_scope(
     *,
     actor: str,
     rule: Callable[[str, str], None],
+    tree_for: TreeFor,
     git: ClaimGit,
     batch_rule: Callable[[list[tuple[str, str]]], None] | None = None,
 ) -> list[str]:
@@ -71,6 +72,12 @@ def _verify_corpus_scope(
     `batch_rule` is for invariants only decidable across the batch (e.g. whether a deleted
     draft's identity was taken over by another file in the same commit). It runs last, on
     records `rule` already admitted.
+
+    Every record `rule` admits that is not a deletion must also be a plain, single-linked file,
+    judged without following it through the lane's held mount (`tree_for`): a link, a hard link
+    or a FIFO at a committed name is refused, never committed, and so is a name no held mount
+    places (#1178). Checked after `rule`, so a refusal `rule` already gives keeps its own
+    message.
 
     The changes come from the claim's `git` session, which no ignore or attributes file the agent
     left can hide a path from or block (#1175); its corpus test is the one the baseline used."""
@@ -85,10 +92,32 @@ def _verify_corpus_scope(
         if not git.in_corpus(path):
             continue
         rule(xy, path)
+        if "D" not in xy:
+            _require_committable_entry(repo_root, tree_for, path, actor=actor)
         in_corpus.append((xy, path))
     if batch_rule is not None:
         batch_rule(in_corpus)
     return sorted(path for _, path in in_corpus)
+
+
+def _require_committable_entry(repo_root: Path, tree_for: TreeFor, path: str, *, actor: str) -> None:
+    """`LeadAuthorError` unless the entry at `path` is a plain, single-linked regular file, judged
+    by a no-follow stat through the held mount that places it (nothing is opened at the leaf, so
+    a FIFO cannot block it, and nothing is read or decoded). A name outside every held mount is
+    refused too: the lane commits only what its mounts hold."""
+    hit = tree_for(repo_root / path)
+    if hit is None:
+        raise LeadAuthorError(
+            f"{actor} changed {path}, which no held mount of the lane places; refusing to commit"
+        )
+    held, name = hit
+    got = stat_entry(held.view(), name)
+    if got.st is None or not is_plain_entry(got.st):
+        why = got.reason or ("gone" if got.absent else "a link, a hard link or a FIFO")
+        raise LeadAuthorError(
+            f"{actor} left {path} as something other than a plain file ({why}); "
+            "refusing to commit"
+        )
 
 
 def lane_skills(trees: DrainTrees, paths: _loop_config.LoopPaths) -> Held:

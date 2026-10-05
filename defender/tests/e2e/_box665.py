@@ -317,7 +317,10 @@ class FakeBox:
 
     name: str = "box-665"
     request: Any = None
-    sandboxed: bool = True
+    #: `False`: no real container stands behind it, so the lead lane's freeze (#1178
+    #: `pause_box`/`thawed`) has nothing to pause; `True` would send the real docker after
+    #: a container that does not exist.
+    sandboxed: bool = False
 
 
 class BoxLifecycleRecorder:

@@ -137,7 +137,7 @@ def worktree_package_guard():
 def noop_start_box(request, **_kw):
     """A box lifecycle that starts nothing: these demands are about the learning cycle's
     wiring, not the (separately spec'd) box lifecycle."""
-    return SimpleNamespace(name=getattr(request, "name", "spec791"))
+    return SimpleNamespace(name=getattr(request, "name", "spec791"), sandboxed=False)
 
 
 def noop_stop_box(_box, **_kw) -> None:

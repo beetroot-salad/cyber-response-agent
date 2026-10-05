@@ -14,6 +14,7 @@ import logging
 import string
 import sys
 from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager
 from defender._model import model
 from defender._run_paths import RunPaths
 from pathlib import Path
@@ -38,6 +39,7 @@ from defender.learning.leads import lead_neighbors
 from defender._claim_git import ClaimGit
 from defender.learning.author._config import GIT_TIMEOUT_SECONDS
 from defender.learning.leads import lead_render
+from defender.runtime import box as _box
 from defender.runtime.verbs import engine_for
 
 from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)
@@ -182,6 +184,10 @@ class LeadAuthorDeps:
     #: The bound on each git call over the worktree (the run's `ClaimGit`, #1175): one that
     #: overruns raises `GitOverran`, a systemic `GitError`.
     git_timeout: float = GIT_TIMEOUT_SECONDS
+    #: Lets the box run for the agent's spawn only (#1178): the drain holds it frozen, so every
+    #: other step of the claim — the mint, the gate, the commit — runs beside a box that writes
+    #: nothing.
+    thaw: Callable[[Any], AbstractContextManager[None]] = _box.thawed
 
 
 def build_lead_author_deps(
@@ -353,7 +359,8 @@ def _run_locked(
         f"{len(pending_drafts)} pending system-skill draft(s)"
     )
 
-    rc = deps.invoke_agent(run_dir, handoffs, pending_drafts, box=box)
+    with deps.thaw(box):
+        rc = deps.invoke_agent(run_dir, handoffs, pending_drafts, box=box)
     if rc != 0:
         _logger.critical(f"lead-author spawn exited rc={rc}; see the trace under {run_dir} (drain will quarantine)")
         return 2
