@@ -86,7 +86,7 @@ def held_runs(tenant: Tenant, io: Any) -> Iterator[_io.Held | None]:
         yield None
         return
     except OSError as exc:
-        raise TenantRefused(f"the runs folder {runs} {_hold_fault(exc)}") from None
+        raise TenantRefused(f"the runs folder {escaped(runs)} {_hold_fault(exc)}") from None
     try:
         yield held
     finally:
