@@ -677,7 +677,7 @@ def cell(name, root):
                 out["answer"] = repr(taken)
         elif name == "read":
             out["answer"] = repr(state.rows(S.coined("FINDINGS")))
-    except Exception as e:
+    except BaseException as e:  # a refusal is not an `Exception`
         out.update(raised=type(e).__name__, errno=getattr(e, "errno", None),
                    refusal=S.is_refusal(e), oserror=isinstance(e, OSError))
     return out

@@ -11,12 +11,13 @@ seeds its own scratch tree by path; neither is a record of this handle.
 
 A planted link, hard link, FIFO, or a folder where a file belongs, anywhere below the root is
 refused as `StateRefused`, never followed and never read as absent (the display verbs below
-turn it into an unreadable count instead of raising). `StateRefused` is not an
-`OSError` (today's `except OSError` arms must not swallow it) and is a member of
-`faults.SYSTEMIC_FAULTS`, so a drain tick stops and exits 2. The queue page, the run-end enqueue
-and the judge are the declared exemptions: the display verbs convert it to an unreadable count
-for the page, `run_common.enqueue_curation` catches it at the run-end enqueue, and
-`branch/cli._grade` catches it for the judge. Ordinary I/O errors
+turn it into an unreadable count instead of raising). `StateRefused` is not an `Exception`,
+so no `except OSError` or `except Exception` arm swallows it, and it is a member of
+`faults.SYSTEMIC_FAULTS`, so a drain tick stops and exits 2. Only an arm that names it catches
+it: the queue page, the run-end enqueue, the judge and the eval harness are the declared
+exemptions (the display verbs convert it to an unreadable count for the page,
+`run_common.enqueue_curation` catches it at the run-end enqueue, `branch/cli._grade` for the
+judge, `evals/harness.run_author` for the harness). Ordinary I/O errors
 keep today's routes. A link at or above the root is operator configuration and is followed once,
 at `open`.
 
@@ -37,7 +38,7 @@ import json
 import logging
 import os
 from functools import partial
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -68,14 +69,15 @@ _T = TypeVar("_T")
 STATE_DIR_ENV = "DEFENDER_LEARNING_STATE_DIR"
 
 
-class StateRefused(Exception):  # noqa: N818 — named for the refusal it reports, like `NotPlainEntry`
+class StateRefused(BaseException):  # noqa: N818 — named for the refusal it reports, like `NotPlainEntry`
     """An entry below the state root the handle will not follow: a link, a hard link, a FIFO, a
     folder where a file belongs, a linked or non-folder holding folder.
 
-    Deliberately not an `OSError`: every `except OSError` arm between a verb and its entry point
-    (`_run_curator_module`, the stuck recorders, the run-end enqueue's own) would otherwise
-    swallow a refusal as an ordinary fault. It is a `SYSTEMIC_FAULTS` member instead, so the
-    stage runner stops the tick and names `record`.
+    Deliberately not an `Exception`, like `KeyboardInterrupt`: every broad arm between a verb and
+    its entry point (`_run_curator_module`'s `except OSError`, the stuck recorders' and the
+    curator containment's `except Exception`) would otherwise swallow a refusal as an ordinary
+    fault, and each new one would need its own re-raise. Only an arm that names it catches it.
+    It is a `SYSTEMIC_FAULTS` member, so the stage runner stops the tick and names `record`.
 
     `record` is the record the operation named (an absolute path string, for the operator);
     `reason` is why it was refused."""
@@ -246,12 +248,10 @@ class PendingDelivery:
     batch_id: str
 
 
-def _is_stamped_copy(row: dict, entry: dict) -> bool:
-    """`entry` is `row` as the batch stamped it: the same fields once the stamps (`consumed_*`,
-    `attempts`) are set aside. Exact, so an empty row, or a row that is merely a subset of a
-    handled one, is not mistaken for it."""
-    return {k: v for k, v in entry.items()
-            if not k.startswith("consumed_") and k != "attempts"} == row
+def canonical_row(row: dict) -> str:
+    """One spelling of a row's whole content, stable across ticks and processes: how a row with
+    no id is recognised (`rotate`'s `drop`) and named (`drain._stuck_row_ids`)."""
+    return json.dumps(row, sort_keys=True, default=str)
 
 
 @dataclass(frozen=True)
@@ -563,11 +563,12 @@ class LearningState:
 
     def rotate(
         self, channel: Channel, held: list[dict], consumed: list[dict], commit_sha: str | None,
-        *, timeout: float | None = None,
+        *, drop: Sequence[dict] = (), timeout: float | None = None,
     ) -> None:
         """The locked rewrite: under the channel's append lock (`timeout` a deadline, `None` blocks),
         replace the queue with `held` plus whatever was appended since the batch's read (a row
-        the batch already handled is dropped: by id, or by its content when it has no id), then append `consumed` to the ledger.
+        the batch already handled is dropped: by id, or, for a row with no id, when it is exactly
+        one of the rows as read that `drop` names), then append `consumed` to the ledger.
 
         Both files are judged before either is written, so a refused ledger stops the rotate
         with the queue untouched (D8). The crash window between the replace and the append is
@@ -578,18 +579,16 @@ class LearningState:
             self._judge(channel.queue)
             self._judge(channel.consumed)
             # Always merges: a non-merging rewrite would drop rows appended between the batch's
-            # read and its rewrite. The drain routes keyless rows here so they leave: a keyless
-            # row has no id to match, so it is matched by its content (a handled entry is the
-            # queued row plus whatever the batch stamped on it), and never makes `None` a
-            # "handled id". A different keyless row appended since the read stays queued.
-            handled = [*held, *consumed]
-            processed = {e[key] for e in handled if e.get(key) is not None}
-            keyless = [e for e in handled if e.get(key) is None]
+            # read and its rewrite. A row with no id has nothing to match by, so the caller names
+            # it as it read it (`drop`) and it leaves only on exact content; a different keyless
+            # row appended since the read stays queued, and `None` is never a "handled id".
+            processed = {e[key] for e in [*held, *consumed] if e.get(key) is not None}
+            dropped = {canonical_row(r) for r in drop}
             current = self._read_rows(channel.queue)[0]
             survivors = list(held) + [
                 r for r in current
                 if (r[key] not in processed if r.get(key) is not None
-                    else not any(_is_stamped_copy(r, e) for e in keyless))]
+                    else canonical_row(r) not in dropped)]
             self._write(channel.queue, "".join(json.dumps(e) + "\n" for e in survivors),
                         "replace")
             if consumed:

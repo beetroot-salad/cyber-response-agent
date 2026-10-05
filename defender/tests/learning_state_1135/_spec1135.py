@@ -292,7 +292,10 @@ def caught(fn: Callable[[], Any]) -> BaseException | None:
     """Run `fn`; the exception it raised, or None. The test asserts on what escaped."""
     try:
         fn()
-    except Exception as e:  # noqa: BLE001 — the test classifies what escaped, not this helper
+    except KeyboardInterrupt:
+        raise
+    # `BaseException`: a refusal is not an `Exception`, and it is what most tests expect to escape.
+    except BaseException as e:  # noqa: BLE001 — the test classifies what escaped, not this helper
         return e
     return None
 

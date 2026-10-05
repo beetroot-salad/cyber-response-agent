@@ -210,10 +210,6 @@ def _has_lead_author_work(state: LearningState) -> bool:
     return pitfalls_lane_is_open(merge_pitfalls(read_pitfalls(state)), threshold)
 
 
-#: What a curator's containment re-raises untouched: the retirement faults and the handle's refusal.
-_RERAISE: tuple[type[BaseException], ...] = (*drain.RETIRE_SET, StateRefused)
-
-
 def _drain_one_curator(
     paths: LoopPaths, state: LearningState, trigger_author: Callable[..., None],
     channel: Channel, threshold_env: str, module_name: str, pending_label: str, *, box: Any,
@@ -221,35 +217,46 @@ def _drain_one_curator(
     """Run one curator, containing its fault to its own channel.
 
     `trigger_author` is a caller-supplied seam whose exception discipline can't be assumed, so
-    the isolation lives here. A `RETIRE_SET` fault propagates; so does a `StateRefused` (a
-    planted entry below the state root stops the whole tick, and recording it stuck would write
-    after the refusal); anything else is recorded on this channel's stuck report and swallowed,
-    so the sibling curator still runs."""
+    the isolation lives here. A `RETIRE_SET` fault propagates; so does a `StateRefused`, which no
+    `Exception` arm catches (a planted entry below the state root stops the whole tick, and
+    recording it stuck would write after the refusal); anything else is recorded on this
+    channel's stuck report and swallowed, so the sibling curator still runs."""
     # `run_batch` already records non-`RETIRE_SET` faults before re-raising. A second record
     # here, with a different row set, would reset `consecutive_ticks` every tick, so the count
     # tells "already recorded" from "raised above `run_batch`, recorded nowhere".
     recorded_before = state.stuck_count(channel)
+    fault: BaseException | None = None
     try:
         trigger_author(
             paths, state, channel, threshold_env, module_name, pending_label, box=box)
-    except _RERAISE:
+    except drain.RETIRE_SET:
         raise
-    # An interrupt leaves at once; swallowing it would record Ctrl-C as a curator fault, run
-    # the sibling curator, and go on to commit, push and open a PR for the batch the operator
-    # asked to stop.
+    # An interrupt is not in the arm below, so it leaves at once: swallowing it would record
+    # Ctrl-C as a curator fault, run the sibling curator, and go on to commit, push and open a
+    # PR for the batch the operator asked to stop.
     #
     # `SystemExit` is contained, since it is not an interrupt: escaping would skip the sibling
     # curator and unwind past `finish_batch`, discarding the first curator's authored lessons
     # with nothing recorded on either channel.
-    except KeyboardInterrupt:
-        raise
     except (Exception, SystemExit) as e:  # noqa: BLE001 — every other fault class is recorded, never silently swallowed
+        fault = e
+    if fault is None:
+        return
+    # Recorded after the arm has closed: the fault is contained, not displaced, so a refusal met
+    # while recording it carries no `__context__` for the stage runner to report as displaced.
+    # An ordinary failure to record is logged, never raised: this frame must not raise on a
+    # non-retiring fault, the recording's own included.
+    try:
         already = state.stuck_count(channel) > recorded_before
         if not already:
-            drain.record_stuck(state, channel, e, state.rows(channel))
-        _logger.error(f"{module_name}: {type(e).__name__} took this curator out of the tick "
-                      f"({'already recorded in' if already else 'recorded to'} "
-                      f"{channel.name}'s stuck report); the other curator still ran")
+            drain.record_stuck(state, channel, fault, state.rows(channel))
+    except Exception as unrecorded:  # noqa: BLE001 — never replaces the contained fault
+        _logger.error(f"{module_name}: stuck record NOT written: {unrecorded!r} (the fault "
+                      f"itself: {fault!r})")
+        return
+    _logger.error(f"{module_name}: {type(fault).__name__} took this curator out of the tick "
+                  f"({'already recorded in' if already else 'recorded to'} "
+                  f"{channel.name}'s stuck report); the other curator still ran")
 
 
 def _drain_curators(

@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import hashlib
 import itertools
-import json
 import logging
 import uuid
 from collections.abc import Callable
@@ -72,6 +71,7 @@ from defender.learning.core.state import (
     Channel,
     LearningState,
     StateRefused,
+    canonical_row,
     retirement_stamp,
 )
 from defender._tree_listing import entry_kind
@@ -374,8 +374,6 @@ def run_batch(
             # silently.
             try:
                 _record_stuck(state, channel, e, [])
-            except StateRefused:
-                raise
             except Exception as unrecorded:  # noqa: BLE001 — never replaces `e`
                 log.error(f"stuck record NOT written: {unrecorded!r} (the fault itself follows)")
             return 2
@@ -450,8 +448,6 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
             # planted entry stops the tick, and nothing is recorded after it.
             try:
                 _record_stuck(state, channel, e, stuck_rows)
-            except StateRefused:
-                raise
             except Exception as unrecorded:  # noqa: BLE001 — see above; never replaces `e`
                 log.error(f"stuck record NOT written: {unrecorded!r} (the fault itself follows)")
         raise
@@ -860,8 +856,6 @@ def _handle_retire(
     if survivors:
         try:
             _record_stuck(cfg.state, channel, e, survivors)
-        except StateRefused:
-            raise
         except Exception as unrecorded:  # noqa: BLE001 — never replaces `e`
             log.error(f"stuck record NOT written: {unrecorded!r} (the fault itself follows)")
     return 2
@@ -1244,8 +1238,8 @@ def _retire_unkeyable(
     well-formed batch-mates are authored this tick.
 
     Not left to the closing rotation, which never runs on a retiring or stuck tick. A keyless
-    row can't be matched by id, so `rotate` matches it by content: this rotation removes these
-    rows and keeps any other keyless row appended meanwhile.
+    row can't be matched by id, so this rotation names the rows as read (`drop`) and `rotate`
+    removes exactly those, keeping any other keyless row appended meanwhile.
 
     The record is flat (row content at top level, not nested under `row` as `retire` writes
     it), since there is no id to reference; consumers must branch on the presence of `row`."""
@@ -1261,7 +1255,7 @@ def _retire_unkeyable(
     state.rotate(
         channel, [],
         [{**row, "consumed_category": "consumed_retired"} for row in rows],
-        None, timeout=timeout_seconds,
+        None, drop=rows, timeout=timeout_seconds,
     )
 
 
@@ -1286,9 +1280,7 @@ def _stuck_row_ids(channel: Channel, rows: list[dict]) -> list[str]:
         if rid is not None:
             named.append(rid)
             continue
-        digest = hashlib.sha256(
-            json.dumps(row, sort_keys=True, default=str).encode("utf-8")
-        ).hexdigest()
+        digest = hashlib.sha256(canonical_row(row).encode("utf-8")).hexdigest()
         named.append(f"unkeyed:{digest[:16]}")
     return sorted(named)
 
