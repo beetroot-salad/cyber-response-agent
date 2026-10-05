@@ -4,8 +4,8 @@ max).
 The PR first read the runs base through `_tenant.runs_base_for(tenant)`, a helper returning a
 bare `Path`, so the owner lint no longer knew the value came from the tenant: an unchecked
 `runs_base / <name>` planted in `run_common.materialize_run` went unreported. Production code
-now reads `tenant.runs`, which the lint tags where it knows the tenant (#1160 covers the
-sites whose tenant comes from a local factory).
+now reads `tenant.runs`, which the lint tags where it knows the tenant — and, since #1160, where
+the tenant comes from a same-module factory (a top-level def annotated `-> RunTenant`).
 """
 from __future__ import annotations
 
@@ -20,10 +20,12 @@ from defender.tests._by_path import load_lint_gate
 _DEFENDER = Path(__file__).resolve().parents[1]
 
 #: (the module, the line its runs base is bound on, the name the planted join appends).
-#: `materialize_run`'s `tenant` is an annotated parameter, which the lint tags. The launcher's
-#: tenant comes from a local factory it does not follow yet (#1160).
+#: `materialize_run`'s `tenant` is an annotated parameter, which the lint tags. The branch
+#: launcher's tenant is `_episode_tenant(...)`, a same-module `-> RunTenant` factory the lint
+#: follows since #1160.
 _SITES = [
     ("run_common.py", "        runs_base = tenant.runs\n", "run_id"),
+    ("learning/branch/cli.py", "    runs_base = tenant.tenant.runs\n", "run_id"),
 ]
 
 
