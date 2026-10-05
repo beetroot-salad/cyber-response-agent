@@ -107,44 +107,17 @@ jobs:
             | tr ' ' '\n' | grep -qx runsc
 
 
-      - name: Probe runsc host-process limits and paused rm
-        continue-on-error: true
+      - name: Paused runsc rm -f, then a retry
         run: |
-          set -x
           docker pull -q python:3.11-slim
-          for lim in none fsize; do
-            for i in 1 2 3 4 5; do
-              args=(); [ $lim = fsize ] && args=(--ulimit fsize=67108864:67108864)
-              docker run -d --name p-$lim-$i --runtime runsc --network none "${args[@]}" python:3.11-slim sleep 300 >/dev/null
-              sleep 1
-              if [ $i = 1 ]; then
-                for p in $(pgrep -f "runsc.*p-$lim-$i" ; pgrep -f runsc-gofer; pgrep -f runsc-sandbox); do
-                  echo "== $lim pid=$p $(tr '\0' ' ' </proc/$p/cmdline | cut -c1-160)"; sudo grep -i "file size" /proc/$p/limits
-                done | sort -u
-              fi
-              docker exec -d p-$lim-$i sh -c 'while :; do printf X >> /tmp/x; sleep 0.05; done'
-              sleep 0.5; docker pause p-$lim-$i; sleep 0.5
-              docker unpause p-$lim-$i; sleep 0.3; docker pause p-$lim-$i
-              out=$(docker rm -f p-$lim-$i 2>&1); echo "RESULT $lim $i rc=$? $out"
-            done
-          done
-          ps -eo pid,ppid,stat,cmd | grep -E " Z|runsc" | grep -v grep | head -40
-      - name: test_1178 x6 with the fsize ulimit (this branch)
-        continue-on-error: true
-        working-directory: defender
-        run: |
-          for i in 1 2 3 4 5 6; do
-            uv run pytest tests/test_1178_frozen_box.py -q -p no:cacheprovider 2>&1 | tail -1 | sed "s/^/WITH $i: /"
-            docker ps -a --format '{{.Names}} {{.Status}}' | grep t1178 | sed "s/^/LEFT $i: /"
-          done
-          for c in $(docker ps -a --format '{{.Names}}' | grep t1178); do
-            pid=$(docker inspect -f '{{.State.Pid}}' $c); echo "== $c pid=$pid"; ps -o pid,ppid,stat,wchan:32,cmd -p $pid; ps -eo pid,ppid,stat,cmd | awk -v p=$pid '$2==p'; sudo grep -i "file size" /proc/$pid/limits
-          done
-      - name: test_1178 x6 without it (main's box package)
-        continue-on-error: true
-        working-directory: defender
-        run: |
-          git checkout origin/main -- runtime/box/
-          for i in 1 2 3 4 5 6; do
-            uv run pytest tests/test_1178_frozen_box.py -q -p no:cacheprovider 2>&1 | tail -1 | sed "s/^/WITHOUT $i: /"
+          for i in 1 2 3 4 5 6 7 8; do
+            n=p-$i
+            docker run -d --name $n --runtime runsc --network none python:3.11-slim sleep 300 >/dev/null
+            docker exec -d $n sh -c 'while :; do printf X >> /tmp/x; sleep 0.05; done'
+            sleep 0.5; docker pause $n
+            out=$(docker rm -f $n 2>&1); rc=$?
+            st=$(docker inspect -f '{{.State.Status}}' $n 2>&1)
+            echo "RESULT1 $i rc=$rc status=$st"
+            if [ $rc -ne 0 ]; then out2=$(docker rm -f $n 2>&1); echo "RESULT2 $i rc=$? $out2"; fi
+            docker inspect $n >/dev/null 2>&1 && echo "STILL-THERE $i" || echo "GONE $i"
           done
