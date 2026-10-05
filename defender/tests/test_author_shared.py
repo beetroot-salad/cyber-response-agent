@@ -24,6 +24,9 @@ import pytest
 from defender import _flock
 from defender import _git  # type: ignore[import-not-found]
 from defender.learning.author import shared as shared  # type: ignore[import-not-found]
+from defender.learning.core import state as state_mod
+from defender.learning.core.state import TRY_ONCE, LockRole
+from defender.tests import _state1135
 from defender.tests._repo import head_files, head_message, seed_repo
 
 
@@ -237,27 +240,30 @@ def test_result_list_normalizes_and_validates():
         shared.result_list({"committed": "x"}, "committed")
 
 
+def _role(name: str = ".lock") -> LockRole:
+    return LockRole("test-role", name, _flock.FAST_POLL)
+
+
 def test_flock_or_skip_acquires_then_releases(tmp_path: Path):
-    """Yields True when uncontended, mkdir's the parent, and releases on exit."""
-    lock = tmp_path / "sub" / ".lock"
-    with shared.flock_or_skip(lock) as locked:
+    """Yields True when uncontended, makes the holding folder, and releases on exit.
+    (Re-spelled from `shared.flock_or_skip` onto the handle's `lock(role, wait=TRY_ONCE)`.)"""
+    state = _state1135.state_over(tmp_path / "root")
+    role = _role("sub/.lock")
+    with state.lock(role, wait=TRY_ONCE) as locked:
         assert locked is True
-        assert lock.parent.is_dir()
-    fh = shared.acquire_flock(lock)
-    assert fh is not None
-    shared.release_flock(fh)
+        assert (tmp_path / "root" / "sub").is_dir()
+    with state.lock(role, wait=TRY_ONCE) as again:
+        assert again is True
 
 
 def test_flock_or_skip_yields_false_when_held(tmp_path: Path):
     """A second entrant on a held lock yields False (skip) rather than blocking."""
-    lock = tmp_path / ".lock"
-    holder = shared.acquire_flock(lock)
-    assert holder is not None
-    try:
-        with shared.flock_or_skip(lock) as locked:
+    state = _state1135.state_over(tmp_path / "root")
+    role = _role()
+    with state.lock(role, wait=TRY_ONCE) as holder:
+        assert holder is True
+        with state.lock(role, wait=TRY_ONCE) as locked:
             assert locked is False
-    finally:
-        shared.release_flock(holder)
 
 
 def test_flock_or_skip_propagates_non_contention_oserror(tmp_path: Path, monkeypatch):
@@ -265,42 +271,40 @@ def test_flock_or_skip_propagates_non_contention_oserror(tmp_path: Path, monkeyp
     swallowed as contention. This is the contract #367 standardized on: only
     ``BlockingIOError`` means "someone else holds it"; everything else is a real
     error the caller should see, not a silent skip."""
-    lock = tmp_path / ".lock"
+    state = _state1135.state_over(tmp_path / "root")
 
     def _no_locks(_fd, _op):
         raise OSError(errno.ENOLCK, "No locks available")
 
     monkeypatch.setattr(_flock.fcntl, "flock", _no_locks)
-    with pytest.raises(OSError, match="No locks available") as excinfo, shared.flock_or_skip(lock):
+    with pytest.raises(OSError, match="No locks available") as excinfo, \
+            state.lock(_role(), wait=TRY_ONCE):
         pass
     assert excinfo.value.errno == errno.ENOLCK
 
 
 def test_acquire_flock_closes_handle_when_error_propagates(tmp_path: Path, monkeypatch):
     """The fail-loud path (e.g. ENOLCK) must still close the lock-file handle:
-    propagating must not leak the fd. The propagating traceback pins
-    ``acquire_flock``'s frame (whose ``fh`` local references the handle), so
-    without an explicit close the fd lingers — the inline dances this replaced
-    closed it in their ``finally``. ``flock_or_skip`` can't recover it either, as
-    ``acquire_flock`` raises before its ``try``/``finally`` is entered."""
-    lock = tmp_path / ".lock"
+    propagating must not leak the fd. (Re-spelled onto `LearningState.lock`, which opens
+    the lock file through `open_lock_at`; the handle that call returned is the one tracked.)"""
+    state = _state1135.state_over(tmp_path / "root")
     opened: list = []
-    real_open = Path.open
+    real_open = state_mod.open_lock_at
 
-    def _tracking_open(self, *a, **k):
-        fh = real_open(self, *a, **k)
+    def _tracking_open(held, name):
+        fh = real_open(held, name)
         opened.append(fh)
         return fh
 
     def _no_locks(_fd, _op):
         raise OSError(errno.ENOLCK, "No locks available")
 
-    monkeypatch.setattr(Path, "open", _tracking_open)
+    monkeypatch.setattr(state_mod, "open_lock_at", _tracking_open)  # lint-monkeypatch: ok — an fd-leak spy on the module-level lock opener; the handle has no seam for it
     monkeypatch.setattr(_flock.fcntl, "flock", _no_locks)
-    with pytest.raises(OSError, match="No locks available"):
-        shared.acquire_flock(lock)
-    assert opened, "acquire_flock never opened the lock file"
-    assert all(fh.closed for fh in opened), "acquire_flock leaked the lock-file handle"
+    with pytest.raises(OSError, match="No locks available"), state.lock(_role(), wait=TRY_ONCE):
+        pass
+    assert opened, "the handle never opened the lock file"
+    assert all(fh.closed for fh in opened), "the handle leaked the lock-file handle"
 
 
 # content-less gates — the #722 defect class on the author's own result fields

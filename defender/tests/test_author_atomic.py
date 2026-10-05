@@ -5,13 +5,13 @@ import json
 from dataclasses import replace
 
 from defender._io import read_jsonl_rows
-from defender.learning.author import shared
+from defender.learning.core.state import CURATOR_DRAIN_LOCK, FINDINGS, TRY_ONCE
 
 
 def test_agent_exception_leaves_queue_intact(tmp_repo, helpers, monkeypatch):
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-K", "benign")
-    helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-K/0", run_id="run-K")
+    helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-K/0", run_id="run-K")
 
     def boom(findings, batch_id, cfg):
         raise a.AuthorError("simulated agent failure")
@@ -19,14 +19,13 @@ def test_agent_exception_leaves_queue_intact(tmp_repo, helpers, monkeypatch):
     cfg = replace(tmp_repo.cfg, invoke_agent=boom)
     rc = a.run_batch(cfg=cfg)
     assert rc == 2
-    rows = read_jsonl_rows(tmp_repo.paths.pending_file)
+    rows = read_jsonl_rows(tmp_repo.paths.state_root / FINDINGS.queue)
     assert {r["finding_id"] for r in rows} == {"run-K/0"}, "queue must survive agent failure"
     assert [r.get("attempts") for r in rows] == [1]
-    assert not tmp_repo.paths.pending_file.with_suffix(".deadletter.jsonl").exists()
+    assert not (tmp_repo.paths.state_root / FINDINGS.deadletter).exists()
 
-    fh = shared.acquire_flock(tmp_repo.cfg.channel.drain_lock)
-    assert fh is not None
-    shared.release_flock(fh)
+    with tmp_repo.state.lock(CURATOR_DRAIN_LOCK, wait=TRY_ONCE) as taken:
+        assert taken, "the drain lock must be free after the failed tick"
 
 
 def test_dlq_quarantines_poison_findings_batch(tmp_repo, helpers, monkeypatch):
@@ -40,7 +39,7 @@ def test_dlq_quarantines_poison_findings_batch(tmp_repo, helpers, monkeypatch):
     # VAR outlives the retired module constant of the same name (#717).
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-P", "benign")
-    helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-P/0", run_id="run-P")
+    helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-P/0", run_id="run-P")
 
     def boom(findings, batch_id, cfg):
         raise a.AuthorError("simulated per-run authoring fault")
@@ -49,8 +48,8 @@ def test_dlq_quarantines_poison_findings_batch(tmp_repo, helpers, monkeypatch):
     for _ in range(3):
         assert a.run_batch(cfg=fault_cfg) == 2
 
-    assert read_jsonl_rows(tmp_repo.paths.pending_file) == []
-    dead = read_jsonl_rows(tmp_repo.paths.pending_file.with_suffix(".deadletter.jsonl"))
+    assert read_jsonl_rows(tmp_repo.paths.state_root / FINDINGS.queue) == []
+    dead = read_jsonl_rows(tmp_repo.paths.state_root / FINDINGS.deadletter)
     assert {r["finding_id"] for r in dead} == {"run-P/0"}
     assert dead[0]["attempts"] == 3
     assert "simulated per-run authoring fault" in dead[0]["deadletter_reason"]
@@ -60,7 +59,7 @@ def test_idempotent_retry_after_partial_failure(tmp_repo, helpers, monkeypatch):
     """First tick fails inside the agent. Second tick retries cleanly."""
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-R", "benign")
-    helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-R/0", run_id="run-R")
+    helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-R/0", run_id="run-R")
 
     state = {"calls": 0}
 
@@ -83,9 +82,9 @@ def test_idempotent_retry_after_partial_failure(tmp_repo, helpers, monkeypatch):
 
     cfg = replace(tmp_repo.cfg, invoke_agent=maybe_fail)
     assert a.run_batch(cfg=cfg) == 2
-    assert "run-R/0" in tmp_repo.paths.pending_file.read_text()
+    assert "run-R/0" in (tmp_repo.paths.state_root / FINDINGS.queue).read_text()
     assert a.run_batch(cfg=cfg) == 0
-    assert tmp_repo.paths.pending_file.read_text().strip() == ""
+    assert (tmp_repo.paths.state_root / FINDINGS.queue).read_text().strip() == ""
 
 
 def _commit_lesson(tmp_repo, a, *, name: str, fid: str):
@@ -111,16 +110,16 @@ def test_hold_committed_keeps_findings_queued_until_corpus_covers_them(
     and rotates it out without re-authoring."""
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-H", "benign")
-    helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-H/0", run_id="run-H")
+    helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-H/0", run_id="run-H")
 
     cfg = replace(
         tmp_repo.cfg, invoke_agent=_commit_lesson(tmp_repo, a, name="lessonH", fid="run-H/0")
     )
     assert a.run_batch(hold_committed=True, cfg=cfg) == 0
-    assert "run-H/0" in tmp_repo.paths.pending_file.read_text()
-    consumed = tmp_repo.cfg.channel.consumed.read_text() if tmp_repo.cfg.channel.consumed.exists() else ""
+    assert "run-H/0" in (tmp_repo.paths.state_root / FINDINGS.queue).read_text()
+    consumed = (tmp_repo.paths.state_root / FINDINGS.consumed).read_text() if (tmp_repo.paths.state_root / FINDINGS.consumed).exists() else ""
     assert "run-H/0" not in consumed
-    held_row = json.loads(tmp_repo.paths.pending_file.read_text().splitlines()[0])
+    held_row = json.loads((tmp_repo.paths.state_root / FINDINGS.queue).read_text().splitlines()[0])
     assert "consumed_category" not in held_row
 
     def must_not_author(findings, batch_id, cfg):
@@ -128,8 +127,8 @@ def test_hold_committed_keeps_findings_queued_until_corpus_covers_them(
 
     cfg = replace(tmp_repo.cfg, invoke_agent=must_not_author)
     assert a.run_batch(hold_committed=True, cfg=cfg) == 0
-    assert tmp_repo.paths.pending_file.read_text().strip() == ""
-    assert "run-H/0" in tmp_repo.cfg.channel.consumed.read_text()
+    assert (tmp_repo.paths.state_root / FINDINGS.queue).read_text().strip() == ""
+    assert "run-H/0" in (tmp_repo.paths.state_root / FINDINGS.consumed).read_text()
 
 
 def test_default_rotate_consumes_committed_immediately(tmp_repo, helpers, monkeypatch):
@@ -137,10 +136,10 @@ def test_default_rotate_consumes_committed_immediately(tmp_repo, helpers, monkey
     straight to consumed.jsonl, as before this change."""
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-D", "benign")
-    helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-D/0", run_id="run-D")
+    helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-D/0", run_id="run-D")
     cfg = replace(
         tmp_repo.cfg, invoke_agent=_commit_lesson(tmp_repo, a, name="lessonD", fid="run-D/0")
     )
     assert a.run_batch(cfg=cfg) == 0
-    assert tmp_repo.paths.pending_file.read_text().strip() == ""
-    assert "run-D/0" in tmp_repo.cfg.channel.consumed.read_text()
+    assert (tmp_repo.paths.state_root / FINDINGS.queue).read_text().strip() == ""
+    assert "run-D/0" in (tmp_repo.paths.state_root / FINDINGS.consumed).read_text()

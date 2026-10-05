@@ -12,7 +12,6 @@ from uuid import uuid4
 if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender.learning.author import shared as _author_shared
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import ENTRY_DIR, ENTRY_FILE, Bound
 from defender._tree_listing import list_tree
@@ -58,17 +57,10 @@ from defender.learning.leads.lead_extraction import (  # noqa: F401  (re-exporte
     extract,
     extract_from_joined,
 )
-from defender.learning.leads._lead_spine import (
-    PENDING_DIR,
-    _spawn_author_agent,
-)
+from defender.learning.leads._lead_spine import _spawn_author_agent
 
 _logger = logging.getLogger(__name__)
 
-
-#: The per-author queue lock under DEFAULT_PATHS — what the CLI locks. `queue_lock_file(paths)`
-#: gives it for any `LoopPaths`, so the drain and a by-hand run contend on one file.
-QUEUE_LOCK_FILE = PENDING_DIR / ".lock"
 
 #: What `run` returns when it did not serve because another tick holds the queue lock. Not 0,
 #: or the drain would delete the claimed request as served; not 2, since it isn't a fault and
@@ -79,30 +71,6 @@ LEAD_AUTHOR_PROMPT = LEARNING_DIR / "leads" / "lead_author.md"  # lint-run-recor
 
 def _lift_threshold() -> int:
     return _loop_config.env_int("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", 5)
-
-
-
-
-def queue_lock_file(paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS) -> Path:
-    return paths.lead_pending_dir / ".lock"
-
-
-def acquire_queue_lock(paths: _loop_config.LoopPaths = _loop_config.DEFAULT_PATHS) -> Any:
-    lock = queue_lock_file(paths)
-    _logger.debug(f"acquire queue-lock={lock}")
-    fh = _author_shared.acquire_flock(lock)
-    if fh is None:
-        _logger.info("queue-lock held by another tick — skipping")
-        return None
-    _logger.debug("queue-lock acquired")
-    return fh
-
-
-def release_queue_lock(fh: Any) -> None:
-    if fh is None:
-        return
-    _author_shared.release_flock(fh)
-    _logger.debug("release queue-lock")
 
 
 

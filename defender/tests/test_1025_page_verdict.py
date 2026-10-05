@@ -29,9 +29,9 @@ import pytest
 import yaml
 
 from defender.tests import _episode_1025 as E
-from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests import test_1025_stage_timing as ST
+from defender.tests import _state1135
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -45,7 +45,7 @@ TILE_ONE = (f"{S.measuring} of {S.graded} graded measuring · {S.contrasting} of
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def visualize_episode():
@@ -307,7 +307,10 @@ def test_1025_an_episode_with_no_judge_yaml_still_renders_its_stages_and_worlds_
     each — the state 92-reconciliation F-1 executed) render as J9a says: their rows under ONE
     group headed "no grade record — not enqueued", no disposition claimed, band unchanged.
     """
-    (tmp_path / "learning-state").write_text("not a directory", encoding="utf-8")
+    # The handle refuses a root that is not a folder up front (before any draw is paid for),
+    # so the post-draw refusal this scenario needs is the queue's holding folder being a
+    # regular file: the root opens, the draws run, and only the enqueue is refused.
+    (tmp_path / "learning-state" / "_pending").write_text("not a directory", encoding="utf-8")
     launch = ST._launch(tmp_path)
     assert launch.rc == 0
     assert launch.judge.calls > 0

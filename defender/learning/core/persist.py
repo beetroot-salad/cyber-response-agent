@@ -1,101 +1,15 @@
 from __future__ import annotations
 
-import contextlib
-import json
 import re
 import threading
-from pathlib import Path
 
-
-# Aliased to `_lockfile` so this module can keep `_flock` as its own name for `queue_lock`.
-from defender import _flock as _lockfile
-from defender._clock import now_iso
 from defender._text import is_content_less
-from defender._io import append_jsonl, read_jsonl_rows, write_atomic
-from defender.learning.core.config import (
-    DEFAULT_PATHS,
-    LoopPaths,
-)
+from defender.learning.core.state import PITFALLS, LearningState
 # The reducer lane's routing key, imported from its owner so every seam asking "is this the
 # reducer's row" compares the same literal.
 from defender._query_rules import BASH_SHIM_QUERY_ID
 
 
-
-
-@contextlib.contextmanager
-def queue_lock(lock_path: Path, *, timeout_seconds: int | None = None):
-    """Exclusive hold of a queue's append-role lock.
-
-    Appenders pass no deadline: an append that gave up would lose its row, and it only waits
-    on other appenders and the short rewrite window.
-
-    The drain must pass one: it holds the repo lock, which serialises every corpus channel,
-    so a wedged appender would otherwise stall them all. Expiry raises `TimeoutError`, which is
-    outside the drain's retire set: a busy lock isn't the batch's fault, so it is recorded
-    stuck, never bumped.
-    """
-    fh = _lockfile.open_lock(lock_path)
-    try:
-        taken = _lockfile.take(fh, timeout_seconds=timeout_seconds)
-    except BaseException:
-        fh.close()
-        raise
-    if not taken:
-        fh.close()
-        raise TimeoutError(
-            f"queue lock {lock_path} held by an appender for >{timeout_seconds}s"
-        )
-    try:
-        yield
-    finally:
-        _lockfile.release(fh)
-
-
-#: In-module callers and the lock suites reach for this spelling.
-_flock = queue_lock
-
-
-def _rewrite_queue(
-    pending_file: Path,
-    consumed_file: Path,
-    id_key: str,
-    held: list[dict],
-    consumed: list[dict],
-    commit_sha: str | None,
-) -> None:
-    # Always merges: a non-merging rewrite would drop rows appended between the batch's read
-    # and its rewrite. `.get`, since the drain routes keyless rows here so they leave.
-    processed = {e.get(id_key) for e in held} | {e.get(id_key) for e in consumed}
-    current = read_jsonl_rows(pending_file)
-    survivors = list(held) + [r for r in current if r.get(id_key) not in processed]
-    write_atomic(pending_file, "".join(json.dumps(entry) + "\n" for entry in survivors))
-    if consumed:
-        now = now_iso()
-        rows = []
-        for entry in consumed:
-            rec = dict(entry)
-            rec.setdefault("consumed_at", now)
-            if rec.get("consumed_category") == "consumed_committed" and commit_sha:
-                rec["consumed_commit"] = commit_sha
-            rows.append(rec)
-        append_jsonl(consumed_file, rows)
-
-
-def rotate_queue_locked(
-    *,
-    pending_file: Path,
-    consumed_file: Path,
-    lock_file: Path,
-    id_key: str,
-    held: list[dict],
-    consumed: list[dict],
-    commit_sha: str | None,
-    timeout_seconds: int | None = None,
-) -> None:
-    pending_file.parent.mkdir(parents=True, exist_ok=True)
-    with queue_lock(lock_file, timeout_seconds=timeout_seconds):
-        _rewrite_queue(pending_file, consumed_file, id_key, held, consumed, commit_sha)
 
 
 def _slugify(s: str) -> str:
@@ -246,7 +160,7 @@ def pitfalls_lane_is_open(records: list[dict], threshold: int) -> bool:
     return any(is_reducer_row(r) and _occurrences(r) >= threshold for r in records)
 
 
-def append_pitfalls(rows: list[dict], *, paths: LoopPaths = DEFAULT_PATHS) -> int:
+def append_pitfalls(rows: list[dict], *, state: LearningState) -> int:
     """Append the failing rows verbatim, one line per failure; `merge_pitfalls` collapses them
     at the consuming seams.
 
@@ -255,49 +169,23 @@ def append_pitfalls(rows: list[dict], *, paths: LoopPaths = DEFAULT_PATHS) -> in
     """
     if not rows:
         return 0
-    with queue_lock(paths.pitfalls.append_lock):
-        return append_jsonl(paths.pitfalls.file, rows)
+    return state.append(PITFALLS, rows)[0]
 
 
-def read_pitfalls(paths: LoopPaths = DEFAULT_PATHS) -> list[dict]:
-    return read_jsonl_rows(paths.pitfalls.file)
+def read_pitfalls(state: LearningState) -> list[dict]:
+    return state.rows(PITFALLS)
 
 
 def rotate_pitfalls(
-    batch_ids: list[str], commit_sha: str | None, *, paths: LoopPaths = DEFAULT_PATHS,
+    batch_ids: list[str], commit_sha: str | None, *, state: LearningState,
     category: str = "consumed_committed", timeout_seconds: int | None = None,
 ) -> None:
-    """`timeout_seconds` is `queue_lock`'s deadline: the drain passes its configured wait,
+    """`timeout_seconds` is the append lock's deadline: the drain passes its configured wait,
     since it holds the tick's locks meanwhile; a by-hand caller passes none."""
     ids = set(batch_ids)
     consumed = [
         {**r, "consumed_category": category}
-        for r in read_jsonl_rows(paths.pitfalls.file)
+        for r in state.rows(PITFALLS)
         if r.get("pitfall_id") in ids
     ]
-    rotate_queue_locked(
-        pending_file=paths.pitfalls.file,
-        consumed_file=paths.pitfalls.consumed,
-        lock_file=paths.pitfalls.append_lock,
-        id_key=paths.pitfalls.id_key,
-        held=[],
-        consumed=consumed,
-        commit_sha=commit_sha,
-        timeout_seconds=timeout_seconds,
-    )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    state.rotate(PITFALLS, [], consumed, commit_sha, timeout=timeout_seconds)

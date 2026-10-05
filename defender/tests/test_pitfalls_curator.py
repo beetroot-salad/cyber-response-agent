@@ -32,10 +32,12 @@ import pytest
 from defender.tests._claim1175 import claim_git
 from defender.learning.leads import pitfalls_curator  # type: ignore[import-not-found]
 from defender.learning.leads.lead_extraction import LeadAuthorError  # type: ignore[import-not-found]
-from defender.learning.core import config, persist  # type: ignore[import-not-found]
+from defender.learning.core import persist  # type: ignore[import-not-found]
 from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
 from defender.tests._repo import seed_skills_repo
+from defender.tests._curator1134 import open_state
 from defender.tests._lead_author_1134 import lane_tree_for, lead_trees
+from defender.learning.core.state import LEAD_QUEUE_LOCK, PITFALLS
 
 
 
@@ -159,7 +161,7 @@ def test_verify_pitfalls_state_returns_sorted_changed(tmp_git_repo: Path):
 
 
 
-def _seed_pitfalls(paths, n: int) -> None:
+def _seed_pitfalls(state, n: int) -> None:
     """``n`` queued pitfalls, each a DISTINCT mistake — one `stderr_digest` per row, since
     #840 collapses repeats of one digest into a single record and the threshold counts
     records. These cases are about the gate and the rotation, not the collapse."""
@@ -174,28 +176,30 @@ def _seed_pitfalls(paths, n: int) -> None:
             }
             for i in range(n)
         ],
-        paths=paths,
+        state=state,
     )
 
 
 def test_run_pitfalls_below_threshold_is_noop(tmp_git_repo: Path, tmp_path: Path, monkeypatch):
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "5")
     paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
-    _seed_pitfalls(paths, 2)
+    state = open_state(paths)
+    _seed_pitfalls(state, 2)
     called = []
-    rc = pitfalls_curator.run_pitfalls(paths=paths, invoke=lambda *a, **k: called.append(1) or 0,
+    rc = pitfalls_curator.run_pitfalls(paths=paths, state=state, invoke=lambda *a, **k: called.append(1) or 0,
                                        trees=lead_trees(paths))
     assert rc == 0
     assert called == []
-    assert len(persist.read_pitfalls(paths)) == 2
+    assert len(persist.read_pitfalls(state)) == 2
 
 
 def test_run_pitfalls_at_threshold_commits_and_rotates(tmp_git_repo: Path, tmp_path: Path, monkeypatch):
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
-    _seed_pitfalls(paths, 2)
+    state = open_state(paths)
+    _seed_pitfalls(state, 2)
 
-    def fake_invoke(handoffs, *, repo_root, box=None):
+    def fake_invoke(handoffs, *, state, repo_root, box=None):
         assert handoffs[0]["system"] == "elastic"
         assert handoffs[0]["path"] == "defender/skills/elastic/execution.md"
         assert len(handoffs[0]["failures"]) == 2
@@ -204,12 +208,12 @@ def test_run_pitfalls_at_threshold_commits_and_rotates(tmp_git_repo: Path, tmp_p
         p.write_text("# elastic\n## Common pitfalls\n- use `index=windows`, not `index:windows`\n")
         return 0
 
-    rc = pitfalls_curator.run_pitfalls(paths=paths, invoke=fake_invoke, trees=lead_trees(paths))
+    rc = pitfalls_curator.run_pitfalls(paths=paths, state=state, invoke=fake_invoke, trees=lead_trees(paths))
     assert rc == 0
     log = _run_git(tmp_git_repo, "log", "--oneline", "-1").stdout
     assert "execution.md pitfalls" in log
-    assert persist.read_pitfalls(paths) == []
-    consumed = [json.loads(ln) for ln in paths.pitfalls.consumed.read_text().splitlines()]
+    assert persist.read_pitfalls(state) == []
+    consumed = [json.loads(ln) for ln in (paths.state_root / PITFALLS.consumed).read_text().splitlines()]
     assert {c["pitfall_id"] for c in consumed} == {"r:l-000:0", "r:l-001:0"}
 
 
@@ -219,12 +223,13 @@ def test_run_pitfalls_no_edit_tick_still_rotates(tmp_git_repo: Path, tmp_path: P
     Otherwise the queue stays >= threshold and re-spawns the curator forever."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
-    _seed_pitfalls(paths, 2)
+    state = open_state(paths)
+    _seed_pitfalls(state, 2)
     rc = pitfalls_curator.run_pitfalls(
-        paths=paths, invoke=lambda handoffs, *, repo_root, box=None: 0, trees=lead_trees(paths)
+        paths=paths, state=state, invoke=lambda handoffs, *, state, repo_root, box=None: 0, trees=lead_trees(paths)
     )
     assert rc == 0
-    assert persist.read_pitfalls(paths) == []
+    assert persist.read_pitfalls(state) == []
     assert _run_git(tmp_git_repo, "status", "--porcelain").stdout == ""
 
 
@@ -278,17 +283,22 @@ def test_run_pitfalls_all_systemless_drops_batch_without_spawn(tmp_git_repo: Pat
     threshold and re-waking the drain every tick."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
+    state = open_state(paths)
     persist.append_pitfalls(
-        [{"pitfall_id": f"r:{i}", "system": ""} for i in range(2)], paths=paths
+        [{"pitfall_id": f"r:{i}", "system": ""} for i in range(2)], state=state
     )
     called: list[int] = []
-    rc = pitfalls_curator.run_pitfalls(paths=paths, invoke=lambda *a, **k: called.append(1) or 0,
+    rc = pitfalls_curator.run_pitfalls(paths=paths, state=state, invoke=lambda *a, **k: called.append(1) or 0,
                                        trees=lead_trees(paths))
     assert rc == 0
     assert called == []
-    assert persist.read_pitfalls(paths) == []
+    assert persist.read_pitfalls(state) == []
 
 
+
+
+def _state(tmp_path: Path):
+    return open_state(LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "state"))
 
 
 def _capture_engine(monkeypatch, *, rc: int = 0, raise_exc=None):
@@ -327,7 +337,7 @@ def test_invoke_pitfalls_agent_prompt_reaches_engine(tmp_path: Path, monkeypatch
     handoffs = [{"surface": "system", "system": "elastic",
                  "path": "defender/skills/elastic/execution.md",
                  "failures": []}]
-    rc = pitfalls_curator._invoke_pitfalls_agent(handoffs, repo_root=tmp_path)
+    rc = pitfalls_curator._invoke_pitfalls_agent(handoffs, state=_state(tmp_path), repo_root=tmp_path)
     assert rc == 0
     prompt = cap["user_prompt"]
     assert re.search(r"<run-[0-9a-f]+-pitfalls_handoffs>", prompt)
@@ -347,12 +357,13 @@ def test_invoke_pitfalls_agent_wires_engine_kwargs_and_pending_anchor(tmp_path: 
     Since #713 the batch id rides the StageWiring rather than being its own engine kwarg,
     so it stays observable on the trace name and label."""
     cap = _capture_engine(monkeypatch)
-    pitfalls_curator._invoke_pitfalls_agent([], repo_root=tmp_path)
+    pitfalls_curator._invoke_pitfalls_agent([], state=_state(tmp_path), repo_root=tmp_path)
     assert cap["system_prompt_file"] == pitfalls_curator.LEAD_PITFALLS_PROMPT
     assert cap["trace_name"].startswith("pitfalls.")
     assert cap["label"].endswith(":pitfalls")
     assert cap["repo_root"] == tmp_path
-    assert cap["learning_run_dir"] == config.DEFAULT_PATHS.lead_pending_dir
+    state_root = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "state").state_root
+    assert cap["learning_run_dir"] == (state_root / LEAD_QUEUE_LOCK.file).parent
 
 
 def test_invoke_pitfalls_agent_config_fault_propagates(tmp_path: Path, monkeypatch):
@@ -361,13 +372,13 @@ def test_invoke_pitfalls_agent_config_fault_propagates(tmp_path: Path, monkeypat
     from defender.learning.core.config import FatalConfigError
     _capture_engine(monkeypatch, raise_exc=FatalConfigError("needs FIREWORKS_API_KEY"))
     with pytest.raises(FatalConfigError):
-        pitfalls_curator._invoke_pitfalls_agent([], repo_root=tmp_path)
+        pitfalls_curator._invoke_pitfalls_agent([], state=_state(tmp_path), repo_root=tmp_path)
 
 
 def test_invoke_pitfalls_agent_passes_through_engine_rc(tmp_path: Path, monkeypatch):
     """A per-run rc (124 from a RunUnprocessable inside the engine) is returned unchanged."""
     _capture_engine(monkeypatch, rc=124)
-    assert pitfalls_curator._invoke_pitfalls_agent([], repo_root=tmp_path) == 124
+    assert pitfalls_curator._invoke_pitfalls_agent([], state=_state(tmp_path), repo_root=tmp_path) == 124
 
 
 

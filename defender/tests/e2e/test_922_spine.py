@@ -45,6 +45,8 @@ from defender.tests import _drain719 as D
 from defender.tests import _judge_921 as J
 from defender.tests._curator1134 import author_trees
 from defender.tests.e2e import _box665 as B
+from defender.tests import _state1135
+from defender.learning.core.state import FINDINGS
 
 pytestmark = pytest.mark.e2e
 
@@ -72,7 +74,7 @@ def _isolated_roots(tmp_path, monkeypatch):
     """
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
     # Stated rather than inherited: the drive below queues two family rows, and the shipped
     # default of 5 would make every assertion below vacuous on a drain that never woke.
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
@@ -110,10 +112,10 @@ class TriggerRecorder:
         self.calls: list[dict] = []
         self._agent = agent
 
-    def __call__(self, paths, pending_file, threshold_env, module_name, pending_label,
+    def __call__(self, paths, state, channel, threshold_env, module_name, pending_label,
                  *, box=None) -> None:
         self.calls.append({
-            "pending_file": pending_file, "threshold_env": threshold_env,
+            "pending_file": state.describe(channel), "threshold_env": threshold_env,
             "module_name": module_name, "pending_label": pending_label, "box": box,
         })
         if module_name != "author":
@@ -123,11 +125,12 @@ class TriggerRecorder:
         # verifier's key source is faked too, or a host with no real key configured
         # (CI) would fail here on a scenario that was never about key sourcing at all.
         cfg = dataclasses.replace(
-            lessons_run.build_author_config(paths, trees=author_trees(paths), box=box),
+            lessons_run.build_author_config(
+                paths, state=state, trees=author_trees(paths), box=box),
             invoke_agent=self._agent,
             source_key=lambda model, *, label=None: None,
         )
-        lessons_run.run_batch(paths=paths, cfg=cfg, hold_committed=True, box=box)
+        lessons_run.run_batch(paths=paths, state=state, cfg=cfg, hold_committed=True, box=box)
 
     @property
     def modules(self) -> list[str]:
@@ -143,9 +146,12 @@ def graded_episode(tmp_path: Path, paths, *, reply=None):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-    J.mod("learning.judge").grade_episode(
-        ep, judge=J.FakeJudge(default=reply or J.as_reply_text(J.reply_doc())),
-        runs_base=tmp_path / "defender-runs", draws=1, queue_dir=paths.pending_dir)
+    from defender.learning.core.state import LearningState
+
+    with LearningState.open(paths) as state:
+        J.mod("learning.judge").grade_episode(
+            ep, judge=J.FakeJudge(default=reply or J.as_reply_text(J.reply_doc())),
+            runs_base=tmp_path / "defender-runs", draws=1, state=state)
     return ep, J.judge_record(ep)
 
 
@@ -173,9 +179,9 @@ def stuff_retired_queues(paths, *, rows: int = 25) -> None:
     channels `BY_NAME` resolves, and the drain wakes a curator and mounts a corpus for each;
     after the cut they are three files nothing reads. That difference is the whole demand.
     """
-    paths.pending_dir.mkdir(parents=True, exist_ok=True)
+    (paths.state_root / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
     for name in RETIRED_OBSERVATION_QUEUES:
-        (paths.pending_dir / name).write_text(
+        ((paths.state_root / FINDINGS.queue).parent / name).write_text(
             "".join(json.dumps(D.obs_row(f"{name}-{i}")) + "\n" for i in range(rows)),
             encoding="utf-8")
 
@@ -215,13 +221,13 @@ def test_922_graded_episode_reaches_the_corpus_through_the_family_partition(tmp_
     """
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
     _ep, record = graded_episode(tmp_path, paths)
-    channel = paths.findings
+    channel = FINDINGS
 
     assert record["episode_outcome"] == "gradable"
-    queued = [r["finding_id"] for r in D.pending(channel)]
+    queued = [r["finding_id"] for r in D.pending(paths, channel)]
     assert record["enqueued_rows"] == len(queued) == 2, (
         f"the graded episode did not put its rows on the shared queue: {queued}")
-    assert {r["direction"] for r in D.pending(channel)} == {"family"}, (
+    assert {r["direction"] for r in D.pending(paths, channel)} == {"family"}, (
         "the spine's producer is the family judge; a non-family row here means the drive is "
         "not exercising the partition this demand is about")
 
@@ -244,7 +250,7 @@ def test_922_graded_episode_reaches_the_corpus_through_the_family_partition(tmp_
     body = lessons[0].read_text(encoding="utf-8")
     for fid in queued:
         assert fid in body, f"the committed lesson does not attribute {fid}"
-    assert {r["finding_id"] for r in D.pending(channel)} == set(queued), (
+    assert {r["finding_id"] for r in D.pending(paths, channel)} == set(queued), (
         "the committed rows left the queue before the batch's PR — `hold_committed=True` is "
         "what keeps them there for the next tick to retire")
 
@@ -253,11 +259,11 @@ def test_922_graded_episode_reaches_the_corpus_through_the_family_partition(tmp_
     assert second.calls == [], (
         "the second tick authored the same findings again — the corpus attribution the first "
         "tick wrote is not being read back")
-    consumed = {r["finding_id"]: r for r in D.consumed(channel)}
+    consumed = {r["finding_id"]: r for r in D.consumed(paths, channel)}
     assert set(consumed) == set(queued), (
         f"the rows did not rotate off the queue as consumed: {sorted(consumed)}")
     assert all(r["consumed_category"] == "consumed_idempotent" for r in consumed.values())
-    assert D.pending(channel) == [], "the authored rows are still queued"
+    assert D.pending(paths, channel) == [], "the authored rows are still queued"
     assert D.git(paths.repo_root, "rev-parse", "HEAD").stdout.strip() == head_after, (
         "the second tick opened a second commit for findings already in the corpus")
 
@@ -273,10 +279,10 @@ def test_922_a_caught_family_is_consumed_without_authoring(tmp_path):
     not the gate function read in isolation.
     """
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
-    channel = paths.findings
+    channel = FINDINGS
     # The judge's own appender writes the family's verdict word onto every row; a `caught`
     # family is enqueued exactly like a `survived` one and separated only by this partition.
-    D.seed(channel, [
+    D.seed(paths, channel, [
         dict(D.finding_row("ep-caught/b/0/0", run_id="ep-caught", direction="family"),
              type="decision-discipline", judge_outcome="caught", subject_anchor="l-001",
              subject_topic="holding-system coverage",
@@ -293,11 +299,11 @@ def test_922_a_caught_family_is_consumed_without_authoring(tmp_path):
         "point is that there is nothing to author")
     assert D.git(paths.repo_root, "rev-parse", "HEAD").stdout.strip() == head_before, (
         "a `caught` family produced a corpus commit")
-    consumed = D.consumed(channel)
+    consumed = D.consumed(paths, channel)
     assert [r["finding_id"] for r in consumed] == ["ep-caught/b/0/0"], (
         f"the caught row was not consumed terminally: {consumed}")
     assert consumed[0]["consumed_category"] == "consumed_family_skip"
-    assert D.pending(channel) == [], "the caught row was left queued forever"
+    assert D.pending(paths, channel) == [], "the caught row was left queued forever"
 
 
 # ---------------------------------------------------------------------------------------
@@ -345,7 +351,7 @@ def test_922_author_drain_triggers_exactly_the_findings_curator(tmp_path):
     # Selected BY MODULE rather than by position, for the same reason the set above is sorted:
     # the tick now triggers two curators and their order is not a contract.
     call = next(c for c in trigger.calls if c["module_name"] == "author")
-    assert call["pending_file"] == paths.findings.file, (
+    assert call["pending_file"] == str(paths.state_root / FINDINGS.queue), (
         f"the findings trigger names {call['pending_file']}, not the findings queue")
     assert call["threshold_env"] == "LEARNING_AUTHOR_THRESHOLD"
     assert call["pending_label"] == "pending"
@@ -405,7 +411,7 @@ def test_922_a_full_findings_queue_alone_wakes_the_drain(tmp_path):
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
     graded_episode(tmp_path, paths)
     for name in RETIRED_OBSERVATION_QUEUES:
-        assert not (paths.pending_dir / name).exists(), (
+        assert not ((paths.state_root / FINDINGS.queue).parent / name).exists(), (
             "this control is about a findings-only queue; an observation queue exists")
 
     trigger = TriggerRecorder(D.recording(D.committing("family-lesson")))
@@ -446,7 +452,7 @@ def test_922_the_retired_queues_alone_no_longer_wake_the_drain(tmp_path):
     """
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
     stuff_retired_queues(paths)
-    assert not paths.findings.file.exists(), (
+    assert not (paths.state_root / FINDINGS.queue).exists(), (
         "this drive is about the retired queues ALONE; the findings queue must be absent")
 
     trigger = TriggerRecorder(D.recording(D.committing("must-not-run")))

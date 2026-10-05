@@ -355,16 +355,26 @@ def enqueue_curation(
     if reason is not None:
         _logger.info(f"NOT enqueuing for curation: {reason}")
         return False
-    from defender.learning.core import markers as _markers
-    from defender.learning.core.config import REPO_ROOT as _LEARN_REPO_ROOT
-    from defender.learning.core.config import LoopPaths, _env_state_dir
+    from defender._env import FatalConfigError
+    from defender.learning.core.config import loop_paths
+    from defender.learning.core.state import LearningState, StateRefused
 
-    paths = LoopPaths(repo_root=_LEARN_REPO_ROOT, state_dir=_env_state_dir())
-    # Reading the alert is inside the guard too: a moved alert must not fail the run.
+    # Reading the alert is inside the guard too: a moved alert must not fail the run. So is the
+    # state tree: a refused entry or a missing root costs this request, never the investigation.
     try:
         case_id = case_ref(alert.read_bytes())
-        _markers.enqueue_case_for_curation(case_id, run_dir, paths)
+        with LearningState.open(loop_paths()) as state:
+            state.enqueue_curation(
+                case_id, {"case_id": case_id, "run_dir": str(run_dir.resolve())})
     except OSError as e:
         _logger.error(f"NOT enqueuing for curation: could not write the request: {e!r}")
+        return False
+    except StateRefused as refused:
+        _logger.error(f"NOT enqueuing for curation: could not enqueue the request, refused "
+                      f"{refused.record}: {refused.reason}")
+        return False
+    except FatalConfigError as config_error:
+        _logger.error(f"NOT enqueuing for curation: could not enqueue the request: "
+                      f"{config_error}")
         return False
     return True

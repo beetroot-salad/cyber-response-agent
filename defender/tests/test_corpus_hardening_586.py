@@ -43,6 +43,7 @@ from defender.learning.core.config import LoopPaths
 from defender.tests._curator1134 import author_trees
 from defender.tests._locale import C_LOCALE_ENV
 from defender.tests.test_trace_lesson import _mk_run  # noqa: E402
+from defender.tests._curator1134 import open_state
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 
@@ -118,7 +119,7 @@ def test_the_curator_preflight_tolerates_what_the_walk_tolerates(tmp_path, capsy
     key differs (`source_finding_ids`, from the findings channel's own `id_key`) and it holds no
     cache; the tolerance demand is the same one."""
     paths = LoopPaths(repo_root=tmp_path)
-    cfg = build_author_config(paths, trees=author_trees(paths))
+    cfg = build_author_config(paths, trees=author_trees(paths), state=open_state(paths))
     d = cfg.corpus_dir
     d.mkdir(parents=True, exist_ok=True)  # the trees made the mount point (a drain's always exists)
     (d / "good.md").write_text("---\nname: good\nsource_finding_ids: [o-1]\n---\nbody\n")

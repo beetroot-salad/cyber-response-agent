@@ -36,6 +36,10 @@ import pytest
 from defender.tests import _drain719 as D
 from defender.tests import _judge_921 as J
 from defender.tests._curator1134 import author_trees
+from defender.learning.core.config import LoopPaths
+from defender.learning.core.state import LearningState
+from defender.tests import _state1135
+from defender.tests._state1135 import env_state
 
 
 @pytest.fixture(autouse=True)
@@ -46,7 +50,7 @@ def _tmp_roots(tmp_path, monkeypatch):
     # this test's own and not the checkout's real `learning/_pending/`. Isolation belongs
     # here rather than in the appender: a production path that picks a different queue when
     # an env var is unset is a pass whose rows can land where no drain reads.
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _enqueue():
@@ -76,7 +80,7 @@ def _graded(tmp_path, **kw):
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        runs_base=tmp_path / "defender-runs", draws=1)
+        runs_base=tmp_path / "defender-runs", draws=1, state=env_state())
     return ep, J.judge_record(ep)
 
 
@@ -95,15 +99,15 @@ def test_921_family_row_is_not_held_as_no_ground_truth(tmp_path):
     where the row ends up rather than about which function was called.
     """
     paths = D.make_paths(tmp_path)
-    channel = D.channel_of(paths, "findings")
-    D.seed(channel, [_family_row()])
+    channel = D.channel_of("findings")
+    D.seed(paths, channel, [_family_row()])
     cfg = D.cfg_for(paths, "findings", invoke_agent=D.committing("family-lesson"))
 
     assert J.mod("learning.author.drain").run_batch(cfg=cfg) == 0
-    assert D.pending(channel) == [], (
+    assert D.pending(paths, channel) == [], (
         "the family row is still queued; without a gate of its own it is held forever as "
         "no_ground_truth")
-    assert [r["finding_id"] for r in D.consumed(channel)] == ["ep-1/b/0/0"]
+    assert [r["finding_id"] for r in D.consumed(paths, channel)] == ["ep-1/b/0/0"]
 
 
 def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings(tmp_path):
@@ -116,9 +120,9 @@ def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings
     partition is written as a second gate downstream of the first.
     """
     paths = D.make_paths(tmp_path)
-    channel = D.channel_of(paths, "findings")
+    channel = D.channel_of("findings")
     D.write_source_refs(paths, "run-adv", disposition="benign")
-    D.seed(channel, [
+    D.seed(paths, channel, [
         D.finding_row("run-adv/0", run_id="run-adv", direction="adversarial"),
         _family_row("ep-1/b/0/0"),
         D.finding_row("run-held/0", run_id="run-held", direction="adversarial"),
@@ -130,7 +134,7 @@ def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings
     authored = {r["finding_id"] for r in agent.calls[0]["rows"]}
     assert authored == {"run-adv/0", "ep-1/b/0/0"}, (
         f"the two populations did not route independently: {sorted(authored)}")
-    still_held = {r["finding_id"] for r in D.pending(channel)}
+    still_held = {r["finding_id"] for r in D.pending(paths, channel)}
     assert still_held == {"run-held/0"}, (
         "the adversarial row with no ground truth stopped being held, or the family row was "
         "held with it")
@@ -139,8 +143,8 @@ def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings
 def test_921_gate_family_authors_a_survived_row(tmp_path):
     """A family row whose `judge_outcome` is `survived` is admitted for authoring."""
     paths = D.make_paths(tmp_path)
-    channel = D.channel_of(paths, "findings")
-    D.seed(channel, [_family_row(judge_outcome="survived")])
+    channel = D.channel_of("findings")
+    D.seed(paths, channel, [_family_row(judge_outcome="survived")])
     agent = D.recording(D.committing("survived"))
 
     assert J.mod("learning.author.drain").run_batch(
@@ -158,8 +162,8 @@ def test_921_gate_family_skips_caught_and_undecidable(tmp_path):
     skip cannot pass on a gate that admits nothing.
     """
     paths = D.make_paths(tmp_path)
-    channel = D.channel_of(paths, "findings")
-    D.seed(channel, [
+    channel = D.channel_of("findings")
+    D.seed(paths, channel, [
         _family_row("ep-1/b/0/0", judge_outcome="caught"),
         _family_row("ep-1/c/0/0", judge_outcome="undecidable"),
         _family_row("ep-1/b/0/1", judge_outcome="survived"),
@@ -170,8 +174,8 @@ def test_921_gate_family_skips_caught_and_undecidable(tmp_path):
         cfg=D.cfg_for(paths, "findings", invoke_agent=agent)) == 0
     assert agent.calls, "the positive control failed: the `survived` row authored nothing"
     assert [r["finding_id"] for r in agent.calls[0]["rows"]] == ["ep-1/b/0/1"]
-    assert D.pending(channel) == [], "a skipped row was HELD instead; a hold is forever"
-    assert {r["finding_id"] for r in D.consumed(channel)} == {
+    assert D.pending(paths, channel) == [], "a skipped row was HELD instead; a hold is forever"
+    assert {r["finding_id"] for r in D.consumed(paths, channel)} == {
         "ep-1/b/0/0", "ep-1/c/0/0", "ep-1/b/0/1"}
 
 
@@ -184,14 +188,14 @@ def test_921_gate_family_is_idempotent_over_a_replayed_batch(tmp_path):
     still authors, so idempotency cannot pass on a gate that has stopped authoring at all.
     """
     paths = D.make_paths(tmp_path)
-    channel = D.channel_of(paths, "findings")
+    channel = D.channel_of("findings")
     drain = J.mod("learning.author.drain")
 
-    D.seed(channel, [_family_row("ep-1/b/0/0")])
+    D.seed(paths, channel, [_family_row("ep-1/b/0/0")])
     first = D.recording(D.committing("once"))
     assert drain.run_batch(cfg=D.cfg_for(paths, "findings", invoke_agent=first)) == 0
 
-    D.seed(channel, [_family_row("ep-1/b/0/0"), _family_row("ep-1/b/0/1")])
+    D.seed(paths, channel, [_family_row("ep-1/b/0/0"), _family_row("ep-1/b/0/1")])
     second = D.recording(D.committing("twice"))
     assert drain.run_batch(cfg=D.cfg_for(paths, "findings", invoke_agent=second)) == 0
     assert second.calls, "the positive control failed: the NEW row authored nothing either"
@@ -216,7 +220,7 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
     ids = [row["finding_id"] for row in first]
     assert len(ids) == len(set(ids)), f"colliding finding ids inside one pass: {ids}"
 
-    retried = enqueue.enqueue(ep, J.mod("learning.judge.family").grade_family(ep))
+    retried = enqueue.enqueue(ep, J.mod("learning.judge.family").grade_family(ep), state=env_state())
     again = [row["finding_id"] for row in J.enqueued_rows(record)][len(ids):]
     assert retried == len(ids)
     assert again == ids, (
@@ -231,9 +235,12 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
     # Its OWN queue: the appender writes to the one configured findings queue, and this second
     # fixture episode reuses the first one's episode id by construction, so sharing a sink here
     # would count the first episode's rows as this one's rather than test the id minting.
+    own_root = tmp_path / "two" / "queue"
+    own_root.mkdir(parents=True)
+    own = LearningState.open(LoopPaths(repo_root=tmp_path / "two", state_dir=own_root))
     J.mod("learning.judge").grade_episode(
         ep2, judge=J.FakeJudge(default=two), runs_base=tmp_path / "two" / "defender-runs",
-        draws=2, queue_dir=tmp_path / "two" / "queue")
+        draws=2, state=own)
     fresh = [row["finding_id"] for row in J.enqueued_rows(J.judge_record(ep2))]
     assert len(fresh) == len(set(fresh)) == 8, (
         f"two worlds x two draws x two findings did not mint eight distinct ids: {fresh}")
@@ -258,7 +265,7 @@ def test_921_enqueue_refuses_discard_and_corpus_contradiction(tmp_path):
         (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
         J.mod("learning.judge").grade_episode(
             ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc(episode_outcome=word))),
-            runs_base=tmp_path / word / "defender-runs", draws=1)
+            runs_base=tmp_path / word / "defender-runs", draws=1, state=env_state())
         record = J.judge_record(ep)
         assert record["episode_outcome"] == word
         assert record["enqueued_rows"] == 0
@@ -282,7 +289,7 @@ def test_921_gradable_episode_appends_one_row_per_finding(tmp_path):
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=two_findings), runs_base=tmp_path / "defender-runs",
-        draws=2)
+        draws=2, state=env_state())
 
     record = J.judge_record(ep)
     rows = J.enqueued_rows(record)
@@ -312,21 +319,21 @@ def test_921_enqueue_refuses_a_row_that_would_key_error_the_shared_gate(tmp_path
         broken = _family_row()
         broken.pop(missing)
         with pytest.raises(J.refusals()) as raised:
-            enqueue.append_rows(ep, [broken])
+            enqueue.append_rows(ep, [broken], state=env_state())
         assert missing in str(raised.value)
     assert len(J.enqueued_rows(record)) == before, "a refused row was appended anyway"
 
     # The blast radius the refusal exists to prevent, on the real channel.
     paths = D.make_paths(tmp_path / "blast")
-    channel = D.channel_of(paths, "findings")
+    channel = D.channel_of("findings")
     D.write_source_refs(paths, "run-adv", disposition="benign")
     unkeyable = _family_row("ep-1/b/0/9")
     unkeyable.pop("run_id")
-    D.seed(channel, [D.finding_row("run-adv/0", run_id="run-adv"), unkeyable])
+    D.seed(paths, channel, [D.finding_row("run-adv/0", run_id="run-adv"), unkeyable])
     with pytest.raises(KeyError):
         J.mod("learning.author.drain").run_batch(
             cfg=D.cfg_for(paths, "findings", invoke_agent=D.committing("blast")))
-    stuck = D.stuck_records(channel)
+    stuck = D.stuck_records(paths, channel)
     assert stuck, "the tick recorded nothing stuck at all"
     assert set(stuck[-1]["row_ids"]) >= {"run-adv/0"}, (
         "the well-formed adversarial row did not ride the malformed one into stuck.jsonl; "
@@ -433,12 +440,12 @@ def test_921_decision_discipline_is_queueable_and_an_unknown_type_is_refused(tmp
     assert "decision-discipline" in config.QUEUEABLE_FINDING_TYPES
     before = len(J.enqueued_rows(record))
     with pytest.raises(J.refusals()) as raised:
-        enqueue.append_rows(ep, [_family_row(type="root-cause-vibes")])
+        enqueue.append_rows(ep, [_family_row(type="root-cause-vibes")], state=env_state())
     assert "root-cause-vibes" in str(raised.value)
     assert len(J.enqueued_rows(record)) == before
 
     # Positive control: the same row with a queueable type lands.
-    assert enqueue.append_rows(ep, [_family_row("ep-1/b/0/7", type="decision-discipline")]) == 1
+    assert enqueue.append_rows(ep, [_family_row("ep-1/b/0/7", type="decision-discipline")], state=env_state()) == 1
 
 
 
@@ -466,7 +473,7 @@ def test_921_rows_are_appended_under_the_queue_lock_one_row_per_finding(tmp_path
     def append(tag: str) -> None:
         try:
             enqueue.append_rows(ep, [
-                _family_row(f"ep-1/{tag}/{n}", finding=f"{tag}-{n}-{big}") for n in range(20)])
+                _family_row(f"ep-1/{tag}/{n}", finding=f"{tag}-{n}-{big}") for n in range(20)], state=env_state())
         except BaseException as exc:  # noqa: BLE001 — recorded and re-raised by the assertion
             errors.append(exc)
 
@@ -514,10 +521,11 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
     from defender._io import read_jsonl_rows_report
 
     paths = D.make_paths(tmp_path)
-    channel = D.channel_of(paths, "findings")
+    channel = D.channel_of("findings")
     D.write_source_refs(paths, "run-adv", disposition="benign")
-    D.seed(channel, [D.finding_row("run-adv/0", run_id="run-adv", direction="adversarial")])
-    with channel.file.open("a", encoding="utf-8") as fh:
+    D.seed(paths, channel, [D.finding_row("run-adv/0", run_id="run-adv", direction="adversarial")])
+    queue = paths.state_root / channel.queue
+    with queue.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(_family_row("ep-1/b/9/9"))[:120])   # NO newline: the tail is TORN
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
@@ -525,10 +533,10 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        runs_base=tmp_path / "defender-runs", draws=1, queue_dir=channel.file.parent)
+        runs_base=tmp_path / "defender-runs", draws=1, state=LearningState.open(paths))
 
     record = J.judge_record(ep)
-    assert Path(record["enqueued_to"]) == channel.file, (
+    assert Path(record["enqueued_to"]) == queue, (
         "the pass wrote somewhere other than the queue it was pointed at, so nothing below is "
         "about the torn tail")
     assert record["queue_malformed_rows"] == 1, (
@@ -536,7 +544,7 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
         "are the same drain and different evidence, and the count is the only thing that says "
         "a writer left a row half-written")
 
-    rows, unreadable = read_jsonl_rows_report(channel.file)
+    rows, unreadable = read_jsonl_rows_report(queue)
     assert unreadable == 1, (
         f"{unreadable} unreadable line(s) on the queue: the torn tail cost more than itself — "
         "an appended row was concatenated onto the fragment and lost with it")
@@ -553,7 +561,7 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
     agent = D.recording(D.committing("torn-tail"))
     assert J.mod("learning.author.drain").run_batch(
         cfg=D.cfg_for(paths, "findings", invoke_agent=agent)) == 0
-    assert D.stuck_records(channel) == [], (
+    assert D.stuck_records(paths, channel) == [], (
         "a torn trailing row stuck-recorded the batch; P6's blast radius is every direction "
         "riding in that tick, which is the whole reason the reader must skip it")
     authored = {r["finding_id"] for call in agent.calls for r in call["rows"]}
@@ -596,7 +604,7 @@ def test_921_self_contradicting_episode_is_discard_and_the_record_is_the_artifac
 
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        runs_base=tmp_path / "defender-runs", draws=1)
+        runs_base=tmp_path / "defender-runs", draws=1, state=env_state())
 
     record = J.judge_record(ep)
     assert record["episode_outcome"] == "discard"
@@ -620,7 +628,7 @@ def test_921_world_contradicted_by_the_corpus_is_corpus_contradiction(tmp_path):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=contradiction), runs_base=tmp_path / "defender-runs",
-        draws=2)
+        draws=2, state=env_state())
 
     record = J.judge_record(ep)
     assert record["episode_outcome"] == "corpus-contradiction"
@@ -634,7 +642,7 @@ def test_921_world_contradicted_by_the_corpus_is_corpus_contradiction(tmp_path):
     (ok / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     J.mod("learning.judge").grade_episode(
         ok, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        runs_base=tmp_path / "ok" / "defender-runs", draws=2)
+        runs_base=tmp_path / "ok" / "defender-runs", draws=2, state=env_state())
     assert J.enqueued_rows(J.judge_record(ok)), "the positive control enqueued nothing"
 
 
@@ -656,7 +664,7 @@ def test_921_discard_needs_the_control_drift_key_or_a_majority_of_draws(tmp_path
                  J.as_reply_text(J.reply_doc()), J.as_reply_text(J.reply_doc())],
         default=J.as_reply_text(J.reply_doc()))
     J.mod("learning.judge").grade_episode(
-        ep, judge=minority, runs_base=tmp_path / "defender-runs", draws=3)
+        ep, judge=minority, runs_base=tmp_path / "defender-runs", draws=3, state=env_state())
 
     record = J.judge_record(ep)
     assert record["episode_outcome"] == "gradable", (
@@ -701,7 +709,7 @@ def test_921_a_family_row_is_exempt_from_the_forward_check(tmp_path):
 
     lessons_run = J.mod("learning.author.lessons.run")
     paths2 = D.make_paths(tmp_path / "cfg")
-    cfg = lessons_run.build_author_config(paths2, trees=author_trees(paths2))
+    cfg = lessons_run.build_author_config(paths2, trees=author_trees(paths2), state=LearningState.open(paths2))
     assert cfg.exempt is checks.skips_forward_check
 
 

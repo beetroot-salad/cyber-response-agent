@@ -365,6 +365,47 @@ def test_a_method_with_the_same_indent_as_a_local_def_IS_a_removed_identifier(tm
     assert "docs.md:outbound_note" in fingerprints, fingerprints
 
 
+def test_an_override_of_an_outside_base_is_not_a_removed_identifier(tmp_path):
+    """A method of a class whose every base comes from outside the repo overrides that base's
+    API: deleting a test double's `with_suffix` (a `Path` subclass) must not condemn every
+    `Path.with_suffix` call in the tree. Controls: a method of a class whose base the file
+    defines, or imports from a repo module, is the repo's own name, and its removal is flagged."""
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "double.py": (
+                "from pathlib import Path\n"
+                "class Base:\n"
+                "    pass\n"
+                "class Planted(type(Path())):\n"
+                "    def with_suffix(self, suffix):\n"
+                "        return self\n"
+                "class Local(Base):\n"
+                "    def outbound_note(self):\n"
+                "        return 1\n"
+            ),
+            "pkg/__init__.py": "",
+            "pkg/base.py": "class Shared:\n    pass\n",
+            "sub.py": (
+                "from pkg.base import Shared\n"
+                "class Paths(Shared):\n"
+                "    def pending_records(self):\n"
+                "        return 1\n"
+            ),
+            "reader.py": "def g(p):\n    return p.pending_records()\n",
+            "user.py": "def f(p):\n    q = p.with_suffix('.x')\n    return q.outbound_note()\n",
+        },
+        pr_files={"double.py": "class Base:\n    pass\n",
+                  "sub.py": "from pkg.base import Shared\nclass Paths(Shared):\n    pass\n"},
+    )
+    work = _clone(tmp_path, up)
+
+    fingerprints = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert "user.py:outbound_note" in fingerprints, "the control failed: nothing scanned"
+    assert "reader.py:pending_records" in fingerprints, "a repo base's method went unscanned"
+    assert "user.py:with_suffix" not in fingerprints, fingerprints
+
+
 def test_removed_ident_with_no_surviving_reference_exits_0(tmp_path):
     """`git grep` exits 1 on "no match". That is a legitimate empty answer, not a failure
     — an over-eager fail-closed refactor would turn it into a GitError."""

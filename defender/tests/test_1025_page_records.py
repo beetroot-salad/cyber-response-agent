@@ -44,6 +44,8 @@ from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests import test_1025_episode_reader as R
 from defender.tests._by_path import load_lint_gate
+from defender.tests import _state1135
+from defender.tests._state1135 import env_state
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -69,7 +71,7 @@ MARKUP = "<script>alert(1)</script><img src=x onerror=alert(1)>"
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def visualize_episode():
@@ -737,7 +739,7 @@ def test_1025_grade_episode_reads_world_archive_through_the_same_screen_as_the_p
         family.read_world_facts(bound, "c", episode_token=T.EPISODE_TOKEN)
 
     grade = E.mod("learning.judge").grade_episode(
-        ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), runs_base=tmp_path / "defender-runs")
+        ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), runs_base=tmp_path / "defender-runs", state=env_state())
     rows = J.rows(grade)
     assert rows["b"].get("ungradable"), rows["b"]
     assert "report.md" in rows["b"]["ungradable_reason"], rows["b"]
@@ -790,7 +792,7 @@ def test_1025_grade_episode_still_grades_an_episode_whose_samples_yaml_is_malfor
     E.plant_raw(ep.dir / "samples.yaml", "logs-*: [\n  {")
     grade = judge_mod.grade_episode(
         ep.dir, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        runs_base=tmp_path / "defender-runs")
+        runs_base=tmp_path / "defender-runs", state=env_state())
     assert (ep.dir / "judge.yaml").is_file(), "the torn samples record took the grading pass down"
     rows = J.rows(grade)
     graded = [label for label, row in rows.items() if not row.get("ungradable")]

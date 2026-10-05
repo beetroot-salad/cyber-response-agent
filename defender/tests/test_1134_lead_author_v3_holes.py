@@ -96,6 +96,7 @@ def test_run_without_deps_mints_and_reaches_its_agent_inside_its_own_trees(
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
     caplog.set_level(logging.DEBUG)
     repo = _worktree(tmp_path)
+    (tmp_path / "state").mkdir()  # the state root is never created lazily (#1135)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     run_dir = _run_dir(tmp_path, ("wazuh.hunt-creds", "wazuh", "esql"),
                        ("elastic.hunt-creds", "elastic", "esql"))

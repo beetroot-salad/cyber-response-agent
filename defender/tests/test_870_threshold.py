@@ -48,6 +48,7 @@ from defender.tests._declared870 import (
 )
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.tests._lead_author_1134 import lead_trees
+from defender.tests._curator1134 import open_state
 from defender.tests._lead_author_1134 import lane_fields
 
 
@@ -57,6 +58,7 @@ def scene(tmp_path: Path):
                      skills=("elastic",), catalog=(), non_systems=("gather",))
     write_reducer_surface(repo)
     commit_all(repo, "seed the reducer surface")
+    (tmp_path / "state").mkdir()  # the state root is never created lazily (#1135)
     return repo, LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
 
 
@@ -88,16 +90,16 @@ def test_the_threshold_gates_on_a_records_own_occurrences(scene, monkeypatch):
     """
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
     _repo, paths = scene
-    persist.append_pitfalls([shim_row(f"r:l-003:{i}") for i in range(3)], paths=paths)
+    persist.append_pitfalls([shim_row(f"r:l-003:{i}") for i in range(3)], state=open_state(paths))
 
-    records = persist.merge_pitfalls(persist.read_pitfalls(paths))
+    records = persist.merge_pitfalls(persist.read_pitfalls(open_state(paths)))
     assert len(records) == 1, "the three shim rows did not merge to one record"
     assert records[0]["occurrences"] == 3
     assert len(records) < pitfalls_threshold(), (
         "the record-counting reading no longer refuses this batch, so the demand is vacuous"
     )
 
-    assert drains._has_lead_author_work(paths) is True, "the drain never wakes for it"
+    assert drains._has_lead_author_work(open_state(paths)) is True, "the drain never wakes for it"
     assert by_surface(_tick(paths).handoffs)["reducer"], "the tick gate refused it"
 
 
@@ -124,13 +126,13 @@ def test_the_motivating_incident_reaches_the_curator_alone(scene, monkeypatch):
             [shim_lead(sql=f"SELECT unnest(data, {i})", query_index=i) for i in range(8)],
             Path("reviewer-measure-0807-b"), catalog=[],
         ),
-        paths=paths,
+        state=open_state(paths),
     )
-    records = persist.merge_pitfalls(persist.read_pitfalls(paths))
+    records = persist.merge_pitfalls(persist.read_pitfalls(open_state(paths)))
     assert [r["occurrences"] for r in records] == [8], "the eight reduces did not merge to one"
     assert records[0]["system"] == ""
 
-    assert drains._has_lead_author_work(paths) is True
+    assert drains._has_lead_author_work(open_state(paths)) is True
     spawn = _tick(paths)
     assert [e["surface"] for e in spawn.handoffs] == ["reducer"]
     assert spawn.handoffs[0]["failures"][0]["occurrences"] == 8
@@ -173,12 +175,12 @@ def test_silent_reducer_failures_alone_do_not_open_the_lane(scene, monkeypatch):
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
     _repo, paths = scene
     below = [silent_shim_row(f"r:l-00{i}:0") for i in range(2)]
-    persist.append_pitfalls(below, paths=paths)
+    persist.append_pitfalls(below, state=open_state(paths))
 
-    records = persist.merge_pitfalls(persist.read_pitfalls(paths))
+    records = persist.merge_pitfalls(persist.read_pitfalls(open_state(paths)))
     assert len(records) == 2, "the two silent rows did not merge to two distinct records"
     assert {r["occurrences"] for r in records} == {1}
-    assert drains._has_lead_author_work(paths) is False, "silent noise woke the drain"
+    assert drains._has_lead_author_work(open_state(paths)) is False, "silent noise woke the drain"
     shut = Spawn(None)
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=shut, trees=lead_trees(paths)) == 0
     assert shut.calls == [], "silent noise alone reached the curator"
@@ -187,15 +189,15 @@ def test_silent_reducer_failures_alone_do_not_open_the_lane(scene, monkeypatch):
     # Above threshold the COUNT clears it — the pre-existing route, unchanged — while every
     # record is still worth exactly one occurrence, so FK-3's disjunct cannot be what fired.
     persist.append_pitfalls(
-        [silent_shim_row(f"r:l-01{i}:0") for i in range(6)], paths=paths,
+        [silent_shim_row(f"r:l-01{i}:0") for i in range(6)], state=open_state(paths),
     )
-    records = persist.merge_pitfalls(persist.read_pitfalls(paths))
+    records = persist.merge_pitfalls(persist.read_pitfalls(open_state(paths)))
     assert len(records) == 8
     assert max(r["occurrences"] for r in records) == 1, (
         "a content-less digest accumulated, so PO-R2's invariant no longer holds and this "
         "demand's whole ground is gone"
     )
-    assert drains._has_lead_author_work(paths) is True, (
+    assert drains._has_lead_author_work(open_state(paths)) is True, (
         "the pre-existing distinct-count gate stopped opening — FK-3 adds a disjunct, it "
         "does not remove the count"
     )
@@ -235,15 +237,15 @@ def test_the_system_lane_still_curates_at_its_own_threshold(scene, monkeypatch):
         [pitfall_row("r:l-000:0", "elastic"),
          pitfall_row("r:l-001:0", "cmdb"),
          shim_row("r:l-003:0")],
-        paths=paths,
+        state=open_state(paths),
     )
-    records = persist.merge_pitfalls(persist.read_pitfalls(paths))
+    records = persist.merge_pitfalls(persist.read_pitfalls(open_state(paths)))
     assert len(records) == 3, "the fixture no longer sits exactly on the count boundary"
     assert max(r["occurrences"] for r in records) == 1, (
         "some record clears the new disjunct on its own, so this says nothing about the count"
     )
 
-    assert drains._has_lead_author_work(paths) is True, (
+    assert drains._has_lead_author_work(open_state(paths)) is True, (
         "the wake gate stopped counting the reducer record, so the system rows never even "
         "reach a tick"
     )
@@ -274,8 +276,8 @@ def test_a_threshold_of_zero_curates_every_tick(scene, monkeypatch):
     _repo, paths = scene
     assert pitfalls_threshold() == 0, "the falsy member was coerced away at the read"
 
-    persist.append_pitfalls([shim_row("r:l-003:0")], paths=paths)
-    assert drains._has_lead_author_work(paths) is True
+    persist.append_pitfalls([shim_row("r:l-003:0")], state=open_state(paths))
+    assert drains._has_lead_author_work(open_state(paths)) is True
     assert by_surface(_tick(paths).handoffs)["reducer"]
 
 
@@ -289,13 +291,13 @@ def test_a_threshold_of_one_curates_on_the_first_mistake(scene, monkeypatch):
     """
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     _repo, paths = scene
-    persist.append_pitfalls([shim_row("r:l-003:0")], paths=paths)
-    assert drains._has_lead_author_work(paths) is True
+    persist.append_pitfalls([shim_row("r:l-003:0")], state=open_state(paths))
+    assert drains._has_lead_author_work(open_state(paths)) is True
     assert by_surface(_tick(paths).handoffs)["reducer"]
 
     attributed = LoopPaths(repo_root=paths.repo_root, state_dir=paths.state_root / "b")
-    persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], paths=attributed)
-    assert drains._has_lead_author_work(attributed) is True
+    persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], state=open_state(attributed))
+    assert drains._has_lead_author_work(open_state(attributed)) is True
     assert by_surface(_tick(attributed).handoffs)["system"]
 
 
@@ -307,7 +309,7 @@ def test_the_lead_author_log_line_counts_post_normalization_records(scene, tmp_p
     POST-normalization count.
 
     It reads the SAME `pitfalls.jsonl` `run_pitfalls` reads — `append_pitfalls(failures,
-    paths=deps.paths)` one line earlier in the same lead-author tick, `failures` being
+    state=deps.state)` one line earlier in the same lead-author tick, `failures` being
     `collect_general_failures`' own output, not a sibling lane's own queue (the R8 census,
     `47-census-merge-pitfalls.md`). So M5′ reaches this count in the SAME TICK it reaches the
     two gates, and it is a THIRD keyed reader of the field this round re-mints.
@@ -327,6 +329,7 @@ def test_the_lead_author_log_line_counts_post_normalization_records(scene, tmp_p
     ]
     deps = lead_author.LeadAuthorDeps(
         paths=paths,
+        state=open_state(paths),
         **lane_fields(paths),
         systems=frozenset({"elastic", "cmdb"}),
         invoke_agent=lambda *a, **k: 0,
@@ -334,8 +337,6 @@ def test_the_lead_author_log_line_counts_post_normalization_records(scene, tmp_p
         synthesize=lambda *a, **k: [],
         build_handoff=lambda *a, **k: [],
         discover_system_drafts=lambda: [],
-        acquire_queue_lock=lambda: object(),
-        release_queue_lock=lambda _fh: None,
     )
     capsys.readouterr()
 
@@ -347,8 +348,8 @@ def test_the_lead_author_log_line_counts_post_normalization_records(scene, tmp_p
     assert "1 distinct mistake(s) in this run" in counted[0], (
         f"the log line counts pre-normalization rows: {counted[0]!r}"
     )
-    assert len(persist.read_pitfalls(paths)) == 3, "the rows themselves are still the evidence"
-    assert {r["system"] for r in persist.read_pitfalls(paths)} == {""}
+    assert len(persist.read_pitfalls(open_state(paths))) == 3, "the rows themselves are still the evidence"
+    assert {r["system"] for r in persist.read_pitfalls(open_state(paths))} == {""}
     assert repo.is_dir()
 
 

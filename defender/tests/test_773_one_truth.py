@@ -223,7 +223,7 @@ def test_a_missing_investigation_in_the_cited_run_is_a_bad_pair_not_a_stuck_tick
     assert (sc.cfg.runs_dir / "f1" / "source_refs.yaml").is_file()
     assert sc.run() == 0
     assert sc.category_of("f1") == "consumed_forward_bad"
-    assert S.stuck_records(sc.channel) == []
+    assert S.stuck_records(sc.paths, sc.channel) == []
     [record] = sc.gap_records()
     assert record["verdicts"][-1]["reasoning"].startswith(S.ERROR_PREFIX)
 

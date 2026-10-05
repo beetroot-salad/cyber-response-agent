@@ -39,6 +39,7 @@ from defender import run as run_py  # noqa: E402
 from defender import run_common  # noqa: E402
 from defender.learning.core import drains  # noqa: E402
 from defender.runtime import scrub as scrub_mod  # noqa: E402
+from defender.tests._state1135 import set_state_dir  # noqa: E402
 from defender.tests._spec791 import (  # noqa: E402
     SCRUB_PROPERTY_TEST,
     TAIL_SEAM,
@@ -66,7 +67,7 @@ HELD_OUT_ALERT = json.dumps({"rule": {"id": "9999"}, "held": "out"}).encode("utf
 def state(tmp_path, monkeypatch):
     """A learning state root and a runs base under tmp, and a key per provider so the
     entrypoint's startup preflight cannot fail ahead of the tail these demands are about."""
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    set_state_dir(monkeypatch, tmp_path / "state")  # the root is never created lazily (#1135)
     satisfy_entrypoint_keys(monkeypatch, tmp_path)
     return loop_paths(tmp_path)
 
@@ -148,7 +149,7 @@ def test_791_finished_investigation_drives_catalog_curation(tmp_path, state):
     branch = SpecBranch(tmp_path / "worktrees")
     rc = drains.lead_author_drain(
         state,
-        run_lead_author=lambda _paths, rd, *, box=None, **_kw: served.append(rd),
+        run_lead_author=lambda _paths, _state, rd, *, box=None, **_kw: served.append(rd),
         run_pitfalls=lambda *_a, **_kw: 0,
         branch=branch, start_box=noop_start_box, stop_box=noop_stop_box, scrub=noop_scrub,
     )
@@ -169,7 +170,7 @@ def test_791_the_curation_marker_names_the_case_and_the_run_dir(tmp_path, state)
     run_dir = _certified_run(tmp_path)
     run_common.enqueue_curation(run_dir, run_dir / "alert.json")
 
-    markers = sorted(state.author_queue_dir.glob("*.json"))
+    markers = sorted((state.state_root / "author-queue").glob("*.json"))
     assert len(markers) == 1
     body = marker_body(markers[0])
 
@@ -195,7 +196,7 @@ def test_791_a_retried_investigation_coalesces_onto_one_curation_request(tmp_pat
     run_common.enqueue_curation(first, first / "alert.json")
     run_common.enqueue_curation(second, second / "alert.json")
 
-    markers = sorted(state.author_queue_dir.glob("*.json"))
+    markers = sorted((state.state_root / "author-queue").glob("*.json"))
     assert len(markers) == 1, \
         f"a retry added a second curation request instead of coalescing: {[m.name for m in markers]}"
     body = marker_body(markers[0])
@@ -228,7 +229,7 @@ def test_791_a_curation_re_ask_issued_mid_drain_is_not_destroyed(tmp_path, state
 
     served: list[Path] = []
 
-    def serve_and_re_ask(_paths, run_dir, *, box=None, **_kw):
+    def serve_and_re_ask(_paths, _state, run_dir, *, box=None, **_kw):
         served.append(run_dir)
         if len(served) == 1:
             # The operator re-investigates the case while the lane is curating it.
@@ -271,8 +272,8 @@ def test_791_a_failed_curation_write_costs_the_investigation_nothing(tmp_path, s
     through the real primitive, and one that this container's uid cannot ignore the way it
     ignores a permission bit."""
     run_dir = _certified_run(tmp_path)
-    state.author_queue_dir.parent.mkdir(parents=True, exist_ok=True)
-    state.author_queue_dir.write_text("not a directory\n", encoding="utf-8")
+    (state.state_root / "author-queue").parent.mkdir(parents=True, exist_ok=True)
+    (state.state_root / "author-queue").write_text("not a directory\n", encoding="utf-8")
 
     assert run_common.enqueue_curation(run_dir, run_dir / "alert.json") is False, \
         "a failed curation write did not report itself"
@@ -284,7 +285,7 @@ def test_791_a_failed_curation_write_costs_the_investigation_nothing(tmp_path, s
         "the failed curation write took the render step with it — the investigation lost its " \
         "human-facing output to an optimisation over a corpus"
 
-    state.author_queue_dir.unlink()
+    (state.state_root / "author-queue").unlink()
     working = SpecTail(state)
     assert drive_tail(run_py.main, plant_alert(tmp_path / "working"), working) == 0
     assert working.step("visualize").curation_requests, \
@@ -350,7 +351,7 @@ def test_791_no_learn_suppresses_curation_too(tmp_path, state):
     assert author_markers(state), \
         "the boundary never fires at all — the suppressed arm above proves nothing"
 
-    for marker in state.author_queue_dir.glob("*.json"):
+    for marker in (state.state_root / "author-queue").glob("*.json"):
         marker.unlink()
     scoring = SpecTail(state)
     assert drive_tail(
@@ -461,7 +462,7 @@ def test_791_the_curation_trigger_joins_the_scrub_ordering_property(tmp_path, st
     assert author_markers(state), \
         "no curation request was written at all, so the refusal below proves nothing"
 
-    for marker in state.author_queue_dir.glob("*.json"):
+    for marker in (state.state_root / "author-queue").glob("*.json"):
         marker.unlink()
     uncertified = SpecTail(state, certify=False)
     assert drive_tail(run_py.main, plant_alert(tmp_path / "uncertified"), uncertified) == 0

@@ -25,6 +25,8 @@ from __future__ import annotations
 import pytest
 
 from defender.tests import _judge_921 as J
+from defender.tests import _state1135
+from defender.tests._state1135 import env_state
 
 
 @pytest.fixture(autouse=True)
@@ -35,7 +37,7 @@ def _tmp_roots(tmp_path, monkeypatch):
     # this test's own and not the checkout's real `learning/_pending/`. Isolation belongs
     # here rather than in the appender: a production path that picks a different queue when
     # an env var is unset is a pass whose rows can land where no drain reads.
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _run():
@@ -49,7 +51,7 @@ def _episode(tmp_path, **kw):
 
 def _grade(tmp_path, ep, judge, **kw):
     J.mod("learning.judge").grade_episode(
-        ep, judge=judge, runs_base=tmp_path / "defender-runs", **kw)
+        ep, judge=judge, runs_base=tmp_path / "defender-runs", state=env_state(), **kw)
     return judge
 
 
@@ -273,7 +275,7 @@ def test_921_no_model_authored_text_reaches_the_prompt_unframed(tmp_path):
         bodies={("deadbee", "defender/lessons/L1.md"): "MARKER-LESSON-BODY\n"})
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
     J.mod("learning.judge").grade_episode(
-        ep, judge=judge, runs_base=tmp_path / "defender-runs", git_show=git_show, draws=1)
+        ep, judge=judge, runs_base=tmp_path / "defender-runs", git_show=git_show, draws=1, state=env_state())
     prompt = judge.prompts[judge.agent_ids.index("judge:b:0")]
 
     for what, marker in {**markers, "lesson": "MARKER-LESSON-BODY"}.items():

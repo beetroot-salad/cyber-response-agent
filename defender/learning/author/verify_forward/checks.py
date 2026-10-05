@@ -26,7 +26,6 @@ class CheckContext:
     source_id: str
     direction: str
     runs_dir: Path
-    pending: Path
     corpus_dir: Path
     repo_root: Path
     check_index: int

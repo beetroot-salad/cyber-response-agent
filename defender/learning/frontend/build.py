@@ -17,7 +17,7 @@ from defender._venv import reexec_into_venv  # noqa: E402
 if __name__ == "__main__":
     reexec_into_venv(__file__)
 
-from defender.learning.core.config import LoopPaths  # noqa: E402
+from defender.learning.core.config import LoopPaths, loop_paths  # noqa: E402
 from defender.learning.frontend import serialize, serialize_queues  # noqa: E402
 from defender.scripts.visualize.visualize_primitives import (  # noqa: E402
     esc_untrusted,
@@ -531,7 +531,7 @@ def main(paths: LoopPaths | None = None) -> int:
     counts = {k: len(v["lessons"]) for k, v in view["groups"].items()}
     print(f"wrote {json_out.relative_to(REPO_ROOT)} + {html_out.relative_to(REPO_ROOT)} — {counts}")
 
-    queues = serialize_queues.stamped_view(paths)
+    queues = serialize_queues.stamped_view(paths if paths is not None else loop_paths())
     q_json = HERE.parent / "queues.json"
     q_json.write_text(serialize_queues.dump_contract(queues), encoding="utf-8")
     q_html = HERE.parent / "queues.html"

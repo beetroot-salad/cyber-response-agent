@@ -39,6 +39,7 @@ from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees
 from defender.learning.leads import lead_author, lead_neighbors, pitfalls_curator
 from defender.learning.leads.draft_synthesis import synthesize_drafts
+from defender.tests import _state1135
 from defender.tests._tree_listing_1134 import RealOs, fd_path
 from defender.tests._declared869 import LeadAuthorSpawn, pitfall_row
 from defender.tests._declared870 import (
@@ -87,6 +88,7 @@ from defender.tests.test_1134_lead_author_handle import (
     marked_template,
     said_for,
 )
+from defender.learning.core.state import PITFALLS
 
 LEAD = LEAD_AUTHOR_DRAIN_LABEL
 
@@ -116,7 +118,8 @@ def _pitfalls_tree(tmp_path: Path) -> LoopPaths:
     write_reducer_surface(repo)
     commit_all(repo, "seed the reducer surface")
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    persist.append_pitfalls([shim_row(f"r:l-003:{i}") for i in range(3)], paths=paths)
+    paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
+    persist.append_pitfalls([shim_row(f"r:l-003:{i}") for i in range(3)], state=_state1135.state_for_paths(paths))
     return paths
 
 
@@ -217,6 +220,7 @@ def test_the_runs_commit_gate_reads_what_the_agent_left_through_the_trees(
     committed as a link."""
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
     run_dir = _run_dir(tmp_path)
     target = write(tmp_path / "outside" / Path(what.name).name, what.text)
     at = paths.skills_dir / what.name
@@ -370,11 +374,12 @@ def test_two_claims_over_one_paths_each_mint_through_their_own_trees(
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
     reached: list[str] = []
     for i, lead in enumerate((WAZUH_LEAD, ELASTIC_LEAD)):
         run_dir = _run_dir(tmp_path / f"claim-{i}", (lead.query_id, lead.system, lead.verb))
         try:
-            drains._invoke_lead_author(paths, run_dir, label=LEAD, on_done=lambda _sha: None)
+            drains._invoke_lead_author(paths, _state1135.state_for_paths(paths), run_dir, label=LEAD, on_done=lambda _sha: None)
         except FatalConfigError:
             reached.append(lead.query_id)
 
@@ -408,6 +413,7 @@ def test_the_lift_bypass_reads_a_pending_draft_through_the_trees(
     monkeypatch.delenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", raising=False)
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
     run_dir = _run_dir(tmp_path)
     target = write(tmp_path / "outside" / "contradicts.md", CONTRADICTING)
     at = paths.skills_dir / "elastic/_draft/contradicts.md"
@@ -449,6 +455,7 @@ def test_the_runs_catalog_loads_go_through_the_deps_held_mount(tmp_path: Path, r
     second handle the trees never held."""
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
+    paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
     run_dir = _run_dir(tmp_path)
     write(paths.skills_dir / TEMPLATE_NAME, marked_template("wazuh.probe"))
     lead = _lead("wazuh.probe", system="wazuh", verb="noverb", params={"index": "idx-7"})
@@ -574,11 +581,12 @@ def test_run_pitfalls_checks_its_trees_before_it_reads_its_queue(
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "99")
     if how == "lane_trees":
         paths = LoopPaths(repo_root=_worktree(tmp_path), state_dir=tmp_path / "state")
+        paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
         trees = lead_trees(paths)
     else:
         paths, trees = _refusing_trees(tmp_path)[how]()
-    persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], paths=paths)
-    queue = paths.pitfalls.file
+    persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], state=_state1135.state_for_paths(paths))
+    queue = paths.state_root / PITFALLS.queue
     spawn = Spawn()
 
     with trees, kernel_watch(reads=[queue], opens=[queue]) as events:

@@ -37,6 +37,8 @@ from defender.runtime.verb_dispositions import (
     dispositions_path,
     load_dispositions,
 )
+from defender.tests._curator1134 import open_state
+from defender.learning.core.state import FINDINGS
 
 #: The names a table row may carry that are NOT roles, mapped to the role whose registered
 #: definition actually makes their calls. One entry since #999: the turn-zero correlation lead
@@ -239,7 +241,7 @@ def test_922_a_verb_granted_to_nobody_records_why():
 
 
 
-def test_922_the_findings_gate_and_its_family_partition_are_still_the_channels_one_gate():
+def test_922_the_findings_gate_and_its_family_partition_are_still_the_channels_one_gate(tmp_path):
     """CENSUS (derived from the shipped author config, not from a module path).
 
     C10, as an executable claim. The findings channel has ONE gate — `CorpusAuthorConfig.gate`
@@ -256,8 +258,8 @@ def test_922_the_findings_gate_and_its_family_partition_are_still_the_channels_o
     from defender.learning.core.config import LoopPaths
     from defender.tests._curator1134 import author_trees
 
-    paths = LoopPaths(repo_root=DEFENDER.parent, state_dir=DEFENDER.parent / "___absent___")
-    gate = build_author_config(paths, trees=author_trees(paths)).gate
+    paths = LoopPaths(repo_root=DEFENDER.parent, state_dir=tmp_path / "state")
+    gate = build_author_config(paths, trees=author_trees(paths), state=open_state(paths)).gate
     assert gate is not None, "the findings channel's config carries no gate"
 
     family = {"schema_version": 1, "finding_id": "ep/b/0/0", "run_id": "ep",
@@ -267,7 +269,7 @@ def test_922_the_findings_gate_and_its_family_partition_are_still_the_channels_o
     caught = dict(family, finding_id="ep/b/0/1", judge_outcome="caught")
 
     held, consumed, to_author = gate([family, caught],
-                                     build_author_config(paths, trees=author_trees(paths)))
+                                     build_author_config(paths, trees=author_trees(paths), state=open_state(paths)))
     assert [r["finding_id"] for r in to_author] == ["ep/b/0/0"], (
         f"the shipped gate did not admit the `survived` family row for authoring: "
         f"{[r['finding_id'] for r in to_author]}")
@@ -314,7 +316,7 @@ def test_922_the_eval_harness_seeds_the_same_queue_file_the_drain_reads():
         (scenario / "findings.jsonl").write_text("", encoding="utf-8")
         harness.materialize(scenario, tmp)
 
-        expected = LoopPaths(repo_root=tmp).findings.file
+        expected = LoopPaths(repo_root=tmp).state_root / FINDINGS.queue
         assert expected.is_file(), (
             f"the eval harness materialized a tree whose findings queue is not at {expected} — "
             "the harness seeds a path the curator it then runs does not read")

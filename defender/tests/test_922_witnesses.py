@@ -53,6 +53,8 @@ from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests._by_path import load_lint_gate
 from defender.tests._repo import seed_adapter_stubs
+from defender.tests import _state1135
+from defender.tests._state1135 import env_state
 
 DEFENDER = Path(__file__).resolve().parents[1]
 
@@ -61,7 +63,7 @@ DEFENDER = Path(__file__).resolve().parents[1]
 def _isolated_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _roots(run_dir: Path, defender_dir: Path):
@@ -129,7 +131,7 @@ def test_922_the_family_judge_frames_the_archived_bodies_it_grades(tmp_path):
 
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
     J.mod("learning.judge").grade_episode(
-        ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=1)
+        ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=1, state=env_state())
 
     assert "judge:b:0" in judge.agent_ids, (
         f"the judge never called for world b: {judge.agent_ids} — nothing to assert against")

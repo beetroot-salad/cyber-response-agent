@@ -96,7 +96,7 @@ import pytest
 from defender._env import FatalConfigError
 from defender._git import GitError
 from defender.learning.author import _config
-from defender.learning.core import drains, markers, persist
+from defender.learning.core import drains, persist
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.faults import SYSTEMIC_FAULTS
 from defender.learning.core.lane_trees import open_drain_trees
@@ -106,6 +106,7 @@ from defender.learning.leads.lead_extraction import ExecutedLead, LeadAuthorErro
 from defender.learning.leads.pitfalls_curator import PitfallsDisposition
 from defender.runtime import box as box_mod
 from defender.tests._curator1134 import plant_fifo
+from defender.tests._state1135 import enqueue_case, state_for_paths
 from defender.tests._declared869 import (
     Spawn,
     commit_all,
@@ -125,6 +126,7 @@ from defender.tests._spec791 import (
     noop_stop_box,
 )
 from defender.tests.test_1134_curator_git_bounds import _Shim, _within
+from defender.learning.core.state import PITFALLS
 
 LEAD = LEAD_AUTHOR_DRAIN_LABEL
 
@@ -225,9 +227,9 @@ class _Branch(SpecBranch):
 
 class _LeadLane:
     """The lead-author work step handed to the drain as `run_lead_author`: the REAL lane
-    (`lead_author.run(label=, deps=)`) under the lane's held trees, with only the agent spawn,
-    `extract` (it hands back `leads`) and the queue lock replaced (the drain holds the real lock
-    for the tick). `replaced` swaps further deps fields in. The agent fake runs `edit(worktree)`
+    (`lead_author.run(label=, deps=)`) under the lane's held trees, with only the agent spawn
+    and `extract` (it hands back `leads`) replaced, run under the queue lock the drain holds for
+    the tick. `replaced` swaps further deps fields in. The agent fake runs `edit(worktree)`
     and returns 0; `reached` records each spawn's handoffs and pending drafts."""
 
     def __init__(self, edit: Callable[[Path], None], *, leads: Iterable[ExecutedLead] = (),
@@ -237,7 +239,7 @@ class _LeadLane:
         self.replaced = replaced
         self.reached: list[dict] = []
 
-    def __call__(self, paths: LoopPaths, run_dir: Path, *, box: Any = None,
+    def __call__(self, paths: LoopPaths, state: Any, run_dir: Path, *, box: Any = None,
                  on_done: Callable[[str | None], None]) -> None:
         worktree = paths.repo_root
 
@@ -249,15 +251,14 @@ class _LeadLane:
 
         with open_drain_trees(paths, LEAD) as trees:
             deps = dataclasses.replace(
-                lead_author.build_lead_author_deps(paths, trees=trees),
+                lead_author.build_lead_author_deps(paths, state=state, trees=trees),
                 invoke_agent=agent,
                 extract=lambda _run_dir: ([], list(self.leads)),
-                acquire_queue_lock=lambda: object(),
-                release_queue_lock=lambda _fh: None,
                 **self.replaced,
             )
-            rc = lead_author.run(run_dir, label=LEAD, paths=paths, deps=deps, box=box,
-                                 on_done=on_done)
+            # The drain holds the queue lock for the whole tick, so the lane runs under it, as
+            # the drain's own default seam does (`run(deps=)` would take it again and skip).
+            rc = lead_author._run_locked(run_dir, deps, box=box, on_done=on_done)
         if rc != 0:
             raise LeadAuthorError(f"lead-author for {run_dir.name} returned rc={rc}")
 
@@ -272,10 +273,10 @@ class _PitfallsLane:
         self.spawn = Spawn(edit)
         self.kwargs = kwargs
 
-    def __call__(self, paths: LoopPaths, *, box: Any = None,
+    def __call__(self, paths: LoopPaths, state: Any, *, box: Any = None,
                  on_curated: Callable[[PitfallsDisposition], None]) -> int:
         with open_drain_trees(paths, LEAD) as trees:
-            return pitfalls_curator.run_pitfalls(paths=paths, trees=trees, invoke=self.spawn,
+            return pitfalls_curator.run_pitfalls(paths=paths, state=state, trees=trees, invoke=self.spawn,
                                                  box=box, on_curated=on_curated, **self.kwargs)
 
 
@@ -347,12 +348,13 @@ def _lead_scene(tmp: Path, monkeypatch: pytest.MonkeyPatch, *, cases: Iterable[s
     if lift_threshold:
         monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1")
     paths = loop_paths(tmp)
+    state = state_for_paths(paths)
     wt = _worktree(tmp / "worktrees", committed=committed)
     run_dirs = []
     for case in cases:
         run_dir = tmp / "runs" / case
         (run_dir / "gather_raw").mkdir(parents=True)
-        markers.enqueue_case_for_curation(case, run_dir, paths)
+        enqueue_case(state, case, run_dir)
         run_dirs.append(run_dir)
     return _Scene(tmp, paths, wt, _Branch(tmp / "worktrees", wt), run_dirs, None)
 
@@ -363,9 +365,9 @@ def _pitfalls_scene(tmp: Path, monkeypatch: pytest.MonkeyPatch, *,
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     paths = loop_paths(tmp)
     wt = _worktree(tmp / "worktrees", committed=committed)
-    persist.append_pitfalls([pitfall_row(PID, "elastic")], paths=paths)
+    persist.append_pitfalls([pitfall_row(PID, "elastic")], state=state_for_paths(paths))
     return _Scene(tmp, paths, wt, _Branch(tmp / "worktrees", wt), [],
-                  paths.pitfalls.file.read_bytes())
+                  (paths.state_root / PITFALLS.queue).read_bytes())
 
 
 def _tick(sc: _Scene, *, run_lead_author: Any = None, run_pitfalls: Any = None,
@@ -444,12 +446,12 @@ def _stalled(shim: _Shim) -> list[str]:
 
 
 def _inflight(paths: LoopPaths) -> dict[str, dict]:
-    d = paths.author_queue_dir / "inflight"
+    d = paths.state_root / "author-queue" / "inflight"
     return {p.name: marker_body(p) for p in sorted(d.glob("*.json"))} if d.is_dir() else {}
 
 
 def _failed(paths: LoopPaths) -> list[dict]:
-    d = paths.author_queue_dir / "failed"
+    d = paths.state_root / "author-queue" / "failed"
     return [json.loads(p.read_text(encoding="utf-8")) for p in sorted(d.glob("*.json"))] \
         if d.is_dir() else []
 
@@ -512,7 +514,7 @@ def _assert_lead_served(sc: _Scene, changes: set[str]) -> None:
 
 def _assert_rows_untouched(sc: _Scene) -> None:
     assert sc.queue_before is not None
-    assert sc.paths.pitfalls.file.read_bytes() == sc.queue_before, "a queued row was rewritten"
+    assert (sc.paths.state_root / PITFALLS.queue).read_bytes() == sc.queue_before, "a queued row was rewritten"
     assert consumed_by_id(sc.paths) == {}
     assert graveyard_by_id(sc.paths) == {}
 
@@ -523,7 +525,7 @@ def _assert_rows_consumed(sc: _Scene, changes: set[str]) -> None:
     consumed = consumed_by_id(sc.paths)
     assert consumed[PID]["consumed_category"] == "consumed_committed"
     assert consumed[PID]["consumed_commit"] == _head_sha(sc.wt)
-    assert persist.read_pitfalls(sc.paths) == []
+    assert persist.read_pitfalls(state_for_paths(sc.paths)) == []
     assert "finish" in sc.branch.events
 
 
@@ -755,7 +757,7 @@ def test_t3_a_plain_star_gitignore_hides_nothing_from_the_pitfalls_scope_check(
     for rel in named:
         assert rel in reason, (rel, reason)
     assert _commits(sc.wt) == 1, "the refused curation committed"
-    assert persist.read_pitfalls(sc.paths) == []
+    assert persist.read_pitfalls(state_for_paths(sc.paths)) == []
 
 
 # ---------------------------------------------------------------------------------------
@@ -1027,14 +1029,14 @@ def _serving(served: list[Path]) -> Callable[..., None]:
     """A `run_lead_author` that serves a claim cleanly with no git of its own: recorded done,
     no commit."""
 
-    def serve(_paths, run_dir, *, box=None, on_done):
+    def serve(_paths, _state, run_dir, *, box=None, on_done):
         served.append(run_dir)
         on_done(None)
 
     return serve
 
 
-def _curating(_paths, *, box=None, on_curated) -> int:
+def _curating(_paths, _state, *, box=None, on_curated) -> int:
     """A `run_pitfalls` that curates cleanly with no git of its own: the queued row committed
     (as a stand-in sha), handed to the drain to consume after the scrub."""
     on_curated(PitfallsDisposition(committed_ids=(PID,), sha="abc1175", held_ids=()))
@@ -1097,7 +1099,7 @@ def test_t5b_a_cleanup_overrun_after_a_clean_claim_ends_the_tick(tmp_path, monke
     assert _inflight(sc.paths) == {"case-a.json": {
         "case_id": "case-a", "run_dir": str(run_a.resolve()), "attempts": 1}}, _inflight(sc.paths)
     assert author_markers(sc.paths) == ["case-b.json"]
-    assert marker_body(sc.paths.author_queue_dir / "case-b.json") == {
+    assert marker_body(sc.paths.state_root / "author-queue" / "case-b.json") == {
         "case_id": "case-b", "run_dir": str(run_b.resolve())}
     assert _failed(sc.paths) == []
     assert _done_sha(run_a) is None
@@ -1216,6 +1218,7 @@ def test_the_lanes_default_bound_is_the_curators_sixty_seconds(tmp_path):
         == _config.GIT_TIMEOUT_SECONDS
     wt = _worktree(tmp_path)
     paths = LoopPaths(repo_root=wt, state_dir=tmp_path / "state")
+    state = state_for_paths(paths)
     with open_drain_trees(paths, LEAD) as trees:
-        assert lead_author.build_lead_author_deps(paths, trees=trees).git_timeout \
+        assert lead_author.build_lead_author_deps(paths, state=state, trees=trees).git_timeout \
             == _config.GIT_TIMEOUT_SECONDS

@@ -7,24 +7,22 @@ from dataclasses import replace
 import pytest
 
 from defender.learning.author import shared
+from defender.learning.core.state import FINDINGS, REPO_LOCK, TRY_ONCE
 
 
 def test_lock_refuses_concurrent_run(tmp_repo, helpers):
     """A second author tick exits cleanly while the first holds the queue lock.
 
     The author drives this through the shared drain body's drain-role gate; the lock
-    primitive is ``shared.acquire_flock`` on the channel's drain lock-file."""
-    lock_file = tmp_repo.cfg.channel.drain_lock
-    fh = shared.acquire_flock(lock_file)
-    assert fh is not None
-    try:
-        second = shared.acquire_flock(lock_file)
-        assert second is None
-    finally:
-        shared.release_flock(fh)
-    third = shared.acquire_flock(lock_file)
-    assert third is not None
-    shared.release_flock(third)
+    primitive is the handle's ``lock(role, wait=TRY_ONCE)`` on the channel's drain role."""
+    role = tmp_repo.cfg.channel.drain_role
+    state = tmp_repo.state
+    with state.lock(role, wait=TRY_ONCE) as first:
+        assert first
+        with state.lock(role, wait=TRY_ONCE) as second:
+            assert not second
+    with state.lock(role, wait=TRY_ONCE) as third:
+        assert third
 
 
 def test_repo_lock_held_returns_zero(tmp_repo, helpers):
@@ -37,9 +35,9 @@ def test_repo_lock_held_returns_zero(tmp_repo, helpers):
 
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-A", "benign")
-    helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-A/0", run_id="run-A")
+    helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-A/0", run_id="run-A")
 
-    lock_file = tmp_repo.cfg.repo_lock_file
+    lock_file = tmp_repo.paths.state_root / REPO_LOCK.file
     lock_file.parent.mkdir(parents=True, exist_ok=True)
     holder = lock_file.open("a+")
     fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
@@ -62,7 +60,7 @@ def test_repo_lock_held_returns_zero(tmp_repo, helpers):
 
     pending = [
         json.loads(line)
-        for line in tmp_repo.paths.pending_file.read_text().splitlines()
+        for line in (tmp_repo.paths.state_root / FINDINGS.queue).read_text().splitlines()
         if line.strip()
     ]
     assert [p["finding_id"] for p in pending] == ["run-A/0"]
@@ -86,8 +84,8 @@ def test_ground_truth_gate_holds_inconclusive(tmp_repo, helpers, monkeypatch):
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-A", "inconclusive")
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-B", "benign")
-    helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-A/0", run_id="run-A")
-    helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-B/0", run_id="run-B")
+    helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-A/0", run_id="run-A")
+    helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-B/0", run_id="run-B")
 
     captured = {}
 
@@ -112,7 +110,7 @@ def test_ground_truth_gate_holds_inconclusive(tmp_repo, helpers, monkeypatch):
 
     pending = [
         json.loads(line)
-        for line in tmp_repo.paths.pending_file.read_text().splitlines()
+        for line in (tmp_repo.paths.state_root / FINDINGS.queue).read_text().splitlines()
         if line.strip()
     ]
     assert [p["finding_id"] for p in pending] == ["run-A/0"]
@@ -141,10 +139,10 @@ def test_ground_truth_gate_benign_authors_off_malicious(tmp_repo, helpers, monke
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-M", "malicious")
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-Bn", "benign")
     helpers.write_finding(
-        tmp_repo.paths.pending_file, finding_id="run-M/0", run_id="run-M", direction="benign"
+        tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-M/0", run_id="run-M", direction="benign"
     )
     helpers.write_finding(
-        tmp_repo.paths.pending_file, finding_id="run-Bn/0", run_id="run-Bn", direction="benign"
+        tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-Bn/0", run_id="run-Bn", direction="benign"
     )
 
     captured = {}
@@ -168,7 +166,7 @@ def test_ground_truth_gate_benign_authors_off_malicious(tmp_repo, helpers, monke
 
     pending = [
         json.loads(line)
-        for line in tmp_repo.paths.pending_file.read_text().splitlines()
+        for line in (tmp_repo.paths.state_root / FINDINGS.queue).read_text().splitlines()
         if line.strip()
     ]
     assert [p["finding_id"] for p in pending] == ["run-Bn/0"]
@@ -176,7 +174,7 @@ def test_ground_truth_gate_benign_authors_off_malicious(tmp_repo, helpers, monke
 
     consumed = [
         json.loads(line)
-        for line in tmp_repo.cfg.channel.consumed.read_text().splitlines()
+        for line in (tmp_repo.paths.state_root / FINDINGS.consumed).read_text().splitlines()
         if line.strip()
     ]
     assert [c["finding_id"] for c in consumed] == ["run-M/0"]
@@ -187,7 +185,7 @@ def test_ground_truth_gate_benign_authors_off_malicious(tmp_repo, helpers, monke
 def test_idempotency_filter_skips_already_authored(tmp_repo, helpers, monkeypatch):
     a = tmp_repo.author
     helpers.write_source_refs(tmp_repo.paths.runs_dir, "run-X", "benign")
-    helpers.write_finding(tmp_repo.paths.pending_file, finding_id="run-X/0", run_id="run-X")
+    helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-X/0", run_id="run-X")
 
     (tmp_repo.paths.lessons_dir / "preexisting.md").write_text(
         "---\n"
@@ -212,10 +210,10 @@ def test_idempotency_filter_skips_already_authored(tmp_repo, helpers, monkeypatc
     assert rc == 0
     assert invoked["called"] is False, "agent must not be invoked when all findings are idempotent"
 
-    assert tmp_repo.paths.pending_file.read_text().strip() == ""
+    assert (tmp_repo.paths.state_root / FINDINGS.queue).read_text().strip() == ""
     consumed = [
         json.loads(line)
-        for line in tmp_repo.cfg.channel.consumed.read_text().splitlines()
+        for line in (tmp_repo.paths.state_root / FINDINGS.consumed).read_text().splitlines()
         if line.strip()
     ]
     assert len(consumed) == 1
@@ -225,8 +223,8 @@ def test_idempotency_filter_skips_already_authored(tmp_repo, helpers, monkeypatc
 
 def test_empty_queue_is_noop(tmp_repo, monkeypatch):
     a = tmp_repo.author
-    tmp_repo.paths.pending_dir.mkdir(parents=True, exist_ok=True)
-    tmp_repo.paths.pending_file.write_text("")
+    (tmp_repo.paths.state_root / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_repo.paths.state_root / FINDINGS.queue).write_text("")
     called = {"n": 0}
 
     def fake_invoke(*args, **kwargs):

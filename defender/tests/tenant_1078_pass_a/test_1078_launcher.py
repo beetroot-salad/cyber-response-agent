@@ -26,6 +26,7 @@ from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests._data_root_1078 import current_data_root
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
+from defender.tests import _state1135
 
 TID = H.VALID_ID
 
@@ -258,7 +259,7 @@ def _graded_launch(tmp_path: Path, monkeypatch, root: Path, *, collide: bool):
     JUDGE step actually runs). The source sits at `<root>/<T>/runs/`; with `collide`, a finished
     run named for graded world `b` stands beside it there. Returns (status, episode dir)."""
     monkeypatch.delenv(T.RUNS_BASE_ENV, raising=False)  # the retired knob: nothing may read it
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
     episodes = _episodes_root(tmp_path, monkeypatch)
     _base, src = H.tenant_source(root, TID)
     if collide:

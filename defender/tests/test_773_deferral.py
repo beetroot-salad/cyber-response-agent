@@ -11,6 +11,7 @@ lost).
 """
 from __future__ import annotations
 
+from pathlib import Path
 import time
 
 import pytest
@@ -49,7 +50,7 @@ def _defer_again(sc, filler_id: str) -> int:
     # `build_scene`'s own auto-seeding rule (`_spec773.py`), mirrored here since this finding
     # is seeded straight onto the channel rather than through `build_scene`.
     S.write_source_refs(sc.paths, filler_id, "benign")
-    S.seed(sc.channel, [*sc.pending(), filler])
+    S.seed(sc.paths, sc.channel, [*sc.pending(), filler])
     sc.curator.writes = {f"{filler_id}.md": S.lesson(filler_id)}
     sc.curator.committed = ["orphan", filler_id]
     return sc.run()
@@ -64,7 +65,7 @@ def _hold_append_lock(store: dict):
 
     def grab(*args):
         cfg = args[2]
-        holder = S.Holder(cfg.channel.append_lock)
+        holder = S.Holder(Path(cfg.state.describe(cfg.channel)).parent / Path(cfg.channel.append_lock).name)
         holder.__enter__()
         store["holder"] = holder
 
@@ -176,7 +177,7 @@ def test_deferrals_and_attempts_counters_move_independently_across_ticks_773(tmp
     assert row["deferrals"] == 1
     assert "attempts" not in row
 
-    S.seed(sc.channel, sc.pending())
+    S.seed(sc.paths, sc.channel, sc.pending())
     sc.curator.raises = S.author_error("now a fault")
     assert sc.run() == 2
     row = sc.pending_by_id()["orphan"]
@@ -192,7 +193,7 @@ def test_a_deferred_rows_count_after_ten_consecutive_deferring_ticks_773(tmp_pat
     actually end it, which is asserted over real repeated ticks."""
     sc = _orphan_tick(tmp_path, max_attempts=3)
     for _ in range(10):
-        S.seed(sc.channel, sc.pending() or [])
+        S.seed(sc.paths, sc.channel, sc.pending() or [])
         if not sc.pending():
             break
         sc.run()
@@ -234,7 +235,7 @@ def test_a_deferred_row_as_the_wake_gate_sees_it_773(tmp_path):
     )
     ticks = 1
     while sc.pending_by_id().get("orphan") and ticks < 10:
-        authorable, held = drains._pending_queue_counts(sc.channel.file)
+        authorable, held = drains._pending_queue_counts(sc.cfg.state, sc.cfg.channel)
         assert authorable >= 1, "a deferred row must still read as work to the wake gate"
         assert held == 0, "a deferred row is not a permanent hold"
         _defer_again(sc, f"filler{ticks}")
@@ -256,10 +257,10 @@ def test_drain_ticks_own_loop_continuation_is_unaffected_by_the_new_row_fields_7
 
     sc = _orphan_tick(tmp_path, max_attempts=5)
     assert sc.run() == 0
-    authorable, held = drains._pending_queue_counts(sc.channel.file)
+    authorable, held = drains._pending_queue_counts(sc.cfg.state, sc.cfg.channel)
     assert (authorable, held) == (1, 0)
 
-    S.seed(sc.channel, sc.pending())
+    S.seed(sc.paths, sc.channel, sc.pending())
     sc.curator.writes = {"l2.md": S.lesson("orphan")}
     sc.curator.committed = ["orphan"]
     assert sc.run() == 0
@@ -454,7 +455,7 @@ def test_a_batch_row_the_curator_mentions_nowhere_and_no_file_cites_773(tmp_path
     """A row the curator mentions in no bucket and that no changed file cites stays queued
     EXACTLY as it was, with no counter of any kind bumped.
 
-    C3: a row named in neither the held nor the consumed list of `rotate_queue_locked` is
+    C3: a row named in neither the held nor the consumed list of the queue rotation is
     left untouched — the probe watched `r2` survive a rotation that named only `r0` and
     `r1`. It is distinct from O4's deferral case, which is a row the curator DID report and
     no approved file cites."""
@@ -522,7 +523,7 @@ def test_a_finding_faulted_and_deferred_in_the_same_tick_773(tmp_path):
     assert sc.run() == 0
     assert sc.pending_by_id()["orphan"]["deferrals"] == 1
 
-    S.seed(sc.channel, sc.pending())
+    S.seed(sc.paths, sc.channel, sc.pending())
     sc.curator.raises = S.author_error("faulted before M5")
     assert sc.run() == 2
     row = sc.pending_by_id()["orphan"]
@@ -639,4 +640,4 @@ def test_a_locked_rotation_that_expires_waiting_for_the_append_lock_773(tmp_path
     finally:
         held["holder"].__exit__()
     assert sc.pending() == before
-    assert [r["fault_class"] for r in S.stuck_records(sc.channel)] == ["TimeoutError"]
+    assert [r["fault_class"] for r in S.stuck_records(sc.paths, sc.channel)] == ["TimeoutError"]

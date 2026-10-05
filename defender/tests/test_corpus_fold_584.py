@@ -842,7 +842,9 @@ def test_d28_curator_consumers_survive_the_dataclass(tmp_path, capsys):
     from defender.tests._curator1134 import author_trees
 
     paths = LoopPaths(repo_root=tmp_path)
-    cfg = build_author_config(paths, trees=author_trees(paths))
+    from defender.tests._state1135 import state_for_paths
+
+    cfg = build_author_config(paths, state=state_for_paths(paths), trees=author_trees(paths))
     corpus = cfg.corpus_dir
     corpus.mkdir(parents=True, exist_ok=True)
     _findings_lesson(corpus, "good", finding_ids=("fid/0", "fid/1"))

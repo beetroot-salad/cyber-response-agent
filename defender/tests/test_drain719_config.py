@@ -20,9 +20,19 @@ import _drain719 as h
 from _drain719 import drain  # the not-yet-written target, via the suite's own shim
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
 from defender.learning.core import drains, persist  # type: ignore[import-not-found]
-from defender.learning.core.config import FatalConfigError  # type: ignore[import-not-found]
+from defender.learning.core.config import FatalConfigError
+from defender.learning.core.state import FINDINGS, PITFALLS  # type: ignore[import-not-found]
 from defender.learning.leads import pitfalls_curator  # type: ignore[import-not-found]
+from defender.tests import _state1135
 from defender.tests._lead_author_1134 import lead_trees
+
+
+def _graveyard_file(paths, ch) -> Path:
+    return paths.state_root / ch.deadletter
+
+
+def _stuck_file(paths, ch) -> Path:
+    return paths.state_root / ch.stuck
 
 
 def _pitfalls_rows(n: int) -> list[dict]:
@@ -48,10 +58,11 @@ def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Pat
     assert paths.state_root == state
 
     for name in h.ALL_CHANNELS:
-        ch = h.channel_of(paths, name)
-        targets = [ch.file, ch.consumed, ch.append_lock, drain.graveyard_file(ch)]
-        if ch.drain_lock is not None:
-            targets.append(ch.drain_lock)
+        ch = h.channel_of(name)
+        targets = [paths.state_root / rel for rel in (ch.queue, ch.consumed, ch.append_lock)]
+        targets.append(_graveyard_file(paths, ch))
+        if ch.drain_role is not None:
+            targets.append(paths.state_root / ch.drain_role.file)
         for p in targets:
             assert state in p.parents, f"{name}: {p} is not under the state root"
             assert paths.repo_root not in p.parents
@@ -59,8 +70,8 @@ def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Pat
     cfg = h.cfg_for(paths, "findings", max_attempts=1, invoke_agent=h.committing("s"))
     assert cfg.corpus_dir.is_relative_to(paths.repo_root), "the corpus is repo-rooted"
 
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "a/0")])
+    ch = h.channel_of("findings")
+    h.seed(paths, ch, [h.row_for("findings", "a/0")])
     fault = h.cfg_for(
         paths,
         "findings",
@@ -68,7 +79,7 @@ def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Pat
         invoke_agent=h.raising(author_shared.AuthorError("so the graveyard is written")),
     )
     assert drain.run_batch(cfg=fault) == 2
-    assert drain.graveyard_file(ch).is_file()
+    assert _graveyard_file(paths, ch).is_file()
     assert not (paths.repo_root / "defender" / "learning" / "_pending").exists()
 
 
@@ -83,14 +94,15 @@ def test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch(tmp_path: Path
     can see the difference the demand is about."""
     paths = h.make_paths(tmp_path)
     h.write_source_refs(paths, "a")
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
 
     for p in (
-        ch.append_lock, ch.drain_lock, drain.graveyard_file(ch), drain.stuck_report_file(ch)
+        paths.state_root / ch.append_lock, paths.state_root / ch.drain_role.file,
+        _graveyard_file(paths, ch), _stuck_file(paths, ch),
     ):
-        assert p.is_relative_to(paths.pending_dir), f"{p} is outside the ignored prefix"
+        assert p.is_relative_to((paths.state_root / FINDINGS.queue).parent), f"{p} is outside the ignored prefix"
 
-    h.seed(ch, [h.row_for("findings", "a/0")])
+    h.seed(paths, ch, [h.row_for("findings", "a/0")])
     fault = h.cfg_for(
         paths,
         "findings",
@@ -98,14 +110,14 @@ def test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch(tmp_path: Path
         invoke_agent=h.raising(author_shared.AuthorError("writes the graveyard")),
     )
     assert drain.run_batch(cfg=fault) == 2
-    assert drain.graveyard_file(ch).is_file()
-    assert ch.drain_lock.exists()
+    assert _graveyard_file(paths, ch).is_file()
+    assert (paths.state_root / ch.drain_role.file).exists()
 
-    h.seed(ch, [h.row_for("findings", "a/1")])
+    h.seed(paths, ch, [h.row_for("findings", "a/1")])
     clean = h.cfg_for(paths, "findings", max_attempts=1, invoke_agent=h.committing("ok"))
     assert drain.run_batch(cfg=clean) == 0, "the new state files aborted the next batch"
 
-    h.seed(ch, [h.row_for("findings", "a/2")])
+    h.seed(paths, ch, [h.row_for("findings", "a/2")])
     stray = h.cfg_for(
         paths,
         "findings",
@@ -130,10 +142,10 @@ def test_a_non_integer_ceiling_aborts_the_tick_before_any_row_is_processed(tmp_p
     In-range values, including the falsy 0, stay queue-level and are exercised by their own
     demands."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
     h.write_source_refs(paths, "a")
-    h.seed(ch, rows)
+    h.seed(paths, ch, rows)
 
     import os
 
@@ -148,9 +160,9 @@ def test_a_non_integer_ceiling_aborts_the_tick_before_any_row_is_processed(tmp_p
         else:
             os.environ["LEARNING_AUTHOR_MAX_ATTEMPTS"] = previous
 
-    assert h.pending(ch) == rows, "no row was processed"
-    assert h.graveyard(ch) == []
-    assert h.consumed(ch) == []
+    assert h.pending(paths, ch) == rows, "no row was processed"
+    assert h.graveyard(paths, ch) == []
+    assert h.consumed(paths, ch) == []
 
 
 def test_the_ceiling_is_read_once_per_batch_at_config_build(tmp_path: Path):
@@ -166,8 +178,8 @@ def test_the_ceiling_is_read_once_per_batch_at_config_build(tmp_path: Path):
 
     paths = h.make_paths(tmp_path)
     h.write_source_refs(paths, "a")
-    ch = h.channel_of(paths, "findings")
-    h.seed(ch, [h.row_for("findings", "a/0")])
+    ch = h.channel_of("findings")
+    h.seed(paths, ch, [h.row_for("findings", "a/0")])
 
     def lower_then_fail(rows, batch_id, cfg):
         os.environ["LEARNING_AUTHOR_MAX_ATTEMPTS"] = "1"
@@ -180,8 +192,8 @@ def test_the_ceiling_is_read_once_per_batch_at_config_build(tmp_path: Path):
     finally:
         os.environ.pop("LEARNING_AUTHOR_MAX_ATTEMPTS", None)
 
-    assert h.attempts_of(ch, "a/0") == 1, "the row retired under a ceiling read mid-batch"
-    assert h.graveyard(ch) == []
+    assert h.attempts_of(paths, ch, "a/0") == 1, "the row retired under a ceiling read mid-batch"
+    assert h.graveyard(paths, ch) == []
 
 
 def test_author_timeout_seconds_zero_behavior_is_pinned(tmp_path: Path):
@@ -200,9 +212,9 @@ def test_author_timeout_seconds_zero_behavior_is_pinned(tmp_path: Path):
     import os
 
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     h.write_source_refs(paths, "run-Z")
-    h.seed(ch, [h.row_for("findings", "run-Z/0")])
+    h.seed(paths, ch, [h.row_for("findings", "run-Z/0")])
 
     previous = os.environ.get("LEARNING_AUTHOR_TIMEOUT_SECONDS")
     os.environ["LEARNING_AUTHOR_TIMEOUT_SECONDS"] = "0"
@@ -243,7 +255,7 @@ def test_pitfalls_agent_failure_bumps_attempts_and_retires_at_the_ceiling(
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "2")
     paths = h.make_paths(tmp_path)
-    h.seed(paths.pitfalls, _pitfalls_rows(2))
+    h.seed(paths, PITFALLS, _pitfalls_rows(2))
 
     with pytest.raises(Exception) as raised:  # noqa: PT011 - the raised class is the subject under test, asserted below
         pitfalls_curator.run_pitfalls(paths=paths, invoke=lambda *a, **k: 7,
@@ -253,19 +265,19 @@ def test_pitfalls_agent_failure_bumps_attempts_and_retires_at_the_ceiling(
         "it would fall through uncaught and the channel would stay stuck"
     )
 
-    def leg(_paths, box=None, **_kw):
-        return pitfalls_curator.run_pitfalls(paths=_paths, invoke=lambda *a, **k: 7,
+    def leg(_paths, _state, box=None, **_kw):
+        return pitfalls_curator.run_pitfalls(paths=_paths, state=_state, invoke=lambda *a, **k: 7,
                                              trees=lead_trees(_paths))
 
-    drains._drain_pitfalls(paths, leg)
-    assert [r.get("attempts") for r in h.pending(paths.pitfalls)] == [1, 1], (
+    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), leg)
+    assert [r.get("attempts") for r in h.pending(paths, PITFALLS)] == [1, 1], (
         "the converted rc did not bump both rows"
     )
-    assert h.graveyard(paths.pitfalls) == []
+    assert h.graveyard(paths, PITFALLS) == []
 
-    drains._drain_pitfalls(paths, leg)
-    assert h.pending(paths.pitfalls) == []
-    grave = h.graveyard(paths.pitfalls)
+    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), leg)
+    assert h.pending(paths, PITFALLS) == []
+    grave = h.graveyard(paths, PITFALLS)
     assert sorted(r["pitfall_id"] for r in grave) == ["r:l-000:0", "r:l-001:0"]
     assert [r.get("attempts") for r in grave] == [2, 2]
 
@@ -280,21 +292,21 @@ def test_pitfalls_batch_retires_at_the_ceiling(tmp_path: Path, monkeypatch):
     the third carrying its reason."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     paths = h.make_paths(tmp_path)
-    h.seed(paths.pitfalls, _pitfalls_rows(2))
+    h.seed(paths, PITFALLS, _pitfalls_rows(2))
 
-    def leg(_paths, box=None, **_kw):
+    def leg(_paths, _state, box=None, **_kw):
         raise author_shared.AuthorError("pitfalls curation failed")
 
     for expected in (1, 2):
-        drains._drain_pitfalls(paths, leg)
-        assert [r.get("attempts") for r in h.pending(paths.pitfalls)] == [expected, expected], (
+        drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), leg)
+        assert [r.get("attempts") for r in h.pending(paths, PITFALLS)] == [expected, expected], (
             f"attempts did not reach {expected} on tick {expected}"
         )
-        assert h.graveyard(paths.pitfalls) == []
+        assert h.graveyard(paths, PITFALLS) == []
 
-    drains._drain_pitfalls(paths, leg)
-    grave = h.graveyard(paths.pitfalls)
-    assert h.pending(paths.pitfalls) == []
+    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), leg)
+    grave = h.graveyard(paths, PITFALLS)
+    assert h.pending(paths, PITFALLS) == []
     assert [r.get("attempts") for r in grave] == [3, 3]
     # #870 FK-11: the ceiling path files `batch-error:<class>` — two writers append to one
     # `pitfalls.deadletter.jsonl`, and a bare `str(e)` beside `_graveyard_dropped_rows`' named
@@ -319,24 +331,24 @@ def test_pitfalls_retirement_removes_batch_ids_not_the_whole_queue(tmp_path: Pat
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "1")
     paths = h.make_paths(tmp_path)
-    h.seed(paths.pitfalls, _pitfalls_rows(2))
+    h.seed(paths, PITFALLS, _pitfalls_rows(2))
     late = h.row_for("pitfalls", "r:l-999:0")
 
-    def leg(_paths, box=None, **_kw):
-        rc = pitfalls_curator.run_pitfalls(paths=_paths, invoke=lambda *a, **k: 7,
+    def leg(_paths, _state, box=None, **_kw):
+        rc = pitfalls_curator.run_pitfalls(paths=_paths, state=_state, invoke=lambda *a, **k: 7,
                                            trees=lead_trees(_paths))
         return rc
 
-    def failing_then_append(_paths, box=None, **_kw):
-        persist.append_pitfalls([late], paths=_paths)
-        return leg(_paths, box=box)
+    def failing_then_append(_paths, _state, box=None, **_kw):
+        persist.append_pitfalls([late], state=_state)
+        return leg(_paths, _state, box=box)
 
-    drains._drain_pitfalls(paths, failing_then_append)
+    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), failing_then_append)
 
-    survivors = h.pending(paths.pitfalls)
+    survivors = h.pending(paths, PITFALLS)
     assert [r["pitfall_id"] for r in survivors] == ["r:l-999:0"]
     assert survivors[0] == late, "the late row was not bumped or rewritten"
-    assert sorted(r["pitfall_id"] for r in h.graveyard(paths.pitfalls)) == [
+    assert sorted(r["pitfall_id"] for r in h.graveyard(paths, PITFALLS)) == [
         "r:l-000:0",
         "r:l-001:0",
     ]
@@ -352,20 +364,20 @@ def test_pitfalls_retire_goes_through_the_locked_rotation(tmp_path: Path):
     Pitfalls has ONE lock serving both roles (C24), so this is the same file the appender
     takes: held from another actor, the retirement does not proceed."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "pitfalls")
-    assert ch.append_lock.name == ".pitfalls.lock"
-    assert ch.drain_lock is None
-    h.seed(ch, _pitfalls_rows(2))
+    ch = h.channel_of("pitfalls")
+    assert (paths.state_root / ch.append_lock).name == ".pitfalls.lock"
+    assert ch.drain_role is None
+    h.seed(paths, ch, _pitfalls_rows(2))
 
     worker = h.Background(
         lambda: drain.retire(
-            channel=ch, batch_ids=["r:l-000:0"], reason="pitfalls retire", max_attempts=1
+            _state1135.state_for_paths(paths), channel=PITFALLS, batch_ids=["r:l-000:0"], reason="pitfalls retire", max_attempts=1
         )
     )
-    with h.Holder(ch.append_lock):
+    with h.Holder(paths.state_root / ch.append_lock):
         worker._thread.start()
         assert not worker.finished_within(1.0), "the pitfalls retire took no lock"
-        assert h.graveyard(ch) == []
+        assert h.graveyard(paths, ch) == []
     assert worker.finished_within(20)
-    assert [r["pitfall_id"] for r in h.pending(ch)] == ["r:l-001:0"]
-    assert [r["pitfall_id"] for r in h.graveyard(ch)] == ["r:l-000:0"]
+    assert [r["pitfall_id"] for r in h.pending(paths, ch)] == ["r:l-001:0"]
+    assert [r["pitfall_id"] for r in h.graveyard(paths, ch)] == ["r:l-000:0"]

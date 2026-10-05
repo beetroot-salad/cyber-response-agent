@@ -23,8 +23,8 @@ from defender._vocab import normalized_judge_outcome
 from defender._yaml import safe_load
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL,
-    DEFAULT_PATHS,
     LoopPaths,
+    loop_paths,
     StageContext,
     StageWiring,
     author_effort as _author_effort,
@@ -35,6 +35,7 @@ from defender.learning.core.config import (
     author_timeout as _author_timeout,
 )
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
+from defender.learning.core.state import FINDINGS, LearningState
 
 
 
@@ -51,9 +52,8 @@ class AuthorConfig(CorpusAuthorConfig):
     """The lessons curator's drain config: the shared corpus-author core plus the held report,
     the manifest seed the lessons prompt takes, and the env-backed model knobs.
 
-    Lock topology lives on `QueueChannel`, not here (#719)."""
+    Lock topology lives on `Channel`, not here (#719)."""
 
-    held_report: Path
     manifest_seed: str | None = None
     # default_factory, not a plain default: these are env-backed knobs and a plain default
     # would freeze at import. A caller that overrides them still wins.
@@ -63,8 +63,8 @@ class AuthorConfig(CorpusAuthorConfig):
 
 
 def build_author_config(
-    paths: LoopPaths = DEFAULT_PATHS, *, trees: DrainTrees, manifest_seed: str | None = None,
-    box: Any = None,
+    paths: LoopPaths, *, state: LearningState, trees: DrainTrees,
+    manifest_seed: str | None = None, box: Any = None,
 ) -> AuthorConfig:
     """This channel's config over `paths`, reading and writing its corpus through `trees`, the
     lane's open trees (`open_drain_trees`): they must hold `paths.lessons_dir` itself
@@ -82,12 +82,9 @@ def build_author_config(
         tree_for=trees.tree_for,
         corpus_dir_rel=paths.lessons_dir_rel,
         runs_dir=paths.runs_dir,
-        pending_dir=paths.pending_dir,
-        channel=paths.findings,
-        repo_lock_file=paths.author_lock_file,
+        state=state,
+        channel=FINDINGS,
         repo_lock_wait_seconds=repo_lock_wait_seconds(),
-        # Channel-scoped, like the graveyard and stuck-row record beside it.
-        held_report=paths.pending_dir / "findings.held_report.log",
         log_prefix=_LOG_PREFIX,
         author_prompt=paths.learning_dir / "author" / "lessons" / "prompt.md",
         invoke_agent=invoke_agent,
@@ -146,7 +143,6 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
     drain does that before committing."""
     from defender.learning.author import curator_engine
 
-    cfg.pending_dir.mkdir(parents=True, exist_ok=True)
     stage_salt = uuid.uuid4().hex
     return curator_engine.run_curator_stage(
         wiring=StageWiring.for_batch(
@@ -154,7 +150,7 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: AuthorConfig) -> dict
             batch_id=batch_id, label="curator",
         ),
         ctx=StageContext(
-            learning_run_dir=cfg.pending_dir,
+            learning_run_dir=cfg.state.stage_dir(AUTHOR_DRAIN_LABEL),
             user=build_user_prompt(findings, batch_id, cfg, salt=stage_salt),
             request_limit=author_request_limit(),
             wall_clock_timeout=cfg.author_timeout,
@@ -203,7 +199,7 @@ def write_held_report(
 
     Nothing is written when the tick declined nothing."""
     _shared.write_disposition_report(
-        cfg.held_report, cfg.pending_dir, batch_id=batch_id,
+        cfg.state, cfg.channel, batch_id=batch_id,
         groups={
             "forward_bad_terminal": forward_bad_terminal, "deferred": deferred,
             "skipped": skipped, "gate_held": gate_held,
@@ -235,7 +231,8 @@ def _write_held_report_after_rotate(outcome, cfg: AuthorConfig) -> None:
 def run_batch(
     *,
     hold_committed: bool = False,
-    paths: LoopPaths = DEFAULT_PATHS,
+    paths: LoopPaths | None = None,
+    state: LearningState | None = None,
     trees: DrainTrees | None = None,
     cfg: AuthorConfig | None = None,
     box: Any = None,
@@ -246,7 +243,9 @@ def run_batch(
     if (trees is None) == (cfg is None):
         raise TypeError("run_batch takes exactly one of trees= and cfg=")
     if trees is not None:
-        cfg = build_author_config(paths, trees=trees, box=box)
+        if paths is None or state is None:
+            raise TypeError("run_batch with trees= takes paths= and state=")
+        cfg = build_author_config(paths, state=state, trees=trees, box=box)
     assert cfg is not None  # narrowed for mypy: exactly one of the two was given
     return drain.run_batch(cfg=cfg, hold_committed=hold_committed, box=box)
 
@@ -357,8 +356,10 @@ def main(argv: list[str]) -> int:
     if len(argv) != 1:
         print("usage: author.py", file=sys.stderr)
         return 64
-    with open_drain_trees(DEFAULT_PATHS, AUTHOR_DRAIN_LABEL) as trees:
-        return run_batch(trees=trees)
+    paths = loop_paths()
+    with LearningState.open(paths) as state, open_drain_trees(
+            paths, AUTHOR_DRAIN_LABEL) as trees:
+        return run_batch(paths=paths, state=state, trees=trees)
 
 
 if __name__ == "__main__":

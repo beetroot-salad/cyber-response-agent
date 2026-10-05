@@ -68,10 +68,10 @@ def test_a_git_failure_in_a_read_only_probe_does_not_spend_an_attempt(tmp_path: 
     fails. The tail then shows the channel is not wedged: with git repaired the same rows
     author normally, which also proves the corpus was restored rather than left dirty."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
     h.write_source_refs(paths, "a")
-    h.seed(ch, rows)
+    h.seed(paths, ch, rows)
 
     cfg = h.cfg_for(
         paths,
@@ -82,13 +82,13 @@ def test_a_git_failure_in_a_read_only_probe_does_not_spend_an_attempt(tmp_path: 
     with pytest.raises(drain.GitProbeError):
         drain.run_batch(cfg=cfg)
 
-    assert h.pending(ch) == rows, "a read-only probe failure rewrote the queue"
-    assert h.attempts_of(ch, "a/0") is None, (
+    assert h.pending(paths, ch) == rows, "a read-only probe failure rewrote the queue"
+    assert h.attempts_of(paths, ch, "a/0") is None, (
         "the batch was charged an attempt for a git failure that says nothing about it — "
         "at max_attempts=1 that is real work deleted on the first index-lock collision"
     )
-    assert h.graveyard(ch) == []
-    assert h.stuck_records(ch)[-1]["fault_class"] == "GitProbeError", (
+    assert h.graveyard(paths, ch) == []
+    assert h.stuck_records(paths, ch)[-1]["fault_class"] == "GitProbeError", (
         "the probe failure left no operator signal, so the row is stuck and silent"
     )
 
@@ -99,7 +99,7 @@ def test_a_git_failure_in_a_read_only_probe_does_not_spend_an_attempt(tmp_path: 
         paths, "findings", max_attempts=1, invoke_agent=h.committing("after")
     )
     assert drain.run_batch(cfg=recovered) == 0, "the channel stayed wedged after the probe fault"
-    assert h.pending(ch) == []
+    assert h.pending(paths, ch) == []
 
 
 # The retire seam does not wait forever while holding the repo lock
@@ -128,12 +128,12 @@ def test_the_retire_seams_append_lock_wait_ends_at_the_configured_deadline(tmp_p
     `finished_within` rather than a bare call: the pre-fix behaviour is a HANG, and a
     regression that hangs should fail this test rather than stall the suite."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
     h.write_source_refs(paths, "a")
-    h.seed(ch, rows)
+    h.seed(paths, ch, rows)
 
-    appender = h.Holder(ch.append_lock)
+    appender = h.Holder(paths.state_root / ch.append_lock)
 
     def curate_then_appender_takes_the_lock(rows, batch_id, cfg):
         appender.__enter__()
@@ -157,9 +157,9 @@ def test_the_retire_seams_append_lock_wait_ends_at_the_configured_deadline(tmp_p
         appender.__exit__()
 
     assert isinstance(tick.error, TimeoutError), f"the tick ended as {tick.error!r}"
-    assert h.pending(ch) == rows, "the queue was rewritten by a retire that never got the lock"
-    assert h.attempts_of(ch, "a/0") is None, "a contended lock spent one of the row's lives"
-    assert h.stuck_records(ch)[-1]["fault_class"] == "TimeoutError"
+    assert h.pending(paths, ch) == rows, "the queue was rewritten by a retire that never got the lock"
+    assert h.attempts_of(paths, ch, "a/0") is None, "a contended lock spent one of the row's lives"
+    assert h.stuck_records(paths, ch)[-1]["fault_class"] == "TimeoutError"
 
 
 # The out-of-scope-write guard stays armed across a faulted tick
@@ -180,10 +180,10 @@ def test_a_stray_the_agent_wrote_outside_the_corpus_does_not_whitelist_itself(tm
     The second tick is the discriminating half. Before the fix it AUTHORED, because the
     stray had become baseline; the row rotated out and the guard never spoke again."""
     paths = h.make_paths(tmp_path)
-    ch = h.channel_of(paths, "findings")
+    ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
     h.write_source_refs(paths, "a")
-    h.seed(ch, rows)
+    h.seed(paths, ch, rows)
     stray = paths.repo_root / "scratch.txt"
 
     cfg = h.cfg_for(
@@ -197,13 +197,13 @@ def test_a_stray_the_agent_wrote_outside_the_corpus_does_not_whitelist_itself(tm
 
     assert drain.run_batch(cfg=cfg) == 2
     assert not stray.exists(), "the out-of-corpus write survived the faulted tick"
-    assert h.attempts_of(ch, "a/0") == 1
+    assert h.attempts_of(paths, ch, "a/0") == 1
 
     assert drain.run_batch(cfg=cfg) == 2, (
         "the second tick authored — the stray was absorbed into the new baseline and the "
         "out-of-scope-write guard is now permanently suppressed for this worktree"
     )
-    assert h.attempts_of(ch, "a/0") == 2
+    assert h.attempts_of(paths, ch, "a/0") == 2
     assert not stray.exists()
 
 

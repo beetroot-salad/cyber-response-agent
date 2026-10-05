@@ -35,6 +35,7 @@ from defender.tests import _judge_921 as J
 from defender.tests import _record_1049 as R
 from defender.tests import _triplet_947 as T
 from defender.tests import _world_1007 as W
+from defender.tests import _state1135
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -47,7 +48,7 @@ TOKEN = T.EPISODE_TOKEN
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(J.STATE_DIR_ENV, str(tmp_path / "learning-state"))
+    _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
 def _episode(tmp_path: Path, *, labels: tuple[str, ...] = ("b", "c"), **kw) -> Path:
@@ -701,7 +702,8 @@ def test_1049_every_caller_coalesces_none_at_the_read_site(tmp_path):
         assert staging.teardown(episode, door=door) == []
     assert staging.sweep(ep, episode_token=TOKEN, door=door) == []
 
-    record = judge.grade_episode(ep, judge=J.FakeJudge(), runs_base=base, git_show=J.FakeGitShow())
+    record = judge.grade_episode(ep, judge=J.FakeJudge(), runs_base=base, git_show=J.FakeGitShow(),
+                                 state=_state1135.env_state())
     assert record.not_graded is not None, record
     assert record.not_graded.reason == 'no review.yaml on disk', record
 

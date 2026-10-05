@@ -81,6 +81,8 @@ temp/
 # Defender learning-loop ephemeral state — never committed.
 defender/learning/_pending/
 defender/learning/_pending_leads/
+defender/learning/_pending_pitfalls/
+defender/learning/_pending_delivery/
 defender/learning/_author.lock
 defender/learning/author-queue/
 defender/learning/learn-queue/
