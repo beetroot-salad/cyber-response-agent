@@ -59,8 +59,10 @@ from defender._io import (
     stat_entry,
 )
 
+from defender.learning.core.config import DrainLabel
+
 if TYPE_CHECKING:
-    from defender.learning.core.config import DrainLabel, LoopPaths
+    from defender.learning.core.config import LoopPaths
 
 _logger = logging.getLogger(__name__)
 
@@ -261,9 +263,10 @@ class RootRecord:
 
 STATE_ROOT = RootRecord()
 
-_LANES: dict[str, str] = {
-    "author_drain": _PENDING,
-    "lead_author_drain": _PENDING_LEADS,  # lint-run-records: ok — the lane's own name (`DrainLabel`)
+#: Each lane's stage folder, by its member: no string names a lane (#1179 O1').
+_LANES: dict[DrainLabel, str] = {
+    DrainLabel.AUTHOR: _PENDING,
+    DrainLabel.LEAD_AUTHOR: _PENDING_LEADS,
 }
 
 
@@ -357,13 +360,13 @@ class LearningState:
             return str(self._root)
         raise ValueError(f"cannot describe {record!r}")
 
-    def stage_dir(self, lane: DrainLabel | str) -> Path:
+    def stage_dir(self, lane: DrainLabel) -> Path:
         """The folder a drain lane's agent stages write into (`_pending/` for the author lane,
         `_pending_leads/` for the lead-author lane), made below the root without following a
         link. N3's one path escape: the stage harness (#1142) still writes there by path."""
-        folder = _LANES.get(str(lane))
+        folder = _LANES.get(lane)
         if folder is None:
-            raise ValueError(f"unknown drain lane {lane!r}; known: {sorted(_LANES)}")
+            raise ValueError(f"unknown drain lane {lane!r}; known: {sorted(map(str, _LANES))}")
         self._guarded(folder, lambda: self._held.mkdir(folder))  # lint-unguarded-tree-write: ok — a descriptor-level mkdir below the held root (no link followed)
         return self._root / folder
 
@@ -703,7 +706,8 @@ class LearningState:
         return bool(self._json_names(_QUEUE)) or bool(self._json_names(_INFLIGHT))
 
     def claim(
-        self, identity_key: str, *, label: str = "lead_author_drain", noun: str = "lead-author",  # lint-run-records: ok — the lane's own name
+        self, identity_key: str, *, label: DrainLabel = DrainLabel.LEAD_AUTHOR,
+        noun: str = "lead-author",
         extra: str = "",
     ) -> Iterator[Claimed]:
         """Claim every queued request and yield the servable ones, orphans first.

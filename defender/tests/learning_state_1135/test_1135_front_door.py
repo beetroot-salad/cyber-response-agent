@@ -436,7 +436,7 @@ _PLANTED_TOUCHES = '''
 from pathlib import Path
 from defender import _flock
 from defender._io import move_at, open_lock_at
-from defender.learning.core.config import LoopPaths
+from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LoopPaths
 
 
 def reads(paths: LoopPaths) -> str:
@@ -474,7 +474,7 @@ def core_calls(held) -> None:
 
 
 def composes_onto_the_stage_folder(state) -> Path:
-    folder = state.stage_dir("author_drain")
+    folder = state.stage_dir(AUTHOR_DRAIN_LABEL)
     return folder / "findings.jsonl"
 
 

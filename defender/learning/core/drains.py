@@ -381,7 +381,7 @@ def _drain_lead_author_markers(
     # `case_id`: this queue's live writer (`enqueue_curation`) mints the filename from the
     # case, so that is what an unreadable row's dead letter is keyed on.
     claims = state.claim(
-        "case_id", label=str(LEAD_AUTHOR_DRAIN_LABEL), noun="lead-author",
+        "case_id", label=LEAD_AUTHOR_DRAIN_LABEL, noun="lead-author",
     )
     served: list[ServedMarker] = []
     for claim in claims:
