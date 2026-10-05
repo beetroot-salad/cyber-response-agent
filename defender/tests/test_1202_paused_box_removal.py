@@ -113,7 +113,8 @@ def test_stop_box_names_both_answers_when_the_box_will_not_go():
     with pytest.raises(BoxFault) as caught:
         _stop(daemon)
     message = str(caught.value)
-    assert "zombie" in message and "stuck" in message, message
+    assert "zombie" in message, message
+    assert "stuck" in message, message
 
 
 class _no_raise:  # noqa: N801 — reads as a context-manager keyword beside `pytest.raises`
