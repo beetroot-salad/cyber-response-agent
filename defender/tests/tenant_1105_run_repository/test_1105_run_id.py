@@ -193,10 +193,13 @@ def test_1105_run_id_parse_admits_a_sidecar_suffixed_id():
 
 
 def test_1105_the_handle_constructors_keep_taking_str_and_todays_run_id_check(tmp_path):
-    """In PR 1 Run.for_tenant and Run.under still take the run id as a str and still refuse a bad
-    one through refuse_bad_run_id with today's ValueError; only the repository's functions take a
-    RunId."""
-    from defender.run_repository import Run
+    """Run.for_tenant and Run.under still take the run id as a str (or a RunId), and admit it by
+    the repository's one rule, RunId.parse: a bad id, an upper-case one and one over the 206-byte
+    bound each raise RunRefused, so no handle is built for a run whose sidecar files could not be
+    named. (Owner ruling, #1105 PR 1 review: this replaced PR 1's split, where the constructors
+    kept refuse_bad_run_id and its ValueError; the name is kept because the spec graph cites
+    it.)"""
+    from defender.run_repository import Run, RunId, RunRefused
 
     runs = tmp_path / H.T_ID / "runs"
     H.plant_tenant_record(runs, H.T_ID)
@@ -206,11 +209,12 @@ def test_1105_the_handle_constructors_keep_taking_str_and_todays_run_id_check(tm
     assert run.tenant_id == H.T_ID
     under = Run.under(runs, "r2", tenant_id=H.T_ID)
     assert under.run_dir == runs / "r2"
+    assert Run.under(runs, RunId.parse("r3")).run_dir == runs / "r3", "a RunId is taken as is"
     for ctor in (lambda rid: Run.for_tenant(H.T_ID, rid, runs_base=runs),
                  lambda rid: Run.under(runs, rid)):
-        err = H.raised(ctor, "Bad Name")
-        assert type(err) is ValueError, err
-        assert "not a valid run id" in str(err), err
+        for bad in ("Bad Name", "UPPER", "a" * (H.RUN_ID_BOUND + 1)):
+            err = H.raised(ctor, bad)
+            assert H.is_a(err, RunRefused), f"{bad[:20]!r}: {err!r}"
 
 
 def test_1105_run_id_is_unforgeable_every_copy_route_reparses_and_new_and_subclassing_are_refused():

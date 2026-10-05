@@ -31,8 +31,8 @@ from typing import Any
 from defender import _artifact_schema, _episode_paths, _provenance, _report
 from defender import _io as _real_io
 from defender import _tenant
-from defender._run_id import refuse_bad_run_id
 from defender.run_repository import _layout
+from defender.run_repository._id import RunId
 from defender.run_repository._layout import RUN_LAYOUT, RunPaths, SessionPaths
 
 #: The five groups, addressed group-then-kind.
@@ -338,7 +338,7 @@ class Run:
 
     @classmethod
     def for_tenant(
-        cls, tenant_id: str, run_id: str, *, runs_base: Path, io: Any = _real_io,
+        cls, tenant_id: str, run_id: str | RunId, *, runs_base: Path, io: Any = _real_io,
     ) -> Run:
         """The constructor run setup uses, once the tenant record exists. Refuses when
         `runs_base` holds no tenant record (`TenantRefused`, #1105 NH-3), and when `tenant_id`
@@ -360,12 +360,16 @@ class Run:
 
     @classmethod
     def under(
-        cls, runs_base: Path, run_id: str, *, io: Any = _real_io, tenant_id: str | None = None,
+        cls, runs_base: Path, run_id: str | RunId, *, io: Any = _real_io,
+        tenant_id: str | None = None,
     ) -> Run:
-        """The no-I/O builder `for_tenant` and `open_run` share — not a public front door."""
-        refuse_bad_run_id(run_id)
+        """The no-I/O builder `for_tenant` and `open_run` share — not a public front door. The
+        id is a `RunId`, or text `RunId.parse` admits (`RunRefused` otherwise): the repository
+        has one admission rule, its 206-byte bound included, so no handle is built for a run
+        whose sidecar files could not be named."""
+        name = str(run_id if isinstance(run_id, RunId) else RunId.parse(run_id))
         runs_base = Path(runs_base)
-        return cls(runs_base / run_id, runs_base=runs_base, io=io, tenant_id=tenant_id)
+        return cls(runs_base / name, runs_base=runs_base, io=io, tenant_id=tenant_id)
 
     @classmethod
     def at(cls, directory: Path) -> Run:
