@@ -73,7 +73,9 @@ services:
   #
   # From the dev container: http://forgejo:3000 (clone the lab with
   # `git clone http://forgejo:3000/tenants/playground.git $DEFENDER_DATA_ROOT/playground/knowledge`,
-  # credentials through a git credential helper, never in the URL). From the host's browser:
+  # credentials through a git credential helper, never in the URL). Each tenant's clone uses
+  # its OWN bot account (`bot-<id>-<salt>`, write on that one repo only), whose token lives at
+  # $DEFENDER_DATA_ROOT/<id>/forge/git-credentials — never an admin token. From the host's browser:
   # http://localhost:${FORGEJO_HTTP_PORT:-3000}. Runs and the runtime image never reach it:
   # the operator clones, and runs read the clone.
   forgejo:
@@ -86,7 +88,7 @@ services:
       FORGEJO__database__DB_TYPE: sqlite3
       # Skip the web install wizard; accounts are created with `forgejo admin user create`.
       FORGEJO__security__INSTALL_LOCK: "true"
-      # Accounts are created by the admin only: one per person, plus a bot for the learning loop.
+      # Accounts are created by the admin only: one per person, plus one bot per tenant.
       FORGEJO__service__DISABLE_REGISTRATION: "true"
       FORGEJO__service__REQUIRE_SIGNIN_VIEW: "true"
       FORGEJO__server__DOMAIN: localhost

@@ -152,6 +152,3 @@ experiments/*/sessions/
 # Local Lean toolchain + mathlib4 checkout (elan install, .olean build output): an
 # 8GB local dependency tree, not source.
 lean-tooling/
-
-# Local Forgejo credentials (devcontainer `forgejo` service; tenant repos)
-.forgejo/
