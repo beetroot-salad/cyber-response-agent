@@ -136,10 +136,19 @@ class ModuleEnv:
     #: a module-level name bound by anything besides its one def/class is never in it. Read by
     #: owner tagging only (`_resolved_callee`, `annotated_class`); `callee` is unchanged.
     own_defs: Mapping[str, str] = field(default_factory=dict, compare=False, repr=False)
+    #: The module's dotted package when `module_env` was given its name; relative imports in
+    #: every scope then resolve against it (`_scope_bindings`).
+    package: str | None = field(default=None, compare=False, repr=False)
 
 
-def _scope_bindings(scope: ast.AST) -> tuple[dict[str, str], set[str]]:
+def _scope_bindings(
+    scope: ast.AST, package: str | None = None,
+) -> tuple[dict[str, str], set[str]]:
     """``(imports, other bindings)`` made directly in one scope.
+
+    With ``package`` (the dotted package the module sits in), a relative import resolves to
+    its absolute origin: ``from ..run_tenant import RunTenant`` in ``defender.runtime.driver``
+    -> ``defender.runtime.run_tenant.RunTenant``. Without it, the leading dots are kept.
 
     Stops at every nested function/lambda/class, whose bindings belong to that scope; the
     nested def's name is bound here.
@@ -167,6 +176,10 @@ def _scope_bindings(scope: ast.AST) -> tuple[dict[str, str], set[str]]:
                 # `level` > 0 is a relative import; keep the leading dots so a relative
                 # `.re` can never be mistaken for the stdlib `re`.
                 prefix = "." * child.level + (child.module or "")
+                if child.level and package is not None:
+                    base = package.split(".")
+                    base = base[:len(base) - (child.level - 1)]
+                    prefix = ".".join([*base, *([child.module] if child.module else [])])
                 for alias in child.names:
                     if alias.name == "*":
                         continue  # unresolvable — but ruff F403 makes it unmergeable
@@ -507,7 +520,7 @@ def _child_env(func: ast.AST, parent: ModuleEnv) -> ModuleEnv:
     """The env inside one function: the enclosing env with this scope's own bindings
     applied. A local non-import binding shadows an inherited import, and a local import
     rebinds on top of it."""
-    local_imports, bound = _scope_bindings(func)
+    local_imports, bound = _scope_bindings(func, parent.package)
     imports = {n: o for n, o in parent.imports.items() if n not in bound}
     imports.update(local_imports)
     defines = frozenset((set(parent.defines) | bound) - set(local_imports))
@@ -530,6 +543,7 @@ def _child_env(func: ast.AST, parent: ModuleEnv) -> ModuleEnv:
         partial_owner_locals=partials,
         carrier_locals=carriers,
         own_defs=own_defs,
+        package=parent.package,
     )
 
 
@@ -545,7 +559,8 @@ def _tag(node: ast.AST, env: ModuleEnv, scope_of: dict[ast.AST, ModuleEnv]) -> N
 
 def _own_defs(tree: ast.AST, imports: dict[str, str], module: str | None) -> dict[str, str]:
     """`{name: "<module>.<name>"}` for each top-level def/class of `module` whose name nothing
-    else at module level binds — a second def, an assignment, an import, a loop target. A
+    else at module level binds — a second def, an assignment, an import, a loop target, a
+    function's `global` rebinding. A
     name bound twice has no single origin, so it resolves to nothing."""
     if module is None:
         return {}
@@ -566,11 +581,16 @@ def _own_defs(tree: ast.AST, imports: dict[str, str], module: str | None) -> dic
             walk(child)
 
     walk(tree)
+    # A `global` declaration lets a function rebind the name at module level.
+    stores.extend(n for node in ast.walk(tree) if isinstance(node, ast.Global)
+                  for n in node.names)
     return {name: f"{module}.{name}" for name in defs
             if defs.count(name) == 1 and name not in stores and name not in imports}
 
 
-def module_env(tree: ast.AST, module: str | None = None) -> ModuleEnv:
+def module_env(
+    tree: ast.AST, module: str | None = None, package: str | None = None,
+) -> ModuleEnv:
     """Build the scope tree for one module and return its root (module-level) env.
 
     Every node is tagged with its scope's env, so ``callee``/``origin``/``str_value`` resolve
@@ -585,7 +605,9 @@ def module_env(tree: ast.AST, module: str | None = None) -> ModuleEnv:
     means skip. Only real scoping is safe for all of them.
     """
     scope_of: dict[ast.AST, ModuleEnv] = {}
-    imports, bound = _scope_bindings(tree)
+    if module is not None and package is None:
+        package = module.rpartition(".")[0]  # a plain module; an `__init__` passes its own
+    imports, bound = _scope_bindings(tree, package)
     defines = frozenset(bound)
     consts = _module_consts(tree)
     own_defs = _own_defs(tree, imports, module)
@@ -600,6 +622,7 @@ def module_env(tree: ast.AST, module: str | None = None) -> ModuleEnv:
         partial_owner_locals=partials,
         carrier_locals=carriers,
         own_defs=own_defs,
+        package=package,
     )
     _tag(tree, root, scope_of)
     return root

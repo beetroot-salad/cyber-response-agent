@@ -265,21 +265,26 @@ def _scan_literal_pass(
     return findings
 
 
-def _module_name(rel: str) -> str:
-    """The dotted module a swept file is (`learning/branch/cli.py` -> `defender.learning.branch.cli`),
-    so a call to one of its own top-level defs resolves to the origin `_astlib`'s factory table
-    names."""
+def module_and_package(rel: str) -> tuple[str, str]:
+    """`(dotted module, dotted package)` of a swept file: `learning/branch/cli.py` ->
+    (`defender.learning.branch.cli`, `defender.learning.branch`); a package's `__init__.py` is
+    its package (`runtime/driver/__init__.py` -> `defender.runtime.driver` twice). So a call to
+    a module's own top-level def, and a relative import, resolve to the origins `_astlib`'s
+    factory table names."""
     parts = Path(rel).with_suffix("").parts
     if parts and parts[-1] == "__init__":
-        parts = parts[:-1]
-    return ".".join(("defender", *parts))
+        module = ".".join(("defender", *parts[:-1]))
+        return module, module
+    module = ".".join(("defender", *parts))
+    return module, module.rpartition(".")[0]
 
 
 def _scan_accessor_pass(rel: str, tree: ast.Module, lines: list[str],
                         accessor_names: frozenset[str]) -> list[Finding]:
     findings: list[Finding] = []
     owner = _enclosing(tree)
-    env = module_env(tree, module=_module_name(rel))
+    module, package = module_and_package(rel)
+    env = module_env(tree, module=module, package=package)
 
     def report(node: ast.AST, why: str) -> None:
         lineno = getattr(node, "lineno", 0)
