@@ -769,11 +769,42 @@ def capture_call(run_dir: Path, *, system: str = "elastic", verb: str = "query",
 GIT_STATUS_FAILED = "git status: GitError('git status --porcelain=v1 -z', 128)"
 GIT_UNAVAILABLE = "git unavailable: FileNotFoundError('git')"
 
+#: The tenant knowledge commit every default stamp carries (#1204): every run materialised after
+#: #1204 stamps `knowledge` from its tenant's clone, so a source, its siblings and the live
+#: capture that agree on everything else agree on this too — which is what a real family
+#: launched from one tenant clone looks like. A FULL 40-hex lowercase sha, never an abbreviation:
+#: the reader folds any other shape to "the record does not say" (#1204 O4), which would make
+#: every default stamp read as knowledge-absent — a waivable fault — and turn every
+#: accept-without-the-flag scenario red for a reason it is not about. Before #1204 is
+#: implemented `RunProvenance.from_obj` ignores the key, so the default is inert there.
+KNOWLEDGE_SHA = "1204" + "d" * 36
+
+#: A second, distinct knowledge commit, for the scenarios about a family across two of them.
+OTHER_KNOWLEDGE_SHA = "1204" + "e" * 36
+
+
+class _OmitKnowledge:
+    """The type of `NO_KNOWLEDGE_KEY` (a named sentinel, so a failing assertion prints it)."""
+
+    def __repr__(self) -> str:
+        return "NO_KNOWLEDGE_KEY"
+
+
+#: `provenance_record(knowledge=NO_KNOWLEDGE_KEY)` OMITS the `knowledge` key altogether: the
+#: shape every stamp written before #1204 has. Distinct from `knowledge=None`, which writes JSON
+#: `null` — the shape `as_json` writes for a record that does not say. Both read back as
+#: `knowledge is None`; the two spellings exist so a scenario can name the one it means.
+NO_KNOWLEDGE_KEY: Any = _OmitKnowledge()
+
+#: The default `knowledge=` of `provenance_record` — a sentinel so each call builds a fresh dict.
+_DEFAULT_KNOWLEDGE: Any = object()
+
 
 def provenance_record(*, commit: str | None = "deadbee", dirty: bool | None = False,
                       unavailable: str | None = None, model: str | None = "m-1",
                       scope: str | None = "repo",
-                      tenant_id: str | None = None) -> dict:
+                      tenant_id: str | None = None,
+                      knowledge: Any = _DEFAULT_KNOWLEDGE) -> dict:
     """One `provenance.json` document, in a shape `capture_tree` can produce.
 
     Four shapes and no others: the clean tree, the dirty tree, the git-status failure (a sha in
@@ -782,11 +813,21 @@ def provenance_record(*, commit: str | None = "deadbee", dirty: bool | None = Fa
     stamp written before the field existed reads back as (#976: compared on commit alone), and
     `model=None` is what `capture_tree` itself produces — the model is the sibling's own
     per-process fact, never the live tree's.
+
+    `knowledge` (#1204) is the tenant knowledge revision's WIRE value, written verbatim: by
+    default `{"commit": KNOWLEDGE_SHA}` (what every post-#1204 run from one tenant clone
+    carries); `"unversioned"` or `{"unavailable": "<reason>"}` for the other two shapes
+    `capture_knowledge` answers with; `None` for an explicit JSON `null`; `NO_KNOWLEDGE_KEY` to
+    omit the key (a pre-#1204 stamp). Anything else is written as given, for forgery scenarios.
     """
     doc: dict[str, Any] = {
         "commit": commit, "dirty": dirty, "dirty_paths": [], "dirty_path_count": 0,
         "unavailable": unavailable, "scope": scope, "model": model,
     }
+    if knowledge is _DEFAULT_KNOWLEDGE:
+        doc["knowledge"] = {"commit": KNOWLEDGE_SHA}
+    elif knowledge is not NO_KNOWLEDGE_KEY:
+        doc["knowledge"] = knowledge
     if dirty:
         doc["dirty_paths"] = ["defender/runtime/driver/__init__.py"]
         doc["dirty_path_count"] = 1
@@ -845,9 +886,11 @@ def source_capture(**overrides: Any) -> FakeCapture:
     """A live-tree capture built from `provenance_record(**overrides)`.
 
     With no overrides it matches the source `runs_base` stamps (commit `deadbee`, clean, scope
-    `repo`), which is what an accepted launch needs; `source_capture(commit="0ther")`,
-    `(dirty=True)`, `(dirty=None, unavailable=GIT_STATUS_FAILED)` and `(commit=None, dirty=None,
-    unavailable=GIT_UNAVAILABLE)` are the four other shapes a real `capture_tree` answers with.
+    `repo`, knowledge `KNOWLEDGE_SHA`), which is what an accepted launch needs;
+    `source_capture(commit="0ther")`, `(dirty=True)`, `(dirty=None, unavailable=GIT_STATUS_FAILED)`
+    and `(commit=None, dirty=None, unavailable=GIT_UNAVAILABLE)` are the four other shapes a real
+    `capture_tree` answers with. `knowledge=` spells the live tenant clone's revision (#1204 D3:
+    production's live capture reads it from the episode tenant's clone).
     """
     return FakeCapture(provenance_record(**overrides))
 
@@ -896,7 +939,7 @@ def archived_world(episode_dir: Path, world_id: str, *, disposition: str = "mali
 def sibling_run_dir(base: Path, world_id: str, *, scrub_ran: bool = True,
                     commit: str | None = "deadbee", dirty: bool | None = False,
                     unavailable: str | None = None,
-                    model: str = "m-1", stamp: bool = True) -> Path:
+                    model: str = "m-1", stamp: bool = True, **record: Any) -> Path:
     """A finished sibling run dir plus its scrub-verdict SIDECAR, under `base`.
 
     `base` is the runs base the sibling's own PROCESS was handed — after §7 FORK-13 that is
@@ -907,6 +950,10 @@ def sibling_run_dir(base: Path, world_id: str, *, scrub_ran: bool = True,
     f"{tree.name}.scrub-verdict.json"` — because G17 REFUTED the design's "inside the run dir"
     reading; a fixture that put it in the tree would make the archive test green on a path the
     production writer never uses.
+
+    Any further keyword (`scope=`, `knowledge=`) passes through to `provenance_record` (#1204:
+    one sibling differing on an anchored field is the fork check's behavioural arm); left out,
+    each takes the record's own default.
     """
     run_dir = base / f"{EPISODE_ID}-{world_id}"
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
@@ -916,7 +963,7 @@ def sibling_run_dir(base: Path, world_id: str, *, scrub_ran: bool = True,
     if stamp:
         (run_dir / "provenance.json").write_text(
             json.dumps(provenance_record(commit=commit, dirty=dirty, unavailable=unavailable,
-                                         model=model)),
+                                         model=model, **record)),
             encoding="utf-8")
     if scrub_ran is not None:
         (base / f"{run_dir.name}.scrub-verdict.json").write_text(
@@ -1087,6 +1134,7 @@ __all__ = [
     "ALERTS_PATTERN", "AS_OF", "BRANCH_MESSAGE_ID", "CLEAN", "CONFIGURED", "DEFENDER",
     "EPISODE_ID", "EPISODE_TOKEN", "EPISODES_BASE_ENV", "EVENTS_PATTERN",
     "GIT_STATUS_FAILED", "GIT_UNAVAILABLE", "GOLDEN_INVESTIGATION", "RUNS_BASE_ENV",
+    "KNOWLEDGE_SHA", "NO_KNOWLEDGE_KEY", "OTHER_KNOWLEDGE_SHA",
     "branchable_investigation",
     "SOURCE_RUN_ID", "WORLDS",
     "DoorCall", "FakeAdapters", "FakeAgent", "FakeDoor", "FakeSpawn", "FakeTransport",
