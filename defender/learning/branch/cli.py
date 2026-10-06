@@ -861,8 +861,7 @@ def _family_refusal(
         return None
     text = "; ".join(fault.text for fault in sorted(faults, key=lambda fault: fault.waivable))
     if all(fault.waivable for fault in faults):
-        text += (" — pass --allow-dirty to waive the dirt and the unproven knowledge, recorded "
-                 "in the family stamp as such")
+        text += " — pass --allow-dirty to waive these faults, recorded in the family stamp as such"
     return text
 
 
