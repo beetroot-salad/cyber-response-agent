@@ -560,6 +560,10 @@ class FakeJudge:
         return len(self.prompts)
 
 
+#: `FakeSibling(knowledge=...)` left out: the sibling's stamp takes `provenance_record`'s default.
+_STAMP_DEFAULT: Any = object()
+
+
 class FakeSibling:
     """The launcher's process seam (`spawn=`), standing in for a sibling that RAN.
 
@@ -577,13 +581,18 @@ class FakeSibling:
     def __init__(self, episode_dir: Path, *, exits: dict[str, int] | None = None,
                  ledgers: dict[str, list[dict]] | None = None,
                  dispositions: dict[str, str] | None = None,
-                 scrub_ran: bool = True, commit: str | None = "deadbee") -> None:
+                 scrub_ran: bool = True, commit: str | None = "deadbee",
+                 knowledge: Any = _STAMP_DEFAULT) -> None:
         self.episode_dir = Path(episode_dir)
         self.exits = dict(exits or {})
         self.ledgers = dict(ledgers or {})
         self.dispositions = dict(dispositions or {})
         self.scrub_ran = scrub_ran
         self.commit = commit
+        # #1204: the knowledge revision each sibling's stamp carries — left out, the stamp
+        # builder's own default (the one the fixture source and live capture carry too).
+        self.stamp_fields: dict[str, Any] = (
+            {} if knowledge is _STAMP_DEFAULT else {"knowledge": knowledge})
         self.launches: list[dict[str, Any]] = []
 
     def __call__(self, argv: list[str], *, env: dict[str, str] | None = None,
@@ -594,7 +603,8 @@ class FakeSibling:
             return 0
         runs = self.episode_dir / "runs"
         runs.mkdir(parents=True, exist_ok=True)
-        run_dir = sibling_run_dir(runs, label, scrub_ran=self.scrub_ran, commit=self.commit)
+        run_dir = sibling_run_dir(runs, label, scrub_ran=self.scrub_ran, commit=self.commit,
+                                  **self.stamp_fields)
         (run_dir / "report.md").write_text(
             report_text(self.dispositions.get(label, "malicious")), encoding="utf-8")
         (run_dir / "investigation.md").write_text(

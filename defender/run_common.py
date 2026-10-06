@@ -126,7 +126,7 @@ def materialize_run(
         with contextlib.suppress(OSError):
             paths.provenance.unlink()
     _stamp(
-        run, model=model, tenant_id=tenant_record.tenant_id,
+        run, knowledge_dir=tenant.knowledge, model=model, tenant_id=tenant_record.tenant_id,
         world_id=world.world_id if world is not None else tenant_record.base_world_id,
         parent_run_id=world.family.source_run_id if world is not None else None,
         fork_turn=world.family.branch_message_id if world is not None else None,
@@ -207,17 +207,18 @@ def _write_alert_once(run: Run, alert: Path) -> None:
 
 
 def _stamp(
-    run: Run, *, model: str | None = None,
+    run: Run, *, knowledge_dir: Path, model: str | None = None,
     tenant_id: str | None = None, world_id: str | None = None,
     parent_run_id: str | None = None, fork_turn: int | None = None,
 ) -> None:
     """Write the run's stamp, never taking the run down doing it (ENOSPC, read-only remount,
     a planted alias). Unlike a missing alert, a missing stamp only means the run's code cannot
     be proven later, so it is logged loudly and the run continues. An interrupted setup is
-    resumable, so a retry re-stamps."""
+    resumable, so a retry re-stamps. `knowledge_dir` is the run's tenant knowledge clone,
+    whose checked-out commit rides beside the product's (#1204)."""
     path = run.facts.provenance.path
     try:
-        record = _provenance.capture_tree(REPO_ROOT)
+        record = _provenance.capture_run(REPO_ROOT, knowledge_dir)
         # Set in the single pre-box write; a later write would land in the box's rw bind.
         if model is not None:
             record = _dataclasses.replace(record, model=model)

@@ -47,6 +47,7 @@ def _tmp_roots(tmp_path, monkeypatch):
     """Both CONFIGURED roots inside `tmp_path`, as every launcher suite sets them."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+    T.isolate_learning_state(tmp_path, monkeypatch)
 
 
 def _cli():
@@ -694,7 +695,9 @@ def test_976_the_accepted_family_stamp_carries_the_sources_whole_record(tmp_path
     # #1106 M2: the launcher now SEEDS each sibling's runs base with the episode's tenant record
     # before any child starts (real siblings always minted one), so the family's base world is
     # read from it — and it is exactly the seeded record's.
-    assert set(stamp) == {"agreed", "allow_dirty", "source", "base_world_id"}
+    # #1204: `waived` names the fault kinds the override waived — none, for a clean family.
+    assert set(stamp) == {"agreed", "allow_dirty", "source", "base_world_id", "waived"}
+    assert stamp["waived"] == []
     from defender import _tenant
 
     assert stamp["base_world_id"] == _tenant.read_tenant(

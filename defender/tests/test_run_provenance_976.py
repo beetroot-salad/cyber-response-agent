@@ -360,13 +360,18 @@ def test_every_field_reaches_the_wire_and_comes_back(tmp_path):
     assert set(on_disk) == declared, (
         f"the wire shape and the record's fields disagree: {declared ^ set(on_disk)}"
     )
+    # #1204: the tenant knowledge revision rides in the same record, so the rich record carries
+    # one — imported HERE, not at module top, so a tree without it fails this arm alone.
+    from defender._provenance import KnowledgeRevision  # type: ignore[attr-defined]
+
     rich = RunProvenance(
         commit="a" * 40, dirty=True, dirty_paths=("x.md", "y.md"), dirty_path_count=2,
-        unavailable=None,
+        unavailable=None, knowledge=KnowledgeRevision.at("c" * 40),
     )
     path = tmp_path / PROVENANCE
     _provenance.write(path, rich)
     assert _provenance.read(path) == rich
+    assert json.loads(path.read_text(encoding="utf-8"))["knowledge"] == {"commit": "c" * 40}
 
 
 def test_a_rename_counts_both_paths_the_sha_fails_to_name(tmp_path):

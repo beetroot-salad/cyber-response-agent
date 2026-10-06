@@ -22,18 +22,26 @@ and the read gate denies the file to every agent (it names host paths of uncommi
 Without git (the shipped runtime image), the commit comes from a build stamp baked at image
 build time, always with `dirty=None`: a workspace may be mounted over the built code, so
 nothing can confirm the bytes on disk are the bytes that were built.
+
+The run also reads the tenant's own knowledge clone (settings; lessons after #1108), which no
+product commit names. `knowledge` records which commit of that clone was checked out at run
+start (#1204), read from its `.git` files directly because the runtime image has no git. It is
+the commit only: no dirty bit, and nothing pins it for the rest of the run.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
+import re
+import stat
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
 from defender import _git
-from defender._io import load_json_artifact, read_guarded, write_guarded
+from defender._io import Bound, bind, load_json_artifact, read_guarded, stat_entry, write_guarded
 from defender._model import model
 
 #: The dirty-path sample's ceiling (the paths are a debugging aid). The true total is always
@@ -60,6 +68,69 @@ _GIT_UNREACHABLE: tuple[type[BaseException], ...] = (subprocess.SubprocessError,
 
 #: The same set plus git's own non-zero exit — everything `capture_tree` must absorb.
 _GIT_FAILED: tuple[type[BaseException], ...] = (_git.GitError, *_GIT_UNREACHABLE)
+
+
+#: A commit as the knowledge reader accepts it: SHA-1 (40) or SHA-256 (64) lowercase hex.
+_SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
+
+#: The wire spelling of a knowledge folder that is not a repository.
+_UNVERSIONED = "unversioned"
+
+
+@model(frozen=True)
+class KnowledgeRevision:
+    """Which revision of the tenant knowledge clone a run started with: a commit, unversioned
+    (the folder is not a repository), or unavailable with the reason. Built by `at`,
+    `unversioned` or `unavailable_because`; both fields `None` is the unversioned variant."""
+
+    commit: str | None = None
+    unavailable: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.commit is not None and self.unavailable is not None:
+            raise ValueError("a knowledge revision is a commit or a reason, never both")
+        if self.commit is not None and not _SHA.fullmatch(self.commit):
+            raise ValueError(f"not a 40- or 64-hex lowercase sha: {self.commit!r}")
+        if self.unavailable is not None and not self.unavailable.strip():
+            raise ValueError("an unavailable knowledge revision names its reason")
+
+    @classmethod
+    def at(cls, commit: str) -> KnowledgeRevision:
+        return cls(commit=commit)
+
+    @classmethod
+    def unversioned(cls) -> KnowledgeRevision:
+        return cls()
+
+    @classmethod
+    def unavailable_because(cls, reason: str) -> KnowledgeRevision:
+        return cls(unavailable=reason)
+
+    def as_wire(self) -> object:
+        """`{"commit": sha}` | `"unversioned"` | `{"unavailable": reason}`."""
+        if self.commit is not None:
+            return {"commit": self.commit}
+        if self.unavailable is not None:
+            return {"unavailable": self.unavailable}
+        return _UNVERSIONED
+
+    @classmethod
+    def from_wire(cls, value: object) -> KnowledgeRevision | None:
+        """The revision a wire value names, or `None` for anything else (absent, `null`, or
+        malformed). Never raises: the stamp sits in the box's rw bind."""
+        if value == _UNVERSIONED and isinstance(value, str):
+            return cls.unversioned()
+        if not isinstance(value, dict) or len(value) != 1:
+            return None
+        commit, reason = value.get("commit"), value.get("unavailable")
+        try:
+            if isinstance(commit, str):
+                return cls.at(commit)
+            if isinstance(reason, str):
+                return cls.unavailable_because(reason)
+        except ValueError:
+            return None
+        return None
 
 
 @model(frozen=True)
@@ -90,6 +161,9 @@ class RunProvenance:
     #: `None` when unforked. Stamped so the run's own files answer it.
     parent_run_id: str | None = None
     fork_turn: int | None = None
+    #: The tenant knowledge revision the run started with (`capture_knowledge`); `None` means
+    #: the record does not say (a stamp written before #1204, or a malformed value read back).
+    knowledge: KnowledgeRevision | None = None
 
     def __post_init__(self) -> None:
         """Refuse a record no capture could have produced, so both the writer and `from_obj`
@@ -130,6 +204,7 @@ class RunProvenance:
                 "world_id": self.world_id,
                 "parent_run_id": self.parent_run_id,
                 "fork_turn": self.fork_turn,
+                "knowledge": None if self.knowledge is None else self.knowledge.as_wire(),
             },
             indent=2,
             sort_keys=True,
@@ -181,6 +256,8 @@ class RunProvenance:
                 fork_turn=(
                     fork_turn if isinstance(fork_turn, int) and not isinstance(fork_turn, bool)
                     else None),
+                # Folded here, before the record is built, so a bad value never voids the rest.
+                knowledge=KnowledgeRevision.from_wire(obj.get("knowledge")),
             )
         except ValueError:
             return None
@@ -240,6 +317,126 @@ def capture_tree(
         dirty_path_count=len(paths),
         scope=CODE_SCOPE,
     )
+
+
+def capture_knowledge(knowledge_dir: Path) -> KnowledgeRevision:
+    """Read which commit the tenant knowledge clone at `knowledge_dir` has checked out.
+
+    @owns knowledge — `RunProvenance.knowledge`, every stamp's tenant knowledge revision. The
+    run stamp and the fork launcher's live capture both take it from here.
+
+    Read from `.git` files, never by running git (the runtime image has none), through the
+    rooted no-follow reader, so a link anywhere below `knowledge_dir` is refused rather than
+    followed. Only `<knowledge_dir>/.git` as a real directory counts: there is no upward search,
+    so a plain folder inside another repository (the product checkout, in dev) is unversioned
+    rather than stamped with that repository's commit. Never raises: this is a record, not a
+    gate, and every failure lands in the reason.
+    """
+    try:
+        with bind(knowledge_dir) as root:
+            return _read_knowledge(root)
+    except _Unreadable as e:
+        return KnowledgeRevision.unavailable_because(str(e))
+    except (OSError, ValueError) as e:
+        return KnowledgeRevision.unavailable_because(f"the knowledge clone could not be read: {e!r}")
+
+
+class _Unreadable(Exception):
+    """A read below the knowledge folder that names no revision; its text is the reason."""
+
+
+def _entry_at(bound: Bound, name: str) -> str | None:
+    """What stands at `name`, judged without following it: `None` when absent, else
+    `directory`, `link`, `file` or `special file`. A refused judgement raises `_Unreadable`
+    with its own reason — the one rule every stat below is read by."""
+    found = stat_entry(bound, name)
+    if found.absent:
+        return None
+    if found.st is None:
+        raise _Unreadable(f"{name} could not be judged: {found.reason}")
+    mode = found.st.st_mode
+    return ("directory" if stat.S_ISDIR(mode) else "link" if stat.S_ISLNK(mode)
+            else "file" if stat.S_ISREG(mode) else "special file")
+
+
+def _file_at(bound: Bound, name: str) -> str | None:
+    """The file at `name`, or `None` when absent. A refused read (a link on the way, a
+    non-file, undecodable bytes) raises `_Unreadable` with its own reason — the one rule every
+    read below is held to, so a refusal is never mistaken for an absence."""
+    found = bound.read(name)
+    if found.text is not None:
+        return found.text
+    if found.absent:
+        return None
+    raise _Unreadable(f"{name} could not be read: {found.reason}")
+
+
+def _commit_in(text: str, where: str) -> KnowledgeRevision:
+    sha = text.strip()
+    if not _SHA.fullmatch(sha):
+        raise _Unreadable(f"{where} does not hold a commit: {sha[:80]!r}")
+    return KnowledgeRevision.at(sha)
+
+
+def _read_knowledge(root: Bound) -> KnowledgeRevision:
+    listing = root.entries()
+    if listing.absent:
+        raise _Unreadable("the knowledge folder is missing")
+    if listing.reason is not None:
+        raise _Unreadable(f"the knowledge folder cannot be read: {listing.reason}")
+    git_kind = _entry_at(root, ".git")
+    if git_kind is None:
+        return KnowledgeRevision.unversioned()
+    if git_kind != "directory":
+        raise _Unreadable(f".git is a {git_kind}, not a directory (it is not followed)")
+    git = root.under(".git")
+    reftable = _entry_at(git, "reftable")
+    if reftable == "directory":
+        raise _Unreadable("reftable refs: this reader reads files-backend refs only")
+    if reftable is not None:
+        raise _Unreadable(f".git/reftable is a {reftable}, not a reftable directory")
+    head = _file_at(git, "HEAD")
+    if head is None:
+        raise _Unreadable("HEAD is absent")
+    text = head.strip()
+    if not text.startswith("ref:"):
+        return _commit_in(text, "HEAD")
+    return _follow_ref(git, text[len("ref:"):].strip())
+
+
+def _follow_ref(git: Bound, name: str) -> KnowledgeRevision:
+    """The commit the ref HEAD names holds."""
+    if not _is_ref_name(name):
+        raise _Unreadable(f"HEAD names {name[:80]!r}, which is not a ref under refs/")
+    # The loose ref wins over packed-refs, and only its ABSENCE falls through: a refused one
+    # shadows the packed line, as in git.
+    loose = _file_at(git, name)
+    if loose is not None:
+        return _commit_in(loose, f"the ref {name}")
+    for line in (_file_at(git, "packed-refs") or "").splitlines():
+        # The `#` header and the `^` peeled lines name no ref.
+        if not line or line[0] in "#^":
+            continue
+        sha, _sep, ref = line.partition(" ")
+        if ref == name:
+            return _commit_in(sha, f"packed-refs' line for {name}")
+    raise _Unreadable(f"unborn branch: HEAD names {name}, which no ref holds yet")
+
+
+def _is_ref_name(name: str) -> bool:
+    """`refs/<component>/...`, each component a plain name: nothing that could step out of
+    `.git` (`..`, an absolute path) or name a non-ref file inside it (`ORIG_HEAD`)."""
+    parts = name.split("/")
+    return (len(parts) >= 2 and parts[0] == "refs"
+            and all(part and part not in (".", "..") and part.isprintable()
+                    and not any(ch.isspace() for ch in part) for part in parts))
+
+
+def capture_run(repo_root: Path, knowledge_dir: Path) -> RunProvenance:
+    """The code stamp of `repo_root` with the knowledge revision of `knowledge_dir` beside it —
+    what a run is stamped with and what the fork launcher compares a source against."""
+    record = capture_tree(repo_root)
+    return dataclasses.replace(record, knowledge=capture_knowledge(knowledge_dir))
 
 
 def write(path: Path, prov: RunProvenance) -> None:
