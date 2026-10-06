@@ -2130,7 +2130,7 @@ structure:
   - id: case_ticket
     frame: leg
     provenance: design
-    where: defender/scripts/case_history/case_ticket.py
+    where: defender/runtime/case_ticket.py
     note: Its mapping consumers (release_predicate, alert_to_open_payload, read_case_record, case_record_to_comment,
       escalation_comment_payload, unreadable_comment_payload) take a CaseMapping; _load_mapping's per-call read
       (:84, _MAPPING_CACHE :81) goes.
@@ -2568,7 +2568,7 @@ structure:
   - id: CaseTicketError
     provenance: code
     facets: {}
-    where: defender/scripts/case_history/case_ticket.py
+    where: defender/runtime/case_ticket.py
     note: Kept on the record for a bad mapping; its text names the host path today (F8/G19).
   - id: TenantRefused
     provenance: code

@@ -33,7 +33,6 @@ from __future__ import annotations
 import functools
 import importlib
 import inspect
-import itertools
 import json
 import os
 import re
@@ -260,14 +259,19 @@ def _drive_run(tmp: Path, mp: Any, *, answers: list[dict[str, Any]],
 # ======================================================================================
 
 
-def _observe_mapping_at_run_start(tmp: Path, mp: Any) -> dict[str, Any]:
-    from defender.learning.branch.estate import applier
-    from defender.runtime import query_tool
-
+def _records_at_run_start() -> tuple[Any, Any]:
+    """The run's record over a planted tenant, then again after its mapping is made one the
+    loader refuses (open and released status equal): (good, bad)."""
     root, folder = _tenant()
     good = _record(root)
     T7.mapping_path(folder).write_text(MAPPING_COLLIDING, encoding="utf-8")
-    bad = _record(root)
+    return good, _record(root)
+
+
+def _view_at_run_start(good: Any, bad: Any, tmp: Path) -> dict[str, Any]:
+    from defender.learning.branch.estate import applier
+    from defender.runtime import query_tool
+
     released = {"status": "closed"}
     unreleased = {"status": "open"}
     pred_good = query_tool._release_predicate(good)
@@ -280,6 +284,10 @@ def _observe_mapping_at_run_start(tmp: Path, mp: Any) -> dict[str, Any]:
         "applier_good": _outcome_of(applier.unservable, TICKET_PATCH, good.ticket_mapping),
         "applier_bad": _outcome_of(applier.unservable, TICKET_PATCH, bad.ticket_mapping),
     }, tmp)
+
+
+def _observe_mapping_at_run_start(tmp: Path, mp: Any) -> dict[str, Any]:
+    return _view_at_run_start(*_records_at_run_start(), tmp)
 
 
 def test_1080_the_case_mapping_is_read_at_run_start_from_the_tenants_home(tmp_path):
@@ -304,19 +312,16 @@ def test_1080_the_case_mapping_is_read_at_run_start_from_the_tenants_home(tmp_pa
 
     from defender.runtime import query_tool
 
-    root, folder = _tenant()
-    good = _record(root)
+    good, bad = _records_at_run_start()
     assert isinstance(good.ticket_mapping, case_mapping), (
         f"the record holds {type(good.ticket_mapping)!r}, not the tenants home's CaseMapping")
     assert type(query_tool._release_predicate(good).__self__) is predicate_cls, (
         "query_tool's release predicate is not the tenants home's ReleasePredicate")
-    T7.mapping_path(folder).write_text(MAPPING_COLLIDING, encoding="utf-8")
-    bad = _record(root)
     assert isinstance(bad.ticket_mapping, case_error), (
         f"a refused mapping is held as {type(bad.ticket_mapping)!r}, not the moved "
         "CaseTicketError")
 
-    assert _observe_mapping_at_run_start(tmp_path, None) == _golden(
+    assert _view_at_run_start(good, bad, tmp_path) == _golden(
         "s_case_mapping_read_at_run_start")
 
 
@@ -326,47 +331,64 @@ def test_1080_the_case_mapping_is_read_at_run_start_from_the_tenants_home(tmp_pa
 
 _COLD_IMPORT = r"""
 import importlib, json, sys
-order, case_mod, settings_mod = json.loads(sys.argv[1]), sys.argv[2], sys.argv[3]
-importers = json.loads(sys.argv[4])
-seen = []
-for name in order:
-    importlib.import_module(name)
-    seen.append([name, case_mod in sys.modules, settings_mod in sys.modules,
-                 sorted(m for m in importers if m in sys.modules)])
-print(json.dumps(seen))
+first, watch = sys.argv[1], json.loads(sys.argv[2])
+importlib.import_module(first)
+print(json.dumps(sorted(m for m in watch if m in sys.modules)))
 """
+
+#: The case-mapping module's production importers that the run-start record, the query door
+#: and the estate applier are (the three edges #1190 retires from O1, plus the record build).
+_NAMED_IMPORTERS = ("defender.runtime.run_tenant", "defender.runtime.query_tool",
+                    "defender.learning.branch.estate.applier")
+
+
+def _importers_of(case_mod: str) -> dict[str, bool]:
+    """Every non-test module under `defender/` that imports `case_mod`, by dotted name, with
+    whether that import sits at module level (`import a.b`, `from a import b`, `from a.b import
+    x` all count)."""
+    parent, _, leaf = case_mod.rpartition(".")
+    out: dict[str, bool] = {}
+    for rel in S.py_files(S.REPO_ROOT, ("defender",)):
+        if S.is_test_path(rel):
+            continue
+        for st in S.import_statements(rel, (S.REPO_ROOT / rel).read_bytes()):
+            if st.module == case_mod or (st.module == parent and leaf in st.names):
+                name = S.dotted(rel)
+                out[name] = out.get(name, False) or st.top_level
+    return out
 
 
 def test_case_mapping_module_is_imported_by_the_run_tenant_record_and_itself_imports_the_settings_module():  # noqa: E501
-    """A cold import of each of the four modules (case mapping, RunTenant, the query tool, the
-    applier) works in every first-import order: no import cycle among the case-mapping module,
-    tenant settings and the run-tenant record, wherever the tenants home sits.
+    """No import cycle runs through the case-mapping module, so every first-import order of it,
+    RunTenant, the query tool and the applier works.
 
-    All 24 orders, each in a fresh interpreter (PYTHONPATH this checkout); the case-mapping
-    module is the one under `defender/runtime/` defining `load_case_mapping`. In every order the
-    run-tenant record's import has loaded the case-mapping module, and the case-mapping
-    module's import has loaded `runtime/tenant_settings`. The edge runs one way: importing the
-    case-mapping module first loads none of its three importers, so a back-edge that every
-    order happens to survive (case mapping importing the run-tenant record) still fails."""
+    Shown without enumerating orders: every importer of the case-mapping module (read off the
+    tree, not listed by hand) imports it at module level, and a fresh interpreter that imports
+    the case-mapping module ALONE has loaded `runtime/tenant_settings` and none of those
+    importers. A cycle through the module would need its own import to reach one of them.
+    Each of the three named importers, imported first in its own fresh interpreter, loads the
+    case-mapping module (positive control: the edge the census reads is the one that runs)."""
     case_mod = S.dotted(S.home_of("load_case_mapping", home=S.RUNTIME))
-    run_tenant, settings = "defender.runtime.run_tenant", "defender.runtime.tenant_settings"
-    modules = (case_mod, run_tenant, "defender.runtime.query_tool",
-               "defender.learning.branch.estate.applier")
-    orders = list(itertools.permutations(modules))
-    importers = json.dumps(modules[1:])
-    results = _children([["-c", _COLD_IMPORT, json.dumps(order), case_mod, settings, importers]
-                         for order in orders])
-    failed = [(order[0], r.returncode, r.stderr.decode(errors="replace")[-600:])
-              for order, r in zip(orders, results, strict=True) if r.returncode != 0]
-    assert not failed, f"a first-import order fails: {failed[:3]}"
-    for order, r in zip(orders, results, strict=True):
-        steps = json.loads(r.stdout)
-        seen = {name: (case_loaded, settings_loaded)
-                for name, case_loaded, settings_loaded, _ in steps}
-        assert seen[run_tenant][0], f"{order}: run_tenant did not load {case_mod}"
-        assert seen[case_mod][1], f"{order}: {case_mod} did not load {settings}"
-        if order[0] == case_mod:
-            assert steps[0][3] == [], f"{case_mod} imports its importers back: {steps[0][3]}"
+    settings = "defender.runtime.tenant_settings"
+    importers = _importers_of(case_mod)
+    assert set(_NAMED_IMPORTERS) <= set(importers), (
+        f"the census of {case_mod}'s importers misses named ones: {sorted(importers)}")
+    deferred = sorted(m for m, top in importers.items() if not top)
+    assert not deferred, f"{case_mod} is imported inside a function by {deferred}"
+
+    firsts = (case_mod, *_NAMED_IMPORTERS)
+    watch = json.dumps(sorted({*importers, case_mod, settings}))
+    results = _children([["-c", _COLD_IMPORT, first, watch] for first in firsts])
+    failed = [(first, r.returncode, r.stderr.decode(errors="replace")[-600:])
+              for first, r in zip(firsts, results, strict=True) if r.returncode != 0]
+    assert not failed, f"a cold first import fails: {failed[:3]}"
+    loaded = {first: set(json.loads(r.stdout)) for first, r in zip(firsts, results, strict=True)}
+    assert settings in loaded[case_mod], f"{case_mod} did not load {settings}"
+    back = sorted(loaded[case_mod] & set(importers))
+    assert not back, f"importing {case_mod} alone loads its importers {back}: a cycle"
+    for first in _NAMED_IMPORTERS:
+        assert case_mod in loaded[first], f"{first} did not load {case_mod}"
+
 
 
 def test_1190_the_whole_case_ticket_module_moved_to_one_runtime_home():
@@ -559,12 +581,10 @@ def test_case_mapping_edited_or_removed_between_run_start_and_the_post_step(case
     lifecycle (after run start, before the post-step): the mapping edited, removed or made
     invalid, the case-history `config.env` edited or removed. The store's calls (which store,
     which comment) and the receipt against the base golden. The production writer is the
-    write-back module wherever it lives (`ticket_writer` stays under `scripts/` until #1165),
-    and the snapshot it is handed is the tenants home's `CaseMapping`, under
-    `defender/runtime/`."""
+    write-back module wherever it lives (`ticket_writer` stays under `scripts/` until #1165).
+    That the snapshot on the record is the tenants home's `CaseMapping` is pinned once, by
+    `test_1080_the_case_mapping_is_read_at_run_start_from_the_tenants_home`."""
     assert _run_main_default_writer() is _writer(), "run.main's post-step is not the writer"
-    root, _folder = _tenant()
-    assert isinstance(_record(root).ticket_mapping, _moved("CaseMapping"))
     assert _observe_edit(case, tmp_path, monkeypatch) == _golden("s217")[case]
 
 
