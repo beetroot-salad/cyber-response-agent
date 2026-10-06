@@ -263,6 +263,16 @@ def test_disposition_for_refuses_an_oversized_source_refs_before_parsing(tmp_pat
     assert SOURCE_REFS_FILE_MAX <= 1024 * 1024
 
 
+def test_disposition_for_holds_a_source_refs_that_is_not_utf8(tmp_path):
+    """A box-written file with an invalid byte is held (None), like over-cap or bad YAML: the
+    decode error must not escape into the drain's batch."""
+    runs = tmp_path / "runs"
+    (runs / "r1").mkdir(parents=True)
+    cfg = cast(AuthorConfig, SimpleNamespace(runs_dir=runs))
+    (runs / "r1" / "source_refs.yaml").write_bytes(b"normalized_disposition: benign\n#\xff\n")
+    assert disposition_for(cfg, "r1") is None
+
+
 def test_d_b12_disposition_for_flood_source_refs_is_held(tmp_path):
     """d: b12 — a flooded source_refs.yaml reads as "no ground truth" (None → the case
     is held), joining the site's YAMLError degrade. Control: a healthy file resolves."""

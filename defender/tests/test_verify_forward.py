@@ -90,6 +90,27 @@ def test_load_run_context_refuses_an_oversized_source_refs(tmp_path):
         vf.load_run_context("rid", runs_dir=runs)
 
 
+@pytest.mark.parametrize("which", ["source_refs.yaml", "investigation.md"])
+@pytest.mark.parametrize("fault", ["not-utf8", "over-cap"])
+def test_load_run_context_turns_an_unreadable_input_into_a_verdict_error(tmp_path, which, fault):
+    """Both inputs are box-writable. An undecodable or over-cap one is a `VerdictError` (the
+    drain's retry-once-then-BAD ending), never a raw `UnicodeDecodeError`/`OSError`."""
+    runs = tmp_path / "runs"
+    (runs / "rid").mkdir(parents=True)
+    (runs / "rid" / "investigation.md").write_text("x", encoding="utf-8")
+    (runs / "rid" / "source_refs.yaml").write_text(
+        "normalized_disposition: benign\n", encoding="utf-8")
+    assert vf.load_run_context("rid", runs_dir=runs) == ("x", "benign")
+    target = runs / "rid" / which
+    if fault == "not-utf8":
+        target.write_bytes(b"normalized_disposition: benign\n\xff\n")
+    else:
+        with open(target, "r+b") as f:
+            f.truncate(64 * 1024 * 1024 + 1)
+    with pytest.raises(vfs.VerdictError, match=which.split(".")[0]):
+        vf.load_run_context("rid", runs_dir=runs)
+
+
 def test_wrap_builds_salted_labeled_block():
     assert wrap("the transcript\n", "case_transcript", "ab" * 16) == (
         f"<run-{'ab' * 16}-case_transcript>\n"

@@ -389,6 +389,11 @@ def test_real_tree_has_no_direct_whole_read():
     assert entries == {}
 
 
+def test_the_shipped_baseline_header_is_the_gates():
+    """An `--update-baseline` run must not churn the header: the shipped one is the gate's."""
+    assert json.loads(REAL_BASELINE.read_text(encoding="utf-8"))["//"] == _GATE.HEADER
+
+
 @pytest.mark.gate
 def test_real_run_scans_the_real_tree_and_reports(capsys):
     """The real path runs the ratchet over the real tree: its summary is printed, with no

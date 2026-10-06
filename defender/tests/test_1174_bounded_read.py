@@ -1159,6 +1159,8 @@ def test_h12_the_cap_has_no_off_switch(tmp_path, reader):
     assert _READERS[reader](p, _io.READ_LIMIT)
     with pytest.raises(TypeError):
         _READERS[reader](p, None)
+    with pytest.raises(TypeError):
+        _READERS[reader](tmp_path / "absent.jsonl", None)
 
 
 def test_h12_the_one_read_step_clamps_whoever_calls_it(tmp_path):
