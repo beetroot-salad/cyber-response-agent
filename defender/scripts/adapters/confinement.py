@@ -1,8 +1,8 @@
 """Target fidelity: a verb cannot be aimed outside the system it is declared under.
 
-Two rule forms — an HTTP read-endpoint allowlist for the URL-shaped adapters, and a
-program+container-target pair for host-state, which has no URL — plus the transport capture
-seam the endpoint rule is checked through and the allowlist's authoring-integrity constructor.
+An HTTP read-endpoint allowlist for the URL-shaped adapters, plus the transport capture seam the
+endpoint rule is checked through and the allowlist's authoring-integrity constructor. A system
+with no URL keeps its own rule in its adapter (host-state, #1215).
 """
 from __future__ import annotations
 
@@ -319,39 +319,7 @@ def is_world_view(index: str, configured_patterns: Iterable[str], world_id: str)
     )
 
 
-# the host-state program+target confinement
-
-
-HOST_STATE_PROGRAMS: frozenset[str] = frozenset({
-    "ps", "cat", "getent", "sha256sum", "dpkg-query",
-})
-
-
-def confine_host(host: str) -> str:
-    from defender.scripts.adapters import host_state_adapter  # deferred: avoid the cycle
-
-    if host not in host_state_adapter.KNOWN_HOSTS:
-        raise ConfinementFault(
-            f"host {host!r} is not in the declared host-state inventory "
-            f"({', '.join(host_state_adapter.KNOWN_HOSTS)})"
-        )
-    return host
-
-
-def confine_host_state_call(program: str, host: str) -> None:
-    """Both halves of the host-state rule: the program against the allowlist, and the container
-    target against the declared inventory (`cat` inside the ticket store would pass the program
-    check alone)."""
-    if program not in HOST_STATE_PROGRAMS:
-        raise ConfinementFault(
-            f"host-state program {program!r} is not in the declared allowlist "
-            f"{sorted(HOST_STATE_PROGRAMS)}"
-        )
-    confine_host(host)
-
-
 __all__ = [
-    "HOST_STATE_PROGRAMS",
     "READ_ENDPOINT_ALLOWLIST",
     "AllowlistError",
     "CapturedRequest",
@@ -360,8 +328,6 @@ __all__ = [
     "ReadEndpointAllowlist",
     "TransportCapture",
     "ViewNameError",
-    "confine_host",
-    "confine_host_state_call",
     "confine_index",
     "confine_read_endpoint",
     "guard_outbound",
