@@ -20,12 +20,13 @@ GOLDENS ARE THE BASE: `goldens/tenants.json`, captured at 80888efb by running th
 functions below (the parked file's, unchanged but for the `home=` pin) under
 `SPEC1080_AT_BASE=1`. With that variable set the locator answers with the base definitions, so
 the behavioural tests here pass at a tree where the move has not happened: that is the check that
-the goldens are still the code's behaviour. The structural test (the env-read lint) stays red
-under it, since it reads the lint's lists, not the locator.
+the goldens are still the code's behaviour. The structural tests stay red under it, since they
+read the tree, not the locator: the env-read lint's lists, the whole-file name census (every base
+name is still in `scripts/case_history/`) and the import-cycle check.
 
 FAULTS ARE REAL INPUTS: real mapping files (BOM, undecodable bytes, a link out of the tenant
-folder, a directory, a FIFO, the 1 MiB bound and one byte over), real fresh interpreters for the
-import orders, the REAL `run.main` under `--update-ticket` with the store behind a `docker` shim
+folder, a directory, a FIFO, the 1 MiB bound and one byte over), a real fresh interpreter per
+module for the import-cycle check, the REAL `run.main` under `--update-ticket` with the store behind a `docker` shim
 first on PATH (`_spec1107.DockerShim`), and the real lint's `scan` over a planted copy.
 """
 from __future__ import annotations
@@ -35,9 +36,8 @@ import importlib
 import inspect
 import json
 import os
-import re
 import textwrap
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +53,7 @@ from defender.tests.scripts_1080_split.test_1080_writeback_tenants_and_views imp
 )
 from defender.tests.tenant_1107_settings import _census_1107 as C1107
 from defender.tests.tenant_1107_settings import _spec1107 as T7
+from defender.tests.tenant_1107_settings.test_1107_census_lint import _reported
 
 #: Every planted tenant's marker (its config values carry it) and its id (the D9 tenant). The
 #: goldens were captured with exactly these.
@@ -336,79 +337,78 @@ importlib.import_module(first)
 print(json.dumps(sorted(m for m in watch if m in sys.modules)))
 """
 
-#: The case-mapping module's production importers that the run-start record, the query door
-#: and the estate applier are (the three edges #1190 retires from O1, plus the record build).
+#: The three modules that import the case-mapping module and that #1190 is about: the run-start
+#: record build, the query door and the estate applier.
 _NAMED_IMPORTERS = ("defender.runtime.run_tenant", "defender.runtime.query_tool",
                     "defender.learning.branch.estate.applier")
+_SETTINGS = "defender.runtime.tenant_settings"
 
 
-def _importers_of(case_mod: str) -> dict[str, bool]:
-    """Every non-test module under `defender/` that imports `case_mod`, by dotted name, with
-    whether that import sits at module level (`import a.b`, `from a import b`, `from a.b import
-    x` all count)."""
-    parent, _, leaf = case_mod.rpartition(".")
-    out: dict[str, bool] = {}
+def _module_level_importers(module: str) -> set[str]:
+    """Every non-test module under `defender/` whose MODULE-LEVEL code imports `module` (`import
+    a.b`, `from a import b`, `from a.b import x` all count). An import inside a function runs
+    after loading, so it cannot close an import cycle and is not counted."""
+    parent, _, leaf = module.rpartition(".")
+    out: set[str] = set()
     for rel in S.py_files(S.REPO_ROOT, ("defender",)):
         if S.is_test_path(rel):
             continue
         for st in S.import_statements(rel, (S.REPO_ROOT / rel).read_bytes()):
-            if st.module == case_mod or (st.module == parent and leaf in st.names):
-                name = S.dotted(rel)
-                out[name] = out.get(name, False) or st.top_level
+            if st.top_level and (st.module == module or (st.module == parent and leaf in st.names)):
+                out.add(S.dotted(rel))
     return out
 
 
 def test_case_mapping_module_is_imported_by_the_run_tenant_record_and_itself_imports_the_settings_module():  # noqa: E501
-    """No import cycle runs through the case-mapping module, so every first-import order of it,
-    RunTenant, the query tool and the applier works.
+    """No import cycle among the case-mapping module, tenant settings, the run-tenant record, the
+    query tool and the applier, so every first-import order of them works.
 
-    Shown without enumerating orders: every importer of the case-mapping module (read off the
-    tree, not listed by hand) imports it at module level, and a fresh interpreter that imports
-    the case-mapping module ALONE has loaded `runtime/tenant_settings` and none of those
-    importers. A cycle through the module would need its own import to reach one of them.
-    Each of the three named importers, imported first in its own fresh interpreter, loads the
-    case-mapping module (positive control: the edge the census reads is the one that runs)."""
+    Shown without enumerating orders. For each of the five modules, a fresh interpreter imports
+    it ALONE and has then loaded none of its module-level importers (read off the tree, not
+    listed by hand). A cycle through a module means loading it reaches something that imports
+    it back at load time, so this covers every cycle that touches any of the five, whether or not
+    it runs through the case-mapping module. Positive controls: the case-mapping module's import
+    loads `runtime/tenant_settings`, and each of the three named importers, imported first,
+    loads the case-mapping module."""
     case_mod = S.dotted(S.home_of("load_case_mapping", home=S.RUNTIME))
-    settings = "defender.runtime.tenant_settings"
-    importers = _importers_of(case_mod)
-    assert set(_NAMED_IMPORTERS) <= set(importers), (
-        f"the census of {case_mod}'s importers misses named ones: {sorted(importers)}")
-    deferred = sorted(m for m, top in importers.items() if not top)
-    assert not deferred, f"{case_mod} is imported inside a function by {deferred}"
+    modules = (case_mod, _SETTINGS, *_NAMED_IMPORTERS)
+    importers = {m: _module_level_importers(m) for m in modules}
+    assert set(_NAMED_IMPORTERS) <= importers[case_mod], (
+        f"the census of {case_mod}'s importers misses named ones: {sorted(importers[case_mod])}")
 
-    firsts = (case_mod, *_NAMED_IMPORTERS)
-    watch = json.dumps(sorted({*importers, case_mod, settings}))
-    results = _children([["-c", _COLD_IMPORT, first, watch] for first in firsts])
-    failed = [(first, r.returncode, r.stderr.decode(errors="replace")[-600:])
-              for first, r in zip(firsts, results, strict=True) if r.returncode != 0]
+    watch = json.dumps(sorted({case_mod, *modules, *(i for s in importers.values() for i in s)}))
+    results = _children([["-c", _COLD_IMPORT, m, watch] for m in modules])
+    failed = [(m, r.returncode, r.stderr.decode(errors="replace")[-600:])
+              for m, r in zip(modules, results, strict=True) if r.returncode != 0]
     assert not failed, f"a cold first import fails: {failed[:3]}"
-    loaded = {first: set(json.loads(r.stdout)) for first, r in zip(firsts, results, strict=True)}
-    assert settings in loaded[case_mod], f"{case_mod} did not load {settings}"
-    back = sorted(loaded[case_mod] & set(importers))
-    assert not back, f"importing {case_mod} alone loads its importers {back}: a cycle"
+    loaded = {m: set(json.loads(r.stdout)) for m, r in zip(modules, results, strict=True)}
+    cycles = {m: sorted(loaded[m] & importers[m]) for m in modules if loaded[m] & importers[m]}
+    assert not cycles, f"importing a module alone loads its own importers (a cycle): {cycles}"
+    assert _SETTINGS in loaded[case_mod], f"{case_mod} did not load {_SETTINGS}"
     for first in _NAMED_IMPORTERS:
         assert case_mod in loaded[first], f"{first} did not load {case_mod}"
 
 
-
 def test_1190_the_whole_case_ticket_module_moved_to_one_runtime_home():
     """Pure whole-file move (design, decided: no split). Every module-level name the base
-    `scripts/case_history/case_ticket.py` defined is defined in the ONE home under
-    `defender/runtime/` (the module defining `load_case_mapping`), and none of them is defined
-    anywhere under `defender/scripts/case_history/`. The home has no module-level `__getattr__`,
+    `scripts/case_history/case_ticket.py` defined is, wherever it is still defined, defined in
+    the ONE home under `defender/runtime/` (the module defining `load_case_mapping`); a name
+    later deleted outright (dead code) is allowed. The home has no module-level `__getattr__`,
     which could serve a name from another module by a string import the AST census cannot see.
 
-    Since every name lives in the home, the env-read sweep of the home covers all of the
-    case-ticket code. Positive control: the census is non-empty and includes names from both
-    halves (the mapping loader and the comment payloads)."""
+    A split that moves part of the module elsewhere (a sibling runtime module re-exported, or
+    the comment half kept beside `ticket_writer`) leaves names defined outside the home and not
+    in it, and fails. Since the code stays in the home, the env-read sweep of the home covers it.
+    Positive control: the census is non-empty and includes names from both halves (the mapping
+    loader and the comment payloads), all defined in the home today."""
     base = S.base_inventory()["py_names"]["defender/scripts/case_history/case_ticket.py"]
-    assert {"load_case_mapping", "case_record_to_comment", "WIRE_BOUND_BYTES"} <= set(base)
     home = S.home_of("load_case_mapping", home=S.RUNTIME)
-    missing = [n for n in base if home not in S.definitions(n)]
-    assert not missing, f"names of the base module not defined in {home}: {missing}"
-    left = {n: [d for d in S.definitions(n) if S.under(d, "defender/scripts/case_history")]
-            for n in base}
-    assert not {n: d for n, d in left.items() if d}, f"split back into scripts/: {left}"
+    both_halves = {"load_case_mapping", "case_record_to_comment", "WIRE_BOUND_BYTES"}
+    assert both_halves <= set(base)
+    assert all(home in S.definitions(n) for n in both_halves), "control: the home lacks a half"
+    elsewhere = {n: list(S.definitions(n)) for n in base
+                 if S.definitions(n) and home not in S.definitions(n)}
+    assert not elsewhere, f"names of the base module now defined only outside {home}: {elsewhere}"
     assert "__getattr__" not in S.module_level_names((S.REPO_ROOT / home).read_bytes(), home)
 
 
@@ -610,26 +610,15 @@ def _env_lint() -> Any:
     return load_lint_gate(ENV_LINT, name=f"{ENV_LINT}_spec1190")
 
 
-def _plant_env_read(root: Path, relpath: str) -> range:
+def _plant_env_read(root: Path, relpath: str) -> int:
     """A copy of `relpath`'s CURRENT source (this checkout's) at `root/relpath` with `ENV_PLANT`
-    appended; the 1-based line range the plant occupies."""
+    appended; the 1-based line of the planted environment read."""
     before = (S.REPO_ROOT / relpath).read_text(encoding="utf-8")
     if not before.endswith("\n"):
         before += "\n"
-    dst = root / relpath
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.write_text(before + ENV_PLANT, encoding="utf-8")
-    start = before.count("\n") + 1
-    return range(start, start + ENV_PLANT.count("\n") + 1)
-
-
-def _flagged(findings: Iterable[str], relpath: str, lines: range) -> bool:
-    """Whether the lint's findings (`rel:line: what`) carry a line of `relpath` inside `lines`."""
-    for f in findings:
-        m = re.match(re.escape(relpath) + r":(\d+):", f)
-        if m and int(m.group(1)) in lines:
-            return True
-    return False
+    T7.plant_module(root, relpath, before + ENV_PLANT)
+    head, _, _ = ENV_PLANT.partition(".environ")
+    return before.count("\n") + head.count("\n") + 1
 
 
 def test_1190_the_env_read_lint_sweeps_the_moved_case_mapping_module_and_the_staying_writer(
@@ -638,9 +627,9 @@ def test_1190_the_env_read_lint_sweeps_the_moved_case_mapping_module_and_the_sta
     after the move, and the move narrows nothing: the module defining `load_case_mapping` (under
     `defender/runtime/`) is in the lint's own file set over the real tree, and so is the
     write-back module (`record_case_ticket`'s, which stays in `defender/scripts/case_history/`
-    until #1165). Every entry of the lint's swept list exists (the lint skips a missing tree
-    silently while another exists, K18), and its test twin `_census_1107.SWEPT` lists the same
-    entries and reaches both modules. The moved module carries no environment read in the real
+    until #1165). The lint itself refuses a swept entry missing from this repo (its own test,
+    `test_o7_lint_refuses_a_swept_entry_missing_from_this_repo`); its test twin
+    `_census_1107.SWEPT` lists the same entries and reaches both modules. The moved module carries no environment read in the real
     tree.
 
     Driven: an `os.environ` read planted in a tmp copy of the moved module, at the path the
@@ -652,10 +641,6 @@ def test_1190_the_env_read_lint_sweeps_the_moved_case_mapping_module_and_the_sta
     mapping = S.home_of("load_case_mapping", home=S.RUNTIME)
     writer = _writer_home()
 
-    dead = [e for e in lint.SWEPT if not (S.REPO_ROOT / e).exists()]
-    assert not dead, (
-        f"lint_tenant_env_reads.SWEPT names {dead}, which no longer exist: the lint skips a "
-        "missing tree silently, so what lived there left the sweep")
     assert set(lint.SWEPT) == set(C1107.SWEPT), (
         f"the env-read lint and its test twin sweep different trees: lint only "
         f"{sorted(set(lint.SWEPT) - set(C1107.SWEPT))}, twin only "
@@ -670,10 +655,10 @@ def test_1190_the_env_read_lint_sweeps_the_moved_case_mapping_module_and_the_sta
 
     root = tmp_path / "tree"
     planted = {r: _plant_env_read(root, r) for r in dict.fromkeys((ENV_CONTROL, mapping, writer))}
-    found = lint.scan(root)
-    assert _flagged(found, ENV_CONTROL, planted[ENV_CONTROL]), (
+    found = "\n".join(lint.scan(root))
+    assert _reported(found, ENV_CONTROL, planted[ENV_CONTROL]), (
         f"control: the env read planted in {ENV_CONTROL} was not reported: {found}")
-    missed = [r for r in (mapping, writer) if not _flagged(found, r, planted[r])]
+    missed = [r for r in (mapping, writer) if not _reported(found, r, planted[r])]
     assert not missed, f"env reads planted in {missed} were not reported: {found}"
 
 

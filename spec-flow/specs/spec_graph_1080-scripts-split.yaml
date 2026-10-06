@@ -88,12 +88,13 @@ demands:
   - scripts_adapters
   discharged_by: test_1080_scripts_holds_only_entry_points
   seed_docstring: 'D1 under the 2026-10-04 scope cut: the IN files are gone from `defender/scripts/`, no re-export shim is left, and their old
-    dotted names do not resolve. Every tracked file under `defender/scripts/` is one of these: `tenant.py`, `policy_cli.py`, `box_image.py`, `tacit_cli.py`;
-    a thin wrapper that a `bin/` shim invokes, which means the `defender-sql` and `defender-lessons` engines'' wrappers; a file under `scripts/adapters/`
-    (all of its base files stay until #1172); or one of the cut''s named OUT files that stay with their owners (`visualize/`''s eight modules
-    and three assets and `workspace_map.py`, #1105; `case_history/ticket_writer.py` and `gather_tools/record_query.py`, #1165; `case_history/case_ticket.py`,
-    the case_ticket follow-up #1190). The IN files (`_venv.py`, `pricing.py`, `gather_tools/payload_view.py`, `lessons/lessons_frontier.py`, `lessons/_lessons_common.py`)
-    are not left there, and no re-export shim keeps their old `defender.scripts.*` path importable.'
+    dotted names do not resolve. Every tracked file under `defender/scripts/` is one of these: `tenant.py`, `policy_cli.py`, `box_image.py`,
+    `tacit_cli.py`; a thin wrapper that a `bin/` shim invokes, which means the `defender-sql` and `defender-lessons` engines'' wrappers; a file
+    under `scripts/adapters/` (all of its base files stay until #1172); or one of the cut''s named OUT files that stay with their owners
+    (`visualize/`''s eight modules and three assets and `workspace_map.py`, #1105; `case_history/ticket_writer.py` and
+    `gather_tools/record_query.py`, #1165). The IN files (`_venv.py`, `pricing.py`, `gather_tools/payload_view.py`,
+    `lessons/lessons_frontier.py`, `lessons/_lessons_common.py`, and `case_history/case_ticket.py`, which the case_ticket follow-up #1190 moves
+    to `defender/runtime/`) are not left there, and no re-export shim keeps their old `defender.scripts.*` path importable.'
   rides:
   - dF1/M-A
   - dF4/M-D
@@ -191,11 +192,12 @@ demands:
   - scripts.access[import]
   - import_census
   discharged_by: test_1080_no_module_outside_scripts_imports_a_module_under_it
-  seed_docstring: 'An AST census over every `.py` under `defender/` and the repo''s `scripts/`, excluding `tests/` directories, finds no `import`
-    or `from … import` that names `defender.scripts` or anything under it. Relative imports are resolved against their package. Under the 2026-10-04
-    scope cut the allowed exceptions are the 35 named (importer, target) pairs (37 import statements) into the `scripts/` modules the cut leaves
-    where they are, each tagged with the issue that retires it (#1172/#1121, #1165, #1105, the case_ticket follow-up #1190). Any other import into the
-    folder fails, and an exception whose edge no longer exists is itself a finding ([218]); o1_exception_list_is_the_named_edges pins the list.'
+  seed_docstring: 'An AST census over every `.py` under `defender/` and the repo''s `scripts/`, excluding `tests/` directories, finds no
+    `import` or `from … import` that names `defender.scripts` or anything under it. Relative imports are resolved against their package. Under
+    the 2026-10-04 scope cut the allowed exceptions are the 32 named (importer, target) pairs (33 import statements) into the `scripts/` modules
+    the cut leaves where they are, each tagged with the issue that retires it (#1172/#1121, #1165, #1105; the case_ticket follow-up #1190
+    retired its 3 pairs when it moved `case_ticket` under `defender/runtime/`). Any other import into the folder fails, and an exception whose
+    edge no longer exists is itself a finding ([218]); o1_exception_list_is_the_named_edges pins the list.'
   phase_e_rejected:
   - nl: tests are held to the census ("tests don't count", D1/O1).
   positive_control:
@@ -496,9 +498,9 @@ demands:
   - load_case_mapping
   - interacts(run_tenant->case_ticket)
   discharged_by: test_1080_the_case_mapping_is_read_at_run_start_from_the_tenants_home
-  seed_docstring: The run-start record build (`run_tenant`) loads `CaseMapping` through `load_case_mapping` in its new home.
-    A fixture tenant's mapping reads as at the base, and a bad mapping surfaces the moved `CaseTicketError`. `query_tool`
-    and `estate/applier` reach the same module.
+  seed_docstring: 'The run-start record build (`run_tenant`) loads `CaseMapping` through `load_case_mapping` in its new home under
+    `defender/runtime/`. A fixture tenant''s mapping reads as at the base, and a bad mapping surfaces the moved `CaseTicketError`. `query_tool`
+    and `estate/applier` reach the same module.'
   source: 20-demands.md (extraction ledger), id verbatim
 - id: s_ticket_post_step
   parked:
@@ -2594,9 +2596,8 @@ demands:
   - interacts(query_tool->case_ticket)
   - interacts(applier->case_ticket)
   discharged_by: test_case_mapping_module_is_imported_by_the_run_tenant_record_and_itself_imports_the_settings_module
-  seed_docstring: 'A cold import of each of the four modules (case mapping, RunTenant, the query tool, the applier) works
-    in every first-import order: no import cycle among the case-mapping module, tenant settings and the run-tenant record,
-    wherever the tenants home sits.'
+  seed_docstring: 'No import cycle among the case-mapping module, tenant settings, the run-tenant record, the query tool and the applier, so
+    every first-import order of them works.'
   source: 45-dispositions.md settled premise [90] (single reading, judge-examined)
 - id: s091
   kind: behavior
@@ -4539,9 +4540,8 @@ demands:
   - interacts(run_tenant->case_ticket)
   - interacts(ticket_writer->case_ticket)
   discharged_by: test_case_mapping_edited_or_removed_between_run_start_and_the_post_step
-  seed_docstring: The post-step uses the case mapping snapshot taken at run start (it is held on RunTenant at run start),
-    not the file as edited or removed afterwards; the ticket system's own config is read when the writer runs, as today. The
-    move changes neither.
+  seed_docstring: 'The post-step uses the case mapping snapshot taken at run start (it is held on RunTenant at run start), not the file as
+    edited or removed afterwards; the ticket system''s own config is read when the writer runs, as today. The move changes neither.'
   source: 45-dispositions.md settled premise [217] (single reading, judge-examined)
 - id: o1_exception_list_is_the_named_edges
   cut_edit: 'E1: ''exactly three'' becomes the 35 named pairs (37 edges); H4 (i)''s third edge (ticket_writer to _stub_transport) is internal
@@ -4569,14 +4569,15 @@ demands:
   - interacts(staging->_stub_transport)
   - interacts(example_adapter->_stub_transport)
   discharged_by: test_1080_the_o1_exception_list_is_exactly_the_named_edges_and_none_is_stale
-  seed_docstring: 'The import census''s exception list holds exactly the 35 named (importer, target) pairs the 2026-10-04 scope cut leaves standing
-    — 37 import statements at the base, the 59 base edges less the 22 the cut''s moves retire — each tagged with the owner that retires it: #1172/#1121
-    (20: into `_stub_transport`, `confinement`, `elastic_adapter`, `esql_text` and `faults`), #1165 (6: into `record_query` and `ticket_writer`),
-    #1105 (6: into the `visualize/` modules and `workspace_map`) and the case_ticket follow-up #1190 (3: into `case_ticket`). H4 (i)''s `ticket_writer
-    -> _stub_transport` edge is internal to `scripts/` and is not listed. Every listed pair still exists in the tree, so an entry that outlives
-    the edge it excused is a finding, not a silent widening, and the list can only shrink. A new import from outside `scripts/` into `scripts/adapters/`
-    (another importer, or another adapters module) planted in a copy of the tree is reported. `scripts/adapters/` keeps all of its base files
-    until #1172. (E1; M-A (a); [218].)'
+  seed_docstring: 'The import census''s exception list holds exactly the 32 named (importer, target) pairs the 2026-10-04 scope cut and the
+    case_ticket follow-up #1190 leave standing — 33 import statements, the 59 base edges less the 22 the cut''s moves retire and the 4 that
+    #1190''s move of `case_ticket` under `defender/runtime/` retires (`run_tenant`''s two, `query_tool`''s and `estate/applier`''s) — each
+    tagged with the owner that retires it: #1172/#1121 (20: into `_stub_transport`, `confinement`, `elastic_adapter`, `esql_text` and `faults`),
+    #1165 (6: into `record_query` and `ticket_writer`) and #1105 (6: into the `visualize/` modules and `workspace_map`). No pair names
+    `case_ticket` (it is no longer under `scripts/`). H4 (i)''s `ticket_writer -> _stub_transport` edge is internal to `scripts/` and is not
+    listed. Every listed pair still exists in the tree, so an entry that outlives the edge it excused is a finding, not a silent widening, and
+    the list can only shrink. A new import from outside `scripts/` into `scripts/adapters/` (another importer, or another adapters module)
+    planted in a copy of the tree is reported. `scripts/adapters/` keeps all of its base files until #1172. (E1; M-A (a); [218].)'
   note: 'Applied by the 2026-10-04 cut author (85-author-cut-digest.md): E1. The test is renamed test_1080_the_o1_exception_list_is_exactly_the_named_edges_and_none_is_stale;
     the list is data (_census1080.O1_EXCEPTIONS), re-derived from _census1080.census at the base (59 edges, 56 pairs) and checked: the 35 pairs
     cover 37 edges and the 22 uncovered edges are exactly the IN moves. The bind interacts(ticket_writer->_stub_transport) is dropped (H4 (i)''s
