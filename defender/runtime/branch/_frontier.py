@@ -20,7 +20,7 @@ from defender._io import (
     read_jsonl_rows,
     read_text_soft,
 )
-from defender._run_paths import RUN_LAYOUT, RunPaths, artifact_dir
+from defender.run_repository import RUN_LAYOUT, RunPaths, artifact_dir
 
 from .. import session_store
 from ._spec import BranchError, BranchSpec

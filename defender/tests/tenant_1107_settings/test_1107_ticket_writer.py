@@ -40,8 +40,8 @@ from types import SimpleNamespace
 from typing import Any
 
 from defender import run_common
-from defender._run_handle import Run
-from defender._run_paths import RunPaths
+from defender.run_repository import Run
+from defender.run_repository import RunPaths
 from defender.runtime import run_end, run_tenant
 from defender.scripts.case_history import ticket_writer
 from defender.tests._data_root_1078 import current_data_root, ensure_d9_tenant
@@ -715,7 +715,7 @@ def test_s60_ticket_write_fs_atomic_replace(tmp_path, monkeypatch):
 def test_s60_ticket_write_path_stable_for_path_helpers(tmp_path, monkeypatch):
     """RunPaths(run_dir).ticket_write(runs_base) is <runs_base>/<run id>.ticket-write.json, a
     sidecar beside the run dir like the scrub verdict (moved out of the box-writable run dir at
-    the third #1156 review; it was <run_dir>/ticket_write.json). _run_paths and _run_handle
+    the third #1156 review; it was <run_dir>/ticket_write.json). the layout and the handle
     resolve this same path, and the record step's receipt lands there."""
     root, _folder, alert = _world(tmp_path)
     run_id = "r-path"

@@ -33,8 +33,8 @@ from typing import Any
 import pytest
 
 from defender import _io
-from defender import _run_handle as H
-from defender._run_paths import RunPaths
+from defender.run_repository import _handle as H
+from defender.run_repository import RunPaths
 from defender.hooks import _run_dir
 from defender.hooks import budget_enforcer as BE
 from defender.runtime import circuit_breaker as CB
@@ -600,6 +600,10 @@ def test_o6_record_outcome_heals_and_counts(tmp_path, kind):
 
 
 def _budget_handle(run_dir: Path, io: Any = _io) -> Any:
+    # #1105 NH-3: a run is built only under a runs folder whose tenant record names its
+    # tenant; run setup writes the record first, so the handle's caller does here too.
+    if not (run_dir.parent / S.TENANT_RECORD_NAME).exists():
+        S.plant_tenant_record(run_dir.parent)
     run = H.Run.for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=run_dir.parent, io=io)
     group = next(g for g, names in H.GROUP_MEMBERS.items() if "budget" in names)
     return S.member(run, group, "budget", *S.member_args("budget"))

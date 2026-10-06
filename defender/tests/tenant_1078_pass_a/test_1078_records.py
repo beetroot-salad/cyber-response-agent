@@ -472,7 +472,7 @@ def test_s7_j34_run_for_tenant_mismatch_backstop(tmp_path):
 
     Called with the real signature, `Run.for_tenant(T, run_id, runs_base=...)`; the control is
     a record naming T, which is accepted."""
-    Run = H.mod("_run_handle").Run
+    Run = H.mod("run_repository._handle").Run
     base = tmp_path / "runs"
     H.plant_record(base, "someone-else")
     before = H.census(tmp_path)
@@ -488,9 +488,9 @@ def test_g_r7_for_tenant_rekey_coherence(tmp_path):
     """Run.for_tenant, driven against a runs-base record minted under pass (A) (tenant_id from
     the request, never DEFAULT_TENANT_ID), still refuses only a genuinely disagreeing record
     and still accepts a record naming the same tenant — the mismatch check
-    (`record.tenant_id != tenant_id`, _run_handle.py:349-359) continues to compare like with
+    (`record.tenant_id != tenant_id`, run_repository/_handle.py:349-359) continues to compare like with
     like now that both sides of the comparison changed provenance."""
-    Run = H.mod("_run_handle").Run
+    Run = H.mod("run_repository._handle").Run
     base = tmp_path / "runs"
     base.mkdir()
     minted = H.ensure_runs_base_record(base, T_ID)

@@ -53,6 +53,15 @@ def _closing_turns() -> list[Turn]:
     ]
 
 
+def _with_record(base: Path) -> Path:
+    """`base` holding its tenant record naming `DEFAULT_TENANT_ID`. #1105 NH-3: `Run.for_tenant`
+    refuses a runs base with no `_tenant.json`, so the record is planted first — as run setup
+    writes it before building the handle."""
+    if not (base / "_tenant.json").exists():
+        S.plant_tenant_record(base)
+    return base
+
+
 def _read_rows(path: Path) -> list[dict]:
     if not path.is_file():
         return []
@@ -70,7 +79,7 @@ def test_leads_and_queries_stay_append_only_and_readable_mid_run_through_the_han
     second process while the run is still going."""
     run_dir = materialize(tmp_path, GOLDEN)
     base = run_dir.parent
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=base)
+    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
     queries = S.member(handle, "tables", "queries")
     leads = S.member(handle, "tables", "leads", S.LEAD_ID)
 
@@ -113,7 +122,7 @@ def test_the_session_store_still_forks_at_turn_n_through_the_handle(tmp_path: Pa
     prefix rows."""
     base = SS.runs_base(tmp_path)
     run_dir = S.seed_run_tree(S.make_run_dir(base, "run-fork"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=base)
+    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
     session = S.member(handle, "session", "session_db", "case-alpha")
 
     with session.open() as store:
@@ -161,7 +170,7 @@ def test_the_handles_session_access_reaches_todays_store_seam_with_no_new_guaran
     """
     base = SS.runs_base(tmp_path)
     run_dir = S.seed_run_tree(S.make_run_dir(base, "run-seam"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=base)
+    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
     session = S.member(handle, "session", "session_db", "case-alpha")
     store_mod = SS.store_mod()
 
@@ -222,7 +231,7 @@ def test_resume_joins_a_session_store_with_an_incomplete_last_append(tmp_path: P
     """
     base = SS.runs_base(tmp_path)
     run_dir = S.seed_run_tree(S.make_run_dir(base, "run-resume"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=base)
+    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
 
     with S.member(handle, "session", "session_db", "case-alpha").open() as store:
         session_id, _ = SS.mid_pair_session(store)
@@ -279,7 +288,7 @@ def test_a_reader_process_resolving_names_in_a_live_run(tmp_path: Path):
     forkable at turn N."""
     base = S.make_runs_base(tmp_path)
     run_dir = S.seed_run_tree(S.make_run_dir(base, "run-live"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=base)
+    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
     S.member(handle, "tables", "queries").append([{"seq": 0}])
     before = S.mutation_census(run_dir)
 
@@ -310,7 +319,7 @@ def test_the_append_only_tables_written_by_two_routes_at_once(tmp_path: Path):
     from defender._io import append_jsonl
     base = S.make_runs_base(tmp_path)
     run_dir = S.seed_run_tree(S.make_run_dir(base, "run-mixed"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=base)
+    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
     queries = S.member(handle, "tables", "queries")
 
     queries.append([{"seq": 0, "route": "handle"}])
@@ -429,7 +438,7 @@ def test_a_failed_observability_write_is_recorded_and_does_not_fail_the_run(tmp_
     failure and does not fail the run."""
     base = S.make_runs_base(tmp_path)
     run_dir = S.seed_run_tree(S.make_run_dir(base, "run-besteffort"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=base)
+    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
 
     # A REAL obstruction through the REAL primitive: the record's own path is occupied by a
     # directory, so today's append seam raises on disk. No exception is injected.
@@ -452,7 +461,9 @@ def test_a_failed_observability_write_is_recorded_and_does_not_fail_the_run(tmp_
     assert clean.partial_failures == ()
 
     # THE CONTRAST, in one test: the SAME obstruction on an IDENTITY-BEARING write fails loudly
-    # rather than being recorded and shrugged off.
+    # rather than being recorded and shrugged off. (The record planted for the handle, #1105
+    # NH-3, gives its name up to the obstruction.)
+    (base / S.TENANT_RECORD_NAME).unlink()
     (base / S.TENANT_RECORD_NAME).mkdir()
     # #1078: `ensure_tenant` is renamed `ensure_runs_base_record(runs_base, tenant_id)` — the
     # obstruction still fails loudly, as the one tenant refusal (demand #0) rather than a
@@ -471,7 +482,7 @@ def test_runs_written_records_are_all_slots_bound_and_role_disjoint(tmp_path: Pa
     no two sub-collections share one source for what they each claim as their own part."""
     base = S.make_runs_base(tmp_path)
     run_dir = S.seed_run_tree(S.make_run_dir(base, "run-payload"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=base)
+    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
 
     S.member(handle, "tables", "queries").append([{"seq": 0, "lead_id": S.LEAD_ID}])
     S.member(handle, "tables", "leads", S.LEAD_ID).write(
@@ -561,7 +572,7 @@ def test_wire_log_writers_stay_distinguishable_under_concurrent_main_and_subagen
     the writer id §7 decision 18 adds to every record."""
     base = S.make_runs_base(tmp_path)
     run_dir = S.seed_run_tree(S.make_run_dir(base, "run-concurrent"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=base)
+    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
     wire = S.member(handle, "observability", "wire_log")
 
     writers = ("MAIN", "gather-l-aaa111", "gather-l-bbb222")

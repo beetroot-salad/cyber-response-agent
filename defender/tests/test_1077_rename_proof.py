@@ -12,10 +12,10 @@ This proves no module NEEDS to: rename every record through the owner, and a rea
 round trip — the writer, the screened readers and the judge's own report reader, spanning six
 modules — still finds every file.
 
-HOW THE RENAME IS DONE, and why not with `monkeypatch`. Patching `_run_paths.ALERT` after
+HOW THE RENAME IS DONE, and why not with `monkeypatch`. Patching `_layout.ALERT` after
 import reaches nothing: a module that did `from ... import ALERT` holds its own reference, the
 owners' derived constants (`SERVED_DIRNAME`, `PRIMING_LOCK_NAME`, `GATHER_RAW_SHAPE`) were
-computed at import, `_episode_paths` took seven names off `_run_paths` at ITS import, and any
+computed at import, `_episode_paths` took seven names off `run_repository._layout` at ITS import, and any
 regex a consumer compiled at module load is already frozen. Every one of those follows
 automatically from a SOURCE rewrite, so that is what this does: a scratch package whose
 entries are symlinks to the real ones, except the owner modules, which are copies with every
@@ -38,7 +38,8 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = REPO_ROOT / "defender"
-OWNER_MODULES = ("_run_paths.py", "_episode_paths.py", "_tenant.py")
+#: By path under `defender/`: #1105 moved the run-layout owner into the runs repository (D1.1).
+OWNER_MODULES = ("run_repository/_layout.py", "_episode_paths.py", "_tenant.py")
 
 #: The token every renamed record gains. Arbitrary — what matters is that no module anywhere
 #: could have guessed it.
@@ -96,6 +97,13 @@ def _rewrite_owner(source: str, *, only: frozenset[str] | None = None) -> tuple[
     return "".join(lines), len(edits)
 
 
+def _owner_text(owner: Path) -> str:
+    """The owner module's source. A stale owner path fails here by name, not as a bare
+    `FileNotFoundError` deep in a rewrite."""
+    assert owner.is_file(), f"no owner module at {owner.relative_to(PACKAGE)} — a stale owner path"
+    return owner.read_text(encoding="utf-8")
+
+
 def _mirror(src: Path, dst: Path, *, replace: dict[Path, str]) -> None:
     """`dst` mirrors `src`: a symlink per entry, except the ones `replace` supplies text for,
     which become real files (and whose parent directories become real too)."""
@@ -123,7 +131,7 @@ def _renamed_tree(tmp_path: Path, *, sabotage: str | None = None) -> Path:
     replace: dict[Path, str] = {}
     total = 0
     for name in OWNER_MODULES:
-        text, count = _rewrite_owner((PACKAGE / name).read_text(encoding="utf-8"))
+        text, count = _rewrite_owner(_owner_text(PACKAGE / name))
         replace[PACKAGE / name] = text
         total += count
     assert total >= 30, f"the rewrite found only {total} record names — it is not exercising"
@@ -213,10 +221,10 @@ def test_the_rename_keeps_the_shape_it_promises_to_keep(value, want):
 #
 # The lint cannot see the store's path: `"sessions"` and `.db` are deliberately outside its
 # match set (too generic). So the rename is the observer (#1077's session-store leftover, O1):
-# rename the sessions directory, or the store's suffix, in `_run_paths.py` ALONE, and a real
+# rename the sessions directory, or the store's suffix, in `run_repository/_layout.py` ALONE, and a real
 # run must create its store where the owner now says — and a resume must find it there.
 #
-# ONLY those constants move, and only in `_run_paths.py`. Renaming every record as the archive
+# ONLY those constants move, and only in `run_repository/_layout.py`. Renaming every record as the archive
 # proof does would also move the run's alert, which the replay harness's `drive` still hands
 # the driver by its literal name — a failure that is not this rule's.
 
@@ -246,11 +254,11 @@ def _with_function_replaced(source: str, name: str, replacement: str) -> str:
 def _session_renamed_tree(tmp_path: Path, names: tuple[str, ...], *,
                           hand_compose_store_path: bool = False) -> Path:
     root = tmp_path / ("sabotaged" if hand_compose_store_path else "renamed")
-    owner = PACKAGE / "_run_paths.py"
-    text, count = _rewrite_owner(owner.read_text(encoding="utf-8"), only=frozenset(names))
+    owner = PACKAGE / "run_repository" / "_layout.py"
+    text, count = _rewrite_owner(_owner_text(owner), only=frozenset(names))
     assert count == len(names), (
-        f"the rewrite renamed {count} of {names} in _run_paths.py — the owner no longer "
-        "spells them as plain module constants, so this proof is not exercising")
+        f"the rewrite renamed {count} of {names} in run_repository/_layout.py — the owner no "
+        "longer spells them as plain module constants, so this proof is not exercising")
     replace = {owner: text}
     if hand_compose_store_path:
         store = PACKAGE / "runtime" / "session_store.py"
@@ -275,7 +283,7 @@ def _loaded(result: subprocess.CompletedProcess[str], name: str) -> str:
 @pytest.mark.parametrize("names", [("SESSIONS_DIRNAME",), ("SESSION_DB_SUFFIX",)],
                          ids=["sessions-dirname", "session-db-suffix"])
 def test_the_session_store_moves_when_its_owner_renames_it(tmp_path, names):
-    """Rename the sessions directory — or the store's suffix — in `_run_paths.py` alone, and a
+    """Rename the sessions directory — or the store's suffix — in `run_repository/_layout.py` alone, and a
     REAL run (the real driver, its default store factory, its own case pointer) creates its
     store at the owner's new path, and the resume door (`branch.open_source_store`, the store
     factory a resumed run is handed) finds it there.
@@ -332,8 +340,8 @@ def test_the_session_store_follows_the_owners_method_not_just_its_constants(tmp_
     """Change what `SessionPaths.sessions_dir` answers without touching a constant, and a real
     run's store still lands where the owner says and the resume door finds it. This is what
     tells "asks the owner" apart from "composes from the owner's constants"."""
-    owner = PACKAGE / "_run_paths.py"
-    text = owner.read_text(encoding="utf-8")
+    owner = PACKAGE / "run_repository" / "_layout.py"
+    text = _owner_text(owner)
     assert text.count(_SESSIONS_DIR_RETURN) == 1, (
         "`SessionPaths.sessions_dir` no longer returns the spelling this proof rewrites — update "
         "the anchor, or this case exercises nothing")
@@ -367,8 +375,8 @@ _OPEN_ONE_STORE = (
 
 
 def _root_moved_tree(tmp_path: Path, *, hand_composed_mkdir: bool) -> Path:
-    owner = PACKAGE / "_run_paths.py"
-    text = owner.read_text(encoding="utf-8")
+    owner = PACKAGE / "run_repository" / "_layout.py"
+    text = _owner_text(owner)
     assert text.count(_TRUST_ROOT_RETURN) == 1, (
         "`SessionPaths.trust_root` no longer returns the spelling this proof rewrites — update "
         "the anchor, or this case exercises nothing")

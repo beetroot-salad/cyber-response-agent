@@ -49,7 +49,7 @@ from pydantic_ai.messages import (  # noqa: E402
 )
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender._run_paths import RunPaths  # noqa: E402
+from defender.run_repository import RunPaths  # noqa: E402
 from defender.tests._branch_947 import (  # noqa: E402
     ALERT_DOC,
     GOLDEN_INVESTIGATION,
@@ -581,7 +581,7 @@ def test_the_sibling_does_not_inherit_the_source_runs_own_account_of_itself(tmp_
     frontmatter as the run's headline. The counters (`budget.json`, `circuit_breaker.json`) are
     this run's spend and this run's per-system fault tallies: inherited, a sibling starts
     pre-tripped or pre-spent for faults it never took. And the wire log is MAIN's whole
-    transcript plus every gather payload verbatim — `_run_paths.WIRE_LOG_DIR` exists precisely
+    transcript plus every gather payload verbatim — `_layout.WIRE_LOG_DIR` exists precisely
     so it is unreadable to the agents of its own run, and copying it into a fresh run dir
     re-opens that at the one moment the run dir is being assembled.
 

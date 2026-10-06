@@ -36,7 +36,7 @@ from pathlib import Path
 
 import pytest
 
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.hooks import _run_dir as hooks_run_dir
 from defender.tests._by_path import cached_parse, import_lint_lib
 
@@ -592,7 +592,7 @@ def _run_paths_reads(tree: ast.AST, accessors: set[str]) -> set[str]:
 def test_no_accessor_names_a_file_nothing_reads():
     """#647's actual rule, kept executable rather than left as prose in the docstring above.
 
-    Every accessor must be READ off a `RunPaths` value somewhere outside `_run_paths.py` and
+    Every accessor must be READ off a `RunPaths` value somewhere outside `run_repository/_layout.py` and
     outside the tests — that is what `meta.json` had stopped having and why it was deleted.
     Derived with `git grep` from the repo root rather than from a list typed into this file,
     for the reason the module docstring gives: every hand-written census in this change was
@@ -609,10 +609,16 @@ def test_no_accessor_names_a_file_nothing_reads():
     operator's record of the case comment the host posted, read by a person — until #1107 gave
     the run page a reader of it, which this census sees."""
     read_outside_the_census = {"box_sentinel"}
+    # The layout owner's own `RunPaths(` calls are not consumers. Excluded by its path, which
+    # #1105 moved into the runs repository (D1.1): a stale exclude matches nothing, and the
+    # owner's calls would then count as consumers and could hide a deleted reader.
+    layout_owner = "defender/run_repository/_layout.py"
+    assert (REPO_ROOT / layout_owner).is_file(), (
+        f"the census excludes {layout_owner}, which is not a file — a stale exclude")
     consumers = [
         h.split(":", 1)[0]
         for h in live_hits(repo_grep(r"RunPaths\(", "*.py"),
-                           extra_excludes=("defender/tests/", "defender/_run_paths.py"))
+                           extra_excludes=("defender/tests/", layout_owner))
     ]
     accessors = {n for n, v in vars(RunPaths).items() if isinstance(v, property)}
     unread = set(accessors)
@@ -691,14 +697,18 @@ def test_no_module_outside_the_defender_package_imports_run_common():
         # dropping the name to satisfy a textual sweep would take the site the gate exists
         # for out of the gate's scope. The exclusion is the gate script only; its baseline
         # is already covered by the suffix rule above.
-        extra_excludes=("scripts/lint/lint_tree_read_follows_link.py",),
+        # `lint_run_layout_imports` (#1105 D7) names it for the same reason: its allow-list keys
+        # run setup's sanctioned layout uses by file and function.
+        extra_excludes=("scripts/lint/lint_tree_read_follows_link.py",
+                        "scripts/lint/lint_run_layout_imports.py"),
     )
     outside = [h for h in hits if not h.startswith("defender/")]
     assert not outside, (
         "run_common is imported from outside the defender package:\n" + "\n".join(outside)
     )
 
-    caller_hits = live_hits(repo_grep(r"\bmaterialize_run\b"))
+    caller_hits = live_hits(repo_grep(r"\bmaterialize_run\b"),
+                            extra_excludes=("scripts/lint/lint_run_layout_imports.py",))
     outside_callers = [
         h for h in caller_hits
         if not h.startswith("defender/")

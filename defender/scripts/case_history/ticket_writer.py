@@ -10,7 +10,7 @@ from pathlib import Path
 
 from defender._io import write_guarded
 from defender._model import model
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.runtime import case_ticket, run_end
 from defender.runtime.run_tenant import RunTenant
 from defender.runtime.verbs import SETTINGS_POINTER, VerbContext, redact_settings_path

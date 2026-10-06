@@ -31,7 +31,7 @@ from pathlib import Path
 
 import pytest
 
-from defender._run_paths import RunPaths, SessionPaths
+from defender.run_repository import RunPaths, SessionPaths
 from defender.runtime.session_store import (
     CASE_ID_RE,
     InvalidCaseId,

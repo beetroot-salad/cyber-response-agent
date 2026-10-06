@@ -20,7 +20,7 @@ from defender._paths import PATHS
 
 
 from defender._io import write_guarded
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from .. import box as box_mod
 from .. import permission
 from ..agent_definition import ResolvedRoots

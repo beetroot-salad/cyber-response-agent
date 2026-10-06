@@ -60,7 +60,7 @@ import pytest
 import yaml
 
 from defender._io import bind
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.tests import _judge_921 as J
 from defender.tests._spec791 import PROJECT_PROFILE
 from defender.tests import _state1135
@@ -159,7 +159,11 @@ _CODE_ROOTS = tuple(
 #: re-homed them off `learning/branch/archive.py`, which now binds them by import). The
 #: run-level owner is censused beside it: the family stamp's name is its `PROVENANCE`.
 _OWNER_MODULE = "_episode_paths.py"
-_OWNER_MODULES = (_OWNER_MODULE, "_run_paths.py")
+#: The run-layout owner, by its path under `defender/` since #1105 moved it into the runs
+#: repository package (D1.1). A stale path here would silently drop it from the census (`rglob`
+#: of a missing path yields nothing), so `_shipped_modules` asserts the census saw it.
+_LAYOUT_MODULE = "run_repository/_layout.py"
+_OWNER_MODULES = (_OWNER_MODULE, _LAYOUT_MODULE)
 _ARCHIVE_MODULE = "learning/branch/archive.py"
 #: The three names and the three files, one mapping.
 _RECORD_NAMES = {"REVIEW_NAME": "review.yaml", "SAMPLES_NAME": "samples.yaml",
@@ -197,6 +201,9 @@ def _shipped_modules() -> dict[str, str]:
             out[path.relative_to(package).as_posix()] = path.read_text(encoding="utf-8")
     assert _ARCHIVE_MODULE in out, f"the census never saw {_ARCHIVE_MODULE}: {sorted(out)[:5]}"
     assert _OWNER_MODULE in out, f"the census never saw {_OWNER_MODULE}"
+    assert _LAYOUT_MODULE in out, (
+        f"the census never saw the run-layout owner {_LAYOUT_MODULE} — a stale owner path drops "
+        "it from the census silently")
     return out
 
 

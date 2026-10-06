@@ -24,7 +24,7 @@ import contextlib
 
 from defender._io import Bound, bind
 from defender._episode_paths import LAYOUT, WORLD_LEAVES
-from defender._run_paths import RUN_LAYOUT
+from defender.run_repository import RUN_LAYOUT
 from defender.hooks.record_lesson_load import (
     EVIDENCE_INDIRECT,
     EVIDENCE_PUSH,

@@ -49,7 +49,7 @@ would be written against two refuted readings:
   leaf.** The archive's `copy2` lane wrote THROUGH a pre-existing hard link at a destination
   leaf. Rather than fork one file out of that lane, the record is the seventh single file —
   beside the scrub verdict, the other host-side sidecar — and the lane's pre-copy destination
-  screen now refuses a hard link at ANY of the seven (`_run_paths.plain_file`, the rule
+  screen now refuses a hard link at ANY of the seven (`_layout.plain_file`, the rule
   `write_guarded` already applied). The archive interprets nothing: it copies the sidecar's
   bytes, and the judge alone decides what they mean (`run_end.parse_record`).
 * **F-M (auto).** The vocabulary owner is STRICT — no whitespace strip, no case fold, no

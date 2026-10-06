@@ -35,7 +35,7 @@ from defender.tests._by_path import WORKTREE, load_module
 import pytest
 
 from defender._pricing import usage_cost
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.tests._session_store_705 import (
     crafted_html_payload,
     jsonl,
@@ -225,7 +225,7 @@ def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
     and `visualize_runtime`'s footer check (the fourth frozen reader) is driven in the same
     page render: the footer's event-presence check must still find its events."""
     from defender import run_common
-    from defender._run_handle import Run
+    from defender.run_repository import Run
     from defender.scripts.visualize import visualize_run
 
     run_dir, store, replay = _driven_run(tmp_path, run_id="runtime-html")
@@ -296,7 +296,7 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
     demand while `message`, `wire_log` and `tool_trace` all got one; the rule could not fire
     because the second driver lived only in an `nl:` evidence string (F2)."""
     from defender import run_common
-    from defender._run_handle import Run
+    from defender.run_repository import Run
     from defender.scripts.visualize import visualize_run
 
     marker = "RENDERED-RUN-MARKER-705-b7c8d9"
@@ -358,7 +358,7 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
     the operator believes succeeded, with nothing in the suite to show it. Positive control:
     the same call over an intact run dir returns normally and writes the page."""
     from defender import run_common
-    from defender._run_handle import Run
+    from defender.run_repository import Run
 
     run_dir, store, _replay = _driven_run(tmp_path, run_id=f"failclosed-{breakage}")
 
@@ -409,7 +409,7 @@ def test_the_rendered_page_escapes_model_authored_payload_content(tmp_path):
     text is present at all: an escaping assertion over a page that never rendered the
     payload passes vacuously."""
     from defender import run_common
-    from defender._run_handle import Run
+    from defender.run_repository import Run
 
     payload = crafted_html_payload()
     run_dir = materialize(tmp_path, GOLDEN)

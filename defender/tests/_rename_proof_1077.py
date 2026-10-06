@@ -19,7 +19,7 @@ from pathlib import Path
 from defender._episode_handle import Episode
 from defender._episode_paths import LAYOUT, EpisodePaths
 from defender._io import bind
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 
 
 def main(root: Path) -> int:

@@ -63,7 +63,7 @@ from defender.runtime.permission import AgentPolicy  # noqa: E402
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests._repo import seed_adapter_stubs  # noqa: E402
 from defender.tests._engine_helpers import replay_once as _replay  # noqa: E402
-from defender._run_paths import WIRE_LOG_DIR  # noqa: E402
+from defender.run_repository import WIRE_LOG_DIR  # noqa: E402
 
 _SKILLS_REL = "defender/skills"
 
@@ -720,15 +720,15 @@ def test_help_text_survives_a_brace_and_names_the_records_the_owner_spells(capsy
     the help text tracks a rename with nothing here to edit."""
     import string
 
-    from defender import _run_paths
+    from defender.run_repository import _layout
     from defender.learning.leads import lead_author
 
     with pytest.raises(SystemExit) as exc:
         lead_author.main(["--help"])
     assert exc.value.code == 0
     out = capsys.readouterr().out
-    for name in (_run_paths.EXECUTED_QUERIES, _run_paths.RAW_MARKER,
-                 _run_paths.LEAD_AUTHOR_DIRNAME):
+    for name in (_layout.EXECUTED_QUERIES, _layout.RAW_MARKER,
+                 _layout.LEAD_AUTHOR_DIRNAME):
         assert name in out, f"--help never showed the owner's {name!r}"
     assert "$EXECUTED_QUERIES" not in out, "a placeholder reached the operator unsubstituted"
 
@@ -739,4 +739,4 @@ def test_help_text_survives_a_brace_and_names_the_records_the_owner_spells(capsy
         lead_author._HELP_EPILOG.template + "\n  edits defender/skills/{system}/SKILL.md")
     rendered = extended.safe_substitute(lead_author._record_names())
     assert "{system}" in rendered, "the brace was eaten rather than shown"
-    assert _run_paths.EXECUTED_QUERIES in rendered
+    assert _layout.EXECUTED_QUERIES in rendered

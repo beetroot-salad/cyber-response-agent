@@ -33,7 +33,7 @@ from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.tests._engine_helpers import assert_stage_tools  # noqa: E402
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests._engine_helpers import replay_once as _replay  # noqa: E402
-from defender._run_paths import WIRE_LOG_DIR  # noqa: E402
+from defender.run_repository import WIRE_LOG_DIR  # noqa: E402
 
 _DEFENDER_DIR = config.REPO_ROOT / "defender"
 _VERDICT = "I reason about the counterfactual here.\n\nMore reasoning.\n\nVERDICT: GOOD"

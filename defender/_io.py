@@ -175,7 +175,7 @@ class _ReadVanished(OSError):
 
 def _read_plain_fd(
     os_: Any, fd: int, size: int, *, binary: bool, errors: str = "strict",
-    limit: int | None = READ_LIMIT,
+    limit: int | None = READ_LIMIT, budget: int | None = None,
 ) -> str | bytes:
     """The one place a whole file's bytes are read (#1174): every whole-file read in `_io`
     comes here, the guarded readers, the canonical wrappers and the locked JSON routines.
@@ -191,7 +191,23 @@ def _read_plain_fd(
     whatever `fstat` said, so a file that grew, or a procfs file reporting `st_size` 0, reads
     in full. Text is decoded as UTF-8 under `errors`, then given universal newlines exactly as
     `Path.read_text` would (translated only when a `\\r` is there). The descriptor stays the
-    caller's to close."""
+    caller's to close.
+
+    With `budget`, the read is a PREFIX instead: no more than `budget` bytes are taken off the
+    file, by reads asking only for what is left of it, and `size` does not apply — so a caller
+    tells a file over its cap from one within it without reading it whole. `limit` still does:
+    a budget above it reads at most `limit` + 1 bytes and refuses a file over `limit` exactly
+    as a whole read does, so no cap takes more memory than the default read. A prefix is
+    byte-faithful: its text is decoded but newlines are NOT translated, because its caller
+    judges bytes (a size bound, a byte compare against what it would write)."""
+    if budget is not None:
+        if limit is None or budget <= limit:
+            return _read_prefix(os_, fd, budget, binary=binary, errors=errors)
+        data = _read_prefix(os_, fd, limit + 1, binary=True, errors=errors)
+        if len(data) > limit:
+            raise _too_large(limit)
+        assert isinstance(data, bytes)
+        return data if binary else data.decode("utf-8", errors)
     if limit is not None and size > limit:
         raise _too_large(limit)
     buf = bytearray()
@@ -210,6 +226,20 @@ def _read_plain_fd(
     if "\r" in text:
         text = text.replace("\r\n", "\n").replace("\r", "\n")
     return text
+
+
+def _read_prefix(os_: Any, fd: int, budget: int, *, binary: bool, errors: str) -> str | bytes:
+    """`_read_plain_fd`'s prefix mode: at most `budget` bytes, asked for a chunk at a time (a
+    huge budget allocates nothing up front), `_ReadVanished` for an `ENOENT` from a `read`,
+    text decoded as UTF-8 under `errors` with no newline translation."""
+    buf = bytearray()
+    try:
+        while len(buf) < budget and (
+                chunk := os_.read(fd, min(budget - len(buf), _READ_CHUNK))):
+            buf += chunk
+    except FileNotFoundError:
+        raise _ReadVanished(errno.ENOENT, _VANISHED) from None
+    return bytes(buf) if binary else buf.decode("utf-8", errors)
 
 
 def _read_followed(path: Path, *, limit: int | None, errors: str) -> str:
@@ -596,13 +626,16 @@ def _open_leaf_stat(
 
 def _read_leaf(
     os_: Any, dir_fd: int, leaf: str, where: Path, *, binary: bool, errors: str = "strict",
+    max_bytes: int | None = None,
 ) -> str | bytes:
     """The whole of the plain file `leaf` (the open decides), or the exception that stopped it:
     `FileNotFoundError` when absent at the open, else a member of `TEXT_READ_ERRORS` (the read
-    step's refusals among them, :func:`_read_plain_fd`)."""
+    step's refusals among them, :func:`_read_plain_fd`). With `max_bytes`, the read step's
+    byte-faithful prefix of at most that many bytes."""
     fd, st = _open_leaf_stat(os_, dir_fd, leaf, os.O_RDONLY, where)
     try:
-        return _read_plain_fd(os_, fd, st.st_size, binary=binary, errors=errors)
+        return _read_plain_fd(os_, fd, st.st_size, binary=binary, errors=errors,
+                              budget=max_bytes)
     finally:
         os_.close(fd)
 
@@ -724,10 +757,17 @@ class Bound:
 
     # -- the reads ------------------------------------------------------------------------------
 
-    def read(self, name: str | PurePath, *, errors: str = "strict") -> RecordRead:
+    def read(self, name: str | PurePath, *, errors: str = "strict",
+             max_bytes: int | None = None) -> RecordRead:
+        """The file at `name`, as a `RecordRead`. `max_bytes` bounds the bytes taken off the
+        file (`_read_plain_fd`'s prefix mode): its text is the first `max_bytes` bytes decoded,
+        newlines kept as they are. Without it the read is whole."""
         spelling, parts = _parse_name(name)
         if errors not in _ERRORS_VALUES:
             raise ValueError("errors must be 'strict' or 'replace'")
+        if max_bytes is not None and (isinstance(max_bytes, bool) or not isinstance(
+                max_bytes, int) or max_bytes < 0):
+            raise ValueError("max_bytes must be a non-negative int")
         if self._absent:
             return RecordRead(name=spelling, text=None, absent=True, reason=None)
         if self._error is not None:
@@ -739,7 +779,7 @@ class Bound:
             with self._handle.dup() as root_fd, _descend(
                     self._os, root_fd, self._prefix + parts[:-1], Path(".")) as dir_fd:
                 text = _read_leaf(self._os, dir_fd, parts[-1], Path(where), binary=False,
-                                  errors=errors)
+                                  errors=errors, max_bytes=max_bytes)
         except FileNotFoundError:
             return RecordRead(name=spelling, text=None, absent=True, reason=None)
         except TEXT_READ_ERRORS as e:
@@ -830,6 +870,19 @@ class Bound:
         _spelling, parts = _parse_name(name)
         return Bound(self._os, self._handle, prefix=self._prefix + parts,
                      absent=self._absent, error=self._error)
+
+
+def located(bound: Bound) -> str:
+    """Where `bound`'s folder is, for a refusal to name: the kernel's name for the held
+    descriptor (`/proc/self/fd`, as the `O_PATH` hold already assumes Linux) joined with the
+    view's prefix; `""` when it cannot be told. Description only — nothing is opened, and
+    nothing is trusted, by it. A function beside `Bound`, as `stat_entry` is (#1133 O3)."""
+    try:
+        with bound._handle.dup() as fd:
+            root = os.readlink(f"/proc/self/fd/{fd}")
+    except OSError:
+        return ""
+    return str(Path(root, *bound._prefix))
 
 
 def stat_entry(bound: Bound, name: str | PurePath) -> StatRead:
@@ -926,17 +979,21 @@ def json_nesting_depth(text: str) -> int:
 
 
 # lint-parse: ok — returns `object`, not `Any`, so each caller must narrow the shape itself.
-def load_json_artifact(text: str) -> tuple[object, str | None]:
+def load_json_artifact(
+    text: str, *, object_pairs_hook: Callable[[list[tuple[str, Any]]], Any] | None = None,
+) -> tuple[object, str | None]:
     """Decode one JSON artifact a box could have written: ``(value, None)``, or ``(None,
     reason)`` when it is not one. Success is ``reason is None`` — ``null`` decodes to ``None``.
 
     The single place malformed-artifact tolerance is decided. Nesting is checked before
     decoding (see :data:`JSON_NESTING_LIMIT`) rather than catching ``RecursionError``, whose
-    occurrence depends on the caller's stack depth."""
+    occurrence depends on the caller's stack depth. ``object_pairs_hook`` is ``json.loads``'s,
+    for a caller with a stricter object rule (the episode record refuses a duplicate key): a
+    ``ValueError`` it raises is that document's ``reason``."""
     if json_nesting_depth(text) > JSON_NESTING_LIMIT:
         return None, f"nested deeper than {JSON_NESTING_LIMIT}"
     try:
-        return json.loads(text), None
+        return json.loads(text, object_pairs_hook=object_pairs_hook), None
     except ValueError as e:
         return None, str(e)
 
@@ -1476,8 +1533,10 @@ def guarded_mkdir(path: Path, *, base: Path) -> None:
             f"guarded_mkdir: {str(path)!r} climbs out of the tree root {str(base)!r} through "
             f"'..' — the target reaches outside the tree the anchor names"
         )
-    # Skip on the hot path once the root exists. `is_dir()` follows symlinks on purpose: a
-    # host-chosen symlinked runs base must keep working.
+    # Skip on the hot path once the root exists. `is_dir()` follows a link at `base` on
+    # purpose: `base` is the caller's trust root. A runs folder is not a link-tolerant base: it
+    # is held no-follow first (`run_repository.hold_runs_folder`, #1105 OP-2), which refuses a
+    # link there before this runs; a bigger disk is reached by moving the data root.
     if not base.is_dir():
         os.makedirs(base, exist_ok=True)
     accum = base
@@ -1764,14 +1823,34 @@ class Held:
                 return False
 
 
-def hold(root: Path, *, os_: Any = os,
+def hold(root: Path, *, os_: Any = os, follow: bool = True,
          open_unnamed: Callable[[int], int] = open_unnamed_at) -> Held:
     """Hold `root` open, following its spelling (the operator's, as :func:`bind`'s). A missing
     root is `FileNotFoundError`, a non-directory `NotADirectoryError`. `open_unnamed` is the
-    unnamed-open seam the held root's creates take (`rooted_write(open_unnamed=)`'s)."""
+    unnamed-open seam the held root's creates take (`rooted_write(open_unnamed=)`'s).
+
+    `follow=False` opens `root` itself no-follow and judges the descriptor as `_step` judges
+    each folder below a root: a link at `root`, dangling or not, is `OSError(ELOOP)` (the
+    linked-folder refusal), anything but a directory `NotADirectoryError`. Its ancestors are
+    still followed, as host configuration. The runs repository holds a tenant's runs folder
+    this way, so a link there is refused rather than listed (#1105 H1)."""
     if _O_PATH is None:  # pragma: no cover — no CI box lacks it
         raise OSError(errno.ENOTSUP, _PLATFORM_FAULT)
-    return Held(os_, os_.open(Path(root), _ROOT_FLAGS), Path(root), open_unnamed=open_unnamed)
+    root = Path(root)
+    if follow:
+        return Held(os_, os_.open(root, _ROOT_FLAGS), root, open_unnamed=open_unnamed)
+    fd = os_.open(root, _STEP_FLAGS)
+    try:
+        st = os_.fstat(fd)
+    except BaseException:
+        os_.close(fd)
+        raise
+    if not stat.S_ISDIR(st.st_mode):
+        os_.close(fd)
+        if stat.S_ISLNK(st.st_mode):
+            raise OSError(errno.ELOOP, _LINKED_FOLDER, str(root))
+        raise NotADirectoryError(errno.ENOTDIR, _NOT_A_FOLDER, str(root))
+    return Held(os_, fd, root, open_unnamed=open_unnamed)
 
 
 def hold_new(parent: Path, name: str, *, os_: Any = os,

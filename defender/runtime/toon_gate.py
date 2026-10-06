@@ -24,12 +24,12 @@ from pydantic_ai.messages import ToolReturn, ToolReturnPart, is_multi_modal_cont
 from pydantic_ai.toolsets import SetMetadataToolset, WrapperToolset
 
 from defender._env import env_int
-from defender._run_paths import GATE_METADATA_KEY
+from defender.run_repository import GATE_METADATA_KEY
 from defender._untrusted import wrap_fresh as _frame
 from defender.hooks.budget_enforcer import BudgetKill
 
 #: `GATE_METADATA_KEY` (the reserved key the original JSON rides on) lives in
-#: `defender._run_paths` because its reader, the visualizer, runs without pydantic-ai.
+#: `defender.run_repository._layout` because its reader, the visualizer, runs without pydantic-ai.
 __all__ = ["GATE_METADATA_KEY", "ToonGateCapability", "mark_owned"]
 
 _OWNED_METADATA_KEY = "_defender_toon_gate_owned"

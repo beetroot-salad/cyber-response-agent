@@ -47,7 +47,7 @@ from pathlib import Path
 
 import pytest
 
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.learning import lead_repository
 from defender.learning._prompt import titled_section
 from defender.learning.branch.cli import _joined_leads

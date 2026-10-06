@@ -31,7 +31,7 @@ from defender.tests.e2e._replay_harness import (
     drive,
     materialize,
 )
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.agents import MAIN_DEF
 from defender.runtime import circuit_breaker, tools as runtime_tools
 from defender.runtime.agent_definition import bind

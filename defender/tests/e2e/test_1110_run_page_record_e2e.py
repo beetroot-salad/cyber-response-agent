@@ -71,8 +71,8 @@ from typing import Any
 import pytest
 
 from defender import _env, _io, _provenance, _tenant, run_common
-from defender._run_handle import Run
-from defender._run_paths import RunPaths
+from defender.run_repository import Run
+from defender.run_repository import RunPaths
 from defender.tests._spec1077 import bound_arguments
 from defender.tests.e2e._replay_harness import GOLDEN, drive
 from defender.tests.e2e.test_922_renderer import MARKER, driven_run, golden_replay, tenant_run
@@ -397,7 +397,7 @@ def test_1110_o1_run_main_saves_the_page_through_the_handle_it_materialized(
 
     Positive control built in: the lifecycle ran in the run dir of the handle `main` was given,
     so the capture is of the run `main` drove, not of some other directory."""
-    from defender._run_handle import Run
+    from defender.run_repository import Run
 
     io = ArgRecordingIo()
     handles: list[Run] = []

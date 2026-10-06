@@ -14,7 +14,7 @@ from pydantic_ai.exceptions import ModelRetry, UnexpectedModelBehavior, UsageLim
 from pydantic_ai.usage import UsageLimits
 
 from defender._io import guarded_mkdir, write_guarded
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.hooks.budget_enforcer import BudgetKill
 
 from . import circuit_breaker

@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from defender._io import write_guarded
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 
 TRUNCATED_BY_REQUEST_LIMIT = "request-limit"
 TRUNCATED_BY_RETRY_EXHAUSTED = "retry-exhausted"

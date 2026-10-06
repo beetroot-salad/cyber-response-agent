@@ -41,10 +41,11 @@ every public `defender._io` callable except the pinned pure set `IO_PURE` (enume
 `_io` binds — its private disk helpers (`_create_named`, `_open_plain_fd`,
 `_ensure_dir_component`, `_refuse_unless_plain`, `_leaf_is_link`, ...), classes and constants,
 pure or not, so none is judged body by body and no scanned module reaches below the handle;
-every public `defender._run_paths` function except a pinned pure set, enumerated the same way
-and checked to be exactly the ones whose bodies touch disk; `os` / `os.path` filesystem
-functions (with `os.path.lexists`), walks, xattrs, `chdir` / `chroot` / `pathconf` /
-`chflags`, `os.system` / `popen` / `exec*` / `spawn*` / `posix_spawn*`; `shutil.*`, `glob.*`,
+every public run-layout function (`defender.run_repository`, the door, or its `_layout`
+submodule) except a pinned pure set, enumerated the same way and checked to be exactly the
+ones whose bodies touch disk; `os` / `os.path` filesystem functions (with `os.path.lexists`),
+walks, xattrs, `chdir` / `chroot` / `pathconf` / `chflags`, `os.system` / `popen` / `exec*` /
+`spawn*` / `posix_spawn*`; `shutil.*`, `glob.*`,
 `tempfile.*`, `subprocess.*`, `filecmp.*`, `linecache.*`, `fileinput.*`, `dbm.*`, `shelve.*`,
 `sqlite3.*`, `pty.*`, `py_compile.*`, `compileall.*`, `zipimport.*`; builtin `open`, `io.open`,
 `io.FileIO`, `io.open_code`, `codecs.open`, `zipfile.ZipFile`, `tarfile.open`,
@@ -978,16 +979,18 @@ def _touching_defs(module: str) -> set[str]:
 
 
 def test_the_run_paths_vocabulary_is_its_disk_touching_functions():
-    """`_run_paths`' public functions join the vocabulary the way `_io`'s do (enumerated from
-    the scanned tree's source, minus a pinned pure set), and the split is exactly the functions
-    whose bodies touch disk (v1 step 7's adversary, h2: `artifact_file(path)` lstats a draft's
-    plain path)."""
+    """The run layout's public functions join the vocabulary the way `_io`'s do (enumerated
+    from the scanned tree's source, minus a pinned pure set), and the split is exactly the
+    functions whose bodies touch disk (v1 step 7's adversary, h2: `artifact_file(path)` lstats a
+    draft's plain path). They count through the door and through the submodule (#1105)."""
     assert TREE.run_paths_vocab >= {"artifact_file", "artifact_dir", "plain_file"}
-    assert TREE.run_paths_vocab == _touching_defs("_run_paths.py"), (
-        "a public `_run_paths` function that touches disk is missing from the vocabulary, or a "
-        "pure one is in it: fix `RUN_PATHS_PURE`")
-    assert TREE.in_vocabulary("defender._run_paths.artifact_file")
-    assert not TREE.in_vocabulary("defender._run_paths.resolve_run_bundle")
+    assert TREE.run_paths_vocab == _touching_defs(C.LAYOUT_MODULE), (
+        f"a public `{C.LAYOUT_MODULE}` function that touches disk is missing from the "
+        "vocabulary, or a pure one is in it: fix `RUN_PATHS_PURE`")
+    for module in ("defender.run_repository", "defender.run_repository._layout"):
+        assert TREE.in_vocabulary(f"{module}.artifact_file"), f"{module}.artifact_file"
+        assert not TREE.in_vocabulary(f"{module}.resolve_run_bundle"), (
+            f"{module}.resolve_run_bundle")
 
 
 def test_the_private_vocabulary_is_each_handle_class_own_state():
@@ -1490,11 +1493,12 @@ REGRESSIONS: dict[str, Regression] = {
         ("    out: dict[Path, tuple[str, ...]] = {}\n    for path in created:\n",
          "    out: dict[Path, tuple[str, ...]] = {}\n    for path in filter(Path.is_file, created):\n", 1),
     ), (("_minted_identities", "load", "Path.is_file", 1),)),
-    # v1 step 7's adversary, h2 (artifact-file-minted-identities): `_run_paths.artifact_file`
+    # v1 step 7's adversary, h2 (artifact-file-minted-identities): the layout's `artifact_file`
     # lstats a draft's plain path inside the skills mount.
     "s7-h2-artifact-file": Regression(RULES, (
         ("from defender import _scaffold_rules\n",
-         "from defender import _scaffold_rules\nfrom defender._run_paths import artifact_file\n", 1),
+         "from defender import _scaffold_rules\nfrom defender.run_repository import artifact_file\n",
+         1),
         ("    out: dict[Path, tuple[str, ...]] = {}\n    for path in created:\n",
          "    out: dict[Path, tuple[str, ...]] = {}\n    for path in created:\n"
          "        if not artifact_file(path):\n            continue\n", 1),

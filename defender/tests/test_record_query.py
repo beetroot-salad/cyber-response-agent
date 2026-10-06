@@ -106,7 +106,7 @@ def _result_of(payload: str) -> dict:
 
 def _write_rows(tmp_path, rows):
     import json
-    from defender._run_paths import RunPaths
+    from defender.run_repository import RunPaths
     log = RunPaths(tmp_path).executed_queries
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")

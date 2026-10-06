@@ -153,7 +153,7 @@ PLANTED = textwrap.dedent(f"""\
 
     from defender import _tenant
     from defender._episode_paths import EpisodePaths
-    from defender._run_paths import RunPaths
+    from defender.run_repository import RunPaths
     from defender._tenant import Tenant, accept_tenant
     from defender._tenant import Tenant as T
     from defender.runtime import run_tenant as run_tenant_mod
