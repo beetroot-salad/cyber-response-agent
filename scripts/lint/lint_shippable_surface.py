@@ -24,9 +24,8 @@ import re
 import sys
 from pathlib import Path
 
-from _astlib import ScanBlind, read_source
+from _astlib import ScanBlind, read_source, source_files
 from _baseline import Finding, gate
-from _gitscope import git_ignored
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -129,18 +128,16 @@ def _excluded(rel: str, prefixes: tuple[str, ...]) -> bool:
 
 def _scan() -> list[Finding]:
     findings: list[Finding] = []
-    # Minus what git ignores (see `_gitscope`): run artifacts a working tree accumulates but a
-    # fresh CI checkout never has. Prefixes are resolved once, since the resolver shells out.
+    # The shared listing drops what git ignores: run artifacts a working tree accumulates but
+    # a fresh CI checkout never has. Prefixes are resolved once, since the resolver shells out.
     prefixes = excluded_prefixes(REPO_ROOT)
     candidates = [
-        p for p in DEFENDER.rglob("*")
-        if p.is_file() and p.suffix in TEXT_SUFFIXES
-        and not _excluded(p.relative_to(REPO_ROOT).as_posix(), prefixes)
+        DEFENDER / rel
+        for rel in source_files(DEFENDER, (".venv", "__pycache__"),
+                                suffixes=tuple(sorted(TEXT_SUFFIXES)))
+        if not _excluded(f"defender/{rel}", prefixes)
     ]
-    ignored = git_ignored(REPO_ROOT, candidates)
     for path in candidates:
-        if path in ignored:
-            continue
         rel = path.relative_to(REPO_ROOT).as_posix()
         text = read_source(path, rel)
         for lineno, line in enumerate(text.splitlines(), start=1):

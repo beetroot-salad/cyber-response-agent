@@ -50,27 +50,20 @@ import sys
 from pathlib import Path
 
 from _baseline import Finding, gate
-from _astlib import ScanBlind, read_and_parse
+from _astlib import ScanBlind, read_and_parse, source_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
 BASELINE_PATH = Path(__file__).with_name("lint_borrowed_vocabulary_baseline.json")
 
-EXCLUDED_DIRS = (".venv", "__pycache__", "runs")
+#: `tests`: a test asserting over a vocabulary is asserting, not interpreting.
+EXCLUDED_DIRS = (".venv", "__pycache__", "runs", "tests")
 
 SUPPRESS = "lint-vocabulary: ok"
 
 # An ALL-CAPS name shorter than this is more likely a flag or an abbreviation than a
 # vocabulary, and a one-letter loop constant would make the census meaningless.
 _MIN_NAME_LEN = 4
-
-
-def _in_scope(path: Path, root: Path) -> bool:
-    rel = path.relative_to(root)
-    if any(part in EXCLUDED_DIRS for part in rel.parts):
-        return False
-    # A test asserting over a vocabulary is asserting, not interpreting.
-    return "tests" not in rel.parts
 
 
 def _is_vocabulary_name(name: str) -> bool:
@@ -249,9 +242,8 @@ def _scan_file(
 
 def _corpus(root: Path) -> list[tuple[str, ast.Module, list[str]]]:
     out: list[tuple[str, ast.Module, list[str]]] = []
-    for path in sorted(root.rglob("*.py")):
-        if not _in_scope(path, root):
-            continue
+    for name in source_files(root, EXCLUDED_DIRS):
+        path = root / name
         rel = path.relative_to(root.parent).as_posix()
         text, tree = read_and_parse(path, rel)
         assert isinstance(tree, ast.Module)

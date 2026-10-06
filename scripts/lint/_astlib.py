@@ -34,17 +34,154 @@ from __future__ import annotations
 
 import ast
 import builtins
-from collections.abc import Iterator, Mapping
+import os
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+
+try:  # bare-name import, as every gate reaches its siblings
+    from _gitscope import git_ignored, git_listed
+except ImportError:  # imported as part of a package (a test loading `scripts.lint`)
+    from ._gitscope import git_ignored, git_listed  # type: ignore[no-redef]
 
 _BUILTIN_NAMES = frozenset(dir(builtins))
 
 
 class ScanBlind(RuntimeError):
-    """A file inside a gate's own scan scope could not be read or parsed. The gate cannot
-    report on what it did not read, and must not report clean."""
+    """A file inside a gate's own scan scope could not be read or parsed, or a path the scope
+    is defined by is gone. The gate cannot report on what it did not read, and must not report
+    clean."""
+
+
+def source_files(root: Path, excluded: Iterable[str], *, suffixes: tuple[str, ...] = (".py",),
+                 prune: Callable[[Path], bool] | None = None) -> list[str]:
+    """Every file under `root` ending in one of `suffixes` that a gate scans, as sorted
+    root-relative POSIX paths. The one listing every gate shares — never walk a tree yourself.
+
+    - Inside a git work tree, the candidates are what git would put in the tree: tracked files
+      plus untracked ones it does not ignore (`_gitscope.git_listed`). Git never enters an
+      ignored directory, so run output under `runs/` can neither blind a gate nor slow it, and
+      a new uncommitted module is still scanned. A tracked file deleted from the working tree
+      is not listed.
+    - Outside a repo, when git cannot answer, or when `root` is itself ignored (a planted tree
+      under a repo's `build/` is the whole scope, not ignored content inside it), the tree is
+      walked instead.
+    - Either way, a file under a directory whose NAME (below `root`, never an ancestor's) is in
+      `excluded`, or which `prune(dir)` rejects, is dropped.
+    - A directory that could not be read, or a kept path that is not valid UTF-8, is
+      ScanBlind: the gate cannot report on what it did not read, nor on a name it cannot print.
+    """
+    root = Path(root).resolve()
+    skip = frozenset(excluded)
+    verdicts: dict[str, bool] = {}
+
+    def dropped(d: str) -> bool:
+        """Is directory `d` (root-relative) dropped, by its own name or `prune`?"""
+        if d not in verdicts:
+            verdicts[d] = d.rsplit("/", 1)[-1] in skip or bool(prune and prune(root / d))
+        return verdicts[d]
+
+    listed = None if git_ignored(root, [root]) else git_listed(root)
+    if listed is None:
+        rels = _walked(root, dropped)
+    else:
+        rels, unopened = listed
+        if unopened:
+            raise ScanBlind(f"cannot list {ascii(unopened)} under {root}: git could not open "
+                            "them, and an unread directory is not certified clean")
+        rels = [r for r in rels if _present(root / r)]  # deleted, not yet committed
+
+    def kept(rel: str) -> bool:
+        parts = rel.split("/")[:-1]
+        return not any(dropped("/".join(parts[:i])) for i in range(1, len(parts) + 1))
+
+    out: list[str] = []
+    for rel in rels:
+        if not rel.endswith(suffixes) or not kept(rel):
+            continue
+        try:
+            rel.encode("utf-8")
+        except UnicodeEncodeError:
+            raise ScanBlind(f"{ascii(rel)} under {root} is not a UTF-8 name — rename it; no "
+                            "gate can report on it") from None
+        out.append(rel)
+    return sorted(out)
+
+
+def _present(path: Path) -> bool:
+    """Is a path git listed still in the working tree? Gone (deleted, or a parent replaced by a
+    file) is not listed. Any other failure to stat it — a directory whose names git could read
+    but whose entries cannot be searched — is ScanBlind, never a silent drop."""
+    try:
+        os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError as err:
+        raise ScanBlind(f"cannot stat {ascii(str(path))}: {err.strerror}") from err
+    return True
+
+
+def _walked(root: Path, dropped: Callable[[str], bool]) -> list[str]:
+    """Every file under `root` by walking, never entering a dropped directory — for a tree git
+    cannot answer for."""
+
+    def blind(err: OSError) -> None:
+        raise ScanBlind(f"cannot list {ascii(err.filename)}: {err.strerror}") from err
+
+    out: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(root, onerror=blind):
+        here = Path(dirpath).relative_to(root).as_posix()
+        prefix = "" if here == "." else f"{here}/"
+        dirnames[:] = sorted(d for d in dirnames if not dropped(prefix + d))
+        out.extend(prefix + f for f in filenames)
+    return out
+
+
+def selects(entry: str, rel: str) -> bool:
+    """Does scope-list `entry` cover file `rel`? Equal, or `entry` ends in `/` and names a
+    package `rel` sits in. A bare directory name selects nothing — spell a package with `/`."""
+    return rel == entry or (entry.endswith("/") and rel.startswith(entry))
+
+
+def require_selected(root: Path, real_root: Path, entries: Iterable[str],
+                     rels: Iterable[str]) -> None:
+    """Over this repo (`root` resolves to `real_root`), raise ScanBlind naming every entry that
+    selects none of `rels` — the files the gate scans. Anywhere else (a planted or partial tree
+    under test, which holds a subset on purpose) do nothing.
+
+    The one place a path-scoped gate decides it is looking at the real repo. Without it, a
+    move, a rename, or an emptied package leaves the gate scanning less and still exiting 0.
+    """
+    if not is_real_root(root, real_root):
+        return
+    scanned = list(rels)
+    dead = sorted(e for e in entries if not any(selects(e, rel) for rel in scanned))
+    if dead:
+        raise ScanBlind(f"scope entries that select no scanned file under {root}: {dead} — "
+                        "whatever they named left the scan; point the list at where it moved "
+                        "(a package is spelled with a trailing `/`)")
+
+
+def require_claimed(root: Path, real_root: Path, entries: Iterable[str],
+                    rels: Iterable[str]) -> None:
+    """Over this repo, raise ScanBlind naming the top-level directory of every file in `rels`
+    that no entry selects — the closure of a gate whose scope is "these dirs, and we declared
+    the rest": a new package is either swept or declared out of scope, never silently neither.
+    Anywhere else, do nothing (see `require_selected`)."""
+    if not is_real_root(root, real_root):
+        return
+    claims = list(entries)
+    stray = sorted({rel.split("/", 1)[0] for rel in rels
+                    if not any(selects(e, rel) for e in claims)})
+    if stray:
+        raise ScanBlind(f"directories under {root} holding source that no scope entry claims: "
+                        f"{stray} — sweep each, or declare it out of scope with the reason")
+
+
+def is_real_root(root: Path, real_root: Path) -> bool:
+    """Is `root` the real repo's tree, not a planted or partial one under test?"""
+    return root.resolve() == real_root.resolve()
 
 
 def read_and_parse(path: Path, rel: str) -> tuple[str, ast.Module]:

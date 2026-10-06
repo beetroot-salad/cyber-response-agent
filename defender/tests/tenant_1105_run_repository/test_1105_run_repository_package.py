@@ -641,29 +641,40 @@ def test_1105_the_package_is_not_ignored_and_run_data_still_is():
     assert still.returncode == 0, "run data under defender/runs/ is no longer ignored (D11)"
 
 
-def test_1105_every_repo_gate_that_sweeps_defender_sees_the_package():
-    """Each of the four lints' _in_scope admits every package file, and neither
+def _scope_of(lint, root: Path) -> set[str]:
+    """What `lint` scans under `root` (#1191): the shared listing `_astlib.source_files` with
+    the lint's `EXCLUDED_DIRS`, then `lint_duplicate_helpers`' own extra rule."""
+    rels = import_lint_lib("_astlib").source_files(root, lint.EXCLUDED_DIRS)
+    if lint.__name__.endswith("lint_duplicate_helpers"):
+        rels = [rel for rel in rels if lint._in_scope(rel)]
+    return set(rels)
+
+
+def test_1105_every_repo_gate_that_sweeps_defender_sees_the_package(tmp_path):
+    """Each of the four lints' scope admits every package file, and neither
     test_1120_censuses._SKIPPED_PARTS nor _spec1120._CHECKOUT_IGNORE contains a part of
     defender/run_repository/. Positive control: each rejects the same files under defender/runs/,
     the name the package did not take (R4-34)."""
     from defender.tests.tenant_1120_piece1 import _spec1120
     from defender.tests.tenant_1120_piece1 import test_1120_censuses as census
 
-    lint_duplicate_helpers = load_lint_gate("lint_duplicate_helpers")
-    lint_borrowed_vocabulary = load_lint_gate("lint_borrowed_vocabulary")
-    lint_half_read_table = load_lint_gate("lint_half_read_table")
-    lint_unowned_field = load_lint_gate("lint_unowned_field")
-    scopes = {
-        "lint_duplicate_helpers": lambda p: lint_duplicate_helpers._in_scope(p),
-        "lint_borrowed_vocabulary": lambda p: lint_borrowed_vocabulary._in_scope(p, H.DEFENDER),
-        "lint_half_read_table": lambda p: lint_half_read_table._in_scope(p, H.DEFENDER),
-        "lint_unowned_field": lambda p: lint_unowned_field._in_scope(p),
-    }
-    for lint, in_scope in scopes.items():
+    lints = [load_lint_gate(stem) for stem in (
+        "lint_duplicate_helpers", "lint_borrowed_vocabulary", "lint_half_read_table",
+        "lint_unowned_field")]
+    planted = tmp_path / "defender"
+    for name in PACKAGE_FILES:
+        for d in ("run_repository", "runs"):
+            (planted / d).mkdir(parents=True, exist_ok=True)
+            (planted / d / name).write_text("", encoding="utf-8")
+    for lint in lints:
+        real = _scope_of(lint, H.DEFENDER)
+        plant = _scope_of(lint, planted)
         for name in PACKAGE_FILES:
-            assert in_scope(H.PACKAGE / name), f"{lint} drops run_repository/{name}"
-            assert not in_scope(H.DEFENDER / "runs" / name), (
-                f"positive control: {lint} drops defender/runs/{name}")
+            assert f"run_repository/{name}" in real, f"{lint.__name__} drops run_repository/{name}"
+            assert f"run_repository/{name}" in plant, (
+                f"{lint.__name__} drops a planted run_repository/{name}")
+            assert f"runs/{name}" not in plant, (
+                f"positive control: {lint.__name__} drops defender/runs/{name}")
     parts = set(Path("defender/run_repository").parts)
     assert not parts & set(census._SKIPPED_PARTS), (
         f"test_1120_censuses skips {sorted(parts & set(census._SKIPPED_PARTS))}")

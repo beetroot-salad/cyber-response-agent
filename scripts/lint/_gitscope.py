@@ -19,6 +19,8 @@ would be worse than the noise.
 """
 from __future__ import annotations
 
+import os
+import re
 import subprocess
 from collections.abc import Iterable
 from pathlib import Path
@@ -43,17 +45,51 @@ def git_ignored(root: Path, paths: Iterable[Path]) -> frozenset[Path]:
 
 
 def _check_ignore(root: Path, batch: list[Path]) -> set[Path]:
-    payload = "\0".join(str(p) for p in batch)
+    # Bytes, not text: a filename that is not valid UTF-8 round-trips through os.fsencode /
+    # os.fsdecode, where a text pipe would raise UnicodeEncodeError and crash the gate.
+    payload = b"\0".join(os.fsencode(p) for p in batch)
     try:
         # lint-git: ok — asking git what git ignores; re-implementing .gitignore precedence
         # (negations, nested files, core.excludesFile) is the bug this exists to stop.
         proc = subprocess.run(
             ["git", "-C", str(root), "check-ignore", "--stdin", "-z"],
-            input=payload, capture_output=True, text=True, timeout=60, check=False,
+            input=payload, capture_output=True, timeout=60, check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return set()  # fail open — lint everything
     # 0 = some path ignored, 1 = none ignored (NOT an error), anything else = real failure.
     if proc.returncode not in (0, 1):
         return set()
-    return {Path(line) for line in proc.stdout.split("\0") if line}
+    return {Path(os.fsdecode(line)) for line in proc.stdout.split(b"\0") if line}
+
+
+#: git's notice that it listed past a directory it could not open (exit status stays 0).
+_UNOPENED = re.compile(r"^warning: could not open directory '(.*)': ")
+
+
+def git_listed(root: Path) -> tuple[list[str], list[str]] | None:
+    """What git puts in the tree under `root`: tracked files plus untracked files it does not
+    ignore (`git ls-files --cached --others --exclude-standard`), as paths relative to `root`,
+    and the directories git could not open while listing. Git never enters an ignored
+    directory, so nothing under one is ever touched.
+
+    None when git cannot answer — not a repo, git missing, a failed run — and the caller lists
+    by walking instead.
+    """
+    try:
+        # lint-git: ok — asking git for the tree it would commit; re-deriving it from
+        # .gitignore precedence is the bug this module exists to stop.
+        proc = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others",
+             "--exclude-standard"],
+            capture_output=True, timeout=120, check=False,
+            env={**os.environ, "LC_ALL": "C"},
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    rels = [os.fsdecode(line) for line in proc.stdout.split(b"\0") if line]
+    unopened = [m.group(1) for line in os.fsdecode(proc.stderr).splitlines()
+                if (m := _UNOPENED.match(line))]
+    return rels, unopened

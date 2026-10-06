@@ -33,7 +33,9 @@ import ast
 import sys
 from pathlib import Path
 
-from _astlib import ScanBlind, ModuleEnv, callee, module_env, read_and_parse
+from _astlib import (
+    ModuleEnv, ScanBlind, callee, module_env, read_and_parse, require_selected, selects, source_files,
+)
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -83,16 +85,10 @@ def _hard_gated(rel: str) -> bool:
     module that became a package (`runtime/driver.py` -> `runtime/driver/`) stays covered
     across all its files.
     """
-    return rel in LINT_HARD_GATED_MODULES or any(
-        entry.endswith("/") and rel.startswith(entry) for entry in LINT_HARD_GATED_MODULES
-    )
+    return any(selects(entry, rel) for entry in LINT_HARD_GATED_MODULES)
 
 
 SUPPRESS_MARKERS = ("lint-unguarded-tree-write: ok",)
-
-
-def _in_scope(path: Path) -> bool:
-    return not any(part in EXCLUDED_DIRS for part in path.parts)
 
 
 def _is_test_module(rel: str) -> bool:
@@ -165,12 +161,11 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
 
 
 def _scan(root: Path) -> list[Finding]:
+    rels = [rel for rel in source_files(root, EXCLUDED_DIRS) if not _is_test_module(rel)]
+    require_selected(root, SCOPE, LINT_HARD_GATED_MODULES, rels)
     findings: list[Finding] = []
-    for path in sorted(root.rglob("*.py")):
-        if not _in_scope(path):
-            continue
-        text, tree = read_and_parse(path, path.relative_to(root).as_posix())
-        rel = path.relative_to(root).as_posix()
+    for rel in rels:
+        text, tree = read_and_parse(root / rel, rel)
         findings.extend(_scan_file(rel, tree, text.splitlines()))
     return findings
 

@@ -54,7 +54,6 @@ import argparse
 import ast
 import collections
 import dataclasses
-import os
 import sys
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
@@ -106,7 +105,7 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
         "_report.py", "_artifact_schema.py", "runtime/compaction.py", "learning/judge/render.py",
         "learning/branch/seams.py", "learning/judge/__init__.py",
         "learning/author/verify_forward/checks.py", "learning/core/config.py",
-        "scripts/workspace_map.py",
+        "scripts/workspace_map.py", "api/demo.py",
     ),
     "run-lifecycle": ("run.py", "run_common.py", "scripts/case_history/ticket_writer.py"),
     "path-taking-readers": (
@@ -757,17 +756,20 @@ def layout_names(root: Path) -> frozenset[str]:
 
 
 def sweep_files(root: Path) -> list[Path]:
-    """Every `.py` in the sweep: `root` minus `evals/` and `tests/`, caches, hidden directories
-    and venvs (pruned before descent)."""
-    out: list[Path] = []
-    for top, dirs, files in os.walk(root):
-        dirs[:] = sorted(
-            d for d in dirs
-            if not (d.startswith(".") or d in ("__pycache__", "venv", "tests")
-                    or (Path(top) == root and d == "evals")
-                    or (Path(top, d) / "pyvenv.cfg").is_file()))
-        out.extend(Path(top) / f for f in sorted(files) if f.endswith(".py"))
-    return out
+    """Every `.py` in the sweep, through the shared listing (`_astlib.source_files`): `root`
+    minus `evals/` and `tests/`, caches, hidden directories and venvs (pruned before descent),
+    and minus what git ignores."""
+
+    def pruned(d: Path) -> bool:
+        if d.name.startswith(".") or (d.parent == root and d.name == "evals"):
+            return True
+        try:
+            return (d / "pyvenv.cfg").is_file()
+        except OSError:
+            return False  # unreadable: kept, so the listing reports it blind
+
+    return [root / rel
+            for rel in _astlib.source_files(root, ("__pycache__", "venv", "tests"), prune=pruned)]
 
 
 def _row_of(rel: str) -> str | None:
@@ -853,7 +855,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=DEFENDER,
                         help="a defender/-shaped tree to sweep (default: this checkout's)")
     args = parser.parse_args(argv)
-    found = scan(args.root)
+    try:
+        found = scan(args.root)
+    except _astlib.ScanBlind as exc:  # the listing itself is blind: no scan happened
+        print(f"[lint_run_layout_imports] {exc}", file=sys.stderr)
+        return 2
     for f in found:
         print(f.display)
     print(f"[lint_run_layout_imports] {len(found)} finding(s).")

@@ -57,7 +57,7 @@ import ast
 import sys
 from pathlib import Path
 
-from _astlib import ScanBlind, read_and_parse, ModuleEnv, callee, module_env, str_args
+from _astlib import ScanBlind, read_and_parse, ModuleEnv, callee, module_env, str_args, source_files
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -79,10 +79,6 @@ _RE_FUNCS = (
 # against the constant, so escapes have two spellings: `"\\A---"` / `"\\n---"` are what a raw
 # `r"\A---"` / `r"\n---"` contains, while `"\n---"` is a real newline (non-raw). Both needed.
 _FENCE_PATTERN_MARKS = ("^---", "\\A---", "\\n---", "\n---")
-
-
-def _in_scope(path: Path) -> bool:
-    return not any(part in EXCLUDED_DIRS for part in path.parts)
 
 
 def _is_test_module(rel: str) -> bool:
@@ -184,10 +180,8 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
 def _scan(root: Path) -> list[Finding]:
     """Findings under ``root``, fingerprints relative to it (drivable on a tmp tree)."""
     findings: list[Finding] = []
-    for path in sorted(root.rglob("*.py")):
-        if not _in_scope(path):
-            continue
-        rel = path.relative_to(root).as_posix()
+    for rel in source_files(root, EXCLUDED_DIRS):
+        path = root / rel
         # Exempt the canonical module by path, not basename: a basename match would wave
         # through a verbatim second copy of the grammar named after the module it duplicates.
         if rel == CANONICAL_MODULE:

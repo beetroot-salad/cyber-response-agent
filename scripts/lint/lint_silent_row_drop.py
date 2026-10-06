@@ -55,10 +55,10 @@ import sys
 from pathlib import Path
 
 try:  # package import in tests
-    from ._astlib import ModuleEnv, ScanBlind, module_env, origin, read_and_parse
+    from ._astlib import ModuleEnv, ScanBlind, module_env, origin, read_and_parse, source_files
     from ._baseline import Finding, gate
 except ImportError:  # direct ``python scripts/lint/...`` execution
-    from _astlib import ModuleEnv, ScanBlind, module_env, origin, read_and_parse
+    from _astlib import ModuleEnv, ScanBlind, module_env, origin, read_and_parse, source_files
     from _baseline import Finding, gate
 
 
@@ -417,13 +417,8 @@ def _relative(path: Path, scope: Path) -> str:
 
 def _scan(scope: Path) -> list[Finding]:
     findings: list[Finding] = []
-    for path in sorted(scope.rglob("*.py")):
-        try:
-            relative_parts = path.relative_to(scope).parts
-        except ValueError:
-            continue
-        if any(part in EXCLUDED_DIRS for part in relative_parts):
-            continue
+    for name in source_files(scope, EXCLUDED_DIRS):
+        path = scope / name
         rel = _relative(path, scope)
         # Raises ScanBlind on an unreadable file rather than scanning a shrunken corpus.
         text, tree = read_and_parse(path, rel)

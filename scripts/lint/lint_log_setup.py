@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 from _baseline import Finding, gate
-from _astlib import ModuleEnv, ScanBlind, callee, module_env, read_and_parse
+from _astlib import ModuleEnv, ScanBlind, callee, module_env, read_and_parse, source_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
@@ -70,10 +70,8 @@ def _calls_setup(block: ast.If, env: ModuleEnv) -> bool:
 
 def _scan() -> list[Finding]:
     findings: list[Finding] = []
-    for path in sorted(DEFENDER.rglob("*.py")):
-        rel_parts = path.relative_to(DEFENDER).parts
-        if any(part in EXCLUDED_DIRS for part in rel_parts):
-            continue
+    for name in source_files(DEFENDER, EXCLUDED_DIRS):
+        path = DEFENDER / name
         rel = path.relative_to(REPO_ROOT).as_posix()
         text, tree = read_and_parse(path, rel)
         lines = text.splitlines()

@@ -14,10 +14,10 @@ import sys
 from pathlib import Path
 
 try:  # package import in tests
-    from ._astlib import ScanBlind, read_and_parse
+    from ._astlib import ScanBlind, is_real_root, read_and_parse, source_files
     from ._baseline import Finding, gate
 except ImportError:  # direct ``python scripts/lint/...`` execution
-    from _astlib import ScanBlind, read_and_parse
+    from _astlib import ScanBlind, is_real_root, read_and_parse, source_files
     from _baseline import Finding, gate
 
 
@@ -113,14 +113,15 @@ def _stage_message_arguments(
 
 
 def _scan(scope: Path) -> list[Finding]:
+    rels = source_files(scope, EXCLUDED_DIRS)
+    if not rels and is_real_root(scope, LEARNING):
+        # Over this repo the scope must still hold code, or the stage prompts it guards have
+        # moved out from under the gate.
+        raise ScanBlind(f"{scope} holds no module to scan — the stage prompts it guarded have "
+                        "moved; point LEARNING at where they went")
     findings: list[Finding] = []
-    for path in sorted(scope.rglob("*.py")):
-        try:
-            relative_parts = path.relative_to(scope).parts
-        except ValueError:
-            continue
-        if any(part in EXCLUDED_DIRS for part in relative_parts):
-            continue
+    for name in rels:
+        path = scope / name
         rel = _relative(path, scope)
         text, tree = read_and_parse(path, rel)
         lines = text.splitlines()
@@ -143,6 +144,10 @@ def main(
     scope: Path = LEARNING,
     baseline_path: Path = BASELINE_PATH,
 ) -> int:
+    if not scope.is_dir():
+        # An absent scope lists nothing: a scan that proved nothing, never a clean result.
+        print(f"lint_stage_prompt_frames: scan scope not found at {scope}", file=sys.stderr)
+        return 2
     try:
         findings = _scan(scope)
     except ScanBlind as exc:

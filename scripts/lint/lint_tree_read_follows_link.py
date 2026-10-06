@@ -43,7 +43,10 @@ import ast
 import sys
 from pathlib import Path
 
-from _astlib import ModuleEnv, ScanBlind, callee, module_env, read_and_parse
+from _astlib import (
+    ModuleEnv, ScanBlind, callee, module_env, read_and_parse, require_selected, selects,
+    source_files,
+)
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -66,11 +69,11 @@ _UNSAFE_CALLEES = frozenset({
 _UNSAFE_METHODS = frozenset({"is_file", "is_dir"})
 
 #: Modules that read a path inside a box-writable tree (a run dir, an episode dir, the drain
-#: corpus). A module that grows such a read and is not added here is not covered.
+#: corpus). An entry ending in `/` covers its whole package (`_astlib.selects`); a module outside
+#: every entry that grows such a read is not covered.
 LINT_TREE_READER_MODULES: frozenset[str] = frozenset({
     "_provenance.py",
     "run_common.py",
-    "runtime/branch.py",
     "learning/branch/cli.py",
     "learning/branch/capture.py",
     "learning/branch/ledger.py",
@@ -85,7 +88,8 @@ LINT_TREE_READER_MODULES: frozenset[str] = frozenset({
     # The stage timing record at the episode root.
     "learning/branch/timing.py",
     "learning/branch/questioner/__init__.py",
-    "runtime/branch/_family.py",
+    # The branch package: the sibling launcher reads the source run dir throughout.
+    "runtime/branch/",
     # The family judge, whose input is the episode tree: archived world dirs, the episode's
     # `judge.yaml`/`review.yaml`/`family.yaml`, per-draw records, and the runs base.
     "learning/judge/__init__.py",
@@ -104,10 +108,6 @@ LINT_TREE_READER_MODULES: frozenset[str] = frozenset({
 })
 
 SUPPRESS_MARKERS = ("lint-tree-read-follows-link: ok",)
-
-
-def _in_scope(path: Path) -> bool:
-    return not any(part in EXCLUDED_DIRS for part in path.parts)
 
 
 def _is_test_module(rel: str) -> bool:
@@ -141,7 +141,7 @@ def _unsafe_reason(call: ast.Call, env: ModuleEnv) -> str | None:
 
 
 def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
-    if _is_test_module(rel) or rel not in LINT_TREE_READER_MODULES:
+    if _is_test_module(rel) or not any(selects(e, rel) for e in LINT_TREE_READER_MODULES):
         return []
     findings: list[Finding] = []
     seen: set[str] = set()
@@ -173,12 +173,13 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
 
 
 def _scan(root: Path) -> list[Finding]:
+    rels = [rel for rel in source_files(root, EXCLUDED_DIRS) if not _is_test_module(rel)]
+    require_selected(root, SCOPE, LINT_TREE_READER_MODULES, rels)
     findings: list[Finding] = []
-    for path in sorted(root.rglob("*.py")):
-        if not _in_scope(path):
-            continue
-        rel = path.relative_to(root).as_posix()
-        text, tree = read_and_parse(path, rel)
+    for rel in rels:
+        if not any(selects(e, rel) for e in LINT_TREE_READER_MODULES):
+            continue  # outside the census: never parsed, so never able to blind the scan
+        text, tree = read_and_parse(root / rel, rel)
         findings.extend(_scan_file(rel, tree, text.splitlines()))
     return findings
 

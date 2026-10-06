@@ -136,8 +136,8 @@ EXPECTED_DEFERRED_LEGACY = frozenset({
 _PACKAGE_FILES = ("__init__.py", "_layout.py", "_handle.py", "_lookup.py", "_record.py",
                   "_held.py", "_id.py", "_errors.py")
 #: D7's categories table (design-rev4.md, "Categories, by module"), every module in exactly one
-#: row: the owners plus the 56 non-owner production importers of the layout (57 at 80888efb;
-#: #1135 took `learning/judge/enqueue.py` off it).
+#: row: the owners plus the 57 non-owner production importers of the layout (57 at 80888efb;
+#: #1135 took `learning/judge/enqueue.py` off it; #1191 added `api/demo.py`, names-only).
 EXPECTED_CATEGORIES: dict[str, frozenset[str]] = {
     "owners": frozenset({*(f"run_repository/{f}" for f in _PACKAGE_FILES),
                          "_episode_paths.py", "_episode_handle.py", "_tenant.py"}),
@@ -157,7 +157,9 @@ EXPECTED_CATEGORIES: dict[str, frozenset[str]] = {
         "_report.py", "_artifact_schema.py", "runtime/compaction.py", "learning/judge/render.py",
         "learning/branch/seams.py", "learning/judge/__init__.py",
         "learning/author/verify_forward/checks.py", "learning/core/config.py",
-        "scripts/workspace_map.py"}),
+        "scripts/workspace_map.py",
+        # #1191: the API stub's demo seeds a fake investigation's artifact names — names, no path.
+        "api/demo.py"}),
     "run-lifecycle": frozenset({"run.py", "run_common.py",
                                 "scripts/case_history/ticket_writer.py"}),
     "path-taking-readers": frozenset({
@@ -772,7 +774,7 @@ def test_1105_layout_lint_flags_a_re_exports_own_import(tmp_path):
 # ==========================================================================================
 
 def test_1105_layout_lint_puts_every_layout_importer_in_exactly_one_category(tmp_path):
-    """The lint's category table places each of the 56 non-owner production importers of the
+    """The lint's category table places each of the 57 non-owner production importers of the
     layout at 80888efb in exactly one row as D7's table lists them, the owners in their own row,
     and exempts layout names exactly in the running-investigation, names-only, run-lifecycle,
     path-taking-reader, not-a-run and deferred_legacy rows; a module in no row gets no
@@ -785,7 +787,7 @@ def test_1105_layout_lint_puts_every_layout_importer_in_exactly_one_category(tmp
         f"{sorted(r for r in EXPECTED_CATEGORIES if table.get(r) != EXPECTED_CATEGORIES[r])}")
     every = [m for mods in table.values() for m in mods]
     assert len(every) == len(set(every)), "a module sits in more than one row"
-    assert sum(len(v) for r, v in EXPECTED_CATEGORIES.items() if r != "owners") == 56
+    assert sum(len(v) for r, v in EXPECTED_CATEGORIES.items() if r != "owners") == 57
     root = _planted(tmp_path)
     for module in _ROW_SAMPLE.values():
         _add(root, module, "from defender.run_repository import RunPaths  # noqa: F401\n\n\n"

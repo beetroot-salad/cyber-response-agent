@@ -55,12 +55,12 @@ _SKIP_PARTS = {".venv", "__pycache__", "node_modules", "tests"}
 #: `defender/runtime/case_ticket.py`; the write-back (`ticket_writer`) stays in the folder.
 #: `lint_tenant_env_reads.SWEPT` lists the same entries (#1190's env-read test holds them equal).
 SWEPT: tuple[str, ...] = (
-    "defender/scripts/adapters",
-    "defender/learning/branch/estate",
+    "defender/scripts/adapters/",
+    "defender/learning/branch/estate/",
     "defender/learning/branch/staging.py",
-    "defender/scripts/case_history",
+    "defender/scripts/case_history/",
     "defender/runtime/case_ticket.py",
-    "defender/runtime/lead_zero",
+    "defender/runtime/lead_zero/",
     "defender/runtime/lead_zero_config.py",
 )
 

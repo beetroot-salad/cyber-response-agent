@@ -30,7 +30,9 @@ A source file the sweep cannot parse is reported as a finding, never skipped and
 of the whole sweep (`_astlib.ScanBlind` is caught per file).
 
 Run from repo root:  python scripts/lint/lint_run_records.py [--render]
-Exit 0 = clean and the page is up to date, 1 = findings or a stale render, 2 = could not run.
+Exit 0 = clean and the page is up to date, 1 = findings or a stale render, 2 = could not run,
+or the sweep's scope is not closed over this repo (a listed dir gone, or a defender/ dir holding
+source that is neither swept nor in UNSCANNED_TREES).
 """
 from __future__ import annotations
 
@@ -43,7 +45,7 @@ from pathlib import Path
 
 from _astlib import (
     PARTIAL_OWNER_ATTRS, ScanBlind, import_source, module_and_package, module_env, owner_derived,
-    read_and_parse, scan_guard,
+    read_and_parse, require_claimed, require_selected, scan_guard, selects, source_files,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -72,7 +74,7 @@ OWNER_MODULES: frozenset[str] = frozenset({
 
 #: The sweep set. Never shrinks below this.
 SWEEP_DIRS: tuple[str, ...] = ("runtime", "learning", "scripts", "evals", "hooks",
-                               "run_repository")
+                               "run_repository", "api")
 SWEEP_TOP_LEVEL = True
 EXCLUDED_DIRS: tuple[str, ...] = (".venv", "__pycache__", "tests")
 
@@ -81,9 +83,10 @@ EXCLUDED_DIRS: tuple[str, ...] = (".venv", "__pycache__", "tests")
 UNSCANNED_TREES: tuple[str, ...] = ("defender/skills", "scripts", "experiments")
 
 SCOPE_STATEMENT = (
-    "This gate sweeps defender/runtime, defender/learning, defender/scripts, defender/evals, "
-    "defender/hooks and the top level of defender/*.py (tests excluded) — it never enters "
-    "defender/skills, top-level scripts, or top-level experiments (§7 decision 5), and it is "
+    f"This gate sweeps {', '.join(f'defender/{d}' for d in SWEEP_DIRS)}"
+    f"{' and the top level of defender/*.py' if SWEEP_TOP_LEVEL else ''} (tests excluded) — it "
+    f"never enters {', '.join(t if '/' in t else f'top-level {t}' for t in UNSCANNED_TREES)} "
+    "(§7 decision 5), and it is "
     "structurally blind to a record name that never reaches the AST as a whole literal — an "
     "assembly in which no single part is ever a literal string, whichever of concatenation, "
     "%-formatting, .format, os.path.join or multi-argument Path() does the assembling (§7 "
@@ -125,17 +128,19 @@ class Finding:
     display: str
 
 
-def _in_scope(path: Path) -> bool:
-    return not any(part in EXCLUDED_DIRS for part in path.parts)
-
-
 def sweep_files(root: Path = DEFENDER) -> list[Path]:
-    files: list[Path] = []
-    if SWEEP_TOP_LEVEL:
-        files.extend(p for p in root.glob("*.py") if _in_scope(p))
-    for d in SWEEP_DIRS:
-        files.extend(p for p in sorted((root / d).rglob("*.py")) if _in_scope(p))
-    return sorted(files)
+    """Every file the gate sweeps under `root`. Over this repo, ScanBlind when a swept dir
+    selects no file, or when a directory holding source is neither swept nor named in
+    `UNSCANNED_TREES` (`_astlib.require_selected` / `require_claimed`); a planted tree under
+    test holds a subset on purpose."""
+    rels = source_files(root, EXCLUDED_DIRS)
+    swept = [f"{d}/" for d in SWEEP_DIRS]
+    declared = [t.removeprefix("defender/") + "/" for t in UNSCANNED_TREES
+                if t.startswith("defender/")]
+    require_selected(root, DEFENDER, swept + declared, rels)
+    require_claimed(root, DEFENDER, swept + declared, [rel for rel in rels if "/" in rel])
+    return [root / rel for rel in rels
+            if ("/" not in rel and SWEEP_TOP_LEVEL) or any(selects(d, rel) for d in swept)]
 
 
 def _discriminating(segment: str) -> bool:
@@ -517,11 +522,15 @@ def main(argv: list[str] | None = None) -> int:
     kinds = load_kinds()
     page = PAGE.read_text(encoding="utf-8")
     rendered = render_page(kinds, page)
+    try:
+        found = scan()  # before any render: a blind run writes nothing
+    except ScanBlind as exc:
+        print(f"[lint_run_records] {exc}", file=sys.stderr)
+        return 2
     if "--render" in args:
         PAGE.write_text(rendered, encoding="utf-8")
         print(f"[lint_run_records] rendered -> {PAGE.relative_to(REPO_ROOT)}")
         page = rendered
-    found = scan()
     if found:
         print(f"\n[lint_run_records] {len(found)} finding(s):")
         for f in found:

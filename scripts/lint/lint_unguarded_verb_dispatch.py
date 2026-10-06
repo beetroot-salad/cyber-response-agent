@@ -37,7 +37,7 @@ import ast
 import sys
 from pathlib import Path
 
-from _astlib import read_and_parse
+from _astlib import ScanBlind, read_and_parse, source_files
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -46,10 +46,6 @@ BASELINE_PATH = Path(__file__).with_name("lint_unguarded_verb_dispatch_baseline.
 
 EXCLUDED_DIRS = (".venv", "__pycache__")
 SUPPRESS_MARKER = "lint-verb-dispatch: ok"
-
-
-def _in_scope(path: Path) -> bool:
-    return not any(part in EXCLUDED_DIRS for part in path.parts)
 
 
 def _is_test_module(rel: str) -> bool:
@@ -161,21 +157,22 @@ HEADER = (
 
 def _scan() -> list[Finding]:
     findings: list[Finding] = []
-    for path in sorted(SCOPE.rglob("*.py")):
-        if not _in_scope(path):
-            continue
+    for name in source_files(SCOPE, EXCLUDED_DIRS):
+        path = SCOPE / name
         rel = path.relative_to(REPO_ROOT).as_posix()
-        try:
-            text, tree = read_and_parse(path, rel)
-        except SyntaxError:
-            continue
+        text, tree = read_and_parse(path, rel)  # ScanBlind on any parse fault: main exits 2
         findings.extend(_scan_file(rel, tree, text.splitlines()))
     return findings
 
 
 def main() -> int:
+    try:
+        findings = _scan()
+    except ScanBlind as exc:
+        print(f"lint_unguarded_verb_dispatch: {exc}", file=sys.stderr)
+        return 2
     return gate(
-        _scan(),
+        findings,
         BASELINE_PATH,
         sys.argv,
         label="lint_unguarded_verb_dispatch",

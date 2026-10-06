@@ -41,7 +41,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from _baseline import Finding, gate
-from _astlib import ScanBlind, read_and_parse
+from _astlib import ScanBlind, read_and_parse, source_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
@@ -70,15 +70,13 @@ ALLOWLIST_NAMES = frozenset(
 SUPPRESS = "lint-dup: ok"
 
 
-def _in_scope(path: Path) -> bool:
-    rel = path.relative_to(DEFENDER)
-    if any(part in EXCLUDED_DIRS for part in rel.parts):
+def _in_scope(rel: str) -> bool:
+    """Beyond the listing's `EXCLUDED_DIRS`: flat pytest modules outside a tests/ dir are
+    fixture helpers too, and `EXCLUDED_PATH_PARTS` are out of scope."""
+    name = rel.rsplit("/", 1)[-1]
+    if name.startswith("test_") or name.endswith("_test.py"):
         return False
-    # Flat pytest modules outside a tests/ dir are fixture helpers too.
-    if path.name.startswith("test_") or path.name.endswith("_test.py"):
-        return False
-    rel_posix = rel.as_posix()
-    return not any(part in rel_posix for part in EXCLUDED_PATH_PARTS)
+    return not any(part in rel for part in EXCLUDED_PATH_PARTS)
 
 
 def _strip_docstring(body: list[ast.stmt]) -> list[ast.stmt]:
@@ -131,9 +129,10 @@ def _collect() -> dict[str, list[tuple[str, int, str]]]:
     """name -> list of (rel_path, lineno, body_fingerprint) for every
     module-level def across in-scope defender/ source."""
     table: dict[str, list[tuple[str, int, str]]] = defaultdict(list)
-    for path in sorted(DEFENDER.rglob("*.py")):
-        if not _in_scope(path):
+    for name in source_files(DEFENDER, EXCLUDED_DIRS):
+        if not _in_scope(name):
             continue
+        path = DEFENDER / name
         text, tree = read_and_parse(path, path.relative_to(REPO_ROOT).as_posix())
         lines = text.splitlines()
         rel = path.relative_to(REPO_ROOT).as_posix()
