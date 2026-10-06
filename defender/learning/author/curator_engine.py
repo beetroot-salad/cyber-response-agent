@@ -147,7 +147,7 @@ class CuratorDeps(AgentDeps):
         scope = RunScope(
             corpus_name=corpus_dir.name,
             read_confine=tuple(
-                (defender_dir / name).resolve() for name in SHIPPED_LESSON_CORPORA
+                defender_dir / name for name in SHIPPED_LESSON_CORPORA
             ),
         )
         deps = bind(
@@ -178,7 +178,7 @@ class CorpusRepairDeps(AgentDeps):
         scope = RunScope(
             corpus_name=corpus_dir.name,
             read_confine=tuple(
-                (defender_dir / name).resolve() for name in SHIPPED_LESSON_CORPORA
+                defender_dir / name for name in SHIPPED_LESSON_CORPORA
             ),
         )
         deps = bind(

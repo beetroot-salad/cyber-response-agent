@@ -255,16 +255,12 @@ def test_validate_companion_drops_warnings():
 
 
 def test_two_validator_entry_points_stay_in_parity(tmp_path):
-    """Both named production exports onto the same validator agree about warn severity —
-    `decide_write` (the gate the write verbs face) and `_decide_investigation_write` (brief
-    F6, kept because the frames suite drives it directly).
-
-    Parity is per-CELL, not per-boundary: each via is driven with the same two documents and
-    each is asserted on its own answer. Claim g4 says the second invokes the first rather
-    than reimplementing it, so this is the cheap regression that keeps that true."""
+    """`decide_write` (the gate the write verbs face) applies the validator's warn severity: a
+    warn-only document is allowed, a parse error is not. Its unused `_decide_investigation_write`
+    twin (brief F6), whose parity this test once pinned, was deleted in #1136."""
     from defender.agents import MAIN_DEF
     from defender.runtime.agent_definition import bind
-    from defender.runtime.permission.files import _decide_investigation_write, decide_write
+    from defender.runtime.permission.files import decide_write
 
     run = tmp_path / "run"
     run.mkdir()
@@ -276,12 +272,10 @@ def test_two_validator_entry_points_stay_in_parity(tmp_path):
     assert decide_write(
         inv, WARN_DOC, run_dir=run, defender_dir=dfn, policy=deps.policy,
     ).allow is True
-    assert _decide_investigation_write(WARN_DOC, inv).allow is True
 
     assert decide_write(
         inv, _PARSE_ERROR, run_dir=run, defender_dir=dfn, policy=deps.policy,
     ).allow is False
-    assert _decide_investigation_write(_PARSE_ERROR, inv).allow is False
 
 
 def test_close_report_validator_meets_a_diagnostic_it_never_saw_before():

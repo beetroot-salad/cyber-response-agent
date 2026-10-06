@@ -10,7 +10,13 @@ if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays 
 
 from pydantic_ai.exceptions import ModelRetry
 
-from defender._io import rooted_mkdir, rooted_read_plain, rooted_write
+from defender._io import (
+    REFUSED_NOT_FILE,
+    REFUSED_UNDECODABLE,
+    bind,
+    rooted_mkdir,
+    rooted_write,
+)
 from defender._run_paths import RunPaths
 from .. import permission
 from ..permission.files import RESOLVE_ERRORS
@@ -21,38 +27,40 @@ from defender.hooks.record_lesson_load import (
     RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA,
 )
 from ._deps import AgentDeps, _bounded_read, _cap_for, _overflow_filter_hint, _record_lesson_load
-from ._bash import _deny_authored_read, _grep_lines, _is_cross_agent_read, _is_learning_role, _resolve_operand, _resolved, _rooted_operand, _write_roots
+from ._bash import _deny_authored_read, _grep_lines, _is_cross_agent_read, _is_learning_role, _resolve_operand, _resolved, _rooted_operand
 
 
 def _read_operand(deps: AgentDeps, p: Path, path: str) -> str | None:
-    """The text of the plain file at the operand `p` through the rooted core, `None` when
-    absent: a refusal is `ModelRetry`, never a traceback (one would end the run with no
-    disposition). The root is the read root `p` sits in (`permission.read_roots`). A link at
-    any component below it, a hard link, a FIFO or a folder at the name is refused, never
-    followed, and the open never blocks."""
-    root, name = _rooted_operand(
-        deps, p, permission.read_roots(deps.policy, deps.run_dir, deps.defender_dir), path=path,
-    )
+    """The text of the plain file at the operand `p` through the rooted core, `None` when no
+    file stands there (nothing, or a folder or FIFO, as `is_file()` answered before). Every
+    other refusal is a `ModelRetry` naming no host path: a link anywhere below the root or a
+    hard link at the name is refused, never followed, and the open never blocks."""
+    root, name = _rooted_operand(deps, p, path=path)
     try:
-        return rooted_read_plain(root, name)
-    except FileNotFoundError:
-        return None
-    except UnicodeDecodeError:
-        raise ModelRetry(f"{path} is not valid UTF-8 text (binary or corrupt)") from None
+        with bind(root) as tree:
+            got = tree.read(name)
     except (OSError, ValueError) as e:
-        raise ModelRetry(f"could not read {path}: {e}") from None
+        raise ModelRetry(f"could not read {path}: {getattr(e, 'strerror', None) or e}") from None
+    if got.absent or got.refused_by == REFUSED_NOT_FILE:
+        return None
+    if got.refused_by == REFUSED_UNDECODABLE:
+        raise ModelRetry(f"{path} is not valid UTF-8 text (binary or corrupt)")
+    if got.reason is not None:
+        raise ModelRetry(f"could not read {path}: {got.reason}")
+    return got.text
 
 
 def _write_operand(deps: AgentDeps, p: Path, path: str, text: str) -> None:
-    """Replace the file at the operand `p` with `text` through the rooted core, making its
-    missing holding folders: nothing below the root is followed, a non-plain entry at the name
-    is refused and left in place, and every refusal is `ModelRetry`."""
-    root, name = _rooted_operand(deps, p, _write_roots(deps), path=path)
+    """Replace the file at the operand `p` with `text` through the rooted core, off the same
+    root its read takes, making its missing holding folders: nothing below the root is
+    followed, a non-plain entry at the name is refused and left in place, and every refusal is
+    a `ModelRetry` naming no host path."""
+    root, name = _rooted_operand(deps, p, path=path)
     try:
         rooted_mkdir(root, PurePosixPath(name).parent.as_posix())
         rooted_write(root, name, text, mode="replace")
     except (OSError, ValueError) as e:
-        raise ModelRetry(f"could not write {path}: {e}") from None
+        raise ModelRetry(f"could not write {path}: {getattr(e, 'strerror', None) or e}") from None
 
 
 def _gated_read(
@@ -65,10 +73,10 @@ def _gated_read(
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
+    _deny_authored_read(deps, p)
     text = _read_operand(deps, p, path)
     if text is None:
         raise ModelRetry(f"file not found: {path}")
-    _deny_authored_read(deps, p)
     _record_lesson_load(deps, p, lesson_corpora, kind=_LOAD_KIND_READ)
     return p, text
 

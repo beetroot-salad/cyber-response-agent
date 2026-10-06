@@ -61,7 +61,7 @@ def _scope_for(
         return RunScope(
             corpus_name=corpus_name,
             read_confine=tuple(
-                (defender_dir / name).resolve() for name in SHIPPED_LESSON_CORPORA
+                defender_dir / name for name in SHIPPED_LESSON_CORPORA
             ),
         )
     return RunScope()

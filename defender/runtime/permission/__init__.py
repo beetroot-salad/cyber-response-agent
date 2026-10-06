@@ -21,7 +21,7 @@ from .files import (
     is_untrusted_read,
     names_run_provenance,
     names_wire_log_dir,
-    read_roots,
+    spelled_read_roots,
 )
 from .grant import OPENS_NOTHING, PROGRAMS, Grant, Route, under
 from .policies.gather import GATHER_FALLTHROUGH_DENY_REASON
@@ -52,7 +52,7 @@ __all__ = [
     "is_untrusted_read",
     "names_run_provenance",
     "names_wire_log_dir",
-    "read_roots",
+    "spelled_read_roots",
     "compile_policy",
     "compile_policy_for",
     "require_anchor_root",

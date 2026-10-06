@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 
 from defender import _artifact_schema
-from defender._io import rooted_read_plain
+from defender._io import bind
 from defender._run_paths import (
     RUN_LAYOUT,
     RunPaths,
@@ -47,12 +47,13 @@ def denylisted(rp: Path) -> bool:
     )
 
 
-def read_roots(
+def spelled_read_roots(
     policy: AgentPolicy, run_dir: Path, defender_dir: Path
 ) -> tuple[Path, ...]:
-    """@owns read_roots: the roots a read must land within, as the caller and the policy
-    spell them (unresolved). A non-empty `policy.read_confine` replaces the `defender_dir`
-    base; `run_dir` and `read_roots` always apply."""
+    """@owns spelled_read_roots: every root a read must land within, as the caller and the
+    policy spell them (unresolved) — not to be confused with `policy.read_roots`, the extra
+    declared roots, which are one part of it. A non-empty `policy.read_confine` replaces the
+    `defender_dir` base; `run_dir` and `policy.read_roots` always apply."""
     base = policy.read_confine if policy.read_confine else (Path(defender_dir),)
     return (Path(run_dir), *base, *policy.read_roots)
 
@@ -60,8 +61,8 @@ def read_roots(
 def _resolved_read_roots(
     policy: AgentPolicy, run_dir: Path, defender_dir: Path
 ) -> tuple[Path, ...]:
-    """:func:`read_roots`, resolved. May raise from `resolve()`; callers fail closed."""
-    return tuple(r.resolve() for r in read_roots(policy, run_dir, defender_dir))
+    """:func:`spelled_read_roots`, resolved. May raise from `resolve()`; callers fail closed."""
+    return tuple(r.resolve() for r in spelled_read_roots(policy, run_dir, defender_dir))
 
 
 def build_write_allow(root: Path, *, suffix: str = "") -> re.Pattern[str]:
@@ -340,20 +341,21 @@ def decide_write(
         return Decision(True) if reason is None else Decision(False, reason)
     # The append-only baseline is read here so the schema module stays filesystem-free. A read
     # fault denies: falling back to `current=None` would let the write replace the document.
-    # Read through the rooted core off the run dir (`rp` is exactly `<run_dir>/<artifact>`), so
-    # a link or hard link at the name is a read fault and denies, never a baseline.
+    # `rp` is resolved, so a symlink at the name was already followed above and this write is
+    # judged as its target (the file tool's own write refuses the link). Read off the run dir
+    # through the rooted core: a hard link, FIFO or folder at the name is a refused read, which
+    # denies rather than serving as the baseline.
     current: str | None = None
     if _artifact_schema.needs_baseline(artifact):
-        try:
-            current = rooted_read_plain(rp.parent, rp.name)
-        except FileNotFoundError:
-            current = None
-        except (OSError, UnicodeDecodeError) as e:
+        with bind(rp.parent) as run_root:
+            got = run_root.read(rp.name)
+        if got.reason is not None:
             return Decision(
                 False,
                 f"Blocked: the current {artifact} could not be read to check this write "
-                f"against it (failing closed): {e}.",
+                f"against it (failing closed): {got.reason}.",
             )
+        current = got.text
     return _as_decision(_artifact_schema.validate_artifact(artifact, proposed_text, current))
 
 
@@ -373,11 +375,3 @@ def _is_run_dir_file(rp: Path, run_dir: Path, name: str) -> bool:
 def _decide_report_write(proposed_text: str) -> Decision:
     """`_artifact_schema.validate_report` as a `Decision`; tests drive this directly."""
     return _as_decision(_artifact_schema.validate_report(proposed_text))
-
-
-def _decide_investigation_write(proposed_text: str, rp: Path) -> Decision:
-    """`_artifact_schema.validate_investigation` against `rp`'s current text, as a `Decision`;
-    tests drive this directly."""
-
-    current = rp.read_text(encoding="utf-8") if rp.is_file() else None
-    return _as_decision(_artifact_schema.validate_investigation(proposed_text, current))

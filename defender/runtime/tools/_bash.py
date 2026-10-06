@@ -155,56 +155,35 @@ def _resolve_operand(deps: AgentDeps, path: str) -> Path:
     return p if p.is_absolute() else deps.cwd_anchor / p
 
 
-def _root_spellings(deps: AgentDeps, root: Path) -> tuple[Path, ...]:
-    """The spellings an operand may reach `root` by: as given, resolved, and, for a root inside
-    the defender tree, the same tail under `deps.defender_dir`'s own spelling. A curator's read
-    confine is stored resolved while its `cwd_anchor` keeps the operator's spelling, so without
-    that last one a relative lesson path under a symlinked repo root would match no root. Every
-    spelling is host-chosen; nothing the model names is resolved here."""
-    spellings = [root]
-    try:
-        resolved, tree = _resolved(root), _resolved(deps.defender_dir)
-    except RESOLVE_ERRORS:
-        return tuple(spellings)
-    spellings.append(resolved)
-    if resolved.is_relative_to(tree):
-        spellings.append(deps.defender_dir / resolved.relative_to(tree))
-    return tuple(spellings)
-
-
-def _rooted_operand(
-    deps: AgentDeps, p: Path, roots: Iterable[Path], *, path: str,
-) -> tuple[Path, str]:
+def _rooted_operand(deps: AgentDeps, p: Path, *, path: str) -> tuple[Path, str]:
     """The operand `p` (as `_resolve_operand` spells it) as the trust root it sits in and its
-    POSIX name below that root, for the rooted core: the root is opened following its spelling,
-    and nothing below it is followed.
+    POSIX name below that root, for both a read and a write of it. The rooted core opens the
+    root following its spelling and follows nothing below it.
 
-    The innermost root `p` sits under lexically wins (the run dir may sit inside the defender
-    dir). `p` itself is never resolved, which would collapse the links the core exists to
-    refuse. A `..` component, or no root at all (a path that reaches one only through a
-    symlink), is refused as `ModelRetry`: the operand is model-supplied."""
+    The roots are the agent's read roots (`permission.spelled_read_roots`; every write lies
+    within them too), each matched as spelled and resolved; the innermost wins (the run dir
+    may sit inside the defender dir). `p` itself is never resolved, which would collapse the
+    links the core exists to refuse. A `..` component, or no root at all (a path that reaches
+    one only through a symlink), is refused as `ModelRetry`: the operand is model-supplied."""
     if ".." in p.parts:
-        raise ModelRetry(
-            f"{path} has a '..' component; name the file by a path without '..'"
-        )
+        raise ModelRetry(f"{path} has a '..' component; name the file by a path without '..'")
     best: Path | None = None
-    for root in roots:
-        for spelling in _root_spellings(deps, Path(root)):
+    for root in permission.spelled_read_roots(deps.policy, deps.run_dir, deps.defender_dir):
+        spellings: tuple[Path, ...]
+        try:
+            spellings = (root, _resolved(root))
+        except RESOLVE_ERRORS:
+            spellings = (root,)
+        for spelling in spellings:
             if spelling in p.parents and (best is None or len(spelling.parts) > len(best.parts)):
                 best = spelling
     if best is None:
         raise ModelRetry(
-            f"{p} is not inside a tree this agent may use; name a path under the run directory "
-            f"or the defender directory (a path that only reaches one through a symlink is "
-            f"refused)"
+            f"{path} is not inside a tree this agent may use; name a path under the run "
+            f"directory or the defender directory (a path that only reaches one through a "
+            f"symlink is refused)"
         )
     return best, p.relative_to(best).as_posix()
-
-
-def _write_roots(deps: AgentDeps) -> tuple[Path, ...]:
-    """The trees a file-tool write is rooted in. The write gate decides what may be written;
-    this only names where the walk starts."""
-    return (deps.run_dir, deps.defender_dir)
 
 
 def _is_learning_role(deps: AgentDeps) -> bool:

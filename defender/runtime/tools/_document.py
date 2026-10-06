@@ -1,7 +1,6 @@
 
 from __future__ import annotations
 
-import errno
 import logging
 import re
 from collections.abc import Iterable
@@ -15,7 +14,7 @@ if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays 
 
 from pydantic_ai.exceptions import ModelRetry
 
-from defender._io import TEXT_READ_ERRORS, rooted_read_plain
+from defender._io import REFUSED_FAULT, bind
 from defender._run_paths import RunPaths
 from .. import compaction, permission
 
@@ -56,7 +55,7 @@ class CompanionRead:
       * never written — `text == ""`: no repair window, nothing to validate, full entry price owed.
       * read — `text` is the document, decoded strictly with universal newlines.
       * could not be read — `text is None`, `refusal` says why: an I/O fault, a non-plain entry
-        at the name (`_io.rooted_read_plain` refuses planted links at the open), or non-UTF-8 bytes.
+        at the name (the rooted core refuses planted links at the open), or non-UTF-8 bytes.
         The window derivation fails open, no gate judges a lenient decode (it would let a
         confident close commit against an unvalidated document), and the host's forced close
         proceeds off an empty body. The model's close turns on `retryable`: an I/O fault is a
@@ -72,24 +71,21 @@ class CompanionRead:
     retryable: bool = False
 
 
-#: The errnos `_io.rooted_read_plain` refuses a non-plain entry with (`ELOOP` for symlinks and other
-#: non-regular shapes, `EMLINK` for hard links). Matched by errno, not message text, so a
-#: reworded refusal cannot turn a planted entry into a retryable fault.
-_PLANTED_ENTRY_ERRNOS = frozenset({errno.ELOOP, errno.EMLINK})
-
-
 def read_companion(deps: AgentDeps) -> CompanionRead:
-    """The one read. Never raises (it runs on every model request via `prepare=`, where a raise
-    would wedge the run) and never logs (callers log where they act on the refusal)."""
-    try:
-        return CompanionRead(text=rooted_read_plain(deps.run_dir, _investigation_name(deps)))
-    except FileNotFoundError:
+    """The one read, through the rooted core off the run dir. Never raises (it runs on every
+    model request via `prepare=`, where a raise would wedge the run) and never logs (callers
+    log where they act on the refusal). Retryable exactly when the core's refusal kind is a
+    fault: a planted entry or undecodable bytes are the document's state, not the mount's, and
+    the kind is the core's own judgement, not a match on message text."""
+    with bind(deps.run_dir) as run_root:
+        got = run_root.read(_investigation_name(deps))
+    if got.absent:
         return CompanionRead(text="")
-    except UnicodeDecodeError as exc:
-        return CompanionRead(text=None, refusal=str(exc), retryable=False)
-    except TEXT_READ_ERRORS as exc:
-        planted = isinstance(exc, OSError) and exc.errno in _PLANTED_ENTRY_ERRNOS
-        return CompanionRead(text=None, refusal=str(exc), retryable=not planted)
+    if got.reason is not None:
+        return CompanionRead(
+            text=None, refusal=got.reason, retryable=got.refused_by == REFUSED_FAULT,
+        )
+    return CompanionRead(text=got.text)
 
 
 def unreadable_write_refusal(verb: str, read: CompanionRead) -> str:

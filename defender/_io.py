@@ -393,9 +393,20 @@ class _Read:
 @dataclasses.dataclass(frozen=True)
 class RecordRead(_Read):
     """A `bind`ed reader's answer to a file, in exactly one of three states: present (`text` a
-    `str`, possibly empty), absent (`absent=True`) or refused (`reason`)."""
+    `str`, possibly empty), absent (`absent=True`) or refused (`reason`, and `refused_by`
+    saying what stopped it: one of the `REFUSED_*` kinds)."""
 
     text: str | None
+    refused_by: str | None = None
+
+
+#: What refused a `bind`ed read (`RecordRead.refused_by`): a link or hard link at the name or a
+#: linked folder on the way (the alias refusal); something at the name, or on the way, that is
+#: not a file or folder (a directory or FIFO at the name, a file used as a folder); bytes that
+#: are not UTF-8; or anything else (an I/O fault, a size cap, a closed root).
+REFUSED_ALIAS, REFUSED_NOT_FILE, REFUSED_UNDECODABLE, REFUSED_FAULT = (
+    "alias", "not_file", "undecodable", "fault",
+)
 
 
 #: What one entry of a listed directory is, judged without following it: a regular file (hard
@@ -590,6 +601,22 @@ def _read_leaf(
         os_.close(fd)
 
 
+def _refused_by(e: BaseException) -> str:
+    """The `REFUSED_*` kind of a refused read's exception. The core already marks the cases
+    apart: `NotPlainEntry` is an entry at the name, alias-marked for a link or hard link; a
+    linked folder on the way is a bare `ELOOP`; a file used as a folder is
+    `NotADirectoryError`."""
+    if isinstance(e, UnicodeDecodeError):
+        return REFUSED_UNDECODABLE
+    if isinstance(e, NotPlainEntry):
+        return REFUSED_ALIAS if getattr(e, "write_guarded_alias", False) else REFUSED_NOT_FILE
+    if isinstance(e, NotADirectoryError):
+        return REFUSED_NOT_FILE
+    if isinstance(e, OSError) and e.errno == errno.ELOOP:
+        return REFUSED_ALIAS
+    return REFUSED_FAULT
+
+
 def _read_reason(e: BaseException) -> str:
     """A refused read's reason, naming no path: the alias sentence for a link, hard link or
     other non-plain entry, else the error's own words."""
@@ -698,7 +725,8 @@ class Bound:
         if self._absent:
             return RecordRead(name=spelling, text=None, absent=True, reason=None)
         if self._error is not None:
-            return RecordRead(name=spelling, text=None, absent=False, reason=self._error)
+            return RecordRead(name=spelling, text=None, absent=False, reason=self._error,
+                              refused_by=REFUSED_FAULT)
         where = PurePath(*self._prefix, *parts)
         try:
             # A closed root is the dup's `EBADF`, answered as a refusal like any other.
@@ -709,7 +737,8 @@ class Bound:
         except FileNotFoundError:
             return RecordRead(name=spelling, text=None, absent=True, reason=None)
         except TEXT_READ_ERRORS as e:
-            return RecordRead(name=spelling, text=None, absent=False, reason=_read_reason(e))
+            return RecordRead(name=spelling, text=None, absent=False, reason=_read_reason(e),
+                              refused_by=_refused_by(e))
         assert isinstance(text, str)
         return RecordRead(name=spelling, text=text, absent=False, reason=None)
 
@@ -1489,27 +1518,6 @@ def rooted_read(
         return None, f"{spelling}: {os.strerror(errno.ENOENT)}"
     except TEXT_READ_ERRORS as e:
         return None, f"{spelling}: {_read_reason(e)}"
-
-
-def rooted_read_plain(root: Path, name: str | PurePath, *, os_: Any = os) -> str:
-    """:func:`rooted_read` as a RAISING primitive, with :func:`read_plain`'s contract: the text
-    of the plain file at `name` under `root`, or the exception that stopped it.
-    `FileNotFoundError` means absent: the root, a holding folder or the name. A link at any
-    component below the root, or a non-plain leaf, is the alias refusal (`ELOOP` / `EMLINK`).
-    Undecodable bytes are `UnicodeDecodeError`. A name outside the relative-name grammar is
-    `ValueError`, before any open. For callers that branch on why a read failed, which
-    :func:`rooted_read`'s reason sentence cannot tell them. An alias refusal carries
-    :data:`ALIAS_READ_REFUSAL`, as :func:`read_plain`'s does, not the core's write wording."""
-    _spelling, parts = _parse_name(name)
-    try:
-        with _rooted(os_, root, parts[:-1]) as dir_fd:
-            text = _read_leaf(os_, dir_fd, parts[-1], Path(root, *parts), binary=False)
-    except OSError as e:
-        if e.errno in (errno.ELOOP, errno.EMLINK) and not isinstance(e, FileNotFoundError):
-            raise OSError(e.errno, ALIAS_READ_REFUSAL, str(Path(root, *parts))) from None
-        raise
-    assert isinstance(text, str)
-    return text
 
 
 def rooted_mkdir(root: Path, folder_name: str | PurePath, *, os_: Any = os) -> None:

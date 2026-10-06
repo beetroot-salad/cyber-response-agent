@@ -535,8 +535,8 @@ def _module(rel: str) -> ast.Module:
 
 def _decide_write_and_its_helpers() -> list[ast.AST]:
     """`decide_write` and every module-level function of `permission/files.py` it reaches by
-    name, so a baseline read moved into a helper is still in scope. `_decide_investigation_write`
-    has no production caller and is not a file-tool site, so it is not reached from here."""
+    name, so a baseline read moved into a helper is still in scope. (Its unused twin
+    `_decide_investigation_write` was deleted.)"""
     tree = _module("runtime/permission/files.py")
     funcs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
     seen: dict[str, ast.AST] = {}
@@ -685,3 +685,33 @@ def test_read_file_keeps_todays_messages(tmp_path):
     assert _refused(lambda: _tool_read_file(deps, "bin.txt")) == (
         "bin.txt is not valid UTF-8 text (binary or corrupt)"
     )
+
+
+# ---------------------------------------------------------------------------------------------
+# review round (#1208): a plain folder is "file not found", and no refusal names a host path
+
+
+def test_read_file_on_a_plain_folder_is_file_not_found_as_today(tmp_path):
+    """An ordinary folder at the name is not a plant: `read_file` says `file not found`, as
+    `is_file()` answered before the move, not the alias refusal."""
+    deps, run = _main(tmp_path)
+    (run / "sub").mkdir()
+    assert _refused(lambda: _tool_read_file(deps, "sub")) == "file not found: sub"
+
+
+@pytest.mark.parametrize("tool", ["read_file", "write_file"])
+def test_a_refusal_names_no_host_path(tool, tmp_path):
+    """The refusal a planted hard link earns names the model's own path, never the host's
+    spelling of the root (agents are not told where their run dir is)."""
+    if tool == "read_file":
+        deps, run = _main(tmp_path)
+        os.link(_host_file(tmp_path), run / "notes.txt")
+        message = _refused(lambda: _tool_read_file(deps, "notes.txt"))
+        root = run
+    else:
+        deps, corpus = _curator(tmp_path)
+        os.link(_host_file(tmp_path), corpus / "x.md")
+        message = _refused(lambda: _tool_write_file(deps, "defender/lessons/x.md", "NEW\n"))
+        root = corpus
+    assert str(tmp_path) not in message, message
+    assert str(root.resolve()) not in message, message
