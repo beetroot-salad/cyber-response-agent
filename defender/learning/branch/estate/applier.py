@@ -15,9 +15,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import field
+from typing import Any
+
 from defender._model import model
 from defender.runtime import case_ticket
-from typing import Any
 
 from ..ledger import PASSTHROUGH, PATCHED, STAGED
 from .lookups import apply_patches

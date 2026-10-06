@@ -25,8 +25,8 @@ from defender._text import as_str
 from defender._untrusted import wrap_fresh
 from defender.learning.branch.redaction import redact_model_visible
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
-from defender.runtime.payload_view import render as _render_payload
 from defender.runtime import case_ticket
+from defender.runtime.payload_view import render as _render_payload
 from defender.runtime.request_ceiling import WRITE_SUMMARY_NOW
 from defender.runtime.tools import DeadEnd
 from defender.scripts.gather_tools.record_query import (
