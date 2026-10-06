@@ -19,6 +19,7 @@ would be worse than the noise.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 from collections.abc import Iterable
 from pathlib import Path
@@ -43,17 +44,19 @@ def git_ignored(root: Path, paths: Iterable[Path]) -> frozenset[Path]:
 
 
 def _check_ignore(root: Path, batch: list[Path]) -> set[Path]:
-    payload = "\0".join(str(p) for p in batch)
+    # Bytes, not text: a filename that is not valid UTF-8 round-trips through os.fsencode /
+    # os.fsdecode, where a text pipe would raise UnicodeEncodeError and crash the gate.
+    payload = b"\0".join(os.fsencode(p) for p in batch)
     try:
         # lint-git: ok — asking git what git ignores; re-implementing .gitignore precedence
         # (negations, nested files, core.excludesFile) is the bug this exists to stop.
         proc = subprocess.run(
             ["git", "-C", str(root), "check-ignore", "--stdin", "-z"],
-            input=payload, capture_output=True, text=True, timeout=60, check=False,
+            input=payload, capture_output=True, timeout=60, check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return set()  # fail open — lint everything
     # 0 = some path ignored, 1 = none ignored (NOT an error), anything else = real failure.
     if proc.returncode not in (0, 1):
         return set()
-    return {Path(line) for line in proc.stdout.split("\0") if line}
+    return {Path(os.fsdecode(line)) for line in proc.stdout.split(b"\0") if line}
