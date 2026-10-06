@@ -250,9 +250,12 @@ def dead_scope_entries() -> dict[str, list[str]]:
             for k, v in lint_scope_lists().items()}
 
 
-#: A path-shaped token inside a baseline key.
+#: A path-shaped token inside a baseline key. A quoted token is a string literal from the
+#: source the key quotes (`lint_unbounded_whole_read` keys carry `ast.unparse` of an
+#: expression: `case_dir / 'manifest.yaml'`), not a file the key is filed under.
 _KEY_PATH = re.compile(
-    r"(?<![\w./-])((?:[\w.-]+/)*[\w.-]+\.(?:py|md|yaml|yml|json|toml|sh|txt|tsv))(?![\w/])")
+    r"(?<![\w./'\"-])((?:[\w.-]+/)*[\w.-]+\.(?:py|md|yaml|yml|json|toml|sh|txt|tsv))"
+    r"(?![\w/'\"])")
 
 
 def baselines() -> dict[str, dict[str, str]]:

@@ -725,6 +725,14 @@ jobs:
       - name: Unpinned text-io gate (utf-8 pin on every text read/write — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_unpinned_text_io.py
 
+      # Whole-file reads by path with no size limit (read_text/read_bytes outside _io, or an
+      # _io reader called with its cap off) under defender/ (#1188). The box fsize ulimit
+      # bounds what a box writes; host-written files carry their own bound, so each read is
+      # a deliberate, reasoned baseline entry saying who writes the file. Also fails,
+      # unbaselinably, if an _io reader's `limit` default drifts off READ_LIMIT.
+      - name: Unbounded whole-read gate (who writes it, what bounds it — baseline-ratcheted)
+        run: defender/.venv/bin/python scripts/lint/lint_unbounded_whole_read.py
+
       # Hand-rolled git subprocess calls under defender/ that bypass the
       # defender._git facade (git / git_status / git_commit / git_worktree_* /
       # GitError) — a ~8× dedup smell plus the spaced-path porcelain bug the
