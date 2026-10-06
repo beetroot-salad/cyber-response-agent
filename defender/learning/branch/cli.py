@@ -1069,9 +1069,10 @@ def parse_branch_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument(
         "--allow-dirty", action="store_true",
         help="launch, and record the family stamp, even though the source run, the live tree "
-             "or a sibling reported a tree git could not certify clean; waives dirt and ONLY "
-             "dirt — never a commit or scope mismatch, an absent stamp or a stamp with no "
-             "commit — and the override is NAMED in the stamp")
+             "or a sibling reported a tree git could not certify clean, or tenant knowledge "
+             "whose commit nothing proves (unversioned, unreadable, or not recorded); waives "
+             "only those — never a commit, scope or knowledge-commit mismatch, an absent stamp "
+             "or a stamp with no commit — and the override is NAMED in the stamp")
     p.add_argument("--model", default=None)
     return p.parse_args(argv)
 
