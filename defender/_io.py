@@ -174,7 +174,7 @@ class _ReadVanished(OSError):
     FileNotFoundError` (absent) catches it: it is a refusal (#1174 O3)."""
 
 
-def _capped(limit: int) -> int:
+def _read_cap(limit: int) -> int:
     """A caller's read limit, clamped to `READ_LIMIT`: it can only lower the cap (#1188 D1). A
     non-int (`None` included) is a `TypeError`, not a `ValueError`, which `TEXT_READ_ERRORS`
     would turn from a caller's bug into "unreadable"."""
@@ -211,7 +211,7 @@ def _read_plain_fd(
     as a whole read does, so no cap takes more memory than the default read. A prefix is
     byte-faithful: its text is decoded but newlines are NOT translated, because its caller
     judges bytes (a size bound, a byte compare against what it would write)."""
-    limit = _capped(limit)
+    limit = _read_cap(limit)
     if budget is not None:
         if budget <= limit:
             return _read_prefix(os_, fd, budget, binary=binary, errors=errors)
