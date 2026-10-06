@@ -1,15 +1,10 @@
 """`RunId`: a run's id as a closed value type (#1105 D12; MF-02, MF-08).
 
 Built only by `RunId.parse(text)` (a pinned id, or one read back from storage) and
-`RunId.mint(label, *, clock=)` (the host's own id). Both enforce today's grammar and case
-stability through `refuse_bad_run_id`, and a bound of 206 bytes on the id. Every refusal is
-`RunRefused`.
-
-The bound is NAME_MAX (255) minus the longest name a side-file write puts beside the run
-folder: the longest sidecar suffix (`.accounting_failures.json`, 25 bytes) plus the staged
-name `write_guarded`'s `replace` mode creates first (`.staged-` and 16 hex digits, 24 bytes),
-so 255 - 49 = 206 (R4-35..R4-37). A filesystem with a smaller NAME_MAX is not covered: the id
-has no path to ask.
+`RunId.mint(label, *, clock=)` (the host's own id). Both admit by `_run_id.run_id_fault`:
+today's grammar, case stability and a bound of 206 bytes on the id (`RUN_ID_MAX_BYTES`, whose
+derivation is there, beside the rule the host's composed ids are judged by too). Every refusal
+is `RunRefused`.
 
 Unforgeable: a direct `RunId(...)`, `RunId.__new__(RunId)` and a subclass each raise
 `RunRefused`, and every copy route (pickle, `copy.copy`, `copy.deepcopy`) rebuilds through
@@ -25,33 +20,16 @@ import datetime as _dt
 from collections.abc import Callable
 from typing import Any, NoReturn
 
-from defender._run_id import (
-    CASE_STABLE_REQUIRED, RUN_ID_ALLOWED, _utc_now, is_valid_run_id, mint_run_id,
-    refuse_bad_run_id,
-)
+from defender._run_id import RUN_ID_ALLOWED, _utc_now, mint_run_id, run_id_fault
 from defender._shown import quoted
 from defender.run_repository._errors import RunRefused
 
 #: The bound on a run id's bytes (D12.3): 255 - 25 - 24. See the module docstring.
-RUN_ID_MAX_BYTES = 206
-
-
 def _admit(text: str) -> str:
-    """`text` if it is a run id `RunId` admits, else `RunRefused`. `text` is an exact `str`."""
-    try:
-        refuse_bad_run_id(text)
-    except ValueError:
-        # Today's rule decides; its own message quotes the text whole, so the refusal names
-        # the clause that failed and quotes the text the bounded way.
-        if not is_valid_run_id(text):
-            raise RunRefused(f"{quoted(text)} is not a valid run id (allowed: "
-                             f"{RUN_ID_ALLOWED})") from None
-        raise RunRefused(f"{quoted(text)} is not case-stable ({CASE_STABLE_REQUIRED}) — use "
-                         f"{quoted(text.casefold())}") from None
-    size = len(text.encode("utf-8"))
-    if size > RUN_ID_MAX_BYTES:
-        raise RunRefused(f"{quoted(text)} is not a valid run id: {size} bytes, over the "
-                         f"{RUN_ID_MAX_BYTES}-byte bound")
+    """`text` if it is a run id `RunId` admits (`run_id_fault`), else `RunRefused`. `text` is
+    an exact `str`."""
+    if (why := run_id_fault(text)) is not None:
+        raise RunRefused(why)
     return text
 
 

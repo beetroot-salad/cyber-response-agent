@@ -35,9 +35,9 @@ from defender._shown import quoted, shown
 from defender.run_repository._errors import RunRefused
 from defender.run_repository._held import (
     EPISODES_DIRNAME, HeldRuns, Listing, hold_runs, require_accepted_tenant, require_run_id,
+    sidecar_owner,
 )
 from defender.run_repository._id import RunId
-from defender.run_repository._layout import RunPaths
 
 #: The largest record the reader accepts and the writer writes, in bytes (D3.4; owner, OP-4).
 _RECORD_CAP = 65536
@@ -56,7 +56,9 @@ def _admit_episode_id(episode_id: object) -> str:
     its text), a valid, case-stable run id (the family model's `refuse_bad_episode_id`
     rule, judged with the same two `_run_id` checks), and short enough that
     `<episode_id>.json` fits a file name. Else `RunRefused`, before any name is built or folder
-    read (OP-5)."""
+    read (OP-5). Not `_run_id.episode_id_fault`: the spec admits ids up to the file-name bound
+    here (a reader over such an id answers empty), and no record can be written for an id that
+    rule refuses, since every arm must be a `RunId` spelled `<episode_id>-<label>`."""
     if type(episode_id) is not str:
         raise RunRefused(f"an episode id must be exactly a str, not {type(episode_id).__name__}")
     if not (is_valid_run_id(episode_id) and is_case_stable_id(episode_id)):
@@ -299,7 +301,7 @@ def _admit_runs(episode_id: str, source: RunId,
     arms: dict[str, RunId] = {}
     for raw_label, run_id in items:
         label = _admit_label(raw_label, folded)
-        if RunPaths.sidecar_owner(str(run_id)) is not None:
+        if sidecar_owner(str(run_id)) is not None:
             raise RunRefused(f"arm {quoted(str(run_id))} is shaped like a host-only sidecar file")
         if str(run_id) != f"{episode_id}-{label}":
             raise RunRefused(f"arm {quoted(str(run_id))} for label {quoted(label)} is not "
@@ -328,11 +330,11 @@ def record_episode_runs(tenant: Tenant, episode_id: str, source_run_id: RunId,
     ever removed. A filesystem fault is `RunRefused` naming the path, never a raw `OSError`."""
     tenant = require_accepted_tenant(tenant)
     source = require_run_id(source_run_id, what="source run id")
-    items = list(runs.items()) if isinstance(runs, Mapping) else None
-    for _label, run_id in items or ():
+    items = list(runs.items()) if isinstance(runs, Mapping) else []
+    for _label, run_id in items:
         require_run_id(run_id, what="arm run id")
     episode_id = _admit_episode_id(episode_id)
-    if items is None:
+    if not isinstance(runs, Mapping):
         raise RunRefused(f"episode {quoted(episode_id)}: runs is not a mapping of label to "
                          f"RunId, but {type(runs).__name__}")
     arms = _admit_runs(episode_id, source, items)

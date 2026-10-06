@@ -31,12 +31,7 @@ from defender import _yaml
 from defender._episode_handle import Episode
 from defender._episode_paths import LAYOUT
 from defender._io import Bound
-from defender._run_id import (
-    CASE_STABLE_REQUIRED,
-    RUN_ID_ALLOWED,
-    is_case_stable_id,
-    is_valid_run_id,
-)
+from defender._run_id import episode_id_fault, run_id_fault
 from defender._world_label import (
     RESERVED_WORLD_LABELS, is_reserved_world_label, reserved_label_fault,
 )
@@ -641,12 +636,12 @@ def check_identities(family: Family) -> None:  # noqa: C901 — one gate over th
         # view and run-id grammars overlap but neither contains the other (the view rule admits
         # `wörld`, `a+b`, `a:b`), and the label is model-authored, so one off the run-id grammar
         # would otherwise fail in every child after the family is staged.
-        if not is_valid_run_id(f"{family.episode_id}-{label}"):
+        if (why := run_id_fault(f"{family.episode_id}-{label}")) is not None:
             raise FamilyError(
-                f"world label {label!r} cannot name this episode's sibling run "
-                f"({family.episode_id}-{label}; allowed: {RUN_ID_ALLOWED}) — each sibling is a "
-                "run dir named for its world, so a label off that grammar is refused by every "
-                "child after the whole family has been authored, staged and reviewed")
+                f"world label {label!r} cannot name this episode's sibling run: {why} — each "
+                "sibling is a run dir named for its world, so a label off the run-id rule (its "
+                "length included) is refused by every child after the whole family has been "
+                "authored, staged and reviewed")
         folded = label.casefold()
         if folded in seen:
             raise FamilyError(
@@ -767,16 +762,11 @@ def refuse_bad_episode_id(episode_id: str) -> None:
     """Refuse an episode id that cannot name a directory of its own.
 
     The id is joined into the episode dir's path and every sibling's run id, so it must be a
-    valid run id and case-stable.
+    run id with room for a sibling (`_run_id.episode_id_fault`, the one statement of the rule).
     """
-    if not is_valid_run_id(episode_id):
-        raise FamilyError(
-            f"episode id {episode_id!r} is not usable (allowed: {RUN_ID_ALLOWED}) — it names "
-            "a directory and half of every sibling's run id")
-    if not is_case_stable_id(episode_id):
-        raise FamilyError(
-            f"episode id {episode_id!r} is not usable ({CASE_STABLE_REQUIRED}) — use "
-            f"{episode_id.casefold()!r}")
+    if (why := episode_id_fault(episode_id)) is not None:
+        raise FamilyError(f"episode id {episode_id!r} is not usable: {why} — it names a "
+                          "directory and half of every sibling's run id")
 
 
 __all__ = [

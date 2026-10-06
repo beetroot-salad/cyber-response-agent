@@ -14,14 +14,19 @@ SHOWN_LIMIT = 120
 
 def quoted(value: object) -> str:
     """`value` repr-style (a control character, DEL, a C1 control or a line separator escaped),
-    bounded: a longer one is cut at `SHOWN_LIMIT` characters with a marker saying how many
-    went. A `str` is cut before it is quoted, so the result is still one valid quoted string."""
+    bounded: escaped FIRST, then cut, so the bound is on what is shown. A longer `str` keeps
+    the longest prefix whose quoted form fits in `SHOWN_LIMIT` characters (never half an
+    escape, still one valid quoted string), with a marker saying how many characters went."""
     text = repr(value)
     if len(text) <= SHOWN_LIMIT:
         return text
-    if isinstance(value, str):
-        return f"{value[:SHOWN_LIMIT]!r}…(+{len(value) - SHOWN_LIMIT} chars)"
-    return f"{text[:SHOWN_LIMIT]}…(+{len(text) - SHOWN_LIMIT} chars)"
+    if not isinstance(value, str):
+        return f"{text[:SHOWN_LIMIT]}…(+{len(text) - SHOWN_LIMIT} chars)"
+    low, high = 0, min(len(value), SHOWN_LIMIT)
+    while low < high:  # the longest prefix whose repr fits; repr grows with the prefix
+        mid = (low + high + 1) // 2
+        low, high = (mid, high) if len(repr(value[:mid])) <= SHOWN_LIMIT else (low, mid - 1)
+    return f"{value[:low]!r}…(+{len(value) - low} chars)"
 
 
 def shown(name: object) -> str:

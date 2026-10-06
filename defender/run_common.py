@@ -19,7 +19,7 @@ if str(REPO_ROOT) not in sys.path:
 from defender import _io, _provenance, _tenant  # noqa: E402
 from defender._io import guarded_mkdir  # noqa: E402
 from defender.run_repository import (  # noqa: E402
-    Run, RunId, RunPaths, RunRefused, artifact_dir, case_ref, episode_sibling_ids,
+    Run, RunId, RunPaths, RunRefused, artifact_dir, case_ref, episode_sibling_ids, sidecar_owner,
 )
 from defender.scripts.visualize._page_failed import VisualizeFailed  # noqa: E402
 
@@ -149,7 +149,7 @@ def _admit_run_id(alert: Path, run_id: str | None) -> str:
     except RunRefused as bad:
         sys.exit(f"invalid run id: {bad}")
     # The sidecar clause (D2.1): a run folder is never named like a host-only sidecar file.
-    if RunPaths.sidecar_owner(str(admitted)) is not None:
+    if sidecar_owner(str(admitted)) is not None:
         sys.exit(f"invalid run id: {str(admitted)!r} is shaped like a host-only sidecar file "
                  "beside a run folder, not a run")
     return str(admitted)

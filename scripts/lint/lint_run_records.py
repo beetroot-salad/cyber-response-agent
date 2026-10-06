@@ -190,18 +190,9 @@ def _accessor_names() -> frozenset[str]:
     from defender._episode_paths import EpisodePaths  # noqa: PLC0415
     from defender.run_repository import RunPaths, SessionPaths  # noqa: PLC0415
 
-    import inspect  # noqa: PLC0415
-
-    def accessors(owner: type) -> list[str]:
-        # A static method (`RunPaths.sidecar_owner`) answers about a name, not a path off an
-        # owner instance, so it is no accessor.
-        return [n for n in dir(owner)
-                if not isinstance(inspect.getattr_static(owner, n), staticmethod)]
-
     partial = (name for owned in PARTIAL_OWNER_ATTRS.values() for name in owned)
     return frozenset(
-        n for n in (*accessors(RunPaths), *accessors(SessionPaths), *accessors(EpisodePaths),
-                    *partial)
+        n for n in (*dir(RunPaths), *dir(SessionPaths), *dir(EpisodePaths), *partial)
         if not n.startswith("_"))
 
 

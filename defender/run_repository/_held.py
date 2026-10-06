@@ -31,7 +31,7 @@ from defender._tenant import (
 )
 from defender.run_repository._errors import RunRefused
 from defender.run_repository._id import RunId
-from defender.run_repository._layout import RunPaths
+from defender.run_repository._layout import _SIDECAR_SUFFIXES, _STAGED_TAIL
 
 #: The episode-record folder, directly in the tenant's runs folder. A leading `_` is never a
 #: run id (`RunId.parse` refuses it), so no run folder can share its name.
@@ -57,11 +57,25 @@ def require_run_id(run_id: object, *, what: str = "run id") -> RunId:
     return run_id
 
 
+def sidecar_owner(name: str) -> str | None:
+    """The run id a sidecar file named `name` belongs to — `<id>` of `<id><suffix>`, or of the
+    staged `<id><suffix>.staged-<hex>` a sidecar write creates first — or `None` when `name` is
+    not shaped like a sidecar. The one statement of the sidecar clause (#1105 D2.1, MF-21): run
+    setup and `open_run` refuse an id it answers for, and the listings take a regular file it
+    answers for as a known sidecar when `RunId.parse` admits the owner (any other such file is
+    refused). A door name of its own (owner ruling): it judges a name, not a path."""
+    bare = name[: m.start()] if (m := _STAGED_TAIL.search(name)) else name
+    for suffix in _SIDECAR_SUFFIXES:
+        if bare.endswith(suffix) and len(bare) > len(suffix):
+            return bare[: -len(suffix)]
+    return None
+
+
 def refuse_sidecar_id(run_id: RunId) -> None:
     """The sidecar clause (D2.1, MF-21) on an id: one shaped like a host-only sidecar file, or
     like the staged file a sidecar write makes first, never names a run. Judged on the name
     alone, before anything is read."""
-    if RunPaths.sidecar_owner(str(run_id)) is not None:
+    if sidecar_owner(str(run_id)) is not None:
         raise RunRefused(f"{quoted(str(run_id))} is shaped like a host-only sidecar file beside "
                          "a run folder, not a run")
 
@@ -116,7 +130,7 @@ def _list_entries(view: _io.Bound, folder: Path, *, io: Any) -> Listing:
         kind = answer.entries[name]
         if name in (TENANT_RECORD_NAME, EPISODES_DIRNAME):
             continue
-        owner = RunPaths.sidecar_owner(name)
+        owner = sidecar_owner(name)
         if kind == io.ENTRY_DIR:
             run_id = _parses(name) if owner is None else None
             if run_id is None:

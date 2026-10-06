@@ -49,6 +49,9 @@ if TYPE_CHECKING:
     from defender.run_repository._errors import (
         RunRefused,
     )
+    from defender.run_repository._held import (
+        sidecar_owner,
+    )
 
 #: Each public name and the submodule that defines it.
 _HOMES: dict[str, str] = {
@@ -72,6 +75,7 @@ _HOMES: dict[str, str] = {
     **dict.fromkeys(("open_run", "list_run_ids", "bound_runs", "run_exists",), "_lookup"),
     **dict.fromkeys(("record_episode_runs", "episode_runs", "sibling_run_ids", "episode_sibling_ids",), "_record"),
     **dict.fromkeys(("RunRefused",), "_errors"),
+    **dict.fromkeys(("sidecar_owner",), "_held"),
 }
 
 __all__ = [
@@ -89,6 +93,7 @@ __all__ = [
     "resolve_run_bundle", "contained_payload", "Run", "RunRecord", "ArchivedWorld",
     "RecordHandle", "case_ref", "RunId", "open_run", "list_run_ids", "bound_runs", "run_exists",
     "record_episode_runs", "episode_runs", "sibling_run_ids", "episode_sibling_ids", "RunRefused",
+    "sidecar_owner",
 ]
 
 

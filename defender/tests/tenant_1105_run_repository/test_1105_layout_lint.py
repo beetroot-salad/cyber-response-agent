@@ -95,7 +95,9 @@ NAMED_GATED = ("RunPaths", "RUN_LAYOUT", "SessionPaths", "WIRE_LOG_NAMES", "GATE
 NON_LAYOUT = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref", "RunId",
                         "open_run", "list_run_ids", "bound_runs", "run_exists",
                         "record_episode_runs", "episode_runs", "sibling_run_ids",
-                        "episode_sibling_ids", "RunRefused"})
+                        "episode_sibling_ids", "RunRefused",
+                        # Owner ruling (second high review): the sidecar clause's own door name.
+                        "sidecar_owner"})
 
 _VE = "scripts/visualize/visualize_episode.py"
 _CLI = "learning/branch/cli.py"

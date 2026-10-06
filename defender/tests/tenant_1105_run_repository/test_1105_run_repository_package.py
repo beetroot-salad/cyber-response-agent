@@ -67,7 +67,10 @@ HANDLE_NAMES = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "
 #: The door's 15 non-layout public names (D1.3).
 NON_LAYOUT_PUBLIC = HANDLE_NAMES | {
     "RunId", "open_run", "list_run_ids", "bound_runs", "run_exists", "record_episode_runs",
-    "episode_runs", "sibling_run_ids", "episode_sibling_ids", "RunRefused"}
+    "episode_runs", "sibling_run_ids", "episode_sibling_ids", "RunRefused",
+    # Owner ruling (second high review): the sidecar clause is a door name of its own, not a
+    # static method on `RunPaths`, so the records lint needs no static-method carve-out.
+    "sidecar_owner"}
 #: Every public name today's code from-imports from the two moved modules (R4-26).
 TODAYS_IMPORTED = frozenset({
     "Run", "case_ref", "ALERT", "CASE_ANSWER_KEY_NAMES", "GATE_METADATA_KEY", "GATHER_RAW_SHAPE",
@@ -366,11 +369,12 @@ def test_1105_the_package_holds_exactly_its_seven_pinned_submodules():  # name k
         f"{sorted(LAYOUT_NAMES - layout_public)}, extra {sorted(layout_public - LAYOUT_NAMES)}")
 
 
-def test_1105_the_door_serves_exactly_its_68_public_names():
-    """defender.run_repository.__all__ is exactly the 68 public names: the layout's 53 (the
+def test_1105_the_door_serves_exactly_its_68_public_names():  # 69 since the sidecar ruling; the spec graph cites this name
+    """defender.run_repository.__all__ is exactly the 69 public names: the layout's 53 (the
     door's layout surface equals _layout's public names, NM-06), Run, RunRecord, ArchivedWorld,
     RecordHandle, case_ref, RunId, open_run, list_run_ids, bound_runs, run_exists,
-    record_episode_runs, episode_runs, sibling_run_ids, episode_sibling_ids and RunRefused; it
+    record_episode_runs, episode_runs, sibling_run_ids, episode_sibling_ids, RunRefused and
+    sidecar_owner; it
     lists none of the layout's 10 imported names nor _check_component, _check_index, _confine,
     and serves none of them as an attribute but annotations, which the door's own
     `from __future__ import annotations` binds; every name today's code imports from the two
@@ -380,10 +384,10 @@ def test_1105_the_door_serves_exactly_its_68_public_names():
 
     served = set(door.__all__)
     assert served == LAYOUT_NAMES | NON_LAYOUT_PUBLIC, (
-        f"__all__ differs from D1.3's 68: missing "
+        f"__all__ differs from D1.3's 68 plus sidecar_owner: missing "
         f"{sorted((LAYOUT_NAMES | NON_LAYOUT_PUBLIC) - served)}, extra "
         f"{sorted(served - LAYOUT_NAMES - NON_LAYOUT_PUBLIC)}")
-    assert len(served) == 68, f"{len(served)} public names, not 68"
+    assert len(served) == 69, f"{len(served)} public names, not 69"
     layout_public = {n for n in _module_defs(ast.parse(Path(_layout.__file__).read_text(
         "utf-8"))) if not n.startswith("_")}
     assert served - NON_LAYOUT_PUBLIC == layout_public, (
@@ -465,7 +469,7 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
                   "missing = [n for n in rr.__all__ if getattr(rr, n, None) is None]\n"
                   "print(len(rr.__all__), missing)\n")
     assert proc.returncode == 0, f"not every public name imports in a fresh interpreter: {_out(proc)}"
-    assert _out(proc).split()[0] == "68", f"not every public name imports in a fresh interpreter: {_out(proc)}"
+    assert _out(proc).split()[0] == "69", f"not every public name imports in a fresh interpreter: {_out(proc)}"
     assert "[]" in _out(proc), f"not every public name imports in a fresh interpreter: {_out(proc)}"
 
 
