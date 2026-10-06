@@ -204,3 +204,85 @@ def test_the_writer_names_a_record_that_vanished_or_cannot_be_read():
     bad = _io.RecordRead(name="ep.json", text=None, absent=False, reason="not utf-8")
     with pytest.raises(R.RunRefused, match="cannot be read"):
         _record._judge_existing(bad, "{}", path=path, episode_id="ep")
+
+
+# -- the third review's findings ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["\x00" * 50, "\x01" * 120, "a" * 500, "ab\nc" * 60])
+def test_a_shown_name_is_bounded_by_what_is_shown(name):
+    """`quoted` escapes first, then cuts: the shown text stays within the limit plus its marker,
+    never ends inside an escape, and never reports a negative count."""
+    from defender._shown import SHOWN_LIMIT, quoted
+    text = quoted(name)
+    head, _sep, marker = text.partition("…(+")
+    assert len(head) <= SHOWN_LIMIT, text
+    assert "-" not in marker, text
+    assert head.endswith("'"), f"cut inside an escape: {text}"
+
+
+def _family_doc(episode_id: str, label: str) -> dict:
+    world = {"world_id": label, "role": "A", "story": "s", "axis": None,
+             "disposition_declared": "malicious", "label_basis": "policy-rule", "overlay": {}}
+    return {"episode_id": episode_id, "source_run_dir": "/runs/src", "source_run_id": "src",
+            "branch_message_id": 1, "fences_at": 1, "as_of": "2026-07-28T16:18:45Z",
+            "continuation_prompt": "go", "base_story": "b",
+            "discriminator": {"predicate": "p"}, "worlds": [world]}
+
+
+def test_a_sibling_id_over_the_bound_is_refused_before_anything_is_staged():
+    """The family gate judges `<episode_id>-<label>` by the whole run-id rule, its 206-byte
+    bound included, so an over-long sibling is refused with the manifest, not by each child
+    after authoring and staging. The episode id itself must leave room for a sibling."""
+    from defender.runtime.branch import _family
+    episode = "e" * 190
+    with pytest.raises(_family.FamilyError, match="206-byte bound"):
+        _family.check_identities(_family.parse_family(_family_doc(episode, "a" * 20)))
+    _family.check_identities(_family.parse_family(_family_doc(episode, "a" * 15)))
+    with pytest.raises(_family.FamilyError, match="no room"):
+        _family.refuse_bad_episode_id("e" * 205)
+
+
+class _HoldCount:
+    def __init__(self):
+        self.holds = 0
+
+    def __call__(self, frame, event, _arg):
+        if event == "call" and frame.f_code.co_name == "hold" and (
+                frame.f_globals.get("__name__") == "defender._io"):
+            self.holds += 1
+
+
+def test_run_setup_holds_the_runs_folder_once(tmp_path):
+    """The folder-state check and the claimed-id read share one no-follow hold."""
+    from defender import run_common
+    t = H.tenant(tmp_path / "data")
+    H.runs_folder(t)
+    alert = tmp_path / "a" / "alert.json"
+    alert.parent.mkdir()
+    alert.write_text('{"alert": 1}', encoding="utf-8")
+    seen = _HoldCount()
+    sys.setprofile(seen)
+    try:
+        run_common.materialize_run(alert, "pinned-1", tenant=t)
+    finally:
+        sys.setprofile(None)
+    assert seen.holds == 1, f"run setup held the runs folder {seen.holds} times"
+
+
+def test_a_runs_folder_that_cannot_be_opened_is_not_called_a_link(tmp_path):
+    """A hold failure other than a link says what the hold said (here: the name is too long),
+    not 'it is a link … or not a directory'."""
+    from defender import run_common
+    from defender._tenant import TenantRefused
+    with pytest.raises(TenantRefused) as refused:
+        run_common._hold_runs_base(tmp_path / ("x" * 300))
+    assert "link" not in str(refused.value), str(refused.value)
+    assert "too long" in str(refused.value), str(refused.value)
+
+
+def test_the_sidecar_clause_is_a_door_name_not_a_path_accessor():
+    assert R.sidecar_owner("r1.run-end.json") == "r1"
+    assert R.sidecar_owner("r1.run-end.json.staged-0a") == "r1"
+    assert R.sidecar_owner("r1") is None
+    assert not hasattr(R.RunPaths, "sidecar_owner")

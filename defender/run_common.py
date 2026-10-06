@@ -93,14 +93,14 @@ def materialize_run(
         runs_base = EpisodePaths(world.episode_dir).runs
     else:
         runs_base = tenant.runs
-    _refuse_unusable_runs_base(runs_base)
-    # The runs base is the host-controlled trust root; nothing above it is judged.
-    guarded_mkdir(runs_base, base=runs_base)
-    # The tenant record comes before the provenance stamp (which must match it) and before the
-    # box exists. Unlike the stamp, its failures propagate: a forged tenant is worse than no run.
-    tenant_record = _tenant.ensure_runs_base_record(runs_base, tenant.id)
-    if pinned and world is None:
-        _refuse_claimed_run_id(runs_base, run_id)
+    # One no-follow hold of the runs base serves its state check and the claimed-id read.
+    with _hold_runs_base(runs_base) as held:
+        # The tenant record comes before the provenance stamp (which must match it) and before
+        # the box exists. Unlike the stamp, its failures propagate: a forged tenant is worse
+        # than no run.
+        tenant_record = _tenant.ensure_runs_base_record(runs_base, tenant.id)
+        if pinned and world is None:
+            _refuse_claimed_run_id(held, runs_base, run_id)
     run = Run.for_tenant(tenant_record.tenant_id, run_id, runs_base=runs_base)
     run_dir = run.run_dir
     paths = RunPaths(run_dir)
@@ -155,34 +155,42 @@ def _admit_run_id(alert: Path, run_id: str | None) -> str:
     return str(admitted)
 
 
-def _refuse_unusable_runs_base(runs_base: Path) -> None:
-    """`TenantRefused` when the runs base is a link (dangling or not) or not a directory
-    (#1105 OP-2), judged by a no-follow hold of it before anything is created or read inside
-    it. Absent is fine: the caller creates it."""
+def _hold_runs_base(runs_base: Path) -> _io.Held:
+    """The runs base, held no-follow (#1105 OP-2): a link there (dangling or not), a non-directory
+    or a folder that cannot be opened is `TenantRefused` carrying the hold's own reason, before
+    anything is created or read inside it. An absent one is created first (`guarded_mkdir`; the
+    runs base is the host-controlled trust root, nothing above it is judged), then held."""
+    held = _hold_or_refuse(runs_base, absent_ok=True)
+    if held is not None:
+        return held
+    guarded_mkdir(runs_base, base=runs_base)
+    held = _hold_or_refuse(runs_base, absent_ok=False)
+    assert held is not None
+    return held
+
+
+def _hold_or_refuse(runs_base: Path, *, absent_ok: bool) -> _io.Held | None:
     try:
-        _io.hold(runs_base, follow=False).close()
+        return _io.hold(runs_base, follow=False)
     except FileNotFoundError:
-        return
+        if absent_ok:
+            return None
+        raise
     except OSError as bad:
         raise _tenant.TenantRefused(
-            f"the runs folder {runs_base} is unusable — it is a link, which is never followed, "
-            f"or not a directory ({bad.strerror or bad})") from None
+            f"the runs folder {runs_base} is unusable: {bad.strerror or bad}") from None
 
 
-def _refuse_claimed_run_id(runs_base: Path, run_id: str) -> None:
-    """Exit when an episode record in the runs base claims the pinned `run_id`: that id names
-    a sibling, not a run of its own (#1105 D3.7). Read through a no-follow hold of the runs
-    base, with no tenant compare (the record step has already judged `_tenant.json`), so a
-    record naming another tenant still claims — the fail-safe direction. A corrupt record, or
-    anything else in `_episodes` that is not a record, refuses every pinned id."""
+def _refuse_claimed_run_id(held: _io.Held, runs_base: Path, run_id: str) -> None:
+    """Exit when an episode record in the held runs base claims the pinned `run_id`: that id
+    names a sibling, not a run of its own (#1105 D3.7). No tenant compare (the record step has
+    already judged `_tenant.json`), so a record naming another tenant still claims — the
+    fail-safe direction. A corrupt record, or anything else in `_episodes` that is not a record,
+    refuses every pinned id."""
     try:
-        with _io.hold(runs_base, follow=False) as held:
-            claimed = episode_sibling_ids(held.view(), where=str(runs_base))
+        claimed = episode_sibling_ids(held.view(), where=str(runs_base))
     except RunRefused as bad:
         sys.exit(str(bad))
-    except OSError as bad:
-        raise _tenant.TenantRefused(
-            f"the runs folder {runs_base} could not be held: {bad.strerror or bad}") from None
     if RunId.parse(run_id) in claimed:
         sys.exit(f"run id {run_id!r} is claimed by an episode record in {runs_base} — it "
                  "names an episode's sibling run; pick a fresh id")
