@@ -90,7 +90,7 @@ def source_files(root: Path, excluded: Iterable[str], *, suffixes: tuple[str, ..
         if unopened:
             raise ScanBlind(f"cannot list {ascii(unopened)} under {root}: git could not open "
                             "them, and an unread directory is not certified clean")
-        rels = [r for r in rels if os.path.lexists(root / r)]  # deleted, not yet committed
+        rels = [r for r in rels if _present(root / r)]  # deleted, not yet committed
 
     def kept(rel: str) -> bool:
         parts = rel.split("/")[:-1]
@@ -107,6 +107,19 @@ def source_files(root: Path, excluded: Iterable[str], *, suffixes: tuple[str, ..
                             "gate can report on it") from None
         out.append(rel)
     return sorted(out)
+
+
+def _present(path: Path) -> bool:
+    """Is a path git listed still in the working tree? Gone (deleted, or a parent replaced by a
+    file) is not listed. Any other failure to stat it — a directory whose names git could read
+    but whose entries cannot be searched — is ScanBlind, never a silent drop."""
+    try:
+        os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError as err:
+        raise ScanBlind(f"cannot stat {ascii(str(path))}: {err.strerror}") from err
+    return True
 
 
 def _walked(root: Path, dropped: Callable[[str], bool]) -> list[str]:
