@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Unbounded whole-file read: flag a read under ``defender/`` that takes a whole file into
-memory by path, outside ``defender._io`` (#1188).
+memory by path, outside ``defender._io`` (#1188, design amendment 3).
 
 A whole-file read sizes its buffer from the file. A box-planted sparse file (``truncate -s
 1T``) once made that a ``MemoryError``, which is not an ``OSError``, so it skipped every
@@ -12,8 +12,10 @@ reader's fail-safe path and crashed the host process. Two things now bound it:
   can only lower it (#1188 D1).
 
 A direct ``read_text``/``read_bytes`` has neither guarantee for a file a HOST process writes:
-tool writes for the model, logs, queues, alert copies, backend payloads. So each one is a
-deliberate choice, marked on its line with who writes the file and what bounds it.
+tool writes for the model, logs, queues, alert copies, backend payloads. A per-site reason
+for why one is still bounded proved easy to get wrong, so production code reads through
+``_io`` instead; the only exceptions are stdlib-only modules that run where ``defender``
+cannot be imported.
 
 What it flags, under ``defender/`` production code (tests and the root ``_io.py`` excluded):
 any use of an attribute named ``read_text`` / ``read_bytes``, called or not, matched by name
@@ -31,7 +33,9 @@ The remedy is ``_io.read_text_utf8`` (for ``read_text(encoding="utf-8")``) or
 ``_io.read_bytes_capped`` (for ``read_bytes()``): the same semantics, capped. Production code
 holds no direct whole read (#1188 amendment 3). A rare deliberate exception takes
 ``# lint-whole-read: ok — <reason>`` on the read's line span; the reason must be text, not just
-dashes. The baseline ships EMPTY, so a new direct read fails CI.
+dashes. Today's exceptions are stdlib-only modules run without ``defender`` on ``sys.path``
+(``runtime/box/_image.py`` and two eval scripts). The baseline ships EMPTY, so a new direct
+read fails CI.
 
 Run from repo root:  python scripts/lint/lint_unbounded_whole_read.py
 Exit 0 = clean, 1 = new finding, 2 = scan blind.

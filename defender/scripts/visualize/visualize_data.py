@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from defender._clock import parse_iso_utc
+from defender._io import read_text_utf8
 from defender.run_repository import RUN_LAYOUT, RunPaths
 from defender._pricing import PRICING, usage_cost  # noqa: F401  (re-exported for this module's consumers)
 from defender.scripts.visualize.visualize_primitives import slugify
@@ -406,4 +407,3 @@ from defender.scripts.visualize.visualize_messages import (  # noqa: F401
     tool_usage,
     transcript_phase_map,
 )
-from defender._io import read_text_utf8

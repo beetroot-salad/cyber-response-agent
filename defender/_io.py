@@ -48,18 +48,14 @@ def read_text_utf8(path: Path, *, limit: int = READ_LIMIT) -> str:
     """The canonical text read: UTF-8 with universal newlines, as `Path.read_text` reads, and
     opened as it opens (following links, blocking). Bounded (#1174): a file over `limit`
     (at most `READ_LIMIT`) raises an `OSError`, before reading or once it grows past it."""
-    return _read_followed(path, limit=limit, errors="strict")
+    return _read_followed_text(path, limit=_read_cap(limit), errors="strict")
 
 
 def read_bytes_capped(path: Path, *, limit: int = READ_LIMIT) -> bytes:
     """`Path.read_bytes`, capped: the exact bytes (no newline translation), opened as it opens
     (following links, blocking). A file over `limit` (at most `READ_LIMIT`) raises an `OSError`,
     before reading or once it grows past it (#1188 amendment 3)."""
-    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
-    try:
-        data = _read_plain_fd(os, fd, os.fstat(fd).st_size, binary=True, limit=limit)
-    finally:
-        os.close(fd)
+    data = _read_followed(path, limit=_read_cap(limit), binary=True)
     assert isinstance(data, bytes)
     return data
 
@@ -267,15 +263,20 @@ def _read_prefix(os_: Any, fd: int, budget: int, *, binary: bool, errors: str) -
     return bytes(buf) if binary else buf.decode("utf-8", errors)
 
 
-def _read_followed(path: Path, *, limit: int, errors: str) -> str:
-    """The canonical wrappers' read: opened as `Path.read_text` opens (following links,
-    blocking, #1174 O9), then the shared step with the wrapper's `limit`."""
+def _read_followed(path: Path, *, limit: int, errors: str = "strict",
+                   binary: bool = False) -> str | bytes:
+    """The canonical wrappers' read: opened as `Path.read_text`/`read_bytes` open (following
+    links, blocking, #1174 O9), then the shared step with the wrapper's `limit`."""
     fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
     try:
-        text = _read_plain_fd(os, fd, os.fstat(fd).st_size, binary=False, errors=errors,
+        return _read_plain_fd(os, fd, os.fstat(fd).st_size, binary=binary, errors=errors,
                               limit=limit)
     finally:
         os.close(fd)
+
+
+def _read_followed_text(path: Path, *, limit: int, errors: str) -> str:
+    text = _read_followed(path, limit=limit, errors=errors)
     assert isinstance(text, str)
     return text
 
@@ -1048,9 +1049,10 @@ def read_jsonl_rows_report(
     account for lost evidence. Bounded like :func:`read_text_utf8` (`limit`, #1174): a file
     over it raises an `OSError`.
     """
+    limit = _read_cap(limit)  # before the absent-file answer: `None` is refused either way
     if not path.is_file():
         return [], 0
-    return _jsonl_rows_of(_read_followed(path, limit=limit, errors="replace"))
+    return _jsonl_rows_of(_read_followed_text(path, limit=limit, errors="replace"))
 
 
 def iter_plain_jsonl_rows(path: Path) -> Iterator[dict]:

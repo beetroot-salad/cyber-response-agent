@@ -736,7 +736,7 @@ jobs:
       # defender/_io (#1188). Every production read goes through _io.read_text_utf8 /
       # read_bytes_capped, capped at READ_LIMIT, which a caller can only lower. A rare
       # exception takes `# lint-whole-read: ok — <reason>`. The baseline ships EMPTY.
-      - name: Unbounded whole-read gate (who writes it, what bounds it — baseline-ratcheted)
+      - name: Unbounded whole-read gate (read through _io's capped readers — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_unbounded_whole_read.py
 
       # Hand-rolled git subprocess calls under defender/ that bypass the

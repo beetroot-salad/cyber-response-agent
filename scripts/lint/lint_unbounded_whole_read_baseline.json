@@ -1,4 +1,4 @@
 {
-  "//": "lint_unbounded_whole_read baseline \u2014 whole-file read_text/read_bytes by path outside defender/_io (#1188). Fingerprint is defender/<file>:<function>:<kind>. This baseline ships EMPTY: a deliberate read carries `# lint-whole-read: ok \u2014 <who writes it, what bounds it>` on its line, and an entry here is a regression someone chose.",
+  "//": "lint_unbounded_whole_read baseline — whole-file read_text/read_bytes by path outside defender/_io (#1188). Fingerprint is defender/<file>:<function>:<kind>. This baseline ships EMPTY: read through _io.read_text_utf8 / read_bytes_capped, or mark a rare exception `# lint-whole-read: ok — <reason>` on its line. An entry here is a regression someone chose.",
   "entries": {}
 }
