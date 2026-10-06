@@ -40,7 +40,7 @@ import sys
 from pathlib import Path
 
 from _baseline import Finding, gate
-from _astlib import ScanBlind, module_env, read_and_parse, str_value
+from _astlib import ScanBlind, module_env, read_and_parse, str_value, source_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCOPE = REPO_ROOT / "defender"
@@ -62,10 +62,6 @@ _READ_SUBCOMMANDS = frozenset({
 #: Below this many literal tokens (a bare `show`) the shape says nothing about how the answer
 #: was derived and would pair unrelated calls.
 _MIN_SHAPE_TOKENS = 2
-
-
-def _in_scope(path: Path) -> bool:
-    return not any(part in EXCLUDED_DIRS for part in path.parts)
 
 
 def _is_test_module(rel: str) -> bool:
@@ -148,9 +144,7 @@ def _shapes_in(rel: str, tree: ast.Module, lines: list[str]) -> dict[str, int]:
 def _scan() -> list[Finding]:
     prod: dict[str, str] = {}                       # shape -> "file:line" of a producer
     tests: dict[str, dict[str, int]] = {}           # test rel -> {shape: line}
-    for path in sorted(SCOPE.rglob("*.py")):
-        if not _in_scope(path):
-            continue
+    for path in (SCOPE / _r for _r in source_files(SCOPE, EXCLUDED_DIRS)):
         rel = path.relative_to(REPO_ROOT).as_posix()
         text, tree = read_and_parse(path, rel)
         shapes = _shapes_in(rel, tree, text.splitlines())

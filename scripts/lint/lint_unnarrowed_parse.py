@@ -68,10 +68,10 @@ import sys
 from pathlib import Path
 
 try:  # package import in tests
-    from ._astlib import ModuleEnv, ScanBlind, callee, module_env, read_and_parse, root_name
+    from ._astlib import ModuleEnv, ScanBlind, callee, module_env, read_and_parse, root_name, source_files
     from ._baseline import Finding, gate
 except ImportError:  # direct ``python scripts/lint/...`` execution
-    from _astlib import ModuleEnv, ScanBlind, callee, module_env, read_and_parse, root_name
+    from _astlib import ModuleEnv, ScanBlind, callee, module_env, read_and_parse, root_name, source_files
     from _baseline import Finding, gate
 
 
@@ -123,10 +123,6 @@ NARROWERS = frozenset({
 # Methods whose receiver is a value (so `callee()` is None) and whose contract is the shape
 # check: pydantic's validators.
 NARROWING_METHODS = frozenset({"model_validate", "model_validate_json", "validate_python"})
-
-
-def _in_scope(path: Path, scope: Path) -> bool:
-    return not any(part in EXCLUDED_DIRS for part in path.relative_to(scope).parts)
 
 
 def _relative(path: Path, scope: Path) -> str:
@@ -394,9 +390,7 @@ def _unowned_iso_parses(
 
 def _scan(scope: Path) -> list[Finding]:
     findings: list[Finding] = []
-    for path in sorted(scope.rglob("*.py")):
-        if not _in_scope(path, scope):
-            continue
+    for path in (scope / _r for _r in source_files(scope, EXCLUDED_DIRS)):
         rel = _relative(path, scope)
         text, tree = read_and_parse(path, rel)
         env = module_env(tree)

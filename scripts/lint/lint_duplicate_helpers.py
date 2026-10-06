@@ -41,7 +41,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from _baseline import Finding, gate
-from _astlib import ScanBlind, read_and_parse
+from _astlib import ScanBlind, read_and_parse, source_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
@@ -131,7 +131,7 @@ def _collect() -> dict[str, list[tuple[str, int, str]]]:
     """name -> list of (rel_path, lineno, body_fingerprint) for every
     module-level def across in-scope defender/ source."""
     table: dict[str, list[tuple[str, int, str]]] = defaultdict(list)
-    for path in sorted(DEFENDER.rglob("*.py")):
+    for path in (DEFENDER / _r for _r in source_files(DEFENDER, EXCLUDED_DIRS)):
         if not _in_scope(path):
             continue
         text, tree = read_and_parse(path, path.relative_to(REPO_ROOT).as_posix())

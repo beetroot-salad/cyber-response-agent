@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 from _baseline import Finding, gate
-from _astlib import ScanBlind, read_and_parse
+from _astlib import ScanBlind, read_and_parse, source_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
@@ -35,11 +35,6 @@ BASELINE_PATH = Path(__file__).with_name("lint_monkeypatch_baseline.json")
 EXCLUDED_DIRS = (".venv", "__pycache__")
 
 SUPPRESS = "lint-monkeypatch: ok"
-
-
-def _in_scope(path: Path) -> bool:
-    rel = path.relative_to(DEFENDER)
-    return not any(part in EXCLUDED_DIRS for part in rel.parts)
 
 
 def _is_monkeypatch_setattr(node: ast.Call) -> bool:
@@ -81,9 +76,7 @@ def _suppressed(node: ast.Call, lines: list[str]) -> bool:
 
 def _scan() -> list[Finding]:
     findings: list[Finding] = []
-    for path in sorted(DEFENDER.rglob("*.py")):
-        if not _in_scope(path):
-            continue
+    for path in (DEFENDER / _r for _r in source_files(DEFENDER, EXCLUDED_DIRS)):
         text, tree = read_and_parse(path, path.relative_to(REPO_ROOT).as_posix())
         lines = text.splitlines()
         rel = path.relative_to(REPO_ROOT).as_posix()

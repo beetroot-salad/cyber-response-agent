@@ -31,7 +31,7 @@ import ast
 import sys
 from pathlib import Path
 
-from _astlib import ScanBlind, callee, module_env, read_and_parse
+from _astlib import ScanBlind, callee, module_env, read_and_parse, source_files
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -50,10 +50,6 @@ _ADVICE = {
     "load": "raw PyYAML load (accepts aliases) — use defender._yaml.safe_load",
     "dump": "raw PyYAML dump (writes aliases) — use defender._yaml.safe_dump",
 }
-
-
-def _in_scope(path: Path) -> bool:
-    return not any(part in EXCLUDED_DIRS for part in path.parts)
 
 
 def _is_test_module(rel: str) -> bool:
@@ -104,9 +100,7 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
 def _scan(root: Path) -> list[Finding]:
     """Findings under ``root``, fingerprints relative to it (drivable on a tmp tree)."""
     findings: list[Finding] = []
-    for path in sorted(root.rglob("*.py")):
-        if not _in_scope(path):
-            continue
+    for path in (root / _r for _r in source_files(root, EXCLUDED_DIRS)):
         rel = path.relative_to(root).as_posix()
         # By path, not basename: a second module named `_yaml.py` is not the canonical one.
         if rel == CANONICAL_MODULE or _is_test_module(rel):

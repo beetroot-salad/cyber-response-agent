@@ -54,7 +54,6 @@ import argparse
 import ast
 import collections
 import dataclasses
-import os
 import sys
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
@@ -757,17 +756,16 @@ def layout_names(root: Path) -> frozenset[str]:
 
 
 def sweep_files(root: Path) -> list[Path]:
-    """Every `.py` in the sweep: `root` minus `evals/` and `tests/`, caches, hidden directories
-    and venvs (pruned before descent)."""
-    out: list[Path] = []
-    for top, dirs, files in os.walk(root):
-        dirs[:] = sorted(
-            d for d in dirs
-            if not (d.startswith(".") or d in ("__pycache__", "venv", "tests")
-                    or (Path(top) == root and d == "evals")
-                    or (Path(top, d) / "pyvenv.cfg").is_file()))
-        out.extend(Path(top) / f for f in sorted(files) if f.endswith(".py"))
-    return out
+    """Every `.py` in the sweep, through the shared listing (`_astlib.source_files`): `root`
+    minus `evals/` and `tests/`, caches, hidden directories and venvs (pruned before descent),
+    and minus what git ignores."""
+
+    def pruned(d: Path) -> bool:
+        return (d.name.startswith(".") or (d.parent == root and d.name == "evals")
+                or (d / "pyvenv.cfg").is_file())
+
+    return [root / rel
+            for rel in _astlib.source_files(root, ("__pycache__", "venv", "tests"), prune=pruned)]
 
 
 def _row_of(rel: str) -> str | None:

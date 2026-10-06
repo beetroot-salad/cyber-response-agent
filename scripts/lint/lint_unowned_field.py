@@ -45,7 +45,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from _baseline import Finding, gate
-from _astlib import ScanBlind, read_and_parse
+from _astlib import ScanBlind, read_and_parse, source_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
@@ -63,15 +63,8 @@ EXCLUDED_DIRS = (".venv", "runs")
 SUPPRESS = "lint-owns: ok"
 
 
-def _in_scope(path: Path) -> bool:
-    return not any(part in EXCLUDED_DIRS for part in path.relative_to(DEFENDER).parts)
-
-
 def _sources() -> list[tuple[Path, str]]:
-    return sorted(
-        ((p, p.relative_to(REPO_ROOT).as_posix()) for p in DEFENDER.rglob("*.py") if _in_scope(p)),
-        key=lambda pair: pair[1],
-    )
+    return [(DEFENDER / rel, f"defender/{rel}") for rel in source_files(DEFENDER, EXCLUDED_DIRS)]
 
 
 def _suppressed(source: str, node: ast.AST) -> bool:

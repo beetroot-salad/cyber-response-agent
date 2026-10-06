@@ -50,7 +50,7 @@ import sys
 from pathlib import Path
 
 from _baseline import Finding, gate
-from _astlib import ScanBlind, read_and_parse
+from _astlib import ScanBlind, read_and_parse, source_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
@@ -249,7 +249,7 @@ def _scan_file(
 
 def _corpus(root: Path) -> list[tuple[str, ast.Module, list[str]]]:
     out: list[tuple[str, ast.Module, list[str]]] = []
-    for path in sorted(root.rglob("*.py")):
+    for path in (root / _r for _r in source_files(root, EXCLUDED_DIRS)):
         if not _in_scope(path, root):
             continue
         rel = path.relative_to(root.parent).as_posix()

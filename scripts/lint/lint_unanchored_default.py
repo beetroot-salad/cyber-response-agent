@@ -48,7 +48,7 @@ import sys
 from pathlib import Path
 
 from _baseline import Finding, gate
-from _astlib import ScanBlind, read_and_parse
+from _astlib import ScanBlind, read_and_parse, source_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
@@ -57,11 +57,6 @@ BASELINE_PATH = Path(__file__).with_name("lint_unanchored_default_baseline.json"
 EXCLUDED_DIRS = (".venv", "__pycache__")
 
 SUPPRESS = "lint-default: ok"
-
-
-def _in_scope(path: Path) -> bool:
-    rel = path.relative_to(DEFENDER)
-    return not any(part in EXCLUDED_DIRS for part in rel.parts)
 
 
 def _param_names(func: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
@@ -191,9 +186,7 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
 
 def _scan() -> list[Finding]:
     findings: list[Finding] = []
-    for path in sorted(DEFENDER.rglob("*.py")):
-        if not _in_scope(path):
-            continue
+    for path in (DEFENDER / _r for _r in source_files(DEFENDER, EXCLUDED_DIRS)):
         text, tree = read_and_parse(path, path.relative_to(REPO_ROOT).as_posix())
         rel = path.relative_to(REPO_ROOT).as_posix()
         findings.extend(_scan_file(rel, tree, text.splitlines()))

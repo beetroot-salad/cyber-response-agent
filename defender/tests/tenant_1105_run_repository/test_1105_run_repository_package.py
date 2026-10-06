@@ -641,8 +641,13 @@ def test_1105_the_package_is_not_ignored_and_run_data_still_is():
     assert still.returncode == 0, "run data under defender/runs/ is no longer ignored (D11)"
 
 
+def _listed_by(lint, path: Path) -> bool:
+    """Would the shared listing a lint builds over `defender/` keep `path`?"""
+    return not set(path.relative_to(H.DEFENDER).parts[:-1]) & set(lint.EXCLUDED_DIRS)
+
+
 def test_1105_every_repo_gate_that_sweeps_defender_sees_the_package():
-    """Each of the four lints' _in_scope admits every package file, and neither
+    """Each of the four lints' scope admits every package file, and neither
     test_1120_censuses._SKIPPED_PARTS nor _spec1120._CHECKOUT_IGNORE contains a part of
     defender/run_repository/. Positive control: each rejects the same files under defender/runs/,
     the name the package did not take (R4-34)."""
@@ -656,8 +661,10 @@ def test_1105_every_repo_gate_that_sweeps_defender_sees_the_package():
     scopes = {
         "lint_duplicate_helpers": lambda p: lint_duplicate_helpers._in_scope(p),
         "lint_borrowed_vocabulary": lambda p: lint_borrowed_vocabulary._in_scope(p, H.DEFENDER),
-        "lint_half_read_table": lambda p: lint_half_read_table._in_scope(p, H.DEFENDER),
-        "lint_unowned_field": lambda p: lint_unowned_field._in_scope(p),
+        # #1191: these two list through `_astlib.source_files`, which prunes a directory by
+        # its name below the root — so their scope is their `EXCLUDED_DIRS` applied that way.
+        "lint_half_read_table": lambda p: _listed_by(lint_half_read_table, p),
+        "lint_unowned_field": lambda p: _listed_by(lint_unowned_field, p),
     }
     for lint, in_scope in scopes.items():
         for name in PACKAGE_FILES:

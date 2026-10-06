@@ -54,7 +54,7 @@ import ast
 import sys
 from pathlib import Path
 
-from _astlib import ModuleEnv, ScanBlind, callee, module_env, read_and_parse, str_args
+from _astlib import ModuleEnv, ScanBlind, callee, module_env, read_and_parse, str_args, source_files
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -135,10 +135,6 @@ def _grammar_filter_calls(node: ast.AST) -> list[ast.Call]:
     return out
 
 
-def _in_scope(path: Path) -> bool:
-    return not any(part in EXCLUDED_DIRS for part in path.parts)
-
-
 def _is_test_module(rel: str) -> bool:
     p = Path(rel)
     return (
@@ -212,9 +208,7 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
 def _scan(root: Path) -> list[Finding]:
     """Findings under ``root``, fingerprints relative to it (drivable on a tmp tree)."""
     findings: list[Finding] = []
-    for path in sorted(root.rglob("*.py")):
-        if not _in_scope(path):
-            continue
+    for path in (root / _r for _r in source_files(root, EXCLUDED_DIRS)):
         rel = path.relative_to(root).as_posix()
         if _is_test_module(rel):
             continue

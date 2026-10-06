@@ -67,7 +67,8 @@ try:  # package import in tests
         module_env,
         origin,
         read_and_parse,
-        str_value,
+        str_value,        source_files,
+
     )
     from ._baseline import Finding, gate
 except ImportError:  # direct ``python scripts/lint/...`` execution
@@ -78,7 +79,8 @@ except ImportError:  # direct ``python scripts/lint/...`` execution
         module_env,
         origin,
         read_and_parse,
-        str_value,
+        str_value,        source_files,
+
     )
     from _baseline import Finding, gate
 
@@ -99,10 +101,6 @@ _LOOKUP_METHODS = frozenset({"get", "items", "keys", "values"})
 
 
 # corpus
-
-
-def _in_scope(path: Path, scope: Path) -> bool:
-    return not any(part in EXCLUDED_DIRS for part in path.relative_to(scope).parts)
 
 
 def _relative(path: Path, scope: Path) -> str:
@@ -389,9 +387,7 @@ def _scan(scope: Path = DEFENDER) -> list[Finding]:
     the gate arming and disarming.
     """
     corpus: list[tuple[str, ast.Module, list[str], ModuleEnv]] = []
-    for path in sorted(scope.rglob("*.py")):
-        if not _in_scope(path, scope):
-            continue
+    for path in (scope / _r for _r in source_files(scope, EXCLUDED_DIRS)):
         rel = _relative(path, scope)
         text, tree = read_and_parse(path, rel)
         corpus.append((rel, tree, text.splitlines(), module_env(tree)))

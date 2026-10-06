@@ -37,7 +37,7 @@ import ast
 import sys
 from pathlib import Path
 
-from _astlib import read_and_parse
+from _astlib import read_and_parse, source_files
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -46,10 +46,6 @@ BASELINE_PATH = Path(__file__).with_name("lint_unguarded_verb_dispatch_baseline.
 
 EXCLUDED_DIRS = (".venv", "__pycache__")
 SUPPRESS_MARKER = "lint-verb-dispatch: ok"
-
-
-def _in_scope(path: Path) -> bool:
-    return not any(part in EXCLUDED_DIRS for part in path.parts)
 
 
 def _is_test_module(rel: str) -> bool:
@@ -161,9 +157,7 @@ HEADER = (
 
 def _scan() -> list[Finding]:
     findings: list[Finding] = []
-    for path in sorted(SCOPE.rglob("*.py")):
-        if not _in_scope(path):
-            continue
+    for path in (SCOPE / _r for _r in source_files(SCOPE, EXCLUDED_DIRS)):
         rel = path.relative_to(REPO_ROOT).as_posix()
         try:
             text, tree = read_and_parse(path, rel)

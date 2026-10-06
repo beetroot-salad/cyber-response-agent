@@ -67,7 +67,7 @@ import ast
 import sys
 from pathlib import Path
 
-from _astlib import ScanBlind, read_and_parse
+from _astlib import ScanBlind, read_and_parse, source_files
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -82,10 +82,6 @@ SUPPRESS_MARKER = "lint-ast-resolve: ok"
 
 #: The resolver itself, which must read `.func.id`, `.asname` and `.module`.
 OWNER = REPO_ROOT / "scripts" / "lint" / "_astlib.py"
-
-
-def _in_scope(path: Path) -> bool:
-    return not any(part in EXCLUDED_DIRS for part in path.parts)
 
 
 def _reaches_the_resolver(text: str) -> bool:
@@ -214,8 +210,8 @@ def main(argv: list[str]) -> int:
     for scope in SCOPES:
         if not scope.exists():
             continue
-        for path in sorted(scope.rglob("*.py")):
-            if not _in_scope(path) or path.resolve() == OWNER.resolve():
+        for path in (scope / _r for _r in source_files(scope, EXCLUDED_DIRS)):
+            if path.resolve() == OWNER.resolve():
                 continue
             rel = path.relative_to(REPO_ROOT).as_posix()
             try:

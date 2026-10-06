@@ -35,7 +35,7 @@ import sys
 from pathlib import Path
 
 from _baseline import Finding, gate
-from _astlib import ScanBlind, read_and_parse
+from _astlib import ScanBlind, read_and_parse, source_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCOPE = REPO_ROOT / "defender"
@@ -45,10 +45,6 @@ EXCLUDED_DIRS = (".venv", "__pycache__")
 # The facade itself is the one sanctioned git-subprocess site.
 EXCLUDED_FILES = ("defender/_git.py",)
 SUPPRESS_MARKER = "lint-git: ok"
-
-
-def _in_scope(path: Path) -> bool:
-    return not any(part in EXCLUDED_DIRS for part in path.parts)
 
 
 def _is_test_module(rel: str) -> bool:
@@ -115,9 +111,7 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
 
 def _scan() -> list[Finding]:
     findings: list[Finding] = []
-    for path in sorted(SCOPE.rglob("*.py")):
-        if not _in_scope(path):
-            continue
+    for path in (SCOPE / _r for _r in source_files(SCOPE, EXCLUDED_DIRS)):
         rel = path.relative_to(REPO_ROOT).as_posix()
         if rel in EXCLUDED_FILES:
             continue

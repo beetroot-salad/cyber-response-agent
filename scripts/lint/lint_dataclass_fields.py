@@ -43,7 +43,7 @@ import ast
 import sys
 from pathlib import Path
 
-from _astlib import ScanBlind, read_and_parse
+from _astlib import ScanBlind, read_and_parse, source_files
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -54,10 +54,6 @@ EXCLUDED_DIRS = (".venv", "__pycache__")
 
 ATTR = "__dataclass_fields__"
 SUPPRESS_MARKERS = ("lint-dataclass-fields: ok",)
-
-
-def _in_scope(path: Path) -> bool:
-    return not any(part in EXCLUDED_DIRS for part in path.parts)
 
 
 def _is_test_module(rel: str) -> bool:
@@ -126,9 +122,7 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
 
 def _scan(root: Path) -> list[Finding]:
     findings: list[Finding] = []
-    for path in sorted(root.rglob("*.py")):
-        if not _in_scope(path):
-            continue
+    for path in (root / _r for _r in source_files(root, EXCLUDED_DIRS)):
         rel = path.relative_to(root).as_posix()
         text, tree = read_and_parse(path, rel)
         findings.extend(_scan_file(rel, tree, text.splitlines()))
