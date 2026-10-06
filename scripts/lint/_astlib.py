@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import ast
 import builtins
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -42,8 +42,25 @@ _BUILTIN_NAMES = frozenset(dir(builtins))
 
 
 class ScanBlind(RuntimeError):
-    """A file inside a gate's own scan scope could not be read or parsed. The gate cannot
-    report on what it did not read, and must not report clean."""
+    """A file inside a gate's own scan scope could not be read or parsed, or a path the scope
+    is defined by is gone. The gate cannot report on what it did not read, and must not report
+    clean."""
+
+
+def require_paths(root: Path, entries: Iterable[str]) -> None:
+    """Raise ScanBlind naming every entry (root-relative; a trailing `/` marks a directory)
+    that does not exist under `root`.
+
+    A gate whose scope is a fixed list of paths calls this over the real repo only — a planted
+    or partial tree under test is meant to hold a subset. Without it, a move that takes a listed
+    module elsewhere leaves the gate scanning less and still exiting 0.
+    """
+    missing = sorted(
+        rel for rel in entries
+        if not ((root / rel).is_dir() if rel.endswith("/") else (root / rel).exists()))
+    if missing:
+        raise ScanBlind(f"scope entries missing under {root}: {missing} — whatever lived there "
+                        "left the scan; point the list at where it moved")
 
 
 def read_and_parse(path: Path, rel: str) -> tuple[str, ast.Module]:

@@ -30,18 +30,23 @@ A source file the sweep cannot parse is reported as a finding, never skipped and
 of the whole sweep (`_astlib.ScanBlind` is caught per file).
 
 Run from repo root:  python scripts/lint/lint_run_records.py [--render]
-Exit 0 = clean and the page is up to date, 1 = findings or a stale render, 2 = could not run.
+Exit 0 = clean and the page is up to date, 1 = findings or a stale render, 2 = could not run,
+or the sweep's scope is not closed over this repo (a listed dir gone, or a defender/ dir holding
+source that is neither swept nor in UNSCANNED_TREES).
 """
 from __future__ import annotations
 
 import ast
 import csv
+import os
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from _astlib import PARTIAL_OWNER_ATTRS, ScanBlind, module_env, owner_derived, read_and_parse
+from _astlib import (
+    PARTIAL_OWNER_ATTRS, ScanBlind, module_env, owner_derived, read_and_parse, require_paths,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = REPO_ROOT / "defender"
@@ -114,7 +119,38 @@ def _in_scope(path: Path) -> bool:
     return not any(part in EXCLUDED_DIRS for part in path.parts)
 
 
+def _holds_swept_source(directory: Path) -> bool:
+    """Does `directory` hold a `.py` the sweep would read if it were listed? Excluded dirs are
+    pruned, not walked (a venv under `defender/` is large)."""
+    for dirpath, dirnames, filenames in os.walk(directory):
+        dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIRS]
+        if any(f.endswith(".py") for f in filenames):
+            return True
+    return False
+
+
+def _require_closed_scope(root: Path) -> None:
+    """ScanBlind unless every listed sweep dir exists and every top-level directory of `root`
+    holding source is either swept or named in `UNSCANNED_TREES` — so a vanished entry or a
+    new package cannot leave the sweep while it still reports clean."""
+    require_paths(root, [f"{d}/" for d in SWEEP_DIRS])
+    unaccounted = sorted(
+        child.name for child in root.iterdir()
+        if child.is_dir() and child.name not in EXCLUDED_DIRS
+        and child.name not in SWEEP_DIRS
+        and f"defender/{child.name}" not in UNSCANNED_TREES
+        and _holds_swept_source(child))
+    if unaccounted:
+        raise ScanBlind(f"defender/ directories holding source that the sweep neither covers nor "
+                        f"declares unscanned: {unaccounted} — add each to SWEEP_DIRS, or to "
+                        "UNSCANNED_TREES as defender/<dir> with the reason it is out of scope")
+
+
 def sweep_files(root: Path = DEFENDER) -> list[Path]:
+    """Every file the gate sweeps under `root`. Over this repo, ScanBlind when the scope is not
+    closed (`_require_closed_scope`); a planted tree under test holds a subset on purpose."""
+    if root.resolve() == DEFENDER.resolve():
+        _require_closed_scope(root)
     files: list[Path] = []
     if SWEEP_TOP_LEVEL:
         files.extend(p for p in root.glob("*.py") if _in_scope(p))
@@ -512,7 +548,11 @@ def main(argv: list[str] | None = None) -> int:
         PAGE.write_text(rendered, encoding="utf-8")
         print(f"[lint_run_records] rendered -> {PAGE.relative_to(REPO_ROOT)}")
         page = rendered
-    found = scan()
+    try:
+        found = scan()
+    except ScanBlind as exc:
+        print(f"[lint_run_records] {exc}", file=sys.stderr)
+        return 2
     if found:
         print(f"\n[lint_run_records] {len(found)} finding(s):")
         for f in found:

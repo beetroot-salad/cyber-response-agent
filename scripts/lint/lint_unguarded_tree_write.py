@@ -33,7 +33,7 @@ import ast
 import sys
 from pathlib import Path
 
-from _astlib import ScanBlind, ModuleEnv, callee, module_env, read_and_parse
+from _astlib import ScanBlind, ModuleEnv, callee, module_env, read_and_parse, require_paths
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -198,6 +198,9 @@ def main(
         print(f"scan scope not found at {root}", file=sys.stderr)
         return 2
     try:
+        if root.resolve() == SCOPE.resolve():
+            # Over this repo only: a planted tree under test holds a subset on purpose.
+            require_paths(root, LINT_HARD_GATED_MODULES)
         findings = _scan(root)
     except ScanBlind as exc:
         print(f"lint_unguarded_tree_write: {exc}", file=sys.stderr)

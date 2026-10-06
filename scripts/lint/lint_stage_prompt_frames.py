@@ -143,6 +143,10 @@ def main(
     scope: Path = LEARNING,
     baseline_path: Path = BASELINE_PATH,
 ) -> int:
+    if not scope.is_dir():
+        # An absent scope rglobs to nothing: a scan that proved nothing, never a clean result.
+        print(f"lint_stage_prompt_frames: scan scope not found at {scope}", file=sys.stderr)
+        return 2
     try:
         findings = _scan(scope)
     except ScanBlind as exc:
