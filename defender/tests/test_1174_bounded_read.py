@@ -828,13 +828,11 @@ def test_o1_the_wrappers_take_a_per_caller_limit(tmp_path):
         _io.read_text_utf8(p, limit=10)
     assert _io.read_text_soft(p, limit=10)[0] is None
     assert _io.read_text_utf8(p, limit=100) == "x" * 100
-    big = sparse(tmp_path / "big.jsonl", 64 * MiB + 1)
-    assert _io.read_jsonl_rows_report(big, limit=None) == ([], 1)
 
 
 def test_o1_the_wire_log_reader_reads_past_the_default_limit(tmp_path):
-    """`visualize_messages.load_messages` reads the wire log (up to 115 MB seen) and passes
-    `limit=None`: an operator tool over a host-written log."""
+    """`visualize_messages.load_messages` reads the wire log (up to 115 MB seen) by streaming it
+    row by row (#1188 D2): an operator tool over a host-written log, never a whole read."""
     run_dir = run_dir_at(tmp_path)
     wire = RunPaths(run_dir).wire_log
     wire.parent.mkdir(parents=True, exist_ok=True)
@@ -976,7 +974,7 @@ def test_h3_a_valid_state_padded_past_the_limit_reads_as_tripped(tmp_path):
     assert CB.is_tripped(run_dir, "elastic") is True
 
 
-# -- H2, H12: limit=None reads the whole file ------------------------------------------------
+# -- H2, H12 (amended by #1188 D1/D2): the cap only lowers; the wire log streams ------------
 
 
 def _rows_around_a_hole(path: Path) -> None:
@@ -989,23 +987,62 @@ def _rows_around_a_hole(path: Path) -> None:
         f.write(b'\n{"n": 2}\n')
 
 
-def test_h2_the_wire_log_reads_every_row_past_the_default_limit(tmp_path):
+def test_h2_the_wire_log_streams_every_row_past_the_cap(tmp_path):
+    """The wire log is past the cap, so a whole read refuses it; the streaming reader still
+    yields every row, and so does the visualizer that uses it."""
     run_dir = run_dir_at(tmp_path)
-    _rows_around_a_hole(RunPaths(run_dir).wire_log)
+    wire = RunPaths(run_dir).wire_log
+    _rows_around_a_hole(wire)
     from defender.scripts.visualize.visualize_data import load_messages
     assert load_messages(run_dir) == [{"n": 1}, {"n": 2}]
-    assert _io.read_jsonl_rows(RunPaths(run_dir).wire_log, limit=None) == [{"n": 1}, {"n": 2}]
+    assert list(_io.iter_plain_jsonl_rows(wire)) == [{"n": 1}, {"n": 2}]
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_jsonl_rows(wire)
 
 
-def test_h12_the_text_wrappers_read_past_the_default_limit_with_no_limit(tmp_path):
+def test_h2_the_streaming_reader_skips_non_rows_and_reads_nothing_when_absent(tmp_path):
+    p = tmp_path / "log.jsonl"
+    p.write_text('{"a": 1}\nnot json\n\n[1, 2]\n{"b": 2}', encoding="utf-8")
+    assert list(_io.iter_plain_jsonl_rows(p)) == [{"a": 1}, {"b": 2}]
+    assert list(_io.iter_plain_jsonl_rows(tmp_path / "absent.jsonl")) == []
+
+
+def test_h2_the_streaming_reader_refuses_a_planted_link(tmp_path):
+    """Opened as `read_plain` opens: no-follow, plain regular file. Control: the link's
+    target, read by its own name, streams."""
+    target = tmp_path / "real.jsonl"
+    target.write_text('{"a": 1}\n', encoding="utf-8")
+    link = tmp_path / "link.jsonl"
+    link.symlink_to(target)
+    assert list(_io.iter_plain_jsonl_rows(target)) == [{"a": 1}]
+    with pytest.raises(OSError, match=_io.ALIAS_READ_REFUSAL):
+        list(_io.iter_plain_jsonl_rows(link))
+
+
+@pytest.mark.parametrize("raised", [64 * MiB + 2, 128 * MiB, 10 ** 12])
+def test_h12_a_caller_cannot_raise_the_cap(tmp_path, raised):
+    """`limit` only lowers: a caller asking for more than READ_LIMIT still gets READ_LIMIT, so
+    a file one byte past it is refused by every wrapper, however the call is spelled."""
     p = sparse(tmp_path / "big.txt", 64 * MiB + 1)
-    text = _io.read_text_utf8(p, limit=None)
-    assert len(text) == 64 * MiB + 1
-    del text
-    soft, reason = _io.read_text_soft(p, limit=None)
-    assert reason is None
-    assert soft is not None
-    assert len(soft) == 64 * MiB + 1
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_text_utf8(p, limit=raised)
+    soft, reason = _io.read_text_soft(p, limit=raised)
+    assert soft is None
+    assert reason
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_jsonl_rows_report(p, limit=raised)
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_jsonl_rows(p, limit=raised)
+
+
+def test_h12_the_cap_has_no_off_switch(tmp_path):
+    """`None` is not a limit any more (#1188 D1): it is refused before any byte is read, not
+    taken as "no bound". Control: the default reads a file under the cap."""
+    p = tmp_path / "small.txt"
+    p.write_text("x" * 100, encoding="utf-8")
+    assert _io.read_text_utf8(p) == "x" * 100
+    with pytest.raises(TypeError):
+        _io.read_text_utf8(p, limit=None)  # type: ignore[arg-type]
 
 
 # -- H4, H5: a size-0 descriptor (a pipe) reads to EOF, bounded as it goes -------------------
