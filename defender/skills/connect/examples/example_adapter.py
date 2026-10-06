@@ -28,7 +28,7 @@ def _config(ctx: VerbContext) -> dict[str, str]:
     adapter reads its configuration from the record, so an exported variable changes nothing a
     run addresses. (A credentialed system has no secret delivery yet: #1163.)
     `load_config` strips the prefix and raises `ConfigFault` (infra, exit 2) for a system with no
-    config, one on an unimplemented access method, or a missing or blank required key."""
+    config, or a missing or blank required key."""
     return _stub_transport.load_config(ctx, SYSTEM, PREFIX, ("URL_BASE", "TIMEOUT_SEC"))
 
 

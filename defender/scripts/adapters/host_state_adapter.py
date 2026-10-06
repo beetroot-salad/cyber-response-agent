@@ -15,7 +15,7 @@ if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
 from defender import _clock
 from defender.runtime.verbs import VerbContext
 from defender.scripts.adapters import _stub_transport as transport
-from defender.scripts.adapters.confinement import confine_host_state_call
+from defender.scripts.adapters.confinement import ConfinementFault
 from defender.scripts.adapters.faults import TransportFault, UpstreamFault
 
 SYSTEM = "host-state"
@@ -27,6 +27,31 @@ SAFE_USERNAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9._-]{0,63}$")
 SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9_./@:+-]+$")
 DEFAULT_TIMEOUT_SEC = 15
 HEALTH_TIMEOUT_SEC = 10
+
+HOST_STATE_PROGRAMS: frozenset[str] = frozenset({
+    "ps", "cat", "getent", "sha256sum", "dpkg-query",
+})
+
+
+def confine_host(host: str) -> str:
+    if host not in KNOWN_HOSTS:
+        raise ConfinementFault(
+            f"host {host!r} is not in the declared host-state inventory "
+            f"({', '.join(KNOWN_HOSTS)})"
+        )
+    return host
+
+
+def confine_host_state_call(program: str, host: str) -> None:
+    """Both halves of the host-state rule: the program against the allowlist, and the container
+    target against the declared inventory (`cat` inside the ticket store would pass the program
+    check alone)."""
+    if program not in HOST_STATE_PROGRAMS:
+        raise ConfinementFault(
+            f"host-state program {program!r} is not in the declared allowlist "
+            f"{sorted(HOST_STATE_PROGRAMS)}"
+        )
+    confine_host(host)
 
 
 def _exec(

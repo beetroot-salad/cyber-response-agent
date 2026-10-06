@@ -853,12 +853,11 @@ def test_o8_example_reads_record(tmp_path, monkeypatch):
     try:
         base = f"http://127.0.0.1:{server.server_address[1]}"
         root, folder = _tenant(tmp_path, "oex")
-        # The entry carries the example's own key spelling and its prefixed one, plus a complete
-        # access method, so the test coins none of the example's key names.
+        # The entry carries the example's own key spelling and its prefixed one, and no docker
+        # access method: the example calls its system directly, so it must not need one.
         S.write_config(folder, "example", S.render_env({
             "URL_BASE": base, "TIMEOUT_SEC": "5", "EXAMPLE_URL_BASE": base,
-            "EXAMPLE_TIMEOUT_SEC": "5", "EXAMPLE_TRANSPORT": S.DOCKER_EXEC,
-            "EXAMPLE_DOCKER_CONTEXT": S.context_name("oex", "example")}))
+            "EXAMPLE_TIMEOUT_SEC": "5"}))
         record = S.resolve(root)
         S.config_path(folder, "example").unlink()
         assert not S.config_path(folder, "example").exists(), "precondition: no config.env on disk"

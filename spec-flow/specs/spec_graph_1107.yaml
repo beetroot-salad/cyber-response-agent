@@ -1306,12 +1306,15 @@ demands:
   - TRANSPORT.domain.distinguished[absent]
   - DOCKER_CONTEXT.domain.distinguished[absent]
   - log
-  discharged_by: test_s7_mf8_resolve_warns_missing_access_method
-  seed_docstring: 'Resolving a tenant folder that predates D2 (config.env files without <PREFIX>_TRANSPORT or
-    <PREFIX>_DOCKER_CONTEXT) logs one warning at resolve listing the systems whose config lacks an access-method
-    key. Resolve does not refuse, and each such system faults on its first call with text naming the missing key
-    (for example "CMDB_TRANSPORT is not set").'
+  discharged_by: test_resolve_does_not_judge_an_access_method
+  seed_docstring: 'Resolving a tenant folder logs no access-method warning, whatever its config.env files declare:
+    the docker access method is the lab transport''s own requirement, not a product rule. Resolve does not refuse,
+    and a docker-reached system lacking either key still faults on its first call, before any docker child runs,
+    with text naming the missing key (for example "CMDB_TRANSPORT is not set").'
   source: 70-resolutions.draft.md MF-8 (i) (A)+(B) (human round 2)
+  note: 'REVERSED by #1215 (PR #1220, human, 2026-10-06): the docker access method is the lab transport''s own
+    requirement, not a product rule — a tenant''s systems are not containers on a Docker host the product controls.
+    Was: resolve logs one warning listing systems lacking an access-method key.'
   premises:
   - '#77 test_existing_tenant_folder_that_predates_the_access_method_keys'
 - id: s7_mf8_config_fault_breaker_accounting_unchanged
@@ -1336,10 +1339,14 @@ demands:
   - check_config
   - interacts(check_config->TRANSPORT)
   - interacts(check_config->DOCKER_CONTEXT)
-  discharged_by: test_s7_mf8_validator_fails_missing_access_method
-  seed_docstring: validate_scaffold FAILs a scaffolded system's config.env that lacks <PREFIX>_TRANSPORT, and one
-    that lacks <PREFIX>_DOCKER_CONTEXT; a config.env carrying both, with TRANSPORT=docker-exec, draws no such FAIL.
+  discharged_by: test_validator_does_not_judge_an_access_method
+  seed_docstring: 'The docker access method is the lab transport''s own requirement, not a product rule: a connected
+    system''s config.env draws no access-method row, whether it declares neither key, half a pair, or a method other
+    than docker-exec. The rest of the file is still judged.'
   source: 70-resolutions.draft.md MF-8 (iii) (A) (human round 2)
+  note: 'REVERSED by #1215 (PR #1220, human, 2026-10-06): the docker access method is the lab transport''s own
+    requirement, not a product rule — a tenant''s systems are not containers on a Docker host the product controls.
+    Was: validate_scaffold FAILs a config.env lacking either access-method key.'
   premises:
   - '#80 test_new_connector_scaffold_without_the_access_method_keys'
 - id: s7_mf8_validator_fails_unimplemented_method
@@ -1349,10 +1356,14 @@ demands:
   - check_config
   - interacts(check_config->TRANSPORT)
   - TRANSPORT.domain.alternatives[http]
-  discharged_by: test_s7_mf8_validator_fails_unimplemented_method
-  seed_docstring: validate_scaffold FAILs a config.env whose <PREFIX>_TRANSPORT names an unimplemented method (http,
-    or any value other than docker-exec), naming the value.
+  discharged_by: test_validator_does_not_judge_an_access_method
+  seed_docstring: 'The docker access method is the lab transport''s own requirement, not a product rule: a connected
+    system''s config.env draws no access-method row, whether it declares neither key, half a pair, or a method other
+    than docker-exec. The rest of the file is still judged.'
   source: 70-resolutions.draft.md MF-8 (iii) (A) (human round 2)
+  note: 'REVERSED by #1215 (PR #1220, human, 2026-10-06): the docker access method is the lab transport''s own
+    requirement, not a product rule — a tenant''s systems are not containers on a Docker host the product controls.
+    Was: validate_scaffold FAILs an unimplemented TRANSPORT value. Merged into the validator node above.'
 - id: s7_mf8_guide_documents_access_method
   kind: behavior
   form: test
@@ -1360,18 +1371,14 @@ demands:
   - adapter_md
   - TRANSPORT
   - DOCKER_CONTEXT
-  discharged_by: test_s7_mf8_guide_documents_access_method
-  seed_docstring: 'adapter.md documents <PREFIX>_TRANSPORT (docker-exec, the one implemented method) and <PREFIX>_DOCKER_CONTEXT
-    as required config.env lines with no default. It also tells the operator that a tenant folder written before
-    D2 has no systems/host-state/ folder at all, so every such tenant needs a new systems/host-state/config.env
-    (R7).'
+  discharged_by: test_connect_guide_teaches_no_docker_access_method
+  seed_docstring: 'The connect guide and skill do not tell a tenant to declare the lab''s docker access lines
+    (<PREFIX>_TRANSPORT / <PREFIX>_DOCKER_CONTEXT) or to reach its system over `docker exec`: a tenant''s systems
+    are not containers on a Docker host the product controls.'
   source: '70-resolutions.draft.md MF-8 (iii) (A) (human round 2: "adapter.md documents both")'
-  note: 'Amended at the Phase F re-open (PF-R7, auto, reading A, 92-reconciliation R7): a tenant folder written before
-    D2 has no systems/host-state/ folder at all (G41), and s7_mf8_resolve_warns_missing_access_method lists only
-    configs that lack an access-method key, never a missing folder; so the connect guide tells the operator every
-    such tenant needs a new systems/host-state/config.env. The spine''s earlier re-open wording (the warning must
-    name host-state) was corrected to reading A, and the widened-warning arm briefly applied to the resolve test
-    was reverted.'
+  note: 'REVERSED by #1215 (PR #1220, human, 2026-10-06): the docker access method is the lab transport''s own
+    requirement, not a product rule — a tenant''s systems are not containers on a Docker host the product controls.
+    Was: adapter.md documents both lines as required, and the R7 host-state folder note (dropped with the section).'
 - id: s7_mf11_record_parts_read_only
   kind: negative
   form: test

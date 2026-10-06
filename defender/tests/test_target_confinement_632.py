@@ -51,7 +51,6 @@ from defender.tests.tenant_1107_settings import _spec1107 as S  # noqa: E402
 from defender.scripts.adapters import elastic_adapter, host_state_adapter  # noqa: E402
 from defender.scripts.adapters import identity_adapter  # noqa: E402
 from defender.scripts.adapters.confinement import (  # noqa: E402
-    HOST_STATE_PROGRAMS,
     READ_ENDPOINT_ALLOWLIST,
     AllowlistError,
     ConfinementFault,
@@ -59,14 +58,17 @@ from defender.scripts.adapters.confinement import (  # noqa: E402
     ReadEndpointAllowlist,
     TransportCapture,
     ViewNameError,
-    confine_host,
-    confine_host_state_call,
     confine_index,
     confine_read_endpoint,
     normalize_endpoint,
     world_view,
 )
 from defender.scripts.adapters.faults import TransportFault  # noqa: E402
+from defender.scripts.adapters.host_state_adapter import (  # noqa: E402
+    HOST_STATE_PROGRAMS,
+    confine_host,
+    confine_host_state_call,
+)
 
 pytestmark = pytest.mark.e2e
 

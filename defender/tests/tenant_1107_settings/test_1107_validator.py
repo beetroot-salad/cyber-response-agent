@@ -118,40 +118,22 @@ def test_o8_env_suffix_retired(tmp_path):
         f"the inline-secret FAIL still recommends the retired _ENV suffix: {inline}")
 
 
-# ---- MF-8 (iii): the access method --------------------------------------------------------------------
+# ---- the access method is not the product's to check -----------------------------------------------
 
-def test_s7_mf8_validator_fails_missing_access_method(tmp_path):
-    """validate_scaffold FAILs a scaffolded system's config.env that lacks <PREFIX>_TRANSPORT, and one
-    that lacks <PREFIX>_DOCKER_CONTEXT; a config.env carrying both, with TRANSPORT=docker-exec, draws
-    no such FAIL."""
-    transport_key, context_key = f"{PREFIX}_TRANSPORT", f"{PREFIX}_DOCKER_CONTEXT"
-    rows = _check(_scaffold(tmp_path / "no-transport", transport=None))
-    assert _naming(_fails(rows), transport_key), (
-        f"a config.env without {transport_key} drew no FAIL naming it; rows: {rows}")
-    rows = _check(_scaffold(tmp_path / "no-context", context=None))
-    assert _naming(_fails(rows), context_key), (
-        f"a config.env without {context_key} drew no FAIL naming it; rows: {rows}")
-    rows = _check(_scaffold(tmp_path / "both"))
-    fails = _fails(rows)
-    assert not _naming(fails, transport_key), (f"a config.env carrying both access-method lines (TRANSPORT=docker-exec) drew an "
-        f"access-method FAIL: {rows}")
-    assert not _naming(fails, context_key), (f"a config.env carrying both access-method lines (TRANSPORT=docker-exec) drew an "
-        f"access-method FAIL: {rows}")
-    assert _passes(rows), f"the validator reported no PASS for a complete scaffold: {rows}"
-
-
-def test_s7_mf8_validator_fails_unimplemented_method(tmp_path):
-    """validate_scaffold FAILs a config.env whose <PREFIX>_TRANSPORT names an unimplemented method
-    (http, or any value other than docker-exec), naming the value."""
-    for value in ("http", "ssh-tunnel", "docker_exec"):
-        rows = _check(_scaffold(tmp_path / value, transport=value))
-        assert _naming(_fails(rows), value), (
-            f"{PREFIX}_TRANSPORT={value!r} (no such method) drew no FAIL naming the value; "
-            f"rows: {rows}")
-    # Control: the one implemented method draws no TRANSPORT FAIL.
-    rows = _check(_scaffold(tmp_path / "docker-exec"))
-    assert not _naming(_fails(rows), f"{PREFIX}_TRANSPORT"), (
-        f"TRANSPORT=docker-exec drew a FAIL: {rows}")
+def test_validator_does_not_judge_an_access_method(tmp_path):
+    """The docker access method is the lab transport's own requirement, not a product rule: a
+    connected system's config.env draws no access-method row, whether it declares neither key,
+    half a pair, or a method other than docker-exec. The rest of the file is still judged."""
+    cases = {"neither": dict(transport=None, context=None),
+             "half": dict(transport=DOCKER_EXEC, context=None),
+             "other-method": dict(transport="http")}
+    for label, kw in cases.items():
+        rows = _check(_scaffold(tmp_path / label, **kw))
+        messages = [m for _, m in rows]
+        assert not _naming(messages, f"{PREFIX}_TRANSPORT"), f"{label}: an access-method row: {rows}"
+        assert not _naming(messages, f"{PREFIX}_DOCKER_CONTEXT"), (
+            f"{label}: an access-method row: {rows}")
+        assert _passes(rows), f"{label}: the validator reported no PASS: {rows}"
 
 
 # ---- the connect guide --------------------------------------------------------------------------
@@ -179,31 +161,14 @@ def test_o8_guide_rewritten():
             f"adapter.md still tells an adapter to resolve config.env from defender_dir: {para}")
 
 
-def test_s7_mf8_guide_documents_access_method():
-    """adapter.md documents <PREFIX>_TRANSPORT (docker-exec, the one implemented method) and
-    <PREFIX>_DOCKER_CONTEXT as required config.env lines with no default. It also tells the
-    operator that a tenant folder written before D2 has no systems/host-state/ folder at all, so
-    every such tenant needs a new systems/host-state/config.env (R7)."""
-    text = ADAPTER_MD.read_text(encoding="utf-8")
-    assert "_TRANSPORT" in text, "adapter.md does not document <PREFIX>_TRANSPORT"
-    assert "_DOCKER_CONTEXT" in text, "adapter.md does not document <PREFIX>_DOCKER_CONTEXT"
-    paras = _paragraphs(text)
-    transport = [p for p in paras if "_TRANSPORT" in p]
-    assert any(DOCKER_EXEC in p for p in transport), (
-        f"no paragraph documenting <PREFIX>_TRANSPORT names docker-exec: {transport}")
-    access = [p for p in paras if "_TRANSPORT" in p or "_DOCKER_CONTEXT" in p]
-    assert any(re.search(r"\brequired\b", p, re.I) for p in access), (
-        f"adapter.md does not say the access-method lines are required: {access}")
-    assert any(re.search(r"no (built-in )?default|without (a )?default|never default|"
-                         r"not defaulted|has no default", p, re.I) for p in access), (
-        f"adapter.md does not say the access-method lines have no default: {access}")
-    # PF-R7 (reading A, auto): a tenant folder written before D2 has no systems/host-state/ at all
-    # (G41), and the resolve warning lists only configs that lack an access-method key, never a
-    # missing folder, so the guide is where the operator learns host-state needs a new file.
-    host_state = [p for p in paras if "host-state" in p and "config.env" in p]
-    assert any(re.search(r"\b(existing|older|earlier|pre-existing|before|predat\w*|upgrad\w*|migrat\w*)\b",
-                         p, re.I)
-               and re.search(r"\b(add|create|new|needs?|must)\b", p, re.I) for p in host_state), (
-        "adapter.md does not tell the operator that a tenant folder written before this change needs "
-        f"a new systems/host-state/config.env: {host_state}")
-
+def test_connect_guide_teaches_no_docker_access_method():
+    """The connect guide and skill do not tell a tenant to declare the lab's docker access lines
+    (<PREFIX>_TRANSPORT / <PREFIX>_DOCKER_CONTEXT) or to reach its system over `docker exec`: a
+    tenant's systems are not containers on a Docker host the product controls."""
+    for doc in (ADAPTER_MD, ADAPTER_MD.parent / "SKILL.md"):
+        text = doc.read_text(encoding="utf-8")
+        assert "_TRANSPORT" not in text, f"{doc.name} still documents <PREFIX>_TRANSPORT"
+        assert "_DOCKER_CONTEXT" not in text, f"{doc.name} still documents <PREFIX>_DOCKER_CONTEXT"
+        offered = [p for p in _paragraphs(text) if "docker exec" in p
+                   and not re.search(r"\blab\b", p)]
+        assert not offered, f"{doc.name} offers docker exec as a tenant transport: {offered}"
