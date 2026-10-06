@@ -67,9 +67,9 @@ def _invoke_lead_author(
     on_done: Callable[[str | None], None], git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> None:
     """The lead-author lane's default work step for one claim. `label` is the lane's (bound in by
-    `lead_author_drain`): the held roots of its writable mounts are opened here, with the box up,
-    and closed when the claim's serve returns or raises (#1134 A3). A fault holding them
-    propagates as itself, never as a swallowed transient."""
+    `lead_author_drain`): the held roots of its writable mounts are opened here, with the
+    batch's box stopped, and closed when the claim's serve returns or raises (#1134 A3). A fault
+    holding them propagates as itself, never as a swallowed transient."""
     from defender.learning.leads.lead_extraction import LeadAuthorError
 
     _logger.info("step=lead-author")
@@ -103,9 +103,10 @@ def _maybe_trigger_author(
 ) -> None:
     """The author lane's default work step for one curator. `label` is the lane's (bound in by
     `author_drain`): when the curator's queue is at threshold, the held roots of the lane's
-    writable mounts are opened here, with the box up, and closed when the curator's batch
-    returns or raises (#1134 A3). Each curator opens its own. A fault holding them propagates
-    out of this step (to `_drain_one_curator`'s stuck record), never as a swallowed crash."""
+    writable mounts are opened here, with the batch's box stopped, and closed when the
+    curator's batch returns or raises (#1134 A3). Each curator opens its own. A fault holding
+    them propagates out of this step (to `_drain_one_curator`'s stuck record), never as a
+    swallowed crash."""
     threshold = env_int(threshold_env, 5)
     # Held is logged beside authorable: the count is authorable rows, not queue depth, so
     # without it a queue of permanent holds would log `pending=0` with no explanation.
@@ -210,6 +211,16 @@ def _has_lead_author_work(state: LearningState) -> bool:
     return pitfalls_lane_is_open(merge_pitfalls(read_pitfalls(state)), threshold)
 
 
+#: The faults `_drain_one_curator` lets out of a curator rather than containing to its channel:
+#: a `RETIRE_SET` fault; a `BoxFault`, since a box that won't start or stop halts the batch as it
+#: halts the lead-author lane (#1195 O4, O5); and an interrupt, since swallowing it would record
+#: Ctrl-C as a curator fault, run the sibling curator, and go on to commit, push and open a PR
+#: for the batch the operator asked to stop.
+_HALTING: tuple[type[BaseException], ...] = (
+    *drain.RETIRE_SET, box_mod.BoxFault, KeyboardInterrupt,
+)
+
+
 def _drain_one_curator(
     paths: LoopPaths, state: LearningState, trigger_author: Callable[..., None],
     channel: Channel, threshold_env: str, module_name: str, pending_label: str, *, box: Any,
@@ -217,10 +228,10 @@ def _drain_one_curator(
     """Run one curator, containing its fault to its own channel.
 
     `trigger_author` is a caller-supplied seam whose exception discipline can't be assumed, so
-    the isolation lives here. A `RETIRE_SET` fault propagates; so does a `StateRefused`, which no
-    `Exception` arm catches (a planted entry below the state root stops the whole tick, and
-    recording it stuck would write after the refusal); anything else is recorded on this
-    channel's stuck report and swallowed, so the sibling curator still runs."""
+    the isolation lives here. A `RETIRE_SET` fault or a `BoxFault` (#1195) propagates; so does a
+    `StateRefused`, which no `Exception` arm catches (a planted entry below the state root stops
+    the whole tick, and recording it stuck would write after the refusal); anything else is
+    recorded on this channel's stuck report and swallowed, so the sibling curator still runs."""
     # `run_batch` already records non-`RETIRE_SET` faults before re-raising. A second record
     # here, with a different row set, would reset `consecutive_ticks` every tick, so the count
     # tells "already recorded" from "raised above `run_batch`, recorded nowhere".
@@ -229,15 +240,11 @@ def _drain_one_curator(
     try:
         trigger_author(
             paths, state, channel, threshold_env, module_name, pending_label, box=box)
-    except drain.RETIRE_SET:
-        raise
-    # An interrupt is not in the arm below, so it leaves at once: swallowing it would record
-    # Ctrl-C as a curator fault, run the sibling curator, and go on to commit, push and open a
-    # PR for the batch the operator asked to stop.
-    #
     # `SystemExit` is contained, since it is not an interrupt: escaping would skip the sibling
     # curator and unwind past `finish_batch`, discarding the first curator's authored lessons
     # with nothing recorded on either channel.
+    except _HALTING:
+        raise
     except (Exception, SystemExit) as e:  # noqa: BLE001 — every other fault class is recorded, never silently swallowed
         fault = e
     if fault is None:
@@ -270,8 +277,9 @@ def _drain_curators(
     # share one tick — worktree, box, branch, PR lease — and `_drain_one_curator` contains each
     # one's non-retiring fault, so it never stops the other or its commit. A `RETIRE_SET` fault
     # propagates, so one in the first curator can cost the second its turn; so does a refusal.
-    # This frame must not raise on any other non-retiring fault, or `finish_batch` is never
-    # reached and neither curator's work is committed.
+    # This frame must not raise on any other fault but a `BoxFault`, or `finish_batch` is never
+    # reached and neither curator's work is committed. The batch's box is stopped between agent
+    # runs and runs only inside each spawn's `box_for_run` (#1195).
     _drain_one_curator(paths, state, trigger_author, FINDINGS, "LEARNING_AUTHOR_THRESHOLD",
                        "author", "pending", box=box)
     _drain_one_curator(paths, state, trigger_author, QUESTIONER_FINDINGS,
@@ -499,12 +507,9 @@ def _drain_lead_author(
     box: Any = None,
     lock_wait_seconds: int | None = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
-    pause: Callable[[Any], None] = box_mod.pause_box,
 ) -> BatchDisposition:
-    # The box is frozen before the lane's first step and stays frozen except while an agent
-    # runs in it (each spawn's `thawed`), so no host step of the tick runs beside a live box
-    # (#1178).
-    pause(box)
+    # The batch's box is stopped between agent runs and runs only inside each spawn's
+    # `box_for_run`, so no host step of the tick runs beside a process an agent left (#1195).
     served = _drain_lead_author_markers(
         paths, state, run_lead_author, box=box, git_timeout=git_timeout)
     pitfalls = _drain_pitfalls(
@@ -653,6 +658,9 @@ def _run_worktree_batch(  # noqa: PLR0913, C901 — one batch, kept whole
     """One batch: deliver what an earlier tick retained, then worktree, box, `do_work`,
     scrub, consume, `finish_batch`, cleanup.
 
+    The box is created and checked once, then stopped before `do_work`: it runs only inside
+    each agent run's `box_for_run`, which stops it again after (#1195).
+
     `do_work` may return a `BatchDisposition` (the lead-author lane does; the lessons lane
     returns `None`), applied once the tree has passed the scrub. A push or PR that then fails
     is recorded for next tick's delivery, not re-served. On exits before the apply (taint, box
@@ -670,6 +678,8 @@ def _run_worktree_batch(  # noqa: PLR0913, C901 — one batch, kept whole
     # startup fault must unwind the worktree and branch already minted.
     try:
         box = start_box(_drain_box_request(wt, batch_id, label, paths))
+        # The lanes' handle: the box is reachable only inside a run window (#1195).
+        runs = box_mod.BoxRuns(box)
     except BaseException as e:
         _unwind_worktree_start_fault(e, wt, branch)
         raise
@@ -685,7 +695,10 @@ def _run_worktree_batch(  # noqa: PLR0913, C901 — one batch, kept whole
         # failed teardown blocks all three.
         work_ok = False
         try:
-            disposition = do_work(wt_paths, box=box)
+            # Stopped before the batch's first host step; inside this `try`, so a stop that
+            # fails still gets the batch-end removal.
+            runs.stop()
+            disposition = do_work(wt_paths, box=runs)
             work_ok = True
         finally:
             box_mod.stop_and_scrub(

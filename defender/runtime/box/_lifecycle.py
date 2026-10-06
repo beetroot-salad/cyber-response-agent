@@ -10,6 +10,7 @@ import logging
 import os
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from typing import Any
 from pathlib import Path
 
 from defender._io import READ_LIMIT, sweep_staged, write_guarded
@@ -205,7 +206,9 @@ def _start_boxed(
             run_dir, f"box startup faulted before the reap scan could run: {e}"
         )
         raise
-    return BoxExecutor(spec=spec, transport=_DockerTransport(name, spec), name=name)
+    return BoxExecutor(
+        spec=spec, transport=_DockerTransport(name, spec), name=name, docker=docker,
+    )
 
 
 def _render_argv(
@@ -297,7 +300,7 @@ def _start_boxed_request(
         raise
     return BoxExecutor(
         spec=request.spec, transport=_DockerTransport(request.name, request.spec),
-        name=request.name,
+        name=request.name, docker=docker,
     )
 
 
@@ -394,89 +397,122 @@ def start_box(
     return unboxed_executor(spec, env=run_common.run_env(defender_dir, run_dir))
 
 
-def stop_box(box: BoxExecutor, *, docker: DockerFn = _docker) -> None:
+def stop_box(box: BoxExecutor, *, docker: DockerFn | None = None) -> None:
+    """Remove the box's container. Through `docker` when one is given, else through the docker
+    the box was created with (#1195), so the whole lifecycle reaches one daemon."""
     if not box.name:
         return
-    reason = _remove_container(docker, box.name)
+    reason = _remove_container(docker or _carried_docker(box), box.name)
     if reason is not None:
         raise BoxFault(f"could not tear down the box {box.name}: {reason}")
 
 
-#: The container states in which nothing in the box runs: frozen, or no longer running at all
-#: (a box that exited or died writes nothing, the scrub's own rule).
-_FROZEN_STATES = frozenset({"paused", "exited", "dead"})
-
-
-def _container_to_hold(box: object) -> str | None:
-    """The container `box` names when there is one to freeze, else `None` (no box, or the
-    unsandboxed fallback: nothing to freeze). A box that cannot say whether it is sandboxed is a
-    `BoxFault`: an unknown box is never assumed safe."""
-    if box is None:
-        return None
-    sandboxed = getattr(box, "sandboxed", None)
-    if sandboxed is None:
-        raise BoxFault(f"cannot tell whether {box!r} is a sandboxed box; refusing to run beside it")
-    if not sandboxed:
-        return None
-    name = getattr(box, "name", None)
-    if not name:
-        raise BoxFault(f"the sandboxed box {box!r} names no container to freeze")
-    return str(name)
-
-
-def _status(docker: DockerFn, name: str) -> str | None:
-    return _inspect_field(docker, name, "{{.State.Status}}")
-
-
-def pause_box(box: object, *, docker: DockerFn = _docker) -> None:
-    """Freeze every process in `box`, proven (#1178): `docker pause`, then `docker inspect` must
-    report the container paused, exited or dead, else `BoxFault`. An "already paused" answer is
-    fine when the status agrees. A no-op when there is no container to freeze."""
-    name = _container_to_hold(box)
-    if name is None:
-        return
-    proc = _call(docker, ["docker", "pause", name])
-    status = _status(docker, name)
-    if status not in _FROZEN_STATES:
+def _carried_docker(box: object) -> DockerFn:
+    """The docker a sandboxed box was created with; the real one for the unsandboxed fallback.
+    A sandboxed box that carries none is a `BoxFault`, never a silent fall back to a daemon it
+    was not created through."""
+    if not getattr(box, "sandboxed", False):
+        return _docker
+    docker = getattr(box, "docker", None)
+    if docker is None:
         raise BoxFault(
-            f"could not freeze the box {name} (pause rc={proc.returncode}: "
-            f"{(proc.stderr or '').strip()}; status {status!r})"
+            f"the sandboxed box {getattr(box, 'name', '')!r} carries no docker to manage it through"
         )
+    return docker
+
+
+#: The states a stopped box may be in: nothing runs in either (main's `_FROZEN_STATES`, less
+#: `paused`, which no run leaves).
+_STOPPED_STATES = frozenset({"exited", "dead"})
+
+
+class BoxRuns:
+    """The lanes' handle on the batch's box (#1195): the box is reachable only inside `.run()`,
+    one agent run's window, so no spawn can run in it outside one and none can forget to.
+
+    The box is stopped between runs. `.run()` refuses to start it unless it is proven stopped
+    (`docker start` on a running box succeeds and does nothing), starts it, proves it running,
+    yields it, and stops it on every exit; a stop that can't be proven wins over whatever the
+    run raised, since the host's next step must not run beside the box. Every call goes through
+    the docker the box was created with. The unsandboxed fallback's handle makes no docker
+    call."""
+
+    def __init__(self, box: object) -> None:
+        sandboxed = getattr(box, "sandboxed", None)
+        if sandboxed is None:
+            raise BoxFault(f"cannot tell whether {box!r} is a sandboxed box; refusing to run beside it")
+        self._name = str(getattr(box, "name", "") or "")
+        if sandboxed and not self._name:
+            raise BoxFault(f"the sandboxed box {box!r} names no container")
+        self._box: Any = box
+        self._docker: DockerFn | None = _carried_docker(box) if sandboxed else None
+
+    def _status(self) -> str | None:
+        assert self._docker is not None
+        return _inspect_field(self._docker, self._name, "{{.State.Status}}")
+
+    def stop(self) -> None:
+        """Stop the box, proven: `docker stop -t 0` kills every process in it, an agent's
+        leftovers included, and the box must then report `exited` or `dead`, else `BoxFault`."""
+        if self._docker is None:
+            return
+        name = self._name
+        proc = _call(self._docker, ["docker", "stop", "-t", "0", name])
+        status = self._status()
+        if status not in _STOPPED_STATES:
+            raise BoxFault(
+                f"could not stop the box {name} (stop rc={proc.returncode}: "
+                f"{(proc.stderr or '').strip()}; status {status!r})"
+            )
+
+    @contextlib.contextmanager
+    def run(self) -> Iterator[BoxExecutor]:
+        """One agent run's window on the box."""
+        if self._docker is None:
+            yield self._box
+            return
+        name = self._name
+        try:
+            status = self._status()
+            if status != "exited":
+                raise BoxFault(
+                    f"refusing to start the box {name} for an agent run: its status is "
+                    f"{status!r}, not 'exited'"
+                )
+            proc = _call(self._docker, ["docker", "start", name])
+            status = self._status()
+            if status != "running":
+                raise BoxFault(
+                    f"could not start the box {name} (start rc={proc.returncode}: "
+                    f"{(proc.stderr or '').strip()}; status {status!r})"
+                )
+        except BaseException:
+            # Best-effort, before the refusal unwinds through host steps.
+            with contextlib.suppress(BoxFault):
+                self.stop()
+            raise
+        try:
+            yield self._box
+        except BaseException:
+            # A stop that can't be proven wins: raised from here, it carries the run's own
+            # exception as its context.
+            self.stop()
+            raise
+        else:
+            self.stop()
 
 
 @contextlib.contextmanager
-def thawed(box: object, *, docker: DockerFn = _docker) -> Iterator[None]:
-    """Let `box` run for the `with` body only, and freeze it again on every exit (#1178): the
-    lane's box is frozen except while an agent runs in it.
-
-    The body runs only once the box is proven running (`docker unpause`, then `docker inspect`),
-    else `BoxFault`, after a best-effort re-freeze. On exit — a return or any exception, an interrupt included — the box is
-    frozen again by `pause_box`; a box that cannot be re-frozen is a `BoxFault` that outranks the
-    body's own exception, since the host's next step must not run beside it. A no-op when there is
-    no container to hold."""
-    name = _container_to_hold(box)
-    if name is None:
-        yield
+def box_for_run(runs: BoxRuns | None) -> Iterator[BoxExecutor | None]:
+    """The spawn sites' `with`: one agent run's window on the batch's box, or no box when there
+    is none. Anything but a `BoxRuns` is refused, so a spawn can't be handed the box itself."""
+    if runs is None:
+        yield None
         return
-    try:
-        proc = _call(docker, ["docker", "unpause", name])
-        status = _status(docker, name)
-        if status != "running":
-            raise BoxFault(
-                f"could not thaw the box {name} (unpause rc={proc.returncode}: "
-                f"{(proc.stderr or '').strip()}; status {status!r})"
-            )
-    except BaseException:
-        # A thaw that could not be proven may still have unpaused the box: freeze it again
-        # before the refusal unwinds through host steps (the claim's cleanup), best-effort —
-        # the refusal is the fault that matters.
-        with contextlib.suppress(BoxFault):
-            pause_box(box, docker=docker)
-        raise
-    try:
-        yield
-    finally:
-        pause_box(box, docker=docker)
+    if not isinstance(runs, BoxRuns):
+        raise BoxFault(f"{runs!r} is not a run handle on a box; refusing to run beside it")
+    with runs.run() as box:
+        yield box
 
 
 def stop_and_scrub(
