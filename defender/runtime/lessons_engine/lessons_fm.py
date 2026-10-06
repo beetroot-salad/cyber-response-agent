@@ -41,6 +41,7 @@ from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._git import REPO_ROOT
 from defender._tsv import flatten_cell
 from defender.runtime.lessons_engine._lessons_common import as_list, iter_lessons, use_utf8_stdio
+from defender._io import read_text_utf8
 
 LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
 
@@ -99,7 +100,7 @@ def cmd_show(paths: list[str]) -> int:
             rc = 2
             continue
         try:
-            fm_raw = split_frontmatter(lesson.read_text(encoding="utf-8"))[1]  # lint-whole-read: ok — repo-shipped lesson corpus (lane edits land only through a reviewed PR); operator CLI
+            fm_raw = split_frontmatter(read_text_utf8(lesson))[1]
         except (FrontmatterError, OSError, UnicodeDecodeError) as e:
             print(f"error: {raw_path}: malformed lesson: {e}", file=sys.stderr)
             rc = 2

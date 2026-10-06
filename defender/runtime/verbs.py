@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Union, get_args, get_origin
 from pydantic import SkipValidation, field_validator
 
 from .verb_grant import GrantError, VerbGrant
+from defender._io import read_bytes_capped
 
 if TYPE_CHECKING:
     from defender.runtime.run_tenant import RunTenant as _RunTenant
@@ -466,7 +467,7 @@ def read_roster(adapters_dir: Path) -> RosterRead:
                 refused.append(name)
             else:
                 accepted[name] = path
-                sources[name] = path.read_bytes()  # lint-whole-read: ok — repo-shipped adapter source (scripts/adapters/*.py); operator-controlled, not on any box-writable mount
+                sources[name] = read_bytes_capped(path)
     except (OSError, RuntimeError) as e:
         raise RegistryError(_cannot_read(adapters_dir, e)) from e
     declared: dict[str, frozenset[str]] = {}

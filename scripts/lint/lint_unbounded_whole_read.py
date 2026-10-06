@@ -16,19 +16,22 @@ tool writes for the model, logs, queues, alert copies, backend payloads. So each
 deliberate choice, marked on its line with who writes the file and what bounds it.
 
 What it flags, under ``defender/`` production code (tests and the root ``_io.py`` excluded):
-any ``<x>.read_text(...)`` / ``<x>.read_bytes(...)``, matched by attribute name whatever the
-receiver. That includes the class-qualified ``Path.read_text(p)`` (and
-``pathlib.Path.read_bytes(p)``, an aliased ``P.read_text(p)``): it is the same attribute, with
-the class as receiver.
+any use of an attribute named ``read_text`` / ``read_bytes``, called or not, matched by name
+whatever the receiver. That covers ``p.read_text()``, the class-qualified ``Path.read_text(p)``
+(and ``pathlib.Path.read_bytes(p)``, an aliased ``P.read_text(p)``: the same attribute, with
+the class as receiver), and a method reference handed on (``map(Path.read_text, ps)``,
+``partial(Path.read_bytes, p)``, ``r = p.read_text``).
 
-What it does not flag: reads through an open handle (``f.read()``, ``json.load(f)``,
-``open(p).read()``) and ``sys.stdin``, because there is no handle tracking and none of them
-reads a path today; and ``_io``'s own readers, whose cap cannot be lifted.
+What it does not flag: ``getattr(p, "read_text")``; reads through an open handle
+(``f.read()``, ``json.load(f)``, ``open(p).read()``) and ``sys.stdin``, because there is no
+handle tracking and none of them reads a path today; and ``_io``'s own readers, whose cap
+cannot be lifted.
 
-Mark a deliberate site with ``# lint-whole-read: ok — <reason>`` on the call's line span. The
-reason is required: a bare marker does not suppress. Say who writes the file and what bounds
-it. "Bounded at the writer by the box fsize limit" holds only when every writer is a box
-process. The baseline ships EMPTY, so a new unmarked read fails CI.
+The remedy is ``_io.read_text_utf8`` (for ``read_text(encoding="utf-8")``) or
+``_io.read_bytes_capped`` (for ``read_bytes()``): the same semantics, capped. Production code
+holds no direct whole read (#1188 amendment 3). A rare deliberate exception takes
+``# lint-whole-read: ok — <reason>`` on the read's line span; the reason must be text, not just
+dashes. The baseline ships EMPTY, so a new direct read fails CI.
 
 Run from repo root:  python scripts/lint/lint_unbounded_whole_read.py
 Exit 0 = clean, 1 = new finding, 2 = scan blind.
@@ -51,17 +54,17 @@ BASELINE_PATH = Path(__file__).with_name("lint_unbounded_whole_read_baseline.jso
 EXCLUDED_DIRS = frozenset({".venv", "__pycache__"})
 #: The shared bounded read step, relative to the scan root: its reads are capped by construction.
 IO_REL = "_io.py"
-#: A marker with a reason after the dash. A bare `ok` does not suppress.
-_MARKER = re.compile(r"lint-whole-read: ok\s*(?:—|--?)\s*\S")
+#: A marker with a reason after the dash. A bare `ok`, or one followed only by dashes, does not
+#: suppress.
+_MARKER = re.compile(r"lint-whole-read: ok\s*(?:—|--?)[\s—-]*[^\s—-]")
 
 _READS = ("read_text", "read_bytes")
 
 
-def _kind(call: ast.Call) -> str | None:
-    """``read_text``/``read_bytes`` for a whole-file read by path, else None."""
-    func = call.func
-    if isinstance(func, ast.Attribute) and func.attr in _READS:
-        return func.attr
+def _kind(node: ast.AST) -> str | None:
+    """``read_text``/``read_bytes`` for a use of a whole-file reader, called or not, else None."""
+    if isinstance(node, ast.Attribute) and node.attr in _READS:
+        return node.attr
     return None
 
 
@@ -78,8 +81,11 @@ def _scan_file(rel: str, tree: ast.Module, lines: list[str], honor_markers: bool
     def visit(node: ast.AST, func_name: str) -> None:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             func_name = node.name
-        if (isinstance(node, ast.Call) and (kind := _kind(node))
-                and not (honor_markers and _marked(node, lines))):
+        # A called reader is judged over the whole call's lines (a marker may sit on an
+        # argument line); its `func` attribute is then not visited on its own.
+        called = isinstance(node, ast.Call) and _kind(node.func) is not None
+        kind = _kind(node.func) if called else _kind(node)  # type: ignore[attr-defined]
+        if kind and not (honor_markers and _marked(node, lines)):
             fingerprint = f"{rel}:{func_name}:{kind}"
             if fingerprint not in seen:
                 seen.add(fingerprint)
@@ -89,7 +95,8 @@ def _scan_file(rel: str, tree: ast.Module, lines: list[str], honor_markers: bool
                             f"(in {func_name}())",
                 ))
         for child in ast.iter_child_nodes(node):
-            visit(child, func_name)
+            if not (called and child is node.func):  # type: ignore[attr-defined]
+                visit(child, func_name)
 
     visit(tree, "<module>")
     return findings
@@ -111,8 +118,8 @@ def _scan(root: Path, *, honor_markers: bool = True) -> list[Finding]:
 HEADER = (
     "lint_unbounded_whole_read baseline — whole-file read_text/read_bytes by path outside "
     "defender/_io (#1188). Fingerprint is defender/<file>:<function>:<kind>. This baseline ships "
-    "EMPTY: a deliberate read carries `# lint-whole-read: ok — <who writes it, what bounds it>` "
-    "on its line, and an entry here is a regression someone chose."
+    "EMPTY: read through _io.read_text_utf8 / read_bytes_capped, or mark a rare exception "
+    "`# lint-whole-read: ok — <reason>` on its line. An entry here is a regression someone chose."
 )
 
 
@@ -139,9 +146,9 @@ def main(
         print(f"lint_unbounded_whole_read: {exc}", file=sys.stderr)
         return 2
     print(
-        "Read a whole file through defender._io (read_text_utf8 / read_plain / read_guarded …, "
-        "capped at READ_LIMIT), or mark the line `# lint-whole-read: ok — <who writes the file "
-        "and what bounds it>`."
+        "Read a whole file through defender._io — read_text_utf8 for read_text(encoding='utf-8'), "
+        "read_bytes_capped for read_bytes(): the same semantics, capped at READ_LIMIT. A rare "
+        "deliberate exception takes `# lint-whole-read: ok — <reason>` on its line."
     )
     return gate(
         findings, baseline, args,

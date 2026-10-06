@@ -45,7 +45,7 @@ import yaml
 
 from defender import _yaml
 from defender._env import env_str
-from defender._io import read_guarded
+from defender._io import read_guarded, read_text_utf8
 from defender._report import read_report
 from defender.run_repository import RunPaths, artifact_file
 from defender._untrusted import message_salt, wrap
@@ -114,7 +114,7 @@ QUESTIONER_DEF = AgentDefinition(
 
 def _prompt(name: str) -> str:
     """One shipped prompt, read from this package."""
-    return (_PROMPTS / name).read_text(encoding="utf-8")  # lint-whole-read: ok — repo-shipped questioner prompt; operator-controlled, not on any box-writable mount
+    return read_text_utf8(_PROMPTS / name)
 
 
 def _measurement_header(source_run_dir: Path, episode_dir: Path,

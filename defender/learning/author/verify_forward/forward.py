@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 
 from defender.learning.author.verify_forward.shared import VerdictError
+from defender._artifact_schema import SOURCE_REFS_FILE_MAX
+from defender._io import read_text_utf8
 
 HERE = Path(__file__).resolve().parent
 PROMPT_PATH = HERE / "forward.md"
@@ -26,16 +28,20 @@ def load_run_context(run_id: str, *, runs_dir: Path) -> tuple[str, str]:
         raise VerdictError(f"verify_forward: missing {investigation.name} at {investigation}")
     if not refs.is_file():
         raise VerdictError(f"verify_forward: missing {refs.name} at {refs}")
+    try:
+        refs_text = read_text_utf8(refs, limit=SOURCE_REFS_FILE_MAX)
+    except OSError as e:
+        raise VerdictError(f"verify_forward: unreadable {refs.name} at {refs}: {e}") from e
     m = re.search(
         r"^normalized_disposition:\s*[\"']?([^\"'\n#]+?)[\"']?\s*(?:#.*)?$",
-        refs.read_text(encoding="utf-8"),  # lint-whole-read: ok — source_refs.yaml: no host writer, only a box process can write it in the rw run dir; bounded at the writer by the box fsize limit
+        refs_text,
         re.MULTILINE,
     )
     if not m:
         raise VerdictError(
             f"verify_forward: {refs.name} missing normalized_disposition: {refs}"
         )
-    return investigation.read_text(encoding="utf-8"), m.group(1).strip()  # lint-whole-read: ok — investigation.md: host writers go through validate_artifact (64 KiB cap, INVESTIGATION_FILE_MAX); box-writable in the rw run dir, bounded by the box fsize limit; read per verify pass
+    return read_text_utf8(investigation), m.group(1).strip()
 
 
 def expected_disposition(direction: str, recorded: str) -> str:

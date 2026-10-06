@@ -6,13 +6,15 @@ import math
 import re
 from pathlib import Path
 
+from defender._io import read_text_utf8
+
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 #: The stylesheet every rendered page inlines, read once at import.
 ASSETS = Path(__file__).resolve().parent / "assets"
-CSS = (ASSETS / "styles.css").read_text(encoding="utf-8")  # lint-whole-read: ok — repo-shipped visualizer asset; operator-controlled, not on any box-writable mount
+CSS = read_text_utf8(ASSETS / "styles.css")
 
 from defender._report import ReportRead, read_report  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
@@ -131,7 +133,7 @@ def render_alert_block(run_dir: Path, *, open_: bool = False, anchor: str = "sec
         body = '<div class="empty">no alert.json</div>'  # lint-run-records: ok — page text naming the record for a reader, not a path
     else:
         try:
-            body = pretty_json_html(json.loads(p.read_text(encoding="utf-8")))  # lint-whole-read: ok — alert.json: external alert copied in by the host; also box-writable in the rw run dir, so bounded at 64 MiB by the box fsize limit; operator render at run end
+            body = pretty_json_html(json.loads(read_text_utf8(p)))
         except json.JSONDecodeError:
-            body = pre_text(p.read_text(encoding="utf-8"))  # lint-whole-read: ok — alert.json: external alert copied in by the host; also box-writable in the rw run dir, so bounded at 64 MiB by the box fsize limit; operator render at run end
+            body = pre_text(read_text_utf8(p))
     return section(anchor, "alert", "Alert", "— input to the defender runtime", body)

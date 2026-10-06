@@ -51,6 +51,19 @@ def read_text_utf8(path: Path, *, limit: int = READ_LIMIT) -> str:
     return _read_followed(path, limit=limit, errors="strict")
 
 
+def read_bytes_capped(path: Path, *, limit: int = READ_LIMIT) -> bytes:
+    """`Path.read_bytes`, capped: the exact bytes (no newline translation), opened as it opens
+    (following links, blocking). A file over `limit` (at most `READ_LIMIT`) raises an `OSError`,
+    before reading or once it grows past it (#1188 amendment 3)."""
+    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
+    try:
+        data = _read_plain_fd(os, fd, os.fstat(fd).st_size, binary=True, limit=limit)
+    finally:
+        os.close(fd)
+    assert isinstance(data, bytes)
+    return data
+
+
 def read_text_soft(
     path: Path, *, limit: int = READ_LIMIT,
 ) -> tuple[str | None, str | None]:
@@ -176,8 +189,8 @@ class _ReadVanished(OSError):
 
 def _read_cap(limit: int) -> int:
     """A caller's read limit, clamped to `READ_LIMIT`: it can only lower the cap (#1188 D1). A
-    non-int (`None` included) is a `TypeError`, not a `ValueError`, which `TEXT_READ_ERRORS`
-    would turn from a caller's bug into "unreadable"."""
+    non-int (`None` included, the old "no bound") is a caller's bug, refused as a `TypeError`
+    before any byte is read rather than compared or added to below."""
     if not isinstance(limit, int) or isinstance(limit, bool):
         raise TypeError(f"read limit must be an int, not {limit!r}")
     return min(limit, READ_LIMIT)
@@ -1043,16 +1056,28 @@ def read_jsonl_rows_report(
 def iter_plain_jsonl_rows(path: Path) -> Iterator[dict]:
     """The JSONL rows of a log too large to read whole (the wire log runs past 100 MB), streamed
     one line at a time (#1188 D2). Nothing at `path` yields nothing; a line that is not a row is
-    skipped. Opened as :func:`read_plain` opens it: a symlink, hard link, FIFO or device is
-    refused with :data:`ALIAS_READ_REFUSAL`, so a planted alias cannot point the stream at a
-    file (or `/dev/zero`) the host never wrote."""
+    skipped, and so is a line longer than `READ_LIMIT`, which is never held whole. Opened as
+    :func:`read_plain` opens it: a symlink, hard link, FIFO or device is refused with
+    :data:`ALIAS_READ_REFUSAL`, so a planted alias cannot point the stream at a file (or
+    `/dev/zero`) the host never wrote."""
     try:
         fd, _ = _open_plain_fd(path)
     except FileNotFoundError:
         return
-    with os.fdopen(fd, encoding="utf-8", errors="replace") as handle:
-        for line in handle:
-            row = parse_jsonl_row(line)
+    try:
+        handle = os.fdopen(fd, "rb")
+    except BaseException:
+        os.close(fd)
+        raise
+    with handle:
+        while raw := handle.readline(READ_LIMIT + 1):
+            if len(raw) > READ_LIMIT and not raw.endswith(b"\n"):
+                # A newline-free stretch past the cap is not a row: drop it a chunk at a time,
+                # never holding more than the cap (#1188 amendment 3).
+                while (tail := handle.readline(_READ_CHUNK)) and not tail.endswith(b"\n"):
+                    pass
+                continue
+            row = parse_jsonl_row(raw.decode("utf-8", "replace"))
             if row is not None:
                 yield row
 

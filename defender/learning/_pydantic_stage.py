@@ -20,6 +20,7 @@ from defender.runtime.driver import MakeModel, build_agent_core
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.usage import UsageLimits
+from defender._io import read_text_utf8
 
 _logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ def build_stage_agent(
     return build_agent_core(
         defn,
         deps_type=deps_type,
-        instructions=wiring.prompt_path.read_text(encoding="utf-8"),  # lint-whole-read: ok — repo-shipped stage prompt; operator-controlled, not on any box-writable mount
+        instructions=read_text_utf8(wiring.prompt_path),
         logger=logger,
         agent_id=wiring.label,
         make_model=make_model,

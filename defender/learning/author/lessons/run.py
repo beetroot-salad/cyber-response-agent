@@ -35,6 +35,8 @@ from defender.learning.core.config import (
 )
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
 from defender.learning.core.state import FINDINGS, LearningState
+from defender._artifact_schema import SOURCE_REFS_FILE_MAX
+from defender._io import read_text_utf8
 
 
 
@@ -113,8 +115,9 @@ def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
     if not refs.is_file():
         return None
     try:
-        doc = safe_load(refs.read_text(encoding="utf-8"))  # lint-whole-read: ok — source_refs.yaml: no host writer, only a box process can write it in the rw run dir; bounded at the writer by the box fsize limit (a 64 MiB YAML parse in the author drain is a separate cost risk)
-    except yaml.YAMLError:
+        doc = safe_load(read_text_utf8(refs, limit=SOURCE_REFS_FILE_MAX))
+    except (yaml.YAMLError, OSError):
+        # OSError: over SOURCE_REFS_FILE_MAX (or unreadable): held, like a YAMLError.
         return None
     if not isinstance(doc, dict):
         return None

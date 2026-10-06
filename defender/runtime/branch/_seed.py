@@ -13,6 +13,7 @@ from typing import Any
 
 
 from defender._io import (
+    read_bytes_capped,
     guarded_mkdir,
     read_guarded,
     read_jsonl_rows,
@@ -141,7 +142,7 @@ def _inherit_evidence(source_run_dir: Path, run_dir: Path, leads: set[str]) -> N
                 "run's own")
         # Bytes, matching `materialize_run`'s `shutil.copy`, so the copy is exact even if not
         # valid UTF-8.
-        write_guarded(RunPaths(run_dir).alert, alert.read_bytes())  # lint-whole-read: ok — alert.json: external alert copied in by the host; also box-writable in the rw run dir, so bounded at 64 MiB by the box fsize limit; per sibling run
+        write_guarded(RunPaths(run_dir).alert, read_bytes_capped(alert))
 
     queries = RunPaths(source_run_dir).executed_queries
     if queries.exists() or queries.is_symlink():
@@ -194,7 +195,7 @@ def _copy_artifact(src: Path, dst: Path) -> None:
     """
     if not artifact_file(src):
         raise BranchError(f"{src} is {_not_a_plain_file(src)}")
-    write_guarded(dst, src.read_bytes())  # lint-whole-read: ok — backend payload: host-written by persist_payload from the adapter response (no write cap); box-writable, bounded there by the box fsize limit; per sibling run
+    write_guarded(dst, read_bytes_capped(src))
 
 
 def _not_a_plain_file(path: Path) -> str:

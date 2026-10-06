@@ -5,6 +5,7 @@ import json
 import logging
 from functools import lru_cache
 from pathlib import Path
+from defender._io import read_text_utf8
 
 _logger = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ _FALLBACK_POLICY: dict = {
 
 def _load_policy(path: Path) -> dict:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))  # lint-whole-read: ok — repo-shipped bash policy JSON beside the module; operator-controlled, not on any box-writable mount
+        return json.loads(read_text_utf8(path))
     except (OSError, ValueError) as e:
         _logger.warning(
             f"bash_policy: could not load {path} ({e!r}); "

@@ -30,6 +30,7 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
+from defender._io import read_bytes_capped
 
 GOLDEN_DIR = Path(__file__).resolve().parent
 
@@ -159,7 +160,7 @@ def migrate_file(path: Path) -> int:
     reproduces its original bytes; if none does, raises `ValueError` (message names
     "serializ") and leaves the file untouched.
     """
-    raw = path.read_bytes()  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
+    raw = read_bytes_capped(path)
     if not raw.strip():
         return 0
 

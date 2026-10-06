@@ -20,6 +20,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from defender._io import read_text_utf8
 
 #: Vocabulary only an eval author writes: the scoring frame, never the operation. Also read
 #: by `validate_cases.check_case` via `eval_tells_in`. (`tests/test_oracle_golden_693.py`
@@ -90,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("out", type=Path, help="story.md to write")
     ns = p.parse_args(argv)
 
-    meta = json.loads(ns.meta.read_text(encoding="utf-8"))  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
+    meta = json.loads(read_text_utf8(ns.meta))
     story = render_story(meta)
 
     found = eval_tells_in(story)

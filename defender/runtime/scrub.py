@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from defender._io import write_guarded
+from defender._io import read_text_utf8, write_guarded
 from defender.run_repository import RunPaths
 
 _logger = logging.getLogger(__name__)
@@ -144,7 +144,7 @@ def tree_verified(tree: Path) -> bool:
     if not p.is_file():
         return False
     try:
-        doc = json.loads(p.read_text(encoding="utf-8"))  # lint-whole-read: ok — scrub verdict sidecar: host-written tiny JSON outside every box mount
+        doc = json.loads(read_text_utf8(p))
     except (OSError, json.JSONDecodeError):
         return False
     return doc.get("ran") is True

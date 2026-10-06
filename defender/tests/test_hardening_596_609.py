@@ -250,7 +250,7 @@ def test_disposition_for_refuses_an_oversized_source_refs_before_parsing(tmp_pat
     """source_refs.yaml is one small mapping, but only a box writes it, so it can be up to the
     box fsize cap. The drain reads it capped at SOURCE_REFS_FILE_MAX and holds the case (None)
     rather than parse megabytes in pure Python. Control: the same document at the cap resolves."""
-    from defender.run_repository._layout import SOURCE_REFS_FILE_MAX
+    from defender._artifact_schema import SOURCE_REFS_FILE_MAX
     runs = tmp_path / "runs"
     (runs / "r1").mkdir(parents=True)
     refs = runs / "r1" / "source_refs.yaml"
