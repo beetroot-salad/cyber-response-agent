@@ -41,8 +41,10 @@ environment). A lookup made through a shared helper outside the trees is out of 
 Run from repo root:  python scripts/lint/lint_tenant_env_reads.py
                      python scripts/lint/lint_tenant_env_reads.py --root <repo-shaped tree>
 Exit 0 = clean, 1 = findings, 2 = the scan saw none of the four trees (a root that holds nothing
-to sweep is a scan that proved nothing, never a clean result). A tree that is missing while
-another is present is simply not scanned — a planted or partial layout is still checked.
+to sweep is a scan that proved nothing, never a clean result), or — over this repo itself — a
+swept entry no longer exists. A move that takes swept code elsewhere must carry its entry along;
+otherwise the moved code leaves the sweep while the lint still passes. Under `--root <tree>` a
+missing entry is simply not scanned, so a planted or partial layout is still checked.
 """
 from __future__ import annotations
 
@@ -78,7 +80,8 @@ EXCLUDED_DIRS = frozenset({"__pycache__", ".venv"})
 
 
 def _swept_files(root: Path) -> list[Path]:
-    """Every module in the four trees under `root`. `ScanBlind` when NONE of them is there."""
+    """Every module in the four trees under `root`. `ScanBlind` when NONE of them is there, or
+    when `root` is this repo and ANY of them is missing."""
     found: list[Path] = []
     seen_a_tree = False
     for rel in SWEPT:
@@ -92,6 +95,11 @@ def _swept_files(root: Path) -> list[Path]:
                          if not EXCLUDED_DIRS.intersection(p.relative_to(target).parts))
     if not seen_a_tree:
         raise ScanBlind(f"none of the four swept trees is under {root} — the lint swept nothing")
+    if root.resolve() == REPO_ROOT.resolve():
+        missing = [rel for rel in SWEPT if not (root / rel).exists()]
+        if missing:
+            raise ScanBlind(f"swept entries missing from this repo: {missing} — whatever lived "
+                            "there left the sweep; point SWEPT at where it moved")
     return found
 
 
