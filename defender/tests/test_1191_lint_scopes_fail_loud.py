@@ -58,11 +58,17 @@ Written in three commits: the spec (a73867c5), the adversary's holes (5de3d6ff),
 amendment 1 (the D1' unit tests, O1's "selects nothing" cases, O5, O6, O7, D5, and the env-read
 lint as a fifth surface). The `require_paths` unit tests of the first commit pinned only the
 superseded existence check and are gone.
+Design amendment 3 (supersedes D1''s and D11's filter-after-walk): a lint scans what git would
+    put in the tree. Nothing inside a git-IGNORED dir can blind the listing or be listed (O9/O10
+    now apply to what is listed: in a git repo, tracked or untracked, they still blind); a
+    relative root lists what the absolute one does, anchored ignores included; a tracked module
+    deleted from the working tree is not listed (O17).
 """
 from __future__ import annotations
 
 import ast
 import datetime as _dt
+import json
 import os
 import re
 import shutil
@@ -78,6 +84,7 @@ import pytest
 from defender import _git
 from defender.run_repository import RUN_LAYOUT
 from defender.tests._by_path import DEFENDER, LINT_DIR, WORKTREE, import_lint_lib, load_lint_gate
+from defender.tests._repo import seed_repo
 
 TREE_READ = "lint_tree_read_follows_link"
 RUN_RECORDS = "lint_run_records"
@@ -1448,6 +1455,26 @@ def test_o1_real_checkout_env_reads_root_flag_naming_this_repo_is_strict(capsys)
         assert PHANTOM in err, f"the blind scan does not name {PHANTOM}:\n{err}"
 
 
+#: Where an item under test sits: outside any repo (the walk), or in a git repo, tracked
+#: (staged with the layout) or untracked (written after it).
+GIT_CASES = ("plain", "tracked", "untracked")
+
+
+def _git_case(repo: Path, case: str, *, before, item) -> Path:
+    """`repo` laid out by `before(repo)`, with `item(repo)` added per `case` (see GIT_CASES).
+    Skips where the filesystem refuses the item (an undecodable name)."""
+    before(repo)
+    if case == "untracked":
+        _git_repo(repo, IGNORES)
+    try:
+        item(repo)
+    except (OSError, UnicodeError) as refused:
+        pytest.skip(f"this filesystem refuses an undecodable name: {refused!r}")
+    if case == "tracked":
+        _git_repo(repo, IGNORES)
+    return repo
+
+
 def _undecodable_name() -> str:
     """`bad\\xff.py` as Python surfaces it (surrogate-escaped)."""
     return os.fsdecode(b"bad\xff.py")
@@ -1456,42 +1483,36 @@ def _undecodable_name() -> str:
 def test_source_files_refuses_an_undecodable_file_name(tmp_path):
     """O10/D10 (supersedes amendment 1's "returns it"): a module whose name is not valid UTF-8 is
     refused loudly — `source_files` raises `ScanBlind` naming it in escaped (`ascii()`) form —
-    in a git repo and outside one. Skipped where the filesystem refuses such a name."""
+    outside a repo, and in a git repo whether the module is tracked or untracked (amendment 3:
+    the git path lists it, and a LISTED name is still refused). Skipped where the filesystem
+    refuses such a name."""
     astlib = import_lint_lib("_astlib")
     bad = _undecodable_name()
-    for repo, in_git in ((tmp_path / "git", True), (tmp_path / "plain", False)):
-        try:
-            _write(repo / "defender" / bad)
-        except (OSError, UnicodeError) as refused:
-            pytest.skip(f"this filesystem refuses an undecodable name: {refused!r}")
-        _write(repo / "defender" / "kept.py")
-        if in_git:
-            _git_repo(repo, "build/\n")
+    for case in GIT_CASES:
+        repo = _git_case(tmp_path / case, case, before=lambda r: _write(r / "defender" / "kept.py"),
+                         item=lambda r: _write(r / "defender" / bad))
         with pytest.raises(astlib.ScanBlind) as caught:
             astlib.source_files(repo / "defender", ())
         message = str(caught.value)
-        assert "bad\\udcff.py" in message, f"the refusal does not name {ascii(bad)}: {message!r}"
+        assert "bad\\udcff.py" in message, (
+            f"{case}: the refusal does not name {ascii(bad)}: {message!r}")
 
 
 def test_source_files_refuses_an_undecodable_directory_name(tmp_path):
     """O10/D10 on a DIRECTORY component: a module whose root-relative name is not valid UTF-8
     only because of the directory it sits in (`bad\\xffdir/m.py`, a valid basename) is refused
-    the same way — `ScanBlind` naming the directory in escaped form — in a git repo and outside
-    one."""
+    the same way — `ScanBlind` naming the directory in escaped form — outside a repo, and in a
+    git repo tracked or untracked."""
     astlib = import_lint_lib("_astlib")
     bad_dir = os.fsdecode(b"bad\xffdir")
-    for repo, in_git in ((tmp_path / "git", True), (tmp_path / "plain", False)):
-        try:
-            _write(repo / "defender" / bad_dir / "m_1191.py")
-        except (OSError, UnicodeError) as refused:
-            pytest.skip(f"this filesystem refuses an undecodable name: {refused!r}")
-        _write(repo / "defender" / "kept.py")
-        if in_git:
-            _git_repo(repo, "zz_ign_1191/\n")
+    for case in GIT_CASES:
+        repo = _git_case(tmp_path / case, case, before=lambda r: _write(r / "defender" / "kept.py"),
+                         item=lambda r: _write(r / "defender" / bad_dir / "m_1191.py"))
         with pytest.raises(astlib.ScanBlind) as caught:
             astlib.source_files(repo / "defender", ())
         message = str(caught.value)
-        assert "bad\\udcffdir" in message, f"the refusal does not name {ascii(bad_dir)}: {message!r}"
+        assert "bad\\udcffdir" in message, (
+            f"{case}: the refusal does not name {ascii(bad_dir)}: {message!r}")
 
 
 # ======================================================================================
@@ -1525,15 +1546,18 @@ def _locked_dir(path: Path) -> Path:
 
 def test_source_files_is_blind_on_an_unreadable_directory(tmp_path):
     """O9/D9: a directory under the root that the listing cannot read raises `ScanBlind` naming
-    it — never a silent skip of what it holds."""
+    it — never a silent skip of what it holds — outside a repo (the walk) and in a git repo,
+    the dir tracked or untracked (amendment 3: git lists past it with only a warning)."""
     astlib = import_lint_lib("_astlib")
-    _write(tmp_path / "kept.py")
-    locked = _locked_dir(tmp_path / "pkg" / "locked_1191")
-    try:
-        with pytest.raises(astlib.ScanBlind, match="locked_1191"):
-            astlib.source_files(tmp_path, ())
-    finally:
-        locked.chmod(0o755)
+    for case in GIT_CASES:
+        repo = _git_case(tmp_path / case, case, before=lambda r: _write(r / "defender" / "kept.py"),
+                         item=lambda r: _write(r / "defender" / "pkg" / "locked_1191" / "inside_1191.py"))
+        locked = _locked_dir(repo / "defender" / "pkg" / "locked_1191")
+        try:
+            with pytest.raises(astlib.ScanBlind, match="locked_1191"):
+                astlib.source_files(repo / "defender", ())
+        finally:
+            locked.chmod(0o755)
 
 
 def test_o9_an_unreadable_directory_blinds_a_lint(tmp_path, capsys):
@@ -1787,3 +1811,113 @@ def test_o16_an_emptied_real_scope_is_blind_however_it_is_spelled(tmp_path):
         result = run(spelled)
         assert result.returncode == 2, (
             f"the emptied real scope, spelled {spelled}, was not blind\n{_said(result)}")
+
+
+# ======================================================================================
+# Design amendment 3 — what git would put in the tree (O5 restated, O17)
+# ======================================================================================
+
+
+def _ignored_tree(repo: Path) -> Path:
+    """A git repo ignoring IGNORES whose `defender/` holds a kept module, a module in a package,
+    and nothing else that is source. Returns `defender/`."""
+    _write(repo / "defender" / "kept.py")
+    _write(repo / "defender" / "pkg" / "a.py")
+    _git_repo(repo, IGNORES)
+    return repo / "defender"
+
+
+def test_source_files_never_enters_an_ignored_dir_holding_undecodable_names(tmp_path):
+    """O5 restated (a)/D17: in a git repo, non-UTF-8 names that git ignores — a module and a
+    directory inside an ignored `zz_ign_1191/` (top-level and nested), and a module whose ignored
+    file NAME is not UTF-8 — are not listed and do not make the listing blind: O10 applies only
+    to what is listed."""
+    astlib = import_lint_lib("_astlib")
+    root = _ignored_tree(tmp_path / "repo")
+    bad_file, bad_dir = os.fsdecode(b"bad\xff_1191.py"), os.fsdecode(b"bad\xffdir_1191")
+    try:
+        for ignored in ("zz_ign_1191", "pkg/zz_ign_1191"):
+            _write(root / ignored / bad_file)
+            _write(root / ignored / bad_dir / "m_1191.py")
+        _write(root / "pkg" / os.fsdecode(b"bad\xff_ignored_1191.py"))
+    except (OSError, UnicodeError) as refused:
+        pytest.skip(f"this filesystem refuses an undecodable name: {refused!r}")
+    assert astlib.source_files(root, ()) == ["kept.py", "pkg/a.py"]
+
+
+def test_source_files_never_enters_an_ignored_unreadable_dir(tmp_path):
+    """O5 restated (a)/D17: in a git repo, a mode-000 directory inside an ignored `zz_ign_1191/`
+    is never entered: no `ScanBlind`, nothing from it listed. Skipped where the mode is not
+    enforced (root with the DAC capabilities)."""
+    astlib = import_lint_lib("_astlib")
+    root = _ignored_tree(tmp_path / "repo")
+    locked = _locked_dir(root / "zz_ign_1191" / "locked_1191")
+    try:
+        listed = astlib.source_files(root, ())
+    finally:
+        locked.chmod(0o755)
+    assert listed == ["kept.py", "pkg/a.py"]
+
+
+_LIST_FROM_CWD = ("import json, sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); "
+                  "import _astlib; print(json.dumps(_astlib.source_files(Path(sys.argv[2]), ())))")
+
+
+@pytest.mark.parametrize("spelled", ["defender", "./defender", "defender/pkg/.."])
+def test_source_files_from_a_relative_root_keeps_anchored_ignores(tmp_path, spelled):
+    """O5 restated (c)/D17 (r2): `source_files` handed a RELATIVE root, from the repo's top as
+    cwd, lists what it lists from the absolute root — an anchored ignore (`/defender/runs/`)
+    still drops `runs/`. Run in a child process so the cwd is the fixture repo's."""
+    astlib = import_lint_lib("_astlib")
+    repo = tmp_path / "repo"
+    _write(repo / "defender" / "kept.py")
+    _write(repo / "defender" / "pkg" / "a.py")
+    _write(repo / "defender" / "runs" / "r1" / "b.py")
+    _git_repo(repo, "/defender/runs/\n")
+    absolute = astlib.source_files(repo / "defender", ())
+    assert absolute == ["kept.py", "pkg/a.py"], f"control: the absolute root lists {absolute}"
+    result = subprocess.run(  # noqa: S603 — fixed argv built by the test
+        [sys.executable, "-c", _LIST_FROM_CWD, str(LINT_DIR), spelled], cwd=repo,
+        capture_output=True, encoding="utf-8", env=_child_env(), timeout=120, check=False)
+    assert result.returncode == 0, _said(result)
+    assert json.loads(result.stdout) == absolute, (
+        f"source_files({spelled!r}) from {repo} lists differently from the absolute root\n"
+        f"{_said(result)}")
+
+
+@pytest.mark.parametrize("committed", [False, True], ids=["staged", "committed"])
+def test_source_files_skips_a_tracked_module_deleted_from_the_tree(tmp_path, committed):
+    """O17/D17: a tracked module (staged, or committed) deleted from the working tree but not
+    from the index is not listed — the listing never names a file that is no longer there."""
+    astlib = import_lint_lib("_astlib")
+    repo = tmp_path / "repo"
+    _write(repo / "defender" / "kept.py")
+    gone = _write(repo / "defender" / "pkg" / "gone_1191.py")
+    if committed:
+        seed_repo(repo)
+    else:
+        _git_repo(repo, IGNORES)
+    gone.unlink()
+    assert astlib.source_files(repo / "defender", ()) == ["kept.py"]
+
+
+@pytest.mark.parametrize("spelled", [".", "./", "defender/.."])
+def test_o5_env_reads_from_a_relative_root_keeps_anchored_ignores(tmp_path, spelled):
+    """O5 restated (c): the env-read lint run as `--root <relative>` from its repo's top keeps an
+    ANCHORED ignore: a read planted under `/<swept package>/zz_ign_1191/` is not reported.
+    Control: the same read planted beside it, not ignored, is (exit 1, named)."""
+    lint_file, entries, base = _surface(tmp_path, ENV_READS)
+    packages = [e for e in entries if e.endswith("/")]
+    assert packages, f"precondition: {ENV_READS}'s list has a package entry: {entries}"
+    package = base / packages[0]
+    anchored = f"/{(package / 'zz_ign_1191').relative_to(tmp_path.resolve()).as_posix()}/\n"
+    _git_repo(tmp_path, anchored)
+    kept = _write(package / "kept_1191.py", ENV_READS_PROBE)
+    _expect(_run(lint_file, "--root", spelled), 1, "kept_1191.py", on="stdout",
+            why=f"control: a read in {packages[0]} not ignored was not reported")
+    kept.unlink()
+    _write(package / "zz_ign_1191" / "x_1191.py", ENV_READS_PROBE)
+    result = _run(lint_file, "--root", spelled)
+    assert result.returncode == 0, (
+        f"--root {spelled}: a read under the anchored ignore {anchored.strip()} was scanned\n"
+        f"{_said(result)}")
