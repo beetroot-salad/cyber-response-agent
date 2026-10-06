@@ -26,7 +26,10 @@ builds a MINI REPO under tmp: a copy of `scripts/lint/` (the lint, its siblings 
 the test follows the list rather than today's entries. The copy's own file is then run as a child
 (`python <tmp>/scripts/lint/<lint>.py`), the way CI runs it, so for that child tmp IS this repo.
 Every negative is paired with a positive control on the same mini repo: untouched it exits 0, and a
-planted violation is reported (so the scan ran and the layout is faithful).
+planted violation is reported (so the scan ran and the layout is faithful). A mini repo has no
+`.git`, takes no arguments and passes no `scope=`, so the same strictness is ALSO pinned over the
+real checkout (a fresh private load of the real lint with one phantom entry, its own `main`), and
+under `--update-baseline`.
 
 `lint_run_records` imports the owner modules (`defender._run_paths`, ...): the child gets
 `PYTHONPATH=<this checkout>`, and `defender` being a namespace package, the copy's own `defender/`
@@ -43,9 +46,11 @@ from __future__ import annotations
 import ast
 import datetime as _dt
 import os
+import re
 import shutil
 import subprocess
 import sys
+import uuid
 from collections.abc import Iterable
 from pathlib import Path
 from types import ModuleType
@@ -122,10 +127,11 @@ def _child_env() -> dict[str, str]:
     return env
 
 
-def _run(lint_file: Path) -> subprocess.CompletedProcess[str]:
-    """The lint file as CI runs it: `python <file>` from its repo's root, no arguments."""
+def _run(lint_file: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """The lint file as CI runs it: `python <file>` from its repo's root (no arguments, unless a
+    test passes the operator's `--update-baseline`)."""
     return subprocess.run(  # noqa: S603 — fixed argv built by the test
-        [sys.executable, str(lint_file)], cwd=lint_file.parents[2], capture_output=True,
+        [sys.executable, str(lint_file), *args], cwd=lint_file.parents[2], capture_output=True,
         encoding="utf-8", errors="replace", env=_child_env(), timeout=300, check=False)
 
 
@@ -151,14 +157,28 @@ def _rebind(lint_file: Path, name: str, expr: str) -> None:
     lint_file.write_text("".join(lines), encoding="utf-8")
 
 
+def _named(text: str, entries: Iterable[str]) -> list[str]:
+    """The entries `text` names as WHOLE paths: as listed, with or without a `defender/` prefix
+    and with or without a directory entry's trailing `/`, bounded on both sides by something that
+    cannot continue a path. So `runtime/tools/` is not named by `runtime/tools_gather.py`, nor
+    `_io.py` by `x/_io.py`."""
+    named: list[str] = []
+    for entry in entries:
+        bare = re.escape(entry.rstrip("/"))
+        if re.search(rf"(?<![\w./-])(?:defender/)?{bare}/?(?![\w./-])", text):
+            named.append(entry)
+    return named
+
+
 def _not_blind_when_each_removed(lint_file: Path, base: Path, entries: Iterable[str]) -> dict[str, str]:
     """For each entry (relative to `base`) in turn: move it out of the tree, run the copy, put it
     back. Returns entry -> what the run said, for every entry whose removal did NOT exit 2 with
-    the entry named on stderr."""
+    the entry named on stderr and NO entry still present named there."""
+    listed = sorted(entries)
     aside = lint_file.parents[2] / "aside_1191"
     aside.mkdir(exist_ok=True)
     wrong: dict[str, str] = {}
-    for i, entry in enumerate(sorted(entries)):
+    for i, entry in enumerate(listed):
         target = base / entry.rstrip("/")
         assert target.exists(), f"the mini repo lacks {entry}"
         held = aside / str(i)
@@ -167,8 +187,9 @@ def _not_blind_when_each_removed(lint_file: Path, base: Path, entries: Iterable[
             result = _run(lint_file)
         finally:
             held.rename(target)
-        if result.returncode != 2 or entry.rstrip("/") not in result.stderr:
-            wrong[entry] = _said(result)
+        present_named = _named(result.stderr, [e for e in listed if e != entry])
+        if result.returncode != 2 or entry.rstrip("/") not in result.stderr or present_named:
+            wrong[entry] = f"also names present entries {present_named}\n{_said(result)}"
     return wrong
 
 
@@ -280,6 +301,8 @@ def test_o1_tree_read_names_every_missing_census_module(tmp_path):
     assert result.returncode == 2, f"two missing census modules did not blind the scan\n{_said(result)}"
     unnamed = [rel for rel in gone if rel not in result.stderr]
     assert not unnamed, f"the blind scan does not name {unnamed}\n{_said(result)}"
+    present_named = _named(result.stderr, [m for m in modules if m not in gone])
+    assert not present_named, f"the blind scan also names present {present_named}\n{_said(result)}"
 
 
 def _tree_write_mini(root: Path) -> tuple[Path, list[str]]:
@@ -584,11 +607,11 @@ def test_o4_api_holds_no_run_record_name():
 
 @pytest.mark.parametrize("stem", [TREE_READ, RUN_RECORDS, TREE_WRITE, STAGE_FRAMES])
 def test_o4_real_lint_is_not_blind_over_this_repo(stem):
-    """The real lint, run the way CI runs it over this checkout, does not exit 2: no scope entry
-    of it is missing and no `defender/` package escapes the run-records closure (green now; red
-    if the checks land before D3)."""
+    """The real lint, run the way CI runs it over this checkout, exits 0: no scope entry of it is
+    missing, no `defender/` package escapes the run-records closure, and what the re-listed
+    modules report is baselined (red if the checks land before D3)."""
     result = _run(LINT_DIR / f"{stem}.py")
-    assert result.returncode != 2, f"{stem} went blind over this repo\n{_said(result)}"
+    assert result.returncode == 0, f"{stem} is not clean over this repo\n{_said(result)}"
 
 
 def test_o4_demo_still_seeds_the_run_record_names():
@@ -603,3 +626,201 @@ def test_o4_demo_still_seeds_the_run_record_names():
     assert done is not None, "the demo seeds no completed investigation"
     assert done.artifacts == [RUN_LAYOUT.report.name, RUN_LAYOUT.investigation.name,
                               RUN_LAYOUT.runtime_html.name], done.artifacts
+
+
+# ======================================================================================
+# O1/O2 over the REAL checkout — strictness must not hinge on anything a mini repo lacks
+# ======================================================================================
+#
+# The mini repos above have no `.git`, are run with no arguments, and never pass `scope=`. A check
+# keyed on any of those (strict only without a `.git`, only when `argv is None`, only when
+# `scope is None`) passes them all and is never strict where it matters. These tests load the
+# REAL lint fresh (a private module object), give it one entry that names nothing, and call its
+# own `main` over this checkout. Positive control in each: the unmodified fresh load exits 0.
+
+#: An entry no checkout holds.
+PHANTOM = "nope_1191"
+
+
+def _main(lint: ModuleType, capsys: pytest.CaptureFixture[str], argv: list[str],
+          **kw: object) -> tuple[int, str]:
+    rc = lint.main(argv, **kw)
+    return rc, capsys.readouterr().err
+
+
+def test_o1_real_checkout_tree_read_phantom_entry_is_blind(tmp_path, capsys):
+    """Over this checkout, a census entry that names nothing makes the tree-read lint exit 2
+    naming it, and only it — called as CI calls it (`main([])`) and with this repo's scope passed
+    explicitly (`main([], scope=SCOPE)`). `--update-baseline` over the same blind scan exits 2
+    and leaves the baseline byte-identical (it must not rewrite the ratchet from a scan that
+    proved nothing)."""
+    assert _fresh(TREE_READ, "_control").main([]) == 0, "control: the real lint is not clean"
+    capsys.readouterr()
+    lint = _fresh(TREE_READ, "_phantom")
+    present = sorted(lint.LINT_TREE_READER_MODULES)
+    phantom = f"{PHANTOM}.py"
+    lint.LINT_TREE_READER_MODULES = frozenset({*present, phantom})
+    for kw in ({}, {"scope": lint.SCOPE}):
+        rc, err = _main(lint, capsys, [], **kw)
+        assert rc == 2, f"main([], **{kw}) over this checkout with {phantom} listed: rc={rc}\n{err}"
+        assert phantom in err, f"the blind scan does not name {phantom}:\n{err}"
+        assert not _named(err, present), f"the blind scan names present entries:\n{err}"
+    baseline = tmp_path / "baseline.json"
+    shutil.copyfile(lint.BASELINE_PATH, baseline)
+    before = baseline.read_bytes()
+    rc, err = _main(lint, capsys, ["--update-baseline"], baseline_path=baseline)
+    assert rc == 2, f"--update-baseline over a blind scan: rc={rc}\n{err}"
+    assert baseline.read_bytes() == before, "--update-baseline rewrote the baseline from a blind scan"
+
+
+def test_o1_real_checkout_tree_write_phantom_entry_is_blind(tmp_path, capsys):
+    """Over this checkout, a hard-gated package entry (`<name>/`) that names nothing makes the
+    tree-write lint exit 2 naming it, and only it — via `main([])` and `main([], scope=SCOPE)`;
+    `--update-baseline` exits 2 and leaves the baseline byte-identical."""
+    assert _fresh(TREE_WRITE, "_control").main([]) == 0, "control: the real lint is not clean"
+    capsys.readouterr()
+    lint = _fresh(TREE_WRITE, "_phantom")
+    present = sorted(lint.LINT_HARD_GATED_MODULES)
+    phantom = f"{PHANTOM}/"
+    lint.LINT_HARD_GATED_MODULES = frozenset({*present, phantom})
+    for kw in ({}, {"scope": lint.SCOPE}):
+        rc, err = _main(lint, capsys, [], **kw)
+        assert rc == 2, f"main([], **{kw}) over this checkout with {phantom} listed: rc={rc}\n{err}"
+        assert PHANTOM in err, f"the blind scan does not name {phantom}:\n{err}"
+        assert not _named(err, present), f"the blind scan names present entries:\n{err}"
+    baseline = tmp_path / "baseline.json"
+    shutil.copyfile(lint.BASELINE_PATH, baseline)
+    before = baseline.read_bytes()
+    rc, err = _main(lint, capsys, ["--update-baseline"], baseline_path=baseline)
+    assert rc == 2, f"--update-baseline over a blind scan: rc={rc}\n{err}"
+    assert baseline.read_bytes() == before, "--update-baseline rewrote the baseline from a blind scan"
+
+
+def test_o1_real_checkout_run_records_phantom_sweep_dir_is_blind(capsys):
+    """Over this checkout, a `SWEEP_DIRS` entry whose `defender/<d>` does not exist makes
+    `main([])` exit 2 naming it, and no swept dir that exists."""
+    assert _fresh(RUN_RECORDS, "_control").main([]) == 0, "control: the real lint is not clean"
+    capsys.readouterr()
+    lint = _fresh(RUN_RECORDS, "_phantom")
+    present = list(lint.SWEEP_DIRS)
+    lint.SWEEP_DIRS = (*present, PHANTOM)
+    rc, err = _main(lint, capsys, [])
+    assert rc == 2, f"main([]) over this checkout with {PHANTOM} swept: rc={rc}\n{err}"
+    assert PHANTOM in err, f"the blind scan does not name {PHANTOM}:\n{err}"
+    assert not _named(err, present), f"the blind scan names present swept dirs:\n{err}"
+
+
+def test_o2_real_checkout_unswept_package_is_blind(capsys):
+    """Over this checkout, a real `defender/` package holding production `.py` that the list stops
+    sweeping (`hooks` dropped from `SWEEP_DIRS`, and not declared unscanned) makes `main([])` exit
+    2 naming it — the closure runs over the real `defender/`, not only over a mini repo."""
+    lint = _fresh(RUN_RECORDS, "_unswept")
+    assert "hooks" in lint.SWEEP_DIRS, f"precondition: {lint.SWEEP_DIRS}"
+    assert "defender/hooks" not in lint.UNSCANNED_TREES, f"precondition: {lint.UNSCANNED_TREES}"
+    assert any(p.name != "__init__.py" for p in (DEFENDER / "hooks").rglob("*.py")), (
+        "precondition: defender/hooks holds production .py")
+    lint.SWEEP_DIRS = tuple(d for d in lint.SWEEP_DIRS if d != "hooks")
+    rc, err = _main(lint, capsys, [])
+    assert rc == 2, f"main([]) over this checkout with hooks/ unswept: rc={rc}\n{err}"
+    assert "hooks" in err, f"the blind scan does not name hooks:\n{err}"
+
+
+@pytest.mark.parametrize("stem", [TREE_READ, TREE_WRITE])
+def test_o1_update_baseline_over_a_blind_scan_keeps_the_baseline(tmp_path, stem):
+    """In a mini repo, `--update-baseline` with a listed entry gone exits 2 naming it and leaves
+    the copy's baseline byte-identical. Control: with the entry back, the same command exits 0
+    and does rewrite that baseline (the mini repo has none of the real findings), so "identical"
+    above means the update was refused, not that it had nothing to write."""
+    build = _tree_read_mini if stem == TREE_READ else _tree_write_mini
+    lint_file, entries = build(tmp_path)
+    baseline = lint_file.with_name(f"{stem}_baseline.json")
+    before = baseline.read_bytes()
+    entry = entries[0]
+    target = tmp_path / "defender" / entry.rstrip("/")
+    held = tmp_path / "aside_1191"
+    target.rename(held)
+    result = _run(lint_file, "--update-baseline")
+    held.rename(target)
+    _expect(result, 2, entry.rstrip("/"), on="stderr",
+            why=f"--update-baseline with {entry} gone was not refused as a blind scan")
+    assert baseline.read_bytes() == before, (
+        f"--update-baseline rewrote {baseline.name} from a blind scan\n{_said(result)}")
+    control = _run(lint_file, "--update-baseline")
+    assert control.returncode == 0, f"control: --update-baseline failed\n{_said(control)}"
+    assert baseline.read_bytes() != before, "control: --update-baseline wrote nothing"
+
+
+# ======================================================================================
+# O2 — the closure is a rule over every name, matched exactly
+# ======================================================================================
+
+
+def test_o2_an_unforeseeable_package_name_is_blind(tmp_path):
+    """The closure checks every top-level directory, not a list of expected names: a package
+    named at random holding `.py` makes the lint exit 2 naming it. Control: clean before it."""
+    lint_file, _sweep = _run_records_mini(tmp_path)
+    _assert_clean(lint_file, RUN_RECORDS)
+    name = f"pkg_{uuid.uuid4().hex[:12]}"
+    _write(tmp_path / "defender" / name / "x.py")
+    _expect(_run(lint_file), 2, name, on="stderr",
+            why=f"an unlisted defender/{name}/ holding .py did not blind the scan")
+
+
+def test_o2_a_name_extending_a_listed_one_is_not_listed(tmp_path):
+    """Membership is exact: a directory whose name extends a swept dir (`<swept>_v2`,
+    `legacy_<swept>`) or a declared-unscanned `defender/<name>` (`<name>_archive`) is a different,
+    unlisted package -> exit 2 naming it. Control: clean before each."""
+    lint = _fresh(RUN_RECORDS)
+    swept = lint.SWEEP_DIRS[0]
+    unscanned = next(t.removeprefix("defender/") for t in lint.UNSCANNED_TREES
+                     if t.startswith("defender/"))
+    names = (f"{swept}_v2", f"legacy_{swept}", f"{unscanned}_archive")
+    listed = [n for n in names if n in lint.SWEEP_DIRS or f"defender/{n}" in lint.UNSCANNED_TREES]
+    assert not listed, f"precondition: {listed} are listed"
+    lint_file, _sweep = _run_records_mini(tmp_path)
+    admitted: dict[str, str] = {}
+    for name in names:
+        _assert_clean(lint_file, RUN_RECORDS)
+        planted = _write(tmp_path / "defender" / name / "x.py")
+        result = _run(lint_file)
+        shutil.rmtree(planted.parent)
+        if result.returncode != 2 or name not in result.stderr:
+            admitted[name] = _said(result)
+    assert not admitted, ("names extending a listed one were admitted:\n"
+                          + "\n".join(f"== {n}\n{w}" for n, w in admitted.items()))
+
+
+# ======================================================================================
+# O4 / D3 — the escape fixes, by mechanism
+# ======================================================================================
+
+
+def test_o4_demo_spells_its_artifacts_through_run_layout():
+    """D3's mechanism: every element of the `artifacts=[...]` list `api/demo.py` seeds is
+    `RUN_LAYOUT.<record>.name` off `defender._run_paths` (resolved through `_astlib`, so an alias
+    counts and a local `RUN_LAYOUT` does not) — report, investigation, runtime page, in that
+    order. A name assembled from pieces (`"report" + ".md"`) is not that, and is exactly what the
+    run-records gate is structurally blind to."""
+    astlib = import_lint_lib("_astlib")
+    path = DEFENDER / "api" / "demo.py"
+    _text, tree = astlib.read_and_parse(path, "api/demo.py")
+    env = astlib.module_env(tree, module="defender.api.demo", package="defender.api")
+    lists = [kw.value for node in ast.walk(tree) if isinstance(node, ast.Call)
+             for kw in node.keywords
+             if kw.arg == "artifacts" and isinstance(kw.value, ast.List) and kw.value.elts]
+    assert lists, "api/demo.py seeds no non-empty artifacts=[...] list"
+    want = [f"defender._run_paths.RUN_LAYOUT.{r}.name"
+            for r in ("report", "investigation", "runtime_html")]
+    for listed in lists:
+        got = [astlib.origin(el, env) for el in listed.elts]
+        assert got == want, (
+            f"api/demo.py:{listed.lineno} seeds {ast.unparse(listed)}; resolved {got}, "
+            f"want {want}")
+
+
+def test_o4_scope_statement_names_every_swept_dir():
+    """The gate's own statement of what it sweeps names every swept dir as `defender/<d>` — `api`
+    included once it is swept — so the statement does not claim less (or other) than the sweep."""
+    lint = _fresh(RUN_RECORDS)
+    unnamed = [d for d in lint.SWEEP_DIRS if f"defender/{d}" not in lint.SCOPE_STATEMENT]
+    assert not unnamed, f"SCOPE_STATEMENT does not name {unnamed}:\n{lint.SCOPE_STATEMENT}"
