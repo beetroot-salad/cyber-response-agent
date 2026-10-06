@@ -43,6 +43,7 @@ from defender._model import model
 from defender._report import read_report
 from defender.run_repository import RunPaths
 from defender.run_common import HELD_OUT_FIXTURES as FIXTURES_DIR
+from defender._io import read_text_utf8
 
 
 def predicted_disposition(run_dir: Path) -> str | None:
@@ -73,7 +74,7 @@ def load_held_out_fixtures(fixtures_dir: Path) -> list[HeldOutAlert]:
                   f"— excluded from the eval set", file=sys.stderr)
             continue
         try:
-            gt_doc = safe_load(gt.read_text(encoding="utf-8")) or {}
+            gt_doc = safe_load(read_text_utf8(gt)) or {}
         except yaml.YAMLError as e:
             print(f"warn: {child.name}: unparseable ground_truth.yaml ({e}) — fixture skipped",
                   file=sys.stderr)

@@ -19,6 +19,7 @@ from pydantic import model_validator
 from defender.run_repository import RUN_LAYOUT, RunPaths
 
 from .. import session_store
+from defender._io import read_text_utf8
 
 
 class BranchError(Exception):
@@ -111,7 +112,7 @@ def open_source_store(run_dir: Path) -> Any:
     # `BranchError`, which the driver's store-setup handler catches.
     try:
         pointer = json.loads(
-            RunPaths(run_dir).session_pointer.read_text(encoding="utf-8"))
+            read_text_utf8(RunPaths(run_dir).session_pointer))
         recorded = Path(pointer["store_path"]).resolve()
         case_id = pointer["case_id"]
         derived = session_store.store_path_for(case_id, runs_base=run_dir.parent).resolve()

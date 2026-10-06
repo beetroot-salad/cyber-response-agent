@@ -35,6 +35,8 @@ from defender.learning.core.config import (
 )
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
 from defender.learning.core.state import FINDINGS, LearningState
+from defender._artifact_schema import SOURCE_REFS_FILE_MAX
+from defender._io import TEXT_READ_ERRORS, read_text_utf8
 
 
 
@@ -113,8 +115,9 @@ def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
     if not refs.is_file():
         return None
     try:
-        doc = safe_load(refs.read_text(encoding="utf-8"))
-    except yaml.YAMLError:
+        doc = safe_load(read_text_utf8(refs, limit=SOURCE_REFS_FILE_MAX))
+    except (yaml.YAMLError, *TEXT_READ_ERRORS):
+        # Over SOURCE_REFS_FILE_MAX, unreadable or not UTF-8: held, like a YAMLError.
         return None
     if not isinstance(doc, dict):
         return None

@@ -15,6 +15,7 @@ from pathlib import Path
 from _harness_util import find_venv_py, init_git, run as _run
 
 from defender import _git
+from defender._io import read_text_utf8
 
 _logger = logging.getLogger(__name__)
 
@@ -154,7 +155,7 @@ def main() -> int:
         sys.exit(f"scenario not found: {scenario}")
     expect = {}
     if (scenario / "expect.json").is_file():
-        expect = json.loads((scenario / "expect.json").read_text(encoding="utf-8"))
+        expect = json.loads(read_text_utf8(scenario / "expect.json"))
 
     RESULTS_DIR.mkdir(exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix=f"leadauthor-eval-{scenario.name}-"))

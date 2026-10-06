@@ -26,7 +26,7 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 
-from defender._io import guarded_mkdir, write_guarded
+from defender._io import guarded_mkdir, read_text_utf8, write_guarded
 from defender._run_id import CASE_ID_RE  # noqa: F401 — re-export; the rule lives with the id rules
 from defender.run_repository import RunPaths, SessionPaths
 from defender._store_errors import InvalidCaseId, StoreError  # noqa: F401 — re-exports
@@ -709,7 +709,7 @@ def write_case_pointer(
 
 
 def resolve_store_path(run_dir: Path) -> Path:
-    data = json.loads(RunPaths(run_dir).session_pointer.read_text(encoding="utf-8"))
+    data = json.loads(read_text_utf8(RunPaths(run_dir).session_pointer))
     return Path(data["store_path"])
 
 
@@ -717,7 +717,7 @@ def resolve_session_id(run_dir: Path) -> str | None:
     """The session this run owns, or `None` when the pointer names none (a fresh run); the
     caller then falls back to `main_session_id`.
     """
-    data = json.loads(RunPaths(run_dir).session_pointer.read_text(encoding="utf-8"))
+    data = json.loads(read_text_utf8(RunPaths(run_dir).session_pointer))
     session_id = data.get("session_id")
     return session_id if isinstance(session_id, str) and session_id else None
 

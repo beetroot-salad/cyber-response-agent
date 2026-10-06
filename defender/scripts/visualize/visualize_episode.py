@@ -27,7 +27,7 @@ if __name__ == "__main__" and (_root := str(Path(__file__).resolve().parents[3])
 
 from defender._clock import parse_iso_utc
 from defender._episode_handle import Episode
-from defender._io import Bound, bind
+from defender._io import Bound, bind, read_text_utf8
 from defender._report import ReportRead
 from defender._run_id import is_valid_run_id
 from defender._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
@@ -62,7 +62,7 @@ from defender.scripts.visualize.visualize_primitives import (
 
 #: The page's own stylesheet, inlined after the shared run-page `CSS`, which knows nothing of
 #: this page's classes. `test_1025_every_class_the_page_emits_has_a_rule` keeps them in step.
-EPISODE_CSS = (ASSETS / "episode.css").read_text(encoding="utf-8")
+EPISODE_CSS = read_text_utf8(ASSETS / "episode.css")
 
 #: The family's own draw documents live under this pseudo-label beside the worlds.
 _FAMILY_LABEL = "family"

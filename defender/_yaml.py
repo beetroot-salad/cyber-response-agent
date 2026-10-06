@@ -7,7 +7,7 @@ from typing import Any, NamedTuple
 
 import yaml
 
-from defender._io import TEXT_READ_ERRORS
+from defender._io import TEXT_READ_ERRORS, read_text_utf8
 
 
 def duplicate_key_paths(text: str) -> tuple[str, ...]:
@@ -307,7 +307,7 @@ def read_reviewed_text(path: Path, *, what: str, error: type[Exception]) -> str:
     if not path.is_file():
         raise error(f"{what} not found at {path}")
     try:
-        return path.read_text(encoding="utf-8")
+        return read_text_utf8(path)
     except TEXT_READ_ERRORS as e:
         raise error(f"{what} at {path} is unreadable ({e})") from e
 

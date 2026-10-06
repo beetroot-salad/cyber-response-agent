@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from defender._clock import now_iso
 from defender._env import env_int
 from defender.runtime.scrub import RunTainted, verdict_path
+from defender._io import read_text_utf8
 
 if TYPE_CHECKING:
     from defender.learning.core.config import DrainLabel
@@ -58,7 +59,7 @@ def _tree_verdict(wt: Path) -> dict:
     if not p.is_file():
         return {}
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        return json.loads(read_text_utf8(p))
     except (OSError, json.JSONDecodeError):
         return {}
 

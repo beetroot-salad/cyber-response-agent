@@ -8,7 +8,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
 
-from defender._io import write_guarded
+from defender._io import read_text_utf8, write_guarded
 from defender._model import model
 from defender.run_repository import RunPaths
 from defender.runtime import case_ticket, run_end
@@ -99,7 +99,7 @@ def open_case_ticket(
         if not alert_path.is_file():
             _logger.warning(f"alert.json not found in {run_dir}; skipping open")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             return
-        alert = json.loads(alert_path.read_text(encoding="utf-8"))
+        alert = json.loads(read_text_utf8(alert_path))
         case_id = run_dir.name
         payload = case_ticket.alert_to_open_payload(alert, case_id, mapping=tenant.ticket_mapping)
         status, body = deps.request(config, "POST", "/tickets", payload, ctx=ctx)

@@ -21,6 +21,7 @@ from defender.hooks.budget_enforcer import (
     DEFAULT_LIMITS,
     BudgetKill,
 )
+from defender._io import read_text_utf8
 
 _logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ def _main_instructions(defender_dir: Path) -> str:
 
     The frontmatter can carry an `allowed-tools:` line that would drift from the tools actually
     registered and teach the model to call a tool it does not have."""
-    return strip_frontmatter((defender_dir / "SKILL.md").read_text(encoding="utf-8"))
+    return strip_frontmatter(read_text_utf8(defender_dir / "SKILL.md"))
 
 
 def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams

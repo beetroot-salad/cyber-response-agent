@@ -29,6 +29,7 @@ import yaml
 from defender import _yaml
 
 from defender._model import model
+from defender._io import read_bytes_capped, read_text_utf8
 
 GOLDEN_DIR = Path(__file__).resolve().parent
 LABEL_PROMPT = GOLDEN_DIR / "prompts" / "label.md"
@@ -81,7 +82,7 @@ def prompts_sha8() -> str:
     """A hash over both prompts; editing either is a new tag."""
     digest = hashlib.sha256()
     for path in (LABEL_PROMPT, VERDICT_PROMPT):
-        digest.update(path.read_bytes())
+        digest.update(read_bytes_capped(path))
     return digest.hexdigest()[:8]
 
 
@@ -141,7 +142,7 @@ def _payload_entry(path: Path) -> dict:
     `truncated` sits beside the payload, not inside it: one source system emits its own
     `truncated` field.
     """
-    raw = path.read_text(encoding="utf-8")
+    raw = read_text_utf8(path)
     if not raw.strip():
         return {"unreadable": True, "note": UNREADABLE_NOTE}
     try:
@@ -179,7 +180,7 @@ def lead_systems(lead: dict) -> set[str]:
 
 
 def load_case_leads(case_dir: Path) -> list[dict]:
-    text = (case_dir / "oracle_visible" / "leads.jsonl").read_text(encoding="utf-8")
+    text = read_text_utf8(case_dir / "oracle_visible" / "leads.jsonl")
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
@@ -220,7 +221,7 @@ def load_lead_inputs(case_dir: Path, lead_id: str) -> LeadInputs:
     baseline = []
     if controls_dir.is_dir():
         for path in sorted(controls_dir.glob("*.json"), key=lambda p: int(p.stem)):
-            record = json.loads(path.read_text(encoding="utf-8"))
+            record = json.loads(read_text_utf8(path))
             baseline.append({
                 "seq": record.get("seq", int(path.stem)),
                 "controls": [_control(c) for c in record.get("controls") or []],
@@ -230,7 +231,7 @@ def load_lead_inputs(case_dir: Path, lead_id: str) -> LeadInputs:
     env_path = case_dir / "environment.yaml"
     # Must be a mapping; refused here so the error names the file rather than surfacing as a
     # `ValidationError` from `LeadInputs`.
-    environment_notes = _yaml.safe_load(env_path.read_text(encoding="utf-8")) or {}
+    environment_notes = _yaml.safe_load(read_text_utf8(env_path)) or {}
     if not isinstance(environment_notes, dict):
         raise ValueError(
             f"{env_path}: environment.yaml must be a YAML mapping, "
@@ -239,11 +240,11 @@ def load_lead_inputs(case_dir: Path, lead_id: str) -> LeadInputs:
         case_id=case_dir.name,
         lead_id=lead_id,
         lead=lead_for_model(leads[lead_id]),
-        sample=sample_path.read_text(encoding="utf-8") if sample_path.exists() else "",
+        sample=read_text_utf8(sample_path) if sample_path.exists() else "",
         observed=observed,
         baseline=baseline,
         environment_notes=environment_notes,
-        story=(case_dir / "oracle_visible" / "story.md").read_text(encoding="utf-8"),
+        story=read_text_utf8(case_dir / "oracle_visible" / "story.md"),
     )
 
 
@@ -461,7 +462,7 @@ def _pass(prompt_path: Path, user: str, parse, *, model: str, effort: str,
 
     Only the appended `_reparse_note` changes between attempts.
     """
-    instructions = prompt_path.read_text(encoding="utf-8")
+    instructions = read_text_utf8(prompt_path)
     payload = user
     for attempt in range(GRAMMAR_ATTEMPTS):
         result = call(instructions, payload, model, effort)
