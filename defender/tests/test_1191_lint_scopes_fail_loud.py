@@ -1,21 +1,30 @@
-"""#1191 — a lint whose fixed scope path has gone missing fails loud instead of scanning less.
+"""#1191 — a lint whose fixed scope entry no longer selects code fails loud instead of scanning less.
 
-O1  A lint run over THIS repo never passes while a fixed path that decides what it scans, or how
-    strictly, is missing: `lint_tree_read_follows_link.LINT_TREE_READER_MODULES`,
-    `lint_run_records.SWEEP_DIRS`, `lint_unguarded_tree_write.LINT_HARD_GATED_MODULES` (an entry
-    ending `/` is a directory) and `lint_stage_prompt_frames`' default scope. Exit 2, naming the
-    entry.
+O1  (as restated by design amendment 1) A lint run over THIS repo never passes while an entry of
+    a fixed scope list SELECTS NONE OF THE FILES THE LINT SCANS — a vanished path, an emptied
+    directory, a file entry now naming a directory: `lint_tree_read_follows_link`
+    `.LINT_TREE_READER_MODULES`, `lint_run_records.SWEEP_DIRS`,
+    `lint_unguarded_tree_write.LINT_HARD_GATED_MODULES`, `lint_tenant_env_reads.SWEPT` (an entry
+    ending `/` selects every file under it, any other entry only the file it equals) and
+    `lint_stage_prompt_frames`' default scope. Exit 2, naming the entry and no other.
 O2  The run-records lint never passes while a top-level `defender/` directory holding production
     `.py` (any `.py` the lint's own `_in_scope` filter keeps) is neither in `SWEEP_DIRS` nor
     spelled `defender/<name>` in `UNSCANNED_TREES` — exact spelling, so the bare repo-top-level
     `scripts` / `experiments` entries admit nothing under `defender/`. Exit 2, naming the dir.
 O3  A run against a planted or partial root (`scope=` / `root=`) keeps today's tolerance.
-O4  The escapes O1/O2 surface are closed: `runtime/branch/*` is back under the tree-read lint,
-    `api/` is swept by the run-records lint and holds no record name, and the real lints do not
-    go blind over the real repo.
-D1  The shared helper is `_astlib.require_paths(root, entries)` (the design leaves the name open;
-    this spec fixes it): `ScanBlind` naming EVERY missing root-relative entry, silent when all
-    exist.
+O4  The escapes O1/O2 surface are closed: `runtime/branch/` (D5: one package entry, so a future
+    module of the package is covered too) is back under the tree-read lint, `api/` is swept by the
+    run-records lint and holds no record name, and the real lints exit 0 over the real repo.
+O5  Which files a lint scans does not depend on where the checkout lives (a parent dir named
+    `tests` or `.venv`) or on gitignored local content; an untracked, not-ignored new file is
+    still scanned.
+O6  The run-records lint's written scope (`SCOPE_STATEMENT`) names exactly its swept dirs and its
+    declared-unscanned trees — derived from the two lists, not kept by hand.
+O7  A blind run-records scan (exit 2) writes nothing, `--render` included.
+D1' The shared helpers in `_astlib` (names fixed by the amendment): `source_files(root,
+    excluded)` -> the `.py` files under `root` as root-relative POSIX `str` paths, pruning
+    directory NAMES in `excluded` below `root` (never its ancestors) and dropping what git
+    ignores; `selects(entry, rel)`; `require_selected(root, real_root, entries, rels)`.
 
 HOW O1 AND O2 ARE OBSERVED. "This repo" is the root a lint derives from its own file
 (`Path(__file__).resolve().parents[2]`, as 53b7efec defines it). Loading the real lint and handing
@@ -36,10 +45,10 @@ under `--update-baseline`.
 (which holds no owner module) is searched first and the owners come from this checkout. Its mini
 repo therefore never holds a top-level `defender/*.py`.
 
-RED UNTIL IMPLEMENTED: every O1/O2 negative (today a missing entry or an unlisted package scans
-less and exits 0), the `require_paths` unit tests (no such helper), and the O4 census tests (the
-tree-read list still names the dead `runtime/branch.py`; `api` is not swept). GREEN NOW and meant
-to stay green: the positive controls, O3, the real-repo runs, and the demo's seeded artifacts.
+Written in three commits: the spec (a73867c5), the adversary's holes (5de3d6ff), and design
+amendment 1 (the D1' unit tests, O1's "selects nothing" cases, O5, O6, O7, D5, and the env-read
+lint as a fifth surface). The `require_paths` unit tests of the first commit pinned only the
+superseded existence check and are gone.
 """
 from __future__ import annotations
 
@@ -57,6 +66,7 @@ from types import ModuleType
 
 import pytest
 
+from defender import _git
 from defender._run_paths import RUN_LAYOUT
 from defender.tests._by_path import DEFENDER, LINT_DIR, WORKTREE, import_lint_lib, load_lint_gate
 
@@ -64,12 +74,22 @@ TREE_READ = "lint_tree_read_follows_link"
 RUN_RECORDS = "lint_run_records"
 TREE_WRITE = "lint_unguarded_tree_write"
 STAGE_FRAMES = "lint_stage_prompt_frames"
+ENV_READS = "lint_tenant_env_reads"
+
+#: Each list-scoped lint's fixed scope list, and the directory (relative to the repo root) its
+#: entries are relative to.
+SCOPE_LISTS: dict[str, tuple[str, str]] = {
+    TREE_READ: ("LINT_TREE_READER_MODULES", "defender"),
+    TREE_WRITE: ("LINT_HARD_GATED_MODULES", "defender"),
+    ENV_READS: ("SWEPT", "."),
+}
+
+#: The stage-frames lint's default scope, fixed by the design (D4: the entry `learning/` under
+#: `defender/`).
+STAGE_FRAMES_SCOPE = "defender/learning"
 
 #: The data files `lint_run_records.main` reads (its kinds registry and the page it renders).
 RUN_RECORDS_DATA = ("defender/docs/run-records-kinds.tsv", "defender/docs/run-records.md")
-
-#: The package `runtime/branch.py` was split into by #979.
-BRANCH_PACKAGE = tuple(f"runtime/branch/{m}.py" for m in ("__init__", "_frontier", "_seed", "_spec"))
 
 #: The file every mini-repo directory is given, so it holds a `.py` without shadowing a real
 #: module name.
@@ -82,6 +102,8 @@ TREE_READ_PROBE = "def _probe_1191(p):\n    return p.is_file()\n"
 TREE_WRITE_PROBE = "def _probe_1191(p):\n    p.write_text('x', encoding='utf-8')\n"
 #: A module-level interpolated boundary: a stage-frames finding.
 STAGE_FRAMES_PROBE = 'GREETING_1191 = f"<{__name__}>"\n'
+#: A process-environment lookup: a tenant-env-read finding.
+ENV_READS_PROBE = "import os\n\n\ndef _probe_1191():\n    return os.environ.get('X_1191')\n"
 
 
 def record_name_probe() -> str:
@@ -184,10 +206,13 @@ def _not_blind_when_each_removed(lint_file: Path, base: Path, entries: Iterable[
         held = aside / str(i)
         target.rename(held)
         try:
+            # Still present: every other entry whose path survived the move (an entry nested
+            # under a removed package entry left with it).
+            present = [e for e in listed if e != entry and (base / e.rstrip("/")).exists()]
             result = _run(lint_file)
         finally:
             held.rename(target)
-        present_named = _named(result.stderr, [e for e in listed if e != entry])
+        present_named = _named(result.stderr, present)
         if result.returncode != 2 or entry.rstrip("/") not in result.stderr or present_named:
             wrong[entry] = f"also names present entries {present_named}\n{_said(result)}"
     return wrong
@@ -206,50 +231,148 @@ def _expect(result: subprocess.CompletedProcess[str], rc: int, named: str, *, on
     assert named in getattr(result, on), f"{why}: {named!r} is not named on {on}\n{said}"
 
 
+def _selects(entry: str, rel: str) -> bool:
+    """The amendment's selection rule, as this spec's own oracle (independent of
+    `_astlib.selects`): equal, or `entry` ends in `/` and `rel` is under it."""
+    return rel == entry or (entry.endswith("/") and rel.startswith(entry))
+
+
+def _real_rels(base: Path, excluded: Iterable[str]) -> list[str]:
+    """Every `.py` under `base` (root-relative POSIX), directory names in `excluded` pruned."""
+    skip = set(excluded)
+    rels: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = [d for d in dirnames if d not in skip]
+        rels += [(Path(dirpath) / f).relative_to(base).as_posix()
+                 for f in filenames if f.endswith(".py")]
+    return sorted(rels)
+
+
+def _lay_out(base: Path, entries: Iterable[str]) -> None:
+    """Each entry made real under `base`: a `/` entry as a package holding one inert module, any
+    other entry as the inert file it names."""
+    for entry in entries:
+        _write(base / entry / PLANTED if entry.endswith("/") else base / entry)
+
+
+def _file_entries(entries: Iterable[str]) -> list[str]:
+    """The entries naming one module (`.py`), sorted."""
+    return sorted(e for e in entries if e.endswith(".py"))
+
+
+def _surface(root: Path, stem: str) -> tuple[Path, list[str], Path]:
+    """A mini repo for a list-scoped lint, laid out from its own list: (copied lint file, the
+    list's entries, the directory they are relative to)."""
+    lint_file = _mini_repo(root, stem)
+    name, under = SCOPE_LISTS[stem]
+    entries = sorted(getattr(_fresh(stem), name))
+    base = (root / under).resolve() if under == "." else root / under
+    _lay_out(base, entries)
+    return lint_file, entries, base
+
+
+def _git_repo(root: Path, gitignore: str) -> None:
+    """`root` made a git repo with `gitignore` as its `.gitignore`, everything in it staged — so
+    a file written afterwards is untracked, and one under an ignored name is ignored."""
+    _write(root / ".gitignore", gitignore)
+    _git.git(["init", "-q", "-b", "main"], cwd=root)
+    _git.git(["add", "-A"], cwd=root)
+
+
 # ======================================================================================
-# D1 — the shared helper
+# D1' — the shared listing and selection helpers (names fixed by design amendment 1)
 # ======================================================================================
 
 
-def test_require_paths_is_silent_when_every_entry_exists(tmp_path):
-    """`_astlib.require_paths(root, entries)` returns without raising when every root-relative
-    entry exists: a file, a directory entry spelled with a trailing `/`, a nested file. Entries
-    may come as any iterable (the lists are frozensets and tuples)."""
+def test_source_files_lists_py_root_relative_pruning_excluded_names_below_root(tmp_path):
+    """`_astlib.source_files(root, excluded)` lists the `.py` files under `root` as root-relative
+    POSIX `str` paths (the `rel`s `selects` matches with a prefix), pruning directories whose NAME
+    is in `excluded` — below `root` only: this root sits under ancestors named `tests` and `.venv`
+    and every file of it is still listed. `excluded` may be any iterable of names."""
     astlib = import_lint_lib("_astlib")
-    _write(tmp_path / "kept_module.py")
-    _write(tmp_path / "kept_dir" / "inner.py")
-    _write(tmp_path / "nested" / "deep" / "leaf.py")
-    entries = ("kept_module.py", "kept_dir/", "nested/deep/leaf.py")
-    astlib.require_paths(tmp_path, entries)
-    astlib.require_paths(tmp_path, frozenset(entries))
+    root = tmp_path / "tests" / ".venv" / "repo"
+    for rel in ("a.py", "pkg/b.py", "pkg/sub/c.py", "pkg/__pycache__/d.py", "tests/t.py",
+                "pkg/tests/u.py", "notes.md", "pkg/data.json", "pkg/e.pyc"):
+        _write(root / rel)
+    got = sorted(astlib.source_files(root, frozenset({"__pycache__", "tests"})))
+    assert got == ["a.py", "pkg/b.py", "pkg/sub/c.py"], got
+    got = sorted(astlib.source_files(root, ("__pycache__",)))
+    assert got == ["a.py", "pkg/b.py", "pkg/sub/c.py", "pkg/tests/u.py", "tests/t.py"], got
 
 
-def test_require_paths_names_every_missing_entry_and_only_those(tmp_path):
-    """A missing entry is a blind scan: `require_paths` raises the `ScanBlind` the gates already
-    turn into exit 2, and its message names EVERY missing entry — a file, a directory entry ending
-    `/`, a nested file — not just the first, and names none that exists."""
+def test_source_files_drops_what_git_ignores_and_keeps_untracked(tmp_path):
+    """In a git repo, `source_files` drops what git IGNORES and keeps what git merely does not
+    track: listed over a subdirectory of the repo (the way the lints list `defender/`), an ignored
+    `build/` at any depth is gone, an unstaged new module is there."""
     astlib = import_lint_lib("_astlib")
-    _write(tmp_path / "kept_module.py")
-    _write(tmp_path / "kept_dir" / "inner.py")
-    entries = ("kept_module.py", "lost_module.py", "kept_dir/", "lost_dir/", "nested/lost_leaf.py")
-    with pytest.raises(astlib.ScanBlind) as caught:
-        astlib.require_paths(tmp_path, entries)
-    message = str(caught.value)
-    unnamed = [e for e in ("lost_module.py", "lost_dir", "nested/lost_leaf.py") if e not in message]
-    assert not unnamed, f"missing entries the ScanBlind does not name: {unnamed}\n{message}"
-    named = [e for e in ("kept_module.py", "kept_dir") if e in message]
-    assert not named, f"the ScanBlind names entries that exist: {named}\n{message}"
+    repo = tmp_path / "repo"
+    for rel in ("defender/kept.py", "defender/build/x.py", "defender/pkg/build/y.py",
+                "defender/pkg/z.py"):
+        _write(repo / rel)
+    _git_repo(repo, "build/\n")
+    _write(repo / "defender" / "new_untracked.py")
+    got = sorted(astlib.source_files(repo / "defender", ()))
+    assert got == ["kept.py", "new_untracked.py", "pkg/z.py"], got
 
 
-def test_require_paths_names_a_missing_directory_entry(tmp_path):
-    """A directory entry (trailing `/`) is checked as a path in its own right: present -> silent,
-    absent -> `ScanBlind` naming it. (Whether a FILE at a `/` entry's spelling counts is not
-    pinned.)"""
+def test_source_files_outside_a_git_repo_drops_nothing(tmp_path):
+    """Outside a git repo nothing is dropped (git's answer fails open): the same layout and
+    `.gitignore` without `git init` lists the `build/` modules too."""
     astlib = import_lint_lib("_astlib")
-    (tmp_path / "pkg").mkdir()
-    astlib.require_paths(tmp_path, ["pkg/"])
-    with pytest.raises(astlib.ScanBlind, match="gone_pkg"):
-        astlib.require_paths(tmp_path, ["pkg/", "gone_pkg/"])
+    repo = tmp_path / "repo"
+    for rel in ("defender/kept.py", "defender/build/x.py"):
+        _write(repo / rel)
+    _write(repo / ".gitignore", "build/\n")
+    got = sorted(astlib.source_files(repo / "defender", ()))
+    assert got == ["build/x.py", "kept.py"], got
+
+
+@pytest.mark.parametrize(("entry", "rel", "selected"), [
+    ("runtime/observe.py", "runtime/observe.py", True),
+    ("runtime/tools/", "runtime/tools/x.py", True),
+    ("runtime/tools/", "runtime/tools/sub/y.py", True),
+    ("runtime/tools/", "runtime/tools_gather.py", False),
+    ("runtime/driver", "runtime/driver/x.py", False),
+    ("x.py", "a/x.py", False),
+    ("runtime/observe.py", "runtime/observe.pyi.py", False),
+])
+def test_selects(entry, rel, selected):
+    """`_astlib.selects(entry, rel)`: an entry selects the file it equals; an entry ending `/`
+    selects every file under it and nothing that merely shares its spelling as a prefix; a
+    directory named without the `/` selects nothing under it; there is no suffix match."""
+    astlib = import_lint_lib("_astlib")
+    assert bool(astlib.selects(entry, rel)) is selected, (entry, rel)
+
+
+def test_require_selected_is_a_no_op_off_this_repo(tmp_path):
+    """`_astlib.require_selected(root, real_root, entries, rels)` does nothing unless `root`
+    resolves to `real_root`: a planted root may lack what the lists name."""
+    astlib = import_lint_lib("_astlib")
+    (tmp_path / "planted").mkdir()
+    (tmp_path / "real").mkdir()
+    astlib.require_selected(tmp_path / "planted", tmp_path / "real",
+                            ("gone_module.py", "lost_pkg/"), [])
+
+
+def test_require_selected_names_every_entry_that_selects_nothing(tmp_path):
+    """Over the real root, `require_selected` raises the `ScanBlind` the gates turn into exit 2,
+    naming EVERY entry that selects no `rel` — a vanished file, an empty package entry, a
+    directory named without its `/` — and no entry that selects one. `root` is compared after
+    resolving (`<real>/sub/..` is the real root)."""
+    astlib = import_lint_lib("_astlib")
+    real = tmp_path / "real"
+    (real / "sub").mkdir(parents=True)
+    entries = ("kept_module.py", "kept_pkg/", "gone_module.py", "lost_pkg/", "dir_named_bare")
+    rels = ["kept_module.py", "kept_pkg/x.py", "dir_named_bare/y.py", "other.py"]
+    for root in (real, real / "sub" / ".."):
+        with pytest.raises(astlib.ScanBlind) as caught:
+            astlib.require_selected(root, real, entries, rels)
+        message = str(caught.value)
+        unnamed = [e for e in ("gone_module.py", "lost_pkg", "dir_named_bare") if e not in message]
+        assert not unnamed, f"entries selecting nothing that the ScanBlind does not name: {unnamed}\n{message}"
+        named = _named(message, ("kept_module.py", "kept_pkg/"))
+        assert not named, f"the ScanBlind names entries that select files: {named}\n{message}"
+    astlib.require_selected(real, real, ("kept_module.py", "kept_pkg/"), rels)
 
 
 # ======================================================================================
@@ -258,10 +381,7 @@ def test_require_paths_names_a_missing_directory_entry(tmp_path):
 
 
 def _tree_read_mini(root: Path) -> tuple[Path, list[str]]:
-    lint_file = _mini_repo(root, TREE_READ)
-    modules = sorted(_fresh(TREE_READ).LINT_TREE_READER_MODULES)
-    for rel in modules:
-        _write(root / "defender" / rel)
+    lint_file, modules, _base = _surface(root, TREE_READ)
     return lint_file, modules
 
 
@@ -271,10 +391,11 @@ def test_o1_tree_read_control_scans_its_census(tmp_path):
     naming it, so the copy really scans the census it was given."""
     lint_file, modules = _tree_read_mini(tmp_path)
     _assert_clean(lint_file, TREE_READ)
-    _write(tmp_path / "defender" / modules[0], TREE_READ_PROBE)
+    module = _file_entries(modules)[0]
+    _write(tmp_path / "defender" / module, TREE_READ_PROBE)
     result = _run(lint_file)
-    _expect(result, 1, modules[0], on="stdout",
-            why=f"a planted is_file() in listed {modules[0]} was not reported")
+    _expect(result, 1, module, on="stdout",
+            why=f"a planted is_file() in listed {module} was not reported")
 
 
 def test_o1_tree_read_missing_census_module_is_blind(tmp_path):
@@ -294,7 +415,8 @@ def test_o1_tree_read_names_every_missing_census_module(tmp_path):
     (RED until O1)."""
     lint_file, modules = _tree_read_mini(tmp_path)
     _assert_clean(lint_file, TREE_READ)
-    gone = (modules[0], modules[-1])
+    files = _file_entries(modules)
+    gone = (files[0], files[-1])
     for rel in gone:
         (tmp_path / "defender" / rel).unlink()
     result = _run(lint_file)
@@ -306,11 +428,7 @@ def test_o1_tree_read_names_every_missing_census_module(tmp_path):
 
 
 def _tree_write_mini(root: Path) -> tuple[Path, list[str]]:
-    lint_file = _mini_repo(root, TREE_WRITE)
-    entries = sorted(_fresh(TREE_WRITE).LINT_HARD_GATED_MODULES)
-    for entry in entries:
-        _write(root / "defender" / entry / PLANTED if entry.endswith("/")
-               else root / "defender" / entry)
+    lint_file, entries, _base = _surface(root, TREE_WRITE)
     return lint_file, entries
 
 
@@ -374,8 +492,7 @@ def test_o1_run_records_missing_sweep_dir_is_blind(tmp_path):
 
 def _stage_frames_mini(root: Path) -> tuple[Path, str]:
     lint_file = _mini_repo(root, STAGE_FRAMES)
-    lint = _fresh(STAGE_FRAMES)
-    scope = Path(lint.LEARNING).relative_to(lint.REPO_ROOT).as_posix()
+    scope = STAGE_FRAMES_SCOPE
     _write(root / scope / PLANTED)
     return lint_file, scope
 
@@ -517,7 +634,7 @@ def test_o3_tree_read_planted_root_missing_census_modules_is_still_checked(tmp_p
     """`main(scope=<planted defender/>)` over a tree holding ONE census module (the rest absent)
     is not blind: a planted `is_file()` there -> exit 1 naming it; inert -> exit 0."""
     lint = _fresh(TREE_READ)
-    one = sorted(lint.LINT_TREE_READER_MODULES)[0]
+    one = _file_entries(lint.LINT_TREE_READER_MODULES)[0]
     scope = tmp_path / "defender"
     _write(scope / one, TREE_READ_PROBE)
     assert lint.main([], scope=scope, baseline_path=tmp_path / "baseline.json") == 1
@@ -556,8 +673,8 @@ def test_o3_run_records_partial_root_is_swept_without_closure(tmp_path):
 
 def test_o3_stage_frames_planted_scope_is_still_checked(tmp_path):
     """`main(argv, scope=<planted dir>)` over a scope outside this repo scans it as before: a
-    module-level f-string -> exit 1; inert -> 0. (A planted scope that does not EXIST is not
-    pinned: the design leaves open whether it keeps c12's exit 0.)"""
+    module-level f-string -> exit 1; inert -> 0. (A scope that does not exist is
+    `test_o1_stage_frames_missing_explicit_scope_is_blind`.)"""
     lint = _fresh(STAGE_FRAMES)
     scope = tmp_path / "learning"
     _write(scope / PLANTED, STAGE_FRAMES_PROBE)
@@ -571,17 +688,24 @@ def test_o3_stage_frames_planted_scope_is_still_checked(tmp_path):
 # ======================================================================================
 
 
-def test_o4_tree_read_census_holds_the_branch_package_and_no_dead_path():
-    """`LINT_TREE_READER_MODULES` lists all four modules `runtime/branch.py` was split into, and
-    every entry exists under `defender/` (RED until D3: it still lists the dead
-    `runtime/branch.py` and none of the four)."""
+def test_o4_tree_read_census_selects_the_whole_branch_package():
+    """D5: the tree-read census selects every real `runtime/branch/*.py` (equal, or under a `/`
+    entry), no census entry selects nothing over the real `defender/`, and a module ADDED to the
+    package later is selected too — the package entry `runtime/branch/` covers future modules
+    (shape B is no longer excused for a package entry)."""
     modules = _fresh(TREE_READ).LINT_TREE_READER_MODULES
-    assert all((DEFENDER / m).is_file() for m in BRANCH_PACKAGE), (
-        f"precondition: the split package is on disk: {BRANCH_PACKAGE}")
-    unlisted = [m for m in BRANCH_PACKAGE if m not in modules]
-    dead = sorted(m for m in modules if not (DEFENDER / m).exists())
-    assert not unlisted, f"tree-read census does not list these branch modules: {unlisted}"
-    assert not dead, f"tree-read census entries naming no file under defender/: {dead}"
+    branch = [r for r in _real_rels(DEFENDER / "runtime" / "branch", {"__pycache__"})]
+    assert branch, "precondition: defender/runtime/branch/ holds modules"
+    unselected = [f"runtime/branch/{r}" for r in branch
+                  if not any(_selects(e, f"runtime/branch/{r}") for e in modules)]
+    assert not unselected, f"tree-read census does not select {unselected}"
+    rels = _real_rels(DEFENDER, {".venv", "__pycache__"})
+    idle = sorted(e for e in modules if not any(_selects(e, r) for r in rels))
+    assert not idle, f"tree-read census entries selecting no file under defender/: {idle}"
+    future = "runtime/branch/_new_module_1191.py"
+    assert any(_selects(e, future) for e in modules), (
+        f"a new module of the branch package ({future}) would be unscanned: the census lists the "
+        f"package file by file, not as `runtime/branch/`")
 
 
 def test_o4_run_records_sweeps_api():
@@ -605,7 +729,7 @@ def test_o4_api_holds_no_run_record_name():
     assert not found, "run-records findings under api/:\n" + "\n".join(found)
 
 
-@pytest.mark.parametrize("stem", [TREE_READ, RUN_RECORDS, TREE_WRITE, STAGE_FRAMES])
+@pytest.mark.parametrize("stem", [TREE_READ, RUN_RECORDS, TREE_WRITE, STAGE_FRAMES, ENV_READS])
 def test_o4_real_lint_is_not_blind_over_this_repo(stem):
     """The real lint, run the way CI runs it over this checkout, exits 0: no scope entry of it is
     missing, no `defender/` package escapes the run-records closure, and what the re-listed
@@ -824,3 +948,280 @@ def test_o4_scope_statement_names_every_swept_dir():
     lint = _fresh(RUN_RECORDS)
     unnamed = [d for d in lint.SWEEP_DIRS if f"defender/{d}" not in lint.SCOPE_STATEMENT]
     assert not unnamed, f"SCOPE_STATEMENT does not name {unnamed}:\n{lint.SCOPE_STATEMENT}"
+
+
+# ======================================================================================
+# Design amendment 1 — O1 restated: an entry that EXISTS but selects nothing is blind
+# ======================================================================================
+
+#: Each lint's probe and the stream its finding lands on (tree-write's listed modules are
+#: hard-gated, reported on stderr).
+PROBES: dict[str, tuple[str, str]] = {
+    TREE_READ: (TREE_READ_PROBE, "stdout"),
+    TREE_WRITE: (TREE_WRITE_PROBE, "stderr"),
+    ENV_READS: (ENV_READS_PROBE, "stdout"),
+    RUN_RECORDS: (record_name_probe(), "stdout"),
+    STAGE_FRAMES: (STAGE_FRAMES_PROBE, "stdout"),
+}
+
+
+def _listed(root: Path, stem: str) -> tuple[Path, list[str], Path]:
+    """`_surface`, with run-records' swept dirs spelled as the package entries they are."""
+    if stem == RUN_RECORDS:
+        lint_file, sweep = _run_records_mini(root)
+        return lint_file, [f"{d}/" for d in sweep], root / "defender"
+    return _surface(root, stem)
+
+
+def _plantable(root: Path, stem: str) -> tuple[Path, Path, str]:
+    """A mini repo for `stem` and a module it scans: (copied lint file, that module, the name its
+    finding is reported under)."""
+    if stem == STAGE_FRAMES:
+        lint_file, scope = _stage_frames_mini(root)
+        return lint_file, root / scope / PLANTED, PLANTED
+    lint_file, entries, base = _listed(root, stem)
+    if stem == RUN_RECORDS:
+        rel = f"{entries[0]}{PLANTED}"
+        return lint_file, base / rel, rel
+    rel = _file_entries(entries)[0]
+    return lint_file, base / rel, rel
+
+
+@pytest.mark.parametrize("stem", [TREE_READ, TREE_WRITE, RUN_RECORDS, ENV_READS])
+def test_o1_an_emptied_listed_package_is_blind(tmp_path, stem):
+    """A listed package that still EXISTS but holds no file the lint scans — only a `__pycache__`
+    module and a README — makes the lint exit 2 naming it, and no other entry. (Run-records'
+    swept dirs are package entries by construction; the others must spell a package with a
+    trailing `/`, as D4/D5 do — the precondition says so where a list has none.)"""
+    lint_file, entries, base = _listed(tmp_path, stem)
+    packages = [e for e in entries if e.endswith("/")]
+    assert packages, (f"precondition: {stem}'s scope list has no package entry ending '/' "
+                      f"(D4 spells packages so; D5 lists runtime/branch/): {entries}")
+    _assert_clean(lint_file, stem)
+    entry = packages[0]
+    shutil.rmtree(base / entry)
+    _write(base / entry / "__pycache__" / "stale_1191.py")
+    _write(base / entry / "README.md", "not code\n")
+    result = _run(lint_file)
+    _expect(result, 2, entry.rstrip("/"), on="stderr",
+            why=f"listed {entry} holds no scanned file and the scan was not blind")
+    named = _named(result.stderr, [e for e in entries if not e.startswith(entry)])
+    assert not named, f"the blind scan also names entries that select files: {named}\n{_said(result)}"
+
+
+@pytest.mark.parametrize("stem", [TREE_READ, TREE_WRITE, ENV_READS])
+def test_o1_a_file_entry_naming_a_package_dir_is_blind(tmp_path, stem):
+    """A module listed by file that became a package, its entry edited to the package's name
+    WITHOUT the trailing `/` (`x/y.py` -> `x/y`): the path exists and holds `.py`, but the entry
+    selects none of it -> exit 2 naming it. Control: spelled `x/y/`, the same entry is clean and
+    a violation planted in the package is reported, so the `/` is what selects."""
+    lint_file, entries, base = _surface(tmp_path, stem)
+    name, _under = SCOPE_LISTS[stem]
+    _assert_clean(lint_file, stem)
+    entry = _file_entries(entries)[0]
+    package = entry.removesuffix(".py")
+    (base / entry).unlink()
+    module = _write(base / package / PLANTED)
+    original = lint_file.read_text(encoding="utf-8")
+
+    def relist(spelled: str) -> None:
+        lint_file.write_text(original, encoding="utf-8")
+        _rebind(lint_file, name, f"type({name})({spelled!r} if e == {entry!r} else e for e in {name})")
+
+    relist(package)
+    result = _run(lint_file)
+    _expect(result, 2, package, on="stderr",
+            why=f"entry {package!r} names a package dir without '/' and the scan was not blind")
+    named = _named(result.stderr, [e for e in entries if e != entry])
+    assert not named, f"the blind scan also names entries that select files: {named}\n{_said(result)}"
+
+    relist(f"{package}/")
+    _assert_clean(lint_file, f"{stem} ({package}/ listed)")
+    probe, on = PROBES[stem]
+    _write(module, probe)
+    _expect(_run(lint_file), 1, f"{package}/{PLANTED}", on=on,
+            why=f"a violation planted in listed package {package}/ was not reported")
+
+
+#: Per list-scoped lint, two entries that EXIST in the real checkout and select nothing: a
+#: package dir named without its `/` (it holds `.py`), and a dir holding no `.py` at all.
+REAL_IDLE: dict[str, tuple[str, str]] = {
+    TREE_READ: ("runtime/branch", "docs/"),
+    TREE_WRITE: ("runtime/driver", "docs/"),
+    ENV_READS: ("defender/runtime/lead_zero", "defender/docs/"),
+}
+
+
+@pytest.mark.parametrize("stem", [TREE_READ, TREE_WRITE, ENV_READS])
+def test_o1_real_checkout_entry_that_exists_but_selects_nothing_is_blind(capsys, stem):
+    """Over this checkout, a list entry that exists but selects nothing — a package dir named
+    without its `/`, a dir with no `.py` — makes the lint's own `main([])` exit 2 naming both, and
+    no entry that selects files. Control: the unmodified fresh load exits 0."""
+    name, under = SCOPE_LISTS[stem]
+    base = WORKTREE if under == "." else WORKTREE / under
+    bare, empty = REAL_IDLE[stem]
+    assert _real_rels(base / bare, {"__pycache__"}), f"precondition: {bare} is a dir holding .py"
+    assert (base / empty).is_dir(), f"precondition: {empty} exists"
+    assert not _real_rels(base / empty, ()), f"precondition: {empty} holds no .py"
+    assert _fresh(stem, "_control").main([]) == 0, f"control: the real {stem} is not clean"
+    capsys.readouterr()
+    lint = _fresh(stem, "_idle")
+    present = sorted(getattr(lint, name))
+    setattr(lint, name, type(getattr(lint, name))((*present, bare, empty)))
+    rc, err = _main(lint, capsys, [])
+    assert rc == 2, f"main([]) over this checkout with {bare!r}, {empty!r} listed: rc={rc}\n{err}"
+    unnamed = [e for e in (bare, empty) if e.rstrip("/") not in err]
+    assert not unnamed, f"the blind scan does not name {unnamed}:\n{err}"
+    same = {bare.rstrip("/"), empty.rstrip("/")}
+    named = _named(err, [e for e in present if e.rstrip("/") not in same])
+    assert not named, f"the blind scan names entries that select files: {named}\n{err}"
+
+
+def test_o1_real_checkout_swept_dir_with_no_module_is_blind(capsys):
+    """Over this checkout, a swept dir that exists but holds no `.py` (`defender/docs`) makes the
+    run-records lint's `main([])` exit 2 naming it. Control: the unmodified fresh load exits 0."""
+    assert (DEFENDER / "docs").is_dir(), "precondition: defender/docs exists"
+    assert not _real_rels(DEFENDER / "docs", ()), "precondition: defender/docs holds no .py"
+    assert _fresh(RUN_RECORDS, "_control").main([]) == 0, "control: the real lint is not clean"
+    capsys.readouterr()
+    lint = _fresh(RUN_RECORDS, "_idle")
+    present = list(lint.SWEEP_DIRS)
+    lint.SWEEP_DIRS = (*present, "docs")
+    rc, err = _main(lint, capsys, [])
+    assert rc == 2, f"main([]) over this checkout with docs swept: rc={rc}\n{err}"
+    assert "docs" in err, f"the blind scan does not name docs:\n{err}"
+    assert not _named(err, present), f"the blind scan names present swept dirs:\n{err}"
+
+
+@pytest.mark.parametrize("stem", [TREE_WRITE, RUN_RECORDS, ENV_READS])
+def test_o1_every_real_scope_entry_selects_a_real_file(stem):
+    """Every entry of the real list selects at least one real module under the amendment's rule
+    (equal, or under a `/` entry) — so a package must be spelled with its `/`. (Tree-read's census
+    is checked by the D5 test.)"""
+    lint = _fresh(stem)
+    if stem == RUN_RECORDS:
+        entries = [f"{d}/" for d in lint.SWEEP_DIRS]
+        rels = _real_rels(DEFENDER, {".venv", "__pycache__", "tests"})
+    elif stem == TREE_WRITE:
+        entries = sorted(lint.LINT_HARD_GATED_MODULES)
+        rels = _real_rels(DEFENDER, {".venv", "__pycache__"})
+    else:
+        entries = sorted(lint.SWEPT)
+        rels = [f"defender/{r}" for r in _real_rels(DEFENDER, {".venv", "__pycache__"})]
+    idle = [e for e in entries if not any(_selects(e, r) for r in rels)]
+    assert not idle, f"{stem} entries selecting no real module: {idle}"
+
+
+def test_o1_stage_frames_missing_explicit_scope_is_blind(tmp_path):
+    """D4 settles what the spec left open: a missing explicit `scope=` exits 2 (a scan of nothing
+    proves nothing), wherever it points. Control: an existing planted scope exits 0."""
+    lint = _fresh(STAGE_FRAMES)
+    baseline = tmp_path / "baseline.json"
+    assert lint.main([], scope=tmp_path / "nope_1191", baseline_path=baseline) == 2
+    _write(tmp_path / "learning" / PLANTED)
+    assert lint.main([], scope=tmp_path / "learning", baseline_path=baseline) == 0
+
+
+# ======================================================================================
+# O5 — what a lint scans does not depend on where the checkout lives, or on ignored content
+# ======================================================================================
+
+
+@pytest.mark.parametrize("parent", ["tests", ".venv"])
+@pytest.mark.parametrize("stem", [RUN_RECORDS, TREE_READ, TREE_WRITE, STAGE_FRAMES, ENV_READS])
+def test_o5_a_checkout_under_an_excluded_name_still_scans(tmp_path, stem, parent):
+    """The mini repo placed under a parent directory named like an excluded name (`tests`,
+    `.venv`): clean -> exit 0, and a violation planted in a scanned module is still reported
+    (exit 1, named). Excluded names are matched below the scan root, never on its ancestors.
+    Control: the same plant under a neutral parent (`test_o1_*_control_*`)."""
+    lint_file, module, rel = _plantable(tmp_path / parent / "repo", stem)
+    _assert_clean(lint_file, f"{stem} under {parent}/")
+    probe, on = PROBES[stem]
+    _write(module, probe)
+    _expect(_run(lint_file), 1, rel, on=on,
+            why=f"with the checkout under a dir named {parent!r}, a plant in {rel} was not reported")
+
+
+@pytest.mark.parametrize("stem", [RUN_RECORDS, TREE_WRITE, STAGE_FRAMES])
+def test_o5_gitignored_content_is_not_scanned_but_untracked_content_is(tmp_path, stem):
+    """In a mini repo that is a git repo ignoring `build/` (its layout staged): an untracked,
+    not-ignored new module holding a violation IS reported (ignored-ness decides, not
+    tracked-ness); the same violation in gitignored `build/` dirs — beside a scanned module and,
+    for run-records, as a top-level `defender/build/` the closure would otherwise name — is not
+    scanned: exit 0."""
+    lint_file, module, _rel = _plantable(tmp_path, stem)
+    _git_repo(tmp_path, "build/\n")
+    _assert_clean(lint_file, f"{stem} as a git repo")
+    probe, _on = PROBES[stem]
+    new = _write(module.parent / "new_1191.py", probe)
+    _expect(_run(lint_file), 1, "new_1191.py", on="stdout",
+            why="an untracked, not-ignored module holding a violation was not scanned")
+    new.unlink()
+    _write(module.parent / "build" / "x_1191.py", probe)
+    _write(tmp_path / "defender" / "build" / "y_1191.py", probe)
+    result = _run(lint_file)
+    assert result.returncode == 0, (
+        f"violations only under gitignored build/ dirs were scanned (or blinded the closure)\n"
+        f"{_said(result)}")
+
+
+# ======================================================================================
+# O6 — the written scope is derived from the two lists
+# ======================================================================================
+
+#: Prints the copied run-records lint's SCOPE_STATEMENT (argv[1]: the copy's directory).
+_READ_STATEMENT = ("import sys; sys.path.insert(0, sys.argv[1]); "
+                   "import lint_run_records as m; print(m.SCOPE_STATEMENT)")
+
+
+def test_o6_scope_statement_names_exactly_both_lists(tmp_path):
+    """Edit the COPIED lint's lists — a swept dir added and one dropped, a `defender/` tree and a
+    repo-top-level tree declared unscanned — and its `SCOPE_STATEMENT` follows: it names
+    `defender/<d>` for every swept dir, every `UNSCANNED_TREES` entry, and no longer the dropped
+    dir. A hand-kept statement cannot."""
+    lint_file = _mini_repo(tmp_path, RUN_RECORDS, data=RUN_RECORDS_DATA)
+    real = _fresh(RUN_RECORDS)
+    dropped = real.SWEEP_DIRS[-1]
+    added = ("zz_swept_1191", "defender/zz_unscanned_1191", "zz_top_1191")
+    _rebind(lint_file, "SWEEP_DIRS", f"(*(d for d in SWEEP_DIRS if d != {dropped!r}), {added[0]!r})")
+    _rebind(lint_file, "UNSCANNED_TREES", f"(*UNSCANNED_TREES, {added[1]!r}, {added[2]!r})")
+    result = subprocess.run(  # noqa: S603 — fixed argv built by the test
+        [sys.executable, "-c", _READ_STATEMENT, str(lint_file.parent)], cwd=tmp_path,
+        capture_output=True, encoding="utf-8", errors="replace", env=_child_env(), timeout=120,
+        check=False)
+    assert result.returncode == 0, f"the copied lint did not load\n{_said(result)}"
+    statement = result.stdout
+    swept = [d for d in real.SWEEP_DIRS if d != dropped] + [added[0]]
+    want = [f"defender/{d}" for d in swept] + [*real.UNSCANNED_TREES, added[1], added[2]]
+    unnamed = [w for w in want if w not in statement]
+    assert not unnamed, f"SCOPE_STATEMENT does not name {unnamed}:\n{statement}"
+    gone = re.search(rf"(?<![\w./-])defender/{re.escape(dropped)}(?![\w./-])", statement)
+    assert not gone, f"SCOPE_STATEMENT still names the dropped defender/{dropped}:\n{statement}"
+
+
+# ======================================================================================
+# O7 — a blind run-records scan writes nothing
+# ======================================================================================
+
+
+def test_o7_a_blind_render_writes_nothing(tmp_path):
+    """With the page stale and a swept dir gone, `lint_run_records.py --render` exits 2 naming the
+    dir and leaves the page byte-identical. Control: with the dir back, the same `--render` exits
+    0 and rewrites the stale page — so "identical" means the write was withheld."""
+    lint_file, sweep = _run_records_mini(tmp_path)
+    page = tmp_path / RUN_RECORDS_DATA[1]
+    mark = _fresh(RUN_RECORDS).BEGIN_MARK
+    text = page.read_text(encoding="utf-8")
+    assert mark in text, "precondition: the page carries the generated block"
+    page.write_text(text.replace(mark, f"{mark}\n| stale_1191 | row |", 1), encoding="utf-8")
+    stale = page.read_bytes()
+    target = tmp_path / "defender" / sweep[0]
+    held = tmp_path / "aside_1191"
+    target.rename(held)
+    result = _run(lint_file, "--render")
+    held.rename(target)
+    _expect(result, 2, sweep[0], on="stderr", why=f"--render with {sweep[0]}/ gone was not blind")
+    assert page.read_bytes() == stale, f"a blind --render rewrote the page\n{_said(result)}"
+    control = _run(lint_file, "--render")
+    assert control.returncode == 0, f"control: --render failed\n{_said(control)}"
+    assert page.read_bytes() != stale, "control: --render did not rewrite the stale page"
