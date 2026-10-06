@@ -74,6 +74,22 @@ def test_load_run_context_missing_disposition(tmp_path, monkeypatch):
         vf.load_run_context("rid", runs_dir=runs)
 
 
+def test_load_run_context_refuses_an_oversized_source_refs(tmp_path):
+    """Capped at SOURCE_REFS_FILE_MAX like the drain's reader: over it is a `VerdictError`
+    (the drain's retry-once-then-BAD ending), not a whole read. Control: at the cap it reads."""
+    from defender.run_repository._layout import SOURCE_REFS_FILE_MAX
+    runs = tmp_path / "runs"
+    (runs / "rid").mkdir(parents=True)
+    (runs / "rid" / "investigation.md").write_text("x", encoding="utf-8")
+    refs = runs / "rid" / "source_refs.yaml"
+    head = "normalized_disposition: benign\n#"
+    refs.write_text(head + "x" * (SOURCE_REFS_FILE_MAX - len(head)), encoding="utf-8")
+    assert vf.load_run_context("rid", runs_dir=runs)[1] == "benign"
+    refs.write_text(head + "x" * (SOURCE_REFS_FILE_MAX - len(head) + 1), encoding="utf-8")
+    with pytest.raises(vfs.VerdictError, match="source_refs"):
+        vf.load_run_context("rid", runs_dir=runs)
+
+
 def test_wrap_builds_salted_labeled_block():
     assert wrap("the transcript\n", "case_transcript", "ab" * 16) == (
         f"<run-{'ab' * 16}-case_transcript>\n"

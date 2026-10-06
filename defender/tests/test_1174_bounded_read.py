@@ -1061,6 +1061,60 @@ def test_h2_the_streaming_reader_is_lazy(tmp_path):
     assert peak < 4 * MiB, peak
 
 
+def test_h2_the_streaming_reader_skips_a_line_past_the_cap_without_holding_it(tmp_path):
+    """A newline-free stretch longer than READ_LIMIT is not a row and is never held whole:
+    peak allocation stays well under its size. The rows on either side still come out."""
+    import tracemalloc
+    p = tmp_path / "log.jsonl"
+    p.write_text('{"n": 1}\n', encoding="utf-8")
+    with open(p, "r+b") as f:  # lint-text-io: ok — test plant of a sparse newline-free stretch
+        f.truncate(200 * MiB)
+        f.seek(0, os.SEEK_END)
+        f.write(b'\n{"n": 2}\n')
+    tracemalloc.start()
+    try:
+        rows = list(_io.iter_plain_jsonl_rows(p))
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert rows == [{"n": 1}, {"n": 2}]
+    assert peak < 160 * MiB, peak
+
+
+def test_h2_a_linked_wire_log_renders_no_messages(tmp_path):
+    """The visualizer over a run copy whose wire log is a link: no messages (the streaming
+    reader refuses the alias), not a crash of the whole page. Control: the plain log renders."""
+    from defender.scripts.visualize.visualize_data import load_messages
+    run_dir = run_dir_at(tmp_path)
+    wire = RunPaths(run_dir).wire_log
+    wire.parent.mkdir(parents=True, exist_ok=True)
+    wire.write_text('{"n": 1}\n', encoding="utf-8")
+    assert load_messages(run_dir) == [{"n": 1}]
+    elsewhere = tmp_path / "elsewhere.jsonl"
+    wire.rename(elsewhere)
+    wire.symlink_to(elsewhere)
+    assert load_messages(run_dir) == []
+
+
+def test_read_bytes_capped_reads_exact_bytes_and_follows_a_link(tmp_path):
+    """`Path.read_bytes` semantics (exact bytes, no newline translation, follows a link), capped.
+    Over the cap it refuses before reading."""
+    p = tmp_path / "a.bin"
+    p.write_bytes(b"x\r\ny\r")
+    link = tmp_path / "link.bin"
+    link.symlink_to(p)
+    assert _io.read_bytes_capped(p) == b"x\r\ny\r"
+    assert _io.read_bytes_capped(link) == b"x\r\ny\r"
+    assert _io.read_bytes_capped(p, limit=10 ** 12) == b"x\r\ny\r"
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_bytes_capped(p, limit=3)
+    big = sparse(tmp_path / "big.bin", 64 * MiB + 1)
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_bytes_capped(big, limit=10 ** 12)
+    with pytest.raises(FileNotFoundError):
+        _io.read_bytes_capped(tmp_path / "absent.bin")
+
+
 @pytest.mark.parametrize("raised", [64 * MiB + 2, 128 * MiB, 10 ** 12])
 def test_h12_a_caller_cannot_raise_the_cap(tmp_path, raised):
     """`limit` only lowers: a caller asking for more than READ_LIMIT still gets READ_LIMIT, so
@@ -1092,6 +1146,7 @@ _READERS = {
     "read_text_soft": lambda p, lim: _io.read_text_soft(p, limit=lim),
     "read_jsonl_rows": lambda p, lim: _io.read_jsonl_rows(p, limit=lim),
     "read_jsonl_rows_report": lambda p, lim: _io.read_jsonl_rows_report(p, limit=lim),
+    "read_bytes_capped": lambda p, lim: _io.read_bytes_capped(p, limit=lim),
 }
 
 

@@ -1,12 +1,15 @@
 """Spec for the lint_unbounded_whole_read gate (#1188 M4, as amended by design amendment 2).
 
 A whole-file read by path in ``defender/`` production code must not land silently. The gate
-flags ``<x>.read_text(...)`` / ``<x>.read_bytes(...)`` and the class-qualified
-``Path.read_text(p)`` form (resolved through ``_astlib.callee``, so ``pathlib.Path.read_bytes(p)``
-and an aliased import count), outside the root ``_io.py`` and outside tests.
+flags any use of an attribute named ``read_text`` / ``read_bytes``, called or not, matched by
+name whatever the receiver: ``p.read_text()``, the class-qualified ``Path.read_text(p)`` (and
+``pathlib.Path.read_bytes(p)``, an aliased ``P.read_text(p)``), and a method reference handed on
+(``map(Path.read_text, ps)``, ``partial(Path.read_bytes, p)``, ``r = p.read_text``). Outside the
+root ``_io.py`` and outside tests. The remedy is ``_io.read_text_utf8`` / ``read_bytes_capped``;
+``getattr(p, "read_text")`` is not matched (recorded non-obligation).
 
-The way past it is the house convention: ``# lint-whole-read: ok — <reason>`` on the call's line
-span, with a non-empty reason. The baseline ships EMPTY. ``_io``'s own readers need no marker and
+The rare exception is the house convention: ``# lint-whole-read: ok — <reason>`` on the read's
+line span, with a reason (not just dashes). The baseline ships EMPTY. ``_io``'s own readers need no marker and
 no checking: their cap only lowers (#1188 D1, pinned in ``test_1174_bounded_read.py``).
 
 Fingerprint: ``<rel>:<func>:<kind>``; ``<func>`` is the innermost enclosing ``def`` (``<module>``
@@ -98,6 +101,33 @@ def test_class_qualified_forms_fire(tmp_path):
         "prod.py:qualified:read_bytes",
         "prod.py:aliased:read_text",
         "prod.py:aliased_module:read_bytes",
+    }
+
+
+def test_method_references_fire(tmp_path):
+    """A reference to the method reads a whole file when it is later called: flagged where it
+    is named. Control (`ctl`): an unrelated attribute of the same receiver is not."""
+    tree = _tree(tmp_path, {"prod.py": (
+        "from functools import partial\n"
+        "from pathlib import Path\n"
+        "\n"
+        "def mapped(ps):\n"
+        "    return list(map(Path.read_text, ps))\n"
+        "\n"
+        "def partial_bytes(p):\n"
+        "    return partial(Path.read_bytes, p)()\n"
+        "\n"
+        "def stored(p):\n"
+        "    r = p.read_text\n"
+        "    return r()\n"
+        "\n"
+        "def ctl(p):\n"
+        "    return p.name, p.read_link\n"
+    )})
+    assert _fps(tree) == {
+        "prod.py:mapped:read_text",
+        "prod.py:partial_bytes:read_bytes",
+        "prod.py:stored:read_text",
     }
 
 
@@ -208,6 +238,10 @@ def test_the_reason_dash_may_be_spelled_plainly(tmp_path, dash):
     "# lint-whole-read: ok —",
     "# lint-whole-read: ok —   ",
     "# lint-whole-read: ok -",
+    "# lint-whole-read: ok --",
+    "# lint-whole-read: ok ——",
+    "# lint-whole-read: ok - -",
+    "# lint-whole-read: ok —-",
     "# lint-text-io: ok — another gate's marker",
     "# noqa",
     "# ok — trusted",
@@ -311,31 +345,36 @@ def test_cli_exits_with_the_gate_status():
 # the real tree (`gate`: CI's lint job runs these; the test job deselects them)
 # --------------------------------------------------------------------------------------------
 
-def _independent_real_census() -> set[str]:
-    """The census written apart from the gate: every `<x>.read_text/read_bytes(...)` call in
-    `defender/` production code (tests, `.venv`, `__pycache__`, the root `_io.py` out), as
-    `rel:kind`."""
-    found: set[str] = set()
-    for path in DEFENDER.rglob("*.py"):
-        rel = path.relative_to(DEFENDER).as_posix()
+def _independent_census(root: Path) -> list[str]:
+    """Written apart from the gate: every attribute named `read_text`/`read_bytes` in `root`'s
+    production code (tests, `.venv`, `__pycache__`, the root `_io.py` out), as `rel:line`."""
+    found: list[str] = []
+    for path in sorted(root.rglob("*.py")):
+        rel = path.relative_to(root).as_posix()
         parts = Path(rel).parts
         if (rel == "_io.py" or "tests" in parts or ".venv" in parts or "__pycache__" in parts
                 or path.name == "conftest.py" or path.name.startswith("test_")
                 or path.name.endswith("_test.py")):
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                    and node.func.attr in ("read_text", "read_bytes")):
-                found.add(f"{rel}:{node.func.attr}")
+            if isinstance(node, ast.Attribute) and node.attr in ("read_text", "read_bytes"):
+                found.append(f"{rel}:{node.lineno}")
     return found
 
 
+def test_the_independent_census_sees_reads(tmp_path):
+    """Control for the real-tree census below: it is not empty because it is blind."""
+    tree = _tree(tmp_path, {"prod.py": "def f(p):\n    return p.read_text(), p.read_bytes\n"})
+    assert _independent_census(tree) == ["prod.py:2", "prod.py:2"]
+
+
 @pytest.mark.gate
-def test_real_tree_is_clean_with_an_empty_baseline():
-    """Every real whole read carries a reasoned marker; the baseline holds nothing."""
+def test_real_tree_has_no_direct_whole_read():
+    """Every production whole-file read goes through `_io`'s capped readers (#1188 amendment 3):
+    none is left to mark, and the baseline holds nothing."""
+    assert _independent_census(DEFENDER) == []
     entries = json.loads(REAL_BASELINE.read_text(encoding="utf-8"))["entries"]
     assert entries == {}
-    assert _fps(DEFENDER) == set()
 
 
 @pytest.mark.gate
@@ -345,53 +384,3 @@ def test_real_run_scans_the_real_tree_and_reports(capsys):
     assert _GATE.main([]) == 0
     out = capsys.readouterr().out
     assert "[lint_unbounded_whole_read] 0 finding(s): 0 baselined, 0 new" in out
-
-
-@pytest.mark.gate
-def test_every_real_read_carries_a_reasoned_marker_on_its_own_span():
-    """Checked apart from the gate: each real read call's own line span holds
-    `lint-whole-read: ok` followed by a dash and a reason."""
-    import re
-    marker = re.compile(r"lint-whole-read: ok\s*(?:—|--?)\s*\S")
-    unmarked = []
-    n = 0
-    for path in DEFENDER.rglob("*.py"):
-        rel = path.relative_to(DEFENDER).as_posix()
-        parts = Path(rel).parts
-        if (rel == "_io.py" or "tests" in parts or ".venv" in parts or "__pycache__" in parts
-                or path.name == "conftest.py" or path.name.startswith("test_")
-                or path.name.endswith("_test.py")):
-            continue
-        text = path.read_text(encoding="utf-8")
-        lines = text.splitlines()
-        for node in ast.walk(ast.parse(text)):
-            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                    and node.func.attr in ("read_text", "read_bytes")):
-                n += 1
-                span = lines[node.lineno - 1:(node.end_lineno or node.lineno)]
-                if not any(marker.search(line) for line in span):
-                    unmarked.append(f"{rel}:{node.lineno}")
-    assert n > 30, "the census itself must see the tree"
-    assert unmarked == []
-
-
-@pytest.mark.gate
-def test_real_scan_covers_an_independent_census():
-    """With markers ignored, the gate sees every read the census sees, so it cannot pass by
-    narrowing its own scope."""
-    census = _independent_real_census()
-    assert len(census) > 30, "the census itself must see the tree"
-    scanned = {f"{fp.split(':')[0]}:{fp.split(':')[2]}"
-               for fp in _fps(DEFENDER, honor_markers=False)}
-    assert census <= scanned, f"reads the gate did not scan: {sorted(census - scanned)}"
-
-
-@pytest.mark.gate
-def test_real_run_fails_when_a_real_read_loses_its_marker():
-    """The real (prefixed) path ratchets too: the real tree with markers ignored has findings,
-    and none of them is in the shipped baseline."""
-    unmarked = _GATE._scan(DEFENDER, honor_markers=False)
-    assert unmarked
-    entries = json.loads(REAL_BASELINE.read_text(encoding="utf-8"))["entries"]
-    assert not any(f"defender/{f.fingerprint}" in entries for f in unmarked)
-

@@ -246,6 +246,23 @@ def test_d_b10_learn_normalize_disposition_flood_is_run_unprocessable(tmp_path):
 
 
 
+def test_disposition_for_refuses_an_oversized_source_refs_before_parsing(tmp_path):
+    """source_refs.yaml is one small mapping, but only a box writes it, so it can be up to the
+    box fsize cap. The drain reads it capped at SOURCE_REFS_FILE_MAX and holds the case (None)
+    rather than parse megabytes in pure Python. Control: the same document at the cap resolves."""
+    from defender.run_repository._layout import SOURCE_REFS_FILE_MAX
+    runs = tmp_path / "runs"
+    (runs / "r1").mkdir(parents=True)
+    refs = runs / "r1" / "source_refs.yaml"
+    cfg = cast(AuthorConfig, SimpleNamespace(runs_dir=runs))
+    head = "normalized_disposition: benign\n#"
+    refs.write_text(head + "x" * (SOURCE_REFS_FILE_MAX - len(head)), encoding="utf-8")
+    assert disposition_for(cfg, "r1") == "benign"
+    refs.write_text(head + "x" * (SOURCE_REFS_FILE_MAX - len(head) + 1), encoding="utf-8")
+    assert disposition_for(cfg, "r1") is None
+    assert SOURCE_REFS_FILE_MAX <= 1024 * 1024
+
+
 def test_d_b12_disposition_for_flood_source_refs_is_held(tmp_path):
     """d: b12 — a flooded source_refs.yaml reads as "no ground truth" (None → the case
     is held), joining the site's YAMLError degrade. Control: a healthy file resolves."""
