@@ -368,9 +368,14 @@ def test_the_independent_census_sees_reads(tmp_path):
     assert _independent_census(tree) == ["prod.py:2", "prod.py:2"]
 
 
-#: The one production whole read outside `_io`: `_image.py` is stdlib-only by contract
-#: (`box_image.py` loads it by path on a bare `python3`), so `_io` is out of its reach.
-_REAL_EXCEPTIONS = {"runtime/box/_image.py"}
+#: The production whole reads outside `_io`, each in a stdlib-only module run without `defender`
+#: on `sys.path`, so `_io` is out of its reach: `_image.py` (`box_image.py` loads it by path on
+#: a bare `python3`) and two eval scripts run by path.
+_REAL_EXCEPTIONS = {
+    "runtime/box/_image.py",
+    "evals/oracle_golden/migrate_esql_encoding.py",
+    "evals/oracle_golden/story_from_run.py",
+}
 
 
 @pytest.mark.gate
@@ -379,7 +384,7 @@ def test_real_tree_has_no_direct_whole_read():
     but the stdlib-only image module's, and the baseline holds nothing."""
     found = _independent_census(DEFENDER)
     assert {hit.split(":")[0] for hit in found} == _REAL_EXCEPTIONS, found
-    assert len(found) == 1, found
+    assert len(found) == len(_REAL_EXCEPTIONS), found
     entries = json.loads(REAL_BASELINE.read_text(encoding="utf-8"))["entries"]
     assert entries == {}
 
@@ -393,13 +398,15 @@ def test_real_run_scans_the_real_tree_and_reports(capsys):
     assert "[lint_unbounded_whole_read] 0 finding(s): 0 baselined, 0 new" in out
 
 
-def test_the_exception_module_imports_only_the_standard_library():
-    """Why `_image.py`'s read is the exception: CI runs `box_image.py` on a bare `python3` that
-    cannot import `defender`, so any non-stdlib import there (an `_io` reader included) breaks
-    the image build. The dev venv imports `defender` anyway, so only this check sees it."""
+@pytest.mark.parametrize("rel", sorted(_REAL_EXCEPTIONS))
+def test_each_exception_module_imports_only_the_standard_library(rel):
+    """Why these reads are the exceptions: each module runs where `defender` cannot be imported
+    (a bare CI `python3`, or a script run by path), so any non-stdlib import there (an `_io`
+    reader included) breaks it. The dev venv imports `defender` anyway, so only this check
+    sees it."""
     import sys
 
-    tree = ast.parse((DEFENDER / "runtime/box/_image.py").read_text(encoding="utf-8"))
+    tree = ast.parse((DEFENDER / rel).read_text(encoding="utf-8"))
     tops = {alias.name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import)
             for alias in n.names}
     tops |= {n.module.split(".")[0] for n in ast.walk(tree)
