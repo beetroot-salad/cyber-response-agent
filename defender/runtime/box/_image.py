@@ -20,7 +20,6 @@ import re
 import tomllib
 from pathlib import Path
 from typing import Any
-from defender._io import read_bytes_capped
 
 #: Bumped whenever the recipe (what the inputs mean, not their bytes) changes. Prefixes every
 #: name, so a mounted tree's own, possibly different, `_image.py` cannot collide with ours.
@@ -101,7 +100,7 @@ def box_closure(lock: dict[str, Any], root_name: str) -> list[dict[str, Any]]:
 
 def _read(tree: Path, name: str) -> bytes:
     try:
-        return read_bytes_capped(tree / name)
+        return (tree / name).read_bytes()  # lint-whole-read: ok — stdlib-only: box_image.py loads this file by path on a bare python3, so _io is out of reach; repo-shipped image inputs
     except OSError as e:
         raise ImageInputError(tree, name, e, unreadable=True) from e
 

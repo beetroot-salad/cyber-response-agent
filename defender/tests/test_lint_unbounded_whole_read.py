@@ -368,11 +368,18 @@ def test_the_independent_census_sees_reads(tmp_path):
     assert _independent_census(tree) == ["prod.py:2", "prod.py:2"]
 
 
+#: The one production whole read outside `_io`: `_image.py` is stdlib-only by contract
+#: (`box_image.py` loads it by path on a bare `python3`), so `_io` is out of its reach.
+_REAL_EXCEPTIONS = {"runtime/box/_image.py"}
+
+
 @pytest.mark.gate
 def test_real_tree_has_no_direct_whole_read():
-    """Every production whole-file read goes through `_io`'s capped readers (#1188 amendment 3):
-    none is left to mark, and the baseline holds nothing."""
-    assert _independent_census(DEFENDER) == []
+    """Every production whole-file read goes through `_io`'s capped readers (#1188 amendment 3)
+    but the stdlib-only image module's, and the baseline holds nothing."""
+    found = _independent_census(DEFENDER)
+    assert {hit.split(":")[0] for hit in found} == _REAL_EXCEPTIONS, found
+    assert len(found) == 1, found
     entries = json.loads(REAL_BASELINE.read_text(encoding="utf-8"))["entries"]
     assert entries == {}
 
@@ -384,3 +391,18 @@ def test_real_run_scans_the_real_tree_and_reports(capsys):
     assert _GATE.main([]) == 0
     out = capsys.readouterr().out
     assert "[lint_unbounded_whole_read] 0 finding(s): 0 baselined, 0 new" in out
+
+
+def test_the_exception_module_imports_only_the_standard_library():
+    """Why `_image.py`'s read is the exception: CI runs `box_image.py` on a bare `python3` that
+    cannot import `defender`, so any non-stdlib import there (an `_io` reader included) breaks
+    the image build. The dev venv imports `defender` anyway, so only this check sees it."""
+    import sys
+
+    tree = ast.parse((DEFENDER / "runtime/box/_image.py").read_text(encoding="utf-8"))
+    tops = {alias.name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import)
+            for alias in n.names}
+    tops |= {n.module.split(".")[0] for n in ast.walk(tree)
+             if isinstance(n, ast.ImportFrom) and n.module and n.level == 0}
+    assert tops, "the census must see the module's imports"
+    assert tops <= set(sys.stdlib_module_names) | {"__future__"}, sorted(tops)
