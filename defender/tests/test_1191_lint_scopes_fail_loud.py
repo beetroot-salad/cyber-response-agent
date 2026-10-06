@@ -25,6 +25,15 @@ D1' The shared helpers in `_astlib` (names fixed by the amendment): `source_file
     excluded)` -> the `.py` files under `root` as root-relative POSIX `str` paths, pruning
     directory NAMES in `excluded` below `root` (never its ancestors) and dropping what git
     ignores; `selects(entry, rel)`; `require_selected(root, real_root, entries, rels)`.
+Design amendment 2 adds: O9 an unreadable directory under the scanned root is blind; O10 a
+    source file whose name is not UTF-8 is blind (exit 2, the name escaped, no traceback) —
+    superseding amendment 1's "returns it"; O11 a planted tree inside a git-ignored directory of
+    the enclosing repo is listed in full; O12 the env-read lint names its dead entries; O13 a dead
+    `defender/...` entry of run-records' `UNSCANNED_TREES` is blind; O14 the scope statement
+    spells a repo-level unscanned entry "top-level <name>"; O15 tree-read parses only census
+    modules and tree-write never parses test modules; O16 stage-frames' real scope is blind when
+    it lists nothing, however its path is spelled; D8 `source_files(..., suffixes=(".py",))`.
+    O8 (every lint lists through `source_files`) is `test_1191_one_listing.py`.
 
 HOW O1 AND O2 ARE OBSERVED. "This repo" is the root a lint derives from its own file
 (`Path(__file__).resolve().parents[2]`, as 53b7efec defines it). Loading the real lint and handing
@@ -149,12 +158,14 @@ def _child_env() -> dict[str, str]:
     return env
 
 
-def _run(lint_file: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _run(lint_file: Path, *args: str,
+         env_extra: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     """The lint file as CI runs it: `python <file>` from its repo's root (no arguments, unless a
-    test passes the operator's `--update-baseline`)."""
+    test passes the operator's `--update-baseline`; `env_extra` adds to the child's env)."""
     return subprocess.run(  # noqa: S603 — fixed argv built by the test
         [sys.executable, str(lint_file), *args], cwd=lint_file.parents[2], capture_output=True,
-        encoding="utf-8", errors="replace", env=_child_env(), timeout=300, check=False)
+        encoding="utf-8", errors="replace", env={**_child_env(), **(env_extra or {})},
+        timeout=300, check=False)
 
 
 def _said(result: subprocess.CompletedProcess[str]) -> str:
@@ -470,6 +481,11 @@ def _run_records_mini(root: Path) -> tuple[Path, tuple[str, ...]]:
                 _write(root / "defender" / d / src.name, src.read_text(encoding="utf-8"))
         else:
             _write(root / "defender" / d / PLANTED)
+    # D13: a `defender/...` entry of UNSCANNED_TREES must select a file too, so the mini repo
+    # holds one under each.
+    for tree in lint.UNSCANNED_TREES:
+        if tree.startswith("defender/"):
+            _write(root / tree / PLANTED)
     return lint_file, sweep
 
 
@@ -1425,20 +1441,267 @@ def test_o1_real_checkout_env_reads_root_flag_naming_this_repo_is_strict(capsys)
         assert PHANTOM in err, f"the blind scan does not name {PHANTOM}:\n{err}"
 
 
-def test_source_files_survives_an_undecodable_file_name(tmp_path):
-    """A module whose name is not valid UTF-8 (bytes `bad\\xff.py`, surfaced by Python as a
-    surrogate-escaped str) neither crashes the listing nor hides it: in a git repo ignoring
-    `build/`, `source_files` returns it, and still drops the ignored module. Skipped where the
-    filesystem refuses such a name."""
+def _undecodable_name() -> str:
+    """`bad\\xff.py` as Python surfaces it (surrogate-escaped)."""
+    return os.fsdecode(b"bad\xff.py")
+
+
+def test_source_files_refuses_an_undecodable_file_name(tmp_path):
+    """O10/D10 (supersedes amendment 1's "returns it"): a module whose name is not valid UTF-8 is
+    refused loudly — `source_files` raises `ScanBlind` naming it in escaped (`ascii()`) form —
+    in a git repo and outside one. Skipped where the filesystem refuses such a name."""
     astlib = import_lint_lib("_astlib")
-    repo = tmp_path / "repo"
-    bad = os.fsdecode(b"bad\xff.py")
+    bad = _undecodable_name()
+    for repo, in_git in ((tmp_path / "git", True), (tmp_path / "plain", False)):
+        try:
+            _write(repo / "defender" / bad)
+        except (OSError, UnicodeError) as refused:
+            pytest.skip(f"this filesystem refuses an undecodable name: {refused!r}")
+        _write(repo / "defender" / "kept.py")
+        if in_git:
+            _git_repo(repo, "build/\n")
+        with pytest.raises(astlib.ScanBlind) as caught:
+            astlib.source_files(repo / "defender", ())
+        message = str(caught.value)
+        assert "bad\\udcff.py" in message, f"the refusal does not name {ascii(bad)}: {message!r}"
+
+
+# ======================================================================================
+# Design amendment 2 — the shared listing's edges (D8–D11) and the review's findings (O12–O16)
+# ======================================================================================
+
+
+def test_source_files_lists_the_suffixes_it_is_asked_for(tmp_path):
+    """D8: `source_files(root, excluded, suffixes=(".py",))` — the default lists `.py`; the
+    text-file lints pass their own suffixes and get exactly those files."""
+    astlib = import_lint_lib("_astlib")
+    for rel in ("a.py", "b.md", "c.txt", "d.json", "sub/e.md", "sub/f.py"):
+        _write(tmp_path / rel)
+    assert sorted(astlib.source_files(tmp_path, ())) == ["a.py", "sub/f.py"]
+    got = sorted(astlib.source_files(tmp_path, (), suffixes=(".md", ".txt")))
+    assert got == ["b.md", "c.txt", "sub/e.md"], got
+
+
+def _locked_dir(path: Path) -> Path:
+    """`path` created holding one module, then made unreadable (mode 000). Skips the test where
+    the mode is not enforced (running as root with the DAC capabilities)."""
+    _write(path / "inside_1191.py")
+    path.chmod(0)
     try:
-        _write(repo / "defender" / bad)
+        os.listdir(path)
+    except PermissionError:
+        return path
+    path.chmod(0o755)
+    pytest.skip("a mode-000 directory is still readable here (root): the mode is not enforced")
+
+
+def test_source_files_is_blind_on_an_unreadable_directory(tmp_path):
+    """O9/D9: a directory under the root that the listing cannot read raises `ScanBlind` naming
+    it — never a silent skip of what it holds."""
+    astlib = import_lint_lib("_astlib")
+    _write(tmp_path / "kept.py")
+    locked = _locked_dir(tmp_path / "pkg" / "locked_1191")
+    try:
+        with pytest.raises(astlib.ScanBlind, match="locked_1191"):
+            astlib.source_files(tmp_path, ())
+    finally:
+        locked.chmod(0o755)
+
+
+def test_o9_an_unreadable_directory_blinds_a_lint(tmp_path, capsys):
+    """O9 through a lint: the tree-write lint over a planted scope holding a mode-000 directory
+    exits 2 naming it. Control: with the directory readable again, the same run exits 0."""
+    lint = _fresh(TREE_WRITE)
+    scope = tmp_path / "defender"
+    _write(scope / "kept.py")
+    locked = _locked_dir(scope / "locked_1191")
+    try:
+        rc = lint.main([], scope=scope, baseline_path=tmp_path / "baseline.json")
+        err = capsys.readouterr().err
+    finally:
+        locked.chmod(0o755)
+    assert rc == 2, f"an unreadable directory under the scope did not blind the scan: rc={rc}\n{err}"
+    assert "locked_1191" in err, f"the blind scan does not name the unreadable directory:\n{err}"
+    assert lint.main([], scope=scope, baseline_path=tmp_path / "baseline.json") == 0
+
+
+def test_o10_an_undecodable_module_name_blinds_a_lint_without_a_traceback(tmp_path):
+    """O10 through a lint, on a strict-UTF-8 stdout/stderr: the tree-write lint over a mini repo
+    holding a module named by the bytes `bad\\xff.py` (and carrying a raw write, so a lint that
+    reported it would print the name) exits 2, shows the name escaped, and prints no traceback.
+    Control: the same mini repo without it exits 0."""
+    lint_file, _entries = _tree_write_mini(tmp_path)
+    strict = {"PYTHONIOENCODING": "utf-8:strict"}
+    clean = _run(lint_file, env_extra=strict)
+    assert clean.returncode == 0, f"control: the mini repo is not clean\n{_said(clean)}"
+    bad = _undecodable_name()
+    try:
+        _write(tmp_path / "defender" / bad, TREE_WRITE_PROBE)
     except (OSError, UnicodeError) as refused:
         pytest.skip(f"this filesystem refuses an undecodable name: {refused!r}")
-    _write(repo / "defender" / "kept.py")
-    _write(repo / "defender" / "build" / "x.py")
+    result = _run(lint_file, env_extra=strict)
+    assert "Traceback" not in result.stderr, f"the lint crashed on the name\n{_said(result)}"
+    _expect(result, 2, "bad\\udcff.py", on="stderr",
+            why="a module whose name is not UTF-8 did not blind the scan with the name escaped")
+
+
+def test_source_files_lists_a_tree_inside_an_ignored_directory_in_full(tmp_path):
+    """O11/D11: a planted tree that sits inside a git-ignored directory of the enclosing repo
+    (`<repo>/build/planted`, `build/` ignored) is listed in full — the root being ignored does
+    not make everything under it vanish. (A dir ignored BELOW the root still is: amendment 1.)"""
+    astlib = import_lint_lib("_astlib")
+    repo = tmp_path / "repo"
+    _write(repo / "kept.py")
     _git_repo(repo, "build/\n")
-    got = sorted(astlib.source_files(repo / "defender", ()))
-    assert got == sorted([bad, "kept.py"]), got
+    planted = repo / "build" / "planted"
+    for rel in ("a.py", "sub/b.py"):
+        _write(planted / rel)
+    assert sorted(astlib.source_files(planted, ())) == ["a.py", "sub/b.py"]
+
+
+def test_o11_a_lint_over_a_tree_inside_an_ignored_directory_reports_its_plant(tmp_path, capsys):
+    """O11 through a lint: the tree-write lint with `scope=<repo>/build/planted` (`build/`
+    ignored by the enclosing repo) reports the raw write planted there (exit 1, named)."""
+    repo = tmp_path / "repo"
+    _write(repo / "kept.py")
+    _git_repo(repo, "build/\n")
+    scope = repo / "build" / "planted"
+    _write(scope / "pkg_1191" / "m.py", TREE_WRITE_PROBE)
+    lint = _fresh(TREE_WRITE)
+    rc = lint.main([], scope=scope, baseline_path=tmp_path / "baseline.json")
+    out = capsys.readouterr().out
+    assert rc == 1, f"the plant under an ignored enclosing dir went unreported: rc={rc}\n{out}"
+    assert "pkg_1191/m.py" in out, f"the finding does not name the plant:\n{out}"
+
+
+def test_o12_env_reads_names_its_dead_entries_when_none_selects(capsys):
+    """O12/D12: over this checkout, with EVERY `SWEPT` entry dead, the env-read lint's blind scan
+    names the dead entries (not only "none of the trees is there"). Control: the unmodified
+    fresh load exits 0."""
+    assert _fresh(ENV_READS, "_control").main([]) == 0, "control: the real lint is not clean"
+    capsys.readouterr()
+    lint = _fresh(ENV_READS, "_dead")
+    phantoms = tuple(f"defender/{PHANTOM}_{i}.py" for i in range(len(lint.SWEPT)))
+    lint.SWEPT = phantoms
+    rc, err = _main(lint, capsys, [])
+    assert rc == 2, f"every SWEPT entry dead: rc={rc}\n{err}"
+    unnamed = [p for p in phantoms if p not in err]
+    assert not unnamed, f"the blind scan does not name the dead entries {unnamed}:\n{err}"
+
+
+def test_o13_a_dead_unscanned_defender_tree_is_blind(capsys):
+    """O13/D13: over this checkout, a `defender/...` entry of `UNSCANNED_TREES` that selects no
+    file makes the run-records lint's `main([])` exit 2 naming it, like a dead swept dir.
+    Control: the unmodified fresh load exits 0."""
+    assert _fresh(RUN_RECORDS, "_control").main([]) == 0, "control: the real lint is not clean"
+    capsys.readouterr()
+    lint = _fresh(RUN_RECORDS, "_dead_unscanned")
+    dead = f"defender/{PHANTOM}"
+    lint.UNSCANNED_TREES = (*lint.UNSCANNED_TREES, dead)
+    rc, err = _main(lint, capsys, [])
+    assert rc == 2, f"main([]) with {dead} declared unscanned: rc={rc}\n{err}"
+    assert PHANTOM in err, f"the blind scan does not name {dead}:\n{err}"
+
+
+def test_o14_a_repo_level_unscanned_entry_is_spelled_top_level(tmp_path):
+    """O14/D14: the scope statement renders a bare (repo-level) `UNSCANNED_TREES` entry as
+    "top-level <name>", after "never enters" — on the real lint, and on a copy with one more
+    bare entry declared — so it never reads as both sweeping and never entering `scripts`."""
+    real = _fresh(RUN_RECORDS)
+    copy = _statement_of_copy(tmp_path, "SWEEP_DIRS", '(*UNSCANNED_TREES, "zz_top_1191")')
+    for statement, unscanned in ((real.SCOPE_STATEMENT, list(real.UNSCANNED_TREES)),
+                                 (copy, [*real.UNSCANNED_TREES, "zz_top_1191"])):
+        tail = statement.partition("never enters")[2]
+        bare = [t for t in unscanned if not t.startswith("defender/")]
+        assert bare, f"precondition: a repo-level unscanned entry: {unscanned}"
+        unspelled = [t for t in bare if f"top-level {t}" not in tail]
+        assert not unspelled, (
+            f"repo-level unscanned entries not spelled 'top-level <name>' after 'never enters': "
+            f"{unspelled}\n{statement}")
+
+
+#: A module that does not parse.
+UNPARSEABLE = "def broken_1191(:\n"
+
+
+def test_o15_tree_read_parses_only_census_modules(tmp_path):
+    """O15/D15: the tree-read lint parses only census modules that are not tests — an unlisted
+    module or a test module (inside a listed package or under `tests/`) with a syntax error
+    leaves it clean (exit 0). Control: a census module with a syntax error is blind (exit 2,
+    named)."""
+    lint_file, modules = _tree_read_mini(tmp_path)
+    _assert_clean(lint_file, TREE_READ)
+    d = tmp_path / "defender"
+    packages = [m for m in modules if m.endswith("/")]
+    planted = [d / "zz_unlisted_1191.py", d / "tests" / "test_broken_1191.py"]
+    planted += [d / p / "test_broken_1191.py" for p in packages[:1]]
+    for path in planted:
+        _write(path, UNPARSEABLE)
+    result = _run(lint_file)
+    assert result.returncode == 0, (
+        f"an unparseable module outside the census (or a test module) blinded the tree-read "
+        f"lint\n{_said(result)}")
+    module = _file_entries(modules)[0]
+    _write(d / module, UNPARSEABLE)
+    _expect(_run(lint_file), 2, module, on="stderr",
+            why=f"control: unparseable census module {module} did not blind the scan")
+
+
+def test_o15_tree_write_never_parses_test_modules(tmp_path):
+    """O15/D15: the tree-write lint never parses test modules — `tests/test_*.py`, a `conftest.py`
+    — so one with a syntax error leaves it clean (exit 0). Control: a non-test module with a
+    syntax error is blind (exit 2, named)."""
+    lint_file, _entries = _tree_write_mini(tmp_path)
+    _assert_clean(lint_file, TREE_WRITE)
+    d = tmp_path / "defender"
+    for path in (d / "tests" / "test_broken_1191.py", d / "pkg_1191" / "conftest.py"):
+        _write(path, UNPARSEABLE)
+    result = _run(lint_file)
+    assert result.returncode == 0, f"an unparseable test module blinded the tree-write lint\n{_said(result)}"
+    _write(d / "zz_broken_1191.py", UNPARSEABLE)
+    _expect(_run(lint_file), 2, "zz_broken_1191.py", on="stderr",
+            why="control: an unparseable non-test module did not blind the scan")
+
+
+def test_o16_stage_frames_real_scope_through_a_symlink_is_not_blind(tmp_path):
+    """O16: the stage-frames lint handed the real `defender/learning` through a symlink scans it
+    like the real scope: not blind (exit 0, the real tree being clean)."""
+    lint = _fresh(STAGE_FRAMES)
+    link = tmp_path / "learning_link_1191"
+    link.symlink_to(DEFENDER / "learning", target_is_directory=True)
+    baseline = tmp_path / "baseline.json"
+    shutil.copyfile(lint.BASELINE_PATH, baseline)
+    assert lint.main([], scope=link, baseline_path=baseline) == 0
+
+
+#: Runs the copied stage-frames lint's `main([], scope=argv[2], baseline_path=argv[3])` (argv[1]:
+#: the copy's directory) and exits with its status.
+_STAGE_FRAMES_MAIN = ("import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); "
+                      "import lint_stage_prompt_frames as m; "
+                      "sys.exit(m.main([], scope=Path(sys.argv[2]), baseline_path=Path(sys.argv[3])))")
+
+
+def test_o16_an_emptied_real_scope_is_blind_however_it_is_spelled(tmp_path):
+    """O16/D16: over this repo, the stage-frames scope that lists no file is blind whatever its
+    path is spelled as — the copy's own `defender/learning`, emptied, handed to its `main` by its
+    real path and through a symlink, exits 2 both times. Control: populated, both exit 0."""
+    lint_file, scope = _stage_frames_mini(tmp_path)
+    real = tmp_path / scope
+    link = tmp_path / "learning_link_1191"
+    link.symlink_to(real, target_is_directory=True)
+
+    def run(spelled: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(  # noqa: S603 — fixed argv built by the test
+            [sys.executable, "-c", _STAGE_FRAMES_MAIN, str(lint_file.parent), str(spelled),
+             str(tmp_path / "baseline.json")], cwd=tmp_path, capture_output=True,
+            encoding="utf-8", errors="replace", env=_child_env(), timeout=120, check=False)
+
+    for spelled in (real, link):
+        control = run(spelled)
+        assert control.returncode == 0, f"control: scope {spelled} not clean\n{_said(control)}"
+    shutil.rmtree(real)
+    _write(real / "README.md", "not code\n")
+    for spelled in (real, link):
+        result = run(spelled)
+        assert result.returncode == 2, (
+            f"the emptied real scope, spelled {spelled}, was not blind\n{_said(result)}")
