@@ -12,6 +12,7 @@ from defender._model import model
 from defender._report import ReportUnreadable, require_report
 from defender.run_repository import RunPaths
 from defender.runtime.tenant_settings import pointer_to, read_regular_bytes
+from defender._io import read_text_utf8
 
 
 #: The mapping's path inside a tenant's `settings/` folder, which every reader is handed.
@@ -273,7 +274,7 @@ def read_case_record(run_dir: Path, *, mapping: CaseMapping | CaseTicketError) -
     alert_path = RunPaths(run_dir).alert
     if alert_path.is_file():
         with contextlib.suppress(json.JSONDecodeError, OSError):
-            signature_id = _signature_id(json.loads(alert_path.read_text(encoding="utf-8")), plain)
+            signature_id = _signature_id(json.loads(read_text_utf8(alert_path)), plain)
 
     return CaseRecord(
         case_id=case_id,

@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from defender._clock import parse_iso_utc
+from defender._io import read_text_utf8
 from defender.run_repository import RUN_LAYOUT, RunPaths
 from defender._pricing import PRICING, usage_cost  # noqa: F401  (re-exported for this module's consumers)
 from defender.scripts.visualize.visualize_primitives import slugify
@@ -58,7 +59,7 @@ def split_investigation_phases(run_dir: Path) -> list[dict]:
     p = RunPaths(run_dir).investigation
     if not p.is_file():
         return []
-    text = p.read_text(encoding="utf-8")
+    text = read_text_utf8(p)
     parts = re.split(r"(?m)^(## .*)$", text)
     out: list[dict] = []
     pre = parts[0].strip()

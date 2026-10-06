@@ -832,13 +832,11 @@ def test_o1_the_wrappers_take_a_per_caller_limit(tmp_path):
         _io.read_text_utf8(p, limit=10)
     assert _io.read_text_soft(p, limit=10)[0] is None
     assert _io.read_text_utf8(p, limit=100) == "x" * 100
-    big = sparse(tmp_path / "big.jsonl", 64 * MiB + 1)
-    assert _io.read_jsonl_rows_report(big, limit=None) == ([], 1)
 
 
 def test_o1_the_wire_log_reader_reads_past_the_default_limit(tmp_path):
-    """`visualize_messages.load_messages` reads the wire log (up to 115 MB seen) and passes
-    `limit=None`: an operator tool over a host-written log."""
+    """`visualize_messages.load_messages` reads the wire log (up to 115 MB seen) by streaming it
+    row by row (#1188 D2): an operator tool over a host-written log, never a whole read."""
     run_dir = run_dir_at(tmp_path)
     wire = RunPaths(run_dir).wire_log
     wire.parent.mkdir(parents=True, exist_ok=True)
@@ -980,7 +978,7 @@ def test_h3_a_valid_state_padded_past_the_limit_reads_as_tripped(tmp_path):
     assert CB.is_tripped(run_dir, "elastic") is True
 
 
-# -- H2, H12: limit=None reads the whole file ------------------------------------------------
+# -- H2, H12 (amended by #1188 D1/D2): the cap only lowers; the wire log streams ------------
 
 
 def _rows_around_a_hole(path: Path) -> None:
@@ -993,23 +991,195 @@ def _rows_around_a_hole(path: Path) -> None:
         f.write(b'\n{"n": 2}\n')
 
 
-def test_h2_the_wire_log_reads_every_row_past_the_default_limit(tmp_path):
+def test_h2_the_wire_log_streams_every_row_past_the_cap(tmp_path):
+    """The wire log is past the cap, so a whole read refuses it; the streaming reader still
+    yields every row, and so does the visualizer that uses it."""
     run_dir = run_dir_at(tmp_path)
-    _rows_around_a_hole(RunPaths(run_dir).wire_log)
+    wire = RunPaths(run_dir).wire_log
+    _rows_around_a_hole(wire)
     from defender.scripts.visualize.visualize_data import load_messages
     assert load_messages(run_dir) == [{"n": 1}, {"n": 2}]
-    assert _io.read_jsonl_rows(RunPaths(run_dir).wire_log, limit=None) == [{"n": 1}, {"n": 2}]
+    assert list(_io.iter_plain_jsonl_rows(wire)) == [{"n": 1}, {"n": 2}]
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_jsonl_rows(wire)
 
 
-def test_h12_the_text_wrappers_read_past_the_default_limit_with_no_limit(tmp_path):
+def test_h2_the_streaming_reader_skips_non_rows_and_reads_nothing_when_absent(tmp_path):
+    p = tmp_path / "log.jsonl"
+    p.write_text('{"a": 1}\nnot json\n\n[1, 2]\n{"b": 2}', encoding="utf-8")
+    assert list(_io.iter_plain_jsonl_rows(p)) == [{"a": 1}, {"b": 2}]
+    assert list(_io.iter_plain_jsonl_rows(tmp_path / "absent.jsonl")) == []
+
+
+def test_h2_the_streaming_reader_refuses_a_planted_link(tmp_path):
+    """Opened as `read_plain` opens: no-follow, plain regular file. Control: the link's
+    target, read by its own name, streams."""
+    target = tmp_path / "real.jsonl"
+    target.write_text('{"a": 1}\n', encoding="utf-8")
+    link = tmp_path / "link.jsonl"
+    link.symlink_to(target)
+    assert list(_io.iter_plain_jsonl_rows(target)) == [{"a": 1}]
+    with pytest.raises(OSError, match=_io.ALIAS_READ_REFUSAL):
+        list(_io.iter_plain_jsonl_rows(link))
+
+
+def test_h2_the_streaming_reader_refuses_a_hard_link_and_a_fifo(tmp_path):
+    """The same plain-entry refusal as `read_plain`: a hard link (`O_NOFOLLOW` cannot refuse it)
+    and a FIFO (refused at the non-blocking open, never waited on). Control: the original name
+    of the hard-linked file streams."""
+    original = tmp_path / "original.jsonl"
+    original.write_text('{"a": 1}\n', encoding="utf-8")
+    hard = tmp_path / "hard.jsonl"
+    os.link(original, hard)
+    with pytest.raises(OSError, match=_io.ALIAS_READ_REFUSAL):
+        list(_io.iter_plain_jsonl_rows(hard))
+    os.unlink(hard)
+    assert list(_io.iter_plain_jsonl_rows(original)) == [{"a": 1}]
+    fifo = tmp_path / "fifo.jsonl"
+    os.mkfifo(fifo)
+    with pytest.raises(OSError, match=_io.ALIAS_READ_REFUSAL):
+        list(_io.iter_plain_jsonl_rows(fifo))
+
+
+def test_h2_the_streaming_reader_is_lazy(tmp_path):
+    """The first row comes off a file with a 256 MiB tail without the tail being read: peak
+    allocation stays far under it. A whole read would allocate the file."""
+    import tracemalloc
+    p = tmp_path / "log.jsonl"
+    p.write_text('{"n": 1}\n', encoding="utf-8")
+    with open(p, "r+b") as f:  # lint-text-io: ok — test plant of a sparse tail
+        f.truncate(256 * MiB)
+    rows = _io.iter_plain_jsonl_rows(p)
+    tracemalloc.start()
+    try:
+        first = next(rows)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+        rows.close()  # type: ignore[attr-defined]
+    assert first == {"n": 1}
+    assert peak < 4 * MiB, peak
+
+
+def test_h2_the_streaming_reader_skips_a_line_past_the_cap_without_holding_it(tmp_path):
+    """A newline-free stretch longer than READ_LIMIT is not a row and is never held whole:
+    peak allocation stays well under its size. The rows on either side still come out."""
+    import tracemalloc
+    p = tmp_path / "log.jsonl"
+    p.write_text('{"n": 1}\n', encoding="utf-8")
+    with open(p, "r+b") as f:  # lint-text-io: ok — test plant of a sparse newline-free stretch
+        f.truncate(200 * MiB)
+        f.seek(0, os.SEEK_END)
+        f.write(b'\n{"n": 2}\n')
+    tracemalloc.start()
+    try:
+        rows = list(_io.iter_plain_jsonl_rows(p))
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert rows == [{"n": 1}, {"n": 2}]
+    assert peak < 160 * MiB, peak
+
+
+def test_h2_a_linked_wire_log_renders_no_messages(tmp_path):
+    """The visualizer over a run copy whose wire log is a link: no messages (the streaming
+    reader refuses the alias), not a crash of the whole page. Control: the plain log renders."""
+    from defender.scripts.visualize.visualize_data import load_messages
+    run_dir = run_dir_at(tmp_path)
+    wire = RunPaths(run_dir).wire_log
+    wire.parent.mkdir(parents=True, exist_ok=True)
+    wire.write_text('{"n": 1}\n', encoding="utf-8")
+    assert load_messages(run_dir) == [{"n": 1}]
+    elsewhere = tmp_path / "elsewhere.jsonl"
+    wire.rename(elsewhere)
+    wire.symlink_to(elsewhere)
+    assert load_messages(run_dir) == []
+
+
+def test_read_bytes_capped_reads_exact_bytes_and_follows_a_link(tmp_path):
+    """`Path.read_bytes` semantics (exact bytes, no newline translation, follows a link), capped.
+    Over the cap it refuses before reading."""
+    p = tmp_path / "a.bin"
+    p.write_bytes(b"x\r\ny\r")
+    link = tmp_path / "link.bin"
+    link.symlink_to(p)
+    assert _io.read_bytes_capped(p) == b"x\r\ny\r"
+    assert _io.read_bytes_capped(link) == b"x\r\ny\r"
+    assert _io.read_bytes_capped(p, limit=10 ** 12) == b"x\r\ny\r"
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_bytes_capped(p, limit=3)
+    big = sparse(tmp_path / "big.bin", 64 * MiB + 1)
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_bytes_capped(big, limit=10 ** 12)
+    with pytest.raises(FileNotFoundError):
+        _io.read_bytes_capped(tmp_path / "absent.bin")
+
+
+@pytest.mark.parametrize("raised", [64 * MiB + 2, 128 * MiB, 10 ** 12])
+def test_h12_a_caller_cannot_raise_the_cap(tmp_path, raised):
+    """`limit` only lowers: a caller asking for more than READ_LIMIT still gets READ_LIMIT, so
+    a file one byte past it is refused by every wrapper, however the call is spelled."""
     p = sparse(tmp_path / "big.txt", 64 * MiB + 1)
-    text = _io.read_text_utf8(p, limit=None)
-    assert len(text) == 64 * MiB + 1
-    del text
-    soft, reason = _io.read_text_soft(p, limit=None)
-    assert reason is None
-    assert soft is not None
-    assert len(soft) == 64 * MiB + 1
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_text_utf8(p, limit=raised)
+    soft, reason = _io.read_text_soft(p, limit=raised)
+    assert soft is None
+    assert reason
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_jsonl_rows_report(p, limit=raised)
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_jsonl_rows(p, limit=raised)
+
+
+def test_h12_a_raised_limit_still_reads_a_file_under_the_cap(tmp_path):
+    """Clamped, not refused: asking for more than READ_LIMIT reads a small file as usual."""
+    p = tmp_path / "small.jsonl"
+    p.write_text('{"a": 1}\n', encoding="utf-8")
+    assert _io.read_text_utf8(p, limit=10 ** 12) == '{"a": 1}\n'
+    assert _io.read_text_soft(p, limit=10 ** 12) == ('{"a": 1}\n', None)
+    assert _io.read_jsonl_rows(p, limit=10 ** 12) == [{"a": 1}]
+    assert _io.read_jsonl_rows_report(p, limit=10 ** 12) == ([{"a": 1}], 0)
+
+
+_READERS = {
+    "read_text_utf8": lambda p, lim: _io.read_text_utf8(p, limit=lim),
+    "read_text_soft": lambda p, lim: _io.read_text_soft(p, limit=lim),
+    "read_jsonl_rows": lambda p, lim: _io.read_jsonl_rows(p, limit=lim),
+    "read_jsonl_rows_report": lambda p, lim: _io.read_jsonl_rows_report(p, limit=lim),
+    "read_bytes_capped": lambda p, lim: _io.read_bytes_capped(p, limit=lim),
+}
+
+
+@pytest.mark.parametrize("reader", sorted(_READERS))
+def test_h12_the_cap_has_no_off_switch(tmp_path, reader):
+    """`None` is not a limit any more (#1188 D1), on every reader that takes one: a TypeError,
+    not "no bound", and not swallowed into a soft "unreadable". Control: the default reads."""
+    p = tmp_path / "small.jsonl"
+    p.write_text('{"a": 1}\n', encoding="utf-8")
+    assert _READERS[reader](p, _io.READ_LIMIT)
+    with pytest.raises(TypeError):
+        _READERS[reader](p, None)
+    with pytest.raises(TypeError):
+        _READERS[reader](tmp_path / "absent.jsonl", None)
+
+
+def test_h12_the_one_read_step_clamps_whoever_calls_it(tmp_path):
+    """The clamp lives in the shared step, not in the wrappers: a direct call with a huge limit
+    still refuses a descriptor past READ_LIMIT. Control: the same call on a small file reads."""
+    big = sparse(tmp_path / "big.bin", 64 * MiB + 1)
+    small = tmp_path / "small.bin"
+    small.write_bytes(b"abc")
+    for path, expect_refusal in ((big, True), (small, False)):
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            size = os.fstat(fd).st_size
+            if expect_refusal:
+                with pytest.raises(OSError, match="read limit"):
+                    _io._read_plain_fd(os, fd, size, binary=True, limit=10 ** 12)
+            else:
+                assert _io._read_plain_fd(os, fd, size, binary=True, limit=10 ** 12) == b"abc"
+        finally:
+            os.close(fd)
 
 
 # -- H4, H5: a size-0 descriptor (a pipe) reads to EOF, bounded as it goes -------------------

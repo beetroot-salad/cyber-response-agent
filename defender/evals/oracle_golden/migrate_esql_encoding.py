@@ -159,7 +159,7 @@ def migrate_file(path: Path) -> int:
     reproduces its original bytes; if none does, raises `ValueError` (message names
     "serializ") and leaves the file untouched.
     """
-    raw = path.read_bytes()
+    raw = path.read_bytes()  # lint-whole-read: ok — stdlib-only script run by path (no defender on sys.path), so _io is out of reach; operator-curated golden-case files
     if not raw.strip():
         return 0
 

@@ -58,6 +58,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from defender._model import model  # noqa: E402
 from defender._yaml import safe_load, safe_load_typed_and_spelled  # noqa: E402
 from defender.evals.oracle_golden import judge  # noqa: E402
+from defender._io import read_text_utf8
 
 # The closed marker vocabulary; anything else is malformed output, not an answer.
 _SUPPRESSED_PREFIX = "<suppressed"
@@ -291,7 +292,7 @@ def measure_case(case_dir: Path, lead_ids: list[str], *, model: str, effort: str
     path = labels_path(case_dir, model, effort)
     cached: dict = {}
     if path.is_file() and not relabel:
-        doc = json.loads(path.read_text(encoding="utf-8"))
+        doc = json.loads(read_text_utf8(path))
         cached = doc.get("leads") or {}
 
     todo = [x for x in lead_ids if x not in cached]
@@ -347,9 +348,9 @@ def _measured(case_dir: Path, proj_path: Path, *, model: str, effort: str) -> _M
 
     Shared by `--dry-run` and `score_case` so the dry run cannot disagree with the score.
     """
-    manifest = safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
+    manifest = safe_load(read_text_utf8(case_dir / "manifest.yaml")) or {}
     # Typed reading for structure and the judge; spelled reading (same shape) for text checks.
-    readings = safe_load_typed_and_spelled(proj_path.read_text(encoding="utf-8"))
+    readings = safe_load_typed_and_spelled(read_text_utf8(proj_path))
     leads = {row["lead_id"]: row for row in judge.load_case_leads(case_dir)}
     preds, duplicates = load_predictions(readings.typed)
     spelled_preds, _ = load_predictions(readings.spelled)
@@ -493,7 +494,7 @@ def forbidden_values(case_dir: Path, manifest: dict) -> list[str]:
         (manifest.get("expectation") or {}, "manifest.yaml expectation")]
     calibration = case_dir / "expected.yaml"
     if calibration.is_file():
-        sources.append((safe_load(calibration.read_text(encoding="utf-8")) or {},
+        sources.append((safe_load(read_text_utf8(calibration)) or {},
                         "expected.yaml"))
     sources.append((manifest, "manifest.yaml"))
     clauses = [_text_clause(doc, "must_not_emit", where=where) for doc, where in sources]

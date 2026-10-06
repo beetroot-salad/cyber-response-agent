@@ -33,7 +33,7 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.usage import UsageLimits
 
-from defender._io import write_guarded
+from defender._io import read_text_utf8, write_guarded
 from defender import _git
 from defender._paths import DefenderPaths, adapters_under
 from defender._vocab import HOST_ONLY_DISPOSITION
@@ -405,7 +405,7 @@ def _alert_doc_soft(alert_path: Path) -> dict:
     """The alert as item 3's contract reads it — `{}` when unreadable or not JSON; the
     contract's own gate does the refusing."""
     try:
-        doc = json.loads(alert_path.read_text(encoding="utf-8"))
+        doc = json.loads(read_text_utf8(alert_path))
     except (OSError, ValueError):
         return {}
     return doc if isinstance(doc, dict) else {}

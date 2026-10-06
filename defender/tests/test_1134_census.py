@@ -481,7 +481,8 @@ ALLOW: tuple[Allowed, ...] = (
     # --- the curator channels' run.py ---------------------------------------------------------
     Allowed(LESSONS_RUN, "disposition_for", "attr", "refs.is_file()", N_E,
             "the run dir's source_refs (`RunPaths(runs_dir / run_id).source_refs`)"),
-    Allowed(LESSONS_RUN, "disposition_for", "attr", "refs.read_text(encoding='utf-8')", N_E,
+    Allowed(LESSONS_RUN, "disposition_for", "call",
+            "read_text_utf8(refs, limit=SOURCE_REFS_FILE_MAX)", N_E,
             "the run dir's source_refs (`RunPaths(runs_dir / run_id).source_refs`)"),
     Allowed(LESSONS_RUN, "main", "construct", "open_drain_trees(paths, AUTHOR_DRAIN_LABEL)",
             D3, "the CLI's own trees over the live checkout, for its lane's label: " + _OPENER),

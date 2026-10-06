@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 
-from defender._io import read_jsonl_rows
+from defender._io import iter_plain_jsonl_rows
 from defender._report import ReportRead
 from defender.run_repository import GATE_METADATA_KEY, RUN_LAYOUT, RunPaths
 # From `agent_role`, not `review_roles`: the latter pulls in the whole runtime (pydantic-ai
@@ -14,17 +15,26 @@ from defender._pricing import usage_cost
 from defender.scripts.visualize.visualize_data import phase_verb
 from defender.scripts.visualize.visualize_primitives import parse_report
 
+_logger = logging.getLogger(__name__)
+
 
 def load_messages(run_dir: Path) -> list[dict]:
-    """The run's wire-log records, or `[]` when the run has none.
+    """The run's wire-log records, or `[]` when the run has none (or its log is a link or
+    special file, which the streaming reader refuses).
 
     Falls back to the older run-root location so older run dirs still render a transcript.
     This is a host-side reader; the `wire_logs/` placement matters only to the read gate."""
     current = RunPaths(run_dir).wire_log
-    # No read limit (#1174): the wire log runs past 100 MB on long runs, and this is an
-    # operator tool over a log the host wrote, not a sandbox-writable record.
-    return read_jsonl_rows(
-        current if current.is_file() else Path(run_dir) / RUN_LAYOUT.wire_log.name, limit=None)
+    # Streamed, not read whole (#1188 D2): the wire log runs past 100 MB on long runs, over
+    # `_io.READ_LIMIT`, which no caller can raise.
+    path = current if current.is_file() else Path(run_dir) / RUN_LAYOUT.wire_log.name
+    try:
+        return list(iter_plain_jsonl_rows(path))
+    except OSError as e:
+        # A linked or special-file wire log (an operator's linked run copy) is refused by the
+        # streaming reader; the page renders with no messages rather than not at all.
+        _logger.warning("wire log at %s not rendered: %s", path, e)
+        return []
 
 
 def _pretty_model(name: str) -> str:

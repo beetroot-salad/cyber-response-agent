@@ -188,6 +188,7 @@ Most gates take a line suppression of the form `# lint-<tag>: ok — <reason>`. 
 | Reads out of that same tree through `run_repository._layout.artifact_file` / `artifact_dir`, which `lstat` | a plain stat/read/copy, which follows the link the write side refuses | `# lint-tree-read-follows-link: ok` |
 | Prompt sections already `defender._untrusted.wrap`-ed when they reach `stage_user_message` | interpolating a section into the prompt yourself | `# lint-stage-frame: ok` |
 | `encoding="utf-8"` pinned on every text read and write | bare `read_text()` / `open(p)` / `write_text(s)`, which use the ambient locale | `# lint-text-io: ok` |
+| Whole-file reads through `defender._io`: `read_text_utf8` for `read_text(encoding="utf-8")`, `read_bytes_capped` for `read_bytes()` (same semantics), capped at `READ_LIMIT`, which a caller can only lower | a bare `read_text()` / `read_bytes()` (or a reference to one), which sizes its buffer from the file | `# lint-whole-read: ok` |
 | An optional input resolved once at the boundary (see below) | re-coalescing the default in the body | `# lint-default: ok` |
 
 ### Test discipline

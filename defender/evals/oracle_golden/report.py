@@ -48,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from defender import _yaml  # noqa: E402
 from defender.evals.oracle_golden import stats as STATS  # noqa: E402 — after the bootstrap
+from defender._io import read_text_utf8
 
 #: Fewest independent units before an interval is published. At n=1 Wilson spans
 #: [0.21, 1.00] and at n=2 [0.34, 1.00], which only invites reading the point estimate.
@@ -78,10 +79,10 @@ def load_golden_cases(cases_dir: Path) -> list[dict]:
         manifest_path = case_dir / "manifest.yaml"
         if not manifest_path.is_file():
             continue
-        manifest = _yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+        manifest = _yaml.safe_load(read_text_utf8(manifest_path)) or {}
         scores = {}
         for score_path in sorted((case_dir / "scores").glob("*.json")):
-            scores[score_path.stem] = json.loads(score_path.read_text(encoding="utf-8"))
+            scores[score_path.stem] = json.loads(read_text_utf8(score_path))
         out.append({"dir": case_dir, "id": case_dir.name, "manifest": manifest,
                     "scores": scores})
     return out

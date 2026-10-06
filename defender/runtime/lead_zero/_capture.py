@@ -15,7 +15,7 @@ from typing import Annotated, Any
 
 from pydantic import SkipValidation
 
-from defender._io import read_jsonl_rows
+from defender._io import read_jsonl_rows, read_text_utf8
 from defender.run_repository import RunPaths
 from defender.hooks.budget_enforcer import (
     BudgetKill,
@@ -142,7 +142,7 @@ async def _capture_issue(
         envelope = captured[0] if captured else None
         return (envelope if isinstance(envelope, dict) else None), text
     try:
-        data = json.loads((deps.run_dir / payload_path).read_text(encoding="utf-8"))
+        data = json.loads(read_text_utf8(deps.run_dir / payload_path))
     except (OSError, ValueError):
         return None, text
     if not isinstance(data, dict):
@@ -308,7 +308,7 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> N
     )
     try:
         # `None`, not `""`, for an absent file, matching `permission.decide_write`'s baseline.
-        existing = path.read_text(encoding="utf-8") if path.is_file() else None
+        existing = read_text_utf8(path) if path.is_file() else None
         proposed = block if existing is None else existing + block
         reason = validate_artifact(RUN_LAYOUT.investigation.name, proposed, existing)
         if reason is not None:

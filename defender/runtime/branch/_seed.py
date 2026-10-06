@@ -13,10 +13,7 @@ from typing import Any
 
 
 from defender._io import (
-    guarded_mkdir,
-    read_guarded,
-    read_jsonl_rows,
-    write_guarded,
+    guarded_mkdir, read_guarded, read_jsonl_rows, read_plain_bytes, write_guarded,
 )
 from defender.run_repository import RUN_LAYOUT, RunPaths, artifact_dir, artifact_file
 
@@ -141,7 +138,7 @@ def _inherit_evidence(source_run_dir: Path, run_dir: Path, leads: set[str]) -> N
                 "run's own")
         # Bytes, matching `materialize_run`'s `shutil.copy`, so the copy is exact even if not
         # valid UTF-8.
-        write_guarded(RunPaths(run_dir).alert, alert.read_bytes())
+        write_guarded(RunPaths(run_dir).alert, _plain_bytes(alert))
 
     queries = RunPaths(source_run_dir).executed_queries
     if queries.exists() or queries.is_symlink():
@@ -194,7 +191,18 @@ def _copy_artifact(src: Path, dst: Path) -> None:
     """
     if not artifact_file(src):
         raise BranchError(f"{src} is {_not_a_plain_file(src)}")
-    write_guarded(dst, src.read_bytes())
+    write_guarded(dst, _plain_bytes(src))
+
+
+def _plain_bytes(path: Path) -> bytes:
+    """`path`'s bytes through `read_plain_bytes`: opened no-follow and judged on the descriptor,
+    so a link swapped in after `artifact_file`'s lstat is refused at the open, and capped at
+    `READ_LIMIT` (#1188). Any refusal is this module's `BranchError`, never a raw `OSError`
+    partway through the fork."""
+    try:
+        return read_plain_bytes(path)
+    except OSError as e:
+        raise BranchError(f"{path} could not be copied into the sibling: {e}") from e
 
 
 def _not_a_plain_file(path: Path) -> str:

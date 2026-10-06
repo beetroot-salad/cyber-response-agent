@@ -27,6 +27,10 @@ _logger = logging.getLogger(__name__)
 REPORT_FRONTMATTER_MAX = 512
 REPORT_FILE_MAX = 8192
 INVESTIGATION_FILE_MAX = 65536
+#: The most either `source_refs.yaml` reader takes in (#1188). The file is one small mapping
+#: (`normalized_disposition`), but only a box writes it, so the box fsize cap (64 MiB) is its
+#: only writer-side bound, and the long-lived author drain parses it in pure-Python YAML.
+SOURCE_REFS_FILE_MAX = 65536
 
 # Refused even though the judge frames report bytes in a salted frame: the report contract
 # should not depend on that prompt-layer hardening.

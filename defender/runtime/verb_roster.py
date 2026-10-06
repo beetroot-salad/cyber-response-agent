@@ -19,6 +19,7 @@ from .verb_grant import DENY_ALL, VerbGrant
 from defender._paths import adapters_under
 
 from .verbs import SYSTEM_PATTERN, RegistryError, read_roster
+from defender._io import read_text_utf8
 
 _AUDIT_DEFAULT_ROLE = "gather"
 _ROSTER_FILENAME = "verb-roster.md"
@@ -82,7 +83,7 @@ def load_roster(defender_dir: Path, role: str) -> str:
     """The committed roster; raises `RosterError` if the body no longer matches its header digest."""
     path = roster_path(defender_dir, role)
     try:
-        text = path.read_text(encoding="utf-8")
+        text = read_text_utf8(path)
     except OSError as e:
         raise RosterError(f"no roster for role {role!r} at {path}: {e}") from e
     match = _HEADER_RE.match(text)
@@ -186,7 +187,7 @@ def audit_read_surfaces(defender_dir: Path, grants: Mapping[str, VerbGrant]) -> 
     hits: list[str] = []
     for path in model_read_surfaces(root):
         try:
-            text = path.read_text(encoding="utf-8")
+            text = read_text_utf8(path)
         except (OSError, UnicodeDecodeError):
             continue
         grant = _grant_for_surface(path, grants)

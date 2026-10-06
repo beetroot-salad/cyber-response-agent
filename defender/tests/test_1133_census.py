@@ -177,10 +177,6 @@ RESIDUE = frozenset({
     # Link-following reads of things that are not episode records: a sibling's scrub verdict,
     # the sidecar beside its run dir (screened by `artifact_file` first); the source run's
     # investigation and alert (run records, #1105); the episode page's own stylesheet asset.
-    ("learning.branch.cli", "_scrub_ran", ".read_text"),
-    ("learning.branch.cli", "_fence_count", ".read_text"),
-    ("learning.branch.cli", "_alert_document", ".read_text"),
-    ("scripts.visualize.visualize_episode", "<module>", ".read_text"),
 })
 
 #: `_io` functions that do no I/O; any OTHER public `_io` function called from the handle is a

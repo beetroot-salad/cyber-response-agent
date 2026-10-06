@@ -23,7 +23,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from defender._io import read_jsonl_rows, read_text_soft
+from defender._io import read_jsonl_rows, read_text_soft, read_text_utf8
 from defender.run_repository import RunPaths
 from defender._untrusted import wrap_fresh
 from defender.hooks.budget_enforcer import (
@@ -195,7 +195,7 @@ def _is_declared(run_dir: Path, lead_id: str) -> bool:
     if not path.is_file():
         return False
     try:
-        companion, _warnings = parse_dense_companion(path.read_text(encoding="utf-8"))
+        companion, _warnings = parse_dense_companion(read_text_utf8(path))
     except Exception as e:  # noqa: BLE001 — prompt prose must not decide a run's fate
         _logger.warning(f"could not check whether {lead_id} is declared: {e!r}")
         return True

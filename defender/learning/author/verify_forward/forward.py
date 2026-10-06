@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 
 from defender.learning.author.verify_forward.shared import VerdictError
+from defender._artifact_schema import SOURCE_REFS_FILE_MAX
+from defender._io import READ_LIMIT, TEXT_READ_ERRORS, read_text_utf8
 
 HERE = Path(__file__).resolve().parent
 PROMPT_PATH = HERE / "forward.md"
@@ -26,16 +28,24 @@ def load_run_context(run_id: str, *, runs_dir: Path) -> tuple[str, str]:
         raise VerdictError(f"verify_forward: missing {investigation.name} at {investigation}")
     if not refs.is_file():
         raise VerdictError(f"verify_forward: missing {refs.name} at {refs}")
+    # Both are box-writable: undecodable or over the cap is this loader's refusal.
+    texts: dict[Path, str] = {}
+    for path, limit in ((refs, SOURCE_REFS_FILE_MAX), (investigation, READ_LIMIT)):
+        try:
+            texts[path] = read_text_utf8(path, limit=limit)
+        except TEXT_READ_ERRORS as e:
+            raise VerdictError(f"verify_forward: unreadable {path.name} at {path}: {e}") from e
+    refs_text, transcript = texts[refs], texts[investigation]
     m = re.search(
         r"^normalized_disposition:\s*[\"']?([^\"'\n#]+?)[\"']?\s*(?:#.*)?$",
-        refs.read_text(encoding="utf-8"),
+        refs_text,
         re.MULTILINE,
     )
     if not m:
         raise VerdictError(
             f"verify_forward: {refs.name} missing normalized_disposition: {refs}"
         )
-    return investigation.read_text(encoding="utf-8"), m.group(1).strip()
+    return transcript, m.group(1).strip()
 
 
 def expected_disposition(direction: str, recorded: str) -> str:

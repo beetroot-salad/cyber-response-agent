@@ -90,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("out", type=Path, help="story.md to write")
     ns = p.parse_args(argv)
 
-    meta = json.loads(ns.meta.read_text(encoding="utf-8"))
+    meta = json.loads(ns.meta.read_text(encoding="utf-8"))  # lint-whole-read: ok — stdlib-only script run by path (no defender on sys.path), so _io is out of reach; operator-curated run meta.json
     story = render_story(meta)
 
     found = eval_tells_in(story)

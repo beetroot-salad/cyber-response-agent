@@ -36,22 +36,32 @@ tuple first (mypy rejects a star-unpack in an ``except`` display)::
 _FILE_MODE = 0o644
 
 
-#: The most a whole-file read takes in by default (#1174): a planted sparse file
-#: (`truncate -s 1T`) would otherwise have CPython pre-size a buffer of `st_size + 1`. Nothing
-#: read through `_io` comes near it but the wire log, whose one reader (an operator tool over a
-#: host-written log) passes `limit=None`.
+#: The most a whole-file read through `_io` takes in (#1174): a planted sparse file
+#: (`truncate -s 1T`) would otherwise have CPython pre-size a buffer of `st_size + 1`. A caller's
+#: `limit` can only lower it (#1188 D1): `_read_plain_fd` clamps every limit here, so no call,
+#: however spelled, reads more. The wire log, the one file legitimately past it, streams
+#: (`iter_plain_jsonl_rows`).
 READ_LIMIT = 64 * 1024 * 1024
 
 
-def read_text_utf8(path: Path, *, limit: int | None = READ_LIMIT) -> str:
+def read_text_utf8(path: Path, *, limit: int = READ_LIMIT) -> str:
     """The canonical text read: UTF-8 with universal newlines, as `Path.read_text` reads, and
     opened as it opens (following links, blocking). Bounded (#1174): a file over `limit`
-    (`None` for none) raises an `OSError`, before reading or once it grows past it."""
-    return _read_followed(path, limit=limit, errors="strict")
+    (at most `READ_LIMIT`) raises an `OSError`, before reading or once it grows past it."""
+    return _read_followed_text(path, limit=_read_cap(limit), errors="strict")
+
+
+def read_bytes_capped(path: Path, *, limit: int = READ_LIMIT) -> bytes:
+    """`Path.read_bytes`, capped: the exact bytes (no newline translation), opened as it opens
+    (following links, blocking). A file over `limit` (at most `READ_LIMIT`) raises an `OSError`,
+    before reading or once it grows past it (#1188 amendment 3)."""
+    data = _read_followed(path, limit=_read_cap(limit), binary=True)
+    assert isinstance(data, bytes)
+    return data
 
 
 def read_text_soft(
-    path: Path, *, limit: int | None = READ_LIMIT,
+    path: Path, *, limit: int = READ_LIMIT,
 ) -> tuple[str | None, str | None]:
     try:
         return read_text_utf8(path, limit=limit), None
@@ -173,9 +183,18 @@ class _ReadVanished(OSError):
     FileNotFoundError` (absent) catches it: it is a refusal (#1174 O3)."""
 
 
+def _read_cap(limit: int) -> int:
+    """A caller's read limit, clamped to `READ_LIMIT`: it can only lower the cap (#1188 D1). A
+    non-int (`None` included, the old "no bound") is a caller's bug, refused as a `TypeError`
+    before any byte is read rather than compared or added to below."""
+    if not isinstance(limit, int) or isinstance(limit, bool):
+        raise TypeError(f"read limit must be an int, not {limit!r}")
+    return min(limit, READ_LIMIT)
+
+
 def _read_plain_fd(
     os_: Any, fd: int, size: int, *, binary: bool, errors: str = "strict",
-    limit: int | None = READ_LIMIT, budget: int | None = None,
+    limit: int = READ_LIMIT, budget: int | None = None,
 ) -> str | bytes:
     """The one place a whole file's bytes are read (#1174): every whole-file read in `_io`
     comes here, the guarded readers, the canonical wrappers and the locked JSON routines.
@@ -184,7 +203,8 @@ def _read_plain_fd(
     `_TooLarge` when `size` (the `st_size` of the open's own `fstat`, not asked again: one
     `fstat` per opened handle, #1049) is over `limit`, before any byte is read, or when the
     reads run past it (it grew); `BlockingIOError` when a non-blocking descriptor has no data
-    yet; `_ReadVanished` for an `ENOENT` from a `read`. `limit=None` reads with no bound.
+    yet; `_ReadVanished` for an `ENOENT` from a `read`. `limit` only lowers the bound: it is
+    clamped to `READ_LIMIT` (#1188 D1), and a non-int (`None` included) is a `TypeError`.
 
     The first read asks for `size + 1`, so a file whose size `fstat` tells reads in one call
     plus the empty one that says EOF; the step keeps reading until a read returns nothing,
@@ -200,22 +220,23 @@ def _read_plain_fd(
     as a whole read does, so no cap takes more memory than the default read. A prefix is
     byte-faithful: its text is decoded but newlines are NOT translated, because its caller
     judges bytes (a size bound, a byte compare against what it would write)."""
+    limit = _read_cap(limit)
     if budget is not None:
-        if limit is None or budget <= limit:
+        if budget <= limit:
             return _read_prefix(os_, fd, budget, binary=binary, errors=errors)
         data = _read_prefix(os_, fd, limit + 1, binary=True, errors=errors)
         if len(data) > limit:
             raise _too_large(limit)
         assert isinstance(data, bytes)
         return data if binary else data.decode("utf-8", errors)
-    if limit is not None and size > limit:
+    if size > limit:
         raise _too_large(limit)
     buf = bytearray()
     want = size + 1 if size > 0 else _READ_CHUNK
     try:
         while chunk := os_.read(fd, want):
             buf += chunk
-            if limit is not None and len(buf) > limit:
+            if len(buf) > limit:
                 raise _too_large(limit)
             want = _READ_CHUNK
     except FileNotFoundError:
@@ -242,15 +263,20 @@ def _read_prefix(os_: Any, fd: int, budget: int, *, binary: bool, errors: str) -
     return bytes(buf) if binary else buf.decode("utf-8", errors)
 
 
-def _read_followed(path: Path, *, limit: int | None, errors: str) -> str:
-    """The canonical wrappers' read: opened as `Path.read_text` opens (following links,
-    blocking, #1174 O9), then the shared step with the wrapper's `limit`."""
+def _read_followed(path: Path, *, limit: int, errors: str = "strict",
+                   binary: bool = False) -> str | bytes:
+    """The canonical wrappers' read: opened as `Path.read_text`/`read_bytes` open (following
+    links, blocking, #1174 O9), then the shared step with the wrapper's `limit`."""
     fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
     try:
-        text = _read_plain_fd(os, fd, os.fstat(fd).st_size, binary=False, errors=errors,
+        return _read_plain_fd(os, fd, os.fstat(fd).st_size, binary=binary, errors=errors,
                               limit=limit)
     finally:
         os.close(fd)
+
+
+def _read_followed_text(path: Path, *, limit: int, errors: str) -> str:
+    text = _read_followed(path, limit=limit, errors=errors)
     assert isinstance(text, str)
     return text
 
@@ -1012,20 +1038,50 @@ def parse_jsonl_row(line: str) -> dict | None:
     return obj if reason is None and isinstance(obj, dict) else None
 
 
-def read_jsonl_rows(path: Path, *, limit: int | None = READ_LIMIT) -> list[dict]:
+def read_jsonl_rows(path: Path, *, limit: int = READ_LIMIT) -> list[dict]:
     return read_jsonl_rows_report(path, limit=limit)[0]
 
 
 def read_jsonl_rows_report(
-    path: Path, *, limit: int | None = READ_LIMIT,
+    path: Path, *, limit: int = READ_LIMIT,
 ) -> tuple[list[dict], int]:
     """JSONL rows plus the number of non-blank lines that were not rows, for callers that must
     account for lost evidence. Bounded like :func:`read_text_utf8` (`limit`, #1174): a file
     over it raises an `OSError`.
     """
+    limit = _read_cap(limit)  # before the absent-file answer: `None` is refused either way
     if not path.is_file():
         return [], 0
-    return _jsonl_rows_of(_read_followed(path, limit=limit, errors="replace"))
+    return _jsonl_rows_of(_read_followed_text(path, limit=limit, errors="replace"))
+
+
+def iter_plain_jsonl_rows(path: Path) -> Iterator[dict]:
+    """The JSONL rows of a log too large to read whole (the wire log runs past 100 MB), streamed
+    one line at a time (#1188 D2). Nothing at `path` yields nothing; a line that is not a row is
+    skipped, and so is a line longer than `READ_LIMIT`, which is never held whole. Opened as
+    :func:`read_plain` opens it: a symlink, hard link, FIFO or device is refused with
+    :data:`ALIAS_READ_REFUSAL`, so a planted alias cannot point the stream at a file (or
+    `/dev/zero`) the host never wrote."""
+    try:
+        fd, _ = _open_plain_fd(path)
+    except FileNotFoundError:
+        return
+    try:
+        handle = os.fdopen(fd, "rb")
+    except BaseException:
+        os.close(fd)
+        raise
+    with handle:
+        while raw := handle.readline(READ_LIMIT + 1):
+            if len(raw) > READ_LIMIT and not raw.endswith(b"\n"):
+                # A newline-free stretch past the cap is not a row: drop it a chunk at a time,
+                # never holding more than the cap (#1188 amendment 3).
+                while (tail := handle.readline(_READ_CHUNK)) and not tail.endswith(b"\n"):
+                    pass
+                continue
+            row = parse_jsonl_row(raw.decode("utf-8", "replace"))
+            if row is not None:
+                yield row
 
 
 def _jsonl_rows_of(text: str) -> tuple[list[dict], int]:
