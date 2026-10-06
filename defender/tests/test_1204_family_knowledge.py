@@ -39,10 +39,13 @@ read-back stamps.
 """
 from __future__ import annotations
 
+import ast
 import dataclasses
 import json
 import os
 import shutil
+import sys
+import types
 from pathlib import Path
 from typing import Any
 
@@ -114,10 +117,19 @@ def _verify(tmp_path: Path, name: str, *, source: dict,
     return report, recorded, stamp
 
 
+def _never_called_dirt(text: str) -> None:
+    """A refusal whose faults are ALL about knowledge (every stamp in these scenarios is
+    clean) never describes itself, or what `--allow-dirty` would waive, as dirt: the flag now
+    waives unprovable knowledge too, and an operator told "pass --allow-dirty to waive the
+    dirt" over a tree git certified clean is sent looking for dirt that is not there."""
+    assert "dirt" not in text.replace("allow-dirty", ""), text
+
+
 def _incomplete(report: dict, recorded: dict, *phrases: str, waivable: bool) -> str:
     """The family was refused for its knowledge: `incomplete`, with the recorded reason naming
     knowledge and each phrase, and offering `--allow-dirty` exactly when passing it would let
-    the family through (the message rule `_family_refusal` holds every fault to)."""
+    the family through (the message rule `_family_refusal` holds every fault to) — never
+    calling a knowledge fault dirt."""
     assert report["outcome"] == "incomplete", report
     reason = recorded["reason"]
     assert reason == report["reason"]
@@ -125,6 +137,7 @@ def _incomplete(report: dict, recorded: dict, *phrases: str, waivable: bool) -> 
     for phrase in phrases:
         assert phrase in reason, (phrase, reason)
     assert ("allow-dirty" in reason) is waivable, reason
+    _never_called_dirt(reason)
     return reason
 
 
@@ -312,6 +325,7 @@ def test_1204_a_live_capture_whose_knowledge_is_unprovable_is_waivable(tmp_path,
     launch = A._prepare(tmp_path, live_tree=T.source_capture(**capture))
     message = A._refused_before_spending(launch)
     A._waivable(message, "live tree", "knowledge")
+    _never_called_dirt(message)
 
     waived = A._prepare(tmp_path, live_tree=T.source_capture(**capture))
     stamp = A._accepted(waived, "--allow-dirty")
@@ -330,6 +344,7 @@ def test_1204_a_source_whose_knowledge_is_unprovable_is_refused_at_preflight_unl
     T.source_stamp(launch.src, knowledge=UNPROVABLE[shape])
     message = A._refused_before_spending(launch)
     A._waivable(message, "source", "knowledge")
+    _never_called_dirt(message)
 
     waived = A._prepare(tmp_path)
     T.source_stamp(waived.src, knowledge=UNPROVABLE[shape])
@@ -357,6 +372,21 @@ def test_1204_a_launch_whose_siblings_read_another_knowledge_commit_ends_incompl
     assert K2 in record["reason"], record["reason"]
     assert "allow-dirty" not in record["reason"], record["reason"]
     assert not (launch.episode_dir / "provenance.json").exists()
+
+
+def test_1204_the_allow_dirty_help_says_it_waives_unprovable_knowledge(capsys):
+    """Non-obligation made visible (one `--allow-dirty` waives both): the flag's own help — the
+    operator's reference for what passing it does — names knowledge among what it waives, and
+    no longer says it waives dirt and only dirt. Without this the help contradicts the
+    refusals that now offer the flag for a knowledge fault."""
+    with pytest.raises(SystemExit):
+        _cli().parse_branch_args(["--help"])
+    text = " ".join(capsys.readouterr().out.split())
+    # The option's own entry: after its LAST mention (the first is the usage line), up to the
+    # next option.
+    entry = text.rsplit("--allow-dirty", 1)[1].split("--model", 1)[0]
+    assert "knowledge" in entry, entry
+    assert "only dirt" not in entry.lower(), entry
 
 
 # ---------------------------------------------------------------------------------------
@@ -472,6 +502,80 @@ def test_1204_each_anchored_and_constant_field_is_compared_through_verify_family
 
     report, recorded, stamp = _verify(tmp_path, "none-differs", source=T.provenance_record())
     assert recorded["outcome"] == "accepted", report["reason"]
+
+
+def _cli_with_table(reclassified: dict[str, str], monkeypatch) -> Any:
+    """The fork-check module rebuilt from ITS OWN SOURCE with one difference: right after the
+    module assigns `STAMP_FIELD_CLASSES`, the name is re-bound to that table with
+    `reclassified` applied. Everything the module derives from the table at import, and
+    everything it reads from it at call time, then sees the re-classified table; a comparison
+    that does not consult the table does not change. No production seam: the module is
+    executed as written, under a scratch name, beside the real one (which is untouched)."""
+    real = _cli()
+    path = Path(real.__file__)
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+    def assigns_table(node: ast.stmt) -> bool:
+        targets = (node.targets if isinstance(node, ast.Assign)
+                   else [node.target] if isinstance(node, ast.AnnAssign) else [])
+        return any(isinstance(t, ast.Name) and t.id == "STAMP_FIELD_CLASSES" for t in targets)
+
+    at = [i for i, node in enumerate(tree.body) if assigns_table(node)]
+    assert len(at) == 1, "STAMP_FIELD_CLASSES is not assigned once at the module's top level"
+    tree.body[at[0] + 1:at[0] + 1] = ast.parse(
+        f"STAMP_FIELD_CLASSES = {{**STAMP_FIELD_CLASSES, **{reclassified!r}}}").body
+    ast.fix_missing_locations(tree)
+    name = f"{real.__name__}_reclassified_1204"
+    rebuilt = types.ModuleType(name)
+    rebuilt.__file__ = str(path)
+    rebuilt.__package__ = real.__package__
+    monkeypatch.setitem(sys.modules, name, rebuilt)
+    exec(compile(tree, str(path), "exec"), rebuilt.__dict__)  # noqa: S102 — the module's own source
+    assert {**_table(), **reclassified} == rebuilt.STAMP_FIELD_CLASSES
+    return rebuilt
+
+
+def _verify_with(cli: Any, tmp_path: Path, name: str, docs: dict[str, dict]) -> dict:
+    """`cli.verify_family` over three real sibling stamp files whose documents are `docs`
+    (by label), against the default source."""
+    base, _src = T.runs_base(tmp_path)
+    dirs = [T.sibling_run_dir(base / name, w) for w in T.WORLDS]
+    for d in dirs:
+        (d / "provenance.json").write_text(json.dumps(docs[d.name[-1]]), encoding="utf-8")
+    ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{name}")
+    with Episode.open(ep) as episode:
+        return cli.verify_family(episode, dirs, source=T.provenance_record())
+
+
+def test_1204_the_field_table_drives_the_comparison(tmp_path, monkeypatch):
+    """O3/D4: the table DRIVES the comparison rather than sitting beside a hardcoded one —
+    re-classify a field in it and the fork check follows. Three families, each judged by the
+    real module and by the same module rebuilt with a re-classified table:
+    * a sibling on another MODEL: `incomplete` (constant) -> `accepted` once model is
+      informational;
+    * a sibling measured over another SCOPE: `incomplete` (anchored) -> `accepted` once scope
+      is informational;
+    * siblings each stamped with their own WORLD (as every real fork is): `accepted`
+      (expected to differ) -> `incomplete`, naming world_id, once world_id is constant.
+    Without this a comparison that kept the old `("commit", "scope", "model")` loop and merely
+    defined the table would pass every other arm of O3."""
+    clean = T.provenance_record()
+    families = {
+        "model": {w: {**clean, "model": "m-2" if w == "b" else "m-1"} for w in T.WORLDS},
+        "scope": {w: {**clean, "scope": "defender" if w == "b" else "repo"} for w in T.WORLDS},
+        "world_id": {w: {**clean, "world_id": f"{T.EPISODE_ID}.{w}"} for w in T.WORLDS},
+    }
+    real_says = {"model": "incomplete", "scope": "incomplete", "world_id": "accepted"}
+    rebuilt = _cli_with_table(
+        {"model": "informational", "scope": "informational", "world_id": "constant"},
+        monkeypatch)
+    for field, docs in families.items():
+        report = _verify_with(_cli(), tmp_path, f"real-{field}".replace("_", "-"), docs)
+        assert report["outcome"] == real_says[field], (field, report["reason"])
+        flipped = _verify_with(rebuilt, tmp_path, f"table-{field}".replace("_", "-"), docs)
+        assert flipped["outcome"] != real_says[field], (field, flipped["reason"])
+        if flipped["outcome"] == "incomplete":
+            assert field in flipped["reason"], (field, flipped["reason"])
 
 
 def test_1204_fields_expected_to_differ_or_informational_are_not_compared(tmp_path):

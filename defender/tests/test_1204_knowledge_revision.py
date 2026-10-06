@@ -41,16 +41,19 @@ exist, and the stamp has no `"knowledge"` key.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from defender import _git, _provenance
+from defender._episode_handle import Episode
 from defender._provenance import RunProvenance
 from defender.run_repository import RunPaths
 from defender.tests import _triplet_947 as T
@@ -266,15 +269,19 @@ def test_1204_a_plain_folder_is_unversioned_and_a_repo_there_is_not(tmp_path):
     assert _wire(knowledge) == {"commit": _head(knowledge)}
 
 
+@pytest.mark.parametrize("between", [(), ("data",), ("data", "acme")],
+                         ids=["depth-1", "depth-2", "depth-3"])
 def test_1204_a_plain_folder_inside_another_repo_is_unversioned_not_the_parents_commit(
-        tmp_path):
-    """O1/A1/C7: no upward search. A plain knowledge folder nested inside a git checkout — the
-    dev layout, where the data root sits inside the product repo — is `"unversioned"`, and the
-    PARENT's sha appears nowhere in what is stamped. `git rev-parse` from inside it would answer
-    the parent's commit (C7, executed), which is exactly the borrowed commit O1 forbids."""
+        tmp_path, between):
+    """O1/A1/C7: no upward search, at ANY depth. A plain knowledge folder nested inside a git
+    checkout — directly inside it, one folder down, or two (the dev layout, where the data root
+    sits inside the product repo) — is `"unversioned"`, and the PARENT's sha appears nowhere in
+    what is stamped. `git rev-parse` from inside it would answer the parent's commit (C7,
+    executed), which is exactly the borrowed commit O1 forbids; a search bounded to a few
+    levels up is still a search."""
     outer = _repo(tmp_path / "product")
     outer_head = _commit(outer, "product work")
-    knowledge = outer / "data" / "acme" / "knowledge"
+    knowledge = outer.joinpath(*between, "knowledge")
     shutil.copytree(FIXTURE, knowledge, symlinks=True)
     assert _g(knowledge, "rev-parse", "HEAD") == outer_head, (
         "precondition: git itself would borrow the parent's commit here")
@@ -401,6 +408,36 @@ def test_1204_a_link_anywhere_on_the_read_path_is_unavailable_and_never_followed
     _assert_unavailable(_wire(knowledge), never=(head,))
 
 
+def test_1204_a_linked_folder_of_a_slashed_branch_is_unavailable_and_never_followed(tmp_path):
+    """O1/D1/C16: no-follow holds on EVERY component of whatever ref HEAD names, not on a fixed
+    list of names. HEAD is on the slashed branch `team/x`, so its loose ref sits under a folder
+    `refs/heads/team/` that no fixed list mentions; that folder is replaced by a link into
+    ANOTHER repository whose `refs/heads/team/x` holds a valid sha of its own. A reader that
+    followed it would stamp the other repository's commit. Unavailable, neither sha stamped;
+    the positive control is the same copy before the link is planted."""
+    real = _repo(tmp_path / "real")
+    _g(real, "checkout", "-q", "-b", "team/x")
+    head = _commit(real, "on team/x")
+    other = _repo(tmp_path / "other")
+    _g(other, "checkout", "-q", "-b", "team/x")
+    other_head = _commit(other, "the other repository's team/x")
+    assert other_head != head
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    shutil.copytree(real / ".git", knowledge / ".git", symlinks=True)
+    assert (knowledge / ".git" / "HEAD").read_text(encoding="utf-8").strip() == (
+        "ref: refs/heads/team/x")
+    assert _wire(knowledge) == {"commit": head}, "positive control: the plain copy"
+
+    team = knowledge / ".git" / "refs" / "heads" / "team"
+    shutil.rmtree(team)
+    team.symlink_to(other / ".git" / "refs" / "heads" / "team")
+    assert (team / "x").read_text(encoding="utf-8").strip() == other_head, (
+        "precondition: following the link reaches a valid ref")
+
+    _assert_unavailable(_wire(knowledge), never=(head, other_head))
+
+
 def test_1204_a_linked_loose_ref_is_not_read_as_absent_and_the_stale_packed_line_is_not_used(
         tmp_path):
     """O1/D1: "the loose ref, ELSE the packed-refs line" falls through only when the loose ref
@@ -427,16 +464,21 @@ def test_1204_a_linked_loose_ref_is_not_read_as_absent_and_the_stale_packed_line
     b"", b"\n", b"garbage\n", b"ref:\n", b"ref: \n", b"ref: refs/heads/\n",
     b"ref: refs/heads/../../../outside\n", b"ref: /ABSOLUTE\n",
     b"ref: refs/heads/ma\x00in\n", b"\xff\xfe not utf-8\n", b"ref: ORIG_HEAD\n",
+    b"ref: refs/../ORIG_HEAD\n", b"ref: refs/heads/main\xff\n",
 ], ids=["empty", "newline", "garbage", "ref-colon", "ref-blank", "ref-dir", "ref-dotdot",
-        "ref-absolute", "ref-nul", "not-utf8", "ref-outside-refs"])
+        "ref-absolute", "ref-nul", "not-utf8", "ref-outside-refs", "ref-dotdot-inside-git",
+        "ref-undecodable"])
 def test_1204_a_malformed_head_is_unavailable_and_never_raises(tmp_path, head_bytes):
     """O1/O4/D1: anything in HEAD that is neither `ref: refs/<name>` nor a bare sha is
     unavailable with a reason — never a raise (a raise out of the stamp would take the run
     down), never a guess. The traversal arms point at a file OUTSIDE `.git` that holds a valid
     sha (`..` and an absolute name), so a reader that resolved them as paths would stamp it;
     `ref: ORIG_HEAD` names a file inside `.git` that also holds one but is not a ref under
-    `refs/` (git itself refuses to point HEAD outside `refs/`). The positive control is the
-    same repo with its real HEAD."""
+    `refs/` (git itself refuses to point HEAD outside `refs/`), and `ref: refs/../ORIG_HEAD`
+    reaches the same file by a `..` that never leaves `.git` — so a containment check on the
+    normalised path does not catch it. `ref: refs/heads/main\\xff` is the real ref's name with
+    an undecodable byte after it: a reader that decoded leniently would resolve `main`. The
+    positive control is the same repo with its real HEAD."""
     repo = _repo(tmp_path / "knowledge")
     head = _head(repo)
     assert _wire(repo) == {"commit": head}
@@ -448,6 +490,90 @@ def test_1204_a_malformed_head_is_unavailable_and_never_raises(tmp_path, head_by
 
     (repo / ".git" / "HEAD").write_bytes(payload)
     _assert_unavailable(_wire(repo), never=(head,))
+
+
+#: The three places a commit is read from, by the ref layout that makes each the one read.
+READ_SITES = ("HEAD", "loose-ref", "packed-refs")
+#: Faults a real filesystem can put at a read site: bytes that do not decode, a directory, and
+#: a FIFO — which a plain `open()` + read blocks on until something writes to it.
+SITE_FAULTS = ("undecodable", "directory", "fifo")
+
+#: How long a capture may take before it counts as hung. Generous: a capture is a few small
+#: reads, so anything near this is a reader waiting on a FIFO, not a slow disk.
+CAPTURE_TIME_BOUND_S = 10.0
+
+
+def _plant_site_fault(repo: Path, site: str, fault: str, head: str) -> Path:
+    """Replace the entry `site` names in a real repo with `fault`; returns its path. For the
+    packed site the repo is packed first, so `packed-refs` is the only place the commit is.
+    The undecodable bytes sit where a LENIENT decode (`errors="ignore"`) would still read the
+    real commit or the real ref name — so only a strict reader answers unavailable."""
+    git_dir = repo / ".git"
+    if site == "packed-refs":
+        _g(repo, "pack-refs", "--all")
+        assert not (git_dir / "refs" / "heads" / "main").exists()
+    path = {"HEAD": git_dir / "HEAD", "loose-ref": git_dir / "refs" / "heads" / "main",
+            "packed-refs": git_dir / "packed-refs"}[site]
+    path.unlink()
+    if fault == "directory":
+        path.mkdir()
+    elif fault == "fifo":
+        os.mkfifo(path)
+    else:
+        path.write_bytes({
+            "HEAD": b"ref: refs/heads/main\xff\n",
+            "loose-ref": head.encode() + b"\xff\n",
+            "packed-refs": (b"# pack-refs with: peeled fully-peeled sorted \n"
+                            + f"{head} refs/heads/main".encode() + b"\xff\n"),
+        }[site])
+    return path
+
+
+def _capture_within_bound(knowledge: Path, fifo: Path | None = None) -> Any:
+    """`capture_knowledge(knowledge)`'s wire value, taken on a thread and given
+    `CAPTURE_TIME_BOUND_S` to answer: a reader still blocked after that fails the test (the
+    stamp is taken before the box starts, so a hang there is a run that never starts). Anything
+    the capture RAISES fails it too. A FIFO a hung reader is waiting on is opened for writing
+    afterwards, which releases the reader so the thread does not outlive the test."""
+    outcome: dict[str, Any] = {}
+
+    def capture() -> None:
+        try:
+            outcome["wire"] = _wire(knowledge)
+        except BaseException as e:  # noqa: BLE001 — reported by the assertion below
+            outcome["raised"] = e
+
+    worker = threading.Thread(target=capture, daemon=True)
+    worker.start()
+    worker.join(CAPTURE_TIME_BOUND_S)
+    hung = worker.is_alive()
+    if hung and fifo is not None:
+        with contextlib.suppress(OSError):
+            os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+        worker.join(CAPTURE_TIME_BOUND_S)
+    assert not hung, (f"capture_knowledge was still blocked after {CAPTURE_TIME_BOUND_S}s "
+                      f"(a FIFO opened and read like a file)")
+    assert "raised" not in outcome, f"capture_knowledge raised {outcome.get('raised')!r}"
+    return outcome["wire"]
+
+
+@pytest.mark.parametrize("fault", SITE_FAULTS)
+@pytest.mark.parametrize("site", READ_SITES)
+def test_1204_a_fault_at_any_read_site_is_unavailable_promptly_and_never_raises(
+        tmp_path, site, fault):
+    """O1/O4/D1 at EVERY place a commit is read — HEAD, the loose ref HEAD names, and
+    `packed-refs` — not only at HEAD: bytes that do not decode, a directory where a file
+    belongs, and a FIFO are each unavailable, answered within a time bound, never raised, and
+    the real commit is not stamped. A decode error or `IsADirectoryError` raised out of the
+    capture would take the stamp down with it; a FIFO read like a file blocks run start
+    forever. The positive control is the same repo before the fault is planted."""
+    repo = _repo(tmp_path / "knowledge")
+    head = _head(repo)
+    assert _wire(repo) == {"commit": head}, "positive control: the real layout"
+    planted = _plant_site_fault(repo, site, fault, head)
+
+    wire = _capture_within_bound(repo, fifo=planted if fault == "fifo" else None)
+    _assert_unavailable(wire, never=(head,))
 
 
 def test_1204_a_missing_or_non_file_head_is_unavailable(tmp_path):
@@ -614,6 +740,60 @@ def test_1204_an_unreadable_knowledge_git_stamps_unavailable_and_the_run_goes_on
     _assert_unavailable(doc["knowledge"])
     assert doc["commit"] is not None or doc["unavailable"] is not None
     assert doc["tenant_id"] == TENANT_ID
+
+
+@pytest.mark.parametrize("fault", ["undecodable", "directory"])
+def test_1204_a_read_fault_inside_the_knowledge_git_still_writes_the_whole_stamp(
+        tmp_path, monkeypatch, fault):
+    """O4 at the write site, for faults that are NOT a gitfile: the clone's loose ref is
+    replaced (after acceptance) by bytes that do not decode, or by a directory. A decode error
+    is not an `OSError`, and an `IsADirectoryError` is one `_stamp` swallows as "could not
+    stamp" — either way a capture that RAISED would leave the run unstamped or crash it. The
+    run is materialised, its stamp is written, the product's fields are the product's capture,
+    and `knowledge` says unavailable without naming the clone's commit."""
+    from defender import run_common
+
+    tenant, knowledge_head = _tenant_with_knowledge(tmp_path, monkeypatch, versioned=True)
+    _plant_site_fault(tenant.knowledge, "loose-ref", fault, knowledge_head)
+    product = _provenance.capture_tree(run_common.REPO_ROOT)
+
+    _run_dir, doc = _materialise(tmp_path, tenant, f"20260101t000000z-{fault}")
+    _assert_unavailable(doc["knowledge"], never=(knowledge_head,))
+    assert doc["commit"] == product.commit
+    assert doc["scope"] == _provenance.CODE_SCOPE
+    assert doc["tenant_id"] == TENANT_ID
+
+
+def test_1204_a_fork_sibling_materialised_through_the_real_path_stamps_the_clones_commit(
+        tmp_path, monkeypatch):
+    """O1/D3/C3: "every executed run, fork siblings included" — a branched sibling is a `run.py
+    --resume` process that reaches the same `materialize_run`, with a `ResumeWorld` resolved
+    from its episode's manifest. Stamped on a versioned tenant, the SIBLING's stamp carries
+    `{"commit": <the clone's HEAD>}` beside its lineage (world, source run, branch point) — so
+    `verify_family` has a knowledge commit to compare on every real sibling, not only on
+    unforked runs. Without this a writer that skipped knowledge on the fork path would leave
+    every real family with knowledge-absent siblings (waivable), and the anchor would never
+    bite."""
+    from defender import run_common
+    from defender.tests.tenant_1078_pass_a import _spec1078 as H
+
+    tenant, knowledge_head = _tenant_with_knowledge(tmp_path, monkeypatch, versioned=True)
+    data_root = tmp_path / "data"
+    _base, src = H.tenant_source(data_root, TENANT_ID, row=False)
+    episode_dir = tmp_path / "episodes" / T.EPISODE_ID
+    manifest = H.family_for(src, episode_dir)
+    world = H.run_py().resume_world(
+        Episode.open(manifest.parent), "b",
+        tenant=lambda: H.T1106.run_tenant(H.accept(data_root, TENANT_ID)))
+
+    run_dir = run_common.materialize_run(
+        src / "alert.json", world.run_id, tenant=tenant, world=world).run_dir
+    assert run_dir.parent == episode_dir / "runs", "precondition: the fork path, not a fresh run"
+    doc = json.loads(RunPaths(run_dir).provenance.read_text(encoding="utf-8"))
+    assert doc["world_id"] == world.world_id
+    assert doc["parent_run_id"] == world.family.source_run_id
+    assert doc["fork_turn"] == world.family.branch_message_id
+    assert doc["knowledge"] == {"commit": knowledge_head}
 
 
 # ---------------------------------------------------------------------------------------
