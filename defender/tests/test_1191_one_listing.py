@@ -29,8 +29,12 @@ uncommitted file still is. And O9/O10 reach every one of them.
     repo: bad names or a mode-000 dir inside an IGNORED dir neither blind the gate nor show up —
     the plant elsewhere is still reported (O5 restated (a)); a tracked module deleted from the
     working tree is not scanned and changes nothing (O17); `lint_run_layout_imports --root
-    <relative>` keeps an anchored ignore (O5 (c)); `lint_ci_hygiene` runs ONE `git ls-files`
-    per run (O18), seen through a logging `git` first on PATH.
+    <relative>` keeps an anchored ignore (O5 (c)); `lint_ci_hygiene` and `lint_raw_yaml` run
+    ONE `git ls-files -z --cached --others --exclude-standard` in `defender/` and at most one
+    `check-ignore` per run (O18), seen through a logging `git` first on PATH. What IS in the tree
+    is scanned: tracked files git would ignore, names git would C-quote, a tracked dangling
+    symlink (named, non-zero); a module under a mode-0644 dir is blind (the D17 correction:
+    only a GONE path is dropped); with git missing or failing, the walk still finds the plant.
 """
 from __future__ import annotations
 
@@ -758,29 +762,189 @@ def _git_calls(log: Path) -> list[tuple[Path, list[str]]]:
     return calls
 
 
-def test_o18_ci_hygiene_lists_defender_once_per_run(tmp_path):
-    """O18/D17: `lint_ci_hygiene` lists `defender/` ONCE per run — one `git ls-files` (amendment
-    3's listing) for the whole run, observed through a logging `git` put first on PATH.
-    Control: the shim logs an `ls-files` run through it."""
+def _shimmed_git(tmp_path: Path) -> tuple[dict[str, str], Path]:
+    """The env putting the logging `git` first on PATH, and its log."""
     real = shutil.which("git")
     assert real, "git is not on PATH"
-    shim_dir = tmp_path / "shim"
-    shim = T._write(shim_dir / "git", _GIT_SHIM.format(real=real))
+    shim = T._write(tmp_path / "shim" / "git", _GIT_SHIM.format(real=real))
     shim.chmod(0o755)
     log = tmp_path / "git_1191.log"
-    env = {"PATH": f"{shim_dir}{os.pathsep}{os.environ.get('PATH', '')}", "GIT_LOG_1191": str(log)}
+    return ({"PATH": f"{shim.parent}{os.pathsep}{os.environ.get('PATH', '')}",
+             "GIT_LOG_1191": str(log)}, log)
+
+
+def test_the_git_shim_logs_what_runs_through_it(tmp_path):
+    """CONTROL for the shim: a `git ls-files -z` run through it is logged, with where it ran."""
+    env, log = _shimmed_git(tmp_path)
     repo = tmp_path / "repo"
-    _ci_repo(repo, "lint_ci_hygiene", ignores=IGNORES)
-    subprocess.run(["git", "ls-files"], cwd=repo / "defender", env={**os.environ, **env},  # noqa: S607 — the shim under test
-                   capture_output=True, check=True, timeout=60)
-    assert [a[0] for _w, a in _git_calls(log)] == ["ls-files"], "control: the shim did not log"
-    log.unlink()
-    result = _as_ci_runs_it(repo, "lint_ci_hygiene", **env)
+    T._write(repo / "defender" / "kept.py")
+    T._git_repo(repo, IGNORES)
+    subprocess.run(["git", "-C", "defender", "ls-files", "-z"], cwd=repo,  # noqa: S607 — the shim under test
+                   env={**os.environ, **env}, capture_output=True, check=True, timeout=60)
+    assert _git_calls(log) == [((repo / "defender").resolve(), ["ls-files", "-z"])]
+
+
+@pytest.mark.parametrize("stem", ["lint_ci_hygiene", "lint_raw_yaml"])
+def test_o18_a_lint_run_makes_one_full_listing_of_its_root(tmp_path, stem):
+    """O18/D17 ("each lint makes one `git ls-files` call, plus one `check-ignore` on the root";
+    `lint_ci_hygiene` "lists defender/ once per run"): through the logging `git` first on PATH,
+    a run over a git mini repo with nested untracked packages makes exactly ONE `git ls-files`,
+    in `defender/`, asking for `-z --cached --others --exclude-standard`, and at most one
+    `check-ignore` — no per-directory or per-file git traffic standing in for a walk."""
+    env, log = _shimmed_git(tmp_path)
+    repo = tmp_path / "repo"
+    root = _ci_repo(repo, stem, ignores=IGNORES)
+    for i in range(5):
+        T._write(root / f"d{i}_1191" / f"e{i}_1191" / f"m{i}_1191.py")
+    result = _as_ci_runs_it(repo, stem, **env)
     assert result.returncode == 0, f"control: the clean git mini repo\n{T._said(result)}"
-    listings = [(str(w), a) for w, a in _git_calls(log) if a[:1] == ["ls-files"]]
-    assert len(listings) == 1, (
-        f"lint_ci_hygiene ran {len(listings)} `git ls-files` listing(s) in one run (want one "
-        f"listing of defender/): {listings}")
+    calls = _git_calls(log)
+    listings = [(where, args) for where, args in calls if args[:1] == ["ls-files"]]
+    assert len(listings) == 1, f"{stem}: {len(listings)} `git ls-files` runs (want one): {calls}"
+    where, args = listings[0]
+    assert where == root.resolve(), f"{stem}: ls-files ran in {where}, not {root}"
+    wanted = {"-z", "--cached", "--others", "--exclude-standard"}
+    assert wanted <= set(args), f"{stem}: ls-files asked for {args}, not {sorted(wanted)}"
+    checks = [args for _w, args in calls if args[:1] == ["check-ignore"]]
+    assert len(checks) <= 1, f"{stem}: {len(checks)} `git check-ignore` runs: {checks}"
+
+
+# --- amendment 3, the adversary's holes: what IS in the tree, and git failing ----------
+
+
+def test_o5_ci_hygiene_never_reads_an_ignored_top_level_json(tmp_path):
+    """O5 restated (nothing inside an ignored tree is source) for `lint_ci_hygiene`'s top-level
+    `.json` listing: an IGNORED, unparseable `defender/x_ignored_1191.json` is never read — the
+    gate stays clean (exit 0)."""
+    stem = "lint_ci_hygiene"
+    repo = tmp_path / "repo"
+    root = _ci_repo(repo, stem, ignores=IGNORES + "*_ignored_1191.json\n")
+    T._write(root / "x_ignored_1191.json", "{ not json")
+    result = _as_ci_runs_it(repo, stem)
+    assert result.returncode == 0, f"an ignored top-level json was read\n{T._said(result)}"
+
+
+#: Tracked files git would otherwise ignore: under an ignored dir, or by an ignored name.
+FORCED = {"dir": "zz_ign_1191/forced_1191.py", "name": "pkg_1191/forced_ignored_1191.py"}
+
+
+@pytest.mark.parametrize("forced", sorted(FORCED))
+@pytest.mark.parametrize("stem", LISTERS)
+def test_o5_each_listing_lint_as_ci_runs_it_scans_tracked_files_git_would_ignore(tmp_path, stem,
+                                                                                forced):
+    """O5 restated ("tracked files plus untracked files that are not ignored"), all lints as CI
+    runs them: a plant force-added (`git add -f`) where git would ignore it — under an ignored
+    dir, or under an ignored name — is TRACKED, so scanned and reported (exit 1, named)."""
+    repo = tmp_path / "repo"
+    root = _ci_repo(repo, stem, ignores=IGNORES)
+    rel = FORCED[forced]
+    plant = T._write(root / rel, PLANTS[stem].source())
+    _git.git(["add", "-f", str(plant.relative_to(repo))], cwd=repo)
+    result = _as_ci_runs_it(repo, stem)
+    said = T._said(result)
+    assert result.returncode == 1, f"{stem}: tracked {rel} was not scanned\n{said}"
+    assert rel in result.stdout + result.stderr, f"{stem}: tracked {rel} not named\n{said}"
+
+
+#: How git can let the listing down: not on PATH at all, or failing every call (exit 128).
+NO_GIT = {"missing": None, "failing": "#!/bin/sh\necho 'fatal: broken_1191' >&2\nexit 128\n"}
+
+
+@pytest.mark.parametrize("how", sorted(NO_GIT))
+@pytest.mark.parametrize("stem", [s for s in LISTERS if not PLANTS[s].committed])
+def test_d17_each_listing_lint_as_ci_runs_it_walks_when_git_lets_it_down(tmp_path, stem, how):
+    """D17 step 3 ("git is unavailable or fails" → the walk), all lints as CI runs them, inside
+    a git repo: with no `git` on PATH, or a `git` that exits 128, the plant is still reported
+    (exit 1, named) — never an empty listing. (shippable_surface resolves its systems through
+    git itself, so it has no git-less run to check.)"""
+    repo = tmp_path / "repo"
+    root = _ci_repo(repo, stem, ignores=IGNORES)
+    T._write(root / PLANT_REL, PLANTS[stem].source())
+    bin_dir = tmp_path / "bin_1191"
+    bin_dir.mkdir()
+    path = str(bin_dir)
+    if NO_GIT[how] is not None:
+        T._write(bin_dir / "git", NO_GIT[how]).chmod(0o755)
+        path = f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"
+    _assert_reported(_as_ci_runs_it(repo, stem, PATH=path),
+                     f"{stem}: with git {how}, the plant was not scanned")
+
+
+#: A plant name git C-quotes without `-z` (a `"`, a backslash, a tab), still valid UTF-8.
+QUOTED_PLANT = 'pkg_1191/q"uo\\te\tab_1191.py'
+
+
+@pytest.mark.parametrize("case", ["tracked", "untracked"])
+@pytest.mark.parametrize("stem", LISTERS)
+def test_o5_each_listing_lint_as_ci_runs_it_reports_a_plant_git_would_quote(tmp_path, stem,
+                                                                            case):
+    """O5 restated, all lints as CI runs them, in a git repo: a plant whose name git would
+    C-quote is in the tree, tracked or untracked, so reported (exit 1, named as it is)."""
+    repo = tmp_path / "repo"
+    root = _ci_repo(repo, stem, ignores=IGNORES)
+    T._write(root / QUOTED_PLANT, PLANTS[stem].source())
+    if case == "tracked":
+        _git.git(["add", "-A"], cwd=repo)
+    result = _as_ci_runs_it(repo, stem)
+    said = T._said(result)
+    assert result.returncode == 1, f"{stem}: the {case} quoted-name plant was not scanned\n{said}"
+    assert QUOTED_PLANT in result.stdout + result.stderr, f"{stem}: not named as it is\n{said}"
+
+
+@pytest.mark.parametrize("stem", LISTERS)
+def test_d17_each_listing_lint_as_ci_runs_it_names_a_tracked_dangling_module(tmp_path, stem):
+    """D17 (as corrected: only a GONE path is dropped), all lints as CI runs them: a tracked
+    dangling symlink module is listed, and the gate that cannot read it says so — a non-zero
+    exit naming it, never a silent skip."""
+    repo = tmp_path / "repo"
+    root = _ci_repo(repo, stem, ignores=IGNORES)
+    (root / "pkg_1191").mkdir(parents=True, exist_ok=True)
+    os.symlink("nowhere_1191.py", root / "pkg_1191" / "dangling_1191.py")
+    _git.git(["add", "-A"], cwd=repo)
+    result = _as_ci_runs_it(repo, stem)
+    said = T._said(result)
+    assert result.returncode != 0, f"{stem}: a dangling tracked module was skipped\n{said}"
+    assert "dangling_1191" in result.stdout + result.stderr, f"{stem}: not named\n{said}"
+
+
+@pytest.mark.parametrize("case", ["tracked", "untracked"])
+@pytest.mark.parametrize("stem", LISTERS)
+def test_o9_each_listing_lint_as_ci_runs_it_is_blind_on_a_module_it_cannot_stat(tmp_path, stem,
+                                                                                case):
+    """O9 + the D17 correction, all lints as CI runs them, in a git repo: a module under a
+    mode-0644 dir (names readable, entries not statable) — git lists it with no warning — makes
+    the gate blind (exit 2 naming it), tracked or untracked. Skipped where the mode is not
+    enforced (root with the DAC capabilities)."""
+    repo = tmp_path / "repo"
+    root = _ci_repo(repo, stem, ignores=IGNORES)
+    T._write(root / "pkg_1191" / "rd_1191" / "m_1191.py", PLANTS[stem].source())
+    if case == "tracked":
+        _git.git(["add", "-A"], cwd=repo)
+    rd = T._unsearchable_dir(root / "pkg_1191" / "rd_1191")
+    try:
+        result = _as_ci_runs_it(repo, stem)
+    finally:
+        rd.chmod(0o755)
+    T._expect(result, 2, "rd_1191", on="stderr",
+              why=f"{stem}: a {case} module it cannot stat did not blind the gate")
+
+
+def test_o5_run_layout_imports_prunes_nested_venv_and_hidden_dirs_in_a_git_repo(tmp_path):
+    """D17 step 4 (`prune` on either path), as CI runs `lint_run_layout_imports` in a git repo:
+    plants in a nested venv (`pyvenv.cfg`) and a nested hidden dir, untracked and not ignored,
+    are not reported. Control: the plant beside them is (exit 1, named)."""
+    stem = "lint_run_layout_imports"
+    repo = tmp_path / "repo"
+    root = _ci_repo(repo, stem, ignores=IGNORES)
+    text = PLANTS[stem].source()
+    T._write(root / "pkg_1191" / "site_env" / "pyvenv.cfg", "home = /usr/bin\n")
+    T._write(root / "pkg_1191" / "site_env" / "lib" / "venv_1191.py", text)
+    T._write(root / "pkg_1191" / ".hidden_1191" / "hid_1191.py", text)
+    T._write(root / PLANT_REL, text)
+    result = _as_ci_runs_it(repo, stem)
+    _assert_reported(result, "control: the plant beside the pruned dirs was not reported")
+    shown = _quiet_about(result, "venv_1191", "hid_1191")
+    assert not shown, f"pruned dirs were scanned on the git path: {shown}\n{T._said(result)}"
 
 
 # --- five lints through their in-process doors -------------------------------------------

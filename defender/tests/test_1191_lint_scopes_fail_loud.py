@@ -1921,3 +1921,157 @@ def test_o5_env_reads_from_a_relative_root_keeps_anchored_ignores(tmp_path, spel
     assert result.returncode == 0, (
         f"--root {spelled}: a read under the anchored ignore {anchored.strip()} was scanned\n"
         f"{_said(result)}")
+
+
+# --- amendment 3, the adversary's holes: what IS in the tree ------------------------------
+
+
+def _git_tree(repo: Path) -> Path:
+    """A git repo ignoring IGNORES with `defender/kept.py` and `defender/pkg/a.py` staged."""
+    _write(repo / "defender" / "kept.py")
+    _write(repo / "defender" / "pkg" / "a.py")
+    _git_repo(repo, IGNORES)
+    return repo / "defender"
+
+
+def test_source_files_lists_tracked_modules_git_would_ignore(tmp_path):
+    """O5 restated ("tracked files plus untracked files that are not ignored"): a module
+    force-added (`git add -f`) under an ignored dir, and a tracked module whose own name is
+    ignored, are TRACKED — listed."""
+    astlib = import_lint_lib("_astlib")
+    root = _git_tree(tmp_path / "repo")
+    _write(root / "zz_ign_1191" / "forced_1191.py")
+    _write(root / "pkg" / "forced_ignored_1191.py")
+    _git.git(["add", "-f", "defender/zz_ign_1191/forced_1191.py",
+              "defender/pkg/forced_ignored_1191.py"], cwd=tmp_path / "repo")
+    assert astlib.source_files(root, ()) == [
+        "kept.py", "pkg/a.py", "pkg/forced_ignored_1191.py", "zz_ign_1191/forced_1191.py"]
+
+
+#: Valid UTF-8 names git C-quotes when not asked for `-z` output.
+QUOTED_NAMES = ('q"uote_1191.py', "back\\slash_1191.py", "tab\t_1191.py")
+
+
+@pytest.mark.parametrize("case", ["tracked", "untracked"])
+def test_source_files_lists_names_git_would_quote(tmp_path, case):
+    """O5 restated: a tracked or untracked, not-ignored module whose valid UTF-8 name git
+    C-quotes (a `"`, a backslash, a tab) is in the tree, so listed as named."""
+    astlib = import_lint_lib("_astlib")
+    repo = tmp_path / "repo"
+    _write(repo / "defender" / "kept.py")
+    if case == "untracked":
+        _git_repo(repo, IGNORES)
+    for name in QUOTED_NAMES:
+        _write(repo / "defender" / "pkg" / name)
+    if case == "tracked":
+        _git_repo(repo, IGNORES)
+    assert astlib.source_files(repo / "defender", ()) == sorted(
+        ["kept.py", *(f"pkg/{n}" for n in QUOTED_NAMES)])
+
+
+@pytest.mark.parametrize("case", ["tracked", "untracked"])
+def test_source_files_lists_a_dangling_symlink_module(tmp_path, case):
+    """D17 (as corrected): only a path that is GONE is dropped. A dangling symlink module is
+    there (`lstat` succeeds), so it is listed — tracked or untracked — and the gate that cannot
+    read it says so (see the all-lints test)."""
+    astlib = import_lint_lib("_astlib")
+    repo = tmp_path / "repo"
+    _write(repo / "defender" / "kept.py")
+    (repo / "defender" / "pkg").mkdir(parents=True)
+    if case == "untracked":
+        _git_repo(repo, IGNORES)
+    os.symlink("nowhere_1191.py", repo / "defender" / "pkg" / "dangling_1191.py")
+    if case == "tracked":
+        _git_repo(repo, IGNORES)
+    assert astlib.source_files(repo / "defender", ()) == ["kept.py", "pkg/dangling_1191.py"]
+
+
+def test_source_files_drops_a_tracked_module_whose_dir_became_a_file(tmp_path):
+    """D17 (as corrected): `NotADirectoryError` is "gone" too — a tracked `pkg/nd_1191/m.py`
+    whose directory was replaced by a plain file is not listed, and does not blind the
+    listing."""
+    astlib = import_lint_lib("_astlib")
+    repo = tmp_path / "repo"
+    root = _git_tree(repo)
+    _write(root / "pkg" / "nd_1191" / "m_1191.py")
+    _git.git(["add", "-A"], cwd=repo)
+    shutil.rmtree(root / "pkg" / "nd_1191")
+    _write(root / "pkg" / "nd_1191", "now a file\n")
+    assert astlib.source_files(root, ()) == ["kept.py", "pkg/a.py"]
+
+
+@pytest.mark.parametrize("case", ["tracked", "untracked"])
+def test_source_files_is_blind_on_a_listed_module_it_cannot_stat(tmp_path, case):
+    """O9 + the D17 correction: a mode-0644 directory (its names readable, its entries not
+    searchable) holding a tracked or untracked module — git lists the module with no warning,
+    `lstat` then fails with EACCES, which is NOT "gone": `ScanBlind` naming it, never a silent
+    drop. Skipped where the mode is not enforced (root with the DAC capabilities)."""
+    astlib = import_lint_lib("_astlib")
+    repo = tmp_path / "repo"
+    _write(repo / "defender" / "kept.py")
+    if case == "untracked":
+        _git_repo(repo, IGNORES)
+    _write(repo / "defender" / "pkg" / "rd_1191" / "m_1191.py")
+    if case == "tracked":
+        _git_repo(repo, IGNORES)
+    rd = _unsearchable_dir(repo / "defender" / "pkg" / "rd_1191")
+    try:
+        with pytest.raises(astlib.ScanBlind, match="rd_1191"):
+            astlib.source_files(repo / "defender", ())
+    finally:
+        rd.chmod(0o755)
+
+
+def _unsearchable_dir(path: Path) -> Path:
+    """`path` (an existing dir) made mode 0644: its names readable, its entries not statable.
+    Skips the test where the mode is not enforced."""
+    path.chmod(0o644)
+    try:
+        next(path.iterdir()).lstat()
+    except PermissionError:
+        return path
+    path.chmod(0o755)
+    pytest.skip("a mode-0644 directory is still searchable here (root): the mode is not enforced")
+
+
+def test_source_files_prunes_nested_dirs_on_the_git_path(tmp_path):
+    """D17 step 4 ("on either path ... drop any file under a directory `prune` rejects"): in a
+    git repo, a venv (`pyvenv.cfg`) and a hidden dir NESTED below the top level, untracked and
+    not ignored, are pruned as the walk prunes them. Control: their sibling module is kept, and
+    outside a repo the same `prune` gives the same listing."""
+    astlib = import_lint_lib("_astlib")
+
+    def lay_out(root: Path) -> None:
+        _write(root / "learning" / "site_env" / "pyvenv.cfg", "home = /usr/bin\n")
+        _write(root / "learning" / "site_env" / "lib" / "probe.py")
+        _write(root / "learning" / ".hidden_1191" / "probe.py")
+        _write(root / "learning" / "swept.py")
+
+    def prune(d: Path) -> bool:
+        return d.name.startswith(".") or (d / "pyvenv.cfg").is_file()
+
+    root = _git_tree(tmp_path / "repo")
+    lay_out(root)
+    want = ["kept.py", "learning/swept.py", "pkg/a.py"]
+    assert astlib.source_files(root, (), prune=prune) == want
+    plain = tmp_path / "plain" / "defender"
+    _write(plain / "kept.py")
+    _write(plain / "pkg" / "a.py")
+    lay_out(plain)
+    assert astlib.source_files(plain, (), prune=prune) == want
+
+
+def test_source_files_refuses_only_kept_undecodable_names(tmp_path):
+    """D17 step 4 (O10 limited to KEPT paths): in a git repo, an untracked, not-ignored non-`.py`
+    file with a bad name, and a bad `.py` name inside an excluded dir, are not kept — a `.py`
+    listing is not blind. Control: the same bad name kept (a `.md` listing) is refused."""
+    astlib = import_lint_lib("_astlib")
+    root = _git_tree(tmp_path / "repo")
+    try:
+        _write(root / "pkg" / os.fsdecode(b"notes\xff_1191.md"))
+        _write(root / "skipme_1191" / os.fsdecode(b"bad\xff_1191.py"))
+    except (OSError, UnicodeError) as refused:
+        pytest.skip(f"this filesystem refuses an undecodable name: {refused!r}")
+    assert astlib.source_files(root, ("skipme_1191",)) == ["kept.py", "pkg/a.py"]
+    with pytest.raises(astlib.ScanBlind, match="notes"):
+        astlib.source_files(root, ("skipme_1191",), suffixes=(".md",))
