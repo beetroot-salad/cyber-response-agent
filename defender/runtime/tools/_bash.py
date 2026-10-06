@@ -12,9 +12,9 @@ if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays 
 
 from pydantic_ai.exceptions import ModelRetry
 
-from defender._io import guarded_mkdir
 from .. import box as box_mod
 from .. import permission
+from ..permission.files import RESOLVE_ERRORS
 from ..agent_role import AgentRole
 
 from defender._untrusted import wrap_fresh
@@ -155,31 +155,41 @@ def _resolve_operand(deps: AgentDeps, path: str) -> Path:
     return p if p.is_absolute() else deps.cwd_anchor / p
 
 
-def _tree_root_for(deps: AgentDeps, p: Path) -> Path:
-    """Which shared tree `p` sits in — the anchor `guarded_mkdir` walks down from.
+def _rooted_operand(deps: AgentDeps, p: Path, *, path: str) -> tuple[Path, str]:
+    """The operand `p` (as `_resolve_operand` spells it) as the trust root it sits in and its
+    POSIX name below that root, for both a read and a write of it. The rooted core opens the
+    root following its spelling and follows nothing below it.
 
-    The run dir is tried first (it may sit inside the defender dir). Each root is tried raw and
-    resolved, since the write gate compared resolved paths; `p` itself is never resolved, which
-    would collapse the symlink the guard exists to refuse. No match means `p` was reached through
-    a symlink; refused as `ModelRetry` because the operand is model-supplied."""
-    for root in (deps.run_dir, deps.defender_dir):
-        for spelling in (root, _resolved(root)):
-            if p == spelling or spelling in p.parents:
-                return spelling
-    raise ModelRetry(
-        f"{p} is not inside a writable tree; name a path under the run directory or the "
-        f"defender directory (a path that only reaches one through a symlink is refused)"
-    )
-
-
-def _guarded_parents(deps: AgentDeps, p: Path) -> None:
-    """`guarded_mkdir` with its containment `ValueError` surfaced as a `ModelRetry`."""
-    try:
-        guarded_mkdir(p.parent, base=_tree_root_for(deps, p))
-    except ValueError as e:
+    The trust roots are the host-chosen folders: the run dir, the defender dir and the agent's
+    declared extra roots (`policy.read_roots`), each matched as spelled and resolved; the
+    innermost wins (the run dir may sit inside the defender dir). A read confine is the gate's
+    rule, never a trust root: rooting at a confined corpus folder would follow a link AT it.
+    `p` itself is never resolved, which would collapse the links the core exists to refuse. A
+    `..` component, a path naming a root itself, or no root at all (a path that reaches one
+    only through a symlink) is refused as `ModelRetry`: the operand is model-supplied."""
+    if p.anchor == "//":  # POSIX lets `//x` mean `/x`; pathlib keeps it as its own anchor
+        p = Path("/", *p.parts[1:])
+    if ".." in p.parts:
+        raise ModelRetry(f"{path} has a '..' component; name the file by a path without '..'")
+    best: Path | None = None
+    for root in (deps.run_dir, deps.defender_dir, *deps.policy.read_roots):
+        spellings: tuple[Path, ...]
+        try:
+            spellings = (root, _resolved(root))
+        except RESOLVE_ERRORS:
+            spellings = (root,)
+        for spelling in spellings:
+            if p == spelling:
+                raise ModelRetry(f"file not found: {path}")
+            if spelling in p.parents and (best is None or len(spelling.parts) > len(best.parts)):
+                best = spelling
+    if best is None:
         raise ModelRetry(
-            f"{p} does not stay inside the writable tree it names: {e}"
-        ) from None
+            f"{path} is not inside a tree this agent may use; name a path under the run "
+            f"directory or the defender directory (a path that only reaches one through a "
+            f"symlink is refused)"
+        )
+    return best, p.relative_to(best).as_posix()
 
 
 def _is_learning_role(deps: AgentDeps) -> bool:

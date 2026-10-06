@@ -1,6 +1,8 @@
 
 from __future__ import annotations
 
+import errno
+
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -10,7 +12,7 @@ if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays 
 
 from pydantic_ai.exceptions import ModelRetry
 
-from defender._io import read_text_utf8, write_guarded
+from defender._io import REFUSED_NOT_FILE, REFUSED_UNDECODABLE, NotPlainEntry, bind, hold
 from defender._run_paths import RunPaths
 from .. import permission
 from ..permission.files import RESOLVE_ERRORS
@@ -21,28 +23,50 @@ from defender.hooks.record_lesson_load import (
     RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA,
 )
 from ._deps import AgentDeps, _bounded_read, _cap_for, _overflow_filter_hint, _record_lesson_load
-from ._bash import _deny_authored_read, _grep_lines, _guarded_parents, _is_cross_agent_read, _is_learning_role, _resolve_operand, _resolved
+from ._bash import _deny_authored_read, _grep_lines, _is_cross_agent_read, _is_learning_role, _resolve_operand, _resolved, _rooted_operand
 
 
-def _probe_is_file(p: Path, path: str) -> bool:
-    """`p.is_file()` over a model-authored path, as a refusal rather than a traceback.
-
-    `pathlib` re-raises most `os.stat` errors; e.g. ENAMETOOLONG on a basename the read gate
-    allows would otherwise end the run with no disposition."""
+def _read_operand(deps: AgentDeps, p: Path, path: str) -> str | None:
+    """The text of the plain file at the operand `p` through the rooted core, `None` when no
+    file stands there (nothing, or a folder or FIFO, as `is_file()` answered before). Every
+    other refusal is a `ModelRetry` naming no host path: a link anywhere below the root or a
+    hard link at the name is refused, never followed, and the open never blocks."""
+    root, name = _rooted_operand(deps, p, path=path)
     try:
-        return p.is_file()
-    except OSError as e:
+        with bind(root) as tree:
+            got = tree.read(name)
+    except ValueError as e:  # a name outside the core's grammar (one that does not encode)
         raise ModelRetry(f"could not read {path}: {e}") from None
+    if got.absent or got.refused_by == REFUSED_NOT_FILE:
+        return None
+    if got.refused_by == REFUSED_UNDECODABLE:
+        raise ModelRetry(f"{path} is not valid UTF-8 text (binary or corrupt)")
+    if got.reason is not None:
+        raise ModelRetry(f"could not read {path}: {got.reason}")
+    return got.text
 
 
-def _probe_read_text(p: Path, path: str) -> str:
-    """`read_text_utf8(p)` over a model-authored path, as a refusal rather than a traceback."""
+def _write_operand(deps: AgentDeps, p: Path, path: str, text: str) -> None:
+    """Replace the file at the operand `p` with `text` through the rooted core, off the same
+    root its read takes, in one walk that makes the missing holding folders: nothing below the
+    root is followed and a non-plain entry at the name is refused and left in place.
+
+    A planted entry on the path (a link, a hard link, a FIFO or folder at the name, a file used
+    as a folder) is the model's to route around, so it is a `ModelRetry` naming no host path.
+    Any other fault (a full disk, an I/O error) is the host's and propagates, as it did before
+    the move: a retry cannot fix it."""
+    root, name = _rooted_operand(deps, p, path=path)
     try:
-        return read_text_utf8(p)
-    except UnicodeDecodeError:
-        raise ModelRetry(f"{path} is not valid UTF-8 text (binary or corrupt)") from None
+        with hold(root) as tree:
+            tree.write(name, text, mode="replace")
+    except (NotPlainEntry, NotADirectoryError) as e:
+        raise ModelRetry(f"could not write {path}: {e.strerror}") from None
     except OSError as e:
-        raise ModelRetry(f"could not read {path}: {e}") from None
+        if e.errno != errno.ELOOP:  # a linked holding folder; anything else is the host's
+            raise
+        raise ModelRetry(f"could not write {path}: {e.strerror}") from None
+    except ValueError as e:
+        raise ModelRetry(f"could not write {path}: {e}") from None
 
 
 def _gated_read(
@@ -55,10 +79,10 @@ def _gated_read(
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
-    if not _probe_is_file(p, path):
-        raise ModelRetry(f"file not found: {path}")
     _deny_authored_read(deps, p)
-    text = _probe_read_text(p, path)
+    text = _read_operand(deps, p, path)
+    if text is None:
+        raise ModelRetry(f"file not found: {path}")
     _record_lesson_load(deps, p, lesson_corpora, kind=_LOAD_KIND_READ)
     return p, text
 
@@ -130,8 +154,7 @@ def _tool_write_file(deps: AgentDeps, path: str, content: str) -> str:
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
-    _guarded_parents(deps, p)
-    write_guarded(p, content)
+    _write_operand(deps, p, path, content)
     deps.authored_paths.add(_resolved(p))
     return f"wrote {path} ({len(content)} bytes)"
 
@@ -149,9 +172,10 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
     )
     if not read_decision.allow:
         raise ModelRetry(read_decision.reason)
-    # One probe, so both checks below see the same answer.
-    exists = _probe_is_file(p, path)
-    current = _probe_read_text(p, path) if exists else ""
+    # One read, so both checks below see the same answer.
+    read = _read_operand(deps, p, path)
+    exists = read is not None
+    current = read if read is not None else ""
     if not old_string and exists:
         raise ModelRetry(
             f"{path} already exists; an empty old_string would overwrite it. "
@@ -171,7 +195,6 @@ def _tool_edit_file(deps: AgentDeps, path: str, old_string: str, new_string: str
     )
     if not decision.allow:
         raise ModelRetry(decision.reason)
-    _guarded_parents(deps, p)
-    write_guarded(p, new_text)
+    _write_operand(deps, p, path, new_text)
     deps.authored_paths.add(_resolved(p))
     return f"edited {path} ({len(new_text)} bytes)"
