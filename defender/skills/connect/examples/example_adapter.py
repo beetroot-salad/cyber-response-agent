@@ -28,8 +28,7 @@ def _config(ctx: VerbContext) -> dict[str, str]:
     adapter reads its configuration from the record, so an exported variable changes nothing a
     run addresses. (A credentialed system has no secret delivery yet: #1163.)
     `load_config` strips the prefix and raises `ConfigFault` (infra, exit 2) for a system with no
-    config, or a missing or blank required key. This adapter calls its system directly, so its
-    config.env declares no docker access method (`EXAMPLE_TRANSPORT` / `EXAMPLE_DOCKER_CONTEXT`)."""
+    config, or a missing or blank required key."""
     return _stub_transport.load_config(ctx, SYSTEM, PREFIX, ("URL_BASE", "TIMEOUT_SEC"))
 
 

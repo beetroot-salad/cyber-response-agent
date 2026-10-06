@@ -188,7 +188,6 @@ def resolved_settings(tenant: Tenant) -> dict[str, Any]:
     (or a launch) begins; nothing ever raises for a part's content (O5): a part that cannot
     stand is carried as the fault that says why."""
     systems = tenant_settings.read_systems(tenant.settings)
-    tenant_settings.warn_missing_access_method(tenant.id, systems)
     try:
         ticket_mapping: CaseMapping | CaseTicketError = load_case_mapping(
             tenant.settings)

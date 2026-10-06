@@ -21,11 +21,8 @@ from defender._scaffold_rules import (  # noqa: E402
     check_template,
 )
 from defender.runtime.tenant_settings import (  # noqa: E402
-    DOCKER_EXEC,
     assignments,
     is_blank,
-    parse_env,
-    system_prefix,
 )
 from defender.runtime.verbs import (  # noqa: E402
     ADAPTER_SUFFIX,
@@ -157,24 +154,6 @@ def _why_unreadable(error: Exception) -> str:
     return (error.strerror if isinstance(error, OSError) else None) or type(error).__name__
 
 
-def _check_access_method(report: Report, entries: dict[str, str], prefix: str) -> None:
-    """A system reached through the docker transport declares it: `<PREFIX>_TRANSPORT` is
-    `docker-exec` and `<PREFIX>_DOCKER_CONTEXT` is set, both required, neither defaulted. A
-    config.env carrying neither key is a system its adapter reaches directly, and passes."""
-    transport, context = f"{prefix}_TRANSPORT", f"{prefix}_DOCKER_CONTEXT"
-    if transport not in entries and context not in entries:
-        return
-    if is_blank(entries.get(transport, "")):
-        report.add(FAIL, f"config.env: {transport} is not set — name the access method "
-                         f"({DOCKER_EXEC}); there is no default")
-    elif entries[transport] != DOCKER_EXEC:
-        report.add(FAIL, f"config.env: {transport}={entries[transport]!r} is not an implemented "
-                         f"access method (only {DOCKER_EXEC})")
-    if is_blank(entries.get(context, "")):
-        report.add(FAIL, f"config.env: {context} is not set — name the docker context the "
-                         "system is reached over; there is no default")
-
-
 #: A key that would reference a tenant secret. Credential delivery is #1163; until it lands such a
 #: reference names nothing, and its value may be the secret itself.
 _SECRET_REF = re.compile(r"_SECRET_REF$", re.I)
@@ -209,8 +188,7 @@ def _check_values(report: Report, every: list[tuple[str, str, bool]]) -> None:
 def check_config(report: Report, settings_dir: Path, system: str) -> None:
     """`system`'s `config.env` in the connected tenant's `settings/` folder (#1106).
 
-    Checked: the access method, when the file declares one (`<PREFIX>_TRANSPORT=docker-exec` and
-    `<PREFIX>_DOCKER_CONTEXT`, both required, no default), and that no line — an `export` or an overridden duplicate
+    Checked: that no line — an `export` or an overridden duplicate
     included — holds a secret or a secret reference. The report names keys, never a value."""
     path = settings_dir / "systems" / system / "config.env"
     if not path.exists():
@@ -221,7 +199,6 @@ def check_config(report: Report, settings_dir: Path, system: str) -> None:
     except TEXT_READ_ERRORS as e:
         report.add(FAIL, f"config.env could not be read ({_why_unreadable(e)})")
         return
-    _check_access_method(report, parse_env(text), system_prefix(system))
     _check_values(report, assignments(text))
 
 

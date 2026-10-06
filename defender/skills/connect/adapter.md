@@ -198,24 +198,13 @@ maintainer offers one, stop and refuse it. Nothing in an adapter logs a secret o
 returns one in a captured payload; this is the single most important property of
 the layer.
 
-## Access method
-
-An adapter that calls its system directly (as `example_adapter.py` does, over HTTP) declares no access method: its `config.env` holds only its own keys.
-
-A system reached through the docker transport (`_stub_transport.py`, `docker --context … exec`) states that in its `config.env`, in two lines that are both required and have no default: `<PREFIX>_TRANSPORT=docker-exec` and `<PREFIX>_DOCKER_CONTEXT=<the docker context the system is reached over>`. Here `<PREFIX>` is the system folder's name upper-cased with `-` as `_` (`case-history` → `CASE_HISTORY`), even if the adapter names its other keys with a different prefix. A docker-reached system missing either is down (exit 2) and is never reached through a guessed docker context; one line without the other is flagged by the validator and warned at run start.
-
-`docker-exec` is the one implemented method; any other value is refused, naming it.
-`<PREFIX>` is the folder name upper-cased (`systems/host-state/` → `HOST_STATE_`).
-A tenant folder written before this change has no `systems/host-state/` folder at
-all, so each existing tenant needs a new `systems/host-state/config.env` holding
-these two lines before its host-state verbs work.
-
 ## Transport
 
-`example_adapter.py`'s `_request` does HTTP via `urllib`; the live tree's
-`_stub_transport.py` shells out to `docker --context … exec … curl`. Swap
-that one layer for whatever your environment needs — direct HTTP, an SSH
-command, an existing CLI you wrap and parse, or a vendor SDK call. The right
+`example_adapter.py`'s `_request` does HTTP via `urllib`. Swap that one layer
+for whatever your environment needs — direct HTTP, an existing CLI you wrap
+and parse, or a vendor SDK call. (The lab's own adapters reach its stand-in
+services through `docker exec` on a Docker host the lab controls; that is the
+lab's wiring, not a transport to copy for a tenant's system.) The right
 transport is a property of *your* deployment, not of this skill; the VERBS
 surface above it — verb signatures, the returned payload, the faults —
 does not change with it.

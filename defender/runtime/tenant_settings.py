@@ -58,8 +58,6 @@ _SETTINGS_POINTER = "the tenant's settings/"
 #: form feed or a vertical tab inside a value).
 _LINE_END = re.compile(r"\r\n|\r|\n")
 
-_PREFIX_NAME = re.compile(r"^[a-z][a-z0-9-]*$")
-
 
 # --------------------------------------------------------------------------------------------
 # The one parser.
@@ -294,26 +292,6 @@ def read_systems(settings: Path) -> Mapping[str, SystemConfig | ConfigFault]:
     return MappingProxyType(out)
 
 
-def warn_missing_access_method(tenant_id: str, systems: Mapping[str, SystemConfig | ConfigFault]) -> None:
-    """One warning naming each system whose config declares half a docker access method: one of
-    `<PREFIX>_TRANSPORT` / `<PREFIX>_DOCKER_CONTEXT` without the other, so every docker call it
-    makes will fault (there is no default). A system declaring neither is one its adapter
-    reaches directly, and is not listed."""
-    lacking = []
-    for name, entry in systems.items():
-        if not isinstance(entry, SystemConfig) or not _PREFIX_NAME.match(name):
-            continue
-        prefix = system_prefix(name)
-        keys = (f"{prefix}_TRANSPORT", f"{prefix}_DOCKER_CONTEXT")
-        missing = [k for k in keys if k not in entry]
-        if len(missing) == 1:
-            lacking.append(f"{name} ({', '.join(missing)})")
-    if lacking:
-        _log.warning(
-            "tenant %r: system config lacks an access-method key, so these systems are down "
-            "until it is added: %s", tenant_id, "; ".join(lacking))
-
-
 def elastic_view(systems: Mapping[str, SystemConfig | ConfigFault]) -> ElasticSettings | ConfigFault | None:
     """The Elastic part, or `None` when the tenant has no `systems/elastic/` folder, or the
     `ConfigFault` for why it cannot stand — a missing file, a key absent or blank, or an access
@@ -359,5 +337,4 @@ __all__ = [
     "read_regular_bytes",
     "read_systems",
     "system_prefix",
-    "warn_missing_access_method",
 ]

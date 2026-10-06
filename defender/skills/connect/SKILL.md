@@ -113,8 +113,7 @@ greenfield tree there's nothing cached yet, so ask all four.
    routes to MCP. Everything else routes to an adapter, and the answer
    picks its **transport** — the one part of the adapter that varies:
    direct API (endpoint + token) → HTTP; an existing CLI/script → a
-   transport that shells out to it and parses; reachable only over
-   `docker exec` / SSH → that, as the transport. Reachable only by SSHing
+   transport that shells out to it and parses. Reachable only by SSHing
    to a bastion and running tools there → **stop**, the agent must run on
    the bastion, not here. The verb surface above the transport is the same
    either way (see `adapter.md` → "The shape to copy").
@@ -176,8 +175,7 @@ everything here grows post-merge.
 
 `settings/systems/{system}/config.env` in the connected tenant's OWN repo (deployed as
 `$DEFENDER_DATA_ROOT/{tenant}/knowledge/`, never in this repo) — the tenant's non-secret
-config (endpoint, timeout, `AUTH_TYPE`, the access lines `<PREFIX>_TRANSPORT=docker-exec`
-and `<PREFIX>_DOCKER_CONTEXT`). Also add a `CHANGE-ME` placeholder copy at
+config (endpoint, timeout, `AUTH_TYPE`). Also add a `CHANGE-ME` placeholder copy at
 `knowledge/tenant-template/settings/systems/{system}/config.env` in this repo, so a tenant
 scaffolded from the template knows the keys.
 Track it in the tenant's repo when it holds no secrets. A secret is never in this file.
