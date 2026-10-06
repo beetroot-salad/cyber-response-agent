@@ -173,7 +173,7 @@ def _trace_lesson_does_not_render_the_placeholder(tmp_path: Path) -> None:
 
 
 def _ticket_lane_reads_the_committed_verdict(tmp_path: Path) -> None:
-    from defender.scripts.case_history import case_ticket
+    from defender.runtime import case_ticket
 
     run_dir = finished_run(tmp_path, disposition=MEMBER)
     assert case_ticket.read_case_record(run_dir, mapping=fixture_run_tenant().ticket_mapping).disposition == MEMBER
@@ -214,7 +214,7 @@ def _the_review_record_has_no_consumer_outside_the_runtime_view(tmp_path: Path) 
     from defender._report import read_report
     from defender.evals.held_out import predicted_disposition
     from defender.learning.core.validate import normalize_disposition
-    from defender.scripts.case_history import case_ticket
+    from defender.runtime import case_ticket
 
     run_dir = finished_run(tmp_path, disposition=MEMBER)
     (run_dir / "review_record.1.json").mkdir()
@@ -380,7 +380,7 @@ def _reader_answers(run_dir: Path) -> dict[str, tuple[str, object]]:
     from defender.evals.held_out import predicted_disposition
     from defender.learning.core.validate import normalize_disposition
     from defender.learning.ops.trace_lesson import _report_disposition
-    from defender.scripts.case_history import case_ticket
+    from defender.runtime import case_ticket
 
     report = run_dir / "report.md"
 

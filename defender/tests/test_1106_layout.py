@@ -134,7 +134,7 @@ def test_the_moved_lead_zero_and_mapping_carry_the_retired_values():
     lz = T.mod("runtime.lead_zero_config")
     assert lz.load_correlation_template(lz.lead_zero_config_path(T.FIXTURE_SETTINGS)) == \
         T.SHIPPED_CORRELATION_TEMPLATE
-    predicate = T.mod("scripts.case_history.case_ticket").release_predicate(
+    predicate = T.mod("runtime.case_ticket").release_predicate(
         T.fixture_run_tenant().ticket_mapping)
     assert predicate.released_status == "closed"
 

@@ -879,7 +879,7 @@ def test_a_ticket_patch_writing_comments_on_an_unreleased_case_is_refused(tmp_pa
     reads `patched`, truthfully) and then never served: the family ends as "a declared
     difference no query could reach" with nothing naming the gate. Positive control: the same
     patch carrying `status: <released>` builds, because a released case IS served whole."""
-    from defender.scripts.case_history import case_ticket
+    from defender.runtime import case_ticket
 
     released = case_ticket.release_predicate(T1106.fixture_run_tenant().ticket_mapping).released_status
     # The recording adapter body declared under the ticket system's name, so the grant can

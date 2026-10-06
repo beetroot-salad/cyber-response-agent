@@ -108,7 +108,7 @@ def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming
 # ---- the case-history mapping --------------------------------------------------------------
 
 def test_the_release_predicate_reads_the_injected_tenants_mapping(injected):
-    case_ticket = T.mod("scripts.case_history.case_ticket")
+    case_ticket = T.mod("runtime.case_ticket")
     predicate = case_ticket.release_predicate(_record(injected).ticket_mapping)
     assert predicate.released_status == "resolved-by-a-person"
     assert predicate.is_released({"status": "resolved-by-a-person"}) is True
@@ -118,7 +118,7 @@ def test_the_release_predicate_reads_the_injected_tenants_mapping(injected):
 
 
 def test_the_open_payload_renders_the_injected_tenants_mapping(injected):
-    case_ticket = T.mod("scripts.case_history.case_ticket")
+    case_ticket = T.mod("runtime.case_ticket")
     alert = {"rule": {"id": "r-1", "description": "d"}, "timestamp": "2026-09-26T00:00:00Z"}
     payload = case_ticket.alert_to_open_payload(
         alert, "case-1", mapping=_record(injected).ticket_mapping)
@@ -132,7 +132,7 @@ def test_a_missing_mapping_is_a_refusal_naming_the_injected_path(tmp_path):
     """No `$DEFENDER_DIR`, no `__file__` fallback: the mapping the folder does not hold is a
     `CaseTicketError` naming it by the settings pointer — while the checkout's copy sits right
     there."""
-    case_ticket = T.mod("scripts.case_history.case_ticket")
+    case_ticket = T.mod("runtime.case_ticket")
     settings = tmp_path / "bare" / "settings"
     settings.mkdir(parents=True)
     with pytest.raises(case_ticket.CaseTicketError) as caught:

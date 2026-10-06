@@ -33,8 +33,8 @@ from defender import run_common
 from defender._run_paths import RunPaths
 from defender.learning.branch.estate import applier
 from defender.learning.branch.estate.registry import EstateError
+from defender.runtime import case_ticket
 from defender.runtime import run_tenant
-from defender.scripts.case_history import case_ticket
 from defender.tests import _spec767 as M
 from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T

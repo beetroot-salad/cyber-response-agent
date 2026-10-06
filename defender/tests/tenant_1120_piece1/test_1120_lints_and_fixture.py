@@ -99,7 +99,7 @@ KNOWLEDGE_JOINS = ("settings", "knowledge", "agent")
 #: `tenant_knowledge`): the real sweep must report nothing in them.
 SETTINGS_LOADER_MODULES = (
     "runtime/verb_dispositions.py", "runtime/lead_zero_config.py", "runtime/run_tenant.py",
-    "scripts/case_history/case_ticket.py", "scripts/adapters/elastic_adapter.py",
+    "runtime/case_ticket.py", "scripts/adapters/elastic_adapter.py",
     "scripts/adapters/_stub_transport.py", "learning/branch/estate/stagers/elastic.py",
     "learning/branch/staging.py", "skills/connect/validate_scaffold.py",
 )
@@ -346,7 +346,7 @@ def test_1120_the_fixture_tenant_carries_the_labs_grants_and_lead_zero_outside_d
     mapping = settings / "systems" / "case-history" / "mapping.yaml"
     assert mapping.read_bytes() == (
         H.TEMPLATE / "settings" / "systems" / "case-history" / "mapping.yaml").read_bytes()
-    case_ticket = H.mod("scripts.case_history.case_ticket")
+    case_ticket = H.mod("runtime.case_ticket")
     predicate = case_ticket.release_predicate(case_ticket.load_case_mapping(settings))
     assert predicate.released_status == "closed"
     configured = {p.parent.name for p in (settings / "systems").glob("*/config.env")}

@@ -455,7 +455,7 @@
           "defender/runtime/verb_dispositions.py::run_grants",
           "defender/scripts/adapters/_stub_transport.py::_config_path",
           "defender/scripts/adapters/elastic_adapter.py::config_path",
-          "defender/scripts/case_history/case_ticket.py::_mapping_path",
+          "defender/runtime/case_ticket.py::_mapping_path",
           "defender/skills/connect/validate_scaffold.py::check_config"
         ],
         "grep": [
@@ -488,7 +488,7 @@
           "defender/scripts/adapters/elastic_adapter.py::load_config",
           "defender/learning/branch/estate/stagers/elastic.py::configured_patterns",
           "defender/learning/branch/staging.py::write_door_from_env",
-          "defender/scripts/case_history/case_ticket.py::load_case_mapping",
+          "defender/runtime/case_ticket.py::load_case_mapping",
           "defender/scripts/case_history/ticket_writer.py::_load_config",
           "defender/skills/connect/validate_scaffold.py::check_config",
           "defender/skills/connect/examples/example_adapter.py::_config"

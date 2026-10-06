@@ -34,11 +34,11 @@ from defender.learning.branch import staging
 from defender.learning.branch.estate.stagers import elastic as elastic_stager
 from defender.runtime import box as box_mod
 from defender.runtime import box_codec, lead_zero_config, verb_dispositions
+from defender.runtime import case_ticket
 from defender.runtime.verbs import VerbContext
 from defender.scripts import policy_cli
 from defender.scripts import tenant as tenant_py
 from defender.scripts.adapters import _stub_transport, elastic_adapter
-from defender.scripts.case_history import case_ticket
 from defender.skills.connect import validate_scaffold
 from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T947
