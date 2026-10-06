@@ -6,10 +6,8 @@ import logging
 import re
 import sys
 from collections.abc import Callable
-from contextlib import AbstractContextManager
 from functools import partial
 from pathlib import Path
-from typing import Any
 
 from uuid import uuid4
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
@@ -560,7 +558,6 @@ def run_pitfalls(  # noqa: PLR0913, C901 — one tick's whole injection surface
     on_curated: Callable[[PitfallsDisposition], None] | None = None,
     lock_wait_seconds: int | None = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
-    thaw: Callable[[Any], AbstractContextManager[None]] = _box.thawed,
 ) -> int:
     """One curation tick over the pitfalls queue.
 
@@ -588,7 +585,7 @@ def run_pitfalls(  # noqa: PLR0913, C901 — one tick's whole injection surface
             return run_pitfalls(
                 paths=paths, state=own, trees=trees, invoke=invoke, box=box,
                 on_curated=on_curated, lock_wait_seconds=lock_wait_seconds,
-                git_timeout=git_timeout, thaw=thaw)
+                git_timeout=git_timeout)
     lane_skills(trees, paths)
     rows = _loop_persist.read_pitfalls(state)
     # The gate counts distinct mistakes, not rows: the queue keeps one row per failure, so a
@@ -656,10 +653,11 @@ def run_pitfalls(  # noqa: PLR0913, C901 — one tick's whole injection surface
         f"{[h['path'] for h in handoffs]}"
     )
 
-    # The box runs for the curator's spawn only; the drain holds it frozen otherwise (#1178).
-    with thaw(box):
+    # The box runs for the spawn only, and is stopped before the gate reads what it wrote
+    # (#1195).
+    with _box.box_for_run(box) as run_box:
         rc = (invoke or _invoke_pitfalls_agent)(
-            handoffs, state=state, repo_root=repo_root, box=box)
+            handoffs, state=state, repo_root=repo_root, box=run_box)
     if rc != 0:
         # Raised, not returned: a returned rc goes uninspected. `AuthorError` is in the drain's
         # retire set, so a repeatedly failing batch reaches the bounded retirement.
