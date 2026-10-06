@@ -316,7 +316,7 @@ def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a mode
         {"the live tree": _as_stamp(live_tree())} if _stamp_speaks(source_stamp) else {})
     refusal = _family_refusal(
         source_stamp, members,
-        source_who=f"source run {source_run_dir}", allow_dirty=allow_dirty)
+        source_who=f"source run {source_run_dir}", allow_dirty=allow_dirty).refusal
     if refusal is not None:
         raise LauncherRefused(f"[branch] {refusal}")
     # The source run dir is a prior box's rw bind, so a link planted at `alert.json` would copy
@@ -690,11 +690,23 @@ def _as_stamp(record: _provenance.RunProvenance) -> dict:
     return json.loads(record.as_json())
 
 
-#: One reason a family cannot be archived as a comparison against its source. `--allow-dirty`
-#: drops exactly the `waivable` faults, so waivability is a property of the fault, not the site.
+#: The kinds of fault `--allow-dirty` waives: a tree git did not certify clean, and tenant
+#: knowledge no commit proves (unversioned, unavailable, or not recorded). The family stamp
+#: records which of them a waived family actually had (`waived`).
+DIRT = "dirt"
+UNPROVEN_KNOWLEDGE = "knowledge"
+
+
+#: One reason a family cannot be archived as a comparison against its source. `kind` is the
+#: waivable kind, or `None` for a fault `--allow-dirty` never reaches — so waivability is a
+#: property of the fault, not the site.
 class _Fault(NamedTuple):
-    waivable: bool
+    kind: str | None
     text: str
+
+    @property
+    def waivable(self) -> bool:
+        return self.kind is not None
 
 
 #: Every `RunProvenance` field, classed by how the fork check judges it (#1204 D4). The
@@ -716,18 +728,68 @@ STAMP_FIELD_CLASSES: dict[str, str] = {
     "fork_turn": "expected_to_differ",
 }
 
+class _HeldRule(NamedTuple):
+    """How the fork check holds one `anchored` or `constant` field: the value compared, the
+    waivable kind a stamp with no such value is faulted as (`None`: an absent value is just a
+    value), and, for an anchored field, the refusal for a member off the source's value."""
+
+    compared: Callable[[dict], object]
+    unknown_kind: str | None = None
+    off_anchor: Callable[[str, object, object], str] | None = None
+
+
+def _knowledge_commit(stamp: dict) -> str | None:
+    """Knowledge is compared as its commit alone, so two unavailable reasons with different
+    text are not a disagreement."""
+    revision = _provenance.KnowledgeRevision.from_wire(stamp.get("knowledge"))
+    return None if revision is None else revision.commit
+
+
+def _off_commit(who: str, got: object, want: object) -> str:
+    return (f"{who} is at commit {got!r} while the source run it continues ran at {want!r} — a "
+            "family is anchored to its source's commit, and a comparison against other code is "
+            "never archived as comparable")
+
+
+def _off_scope(who: str, got: object, want: object) -> str:
+    return (f"the dirt of {who} was measured over scope {got!r} and the source's over {want!r} "
+            "— the two clean bits answer different questions, so agreeing on the commit does not "
+            "make them a match")
+
+
+def _off_knowledge(who: str, got: object, want: object) -> str:
+    return (f"{who} read tenant knowledge at commit {got!r} while the source run it continues "
+            f"read {want!r} — a family is anchored to the knowledge its source read, and a "
+            "comparison against other settings and lessons is never archived as comparable")
+
+
+#: The rule of every held field that is more than "compare the value as recorded". An anchored
+#: field must have one (its refusal text), which is held at import below, so no anchored field
+#: falls back to a vague message.
+_HELD_RULES: dict[str, _HeldRule] = {
+    "commit": _HeldRule(compared=lambda stamp: stamp.get("commit"), off_anchor=_off_commit),
+    "scope": _HeldRule(compared=lambda stamp: stamp.get("scope"), off_anchor=_off_scope),
+    "knowledge": _HeldRule(compared=_knowledge_commit, unknown_kind=UNPROVEN_KNOWLEDGE,
+                           off_anchor=_off_knowledge),
+}
+
+
+def _as_recorded(field: str) -> _HeldRule:
+    return _HeldRule(compared=lambda stamp: stamp.get(field))
+
+
 _ANCHORED = tuple(f for f, c in STAMP_FIELD_CLASSES.items() if c == "anchored")
-_HELD_CONSTANT = tuple(f for f, c in STAMP_FIELD_CLASSES.items() if c in ("anchored", "constant"))
+_HELD = {f: _HELD_RULES.get(f) or _as_recorded(f)
+         for f, c in STAMP_FIELD_CLASSES.items() if c in ("anchored", "constant")}
+if _missing := [f for f in _ANCHORED if _HELD[f].off_anchor is None]:
+    raise RuntimeError(f"anchored stamp field(s) {_missing} have no refusal text in _HELD_RULES")
 
 
-def _compared(stamp: dict, field: str) -> object:
-    """The value the family is held to on `field`. Knowledge is compared as its commit alone,
-    so two unavailable reasons with different text are not a disagreement; a stamp whose
-    knowledge names no commit answers `None` and is judged by `_unprovable_knowledge`."""
-    if field == "knowledge":
-        revision = _provenance.KnowledgeRevision.from_wire(stamp.get("knowledge"))
-        return None if revision is None else revision.commit
-    return stamp.get(field)
+def _unknown_faults(who: str, stamp: dict) -> list[_Fault]:
+    """The waivable faults of a stamp with no value on a field whose unknown is its own fault."""
+    return [_Fault(rule.unknown_kind, _unprovable(field, who, stamp))
+            for field, rule in _HELD.items()
+            if rule.unknown_kind is not None and rule.compared(stamp) is None]
 
 
 def _family_faults(
@@ -752,14 +814,13 @@ def _family_faults(
     faults: list[_Fault] = []
     anchored = _stamp_speaks(source)
     if not anchored:
-        faults.append(_Fault(False, (
+        faults.append(_Fault(None, (
             f"{source_who} names no commit (unavailable={source.get('unavailable')!r}) — a "
             "family is anchored to the commit its source ran, and there is none to anchor to")))
     else:
         if not _clean_stamp(source):
-            faults.append(_Fault(True, _not_certified_clean(source_who, source)))
-        if _compared(source, "knowledge") is None:
-            faults.append(_Fault(True, _unprovable_knowledge(source_who, source)))
+            faults.append(_Fault(DIRT, _not_certified_clean(source_who, source)))
+        faults.extend(_unknown_faults(source_who, source))
     for who, stamp in members.items():
         faults.extend(_member_faults(who, stamp, anchor=source if anchored else None))
     # Agreement is over every stamp that names a commit, dirty ones included: excluding dirty
@@ -767,16 +828,16 @@ def _family_faults(
     # checkout and are all dirty together.
     comparable = {who: stamp for who, stamp in members.items()
                   if stamp is not None and _stamp_speaks(stamp)}
-    for field in _HELD_CONSTANT:
+    for field, rule in _HELD.items():
         # A field the anchor pinned was compared member by member above.
-        if anchored and field in _ANCHORED and _compared(source, field) is not None:
+        if anchored and field in _ANCHORED and rule.compared(source) is not None:
             continue
-        values = {who: _compared(stamp, field) for who, stamp in comparable.items()}
-        if field == "knowledge":
-            # Unprovable knowledge is its own (waivable) fault, not a disagreeing value.
+        values = {who: rule.compared(stamp) for who, stamp in comparable.items()}
+        if rule.unknown_kind is not None:
+            # An unknown here is its own (waivable) fault, not a disagreeing value.
             values = {who: value for who, value in values.items() if value is not None}
         if len(set(values.values())) > 1:
-            faults.append(_Fault(False, (
+            faults.append(_Fault(None, (
                 f"siblings disagree on {field}: {values} — the family is held constant on it, "
                 "so a comparison across two values is never archived as comparable")))
     return faults
@@ -786,58 +847,39 @@ def _member_faults(who: str, stamp: dict | None, *, anchor: dict | None) -> list
     """One tree's faults against the anchor. `anchor` is `None` when the source could not
     anchor (already reported); the tree is then judged on its own stamp alone."""
     if stamp is None:
-        return [_Fault(False, (
+        return [_Fault(None, (
             f"{who} carries no readable provenance stamp — an absent or unreadable stamp is "
             "not an agreeing one"))]
     if not _stamp_speaks(stamp):
-        return [_Fault(False, (
+        return [_Fault(None, (
             f"{who} names no commit (unavailable={stamp.get('unavailable')!r}) — a silent "
             "stamp cannot be held to anything"))]
     faults: list[_Fault] = []
     for field in _ANCHORED:
-        want = None if anchor is None else _compared(anchor, field)
-        got = _compared(stamp, field)
-        # The source pins nothing here, or the member's knowledge is unprovable (below).
-        if want is None or (got is None and field == "knowledge"):
+        rule = _HELD[field]
+        want = None if anchor is None else rule.compared(anchor)
+        got = rule.compared(stamp)
+        # The source pins nothing here, or the member's unknown is its own fault (below).
+        if want is None or (got is None and rule.unknown_kind is not None):
             continue
-        if got != want:
-            faults.append(_Fault(False, _off_anchor(field, who, got, want)))
-    if _compared(stamp, "knowledge") is None:
-        faults.append(_Fault(True, _unprovable_knowledge(who, stamp)))
+        if got != want and rule.off_anchor is not None:
+            faults.append(_Fault(None, rule.off_anchor(who, got, want)))
+    faults.extend(_unknown_faults(who, stamp))
     if not _clean_stamp(stamp):
-        faults.append(_Fault(True, _not_certified_clean(who, stamp)))
+        faults.append(_Fault(DIRT, _not_certified_clean(who, stamp)))
     return faults
 
 
-def _off_anchor(field: str, who: str, got: object, want: object) -> str:
-    """The refusal for a member whose anchored `field` is not the source's."""
-    if field == "commit":
-        return (f"{who} is at commit {got!r} while the source run it continues ran at {want!r} "
-                "— a family is anchored to its source's commit, and a comparison against other "
-                "code is never archived as comparable")
-    if field == "scope":
-        return (f"the dirt of {who} was measured over scope {got!r} and the source's over "
-                f"{want!r} — the two clean bits answer different questions, so agreeing on the "
-                "commit does not make them a match")
-    if field == "knowledge":
-        return (f"{who} read tenant knowledge at commit {got!r} while the source run it "
-                f"continues read {want!r} — a family is anchored to the knowledge its source "
-                "read, and a comparison against other settings and lessons is never archived "
-                "as comparable")
-    return (f"{who} has {field}={got!r} while the source run it continues has {want!r} — a "
-            "family is anchored to its source on it")
-
-
-def _unprovable_knowledge(who: str, stamp: dict) -> str:
-    """The waivable fault for a stamp whose knowledge names no commit."""
-    revision = _provenance.KnowledgeRevision.from_wire(stamp.get("knowledge"))
+def _unprovable(field: str, who: str, stamp: dict) -> str:
+    """The waivable fault text for a stamp with no value on `field` (today only knowledge)."""
+    revision = _provenance.KnowledgeRevision.from_wire(stamp.get(field))
     if revision is None:
-        what = "records no tenant knowledge revision (stamped before #1204, or it does not say)"
+        what = f"records no tenant {field} revision (stamped before #1204, or it does not say)"
     elif revision.unavailable is not None:
-        what = f"could not name its tenant knowledge commit ({revision.unavailable})"
+        what = f"could not name its tenant {field} commit ({revision.unavailable})"
     else:
-        what = "read an unversioned tenant knowledge folder"
-    return (f"{who} {what} — nothing proves it read the same knowledge as the rest of the "
+        what = f"read an unversioned tenant {field} folder"
+    return (f"{who} {what} — nothing proves it read the same {field} as the rest of the "
             "family")
 
 
@@ -847,22 +889,30 @@ def _not_certified_clean(who: str, stamp: dict) -> str:
             "commit does not name the bytes that ran")
 
 
+class _Judgement(NamedTuple):
+    #: The faults `--allow-dirty` did not waive, as one refusal — or `None`.
+    refusal: str | None
+    #: The kinds of fault the flag waived, sorted; `[]` when nothing was waived.
+    waived: list[str]
+
+
 def _family_refusal(
     source: dict, members: dict[str, dict | None], *, source_who: str, allow_dirty: bool,
-) -> str | None:
-    """The faults `--allow-dirty` did not waive, as one refusal — or `None`.
+) -> _Judgement:
+    """The family's faults as one refusal, and the kinds the override waived.
 
     Non-waivable faults are listed first, and `--allow-dirty` is suggested only when passing it
     would let the family through; fault messages themselves never mention the flag.
     """
-    faults = [fault for fault in _family_faults(source, members, source_who=source_who)
-              if not (fault.waivable and allow_dirty)]
+    found = _family_faults(source, members, source_who=source_who)
+    waived = sorted({f.kind for f in found if f.kind is not None}) if allow_dirty else []
+    faults = [fault for fault in found if not (fault.waivable and allow_dirty)]
     if not faults:
-        return None
+        return _Judgement(None, waived)
     text = "; ".join(fault.text for fault in sorted(faults, key=lambda fault: fault.waivable))
     if all(fault.waivable for fault in faults):
         text += " — pass --allow-dirty to waive these faults, recorded in the family stamp as such"
-    return text
+    return _Judgement(text, waived)
 
 
 def _clean_stamp(stamp: dict | None) -> bool:
@@ -913,11 +963,11 @@ def verify_family(
         reasons.append(
             f"sibling(s) {unverified} have no scrub verdict recording a completed walk — an "
             "unwalked tree is one nothing has certified as free of what the box left behind")
-    refusal = _family_refusal(
+    judged = _family_refusal(
         source, {f"sibling {label!r}": stamps[label] for label in scrub_verified},
         source_who="the source run", allow_dirty=allow_dirty)
-    if refusal is not None:
-        reasons.append(refusal)
+    if judged.refusal is not None:
+        reasons.append(judged.refusal)
     cross_tenant = _cross_tenant_fault(stamps, scrub_verified)
     if cross_tenant is not None:
         reasons.append(cross_tenant)
@@ -947,7 +997,8 @@ def verify_family(
         raise
     if outcome == ACCEPTED:
         _write_family_stamp(
-            episode, stamps, source=source, allow_dirty=allow_dirty, dirs=dirs)
+            episode, stamps, source=source, allow_dirty=allow_dirty, waived=judged.waived,
+            dirs=dirs)
     _record_episode_outcome(episode, outcome=outcome, reason=reason)
     if door is not None:
         staging_mod.teardown(episode, door=door)
@@ -989,7 +1040,7 @@ def _cross_tenant_fault(stamps: dict[str, dict | None], labels: Sequence[str]) -
 
 def _write_family_stamp(
     episode: Episode, stamps: dict[str, dict | None], *, source: dict, allow_dirty: bool,
-    dirs: dict[str, Path] | None = None,
+    waived: list[str] | None = None, dirs: dict[str, Path] | None = None,
 ) -> None:
     """The family's one stamp: what every sibling agreed on, what it was anchored to, and
     whether it was waved through.
@@ -998,21 +1049,32 @@ def _write_family_stamp(
     `_stamp_of` read it at preflight. Copied verbatim so a waived dirty source shows
     `source.dirty` beside `allow_dirty`, and the archive never reads as anchored to a clean sha.
 
+    @owns waived — the family stamp's `waived` key: the kinds of fault (`DIRT`,
+    `UNPROVEN_KNOWLEDGE`) `--allow-dirty` actually waived for this family, from
+    `_family_refusal`'s judgement; `[]` when nothing was. `allow_dirty` alone cannot tell a
+    dirty-code family from one whose source merely predates the knowledge stamp.
+
     The agreed record (about the siblings), the source (what they were held to) and the
-    override (the operator's flag) are kept separate so a clean family and a waived one read
-    differently.
+    override (the operator's flag, and what it waived) are kept separate so a clean family and
+    a waived one read differently.
     """
-    # Any sibling's stamp is the agreed record on commit, scope and model (and on the knowledge
-    # commit, unless waived), since `_family_refusal` passed. Dirt fields may differ under `--allow-dirty` and here are the
-    # first sibling's; each sibling's own is archived in `worlds/<label>/provenance.json`.
-    # `verify_family` guarantees at least one sibling, so `next` cannot raise.
-    agreed = {k: v for k, v in next(
-        stamp for stamp in stamps.values() if stamp is not None).items() if k != "world_id"}
+    present = [stamp for stamp in stamps.values() if stamp is not None]
+    # Every held field is the agreed record's, since `_family_refusal` passed: the first
+    # sibling's value, except where an unknown is its own waived fault — there the agreed value
+    # is one a sibling actually named, or `None` when none did. Dirt fields may differ under
+    # `--allow-dirty` and here are the first sibling's; each sibling's own is archived in
+    # `worlds/<label>/provenance.json`. `verify_family` guarantees at least one sibling.
+    agreed = {k: v for k, v in present[0].items() if k != "world_id"}
+    for field, rule in _HELD.items():
+        if rule.unknown_kind is not None:
+            agreed[field] = next(
+                (stamp.get(field) for stamp in present if rule.compared(stamp) is not None), None)
     # The family's base world, from the tenant record at the siblings' runs base: no member
     # stamps it, and lessons attribution keys on it.
     base_world_id = _family_base_world_id(dirs)
     doc: dict[str, object] = {
-        "agreed": agreed, "allow_dirty": bool(allow_dirty), "source": dict(source)}
+        "agreed": agreed, "allow_dirty": bool(allow_dirty), "source": dict(source),
+        "waived": list(waived or [])}
     if base_world_id is not None:
         doc["base_world_id"] = base_world_id
     episode.family_stamp.write(

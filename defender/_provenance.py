@@ -335,59 +335,92 @@ def capture_knowledge(knowledge_dir: Path) -> KnowledgeRevision:
     try:
         with bind(knowledge_dir) as root:
             return _read_knowledge(root)
+    except _Unreadable as e:
+        return KnowledgeRevision.unavailable_because(str(e))
     except (OSError, ValueError) as e:
         return KnowledgeRevision.unavailable_because(f"the knowledge clone could not be read: {e!r}")
 
 
+class _Unreadable(Exception):
+    """A read below the knowledge folder that names no revision; its text is the reason."""
+
+
+def _entry_at(bound: Bound, name: str) -> str | None:
+    """What stands at `name`, judged without following it: `None` when absent, else
+    `directory`, `link`, `file` or `special file`. A refused judgement raises `_Unreadable`
+    with its own reason — the one rule every stat below is read by."""
+    found = stat_entry(bound, name)
+    if found.absent:
+        return None
+    if found.st is None:
+        raise _Unreadable(f"{name} could not be judged: {found.reason}")
+    mode = found.st.st_mode
+    return ("directory" if stat.S_ISDIR(mode) else "link" if stat.S_ISLNK(mode)
+            else "file" if stat.S_ISREG(mode) else "special file")
+
+
+def _file_at(bound: Bound, name: str) -> str | None:
+    """The file at `name`, or `None` when absent. A refused read (a link on the way, a
+    non-file, undecodable bytes) raises `_Unreadable` with its own reason — the one rule every
+    read below is held to, so a refusal is never mistaken for an absence."""
+    found = bound.read(name)
+    if found.text is not None:
+        return found.text
+    if found.absent:
+        return None
+    raise _Unreadable(f"{name} could not be read: {found.reason}")
+
+
+def _commit_in(text: str, where: str) -> KnowledgeRevision:
+    sha = text.strip()
+    if not _SHA.fullmatch(sha):
+        raise _Unreadable(f"{where} does not hold a commit: {sha[:80]!r}")
+    return KnowledgeRevision.at(sha)
+
+
 def _read_knowledge(root: Bound) -> KnowledgeRevision:
-    unavailable = KnowledgeRevision.unavailable_because
-    git_dir = stat_entry(root, ".git")
-    if git_dir.absent:
+    listing = root.entries()
+    if listing.absent:
+        raise _Unreadable("the knowledge folder is missing")
+    if listing.reason is not None:
+        raise _Unreadable(f"the knowledge folder cannot be read: {listing.reason}")
+    git_kind = _entry_at(root, ".git")
+    if git_kind is None:
         return KnowledgeRevision.unversioned()
-    if git_dir.st is None:
-        return unavailable(f".git could not be judged: {git_dir.reason}")
-    if not stat.S_ISDIR(git_dir.st.st_mode):
-        return unavailable(".git is not a real directory (a gitfile or a link is not followed)")
-    if not stat_entry(root, ".git/reftable").absent:
-        return unavailable("reftable refs: this reader reads files-backend refs only")
-    head = root.read(".git/HEAD")
-    if head.text is None:
-        return unavailable(f"HEAD is {'absent' if head.absent else 'unreadable'}"
-                           f"{'' if head.reason is None else f' ({head.reason})'}")
-    text = head.text.strip()
+    if git_kind != "directory":
+        raise _Unreadable(f".git is a {git_kind}, not a directory (it is not followed)")
+    git = root.under(".git")
+    reftable = _entry_at(git, "reftable")
+    if reftable == "directory":
+        raise _Unreadable("reftable refs: this reader reads files-backend refs only")
+    if reftable is not None:
+        raise _Unreadable(f".git/reftable is a {reftable}, not a reftable directory")
+    head = _file_at(git, "HEAD")
+    if head is None:
+        raise _Unreadable("HEAD is absent")
+    text = head.strip()
     if not text.startswith("ref:"):
-        return (KnowledgeRevision.at(text) if _SHA.fullmatch(text)
-                else unavailable(f"HEAD is neither a ref nor a commit: {text[:80]!r}"))
-    name = text[len("ref:"):].strip()
+        return _commit_in(text, "HEAD")
+    return _follow_ref(git, text[len("ref:"):].strip())
+
+
+def _follow_ref(git: Bound, name: str) -> KnowledgeRevision:
+    """The commit the ref HEAD names holds."""
     if not _is_ref_name(name):
-        return unavailable(f"HEAD names {name[:80]!r}, which is not a ref under refs/")
-    return _resolve_ref(root, name)
-
-
-def _resolve_ref(root: Bound, name: str) -> KnowledgeRevision:
-    """The commit the ref `name` holds: its loose file, else its `packed-refs` line."""
-    unavailable = KnowledgeRevision.unavailable_because
-    loose = root.read(f".git/{name}")
-    if loose.text is not None:
-        sha = loose.text.strip()
-        return (KnowledgeRevision.at(sha) if _SHA.fullmatch(sha)
-                else unavailable(f"the ref {name} does not hold a commit: {sha[:80]!r}"))
-    # Only an ABSENT loose ref falls through to packed-refs: a refused one shadows it, as
-    # git's loose-over-packed rule does.
-    if not loose.absent:
-        return unavailable(f"the ref {name} could not be read: {loose.reason}")
-    packed = root.read(".git/packed-refs")
-    if packed.text is None and not packed.absent:
-        return unavailable(f"packed-refs could not be read: {packed.reason}")
-    for line in (packed.text or "").splitlines():
+        raise _Unreadable(f"HEAD names {name[:80]!r}, which is not a ref under refs/")
+    # The loose ref wins over packed-refs, and only its ABSENCE falls through: a refused one
+    # shadows the packed line, as in git.
+    loose = _file_at(git, name)
+    if loose is not None:
+        return _commit_in(loose, f"the ref {name}")
+    for line in (_file_at(git, "packed-refs") or "").splitlines():
         # The `#` header and the `^` peeled lines name no ref.
         if not line or line[0] in "#^":
             continue
         sha, _sep, ref = line.partition(" ")
         if ref == name:
-            return (KnowledgeRevision.at(sha) if _SHA.fullmatch(sha)
-                    else unavailable(f"packed-refs holds no commit for {name}: {sha[:80]!r}"))
-    return unavailable(f"unborn branch: HEAD names {name}, which no ref holds yet")
+            return _commit_in(sha, f"packed-refs' line for {name}")
+    raise _Unreadable(f"unborn branch: HEAD names {name}, which no ref holds yet")
 
 
 def _is_ref_name(name: str) -> bool:
