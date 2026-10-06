@@ -13,6 +13,7 @@ import datetime as _dt
 from collections.abc import Callable, Sequence
 from functools import partial
 
+from defender._run_paths import RUN_LAYOUT
 from defender._tenant import TenantId, is_valid_tenant_id
 
 from .fakes import (
@@ -107,7 +108,8 @@ def _seed(store: InMemoryStore, secrets: InMemorySecrets, tenant: str, now: _dt.
         investigation_id=f"{tenant}-inv-completed", alert_id=brute.alert_id, status="completed",
         disposition="benign", cost_usd=1.84, created_at=now - 29 * hour,
         started_at=now - 29 * hour, finished_at=now - 29 * hour + _dt.timedelta(minutes=11),
-        artifacts=["report.md", "investigation.md", "runtime.html"],
+        artifacts=[RUN_LAYOUT.report.name, RUN_LAYOUT.investigation.name,
+                   RUN_LAYOUT.runtime_html.name],
     ))
     store.add_investigation(tenant, Investigation(
         investigation_id=f"{tenant}-inv-running", alert_id=shell.alert_id, status="running",

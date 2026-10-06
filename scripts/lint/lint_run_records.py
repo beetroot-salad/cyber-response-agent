@@ -57,7 +57,7 @@ OWNER_MODULES: frozenset[str] = frozenset(
     {"_run_paths.py", "_episode_paths.py", "_tenant.py", "_run_handle.py"})
 
 #: The sweep set. Never shrinks below this.
-SWEEP_DIRS: tuple[str, ...] = ("runtime", "learning", "scripts", "evals", "hooks")
+SWEEP_DIRS: tuple[str, ...] = ("runtime", "learning", "scripts", "evals", "hooks", "api")
 SWEEP_TOP_LEVEL = True
 EXCLUDED_DIRS: tuple[str, ...] = (".venv", "__pycache__", "tests")
 
@@ -67,7 +67,7 @@ UNSCANNED_TREES: tuple[str, ...] = ("defender/skills", "scripts", "experiments")
 
 SCOPE_STATEMENT = (
     "This gate sweeps defender/runtime, defender/learning, defender/scripts, defender/evals, "
-    "defender/hooks and the top level of defender/*.py (tests excluded) — it never enters "
+    "defender/hooks, defender/api and the top level of defender/*.py (tests excluded) — it never enters "
     "defender/skills, top-level scripts, or top-level experiments (§7 decision 5), and it is "
     "structurally blind to a record name that never reaches the AST as a whole literal — an "
     "assembly in which no single part is ever a literal string, whichever of concatenation, "

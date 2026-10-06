@@ -70,7 +70,10 @@ _UNSAFE_METHODS = frozenset({"is_file", "is_dir"})
 LINT_TREE_READER_MODULES: frozenset[str] = frozenset({
     "_provenance.py",
     "run_common.py",
-    "runtime/branch.py",
+    "runtime/branch/__init__.py",
+    "runtime/branch/_frontier.py",
+    "runtime/branch/_seed.py",
+    "runtime/branch/_spec.py",
     "learning/branch/cli.py",
     "learning/branch/capture.py",
     "learning/branch/ledger.py",
