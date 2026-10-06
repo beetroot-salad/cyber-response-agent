@@ -42,7 +42,7 @@ Run from repo root:  python scripts/lint/lint_tenant_env_reads.py
                      python scripts/lint/lint_tenant_env_reads.py --root <repo-shaped tree>
 Exit 0 = clean, 1 = findings, 2 = the scan saw none of the four trees (a root that holds nothing
 to sweep is a scan that proved nothing, never a clean result), or — over this repo itself — a
-swept entry no longer exists. A move that takes swept code elsewhere must carry its entry along;
+swept entry selects no module (gone, emptied, or a package spelled without its `/`). A move that takes swept code elsewhere must carry its entry along;
 otherwise the moved code leaves the sweep while the lint still passes. Under `--root <tree>` a
 missing entry is simply not scanned, so a planted or partial layout is still checked.
 """
@@ -57,18 +57,22 @@ from pathlib import Path
 if (_here := str(Path(__file__).resolve().parent)) not in sys.path:
     sys.path.insert(0, _here)
 
-from _astlib import ModuleEnv, ScanBlind, callee, module_env, origin, read_and_parse  # noqa: E402
+from _astlib import (  # noqa: E402
+    ModuleEnv, ScanBlind, callee, module_env, origin, read_and_parse, require_selected, selects,
+    source_files,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-#: The four swept trees, repo-relative: a directory is walked, a file is taken as it is.
+#: The four swept trees, repo-relative, matched by `_astlib.selects`: a package is spelled with a
+#: trailing `/` and covers every module under it; a file entry is taken as it is.
 SWEPT: tuple[str, ...] = (
-    "defender/scripts/adapters",
-    "defender/learning/branch/estate",
+    "defender/scripts/adapters/",
+    "defender/learning/branch/estate/",
     "defender/learning/branch/staging.py",
-    "defender/scripts/case_history",
+    "defender/scripts/case_history/",
     "defender/runtime/case_ticket.py",
-    "defender/runtime/lead_zero",
+    "defender/runtime/lead_zero/",
     "defender/runtime/lead_zero_config.py",
 )
 
@@ -81,26 +85,15 @@ EXCLUDED_DIRS = frozenset({"__pycache__", ".venv"})
 
 def _swept_files(root: Path) -> list[Path]:
     """Every module in the four trees under `root`. `ScanBlind` when NONE of them is there, or
-    when `root` is this repo and ANY of them is missing."""
-    found: list[Path] = []
-    seen_a_tree = False
-    for rel in SWEPT:
-        target = root / rel
-        if target.is_file():
-            seen_a_tree = True
-            found.append(target)
-        elif target.is_dir():
-            seen_a_tree = True
-            found.extend(p for p in sorted(target.rglob("*.py"))
-                         if not EXCLUDED_DIRS.intersection(p.relative_to(target).parts))
-    if not seen_a_tree:
+    when `root` is this repo and ANY entry selects no module (`_astlib.require_selected`)."""
+    base = root / "defender"
+    rels = ([f"defender/{r}" for r in source_files(base, EXCLUDED_DIRS)]
+            if base.is_dir() else [])
+    found = [rel for rel in rels if any(selects(e, rel) for e in SWEPT)]
+    if not found:
         raise ScanBlind(f"none of the four swept trees is under {root} — the lint swept nothing")
-    if root.resolve() == REPO_ROOT.resolve():
-        missing = [rel for rel in SWEPT if not (root / rel).exists()]
-        if missing:
-            raise ScanBlind(f"swept entries missing from this repo: {missing} — whatever lived "
-                            "there left the sweep; point SWEPT at where it moved")
-    return found
+    require_selected(root, REPO_ROOT, SWEPT, rels)
+    return [root / rel for rel in found]
 
 
 def _main_ranges(tree: ast.Module) -> list[tuple[int, int]]:

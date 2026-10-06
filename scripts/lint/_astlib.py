@@ -34,9 +34,15 @@ from __future__ import annotations
 
 import ast
 import builtins
+import os
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+
+try:  # bare-name import, as every gate reaches its siblings
+    from _gitscope import git_ignored
+except ImportError:  # imported as part of a package (a test loading `scripts.lint`)
+    from ._gitscope import git_ignored  # type: ignore[no-redef]
 
 _BUILTIN_NAMES = frozenset(dir(builtins))
 
@@ -47,20 +53,68 @@ class ScanBlind(RuntimeError):
     clean."""
 
 
-def require_paths(root: Path, entries: Iterable[str]) -> None:
-    """Raise ScanBlind naming every entry (root-relative; a trailing `/` marks a directory)
-    that does not exist under `root`.
+def source_files(root: Path, excluded: Iterable[str]) -> list[str]:
+    """Every `.py` under `root` a gate scans, as sorted root-relative POSIX paths.
 
-    A gate whose scope is a fixed list of paths calls this over the real repo only — a planted
-    or partial tree under test is meant to hold a subset. Without it, a move that takes a listed
-    module elsewhere leaves the gate scanning less and still exiting 0.
+    A directory is pruned by its NAME below `root` — never by an ancestor's, so a checkout that
+    happens to live under a dir called `tests` is still scanned. What git ignores is dropped
+    (`_gitscope.git_ignored`: ignored-ness, not tracked-ness, so a new uncommitted module is
+    still scanned, and failing open outside a repo), so a local `build/` or `venv/` is not
+    source. The one listing every path-scoped gate shares — keep their scopes on it.
     """
-    missing = sorted(
-        rel for rel in entries
-        if not ((root / rel).is_dir() if rel.endswith("/") else (root / rel).exists()))
-    if missing:
-        raise ScanBlind(f"scope entries missing under {root}: {missing} — whatever lived there "
-                        "left the scan; point the list at where it moved")
+    skip = frozenset(excluded)
+    found: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in skip)
+        found.extend(Path(dirpath, f) for f in filenames if f.endswith(".py"))
+    ignored = git_ignored(root, found)
+    return sorted(p.relative_to(root).as_posix() for p in found if p not in ignored)
+
+
+def selects(entry: str, rel: str) -> bool:
+    """Does scope-list `entry` cover file `rel`? Equal, or `entry` ends in `/` and names a
+    package `rel` sits in. A bare directory name selects nothing — spell a package with `/`."""
+    return rel == entry or (entry.endswith("/") and rel.startswith(entry))
+
+
+def require_selected(root: Path, real_root: Path, entries: Iterable[str],
+                     rels: Iterable[str]) -> None:
+    """Over this repo (`root` resolves to `real_root`), raise ScanBlind naming every entry that
+    selects none of `rels` — the files the gate scans. Anywhere else (a planted or partial tree
+    under test, which holds a subset on purpose) do nothing.
+
+    The one place a path-scoped gate decides it is looking at the real repo. Without it, a
+    move, a rename, or an emptied package leaves the gate scanning less and still exiting 0.
+    """
+    if not _is_real(root, real_root):
+        return
+    scanned = list(rels)
+    dead = sorted(e for e in entries if not any(selects(e, rel) for rel in scanned))
+    if dead:
+        raise ScanBlind(f"scope entries that select no scanned file under {root}: {dead} — "
+                        "whatever they named left the scan; point the list at where it moved "
+                        "(a package is spelled with a trailing `/`)")
+
+
+def require_claimed(root: Path, real_root: Path, entries: Iterable[str],
+                    rels: Iterable[str]) -> None:
+    """Over this repo, raise ScanBlind naming the top-level directory of every file in `rels`
+    that no entry selects — the closure of a gate whose scope is "these dirs, and we declared
+    the rest": a new package is either swept or declared out of scope, never silently neither.
+    Anywhere else, do nothing (see `require_selected`)."""
+    if not _is_real(root, real_root):
+        return
+    claims = list(entries)
+    stray = sorted({rel.split("/", 1)[0] for rel in rels
+                    if not any(selects(e, rel) for e in claims)})
+    if stray:
+        raise ScanBlind(f"directories under {root} holding source that no scope entry claims: "
+                        f"{stray} — sweep each, or declare it out of scope with the reason")
+
+
+def _is_real(root: Path, real_root: Path) -> bool:
+    """Is `root` the real repo's tree, not a planted or partial one under test?"""
+    return root.resolve() == real_root.resolve()
 
 
 def read_and_parse(path: Path, rel: str) -> tuple[str, ast.Module]:

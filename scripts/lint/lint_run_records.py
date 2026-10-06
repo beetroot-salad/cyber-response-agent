@@ -38,14 +38,14 @@ from __future__ import annotations
 
 import ast
 import csv
-import os
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from _astlib import (
-    PARTIAL_OWNER_ATTRS, ScanBlind, module_env, owner_derived, read_and_parse, require_paths,
+    PARTIAL_OWNER_ATTRS, ScanBlind, module_env, owner_derived, read_and_parse, require_claimed,
+    require_selected, selects, source_files,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -71,9 +71,9 @@ EXCLUDED_DIRS: tuple[str, ...] = (".venv", "__pycache__", "tests")
 UNSCANNED_TREES: tuple[str, ...] = ("defender/skills", "scripts", "experiments")
 
 SCOPE_STATEMENT = (
-    "This gate sweeps defender/runtime, defender/learning, defender/scripts, defender/evals, "
-    "defender/hooks, defender/api and the top level of defender/*.py (tests excluded) — it never enters "
-    "defender/skills, top-level scripts, or top-level experiments (§7 decision 5), and it is "
+    f"This gate sweeps {', '.join(f'defender/{d}' for d in SWEEP_DIRS)}"
+    f"{' and the top level of defender/*.py' if SWEEP_TOP_LEVEL else ''} (tests excluded) — it "
+    f"never enters {', '.join(UNSCANNED_TREES)} (repo-relative; §7 decision 5), and it is "
     "structurally blind to a record name that never reaches the AST as a whole literal — an "
     "assembly in which no single part is ever a literal string, whichever of concatenation, "
     "%-formatting, .format, os.path.join or multi-argument Path() does the assembling (§7 "
@@ -115,48 +115,20 @@ class Finding:
     display: str
 
 
-def _in_scope(path: Path) -> bool:
-    return not any(part in EXCLUDED_DIRS for part in path.parts)
-
-
-def _holds_swept_source(directory: Path) -> bool:
-    """Does `directory` hold a `.py` the sweep would read if it were listed? Excluded dirs are
-    pruned, not walked (a venv under `defender/` is large)."""
-    for dirpath, dirnames, filenames in os.walk(directory):
-        dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIRS]
-        if any(f.endswith(".py") for f in filenames):
-            return True
-    return False
-
-
-def _require_closed_scope(root: Path) -> None:
-    """ScanBlind unless every listed sweep dir exists and every top-level directory of `root`
-    holding source is either swept or named in `UNSCANNED_TREES` — so a vanished entry or a
-    new package cannot leave the sweep while it still reports clean."""
-    require_paths(root, [f"{d}/" for d in SWEEP_DIRS])
-    unaccounted = sorted(
-        child.name for child in root.iterdir()
-        if child.is_dir() and child.name not in EXCLUDED_DIRS
-        and child.name not in SWEEP_DIRS
-        and f"defender/{child.name}" not in UNSCANNED_TREES
-        and _holds_swept_source(child))
-    if unaccounted:
-        raise ScanBlind(f"defender/ directories holding source that the sweep neither covers nor "
-                        f"declares unscanned: {unaccounted} — add each to SWEEP_DIRS, or to "
-                        "UNSCANNED_TREES as defender/<dir> with the reason it is out of scope")
-
-
 def sweep_files(root: Path = DEFENDER) -> list[Path]:
-    """Every file the gate sweeps under `root`. Over this repo, ScanBlind when the scope is not
-    closed (`_require_closed_scope`); a planted tree under test holds a subset on purpose."""
-    if root.resolve() == DEFENDER.resolve():
-        _require_closed_scope(root)
-    files: list[Path] = []
-    if SWEEP_TOP_LEVEL:
-        files.extend(p for p in root.glob("*.py") if _in_scope(p))
-    for d in SWEEP_DIRS:
-        files.extend(p for p in sorted((root / d).rglob("*.py")) if _in_scope(p))
-    return sorted(files)
+    """Every file the gate sweeps under `root`. Over this repo, ScanBlind when a swept dir
+    selects no file, or when a directory holding source is neither swept nor named in
+    `UNSCANNED_TREES` (`_astlib.require_selected` / `require_claimed`); a planted tree under
+    test holds a subset on purpose."""
+    rels = source_files(root, EXCLUDED_DIRS)
+    swept = [f"{d}/" for d in SWEEP_DIRS]
+    nested = [rel for rel in rels if "/" in rel]
+    require_selected(root, DEFENDER, swept, rels)
+    require_claimed(root, DEFENDER, swept + [
+        t.removeprefix("defender/") + "/" for t in UNSCANNED_TREES if t.startswith("defender/")
+    ], nested)
+    return [root / rel for rel in rels
+            if ("/" not in rel and SWEEP_TOP_LEVEL) or any(selects(d, rel) for d in swept)]
 
 
 def _discriminating(segment: str) -> bool:
