@@ -90,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("out", type=Path, help="story.md to write")
     ns = p.parse_args(argv)
 
-    meta = json.loads(ns.meta.read_text(encoding="utf-8"))
+    meta = json.loads(ns.meta.read_text(encoding="utf-8"))  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
     story = render_story(meta)
 
     found = eval_tells_in(story)

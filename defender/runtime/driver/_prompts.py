@@ -44,7 +44,7 @@ def _main_instructions(defender_dir: Path) -> str:
 
     The frontmatter can carry an `allowed-tools:` line that would drift from the tools actually
     registered and teach the model to call a tool it does not have."""
-    return strip_frontmatter((defender_dir / "SKILL.md").read_text(encoding="utf-8"))
+    return strip_frontmatter((defender_dir / "SKILL.md").read_text(encoding="utf-8"))  # lint-whole-read: ok — repo-shipped SKILL.md; operator-controlled, not on any box-writable mount
 
 
 def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams

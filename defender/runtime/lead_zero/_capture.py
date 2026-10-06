@@ -142,7 +142,7 @@ async def _capture_issue(
         envelope = captured[0] if captured else None
         return (envelope if isinstance(envelope, dict) else None), text
     try:
-        data = json.loads((deps.run_dir / payload_path).read_text(encoding="utf-8"))
+        data = json.loads((deps.run_dir / payload_path).read_text(encoding="utf-8"))  # lint-whole-read: ok — backend payload: host-written by persist_payload from the adapter response (no write cap); box-writable, bounded there by the box fsize limit; per-run driver
     except (OSError, ValueError):
         return None, text
     if not isinstance(data, dict):
@@ -308,7 +308,7 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> N
     )
     try:
         # `None`, not `""`, for an absent file, matching `permission.decide_write`'s baseline.
-        existing = path.read_text(encoding="utf-8") if path.is_file() else None
+        existing = path.read_text(encoding="utf-8") if path.is_file() else None  # lint-whole-read: ok — investigation.md: host writers go through validate_artifact (64 KiB cap, INVESTIGATION_FILE_MAX); box-writable in the rw run dir, bounded by the box fsize limit; per-run driver
         proposed = block if existing is None else existing + block
         reason = validate_artifact(RUN_LAYOUT.investigation.name, proposed, existing)
         if reason is not None:

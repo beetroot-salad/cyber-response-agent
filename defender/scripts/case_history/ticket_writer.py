@@ -99,7 +99,7 @@ def open_case_ticket(
         if not alert_path.is_file():
             _logger.warning(f"alert.json not found in {run_dir}; skipping open")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
             return
-        alert = json.loads(alert_path.read_text(encoding="utf-8"))
+        alert = json.loads(alert_path.read_text(encoding="utf-8"))  # lint-whole-read: ok — alert.json: external alert copied in by the host; also box-writable in the rw run dir, so bounded at 64 MiB by the box fsize limit; run.py ticket step
         case_id = run_dir.name
         payload = case_ticket.alert_to_open_payload(alert, case_id, mapping=tenant.ticket_mapping)
         status, body = deps.request(config, "POST", "/tickets", payload, ctx=ctx)

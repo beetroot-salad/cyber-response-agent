@@ -144,7 +144,7 @@ def tree_verified(tree: Path) -> bool:
     if not p.is_file():
         return False
     try:
-        doc = json.loads(p.read_text(encoding="utf-8"))
+        doc = json.loads(p.read_text(encoding="utf-8"))  # lint-whole-read: ok — scrub verdict sidecar: host-written tiny JSON outside every box mount
     except (OSError, json.JSONDecodeError):
         return False
     return doc.get("ran") is True

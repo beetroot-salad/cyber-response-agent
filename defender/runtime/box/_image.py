@@ -100,7 +100,7 @@ def box_closure(lock: dict[str, Any], root_name: str) -> list[dict[str, Any]]:
 
 def _read(tree: Path, name: str) -> bytes:
     try:
-        return (tree / name).read_bytes()
+        return (tree / name).read_bytes()  # lint-whole-read: ok — repo-shipped box image build inputs and lock; operator-controlled, not on any box-writable mount
     except OSError as e:
         raise ImageInputError(tree, name, e, unreadable=True) from e
 

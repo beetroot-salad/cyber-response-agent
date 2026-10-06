@@ -26,14 +26,14 @@ def load_run_context(run_id: str, *, runs_dir: Path) -> tuple[str, str]:
         raise VerdictError(f"verify_forward: missing {refs.name} at {refs}")
     m = re.search(
         r"^normalized_disposition:\s*[\"']?([^\"'\n#]+?)[\"']?\s*(?:#.*)?$",
-        refs.read_text(encoding="utf-8"),
+        refs.read_text(encoding="utf-8"),  # lint-whole-read: ok — source_refs.yaml: no host writer, only a box process can write it in the rw run dir; bounded at the writer by the box fsize limit
         re.MULTILINE,
     )
     if not m:
         raise VerdictError(
             f"verify_forward: {refs.name} missing normalized_disposition: {refs}"
         )
-    return investigation.read_text(encoding="utf-8"), m.group(1).strip()
+    return investigation.read_text(encoding="utf-8"), m.group(1).strip()  # lint-whole-read: ok — investigation.md: host writers go through validate_artifact (64 KiB cap, INVESTIGATION_FILE_MAX); box-writable in the rw run dir, bounded by the box fsize limit; read per verify pass
 
 
 def expected_disposition(direction: str, recorded: str) -> str:

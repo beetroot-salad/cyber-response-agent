@@ -20,7 +20,7 @@ _FALLBACK_POLICY: dict = {
 
 def _load_policy(path: Path) -> dict:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))  # lint-whole-read: ok — repo-shipped bash policy JSON beside the module; operator-controlled, not on any box-writable mount
     except (OSError, ValueError) as e:
         _logger.warning(
             f"bash_policy: could not load {path} ({e!r}); "

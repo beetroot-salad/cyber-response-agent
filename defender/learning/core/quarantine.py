@@ -58,7 +58,7 @@ def _tree_verdict(wt: Path) -> dict:
     if not p.is_file():
         return {}
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        return json.loads(p.read_text(encoding="utf-8"))  # lint-whole-read: ok — scrub verdict: host-written tiny JSON outside the lane's writable trees
     except (OSError, json.JSONDecodeError):
         return {}
 

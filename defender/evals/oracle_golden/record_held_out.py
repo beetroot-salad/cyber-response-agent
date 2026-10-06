@@ -35,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     ns = p.parse_args(argv)
     ledger_path = ns.ledger if ns.ledger is not None else LEDGER
 
-    manifest = _yaml.safe_load((ns.case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
+    manifest = _yaml.safe_load((ns.case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
     if manifest.get("split") != "held-out":
         print(f"!! {ns.case_dir.name} is split={manifest.get('split')!r}; only held-out "
               f"results are ledgered", file=sys.stderr)
@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     # Refuse a score whose recorded judge does not match its tag's judge suffix.
-    score = json.loads(score_path.read_bytes())
+    score = json.loads(score_path.read_bytes())  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
     recorded = score.get("judge") or {}
     if not ns.tag.endswith(judge.tag_suffix(recorded.get("model", ""),
                                             recorded.get("effort", ""))):
@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
               f"Re-score under the correct tag; do not rename the file.", file=sys.stderr)
         return 1
 
-    doc = _yaml.safe_load(ledger_path.read_text(encoding="utf-8")) or {}
+    doc = _yaml.safe_load(ledger_path.read_text(encoding="utf-8")) or {}  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
     entries = doc.get("entries") or []
     key = (ns.case_dir.name, ns.tag)
     for entry in entries:
@@ -70,11 +70,11 @@ def main(argv: list[str] | None = None) -> int:
     entries.append({
         "case": ns.case_dir.name,
         "tag": ns.tag,
-        "sha256": hashlib.sha256(score_path.read_bytes()).hexdigest(),
+        "sha256": hashlib.sha256(score_path.read_bytes()).hexdigest(),  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
         "recorded": ns.recorded,
     })
     # Keep the file's explanatory header (everything before `entries:`).
-    head = ledger_path.read_text(encoding="utf-8").split("entries:")[0]
+    head = ledger_path.read_text(encoding="utf-8").split("entries:")[0]  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
     ledger_path.write_text(
         head + _yaml.safe_dump({"entries": entries}, sort_keys=False, width=100,
                               allow_unicode=True),

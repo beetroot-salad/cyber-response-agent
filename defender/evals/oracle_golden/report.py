@@ -78,10 +78,10 @@ def load_golden_cases(cases_dir: Path) -> list[dict]:
         manifest_path = case_dir / "manifest.yaml"
         if not manifest_path.is_file():
             continue
-        manifest = _yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+        manifest = _yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
         scores = {}
         for score_path in sorted((case_dir / "scores").glob("*.json")):
-            scores[score_path.stem] = json.loads(score_path.read_text(encoding="utf-8"))
+            scores[score_path.stem] = json.loads(score_path.read_text(encoding="utf-8"))  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
         out.append({"dir": case_dir, "id": case_dir.name, "manifest": manifest,
                     "scores": scores})
     return out

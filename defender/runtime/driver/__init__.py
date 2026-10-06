@@ -405,7 +405,7 @@ def _alert_doc_soft(alert_path: Path) -> dict:
     """The alert as item 3's contract reads it — `{}` when unreadable or not JSON; the
     contract's own gate does the refusing."""
     try:
-        doc = json.loads(alert_path.read_text(encoding="utf-8"))
+        doc = json.loads(alert_path.read_text(encoding="utf-8"))  # lint-whole-read: ok — alert.json: external alert copied in by the host; also box-writable in the rw run dir, so bounded at 64 MiB by the box fsize limit; per-run driver
     except (OSError, ValueError):
         return {}
     return doc if isinstance(doc, dict) else {}

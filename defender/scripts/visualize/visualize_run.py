@@ -111,11 +111,11 @@ def _main_checkout(start: Path) -> Path:
     if dot_git.is_dir() or not dot_git.exists():
         return start
     try:
-        pointer = dot_git.read_text(encoding="utf-8").strip()
+        pointer = dot_git.read_text(encoding="utf-8").strip()  # lint-whole-read: ok — git metadata of the operator's own checkout; operator-controlled
         if not pointer.startswith("gitdir:"):
             raise ValueError(f"{dot_git} is not a gitdir pointer")
         admin = (start / pointer[len("gitdir:"):].strip()).resolve()
-        common = (admin / (admin / "commondir").read_text(encoding="utf-8").strip()).resolve()
+        common = (admin / (admin / "commondir").read_text(encoding="utf-8").strip()).resolve()  # lint-whole-read: ok — git metadata of the operator's own checkout; operator-controlled
         main = common.parent
         if not (main / "defender").is_dir():
             raise ValueError(f"{main} (from {dot_git}) holds no defender/")
@@ -405,7 +405,7 @@ def _lead_summary(leads: list) -> str:
 
 
 
-RUNTIME_JS = (ASSETS / "runtime.js").read_text(encoding="utf-8")
+RUNTIME_JS = (ASSETS / "runtime.js").read_text(encoding="utf-8")  # lint-whole-read: ok — repo-shipped visualizer asset; operator-controlled, not on any box-writable mount
 
 
 

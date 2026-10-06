@@ -111,7 +111,7 @@ def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
     if not refs.is_file():
         return None
     try:
-        doc = safe_load(refs.read_text(encoding="utf-8"))
+        doc = safe_load(refs.read_text(encoding="utf-8"))  # lint-whole-read: ok — source_refs.yaml: no host writer, only a box process can write it in the rw run dir; bounded at the writer by the box fsize limit (a 64 MiB YAML parse in the author drain is a separate cost risk)
     except yaml.YAMLError:
         return None
     if not isinstance(doc, dict):

@@ -62,7 +62,7 @@ from defender.scripts.visualize.visualize_primitives import (
 
 #: The page's own stylesheet, inlined after the shared run-page `CSS`, which knows nothing of
 #: this page's classes. `test_1025_every_class_the_page_emits_has_a_rule` keeps them in step.
-EPISODE_CSS = (ASSETS / "episode.css").read_text(encoding="utf-8")
+EPISODE_CSS = (ASSETS / "episode.css").read_text(encoding="utf-8")  # lint-whole-read: ok — repo-shipped visualizer asset; operator-controlled, not on any box-writable mount
 
 #: The family's own draw documents live under this pseudo-label beside the worlds.
 _FAMILY_LABEL = "family"

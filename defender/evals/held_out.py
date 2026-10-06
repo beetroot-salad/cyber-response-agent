@@ -73,7 +73,7 @@ def load_held_out_fixtures(fixtures_dir: Path) -> list[HeldOutAlert]:
                   f"— excluded from the eval set", file=sys.stderr)
             continue
         try:
-            gt_doc = safe_load(gt.read_text(encoding="utf-8")) or {}
+            gt_doc = safe_load(gt.read_text(encoding="utf-8")) or {}  # lint-whole-read: ok — operator-labeled held-out ground truth under defender/fixtures; operator-controlled
         except yaml.YAMLError as e:
             print(f"warn: {child.name}: unparseable ground_truth.yaml ({e}) — fixture skipped",
                   file=sys.stderr)

@@ -304,7 +304,7 @@ def _operation_window(case_dir: Path) -> tuple[datetime, datetime] | None:
     manifest_path = case_dir / "manifest.yaml"
     if not manifest_path.is_file():
         return None
-    manifest = _yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+    manifest = _yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
     for block in ("attack", "operation"):
         window = (manifest.get(block) or {}).get("window")
         if isinstance(window, list) and len(window) == 2:
@@ -320,7 +320,7 @@ def lead_queries(case_dir: Path) -> list[tuple[str, int, dict]]:
     position would baseline one query against another's envelope. Cases without a `seq`
     field fall back to position, which is exact for them (no sentinels were split out).
     """
-    text = (case_dir / "oracle_visible" / "leads.jsonl").read_text(encoding="utf-8")
+    text = (case_dir / "oracle_visible" / "leads.jsonl").read_text(encoding="utf-8")  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
     out = []
     for line in text.splitlines():
         if not line.strip():

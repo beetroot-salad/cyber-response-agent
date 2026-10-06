@@ -215,7 +215,7 @@ def gather_def_for(verb_grant: VerbGrant) -> AgentDefinition:
 def _gather_instructions(defender_dir: Path) -> str:
     """Gather's system prompt, frontmatter stripped like MAIN's."""
     return strip_frontmatter(
-        (defender_dir / "skills" / "gather" / "SKILL.md").read_text(encoding="utf-8")
+        (defender_dir / "skills" / "gather" / "SKILL.md").read_text(encoding="utf-8")  # lint-whole-read: ok — repo-shipped gather SKILL.md; operator-controlled, not on any box-writable mount
     )
 
 
@@ -283,7 +283,7 @@ def _fold_decision(run_dir: Path) -> _FoldDecision | None:
     same frontier is reused until the next loop closes.
     """
     inv = RunPaths(run_dir).investigation
-    inv_text = inv.read_text(encoding="utf-8") if inv.is_file() else ""
+    inv_text = inv.read_text(encoding="utf-8") if inv.is_file() else ""  # lint-whole-read: ok — investigation.md: host writers go through validate_artifact (64 KiB cap, INVESTIGATION_FILE_MAX); box-writable in the rw run dir, bounded by the box fsize limit; per-run driver
     fold_through = compaction.fold_boundary(inv_text)
     if fold_through <= 0:
         return None

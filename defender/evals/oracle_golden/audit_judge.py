@@ -86,7 +86,7 @@ def audit_set(case_names: tuple[str, ...]) -> list[tuple[Path, str, str, dict]]:
     out: list[tuple[Path, str, str, dict]] = []
     for name in case_names:
         case_dir = CASES_DIR / name
-        expected = _yaml.safe_load((case_dir / "expected.yaml").read_text(encoding="utf-8"))
+        expected = _yaml.safe_load((case_dir / "expected.yaml").read_text(encoding="utf-8"))  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
         leads = {row["lead_id"]: row for row in judge.load_case_leads(case_dir)}
         for lead_id, spec in (expected.get("leads") or {}).items():
             if lead_id not in leads:
@@ -217,12 +217,12 @@ def verdict_set(case_names: tuple[str, ...],
         labels_path = score.labels_path(case_dir, model, effort)
         if not (proj_path.is_file() and labels_path.is_file()):
             continue
-        manifest = _yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
+        manifest = _yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
         if manifest.get("defective") or score.is_derived(manifest.get("kind")):
             continue
-        proj = _yaml.safe_load(proj_path.read_text(encoding="utf-8")) or {}
+        proj = _yaml.safe_load(proj_path.read_text(encoding="utf-8")) or {}  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
         preds, _ = score.load_predictions(proj)
-        labels = (json.loads(labels_path.read_text(encoding="utf-8")).get("leads") or {})
+        labels = (json.loads(labels_path.read_text(encoding="utf-8")).get("leads") or {})  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
         for lead_id, label in sorted(labels.items()):
             # The same exclusions score.py applies before judging.
             if label.get("delta_kind") == "undecidable" or lead_id not in preds:

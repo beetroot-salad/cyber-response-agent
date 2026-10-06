@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from defender._io import read_jsonl_rows
+from defender._io import iter_plain_jsonl_rows
 from defender._report import ReportRead
 from defender._run_paths import GATE_METADATA_KEY, RUN_LAYOUT, RunPaths
 # From `agent_role`, not `review_roles`: the latter pulls in the whole runtime (pydantic-ai
@@ -21,10 +21,10 @@ def load_messages(run_dir: Path) -> list[dict]:
     Falls back to the older run-root location so older run dirs still render a transcript.
     This is a host-side reader; the `wire_logs/` placement matters only to the read gate."""
     current = RunPaths(run_dir).wire_log
-    # No read limit (#1174): the wire log runs past 100 MB on long runs, and this is an
-    # operator tool over a log the host wrote, not a sandbox-writable record.
-    return read_jsonl_rows(
-        current if current.is_file() else Path(run_dir) / RUN_LAYOUT.wire_log.name, limit=None)
+    # Streamed, not read whole (#1188 D2): the wire log runs past 100 MB on long runs, over
+    # `_io.READ_LIMIT`, which no caller can raise.
+    return list(iter_plain_jsonl_rows(
+        current if current.is_file() else Path(run_dir) / RUN_LAYOUT.wire_log.name))
 
 
 def _pretty_model(name: str) -> str:

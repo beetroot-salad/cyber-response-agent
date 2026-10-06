@@ -273,7 +273,7 @@ def read_case_record(run_dir: Path, *, mapping: CaseMapping | CaseTicketError) -
     alert_path = RunPaths(run_dir).alert
     if alert_path.is_file():
         with contextlib.suppress(json.JSONDecodeError, OSError):
-            signature_id = _signature_id(json.loads(alert_path.read_text(encoding="utf-8")), plain)
+            signature_id = _signature_id(json.loads(alert_path.read_text(encoding="utf-8")), plain)  # lint-whole-read: ok — alert.json: external alert copied in by the host; also box-writable in the rw run dir, so bounded at 64 MiB by the box fsize limit; run.py ticket step
 
     return CaseRecord(
         case_id=case_id,

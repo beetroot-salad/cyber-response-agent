@@ -159,7 +159,7 @@ def migrate_file(path: Path) -> int:
     reproduces its original bytes; if none does, raises `ValueError` (message names
     "serializ") and leaves the file untouched.
     """
-    raw = path.read_bytes()
+    raw = path.read_bytes()  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
     if not raw.strip():
         return 0
 

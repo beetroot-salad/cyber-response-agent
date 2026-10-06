@@ -82,7 +82,7 @@ def load_roster(defender_dir: Path, role: str) -> str:
     """The committed roster; raises `RosterError` if the body no longer matches its header digest."""
     path = roster_path(defender_dir, role)
     try:
-        text = path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8")  # lint-whole-read: ok — repo-shipped generated, committed verb roster; operator-controlled, not on any box-writable mount
     except OSError as e:
         raise RosterError(f"no roster for role {role!r} at {path}: {e}") from e
     match = _HEADER_RE.match(text)
@@ -186,7 +186,7 @@ def audit_read_surfaces(defender_dir: Path, grants: Mapping[str, VerbGrant]) -> 
     hits: list[str] = []
     for path in model_read_surfaces(root):
         try:
-            text = path.read_text(encoding="utf-8")
+            text = path.read_text(encoding="utf-8")  # lint-whole-read: ok — repo-shipped skill surfaces (SKILL.md, execution.md, query templates), read by a CI audit; operator-controlled, not on any box-writable mount
         except (OSError, UnicodeDecodeError):
             continue
         grant = _grant_for_surface(path, grants)

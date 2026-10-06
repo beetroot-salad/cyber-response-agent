@@ -53,7 +53,7 @@ def build_stage_agent(
     return build_agent_core(
         defn,
         deps_type=deps_type,
-        instructions=wiring.prompt_path.read_text(encoding="utf-8"),
+        instructions=wiring.prompt_path.read_text(encoding="utf-8"),  # lint-whole-read: ok — repo-shipped stage prompt; operator-controlled, not on any box-writable mount
         logger=logger,
         agent_id=wiring.label,
         make_model=make_model,

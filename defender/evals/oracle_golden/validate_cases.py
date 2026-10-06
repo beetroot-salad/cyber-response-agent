@@ -61,7 +61,7 @@ REQUIRED_FILES = ("manifest.yaml", "environment.yaml",
 
 def _leads_of(case_dir: Path) -> dict[str, dict]:
     out = {}
-    text = (case_dir / "oracle_visible" / "leads.jsonl").read_text(encoding="utf-8")
+    text = (case_dir / "oracle_visible" / "leads.jsonl").read_text(encoding="utf-8")  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
     for line in text.splitlines():
         if line.strip():
             row = json.loads(line)
@@ -86,11 +86,11 @@ def check_case(case_dir: Path, by_id: dict[str, dict],
     if problems:
         return problems          # nothing below can run without these
 
-    manifest = _yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
+    manifest = _yaml.safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
     problems += check_identity(case_dir, manifest)
     problems += check_environment(case_dir)
 
-    story = (case_dir / "oracle_visible" / "story.md").read_text(encoding="utf-8")
+    story = (case_dir / "oracle_visible" / "story.md").read_text(encoding="utf-8")  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
     tells = eval_tells_in(story)
     if tells:
         problems.append(f"{name}: story.md leaks the evaluation frame: {tells}")
@@ -114,7 +114,7 @@ def load_known_defects(path: Path = KNOWN_DEFECTS) -> dict[tuple[str, str, int],
     """
     if not path.is_file():
         return {}
-    doc = _yaml.safe_load(path.read_text(encoding="utf-8"))
+    doc = _yaml.safe_load(path.read_text(encoding="utf-8"))  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
     if doc is None:
         return {}
     if not isinstance(doc, dict):
@@ -254,7 +254,7 @@ def control_problems_by_record(case_dir: Path) -> dict[tuple[str, str, int], lis
         problems = by_record.setdefault(key, [])
         # An unreadable record is a problem line, not a traceback that ends the sweep.
         try:
-            record = json.loads(path.read_text(encoding="utf-8"))
+            record = json.loads(path.read_text(encoding="utf-8"))  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
         except json.JSONDecodeError as exc:
             problems.append(f"{name}: {path.parent.name}/{path.name} is not readable "
                             f"JSON ({exc})")
@@ -400,7 +400,7 @@ def check_environment(case_dir: Path) -> list[str]:
     lever-ups, how controls were built, what `window_live: false` means.
     """
     name = case_dir.name
-    notes = _yaml.safe_load((case_dir / "environment.yaml").read_text(encoding="utf-8")) or {}
+    notes = _yaml.safe_load((case_dir / "environment.yaml").read_text(encoding="utf-8")) or {}  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
     problems = []
     if not notes.get("capture_environment"):
         problems.append(f"{name}: environment.yaml has no capture_environment")
@@ -451,7 +451,7 @@ def check_held_out_ledger(cases: list[tuple[Path, dict]],
     detected.
     """
     problems = []
-    ledger = (_yaml.safe_load(ledger_path.read_text(encoding="utf-8"))
+    ledger = (_yaml.safe_load(ledger_path.read_text(encoding="utf-8"))  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
               if ledger_path.is_file() else {})
     entries = {(e["case"], e["tag"]): e for e in (ledger or {}).get("entries") or []}
     if len(entries) != len((ledger or {}).get("entries") or []):
@@ -464,7 +464,7 @@ def check_held_out_ledger(cases: list[tuple[Path, dict]],
         for score_path in sorted((case_dir / "scores").glob("*.json")):
             key = (case_dir.name, score_path.stem)
             seen.add(key)
-            digest = hashlib.sha256(score_path.read_bytes()).hexdigest()
+            digest = hashlib.sha256(score_path.read_bytes()).hexdigest()  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
             entry = entries.get(key)
             if entry is None:
                 problems.append(f"{case_dir.name}/{score_path.stem}: held-out score has "
@@ -504,7 +504,7 @@ def coverage(case_dir: Path, manifest: dict) -> dict:
     live = dead = 0
     if controls_dir.is_dir():
         for path in controls_dir.rglob("*.json"):
-            for control in json.loads(path.read_text(encoding="utf-8")).get("controls") or []:
+            for control in json.loads(path.read_text(encoding="utf-8")).get("controls") or []:  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
                 if control.get("live"):
                     live += 1
                 else:
@@ -566,7 +566,7 @@ def main(argv: list[str] | None = None) -> int:
     by_id, cases = {}, []
     for case_dir in case_dirs:
         manifest_path = case_dir / "manifest.yaml"
-        manifest = (_yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+        manifest = (_yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
                     if manifest_path.is_file() else {})
         by_id[case_dir.name] = manifest
         cases.append((case_dir, manifest))

@@ -58,7 +58,7 @@ def split_investigation_phases(run_dir: Path) -> list[dict]:
     p = RunPaths(run_dir).investigation
     if not p.is_file():
         return []
-    text = p.read_text(encoding="utf-8")
+    text = p.read_text(encoding="utf-8")  # lint-whole-read: ok — investigation.md: host writers go through validate_artifact (64 KiB cap, INVESTIGATION_FILE_MAX); box-writable in the rw run dir, bounded by the box fsize limit; operator render at run end
     parts = re.split(r"(?m)^(## .*)$", text)
     out: list[dict] = []
     pre = parts[0].strip()

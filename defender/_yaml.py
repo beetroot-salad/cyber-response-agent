@@ -307,7 +307,7 @@ def read_reviewed_text(path: Path, *, what: str, error: type[Exception]) -> str:
     if not path.is_file():
         raise error(f"{what} not found at {path}")
     try:
-        return path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8")  # lint-whole-read: ok — reviewed tenant settings (verb-grants.yaml, lead-zero.yaml) written by the operator; never mounted into a box
     except TEXT_READ_ERRORS as e:
         raise error(f"{what} at {path} is unreadable ({e})") from e
 

@@ -154,7 +154,7 @@ def main() -> int:
         sys.exit(f"scenario not found: {scenario}")
     expect = {}
     if (scenario / "expect.json").is_file():
-        expect = json.loads((scenario / "expect.json").read_text(encoding="utf-8"))
+        expect = json.loads((scenario / "expect.json").read_text(encoding="utf-8"))  # lint-whole-read: ok — repo-shipped eval scenario (evals/scenarios_lead/); operator-controlled, not on any box-writable mount
 
     RESULTS_DIR.mkdir(exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix=f"leadauthor-eval-{scenario.name}-"))

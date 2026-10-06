@@ -114,7 +114,7 @@ QUESTIONER_DEF = AgentDefinition(
 
 def _prompt(name: str) -> str:
     """One shipped prompt, read from this package."""
-    return (_PROMPTS / name).read_text(encoding="utf-8")
+    return (_PROMPTS / name).read_text(encoding="utf-8")  # lint-whole-read: ok — repo-shipped questioner prompt; operator-controlled, not on any box-writable mount
 
 
 def _measurement_header(source_run_dir: Path, episode_dir: Path,

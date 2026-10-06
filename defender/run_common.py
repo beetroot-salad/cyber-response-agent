@@ -165,7 +165,7 @@ def _clear_stale_sidecars(run: Run) -> None:
 def _write_alert_once(run: Run, alert: Path) -> None:
     """The alert is write-once: written through the guarded exclusive lane when absent;
     when present it must match byte for byte, or the id is being reused for another case."""
-    alert_bytes = alert.read_bytes()
+    alert_bytes = alert.read_bytes()  # lint-whole-read: ok — the run's alert input: external file named on the CLI, or a sibling run's alert.json (box-writable, bounded by the box fsize limit); read once per run.py
     existing, reason = _io.read_bytes_guarded(run.facts.alert.path)
     if existing is None and _io.entry_present(run.facts.alert.path):
         sys.exit(
@@ -296,7 +296,7 @@ def held_out_alert_digests(fixtures_dir: Path = HELD_OUT_FIXTURES) -> set[str]:
     for child in sorted(fixtures_dir.iterdir()):
         alert = RunPaths(child).alert
         try:
-            out.add(hashlib.sha256(alert.read_bytes()).hexdigest())
+            out.add(hashlib.sha256(alert.read_bytes()).hexdigest())  # lint-whole-read: ok — operator-curated held-out fixtures (fixtures/held-out/*/alert.json); operator-controlled
         except OSError:
             continue
     return out
@@ -304,7 +304,7 @@ def held_out_alert_digests(fixtures_dir: Path = HELD_OUT_FIXTURES) -> set[str]:
 
 def is_held_out_alert_copy(alert: Path, fixtures_dir: Path = HELD_OUT_FIXTURES) -> bool:
     try:
-        digest = hashlib.sha256(alert.read_bytes()).hexdigest()
+        digest = hashlib.sha256(alert.read_bytes()).hexdigest()  # lint-whole-read: ok — the run's alert input (external, or a box-writable sibling alert bounded by the box fsize limit); read once at run end in run.py
     except OSError:
         return False
     return digest in held_out_alert_digests(fixtures_dir)
@@ -362,7 +362,7 @@ def enqueue_curation(
     # Reading the alert is inside the guard too: a moved alert must not fail the run. So is the
     # state tree: a refused entry or a missing root costs this request, never the investigation.
     try:
-        case_id = case_ref(alert.read_bytes())
+        case_id = case_ref(alert.read_bytes())  # lint-whole-read: ok — the run's alert input (external, or a box-writable sibling alert bounded by the box fsize limit); read once at run end in run.py
         with LearningState.open(loop_paths()) as state:
             state.enqueue_curation(
                 case_id, {"case_id": case_id, "run_dir": str(run_dir.resolve())})

@@ -291,7 +291,7 @@ def measure_case(case_dir: Path, lead_ids: list[str], *, model: str, effort: str
     path = labels_path(case_dir, model, effort)
     cached: dict = {}
     if path.is_file() and not relabel:
-        doc = json.loads(path.read_text(encoding="utf-8"))
+        doc = json.loads(path.read_text(encoding="utf-8"))  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
         cached = doc.get("leads") or {}
 
     todo = [x for x in lead_ids if x not in cached]
@@ -347,9 +347,9 @@ def _measured(case_dir: Path, proj_path: Path, *, model: str, effort: str) -> _M
 
     Shared by `--dry-run` and `score_case` so the dry run cannot disagree with the score.
     """
-    manifest = safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}
+    manifest = safe_load((case_dir / "manifest.yaml").read_text(encoding="utf-8")) or {}  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
     # Typed reading for structure and the judge; spelled reading (same shape) for text checks.
-    readings = safe_load_typed_and_spelled(proj_path.read_text(encoding="utf-8"))
+    readings = safe_load_typed_and_spelled(proj_path.read_text(encoding="utf-8"))  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
     leads = {row["lead_id"]: row for row in judge.load_case_leads(case_dir)}
     preds, duplicates = load_predictions(readings.typed)
     spelled_preds, _ = load_predictions(readings.spelled)
@@ -493,7 +493,7 @@ def forbidden_values(case_dir: Path, manifest: dict) -> list[str]:
         (manifest.get("expectation") or {}, "manifest.yaml expectation")]
     calibration = case_dir / "expected.yaml"
     if calibration.is_file():
-        sources.append((safe_load(calibration.read_text(encoding="utf-8")) or {},
+        sources.append((safe_load(calibration.read_text(encoding="utf-8")) or {},  # lint-whole-read: ok — operator-only eval tooling over operator-curated golden-case files (evals/oracle_golden/); never read by a long-lived host process
                         "expected.yaml"))
     sources.append((manifest, "manifest.yaml"))
     clauses = [_text_clause(doc, "must_not_emit", where=where) for doc, where in sources]

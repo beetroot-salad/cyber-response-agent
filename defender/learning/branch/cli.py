@@ -662,7 +662,7 @@ def _scrub_ran(run_dir: Path) -> bool:
     if not artifact_file(verdict):
         return False
     try:
-        record = json.loads(verdict.read_text(encoding="utf-8"))
+        record = json.loads(verdict.read_text(encoding="utf-8"))  # lint-whole-read: ok — scrub verdict sidecar: host-written tiny JSON ({ran, reason}) outside every box mount
     except (OSError, ValueError):
         return False
     return isinstance(record, dict) and record.get("ran") is True
@@ -1473,7 +1473,7 @@ def _fence_count(source: Path, branch_message_id: int, *,
     path = RunPaths(source).investigation
     if not artifact_file(path):
         return 0
-    document = path.read_text(encoding="utf-8")
+    document = path.read_text(encoding="utf-8")  # lint-whole-read: ok — investigation.md: host writers go through validate_artifact (64 KiB cap, INVESTIGATION_FILE_MAX); box-writable in the rw run dir, bounded by the box fsize limit; per-episode CLI
     total = len(scan_fences(document).bodies)  # lint-row-drop: ok — a count of fences, not a read of their content; `fence_count_at` below answers whenever a session exists  # noqa: E501
     store = _source_store(source)
     if store is None:
@@ -1503,7 +1503,7 @@ def _alert_document(source: Path) -> dict:
     """The source run's alert, already screened by the preflight."""
     path = RunPaths(source).alert
     try:
-        text = path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8")  # lint-whole-read: ok — alert.json: external alert copied in by the host; also box-writable in the rw run dir, so bounded at 64 MiB by the box fsize limit; per-episode CLI
     except OSError:
         return {}
     loaded, unreadable = load_json_artifact(text)

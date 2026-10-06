@@ -725,11 +725,10 @@ jobs:
       - name: Unpinned text-io gate (utf-8 pin on every text read/write — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_unpinned_text_io.py
 
-      # Whole-file reads by path with no size limit (read_text/read_bytes outside _io, or an
-      # _io reader called with its cap off) under defender/ (#1188). The box fsize ulimit
-      # bounds what a box writes; host-written files carry their own bound, so each read is
-      # a deliberate, reasoned baseline entry saying who writes the file. Also fails,
-      # unbaselinably, if an _io reader's `limit` default drifts off READ_LIMIT.
+      # Whole-file reads by path (read_text/read_bytes) outside defender/_io (#1188). The box
+      # fsize ulimit bounds what a box writes and _io's cap only lowers; a host-written file
+      # carries its own bound, so each direct read is marked `# lint-whole-read: ok — <who
+      # writes it, what bounds it>`. The baseline ships EMPTY.
       - name: Unbounded whole-read gate (who writes it, what bounds it — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_unbounded_whole_read.py
 

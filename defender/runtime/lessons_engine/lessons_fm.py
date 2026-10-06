@@ -99,7 +99,7 @@ def cmd_show(paths: list[str]) -> int:
             rc = 2
             continue
         try:
-            fm_raw = split_frontmatter(lesson.read_text(encoding="utf-8"))[1]
+            fm_raw = split_frontmatter(lesson.read_text(encoding="utf-8"))[1]  # lint-whole-read: ok — repo-shipped lesson corpus (lane edits land only through a reviewed PR); operator CLI
         except (FrontmatterError, OSError, UnicodeDecodeError) as e:
             print(f"error: {raw_path}: malformed lesson: {e}", file=sys.stderr)
             rc = 2

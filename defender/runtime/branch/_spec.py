@@ -111,7 +111,7 @@ def open_source_store(run_dir: Path) -> Any:
     # `BranchError`, which the driver's store-setup handler catches.
     try:
         pointer = json.loads(
-            RunPaths(run_dir).session_pointer.read_text(encoding="utf-8"))
+            RunPaths(run_dir).session_pointer.read_text(encoding="utf-8"))  # lint-whole-read: ok — session pointer: host-written tiny JSON; box-writable in the rw run dir, so bounded by the box fsize limit; per-run reader
         recorded = Path(pointer["store_path"]).resolve()
         case_id = pointer["case_id"]
         derived = session_store.store_path_for(case_id, runs_base=run_dir.parent).resolve()
