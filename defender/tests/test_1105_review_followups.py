@@ -343,3 +343,66 @@ def test_a_long_printable_path_keeps_its_file_name_when_cut():
     assert text.startswith("agent/skills/"), text
     assert "chars)" in text, text
     assert len(text) < len(path), text
+
+
+# -- the second xhigh review's findings ---------------------------------------------------------
+
+
+def test_a_tenant_refusal_escapes_its_own_message(tmp_path):
+    """`TenantRefused` escapes what it is built with, so the run handle's tenant check, which
+    raises it directly, stays one line under a runs folder whose path carries a newline."""
+    from defender._tenant import TenantRefused
+    assert "\n" not in str(TenantRefused("a\nb\x1b[2J"))
+    runs = tmp_path / _FORGED / "runs"
+    runs.mkdir(parents=True)
+    with pytest.raises(TenantRefused) as refused:
+        R.Run.for_tenant(H.T_ID, R.RunId.parse("r1"), runs_base=runs)
+    assert "\n" not in str(refused.value), str(refused.value)
+
+
+def test_a_huge_label_is_refused_in_a_bounded_message(tmp_path):
+    t = H.tenant(tmp_path / "data")
+    runs = H.runs_folder(t)
+    H.make_run(runs, "r0")
+    with pytest.raises(R.RunRefused) as refused:
+        R.record_episode_runs(t, "ep", R.RunId.parse("r0"), {"a b" * 20000: R.RunId.parse("ep-a")})
+    assert len(str(refused.value)) < 2000, len(str(refused.value))
+
+
+def test_a_runs_folder_fault_above_the_folder_is_not_blamed_on_the_folder(tmp_path):
+    """An ancestor that is a symlink loop or a file is reported as the hold's own reason, not
+    as 'the runs folder is a link' or 'is not a directory'."""
+    from defender._tenant import TenantRefused
+    loop = tmp_path / "loop"
+    os.symlink(loop, loop)
+    plain = tmp_path / "plain"
+    plain.write_text("x", encoding="utf-8")
+    for folder in (loop / "runs", plain / "runs"):
+        with pytest.raises(TenantRefused) as refused:
+            R.hold_runs_folder(folder)
+        text = str(refused.value)
+        assert "is a link" not in text, text
+        assert "is not a directory" not in text, text
+
+
+def test_creating_a_runs_folder_under_a_dangling_ancestor_is_a_refusal(tmp_path):
+    """With `create`, nothing but a refusal leaves the hold: a dangling ancestor makes the
+    create fail, which is `TenantRefused`, not a raw `FileNotFoundError` run.py cannot catch."""
+    from defender._tenant import TenantRefused
+    os.symlink(tmp_path / "nowhere", tmp_path / "dangling")
+    with pytest.raises(TenantRefused):
+        R.hold_runs_folder(tmp_path / "dangling" / "runs", create=True)
+
+
+def test_a_capped_read_keeps_the_read_limit(tmp_path):
+    """`max_bytes` above the read limit cannot read past it: a file over the limit is refused
+    as the whole read refuses it (a sparse file, so the disk holds nothing)."""
+    big = tmp_path / "big"
+    with big.open("wb") as fh:
+        fh.truncate(_io.READ_LIMIT + 10)
+    with _io.bind(tmp_path) as bound:
+        whole = bound.read("big")
+        capped = bound.read("big", max_bytes=_io.READ_LIMIT * 2)
+    assert whole.text is None, "the whole read refuses a file over the limit"
+    assert capped.text is None, "a cap above the limit read past it"
+    assert capped.reason == whole.reason, (capped.reason, whole.reason)

@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from _astlib import (
-    PARTIAL_OWNER_ATTRS, ScanBlind, absolute_from, module_env, owner_derived, package_of,
+    PARTIAL_OWNER_ATTRS, ScanBlind, import_source, module_and_package, module_env, owner_derived,
     read_and_parse, scan_guard,
 )
 
@@ -280,20 +280,6 @@ def _scan_literal_pass(
     return findings
 
 
-def module_and_package(rel: str) -> tuple[str, str]:
-    """`(dotted module, dotted package)` of a swept file: `learning/branch/cli.py` ->
-    (`defender.learning.branch.cli`, `defender.learning.branch`); a package's `__init__.py` is
-    its package (`runtime/driver/__init__.py` -> `defender.runtime.driver` twice). So a call to
-    a module's own top-level def, and a relative import, resolve to the origins `_astlib`'s
-    factory table names."""
-    parts = Path(rel).with_suffix("").parts
-    if parts and parts[-1] == "__init__":
-        module = ".".join(("defender", *parts[:-1]))
-        return module, module
-    module = ".".join(("defender", *parts))
-    return module, module.rpartition(".")[0]
-
-
 def _scan_accessor_pass(rel: str, tree: ast.Module, lines: list[str],
                         accessor_names: frozenset[str]) -> list[Finding]:
     findings: list[Finding] = []
@@ -430,10 +416,10 @@ def _scan_import_pass(rel: str, tree: ast.Module, lines: list[str]) -> list[Find
                      f"HOLD a record name; ask the owner for the path or its relative form",
         ))
 
-    package = package_of(rel)
+    _module, package = module_and_package(rel)
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            module = absolute_from(package, node)
+            module = import_source(node, package)
             # `from defender import _episode_paths` binds the module, not a name in it; record
             # it as well as `import x.y`, or the attribute arm below never sees it.
             for alias in node.names:

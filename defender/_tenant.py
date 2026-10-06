@@ -38,7 +38,7 @@ from pydantic_core import core_schema
 from defender import _io as _real_io
 from defender import _paths
 from defender._model import model
-from defender._shown import quoted, shown
+from defender._shown import escaped, quoted, shown
 from defender._tenants import (
     AGENT_HALF,
     REQUIRED_SETTINGS,
@@ -77,6 +77,11 @@ class TenantRefused(Exception):
     verbatim. An `Exception`, not a `ValueError` (#1067's `_model.py` convention): pydantic
     wraps a `ValueError` raised inside a validator into its own `ValidationError`, where an
     `except TenantRefused` would silently miss it."""
+
+    def __init__(self, message: object = "") -> None:
+        # Escaped where it is built, as `RunRefused` is: a path or a value read off disk can
+        # carry a control character, and no raising site has to remember to escape it.
+        super().__init__(escaped(message))
 
 
 class TenantId(str):

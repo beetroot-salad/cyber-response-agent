@@ -830,6 +830,7 @@ def test_1105_bound_runs_yields_run_id_and_wrapper_rows_in_list_run_ids_order_ov
     # Owner ruling (CI): the counts are of the whole process, so another test's unscoped
     # handle (closed on collection, `_io._Handle`) must not be collected mid-count.
     gc.collect()
+    was_enabled = gc.isenabled()
     gc.disable()
     try:
         c0 = H.open_fd_count()
@@ -852,7 +853,8 @@ def test_1105_bound_runs_yields_run_id_and_wrapper_rows_in_list_run_ids_order_ov
             assert H.open_fd_count() == c0 + 1, "reading 200 rows holds no descriptor of its own"
         assert H.open_fd_count() == c0, "the block's descriptor is closed after it"
     finally:
-        gc.enable()
+        if was_enabled:
+            gc.enable()
 
 
 def test_1105_bound_runs_is_single_use_and_refuses_every_read_after_the_block(tmp_path):

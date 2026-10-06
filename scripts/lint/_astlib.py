@@ -97,28 +97,44 @@ def scan_guard(rel: str) -> Iterator[None]:
         ) from None
 
 
-def package_of(rel: str, *, root: str = "defender") -> str:
-    """The package a module at `rel` (a path under the `root` package's folder) belongs to."""
-    return ".".join((root, *Path(rel).parent.parts))
+def module_and_package(rel: str, *, root: str = "defender") -> tuple[str, str]:
+    """`(dotted module, dotted package)` of a file at `rel` under the `root` package's folder:
+    `learning/branch/cli.py` -> (`defender.learning.branch.cli`, `defender.learning.branch`); a
+    package's `__init__.py` is its package (`runtime/driver/__init__.py` ->
+    `defender.runtime.driver` twice). What `module_env` takes, so a relative import resolves."""
+    parts = Path(rel).with_suffix("").parts
+    if parts and parts[-1] == "__init__":
+        module = ".".join((root, *parts[:-1]))
+        return module, module
+    module = ".".join((root, *parts))
+    return module, module.rpartition(".")[0]
 
 
-def absolute_module(dotted: str, package: str) -> str:
-    """`dotted`, a module spelled absolutely or with leading dots (`..run_repository.RunPaths`,
-    as `origin` and a relative from-import spell it), made absolute against the importing
-    module's `package`. The one relative-import resolver the gates share."""
-    level = len(dotted) - len(dotted.lstrip("."))
-    if not level:
-        return dotted
-    base = package
-    for _ in range(level - 1):
-        base = base.rpartition(".")[0]
-    rest = dotted[level:]
-    return f"{base}.{rest}" if rest else base
+def import_source(node: ast.ImportFrom, package: str | None) -> str:
+    """The module a from-import names: absolute when `package` (the importing module's) is
+    given — `from .. import x` in `defender.runtime.driver` is `defender.runtime` — else with
+    its leading dots kept, so a relative `.re` is never mistaken for the stdlib `re`. The one
+    relative-import resolver: the scope tree's bindings use it too."""
+    if node.level and package is not None:
+        base = package.split(".")
+        base = base[:len(base) - (node.level - 1)]
+        return ".".join([*base, *([node.module] if node.module else [])])
+    return "." * node.level + (node.module or "")
 
 
-def absolute_from(package: str, node: ast.ImportFrom) -> str:
-    """The absolute module a from-import names, its relative dots resolved against `package`."""
-    return absolute_module("." * node.level + (node.module or ""), package)
+#: The runs repository's door (#1105): its private submodules define what the door serves.
+_RUN_REPOSITORY = "defender.run_repository"
+
+
+def door_spelling(origin: str) -> str:
+    """`origin` in its one spelling: a name the runs repository defines in a private submodule
+    (`defender.run_repository._layout.RunPaths`) is the door's (`defender.run_repository.
+    RunPaths`), since the door serves it; anything else is unchanged."""
+    parts = origin.split(".")
+    if (origin.startswith(_RUN_REPOSITORY + "._") and len(parts) >= 3
+            and parts[2].startswith("_") and not parts[2].startswith("__")):
+        del parts[2]
+    return ".".join(parts)
 
 
 def read_source(path: Path, rel: str) -> str:
@@ -219,13 +235,7 @@ def _scope_bindings(
                         imports[root] = root
                 continue
             if isinstance(child, ast.ImportFrom):
-                # `level` > 0 is a relative import; keep the leading dots so a relative
-                # `.re` can never be mistaken for the stdlib `re`.
-                prefix = "." * child.level + (child.module or "")
-                if child.level and package is not None:
-                    base = package.split(".")
-                    base = base[:len(base) - (child.level - 1)]
-                    prefix = ".".join([*base, *([child.module] if child.module else [])])
+                prefix = import_source(child, package)
                 for alias in child.names:
                     if alias.name == "*":
                         continue  # unresolvable — but ruff F403 makes it unmergeable
@@ -268,16 +278,13 @@ def _module_consts(tree: ast.AST) -> dict[str, str]:
 #: The name-owner classes `owner_derived` tags — construction of one, and reads on the instance
 #: it builds, resolved by dotted origin so an alias or a from-import still counts.
 _OWNER_CLASS_ORIGINS = frozenset({
-    # Each owner reached through the runs repository's door (#1105) is spelled twice: the door
-    # (`defender.run_repository.X`, every importer's spelling) and the submodule that defines
-    # it (the package's own imports).
+    # An owner the runs repository defines is spelled as its door serves it (#1105): every
+    # origin is compared through `door_spelling`, so the submodule spelling needs no line.
     "defender.run_repository.RunPaths",
-    "defender.run_repository._layout.RunPaths",
     "defender._episode_paths.EpisodePaths",
     # The file-backed handle: a value reached through `run.facts.<record>` /
     # `run.tables.<table>` is owner-derived like `RunPaths(x).<record>`.
     "defender.run_repository.Run",
-    "defender.run_repository._handle.Run",
     # The episode handle (#1133): `episode.served_base` / `episode.world(label).draw(n)` are
     # owner-derived like `EpisodePaths(ep).<record>`.
     "defender._episode_handle.Episode",
@@ -285,7 +292,6 @@ _OWNER_CLASS_ORIGINS = frozenset({
     # The session store's owner, built from the runs base since one store spans a run and
     # its resumes and forks.
     "defender.run_repository.SessionPaths",
-    "defender.run_repository._layout.SessionPaths",
 })
 
 #: Owners whose members are owner-derived only for a NAMED set (#1120 M5), keyed by class
@@ -329,12 +335,18 @@ _PARTIAL_OWNER_CARRIERS: dict[str, dict[str, str]] = {
 #: relative to the run dir (the form `_io.Bound`'s readers take). Both are owner-derived.
 _OWNER_VALUE_ORIGINS = frozenset({
     "defender.run_repository.RUN_LAYOUT",
-    "defender.run_repository._layout.RUN_LAYOUT",
     "defender.run_repository.WIRE_LOG_NAMES",
-    "defender.run_repository._layout.WIRE_LOG_NAMES",
     "defender._episode_paths.LAYOUT",
     "defender._episode_paths.WORLD_LEAVES",
 })
+
+
+def _is_owner_class(origin: str | None) -> bool:
+    return origin is not None and door_spelling(origin) in _OWNER_CLASS_ORIGINS
+
+
+def _is_owner_value(origin: str | None) -> bool:
+    return origin is not None and door_spelling(origin) in _OWNER_VALUE_ORIGINS
 
 #: The handle sub-collections an owner-rooted attribute chain may pass through (for
 #: `run.facts.<record>`). Named rather than recursing through any attribute: otherwise
@@ -528,10 +540,10 @@ def _owner_locals(
     def is_owner_expr(node: ast.expr) -> bool:
         node = _unawait(node)
         if isinstance(node, ast.Call):
-            return (_resolved_callee(node, probe_env) in _OWNER_CLASS_ORIGINS
+            return (_is_owner_class(_resolved_callee(node, probe_env))
                     or _is_subhandle_call(node, owners, probe_env))
         if isinstance(node, ast.Name):
-            return node.id in owners or _origin(node, probe_env) in _OWNER_VALUE_ORIGINS
+            return node.id in owners or _is_owner_value(_origin(node, probe_env))
         if isinstance(node, ast.Attribute):
             return (_owner_instance_in(node.value, owners, probe_env)
                     or _partial_owner_member(node, partials, carriers, probe_env))
@@ -539,7 +551,7 @@ def _owner_locals(
 
     if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
         for arg in (*scope.args.posonlyargs, *scope.args.args, *scope.args.kwonlyargs):
-            if annotated_class(arg.annotation, probe_env) in _OWNER_CLASS_ORIGINS:
+            if _is_owner_class(annotated_class(arg.annotation, probe_env)):
                 owners.add(arg.arg)
 
     def walk(node: ast.AST) -> None:
@@ -558,10 +570,10 @@ def _owner_locals(
 def _owner_instance_in(node: ast.expr, owners: set[str], env: ModuleEnv) -> bool:
     node = _unawait(node)
     if isinstance(node, ast.Call):
-        return (_resolved_callee(node, env) in _OWNER_CLASS_ORIGINS
+        return (_is_owner_class(_resolved_callee(node, env))
                 or _is_subhandle_call(node, owners, env))
     if isinstance(node, ast.Name):
-        return node.id in owners or _origin(node, env) in _OWNER_VALUE_ORIGINS
+        return node.id in owners or _is_owner_value(_origin(node, env))
     if isinstance(node, ast.Attribute):
         # An attribute chain rooted at an owner stays owner-derived only through a declared
         # sub-collection; any other member is a container this pass cannot see into, which
@@ -699,7 +711,7 @@ def owner_derived(node: ast.expr, env: ModuleEnv) -> bool:
         return (_owner_instance_in(node.value, set(e.owner_locals), e)
                 or _partial_owner_member(node, e.partial_owner_locals, e.carrier_locals, e))
     if isinstance(node, ast.Call):
-        return _resolved_callee(node, e) in _OWNER_CLASS_ORIGINS
+        return _is_owner_class(_resolved_callee(node, e))
     return False
 
 

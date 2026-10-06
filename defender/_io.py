@@ -194,12 +194,20 @@ def _read_plain_fd(
     caller's to close.
 
     With `budget`, the read is a PREFIX instead: no more than `budget` bytes are taken off the
-    file, by reads asking only for what is left of it, and neither `limit` nor `size` applies —
-    so a caller tells a file over its cap from one within it without reading it whole. A prefix
-    is byte-faithful: its text is decoded but newlines are NOT translated, because its caller
+    file, by reads asking only for what is left of it, and `size` does not apply — so a caller
+    tells a file over its cap from one within it without reading it whole. `limit` still does:
+    a budget above it reads at most `limit` + 1 bytes and refuses a file over `limit` exactly
+    as a whole read does, so no cap takes more memory than the default read. A prefix is
+    byte-faithful: its text is decoded but newlines are NOT translated, because its caller
     judges bytes (a size bound, a byte compare against what it would write)."""
     if budget is not None:
-        return _read_prefix(os_, fd, budget, binary=binary, errors=errors)
+        if limit is None or budget <= limit:
+            return _read_prefix(os_, fd, budget, binary=binary, errors=errors)
+        data = _read_prefix(os_, fd, limit + 1, binary=True, errors=errors)
+        if len(data) > limit:
+            raise _too_large(limit)
+        assert isinstance(data, bytes)
+        return data if binary else data.decode("utf-8", errors)
     if limit is not None and size > limit:
         raise _too_large(limit)
     buf = bytearray()
@@ -1525,8 +1533,10 @@ def guarded_mkdir(path: Path, *, base: Path) -> None:
             f"guarded_mkdir: {str(path)!r} climbs out of the tree root {str(base)!r} through "
             f"'..' — the target reaches outside the tree the anchor names"
         )
-    # Skip on the hot path once the root exists. `is_dir()` follows symlinks on purpose: a
-    # host-chosen symlinked runs base must keep working.
+    # Skip on the hot path once the root exists. `is_dir()` follows a link at `base` on
+    # purpose: `base` is the caller's trust root. A runs folder is not a link-tolerant base: it
+    # is held no-follow first (`run_repository.hold_runs_folder`, #1105 OP-2), which refuses a
+    # link there before this runs; a bigger disk is reached by moving the data root.
     if not base.is_dir():
         os.makedirs(base, exist_ok=True)
     accum = base

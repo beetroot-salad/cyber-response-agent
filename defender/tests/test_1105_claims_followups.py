@@ -148,3 +148,18 @@ def test_the_layout_lint_ignores_a_name_merely_spelled_like_a_layout_name(tmp_pa
     _plant(root, "learning/probe_vocab.py", "from defender.skills.vocab import PROVENANCE\n")
     shown = [f.display for f in _lint().scan(root, allow_list=[])]
     assert not [d for d in shown if "learning/probe_vocab.py" in d], shown
+
+
+@pytest.mark.parametrize(("rel", "text"), [
+    ("runtime/rel2.py", "from .. import run_repository as rr\n\n\ndef f(d):\n    return rr.RunPaths(d)\n"),
+    ("learning/branch/rel1.py",
+     "from ... import run_repository\n\n\ndef f(d):\n    return run_repository.RunPaths(d)\n"),
+    ("runtime/rel3.py", "from ..run_repository import ALERT\n"),
+])
+def test_the_layout_lint_resolves_a_relative_import_as_the_absolute_one(tmp_path, rel, text):
+    """The xhigh review's case: a layout name reached through a relative import is the same
+    name its absolute spelling is (the scope tree is built knowing the module's package)."""
+    root = _package_copy(tmp_path)
+    _plant(root, rel, text)
+    shown = [f.display for f in _lint().scan(root, allow_list=[])]
+    assert [d for d in shown if rel in d], shown

@@ -207,13 +207,9 @@ class Finding:
 
 
 def canonical(origin: str) -> str:
-    """A run-repository origin in its door spelling: `defender.run_repository._layout.X` and
-    `defender.run_repository.X` are one name."""
-    parts = origin.split(".")
-    if (origin.startswith(_DOOR + "._") and len(parts) >= 3 and parts[2].startswith("_")
-            and not parts[2].startswith("__")):
-        del parts[2]
-    return ".".join(parts)
+    """A run-repository origin in its door spelling (`_astlib.door_spelling`):
+    `defender.run_repository._layout.X` and `defender.run_repository.X` are one name."""
+    return _astlib.door_spelling(origin)
 
 
 # ==========================================================================================
@@ -238,14 +234,7 @@ class _Module:
     def imported(self, name: str) -> str | None:
         """What a module-level import binds `name` to, absolute and canonical."""
         dotted = self.env.imports.get(name)
-        return canonical(_astlib.absolute_module(dotted, self.package)) if dotted else None
-
-
-def _module_name(rel: str) -> str:
-    parts = list(Path(rel).with_suffix("").parts)
-    if parts and parts[-1] == "__init__":
-        parts.pop()
-    return ".".join(("defender", *parts))
+        return canonical(dotted) if dotted else None
 
 
 def _module_facts(rel: str, tree: ast.Module) -> _Module:
@@ -262,8 +251,9 @@ def _module_facts(rel: str, tree: ast.Module) -> _Module:
             values[node.targets[0].id] = node.value
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             values[node.target.id] = node.annotation if node.value is None else node.value
-    return _Module(_module_name(rel), _astlib.package_of(rel), _astlib.module_env(tree), classes,
-                   functions, values)
+    module, package = _astlib.module_and_package(rel)
+    return _Module(module, package, _astlib.module_env(tree, module=module, package=package),
+                   classes, functions, values)
 
 
 class _Program:
@@ -404,7 +394,7 @@ def _name_origin(node: ast.expr, mod: _Module,
     if local_classes and head in local_classes:
         return canonical(f"{local_classes[head]}.{rest}" if rest else local_classes[head])
     origin = _astlib.origin(node, mod.env)
-    return canonical(_astlib.absolute_module(origin, mod.package)) if origin else None
+    return canonical(origin) if origin else None
 
 
 def _dataclass_fields(cls: ast.ClassDef) -> dict[str, ast.expr]:
@@ -668,7 +658,7 @@ class _Scanner:
         self.uses.append(_Use(scope, name, getattr(node, "lineno", 0)))
 
     def _import(self, node: ast.ImportFrom, scope: str) -> None:
-        source = canonical(_astlib.absolute_from(self.package, node))
+        source = canonical(_astlib.import_source(node, self.package))
         if not source.startswith("defender"):
             return
         for a in node.names:

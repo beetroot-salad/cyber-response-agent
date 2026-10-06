@@ -12,12 +12,12 @@ block, closing the handle when it ends. The object is the call's whole view of t
 
 This module is the package's bottom layer: `_record` (the episode records) and `_lookup` (the
 lookups) import it, and it imports neither. A fault of the folder or of its `_tenant.json` is
-`TenantRefused` (P2), built by `tenant_refusal`, which escapes it to one line as `RunRefused`
-escapes itself.
+`TenantRefused` (P2), which escapes its own message to one line, as `RunRefused` does.
 """
 from __future__ import annotations
 
-import errno
+import os
+import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -26,7 +26,7 @@ from typing import Any
 
 from defender import _io
 from defender._run_id import run_id_fault
-from defender._shown import escaped, quoted, shown
+from defender._shown import quoted, shown
 from defender._tenant import (
     TENANT_RECORD_NAME, Tenant, TenantRecordMismatch, TenantRefused, read_tenant, record_path,
 )
@@ -94,13 +94,6 @@ def refuse_sidecar_id(run_id: RunId) -> None:
         raise RunRefused(why)
 
 
-def tenant_refusal(message: str, cls: type[TenantRefused] = TenantRefused) -> TenantRefused:
-    """A tenant refusal the package raises, its message `escaped` as every `RunRefused`'s is,
-    so the runs folder's own path cannot break its one line. `TenantRefused` is the tenant
-    module's, so it is escaped here, at the package's one place that builds it."""
-    return cls(escaped(message))
-
-
 def entry_path(folder: Path | str, name: str) -> str:
     """`<folder>/<name>` as a refusal shows it: a hostile name read off disk is quoted."""
     return f"{folder}/{shown(name)}"
@@ -143,7 +136,7 @@ def _list_entries(view: _io.Bound, folder: Path, *, io: Any) -> Listing:
     answer = view.entries()
     if answer.entries is None:
         why = "it is gone" if answer.absent else answer.reason
-        raise tenant_refusal(f"the runs folder {folder} could not be listed: {why}")
+        raise TenantRefused(f"the runs folder {folder} could not be listed: {why}")
     runs: list[RunId] = []
     sidecars: set[str] = set()
     sidecar_ids: set[RunId] = set()
@@ -173,10 +166,18 @@ def _list_entries(view: _io.Bound, folder: Path, *, io: Any) -> Listing:
 # -- the held folder (H1–H3) ---------------------------------------------------------------------
 
 
-def _hold_fault(exc: OSError) -> str:
-    if exc.errno == errno.ELOOP:
-        return f"is a link, which is never followed ({exc.strerror})"
-    if exc.errno == errno.ENOTDIR:
+def _hold_fault(folder: Path, exc: OSError) -> str:
+    """Why `folder` could not be held, judged from the folder's own entry (a no-follow `lstat`,
+    description only) rather than from the errno, which an ancestor's fault shares: a link at
+    the folder, something other than a directory there, else the hold's own reason — a folder
+    above it that cannot be walked included."""
+    try:
+        st = os.lstat(folder)
+    except OSError:
+        st = None
+    if st is not None and stat.S_ISLNK(st.st_mode):
+        return "is a link, which is never followed"
+    if st is not None and not stat.S_ISDIR(st.st_mode):
         return "is not a directory"
     return f"cannot be opened ({exc.strerror or exc})"
 
@@ -212,7 +213,7 @@ class HeldRuns:
         """This hold, when the folder exists; else `TenantRefused` (a function that needs the
         folder — `open_run`, the writer — never creates it: run setup does, with its record)."""
         if self.absent:
-            raise tenant_refusal(f"the runs folder {self.folder} is absent — run setup creates "
+            raise TenantRefused(f"the runs folder {self.folder} is absent — run setup creates "
                                  "it, with its tenant record")
         return self
 
@@ -234,13 +235,11 @@ class HeldRuns:
             path = record_path(self.folder)
             try:
                 record = read_tenant(self.folder, io=_HeldRecordIO(view))
-            except TenantRefused as exc:
-                raise tenant_refusal(str(exc), type(exc)) from None
             except (RecursionError, ValueError, TypeError, OSError) as exc:
-                raise tenant_refusal(f"{path} could not be judged: {exc}") from None
+                raise TenantRefused(f"{path} could not be judged: {exc}") from None
             if record.tenant_id != self.tenant.id:
-                raise tenant_refusal(f"{path} names the tenant {quoted(record.tenant_id)}, not "
-                                     f"{quoted(self.tenant.id)}", TenantRecordMismatch)
+                raise TenantRecordMismatch(f"{path} names the tenant {quoted(record.tenant_id)}, "
+                                           f"not {quoted(self.tenant.id)}")
             self._checked = view
         return self._checked
 
@@ -259,23 +258,25 @@ class HeldRuns:
 
 def hold_runs_folder(folder: Path, *, create: bool = False, io: Any = _io) -> _io.Held:
     """`folder` — a runs folder — held open no-follow, the one way the package and run setup
-    open one (#1105 H1, OP-2). A link there (dangling or not), a non-directory or a folder that
-    cannot be opened is `TenantRefused` naming the folder and the fault. An absent folder is
-    `FileNotFoundError`, or with `create` is made first (`guarded_mkdir`: the runs folder is the
-    host-controlled trust root, nothing above it is judged) and then held."""
+    open one (#1105 H1, OP-2). An absent folder is `FileNotFoundError`, or with `create` is made
+    first (`guarded_mkdir`: the runs folder is the host-controlled trust root, nothing above it
+    is judged) and then held. Every other failure — a link (dangling or not) or a non-directory
+    at the folder, a folder above it that cannot be walked, a create that fails — is
+    `TenantRefused` naming the folder and the fault."""
     folder = Path(folder)
     try:
-        try:
-            return io.hold(folder, follow=False)
-        except FileNotFoundError:
-            if not create:
-                raise
-        io.guarded_mkdir(folder, base=folder)
         return io.hold(folder, follow=False)
     except FileNotFoundError:
-        raise
+        if not create:
+            raise
     except OSError as exc:
-        raise tenant_refusal(f"the runs folder {folder} {_hold_fault(exc)}") from None
+        raise TenantRefused(f"the runs folder {folder} {_hold_fault(folder, exc)}") from None
+    try:
+        io.guarded_mkdir(folder, base=folder)
+        return io.hold(folder, follow=False)
+    except OSError as exc:
+        raise TenantRefused(f"the runs folder {folder} could not be created and held: "
+                            f"{_hold_fault(folder, exc)}") from None
 
 
 @contextmanager

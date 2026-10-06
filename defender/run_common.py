@@ -87,7 +87,7 @@ def materialize_run(
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
     pinned = run_id is not None
-    run_id = _admit_run_id(alert, run_id)
+    admitted = _admit_run_id(alert, run_id)
     if world is not None:
         from defender._episode_paths import EpisodePaths
 
@@ -101,8 +101,8 @@ def materialize_run(
         # than no run.
         tenant_record = _tenant.ensure_runs_base_record(runs_base, tenant.id)
         if pinned and world is None:
-            _refuse_claimed_run_id(held, runs_base, run_id)
-    run = Run.for_tenant(tenant_record.tenant_id, run_id, runs_base=runs_base)
+            _refuse_claimed_run_id(held, runs_base, admitted)
+    run = Run.for_tenant(tenant_record.tenant_id, admitted, runs_base=runs_base)
     run_dir = run.run_dir
     paths = RunPaths(run_dir)
 
@@ -134,7 +134,7 @@ def materialize_run(
     return run
 
 
-def _admit_run_id(alert: Path, run_id: str | None) -> str:
+def _admit_run_id(alert: Path, run_id: str | None) -> RunId:
     """The run id this call will materialise, or the refusal — minted from the alert when the
     operator pinned none."""
     # The explicit collision guard first; the run-id grammar refusing `_` is a coincidence.
@@ -152,10 +152,10 @@ def _admit_run_id(alert: Path, run_id: str | None) -> str:
     # The sidecar clause (D2.1): the repository's one answer to "may this text name a run?".
     if (why := run_name_fault(str(admitted))) is not None:
         sys.exit(f"invalid run id: {why}")
-    return str(admitted)
+    return admitted
 
 
-def _refuse_claimed_run_id(held: _io.Held, runs_base: Path, run_id: str) -> None:
+def _refuse_claimed_run_id(held: _io.Held, runs_base: Path, run_id: RunId) -> None:
     """Exit when an episode record in the held runs base claims the pinned `run_id`: that id
     names a sibling, not a run of its own (#1105 D3.7). No tenant compare (the record step has
     already judged `_tenant.json`), so a record naming another tenant still claims — the
@@ -165,8 +165,8 @@ def _refuse_claimed_run_id(held: _io.Held, runs_base: Path, run_id: str) -> None
         claimed = episode_sibling_ids(held.view(), where=str(runs_base))
     except RunRefused as bad:
         sys.exit(str(bad))
-    if RunId.parse(run_id) in claimed:
-        sys.exit(f"run id {run_id!r} is claimed by an episode record in {runs_base} — it "
+    if run_id in claimed:
+        sys.exit(f"run id {str(run_id)!r} is claimed by an episode record in {runs_base} — it "
                  "names an episode's sibling run; pick a fresh id")
 
 
