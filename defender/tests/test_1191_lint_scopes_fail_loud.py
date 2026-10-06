@@ -103,6 +103,9 @@ RUN_RECORDS_DATA = ("defender/docs/run-records-kinds.tsv", "defender/docs/run-re
 #: The file every mini-repo directory is given, so it holds a `.py` without shadowing a real
 #: module name.
 PLANTED = "planted_1191.py"
+#: Git-ignore rules naming nothing a lint could prune by spelling (an ignored `build/` can be
+#: pruned by name without ever asking git).
+IGNORES = "zz_ign_1191/\n*_ignored_1191.py\n"
 INERT = '"""Planted by #1191\'s mini repo; nothing to find here."""\n'
 
 #: A link-following admit check: a tree-read finding in a listed module.
@@ -1168,24 +1171,26 @@ def test_o5_a_checkout_under_an_excluded_name_still_scans(tmp_path, stem, parent
 
 @pytest.mark.parametrize("stem", [RUN_RECORDS, TREE_WRITE, STAGE_FRAMES])
 def test_o5_gitignored_content_is_not_scanned_but_untracked_content_is(tmp_path, stem):
-    """In a mini repo that is a git repo ignoring `build/` (its layout staged): an untracked,
-    not-ignored new module holding a violation IS reported (ignored-ness decides, not
-    tracked-ness); the same violation in gitignored `build/` dirs — beside a scanned module and,
-    for run-records, as a top-level `defender/build/` the closure would otherwise name — is not
-    scanned: exit 0."""
+    """In a mini repo that is a git repo ignoring `zz_ign_1191/` and `*_ignored_1191.py` (names
+    no lint could prune by spelling; its layout staged): an untracked, not-ignored new module
+    holding a violation IS reported (ignored-ness decides, not tracked-ness); the same violation
+    in gitignored dirs — beside a scanned module and, for run-records, as a top-level
+    `defender/zz_ign_1191/` the closure would otherwise name — or in an ignored file name, is
+    not scanned: exit 0."""
     lint_file, module, _rel = _plantable(tmp_path, stem)
-    _git_repo(tmp_path, "build/\n")
+    _git_repo(tmp_path, IGNORES)
     _assert_clean(lint_file, f"{stem} as a git repo")
     probe, _on = PROBES[stem]
     new = _write(module.parent / "new_1191.py", probe)
     _expect(_run(lint_file), 1, "new_1191.py", on="stdout",
             why="an untracked, not-ignored module holding a violation was not scanned")
     new.unlink()
-    _write(module.parent / "build" / "x_1191.py", probe)
-    _write(tmp_path / "defender" / "build" / "y_1191.py", probe)
+    _write(module.parent / "zz_ign_1191" / "x_1191.py", probe)
+    _write(tmp_path / "defender" / "zz_ign_1191" / "y_1191.py", probe)
+    _write(module.parent / "z_ignored_1191.py", probe)
     result = _run(lint_file)
     assert result.returncode == 0, (
-        f"violations only under gitignored build/ dirs were scanned (or blinded the closure)\n"
+        f"violations only in gitignored content were scanned (or blinded the closure)\n"
         f"{_said(result)}")
 
 
@@ -1310,24 +1315,26 @@ def test_o1_a_listed_package_holding_only_test_modules_is_blind(tmp_path, stem, 
 
 @pytest.mark.parametrize("stem", [TREE_READ, TREE_WRITE, ENV_READS])
 def test_o5_gitignored_content_under_a_listed_package_is_not_scanned(tmp_path, stem):
-    """O5/D4 for every list-scoped lint: in a git repo ignoring `build/` (layout staged), an
-    untracked, not-ignored module holding a violation inside a listed package IS reported; the
-    same violation under that package's gitignored `build/` is not: exit 0."""
+    """O5/D4 for every list-scoped lint: in a git repo ignoring `zz_ign_1191/` and
+    `*_ignored_1191.py` (layout staged), an untracked, not-ignored module holding a violation
+    inside a listed package IS reported; the same violation under that package's gitignored
+    dir, or in an ignored file name, is not: exit 0."""
     lint_file, entries, base = _surface(tmp_path, stem)
     packages = [e for e in entries if e.endswith("/")]
     assert packages, f"precondition: {stem}'s list has a package entry: {entries}"
     package = base / packages[0]
-    _git_repo(tmp_path, "build/\n")
+    _git_repo(tmp_path, IGNORES)
     _assert_clean(lint_file, f"{stem} as a git repo")
     probe, on = PROBES[stem]
     new = _write(package / "new_1191.py", probe)
     _expect(_run(lint_file), 1, "new_1191.py", on=on,
             why=f"an untracked, not-ignored module in listed {packages[0]} was not scanned")
     new.unlink()
-    _write(package / "build" / "x_1191.py", probe)
+    _write(package / "zz_ign_1191" / "x_1191.py", probe)
+    _write(package / "z_ignored_1191.py", probe)
     result = _run(lint_file)
     assert result.returncode == 0, (
-        f"a violation under gitignored {packages[0]}build/ was scanned\n{_said(result)}")
+        f"a violation in gitignored content of {packages[0]} was scanned\n{_said(result)}")
 
 
 def test_o7_a_render_blinded_by_the_closure_writes_nothing(tmp_path):
@@ -1466,6 +1473,27 @@ def test_source_files_refuses_an_undecodable_file_name(tmp_path):
         assert "bad\\udcff.py" in message, f"the refusal does not name {ascii(bad)}: {message!r}"
 
 
+def test_source_files_refuses_an_undecodable_directory_name(tmp_path):
+    """O10/D10 on a DIRECTORY component: a module whose root-relative name is not valid UTF-8
+    only because of the directory it sits in (`bad\\xffdir/m.py`, a valid basename) is refused
+    the same way — `ScanBlind` naming the directory in escaped form — in a git repo and outside
+    one."""
+    astlib = import_lint_lib("_astlib")
+    bad_dir = os.fsdecode(b"bad\xffdir")
+    for repo, in_git in ((tmp_path / "git", True), (tmp_path / "plain", False)):
+        try:
+            _write(repo / "defender" / bad_dir / "m_1191.py")
+        except (OSError, UnicodeError) as refused:
+            pytest.skip(f"this filesystem refuses an undecodable name: {refused!r}")
+        _write(repo / "defender" / "kept.py")
+        if in_git:
+            _git_repo(repo, "zz_ign_1191/\n")
+        with pytest.raises(astlib.ScanBlind) as caught:
+            astlib.source_files(repo / "defender", ())
+        message = str(caught.value)
+        assert "bad\\udcffdir" in message, f"the refusal does not name {ascii(bad_dir)}: {message!r}"
+
+
 # ======================================================================================
 # Design amendment 2 — the shared listing's edges (D8–D11) and the review's findings (O12–O16)
 # ======================================================================================
@@ -1559,6 +1587,22 @@ def test_source_files_lists_a_tree_inside_an_ignored_directory_in_full(tmp_path)
     assert sorted(astlib.source_files(planted, ())) == ["a.py", "sub/b.py"]
 
 
+def test_source_files_drops_ignored_modules_under_a_root_git_does_not_ignore(tmp_path):
+    """D11's exception is for a ROOT git ignores, asked of git — not inferred from the files: a
+    root that is NOT ignored, every module of which happens to be ignored (generated modules,
+    `*_gen_1191.py`), lists nothing. Control: the same tree with one module that is not ignored
+    lists just that one."""
+    astlib = import_lint_lib("_astlib")
+    repo = tmp_path / "repo"
+    _write(repo / "README.md", "x\n")
+    _git_repo(repo, "*_gen_1191.py\n")
+    _write(repo / "defender" / "a_gen_1191.py")
+    _write(repo / "defender" / "pkg" / "b_gen_1191.py")
+    assert astlib.source_files(repo / "defender", ()) == []
+    _write(repo / "defender" / "pkg" / "kept_1191.py")
+    assert astlib.source_files(repo / "defender", ()) == ["pkg/kept_1191.py"]
+
+
 def test_o11_a_lint_over_a_tree_inside_an_ignored_directory_reports_its_plant(tmp_path, capsys):
     """O11 through a lint: the tree-write lint with `scope=<repo>/build/planted` (`build/`
     ignored by the enclosing repo) reports the raw write planted there (exit 1, named)."""
@@ -1603,10 +1647,25 @@ def test_o13_a_dead_unscanned_defender_tree_is_blind(capsys):
     assert PHANTOM in err, f"the blind scan does not name {dead}:\n{err}"
 
 
+def test_o13_an_unscanned_defender_tree_holding_no_module_is_blind(capsys):
+    """O13/D13 is "selects no file", not "does not exist": over this checkout, declaring
+    `defender/docs` unscanned — a directory that EXISTS and holds no `.py` — makes the
+    run-records lint's `main([])` exit 2 naming it."""
+    docs = DEFENDER / "docs"
+    assert docs.is_dir(), "precondition: defender/docs exists"
+    assert not [p for p in docs.rglob("*.py")], "precondition: defender/docs holds no module"
+    lint = _fresh(RUN_RECORDS, "_idle_unscanned")
+    lint.UNSCANNED_TREES = (*lint.UNSCANNED_TREES, "defender/docs")
+    rc, err = _main(lint, capsys, [])
+    assert rc == 2, f"main([]) with defender/docs declared unscanned: rc={rc}\n{err}"
+    assert _named(err, ["docs/"]), f"the blind scan does not name defender/docs:\n{err}"
+
+
 def test_o14_a_repo_level_unscanned_entry_is_spelled_top_level(tmp_path):
     """O14/D14: the scope statement renders a bare (repo-level) `UNSCANNED_TREES` entry as
-    "top-level <name>", after "never enters" — on the real lint, and on a copy with one more
-    bare entry declared — so it never reads as both sweeping and never entering `scripts`."""
+    "top-level <name>", after "never enters", and never bare there — on the real lint, and on
+    a copy with one more bare entry declared — so it never reads as both sweeping and never
+    entering `scripts`."""
     real = _fresh(RUN_RECORDS)
     copy = _statement_of_copy(tmp_path, "SWEEP_DIRS", '(*UNSCANNED_TREES, "zz_top_1191")')
     for statement, unscanned in ((real.SCOPE_STATEMENT, list(real.UNSCANNED_TREES)),
@@ -1618,23 +1677,33 @@ def test_o14_a_repo_level_unscanned_entry_is_spelled_top_level(tmp_path):
         assert not unspelled, (
             f"repo-level unscanned entries not spelled 'top-level <name>' after 'never enters': "
             f"{unspelled}\n{statement}")
+        # ...and ONLY so: no bare mention of the name as a whole path anywhere after it.
+        named_bare = [t for t in bare
+                      if re.search(rf"(?<![\w./-])(?<!top-level ){re.escape(t)}(?![\w./-])", tail)]
+        assert not named_bare, (
+            f"repo-level unscanned entries also named bare after 'never enters': {named_bare}"
+            f"\n{statement}")
 
 
 #: A module that does not parse.
 UNPARSEABLE = "def broken_1191(:\n"
+#: Test-module shapes outside `tests/` (the lints' own notion: `test_*.py`, `*_test.py`,
+#: `conftest.py`).
+TEST_MODULE_NAMES = ("test_broken_1191.py", "broken_1191_test.py", "conftest.py")
 
 
 def test_o15_tree_read_parses_only_census_modules(tmp_path):
     """O15/D15: the tree-read lint parses only census modules that are not tests — an unlisted
-    module or a test module (inside a listed package or under `tests/`) with a syntax error
-    leaves it clean (exit 0). Control: a census module with a syntax error is blind (exit 2,
+    module, or a test module under `tests/` or of any test shape inside a listed package
+    (`test_*.py`, `*_test.py`, `conftest.py`), with a syntax error leaves it clean (exit 0). Control: a census module with a syntax error is blind (exit 2,
     named)."""
     lint_file, modules = _tree_read_mini(tmp_path)
     _assert_clean(lint_file, TREE_READ)
     d = tmp_path / "defender"
     packages = [m for m in modules if m.endswith("/")]
     planted = [d / "zz_unlisted_1191.py", d / "tests" / "test_broken_1191.py"]
-    planted += [d / p / "test_broken_1191.py" for p in packages[:1]]
+    for package in packages[:1]:
+        planted += [d / package / name for name in TEST_MODULE_NAMES]
     for path in planted:
         _write(path, UNPARSEABLE)
     result = _run(lint_file)
@@ -1648,19 +1717,32 @@ def test_o15_tree_read_parses_only_census_modules(tmp_path):
 
 
 def test_o15_tree_write_never_parses_test_modules(tmp_path):
-    """O15/D15: the tree-write lint never parses test modules — `tests/test_*.py`, a `conftest.py`
-    — so one with a syntax error leaves it clean (exit 0). Control: a non-test module with a
+    """O15/D15: the tree-write lint never parses test modules — under `tests/`, or of any test
+    shape outside it (`test_*.py`, `*_test.py`, `conftest.py`, top-level or in a package) — so
+    one with a syntax error leaves it clean (exit 0). Control: a non-test module with a
     syntax error is blind (exit 2, named)."""
     lint_file, _entries = _tree_write_mini(tmp_path)
     _assert_clean(lint_file, TREE_WRITE)
     d = tmp_path / "defender"
-    for path in (d / "tests" / "test_broken_1191.py", d / "pkg_1191" / "conftest.py"):
+    planted = [d / "tests" / "test_broken_1191.py", d / "conftest.py"]
+    planted += [d / "pkg_1191" / name for name in TEST_MODULE_NAMES]
+    for path in planted:
         _write(path, UNPARSEABLE)
     result = _run(lint_file)
     assert result.returncode == 0, f"an unparseable test module blinded the tree-write lint\n{_said(result)}"
     _write(d / "zz_broken_1191.py", UNPARSEABLE)
     _expect(_run(lint_file), 2, "zz_broken_1191.py", on="stderr",
             why="control: an unparseable non-test module did not blind the scan")
+
+
+def test_o3_an_empty_planted_stage_frames_scope_keeps_todays_tolerance(tmp_path):
+    """O3 + D16: only the REAL scope is blind on an empty listing. A planted scope that exists
+    and holds no module (only a README) exits 0 — as it did before #1191 (76e48940's lint:
+    `main([], scope=<planted>)` over such a scope returns 0)."""
+    lint = _fresh(STAGE_FRAMES, "_empty_planted")
+    scope = tmp_path / "learning"
+    _write(scope / "README.md", "not code\n")
+    assert lint.main([], scope=scope, baseline_path=tmp_path / "baseline.json") == 0
 
 
 def test_o16_stage_frames_real_scope_through_a_symlink_is_not_blind(tmp_path):
