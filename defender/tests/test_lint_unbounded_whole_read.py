@@ -725,3 +725,170 @@ def test_real_investigation_reads_name_the_host_writer_cap():
     for fp in _INVESTIGATION_READS:
         reason = entries[f"defender/{fp}"]
         assert "64 KiB" in reason, f"{fp}: reason must name the 64 KiB host-writer cap: {reason!r}"
+
+
+# --------------------------------------------------------------------------------------------
+# adversary pass (#1188): shapes the first spec pinned only by the design's example spellings
+# --------------------------------------------------------------------------------------------
+
+def test_injected_receiver_is_matched_by_reader_name_not_receiver_spelling(tmp_path):
+    """The fallback keys on the attribute (the reader's name), whatever the receiver is called:
+    `io_mod.` is a spelling the real tree uses. Control: the same receiver, capped, is silent."""
+    tree = _tree(tmp_path, {"prod.py": (
+        "def a(io_mod, p):\n"
+        "    return io_mod.read_jsonl_rows(p, limit=None)\n"
+        "\n"
+        "def b(deps, p):\n"
+        "    return deps.store.io.read_text_utf8(p, limit=None)\n"
+        "\n"
+        "def capped(io_mod, p):\n"
+        "    return io_mod.read_jsonl_rows(p)\n"
+    )})
+    assert _fps(tree) == {
+        "prod.py:a:uncapped:read_jsonl_rows",
+        "prod.py:b:uncapped:read_text_utf8",
+    }
+
+
+def test_a_read_limit_from_anywhere_but_io_fires(tmp_path):
+    """Origin, not the trailing name: a `READ_LIMIT` imported from another module, or any
+    `<x>.READ_LIMIT` that is not `defender._io`'s, is just another expression."""
+    tree = _tree(tmp_path, {"prod.py": (
+        "from defender._io import read_jsonl_rows\n"
+        "from otherpkg import READ_LIMIT\n"
+        "from otherpkg import cfg\n"
+        "\n"
+        "def other_import(p):\n"
+        "    return read_jsonl_rows(p, limit=READ_LIMIT)\n"
+        "\n"
+        "def other_attr(p):\n"
+        "    return read_jsonl_rows(p, limit=cfg.READ_LIMIT)\n"
+    )})
+    assert _fps(tree) == {
+        "prod.py:other_import:uncapped:read_jsonl_rows",
+        "prod.py:other_attr:uncapped:read_jsonl_rows",
+    }
+
+
+def test_relative_imports_of_io_resolve(tmp_path):
+    """A module inside the package reaching `_io` relatively (`from .._io import ...`,
+    `from .. import _io`) is the same reader; so is its `READ_LIMIT` (the silent control)."""
+    tree = _tree(tmp_path, {"learning/prod.py": (
+        "from .. import _io\n"
+        "from .._io import READ_LIMIT, read_jsonl_rows\n"
+        "\n"
+        "def from_name(p):\n"
+        "    return read_jsonl_rows(p, limit=None)\n"
+        "\n"
+        "def from_module(p):\n"
+        "    return _io.read_text_utf8(p, limit=None)\n"
+        "\n"
+        "def capped(p):\n"
+        "    return read_jsonl_rows(p, limit=READ_LIMIT)\n"
+    )})
+    assert _fps(tree) == {
+        "learning/prod.py:from_name:uncapped:read_jsonl_rows",
+        "learning/prod.py:from_module:uncapped:read_text_utf8",
+    }
+
+
+def test_a_positional_limit_reader_is_in_the_reader_set(tmp_path):
+    """`limit` as a plain positional parameter counts as much as a keyword-only one."""
+    tree = _tree(
+        tmp_path,
+        {"prod.py": (
+            "from defender._io import read_pos\n"
+            "\n"
+            "def f(p):\n"
+            "    return read_pos(p, limit=None)\n"
+            "\n"
+            "def capped(p):\n"
+            "    return read_pos(p, limit=10)\n"
+        )},
+        extra=(
+            "\n"
+            "\n"
+            "def read_pos(path: Path, limit: int | None = READ_LIMIT) -> str:\n"
+            "    return ''\n"
+        ),
+    )
+    assert _fps(tree) == {"prod.py:f:uncapped:read_pos"}
+
+
+def test_a_comment_does_not_suppress(tmp_path):
+    """No inline escape: the only way past the gate is a reasoned baseline entry."""
+    tree = _tree(tmp_path, {"prod.py": (
+        "from defender._io import read_jsonl_rows\n"
+        "\n"
+        "def f(p):\n"
+        "    return p.read_text()  # noqa  lint-unbounded-read: ok\n"
+        "\n"
+        "def g(p):\n"
+        "    return read_jsonl_rows(p, limit=None)  # ok — trusted\n"
+    )})
+    assert _fps(tree) == {"prod.py:f:read_text:p", "prod.py:g:uncapped:read_jsonl_rows"}
+
+
+def test_class_qualified_through_an_aliased_module(tmp_path):
+    tree = _tree(tmp_path, {"prod.py": (
+        "import pathlib as pl\n"
+        "\n"
+        "def f(p):\n"
+        "    return pl.Path.read_text(p)\n"
+    )})
+    assert _fps(tree) == {"prod.py:f:read_text:p"}
+
+
+def _independent_real_census() -> set[str]:
+    """C11's probe, written apart from the gate: every `<x>.read_text/read_bytes(...)` call in
+    `defender/` production code (tests, `.venv`, `__pycache__` and the root `_io.py` out), as
+    `rel:kind`. The gate's scan must cover every one, so it cannot narrow its own scope."""
+    import ast
+
+    found: set[str] = set()
+    for path in DEFENDER.rglob("*.py"):
+        rel = path.relative_to(DEFENDER).as_posix()
+        parts = Path(rel).parts
+        if (rel == "_io.py" or "tests" in parts or ".venv" in parts or "__pycache__" in parts
+                or path.name == "conftest.py" or path.name.startswith("test_")
+                or path.name.endswith("_test.py")):
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in ("read_text", "read_bytes")):
+                found.add(f"{rel}:{node.func.attr}")
+    return found
+
+
+@pytest.mark.gate
+def test_real_scan_covers_an_independent_census():
+    census = _independent_real_census()
+    assert len(census) > 30, "the census itself must see the tree"
+    scanned = {f"{fp.split(':')[0]}:{fp.split(':')[2]}" for fp in _real_fps()}
+    assert census <= scanned, f"reads the gate did not scan: {sorted(census - scanned)}"
+
+
+@pytest.mark.gate
+def test_real_run_fails_on_an_empty_baseline(tmp_path):
+    """The real (unprefixed-scope) path ratchets too: with nothing baselined it fails."""
+    assert _GATE.main([], baseline_path=tmp_path / "absent.json") == 1
+
+
+def test_cli_exits_with_the_gate_status():
+    """The script's exit code is `main()`'s: CI reads only the process status."""
+    import ast
+
+    src = (LINT_DIR / "lint_unbounded_whole_read.py").read_text(encoding="utf-8")
+    guards = [n for n in ast.parse(src).body if isinstance(n, ast.If)
+              and "__main__" in ast.unparse(n.test)]
+    assert [ast.unparse(s) for g in guards for s in g.body] == ["sys.exit(main())"]
+
+
+@pytest.mark.gate
+def test_real_wire_log_reason_names_its_host_writer():
+    """The wire log is host-written and routinely past 100 MB: the box fsize limit does not
+    bound it, so its reason must say who writes it and must not lean on fsize."""
+    reason = _real_entries()[
+        "defender/scripts/visualize/visualize_messages.py:load_messages:uncapped:read_jsonl_rows"]
+    assert "host-written" in reason, reason
+    assert "fsize" not in reason, reason
