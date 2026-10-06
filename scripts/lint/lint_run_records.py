@@ -265,11 +265,21 @@ def _scan_literal_pass(
     return findings
 
 
+def _module_name(rel: str) -> str:
+    """The dotted module a swept file is (`learning/branch/cli.py` -> `defender.learning.branch.cli`),
+    so a call to one of its own top-level defs resolves to the origin `_astlib`'s factory table
+    names."""
+    parts = Path(rel).with_suffix("").parts
+    if parts and parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(("defender", *parts))
+
+
 def _scan_accessor_pass(rel: str, tree: ast.Module, lines: list[str],
                         accessor_names: frozenset[str]) -> list[Finding]:
     findings: list[Finding] = []
     owner = _enclosing(tree)
-    env = module_env(tree)
+    env = module_env(tree, module=_module_name(rel))
 
     def report(node: ast.AST, why: str) -> None:
         lineno = getattr(node, "lineno", 0)
