@@ -47,7 +47,7 @@ import re
 import sys
 from pathlib import Path
 
-from _astlib import ScanBlind, read_and_parse
+from _astlib import ScanBlind, read_and_parse, source_files
 from _baseline import Finding, gate
 from lint_unpinned_text_io import _is_test_module
 
@@ -110,10 +110,10 @@ def _scan(root: Path, *, honor_markers: bool = True) -> list[Finding]:
     """Findings under ``root``, fingerprints relative to it (drivable on a tmp tree).
     ``honor_markers=False`` also reports marked reads (the census of every whole read)."""
     findings: list[Finding] = []
-    for path in sorted(root.rglob("*.py")):
-        rel = path.relative_to(root).as_posix()
-        if rel == IO_REL or EXCLUDED_DIRS.intersection(Path(rel).parts) or _is_test_module(rel):
+    for rel in source_files(root, EXCLUDED_DIRS):
+        if rel == IO_REL or _is_test_module(rel):
             continue
+        path = root / rel
         text, tree = read_and_parse(path, rel)
         findings.extend(_scan_file(rel, tree, text.splitlines(), honor_markers))
     return findings
