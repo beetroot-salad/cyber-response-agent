@@ -1003,8 +1003,9 @@ def test_o1_an_emptied_listed_package_is_blind(tmp_path, stem):
     _write(base / entry / "__pycache__" / "stale_1191.py")
     _write(base / entry / "README.md", "not code\n")
     result = _run(lint_file)
-    _expect(result, 2, entry.rstrip("/"), on="stderr",
-            why=f"listed {entry} holds no scanned file and the scan was not blind")
+    assert result.returncode == 2, (
+        f"listed {entry} holds no scanned file and the scan was not blind\n{_said(result)}")
+    assert _named(result.stderr, [entry]), f"the blind scan does not name {entry}\n{_said(result)}"
     named = _named(result.stderr, [e for e in entries if not e.startswith(entry)])
     assert not named, f"the blind scan also names entries that select files: {named}\n{_said(result)}"
 
@@ -1174,23 +1175,37 @@ _READ_STATEMENT = ("import sys; sys.path.insert(0, sys.argv[1]); "
                    "import lint_run_records as m; print(m.SCOPE_STATEMENT)")
 
 
+def _statement_of_copy(root: Path, sweep_expr: str, unscanned_expr: str) -> str:
+    """The `SCOPE_STATEMENT` of a copy of the run-records lint whose `SWEEP_DIRS` and
+    `UNSCANNED_TREES` are rebound to the given expressions, read off the copy in a child."""
+    lint_file = _mini_repo(root, RUN_RECORDS, data=RUN_RECORDS_DATA)
+    _rebind(lint_file, "SWEEP_DIRS", sweep_expr)
+    _rebind(lint_file, "UNSCANNED_TREES", unscanned_expr)
+    result = subprocess.run(  # noqa: S603 — fixed argv built by the test
+        [sys.executable, "-c", _READ_STATEMENT, str(lint_file.parent)], cwd=root,
+        capture_output=True, encoding="utf-8", errors="replace", env=_child_env(), timeout=120,
+        check=False)
+    assert result.returncode == 0, f"the copied lint did not load\n{_said(result)}"
+    return result.stdout
+
+
+def _spelled(text: str, path: str) -> bool:
+    """`path` appears in `text` as a whole path, exactly as spelled (no prefix allowance: bare
+    `scripts` is not spelled by `defender/scripts`)."""
+    return re.search(rf"(?<![\w./-]){re.escape(path)}(?![\w./-])", text) is not None
+
+
 def test_o6_scope_statement_names_exactly_both_lists(tmp_path):
     """Edit the COPIED lint's lists — a swept dir added and one dropped, a `defender/` tree and a
     repo-top-level tree declared unscanned — and its `SCOPE_STATEMENT` follows: it names
     `defender/<d>` for every swept dir, every `UNSCANNED_TREES` entry, and no longer the dropped
     dir. A hand-kept statement cannot."""
-    lint_file = _mini_repo(tmp_path, RUN_RECORDS, data=RUN_RECORDS_DATA)
     real = _fresh(RUN_RECORDS)
     dropped = real.SWEEP_DIRS[-1]
     added = ("zz_swept_1191", "defender/zz_unscanned_1191", "zz_top_1191")
-    _rebind(lint_file, "SWEEP_DIRS", f"(*(d for d in SWEEP_DIRS if d != {dropped!r}), {added[0]!r})")
-    _rebind(lint_file, "UNSCANNED_TREES", f"(*UNSCANNED_TREES, {added[1]!r}, {added[2]!r})")
-    result = subprocess.run(  # noqa: S603 — fixed argv built by the test
-        [sys.executable, "-c", _READ_STATEMENT, str(lint_file.parent)], cwd=tmp_path,
-        capture_output=True, encoding="utf-8", errors="replace", env=_child_env(), timeout=120,
-        check=False)
-    assert result.returncode == 0, f"the copied lint did not load\n{_said(result)}"
-    statement = result.stdout
+    statement = _statement_of_copy(
+        tmp_path, f"(*(d for d in SWEEP_DIRS if d != {dropped!r}), {added[0]!r})",
+        f"(*UNSCANNED_TREES, {added[1]!r}, {added[2]!r})")
     swept = [d for d in real.SWEEP_DIRS if d != dropped] + [added[0]]
     want = [f"defender/{d}" for d in swept] + [*real.UNSCANNED_TREES, added[1], added[2]]
     unnamed = [w for w in want if w not in statement]
@@ -1225,3 +1240,198 @@ def test_o7_a_blind_render_writes_nothing(tmp_path):
     control = _run(lint_file, "--render")
     assert control.returncode == 0, f"control: --render failed\n{_said(control)}"
     assert page.read_bytes() != stale, "control: --render did not rewrite the stale page"
+
+
+# ======================================================================================
+# Holes the amendment adversary found in 0d415c26 (each passed by a cheating implementation)
+# ======================================================================================
+
+
+@pytest.mark.parametrize("leftovers", [("__pycache__/stale_1191.py", "README.md"),
+                                       ("tests/test_x_1191.py",)])
+def test_o1_stage_frames_emptied_default_scope_is_blind(tmp_path, leftovers):
+    """O1 restated covers the stage-frames lint's default scope (D4: the entry `learning/` under
+    `defender/`): emptied — left holding only a `__pycache__` module and a README, or only a test
+    module — it EXISTS but selects nothing the lint scans: exit 2 naming it. Control: the
+    untouched mini repo exits 0."""
+    lint_file, scope = _stage_frames_mini(tmp_path)
+    _assert_clean(lint_file, STAGE_FRAMES)
+    shutil.rmtree(tmp_path / scope)
+    for rel in leftovers:
+        _write(tmp_path / scope / rel, "not code\n" if rel.endswith(".md") else INERT)
+    _expect(_run(lint_file), 2, "learning", on="stderr",
+            why=f"defender/learning holds only {leftovers} and the scan was not blind")
+
+
+@pytest.mark.parametrize("leftover", ["test_stale_1191.py", "conftest.py", "tests/helper_1191.py"])
+@pytest.mark.parametrize("stem", [TREE_READ, TREE_WRITE])
+def test_o1_a_listed_package_holding_only_test_modules_is_blind(tmp_path, stem, leftover):
+    """A listed package left holding only a test module (`test_*.py`, `conftest.py`, a module
+    under `tests/`) selects a listed file but nothing the lint SCANS (both lints drop test
+    modules): exit 2 naming the package entry itself — matched as a whole path, so a nested entry
+    removed with it (`runtime/branch/_family.py`) does not stand in for it. Control: the
+    untouched mini repo exits 0."""
+    lint_file, entries, base = _surface(tmp_path, stem)
+    packages = [e for e in entries if e.endswith("/")]
+    assert packages, f"precondition: {stem}'s list has a package entry: {entries}"
+    entry = packages[0]
+    _assert_clean(lint_file, stem)
+    shutil.rmtree(base / entry)
+    _write(base / entry / leftover)
+    result = _run(lint_file)
+    assert result.returncode == 2, (
+        f"listed {entry} holds only {leftover} (never scanned) and the scan was not blind\n"
+        f"{_said(result)}")
+    assert _named(result.stderr, [entry]), f"the blind scan does not name {entry}\n{_said(result)}"
+
+
+@pytest.mark.parametrize("stem", [TREE_READ, TREE_WRITE, ENV_READS])
+def test_o5_gitignored_content_under_a_listed_package_is_not_scanned(tmp_path, stem):
+    """O5/D4 for every list-scoped lint: in a git repo ignoring `build/` (layout staged), an
+    untracked, not-ignored module holding a violation inside a listed package IS reported; the
+    same violation under that package's gitignored `build/` is not: exit 0."""
+    lint_file, entries, base = _surface(tmp_path, stem)
+    packages = [e for e in entries if e.endswith("/")]
+    assert packages, f"precondition: {stem}'s list has a package entry: {entries}"
+    package = base / packages[0]
+    _git_repo(tmp_path, "build/\n")
+    _assert_clean(lint_file, f"{stem} as a git repo")
+    probe, on = PROBES[stem]
+    new = _write(package / "new_1191.py", probe)
+    _expect(_run(lint_file), 1, "new_1191.py", on=on,
+            why=f"an untracked, not-ignored module in listed {packages[0]} was not scanned")
+    new.unlink()
+    _write(package / "build" / "x_1191.py", probe)
+    result = _run(lint_file)
+    assert result.returncode == 0, (
+        f"a violation under gitignored {packages[0]}build/ was scanned\n{_said(result)}")
+
+
+def test_o7_a_render_blinded_by_the_closure_writes_nothing(tmp_path):
+    """O7 whatever makes the scan blind: an unlisted package (the closure) with the page stale —
+    `--render` exits 2 naming the package and leaves the page byte-identical. Control: without
+    the package, the same `--render` exits 0 and rewrites the page."""
+    lint_file, _sweep = _run_records_mini(tmp_path)
+    page = tmp_path / RUN_RECORDS_DATA[1]
+    mark = _fresh(RUN_RECORDS).BEGIN_MARK
+    text = page.read_text(encoding="utf-8")
+    assert mark in text, "precondition: the page carries the generated block"
+    page.write_text(text.replace(mark, f"{mark}\n| stale_1191 | row |", 1), encoding="utf-8")
+    stale = page.read_bytes()
+    planted = _write(tmp_path / "defender" / "newpkg_1191" / "x.py")
+    result = _run(lint_file, "--render")
+    _expect(result, 2, "newpkg_1191", on="stderr", why="an unlisted package did not blind --render")
+    assert page.read_bytes() == stale, f"a closure-blind --render rewrote the page\n{_said(result)}"
+    shutil.rmtree(planted.parent)
+    control = _run(lint_file, "--render")
+    assert control.returncode == 0, f"control: --render failed\n{_said(control)}"
+    assert page.read_bytes() != stale, "control: --render did not rewrite the stale page"
+
+
+def test_o6_dropping_any_entry_of_either_list_unnames_it(tmp_path):
+    """O6 "exactly", from both ends of both lists: drop the FIRST swept dir and the LAST
+    declared-unscanned tree in the copy, and the statement names neither (a statement kept by
+    hand for today's entries plus the delta would still name them)."""
+    real = _fresh(RUN_RECORDS)
+    swept, unscanned = real.SWEEP_DIRS[0], real.UNSCANNED_TREES[-1]
+    statement = _statement_of_copy(
+        tmp_path, f"tuple(d for d in SWEEP_DIRS if d != {swept!r})",
+        f"tuple(t for t in UNSCANNED_TREES if t != {unscanned!r})")
+    assert not _spelled(statement, f"defender/{swept}"), (
+        f"SCOPE_STATEMENT still names dropped defender/{swept}:\n{statement}")
+    assert not _spelled(statement, unscanned), (
+        f"SCOPE_STATEMENT still names dropped {unscanned}:\n{statement}")
+    kept = [f"defender/{d}" for d in real.SWEEP_DIRS if d != swept]
+    assert all(_spelled(statement, k) for k in kept), f"control: {kept} not all named:\n{statement}"
+
+
+def test_o6_each_list_lands_on_its_own_side_of_the_sentence(tmp_path):
+    """D6 generates a "sweeps ... / never enters ..." sentence: every swept dir (as
+    `defender/<d>`) is named before "never enters", every declared-unscanned tree after it, and
+    no unscanned tree is named before it — on the real lint, and on a copy with one entry added
+    to each list (which must land on its own side and only there)."""
+    added_swept, added_unscanned = "zz_swept_1191", "defender/zz_unscanned_1191"
+    copy = _statement_of_copy(tmp_path, f"(*SWEEP_DIRS, {added_swept!r})",
+                              f"(*UNSCANNED_TREES, {added_unscanned!r})")
+    real = _fresh(RUN_RECORDS)
+    for statement, swept, unscanned in (
+            (real.SCOPE_STATEMENT, list(real.SWEEP_DIRS), list(real.UNSCANNED_TREES)),
+            (copy, [*real.SWEEP_DIRS, added_swept], [*real.UNSCANNED_TREES, added_unscanned])):
+        head, sep, tail = statement.partition("never enters")
+        assert sep, f"no 'never enters' clause:\n{statement}"
+        unswept = [d for d in swept if not _spelled(head, f"defender/{d}")]
+        assert not unswept, f"swept dirs not named before 'never enters': {unswept}\n{statement}"
+        unnamed = [t for t in unscanned if not _spelled(tail, t)]
+        assert not unnamed, f"unscanned trees not named after 'never enters': {unnamed}\n{statement}"
+        misplaced = [t for t in unscanned if _spelled(head, t)]
+        assert not misplaced, f"unscanned trees named as swept: {misplaced}\n{statement}"
+    assert added_swept not in copy.partition("never enters")[2], f"{added_swept} named as unscanned"
+
+
+def test_source_files_follows_the_repos_own_ignore_rules(tmp_path, monkeypatch):
+    """`source_files` drops exactly what git ignores, by the repo's OWN rules — not a list of
+    usual names: here `.gitignore` ignores another directory name, a file glob, and re-includes
+    one file by negation, and does NOT ignore `build/` or `venv/`. (Git's global and system
+    config are switched off for this test so a developer's own excludes cannot change the
+    answer.)"""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    astlib = import_lint_lib("_astlib")
+    repo = tmp_path / "repo"
+    for rel in ("defender/kept.py", "defender/build/b.py", "defender/scratch_1191/s.py",
+                "defender/pkg/gen_1191.py", "defender/venv/v.py"):
+        _write(repo / rel)
+    _git_repo(repo, "scratch_1191/\n*_1191.py\n!defender/pkg/keep_1191.py\n")
+    _write(repo / "defender" / "pkg" / "keep_1191.py")
+    got = sorted(astlib.source_files(repo / "defender", ()))
+    assert got == ["build/b.py", "kept.py", "pkg/keep_1191.py", "venv/v.py"], got
+
+
+def test_o2_an_unlisted_dir_holding_only_gitignored_modules_is_not_a_package(tmp_path):
+    """D2': the closure runs on the shared listing, so a top-level `defender/newpkg/` whose only
+    `.py` sits under a gitignored `build/` is no package: exit 0. Control: with `build/` no longer
+    ignored, the same tree exits 2 naming `newpkg_1191`."""
+    lint_file, _sweep = _run_records_mini(tmp_path)
+    _git_repo(tmp_path, "build/\n")
+    _assert_clean(lint_file, f"{RUN_RECORDS} as a git repo")
+    _write(tmp_path / "defender" / "newpkg_1191" / "build" / "x.py")
+    result = _run(lint_file)
+    assert result.returncode == 0, (
+        f"only-ignored .py under newpkg_1191/ blinded the closure\n{_said(result)}")
+    _write(tmp_path / ".gitignore", "# nothing ignored\n")
+    _expect(_run(lint_file), 2, "newpkg_1191", on="stderr",
+            why="control: with build/ un-ignored, unlisted newpkg_1191/ did not blind the scan")
+
+
+def test_o1_real_checkout_env_reads_root_flag_naming_this_repo_is_strict(capsys):
+    """Strictness follows where the root RESOLVES, not whether `--root` was passed: the env-read
+    lint handed this checkout by `--root` (plainly, or as `defender/..`) with a phantom `SWEPT`
+    entry exits 2 naming it. Control: the unmodified fresh load, same argv, exits 0."""
+    for argv in (["--root", str(WORKTREE)], ["--root", str(WORKTREE / "defender" / "..")]):
+        assert _fresh(ENV_READS, "_control").main(argv) == 0, f"control: main({argv}) not clean"
+        capsys.readouterr()
+        lint = _fresh(ENV_READS, "_phantom")
+        lint.SWEPT = (*lint.SWEPT, f"defender/{PHANTOM}.py")
+        rc, err = _main(lint, capsys, argv)
+        assert rc == 2, f"main({argv}) over this checkout with a phantom entry: rc={rc}\n{err}"
+        assert PHANTOM in err, f"the blind scan does not name {PHANTOM}:\n{err}"
+
+
+def test_source_files_survives_an_undecodable_file_name(tmp_path):
+    """A module whose name is not valid UTF-8 (bytes `bad\\xff.py`, surfaced by Python as a
+    surrogate-escaped str) neither crashes the listing nor hides it: in a git repo ignoring
+    `build/`, `source_files` returns it, and still drops the ignored module. Skipped where the
+    filesystem refuses such a name."""
+    astlib = import_lint_lib("_astlib")
+    repo = tmp_path / "repo"
+    bad = os.fsdecode(b"bad\xff.py")
+    try:
+        _write(repo / "defender" / bad)
+    except (OSError, UnicodeError) as refused:
+        pytest.skip(f"this filesystem refuses an undecodable name: {refused!r}")
+    _write(repo / "defender" / "kept.py")
+    _write(repo / "defender" / "build" / "x.py")
+    _git_repo(repo, "build/\n")
+    got = sorted(astlib.source_files(repo / "defender", ()))
+    assert got == sorted([bad, "kept.py"]), got
