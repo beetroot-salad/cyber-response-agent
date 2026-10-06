@@ -675,10 +675,17 @@ class _Scanner:
             if a.name == "*":
                 if source in _STAR_SOURCES:
                     self._use(scope, "*", node)
-            elif a.name in self.layout:
+            elif self._is_layout(f"{source}.{a.name}"):
                 self._use(scope, a.name, node)
             elif a.name == _RUNS_DIRNAME:
                 self._use(scope, _RUNS_DIRNAME, node)
+
+    def _is_layout(self, origin: str) -> bool:
+        """Whether `origin` is a layout name, judged by where it is DEFINED: followed through
+        every relay module that re-binds it (`_episode_paths.ALERT` is the door's `ALERT`), so a
+        name merely spelled like a layout name elsewhere (invlang's `PROVENANCE`) is not one."""
+        head, _, last = self.prog.resolve(origin).rpartition(".")
+        return head == _DOOR and last in self.layout
 
     def _attribute(self, node: ast.Attribute, scope: str, env: Mapping[str, Type]) -> bool:
         """Flag `node` if it is a gated read; True when its value need not be walked."""
@@ -686,7 +693,7 @@ class _Scanner:
             origin = _name_origin(node, self.mod)
             if origin is not None:
                 head, _, last = origin.rpartition(".")
-                if head == _DOOR and last in self.layout:
+                if self._is_layout(origin):
                     self._use(scope, last, node)
                     return True
                 if head.startswith("defender") and last == _RUNS_DIRNAME:
@@ -703,9 +710,9 @@ class _Scanner:
 
 def _own_nodes(body: list[ast.stmt]) -> Iterator[ast.AST]:
     """Every node of a function body that is not inside a nested def, class or lambda."""
-    stack: list[ast.AST] = list(body)
+    stack: collections.deque[ast.AST] = collections.deque(body)
     while stack:
-        node = stack.pop(0)
+        node = stack.popleft()
         yield node
         for child in ast.iter_child_nodes(node):
             if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,

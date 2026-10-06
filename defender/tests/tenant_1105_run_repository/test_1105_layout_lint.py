@@ -96,8 +96,9 @@ NON_LAYOUT = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "ca
                         "open_run", "list_run_ids", "bound_runs", "run_exists",
                         "record_episode_runs", "episode_runs", "sibling_run_ids",
                         "episode_sibling_ids", "RunRefused",
-                        # Owner ruling (second high review): the sidecar clause's own door name.
-                        "sidecar_owner"})
+                        # Owner rulings (the high and xhigh reviews): the two decisions the
+                        # repository answers for its outside callers.
+                        "run_name_fault", "hold_runs_folder"})
 
 _VE = "scripts/visualize/visualize_episode.py"
 _CLI = "learning/branch/cli.py"

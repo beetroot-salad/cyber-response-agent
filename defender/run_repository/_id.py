@@ -24,7 +24,6 @@ from defender._run_id import RUN_ID_ALLOWED, _utc_now, mint_run_id, run_id_fault
 from defender._shown import quoted
 from defender.run_repository._errors import RunRefused
 
-#: The bound on a run id's bytes (D12.3): 255 - 25 - 24. See the module docstring.
 def _admit(text: str) -> str:
     """`text` if it is a run id `RunId` admits (`run_id_fault`), else `RunRefused`. `text` is
     an exact `str`."""

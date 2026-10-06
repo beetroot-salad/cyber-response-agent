@@ -262,27 +262,83 @@ def test_run_setup_holds_the_runs_folder_once(tmp_path):
     alert.parent.mkdir()
     alert.write_text('{"alert": 1}', encoding="utf-8")
     seen = _HoldCount()
+    previous = sys.getprofile()
     sys.setprofile(seen)
     try:
         run_common.materialize_run(alert, "pinned-1", tenant=t)
     finally:
-        sys.setprofile(None)
+        sys.setprofile(previous)
     assert seen.holds == 1, f"run setup held the runs folder {seen.holds} times"
 
 
 def test_a_runs_folder_that_cannot_be_opened_is_not_called_a_link(tmp_path):
     """A hold failure other than a link says what the hold said (here: the name is too long),
     not 'it is a link … or not a directory'."""
-    from defender import run_common
     from defender._tenant import TenantRefused
     with pytest.raises(TenantRefused) as refused:
-        run_common._hold_runs_base(tmp_path / ("x" * 300))
+        R.hold_runs_folder(tmp_path / ("x" * 300), create=True)
     assert "link" not in str(refused.value), str(refused.value)
     assert "too long" in str(refused.value), str(refused.value)
 
 
-def test_the_sidecar_clause_is_a_door_name_not_a_path_accessor():
-    assert R.sidecar_owner("r1.run-end.json") == "r1"
-    assert R.sidecar_owner("r1.run-end.json.staged-0a") == "r1"
-    assert R.sidecar_owner("r1") is None
+def test_run_setup_and_the_lookups_refuse_a_linked_runs_folder_in_the_same_words(tmp_path):
+    """Run setup holds its runs folder with the repository's own opener, so one state has one
+    message wherever it is met."""
+    from defender import run_common
+    from defender._tenant import TenantRefused
+    t = H.tenant(tmp_path / "data")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    os.symlink(elsewhere, t.runs)
+    alert = tmp_path / "a" / "alert.json"
+    alert.parent.mkdir()
+    alert.write_text('{"alert": 1}', encoding="utf-8")
+    with pytest.raises(TenantRefused) as setup:
+        run_common.materialize_run(alert, "pinned-1", tenant=t)
+    with pytest.raises(TenantRefused) as lookup:
+        R.list_run_ids(t)
+    assert str(setup.value) == str(lookup.value), (str(setup.value), str(lookup.value))
+    assert "is a link" in str(setup.value), str(setup.value)
+
+
+def test_the_run_name_rule_is_one_answer_for_every_caller():
+    """`run_name_fault` is the run-id rule plus the sidecar clause, and the sidecar clause is
+    no `RunPaths` method (the records lint needs no carve-out)."""
+    assert R.run_name_fault("r1") is None
+    assert "sidecar" in R.run_name_fault("r1.run-end.json")
+    assert "sidecar" in R.run_name_fault("r1.run-end.json.staged-0a")
+    assert "206-byte" in R.run_name_fault("r" * 207)
     assert not hasattr(R.RunPaths, "sidecar_owner")
+
+
+def test_a_sidecar_shaped_label_is_refused_at_the_family_gate():
+    """The xhigh review's case: a label that passes the view and run-id rules but makes the
+    sibling id sidecar-shaped is refused with the manifest, not by every child."""
+    from defender.runtime.branch import _family
+    with pytest.raises(_family.FamilyError, match="sidecar"):
+        _family.check_identities(_family.parse_family(
+            _family_doc("ep", "x.accounting_failures.json")))
+
+
+def test_run_exists_and_the_writer_agree_on_a_taken_id(tmp_path):
+    """An id that owns sidecar files but has no run folder is taken for both: `run_exists`
+    answers True and the writer refuses it as an arm."""
+    t = H.tenant(tmp_path / "data")
+    runs = H.runs_folder(t)
+    H.make_run(runs, "r0")
+    (runs / "ep-a.run-end.json").write_text("{}", encoding="utf-8")
+    assert R.run_exists(t, R.RunId.parse("ep-a")) is True
+    with pytest.raises(R.RunRefused, match="taken"):
+        R.record_episode_runs(t, "ep", R.RunId.parse("r0"), {"a": R.RunId.parse("ep-a")})
+
+
+def test_a_long_printable_path_keeps_its_file_name_when_cut():
+    """The xhigh review's case: a knowledge-folder refusal over a deep path must still name the
+    entry to remove, so `shown` cuts the middle and keeps the start and the end."""
+    from defender._shown import shown
+    path = "agent/" + "skills/very-long-skill-folder-name/" * 4 + "file.md"
+    text = shown(path)
+    assert text.endswith("folder-name/file.md"), text
+    assert text.startswith("agent/skills/"), text
+    assert "chars)" in text, text
+    assert len(text) < len(path), text

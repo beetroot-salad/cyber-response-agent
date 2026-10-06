@@ -79,8 +79,10 @@ def list_run_ids(tenant: Tenant, *, io: Any = _io) -> list[RunId]:
 
 
 def run_exists(tenant: Tenant, run_id: RunId, *, io: Any = _io) -> bool:
-    """Whether a run or a known sidecar file stands at `run_id` in the tenant's runs folder:
-    an occupancy answer, so the sidecar clause is not applied to `run_id`. `False` when the
+    """Whether `run_id` is taken in the tenant's runs folder (`Listing.holds`, the record
+    writer's definition too): a run stands there, sidecar files owned by that id stand beside
+    it (its folder gone or not), or a sidecar file is named exactly `run_id`. An occupancy
+    answer, so the sidecar clause is not applied to `run_id`. `False` when the
     folder is absent. The whole listing is judged, so an unexpected entry refuses, save
     `_tenant.json` and `_episodes`, whose kind is judged only where they are read: `_episodes`
     is not read here."""
@@ -89,8 +91,7 @@ def run_exists(tenant: Tenant, run_id: RunId, *, io: Any = _io) -> bool:
     with hold_runs(tenant, io) as runs:
         if runs.absent:
             return False
-        listing = runs.listing()
-        return run_id in listing.runs or str(run_id) in listing.sidecars
+        return runs.listing().holds(run_id)
 
 
 class RunRow:

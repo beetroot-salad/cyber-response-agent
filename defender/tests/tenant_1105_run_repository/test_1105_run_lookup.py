@@ -1272,7 +1272,8 @@ def test_1105_a_run_with_sidecar_files_beside_it_lists_as_the_one_run(tmp_path):
     """A run folder r1 with its four sidecar files beside it and a staged one
     (r1.run-end.json.staged-<16 hex>) lists as the one run r1 in list_run_ids and bound_runs,
     neither refuses, and run_exists answers True for r1 and for each sidecar name; sidecar files
-    left for a run whose folder is gone are accepted the same way and that id is not listed. A
+    left for a run whose folder is gone are accepted the same way, that id is not listed, and
+    run_exists answers True for it (owner ruling: the writer's "taken"). A
     run whose id is 206 bytes (the bound) with the longest sidecar suffix's staged file beside it
     (<id>.accounting_failures.json.staged-<16 hex>, a 255-byte name made on the real filesystem)
     lists as that one run in both listings, and run_exists answers True for it."""
@@ -1286,7 +1287,9 @@ def test_1105_a_run_with_sidecar_files_beside_it_lists_as_the_one_run(tmp_path):
     assert run_exists(t, RunId.parse("r1")) is True, "r1 exists"
     for path in made:
         assert run_exists(t, RunId.parse(path.name)) is True, f"{path.name} exists"
-    assert run_exists(t, RunId.parse("gone")) is False, "the gone run's id has no folder"
+    # Owner ruling (xhigh review): "taken" has one definition, the record writer's, so an id
+    # whose folder is gone but whose sidecar files remain is taken (was: False).
+    assert run_exists(t, RunId.parse("gone")) is True, "the gone run's sidecars still hold its id"
     longest = max(H.SIDECAR_SUFFIXES, key=len)
     long_id = "r1-" + "a" * (H.RUN_ID_BOUND - 3)
     H.make_run(t.runs, long_id)

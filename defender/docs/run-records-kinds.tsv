@@ -1,9 +1,9 @@
 kind	table	path	deny	archived_as	subcollection	note	table_note
-alert	1	alert.json	— (deliberately not in the answer key, `run_repository/_layout.py:539-541`)	alert.json	run.facts.alert	input copied by the host	
+alert	1	alert.json	— (deliberately not in the answer key, `run_repository/_layout.py`, the comment on `CASE_ANSWER_KEY_NAMES`)	alert.json	run.facts.alert	input copied by the host	
 report	1	report.md	confined	report.md	run.documents.report	the close tool is its only writer; no role holds a write grant for it (`close_tool.py:1`)	
 investigation	1	investigation.md	confined	investigation.md	run.documents.investigation	seeds (lead-0, branch resume) write it before the first turn; the document tool during	
 queries	1	executed_queries.jsonl	confined	staged as a table	run.tables.queries	append-only; the gather lane's denial rows land here too	
-source_refs	1	source_refs.yaml	confined (`run_repository/_layout.py:363-366`)	—	run.documents.source_refs	no writer in this repo — consumed only; test helpers fabricate it (`tests/conftest.py:202`); `tests/test_orchestrate_thresholds.py:509` records that its writer is gone	
+source_refs	1	source_refs.yaml	confined (`run_repository/_layout.py`: `CASE_ANSWER_KEY_NAMES` and `RunPaths.source_refs`)	—	run.documents.source_refs	no writer in this repo — consumed only; test helpers fabricate it (`tests/conftest.py:202`); `tests/test_orchestrate_thresholds.py:509` records that its writer is gone	
 gather_raw	1	gather_raw/<lead>/<seq>.json	shape	staged as a table	run.tables.payloads	by-ref payloads; the model reaches them by the bash `cat` lane only	
 lead_claim	1	gather_raw/<lead>.lead.json	shape (same dir)	with gather_raw	run.tables.leads	per-lead claim sidecar, exclusive create	
 gather_summaries	1	gather_summaries/<lead>.md	—	gather_summaries/	run.documents.gather_summaries		
@@ -19,7 +19,7 @@ circuit_breaker	1	circuit_breaker.json	—	—	run.observability.circuit_breaker
 lessons_loaded	1	lessons_loaded.jsonl	—	lessons_loaded.jsonl	run.observability.lessons_loaded	receipt of corpus consumption; `hooks/record_lesson_load` is the reader-side classifier	
 ticket_reads	1	ticket_reads/<seq>.json	cap	—	run.tables.ticket_reads	retired writer (the old pipeline judge, `permission/files.py:394-395`); only the path shape (`run_repository/_layout.py:231-233`) and the read cap survive	
 session_pointer	1	session_store_pointer.json	—	—	run.observability.session_pointer	written by the driver before the first turn	
-runtime_html	1	runtime.html	(inlines MAIN's transcript; safe on timing only, `run_repository/_layout.py:29-31`)	—	run.observability.runtime_html	copied to the main checkout's `run-visualizations/` on `dev` deployments only, written as the checkout's owner (`visualize_run.mirror_page`, #1084/#1110)	
+runtime_html	1	runtime.html	(inlines MAIN's transcript; safe on timing only, `run_repository/_layout.py`, the comment on `WIRE_LOG_DIR`)	—	run.observability.runtime_html	copied to the main checkout's `run-visualizations/` on `dev` deployments only, written as the checkout's owner (`visualize_run.mirror_page`, #1084/#1110)	
 box_sentinel	1	.box-sentinel	—	—	run.observability.box_sentinel	`unlink_on_fault=False` (`_lifecycle.py:105-106`), left behind on a fault as evidence (`:96-102`); the mount-check sentinel `.box-sentinel-<uuid>` (`:109-117`) is a different, self-cleaning family	
 provenance	1	provenance.json	outright	provenance.json	run.facts.provenance	stamped by the host at materialize time	
 run_end	2	<run>.run-end.json		run_end.json (renamed, `archive.py:148`)	run.facts.run_end	cleared by the host at `run_common.py:71-77` before a reused id	All four are written outside the box's writable mount so the model can neither plant nor suppress them. No read-gate deny names them; root containment keeps every role out.

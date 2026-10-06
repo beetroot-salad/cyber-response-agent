@@ -118,3 +118,33 @@ def test_the_layout_lint_with_no_layout_universe_is_a_finding(tmp_path, state):
         layout.write_text("", encoding="utf-8")
     findings = _lint().scan(root, allow_list=[])
     assert any("_layout.py" in f.display for f in findings), [f.display for f in findings]
+
+
+def _plant(root, rel, text):
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def test_the_layout_lint_follows_a_layout_name_through_a_relay_module(tmp_path):
+    """A layout name read off a module that re-binds it (`relay.ALERT`) is the door's name: the
+    xhigh review's bypass, where only a read off the door itself was flagged."""
+    root = _package_copy(tmp_path)
+    _plant(root, "learning/relay.py", "from defender.run_repository import ALERT, RUN_LAYOUT\n")
+    _plant(root, "learning/probe_relay.py",
+           "from defender.learning import relay as ep\n\n\n"
+           "def f(d):\n    return d / ep.ALERT, ep.RUN_LAYOUT.report\n")
+    shown = [f.display for f in _lint().scan(root, allow_list=[])]
+    hits = [d for d in shown if "learning/probe_relay.py" in d]
+    assert any("ALERT" in d for d in hits), shown
+    assert any("RUN_LAYOUT" in d for d in hits), shown
+
+
+def test_the_layout_lint_ignores_a_name_merely_spelled_like_a_layout_name(tmp_path):
+    """An unrelated constant named like a layout name is judged by where it is defined, so it
+    is no run-layout import (the xhigh review's `PROVENANCE` from invlang's vocabulary)."""
+    root = _package_copy(tmp_path)
+    _plant(root, "skills/vocab.py", 'PROVENANCE = ("source", "derived")\n')
+    _plant(root, "learning/probe_vocab.py", "from defender.skills.vocab import PROVENANCE\n")
+    shown = [f.display for f in _lint().scan(root, allow_list=[])]
+    assert not [d for d in shown if "learning/probe_vocab.py" in d], shown

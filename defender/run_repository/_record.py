@@ -35,7 +35,7 @@ from defender._shown import quoted, shown
 from defender.run_repository._errors import RunRefused
 from defender.run_repository._held import (
     EPISODES_DIRNAME, HeldRuns, Listing, hold_runs, require_accepted_tenant, require_run_id,
-    sidecar_owner,
+    run_name_fault,
 )
 from defender.run_repository._id import RunId
 
@@ -139,12 +139,9 @@ def _parse_episode_record(text: str, *, path: str, stem: str,
                   tenant_id: str | None) -> tuple[RunId, dict[str, RunId]]:
     """The source and `{label: RunId}` of one record's text, or `RunRefused` naming `path` for
     the first rule it breaks (D3.4). `tenant_id=None` makes no tenant compare."""
-    if _io.json_nesting_depth(text) > _io.JSON_NESTING_LIMIT:
-        raise _corrupt(path, f"nested deeper than {_io.JSON_NESTING_LIMIT}")
-    try:
-        doc = json.loads(text, object_pairs_hook=_no_duplicate_keys)
-    except (ValueError, RecursionError) as exc:
-        raise _corrupt(path, f"not one strict JSON document: {exc}") from None
+    doc, reason = _io.load_json_artifact(text, object_pairs_hook=_no_duplicate_keys)
+    if reason is not None:
+        raise _corrupt(path, f"not one strict JSON document: {reason}")
     if not _strict_text(doc):
         raise _corrupt(path, "it escapes a lone surrogate, which no UTF-8 text holds")
     if not isinstance(doc, dict) or set(doc) != _FIELDS:
@@ -301,8 +298,8 @@ def _admit_runs(episode_id: str, source: RunId,
     arms: dict[str, RunId] = {}
     for raw_label, run_id in items:
         label = _admit_label(raw_label, folded)
-        if sidecar_owner(str(run_id)) is not None:
-            raise RunRefused(f"arm {quoted(str(run_id))} is shaped like a host-only sidecar file")
+        if (why := run_name_fault(str(run_id))) is not None:
+            raise RunRefused(f"arm {quoted(str(run_id))} cannot name a run: {why}")
         if str(run_id) != f"{episode_id}-{label}":
             raise RunRefused(f"arm {quoted(str(run_id))} for label {quoted(label)} is not "
                              f"{quoted(f'{episode_id}-{label}')}")
@@ -388,6 +385,6 @@ def _refuse_taken_arms(arms: Mapping[str, RunId], records: Mapping[str, Mapping[
         if run_id in claimed:
             raise RunRefused(f"arm {quoted(str(run_id))} is already claimed by episode "
                              f"{quoted(claimed[run_id])}'s record")
-        if run_id in listing.runs or run_id in listing.sidecar_ids:
+        if listing.holds(run_id):
             raise RunRefused(f"arm {quoted(str(run_id))} is taken: {folder}/{run_id} holds a "
                              "run or its sidecar files")

@@ -29,11 +29,23 @@ def quoted(value: object) -> str:
     return f"{value[:low]!r}…(+{len(value) - low} chars)"
 
 
+#: How much of a long printable name `shown` keeps before its cut; the rest of `SHOWN_LIMIT`
+#: goes to its end, where a path's file name is.
+_SHOWN_HEAD = 50
+
+
 def shown(name: object) -> str:
     """A name inside a path, as a refusal shows it: verbatim when it is printable and short, so
-    an ordinary path stays copy-pasteable, else `quoted`."""
+    an ordinary path stays copy-pasteable. A longer printable one keeps its start and its end —
+    the file name an operator must act on — and cuts the middle, saying how much went. Anything
+    with a character `str.isprintable` rejects is `quoted`."""
     text = str(name)
-    return text if text.isprintable() and len(text) <= SHOWN_LIMIT else quoted(text)
+    if not text.isprintable():
+        return quoted(text)
+    if len(text) <= SHOWN_LIMIT:
+        return text
+    tail = SHOWN_LIMIT - _SHOWN_HEAD
+    return f"{text[:_SHOWN_HEAD]}…(+{len(text) - SHOWN_LIMIT} chars)…{text[-tail:]}"
 
 
 def escaped(text: object) -> str:

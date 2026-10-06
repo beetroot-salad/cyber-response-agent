@@ -19,7 +19,8 @@ if str(REPO_ROOT) not in sys.path:
 from defender import _io, _provenance, _tenant  # noqa: E402
 from defender._io import guarded_mkdir  # noqa: E402
 from defender.run_repository import (  # noqa: E402
-    Run, RunId, RunPaths, RunRefused, artifact_dir, case_ref, episode_sibling_ids, sidecar_owner,
+    Run, RunId, RunPaths, RunRefused, artifact_dir, case_ref, episode_sibling_ids,
+    hold_runs_folder, run_name_fault,
 )
 from defender.scripts.visualize._page_failed import VisualizeFailed  # noqa: E402
 
@@ -94,7 +95,7 @@ def materialize_run(
     else:
         runs_base = tenant.runs
     # One no-follow hold of the runs base serves its state check and the claimed-id read.
-    with _hold_runs_base(runs_base) as held:
+    with hold_runs_folder(runs_base, create=True) as held:
         # The tenant record comes before the provenance stamp (which must match it) and before
         # the box exists. Unlike the stamp, its failures propagate: a forged tenant is worse
         # than no run.
@@ -148,37 +149,10 @@ def _admit_run_id(alert: Path, run_id: str | None) -> str:
                     else RunId.parse(run_id))
     except RunRefused as bad:
         sys.exit(f"invalid run id: {bad}")
-    # The sidecar clause (D2.1): a run folder is never named like a host-only sidecar file.
-    if sidecar_owner(str(admitted)) is not None:
-        sys.exit(f"invalid run id: {str(admitted)!r} is shaped like a host-only sidecar file "
-                 "beside a run folder, not a run")
+    # The sidecar clause (D2.1): the repository's one answer to "may this text name a run?".
+    if (why := run_name_fault(str(admitted))) is not None:
+        sys.exit(f"invalid run id: {why}")
     return str(admitted)
-
-
-def _hold_runs_base(runs_base: Path) -> _io.Held:
-    """The runs base, held no-follow (#1105 OP-2): a link there (dangling or not), a non-directory
-    or a folder that cannot be opened is `TenantRefused` carrying the hold's own reason, before
-    anything is created or read inside it. An absent one is created first (`guarded_mkdir`; the
-    runs base is the host-controlled trust root, nothing above it is judged), then held."""
-    held = _hold_or_refuse(runs_base, absent_ok=True)
-    if held is not None:
-        return held
-    guarded_mkdir(runs_base, base=runs_base)
-    held = _hold_or_refuse(runs_base, absent_ok=False)
-    assert held is not None
-    return held
-
-
-def _hold_or_refuse(runs_base: Path, *, absent_ok: bool) -> _io.Held | None:
-    try:
-        return _io.hold(runs_base, follow=False)
-    except FileNotFoundError:
-        if absent_ok:
-            return None
-        raise
-    except OSError as bad:
-        raise _tenant.TenantRefused(
-            f"the runs folder {runs_base} is unusable: {bad.strerror or bad}") from None
 
 
 def _refuse_claimed_run_id(held: _io.Held, runs_base: Path, run_id: str) -> None:

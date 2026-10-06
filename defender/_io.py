@@ -936,17 +936,21 @@ def json_nesting_depth(text: str) -> int:
 
 
 # lint-parse: ok — returns `object`, not `Any`, so each caller must narrow the shape itself.
-def load_json_artifact(text: str) -> tuple[object, str | None]:
+def load_json_artifact(
+    text: str, *, object_pairs_hook: Callable[[list[tuple[str, Any]]], Any] | None = None,
+) -> tuple[object, str | None]:
     """Decode one JSON artifact a box could have written: ``(value, None)``, or ``(None,
     reason)`` when it is not one. Success is ``reason is None`` — ``null`` decodes to ``None``.
 
     The single place malformed-artifact tolerance is decided. Nesting is checked before
     decoding (see :data:`JSON_NESTING_LIMIT`) rather than catching ``RecursionError``, whose
-    occurrence depends on the caller's stack depth."""
+    occurrence depends on the caller's stack depth. ``object_pairs_hook`` is ``json.loads``'s,
+    for a caller with a stricter object rule (the episode record refuses a duplicate key): a
+    ``ValueError`` it raises is that document's ``reason``."""
     if json_nesting_depth(text) > JSON_NESTING_LIMIT:
         return None, f"nested deeper than {JSON_NESTING_LIMIT}"
     try:
-        return json.loads(text), None
+        return json.loads(text, object_pairs_hook=object_pairs_hook), None
     except ValueError as e:
         return None, str(e)
 

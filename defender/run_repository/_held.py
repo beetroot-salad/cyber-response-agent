@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from defender import _io
+from defender._run_id import run_id_fault
 from defender._shown import escaped, quoted, shown
 from defender._tenant import (
     TENANT_RECORD_NAME, Tenant, TenantRecordMismatch, TenantRefused, read_tenant, record_path,
@@ -63,7 +64,8 @@ def sidecar_owner(name: str) -> str | None:
     not shaped like a sidecar. The one statement of the sidecar clause (#1105 D2.1, MF-21): run
     setup and `open_run` refuse an id it answers for, and the listings take a regular file it
     answers for as a known sidecar when `RunId.parse` admits the owner (any other such file is
-    refused). A door name of its own (owner ruling): it judges a name, not a path."""
+    refused). It judges a name, not a path; outside the package it is asked through
+    `run_name_fault`."""
     bare = name[: m.start()] if (m := _STAGED_TAIL.search(name)) else name
     for suffix in _SIDECAR_SUFFIXES:
         if bare.endswith(suffix) and len(bare) > len(suffix):
@@ -71,13 +73,25 @@ def sidecar_owner(name: str) -> str | None:
     return None
 
 
+def run_name_fault(text: str) -> str | None:
+    """Why `text` cannot name a run folder, or `None`: the run-id rule (`run_id_fault`: grammar,
+    case stability, the 206-byte bound) and the sidecar clause (D2.1, MF-21: a name shaped like
+    a host-only sidecar file, or the staged file a sidecar write makes first, never names a
+    run). Judged on the name alone, before anything is read. The one answer to "may this text
+    name a run?": run setup admits a run id by it, the family model's gate judges each
+    `<episode_id>-<label>` by it, and the record writer each arm."""
+    if (why := run_id_fault(text)) is not None:
+        return why
+    if sidecar_owner(text) is not None:
+        return (f"{quoted(text)} is shaped like a host-only sidecar file beside a run folder, "
+                "not a run")
+    return None
+
+
 def refuse_sidecar_id(run_id: RunId) -> None:
-    """The sidecar clause (D2.1, MF-21) on an id: one shaped like a host-only sidecar file, or
-    like the staged file a sidecar write makes first, never names a run. Judged on the name
-    alone, before anything is read."""
-    if sidecar_owner(str(run_id)) is not None:
-        raise RunRefused(f"{quoted(str(run_id))} is shaped like a host-only sidecar file beside "
-                         "a run folder, not a run")
+    """`run_name_fault` on a `RunId` (whose run-id rule already holds), as `RunRefused`."""
+    if (why := run_name_fault(str(run_id))) is not None:
+        raise RunRefused(why)
 
 
 def tenant_refusal(message: str, cls: type[TenantRefused] = TenantRefused) -> TenantRefused:
@@ -103,6 +117,13 @@ class Listing:
     runs: tuple[RunId, ...]
     sidecars: frozenset[str]
     sidecar_ids: frozenset[RunId]
+
+    def holds(self, run_id: RunId) -> bool:
+        """Whether `run_id` is taken in this folder: a run stands there, a sidecar file owned by
+        that id stands beside it (a new run there would meet that file), or a sidecar file is
+        named exactly `run_id`. The one definition `run_exists` and the record writer share."""
+        return (run_id in self.runs or run_id in self.sidecar_ids
+                or str(run_id) in self.sidecars)
 
 
 def _parses(text: str) -> RunId | None:
@@ -236,18 +257,36 @@ class HeldRuns:
         self._held.write(name, text, mode=mode)
 
 
+def hold_runs_folder(folder: Path, *, create: bool = False, io: Any = _io) -> _io.Held:
+    """`folder` — a runs folder — held open no-follow, the one way the package and run setup
+    open one (#1105 H1, OP-2). A link there (dangling or not), a non-directory or a folder that
+    cannot be opened is `TenantRefused` naming the folder and the fault. An absent folder is
+    `FileNotFoundError`, or with `create` is made first (`guarded_mkdir`: the runs folder is the
+    host-controlled trust root, nothing above it is judged) and then held."""
+    folder = Path(folder)
+    try:
+        try:
+            return io.hold(folder, follow=False)
+        except FileNotFoundError:
+            if not create:
+                raise
+        io.guarded_mkdir(folder, base=folder)
+        return io.hold(folder, follow=False)
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        raise tenant_refusal(f"the runs folder {folder} {_hold_fault(exc)}") from None
+
+
 @contextmanager
 def hold_runs(tenant: Tenant, io: Any) -> Iterator[HeldRuns]:
     """`tenant.runs`, held open no-follow for the block (`absent` when it does not exist, the
-    one expected state of the folder itself). Any other refusal of the open is `TenantRefused`
-    naming the folder; the handle is closed when the block ends, however it ends."""
-    folder = Path(tenant.runs)
+    one expected state of the folder itself) by `hold_runs_folder`; the handle is closed when
+    the block ends, however it ends."""
     try:
-        held = io.hold(folder, follow=False)
+        held = hold_runs_folder(Path(tenant.runs), io=io)
     except FileNotFoundError:
         held = None
-    except OSError as exc:
-        raise tenant_refusal(f"the runs folder {folder} {_hold_fault(exc)}") from None
     if held is None:
         yield HeldRuns(tenant, None, io)
         return
