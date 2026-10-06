@@ -15,6 +15,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._io import (
+    READ_LIMIT,
     guarded_mkdir,
     read_jsonl_rows,
     write_guarded,
@@ -164,12 +165,19 @@ def persist_payload(run_dir: Path, lead_id: str, seq: int, text: str) -> str | N
 
     Catches `ValueError` too: `guarded_mkdir` raises it when a `lead_id` with separators or
     `..` escapes the tree. The sidecar must exist even when empty, because
-    `lead_extraction.extract_from_joined` drops any row whose `raw_ref` is not a file."""
+    `lead_extraction.extract_from_joined` drops any row whose `raw_ref` is not a file.
+
+    A payload over `READ_LIMIT` bytes is not written (#1217): every reader of a sidecar refuses
+    one, and a host write is outside the box's `fsize` cap. `None` is the shape any failed write
+    already takes, so the row records no sidecar and readers fall back as they do for that."""
     owner = RunPaths(run_dir)
     try:
+        data = text.encode("utf-8")
+        if len(data) > READ_LIMIT:
+            return None
         payload_path = owner.payload(lead_id, seq)
         guarded_mkdir(payload_path.parent, base=run_dir)
-        write_guarded(payload_path, text)
+        write_guarded(payload_path, data)
     except (OSError, ValueError):
         return None
     return owner.payload_relpath(lead_id, seq)
