@@ -583,7 +583,9 @@ def test_947_family_stamp_carries_agreed_and_override_as_disjoint_roles(tmp_path
     _verify_family(ep, [T.sibling_run_dir(ep / "runs", w) for w in T.WORLDS],
                    source=T.provenance_record())
     stamp = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
-    assert set(stamp) == {"agreed", "allow_dirty", "source"}
+    # #1204: `waived` names the fault kinds the override waived — none, for a clean family.
+    assert set(stamp) == {"agreed", "allow_dirty", "source", "waived"}
+    assert stamp["waived"] == []
     assert "allow_dirty" not in stamp["agreed"]
     assert "allow_dirty" not in stamp["source"]
     assert stamp["allow_dirty"] is False

@@ -347,6 +347,35 @@ def test_1204_a_reftable_directory_is_unavailable_even_beside_readable_loose_ref
     _assert_unavailable(_wire(repo), mentions=("reftable",), never=(head,))
 
 
+@pytest.mark.parametrize("what", ["link", "file"])
+def test_1204_a_non_directory_at_git_reftable_is_named_for_what_it_is(tmp_path, what):
+    """O1/D1, one rule for every read's answer (review fix): `.git/reftable` decides the ref
+    format only when a DIRECTORY is there. A link (no-follow: a link is present, whatever it
+    points at) or a plain file at that name is not a reftable repository — it is unavailable
+    with a reason naming what stands there, never the reftable-refs reason. The link's target
+    is a real directory, so a reader that followed it would call this a reftable repo. The
+    positive control is a real directory at the same name in the same repo, whose reason is
+    the reftable one — and the two reasons differ."""
+    repo = _repo(tmp_path / "knowledge")
+    head = _head(repo)
+    reftable = repo / ".git" / "reftable"
+    reftable.mkdir()
+    reftable_reason = _assert_unavailable(_wire(repo), mentions=("reftable",), never=(head,))
+    reftable.rmdir()
+    assert _wire(repo) == {"commit": head}, "positive control: nothing at .git/reftable"
+
+    if what == "link":
+        target = tmp_path / "a-real-directory"
+        target.mkdir()
+        reftable.symlink_to(target)
+    else:
+        reftable.write_text("not a ref table\n", encoding="utf-8")
+    reason = _assert_unavailable(_wire(repo), mentions=("reftable",), never=(head,))
+    assert reason != reftable_reason, reason
+    named = ("link",) if what == "link" else ("file", "not a directory")
+    assert any(word in reason.casefold() for word in named), (named, reason)
+
+
 def test_1204_a_git_FILE_is_unavailable_and_its_gitdir_is_not_followed(tmp_path):
     """O1/A1/D1: `.git` that is not a real directory is not versioned-and-readable here. A
     `git worktree` (like a submodule) has a `.git` FILE reading `gitdir: <elsewhere>`; following
@@ -588,16 +617,22 @@ def test_1204_a_missing_or_non_file_head_is_unavailable(tmp_path):
     _assert_unavailable(_wire(repo), never=(head,))
 
 
-def test_1204_a_knowledge_folder_that_is_absent_or_a_file_never_raises(tmp_path):
-    """O4: the reader never raises, whatever stands at the knowledge path — and it never
-    invents a commit for a folder that is not there."""
-    absent = tmp_path / "nowhere"
+def test_1204_a_knowledge_folder_that_is_missing_or_a_file_is_unavailable(tmp_path):
+    """O1/O4, one rule for every read's answer (review fix): `"unversioned"` is a statement
+    ABOUT a folder — it is there, and it is not a repository — so a knowledge folder that does
+    not exist is unavailable, with a reason saying it is missing, not "unversioned"; a FILE at
+    the knowledge path is unavailable too. Neither raises. The positive control is an existing
+    plain folder, which is `"unversioned"`."""
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert _wire(plain) == "unversioned", "positive control: a folder that is there"
+
+    missing = _assert_unavailable(_wire(tmp_path / "nowhere"))
+    assert any(word in missing.casefold()
+               for word in ("missing", "absent", "does not exist", "no such")), missing
     as_file = tmp_path / "a-file"
     as_file.write_text("not a folder\n", encoding="utf-8")
-    for path in (absent, as_file):
-        wire = _wire(path)
-        assert wire == "unversioned" or (isinstance(wire, dict) and set(wire) == {"unavailable"}), (
-            path, wire)
+    _assert_unavailable(_wire(as_file))
 
 
 #: Where a sha can be written: a detached HEAD, a loose ref, a packed-refs line.

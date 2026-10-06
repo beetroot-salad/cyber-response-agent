@@ -100,12 +100,15 @@ UNPROVABLE_SAYS: dict[str, str | None] = {
 
 def _verify(tmp_path: Path, name: str, *, source: dict,
             siblings: dict[str, dict] | None = None,
-            allow_dirty: bool = False) -> tuple[dict, dict, dict | None]:
+            allow_dirty: bool = False, reverse: bool = False) -> tuple[dict, dict, dict | None]:
     """`verify_family` over three REAL sibling stamp files (`T.sibling_run_dir`, each with the
     overrides `siblings[label]` names) against `source`. Returns the report, the RECORDED
-    episode outcome (`review.yaml`), and the family stamp (`None` when none was written)."""
+    episode outcome (`review.yaml`), and the family stamp (`None` when none was written).
+    The run dirs are handed over in `T.WORLDS` order (a, b, c), or reversed with `reverse`."""
     base, _src = T.runs_base(tmp_path)
     dirs = [T.sibling_run_dir(base / name, w, **(siblings or {}).get(w, {})) for w in T.WORLDS]
+    if reverse:
+        dirs.reverse()
     ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{name}")
     with Episode.open(ep) as episode:
         report = _cli().verify_family(episode, dirs, source=source, allow_dirty=allow_dirty)
@@ -301,6 +304,7 @@ def test_1204_a_launch_whose_live_knowledge_matches_the_source_is_accepted(tmp_p
     assert launch.live_tree.calls == 1
     assert stamp["source"]["knowledge"] == {"commit": K}
     assert stamp["agreed"]["knowledge"] == {"commit": K}
+    assert stamp["waived"] == [], "nothing was waived, and the flag was not given"
 
 
 def test_1204_a_live_tenant_clone_on_another_knowledge_commit_is_refused_and_never_waived(
@@ -387,6 +391,117 @@ def test_1204_the_allow_dirty_help_says_it_waives_unprovable_knowledge(capsys):
     entry = text.rsplit("--allow-dirty", 1)[1].split("--model", 1)[0]
     assert "knowledge" in entry, entry
     assert "only dirt" not in entry.lower(), entry
+
+
+# ---------------------------------------------------------------------------------------
+# The family stamp says WHAT the override waived, and `agreed` is what the check held
+# ---------------------------------------------------------------------------------------
+
+#: `(source, sibling overrides, --allow-dirty, the "waived" the family stamp must record)`.
+#: `"waived"` is the SORTED list of the fault kinds `--allow-dirty` actually waived for this
+#: family: `"dirt"` (a tree on the source or a sibling not certified clean) and `"knowledge"`
+#: (knowledge on the source or a sibling that no commit proves: unversioned, unavailable, or
+#: not recorded); `[]` when nothing was waived, with the flag or without it.
+WAIVED: dict[str, tuple[dict, dict[str, dict], bool, list[str]]] = {
+    "clean-flag-off": (T.provenance_record(), {}, False, []),
+    "clean-flag-on": (T.provenance_record(), {}, True, []),
+    "dirty-sibling": (T.provenance_record(), {"b": {"dirty": True}}, True, ["dirt"]),
+    "unknown-tree-sibling": (
+        T.provenance_record(), {"c": {"dirty": None, "unavailable": T.GIT_STATUS_FAILED}},
+        True, ["dirt"]),
+    "dirty-source": (T.provenance_record(dirty=True), {}, True, ["dirt"]),
+    "pre-1204-source": (T.provenance_record(knowledge=T.NO_KNOWLEDGE_KEY), {}, True,
+                        ["knowledge"]),
+    "unversioned-sibling": (T.provenance_record(), {"b": {"knowledge": "unversioned"}}, True,
+                            ["knowledge"]),
+    "unavailable-source": (T.provenance_record(knowledge=UNAVAILABLE_REFTABLE), {}, True,
+                           ["knowledge"]),
+    "both": (T.provenance_record(knowledge=T.NO_KNOWLEDGE_KEY), {"b": {"dirty": True}}, True,
+             ["dirt", "knowledge"]),
+}
+
+
+@pytest.mark.parametrize("case", sorted(WAIVED))
+def test_1204_the_family_stamp_records_which_fault_kinds_the_override_waived(tmp_path, case):
+    """Review fix (faults carry their kind): `--allow-dirty` now waives two kinds of fault, and
+    one `allow_dirty: true` bit cannot say which — a family whose only waived fault was a
+    pre-#1204 source's missing knowledge commit read, in the archive, exactly like one whose
+    code was dirty. The accepted family stamp records `"waived"`: the sorted kinds the flag
+    actually waived. A clean family is `[]` with the flag or without it; a pre-#1204 source on
+    clean code is `["knowledge"]` and never `"dirt"`. `allow_dirty` keeps recording the flag."""
+    source, siblings, flag, waived = WAIVED[case]
+    report, recorded, stamp = _verify(tmp_path, f"waived-{case}", source=source,
+                                      siblings=siblings, allow_dirty=flag)
+    assert recorded["outcome"] == "accepted", report["reason"]
+    assert stamp is not None
+    assert stamp["waived"] == waived, stamp.get("waived")
+    assert stamp["allow_dirty"] is flag
+
+
+@pytest.mark.parametrize("dirty_source", [False, True], ids=["clean-code", "dirty-code"])
+def test_1204_a_launch_that_waives_a_pre_1204_sources_knowledge_records_it_as_knowledge(
+        tmp_path, dirty_source):
+    """The same record end to end through the launcher: a source stamped before #1204 (no
+    knowledge key), launched with `--allow-dirty`, is accepted and its family stamp says
+    `"waived": ["knowledge"]` when its code was clean — the review's case: it must not read as
+    a dirty family — and `["dirt", "knowledge"]` when the code was dirty too. The siblings
+    agreed on K, so `agreed.knowledge` is K."""
+    launch = A._prepare(tmp_path)
+    T.source_stamp(launch.src, knowledge=T.NO_KNOWLEDGE_KEY, dirty=dirty_source)
+    stamp = A._accepted(launch, "--allow-dirty")
+    assert stamp["waived"] == (["dirt", "knowledge"] if dirty_source else ["knowledge"])
+    assert stamp["source"]["dirty"] is dirty_source
+    assert stamp["allow_dirty"] is True
+    assert stamp["agreed"]["knowledge"] == {"commit": K}
+
+
+#: Siblings that name no knowledge commit, in the FIRST position (`a` is handed over first).
+NO_COMMIT_FIRST: dict[str, dict[str, dict]] = {
+    "unversioned": {"a": {"knowledge": "unversioned"}},
+    "unavailable": {"a": {"knowledge": UNAVAILABLE_REFTABLE}},
+    "absent": {"a": {"knowledge": T.NO_KNOWLEDGE_KEY}, "b": {"knowledge": None}},
+}
+
+
+@pytest.mark.parametrize("reverse", [False, True], ids=["unprovable-first", "unprovable-last"])
+@pytest.mark.parametrize("shape", sorted(NO_COMMIT_FIRST))
+def test_1204_agreed_knowledge_is_the_commit_the_check_held_not_the_first_siblings(
+        tmp_path, shape, reverse):
+    """Review fix (the agreed record): `agreed` is what the check HELD CONSTANT, not a copy of
+    whichever sibling came first. Under the waiver, a family whose first sibling's knowledge is
+    unprovable and whose others agree on K records `agreed.knowledge == {"commit": K}` — in
+    either order — never the first sibling's `"unversioned"` or unavailable reason, which would
+    say the family agreed on no commit. The other agreed fields are the siblings' shared
+    values, as before."""
+    report, recorded, stamp = _verify(
+        tmp_path, f"agreed-{shape}-{reverse}".lower(), source=T.provenance_record(),
+        siblings=NO_COMMIT_FIRST[shape], allow_dirty=True, reverse=reverse)
+    assert recorded["outcome"] == "accepted", report["reason"]
+    assert stamp is not None
+    assert stamp["agreed"]["knowledge"] == {"commit": K}, stamp["agreed"]
+    assert stamp["waived"] == ["knowledge"]
+    assert (stamp["agreed"]["commit"], stamp["agreed"]["scope"], stamp["agreed"]["model"]) == (
+        "deadbee", "repo", "m-1")
+
+
+@pytest.mark.parametrize("source_shape", ["on-k", "absent"])
+def test_1204_agreed_knowledge_is_null_when_no_sibling_names_a_commit(tmp_path, source_shape):
+    """Review fix (the agreed record), the other half: when NO sibling names a knowledge commit
+    there is no agreed knowledge, and `agreed.knowledge` is `null` — the key present, the value
+    saying nothing was agreed — never one sibling's `"unversioned"` or unavailable reason
+    presented as the family's. Against a source on K and against a pre-#1204 source, under the
+    waiver."""
+    source = (T.provenance_record() if source_shape == "on-k"
+              else T.provenance_record(knowledge=T.NO_KNOWLEDGE_KEY))
+    siblings = {"a": {"knowledge": "unversioned"}, "b": {"knowledge": UNAVAILABLE_REFTABLE},
+                "c": {"knowledge": T.NO_KNOWLEDGE_KEY}}
+    report, recorded, stamp = _verify(tmp_path, f"no-agreed-{source_shape}", source=source,
+                                      siblings=siblings, allow_dirty=True)
+    assert recorded["outcome"] == "accepted", report["reason"]
+    assert stamp is not None
+    assert "knowledge" in stamp["agreed"], stamp["agreed"]
+    assert stamp["agreed"]["knowledge"] is None, stamp["agreed"]
+    assert stamp["waived"] == ["knowledge"]
 
 
 # ---------------------------------------------------------------------------------------
