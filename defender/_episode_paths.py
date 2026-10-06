@@ -4,7 +4,7 @@ import dataclasses
 from pathlib import Path, PurePosixPath
 
 from defender._run_id import CASE_STABLE_REQUIRED, is_case_stable_id
-from defender._run_paths import (
+from defender.run_repository._layout import (
     RUN_LAYOUT,
     ALERT,
     PROVENANCE,
@@ -40,7 +40,7 @@ RUN_DIR_POINTER_NAME = "run_dir"
 
 #: The archive's names for the two sidecars, which live beside a run dir keyed by run id and
 #: are re-homed under the world as a bare `<kind>.json`. Other archived names are the run
-#: dir's own, from `_run_paths`.
+#: dir's own, from `run_repository._layout`.
 ARCHIVED_SCRUB_VERDICT_NAME = "scrub_verdict.json"
 ARCHIVED_RUN_END_NAME = "run_end.json"
 
@@ -374,7 +374,7 @@ class EpisodePaths:
 
     @property
     def family_stamp(self) -> Path:
-        """The family stamp: `_run_paths.PROVENANCE`'s file name, different shape."""
+        """The family stamp: `_layout.PROVENANCE`'s file name, different shape."""
         return self.episode_dir / LAYOUT.family_stamp
 
     @property

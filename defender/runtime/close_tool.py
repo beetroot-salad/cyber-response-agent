@@ -16,7 +16,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from defender._model import model
-from defender._run_paths import RUN_LAYOUT, RunPaths
+from defender.run_repository import RUN_LAYOUT, RunPaths
 from pathlib import Path
 from typing import Annotated, Any
 

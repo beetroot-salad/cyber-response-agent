@@ -35,7 +35,8 @@ from __future__ import annotations
 import ast
 import builtins
 import os
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -135,15 +136,76 @@ def read_and_parse(path: Path, rel: str) -> tuple[str, ast.Module]:
             f"{rel}: could not be read ({exc.__class__.__name__}: {exc}) — it is inside this "
             f"gate's scan scope, so skipping it would shrink the scanned corpus silently."
         ) from exc
+    return text, parse_source(text, rel)
+
+
+def parse_source(text: str, rel: str) -> ast.Module:
+    """`text` parsed, or ScanBlind: a syntax error, a NUL byte (a ``ValueError`` before 3.12),
+    or nesting too deep for the parser (``RecursionError``/``MemoryError``) — each a file this
+    gate never examined, which it must report rather than crash on or skip."""
     try:
-        tree = ast.parse(text)
-    except SyntaxError as exc:
+        return ast.parse(text)
+    except (SyntaxError, ValueError, RecursionError, MemoryError) as exc:
         raise ScanBlind(
             f"{rel}: could not be parsed ({exc.__class__.__name__}: {exc}) — it is inside this "
             f"gate's scan scope, so it was never examined. Fix the syntax and re-run; a file "
             f"this gate cannot parse is a file it cannot clear."
-        ) from exc
-    return text, tree
+        ) from None
+
+
+@contextmanager
+def scan_guard(rel: str) -> Iterator[None]:
+    """Around a gate's walk of one parsed file: a tree nested too deep for a recursive walk
+    (``RecursionError``/``MemoryError``) is ScanBlind naming the file, never a bare traceback
+    out of the sweep — the walk's half of what `parse_source` guarantees for the parse."""
+    try:
+        yield
+    except (RecursionError, MemoryError) as exc:
+        raise ScanBlind(
+            f"{rel}: nested too deeply to scan ({exc.__class__.__name__}) — it is inside this "
+            f"gate's scan scope, so it was never examined; a file this gate cannot walk is a "
+            f"file it cannot clear."
+        ) from None
+
+
+def module_and_package(rel: str, *, root: str = "defender") -> tuple[str, str]:
+    """`(dotted module, dotted package)` of a file at `rel` under the `root` package's folder:
+    `learning/branch/cli.py` -> (`defender.learning.branch.cli`, `defender.learning.branch`); a
+    package's `__init__.py` is its package (`runtime/driver/__init__.py` ->
+    `defender.runtime.driver` twice). What `module_env` takes, so a relative import resolves."""
+    parts = Path(rel).with_suffix("").parts
+    if parts and parts[-1] == "__init__":
+        module = ".".join((root, *parts[:-1]))
+        return module, module
+    module = ".".join((root, *parts))
+    return module, module.rpartition(".")[0]
+
+
+def import_source(node: ast.ImportFrom, package: str | None) -> str:
+    """The module a from-import names: absolute when `package` (the importing module's) is
+    given — `from .. import x` in `defender.runtime.driver` is `defender.runtime` — else with
+    its leading dots kept, so a relative `.re` is never mistaken for the stdlib `re`. The one
+    relative-import resolver: the scope tree's bindings use it too."""
+    if node.level and package is not None:
+        base = package.split(".")
+        base = base[:len(base) - (node.level - 1)]
+        return ".".join([*base, *([node.module] if node.module else [])])
+    return "." * node.level + (node.module or "")
+
+
+#: The runs repository's door (#1105): its private submodules define what the door serves.
+_RUN_REPOSITORY = "defender.run_repository"
+
+
+def door_spelling(origin: str) -> str:
+    """`origin` in its one spelling: a name the runs repository defines in a private submodule
+    (`defender.run_repository._layout.RunPaths`) is the door's (`defender.run_repository.
+    RunPaths`), since the door serves it; anything else is unchanged."""
+    parts = origin.split(".")
+    if (origin.startswith(_RUN_REPOSITORY + "._") and len(parts) >= 3
+            and parts[2].startswith("_") and not parts[2].startswith("__")):
+        del parts[2]
+    return ".".join(parts)
 
 
 def read_source(path: Path, rel: str) -> str:
@@ -244,13 +306,7 @@ def _scope_bindings(
                         imports[root] = root
                 continue
             if isinstance(child, ast.ImportFrom):
-                # `level` > 0 is a relative import; keep the leading dots so a relative
-                # `.re` can never be mistaken for the stdlib `re`.
-                prefix = "." * child.level + (child.module or "")
-                if child.level and package is not None:
-                    base = package.split(".")
-                    base = base[:len(base) - (child.level - 1)]
-                    prefix = ".".join([*base, *([child.module] if child.module else [])])
+                prefix = import_source(child, package)
                 for alias in child.names:
                     if alias.name == "*":
                         continue  # unresolvable — but ruff F403 makes it unmergeable
@@ -293,18 +349,20 @@ def _module_consts(tree: ast.AST) -> dict[str, str]:
 #: The name-owner classes `owner_derived` tags — construction of one, and reads on the instance
 #: it builds, resolved by dotted origin so an alias or a from-import still counts.
 _OWNER_CLASS_ORIGINS = frozenset({
-    "defender._run_paths.RunPaths",
+    # An owner the runs repository defines is spelled as its door serves it (#1105): every
+    # origin is compared through `door_spelling`, so the submodule spelling needs no line.
+    "defender.run_repository.RunPaths",
     "defender._episode_paths.EpisodePaths",
     # The file-backed handle: a value reached through `run.facts.<record>` /
     # `run.tables.<table>` is owner-derived like `RunPaths(x).<record>`.
-    "defender._run_handle.Run",
+    "defender.run_repository.Run",
     # The episode handle (#1133): `episode.served_base` / `episode.world(label).draw(n)` are
     # owner-derived like `EpisodePaths(ep).<record>`.
     "defender._episode_handle.Episode",
     "defender._episode_paths.WorldPaths",
     # The session store's owner, built from the runs base since one store spans a run and
     # its resumes and forks.
-    "defender._run_paths.SessionPaths",
+    "defender.run_repository.SessionPaths",
 })
 
 #: Owners whose members are owner-derived only for a NAMED set (#1120 M5), keyed by class
@@ -333,6 +391,8 @@ _TENANT_FACTORIES: dict[str, str] = {
     "defender.run._resolve_run_tenant": _RUN_TENANT,
     "defender.run._accept_request_tenant": _TENANT,
     "defender.learning.branch.cli._episode_tenant": _RUN_TENANT,
+    # #1105: the runs repository's argument check returns the accepted `Tenant` it was handed.
+    "defender.run_repository._held.require_accepted_tenant": _TENANT,
 }
 
 #: Classes one of whose members IS a partial owner instance: `RunTenant.tenant` is the run's
@@ -345,11 +405,19 @@ _PARTIAL_OWNER_CARRIERS: dict[str, dict[str, str]] = {
 #: than constructs. `RunPaths(d).alert` is a path; `RUN_LAYOUT.alert` is the same record's name
 #: relative to the run dir (the form `_io.Bound`'s readers take). Both are owner-derived.
 _OWNER_VALUE_ORIGINS = frozenset({
-    "defender._run_paths.RUN_LAYOUT",
-    "defender._run_paths.WIRE_LOG_NAMES",
+    "defender.run_repository.RUN_LAYOUT",
+    "defender.run_repository.WIRE_LOG_NAMES",
     "defender._episode_paths.LAYOUT",
     "defender._episode_paths.WORLD_LEAVES",
 })
+
+
+def _is_owner_class(origin: str | None) -> bool:
+    return origin is not None and door_spelling(origin) in _OWNER_CLASS_ORIGINS
+
+
+def _is_owner_value(origin: str | None) -> bool:
+    return origin is not None and door_spelling(origin) in _OWNER_VALUE_ORIGINS
 
 #: The handle sub-collections an owner-rooted attribute chain may pass through (for
 #: `run.facts.<record>`). Named rather than recursing through any attribute: otherwise
@@ -543,10 +611,10 @@ def _owner_locals(
     def is_owner_expr(node: ast.expr) -> bool:
         node = _unawait(node)
         if isinstance(node, ast.Call):
-            return (_resolved_callee(node, probe_env) in _OWNER_CLASS_ORIGINS
+            return (_is_owner_class(_resolved_callee(node, probe_env))
                     or _is_subhandle_call(node, owners, probe_env))
         if isinstance(node, ast.Name):
-            return node.id in owners or _origin(node, probe_env) in _OWNER_VALUE_ORIGINS
+            return node.id in owners or _is_owner_value(_origin(node, probe_env))
         if isinstance(node, ast.Attribute):
             return (_owner_instance_in(node.value, owners, probe_env)
                     or _partial_owner_member(node, partials, carriers, probe_env))
@@ -554,7 +622,7 @@ def _owner_locals(
 
     if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
         for arg in (*scope.args.posonlyargs, *scope.args.args, *scope.args.kwonlyargs):
-            if annotated_class(arg.annotation, probe_env) in _OWNER_CLASS_ORIGINS:
+            if _is_owner_class(annotated_class(arg.annotation, probe_env)):
                 owners.add(arg.arg)
 
     def walk(node: ast.AST) -> None:
@@ -573,10 +641,10 @@ def _owner_locals(
 def _owner_instance_in(node: ast.expr, owners: set[str], env: ModuleEnv) -> bool:
     node = _unawait(node)
     if isinstance(node, ast.Call):
-        return (_resolved_callee(node, env) in _OWNER_CLASS_ORIGINS
+        return (_is_owner_class(_resolved_callee(node, env))
                 or _is_subhandle_call(node, owners, env))
     if isinstance(node, ast.Name):
-        return node.id in owners or _origin(node, env) in _OWNER_VALUE_ORIGINS
+        return node.id in owners or _is_owner_value(_origin(node, env))
     if isinstance(node, ast.Attribute):
         # An attribute chain rooted at an owner stays owner-derived only through a declared
         # sub-collection; any other member is a container this pass cannot see into, which
@@ -714,7 +782,7 @@ def owner_derived(node: ast.expr, env: ModuleEnv) -> bool:
         return (_owner_instance_in(node.value, set(e.owner_locals), e)
                 or _partial_owner_member(node, e.partial_owner_locals, e.carrier_locals, e))
     if isinstance(node, ast.Call):
-        return _resolved_callee(node, e) in _OWNER_CLASS_ORIGINS
+        return _is_owner_class(_resolved_callee(node, e))
     return False
 
 

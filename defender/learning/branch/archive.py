@@ -19,7 +19,7 @@ Every read out of the run dir is lstat-screened before anything lands. The run d
 rw bind, so an artifact's name may be a planted symlink, and `shutil.copy2` would copy the
 target's bytes into the archive as if they were in-run artifacts. The tables go through
 `lead_repository.stage_tables` (its own screened staging); single files through
-`_run_paths.artifact_file`. The whole world is screened before anything is copied, so a world
+`_layout.artifact_file`. The whole world is screened before anything is copied, so a world
 carrying one planted link archives NOTHING rather than a half-world whose missing file reads as a
 run that did not produce one.
 
@@ -40,7 +40,7 @@ from typing import Any
 from defender._episode_handle import Episode
 from defender._io import Bound, entry_present
 from defender._episode_paths import LAYOUT, WorldPaths
-from defender._run_paths import (
+from defender.run_repository import (
     RunPaths,
     artifact_dir,
     artifact_file,

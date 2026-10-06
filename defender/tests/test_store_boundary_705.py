@@ -33,7 +33,7 @@ import json
 import os
 from pathlib import Path
 
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 
 import pytest
 

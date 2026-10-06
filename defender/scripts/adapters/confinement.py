@@ -18,6 +18,7 @@ if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender._model import model
+from defender._world_label import view_name_fault, world_view_fault
 from defender.scripts.adapters.faults import AdapterFault
 
 
@@ -216,10 +217,6 @@ def confine_index(
 
 # the world-view namespace
 
-#: Punctuation an Elasticsearch index or alias name cannot carry (whitespace is checked
-#: separately). `:` is absent: legal in the cross-cluster expression `remote:logs-*`.
-_ILLEGAL_IN_NAME = frozenset('\\/*?"<>|,')
-
 #: The namespace every world view lives in, as a prefix. A suffixed view (`logs-*` ->
 #: `logs-w-a`) would still match `logs-*`, so the base run and unstaged siblings would read the
 #: world's staged documents. `world_view` checks the disjointness per name.
@@ -273,24 +270,10 @@ def _view_stem(pattern: str) -> str:
 
 
 def _nameable(part: str, origin: str) -> str:
-    """`part`, or a refusal naming what an index or alias cannot hold."""
-    if not part:
-        raise ViewNameError(
-            f"{origin} reduces to nothing an alias can be named by — a world view is built "
-            "from the corpus it stages, and a bare wildcard leaves no corpus to name")
-    illegal = sorted({c for c in part if c in _ILLEGAL_IN_NAME or c.isspace()})
-    if illegal:
-        raise ViewNameError(
-            f"{origin} carries {illegal}, which an index or alias name cannot hold — the view "
-            "is written back unquoted, so the retargeted query would not parse as the one "
-            "command it replaced")
-    # Lower case only. Elasticsearch does not refuse an upper-case alias here: `_search` uses
-    # `ignore_unavailable=true`, so it silently returns zero hits.
-    if part != part.lower():
-        raise ViewNameError(
-            f"{origin} carries upper case, which an index or alias name cannot hold — a view "
-            "named above the case rule is not refused by the cluster, it is answered with an "
-            "empty result, so the world would read as one that changed nothing")
+    """`part`, or a refusal naming what an index or alias cannot hold
+    (`_world_label.view_name_fault`)."""
+    if (why := view_name_fault(part, origin)) is not None:
+        raise ViewNameError(why)
     return part
 
 
@@ -302,19 +285,11 @@ def refuse_unnameable_world(world_id: str) -> str:
 
 
 def _nameable_world(world_id: str) -> str:
-    """`world_id`, held to the alias name rule plus one more: no `-`.
-
-    `-` delimits `wv-{id}-{stem}`, so an id containing it makes one world's view name parse as
-    another's (`a-logs-nginx`'s view of `logs-*` reads as world `a`'s view of
-    `logs-nginx-logs-*`).
-    """
-    world = _nameable(world_id, f"world id {world_id!r}")
-    if "-" in world:
-        raise ViewNameError(
-            f"world id {world_id!r} carries '-', which a view name uses to separate the id "
-            "from the corpus it stages — an id holding the delimiter makes one view name "
-            "readable as another world's, so the boundary between siblings stops holding")
-    return world
+    """`world_id`, held to the alias name rule plus one more: no `-`
+    (`_world_label.world_view_fault`)."""
+    if (why := world_view_fault(world_id)) is not None:
+        raise ViewNameError(why)
+    return world_id
 
 
 def is_world_view(index: str, configured_patterns: Iterable[str], world_id: str) -> bool:

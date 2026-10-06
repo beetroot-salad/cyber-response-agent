@@ -2,7 +2,7 @@
 (#1077, the session-store leftover of D7).
 
 NOT A TEST MODULE (the leading underscore keeps pytest from collecting it). It is the payload
-`test_1077_rename_proof.py` runs in a subprocess, against a tree whose `_run_paths.py` has had
+`test_1077_rename_proof.py` runs in a subprocess, against a tree whose `run_repository/_layout.py` has had
 the sessions directory's name, or the store's suffix, or both, rewritten to something else.
 
 Nothing in this file spells either name, so it keeps working under any rename. What it drives:
@@ -27,8 +27,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from defender import _run_paths
-from defender._run_paths import SessionPaths
+from defender.run_repository import _layout
+from defender.run_repository import SessionPaths
 from defender.runtime import branch, session_store
 from defender.tests.e2e._replay_harness import GOLDEN, ReplayFn, Turn, drive, materialize
 
@@ -47,7 +47,7 @@ def main(root: Path) -> int:
     # wrong place" apart from "the subprocess imported the real package and renamed nothing".
     # Read off the owner BY NAME: this file never holds either value itself.
     for name in ("SESSIONS_DIRNAME", "SESSION_DB_SUFFIX"):
-        print(f"{name}={getattr(_run_paths, name)}", flush=True)
+        print(f"{name}={getattr(_layout, name)}", flush=True)
 
     summary = drive(run_dir, run_id="rename-proof-session", main=ReplayFn([
         Turn(text="Nothing to do; stopping."),

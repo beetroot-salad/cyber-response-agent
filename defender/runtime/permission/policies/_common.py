@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from defender._run_paths import GATHER_RAW_SHAPE, gather_summaries_shape
+from defender.run_repository import GATHER_RAW_SHAPE, gather_summaries_shape
 from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS
 from defender.runtime.permission.grant import (
     SEG,

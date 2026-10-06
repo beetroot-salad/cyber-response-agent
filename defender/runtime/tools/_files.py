@@ -13,7 +13,7 @@ if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays 
 from pydantic_ai.exceptions import ModelRetry
 
 from defender._io import REFUSED_NOT_FILE, REFUSED_UNDECODABLE, NotPlainEntry, bind, hold
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from .. import permission
 from ..permission.files import RESOLVE_ERRORS
 

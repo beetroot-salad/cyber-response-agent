@@ -21,7 +21,7 @@ from pydantic_ai.messages import (
 from defender._clock import now_iso
 from defender._env import env_int
 from defender._io import JSON_NESTING_LIMIT, guarded_mkdir, json_safe, open_guarded, write_guarded
-from defender._run_paths import RUN_LAYOUT, RunPaths
+from defender.run_repository import RUN_LAYOUT, RunPaths
 from defender.runtime._wire import wire_digest
 
 from defender._pricing import usage_cost
@@ -248,7 +248,7 @@ def denial_logger(run_dir: Path) -> RequestLogger:
 def wire_log_path(run_dir: Path) -> Path:
     """The run's wire log (`<run_dir>/wire_logs/llm_requests.jsonl`), creating the holding dir.
 
-    The subdirectory is a read-gate boundary (see `_run_paths.WIRE_LOG_DIR`). The assertion
+    The subdirectory is a read-gate boundary (see `_layout.WIRE_LOG_DIR`). The assertion
     keeps this writer's path identical to the `RunPaths` accessor readers use."""
     path = stage_trace_path(run_dir, RUN_LAYOUT.wire_log.name)
     assert path == RunPaths(Path(run_dir)).wire_log, (

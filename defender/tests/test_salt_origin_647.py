@@ -42,7 +42,7 @@ from pathlib import Path
 import pytest
 
 from defender import run_common
-from defender._run_paths import PROVENANCE, RunPaths
+from defender.run_repository import PROVENANCE, RunPaths
 from defender.scripts.workspace_map import _unlisted
 from defender.tests.e2e._replay_harness import (
     GOLDEN,

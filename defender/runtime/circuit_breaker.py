@@ -7,7 +7,7 @@ from pathlib import Path
 
 from defender._clock import now_iso
 from defender._io import TEXT_READ_ERRORS, load_json_artifact, read_text_utf8
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.hooks._run_dir import update_json_locked
 
 _logger = logging.getLogger(__name__)

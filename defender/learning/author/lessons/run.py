@@ -8,7 +8,6 @@ from dataclasses import field
 from defender._model import model
 from pathlib import Path
 
-from defender._run_paths import RunPaths
 from typing import Any
 
 import yaml
@@ -107,6 +106,9 @@ def build_author_config(
 
 
 def disposition_for(cfg: AuthorConfig, run_id: str) -> str | None:
+    # The layout import lives here, inside this deferred_legacy reader (#1105 D7, FR-1).
+    from defender.run_repository import RunPaths
+
     refs = RunPaths(cfg.runs_dir / run_id).source_refs
     if not refs.is_file():
         return None

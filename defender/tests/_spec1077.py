@@ -1,7 +1,7 @@
 """Shared machinery for #1077's run-handle spec — NO test scripts.
 
 The change (`spec-flow/specs/spec_graph_1077.yaml`, `70-resolutions.md`): no module outside
-the name owners spells a run or episode record's name. `defender/_run_paths.py::RunPaths` grows
+the name owners spells a run or episode record's name. `defender/run_repository/_layout.py::RunPaths` grows
 from seven accessors to ~twenty, a new `defender/_episode_paths.py::EpisodePaths` owns the
 episode layout, a new `defender/_tenant.py` owns `<runs_base>/_tenant.json`, and a new handle
 module wraps all three: `Run` with five sub-collections (`tables`, `facts`, `documents`,
@@ -73,18 +73,24 @@ NOT_ROOT = pytest.mark.skipif(
 # The coined module names. ONE place, so a rename is one edit.
 # ======================================================================================
 
-#: The handle module. D6(a)'s exempt owner set is `_run_paths.py`, `_episode_paths.py`,
+#: The handle module. D6(a)'s exempt owner set is `run_repository/_layout.py`, `_episode_paths.py`,
 #: `_tenant.py` and "the handle"; the other three are underscore-prefixed private modules
 #: beside `_io.py` and `_provenance.py`, so the handle follows the same convention.
-HANDLE_MODULE = "_run_handle"
+HANDLE_MODULE = "run_repository._handle"
 TENANT_MODULE = "_tenant"
 EPISODE_MODULE = "_episode_paths"
-OWNER_MODULE_FILES = (
-    "_run_paths.py", "_episode_paths.py", "_tenant.py", f"{HANDLE_MODULE}.py")
+#: The owner modules by their path under `defender/` (#1105 D1.5): every file of the runs
+#: repository package — which absorbed the layout (`_layout.py`, formerly the flat-tier
+#: run-path module) and the handle (`_handle.py`, formerly the flat-tier run-handle module) —
+#: plus the two owners that stay outside it. The package's files are read off disk, so a
+#: module it gains is an owner without a list edit.
+RUN_REPOSITORY_FILES = tuple(sorted(
+    f"run_repository/{p.name}" for p in (DEFENDER / "run_repository").glob("*.py")))
+OWNER_MODULE_FILES = (*RUN_REPOSITORY_FILES, "_episode_paths.py", "_tenant.py")
 
 
 def handle() -> Any:
-    """`defender/_run_handle.py` — `Run`, `RunRecord`, `RecordHandle`, `ArchivedWorld`."""
+    """`defender/run_repository/_handle.py` — `Run`, `RunRecord`, `RecordHandle`, `ArchivedWorld`."""
     return mod(HANDLE_MODULE)
 
 
@@ -99,7 +105,7 @@ def episode_paths() -> Any:
 
 
 def run_paths_mod() -> Any:
-    return mod("_run_paths")
+    return mod("run_repository._layout")
 
 
 def RunPaths(run_dir: Path) -> Any:  # noqa: N802 — it is the class's own name
@@ -203,7 +209,7 @@ MEMBER_ACCESSOR: dict[str, str] = {
 #: that would have written JSONL into SQLite. `append` for a JSONL table or trace, `write` for
 #: a whole document or a write-once fact, `update` alone for the two `flock`ed JSON states,
 #: `open` for the session store, `None` for a record nothing in the host writes through the
-#: handle. Mirrors `defender._run_handle.MEMBER_VERB`; that module is the shipped shape, this
+#: handle. Mirrors `defender.run_repository._handle.MEMBER_VERB`; that module is the shipped shape, this
 #: is the spec.
 MEMBER_VERB: dict[str, str | None] = {
     "queries": "append", "policy_denials": "append", "leads": "write", "payloads": "write",
@@ -267,7 +273,8 @@ UNSCANNED_TREES = ("defender/skills", "scripts", "experiments")
 class Accessor:
     """One row of the kinds table and the single accessor that owns its name.
 
-    `owner` is "run" (`RunPaths`), "episode" (`EpisodePaths`) or "tenant" (`_tenant`); `attr`
+    `owner` is "run" (`RunPaths`), "episode" (`EpisodePaths`), "tenant" (`_tenant`) or
+    "repository" (the runs repository's record module, #1105); `attr`
     is the accessor's name on that owner; `args` are the components a composing accessor takes,
     in call order, as the concrete values this suite drives it with.
     """
@@ -345,6 +352,8 @@ ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
     Accessor("episode_runs", "episode", "sibling_run_dir", (EPISODE_ID, LABEL), composing=True),
     Accessor("archive_proj", "episode", "world_dir", (LABEL,), composing=True),
     Accessor("tenant", "tenant", "record_path"),
+    # #1105 D3: the episode -> runs record, owned by the runs repository's record module.
+    Accessor("episode_runs_record", "repository", "episode_record_path", (EPISODE_ID,)),
     Accessor("tenant_row", "tenant_row", "row"),
 )
 
@@ -415,6 +424,8 @@ def resolve(acc: Accessor, *, run_dir: Path, runs_base: Path | None = None,
         return tenant().record_path(runs_base)
     if acc.owner == "tenant_row":
         return tenant()._TenantPaths(data_root, tenant_id).row
+    if acc.owner == "repository":
+        return getattr(mod("run_repository._record"), acc.attr)(runs_base, *values)
     owner = RunPaths(run_dir) if acc.owner == "run" else EpisodePaths(episode_dir)
     member = getattr(owner, acc.attr)
     if acc.attr in UPWARD_ACCESSORS:

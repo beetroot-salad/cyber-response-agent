@@ -3,12 +3,12 @@ and the per-kind `RecordHandle`.
 
 Carries 33 demands of `spec-flow/specs/spec_graph_1077.yaml`, each test named after its
 demand's `discharged_by` pointer and carrying that demand's prose in its docstring. The
-coined names (`_run_handle`, `RecordHandle`, `RunRecord`) and every fixture live in
+coined names (`run_repository._handle`, `RecordHandle`, `RunRecord`) and every fixture live in
 `defender/tests/_spec1077.py`. Two of the 33 are the final §7 rework's: `h54` (decision 20 — the
 bare run id's case fold, which claim RC-3 showed no rule covered) and `h55` (decision 22 — a
 `for_tenant` tenant argument the record at the resolved base disagrees with).
 
-RED AGAINST BASE db1af01a by construction: `defender/_run_handle.py` does not exist, and every
+RED AGAINST BASE db1af01a by construction: `defender/run_repository/_handle.py` does not exist, and every
 test reaches it through `S.handle()` per call, so the failure is the missing module once per
 test rather than a collection error hiding the rest.
 
@@ -36,9 +36,18 @@ def run_dir(base: Path) -> Path:
     return S.seed_run_tree(S.make_run_dir(base))
 
 
+def _with_record(base: Path) -> Path:
+    """`base` holding its tenant record naming `DEFAULT_TENANT_ID`, unless a test planted its
+    own. #1105 NH-3: `Run.for_tenant` refuses a runs base with no `_tenant.json`, so a handle is
+    built only once the record exists — as run setup writes it before building the handle."""
+    if not (base / "_tenant.json").exists():
+        S.plant_tenant_record(base)
+    return base
+
+
 def _tenanted(base: Path, run_id: str = "run-1077"):
     """A handle built the way real application code builds one (decision 1d)."""
-    return S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_id, runs_base=base)
+    return S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_id, runs_base=_with_record(base))
 
 
 # ---------------------------------------------------------------------------------------
@@ -141,7 +150,11 @@ def test_the_wrappers_read_reaches_todays_reader_unchanged(base, run_dir):
     """A wrapper's read method reaches today's reader for that record's shape, with the same
     guard and the same result the call site got before."""
     recorder = S.RecordingIo()
-    run = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=base, io=recorder)
+    run = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base),
+                             io=recorder)
+    # The constructor's own record read (#1105 NH-3) is not the wrapper's: start the record here.
+    recorder.calls.clear()
+    recorder.invocations.clear()
     S.RunPaths(run_dir).report.write_text("# report\n", encoding="utf-8")
 
     got = S.member(run, "documents", "report").read()
@@ -212,8 +225,8 @@ def test_run_at_is_documented_and_used_only_by_eval_fixture_and_tooling_callers(
 
 
 def test_run_under_is_an_internal_helper_and_no_caller_outside_the_owner_uses_it(base, run_dir):
-    """`Run.under` is an internal helper `Run.for_tenant` is built on, and no caller outside the
-    owner's own module reaches it.
+    """`Run.under` is an internal helper `Run.for_tenant` (and the runs repository's `open_run`)
+    is built on, and no caller outside the owner package reaches it.
 
     NEGATIVE. Positive control inline: `Run.for_tenant` IS reached and resolves the same
     directory `under` would have.
@@ -227,7 +240,9 @@ def test_run_under_is_an_internal_helper_and_no_caller_outside_the_owner_uses_it
     hits = []
     for py in sorted(DEFENDER.rglob("*.py")):
         rel = py.relative_to(DEFENDER).as_posix()
-        if rel.startswith(("tests/", ".venv/")) or rel == f"{S.HANDLE_MODULE}.py":
+        # The owner is the runs repository package as a whole (#1105 D1.5): its `open_run`
+        # builds the handle with `Run.under` once it has judged the record (DV-2).
+        if rel.startswith(("tests/", ".venv/", "run_repository/")):
             continue
         try:
             _text, tree = cached_parse(py, rel)
@@ -274,6 +289,7 @@ def test_run_id_admission_is_todays_validator_by_reference_not_a_second_one(base
         is_case_stable_id,
         is_valid_run_id,
     )
+    _with_record(base)
     bad = ("", "-leading-dash", "has space", "héllo", "a/b", "..")
     for run_id in bad:
         assert not is_valid_run_id(run_id), f"{run_id!r} is the validator's own refusal"
@@ -307,6 +323,7 @@ def test_two_run_ids_differing_only_by_case_cannot_become_one_run_directory(base
     case-variant of an existing run id is REFUSED rather than silently resolving onto that
     run's directory."""
     from defender._run_id import CASE_STABLE_REQUIRED
+    _with_record(base)
     S.seed_run_tree(S.make_run_dir(base, "run-1"))
     S.plant_stamp(base / "run-1", commit="c0ffee", dirty=False, tenant_id=S.DEFAULT_TENANT_ID)
 
@@ -331,7 +348,7 @@ def test_two_run_ids_differing_only_by_case_cannot_become_one_run_directory(base
     # And nothing was touched on the way to the refusal.
     assert S.Run().at(base / "run-1").record.commit == "c0ffee", (
         "the refused call re-stamped the run whose directory the case variant folds onto")
-    assert sorted(p.name for p in base.iterdir()) == ["run-1"], (
+    assert sorted(p.name for p in base.iterdir()) == ["_tenant.json", "run-1"], (
         f"the refused call created something: {sorted(p.name for p in base.iterdir())}")
     # Positive control: the case-stable spelling is admitted, unchanged.
     assert S.Run().for_tenant(S.DEFAULT_TENANT_ID, "run-2", runs_base=base) is not None
@@ -446,7 +463,8 @@ def test_every_writer_method_reaches_todays_seam_unchanged(base, run_dir):
     pre-#771 `append_jsonl`, whose `open("a")` follows a planted link), the locked rewrite, the
     request logger, the session store."""
     recorder = S.RecordingIo()
-    run = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=base, io=recorder)
+    run = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base),
+                             io=recorder)
 
     # #1111: the guarded seams are the ROOTED ones (`rooted_write` / `rooted_locked_for_rewrite`,
     # handed the run dir and the record's name under it), never the path-based ones they replace.
@@ -493,6 +511,7 @@ def test_run_under_run_id_containing_path_separator(base):
     """Security dive universal (1): no accessor resolves outside its root for any input — a
     '/'-bearing run_id handed to the constructors must not escape the runs base, whether it
     arrives at the public `Run.for_tenant` or at the internal `Run.under` it is built on."""
+    _with_record(base)
     escaped = base.parent / "escaped"
     escaped.mkdir(exist_ok=True)
     for run_id in ("../escaped", "a/b", "/etc"):
@@ -509,6 +528,7 @@ def test_run_under_run_id_containing_path_separator(base):
 def test_run_under_run_id_containing_parent_traversal(base):
     """The resolved run dir remains inside the runs base regardless of a '..'-shaped run_id, at
     the public constructor and at the internal helper alike."""
+    _with_record(base)
     outside = base.parent / "outside"
     outside.mkdir(exist_ok=True)
     for run_id in ("..", "../..", "../outside", "x/../../outside"):
@@ -676,7 +696,7 @@ def test_a_handle_built_from_a_bare_directory_lacks_the_input_the_upward_accesso
         assert "forbidden" not in said.lower()
     # Positive control: given a runs base, the same accessors resolve.
     run_dir = S.seed_run_tree(S.make_run_dir(base))
-    tenanted = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=base)
+    tenanted = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
     assert S.member(tenanted, "facts", "run_end").path.parent == base
 
 
@@ -844,7 +864,8 @@ def test_the_write_method_creates_the_directory_the_path_accessor_no_longer_does
     """The write method creates the directory its record needs, and it is the only thing that
     does."""
     recorder = S.RecordingIo()
-    run = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=base, io=recorder)
+    run = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base),
+                             io=recorder)
     trace = S.member(run, "observability", "review_trace", S.ROLE)
 
     assert not (run_dir / "wire_logs").exists()

@@ -43,7 +43,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender.agents import CORPUS_AUTHOR_DEF, MAIN_DEF  # noqa: E402
 from defender.tests import _tenants1106  # noqa: E402
-from defender._run_paths import WIRE_LOG_DIR, WIRE_LOG, RunPaths  # noqa: E402
+from defender.run_repository import WIRE_LOG_DIR, WIRE_LOG, RunPaths  # noqa: E402
 from defender.runtime import observe, permission  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
     RunScope,
@@ -95,7 +95,7 @@ def _bash(env, cmd, which):
 def test_the_wire_log_lives_one_level_below_the_run_root(tmp_path):
     """The location is the mechanism, so it is pinned as such: `<run>/wire_logs/` — a directory,
     not a run-root name. `wire_log_path` creates the dir (the driver opens the logger on it
-    before anything else writes into the run), and agrees with the layout `_run_paths` declares
+    before anything else writes into the run), and agrees with the layout `run_repository._layout` declares
     for every reader."""
     run = tmp_path / "run"
     run.mkdir()

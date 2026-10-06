@@ -38,6 +38,7 @@ from pydantic_core import core_schema
 from defender import _io as _real_io
 from defender import _paths
 from defender._model import model
+from defender._shown import escaped, quoted, shown
 from defender._tenants import (
     AGENT_HALF,
     REQUIRED_SETTINGS,
@@ -69,26 +70,6 @@ _LEARNING_STATE_ENV = "DEFENDER_LEARNING_STATE_DIR"
 #: newline — settled by the user).
 _GRAMMAR = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 
-#: How much of a refused value a message carries (N16): enough to recognise it, never a
-#: megabyte of attacker-chosen bytes.
-_SHOWN_LIMIT = 120
-
-
-def _shown(value: object) -> str:
-    """`value` as a refusal names it: escaped (repr-style, so no control character reaches a
-    terminal or a log raw) and bounded."""
-    text = repr(value)
-    return text if len(text) <= _SHOWN_LIMIT else f"{text[:_SHOWN_LIMIT]}… ({len(text)} chars)"
-
-
-def _entry_shown(folder: Path, rel: str) -> str:
-    """A path inside a knowledge folder as a refusal names it: `folder` (the operator's own
-    spelling) as it is, and `rel` — names the tenant's repo chose — escaped and bounded by
-    `_shown` when any character of it is not printable (a newline, an escape sequence, an
-    undecodable byte), so a crafted file name cannot rewrite the operator's terminal."""
-    return str(folder / rel) if rel.isprintable() else f"{folder}/{_shown(rel)}"
-
-
 class TenantRefused(Exception):
     """The one refusal shape (#0, F0/J29) for every tenant owner — this module (acceptance
     and its knowledge-folder rules included) and the run's grants (`run_tenant`): the
@@ -96,6 +77,11 @@ class TenantRefused(Exception):
     verbatim. An `Exception`, not a `ValueError` (#1067's `_model.py` convention): pydantic
     wraps a `ValueError` raised inside a validator into its own `ValidationError`, where an
     `except TenantRefused` would silently miss it."""
+
+    def __init__(self, message: object = "") -> None:
+        # Escaped where it is built, as `RunRefused` is: a path or a value read off disk can
+        # carry a control character, and no raising site has to remember to escape it.
+        super().__init__(escaped(message))
 
 
 class TenantId(str):
@@ -117,7 +103,7 @@ class TenantId(str):
             return raw
         if not isinstance(raw, str) or not _GRAMMAR.fullmatch(raw):
             raise TenantRefused(
-                f"{_shown(raw)} is not a valid tenant id (must match {_GRAMMAR.pattern!r})")
+                f"{quoted(raw)} is not a valid tenant id (must match {_GRAMMAR.pattern!r})")
         return super().__new__(cls, raw)
 
     @classmethod
@@ -166,10 +152,11 @@ def _parse_json_record(
 ) -> _R:
     """`text` as a `record` (the runs-base record or the tenant row), or `refusal` naming
     `source`. Keys beyond `fields` are ignored; `TenantId` checks the id as the field is set."""
-    try:
-        obj = json.loads(text)
-    except ValueError as bad:
-        raise refusal(f"{source} is not valid JSON: {bad}") from bad
+    # The nesting-checked decoder, not `json.loads`: a deeply nested record is refused as
+    # corrupt, naming it, rather than escaping as a `RecursionError` (#1105, P2).
+    obj, bad_json = _real_io.load_json_artifact(text)
+    if bad_json is not None:
+        raise refusal(f"{source} is not valid JSON: {bad_json}")
     if not isinstance(obj, dict):
         raise refusal(f"{source} is not a JSON object")
     try:
@@ -578,7 +565,7 @@ def _check_knowledge(
     stray = sorted(name for name in top.entries if name not in TOP_LEVEL_ALLOWED)
     if stray:
         raise TenantRefused(
-            f"{_entry_shown(folder, stray[0])} is not allowed at the top of a tenant's "
+            f"{folder}/{shown(stray[0])} is not allowed at the top of a tenant's "
             "knowledge folder — "
             f"it may hold only {sorted(TOP_LEVEL_ALLOWED)}; keep anything else (an .env, "
             "secrets) out of the data root")
@@ -633,11 +620,11 @@ def _refuse_links_and_special_files(bound: _real_io.Bound, folder: Path, half: s
         current = pending.pop()
         listed = _real_io.stat_entries(bound.under(current))
         if listed.stats is None:
-            raise TenantRefused(f"{_entry_shown(folder, current)} could not be checked for links: "
+            raise TenantRefused(f"{folder}/{shown(current)} could not be checked for links: "
                                 f"{listed.reason or 'it vanished during the check'}")
         for name, st in sorted(listed.stats.items()):
             rel = f"{current}/{name}"
-            entry = _entry_shown(folder, rel)
+            entry = f"{folder}/{shown(rel)}"
             mode = st.st_mode
             if stat.S_ISLNK(mode):
                 raise TenantRefused(
@@ -694,7 +681,7 @@ def read_tenant_id_file(path: Path) -> TenantId:
     except (UnicodeDecodeError, TenantRefused):
         raise TenantRefused(
             f"{path} must hold exactly a tenant id and at most one line ending; it holds "
-            f"{_shown(data)}") from None
+            f"{quoted(data)}") from None
 
 
 def tenant_id_file_text(tenant_id: TenantId) -> str:

@@ -31,12 +31,11 @@ from defender import _yaml
 from defender._episode_handle import Episode
 from defender._episode_paths import LAYOUT
 from defender._io import Bound
-from defender._run_id import (
-    CASE_STABLE_REQUIRED,
-    RUN_ID_ALLOWED,
-    is_case_stable_id,
-    is_valid_run_id,
+from defender._run_id import episode_id_fault
+from defender._world_label import (
+    RESERVED_WORLD_LABELS, is_reserved_world_label, reserved_label_fault,
 )
+from defender.run_repository import run_name_fault
 from defender._vocab import (
     DISPOSITION_ENUM,
     DISPOSITION_VALUES,
@@ -597,43 +596,11 @@ def check_manifest_digest(view: Bound, recorded: str) -> None:
 # identity: one gate, before anything is staged
 # ---------------------------------------------------------------------------------------
 
-#: Labels no world may claim. `base` names the family's shared capture (a world using it would
-#: append live rows into the recording its siblings replay); `family` would give a per-world judge
-#: draw the family-level call's agent id `judge:family:<n>`, interleaving two streams in one
-#: wire log.
-RESERVED_WORLD_LABELS: frozenset[str] = frozenset({"base", "family"})
-
-#: `family_<digits>` too, defensively: the colon fold that names a wire-log file is not obviously
-#: injective across `judge:<world>:<n>` and `judge:family:<n>`, so the whole near-miss shape is
-#: refused.
-_RESERVED_FAMILY_DRAW_LABEL = re.compile(r"\Afamily_\d+\Z", re.IGNORECASE)
-
-
-def is_reserved_world_label(label: str) -> bool:
-    """The membership test for the reserved namespace (the set, case-folded, and the
-    `family_<digits>` shape). Other gates, such as the judge's, ask this rather than re-deriving
-    the fold."""
-    return (label.casefold() in RESERVED_WORLD_LABELS
-            or _RESERVED_FAMILY_DRAW_LABEL.match(label) is not None)
-
-
 def refuse_reserved_world_label(label: str, *, at: str) -> None:
     """Refuse a reserved label; called wherever a world is parsed, not only by the launcher.
-
-    The shape arm runs first so `family_1` is refused for the rule that actually matched it.
-    """
-    where = f"{at} " if at else ""
-    if _RESERVED_FAMILY_DRAW_LABEL.match(label):
-        raise FamilyError(
-            f"{where}world label {label!r} matches family_<n> — the colon fold that names a "
-            "wire log file is not injective, and this label's own agent id would fold to the "
-            "same stem as one of the family call's draws")
-    if is_reserved_world_label(label):
-        raise FamilyError(
-            f"{where}world label {label!r} is the reserved name of the family's own base "
-            "capture or the family-level judge call — a world claiming it would append its "
-            "live rows into the recording its siblings replay, or collide with the family "
-            "call's own agent id")
+    The rule and its words are `_world_label.reserved_label_fault`'s."""
+    if (why := reserved_label_fault(label, at=at)) is not None:
+        raise FamilyError(why)
 
 
 def check_identities(family: Family) -> None:  # noqa: C901 — one gate over the whole manifest, kept together
@@ -670,12 +637,13 @@ def check_identities(family: Family) -> None:  # noqa: C901 — one gate over th
         # view and run-id grammars overlap but neither contains the other (the view rule admits
         # `wörld`, `a+b`, `a:b`), and the label is model-authored, so one off the run-id grammar
         # would otherwise fail in every child after the family is staged.
-        if not is_valid_run_id(f"{family.episode_id}-{label}"):
+        if (why := run_name_fault(f"{family.episode_id}-{label}")) is not None:
             raise FamilyError(
-                f"world label {label!r} cannot name this episode's sibling run "
-                f"({family.episode_id}-{label}; allowed: {RUN_ID_ALLOWED}) — each sibling is a "
-                "run dir named for its world, so a label off that grammar is refused by every "
-                "child after the whole family has been authored, staged and reviewed")
+                f"world label {label!r} cannot name this episode's sibling run: {why} — each "
+                "sibling is a run dir named for its world, so a label the runs repository would "
+                "not admit as a run name (its length and the sidecar shapes included) is "
+                "refused by every child after the whole family has been authored, staged and "
+                "reviewed")
         folded = label.casefold()
         if folded in seen:
             raise FamilyError(
@@ -796,16 +764,11 @@ def refuse_bad_episode_id(episode_id: str) -> None:
     """Refuse an episode id that cannot name a directory of its own.
 
     The id is joined into the episode dir's path and every sibling's run id, so it must be a
-    valid run id and case-stable.
+    run id with room for a sibling (`_run_id.episode_id_fault`, the one statement of the rule).
     """
-    if not is_valid_run_id(episode_id):
-        raise FamilyError(
-            f"episode id {episode_id!r} is not usable (allowed: {RUN_ID_ALLOWED}) — it names "
-            "a directory and half of every sibling's run id")
-    if not is_case_stable_id(episode_id):
-        raise FamilyError(
-            f"episode id {episode_id!r} is not usable ({CASE_STABLE_REQUIRED}) — use "
-            f"{episode_id.casefold()!r}")
+    if (why := episode_id_fault(episode_id)) is not None:
+        raise FamilyError(f"episode id {episode_id!r} is not usable: {why} — it names a "
+                          "directory and half of every sibling's run id")
 
 
 __all__ = [

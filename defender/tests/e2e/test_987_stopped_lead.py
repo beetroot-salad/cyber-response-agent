@@ -66,7 +66,7 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.tests import _tenants1106 as T1106  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender._run_paths import RunPaths  # noqa: E402
+from defender.run_repository import RunPaths  # noqa: E402
 from defender.hooks import budget_enforcer  # noqa: E402
 from defender.runtime import driver, observe, session_store, tools_gather  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402

@@ -42,7 +42,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender import _run_paths  # noqa: E402
+from defender.run_repository import _layout  # noqa: E402
 from defender.agents import MAIN_DEF  # noqa: E402
 from defender.hooks.record_lead import CLAIMED, LEAD_ID_RE, claim_lead  # noqa: E402
 from defender.learning.core import persist  # noqa: E402
@@ -123,8 +123,8 @@ def test_f09_the_gate_and_the_validators_share_one_alphabet(env):
     """The property, not the instance: for EVERY id the claim gate accepts, the payload it mints
     is readable by gather. Pinned as a shared spelling too, so a future edit to one site is a
     test failure rather than a second silent drift."""
-    assert f"gather_raw/l-{_run_paths.LEAD_ID_BODY}/[0-9]+\\.json" == _run_paths.GATHER_RAW_SHAPE
-    assert f"^l-{_run_paths.LEAD_ID_BODY}\\Z" == LEAD_ID_RE.pattern
+    assert f"gather_raw/l-{_layout.LEAD_ID_BODY}/[0-9]+\\.json" == _layout.GATHER_RAW_SHAPE
+    assert f"^l-{_layout.LEAD_ID_BODY}\\Z" == LEAD_ID_RE.pattern
 
     gather = _gather(env)
     for lead in (NUMERIC, LETTERED, "l-auth1", "l-A", "l-0", "l-999", "l-Ab9z"):

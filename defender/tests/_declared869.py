@@ -321,7 +321,7 @@ def seed_executed_query(
     rule existed" is not a hypothetical shape — it is whatever `append_query_row` wrote at
     the time. Seeding through that function rather than by hand is what keeps this fixture a
     real historical row instead of the test's own idea of one."""
-    from defender._run_paths import RunPaths
+    from defender.run_repository import RunPaths
     from defender.scripts.gather_tools.record_query import append_query_row
 
     gather = RunPaths(run_dir).gather_raw

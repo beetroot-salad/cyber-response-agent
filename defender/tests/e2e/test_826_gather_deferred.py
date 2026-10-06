@@ -61,7 +61,7 @@ class _Res:
     @property
     def rows(self) -> list[dict]:
         from defender._io import read_jsonl_rows
-        from defender._run_paths import RunPaths
+        from defender.run_repository import RunPaths
 
         return read_jsonl_rows(RunPaths(self.run_dir).executed_queries)
 

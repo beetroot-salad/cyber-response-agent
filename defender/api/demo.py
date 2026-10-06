@@ -13,7 +13,7 @@ import datetime as _dt
 from collections.abc import Callable, Sequence
 from functools import partial
 
-from defender._run_paths import RUN_LAYOUT
+from defender.run_repository import RUN_LAYOUT
 from defender._tenant import TenantId, is_valid_tenant_id
 
 from .fakes import (

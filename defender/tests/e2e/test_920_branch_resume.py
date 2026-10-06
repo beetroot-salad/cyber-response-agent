@@ -43,7 +43,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender._run_paths import RunPaths  # noqa: E402
+from defender.run_repository import RunPaths  # noqa: E402
 from defender.tests._branch_947 import spec_at  # noqa: E402
 from defender.tests._session_head_754 import message_ids  # noqa: E402
 from defender.tests._session_store_705 import sql, store_factory, store_mod  # noqa: E402

@@ -65,3 +65,51 @@ services:
     mem_limit: 8g
     memswap_limit: 8g
     command: ["sleep", "infinity"]
+
+  # Self-hosted git service for tenant knowledge repos (#1108, #1120): each tenant's
+  # `settings/` + `agent/` live in their own repo here, never in this product repo or on
+  # GitHub. Operator-side infrastructure, like the data root — NOT part of the playground
+  # (that is the simulated client estate, and is destroyed on lever-down).
+  #
+  # From the dev container: http://forgejo:3000 (clone the lab with
+  # `git clone http://forgejo:3000/tenants/playground.git $DEFENDER_DATA_ROOT/playground/knowledge`,
+  # credentials through a git credential helper, never in the URL). Each tenant's clone uses
+  # its OWN bot account (`bot-<id>-<salt>`, write on that one repo only), whose token lives at
+  # $DEFENDER_DATA_ROOT/<id>/forge/git-credentials — never an admin token. From the host's browser:
+  # http://localhost:${FORGEJO_HTTP_PORT:-3000}. Runs and the runtime image never reach it:
+  # the operator clones, and runs read the clone.
+  forgejo:
+    # 15.x is the LTS line (supported to 2027-07). Override per machine in .devcontainer/.env.
+    image: codeberg.org/forgejo/forgejo:${FORGEJO_VERSION:-15.0.9}
+    container_name: response-forgejo
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      FORGEJO__database__DB_TYPE: sqlite3
+      # Skip the web install wizard; accounts are created with `forgejo admin user create`.
+      FORGEJO__security__INSTALL_LOCK: "true"
+      # Accounts are created by the admin only: one per person, plus one bot per tenant.
+      FORGEJO__service__DISABLE_REGISTRATION: "true"
+      FORGEJO__service__REQUIRE_SIGNIN_VIEW: "true"
+      FORGEJO__server__DOMAIN: localhost
+      # The URL shown in the UI and in API responses (PR links): the one the host's browser opens.
+      FORGEJO__server__ROOT_URL: http://localhost:${FORGEJO_HTTP_PORT:-3000}/
+      FORGEJO__server__HTTP_PORT: "3000"
+      # SSH is reachable only on the compose network (not published to the host).
+      FORGEJO__server__SSH_DOMAIN: forgejo
+      FORGEJO__server__SSH_PORT: "22"
+    volumes:
+      # A named volume, so repos survive a devcontainer rebuild (`docker compose down` keeps
+      # it; only `down -v` deletes it). Back it up before any `-v`.
+      - forgejo-data:/data
+    ports:
+      # Loopback only: the UI is for this machine's browser, not the network.
+      - "127.0.0.1:${FORGEJO_HTTP_PORT:-3000}:3000"
+    # A git service with sqlite idles around 150 MB; the cap keeps it from competing with the
+    # dev container's 8g on a 14 GiB host.
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+
+volumes:
+  forgejo-data:

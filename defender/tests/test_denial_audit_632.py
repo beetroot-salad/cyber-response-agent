@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import json
 
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 import re
 from pathlib import Path
 

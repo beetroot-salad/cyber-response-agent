@@ -27,7 +27,7 @@ from pathlib import Path
 import pytest
 
 from defender import _io, _tenant, run_common
-from defender._run_handle import Run
+from defender.run_repository import Run
 from defender.tests.e2e._replay_harness import GOLDEN, ReplayFn, Turn, drive, materialize
 
 pytestmark = pytest.mark.e2e

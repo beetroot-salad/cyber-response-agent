@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from defender._io import guarded_mkdir
-from defender._run_paths import LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: this module is the claim gate's import surface
+from defender.run_repository import LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: this module is the claim gate's import surface
 
 #: `claim_lead`'s answers. Success must be distinguishable from "nothing was written": the
 #: sidecar's `O_EXCL` create is the only id-reuse gate, so dispatching without a row would let

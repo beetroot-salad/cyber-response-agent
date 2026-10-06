@@ -732,7 +732,7 @@ def _leads(world_dir: Path, label: str) -> None:
     queries table, and `gather_summaries/<lead>.md`. `l-000` is the PRE-BRANCH alert fetch —
     present in the table and the lead files, never in a summary or a resolution row — so the
     judge's leads-view set (`referenced_leads ∪ summary stems`, x12) excludes it."""
-    from defender._run_paths import RunPaths
+    from defender.run_repository import RunPaths
 
     leads = ["l-000", "l-001", "l-002", "l-00c"]
     rows = []

@@ -151,7 +151,7 @@ def test_a_pre_existing_record_at_the_destination_is_overwritten_through_the_gua
     overwrites a regular file AND wrote through a hard link at a destination leaf, while
     `write_guarded`'s `_refuse_unless_plain` refuses `S_ISREG and st_nlink > 1`. Resolved at
     the LANE: the record is the seventh single file, and the lane's pre-copy destination
-    screen now refuses a hard link at any of the seven (`_run_paths.plain_file`) — so a
+    screen now refuses a hard link at any of the seven (`_layout.plain_file`) — so a
     planted alias cannot redirect the host's own record, or any other artifact, out of the
     archive, and the whole world is refused before a byte lands."""
     ep, dirs, _base = _episode_with(tmp_path, worlds=("b",))

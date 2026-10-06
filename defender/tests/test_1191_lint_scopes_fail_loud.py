@@ -40,7 +40,7 @@ planted violation is reported (so the scan ran and the layout is faithful). A mi
 real checkout (a fresh private load of the real lint with one phantom entry, its own `main`), and
 under `--update-baseline`.
 
-`lint_run_records` imports the owner modules (`defender._run_paths`, ...): the child gets
+`lint_run_records` imports the owner modules (`defender.run_repository`, ...): the child gets
 `PYTHONPATH=<this checkout>`, and `defender` being a namespace package, the copy's own `defender/`
 (which holds no owner module) is searched first and the owners come from this checkout. Its mini
 repo therefore never holds a top-level `defender/*.py`.
@@ -67,7 +67,7 @@ from types import ModuleType
 import pytest
 
 from defender import _git
-from defender._run_paths import RUN_LAYOUT
+from defender.run_repository import RUN_LAYOUT
 from defender.tests._by_path import DEFENDER, LINT_DIR, WORKTREE, import_lint_lib, load_lint_gate
 
 TREE_READ = "lint_tree_read_follows_link"
@@ -460,9 +460,16 @@ def test_o1_tree_write_missing_hard_gated_entry_is_blind(tmp_path):
 
 def _run_records_mini(root: Path) -> tuple[Path, tuple[str, ...]]:
     lint_file = _mini_repo(root, RUN_RECORDS, data=RUN_RECORDS_DATA)
-    sweep = tuple(_fresh(RUN_RECORDS).SWEEP_DIRS)
+    lint = _fresh(RUN_RECORDS)
+    sweep = tuple(lint.SWEEP_DIRS)
     for d in sweep:
-        _write(root / "defender" / d / PLANTED)
+        if d == lint.OWNER_PACKAGE:
+            # #1105: every module in the owner package is an owner the lint imports by name, so
+            # the package is the real one, not an inert plant.
+            for src in sorted((DEFENDER / d).glob("*.py")):
+                _write(root / "defender" / d / src.name, src.read_text(encoding="utf-8"))
+        else:
+            _write(root / "defender" / d / PLANTED)
     return lint_file, sweep
 
 
@@ -921,7 +928,7 @@ def test_o2_a_name_extending_a_listed_one_is_not_listed(tmp_path):
 
 def test_o4_demo_spells_its_artifacts_through_run_layout():
     """D3's mechanism: every element of the `artifacts=[...]` list `api/demo.py` seeds is
-    `RUN_LAYOUT.<record>.name` off `defender._run_paths` (resolved through `_astlib`, so an alias
+    `RUN_LAYOUT.<record>.name` off `defender.run_repository` (resolved through `_astlib`, so an alias
     counts and a local `RUN_LAYOUT` does not) — report, investigation, runtime page, in that
     order. A name assembled from pieces (`"report" + ".md"`) is not that, and is exactly what the
     run-records gate is structurally blind to."""
@@ -933,7 +940,7 @@ def test_o4_demo_spells_its_artifacts_through_run_layout():
              for kw in node.keywords
              if kw.arg == "artifacts" and isinstance(kw.value, ast.List) and kw.value.elts]
     assert lists, "api/demo.py seeds no non-empty artifacts=[...] list"
-    want = [f"defender._run_paths.RUN_LAYOUT.{r}.name"
+    want = [f"defender.run_repository.RUN_LAYOUT.{r}.name"
             for r in ("report", "investigation", "runtime_html")]
     for listed in lists:
         got = [astlib.origin(el, env) for el in listed.elts]

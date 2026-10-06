@@ -53,7 +53,7 @@ from defender._io import read_jsonl_rows, read_text_soft, use_utf8_stdio
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._report import UNKNOWN_DISPOSITION, read_report
 from defender._tsv import flatten_cell as _flatten
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.learning.core.config import DEFAULT_PATHS
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
