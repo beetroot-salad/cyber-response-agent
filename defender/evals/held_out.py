@@ -41,7 +41,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
 from defender._yaml import safe_load
 from defender._model import model
 from defender._report import read_report
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.run_common import HELD_OUT_FIXTURES as FIXTURES_DIR
 
 

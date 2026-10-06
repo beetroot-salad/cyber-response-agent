@@ -31,7 +31,7 @@ from defender.tests.e2e._replay_harness import (
     normalize,
 )
 from defender._io import read_jsonl_rows
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.runtime import permission, tools as runtime_tools
 from defender.runtime.agent_definition import compile_policy_for
 from defender.runtime.close_tool import CAUSE_EVIDENCE_CANNOT_DISCRIMINATE

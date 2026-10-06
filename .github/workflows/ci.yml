@@ -695,11 +695,18 @@ jobs:
       - name: Run-records inventory gate (#1076 — hard, rendered page)
         run: defender/.venv/bin/python scripts/lint/lint_run_records.py
 
+      # The run-layout fence (#1105 D7, interim until #1082): outside defender/run_repository/
+      # and its owner modules, no run-layout name, episode-runs name, Tenant.runs or run-handle
+      # constructor except where its category table exempts it or its allow-list (the only
+      # hatch; a stale entry fails) names the use. PR 2 empties the allow-list.
+      - name: Run-layout fence (#1105 D7 — hard, allow-list only)
+        run: defender/.venv/bin/python scripts/lint/lint_run_layout_imports.py
+
       # The READ-side twin of the gate above. #771 M3 settled writing into a box-writable tree
       # and left reading alone, so the same directory this repo refuses to write through
       # unexamined was trusted when stat'ed and copied: is_file()/is_dir()/shutil.copy* all
       # follow a link, so a planted one is admitted as an artifact and its TARGET's bytes are
-      # copied in under the artifact's name. defender._run_paths.artifact_file / artifact_dir
+      # copied in under the artifact's name. defender.run_repository._layout.artifact_file / artifact_dir
       # are lstat and judge the entry itself. Scoped to the LINT_TREE_READER_MODULES census.
       - name: Link-following tree-read gate (lstat the entry, not its target — baseline-ratcheted)
         run: defender/.venv/bin/python scripts/lint/lint_tree_read_follows_link.py

@@ -102,6 +102,12 @@ SCRUB_VERDICT_SUFFIX = ".scrub-verdict.json"
 ACCOUNTING_FAILURES_SUFFIX = ".accounting_failures.json"
 #: The case-ticket write's receipt: a host record the box must neither plant nor block (#1107).
 TICKET_WRITE_SUFFIX = ".ticket-write.json"
+#: The four host-only sidecars, each `<run id><suffix>` beside the run folder in the runs base.
+_SIDECAR_SUFFIXES = (RUN_END_SIDECAR_SUFFIX, SCRUB_VERDICT_SUFFIX, ACCOUNTING_FAILURES_SUFFIX,
+                     TICKET_WRITE_SUFFIX)
+#: The tail a sidecar write's staged file carries before its rename (`_io.staged_leaf`:
+#: `.staged-` and lowercase hex digits; one or more, #1105 DV-5).
+_STAGED_TAIL = re.compile(r"\.staged-[0-9a-f]+\Z")
 
 #: The sessions directory is a sibling of the runs base, never a child.
 SESSIONS_DIRNAME = "sessions"

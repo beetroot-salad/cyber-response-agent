@@ -16,7 +16,7 @@ from pydantic import model_validator
 
 
 
-from defender._run_paths import RUN_LAYOUT, RunPaths
+from defender.run_repository import RUN_LAYOUT, RunPaths
 
 from .. import session_store
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 from defender._model import model
-from defender._run_paths import RUN_LAYOUT
+from defender.run_repository import RUN_LAYOUT
 from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import SkipValidation

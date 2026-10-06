@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from defender._io import write_guarded
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 
 _logger = logging.getLogger(__name__)
 

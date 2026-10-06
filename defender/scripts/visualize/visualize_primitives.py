@@ -15,7 +15,7 @@ ASSETS = Path(__file__).resolve().parent / "assets"
 CSS = (ASSETS / "styles.css").read_text(encoding="utf-8")  # lint-whole-read: ok — repo-shipped visualizer asset; operator-controlled, not on any box-writable mount
 
 from defender._report import ReportRead, read_report  # noqa: E402
-from defender._run_paths import RunPaths  # noqa: E402
+from defender.run_repository import RunPaths  # noqa: E402
 
 
 

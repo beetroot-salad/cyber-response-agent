@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from defender._model import model
-from defender._run_paths import WIRE_LOG_NAMES
+from defender.run_repository import WIRE_LOG_NAMES
 from pathlib import Path
 from typing import Any
 

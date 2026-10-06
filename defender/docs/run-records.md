@@ -1,9 +1,9 @@
 # Run records — every kind of file a run reads and writes
 
 The inventory issue #1076 asked for: one page naming every record kind a run has and where it
-lives. #1077 turns that inventory into the file-backed `Run` handle: `defender/_run_paths.py`
+lives. #1077 turns that inventory into the file-backed `Run` handle: `defender/run_repository/_layout.py`
 (`RunPaths`), `defender/_episode_paths.py` (`EpisodePaths`) and `defender/_tenant.py` own every
-name a run or episode record carries, and `defender/_run_handle.py` (`Run`, `RunRecord`,
+name a run or episode record carries, and `defender/run_repository/_handle.py` (`Run`, `RunRecord`,
 `RecordHandle`, `ArchivedWorld`) wraps them into the handle application code addresses by
 `(tenant_id, run_id)`.
 
@@ -69,11 +69,11 @@ unreachable by root containment rather than by a named deny.
 
 | kind | table | path | denied to | archived as | sub-collection | note |
 |---|---|---|---|---|---|---|
-| alert | 1 | `alert.json` | — (deliberately not in the answer key, `_run_paths.py:197-198`) | alert.json | run.facts.alert | input copied by the host |
+| alert | 1 | `alert.json` | — (deliberately not in the answer key, `run_repository/_layout.py`, the comment on `CASE_ANSWER_KEY_NAMES`) | alert.json | run.facts.alert | input copied by the host |
 | report | 1 | `report.md` | confined | report.md | run.documents.report | the close tool is its only writer; no role holds a write grant for it (`close_tool.py:1`) |
 | investigation | 1 | `investigation.md` | confined | investigation.md | run.documents.investigation | seeds (lead-0, branch resume) write it before the first turn; the document tool during |
 | queries | 1 | `executed_queries.jsonl` | confined | staged as a table | run.tables.queries | append-only; the gather lane's denial rows land here too |
-| source_refs | 1 | `source_refs.yaml` | confined (`_run_paths.py:202-204`) | — | run.documents.source_refs | no writer in this repo — consumed only; test helpers fabricate it (`tests/conftest.py:202`); `tests/test_orchestrate_thresholds.py:509` records that its writer is gone |
+| source_refs | 1 | `source_refs.yaml` | confined (`run_repository/_layout.py`: `CASE_ANSWER_KEY_NAMES` and `RunPaths.source_refs`) | — | run.documents.source_refs | no writer in this repo — consumed only; test helpers fabricate it (`tests/conftest.py:202`); `tests/test_orchestrate_thresholds.py:509` records that its writer is gone |
 | gather_raw | 1 | `gather_raw/<lead>/<seq>.json` | shape | staged as a table | run.tables.payloads | by-ref payloads; the model reaches them by the bash `cat` lane only |
 | lead_claim | 1 | `gather_raw/<lead>.lead.json` | shape (same dir) | with gather_raw | run.tables.leads | per-lead claim sidecar, exclusive create |
 | gather_summaries | 1 | `gather_summaries/<lead>.md` | — | gather_summaries/ | run.documents.gather_summaries |  |
@@ -87,9 +87,9 @@ unreachable by root containment rather than by a named deny.
 | budget | 1 | `budget.json` | — | — | run.observability.budget | counter, locked json |
 | circuit_breaker | 1 | `circuit_breaker.json` | — | — | run.observability.circuit_breaker | counter |
 | lessons_loaded | 1 | `lessons_loaded.jsonl` | — | lessons_loaded.jsonl | run.observability.lessons_loaded | receipt of corpus consumption; `hooks/record_lesson_load` is the reader-side classifier |
-| ticket_reads | 1 | `ticket_reads/<seq>.json` | cap | — | run.tables.ticket_reads | retired writer (the old pipeline judge, `permission/files.py:394-395`); only the path shape (`_run_paths.py:190`) and the read cap survive |
+| ticket_reads | 1 | `ticket_reads/<seq>.json` | cap | — | run.tables.ticket_reads | retired writer (the old pipeline judge, `permission/files.py:394-395`); only the path shape (`run_repository/_layout.py:231-233`) and the read cap survive |
 | session_pointer | 1 | `session_store_pointer.json` | — | — | run.observability.session_pointer | written by the driver before the first turn |
-| runtime_html | 1 | `runtime.html` | (inlines MAIN's transcript; safe on timing only, `_run_paths.py:63-68`) | — | run.observability.runtime_html | copied to the main checkout's `run-visualizations/` on `dev` deployments only, written as the checkout's owner (`visualize_run.mirror_page`, #1084/#1110) |
+| runtime_html | 1 | `runtime.html` | (inlines MAIN's transcript; safe on timing only, `run_repository/_layout.py`, the comment on `WIRE_LOG_DIR`) | — | run.observability.runtime_html | copied to the main checkout's `run-visualizations/` on `dev` deployments only, written as the checkout's owner (`visualize_run.mirror_page`, #1084/#1110) |
 | box_sentinel | 1 | `.box-sentinel` | — | — | run.observability.box_sentinel | `unlink_on_fault=False` (`_lifecycle.py:105-106`), left behind on a fault as evidence (`:96-102`); the mount-check sentinel `.box-sentinel-<uuid>` (`:109-117`) is a different, self-cleaning family |
 | provenance | 1 | `provenance.json` | outright | provenance.json | run.facts.provenance | stamped by the host at materialize time |
 | run_end | 2 | `<run>.run-end.json` | — | run_end.json (renamed, `archive.py:148`) | run.facts.run_end | cleared by the host at `run_common.py:71-77` before a reused id |
@@ -113,6 +113,7 @@ unreachable by root containment rather than by a named deny.
 | archive_proj | 4 | `worlds/<label>` | — | — | episode.archive_proj | the archive copy itself (section 5) |
 | tool_seam |  | `(the role's declared read/write targets)` | — | — | — | the model's generic read/write/edit file tools; the kind is decided by the gate at the call |
 | tenant | 2 | `_tenant.json` | — | — | tenant | D2: created once when absent |
+| episode_runs_record | 2 | `_episodes/<episode_id>.json` | — | — | — | #1105 D3: the episode -> runs record, host-only beside _tenant.json; written once by run_repository.record_episode_runs (no production writer in PR 1), read by the repository's listings and run setup's claimed-id check |
 | tenant_row | 5 | `<tenant>/tenant.json` | — | — | tenant.row | #1078 D1: the tenant's own row, created once per data root by the tenant setup command |
 
 <!-- end generated -->

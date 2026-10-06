@@ -71,7 +71,7 @@ from defender.hooks.inject_system_skill_description import descriptor_catalog
 from defender import _clock
 from defender._env import env_bool
 from defender._frontmatter import strip_frontmatter
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from ..run_tenant import RunTenant
 from ._prompts import (
     BUDGET_ENFORCE_FLAG,

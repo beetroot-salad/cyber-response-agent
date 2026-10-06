@@ -10,7 +10,7 @@ from typing import Any
 
 from defender._model import model
 from defender._report import ReportUnreadable, require_report
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.runtime.tenant_settings import pointer_to, read_regular_bytes
 
 

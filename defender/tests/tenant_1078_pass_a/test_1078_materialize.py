@@ -160,7 +160,7 @@ def test_d9_run_dir_file_set_unchanged(tmp_path, tenant_root):
     A fresh materialize leaves exactly what setup writes — the owner's alert, gather_raw and
     provenance names — and beside the run dir only the runs-base record."""
     run_dir = Path(_materialize(H.plant_alert(tmp_path / "in"), "r1", T_ID))
-    paths = H.mod("_run_paths").RunPaths(run_dir)
+    paths = H.mod("run_repository._layout").RunPaths(run_dir)
     assert set(H.entries(run_dir)) == {paths.alert.name, paths.gather_raw.name,
                                        paths.provenance.name}
     assert H.entries(run_dir.parent) == sorted([H.RECORD_NAME, "r1"])
@@ -405,7 +405,7 @@ def test_old_style_setup_state_classification_runs_against_a_tenant_scoped_run_d
     <T>/runs/<id>/: a same `--run-id --tenant` resume finds the run dir Run.for_tenant
     computes as runs_base_for(T)/<id>."""
     rc = H.run_common()
-    Run = H.mod("_run_handle").Run
+    Run = H.mod("run_repository._handle").Run
     base = H.runs_base_for(T_ID)
     alert = H.plant_alert(tmp_path / "in")
     run_dir = Path(_materialize(alert, "x1", T_ID))
@@ -452,7 +452,7 @@ def test_o6_old_run_id_fresh_under_tenant(tmp_path, monkeypatch, tenant_root):
     before = H.census(old)
     run_dir = Path(_materialize(H.plant_alert(tmp_path / "in"), "x", T_ID))
     assert run_dir == tenant_root / T_ID / "runs" / "x"
-    paths = H.mod("_run_paths").RunPaths(run_dir)
+    paths = H.mod("run_repository._layout").RunPaths(run_dir)
     assert set(os.listdir(run_dir)) == {paths.alert.name, paths.gather_raw.name,
                                         paths.provenance.name}, "not a fresh setup"
     assert H.census(old) == before, "the old run X was touched"

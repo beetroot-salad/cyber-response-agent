@@ -18,7 +18,7 @@ from defender._io import (
     read_jsonl_rows,
     write_guarded,
 )
-from defender._run_paths import RUN_LAYOUT, RunPaths, artifact_dir, artifact_file
+from defender.run_repository import RUN_LAYOUT, RunPaths, artifact_dir, artifact_file
 
 from ._spec import BranchError, BranchSpec
 from ._frontier import _lead_dirs, fence_count_at, leads_at, source_session

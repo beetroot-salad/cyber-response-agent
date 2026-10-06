@@ -31,7 +31,7 @@ from defender._io import Bound, bind
 from defender._report import ReportRead
 from defender._run_id import is_valid_run_id
 from defender._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
-from defender._run_paths import RUN_LAYOUT, WIRE_LOG_NAMES
+from defender.run_repository import RUN_LAYOUT, WIRE_LOG_NAMES
 from defender._vocab import normalized_disposition, normalized_judge_outcome
 from defender.learning.branch import archive, staging
 from defender.learning.branch import timing as timing_mod

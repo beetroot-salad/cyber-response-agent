@@ -16,7 +16,7 @@ from typing import Annotated, Any
 from pydantic import SkipValidation
 
 from defender._io import read_jsonl_rows
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.hooks.budget_enforcer import (
     BudgetKill,
     read_budget,
@@ -295,7 +295,7 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> N
     validation is not written: the id stays undeclared and MAIN gets a recoverable
     `undeclared lead` refusal instead of unvalidated bytes. Best-effort: never raises."""
     from defender._artifact_schema import validate_artifact
-    from defender._run_paths import RUN_LAYOUT
+    from defender.run_repository import RUN_LAYOUT
     from defender._io import write_guarded
 
     path = RunPaths(run_dir).investigation

@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from defender._run_paths import RUN_LAYOUT
+from defender.run_repository import RUN_LAYOUT
 from defender._frontmatter import FrontmatterError, parse_frontmatter
 from defender._io import read_text_soft
 from defender._model import model

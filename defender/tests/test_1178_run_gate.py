@@ -73,7 +73,7 @@ import pytest
 
 from defender import _git
 from defender._io import READ_LIMIT
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.learning.core import drains, persist
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.leads import lead_author, pitfalls_curator

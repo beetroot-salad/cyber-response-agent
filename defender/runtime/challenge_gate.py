@@ -129,7 +129,7 @@ class ReviewState:
 
 def write_review_record(run_dir, turn: int, record: dict) -> None:
     from defender._io import write_guarded
-    from defender._run_paths import RunPaths
+    from defender.run_repository import RunPaths
 
     write_guarded(
         RunPaths(run_dir).review_record(turn), json.dumps(record, indent=2), mode="replace")
@@ -212,7 +212,7 @@ def _write_trace_row(
         line += raw_reply if raw_reply.endswith("\n") else raw_reply + "\n"
     # One guarded append so the row and its reply land together. The directory is created
     # here (the `RunPaths` resolver stays pure), guarded from the run dir: the box's rw bind.
-    from defender._run_paths import RunPaths
+    from defender.run_repository import RunPaths
 
     path = RunPaths(Path(run_dir)).review_trace(role)
     guarded_mkdir(path.parent, base=Path(run_dir))

@@ -21,7 +21,7 @@ import pytest
 
 from defender import run as run_py
 from defender import run_common
-from defender._run_handle import case_ref
+from defender.run_repository import case_ref
 from defender.learning import judge as judge_mod
 from defender.learning.branch import cli as branch_cli
 from defender.learning.core import config

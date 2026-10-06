@@ -1007,7 +1007,7 @@ def test_a_lead_id_outside_the_shape_is_an_unreadable_row_not_a_view_1_heading(
     sources are shaped by construction (resolution tokens, `claim_lead`-validated stems),
     this one was screened only for non-emptiness. The screen is at the ONE loader every
     consumer reads through (`lead_repository.load_queries_report`), against the lead-id
-    shape the writers already enforce (`_run_paths.LEAD_ID_RE`): a row whose id is not a
+    shape the writers already enforce (`_layout.LEAD_ID_RE`): a row whose id is not a
     lead id counts as one unreadable record, like a row with no id, and no consumer sees it.
 
     Observed failing by: the forged heading or the forged `- summary:` line in the

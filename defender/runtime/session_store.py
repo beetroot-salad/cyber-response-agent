@@ -28,7 +28,7 @@ from pydantic_ai.messages import (
 
 from defender._io import guarded_mkdir, write_guarded
 from defender._run_id import CASE_ID_RE  # noqa: F401 — re-export; the rule lives with the id rules
-from defender._run_paths import RunPaths, SessionPaths
+from defender.run_repository import RunPaths, SessionPaths
 from defender._store_errors import InvalidCaseId, StoreError  # noqa: F401 — re-exports
 # The `truncated_by` vocabulary and its normalizer are owned by `runtime/run_end.py`;
 # re-exported for the column's writers. Non-store readers import them from the owner.

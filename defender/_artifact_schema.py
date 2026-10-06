@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 
-from defender import _run_paths
+from defender.run_repository import RUN_LAYOUT
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._yaml import duplicate_top_level_key
 # Not the normalizer: the write gate tests the value exactly (see `validate_report`).
@@ -37,13 +37,13 @@ REPORT_CLOSE_DELIMITER = "</report>"
 # must not hold record names of its own.
 def artifact_names() -> tuple[str, ...]:
     """The artifacts this module has a schema for, by name, from the run-dir owner."""
-    return (_run_paths.RUN_LAYOUT.report.name, _run_paths.RUN_LAYOUT.investigation.name)
+    return (RUN_LAYOUT.report.name, RUN_LAYOUT.investigation.name)
 
 # Only the append-only investigation validates against its history. The gate reads the
 # baseline only for these names, keeping a raising `read_text` off the report path.
 def needs_baseline(name: str) -> bool:
     """Does validating this artifact need the CURRENT on-disk text?"""
-    return name == _run_paths.RUN_LAYOUT.investigation.name
+    return name == RUN_LAYOUT.investigation.name
 
 
 def _utf8_len(text: str) -> int:
@@ -260,8 +260,8 @@ def validate_artifact(name: str, proposed_text: str, current: str | None) -> str
     reason = encodable_or_reason(proposed_text, name)
     if reason is not None:
         return reason
-    if name == _run_paths.RUN_LAYOUT.report.name:
+    if name == RUN_LAYOUT.report.name:
         return validate_report(proposed_text)
-    if name == _run_paths.RUN_LAYOUT.investigation.name:
+    if name == RUN_LAYOUT.investigation.name:
         return validate_investigation(proposed_text, current)
     raise ValueError(f"no content schema for artifact {name!r}")

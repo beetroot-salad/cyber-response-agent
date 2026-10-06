@@ -153,7 +153,7 @@ def test_the_sort_param_is_visible_to_the_model_on_both_search_verbs():
 
 def _write(tmp_path: Path, rows: list[dict]) -> Path:
     from defender._io import append_jsonl
-    from defender._run_paths import RunPaths
+    from defender.run_repository import RunPaths
 
     append_jsonl(RunPaths(tmp_path).executed_queries, rows)
     return tmp_path

@@ -111,7 +111,7 @@ from typing import Any
 
 from defender import _io
 from defender._episode_paths import LAYOUT
-from defender._run_paths import WIRE_LOG_NAMES
+from defender.run_repository import WIRE_LOG_NAMES
 from defender.tests.test_1111_rooted_io import (  # noqa: F401 — re-exported for the #1133 suite
     DEADLINE,
     HOST_BYTES,

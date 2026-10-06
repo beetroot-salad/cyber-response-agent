@@ -83,7 +83,7 @@ def _artifact_accessors() -> frozenset[str]:
     no resolvable origin."""
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
-    from defender._run_paths import RunPaths  # noqa: PLC0415
+    from defender.run_repository import RunPaths  # noqa: PLC0415
 
     probe = RunPaths(Path("/probe"))
     names: set[str] = set()

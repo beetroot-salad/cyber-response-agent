@@ -61,7 +61,7 @@ MARKER = "t1080"
 
 TENANT = "playground"
 
-#: The receipt's suffix beside the run dir (`_run_paths.TICKET_WRITE_SUFFIX`, unmoved) — used only
+#: The receipt's suffix beside the run dir (`run_repository.TICKET_WRITE_SUFFIX`, #1105's door) — used only
 #: to pick receipts out of a runs base listing; where the writer puts one is the golden's.
 RECEIPT_SUFFIX = ".ticket-write.json"
 

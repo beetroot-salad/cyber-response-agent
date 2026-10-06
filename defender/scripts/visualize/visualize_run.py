@@ -15,7 +15,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 from defender import _env
 from defender._io import load_json_artifact, read_guarded, read_jsonl_rows
 from defender._report import ReportRead
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.learning import lead_repository
 from defender.scripts.visualize import _mirror_write
 from defender.scripts.visualize._page_failed import VisualizeFailed
@@ -70,7 +70,7 @@ _MIRROR_WRITER = Path(_mirror_write.__file__).resolve()
 _logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from defender._run_handle import Run
+    from defender.run_repository import Run
 
 #: What the dev-only copy did: landed, was not attempted (not a `dev` deployment), or failed.
 CopyOutcome = Literal["copied", "skipped", "failed"]
@@ -618,7 +618,7 @@ def main(argv: list[str]) -> int:
     its provenance names. Exits 1 when the record was not saved, or when a `dev` copy failed —
     refreshing that copy is often why an operator re-renders."""
     from defender import _log
-    from defender._run_handle import Run
+    from defender.run_repository import Run
 
     args = argv[1:]
     update_ticket = "--update-ticket" in args

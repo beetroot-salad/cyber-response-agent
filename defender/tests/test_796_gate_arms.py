@@ -17,7 +17,7 @@ from defender.tests._frames680 import frame_salt_of
 
 from defender._io import read_jsonl_rows
 from defender.runtime import challenge_gate
-from defender._run_paths import RunPaths
+from defender.run_repository import RunPaths
 from defender.runtime.close_tool import (
     CAUSE_EVIDENCE_CANNOT_DISCRIMINATE,
     CAUSE_NOTHING_LEFT_TO_ASK,

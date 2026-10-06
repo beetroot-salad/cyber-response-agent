@@ -28,7 +28,7 @@ pytest.importorskip("pydantic_ai")
 toons = pytest.importorskip("toons")  # noqa: E402
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender._run_paths import RunPaths  # noqa: E402
+from defender.run_repository import RunPaths  # noqa: E402
 from defender.tests._session_store_705 import sql, store_factory  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
