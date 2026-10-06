@@ -1,7 +1,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path, PurePosixPath
+import errno
+
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays lazy
@@ -10,13 +12,7 @@ if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays 
 
 from pydantic_ai.exceptions import ModelRetry
 
-from defender._io import (
-    REFUSED_NOT_FILE,
-    REFUSED_UNDECODABLE,
-    bind,
-    rooted_mkdir,
-    rooted_write,
-)
+from defender._io import REFUSED_NOT_FILE, REFUSED_UNDECODABLE, NotPlainEntry, bind, hold
 from defender._run_paths import RunPaths
 from .. import permission
 from ..permission.files import RESOLVE_ERRORS
@@ -39,8 +35,8 @@ def _read_operand(deps: AgentDeps, p: Path, path: str) -> str | None:
     try:
         with bind(root) as tree:
             got = tree.read(name)
-    except (OSError, ValueError) as e:
-        raise ModelRetry(f"could not read {path}: {getattr(e, 'strerror', None) or e}") from None
+    except ValueError as e:  # a name outside the core's grammar (one that does not encode)
+        raise ModelRetry(f"could not read {path}: {e}") from None
     if got.absent or got.refused_by == REFUSED_NOT_FILE:
         return None
     if got.refused_by == REFUSED_UNDECODABLE:
@@ -52,15 +48,25 @@ def _read_operand(deps: AgentDeps, p: Path, path: str) -> str | None:
 
 def _write_operand(deps: AgentDeps, p: Path, path: str, text: str) -> None:
     """Replace the file at the operand `p` with `text` through the rooted core, off the same
-    root its read takes, making its missing holding folders: nothing below the root is
-    followed, a non-plain entry at the name is refused and left in place, and every refusal is
-    a `ModelRetry` naming no host path."""
+    root its read takes, in one walk that makes the missing holding folders: nothing below the
+    root is followed and a non-plain entry at the name is refused and left in place.
+
+    A planted entry on the path (a link, a hard link, a FIFO or folder at the name, a file used
+    as a folder) is the model's to route around, so it is a `ModelRetry` naming no host path.
+    Any other fault (a full disk, an I/O error) is the host's and propagates, as it did before
+    the move: a retry cannot fix it."""
     root, name = _rooted_operand(deps, p, path=path)
     try:
-        rooted_mkdir(root, PurePosixPath(name).parent.as_posix())
-        rooted_write(root, name, text, mode="replace")
-    except (OSError, ValueError) as e:
-        raise ModelRetry(f"could not write {path}: {getattr(e, 'strerror', None) or e}") from None
+        with hold(root) as tree:
+            tree.write(name, text, mode="replace")
+    except (NotPlainEntry, NotADirectoryError) as e:
+        raise ModelRetry(f"could not write {path}: {e.strerror}") from None
+    except OSError as e:
+        if e.errno != errno.ELOOP:  # a linked holding folder; anything else is the host's
+            raise
+        raise ModelRetry(f"could not write {path}: {e.strerror}") from None
+    except ValueError as e:
+        raise ModelRetry(f"could not write {path}: {e}") from None
 
 
 def _gated_read(

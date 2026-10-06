@@ -715,3 +715,48 @@ def test_a_refusal_names_no_host_path(tool, tmp_path):
         root = corpus
     assert str(tmp_path) not in message, message
     assert str(root.resolve()) not in message, message
+
+
+# ---------------------------------------------------------------------------------------------
+# second review round (#1208): a confine is never a trust root; `//`; the refusal kind
+
+
+def test_a_symlinked_corpus_folder_is_refused_for_curator_io(tmp_path):
+    """`defender/lessons` itself a symlink to a folder outside the worktree, made before the
+    curator binds (the gate resolves it and admits both lanes): the walk starts at the defender
+    dir, never at the confined corpus folder, so the link is refused for the read and the
+    write and nothing lands at its target — as `main` refused the write."""
+    wt = make_worktree(tmp_path)
+    corpus = wt / "defender" / "lessons"
+    outside = tmp_path / "outside-lessons"
+    corpus.rename(outside)
+    os.symlink(outside, corpus, target_is_directory=True)
+    (outside / "a.md").write_text("ORIGINAL lesson\n", encoding="utf-8")
+    deps = CuratorDeps.for_run(pending_run_dir(tmp_path), wt, corpus, box=None)
+
+    _refused(lambda: _tool_lesson_read(deps, "defender/lessons/a.md", part="full"))
+    _refused(lambda: _tool_write_file(deps, "defender/lessons/new.md", "NEW\n"))
+    assert not (outside / "new.md").exists(), "the write landed through the linked corpus"
+
+
+def test_a_double_slash_spelling_reads_as_today(tmp_path):
+    """POSIX lets `//x` mean `/x`; the gate admits it, so the read must too, not refuse it as
+    reaching its root through a symlink."""
+    deps, run = _main(tmp_path)
+    (run / "notes.txt").write_text("plain notes\n", encoding="utf-8")
+    assert "plain notes" in _tool_read_file(deps, "/" + str(run / "notes.txt"))
+
+
+def test_a_refused_record_read_must_say_what_refused_it():
+    """`RecordRead.refused_by` is set exactly when the read was refused, so a consumer that
+    branches on it can never meet a refusal with no kind (and misfile an I/O fault as a
+    plant)."""
+    from defender._io import REFUSED_FAULT, RecordRead
+
+    with pytest.raises(ValueError, match="names what refused it"):
+        RecordRead(name="x", absent=False, reason="refused", text=None)
+    with pytest.raises(ValueError, match="names what refused it"):
+        RecordRead(name="x", absent=False, reason=None, text="t", refused_by=REFUSED_FAULT)
+    assert RecordRead(
+        name="x", absent=False, reason="refused", text=None, refused_by=REFUSED_FAULT,
+    ).refused_by == REFUSED_FAULT

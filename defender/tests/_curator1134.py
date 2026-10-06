@@ -48,7 +48,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from defender._io import Bound, Held, NotPlainEntry, RecordRead, hold, open_unnamed_at
+from defender._io import REFUSED_ALIAS, Bound, Held, NotPlainEntry, RecordRead, hold, open_unnamed_at
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
 from defender.tests._state1135 import state_for_paths as open_state  # noqa: F401 — re-export: this module's tests open their handle through it
@@ -372,7 +372,7 @@ class JournalBound(Bound):
         self.log.append(("read", key))
         if key in self.refuse:
             return RecordRead(name=key, absent=False, reason="refused by the test's view",
-                              text=None)
+                              text=None, refused_by=REFUSED_ALIAS)
         got = super().read(name, errors=errors)
         if key in self.extra and got.text is not None:
             return dataclasses.replace(got, text=got.text + self.extra[key])

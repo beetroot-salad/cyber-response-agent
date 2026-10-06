@@ -15,7 +15,7 @@ import sys
 import threading
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path, PurePath
-from typing import IO, Any, Literal, overload
+from typing import IO, Any, Final, Literal, overload
 
 TEXT_READ_ERRORS: tuple[type[Exception], ...] = (OSError, UnicodeDecodeError)
 """What reading a text file can raise: unreadable (``OSError``) or undecodable
@@ -390,6 +390,17 @@ class _Read:
         return f"{self.name}: {self.reason}" if self.name else self.reason
 
 
+#: What refused a `bind`ed read (`RecordRead.refused_by`): a link or hard link at the name or a
+#: linked folder on the way (the alias refusal); something at the name, or on the way, that is
+#: not a file or folder (a directory or FIFO at the name, a file used as a folder); bytes that
+#: are not UTF-8; or anything else (an I/O fault, a size cap, a closed root).
+RefusalKind = Literal["alias", "not_file", "undecodable", "fault"]
+REFUSED_ALIAS: Final = "alias"
+REFUSED_NOT_FILE: Final = "not_file"
+REFUSED_UNDECODABLE: Final = "undecodable"
+REFUSED_FAULT: Final = "fault"
+
+
 @dataclasses.dataclass(frozen=True)
 class RecordRead(_Read):
     """A `bind`ed reader's answer to a file, in exactly one of three states: present (`text` a
@@ -397,16 +408,11 @@ class RecordRead(_Read):
     saying what stopped it: one of the `REFUSED_*` kinds)."""
 
     text: str | None
-    refused_by: str | None = None
+    refused_by: RefusalKind | None = None
 
-
-#: What refused a `bind`ed read (`RecordRead.refused_by`): a link or hard link at the name or a
-#: linked folder on the way (the alias refusal); something at the name, or on the way, that is
-#: not a file or folder (a directory or FIFO at the name, a file used as a folder); bytes that
-#: are not UTF-8; or anything else (an I/O fault, a size cap, a closed root).
-REFUSED_ALIAS, REFUSED_NOT_FILE, REFUSED_UNDECODABLE, REFUSED_FAULT = (
-    "alias", "not_file", "undecodable", "fault",
-)
+    def __post_init__(self) -> None:
+        if (self.reason is None) != (self.refused_by is None):
+            raise ValueError("a refused RecordRead names what refused it, and only a refused one")
 
 
 #: What one entry of a listed directory is, judged without following it: a regular file (hard
@@ -601,7 +607,7 @@ def _read_leaf(
         os_.close(fd)
 
 
-def _refused_by(e: BaseException) -> str:
+def _refused_by(e: BaseException) -> RefusalKind:
     """The `REFUSED_*` kind of a refused read's exception. The core already marks the cases
     apart: `NotPlainEntry` is an entry at the name, alias-marked for a link or hard link; a
     linked folder on the way is a bare `ELOOP`; a file used as a folder is

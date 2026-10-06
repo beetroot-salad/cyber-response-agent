@@ -254,7 +254,7 @@ def test_validate_companion_drops_warnings():
     assert "parse error" in validate_companion(_PARSE_ERROR, None)[0]
 
 
-def test_two_validator_entry_points_stay_in_parity(tmp_path):
+def test_the_write_gate_applies_the_validators_warn_severity(tmp_path):
     """`decide_write` (the gate the write verbs face) applies the validator's warn severity: a
     warn-only document is allowed, a parse error is not. Its unused `_decide_investigation_write`
     twin (brief F6), whose parity this test once pinned, was deleted in #1136."""

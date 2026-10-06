@@ -204,7 +204,9 @@ demands:
     form: test
     binds: ["validate_investigation.access[decide_write]",
             "validate_investigation.access[decide_investigation_write]"]
-    discharged_by: test_two_validator_entry_points_stay_in_parity
+    discharged_by: test_the_write_gate_applies_the_validators_warn_severity
+    # #1136 deleted `_decide_investigation_write`, so this now holds through `decide_write`
+    # alone; the history below is the original claim.
     # brief F6 + claim g4: `_decide_investigation_write` invokes validate_investigation rather
     # than reimplementing it, so M2 is visible through both entries. Kept as a cheap regression.
   - id: close_report_validator_unchanged

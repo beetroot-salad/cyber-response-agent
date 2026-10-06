@@ -19,8 +19,7 @@ from pathlib import Path
 from defender.agents import MAIN_DEF
 from defender.runtime.agent_definition import RunScope, bind
 from defender.runtime.box import BoxResult
-from defender import _artifact_schema
-from defender.runtime.permission.files import _decide_report_write
+from defender.runtime.permission.files import _decide_report_write, decide_write
 from defender.runtime.tools import (
     _format_bash_result,
     _tool_bash,
@@ -509,9 +508,17 @@ def test_d17_legal_artifacts_gain_no_new_deny_or_modelretry(tmp_path):
     # parser accepts even fenced. Prose carries the same lookalike and is legal.
     investigation = "## notes\n\nhypothesis -- because evidence\n"
     assert _decide_report_write(report).allow
-    # A first write (no baseline): the validator the write gate applies (#1136 removed its
-    # unused `_decide_investigation_write` twin).
-    assert _artifact_schema.validate_investigation(investigation, None) is None
+    # A first write, through the write gate itself (its `_decide_investigation_write` twin was
+    # deleted in #1136), so the gate's own baseline read is in the path.
+    run = tmp_path / "run"
+    run.mkdir()
+    dfn = tmp_path / "defender"
+    dfn.mkdir()
+    gate_deps = bind(MAIN_DEF, run, defender_dir=dfn)
+    assert decide_write(
+        run / "investigation.md", investigation, run_dir=run, defender_dir=dfn,
+        policy=gate_deps.policy,
+    ).allow
 
 
 

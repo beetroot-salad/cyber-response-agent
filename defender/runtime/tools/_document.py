@@ -15,7 +15,7 @@ if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays 
 from pydantic_ai.exceptions import ModelRetry
 
 from defender._io import REFUSED_FAULT, bind
-from defender._run_paths import RunPaths
+from defender._run_paths import RUN_LAYOUT, RunPaths
 from .. import compaction, permission
 
 # The byte ruler the artifact bounds are measured with, so reported "bytes" match what the gate judges.
@@ -39,9 +39,6 @@ def _investigation_path(deps: AgentDeps) -> Path:
     return RunPaths(deps.run_dir).investigation
 
 
-def _investigation_name(deps: AgentDeps) -> str:
-    """`investigation.md`'s name below the run dir, its trust root for the rooted core."""
-    return _investigation_path(deps).relative_to(deps.run_dir).as_posix()
 
 
 @model(frozen=True)
@@ -78,7 +75,7 @@ def read_companion(deps: AgentDeps) -> CompanionRead:
     fault: a planted entry or undecodable bytes are the document's state, not the mount's, and
     the kind is the core's own judgement, not a match on message text."""
     with bind(deps.run_dir) as run_root:
-        got = run_root.read(_investigation_name(deps))
+        got = run_root.read(RUN_LAYOUT.investigation.as_posix())
     if got.absent:
         return CompanionRead(text="")
     if got.reason is not None:

@@ -160,21 +160,27 @@ def _rooted_operand(deps: AgentDeps, p: Path, *, path: str) -> tuple[Path, str]:
     POSIX name below that root, for both a read and a write of it. The rooted core opens the
     root following its spelling and follows nothing below it.
 
-    The roots are the agent's read roots (`permission.spelled_read_roots`; every write lies
-    within them too), each matched as spelled and resolved; the innermost wins (the run dir
-    may sit inside the defender dir). `p` itself is never resolved, which would collapse the
-    links the core exists to refuse. A `..` component, or no root at all (a path that reaches
-    one only through a symlink), is refused as `ModelRetry`: the operand is model-supplied."""
+    The trust roots are the host-chosen folders: the run dir, the defender dir and the agent's
+    declared extra roots (`policy.read_roots`), each matched as spelled and resolved; the
+    innermost wins (the run dir may sit inside the defender dir). A read confine is the gate's
+    rule, never a trust root: rooting at a confined corpus folder would follow a link AT it.
+    `p` itself is never resolved, which would collapse the links the core exists to refuse. A
+    `..` component, a path naming a root itself, or no root at all (a path that reaches one
+    only through a symlink) is refused as `ModelRetry`: the operand is model-supplied."""
+    if p.anchor == "//":  # POSIX lets `//x` mean `/x`; pathlib keeps it as its own anchor
+        p = Path("/", *p.parts[1:])
     if ".." in p.parts:
         raise ModelRetry(f"{path} has a '..' component; name the file by a path without '..'")
     best: Path | None = None
-    for root in permission.spelled_read_roots(deps.policy, deps.run_dir, deps.defender_dir):
+    for root in (deps.run_dir, deps.defender_dir, *deps.policy.read_roots):
         spellings: tuple[Path, ...]
         try:
             spellings = (root, _resolved(root))
         except RESOLVE_ERRORS:
             spellings = (root,)
         for spelling in spellings:
+            if p == spelling:
+                raise ModelRetry(f"file not found: {path}")
             if spelling in p.parents and (best is None or len(spelling.parts) > len(best.parts)):
                 best = spelling
     if best is None:
