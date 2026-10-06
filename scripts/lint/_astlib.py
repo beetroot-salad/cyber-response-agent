@@ -41,9 +41,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 try:  # bare-name import, as every gate reaches its siblings
-    from _gitscope import git_ignored
+    from _gitscope import git_ignored, git_listed
 except ImportError:  # imported as part of a package (a test loading `scripts.lint`)
-    from ._gitscope import git_ignored  # type: ignore[no-redef]
+    from ._gitscope import git_ignored, git_listed  # type: ignore[no-redef]
 
 _BUILTIN_NAMES = frozenset(dir(builtins))
 
@@ -59,37 +59,70 @@ def source_files(root: Path, excluded: Iterable[str], *, suffixes: tuple[str, ..
     """Every file under `root` ending in one of `suffixes` that a gate scans, as sorted
     root-relative POSIX paths. The one listing every gate shares — never walk a tree yourself.
 
-    - A directory is pruned by its NAME below `root` (or when `prune(dir)` says so) — never by an
-      ancestor's, so a checkout that happens to live under a dir called `tests` is still scanned.
-    - What git ignores is dropped (`_gitscope.git_ignored`: ignored-ness, not tracked-ness, so a
-      new uncommitted module is still scanned; fails open outside a repo), so a local `build/`
-      or `venv/` is not source — unless `root` is itself ignored: a planted tree under a
-      repo's `build/` is the whole scope, not ignored content inside it.
-    - A directory the walk cannot read, or a name that is not valid UTF-8, is ScanBlind: the
-      gate cannot report on what it did not read, and a name it cannot print is one it cannot
-      report on either.
+    - Inside a git work tree, the candidates are what git would put in the tree: tracked files
+      plus untracked ones it does not ignore (`_gitscope.git_listed`). Git never enters an
+      ignored directory, so run output under `runs/` can neither blind a gate nor slow it, and
+      a new uncommitted module is still scanned. A tracked file deleted from the working tree
+      is not listed.
+    - Outside a repo, when git cannot answer, or when `root` is itself ignored (a planted tree
+      under a repo's `build/` is the whole scope, not ignored content inside it), the tree is
+      walked instead.
+    - Either way, a file under a directory whose NAME (below `root`, never an ancestor's) is in
+      `excluded`, or which `prune(dir)` rejects, is dropped.
+    - A directory that could not be read, or a kept path that is not valid UTF-8, is
+      ScanBlind: the gate cannot report on what it did not read, nor on a name it cannot print.
     """
+    root = Path(root).resolve()
     skip = frozenset(excluded)
+    verdicts: dict[str, bool] = {}
+
+    def dropped(d: str) -> bool:
+        """Is directory `d` (root-relative) dropped, by its own name or `prune`?"""
+        if d not in verdicts:
+            verdicts[d] = d.rsplit("/", 1)[-1] in skip or bool(prune and prune(root / d))
+        return verdicts[d]
+
+    listed = None if git_ignored(root, [root]) else git_listed(root)
+    if listed is None:
+        rels = _walked(root, dropped)
+    else:
+        rels, unopened = listed
+        if unopened:
+            raise ScanBlind(f"cannot list {ascii(unopened)} under {root}: git could not open "
+                            "them, and an unread directory is not certified clean")
+        rels = [r for r in rels if os.path.lexists(root / r)]  # deleted, not yet committed
+
+    def kept(rel: str) -> bool:
+        parts = rel.split("/")[:-1]
+        return not any(dropped("/".join(parts[:i])) for i in range(1, len(parts) + 1))
+
+    out: list[str] = []
+    for rel in rels:
+        if not rel.endswith(suffixes) or not kept(rel):
+            continue
+        try:
+            rel.encode("utf-8")
+        except UnicodeEncodeError:
+            raise ScanBlind(f"{ascii(rel)} under {root} is not a UTF-8 name — rename it; no "
+                            "gate can report on it") from None
+        out.append(rel)
+    return sorted(out)
+
+
+def _walked(root: Path, dropped: Callable[[str], bool]) -> list[str]:
+    """Every file under `root` by walking, never entering a dropped directory — for a tree git
+    cannot answer for."""
 
     def blind(err: OSError) -> None:
         raise ScanBlind(f"cannot list {ascii(err.filename)}: {err.strerror}") from err
 
-    found: list[Path] = []
+    out: list[str] = []
     for dirpath, dirnames, filenames in os.walk(root, onerror=blind):
-        here = Path(dirpath)
-        dirnames[:] = sorted(d for d in dirnames
-                             if d not in skip and not (prune and prune(here / d)))
-        listed = [f for f in filenames if f.endswith(suffixes)]
-        for name in (*dirnames, *listed):
-            try:
-                name.encode("utf-8")
-            except UnicodeEncodeError:
-                rel = (here / name).relative_to(root).as_posix()
-                raise ScanBlind(f"{ascii(rel)} under {root} is not a UTF-8 name — "
-                                "rename it; no gate can report on it") from None
-        found.extend(here / f for f in listed)
-    ignored = frozenset() if git_ignored(root, [root]) else git_ignored(root, found)
-    return sorted(p.relative_to(root).as_posix() for p in found if p not in ignored)
+        here = Path(dirpath).relative_to(root).as_posix()
+        prefix = "" if here == "." else f"{here}/"
+        dirnames[:] = sorted(d for d in dirnames if not dropped(prefix + d))
+        out.extend(prefix + f for f in filenames)
+    return out
 
 
 def selects(entry: str, rel: str) -> bool:
