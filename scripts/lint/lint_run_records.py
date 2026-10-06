@@ -516,15 +516,15 @@ def main(argv: list[str] | None = None) -> int:
     kinds = load_kinds()
     page = PAGE.read_text(encoding="utf-8")
     rendered = render_page(kinds, page)
+    try:
+        found = scan()  # before any render: a blind run writes nothing
+    except ScanBlind as exc:
+        print(f"[lint_run_records] {exc}", file=sys.stderr)
+        return 2
     if "--render" in args:
         PAGE.write_text(rendered, encoding="utf-8")
         print(f"[lint_run_records] rendered -> {PAGE.relative_to(REPO_ROOT)}")
         page = rendered
-    try:
-        found = scan()
-    except ScanBlind as exc:
-        print(f"[lint_run_records] {exc}", file=sys.stderr)
-        return 2
     if found:
         print(f"\n[lint_run_records] {len(found)} finding(s):")
         for f in found:
