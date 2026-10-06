@@ -98,7 +98,7 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
         "runtime/tools/_deps.py", "runtime/tools/_document.py", "runtime/tools/_files.py",
         "runtime/tools_gather.py", "runtime/toon_gate.py", "runtime/box/_lifecycle.py",
         "runtime/branch/__init__.py", "runtime/branch/_frontier.py", "runtime/branch/_seed.py",
-        "runtime/branch/_spec.py", "scripts/case_history/case_ticket.py",
+        "runtime/branch/_spec.py", "runtime/case_ticket.py",
         "scripts/gather_tools/record_query.py", "skills/invlang/corpus.py",
     ),
     # A `/` join onto a layout value here is `lint_run_records` arm (b)'s finding, not this one.

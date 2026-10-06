@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import fields
 
 from defender._artifact_schema import REPORT_FRONTMATTER_MAX, validate_artifact
+from defender.runtime import case_ticket
 from defender.runtime.challenge_gate import GateVerdict
 from defender.runtime.close_tool import (
     CAUSE_REVIEW_INCOMPLETE,
@@ -28,7 +29,6 @@ from defender.runtime.close_tool import (
     STANDS,
     CloseResult,
 )
-from defender.scripts.case_history import case_ticket
 from defender.skills.invlang.validate import validate_companion
 from defender.skills.invlang.validate._gating import _MAX_CEILING_FRONTMATTER_BYTES, ceiling_test_block
 from defender.tests import _spec923, _tacit983

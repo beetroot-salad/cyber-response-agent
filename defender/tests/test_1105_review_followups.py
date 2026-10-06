@@ -201,7 +201,8 @@ def test_the_writer_names_a_record_that_vanished_or_cannot_be_read():
     gone = _io.RecordRead(name="ep.json", text=None, absent=True, reason=None)
     with pytest.raises(R.RunRefused, match="gone again"):
         _record._judge_existing(gone, "{}", path=path, episode_id="ep")
-    bad = _io.RecordRead(name="ep.json", text=None, absent=False, reason="not utf-8")
+    bad = _io.RecordRead(name="ep.json", text=None, absent=False, reason="not utf-8",
+                         refused_by=_io.REFUSED_UNDECODABLE)
     with pytest.raises(R.RunRefused, match="cannot be read"):
         _record._judge_existing(bad, "{}", path=path, episode_id="ep")
 

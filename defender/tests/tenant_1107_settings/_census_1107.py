@@ -51,11 +51,15 @@ _SKIP_PARTS = {".venv", "__pycache__", "node_modules", "tests"}
 
 #: O7's four swept trees (C5, the design's O7 sentence), repo-relative: adapters, estate with
 #: staging.py, case-history, and `runtime/lead_zero*` (the package and lead_zero_config.py).
+#: The case-history tree is two entries since #1190 moved the case-mapping module out of it to
+#: `defender/runtime/case_ticket.py`; the write-back (`ticket_writer`) stays in the folder.
+#: `lint_tenant_env_reads.SWEPT` lists the same entries (#1190's env-read test holds them equal).
 SWEPT: tuple[str, ...] = (
     "defender/scripts/adapters",
     "defender/learning/branch/estate",
     "defender/learning/branch/staging.py",
     "defender/scripts/case_history",
+    "defender/runtime/case_ticket.py",
     "defender/runtime/lead_zero",
     "defender/runtime/lead_zero_config.py",
 )

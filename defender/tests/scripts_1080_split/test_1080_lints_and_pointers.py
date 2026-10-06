@@ -56,10 +56,12 @@ CI = S.REPO_ROOT / ".github" / "workflows" / "ci.yml"
 #: Every base module of `defender/scripts/` the design moves, and the symbols whose homes now
 #: hold its code (each with the home it must sit under, None = wherever it is outside
 #: `scripts/`). The anchors are the placement group's (`MODULE_ANCHORS`), filtered alike to the
-#: seven modules the 2026-10-04 scope cut moves (E2): the OUT modules (`adapters/`,
-#: `case_history/`, `record_query.py`, `visualize/`, `workspace_map.py`) stay where they are.
-#: The two engines' base paths keep no wrapper (post-review: the shims run the engines with
-#: `-m`, reversing M-H (a)); the anchor names the engine.
+#: seven modules the 2026-10-04 scope cut moves (E2), plus `case_history/case_ticket.py`, which
+#: the case_ticket follow-up #1190 moves whole under `defender/runtime/` (F-C): its baseline
+#: keys, profile rows and lint plants follow it. The OUT modules (`adapters/`,
+#: `case_history/ticket_writer.py`, `record_query.py`, `visualize/`, `workspace_map.py`) stay
+#: where they are. The two engines' base paths keep no wrapper (post-review: the shims run the
+#: engines with `-m`, reversing M-H (a)); the anchor names the engine.
 MOVED_HOMES: dict[str, tuple[tuple[str, str | None], ...]] = {
     "defender/scripts/_venv.py": (("reexec_into_venv", S.FLAT_TIER),),
     "defender/scripts/pricing.py": (("usage_cost", S.PRICING),),
@@ -68,12 +70,13 @@ MOVED_HOMES: dict[str, tuple[tuple[str, str | None], ...]] = {
     "defender/scripts/lessons/_lessons_common.py": (("resolve_corpus", None),),
     "defender/scripts/lessons/lessons_fm.py": (("cmd_tags", None),),
     "defender/scripts/lessons/lessons_frontier.py": (("match_lessons", None),),
+    "defender/scripts/case_history/case_ticket.py": (("load_case_mapping", S.RUNTIME),),
 }
 
 #: The OUT files whose base lint-baseline keys stay keyed at their base paths (cut_edit of
-#: m5_baselines_name_no_moved_path and s105: the case-ticket findings and `derive_system`).
-OUT_KEYED = ("defender/scripts/case_history/case_ticket.py",
-             "defender/scripts/gather_tools/record_query.py")
+#: m5_baselines_name_no_moved_path and s105: `derive_system`). The case-ticket findings left
+#: this list with #1190: their file moves (`MOVED_HOMES`), so they are re-keyed to its home.
+OUT_KEYED = ("defender/scripts/gather_tools/record_query.py",)
 
 #: The shims that ran a wrapper at the base and now run their engine as a module (post-review,
 #: reversing M-H (a)); every other shim stays byte-identical to the base.
@@ -482,7 +485,7 @@ def _moved_keys() -> dict[str, list[str]]:
 
 def _out_keys() -> dict[str, list[str]]:
     """Per baseline: the base keys that named an `OUT_KEYED` file, which the cut leaves in
-    place (golden: the vulture baseline's four case-ticket findings and `derive_system`)."""
+    place (golden: the vulture baseline's `derive_system`)."""
     return {name: [k for k in keys if any(p in OUT_KEYED for p in key_paths(k))]
             for name, keys in _golden()["baseline_keys_naming_scripts"].items()}
 
@@ -518,10 +521,12 @@ def test_1080_no_lint_baseline_keys_a_path_that_no_longer_exists():
     Every path-shaped token of every key of every baseline resolves against the repo root or
     `defender/`. For each base key that named a module the design moves, the finding is at the
     home of the symbol it names (found by symbol) wherever the current baseline still carries it
-    — never at the old path. Under the 2026-10-04 scope cut no base key names an IN module; the
-    keys that named `defender/scripts/` code the cut leaves in place (golden: the vulture
-    baseline's four case-ticket findings and `derive_system`) stay at their base paths wherever
-    the current baseline still carries them.
+    — never at the old path. Under the 2026-10-04 scope cut no base key names an IN module but
+    `case_ticket`, which the case_ticket follow-up #1190 moves under `defender/runtime/`: the
+    vulture baseline's four case-ticket findings are keyed at the home of the function each
+    names. The key that named `defender/scripts/` code the cut leaves in place (golden: the
+    vulture baseline's `derive_system`) stays at its base path wherever the current baseline
+    still carries it.
     """
     stale = [(name, k, p) for name, entries in baselines().items() for k in entries
              for p in key_paths(k) if not resolves(p)]
@@ -541,12 +546,12 @@ def test_1080_no_lint_baseline_keys_a_path_that_no_longer_exists():
 
 @pytest.mark.gate
 def test_vulture_baseline_holds_fingerprints_keyed_by_files_that_moved(monkeypatch):
-    """No baseline entry (vulture, unnarrowed-parse) names a moved path: findings carried by moved files are re-keyed to their new paths, entries for files that no longer exist are removed, and a finding re-introduced at the old path is not excused by a stale entry. The gates are green after the change. (M5: update the path-keyed baselines.) Under the 2026-10-04 scope cut the golden keys for `case_ticket` and `derive_system` stay at their base paths: their files do not move.
+    """No baseline entry (vulture, unnarrowed-parse) names a moved path: findings carried by moved files are re-keyed to their new paths, entries for files that no longer exist are removed, and a finding re-introduced at the old path is not excused by a stale entry. The gates are green after the change. (M5: update the path-keyed baselines.) Under the 2026-10-04 scope cut the golden key for `derive_system` stays at its base path: its file does not move. (The four `case_ticket` keys move with their file, #1190: `test_1080_no_lint_baseline_keys_a_path_that_no_longer_exists` holds them to its home.)
 
     Read from the two baselines and the base record of their keys (golden; at 80888efb the only
     `scripts/` keys are vulture's case-ticket and `derive_system` findings, `tenant.py`'s, and
-    unnarrowed-parse's adapters — none of them an IN module). No key of either baseline names a
-    path that no longer exists; each case-ticket / `derive_system` key's file is still at its
+    unnarrowed-parse's adapters — none of them an IN module of the cut). No key of either
+    baseline names a path that no longer exists; the `derive_system` key's file is still at its
     base path and, wherever the current baseline still carries the finding, it is keyed there.
     Then both gates' `main` run over the real tree and exit 0 (a `gate` test: a repo-wide
     re-run).
@@ -556,7 +561,7 @@ def test_vulture_baseline_holds_fingerprints_keyed_by_files_that_moved(monkeypat
         dead = [k for k in current[name] for p in key_paths(k) if not resolves(p)]
         assert not dead, f"{name} keys paths that no longer exist: {dead}"
     owed = _out_keys()["lint_vulture_baseline.json"]
-    assert owed, "golden: no base vulture key named a case-ticket or derive_system finding"
+    assert owed, "golden: no base vulture key named a derive_system finding"
     moved_out = _misplaced_out_keys({n: current[n] for n in _out_keys()})
     assert not moved_out, f"a finding of a file the cut leaves in place was re-keyed: {moved_out}"
     monkeypatch.setenv("PATH", f"{Path(sys.executable).parent}:{S.child_env()['PATH']}")
@@ -755,15 +760,26 @@ def test_path_scan_for_stale_text_meets_dead_pins_that_predate_the_change(tmp_pa
 
 
 def test_staying_commands_import_modules_that_have_moved(tmp_path):
-    """The staying commands (tenant, policy_cli, box_image, tacit_cli) run by path and by module name from CI, the shims and the docs from any working directory as they do today, and `box_image.py` still runs under the runner's bare interpreter before dependency sync. (The tenant command's import of the case-mapping module is parked with the case_ticket follow-up #1190 by the 2026-10-04 scope cut: that module does not move.)
+    """The staying commands (tenant, policy_cli, box_image, tacit_cli) run by path and by module name from CI, the shims and the docs from any working directory as they do today; the tenant command imports the case-mapping module from its new home under `defender/runtime/` (an import from scripts/ outward is allowed, only the reverse is census-checked; the case_ticket follow-up #1190 restored this cell), and `box_image.py` still runs under the runner's bare interpreter before dependency sync.
 
-    Each command, run from a working directory
+    `tenant.py`'s import statements name the case-mapping module's home (found by symbol, under
+    `defender/runtime/`) and nothing under the old case-history folder. Each command, run from a working directory
     outside the checkout — by path with no `PYTHONPATH`, through `bin/defender-policy`, and by
     module with the checkout importable — exits as at the base and prints the base's usage block
     (golden). The runner's bare interpreter is stood in for by this interpreter with `-I -S` (no
     site-packages, no environment), under which `box_image.py tag` prints exactly the tag the
     image module computes for this tree; `tacit_cli check`, as CI runs it, exits 0.
     """
+    home = S.home_of("load_case_mapping", home=S.RUNTIME)
+    stmts = list(S.import_statements("defender/scripts/tenant.py",
+                                     (S.SCRIPTS / "tenant.py").read_bytes()))
+    named = {st.module for st in stmts} | {f"{st.module}.{n}" for st in stmts for n in st.names}
+    assert S.dotted(home) in named, f"tenant.py does not import the case-mapping module {S.dotted(home)}"
+    if not S.under(home, "defender/scripts"):  # (the authoring self-check resolves the base home)
+        old = [st for st in stmts if st.module.startswith("defender.scripts.case_history.case_ticket")
+               or (st.module == "defender.scripts.case_history" and "case_ticket" in st.names)]  # lint-ast-resolve: ok — a static census over a fixed module's own source; its import spellings are the observation
+        assert not old, f"tenant.py still imports the case-mapping module from its old path: {old}"
+
     runs = staying_command_runs(tmp_path)
     assert runs == _golden()["staying_command_runs"], (
         f"a staying command no longer runs as at the base: {runs}")

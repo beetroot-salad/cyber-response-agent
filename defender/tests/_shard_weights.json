@@ -45,6 +45,7 @@
  "tests/evals/test_story_from_run.py": 0.4,
  "tests/evals/test_validate_cases.py": 1.1,
  "tests/learning/test_loop.py": 2.3,
+ "tests/scripts_1080_split/test_1190_case_mapping_home.py": 14.0,
  "tests/tenant_1078_pass_a/test_1078_consumers.py": 0.8,
  "tests/tenant_1078_pass_a/test_1078_env.py": 1.8,
  "tests/tenant_1078_pass_a/test_1078_gates.py": 2.4,

@@ -47,7 +47,7 @@ from defender._untrusted import wrap
 from defender.evals.held_out import predicted_disposition
 from defender.learning.core.validate import RunUnprocessable, normalize_disposition
 from defender.runtime import permission
-from defender.scripts.case_history.case_ticket import CaseTicketError, read_case_record
+from defender.runtime.case_ticket import CaseTicketError, read_case_record
 from defender.tests._tenants1106 import fixture_run_tenant
 
 # The resolved bounds (70-resolutions.md), all UTF-8 bytes.

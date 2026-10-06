@@ -272,7 +272,7 @@ def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
     to the outbound comment. What protects a LATER run from reading it back is D4's approval
     screen (`test_767_screen.py`'s `o2_unapproved_no_agent_comment` and
     `o2_approved_serves_latest`), never an absence of the content on the wire."""
-    from defender.scripts.case_history import case_ticket
+    from defender.runtime import case_ticket
 
     receipts = _receipts(BENIGN_DOC)
     report = close_tool.render_report(

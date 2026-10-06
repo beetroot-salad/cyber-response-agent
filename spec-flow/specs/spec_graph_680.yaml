@@ -155,6 +155,7 @@ demands:
   - id: legal_artifacts_not_newly_denied
     kind: behavior
     form: test
+    # #1136 deleted `_decide_investigation_write`; its test now drives `decide_write`.
     binds: [_decide_report_write, _decide_investigation_write, report_md, investigation_md]
     discharged_by: test_d17_legal_artifacts_gain_no_new_deny_or_modelretry
 

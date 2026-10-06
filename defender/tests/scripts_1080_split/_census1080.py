@@ -21,8 +21,9 @@ under a directory named `tests`, or a `conftest.py`) and minus `defender/scripts
 (inside-scripts edges are free: s157). A file the census cannot parse fails it, named ([153]).
 
 THE EXCEPTION LISTS ARE DATA HERE AND ASSERTED BY TESTS: O1's named (importer, target) pairs
-(`O1_EXCEPTIONS`) — since the 2026-10-04 scope cut, the 35 pairs (37 import statements) into the
-`scripts/` modules the cut leaves where they are, each tagged with the issue that retires it;
+(`O1_EXCEPTIONS`) — since the 2026-10-04 scope cut, the pairs into the `scripts/` modules the cut
+leaves where they are, each tagged with the issue that retires it: 35 pairs (37 import statements)
+at the cut, 32 (33) since #1190 moved `case_ticket` under `defender/runtime/` and retired its 3;
 O2's N5 edges (dF7 (a)): learning's page entry points importing reports (the O2 tests are parked
 with #1105 / #1172; their helpers stay here for the preserved copies). A listed edge that no
 longer exists is a finding ([218]), never a silent widening, so the list can only shrink.
@@ -58,10 +59,11 @@ WRAPPER_SHIMS = ("defender-sql", "defender-lessons")
 #: E1 (the 2026-10-04 scope cut): the `scripts/` files outside `adapters/` that the cut leaves
 #: where they are, each OWNED by another issue — `visualize/` (eight modules and three assets)
 #: and `workspace_map.py` by #1105, `case_history/ticket_writer.py` and `record_query.py` (its
-#: guards and writers; its query rules move) by #1165, `case_history/case_ticket.py` by a new
-#: follow-up. They are neither entry points nor moved: D1 reads "the IN files are gone".
+#: guards and writers; its query rules move) by #1165. They are neither entry points nor moved:
+#: D1 reads "the IN files are gone". (`case_history/case_ticket.py` was the fourth owner's, the
+#: follow-up #1190, which moves it to `defender/runtime/case_ticket.py`: it is no longer listed,
+#: so the placement check and the moved-file tests hold it to "gone, no shim".)
 OUT_STAYING = (
-    "defender/scripts/case_history/case_ticket.py",
     "defender/scripts/case_history/ticket_writer.py",
     "defender/scripts/gather_tools/record_query.py",
     "defender/scripts/visualize/_mirror_write.py",
@@ -82,14 +84,16 @@ _S = "defender.scripts."
 _FAULTS = _S + "adapters.faults"
 _CONFINEMENT = _S + "adapters.confinement"
 _RECORD_QUERY = _S + "gather_tools.record_query"
-_CASE_TICKET = _S + "case_history.case_ticket"
 
 #: E1: O1's named exceptions — every (importer, target module) pair into `scripts/` the cut
-#: leaves standing (35 pairs, 37 import statements at the base), each with the owner that
-#: retires it. A pair covers every import statement between the two files. Derived from
-#: `census()` at the base minus the 22 edges the cut's IN moves retire (`_venv`, `pricing`,
+#: leaves standing, each with the owner that retires it: 32 pairs, 33 import statements. A pair
+#: covers every import statement between the two files. Derived from `census()` at the base
+#: (59 statements) minus the 22 edges the cut's IN moves retire (`_venv`, `pricing`,
 #: `payload_view`, `sql`, `lessons_frontier`, and the ten importers of `record_query`'s query
-#: rules). H4 (i)'s `ticket_writer -> _stub_transport` edge is inside `scripts/`, not listed.
+#: rules) and the 4 the case_ticket follow-up #1190 retires (its 3 pairs: `run_tenant` (two
+#: statements), `query_tool`, `estate/applier`). H4 (i)'s `ticket_writer -> _stub_transport`
+#: edge is inside `scripts/`, not listed; neither is `tenant.py`'s or `ticket_writer`'s import of
+#: the moved `case_ticket` (an importer inside `scripts/` is free).
 O1_EXCEPTIONS: tuple[tuple[str, str, str], ...] = (
     # #1172 / #1121 (20)
     ("defender/learning/branch/staging.py", STUB_TRANSPORT, "#1172/#1121"),
@@ -127,10 +131,6 @@ O1_EXCEPTIONS: tuple[tuple[str, str, str], ...] = (
     ("defender/learning/frontend/build.py", _S + "visualize.visualize_primitives", "#1105"),
     ("defender/learning/branch/cli.py", _S + "visualize.visualize_episode", "#1105"),
     ("defender/runtime/orient.py", _S + "workspace_map", "#1105"),
-    # the case_ticket follow-up #1190 (3)
-    ("defender/runtime/run_tenant.py", _CASE_TICKET, "case_ticket follow-up #1190"),
-    ("defender/runtime/query_tool.py", _CASE_TICKET, "case_ticket follow-up #1190"),
-    ("defender/learning/branch/estate/applier.py", _CASE_TICKET, "case_ticket follow-up #1190"),
 )
 
 

@@ -398,6 +398,29 @@ def test_o7_lint_clean_empty_allowlist(tmp_path):
     assert rc2 != 0, f"the lint passed a planted os.environ read, so exit 0 above proves nothing:\n{out2}"
 
 
+def test_o7_lint_refuses_a_swept_entry_missing_from_this_repo(tmp_path):
+    """Over this repo, a swept entry that no longer exists is a blind scan (exit 2), not a clean
+    one: a move that takes swept code elsewhere without carrying its entry along would otherwise
+    drop that code from the sweep while the lint keeps passing. Under `--root` the same missing
+    entry is still just not scanned, so a planted partial tree is checked as before.
+
+    Driven on a fresh copy of the lint with one non-existent entry added to its swept list.
+    Positive control: the unmodified copy scans this repo cleanly."""
+    clean = S.env_lint()
+    assert clean.main([]) == 0, "control: the lint does not pass this repo as it is"
+
+    lint = S.env_lint()
+    gone = "defender/runtime/moved_away_1190.py"
+    lint.SWEPT = (*lint.SWEPT, gone)
+    with pytest.raises(lint.ScanBlind, match=re.escape(gone)):
+        lint.scan(REPO)
+    assert lint.main([]) == 2, "a missing swept entry over this repo did not fail the lint"
+
+    _skeleton(tmp_path)
+    assert lint.main(["--root", str(tmp_path)]) == 0, (
+        "a planted tree without the extra entry is refused: --root must still allow partial trees")
+
+
 def test_o7_lint_in_ci():
     """.github/workflows/ci.yml runs scripts/lint/lint_tenant_env_reads.py as a step beside the other
     custom lints (CX20)."""

@@ -53,7 +53,7 @@ what manufactures the read PR's fixtures.
 
 - **Anti-corruption boundary — internal model ≠ external model.** `report.md`
   (+ `alert.json`) is the *internal* case model; the ticket schema is the *external*
-  model. `scripts/case_history/case_ticket.py` is the **only** code that knows both: it
+  model. `runtime/case_ticket.py` is the **only** code that knows both: it
   parses the internal artifacts into a `CaseRecord` and maps that to/from ticket
   payloads. The drivers, the report schema, and (PR 2) the learning reader never bind
   to ticket field names. When the store changes (e.g. Elastic Cases), only the mapper,
@@ -107,7 +107,7 @@ what manufactures the read PR's fixtures.
 
 ## Shape
 
-- `scripts/case_history/case_ticket.py` — pure: `CaseRecord`, `read_case_record`, the
+- `runtime/case_ticket.py` — pure: `CaseRecord`, `read_case_record`, the
   mapper (`alert_to_open_payload`, `case_record_to_comment`), the release predicate
   (`release_predicate` / `is_released`) the read screen and the writer both decide
   with, rendering from the mapping config.

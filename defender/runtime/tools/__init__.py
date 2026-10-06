@@ -34,7 +34,6 @@ from defender._paths import PATHS
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
 
-from defender._io import guarded_mkdir, read_text_utf8, write_guarded
 from .. import box as box_mod
 from .. import permission
 from ..agent_definition import ResolvedRoots, ToolSet
@@ -79,7 +78,6 @@ from ._bash import (
     _deny_authored_bash_read,
     _deny_authored_read,
     _grep_lines,
-    _guarded_parents,
     _is_cross_agent_read,
     _is_learning_role,
     _opened_operands,
@@ -87,21 +85,21 @@ from ._bash import (
     _record_shim_failure,
     _resolve_operand,
     _resolved,
+    _rooted_operand,
     _shim_exit_code,
     _tool_bash,
-    _tree_root_for,
     _under,
 )
 from ._files import (
     _bound_and_wrap,
     _closed_for_investigation_write,
     _gated_read,
-    _probe_is_file,
-    _probe_read_text,
+    _read_operand,
     _tail_chars,
     _tool_edit_file,
     _tool_read_file,
     _tool_write_file,
+    _write_operand,
 )
 from ._document import (
     _LINE_SEP_RE,
@@ -304,8 +302,8 @@ __all__ = [
     "_format_bash_result",
     "_frontier_recall",
     "_gated_read",
+    "_read_operand",
     "_grep_lines",
-    "_guarded_parents",
     "_investigation_path",
     "_is_cross_agent_read",
     "_is_learning_role",
@@ -316,8 +314,6 @@ __all__ = [
     "_opens_untrusted_read",
     "_overflow_filter_hint",
     "_prepare_fix_row",
-    "_probe_is_file",
-    "_probe_read_text",
     "_read_char_cap",
     "_record_lesson_load",
     "_record_shim_failure",
@@ -325,6 +321,7 @@ __all__ = [
     "_register_investigation_verbs",
     "_resolve_operand",
     "_resolved",
+    "_rooted_operand",
     "_shim_exit_code",
     "_split_lines",
     "_tail_chars",
@@ -334,7 +331,7 @@ __all__ = [
     "_tool_fix_row",
     "_tool_read_file",
     "_tool_write_file",
-    "_tree_root_for",
+    "_write_operand",
     "_under",
     "_utf8_len",
     "_warn_over",
@@ -349,12 +346,10 @@ __all__ = [
     "flagged_diagnostics",
     "flagged_in",
     "flagged_write_refusal",
-    "guarded_mkdir",
     "json",
     "now_iso",
     "permission",
     "re",
-    "read_text_utf8",
     "record_query",
     "register_tools",
     "read_companion",
@@ -365,5 +360,4 @@ __all__ = [
     "time",
     "unreadable_write_refusal",
     "wrap_fresh",
-    "write_guarded",
 ]

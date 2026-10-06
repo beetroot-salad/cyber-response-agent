@@ -70,7 +70,7 @@ def test_no_module_stands_between_the_vocabulary_and_its_readers():
     """
     import defender._artifact_schema as schema
     import defender.learning.core.config as loop_config
-    from defender.scripts.case_history import case_ticket as ticket
+    from defender.runtime import case_ticket as ticket
 
     assert not hasattr(loop_config, "DISPOSITION_ENUM")
     assert not hasattr(ticket, "DISPOSITION_ENUM")

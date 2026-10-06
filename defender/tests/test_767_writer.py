@@ -34,7 +34,8 @@ import re
 
 import pytest
 
-from defender.scripts.case_history import case_ticket, ticket_writer
+from defender.runtime import case_ticket
+from defender.scripts.case_history import ticket_writer
 from defender.tests._spec767 import (
     AGENT_AUTHOR,
     OPEN_STATUS,
