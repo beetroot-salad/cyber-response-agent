@@ -860,20 +860,24 @@ def test_the_cross_tenant_comparison_runs_over_the_stamped_siblings_and_records_
 
 
 def test_verify_family_still_compares_only_commit_scope_and_model(tmp_path):
-    """`verify_family` still compares only `commit`, `scope` and `model`, and the two new stamp
-    fields reach none of its fault comparisons.
+    """The two new stamp fields reach none of `verify_family`'s held-constant comparisons:
+    `world_id` differs between siblings by design and `tenant_id` has its own rule.
+
+    #1204 D4 replaced the hardcoded `("commit", "scope", "model")` loop with the field table
+    that drives it (`STAMP_FIELD_CLASSES`; `knowledge` joined the compared fields there), so
+    the classification is read off the table rather than the source text — and the behaviour
+    below still proves world_id is not compared.
 
     NEGATIVE. Positive control: the one comparison that DOES move is the cross-tenant member
-    fault, which is not part of this named-field loop.
+    fault, which is not part of the table-driven loop.
     """
-    import inspect
-    src_text = inspect.getsource(S.branch_cli())
-    assert 'for field in ("commit", "scope", "model")' in src_text, (
-        "the named-field loop must still be anchored on exactly these three; the two new stamp "
-        "fields must reach none of it")
-    assert 'for field in ("commit", "scope", "model", "tenant_id")' not in src_text
-    assert '"world_id"' not in src_text.split("def _family_faults")[-1].split("\ndef ")[0], (
-        "world_id reached the named-field comparison, where siblings differ by design and "
+    table = S.branch_cli().STAMP_FIELD_CLASSES
+    held = {f for f, c in table.items() if c in ("anchored", "constant")}
+    assert held == {"commit", "scope", "model", "knowledge"}, held
+    assert table["tenant_id"] == "dedicated", (
+        "tenant_id is judged by `_cross_tenant_fault`, never the held-constant loop")
+    assert table["world_id"] == "expected_to_differ", (
+        "world_id reached the held-constant comparison, where siblings differ by design and "
         "every family would be a fault")
 
     base, ep, dirs = _family_dirs(tmp_path, episode_id=f"{T.EPISODE_ID}-worlds-differ")
