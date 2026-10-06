@@ -122,8 +122,8 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
 
 def _scan(root: Path) -> list[Finding]:
     findings: list[Finding] = []
-    for path in (root / _r for _r in source_files(root, EXCLUDED_DIRS)):
-        rel = path.relative_to(root).as_posix()
+    for rel in source_files(root, EXCLUDED_DIRS):
+        path = root / rel
         text, tree = read_and_parse(path, rel)
         findings.extend(_scan_file(rel, tree, text.splitlines()))
     return findings

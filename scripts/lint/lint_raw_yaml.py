@@ -100,8 +100,8 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
 def _scan(root: Path) -> list[Finding]:
     """Findings under ``root``, fingerprints relative to it (drivable on a tmp tree)."""
     findings: list[Finding] = []
-    for path in (root / _r for _r in source_files(root, EXCLUDED_DIRS)):
-        rel = path.relative_to(root).as_posix()
+    for rel in source_files(root, EXCLUDED_DIRS):
+        path = root / rel
         # By path, not basename: a second module named `_yaml.py` is not the canonical one.
         if rel == CANONICAL_MODULE or _is_test_module(rel):
             continue

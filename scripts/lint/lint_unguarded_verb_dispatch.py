@@ -157,12 +157,10 @@ HEADER = (
 
 def _scan() -> list[Finding]:
     findings: list[Finding] = []
-    for path in (SCOPE / _r for _r in source_files(SCOPE, EXCLUDED_DIRS)):
+    for name in source_files(SCOPE, EXCLUDED_DIRS):
+        path = SCOPE / name
         rel = path.relative_to(REPO_ROOT).as_posix()
-        try:
-            text, tree = read_and_parse(path, rel)
-        except SyntaxError:
-            continue
+        text, tree = read_and_parse(path, rel)  # ScanBlind on any parse fault: main exits 2
         findings.extend(_scan_file(rel, tree, text.splitlines()))
     return findings
 

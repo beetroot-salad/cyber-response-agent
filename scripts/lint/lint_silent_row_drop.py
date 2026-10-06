@@ -417,7 +417,8 @@ def _relative(path: Path, scope: Path) -> str:
 
 def _scan(scope: Path) -> list[Finding]:
     findings: list[Finding] = []
-    for path in (scope / _r for _r in source_files(scope, EXCLUDED_DIRS)):
+    for name in source_files(scope, EXCLUDED_DIRS):
+        path = scope / name
         rel = _relative(path, scope)
         # Raises ScanBlind on an unreadable file rather than scanning a shrunken corpus.
         text, tree = read_and_parse(path, rel)

@@ -67,8 +67,8 @@ try:  # package import in tests
         module_env,
         origin,
         read_and_parse,
-        str_value,        source_files,
-
+        str_value,
+        source_files,
     )
     from ._baseline import Finding, gate
 except ImportError:  # direct ``python scripts/lint/...`` execution
@@ -79,8 +79,8 @@ except ImportError:  # direct ``python scripts/lint/...`` execution
         module_env,
         origin,
         read_and_parse,
-        str_value,        source_files,
-
+        str_value,
+        source_files,
     )
     from _baseline import Finding, gate
 
@@ -387,7 +387,8 @@ def _scan(scope: Path = DEFENDER) -> list[Finding]:
     the gate arming and disarming.
     """
     corpus: list[tuple[str, ast.Module, list[str], ModuleEnv]] = []
-    for path in (scope / _r for _r in source_files(scope, EXCLUDED_DIRS)):
+    for name in source_files(scope, EXCLUDED_DIRS):
+        path = scope / name
         rel = _relative(path, scope)
         text, tree = read_and_parse(path, rel)
         corpus.append((rel, tree, text.splitlines(), module_env(tree)))

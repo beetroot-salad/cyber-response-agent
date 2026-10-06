@@ -111,7 +111,8 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
 
 def _scan() -> list[Finding]:
     findings: list[Finding] = []
-    for path in (SCOPE / _r for _r in source_files(SCOPE, EXCLUDED_DIRS)):
+    for name in source_files(SCOPE, EXCLUDED_DIRS):
+        path = SCOPE / name
         rel = path.relative_to(REPO_ROOT).as_posix()
         if rel in EXCLUDED_FILES:
             continue

@@ -70,7 +70,8 @@ def _calls_setup(block: ast.If, env: ModuleEnv) -> bool:
 
 def _scan() -> list[Finding]:
     findings: list[Finding] = []
-    for path in (DEFENDER / _r for _r in source_files(DEFENDER, EXCLUDED_DIRS)):
+    for name in source_files(DEFENDER, EXCLUDED_DIRS):
+        path = DEFENDER / name
         rel = path.relative_to(REPO_ROOT).as_posix()
         text, tree = read_and_parse(path, rel)
         lines = text.splitlines()

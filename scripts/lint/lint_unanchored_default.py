@@ -186,7 +186,8 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
 
 def _scan() -> list[Finding]:
     findings: list[Finding] = []
-    for path in (DEFENDER / _r for _r in source_files(DEFENDER, EXCLUDED_DIRS)):
+    for name in source_files(DEFENDER, EXCLUDED_DIRS):
+        path = DEFENDER / name
         text, tree = read_and_parse(path, path.relative_to(REPO_ROOT).as_posix())
         rel = path.relative_to(REPO_ROOT).as_posix()
         findings.extend(_scan_file(rel, tree, text.splitlines()))

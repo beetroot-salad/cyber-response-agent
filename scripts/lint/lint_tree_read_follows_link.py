@@ -44,7 +44,8 @@ import sys
 from pathlib import Path
 
 from _astlib import (
-    ModuleEnv, ScanBlind, callee, module_env, read_and_parse, require_selected, selects, source_files,
+    ModuleEnv, ScanBlind, callee, module_env, read_and_parse, require_selected, selects,
+    source_files,
 )
 from _baseline import Finding, gate
 

@@ -76,7 +76,8 @@ def _suppressed(node: ast.Call, lines: list[str]) -> bool:
 
 def _scan() -> list[Finding]:
     findings: list[Finding] = []
-    for path in (DEFENDER / _r for _r in source_files(DEFENDER, EXCLUDED_DIRS)):
+    for name in source_files(DEFENDER, EXCLUDED_DIRS):
+        path = DEFENDER / name
         text, tree = read_and_parse(path, path.relative_to(REPO_ROOT).as_posix())
         lines = text.splitlines()
         rel = path.relative_to(REPO_ROOT).as_posix()

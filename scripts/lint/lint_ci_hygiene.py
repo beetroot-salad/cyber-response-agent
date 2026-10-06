@@ -95,25 +95,24 @@ def _is_excluded(rel: str) -> bool:
     return any(rel.startswith(p) for p in EXCLUDED_PREFIXES)
 
 
-def _iter_defender_files() -> list[Path]:
-    """Every shipped text file under `defender/`, minus what git ignores.
-
-    `EXCLUDED_PREFIXES` scopes what is deliberately out of scope; the shared listing
-    (`_astlib.source_files`) drops what git ignores, which is not part of the repo at all, such as run output (`learning/runs/`, `author-queue/`)
-    that accumulates in a working tree but never exists in a fresh CI checkout."""
-    out: list[Path] = []
+def _listing() -> list[str]:
+    """Every text file under `defender/` the shared listing (`_astlib.source_files`) yields —
+    git-ignored run output (`learning/runs/`, `author-queue/`) never among them. Taken once per
+    run by `main` and handed to each check."""
     if not DEFENDER.is_dir():
-        return out
-    return [
-        DEFENDER / rel
-        for rel in source_files(DEFENDER, _PRUNED, suffixes=tuple(sorted(TEXT_SUFFIXES)))
-        if not _is_excluded(f"defender/{rel}")
-    ]
+        return []
+    return source_files(DEFENDER, _PRUNED, suffixes=tuple(sorted(TEXT_SUFFIXES)))
 
 
-def check_hardcoded_paths() -> list[Finding]:
+def _iter_defender_files(listed: list[str]) -> list[Path]:
+    """The shipped text files of `listed`, minus `EXCLUDED_PREFIXES` (deliberately out of
+    scope)."""
+    return [DEFENDER / rel for rel in listed if not _is_excluded(f"defender/{rel}")]
+
+
+def check_hardcoded_paths(listed: list[str] | None = None) -> list[Finding]:
     findings: list[Finding] = []
-    for path in _iter_defender_files():
+    for path in _iter_defender_files(_listing() if listed is None else listed):
         rel = path.relative_to(REPO_ROOT).as_posix()
         text = read_source(path, rel)
         for lineno, line in enumerate(text.splitlines(), start=1):
@@ -147,24 +146,20 @@ def _iter_command_fields(node, path_prefix: str = ""):
             yield from _iter_command_fields(item, f"{path_prefix}[{idx}]")
 
 
-def _settings_files() -> list[Path]:
-    """Known JSON config locations under defender/: the top-level `*.json`, every nested
-    `*-settings.json` the shared listing yields, and the plugin manifest."""
-    out: list[Path] = []
-    for path in DEFENDER.glob("*.json"):
-        out.append(path)
-    out.extend(DEFENDER / rel
-               for rel in source_files(DEFENDER, _PRUNED, suffixes=("-settings.json",))
-               if "/" in rel)
-    plugin_manifest = DEFENDER / ".claude-plugin" / "plugin.json"
-    if plugin_manifest.exists():
-        out.append(plugin_manifest)
-    return out
+def _settings_files(listed: list[str]) -> list[Path]:
+    """Known JSON config locations under defender/, out of `listed`: the top-level `*.json`,
+    every nested `*-settings.json`, and the plugin manifest."""
+    rels = [rel for rel in listed
+            if ("/" not in rel and rel.endswith(".json")) or rel.endswith("-settings.json")]
+    manifest = ".claude-plugin/plugin.json"
+    if manifest not in rels and (DEFENDER / manifest).exists():
+        rels.append(manifest)
+    return [DEFENDER / rel for rel in rels]
 
 
-def check_python_interpreter() -> list[Finding]:
+def check_python_interpreter(listed: list[str] | None = None) -> list[Finding]:
     findings: list[Finding] = []
-    for path in _settings_files():
+    for path in _settings_files(_listing() if listed is None else listed):
         rel = path.relative_to(REPO_ROOT).as_posix()
         if _is_excluded(rel):
             continue
@@ -205,9 +200,9 @@ def _iter_matchers(node, path_prefix: str = ""):
             yield from _iter_matchers(item, f"{path_prefix}[{idx}]")
 
 
-def check_hook_matchers() -> list[Finding]:
+def check_hook_matchers(listed: list[str] | None = None) -> list[Finding]:
     findings: list[Finding] = []
-    for path in _settings_files():
+    for path in _settings_files(_listing() if listed is None else listed):
         rel = path.relative_to(REPO_ROOT).as_posix()
         if _is_excluded(rel):
             continue
@@ -248,10 +243,11 @@ def main(argv: list[str]) -> int:
     # An unreadable file never entered the corpus. Exit 2: the gate could not run, which is
     # not "clean".
     try:
+        listed = _listing()
         findings = (
-            check_hardcoded_paths()
-            + check_python_interpreter()
-            + check_hook_matchers()
+            check_hardcoded_paths(listed)
+            + check_python_interpreter(listed)
+            + check_hook_matchers(listed)
         )
     except ScanBlind as exc:
         print(f"lint_ci_hygiene: {exc}", file=sys.stderr)

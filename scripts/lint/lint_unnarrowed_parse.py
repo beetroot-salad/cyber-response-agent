@@ -390,7 +390,8 @@ def _unowned_iso_parses(
 
 def _scan(scope: Path) -> list[Finding]:
     findings: list[Finding] = []
-    for path in (scope / _r for _r in source_files(scope, EXCLUDED_DIRS)):
+    for name in source_files(scope, EXCLUDED_DIRS):
+        path = scope / name
         rel = _relative(path, scope)
         text, tree = read_and_parse(path, rel)
         env = module_env(tree)

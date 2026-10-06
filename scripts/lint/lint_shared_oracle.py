@@ -144,7 +144,8 @@ def _shapes_in(rel: str, tree: ast.Module, lines: list[str]) -> dict[str, int]:
 def _scan() -> list[Finding]:
     prod: dict[str, str] = {}                       # shape -> "file:line" of a producer
     tests: dict[str, dict[str, int]] = {}           # test rel -> {shape: line}
-    for path in (SCOPE / _r for _r in source_files(SCOPE, EXCLUDED_DIRS)):
+    for name in source_files(SCOPE, EXCLUDED_DIRS):
+        path = SCOPE / name
         rel = path.relative_to(REPO_ROOT).as_posix()
         text, tree = read_and_parse(path, rel)
         shapes = _shapes_in(rel, tree, text.splitlines())

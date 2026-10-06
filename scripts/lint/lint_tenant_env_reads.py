@@ -42,9 +42,10 @@ Run from repo root:  python scripts/lint/lint_tenant_env_reads.py
                      python scripts/lint/lint_tenant_env_reads.py --root <repo-shaped tree>
 Exit 0 = clean, 1 = findings, 2 = the scan saw none of the four trees (a root that holds nothing
 to sweep is a scan that proved nothing, never a clean result), or — over this repo itself — a
-swept entry selects no module (gone, emptied, or a package spelled without its `/`). A move that takes swept code elsewhere must carry its entry along;
-otherwise the moved code leaves the sweep while the lint still passes. Under `--root <tree>` a
-missing entry is simply not scanned, so a planted or partial layout is still checked.
+swept entry selects no module (gone, emptied, or a package spelled without its `/`). A move
+that takes swept code elsewhere must carry its entry along; otherwise the moved code leaves
+the sweep while the lint still passes. Over any other tree (`--root` naming a planted or partial
+layout) a missing entry is simply not scanned, so that layout is still checked.
 """
 from __future__ import annotations
 
