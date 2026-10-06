@@ -1594,14 +1594,12 @@ _TODAY = {
 }
 
 
-def _factory_census(files: Iterable[Path], root: Path, gate: Any | None = None
-                    ) -> dict[str, str]:
+def _factory_census(files: Iterable[Path], root: Path, gate: Any) -> dict[str, str]:
     """{top-level def / async def's origin: the factory class its return annotation names},
     public and private, over `files` under `root` (a defender dir). Each file is named by the
     GATE's own `module_and_package(rel)` — never a derivation of the test's — and its
     annotations are resolved by `_astlib.annotated_class` against
     `module_env(tree, module=..., package=...)`. Methods and nested defs are not factories."""
-    gate = gate if gate is not None else _lint_run_records()
     astlib = import_lint_lib("_astlib")
     out: dict[str, str] = {}
     for path in files:
@@ -1731,7 +1729,8 @@ def annotation_displays(annotation_tree: Path) -> list[str]:
 
 @pytest.fixture(scope="module")
 def annotation_census(annotation_tree: Path) -> dict[str, str]:
-    return _factory_census([annotation_tree / _ANNOTATION_REL], annotation_tree)
+    return _factory_census([annotation_tree / _ANNOTATION_REL], annotation_tree,
+                           _lint_run_records())
 
 
 @pytest.mark.parametrize(("i", "form"), _FORM_CASES, ids=_FORM_IDS)
@@ -1870,7 +1869,7 @@ def fresh_census(tmp_path: Path) -> dict[str, str]:
         S.plant(tmp_path, "runtime/driver/__init__.py", _FRESH_RELATIVE),
         S.plant(tmp_path, "runtime/driver/beside.py", _FRESH_RELATIVE),
     ]
-    return _factory_census(files, tmp_path)
+    return _factory_census(files, tmp_path, _lint_run_records())
 
 
 def test_the_census_counts_top_level_factories_of_either_class(
