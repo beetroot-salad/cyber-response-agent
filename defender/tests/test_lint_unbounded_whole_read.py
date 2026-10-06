@@ -152,6 +152,8 @@ def test_tests_venv_cache_and_only_the_root_io_py_are_excluded(tmp_path):
     src = "def f(p):\n    return p.read_text()\n"
     tree = _tree(tmp_path, {
         "prod.py": src,
+        "latest.py": src,
+        "attest_report.py": src,
         "sub/_io.py": src,
         "tests/helper.py": src,
         "pkg/tests/deep.py": src,
@@ -161,7 +163,10 @@ def test_tests_venv_cache_and_only_the_root_io_py_are_excluded(tmp_path):
         ".venv/lib/site.py": src,
         "__pycache__/cached.py": src,
     })
-    assert _fps(tree) == {"prod.py:f:read_text", "sub/_io.py:f:read_text"}
+    assert _fps(tree) == {
+        "prod.py:f:read_text", "latest.py:f:read_text", "attest_report.py:f:read_text",
+        "sub/_io.py:f:read_text",
+    }
 
 
 def test_same_fingerprint_twice_is_one_finding(tmp_path):
@@ -232,6 +237,18 @@ def test_the_marker_covers_the_calls_own_line_span_only(tmp_path):
         "    return x\n"
     )})
     assert _fps(tree) == {"prod.py:above:read_text", "prod.py:below:read_text"}
+
+
+def test_one_marked_read_does_not_cover_another_in_the_same_function(tmp_path):
+    """The mark covers its own call: the unmarked read beside it, same kind, same def, fires."""
+    tree = _tree(tmp_path, {"prod.py": (
+        "def f(p, q):\n"
+        f"    a = p.read_text()  {MARK}\n"
+        "    b = q.read_text()\n"
+        "    return a, b\n"
+    )})
+    assert _fps(tree) == {"prod.py:f:read_text"}
+    assert _GATE.main([], scope=tree, baseline_path=tmp_path / "absent.json") == 1
 
 
 def test_one_marked_read_does_not_cover_another_in_a_same_named_method(tmp_path):
@@ -318,7 +335,44 @@ def test_real_tree_is_clean_with_an_empty_baseline():
     """Every real whole read carries a reasoned marker; the baseline holds nothing."""
     entries = json.loads(REAL_BASELINE.read_text(encoding="utf-8"))["entries"]
     assert entries == {}
+    assert _fps(DEFENDER) == set()
+
+
+@pytest.mark.gate
+def test_real_run_scans_the_real_tree_and_reports(capsys):
+    """The real path runs the ratchet over the real tree: its summary is printed, with no
+    finding. A real run that returned 0 without scanning prints nothing."""
     assert _GATE.main([]) == 0
+    out = capsys.readouterr().out
+    assert "[lint_unbounded_whole_read] 0 finding(s): 0 baselined, 0 new" in out
+
+
+@pytest.mark.gate
+def test_every_real_read_carries_a_reasoned_marker_on_its_own_span():
+    """Checked apart from the gate: each real read call's own line span holds
+    `lint-whole-read: ok` followed by a dash and a reason."""
+    import re
+    marker = re.compile(r"lint-whole-read: ok\s*(?:—|--?)\s*\S")
+    unmarked = []
+    n = 0
+    for path in DEFENDER.rglob("*.py"):
+        rel = path.relative_to(DEFENDER).as_posix()
+        parts = Path(rel).parts
+        if (rel == "_io.py" or "tests" in parts or ".venv" in parts or "__pycache__" in parts
+                or path.name == "conftest.py" or path.name.startswith("test_")
+                or path.name.endswith("_test.py")):
+            continue
+        text = path.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        for node in ast.walk(ast.parse(text)):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in ("read_text", "read_bytes")):
+                n += 1
+                span = lines[node.lineno - 1:(node.end_lineno or node.lineno)]
+                if not any(marker.search(line) for line in span):
+                    unmarked.append(f"{rel}:{node.lineno}")
+    assert n > 30, "the census itself must see the tree"
+    assert unmarked == []
 
 
 @pytest.mark.gate

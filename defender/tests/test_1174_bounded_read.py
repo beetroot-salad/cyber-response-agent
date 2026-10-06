@@ -1023,6 +1023,44 @@ def test_h2_the_streaming_reader_refuses_a_planted_link(tmp_path):
         list(_io.iter_plain_jsonl_rows(link))
 
 
+def test_h2_the_streaming_reader_refuses_a_hard_link_and_a_fifo(tmp_path):
+    """The same plain-entry refusal as `read_plain`: a hard link (`O_NOFOLLOW` cannot refuse it)
+    and a FIFO (refused at the non-blocking open, never waited on). Control: the original name
+    of the hard-linked file streams."""
+    original = tmp_path / "original.jsonl"
+    original.write_text('{"a": 1}\n', encoding="utf-8")
+    hard = tmp_path / "hard.jsonl"
+    os.link(original, hard)
+    with pytest.raises(OSError, match=_io.ALIAS_READ_REFUSAL):
+        list(_io.iter_plain_jsonl_rows(hard))
+    os.unlink(hard)
+    assert list(_io.iter_plain_jsonl_rows(original)) == [{"a": 1}]
+    fifo = tmp_path / "fifo.jsonl"
+    os.mkfifo(fifo)
+    with pytest.raises(OSError, match=_io.ALIAS_READ_REFUSAL):
+        list(_io.iter_plain_jsonl_rows(fifo))
+
+
+def test_h2_the_streaming_reader_is_lazy(tmp_path):
+    """The first row comes off a file with a 256 MiB tail without the tail being read: peak
+    allocation stays far under it. A whole read would allocate the file."""
+    import tracemalloc
+    p = tmp_path / "log.jsonl"
+    p.write_text('{"n": 1}\n', encoding="utf-8")
+    with open(p, "r+b") as f:  # lint-text-io: ok — test plant of a sparse tail
+        f.truncate(256 * MiB)
+    rows = _io.iter_plain_jsonl_rows(p)
+    tracemalloc.start()
+    try:
+        first = next(rows)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+        rows.close()  # type: ignore[attr-defined]
+    assert first == {"n": 1}
+    assert peak < 4 * MiB, peak
+
+
 @pytest.mark.parametrize("raised", [64 * MiB + 2, 128 * MiB, 10 ** 12])
 def test_h12_a_caller_cannot_raise_the_cap(tmp_path, raised):
     """`limit` only lowers: a caller asking for more than READ_LIMIT still gets READ_LIMIT, so
@@ -1039,14 +1077,52 @@ def test_h12_a_caller_cannot_raise_the_cap(tmp_path, raised):
         _io.read_jsonl_rows(p, limit=raised)
 
 
-def test_h12_the_cap_has_no_off_switch(tmp_path):
-    """`None` is not a limit any more (#1188 D1): it is refused before any byte is read, not
-    taken as "no bound". Control: the default reads a file under the cap."""
-    p = tmp_path / "small.txt"
-    p.write_text("x" * 100, encoding="utf-8")
-    assert _io.read_text_utf8(p) == "x" * 100
+def test_h12_a_raised_limit_still_reads_a_file_under_the_cap(tmp_path):
+    """Clamped, not refused: asking for more than READ_LIMIT reads a small file as usual."""
+    p = tmp_path / "small.jsonl"
+    p.write_text('{"a": 1}\n', encoding="utf-8")
+    assert _io.read_text_utf8(p, limit=10 ** 12) == '{"a": 1}\n'
+    assert _io.read_text_soft(p, limit=10 ** 12) == ('{"a": 1}\n', None)
+    assert _io.read_jsonl_rows(p, limit=10 ** 12) == [{"a": 1}]
+    assert _io.read_jsonl_rows_report(p, limit=10 ** 12) == ([{"a": 1}], 0)
+
+
+_READERS = {
+    "read_text_utf8": lambda p, lim: _io.read_text_utf8(p, limit=lim),
+    "read_text_soft": lambda p, lim: _io.read_text_soft(p, limit=lim),
+    "read_jsonl_rows": lambda p, lim: _io.read_jsonl_rows(p, limit=lim),
+    "read_jsonl_rows_report": lambda p, lim: _io.read_jsonl_rows_report(p, limit=lim),
+}
+
+
+@pytest.mark.parametrize("reader", sorted(_READERS))
+def test_h12_the_cap_has_no_off_switch(tmp_path, reader):
+    """`None` is not a limit any more (#1188 D1), on every reader that takes one: a TypeError,
+    not "no bound", and not swallowed into a soft "unreadable". Control: the default reads."""
+    p = tmp_path / "small.jsonl"
+    p.write_text('{"a": 1}\n', encoding="utf-8")
+    assert _READERS[reader](p, _io.READ_LIMIT)
     with pytest.raises(TypeError):
-        _io.read_text_utf8(p, limit=None)  # type: ignore[arg-type]
+        _READERS[reader](p, None)
+
+
+def test_h12_the_one_read_step_clamps_whoever_calls_it(tmp_path):
+    """The clamp lives in the shared step, not in the wrappers: a direct call with a huge limit
+    still refuses a descriptor past READ_LIMIT. Control: the same call on a small file reads."""
+    big = sparse(tmp_path / "big.bin", 64 * MiB + 1)
+    small = tmp_path / "small.bin"
+    small.write_bytes(b"abc")
+    for path, expect_refusal in ((big, True), (small, False)):
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            size = os.fstat(fd).st_size
+            if expect_refusal:
+                with pytest.raises(OSError, match="read limit"):
+                    _io._read_plain_fd(os, fd, size, binary=True, limit=10 ** 12)
+            else:
+                assert _io._read_plain_fd(os, fd, size, binary=True, limit=10 ** 12) == b"abc"
+        finally:
+            os.close(fd)
 
 
 # -- H4, H5: a size-0 descriptor (a pipe) reads to EOF, bounded as it goes -------------------
