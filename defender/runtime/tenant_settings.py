@@ -295,15 +295,18 @@ def read_systems(settings: Path) -> Mapping[str, SystemConfig | ConfigFault]:
 
 
 def warn_missing_access_method(tenant_id: str, systems: Mapping[str, SystemConfig | ConfigFault]) -> None:
-    """One warning naming each system whose config predates D2: it lacks `<PREFIX>_TRANSPORT` or
-    `<PREFIX>_DOCKER_CONTEXT`, so every call it makes will fault (there is no default)."""
+    """One warning naming each system whose config declares half a docker access method: one of
+    `<PREFIX>_TRANSPORT` / `<PREFIX>_DOCKER_CONTEXT` without the other, so every docker call it
+    makes will fault (there is no default). A system declaring neither is one its adapter
+    reaches directly, and is not listed."""
     lacking = []
     for name, entry in systems.items():
         if not isinstance(entry, SystemConfig) or not _PREFIX_NAME.match(name):
             continue
         prefix = system_prefix(name)
-        missing = [k for k in (f"{prefix}_TRANSPORT", f"{prefix}_DOCKER_CONTEXT") if k not in entry]
-        if missing:
+        keys = (f"{prefix}_TRANSPORT", f"{prefix}_DOCKER_CONTEXT")
+        missing = [k for k in keys if k not in entry]
+        if len(missing) == 1:
             lacking.append(f"{name} ({', '.join(missing)})")
     if lacking:
         _log.warning(

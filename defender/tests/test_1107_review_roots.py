@@ -403,8 +403,9 @@ def test_an_unexaminable_system_folder_is_that_system_down(tmp_path, monkeypatch
 
 def test_the_access_lines_are_named_after_the_folder_whatever_the_adapter_prefix():
     """An adapter may name its keys with its own prefix; the access lines are always named after
-    the system folder. `load_config` and the transport judge the same two keys, so a config the
-    adapter accepts is never refused at the first call."""
+    the system folder. The docker transport judges those two keys (`load_config` does not: a
+    directly-reached system declares none), so access lines spelled with the adapter's prefix are
+    refused at the first docker call, naming the folder-named key."""
     from types import SimpleNamespace
 
     from defender.runtime.tenant_settings import SystemConfig
@@ -422,4 +423,4 @@ def test_the_access_lines_are_named_after_the_folder_whatever_the_adapter_prefix
         "MYPFX_URL_BASE": "http://mysys:1", "MYPFX_TIMEOUT_SEC": "5"})})
     ctx = VerbContext(defender_dir=S.DEFENDER, run_dir=S.DEFENDER, env={}, tenant=lacking)
     with pytest.raises(ConfigFault, match="MY_SYS_TRANSPORT"):
-        transport.load_config(ctx, "my-sys", "MYPFX", ("URL_BASE", "TIMEOUT_SEC"))
+        transport.docker_context(ctx, "my-sys")

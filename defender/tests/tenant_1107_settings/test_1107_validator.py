@@ -140,6 +140,17 @@ def test_s7_mf8_validator_fails_missing_access_method(tmp_path):
     assert _passes(rows), f"the validator reported no PASS for a complete scaffold: {rows}"
 
 
+def test_validator_passes_a_system_declaring_no_access_method(tmp_path):
+    """A config.env carrying neither <PREFIX>_TRANSPORT nor <PREFIX>_DOCKER_CONTEXT is a system
+    its adapter reaches directly: it draws no access-method FAIL. Half a pair still FAILs
+    (test_s7_mf8_validator_fails_missing_access_method)."""
+    rows = _check(_scaffold(tmp_path / "direct", transport=None, context=None))
+    fails = _fails(rows)
+    assert not _naming(fails, f"{PREFIX}_TRANSPORT"), f"a direct system drew a FAIL: {rows}"
+    assert not _naming(fails, f"{PREFIX}_DOCKER_CONTEXT"), f"a direct system drew a FAIL: {rows}"
+    assert _passes(rows), f"the validator reported no PASS for a direct system: {rows}"
+
+
 def test_s7_mf8_validator_fails_unimplemented_method(tmp_path):
     """validate_scaffold FAILs a config.env whose <PREFIX>_TRANSPORT names an unimplemented method
     (http, or any value other than docker-exec), naming the value."""

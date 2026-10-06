@@ -684,10 +684,12 @@ def test_o1_resolver_ignores_env(tmp_path, monkeypatch):
 
 
 def test_s7_mf8_resolve_warns_missing_access_method(tmp_path, caplog):
-    """Resolving a tenant folder that predates D2 (config.env files without <PREFIX>_TRANSPORT or
-    <PREFIX>_DOCKER_CONTEXT) logs one warning at resolve listing the systems whose config lacks an
-    access-method key. Resolve does not refuse, and each such system faults on its first call with
-    text naming the missing key (for example "CMDB_TRANSPORT is not set")."""
+    """Resolving a tenant folder whose config.env files declare half a docker access method (one
+    of <PREFIX>_TRANSPORT / <PREFIX>_DOCKER_CONTEXT without the other) logs one warning at resolve
+    listing those systems. A system declaring neither is one its adapter may reach directly
+    (#1215 follow-up), so it is not listed. Resolve does not refuse, and a docker-reached system
+    lacking either key faults on its first call with text naming the missing key (for example
+    "CMDB_TRANSPORT is not set")."""
     def without(text: str, key: str) -> str:
         return "".join(ln + "\n" for ln in text.splitlines() if not ln.startswith(f"{key}="))
 
@@ -703,12 +705,13 @@ def test_s7_mf8_resolve_warns_missing_access_method(tmp_path, caplog):
     with caplog.at_level(logging.WARNING):
         rec = _resolve(root)  # does not refuse
 
-    lacking = ("cmdb", "ticket", "identity")
+    half = ("ticket", "identity")
     warned = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING
-              and any(name in r.getMessage() for name in lacking)]
+              and any(name in r.getMessage() for name in half)]
     assert len(warned) == 1, [r.getMessage() for r in caplog.records]
-    assert all(name in warned[0] for name in lacking), warned[0]
+    assert all(name in warned[0] for name in half), warned[0]
     assert "change-mgmt" not in warned[0], warned[0]  # complete: not listed
+    assert "cmdb" not in warned[0], warned[0]  # declares neither: reached directly, not listed
 
     shim = S.DockerShim(tmp_path / "shim", [S.answer('{"host": "web-1"}', "200")])
     ctx = _ctx(rec, tmp_path, shim.env({"PATH": os.environ.get("PATH", "")}))

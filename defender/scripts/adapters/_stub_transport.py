@@ -88,9 +88,10 @@ def access_context(ctx: VerbContext, system: str) -> str:
     docker as `--context ''`, which docker defers to its own `DOCKER_CONTEXT` or current context,
     re-opening the very steering this record removed (MF-3).
 
-    Called first by every adapter's `load_config` and by every transport entry, so a system that
-    is down for its access method faults naming that key before any URL is confined or any
-    timeout parsed.
+    Called by every docker transport entry, so a system reached through docker that is down for
+    its access method faults naming that key before any docker child runs. Not by `load_config`:
+    the two keys are this transport's own requirement, and a system its adapter reaches directly
+    declares neither.
 
     The two keys are named after the system FOLDER (`system_prefix`: `case-history` →
     `CASE_HISTORY_TRANSPORT`), whatever prefix an adapter uses for its other keys. One derivation,
@@ -137,13 +138,13 @@ def load_config(
     file as it is now and not the process environment: an edit mid-run and an exported variable
     change nothing a run addresses (O1, O2). The prefix namespaces the file's keys
     (CMDB_URL_BASE, IDENTITY_BASTION_HOST); caller-friendly stripped keys come back as URL_BASE /
-    BASTION_HOST / TIMEOUT_SEC. A system with no usable config, an unimplemented access method, or
-    a missing, blank or malformed required key is a `ConfigFault` — infra (exit 2), because a
-    system with no config is definitionally down, and only exit 2 trips the breaker.
+    BASTION_HOST / TIMEOUT_SEC. A system with no usable config, or a missing, blank or malformed
+    required key is a `ConfigFault` — infra (exit 2), because a system with no config is
+    definitionally down, and only exit 2 trips the breaker.
 
-    The access method is checked FIRST (`access_context`), ahead of the required keys and the
-    timeout: a system whose method is not `docker-exec` is down for that reason, whatever else
-    its file says.
+    The access method is not checked here: it is the docker transport's requirement, checked by
+    each docker transport entry (`access_context`), so a system its adapter reaches directly
+    declares no `<PREFIX>_TRANSPORT` / `<PREFIX>_DOCKER_CONTEXT`.
 
     `required` is the key set THIS system needs — the three-key transport template by default,
     which is what the five docker-exec-curl stubs declare. A system needing more passes its own
@@ -153,7 +154,6 @@ def load_config(
     have a missing environment fact resolve silently.
     """
     entry = system_entry(ctx, system)
-    access_context(ctx, system)
     cfg: dict[str, str] = {}
     for key in required:
         val = entry.get(f"{prefix}_{key}")
