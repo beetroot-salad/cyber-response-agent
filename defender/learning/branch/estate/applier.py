@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import field
 from defender._model import model
+from defender.runtime import case_ticket
 from typing import Any
 
 from ..ledger import PASSTHROUGH, PATCHED, STAGED
@@ -75,8 +76,6 @@ def unservable(patches: Mapping, mapping: Any | None) -> list[str]:
     }
     if not with_comments:
         return []
-    from defender.runtime import case_ticket
-
     if mapping is None:
         return [f"{_TICKET_SYSTEM}/{entity}: patches `comments`, but no tenant record "
                 "was handed in to say which status releases them" for entity in with_comments]

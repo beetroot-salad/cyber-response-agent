@@ -20,13 +20,12 @@ from defender._tenant import Tenant, TenantId, TenantRefused, accept_tenant
 from defender.runtime.verb_dispositions import RunGrants, require_gather_query, run_grants
 from defender.runtime.verb_grant import GrantError, VerbGrant
 from defender.runtime import tenant_settings
+from defender.runtime.case_ticket import CaseMapping, CaseTicketError, load_case_mapping
 from defender.runtime.tenant_settings import (
     ElasticSettings,
     SystemConfig,
 )
 from defender.scripts.adapters.faults import ConfigFault
-from defender.runtime import case_ticket
-from defender.runtime.case_ticket import CaseMapping, CaseTicketError
 
 if TYPE_CHECKING:
     from defender.runtime.lead_zero import CorrelationDispatch
@@ -191,7 +190,7 @@ def resolved_settings(tenant: Tenant) -> dict[str, Any]:
     systems = tenant_settings.read_systems(tenant.settings)
     tenant_settings.warn_missing_access_method(tenant.id, systems)
     try:
-        ticket_mapping: CaseMapping | CaseTicketError = case_ticket.load_case_mapping(
+        ticket_mapping: CaseMapping | CaseTicketError = load_case_mapping(
             tenant.settings)
     except CaseTicketError as error:
         # The text only: the caught error's traceback and cause (the OSError, with its host

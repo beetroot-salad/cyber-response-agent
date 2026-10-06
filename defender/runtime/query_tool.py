@@ -26,6 +26,7 @@ from defender._untrusted import wrap_fresh
 from defender.learning.branch.redaction import redact_model_visible
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
 from defender.runtime.payload_view import render as _render_payload
+from defender.runtime import case_ticket
 from defender.runtime.request_ceiling import WRITE_SUMMARY_NOW
 from defender.runtime.tools import DeadEnd
 from defender.scripts.gather_tools.record_query import (
@@ -176,8 +177,6 @@ def _release_predicate(tenant: Any) -> Any:
     "nothing released", so no comment is served (fail closed), rather than refusing the query as
     infra and charging the `ticket` breaker for a config defect. The warning is logged because
     otherwise a broken mapping looks like a store with no comments."""
-    from defender.runtime import case_ticket
-
     try:
         return case_ticket.release_predicate(tenant.ticket_mapping).is_released
     except Exception as e:  # noqa: BLE001 — degrade on every construction failure, see docstring
