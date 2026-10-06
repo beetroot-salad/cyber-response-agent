@@ -35,7 +35,7 @@ from __future__ import annotations
 import ast
 import builtins
 import os
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -54,21 +54,41 @@ class ScanBlind(RuntimeError):
     clean."""
 
 
-def source_files(root: Path, excluded: Iterable[str]) -> list[str]:
-    """Every `.py` under `root` a gate scans, as sorted root-relative POSIX paths.
+def source_files(root: Path, excluded: Iterable[str], *, suffixes: tuple[str, ...] = (".py",),
+                 prune: Callable[[Path], bool] | None = None) -> list[str]:
+    """Every file under `root` ending in one of `suffixes` that a gate scans, as sorted
+    root-relative POSIX paths. The one listing every gate shares — never walk a tree yourself.
 
-    A directory is pruned by its NAME below `root` — never by an ancestor's, so a checkout that
-    happens to live under a dir called `tests` is still scanned. What git ignores is dropped
-    (`_gitscope.git_ignored`: ignored-ness, not tracked-ness, so a new uncommitted module is
-    still scanned, and failing open outside a repo), so a local `build/` or `venv/` is not
-    source. The one listing every path-scoped gate shares — keep their scopes on it.
+    - A directory is pruned by its NAME below `root` (or when `prune(dir)` says so) — never by an
+      ancestor's, so a checkout that happens to live under a dir called `tests` is still scanned.
+    - What git ignores is dropped (`_gitscope.git_ignored`: ignored-ness, not tracked-ness, so a
+      new uncommitted module is still scanned; fails open outside a repo), so a local `build/`
+      or `venv/` is not source — unless `root` is itself ignored: a planted tree under a
+      repo's `build/` is the whole scope, not ignored content inside it.
+    - A directory the walk cannot read, or a name that is not valid UTF-8, is ScanBlind: the
+      gate cannot report on what it did not read, and a name it cannot print is one it cannot
+      report on either.
     """
     skip = frozenset(excluded)
+
+    def blind(err: OSError) -> None:
+        raise ScanBlind(f"cannot list {ascii(err.filename)}: {err.strerror}") from err
+
     found: list[Path] = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if d not in skip)
-        found.extend(Path(dirpath, f) for f in filenames if f.endswith(".py"))
-    ignored = git_ignored(root, found)
+    for dirpath, dirnames, filenames in os.walk(root, onerror=blind):
+        here = Path(dirpath)
+        dirnames[:] = sorted(d for d in dirnames
+                             if d not in skip and not (prune and prune(here / d)))
+        listed = [f for f in filenames if f.endswith(suffixes)]
+        for name in (*dirnames, *listed):
+            try:
+                name.encode("utf-8")
+            except UnicodeEncodeError:
+                rel = (here / name).relative_to(root).as_posix()
+                raise ScanBlind(f"{ascii(rel)} under {root} is not a UTF-8 name — "
+                                "rename it; no gate can report on it") from None
+        found.extend(here / f for f in listed)
+    ignored = frozenset() if git_ignored(root, [root]) else git_ignored(root, found)
     return sorted(p.relative_to(root).as_posix() for p in found if p not in ignored)
 
 
@@ -87,7 +107,7 @@ def require_selected(root: Path, real_root: Path, entries: Iterable[str],
     The one place a path-scoped gate decides it is looking at the real repo. Without it, a
     move, a rename, or an emptied package leaves the gate scanning less and still exiting 0.
     """
-    if not _is_real(root, real_root):
+    if not is_real_root(root, real_root):
         return
     scanned = list(rels)
     dead = sorted(e for e in entries if not any(selects(e, rel) for rel in scanned))
@@ -103,7 +123,7 @@ def require_claimed(root: Path, real_root: Path, entries: Iterable[str],
     that no entry selects — the closure of a gate whose scope is "these dirs, and we declared
     the rest": a new package is either swept or declared out of scope, never silently neither.
     Anywhere else, do nothing (see `require_selected`)."""
-    if not _is_real(root, real_root):
+    if not is_real_root(root, real_root):
         return
     claims = list(entries)
     stray = sorted({rel.split("/", 1)[0] for rel in rels
@@ -113,7 +133,7 @@ def require_claimed(root: Path, real_root: Path, entries: Iterable[str],
                         f"{stray} — sweep each, or declare it out of scope with the reason")
 
 
-def _is_real(root: Path, real_root: Path) -> bool:
+def is_real_root(root: Path, real_root: Path) -> bool:
     """Is `root` the real repo's tree, not a planted or partial one under test?"""
     return root.resolve() == real_root.resolve()
 

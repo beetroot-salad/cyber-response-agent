@@ -89,10 +89,10 @@ def _swept_files(root: Path) -> list[Path]:
     base = root / "defender"
     rels = ([f"defender/{r}" for r in source_files(base, EXCLUDED_DIRS)]
             if base.is_dir() else [])
+    require_selected(root, REPO_ROOT, SWEPT, rels)  # first: over this repo, name the dead entries
     found = [rel for rel in rels if any(selects(e, rel) for e in SWEPT)]
     if not found:
         raise ScanBlind(f"none of the four swept trees is under {root} — the lint swept nothing")
-    require_selected(root, REPO_ROOT, SWEPT, rels)
     return [root / rel for rel in found]
 
 

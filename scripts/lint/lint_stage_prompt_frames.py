@@ -14,10 +14,10 @@ import sys
 from pathlib import Path
 
 try:  # package import in tests
-    from ._astlib import ScanBlind, read_and_parse, require_selected, source_files
+    from ._astlib import ScanBlind, is_real_root, read_and_parse, source_files
     from ._baseline import Finding, gate
 except ImportError:  # direct ``python scripts/lint/...`` execution
-    from _astlib import ScanBlind, read_and_parse, require_selected, source_files
+    from _astlib import ScanBlind, is_real_root, read_and_parse, source_files
     from _baseline import Finding, gate
 
 
@@ -114,9 +114,11 @@ def _stage_message_arguments(
 
 def _scan(scope: Path) -> list[Finding]:
     rels = source_files(scope, EXCLUDED_DIRS)
-    # The scope is the entry `learning/` under `defender/`: over this repo it must still select
-    # code, or the stage prompts it guards have moved out from under the gate.
-    require_selected(scope, LEARNING, [f"{LEARNING.name}/"], [f"{scope.name}/{r}" for r in rels])
+    if not rels and is_real_root(scope, LEARNING):
+        # Over this repo the scope must still hold code, or the stage prompts it guards have
+        # moved out from under the gate.
+        raise ScanBlind(f"{scope} holds no module to scan — the stage prompts it guarded have "
+                        "moved; point LEARNING at where they went")
     findings: list[Finding] = []
     for name in rels:
         path = scope / name

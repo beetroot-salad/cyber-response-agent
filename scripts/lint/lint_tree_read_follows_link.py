@@ -172,11 +172,12 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
 
 
 def _scan(root: Path) -> list[Finding]:
-    rels = source_files(root, EXCLUDED_DIRS)
-    require_selected(root, SCOPE, LINT_TREE_READER_MODULES,
-                     [rel for rel in rels if not _is_test_module(rel)])
+    rels = [rel for rel in source_files(root, EXCLUDED_DIRS) if not _is_test_module(rel)]
+    require_selected(root, SCOPE, LINT_TREE_READER_MODULES, rels)
     findings: list[Finding] = []
     for rel in rels:
+        if not any(selects(e, rel) for e in LINT_TREE_READER_MODULES):
+            continue  # outside the census: never parsed, so never able to blind the scan
         text, tree = read_and_parse(root / rel, rel)
         findings.extend(_scan_file(rel, tree, text.splitlines()))
     return findings

@@ -85,7 +85,8 @@ UNSCANNED_TREES: tuple[str, ...] = ("defender/skills", "scripts", "experiments")
 SCOPE_STATEMENT = (
     f"This gate sweeps {', '.join(f'defender/{d}' for d in SWEEP_DIRS)}"
     f"{' and the top level of defender/*.py' if SWEEP_TOP_LEVEL else ''} (tests excluded) — it "
-    f"never enters {', '.join(UNSCANNED_TREES)} (repo-relative; §7 decision 5), and it is "
+    f"never enters {', '.join(t if '/' in t else f'top-level {t}' for t in UNSCANNED_TREES)} "
+    "(§7 decision 5), and it is "
     "structurally blind to a record name that never reaches the AST as a whole literal — an "
     "assembly in which no single part is ever a literal string, whichever of concatenation, "
     "%-formatting, .format, os.path.join or multi-argument Path() does the assembling (§7 "
@@ -134,11 +135,10 @@ def sweep_files(root: Path = DEFENDER) -> list[Path]:
     test holds a subset on purpose."""
     rels = source_files(root, EXCLUDED_DIRS)
     swept = [f"{d}/" for d in SWEEP_DIRS]
-    nested = [rel for rel in rels if "/" in rel]
-    require_selected(root, DEFENDER, swept, rels)
-    require_claimed(root, DEFENDER, swept + [
-        t.removeprefix("defender/") + "/" for t in UNSCANNED_TREES if t.startswith("defender/")
-    ], nested)
+    declared = [t.removeprefix("defender/") + "/" for t in UNSCANNED_TREES
+                if t.startswith("defender/")]
+    require_selected(root, DEFENDER, swept + declared, rels)
+    require_claimed(root, DEFENDER, swept + declared, [rel for rel in rels if "/" in rel])
     return [root / rel for rel in rels
             if ("/" not in rel and SWEEP_TOP_LEVEL) or any(selects(d, rel) for d in swept)]
 

@@ -161,9 +161,8 @@ def _scan_file(rel: str, tree: ast.AST, lines: list[str]) -> list[Finding]:
 
 
 def _scan(root: Path) -> list[Finding]:
-    rels = source_files(root, EXCLUDED_DIRS)
-    require_selected(root, SCOPE, LINT_HARD_GATED_MODULES,
-                     [rel for rel in rels if not _is_test_module(rel)])
+    rels = [rel for rel in source_files(root, EXCLUDED_DIRS) if not _is_test_module(rel)]
+    require_selected(root, SCOPE, LINT_HARD_GATED_MODULES, rels)
     findings: list[Finding] = []
     for rel in rels:
         text, tree = read_and_parse(root / rel, rel)
