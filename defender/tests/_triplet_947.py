@@ -882,6 +882,22 @@ class FakeCapture:
         return built
 
 
+#: The learning state root's override (`learning/core/config.py::loop_paths`, read at call time).
+LEARNING_STATE_ENV = "DEFENDER_LEARNING_STATE_DIR"
+
+
+def isolate_learning_state(tmp_path: Path, monkeypatch: Any) -> Path:
+    """Point the learning state root inside `tmp_path`. An ACCEPTED launch ends in the family
+    judge, which appends its findings (e.g. the mechanical `unreachable-difference` one) to the
+    questioner queue under `loop_paths().state_root` — by default `defender/learning/` in the
+    checkout itself, where a later test asserting nothing was written outside a run's records
+    finds it. The root must exist: nothing creates it."""
+    root = tmp_path / "learning-state"
+    root.mkdir(exist_ok=True)
+    monkeypatch.setenv(LEARNING_STATE_ENV, str(root))
+    return root
+
+
 def source_capture(**overrides: Any) -> FakeCapture:
     """A live-tree capture built from `provenance_record(**overrides)`.
 
@@ -1144,7 +1160,7 @@ __all__ = [
     "report_text",
     "corpus_document",
     "elastic_overlay", "episode", "family_doc", "provenance_record",
-    "FakeCapture", "source_capture", "source_stamp",
+    "FakeCapture", "source_capture", "source_stamp", "isolate_learning_state", "LEARNING_STATE_ENV",
     "lesson_row", "mod", "overlay", "refusals", "replace", "review_doc", "runs_base",
     "sibling_run_dir",
     "staged_rows", "sym", "world_doc", "world_token", "write_family",

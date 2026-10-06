@@ -47,6 +47,7 @@ def _tmp_roots(tmp_path, monkeypatch):
     """Both CONFIGURED roots inside `tmp_path`, as every launcher suite sets them."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+    T.isolate_learning_state(tmp_path, monkeypatch)
 
 
 def _cli():
