@@ -106,7 +106,11 @@ def _stale(field: str, sources: list[tuple[Path, str]], texts: dict[str, str]) -
 
 
 def main(argv: list[str]) -> int:
-    sources = _sources()
+    try:
+        sources = _sources()
+    except ScanBlind as exc:
+        print(f"lint_unowned_field: {exc}", file=sys.stderr)
+        return 2
     texts: dict[str, str] = {}
     owned: list[tuple[str, str, int, str]] = []
     malformed: list[tuple[str, int, str]] = []

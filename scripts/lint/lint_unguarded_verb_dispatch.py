@@ -37,7 +37,7 @@ import ast
 import sys
 from pathlib import Path
 
-from _astlib import read_and_parse, source_files
+from _astlib import ScanBlind, read_and_parse, source_files
 from _baseline import Finding, gate
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -168,8 +168,13 @@ def _scan() -> list[Finding]:
 
 
 def main() -> int:
+    try:
+        findings = _scan()
+    except ScanBlind as exc:
+        print(f"lint_unguarded_verb_dispatch: {exc}", file=sys.stderr)
+        return 2
     return gate(
-        _scan(),
+        findings,
         BASELINE_PATH,
         sys.argv,
         label="lint_unguarded_verb_dispatch",

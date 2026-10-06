@@ -210,7 +210,12 @@ def main(argv: list[str]) -> int:
     for scope in SCOPES:
         if not scope.exists():
             continue
-        for path in (scope / _r for _r in source_files(scope, EXCLUDED_DIRS)):
+        try:
+            rels = source_files(scope, EXCLUDED_DIRS)
+        except ScanBlind as blind:
+            print(f"[{LABEL}] could not list {scope}: {blind}", file=sys.stderr)
+            return 2
+        for path in (scope / _r for _r in rels):
             if path.resolve() == OWNER.resolve():
                 continue
             rel = path.relative_to(REPO_ROOT).as_posix()

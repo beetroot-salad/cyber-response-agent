@@ -761,8 +761,12 @@ def sweep_files(root: Path) -> list[Path]:
     and minus what git ignores."""
 
     def pruned(d: Path) -> bool:
-        return (d.name.startswith(".") or (d.parent == root and d.name == "evals")
-                or (d / "pyvenv.cfg").is_file())
+        if d.name.startswith(".") or (d.parent == root and d.name == "evals"):
+            return True
+        try:
+            return (d / "pyvenv.cfg").is_file()
+        except OSError:
+            return False  # unreadable: kept, so the listing reports it blind
 
     return [root / rel
             for rel in _astlib.source_files(root, ("__pycache__", "venv", "tests"), prune=pruned)]
@@ -851,7 +855,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=DEFENDER,
                         help="a defender/-shaped tree to sweep (default: this checkout's)")
     args = parser.parse_args(argv)
-    found = scan(args.root)
+    try:
+        found = scan(args.root)
+    except _astlib.ScanBlind as exc:  # the listing itself is blind: no scan happened
+        print(f"[lint_run_layout_imports] {exc}", file=sys.stderr)
+        return 2
     for f in found:
         print(f.display)
     print(f"[lint_run_layout_imports] {len(found)} finding(s).")
