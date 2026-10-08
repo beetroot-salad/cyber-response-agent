@@ -31,7 +31,6 @@ from typing import Any
 
 from defender import run_common
 from defender.run_repository import RunPaths
-from defender.learning.branch.estate import applier
 from defender.learning.branch.estate.registry import EstateError
 from defender.runtime import case_ticket
 from defender.runtime import run_tenant
@@ -503,10 +502,11 @@ def test_s7_mf11_mutating_callers_copy_locally(tmp_path):
 
 
 def test_d_mapping_error_consumers(tmp_path, caplog):
-    """With record.ticket_mapping a CaseTicketError, each consumer handles it as at base (CX21). The
-    query tool's ticket screen serves no comments, since every ticket reads as unreleased, and logs
-    one warning. The estate applier refuses a comment patch, naming the mapping error. The record
-    step warns and writes an error receipt."""
+    """With record.ticket_mapping a CaseTicketError, the record step warns and writes an error
+    receipt (CX21, as at base), and nothing else is touched by it: the query tool reads no
+    mapping, so a ticket listing reaches gather whole — keys and comments, open or closed — with
+    no warning about the mapping. (#1221 removed the query tool's release screen, which degraded
+    to serving no comments here, and the estate applier's comment-patch refusal.)"""
     root = tmp_path / "tenants"
     # `open.status` and `released.status` both 'open': the loader's own lifecycle refusal (#767),
     # a mapping file present (so the tenant is accepted, REQUIRED_SETTINGS) and unusable.
@@ -517,7 +517,7 @@ def test_d_mapping_error_consumers(tmp_path, caplog):
     assert isinstance(error, S.case_ticket_error()), f"ticket_mapping is {error!r}"
     said = str(error)
 
-    # (a) The screen: every ticket unreleased, keys served, comments not; one warning.
+    # (a) The query tool: no mapping is read, so every ticket is served whole; no warning.
     caplog.set_level(logging.WARNING)
     tickets = [M.ticket("SOC-OPEN-1107", status="open", comments=[M.comment("MARK-OPEN-1107")]),
                M.ticket("SOC-CLOSED-1107", status="closed",
@@ -525,26 +525,14 @@ def test_d_mapping_error_consumers(tmp_path, caplog):
     caplog.clear()
     run_dir, gather, calls = _screen_leg(tmp_path, root, "screen-err", tickets)
     assert len(calls) == 1, f"the ticket verb ran {len(calls)} times"
-    assert _shown(gather, "SOC-OPEN-1107"), "the screen dropped the tickets themselves"
-    assert _shown(gather, "SOC-CLOSED-1107"), "the screen dropped the tickets themselves"
-    for marker in ("MARK-OPEN-1107", "MARK-CLOSED-1107"):
-        assert not _shown(gather, marker), f"a comment ({marker}) was served off a bad mapping"
-        assert S.holders(run_dir, marker) == [], f"{marker} reached the run dir"
-    # The screen's own warning: the query tool's logger, naming the kept error (CX21, as at base).
+    for shown in ("SOC-OPEN-1107", "SOC-CLOSED-1107", "MARK-OPEN-1107", "MARK-CLOSED-1107"):
+        assert _shown(gather, shown), f"{shown} was withheld from gather under a bad mapping"
     warned = [r for r in caplog.records
               if r.name == "defender.runtime.query_tool" and r.levelno >= logging.WARNING
               and said in r.getMessage()]
-    assert len(warned) == 1, f"the screen warned {len(warned)} times naming the mapping error"
+    assert warned == [], "the query tool still reads the case-history mapping"
 
-    # (b) The estate applier: a comment patch is refused, naming the error.
-    patches = {"ticket": {"SOC-9": {"status": "closed",
-                                    "comments": [{"author": "defender", "body": "a note"}]}}}
-    refused = applier.unservable(patches, record.ticket_mapping)
-    assert refused, refused
-    assert all("SOC-9" in r for r in refused), refused
-    assert any(said in r for r in refused), f"the refusal does not name the error: {refused}"
-
-    # (c) The record step: a warning and an error receipt, no comment sent.
+    # (b) The record step: a warning and an error receipt, no comment sent.
     case_dir = M.make_run(tmp_path / "runs", "case-err-1107")
     # CX8: the shim on the child's PATH receives argv + env; it answers the read-back as an open
     # case (not released) and a POST as created, in curl's body + status-line shape.
@@ -562,10 +550,12 @@ def test_d_mapping_error_consumers(tmp_path, caplog):
         "a comment was sent off a bad mapping")
 
 
-def test_o2_ticket_screen_mapping_snapshot(tmp_path):
-    """After the record is built, editing mapping.yaml's released status does not change the next
-    ticket screen: the query tool screens against record.ticket_mapping as built."""
-    # rejected: the per-call re-read at base (CX9) and test_767_the_mapping_is_parsed_once_per_edit (CX10)
+def test_o2_ticket_replies_ignore_the_mapping(tmp_path):
+    """Neither the record's ticket_mapping nor an edit of mapping.yaml after the record is built
+    changes what a ticket reply serves: the query tool reads no mapping, so a case closed under
+    the mapping as built, one closed only under the edited file, and an open one all reach
+    gather with their comments. (#1221 removed the release screen that once read the record's
+    released status here.)"""
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="o2", table=TICKET_TABLE, released_status="closed")
     record = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
@@ -579,24 +569,24 @@ def test_o2_ticket_screen_mapping_snapshot(tmp_path):
 
     tickets = [M.ticket("SOC-CLOSED-O2", status="closed", comments=[M.comment("MARK-CLOSED-O2")]),
                M.ticket("SOC-EDITED-O2", status="done-edited-1107",
-                        comments=[M.comment("MARK-EDITED-O2")])]
+                        comments=[M.comment("MARK-EDITED-O2")]),
+               M.ticket("SOC-OPEN-O2", status="open", comments=[M.comment("MARK-OPEN-O2")])]
     run_dir, gather, calls = _screen_leg(tmp_path, root, "screen-o2", tickets,
                                          while_serving=edit_mapping)
     assert len(calls) == 1, f"the ticket verb ran {len(calls)} times"
     assert "done-edited-1107" in S.mapping_path(folder).read_text(encoding="utf-8"), (
         "the mid-run edit did not land")
-    assert _shown(gather, "SOC-EDITED-O2"), "the screen dropped the edited-status ticket itself"
-    assert _shown(gather, "MARK-CLOSED-O2"), (
-        "a ticket released under the mapping as built was screened by the edited file")
-    assert not _shown(gather, "MARK-EDITED-O2"), (
-        "a ticket released only under the edited file was served its comments")
-    assert S.holders(run_dir, "MARK-EDITED-O2") == [], "the edited-file release reached the run"
+    for marker in ("MARK-CLOSED-O2", "MARK-EDITED-O2", "MARK-OPEN-O2"):
+        assert _shown(gather, marker), f"{marker} was withheld — a ticket reply read the mapping"
+        assert S.holders(run_dir, marker), f"{marker} never reached the run's capture"
 
 
-def test_c_estate_registry_reads_record(tmp_path, monkeypatch):
-    """A resumed sibling's WorldRegistry, built in run.py, and the estate applier judge a ticket
-    comment patch against the record's ticket_mapping. Editing mapping.yaml's released status after
-    the record is built does not change which patch is refused."""
+def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
+    """A resumed sibling's WorldRegistry, built in run.py, accepts a ticket comment patch whatever
+    status it moves the case to — the status the record was built with, or one only a mid-run
+    edit of mapping.yaml names: no ticket reply is screened any more, so no patch can author a
+    difference the sibling could not see, and the registry consults no mapping. (#1221 removed
+    the estate applier's refusal, which judged the patch against the record's ticket_mapping.)"""
     # #1120: the resumed sibling reads its tenant from `DEFENDER_DATA_ROOT` alone.
     root = current_data_root()
     folder = S.plant(root, marker="est", table=TICKET_TABLE, released_status="closed")
@@ -653,7 +643,7 @@ def test_c_estate_registry_reads_record(tmp_path, monkeypatch):
             outcome = refused
         return outcome, investigated, handed
 
-    got_b, investigated_b, handed_b = resume("b")
+    got_b, investigated_b, _ = resume("b")
     assert "done-edited-1107" in S.mapping_path(folder).read_text(encoding="utf-8"), (
         "the post-record edit did not land")
     assert got_b == (0, None), (
@@ -662,15 +652,6 @@ def test_c_estate_registry_reads_record(tmp_path, monkeypatch):
     assert len(investigated_b) == 1, "world b's WorldRegistry was built but nothing ran on it"
 
     got_c, investigated_c, _ = resume("c")
-    assert isinstance(got_c, EstateError), (
-        f"world c (comments on a status only the edited file releases) was accepted: {got_c}")
-    assert "SOC-2" in str(got_c), got_c
-    assert investigated_c == [], "world c's refused registry still ran the investigation"
-
-    # The applier itself, handed the record run.py built (before the edit), agrees.
-    record = handed_b["tenant"]
-    assert applier.unservable(as_built, record.ticket_mapping) == [], (
-        "the applier refused a patch releasing to the record's status")
-    refused = applier.unservable(as_edited, record.ticket_mapping)
-    assert refused, refused
-    assert "SOC-2" in refused[0], refused
+    assert got_c == (0, None), (
+        f"world c (comments on a status only the edited file names) was refused: {got_c}")
+    assert len(investigated_c) == 1, "world c's WorldRegistry was built but nothing ran on it"

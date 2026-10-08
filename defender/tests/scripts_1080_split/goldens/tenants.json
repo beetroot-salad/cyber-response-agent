@@ -545,23 +545,13 @@
    "error": "CaseTicketError",
    "message": "case-history mapping's `open.status` and `released.status` are both 'open' \u2014 every case would open already released"
   },
-  "query_tool_good": [
+  "release_predicate_good": [
    true,
    false
   ],
-  "query_tool_bad": [
-   false,
-   false
-  ],
-  "applier_good": {
-   "returns": [
-    "ticket/C-1: patches `comments` on a case it does not also move to the released status ('closed') \u2014 an unreleased case serves no comments (#767), so the sibling could never observe this difference"
-   ]
-  },
-  "applier_bad": {
-   "returns": [
-    "ticket/C-1: patches `comments`, but the case-history mapping cannot say which status releases them (case-history mapping's `open.status` and `released.status` are both 'open' \u2014 every case would open already released)"
-   ]
+  "release_predicate_bad": {
+   "raises": "CaseTicketError",
+   "message": "case-history mapping's `open.status` and `released.status` are both 'open' \u2014 every case would open already released"
   }
  },
  "s187": {

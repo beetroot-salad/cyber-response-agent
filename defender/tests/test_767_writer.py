@@ -204,8 +204,9 @@ def test_767_open_payload_status_and_labels(tmp_path, monkeypatch):
 
 def test_767_writer_never_records_behind_a_release(tmp_path, monkeypatch, capsys):
     """The writer's half of the release invariant. A person's close is a statement about the
-    comments on the ticket WHEN THEY CLOSED IT; the screen serves a closed case whole, so a
-    comment appended after the close would be served under it with no person having seen it.
+    comments on the ticket WHEN THEY CLOSED IT, so a comment appended after the close would sit
+    under it with no person having seen it. #1221 removed the read-side screen; this write-side
+    refusal stays (its N7), and `released.status` stays in the mapping for it alone.
     The writer never moves the status (O1), so it keeps the close true the only other way: it
     reads the case back first and refuses to append to a released one — a receipt, a warning,
     and no POST.
@@ -259,6 +260,108 @@ def test_767_writer_never_records_behind_a_release(tmp_path, monkeypatch, capsys
         "nothing"
     )
     assert receipt(run_dir)["ok"] is True
+
+
+def test_767_release_predicate_lives_in_the_mapper(tmp_path, monkeypatch):
+    """d4_predicates_in_mapper — SEAM. `is_released(ticket)` lives in the mapper
+    (`runtime/case_ticket.py`), and the writer decides through it: changing the mapping changes
+    BOTH the predicate's answer and which case the writer refuses to append to, with no code
+    edit (O5).
+
+    Driven, not enumerated: the mapping is rewritten to a different released status, and the
+    writer is then observed following it. An `isinstance`/`hasattr` check over the name would
+    certify that it exists and never that it is WIRED.
+
+    #1221 removed the read-side screen that was this predicate's other consumer; the writer's
+    courtesy check is the one left (its N7), so the wiring is observed there."""
+    is_released = require(case_ticket, "is_released", "D4's predicate lives in the mapper")
+
+    use_mapping(monkeypatch, tmp_path / "dfn", mapping_doc(released_status="resolved"))
+    mapping = current_mapping()
+    resolved = ticket("SOC-CUSTOM", status="resolved")
+    stock = ticket("SOC-STOCK", status=RELEASED_STATUS)
+
+    assert is_released(resolved, mapping=mapping) is True
+    assert is_released(ticket("SOC-OPEN", status=OPEN_STATUS), mapping=mapping) is False
+    assert is_released(stock, mapping=mapping) is False, (
+        f"the previous released status {RELEASED_STATUS!r} still releases after the mapping "
+        "named another — the predicate is keyed on a code literal, not on the mapping"
+    )
+
+    behind = FakeStore(ticket=resolved)
+    record(make_run(tmp_path, name="20260917T000001Z-resolved"), behind)
+    assert behind.writes() == [], "the mapping moved and the writer's release check did not"
+
+    # The store's `closed` is no longer the released state under this mapping, so the writer
+    # records on such a case — the same wiring, observed in the other direction.
+    stale = FakeStore(ticket=stock)
+    record(make_run(tmp_path, name="20260917T000002Z-stock"), stale)
+    assert [c.method for c in stale.calls] == ["GET", "POST"], (
+        "the writer kept refusing behind the retired status"
+    )
+
+
+def test_767_release_predicate_cannot_be_built_in_a_serving_state(tmp_path, monkeypatch):
+    """d_predicates_fail_closed_by_construction — SAFE BY CONSTRUCTION. The predicate is
+    unbuildable in an unsafe mapping state: the constructor RAISES rather than merely behaving
+    when configured right. It refuses a mapping missing `released.status`, carrying a
+    non-string or blank one — never coercing, because a coerced list produces a status
+    spelling no store will ever answer — and one whose `open.status` IS the released status.
+
+    The whitespace arm is the one normalisation kept, on the MAPPING's side only: a padded
+    quoted scalar configures the stripped status, and the ticket's own status is compared
+    exactly.
+
+    The consumer half is the writer's (#1221 removed the read-side screen and its degrade):
+    under every unsafe mapping the writer cannot tell whether the case is released, so it
+    appends nothing and leaves an error receipt — undecidable reads as released, the direction
+    that writes nothing."""
+    build = require(
+        case_ticket, "release_predicate",
+        "§7 R1 makes the predicate safe by construction: there is a constructor and it "
+        "refuses the unsafe state",
+    )
+    root = tmp_path / "dfn"
+    closed = ticket("SOC-CLOSED", status=RELEASED_STATUS)
+
+    use_mapping(monkeypatch, root, mapping_doc())
+    assert build(current_mapping()).is_released(closed) is True, (
+        "the control failed: a valid mapping builds"
+    )
+
+    use_mapping(monkeypatch, root, mapping_doc(released_status=f"  {RELEASED_STATUS} "))
+    assert build(current_mapping()).is_released(closed) is True, (
+        "a quoted, padded `released.status` configured a state no ticket can carry"
+    )
+    assert build(current_mapping()).is_released(
+        ticket("SOC-PADDED", status=f"  {RELEASED_STATUS} ")) is False, (
+        "the ticket's own status was trimmed — the store's vocabulary is canonical"
+    )
+
+    unsafe = {
+        "the released section is missing (FK11)": mapping_doc(with_released=False),
+        "released.status is a list (FK18)": mapping_doc(released_status=["closed"]),
+        "released.status is a number (FK18)": mapping_doc(released_status=7),
+        "released.status is blank (FK19)": mapping_doc(released_status="  "),
+        "open.status is the released status": mapping_doc(open_status=RELEASED_STATUS),
+    }
+    for n, (why, doc) in enumerate(unsafe.items()):
+        use_mapping(monkeypatch, root, doc)
+        with pytest.raises(case_ticket.CaseTicketError):
+            build(current_mapping())
+
+        run_dir = make_run(tmp_path, name=f"20260917T00010{n}Z-unsafe")
+        store = FakeStore()
+        assert record(run_dir, store) is None, f"{why}: the fault escaped into the run"
+        assert store.writes() == [], f"{why}: the writer appended without a release predicate"
+        assert receipt(run_dir)["status"] == ticket_writer.RECEIPT_ERROR, (
+            f"{why}: the refusal left no error receipt"
+        )
+
+    use_mapping(monkeypatch, root, mapping_doc(comment_body="{disposition}"))
+    assert build(current_mapping()).is_released(closed) is True, (
+        "the control failed after the loop: a valid mapping must still build"
+    )
 
 
 def test_767_no_host_payload_sets_verdict(tmp_path, monkeypatch, capsys):
@@ -475,7 +578,7 @@ def test_767_comment_payload_keys_are_author_and_body_only(tmp_path, monkeypatch
         "the writer bound the stale `close.author` instead of the top-level `comment.author` "
         "— the two sections spell the same key names (r6/FK27) and the binding must be explicit"
     )
-    assert payload["body"].startswith("benign — ")
+    assert store.comment_body().startswith("benign — ")
 
 
 # =======================================================================================
@@ -484,9 +587,10 @@ def test_767_comment_payload_keys_are_author_and_body_only(tmp_path, monkeypatch
 
 
 def test_767_comment_first_line_is_proposed_disposition(tmp_path, monkeypatch):
-    """o4_first_line_disposition — the comment's FIRST line is the host-rendered
-    `{disposition} — {cause}`, above a blank line, so a person opening the case reads the
-    proposed disposition before anything the model wrote.
+    """o4_first_line_disposition — the comment's first line below the agent tag (#1221) is the
+    host-rendered `{disposition} — {cause}`, above a blank line, so a person opening the case
+    reads which run wrote it and then the proposed disposition, before anything the model
+    wrote.
 
     O4's own failure witness is "a comment whose first line lacks the proposed disposition",
     and the structural guarantee is exactly this wide (S5/N11): the first line is host-
@@ -616,8 +720,9 @@ def test_767_narrative_is_the_fence_stripped_report_body(tmp_path, monkeypatch):
     ],
 )
 def test_767_comment_body_is_bounded_on_the_wire(tmp_path, monkeypatch, why, filler):
-    """o8_wire_bound — the rendered comment body is at most 4096 UTF-8 BYTES on the wire, the
-    cut rounds DOWN to the last whole character, and the `…` sits INSIDE the bound (§7 R2).
+    """o8_wire_bound — the comment body is at most 4096 UTF-8 BYTES on the wire, the agent tag
+    line (#1221) counted inside it, the cut rounds DOWN to the last whole character, and the
+    `…` sits INSIDE the bound (§7 R2).
 
     The multibyte members are the point: a raw 4096-BYTE slice lands inside a character, and
     a surviving 472-CHARACTER cap (r2/c10) would cut at 472 and never reach the bound at all.
@@ -630,7 +735,7 @@ def test_767_comment_body_is_bounded_on_the_wire(tmp_path, monkeypatch, why, fil
     store = FakeStore()
     record(run_dir, store)
 
-    wire = store.comment_body()
+    wire = store.wire_body()
     size = len(wire.encode("utf-8"))
     assert size <= WIRE_BOUND_BYTES, f"{size} bytes crossed, over the {WIRE_BOUND_BYTES} bound"
     assert size > WIRE_BOUND_BYTES - 8, (
@@ -658,7 +763,7 @@ def test_767_wire_bound_wins_and_the_cut_is_visible(tmp_path, monkeypatch):
     store = FakeStore()
     record(run_dir, store)
 
-    wire = store.comment_body()
+    wire = store.wire_body()
     assert wire.count(ELLIPSIS) == 1, f"{wire.count(ELLIPSIS)} ellipses, not one"
     assert wire.endswith(ELLIPSIS)
     assert len(wire.encode("utf-8")) <= WIRE_BOUND_BYTES

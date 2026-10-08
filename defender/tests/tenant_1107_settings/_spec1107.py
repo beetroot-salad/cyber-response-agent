@@ -20,8 +20,8 @@ receipt shape and the lint's `main(argv) -> int`. It does NOT name:
   * the keyword the ticket writer's two steps take the record, the defender dir and the run env
     under (`tenant=`, `defender_dir=`, `env=` here — `record_step` / `open_step`);
   * the keyword the `case_ticket` mapping consumers take the mapping under (`mapping=` here —
-    `with_mapping`), nor `release_predicate`'s (positional here — `released_status`), nor
-    `applier.unservable`'s (positional second argument, where the settings folder went);
+    `with_mapping`), nor `release_predicate`'s (positional here — `released_status`) (the
+    estate applier's `unservable`, which took it positionally too, was removed by #1221);
   * how `review.verb_context` is handed the episode tenant's record (positionally, where the
     settings folder went — `review_verb_context`);
   * the keyword a transport call names the secrets its one child needs under (`secrets=`, a tuple

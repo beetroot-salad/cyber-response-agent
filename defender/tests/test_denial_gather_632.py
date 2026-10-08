@@ -758,10 +758,8 @@ def test_a_case_or_whitespace_variant_of_a_granted_name_never_executes(
 
 
 def test_gather_is_denied_ticket_get_ticket(tmp_path: Path):
-    """Gather is denied `ticket.get-ticket`, which only the judge uses. The verb_grant
-    subsumes a hand-written rule: reducing gather to `list-tickets` makes the self-case
-    exclusion's GET branch unreachable. A class-shaped grant could not have expressed this —
-    both are reads on a system gather legitimately holds."""
+    """Gather is denied `ticket.get-ticket`, which only the judge used. A class-shaped grant
+    could not have expressed this — both are reads on a system gather legitimately holds."""
     rec = VerbRecorder()
     reg = ScopedFakeVerbs(
         recording_table(rec, {"ticket": ("list-tickets", "get-ticket")}),
@@ -781,13 +779,9 @@ def test_gather_list_tickets_still_reaches_the_store(tmp_path: Path):
     positive control for the denial above: the same system, through the same registry
     lookup, on the verb the verb_grant does name.
 
-    THE FAKE ANSWERS IN THE STORE'S REAL ENVELOPE SHAPE, and that is a correction rather than
-    a detail. The list endpoint answers `{"total", "tickets"}` and gather's ticket screen
-    enforces that shape as a contract — a bare array is filed as malformed. A fake handing
-    back a bare array while this test demanded `exit_code == 0` made the two demands
-    contradict at the edges: the only implementation satisfying both is one whose screen skips
-    non-object payloads, which is exactly the bypass that lets the self-case exclusion be
-    dodged by changing the response's shape."""
+    The fake answers in the store's real envelope shape, `{"total", "tickets"}`. Since #1221
+    no ticket screen reads that shape, and the reply is served as the store answered it
+    (`test_1221_list_tickets_serves_the_own_case_and_an_open_cases_comments`)."""
     rec = VerbRecorder()
 
     def list_tickets(ctx, **params):
@@ -805,66 +799,6 @@ def test_gather_list_tickets_still_reaches_the_store(tmp_path: Path):
     assert r.own_rows[0]["exit_code"] == 0
     assert "SOC-777" in r.gather_delta, "the granted read's own content never reached the model"
     assert r.own_denials == []
-
-
-def test_the_self_case_list_filter_still_excludes_the_current_ticket(tmp_path: Path):
-    """The list-path identity filter still EXCLUDES the current investigation's own ticket
-    from what gather sees, unchanged by the verb_grant. The guard is KEPT rather than retired
-    with its tests (§7 R17): narrowing gather to `list-tickets` makes its hand-written GET
-    branch unreachable, and one dead branch is cheap — deleting it would make any future
-    widening of the grant silently re-open the self-read.
-
-    THE SELF KEY IS THE RUN'S OWN ID, and the exclusion is asserted on the model-visible
-    result rather than on the call count. A fixture returning two tickets neither of which
-    IS the current case exercises nothing: the filter runs, removes nothing, and every
-    assertion about call counts and exit codes passes over a screen that was never asked to
-    screen. The store below returns the run's own key beside a foreign one, so the surviving
-    difference between "the screen ran" and "the screen was deleted" is visible in the text
-    the model got back.
-
-    The second drive is the shape half. A screen that only inspects an object envelope is
-    bypassed by answering with a bare array — and gather's ticket screen deliberately files
-    that shape as MALFORMED rather than passing it through, because reading a bare array as
-    the ticket list would invent a shape the store does not document, on the one path where
-    inventing one hands the model its own answer key. Withheld, not silently forwarded."""
-    run_id = "d23-self-case"
-    rec = VerbRecorder()
-
-    def list_tickets(ctx, *, status=None, label=None, q=None, require_closed=False):
-        rec.record("list-tickets", ctx, {"status": status, "label": label, "q": q})
-        return ticket_envelope(run_id, "SOC-777")
-
-    reg = ScopedFakeVerbs({"ticket": {"list-tickets": list_tickets}}, T1106.fixture_grants().gather)
-    r = run_gather(tmp_path / "envelope", verbs=reg, system="ticket",
-                   turns=[q("ticket", "list-tickets", {}), DONE], run_id=run_id)
-
-    assert len(rec.calls) == 1, "the filter was applied by refusing the call instead of filtering it"
-    assert len(r.own_rows) == 1
-    assert r.own_rows[0]["exit_code"] == 0
-    assert "SOC-777" in r.gather_delta, \
-        "the screen dropped the whole listing — the exclusion below would hold vacuously"
-    assert run_id not in r.gather_delta, \
-        "the current investigation's own ticket survived gather's self-case exclusion"
-    payload = (r.run_dir / "gather_raw" / LEAD / "0.json").read_text(encoding="utf-8")
-    assert run_id not in payload, \
-        "the unscreened listing was captured to the payload tree, where the loop rereads it"
-
-    shaped = VerbRecorder()
-
-    def bare_list(ctx, **params):
-        shaped.record("list-tickets", ctx, params)
-        return [{"key": run_id, "status": "open"}, {"key": "SOC-777", "status": "closed"}]
-
-    bare = ScopedFakeVerbs({"ticket": {"list-tickets": bare_list}}, T1106.fixture_grants().gather)
-    b = run_gather(tmp_path / "bare", verbs=bare, system="ticket",
-                   turns=[q("ticket", "list-tickets", {}), DONE], run_id="d23b")
-
-    assert len(shaped.calls) == 1
-    assert len(b.own_rows) == 1
-    assert b.own_rows[0]["exit_code"] != 0, \
-        "a non-object listing bypassed the screen instead of being filed as malformed"
-    assert "d23b" not in b.gather_delta, \
-        "a bare array bypassed the self-case exclusion — the screen keys on the payload's shape"
 
 
 def test_an_impersonated_query_id_does_not_change_the_grant_decision(tmp_path: Path):

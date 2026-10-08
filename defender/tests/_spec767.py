@@ -22,7 +22,7 @@ THE SEAMS THESE FAKES ENTER THROUGH ARE PRODUCTION'S OWN (the project profile fo
     `ticket_mapping`). `use_mapping` plants a complete tenant whose mapping is the test's and
     returns its settings folder; the helpers below resolve the record of the tenant the test
     planted (or, with none planted, the committed fixture tenant's) and hand it to the real
-    writer and screen, so a hostile-mapping control still needs no new seam;
+    writer, so a hostile-mapping control still needs no new seam;
   * the entrypoint's tail — `run.py main(..., ticket_writer=)`, the duck-typed seam
     `tests/_spec791.py` already implements (g10).
 
@@ -46,7 +46,7 @@ from defender.tests.tenant_1107_settings import _spec1107 as S1107
 # --------------------------------------------------------------------------------------
 # The vendor spellings this lane introduces. Every one of them lives in the MAPPING (O5) —
 # these constants are the TEST's copy, used to build a mapping and to read the wire back,
-# never a claim about what the writer or the screen may hardcode (that is
+# never a claim about what the writer may hardcode (that is
 # o5_no_vendor_literals_in_code's own demand).
 # --------------------------------------------------------------------------------------
 
@@ -189,15 +189,15 @@ def write_mapping(root: Path, doc: dict[str, Any] | str) -> Path:
 
 
 #: The settings folder THIS test planted its mapping into, recorded through `monkeypatch`
-#: (`setitem`, undone after every test) so the helpers below hand the same tenant to the writer
-#: and the screen. The test's own bookkeeping — nothing in production reads this dict.
+#: (`setitem`, undone after every test) so the helpers below hand the same tenant to every
+#: call. The test's own bookkeeping — nothing in production reads this dict.
 _PLANTED: dict[str, Path] = {}
 
 
 def use_mapping(monkeypatch, root: Path, doc: dict[str, Any] | str | None = None) -> Path:
     """Plant a mapping of this test's choosing and return its SETTINGS FOLDER.
 
-    #1107: the record the writer and the screen are handed is resolved from this folder at the
+    #1107: the record the writer is handed is resolved from this folder at the
     moment of the call (`current_record`), so a test that plants a second mapping is handing the
     next call a record built from it — and a record taken before keeps the first."""
     write_mapping(root, mapping_doc() if doc is None else doc)
@@ -439,10 +439,37 @@ class FakeStore:
         assert isinstance(payloads[0], dict), "the comment payload is not a JSON object"
         return payloads[0]
 
-    def comment_body(self) -> str:
+    def wire_body(self) -> str:
+        """The comment body exactly as it crossed the wire, the agent tag line included (#1221).
+        What a byte bound on the WHOLE body is asserted against."""
         body = self.only_comment().get("body")
         assert isinstance(body, str), "the comment payload carries no string `body`"
         return body
+
+    def comment_body(self) -> str:
+        """The rendered comment BELOW the agent tag line — what every pre-#1221 assertion about
+        the body's shape is about.
+
+        #1221 M1: every comment the host posts opens with one plain-text line naming the
+        authoring run, added at the single POST and never through the mapping's template. So
+        this reads the posted body, requires that its first line is a tag (the exact line, and
+        which run it names, are `test_1221_agent_tag.py`'s), and hands back the rest: the
+        mapping's own rendering, unchanged. A body that does not open with the tag is a failure
+        here, on every writer scenario, not only in the tag's own suite."""
+        from defender.runtime import case_ticket
+
+        prefix = require(
+            case_ticket, "AGENT_TAG_PREFIX",
+            "#1221 M1: every comment the host posts opens with the agent tag line",
+        )
+        wire = self.wire_body()
+        tag_line, newline, rest = wire.partition("\n")
+        assert newline, f"the posted comment is one line, with no comment below a tag: {wire!r}"
+        assert tag_line.startswith(prefix), (
+            f"the posted comment does not open with the agent tag line ({prefix!r}): "
+            f"{wire[:160]!r}"
+        )
+        return rest
 
 
 
@@ -496,7 +523,7 @@ def receipt(run_dir: Path) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------------------
-# The store's own records, and the screen the query tool applies to them
+# The store's own records — what a ticket verb answers gather with
 # --------------------------------------------------------------------------------------
 
 
@@ -538,29 +565,12 @@ SELF_KEY = "20260917T000000Z-the-current-case"
 OTHER_KEY = "20260101T000000Z-a-prior-case"
 
 
-def screen(payload: Any, *, verb: str, self_key: str = SELF_KEY) -> tuple[Any, int, str]:
-    """Drive the REAL screen the way `QueryCapture._execute` drives it (r5/c6: the single
-    insertion point, called after `handler(args)` and before `_record`/`_model_view`)."""
-    from defender.runtime import query_tool
-
-    return query_tool._screen_ticket_payload(
-        self_key, "ticket", verb, payload, tenant=current_record())
-
-
-def screen_list(payload: Any, *, self_key: str = SELF_KEY) -> tuple[Any, int, str]:
-    return screen(payload, verb="list-tickets", self_key=self_key)
-
-
-def screen_get(payload: Any, *, self_key: str = SELF_KEY) -> tuple[Any, int, str]:
-    return screen(payload, verb="get-ticket", self_key=self_key)
-
-
 def served_tickets(payload: Any) -> list[dict[str, Any]]:
     assert isinstance(payload, dict), (
-        f"the screen did not answer a ticket listing envelope: {payload!r}"
+        f"the reply is not a ticket listing envelope: {payload!r}"
     )
     assert isinstance(payload.get("tickets"), list), (
-        f"the screen's envelope carries no ticket list: {payload!r}"
+        f"the listing envelope carries no ticket list: {payload!r}"
     )
     return payload["tickets"]
 

@@ -1,10 +1,11 @@
-"""#767 — what a gather lead's CAPTURE holds after D4's screen has run.
+"""#767 — what a gather lead's CAPTURE holds of a ticket reply (since #1221: the store's answer).
 
 Three demands of `spec-flow/specs/spec_graph_767-ticket-store-approval.yaml`, named by their
-`discharged_by`. These are the ones that genuinely need the whole pipe: the screen runs
-strictly between `handler(args)` and `_record` (F8/r5), so what the capture persists is a
-statement about the ORDER of two production frames, and nothing short of driving the real
-query tool can observe it.
+`discharged_by`. They need the whole pipe: what the capture persists is a statement about
+everything between `handler(args)` and `_record`, and nothing short of driving the real query
+tool can observe it. #1221 removed D4's release screen from that span, so the capture, the
+archive surface and the model's turn now all hold the reply as the store answered it — an open
+case's comments included — and a case re-opened between two reads changes neither read.
 
 Sited in `tests/` rather than in `tests/e2e/` and carrying `pytestmark = pytest.mark.e2e`, the
 way `tests/test_denial_gather_632.py` already does: the marker is what CI selects on, and the
@@ -61,8 +62,8 @@ def _comment(author: str, body: str) -> dict[str, Any]:
 def _seed(released: str, author: str, *, closed: bool = True) -> dict[str, Any]:
     """The e2e seed (the `d6_e2e_seed` clause): one closed case carrying two agent comments
     and an analyst's, one open case carrying an agent's and an analyst's. `closed=False`
-    re-opens the first case, which is what the retroactive-scrub demand drives across two
-    calls in one run."""
+    re-opens the first case, which the no-retroactive-scrub demand drives across two calls in
+    one run."""
     closed_ticket = {
         "key": CLOSED_KEY,
         "summary": CORRELATION_SUMMARY,
@@ -87,7 +88,7 @@ def _seed(released: str, author: str, *, closed: bool = True) -> dict[str, Any]:
 def _registry(payloads: list[dict[str, Any]]) -> ScopedFakeVerbs:
     """A ticket system whose `list-tickets` answers the next seeded store state per call.
 
-    A fake of the STORE, not of the screen: it hands back an envelope and classifies nothing.
+    A fake of the STORE: it hands back an envelope and classifies nothing.
     The grant is gather's real one for this pair (`ticket.list-tickets`, c2)."""
     served: list[dict[str, Any]] = []
 
@@ -115,59 +116,39 @@ def _rows_with_payloads(run) -> list[tuple[dict, Any]]:
     return out
 
 
-def test_767_the_capture_carries_the_screened_payload(tmp_path: Path):
-    """d_capture_carries_the_screened_payload — COHERENCE, settled premise 49, bound at the
-    UNMOVED reader's own edge. The offline collectors join on `executed_queries.jsonl` and
-    `gather_raw/`, and they inherit EXACTLY the screened payload: a comment D4 dropped is as
-    absent from the capture as it is from the model's turn.
-
-    The screen runs strictly after `handler(args)` and strictly before `_record` (F8/r5), so
-    the capture persists the screened payload BY CONSTRUCTION — and that is precisely why it
-    has to be observed rather than reasoned about: the whole property is the order of two
-    production frames, and a screen moved one line later leaves the capture holding the
-    unscreened record while every unit-level assertion about the screen stays green.
-
-    Bound at this reader's own edge rather than at the boundary's altitude, per R7: a demand
-    on `case_history_store` would read green with only the model's turn observed."""
+def test_767_the_capture_carries_the_store_payload(tmp_path: Path):
+    """d_capture_carries_the_screened_payload, after #1221 — COHERENCE, bound at the UNMOVED
+    reader's own edge. The offline collectors join on `executed_queries.jsonl` and
+    `gather_raw/`, and they inherit EXACTLY the reply the store gave: the capture equals the
+    store's answer, so an open case's comments — an agent's and an analyst's — are as present
+    in the capture as in the model's turn. (#1221 removed the release screen that ran between
+    the handler and `_record` and once dropped them.)"""
     released, author = shipped_released_status_and_author()
+    seed = _seed(released, author)
     run = run_gather(
-        tmp_path, verbs=_registry([_seed(released, author)]),
+        tmp_path, verbs=_registry([seed]),
         system="ticket", turns=[q("ticket", "list-tickets"), DONE], run_id="s767-capture",
     )
 
     captured = _rows_with_payloads(run)
-    assert captured, "the lead's ticket read left no evidence row at all"
-    blob = json.dumps([payload for _, payload in captured])
-
-    for text in (SERVED_TEXT, EARLIER_TEXT, ANALYST_TEXT):
-        assert text in blob, (
-            f"{text} is absent from the capture — a closed case is served WHOLE, and every "
-            "absence asserted below could otherwise be green for any reason at all"
-        )
-    for text in (WITHHELD_TEXT, OPEN_ANALYST_TEXT):
-        assert text not in blob, (
-            f"the capture persisted {text} from an OPEN case — the screen runs after the "
-            "handler and before `_record`, and this is what that ordering is FOR"
-        )
-    assert "a second case on the same host" in blob, (
-        "the open case's non-comment fields were dropped from the capture (N5)"
+    assert [payload for _, payload in captured] == [seed], (
+        "the capture is not the store's answer — something between the handler and `_record` "
+        "transformed the ticket reply"
     )
-
     turn = "\n".join(run.gather.seen)
-    assert SERVED_TEXT in turn, "the model never saw the closed case's comment"
-    assert WITHHELD_TEXT not in turn, "the model's turn carries the withheld comment"
+    for text in (SERVED_TEXT, EARLIER_TEXT, ANALYST_TEXT, WITHHELD_TEXT, OPEN_ANALYST_TEXT):
+        assert text in turn, f"the model never saw {text}"
 
 
-def test_767_an_archived_world_carries_only_the_screened_capture(tmp_path: Path):
-    """d_archived_world_carries_only_screened_capture — settled premise 44. A branched
-    world's staged tree carries only what the ORDINARY capture already wrote, and that was
-    written after the screen (F8/F9). There is no ticket-specific staging mechanism at all
-    (g12: the branch estate's stagers cover elastic and nothing else), so "what a world
-    carries" is exactly "what is on the run dir's evidence surface".
+def test_767_an_archived_world_carries_the_capture_whole(tmp_path: Path):
+    """d_archived_world_carries_only_screened_capture, after #1221. A branched world's staged
+    tree carries only what the ORDINARY capture already wrote (F8/F9; the branch estate's
+    stagers cover elastic and nothing else), and since #1221 that capture is the store's whole
+    answer — so the surface a world archives holds every comment the store served, an open
+    case's included, and nothing the capture did not write.
 
     Asserted over the whole surface a world archives — `executed_queries.jsonl` and every file
-    under `gather_raw/` — rather than over the one payload the previous demand reads, because
-    the archive copies the tree and not a row."""
+    under `gather_raw/` — because the archive copies the tree and not a row."""
     released, author = shipped_released_status_and_author()
     run = run_gather(
         tmp_path, verbs=_registry([_seed(released, author)]),
@@ -184,40 +165,32 @@ def test_767_an_archived_world_carries_only_the_screened_capture(tmp_path: Path)
 
     assert surface, "the run left no evidence surface for a world to archive"
     joined = "\n".join(surface.values())
-    assert SERVED_TEXT in joined, "nothing screened reached the surface — the assertion is vacuous"
-    for withheld, why in (
-        (WITHHELD_TEXT, "an open case's agent comment"),
-        (OPEN_ANALYST_TEXT, "an open case's analyst comment"),
-    ):
-        offenders = sorted(k for k, v in surface.items() if withheld in v)
-        assert not offenders, (
-            f"{why} is on the tree a branched world archives, in {offenders} — a world's "
-            "staged tree carries only what the capture wrote, so anything here reaches a "
-            "later model with no screen between"
-        )
+    for text in (SERVED_TEXT, WITHHELD_TEXT, OPEN_ANALYST_TEXT):
+        assert text in joined, f"{text} is missing from the surface a branched world archives"
 
 
 def test_767_a_later_revocation_does_not_touch_an_existing_capture(tmp_path: Path):
-    """d_capture_not_retroactively_scrubbed — NEGATIVE, settled premise 41. A revocation after
-    the fact does not touch an already-persisted capture: O2 binds each read AT READ TIME, and
-    nothing in D1-D8 is a retroactive scrub. Future reads correctly stop serving.
+    """d_capture_not_retroactively_scrubbed — NEGATIVE, settled premise 41. A re-open after
+    the fact does not touch an already-persisted capture: nothing is a retroactive scrub.
 
     Driven as the pair the premise describes, inside ONE run: the same store is read twice,
     with the case RE-OPENED between the calls, so the first capture and the second are both
-    on disk and can be compared. The first must still hold what it lawfully held; the second
-    must hold nothing.
+    on disk and can be compared. The first must still hold what it held. Since #1221 a ticket's
+    lifecycle state decides nothing about what is served, so the second holds the re-opened
+    case's comments too — each capture is exactly the store's answer at its call.
 
     Its positive control is `d_capture_carries_the_screened_payload` — a capture that DOES
-    carry screened agent text — so "the earlier capture is untouched" is not "no capture was
-    ever written".
+    carry the agent text — so "the earlier capture is untouched" is not "no capture was ever
+    written".
 
     KNOWN LIMIT, stated rather than implied: this demand is about the absence of a scrub, and
     no mechanism in this design could produce one. It is written to fail if a future retention
     or revocation feature reaches back into a written run dir."""
     released, author = shipped_released_status_and_author()
+    before, reopened = _seed(released, author), _seed(released, author, closed=False)
     run = run_gather(
         tmp_path,
-        verbs=_registry([_seed(released, author), _seed(released, author, closed=False)]),
+        verbs=_registry([before, reopened]),
         system="ticket",
         turns=[
             q("ticket", "list-tickets", {"label": "first"}),
@@ -234,11 +207,8 @@ def test_767_a_later_revocation_does_not_touch_an_existing_capture(tmp_path: Pat
     )
     first, second = (payload for _, payload in captured)
 
-    assert SERVED_TEXT in json.dumps(first), (
-        "the first read captured nothing the revocation could have removed"
+    assert first == before, "the first capture was altered after the case was re-opened"
+    assert second == reopened, (
+        "the second read is not the store's answer — the re-opened case's lifecycle state "
+        "changed what was served"
     )
-    assert SERVED_TEXT not in json.dumps(second), (
-        "the second read served the comment after the case was re-opened — O2 binds each "
-        "read at read time"
-    )
-    assert WITHHELD_TEXT not in json.dumps([first, second])

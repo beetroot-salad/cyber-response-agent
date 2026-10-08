@@ -334,7 +334,7 @@ def world_registry(
     """A `WorldRegistry` built through its own constructor, over a fresh ledger at `path`."""
     return WorldRegistry(
         read_roster(adapters), grant, world=world, ledger=fresh_ledger(ledger_path), applier=applier,
-        as_of=AS_OF, tenant=T1106.fixture_run_tenant(),
+        as_of=AS_OF,
     )
 
 
@@ -870,37 +870,30 @@ def test_a_patch_for_a_staged_system_is_refused_too(tmp_path):
             applier=WorldApplier(patches={"elastic": {"canary-1": {"owner": "worldA"}}}))
 
 
-def test_a_ticket_patch_writing_comments_on_an_unreleased_case_is_refused(tmp_path):
-    """    A `ticket` patch that writes `comments` without moving the case to the released status
-    is refused at construction — the third silent drop, one door further down.
+def test_a_ticket_patch_writing_comments_on_an_unreleased_case_is_accepted(tmp_path):
+    """    A `ticket` patch that writes `comments` WITHOUT moving the case to the released status
+    builds: #1221 removed the read screen that emptied an unreleased case's comments, so such a
+    difference now reaches the sibling and there is nothing to refuse (the applier's
+    `unservable` gate went with the screen, and the registry takes no tenant record for it).
 
-    #767's read screen empties an unreleased case's comments on every ticket response, and it
-    runs AFTER the estate's patch, so such a world's difference is authored, applied (the row
-    reads `patched`, truthfully) and then never served: the family ends as "a declared
-    difference no query could reach" with nothing naming the gate. Positive control: the same
-    patch carrying `status: <released>` builds, because a released case IS served whole."""
-    from defender.runtime import case_ticket
-
-    released = case_ticket.release_predicate(T1106.fixture_run_tenant().ticket_mapping).released_status
-    # The recording adapter body declared under the ticket system's name, so the grant can
-    # name it: which verbs it carries is beside the point here — the refusal is about the
-    # PATCH TABLE, decided before any call is served.
+    The complementary control: the construction-time gates that remain still refuse — the same
+    patch on a world that does not declare `ticket` is one its applier could never apply."""
     adapters = fake_estate(tmp_path)
     (adapters / "ticket_adapter.py").write_text(_RECORDING_ADAPTER, encoding="utf-8")
     grant = VerbGrant(role="gather", entries=(*FAKE_GRANT.entries, ("ticket", "health-check", "r")))
     note = [{"author": "analyst", "body": "the same binary was benign last quarter"}]
-    with pytest.raises(EstateError, match="comments"):
-        world_registry(
-            adapters, grant, tmp_path / SERVED_FILE,
-            world=World("w1", touches=("ticket",)),
-            applier=WorldApplier(patches={"ticket": {"SOC-9": {"comments": note}}}))
-    assert not (tmp_path / SERVED_FILE).exists(), "a refused world must not have written a row"
+    patches = {"ticket": {"SOC-9": {"comments": note, "status": "open"}}}
 
-    world_registry(
+    registry = world_registry(
         adapters, grant, tmp_path / SERVED_FILE,
-        world=World("w1", touches=("ticket",)),
-        applier=WorldApplier(
-            patches={"ticket": {"SOC-9": {"comments": note, "status": released}}}))
+        world=World("w1", touches=("ticket",)), applier=WorldApplier(patches=patches))
+    assert registry.world.touches == ("ticket",)
+    assert not (tmp_path / SERVED_FILE).exists(), "building a world served a row"
+
+    with pytest.raises(EstateError, match="ticket"):
+        world_registry(
+            adapters, grant, tmp_path / "ep2" / "served" / "w.jsonl",
+            world=World("w1", touches=("cmdb",)), applier=WorldApplier(patches=patches))
 
 
 @pytest.mark.parametrize("world_id", ["world A", "W1", "w*1"])

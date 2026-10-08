@@ -137,12 +137,6 @@ MAPPING = textwrap.dedent("""\
 #: A mapping the loader refuses for its own lifecycle rule (open.status == released.status).
 MAPPING_COLLIDING = MAPPING.replace("  status: closed\n", "  status: open\n")
 
-#: A ticket patch that writes comments without releasing the case — what `applier.unservable`
-#: judges with the mapping's released status.
-TICKET_PATCH: dict[str, Any] = {"ticket": {"C-1": {"comments": [{"body": "x"}],
-                                                   "status": "open"}}}
-
-
 def report_text(disposition: str = "benign",
                 cause: str = "the disposition was recorded without a challenge review",
                 body: str = "Disposition recorded by the close gate. outcome=stands.") -> str:
@@ -197,9 +191,40 @@ def _store_ok(key: str) -> list[dict[str, Any]]:
             T7.answer(json.dumps({"id": 1}), "201")]
 
 
-def _calls(shim: Any) -> list[list[str]]:
-    """Every docker argv the store saw, in order."""
-    return [c["argv"] for c in shim.calls()]
+def _calls(shim: Any, run_id: str) -> list[list[str]]:
+    """Every docker argv the store saw, in order, each comment POST's body read below its agent
+    tag line (`_untagged`)."""
+    return [_untagged(c["argv"], run_id) for c in shim.calls()]
+
+
+def _untagged(argv: list[str], run_id: str) -> list[str]:
+    """`argv` with a comment POST's agent tag line (#1221) CHECKED and then removed from the
+    body it sends, so the base golden — captured before every posted comment opened with the
+    tag — still states the rest of the call byte for byte.
+
+    #1221 M1 puts one line naming the authoring run at the start of every comment the host
+    posts (`test_1221_agent_tag.py` owns the line itself); this observer requires that line to
+    be the tag for `run_id` before it drops it, so an untagged post fails here rather than
+    matching the golden. Every other call is returned as it was."""
+    if "POST" not in argv or not any(a.endswith("/comments") for a in argv):
+        return argv
+    from defender.runtime import case_ticket
+
+    agent_comment_tag = getattr(case_ticket, "agent_comment_tag", None)
+    assert agent_comment_tag is not None, (
+        "case_ticket.agent_comment_tag does not exist — #1221 M1: every comment the host posts "
+        "opens with the agent tag line"
+    )
+    at = argv.index("-d") + 1
+    payload = json.loads(argv[at])
+    tag_line, newline, rest = payload["body"].partition("\n")
+    assert newline, f"the posted comment is one line: {payload['body'][:160]!r}"
+    assert tag_line == agent_comment_tag(run_id), (
+        f"the posted comment does not open with the agent tag for {run_id}: {tag_line!r}"
+    )
+    out = list(argv)
+    out[at] = json.dumps({**payload, "body": rest}, sort_keys=True)
+    return out
 
 
 def _posts(calls: list[list[str]]) -> int:
@@ -249,7 +274,7 @@ def _drive_run(tmp: Path, mp: Any, *, answers: list[dict[str, Any]],
                          before_lifecycle=lifecycle_tail)
     rc, refused = T7.drive_run(T7.run_argv(alert, root, update_ticket=True), rec,
                                visualize=rec.visualize)
-    calls = _calls(shim)
+    calls = _calls(shim, run_id="r1080")
     return {"rc": rc, "refused": None if refused is None else str(refused.code),
             "order": rec.order, "calls": calls, "posts": _posts(calls),
             "receipts": _receipts(tmp / "runs")}
@@ -270,20 +295,19 @@ def _records_at_run_start() -> tuple[Any, Any]:
 
 
 def _view_at_run_start(good: Any, bad: Any, tmp: Path) -> dict[str, Any]:
-    from defender.learning.branch.estate import applier
-    from defender.runtime import query_tool
-
+    """The record's mapping, and the release predicate the ticket writer builds from it (#1221
+    removed the query tool's and the estate applier's readings of it; the writer's courtesy
+    check is the one consumer left)."""
+    predicate = _moved("release_predicate")
     released = {"status": "closed"}
     unreleased = {"status": "open"}
-    pred_good = query_tool._release_predicate(good)
-    pred_bad = query_tool._release_predicate(bad)
+    pred_good = predicate(good.ticket_mapping).is_released
     return _norm({
         "record_good": _held(good.ticket_mapping),
         "record_bad": _held(bad.ticket_mapping),
-        "query_tool_good": [pred_good(released), pred_good(unreleased)],
-        "query_tool_bad": [pred_bad(released), pred_bad(unreleased)],
-        "applier_good": _outcome_of(applier.unservable, TICKET_PATCH, good.ticket_mapping),
-        "applier_bad": _outcome_of(applier.unservable, TICKET_PATCH, bad.ticket_mapping),
+        "release_predicate_good": [pred_good(released), pred_good(unreleased)],
+        "release_predicate_bad": _outcome_of(predicate, bad.ticket_mapping,
+                                             view=lambda built: built.released_status),
     }, tmp)
 
 
@@ -294,30 +318,26 @@ def _observe_mapping_at_run_start(tmp: Path, mp: Any) -> dict[str, Any]:
 def test_1080_the_case_mapping_is_read_at_run_start_from_the_tenants_home(tmp_path):
     """The run-start record build (`run_tenant`) loads `CaseMapping` through `load_case_mapping`
     in its new home under `defender/runtime/`. A fixture tenant's mapping reads as at the base,
-    and a bad mapping surfaces the moved `CaseTicketError`. `query_tool` and `estate/applier`
-    reach the same module.
+    and a bad mapping surfaces the moved `CaseTicketError`.
 
     Observed through the unmoved readers: `run_tenant.resolve_tenant` over a planted tenant holds
     an instance of the moved `CaseMapping` (content as at the base), and over a mapping the
     loader refuses (open and released status equal) an instance of the moved `CaseTicketError`
-    (text as at the base). `query_tool._release_predicate` answers through the moved
-    `ReleasePredicate`, and `applier.unservable` handed the record's kept error lists the
-    refusal rather than letting it escape — which it would if the applier caught another copy of
-    the error class. Every moved name is found under `defender/runtime/`, so a home anywhere
-    else fails here."""
+    (text as at the base). The release predicate the ticket writer builds from the record is
+    the moved `ReleasePredicate`, and built from the kept error it raises that error's text.
+    (#1221 removed the query tool's and the estate applier's readings of the predicate.) Every
+    moved name is found under `defender/runtime/`, so a home anywhere else fails here."""
     home = _case_module()
     case_mapping, case_error = _moved("CaseMapping"), _moved("CaseTicketError")
     predicate_cls = _moved("ReleasePredicate")
     assert {case_mapping.__module__, case_error.__module__, predicate_cls.__module__} == {
         home.__name__}, "the case-mapping types are not all defined in the tenants home"
 
-    from defender.runtime import query_tool
-
     good, bad = _records_at_run_start()
     assert isinstance(good.ticket_mapping, case_mapping), (
         f"the record holds {type(good.ticket_mapping)!r}, not the tenants home's CaseMapping")
-    assert type(query_tool._release_predicate(good).__self__) is predicate_cls, (
-        "query_tool's release predicate is not the tenants home's ReleasePredicate")
+    assert type(_moved("release_predicate")(good.ticket_mapping)) is predicate_cls, (
+        "the release predicate built from the record is not the tenants home's ReleasePredicate")
     assert isinstance(bad.ticket_mapping, case_error), (
         f"a refused mapping is held as {type(bad.ticket_mapping)!r}, not the moved "
         "CaseTicketError")
@@ -337,10 +357,12 @@ importlib.import_module(first)
 print(json.dumps(sorted(m for m in watch if m in sys.modules)))
 """
 
-#: The three modules that import the case-mapping module and that #1190 is about: the run-start
-#: record build, the query door and the estate applier.
-_NAMED_IMPORTERS = ("defender.runtime.run_tenant", "defender.runtime.query_tool",
-                    "defender.learning.branch.estate.applier")
+#: The modules that import the case-mapping module and that #1190 is about: the run-start record
+#: build, and the ticket writer (wherever it lives). The query door and the estate applier were
+#: importers too until #1221 removed their readings of the release predicate.
+def _named_importers() -> tuple[str, ...]:
+    return ("defender.runtime.run_tenant", S.dotted(_writer_home()))
+
 _SETTINGS = "defender.runtime.tenant_settings"
 
 
@@ -360,20 +382,22 @@ def _module_level_importers(module: str) -> set[str]:
 
 
 def test_case_mapping_module_is_imported_by_the_run_tenant_record_and_itself_imports_the_settings_module():  # noqa: E501
-    """No import cycle among the case-mapping module, tenant settings, the run-tenant record, the
-    query tool and the applier, so every first-import order of them works.
+    """No import cycle among the case-mapping module, tenant settings, the run-tenant record and
+    the ticket writer, so every first-import order of them works.
 
-    Shown without enumerating orders. For each of the five modules, a fresh interpreter imports
+    Shown without enumerating orders. For each of the four modules, a fresh interpreter imports
     it ALONE and has then loaded none of its module-level importers (read off the tree, not
     listed by hand). A cycle through a module means loading it reaches something that imports
-    it back at load time, so this covers every cycle that touches any of the five, whether or not
+    it back at load time, so this covers every cycle that touches any of the four, whether or not
     it runs through the case-mapping module. Positive controls: the case-mapping module's import
-    loads `runtime/tenant_settings`, and each of the three named importers, imported first,
-    loads the case-mapping module."""
+    loads `runtime/tenant_settings`, and each of the two named importers, imported first, loads
+    the case-mapping module. (The query tool and the estate applier were named here until #1221
+    removed their readings of the release predicate, and with them their imports.)"""
     case_mod = S.dotted(S.home_of("load_case_mapping", home=S.RUNTIME))
-    modules = (case_mod, _SETTINGS, *_NAMED_IMPORTERS)
+    named = _named_importers()
+    modules = (case_mod, _SETTINGS, *named)
     importers = {m: _module_level_importers(m) for m in modules}
-    assert set(_NAMED_IMPORTERS) <= importers[case_mod], (
+    assert set(named) <= importers[case_mod], (
         f"the census of {case_mod}'s importers misses named ones: {sorted(importers[case_mod])}")
 
     watch = json.dumps(sorted({case_mod, *modules, *(i for s in importers.values() for i in s)}))
@@ -385,7 +409,7 @@ def test_case_mapping_module_is_imported_by_the_run_tenant_record_and_itself_imp
     cycles = {m: sorted(loaded[m] & importers[m]) for m in modules if loaded[m] & importers[m]}
     assert not cycles, f"importing a module alone loads its own importers (a cycle): {cycles}"
     assert _SETTINGS in loaded[case_mod], f"{case_mod} did not load {_SETTINGS}"
-    for first in _NAMED_IMPORTERS:
+    for first in named:
         assert case_mod in loaded[first], f"{first} did not load {case_mod}"
 
 
