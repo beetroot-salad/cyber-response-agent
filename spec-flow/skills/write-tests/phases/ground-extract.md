@@ -24,7 +24,7 @@ Digest: claim, flagged-fact, and shared-root counts, and every refutation. Red-f
 
 You need only the design doc and the inherited `claims:` block; you return the demand list, the raised claims, and the background classification. Read **references/schema.md** for address forms before starting.
 
-Read the doc's principles first — a demand that contradicts them (recovery code where the posture is fail loud) is a red flag, not a demand. Read every issue or PR the doc cites or defers to that its `claims:` block does not already cover, and red-flag any whose design conflicts with this one: a cited neighbor nobody read once cost a run five hours of phases built on the design it superseded.
+Read the doc's principles first — a demand that contradicts them is a red flag, not a demand. Read every issue or PR the doc cites or defers to that its `claims:` block does not already cover, and red-flag any whose design conflicts with this one: a cited neighbor nobody read once cost a run five hours of phases built on the design it superseded.
 
 Read the doc. Every sentence sorts three ways: a normative sentence becomes a demand, a sentence asserting a fact about existing reality becomes a ledger claim, and the rest is explicitly classified background; a sentence may not fall outside the sort. A demand is `form: test` unless deliberately deferred to prose (`form: clause`) — a clause does not discharge a gate obligation (rules.md), so the downgrade is a recorded choice, never a default.
 

@@ -174,14 +174,14 @@ gate:
                         # resolved_to: present when the resolution spawned a demand
   pre_discharged: [{rule: R4, element: <address>, by: <demand id>, edge: <interacts/drives address>, cites: [<claim id>]}]
 handoff:
-  principles: "<the threat model and failure posture the forks were judged against — profile + doc + §0>"
+  principles: "<where the principles the forks were judged against came from — the project document, the doc's delta, a §0 answer>"
   tensions:   ["<root cause — the dissolving call proposed — the human's ruling — clusters it dissolved>", ...]
   forks:      ["<the fork, how it was resolved, and `resolved_by: human | auto`>", ...]
                      # auto = §7 judged it non-material and took the recommendation; the entry
                      # is what lets the merge-gate human see the choice and disagree with it
   refuted:    ["<a design claim the ledger refuted, and the correction>", ...]
   deferred:   ["<a claim only the implementation can settle — write-code-from-spec's probe>", ...]
-  drops:      ["<premise name — why no demand was minted>", ...]   # a fork dropped as outside the threat model names the principle   # every answered premise not in the suite/forks lands here (phase-F count)
+  drops:      ["<premise name — why no demand was minted>", ...]   # a fork dropped as outside the principles names the principle   # every answered premise not in the suite/forks lands here (phase-F count)
   nullstub_passes: ["<test name — structure | reuse | parity>", ...]  # each recorded legitimate null-stub pass
   deviations: ["<what this run could not do, and what it costs the suite>", ...]
                      # READ BY the implementer (before writing code) and the adversarial
