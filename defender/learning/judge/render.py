@@ -633,12 +633,12 @@ def _lesson_paths_for(lesson_name: Any) -> list[str]:
     The inverse of `hooks.record_lesson_load.lesson_name` (which records the stem of
     `defender/<corpus>/<stem>.md`) over `RUNTIME_LESSON_CORPORA`. Empty for a name that is not
     a single path segment, which would build a path outside the corpus."""
-    from defender.hooks.record_lesson_load import RUNTIME_LESSON_CORPORA
+    from defender._knowledge import RUNTIME_LESSON_CORPORA, checkout_rel
 
     if (not isinstance(lesson_name, str) or not lesson_name
             or lesson_name != Path(lesson_name).name or lesson_name in (".", "..")):
         return []
-    return [f"defender/{corpus}/{lesson_name}.md"
+    return [f"{checkout_rel(corpus)}{lesson_name}.md"
             for corpus in sorted(RUNTIME_LESSON_CORPORA)]
 
 

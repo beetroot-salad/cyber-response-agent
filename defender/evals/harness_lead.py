@@ -15,6 +15,7 @@ from pathlib import Path
 from _harness_util import find_venv_py, init_git, run as _run
 
 from defender import _git
+from defender._knowledge import KnowledgePaths
 from defender._io import read_text_utf8
 
 _logger = logging.getLogger(__name__)
@@ -45,13 +46,13 @@ def materialize(scenario: Path, tmp: Path) -> Path:
     shutil.copy(REAL_DEFENDER / "_untrusted.py", tmp / "defender" / "_untrusted.py")
 
     shutil.copytree(
-        REAL_DEFENDER / "skills" / "gather" / "queries",
-        tmp / "defender" / "skills" / "gather" / "queries",
+        KnowledgePaths.of_defender_dir(REAL_DEFENDER).catalog_dir,
+        KnowledgePaths.of_defender_dir(tmp / "defender").catalog_dir,
     )
     adapters_dst = tmp / "defender" / "scripts" / "adapters"
     adapters_dst.mkdir(parents=True)
-    for skill in sorted((REAL_DEFENDER / "skills").glob("*/SKILL.md")):
-        dst = tmp / "defender" / "skills" / skill.parent.name / "SKILL.md"
+    for skill in sorted(KnowledgePaths.of_defender_dir(REAL_DEFENDER).skills_dir.glob("*/SKILL.md")):
+        dst = KnowledgePaths.of_defender_dir(tmp / "defender").system_skill_dir(skill.parent.name) / "SKILL.md"
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(skill, dst)
         # The materialized tree has no adapters dir, so the declared-systems resolver would
@@ -63,7 +64,7 @@ def materialize(scenario: Path, tmp: Path) -> Path:
     overlay = scenario / "catalog_overlay"
     if overlay.is_dir():
         shutil.copytree(
-            overlay, tmp / "defender" / "skills" / "gather" / "queries",
+            overlay, KnowledgePaths.of_defender_dir(tmp / "defender").catalog_dir,
             dirs_exist_ok=True,
         )
 
@@ -138,7 +139,7 @@ def capture(tmp: Path, scenario_name: str, proc: subprocess.CompletedProcess,
     (out / "head_show.txt").write_text(show, encoding="utf-8")
     (out / "verdict.txt").write_text(verdict + "\n" + "\n".join(notes) + "\n", encoding="utf-8")
     shutil.copytree(
-        tmp / "defender" / "skills" / "gather" / "queries",
+        KnowledgePaths.of_defender_dir(tmp / "defender").catalog_dir,
         out / "catalog_after", dirs_exist_ok=True,
     )
     return out

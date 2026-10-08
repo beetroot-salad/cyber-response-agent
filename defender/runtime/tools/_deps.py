@@ -27,6 +27,7 @@ from ..agent_definition import ResolvedRoots
 from ..agent_role import AgentRole
 
 from defender._env import env_int
+from defender._knowledge import KnowledgePaths
 from defender.runtime.payload_view import (
     passthrough_max_bytes as _capture_view_cap,
 )
@@ -137,6 +138,11 @@ class AgentDeps:
     tenant: Annotated[_RunTenant | None, SkipValidation] = field(kw_only=True, default=None)
 
     role: ClassVar[AgentRole] = AgentRole.MAIN
+
+    @property
+    def knowledge(self) -> KnowledgePaths:
+        """The agent knowledge this role reads (#1108): today the corpus inside `defender_dir`."""
+        return KnowledgePaths.of_defender_dir(self.defender_dir)
 
     @classmethod
     def _for_run(

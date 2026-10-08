@@ -13,7 +13,7 @@ from uuid import uuid4
 from defender._model import model
 from defender._text import is_content_less
 from defender._untrusted import wrap
-from defender.hooks.record_lesson_load import LESSON_CORPORA as _LESSON_CORPORA
+from defender._knowledge import CHECKOUT_AGENT_REL, LESSON_CORPORA as _LESSON_CORPORA, KnowledgePaths
 from defender.learning.author import shared as _shared
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
@@ -94,8 +94,15 @@ _CORPUS_REPAIR_DENY_REASON = (
 SHIPPED_LESSON_CORPORA: tuple[str, ...] = tuple(sorted(_LESSON_CORPORA))
 
 
+def lesson_read_confine(defender_dir: Path) -> tuple[Path, ...]:
+    """The curators' read confine: every shipped lesson corpus of the knowledge the tree at
+    `defender_dir` carries, resolved."""
+    knowledge = KnowledgePaths.of_defender_dir(defender_dir)
+    return tuple(knowledge.corpus_dir(name).resolve() for name in SHIPPED_LESSON_CORPORA)
+
+
 def _corpus_spellings(corpus_dir: Path) -> str:
-    rel = f"defender/{corpus_dir.name}"
+    rel = f"{CHECKOUT_AGENT_REL}/{corpus_dir.name}"
     return "|".join(re.escape(s) for s in (rel, str(corpus_dir)))
 
 
@@ -146,9 +153,7 @@ class CuratorDeps(AgentDeps):
         defender_dir = repo_root / "defender"
         scope = RunScope(
             corpus_name=corpus_dir.name,
-            read_confine=tuple(
-                (defender_dir / name).resolve() for name in SHIPPED_LESSON_CORPORA
-            ),
+            read_confine=lesson_read_confine(defender_dir),
         )
         deps = bind(
             CORPUS_AUTHOR_DEF, run_dir, scope=scope, defender_dir=defender_dir,
@@ -177,9 +182,7 @@ class CorpusRepairDeps(AgentDeps):
         defender_dir = repo_root / "defender"
         scope = RunScope(
             corpus_name=corpus_dir.name,
-            read_confine=tuple(
-                (defender_dir / name).resolve() for name in SHIPPED_LESSON_CORPORA
-            ),
+            read_confine=lesson_read_confine(defender_dir),
         )
         deps = bind(
             CORPUS_REPAIR_DEF, run_dir, scope=scope, defender_dir=defender_dir,

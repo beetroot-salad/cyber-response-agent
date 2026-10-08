@@ -20,6 +20,7 @@ from pydantic_ai.exceptions import (
     ToolRetryError,
 )
 
+from defender._knowledge import SKILLS, checkout_rel
 from defender.hooks.budget_enforcer import BudgetKill
 from defender._text import as_str
 from defender._untrusted import wrap_fresh
@@ -666,13 +667,16 @@ _LIST_VERBS_UNKNOWN_SYSTEM = (
     "to; confirm it there and call this again with that name."
 )
 
+#: Where a system's skill sits, as the model-facing notes below name it (`defender._knowledge`).
+_SKILLS_REL = checkout_rel(SKILLS)
+
 #: Reached only for a name that passed `_adapter_path_under`'s checks, so interpolating it into
 #: a path is safe. `execution.md` holds only value constraints and pitfalls, not verbs.
 _LIST_VERBS_UNLOADABLE = (
     "`{system}` — UNAVAILABLE: its adapter could not be loaded ({err}). No verb surface can be "
     "derived for it right now, and no file carries a copy — the verb roster and its params are "
     "read from the live signatures and nowhere else. "
-    "`defender/skills/{system}/execution.md` still states this system's value constraints and "
+    f"`{_SKILLS_REL}{{system}}/execution.md` still states this system's value constraints and "
     "recorded pitfalls; report the failure in your summary rather than guessing a verb or a "
     "param name."
 )
@@ -682,7 +686,7 @@ _LIST_VERBS_UNLOADABLE = (
 _LIST_VERBS_UNDERIVABLE = (
     "`{system}` — UNAVAILABLE: its verb surface could not be derived ({err}). That is a "
     "defender-side fault, not something your call can fix, and no file carries a copy of the "
-    "surface. `defender/skills/{system}/execution.md` still states this system's value "
+    f"surface. `{_SKILLS_REL}{{system}}/execution.md` still states this system's value "
     "constraints and recorded pitfalls; report the failure in your summary rather than guessing "
     "a verb or a param name."
 )
@@ -691,7 +695,7 @@ _LIST_VERBS_UNDERIVABLE = (
 _LIST_VERBS_NO_VERBS = (
     "`{system}` — UNAVAILABLE: its adapter declares no verbs at all, so no verb surface can be "
     "derived for it, and no file carries a copy. "
-    "`defender/skills/{system}/execution.md` still states this system's value constraints and "
+    f"`{_SKILLS_REL}{{system}}/execution.md` still states this system's value constraints and "
     "recorded pitfalls; report the failure in your summary rather than guessing a verb or a "
     "param name."
 )

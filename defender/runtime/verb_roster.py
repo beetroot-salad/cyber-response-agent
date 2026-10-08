@@ -16,6 +16,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from .verb_grant import DENY_ALL, VerbGrant
+from defender._knowledge import KnowledgePaths
 from defender._paths import adapters_under
 
 from .verbs import SYSTEM_PATTERN, RegistryError, read_roster
@@ -106,7 +107,9 @@ def model_read_surfaces(defender_dir: Path) -> tuple[Path, ...]:
         return ()
     out.extend(sorted(skills.glob("*/SKILL.md")))
     out.extend(sorted(skills.glob("*/execution.md")))
-    queries = skills / "gather" / "queries"
+    # The catalog through its owner; the `skills/` walk above still spans general and
+    # per-system skills in one tree, which #1108 P4 splits into two roots.
+    queries = KnowledgePaths.of_defender_dir(root).catalog_dir
     if queries.is_dir():
         out.extend(sorted(p for p in queries.rglob("*.md")))
     out.extend(sorted(skills.glob(f"*/{_ROSTER_FILENAME}")))

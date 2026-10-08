@@ -15,7 +15,8 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from defender._corpus import QueryTemplate, iter_query_templates, query_catalog_dir
+from defender._corpus import QueryTemplate, iter_query_templates
+from defender._knowledge import KnowledgePaths
 from defender._tenant import Tenant, TenantId, TenantRefused, accept_tenant
 from defender.runtime.verb_dispositions import RunGrants, require_gather_query, run_grants
 from defender.runtime.verb_grant import GrantError, VerbGrant
@@ -92,7 +93,7 @@ class RunTenant:
 
 def catalog_templates(defender_dir: Path) -> list[QueryTemplate]:
     """The query catalog of the tree a run reads, walked once."""
-    return list(iter_query_templates(query_catalog_dir(defender_dir)))
+    return list(iter_query_templates(KnowledgePaths.of_defender_dir(defender_dir).catalog_dir))
 
 
 def correlation_dispatch(

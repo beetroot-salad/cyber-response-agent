@@ -36,6 +36,7 @@ import yaml
 
 from defender import _yaml
 from defender._io import TEXT_READ_ERRORS, read_text_utf8
+from defender._knowledge import KnowledgePaths
 from defender.runtime.verbs import VerbContext
 
 SYSTEM = "tacit-knowledge"
@@ -87,7 +88,7 @@ def registry_path(defender_dir: Path) -> Path:
     not a tenant's `settings/systems/{system}/`, which holds endpoints and credentials for live
     services.
     """
-    return Path(defender_dir) / "skills" / SYSTEM / "registry.yaml"
+    return KnowledgePaths.of_defender_dir(Path(defender_dir)).system_skill_dir(SYSTEM) / "registry.yaml"
 
 
 def _literal_chars(value: str) -> int:

@@ -49,8 +49,9 @@ from defender.skills.invlang.validate import (
 )
 from defender import _yaml
 from defender._git import REPO_ROOT
+from defender._knowledge import KnowledgePaths
 
-DEFAULT_CORPUS = REPO_ROOT / "defender" / "lessons"
+DEFAULT_CORPUS = KnowledgePaths.of_defender_dir(REPO_ROOT / "defender").lessons_dir
 CORPUS_NAME = DEFAULT_CORPUS.name
 
 #: Selectors are hidden from the rendered block: the `matched` line already names the vertex

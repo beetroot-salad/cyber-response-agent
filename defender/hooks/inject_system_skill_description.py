@@ -5,12 +5,13 @@ from pathlib import Path
 
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import read_text_soft
+from defender._knowledge import KnowledgePaths
 from defender._paths import adapters_under
 from defender.runtime.verb_grant import DENY_ALL, VerbGrant
 from defender.runtime.verbs import ModuleVerbRegistry, RosterRead
 
 DEFENDER_DIR = Path(__file__).resolve().parent.parent
-SKILLS_DIR = DEFENDER_DIR / "skills"
+SKILLS_DIR = KnowledgePaths.of_defender_dir(DEFENDER_DIR).skills_dir
 ADAPTERS_DIR = adapters_under(DEFENDER_DIR)
 
 

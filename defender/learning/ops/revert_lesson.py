@@ -8,13 +8,14 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._knowledge import LESSONS, checkout_rel
 from defender.learning.core.config import loop_paths
 from defender.learning.core.state import AUTHOR_DRAIN_LOCK, TRY_ONCE, LearningState
 from defender.learning.author.branch import AuthorBranch, BranchError
 
 _logger = logging.getLogger(__name__)
 
-LESSONS_REL = "defender/lessons"
+LESSONS_REL = checkout_rel(LESSONS).rstrip("/")
 
 
 def revert(
