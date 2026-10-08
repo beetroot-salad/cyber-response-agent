@@ -543,15 +543,7 @@
   },
   "record_bad": {
    "error": "CaseTicketError",
-   "message": "case-history mapping's `open.status` and `released.status` are both 'open' \u2014 every case would open already released"
-  },
-  "release_predicate_good": [
-   true,
-   false
-  ],
-  "release_predicate_bad": {
-   "raises": "CaseTicketError",
-   "message": "case-history mapping's `open.status` and `released.status` are both 'open' \u2014 every case would open already released"
+   "message": "case-history mapping's `open.status` must be a literal, not a template: '{signature}' \u2014 nothing rendered from an alert may move a case along its lifecycle"
   }
  },
  "s187": {
@@ -985,36 +977,31 @@
    "load_case_mapping": {
     "raises": "CaseTicketError",
     "message": "case-history mapping is not a mapping: the tenant's settings/systems/case-history/mapping.yaml"
-   },
-   "release_predicate": null
+   }
   },
   "scalar": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
     "message": "case-history mapping is not a mapping: the tenant's settings/systems/case-history/mapping.yaml"
-   },
-   "release_predicate": null
+   }
   },
   "null_tilde": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
     "message": "case-history mapping is not a mapping: the tenant's settings/systems/case-history/mapping.yaml"
-   },
-   "release_predicate": null
+   }
   },
   "null_word": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
     "message": "case-history mapping is not a mapping: the tenant's settings/systems/case-history/mapping.yaml"
-   },
-   "release_predicate": null
+   }
   },
   "comment_only": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
     "message": "case-history mapping is not a mapping: the tenant's settings/systems/case-history/mapping.yaml"
-   },
-   "release_predicate": null
+   }
   },
   "duplicate_top_level_key": {
    "load_case_mapping": {
@@ -1101,17 +1088,94 @@
       ]
      ]
     }
-   },
-   "release_predicate": {
-    "returns": "closed"
    }
   },
   "duplicate_nested_key": {
    "load_case_mapping": {
-    "raises": "CaseTicketError",
-    "message": "case-history mapping's `open.status` and `released.status` are both 'open' \u2014 every case would open already released"
-   },
-   "release_predicate": null
+    "returns": {
+     "dict": [
+      [
+       "source",
+       {
+        "dict": [
+         [
+          "signature",
+          "rule.id"
+         ],
+         [
+          "summary",
+          "rule.description"
+         ],
+         [
+          "event_time",
+          "timestamp"
+         ]
+        ]
+       }
+      ],
+      [
+       "open",
+       {
+        "dict": [
+         [
+          "key",
+          "{case_id}"
+         ],
+         [
+          "summary",
+          "{summary}"
+         ],
+         [
+          "description",
+          "Opened from alert {case_id} (rule {signature})."
+         ],
+         [
+          "status",
+          "open"
+         ],
+         [
+          "reporter",
+          "defender"
+         ],
+         [
+          "labels",
+          [
+           "sig:{signature}",
+           "evt:{event_time}"
+          ]
+         ]
+        ]
+       }
+      ],
+      [
+       "comment",
+       {
+        "dict": [
+         [
+          "author",
+          "defender-1080"
+         ],
+         [
+          "body",
+          "[{signature}] {disposition} \u2014 {cause}\n\n{narrative}"
+         ]
+        ]
+       }
+      ],
+      [
+       "released",
+       {
+        "dict": [
+         [
+          "status",
+          "open"
+         ]
+        ]
+       }
+      ]
+     ]
+    }
+   }
   },
   "unknown_keys": {
    "load_case_mapping": {
@@ -1213,24 +1277,19 @@
       ]
      ]
     }
-   },
-   "release_predicate": {
-    "returns": "closed"
    }
   },
   "open_status_an_integer": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
     "message": "case-history mapping's `open.status` must be a non-empty string"
-   },
-   "release_predicate": null
+   }
   },
   "open_status_a_template": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
     "message": "case-history mapping's `open.status` must be a literal, not a template: '{signature}' \u2014 nothing rendered from an alert may move a case along its lifecycle"
-   },
-   "release_predicate": null
+   }
   },
   "released_a_scalar": {
    "load_case_mapping": {
@@ -1310,10 +1369,6 @@
       ]
      ]
     }
-   },
-   "release_predicate": {
-    "raises": "CaseTicketError",
-    "message": "case-history mapping has no `released` section (released.status required)"
    }
   },
   "comment_author_a_list": {
@@ -1404,9 +1459,6 @@
       ]
      ]
     }
-   },
-   "release_predicate": {
-    "returns": "closed"
    }
   },
   "comment_missing": {
@@ -1479,59 +1531,49 @@
       ]
      ]
     }
-   },
-   "release_predicate": {
-    "returns": "closed"
    }
   },
   "anchor_and_alias": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
     "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: line 18: the document reuses a node by alias (*b); write the value out in full"
-   },
-   "release_predicate": null
+   }
   },
   "merge_key": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
     "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: line 7: the document reuses a node by alias (*b); write the value out in full"
-   },
-   "release_predicate": null
+   }
   },
   "python_object_tag": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
     "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: could not determine a constructor for the tag 'tag:yaml.org,2002:python/object/apply:os.getcwd'\n  in \"<unicode string>\", line 19, column 7:\n    hook: !!python/object/apply:os.getcwd []\n          ^"
-   },
-   "release_predicate": null
+   }
   },
   "python_name_tag": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
     "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: could not determine a constructor for the tag 'tag:yaml.org,2002:python/name:os.system'\n  in \"<unicode string>\", line 19, column 7:\n    hook: !!python/name:os.system\n          ^"
-   },
-   "release_predicate": null
+   }
   },
   "invalid_yaml": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
     "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: while parsing a flow sequence\n  in \"<unicode string>\", line 1, column 7:\n    open: [unclosed\n          ^\nexpected ',' or ']', but got '<stream end>'\n  in \"<unicode string>\", line 2, column 1:\n    \n    ^"
-   },
-   "release_predicate": null
+   }
   },
   "tab_indented": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
     "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: while scanning for the next token\nfound character '\\t' that cannot start any token\n  in \"<unicode string>\", line 2, column 1:\n    \tstatus: open\n    ^"
-   },
-   "release_predicate": null
+   }
   },
   "two_documents": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
     "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: expected a single document in the stream\n  in \"<unicode string>\", line 1, column 1:\n    source:\n    ^\nbut found another document\n  in \"<unicode string>\", line 19, column 1:\n    ---\n    ^"
-   },
-   "release_predicate": null
+   }
   }
  },
  "s_ticket_post_step": {
@@ -3146,23 +3188,6 @@
      "curl",
      "-sS",
      "-X",
-     "GET",
-     "--max-time",
-     "10",
-     "-H",
-     "Accept: application/json",
-     "-w",
-     "\n%{http_code}",
-     "http://case-history-t1080:8080/tickets/r1080"
-    ],
-    [
-     "--context",
-     "ctx-t1080-case-history",
-     "exec",
-     "bastion-t1080",
-     "curl",
-     "-sS",
-     "-X",
      "POST",
      "--max-time",
      "10",
@@ -3216,23 +3241,6 @@
      "-w",
      "\n%{http_code}",
      "http://case-history-t1080:8080/tickets"
-    ],
-    [
-     "--context",
-     "ctx-t1080-case-history",
-     "exec",
-     "bastion-t1080",
-     "curl",
-     "-sS",
-     "-X",
-     "GET",
-     "--max-time",
-     "10",
-     "-H",
-     "Accept: application/json",
-     "-w",
-     "\n%{http_code}",
-     "http://case-history-t1080:8080/tickets/r1080"
     ],
     [
      "--context",
@@ -3304,23 +3312,6 @@
      "curl",
      "-sS",
      "-X",
-     "GET",
-     "--max-time",
-     "10",
-     "-H",
-     "Accept: application/json",
-     "-w",
-     "\n%{http_code}",
-     "http://case-history-t1080:8080/tickets/r1080"
-    ],
-    [
-     "--context",
-     "ctx-t1080-case-history",
-     "exec",
-     "bastion-t1080",
-     "curl",
-     "-sS",
-     "-X",
      "POST",
      "--max-time",
      "10",
@@ -3383,23 +3374,6 @@
      "curl",
      "-sS",
      "-X",
-     "GET",
-     "--max-time",
-     "10",
-     "-H",
-     "Accept: application/json",
-     "-w",
-     "\n%{http_code}",
-     "http://case-history-t1080:8080/tickets/r1080"
-    ],
-    [
-     "--context",
-     "ctx-t1080-case-history",
-     "exec",
-     "bastion-t1080",
-     "curl",
-     "-sS",
-     "-X",
      "POST",
      "--max-time",
      "10",
@@ -3453,23 +3427,6 @@
      "-w",
      "\n%{http_code}",
      "http://case-history-t1080:8080/tickets"
-    ],
-    [
-     "--context",
-     "ctx-t1080-case-history",
-     "exec",
-     "bastion-t1080",
-     "curl",
-     "-sS",
-     "-X",
-     "GET",
-     "--max-time",
-     "10",
-     "-H",
-     "Accept: application/json",
-     "-w",
-     "\n%{http_code}",
-     "http://case-history-t1080:8080/tickets/r1080"
     ],
     [
      "--context",

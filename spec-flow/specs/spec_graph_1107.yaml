@@ -191,6 +191,9 @@ demands:
     becomes a CaseMapping. A file that is not YAML, not a mapping, or fails the lifecycle check is kept as its CaseTicketError
     and is never raised at resolve.
   source: 20-demands.md (phase B)
+  note: 'AMENDED by #1221''s amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer asks whether a case is closed, so nothing reads `released:` and the
+    lifecycle check is the literal-`open.status` rule alone. A mapping whose `open.status` equals its legacy
+    `released.status` is now a CaseMapping; the lifecycle arm is a templated `open.status`.'
 - id: d_case_ticket_takes_mapping
   kind: seam
   form: test
@@ -204,6 +207,8 @@ demands:
     instead of settings_dir. None of them reads mapping.yaml: called with a CaseMapping while no mapping file exists
     anywhere, they answer from it.'
   source: 20-demands.md (phase B)
+  note: 'AMENDED by #1221''s amendment (issue #1221, reversing its N7, human, 2026-10-08): release_predicate is removed with the writer''s closed-case check, so the consumers
+    are the other five.'
 - id: d_mapping_error_consumers
   kind: coherence
   form: test
@@ -656,6 +661,8 @@ demands:
     writes ticket_write.json with ok false, status 'error', the store's url, and a reason that names the mapping
     problem, and it logs a warning.
   source: 20-demands.md (phase B)
+  note: 'AMENDED by #1221''s amendment (issue #1221, reversing its N7, human, 2026-10-08): the bad mapping is a templated `open.status`, the loader''s one remaining lifecycle
+    refusal; `open.status` equal to `released.status` now loads.'
 - id: o6_transport_fault_receipt
   kind: behavior
   form: test
@@ -1684,6 +1691,9 @@ demands:
     released-by-a-person decline keeps today''s receipt and gains a non-empty reason naming the decline. Assertions
     stay at a non-empty reason and no host path.'
   source: 70-resolutions.draft.md NF-23 (auto, judge's recommendation)
+  note: 'AMENDED by #1221''s amendment (issue #1221, reversing its N7, human, 2026-10-08): there is no released-by-a-person decline any more — a case the store holds as
+    `closed` is recorded like any other (receipt `commented`, ok true, no reason; no read of the case), so the
+    second arm now pins that instead of the `refused-released` receipt (premise #88 is void).'
   premises:
   - '#84 test_case_history_timeout_vs_malformed_response_receipt'
   - '#87 test_multiple_config_faults_in_one_record_step'

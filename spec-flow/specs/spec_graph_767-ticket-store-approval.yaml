@@ -201,6 +201,7 @@ demands:
   # ---- Demand #0 — the return-value contract (20-demands.md, provisional on four forks) -------
   - {id: d0_record_return, kind: behavior, form: test, stakeholder: operator,
      discharged_by: test_767_record_case_ticket_returns_and_receipts,
+     note: "AMENDED by #1221's amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer reads a case back or declines a closed one: the check existed because a person's close released a case's comments to later runs, and the release screen is gone (every comment is served, the host's own tagged); the mapping names no released status, and a `released:` section an un-migrated tenant carries loads and is ignored. The writer's one call to the store is now the comment POST, with no read-back before it.",
      binds: [record_case_ticket, "interacts(record_case_ticket->case_history_store).response",
              ticket_write_receipt, "interacts(record_case_ticket->ticket_write_receipt).payload"],
      fork: FK29, unknown: "the receipt's success `status` word — `\"closed\"` (r1, today's literal)
@@ -245,7 +246,7 @@ demands:
              "alert_json.domain.distinguished[rule-id-rendering-to-the-released-status]",
              "alert_json.domain.distinguished[timestamp-rendering-to-the-released-status]"],
      positive_control: d_loader_refusal_positive_control,
-     note: "REWORK — replaces `o1_loader_refuses_approved_label` (FAM-2, FK24-FK27). The release
+     note: "AMENDED by #1221's amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer reads a case back or declines a closed one: the check existed because a person's close released a case's comments to later runs, and the release screen is gone (every comment is served, the host's own tagged); the mapping names no released status, and a `released:` section an un-migrated tenant carries loads and is ignored. So the one refusal this demand kept, `open.status` equal to `released.status`, is dropped — that mapping loads and its open carries its own literal status; the literal-`open.status` rule stays (test_767_the_loader_still_refuses_a_non_literal_open_status). Earlier note: REWORK — replaces `o1_loader_refuses_approved_label` (FAM-2, FK24-FK27). The release
        signal has no surface an alert can reach: a status is not templated from an alert in the
        shipped mapping and, on the store's side, is a closed vocabulary (c8). So the loader walks
        no label templates and refuses nothing about labels — an operator may template any label,
@@ -345,7 +346,7 @@ demands:
   # ---- O5 — vendor spellings live in the mapping ----------------------------------------------
   - {id: o5_no_vendor_literals_in_code, kind: coherence, form: test, stakeholder: operator,
      discharged_by: test_767_no_status_or_author_literal_in_writer_or_screen,
-     note: "AMENDED by #1221 (issue #1221 D3/M2, human, 2026-10-08): the screen half is removed; the writer still follows the mapping and neither the writer nor the query tool spells a vendor literal.",
+     note: "AMENDED by #1221's amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer reads a case back or declines a closed one: the check existed because a person's close released a case's comments to later runs, and the release screen is gone (every comment is served, the host's own tagged); the mapping names no released status, and a `released:` section an un-migrated tenant carries loads and is ignored. The writer follows the mapping's comment author and asks no status, so a case held as `closed` or in a vendor-coined status is commented on alike. Earlier note: AMENDED by #1221 (issue #1221 D3/M2, human, 2026-10-08): the screen half is removed; the writer still follows the mapping and neither the writer nor the query tool spells a vendor literal.",
      binds: [case_history_mapping, mapping_released, mapping_comment, ticket_screen, is_released,
              record_case_ticket, "interacts(record_case_ticket->case_history_mapping)",
              "interacts(query_tool->case_history_mapping)",
@@ -358,8 +359,8 @@ demands:
      rejected: [{nl: "N8 — ticket_screen's existing envelope binding (tickets, key, comments,
        author) is the stub adapter's own and stays bound in code."}]}
   - {id: d4_predicates_in_mapper, kind: seam, form: test, stakeholder: operator,
-     discharged_by: test_767_release_predicate_lives_in_the_mapper,
-     note: "AMENDED by #1221 (issue #1221 D3/M2, human, 2026-10-08): the read screen this predicate also fed is removed; the writer's release check (#1221 N7) is its one consumer, and the test, re-homed to test_767_writer.py, observes the wiring there.",
+     discharged_by: test_767_the_release_predicate_and_its_refusal_are_gone,
+     note: "REVERSED by #1221's amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer reads a case back or declines a closed one: the check existed because a person's close released a case's comments to later runs, and the release screen is gone (every comment is served, the host's own tagged); the mapping names no released status, and a `released:` section an un-migrated tenant carries loads and is ignored. The predicate's last consumer went with the check, so `ReleasePredicate`, `release_predicate`, `is_released` and the `refused-released` receipt word are removed. Was: test_767_release_predicate_lives_in_the_mapper. Earlier note: AMENDED by #1221 (issue #1221 D3/M2, human, 2026-10-08): the read screen this predicate also fed is removed; the writer's release check (#1221 N7) is its one consumer, and the test, re-homed to test_767_writer.py, observes the wiring there.",
      binds: [is_released, ticket_screen, case_ticket, "interacts(query_tool->is_released)"]}
 
   # ---- O6 / S2 / N9 — no model role can reach a write -----------------------------------------
@@ -404,13 +405,13 @@ demands:
        The exit-code observable itself is settled; the arm list is not."}
   - {id: d_writer_never_records_behind_a_release, kind: negative, form: test, stakeholder: analyst,
      minted_from: "the review's fourth rule (84a091ff), re-grounded by the REWORK on the lifecycle",
-     discharged_by: test_767_writer_never_records_behind_a_release,
+     discharged_by: test_767_writer_comments_on_a_closed_case,
      binds: [record_case_ticket, is_released, mapping_released, ticket_write_receipt,
              "case_history_store.identity", "interacts(record_case_ticket->case_history_store)",
              "interacts(record_case_ticket->case_history_store).response",
              "case_history_mapping.domain.distinguished[missing-released-section]"],
      positive_control: d0_record_return,
-     note: "the writer's half of the release invariant, and what answers the R2 hole on
+     note: "REVERSED by #1221's amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer reads a case back or declines a closed one: the check existed because a person's close released a case's comments to later runs, and the release screen is gone (every comment is served, the host's own tagged); the mapping names no released status, and a `released:` section an un-migrated tenant carries loads and is ignored. A case the store holds as `closed` gets the comment like any other — one POST, no GET, receipt `commented` — and every former undecidable arm (an unreadable case, a non-ticket reply, a mapping with no `released:` section) is moot. Was: test_767_writer_never_records_behind_a_release. Earlier note: the writer's half of the release invariant, and what answers the R2 hole on
        `case_history_store.identity` now that the read side picks no comment: a person's close
        covers the comments on the case WHEN THEY CLOSED IT, so the writer reads the case back
        first and refuses — receipt `refused-released`, a warning, no POST — when it is already in
@@ -440,8 +441,9 @@ demands:
        strip runs before or after the cut — the boundary-planted fence only survives one ordering."}
   # REWORK — `o8_one_agent_comment_per_ticket` (FK02, FK03, FK35) is DELETED: the read side no
   # longer picks a comment, and what bounds a closed case's comment count is the writer, which
-  # never records behind a close (`test_767_writer_never_records_behind_a_release`). The
-  # model-view bound survives as `scale_model_view_stays_bounded`.
+  # never records behind a close (`test_767_writer_never_records_behind_a_release` — itself
+  # REVERSED by #1221's amendment: the writer now comments on a closed case too, so nothing bounds
+  # a closed case's comment count). The model-view bound survives as `scale_model_view_stays_bounded`.
   - {id: p_o8_beats_o4, kind: domain-outcome, form: test, stakeholder: a later run,
      discharged_by: test_767_wire_bound_wins_and_the_cut_is_visible,
      binds: [case_record_to_comment, "interacts(record_case_ticket->case_history_store).payload",
@@ -479,7 +481,8 @@ demands:
 
   # ---- Mechanism demands (D1–D6) and the N-rows that are independently observable --------------
   - {id: d1_mapping_sections, kind: shape, form: test, stakeholder: operator,
-     discharged_by: test_767_mapping_carries_comment_and_released_and_no_close_lane,
+     discharged_by: test_767_mapping_carries_comment_and_no_close_or_released_lane,
+     note: "AMENDED by #1221's amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer reads a case back or declines a closed one: the check existed because a person's close released a case's comments to later runs, and the release screen is gone (every comment is served, the host's own tagged); the mapping names no released status, and a `released:` section an un-migrated tenant carries loads and is ignored. The shipped mapping drops the `released: {status}` section D1 added. Was: test_767_mapping_carries_comment_and_released_and_no_close_lane.",
      binds: [case_history_mapping, mapping_comment, mapping_released,
              "interacts(record_case_ticket->case_history_mapping)",
              "case_history_mapping.domain.distinguished[retains-close-section]"],
@@ -687,6 +690,7 @@ demands:
   - {id: d_loader_refusal_positive_control, kind: domain-outcome, form: test,
      stakeholder: operator, minted_from: "40-premises.md red flag 1 (FK-X1)",
      discharged_by: test_767_the_shipped_mapping_loads_and_a_broken_one_skips_the_write,
+     note: "AMENDED by #1221's amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer reads a case back or declines a closed one: the check existed because a person's close released a case's comments to later runs, and the release screen is gone (every comment is served, the host's own tagged); the mapping names no released status, and a `released:` section an un-migrated tenant carries loads and is ignored. The refused arm is now a templated `open.status` (the loader's one remaining lifecycle rule), since an `open.status == released.status` mapping loads.",
      binds: [case_history_mapping, record_case_ticket, mapping_open, mapping_released, is_released,
              "case_history_mapping.domain.distinguished[shipped-default]",
              "case_history_mapping.domain.distinguished[open-status-is-the-released-status]"],
@@ -773,7 +777,7 @@ demands:
      binds: [ticket_skill_md],
      settled_premise: 69,
      fork: FK43,
-     note: "REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed, the own-case exclusion and the release screen; a ticket reply is served and captured as the store answered it, and model-made precedent is handled by the agent tag (O1) and rule #27 (O2) instead. The release-lane sentences, with the endorsement and truncation notes inside them, are deleted with the screens, and the briefing must no longer claim either screen. Was: test_767_ticket_skill_md_describes_the_release_lane. Earlier note: UPGRADED AT PHASE E from `form: clause`. §7 FK55 split the item in two and kept this
+     note: "AMENDED by #1221's amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer reads a case back or declines a closed one: the check existed because a person's close released a case's comments to later runs, and the release screen is gone (every comment is served, the host's own tagged); the mapping names no released status, and a `released:` section an un-migrated tenant carries loads and is ignored. The briefing's write-side sentence — a re-run of a case a person already closed is refused rather than appended — is false too and must go. Earlier note: REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed, the own-case exclusion and the release screen; a ticket reply is served and captured as the store answered it, and model-made precedent is handled by the agent tag (O1) and rule #27 (O2) instead. The release-lane sentences, with the endorsement and truncation notes inside them, are deleted with the screens, and the briefing must no longer claim either screen. Was: test_767_ticket_skill_md_describes_the_release_lane. Earlier note: UPGRADED AT PHASE E from `form: clause`. §7 FK55 split the item in two and kept this
        half IN the suite: SKILL.md is MODEL-FACING prose and D4 makes three of its sentences
        false, so its rewrite is an observable obligation rather than a deferral. FK43 is applied
        in the test — the tag is RELEASE-FOR-READING, not an endorsement of the verdict — and so
@@ -797,7 +801,7 @@ demands:
   # resolution it comes from; none of them existed at the gate, because each is an answer.
   - {id: d_predicates_fail_closed_by_construction, kind: seam, form: test, stakeholder: a later run,
      minted_from: "70-resolutions.md R1 (FAM-1's downstream consequence)",
-     discharged_by: test_767_release_predicate_cannot_be_built_in_a_serving_state,
+     discharged_by: test_767_a_legacy_released_section_is_ignored,
      binds: [is_released, case_ticket, case_history_mapping, ticket_screen,
              "case_history_mapping.domain.distinguished[invalid-yaml]",
              "case_history_mapping.domain.distinguished[missing-released-section]",
@@ -809,7 +813,7 @@ demands:
              "mapping_released.domain.distinguished[blank]",
              "mapping_released.domain.distinguished[padded]",
              "is_released.domain.distinguished[released-section-missing]"],
-     note: "AMENDED by #1221 (issue #1221 D3/M2, human, 2026-10-08): the read-side degrade (FK20) went with the screen; the test, re-homed to test_767_writer.py, pins the constructor's refusals and the writer appending nothing under them. Earlier note: the R5 judgment hole's `resolved_to`. §7 R1 decided FAM-1 fail-closed on both sides
+     note: "REVERSED by #1221's amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer reads a case back or declines a closed one: the check existed because a person's close released a case's comments to later runs, and the release screen is gone (every comment is served, the host's own tagged); the mapping names no released status, and a `released:` section an un-migrated tenant carries loads and is ignored. There is no predicate to build, so every mapping state this demand refused — no `released:` section, a non-string, blank or padded `released.status`, `open.status` equal to it — now loads and is recorded under; the one rule kept, a literal `open.status`, is test_767_the_loader_still_refuses_a_non_literal_open_status. Was: test_767_release_predicate_cannot_be_built_in_a_serving_state. Earlier note: AMENDED by #1221 (issue #1221 D3/M2, human, 2026-10-08): the read-side degrade (FK20) went with the screen; the test, re-homed to test_767_writer.py, pins the constructor's refusals and the writer appending nothing under them. Earlier note: the R5 judgment hole's `resolved_to`. §7 R1 decided FAM-1 fail-closed on both sides
        AND, along with it, that the predicate must be SAFE BY CONSTRUCTION once it lands: the
        constructor raises in the unsafe state rather than merely behaving when configured right.
        The test carries FK20's read-side extension too — O7 is stated for the WRITE only, so the

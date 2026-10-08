@@ -3,14 +3,15 @@
 Every test in `test_767_*.py` is one demand of
 `spec-flow/specs/spec_graph_767-ticket-store-approval.yaml`, named by that demand's
 `discharged_by`. RED against `a77335d5` is the expected state: `record_case_ticket`,
-`case_record_to_comment`, the mapping's `comment:`/`released:` sections and the release
-predicate are all COINED here — none of them exists yet. Where the implementation spells a
-symbol otherwise, these names follow the code.
+`case_record_to_comment` and the mapping's `comment:` section are COINED here — none of them
+existed yet. Where the implementation spells a symbol otherwise, these names follow the code.
 
-THE RELEASE SIGNAL IS THE CASE'S LIFECYCLE STATE, never a tag and never a comment's author.
-A person closes a case once they have reviewed it; `status` is a closed vocabulary the
-store itself enforces, so nothing rendered from an alert can move a case along it, and a
-comment's `author` — whatever the posting client chose to send — decides nothing.
+A PERSON CLOSES A CASE; THE HOST NEVER DOES, AND NEVER ASKS. `status` is a closed vocabulary the
+store itself enforces, so nothing rendered from an alert can move a case along it. Since #1221's
+amendment (2026-10-08) the writer does not read a case back or decline a closed one either: the
+release screen that gave a person's close its meaning to later runs is gone (every comment is
+served, the host's own tagged), so the mapping no longer names a released status and a
+`released:` section an un-migrated tenant still carries is loaded and ignored.
 
 THE SEAMS THESE FAKES ENTER THROUGH ARE PRODUCTION'S OWN (the project profile forbids
 `monkeypatch.setattr`, and CI ratchets new sites):
@@ -52,9 +53,15 @@ from defender.tests.tenant_1107_settings import _spec1107 as S1107
 
 #: The lifecycle state a person moves a reviewed case to — the store's own `closed` (c8: the
 #: stub enforces `status ∈ {open, in_progress, closed}` as a Literal, rejecting anything else
-#: with 422). The test's copy of the mapping's `released.status`; O5 owns that the code never
-#: spells it.
-RELEASED_STATUS = "closed"
+#: with 422). A STORE word, not a mapping one: since #1221's amendment no code reads it and the
+#: mapping names it nowhere (a legacy `released:` section is ignored). Used here as the closed
+#: case a writer still comments on, and as the hostile value an alert might carry.
+CLOSED_STATUS = "closed"
+
+#: The `released:` section an un-migrated tenant's mapping still carries (#767's release
+#: status). The loader accepts it and nothing reads it (#1221, amended); the SHIPPED mapping no
+#: longer has one (`released=None`).
+LEGACY_RELEASED: dict[str, Any] = {"status": CLOSED_STATUS}
 #: The state the bridge opens a case in (`open.status`).
 OPEN_STATUS = "open"
 
@@ -122,16 +129,17 @@ def mapping_doc(  # noqa: PLR0913 — one keyword per MEMBER a demand exercises,
     open_status: Any = OPEN_STATUS,
     comment_author: str | None = AGENT_AUTHOR,
     comment_body: str | None = COMMENT_BODY_TEMPLATE,
-    released_status: Any = RELEASED_STATUS,
+    released: Any = LEGACY_RELEASED,
     with_comment: bool = True,
-    with_released: bool = True,
     close_section: dict[str, Any] | None = None,
     extra_open: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The post-#767 mapping as a dict. Every knob is a member some demand exercises:
-    `with_comment`/`with_released` are FAM-1's missing sections, `released_status` carries
-    FK18's non-string, `open_status` the open/released collision, `close_section` is FK27's
-    stale lane and `extra_open` is an operator-added open field."""
+    `with_comment` is FAM-1's missing section, `open_status` the literal-status rule the loader
+    keeps (a template, an empty or non-string status), `released` the legacy section an
+    un-migrated tenant carries (`None` omits it, the shipped shape since #1221's amendment; any
+    other value is written as-is and must be ignored), `close_section` is FK27's stale lane and
+    `extra_open` is an operator-added open field."""
     doc: dict[str, Any] = {
         "source": {
             "signature": "rule.id",
@@ -156,8 +164,8 @@ def mapping_doc(  # noqa: PLR0913 — one keyword per MEMBER a demand exercises,
         if comment_body is not None:
             section["body"] = comment_body
         doc["comment"] = section
-    if with_released:
-        doc["released"] = {"status": released_status}
+    if released is not None:
+        doc["released"] = dict(released) if isinstance(released, dict) else released
     if close_section is not None:
         doc["close"] = close_section
     return doc
@@ -249,23 +257,19 @@ def current_mapping() -> Any:
     return current_record().ticket_mapping
 
 
-def shipped_released_status_and_author() -> tuple[str, str]:
-    """The released status and the agent identity as the SHIPPED mapping spells them.
+def shipped_comment_author() -> str:
+    """The agent identity as the SHIPPED mapping spells it (`comment.author`).
 
     Read off the real file rather than taken from this module's constants, because the
     scenarios that do not plant their own mapping — anything driving the whole run — resolve
     the shipped mapping, and reading it here is what makes those tests a statement about the
-    file an operator edits (O5) rather than about a literal."""
-    doc = shipped_mapping_doc()
-    released = doc.get("released") or {}
-    comment_section = doc.get("comment") or {}
-    assert isinstance(released.get("status"), str), (
-        "the shipped mapping has no `released: {status}` section (D1)"
-    )
+    file an operator edits (O5) rather than about a literal. (It once returned the shipped
+    `released.status` too; #1221's amendment removed that section from the shipped mapping.)"""
+    comment_section = shipped_mapping_doc().get("comment") or {}
     assert isinstance(comment_section.get("author"), str), (
         "the shipped mapping has no `comment: {author}` section (D1)"
     )
-    return released["status"], comment_section["author"]
+    return comment_section["author"]
 
 
 def shipped_mapping_doc() -> dict[str, Any]:
@@ -328,7 +332,7 @@ def make_run(tmp_path: Path, name: str = "20260917T000000Z-sshd", *, alert: Any 
 # --------------------------------------------------------------------------------------
 
 
-#: `ticket` on `FakeStore` distinguishes "omitted" (a default open, unreleased case) from an
+#: `ticket` on `FakeStore` distinguishes "omitted" (a default open case) from an
 #: explicit `None` (the store holds no such key), the same way `_CONFIG_UNSET` does for `config`.
 _TICKET_UNSET = object()
 
@@ -362,9 +366,12 @@ class FakeStore:
         unknown key, 405 on PATCH/PUT (c8, executed).
       * ``body`` — the reply text to a WRITE. A malformed one is FK31's arm; nothing reads
         it (c5), and no assertion in this suite is made against it.
-      * ``ticket`` — the ticket object a `GET /tickets/{key}` answers with (200), which the
-        writer reads back before it records so that it never appends behind a person's
-        close. Defaults to an open, unreleased case; `None` answers the read with a 404.
+      * ``ticket`` — the ticket object a `GET /tickets/{key}` would answer with (200);
+        `None` answers such a read with a 404. Since #1221's amendment the writer makes NO
+        read — it posts its one comment whatever the case's status — so a GET here is a
+        regression the writer tests assert absent on `calls`; the fake still answers one so
+        that a regressed read is recorded rather than crashing the scenario. Defaults to an
+        open case.
 
     It classifies nothing and decides no policy: every branch here is "record, then answer".
     """
@@ -413,7 +420,8 @@ class FakeStore:
 
     def writes(self) -> list[OutboundCall]:
         """Every call that could change the estate — the census the write-side demands
-        count; the writer's own read-back (`GET`) is not one of them."""
+        count. A `GET` is not one; that the writer makes none at all (#1221, amended) is
+        asserted on `calls`."""
         return [c for c in self.calls if c.method != "GET"]
 
     def paths(self, suffix: str | None = None) -> list[str]:

@@ -134,8 +134,10 @@ MAPPING = textwrap.dedent("""\
       status: closed
     """)
 
-#: A mapping the loader refuses for its own lifecycle rule (open.status == released.status).
-MAPPING_COLLIDING = MAPPING.replace("  status: closed\n", "  status: open\n")
+#: A mapping the loader refuses for its own lifecycle rule: a templated `open.status`. (It was
+#: `open.status == released.status` until #1221's amendment, which made that mapping load and
+#: left the literal-`open.status` rule the loader's only one.)
+MAPPING_REFUSED = MAPPING.replace("  status: open\n", '  status: "{signature}"\n')
 
 def report_text(disposition: str = "benign",
                 cause: str = "the disposition was recorded without a challenge review",
@@ -184,10 +186,9 @@ def _plain(mapping: Any) -> Any:
 
 
 def _store_ok(key: str) -> list[dict[str, Any]]:
-    """The store's answers to one open + record: the case created, read back unreleased, the
-    comment accepted."""
+    """The store's answers to one open + record: the case created, the comment accepted (#1221's
+    amendment: the writer reads nothing back in between)."""
     return [T7.answer(json.dumps({"key": key}), "201"),
-            T7.answer(json.dumps({"key": key, "status": "open", "comments": []}), "200"),
             T7.answer(json.dumps({"id": 1}), "201")]
 
 
@@ -287,27 +288,19 @@ def _drive_run(tmp: Path, mp: Any, *, answers: list[dict[str, Any]],
 
 def _records_at_run_start() -> tuple[Any, Any]:
     """The run's record over a planted tenant, then again after its mapping is made one the
-    loader refuses (open and released status equal): (good, bad)."""
+    loader refuses (a templated open.status): (good, bad)."""
     root, folder = _tenant()
     good = _record(root)
-    T7.mapping_path(folder).write_text(MAPPING_COLLIDING, encoding="utf-8")
+    T7.mapping_path(folder).write_text(MAPPING_REFUSED, encoding="utf-8")
     return good, _record(root)
 
 
 def _view_at_run_start(good: Any, bad: Any, tmp: Path) -> dict[str, Any]:
-    """The record's mapping, and the release predicate the ticket writer builds from it (#1221
-    removed the query tool's and the estate applier's readings of it; the writer's courtesy
-    check is the one consumer left)."""
-    predicate = _moved("release_predicate")
-    released = {"status": "closed"}
-    unreleased = {"status": "open"}
-    pred_good = predicate(good.ticket_mapping).is_released
+    """The record's mapping, as held. (The release predicate the ticket writer built from it was
+    observed here too, until #1221's amendment removed it; nothing reads a released status.)"""
     return _norm({
         "record_good": _held(good.ticket_mapping),
         "record_bad": _held(bad.ticket_mapping),
-        "release_predicate_good": [pred_good(released), pred_good(unreleased)],
-        "release_predicate_bad": _outcome_of(predicate, bad.ticket_mapping,
-                                             view=lambda built: built.released_status),
     }, tmp)
 
 
@@ -322,22 +315,18 @@ def test_1080_the_case_mapping_is_read_at_run_start_from_the_tenants_home(tmp_pa
 
     Observed through the unmoved readers: `run_tenant.resolve_tenant` over a planted tenant holds
     an instance of the moved `CaseMapping` (content as at the base), and over a mapping the
-    loader refuses (open and released status equal) an instance of the moved `CaseTicketError`
-    (text as at the base). The release predicate the ticket writer builds from the record is
-    the moved `ReleasePredicate`, and built from the kept error it raises that error's text.
-    (#1221 removed the query tool's and the estate applier's readings of the predicate.) Every
-    moved name is found under `defender/runtime/`, so a home anywhere else fails here."""
+    loader refuses (a templated open.status) an instance of the moved `CaseTicketError` (text as
+    the loader spells it). (The release predicate the ticket writer built from the record was
+    observed here too until #1221's amendment removed it.) Every moved name is found under
+    `defender/runtime/`, so a home anywhere else fails here."""
     home = _case_module()
     case_mapping, case_error = _moved("CaseMapping"), _moved("CaseTicketError")
-    predicate_cls = _moved("ReleasePredicate")
-    assert {case_mapping.__module__, case_error.__module__, predicate_cls.__module__} == {
+    assert {case_mapping.__module__, case_error.__module__} == {
         home.__name__}, "the case-mapping types are not all defined in the tenants home"
 
     good, bad = _records_at_run_start()
     assert isinstance(good.ticket_mapping, case_mapping), (
         f"the record holds {type(good.ticket_mapping)!r}, not the tenants home's CaseMapping")
-    assert type(_moved("release_predicate")(good.ticket_mapping)) is predicate_cls, (
-        "the release predicate built from the record is not the tenants home's ReleasePredicate")
     assert isinstance(bad.ticket_mapping, case_error), (
         f"a refused mapping is held as {type(bad.ticket_mapping)!r}, not the moved "
         "CaseTicketError")
@@ -545,16 +534,12 @@ YAML_SHAPES: dict[str, str] = {
 
 
 def _observe_yaml_shape(shape: str, tmp: Path, mp: Any) -> dict[str, Any]:
-    load, predicate = _moved("load_case_mapping"), _moved("release_predicate")
+    load = _moved("load_case_mapping")
     settings = tmp / "settings"
     path = settings / "systems" / "case-history" / "mapping.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(YAML_SHAPES[shape], encoding="utf-8")
-    loaded = _outcome_of(load, settings, view=_plain)
-    used: Any = None
-    if "returns" in loaded:
-        used = _outcome_of(lambda: predicate(load(settings)).released_status)
-    return _norm({"load_case_mapping": loaded, "release_predicate": used}, tmp)
+    return _norm({"load_case_mapping": _outcome_of(load, settings, view=_plain)}, tmp)
 
 
 @pytest.mark.parametrize("shape", list(YAML_SHAPES))
@@ -565,8 +550,10 @@ def test_case_mapping_yaml_of_the_wrong_shape(shape, tmp_path):
     accepted or refused as today.
 
     Each shape is a real file read by the moved `load_case_mapping` (its home under
-    `defender/runtime/`); an accepted one is also used once (the moved `release_predicate`, the
-    reader every consumer goes through). Both outcomes against the base golden."""
+    `defender/runtime/`), against the base golden. (An accepted one was also used once through
+    the release predicate until #1221's amendment removed it; that amendment also made
+    `duplicate_nested_key` — whose last `released.status` equals `open.status` — load, where the
+    base refused it for the dropped open/released collision rule.)"""
     assert _observe_yaml_shape(shape, tmp_path, None) == _golden("s188")[shape]
 
 

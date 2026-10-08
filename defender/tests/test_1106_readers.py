@@ -34,12 +34,12 @@ MARK = "injected"
 @pytest.fixture
 def injected(tmp_path) -> Path:
     """The injected tenant's settings folder: `<tmp root>/playground/knowledge/settings`, every value
-    carrying `MARK`, the mapping's released status and reporter distinct from the checkout's."""
+    carrying `MARK`, the mapping's reporter distinct from the checkout's."""
     root = tmp_path / "injected-root"
     S.plant(
         root, T.PLAYGROUND_ID, table=T.TABLE_B, marker=MARK,
         lead_zero=T.lead_zero_text("elastic.injected-tenant-template"),
-        released_status="resolved-by-a-person", reporter="injected-reporter",
+        reporter="injected-reporter",
     )
     td = T.accept(root, T.PLAYGROUND_ID)
     assert not td.settings.is_relative_to(T.REPO_ROOT), "the fixture root must be outside"
@@ -107,16 +107,6 @@ def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming
 
 # ---- the case-history mapping --------------------------------------------------------------
 
-def test_the_release_predicate_reads_the_injected_tenants_mapping(injected):
-    case_ticket = T.mod("runtime.case_ticket")
-    predicate = case_ticket.release_predicate(_record(injected).ticket_mapping)
-    assert predicate.released_status == "resolved-by-a-person"
-    assert predicate.is_released({"status": "resolved-by-a-person"}) is True
-    assert predicate.is_released({"status": "closed"}) is False
-    assert case_ticket.release_predicate(T.fixture_run_tenant().ticket_mapping
-                                         ).released_status != predicate.released_status
-
-
 def test_the_open_payload_renders_the_injected_tenants_mapping(injected):
     case_ticket = T.mod("runtime.case_ticket")
     alert = {"rule": {"id": "r-1", "description": "d"}, "timestamp": "2026-09-26T00:00:00Z"}
@@ -136,7 +126,7 @@ def test_a_missing_mapping_is_a_refusal_naming_the_injected_path(tmp_path):
     settings = tmp_path / "bare" / "settings"
     settings.mkdir(parents=True)
     with pytest.raises(case_ticket.CaseTicketError) as caught:
-        case_ticket.release_predicate(case_ticket.load_case_mapping(settings))
+        case_ticket.load_case_mapping(settings)
     assert "the tenant's settings/systems/case-history/mapping.yaml" in str(caught.value)
     assert str(settings) not in str(caught.value)
     assert (T.FIXTURE_SETTINGS / "systems" / "case-history" / "mapping.yaml").is_file()

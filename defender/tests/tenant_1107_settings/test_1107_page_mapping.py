@@ -9,7 +9,8 @@ the page being byte-equal to the page of the same run dir with no receipt at all
 deterministic across renders and carries no ticket text — measured before writing).
 
 The mapping half drives the `case_ticket` consumers with the record's `ticket_mapping` (coined
-keyword `mapping=`, `release_predicate` positional — `S.with_mapping`), the query tool's
+keyword `mapping=` — `S.with_mapping`; `release_predicate`, once positional here, was removed by
+#1221's amendment), the query tool's
 ticket screen through the replay harness (`verbs=` / `tenant=`; the served payload is what the
 gather model was shown), the estate applier, and a resumed sibling's `WorldRegistry` through
 `run.main --resume`, whose `lifecycle` seam hands the REAL `_drive_investigation` a recording
@@ -168,11 +169,12 @@ def _plain(value: Any) -> Any:
     return value
 
 
-def _mapping_1107(released_status: str) -> str:
+def _mapping_1107() -> str:
     """The `_tenants1106` mapping with every value a consumer answers from made distinctive:
-    the signature read from `rule.name` (not the `rule.id` fallback), the reporter, the comment
-    author and the released status."""
-    return (T1106.mapping_text(released_status=released_status, reporter="rep-1107")
+    the signature read from `rule.name` (not the `rule.id` fallback), the reporter and the
+    comment author. (It made the released status distinctive too, until #1221's amendment left
+    nothing that reads one.)"""
+    return (T1106.mapping_text(reporter="rep-1107")
             .replace("signature: rule.id", "signature: rule.name")
             .replace("author: defender", "author: author-1107"))
 
@@ -423,24 +425,21 @@ def test_s7pg_box_planted_flag_and_receipt_render_no_ticket_line(tmp_path, monke
 # ======================================================================================
 
 def test_d_case_ticket_takes_mapping(tmp_path):
-    """The case_ticket functions that consume the mapping (release_predicate, alert_to_open_payload,
+    """The case_ticket functions that consume the mapping (alert_to_open_payload,
     read_case_record, case_record_to_comment, escalation_comment_payload,
-    unreadable_comment_payload) take a CaseMapping instead of settings_dir. None of them reads
+    unreadable_comment_payload — and release_predicate, until #1221's amendment removed it) take
+    a CaseMapping instead of settings_dir. None of them reads
     mapping.yaml: called with a CaseMapping while no mapping file exists anywhere, they answer from
     it."""
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="map")
-    S.mapping_path(folder).write_text(_mapping_1107("released-1107"), encoding="utf-8")
+    S.mapping_path(folder).write_text(_mapping_1107(), encoding="utf-8")
     record = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                                        dispatches_lead_zero=False)
     mapping = record.ticket_mapping
     assert isinstance(mapping, S.record_type("CaseMapping")), f"ticket_mapping is {mapping!r}"
     S.mapping_path(folder).unlink()
     assert not S.mapping_path(folder).exists(), "the mapping file is still there"
-
-    predicate = case_ticket.release_predicate(mapping)
-    assert predicate.is_released({"status": "released-1107"}), "the mapping's released status"
-    assert not predicate.is_released({"status": "closed"}), "a status the mapping does not name"
 
     alert = _alert_1107("sig-name-1107", "summary-1107")
     payload = S.with_mapping(case_ticket.alert_to_open_payload, alert, "case-1107", mapping=mapping)
@@ -467,7 +466,7 @@ def test_s7_mf11_mutating_callers_copy_locally(tmp_path):
     a local copy."""
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="mf11")
-    S.mapping_path(folder).write_text(_mapping_1107("released-1107"), encoding="utf-8")
+    S.mapping_path(folder).write_text(_mapping_1107(), encoding="utf-8")
     record = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                                        dispatches_lead_zero=False)
     mapping = record.ticket_mapping
@@ -497,7 +496,7 @@ def test_s7_mf11_mutating_callers_copy_locally(tmp_path):
     assert unreadable["author"] == "author-1107", unreadable
     assert S.with_mapping(case_ticket.case_record_to_comment, rec,
                         mapping=mapping)["author"] == "author-1107", "a comment edit leaked"
-    assert case_ticket.release_predicate(mapping).released_status == "released-1107"
+    assert S.open_reporter(mapping) == "rep-1107"
     assert _plain(mapping) == before, "building payloads changed the record's mapping"
 
 
@@ -508,9 +507,10 @@ def test_d_mapping_error_consumers(tmp_path, caplog):
     no warning about the mapping. (#1221 removed the query tool's release screen, which degraded
     to serving no comments here, and the estate applier's comment-patch refusal.)"""
     root = tmp_path / "tenants"
-    # `open.status` and `released.status` both 'open': the loader's own lifecycle refusal (#767),
-    # a mapping file present (so the tenant is accepted, REQUIRED_SETTINGS) and unusable.
-    S.plant(root, marker="bad", table=TICKET_TABLE, released_status="open")
+    # A templated `open.status`: the loader's own lifecycle refusal (#767; since #1221's amendment
+    # its only one), a mapping file present (so the tenant is accepted, REQUIRED_SETTINGS) and
+    # unusable.
+    S.plant(root, marker="bad", table=TICKET_TABLE, open_status="{summary}")
     record = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                                        dispatches_lead_zero=False)
     error = record.ticket_mapping
@@ -534,8 +534,8 @@ def test_d_mapping_error_consumers(tmp_path, caplog):
 
     # (b) The record step: a warning and an error receipt, no comment sent.
     case_dir = M.make_run(tmp_path / "runs", "case-err-1107")
-    # CX8: the shim on the child's PATH receives argv + env; it answers the read-back as an open
-    # case (not released) and a POST as created, in curl's body + status-line shape.
+    # CX8: the shim on the child's PATH receives argv + env; it answers a POST as created, in
+    # curl's body + status-line shape.
     shim = S.DockerShim(tmp_path / "docker", S.store_answers_ok(case_dir.name))
     caplog.clear()
     assert S.record_step(case_dir, record, env=shim.env()) is None
@@ -555,17 +555,18 @@ def test_o2_ticket_replies_ignore_the_mapping(tmp_path):
     changes what a ticket reply serves: the query tool reads no mapping, so a case closed under
     the mapping as built, one closed only under the edited file, and an open one all reach
     gather with their comments. (#1221 removed the release screen that once read the record's
-    released status here.)"""
+    released status here; its amendment removed the released status itself, so the mid-run edit
+    moves the reporter, and the "edited" case's status is one only that edit names.)"""
     root = tmp_path / "tenants"
-    folder = S.plant(root, marker="o2", table=TICKET_TABLE, released_status="closed")
+    folder = S.plant(root, marker="o2", table=TICKET_TABLE)
     record = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                                        dispatches_lead_zero=False)
-    assert case_ticket.release_predicate(record.ticket_mapping).released_status == "closed"
+    assert S.open_reporter(record.ticket_mapping) == "defender"
 
     def edit_mapping() -> None:
-        # Mid-run, after the record was built: an operator moves the released status.
+        # Mid-run, after the record was built: an operator edits the mapping.
         S.mapping_path(folder).write_text(
-            T1106.mapping_text(released_status="done-edited-1107"), encoding="utf-8")
+            T1106.mapping_text(reporter="done-edited-1107"), encoding="utf-8")
 
     tickets = [M.ticket("SOC-CLOSED-O2", status="closed", comments=[M.comment("MARK-CLOSED-O2")]),
                M.ticket("SOC-EDITED-O2", status="done-edited-1107",
@@ -589,10 +590,10 @@ def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
     the estate applier's refusal, which judged the patch against the record's ticket_mapping.)"""
     # #1120: the resumed sibling reads its tenant from `DEFENDER_DATA_ROOT` alone.
     root = current_data_root()
-    folder = S.plant(root, marker="est", table=TICKET_TABLE, released_status="closed")
+    folder = S.plant(root, marker="est", table=TICKET_TABLE)
     probe = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                                       dispatches_lead_zero=False)
-    assert case_ticket.release_predicate(probe.ticket_mapping).released_status == "closed"
+    assert S.open_reporter(probe.ticket_mapping) == "defender"
 
     def patch(entity: str, status: str) -> dict[str, Any]:
         return {"ticket": {entity: {"status": status, "comments": [
@@ -612,14 +613,14 @@ def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
     def resume(world: str) -> tuple[Any, list[dict[str, Any]], dict[str, Any]]:
         # The record is built from the file as planted; the edit lands after (preflight runs
         # after `tenant = tenant_of()`), each run afresh.
-        S.mapping_path(folder).write_text(T1106.mapping_text(released_status="closed"),
+        S.mapping_path(folder).write_text(T1106.mapping_text(),
                                           encoding="utf-8")
         investigated: list[dict[str, Any]] = []
         handed: dict[str, Any] = {}
 
         def edit_after_record(_model: str | None = None) -> int:
             S.mapping_path(folder).write_text(
-                T1106.mapping_text(released_status="done-edited-1107"), encoding="utf-8")
+                T1106.mapping_text(reporter="done-edited-1107"), encoding="utf-8")
             return 0
 
         def lifecycle(**kw: Any) -> dict[str, Any]:

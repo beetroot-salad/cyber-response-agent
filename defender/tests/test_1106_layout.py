@@ -134,9 +134,11 @@ def test_the_moved_lead_zero_and_mapping_carry_the_retired_values():
     lz = T.mod("runtime.lead_zero_config")
     assert lz.load_correlation_template(lz.lead_zero_config_path(T.FIXTURE_SETTINGS)) == \
         T.SHIPPED_CORRELATION_TEMPLATE
-    predicate = T.mod("runtime.case_ticket").release_predicate(
-        T.fixture_run_tenant().ticket_mapping)
-    assert predicate.released_status == "closed"
+    # The mapping's own values as they were before the move (#1221's amendment dropped the
+    # `released:` section this once read through the release predicate).
+    mapping = T.fixture_run_tenant().ticket_mapping
+    assert mapping["open"]["status"] == "open"
+    assert mapping["comment"]["author"] == "defender"
 
 
 def test_the_playground_agent_half_exists_and_holds_no_settings_kind():

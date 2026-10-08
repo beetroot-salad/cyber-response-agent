@@ -18,9 +18,10 @@ all production. A new scenario is a verb table and two `Turn`s, not fresh plumbi
 
 THE MAPPING IS THE SHIPPED ONE HERE, deliberately: a driven run reads the committed playground
 tenant's settings (#1106) for its mapping and its grants alike, so repointing it at a fixture
-tenant would change the run rather than the mapping. The released status and the agent identity are therefore READ OFF
-the shipped file (`shipped_released_status_and_author`), which also makes these tests a
-statement about the file an operator edits (O5).
+tenant would change the run rather than the mapping. The agent identity is therefore READ OFF
+the shipped file (`shipped_comment_author`), which also makes these tests a statement about the
+file an operator edits (O5). A closed case's status is the store's own `closed`
+(`CLOSED_STATUS`): since #1221's amendment the mapping names no released status at all.
 """
 from __future__ import annotations
 
@@ -34,7 +35,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.runtime.verbs import VerbContext  # noqa: E402
-from defender.tests._spec767 import shipped_released_status_and_author  # noqa: E402
+from defender.tests._spec767 import CLOSED_STATUS, shipped_comment_author  # noqa: E402
 from defender.tests._verb_authorization_632 import (  # noqa: E402
     DONE,
     ScopedFakeVerbs,
@@ -59,7 +60,7 @@ def _comment(author: str, body: str) -> dict[str, Any]:
     return {"author": author, "body": body, "created": "2026-09-16T12:00:00Z"}
 
 
-def _seed(released: str, author: str, *, closed: bool = True) -> dict[str, Any]:
+def _seed(author: str, *, closed: bool = True) -> dict[str, Any]:
     """The e2e seed (the `d6_e2e_seed` clause): one closed case carrying two agent comments
     and an analyst's, one open case carrying an agent's and an analyst's. `closed=False`
     re-opens the first case, which the no-retroactive-scrub demand drives across two calls in
@@ -67,7 +68,7 @@ def _seed(released: str, author: str, *, closed: bool = True) -> dict[str, Any]:
     closed_ticket = {
         "key": CLOSED_KEY,
         "summary": CORRELATION_SUMMARY,
-        "status": released if closed else "in_progress",
+        "status": CLOSED_STATUS if closed else "in_progress",
         "labels": ["sig:5710"],
         "comments": [
             _comment(author, EARLIER_TEXT),
@@ -123,8 +124,7 @@ def test_767_the_capture_carries_the_store_payload(tmp_path: Path):
     store's answer, so an open case's comments — an agent's and an analyst's — are as present
     in the capture as in the model's turn. (#1221 removed the release screen that ran between
     the handler and `_record` and once dropped them.)"""
-    released, author = shipped_released_status_and_author()
-    seed = _seed(released, author)
+    seed = _seed(shipped_comment_author())
     run = run_gather(
         tmp_path, verbs=_registry([seed]),
         system="ticket", turns=[q("ticket", "list-tickets"), DONE], run_id="s767-capture",
@@ -149,9 +149,8 @@ def test_767_an_archived_world_carries_the_capture_whole(tmp_path: Path):
 
     Asserted over the whole surface a world archives — `executed_queries.jsonl` and every file
     under `gather_raw/` — because the archive copies the tree and not a row."""
-    released, author = shipped_released_status_and_author()
     run = run_gather(
-        tmp_path, verbs=_registry([_seed(released, author)]),
+        tmp_path, verbs=_registry([_seed(shipped_comment_author())]),
         system="ticket", turns=[q("ticket", "list-tickets"), DONE], run_id="s767-archive",
     )
 
@@ -186,8 +185,8 @@ def test_767_a_later_revocation_does_not_touch_an_existing_capture(tmp_path: Pat
     KNOWN LIMIT, stated rather than implied: this demand is about the absence of a scrub, and
     no mechanism in this design could produce one. It is written to fail if a future retention
     or revocation feature reaches back into a written run dir."""
-    released, author = shipped_released_status_and_author()
-    before, reopened = _seed(released, author), _seed(released, author, closed=False)
+    author = shipped_comment_author()
+    before, reopened = _seed(author), _seed(author, closed=False)
     run = run_gather(
         tmp_path,
         verbs=_registry([before, reopened]),
