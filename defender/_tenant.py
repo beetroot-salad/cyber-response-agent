@@ -10,8 +10,9 @@ point. Each runs base records the tenant it serves at `<runs_base>/_tenant.json`
 (`ensure_runs_base_record`): created once, never overwritten, and a run for another tenant is
 refused rather than stamped.
 
-Both files are created through `write_guarded(mode="create")`, so a reader sees them absent or
-complete. Every refusal is a `TenantRefused` naming the refused value — an id, or the
+Both files are created complete-or-absent — the runs-base record through
+`write_guarded(mode="create")`, the row off its held folder (`_io.hold_new`, `Held.write`) — so
+a reader sees them absent or complete. Every refusal is a `TenantRefused` naming the refused value — an id, or the
 content of an `agent/.tenant-id`, escaped and bounded (`_shown`); a path, operator-set, as it
 is — which entry points catch and print verbatim; a corrupt record refuses the run rather than
 reading as `None`. `refuse_colliding_run_id` keeps run ids off the record's filename.
@@ -452,7 +453,7 @@ def accept_tenant(
          (steps 3-5 saw no link there), against each tree's resolution.
 
     Reads only. The knowledge folder is walked through `_io.bind`'s no-follow reader, from the
-    data root down, so no link below the root is followed there; the row is read by its path
+    data root down, so no link below the root is followed there; the row is read off `<T>`
     (no-follow at the file itself), and step 7 judges `runs/` by where it leads. Any read a check cannot complete — an `OSError`, or a link
     loop where a path given to it is resolved — is the refusal, naming the path and the
     reason."""
@@ -698,29 +699,31 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def create_tenant(root: Path, tenant_id: TenantId, *, io: Any = _real_io) -> TenantRow:
+def create_tenant(root: Path, tenant_id: TenantId) -> TenantRow:
     """Mint tenant_id's row exactly once, into a FRESH data root (O10: tenant 1 only). The
-    folder is made through `guarded_mkdir` (F12: no raw mkdir here), which re-judges every
-    component below `root` at mkdir time, closing an O11a-vs-write-time symlink swap; the row
-    itself is created through the complete-or-absent lane (J16/J63), never overwritten (O2,
-    D1)."""
+    folder is made and held by `hold_new` off the root's handle (F12: no raw mkdir here), which
+    judges `<T>` with no link followed at mkdir time, closing an O11a-vs-write-time symlink swap;
+    the row itself is created off that held folder through the core's complete-or-absent lane
+    (J16/J63, #1137), never overwritten (O2, D1)."""
     paths = _TenantPaths(root, tenant_id)
     root = Path(root)
     refuse_foreign_data_root(root, paths.tenant_id)
     try:
-        io.guarded_mkdir(paths.dir, base=root)
+        held = _real_io.hold_new(root, paths.tenant_id)
     except OSError as blocked:
         raise TenantRefused(f"{paths.dir}: {blocked}") from blocked
     row = TenantRow(tenant_id=paths.tenant_id, created_at=_now())
     body = json.dumps(
         {"tenant_id": row.tenant_id, "created_at": row.created_at}, indent=2, sort_keys=True,
     ) + "\n"
-    try:
-        io.write_guarded(paths.row, body, mode="create")
-    except FileExistsError as taken:
-        raise TenantRefused(f"{paths.row} already exists — a tenant is created once") from taken
-    except OSError as blocked:
-        raise TenantRefused(f"{paths.row}: {blocked}") from blocked
+    with held:
+        try:
+            held.write(ROW_NAME, body, mode="create")
+        except FileExistsError as taken:
+            raise TenantRefused(
+                f"{paths.row} already exists — a tenant is created once") from taken
+        except OSError as blocked:
+            raise TenantRefused(f"{paths.row}: {blocked}") from blocked
     return row
 
 
@@ -774,9 +777,16 @@ def require_tenant(root: Path, tenant_id: TenantId) -> TenantRow:
 
 
 def _read_row(paths: _TenantPaths) -> TenantRow:
-    text, reason = _real_io.read_guarded(paths.row)
+    # Read off `<T>`, its spelling followed as the folders above a path read's leaf are; the row
+    # itself is opened no-follow and judged by the core (#1137). A reason never names a path.
+    try:
+        with _real_io.bind(paths.dir) as bound:
+            answer = bound.read(ROW_NAME)
+    except OSError as unreadable:
+        raise TenantRefused(f"{paths.row}: {unreadable}") from unreadable
+    text = answer.text
     if text is None:
-        raise TenantRefused(f"{paths.row}: {reason}")
+        raise TenantRefused(f"{paths.row}: {'absent' if answer.absent else answer.reason}")
     row = _parse_json_record(text, TenantRow, _ROW_FIELDS, source=paths.row, refusal=TenantRefused)
     if row.tenant_id != paths.tenant_id:
         raise TenantRefused(f"{paths.row} names {row.tenant_id!r}, not {paths.tenant_id!r}")
