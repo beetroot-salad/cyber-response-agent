@@ -153,6 +153,9 @@ class SpecBranch:
     """The drain's git-worktree lifecycle, recorded rather than performed: these demands are
     about which lane RAN, not about the (separately spec'd) supply-chain step."""
 
+    #: What the real `AuthorBranch` cuts a batch from (its default); a box-start fault names it.
+    branch_base = "origin/main"
+
     branch_prefix = "lead-author/"
 
     def __init__(self, base: Path) -> None:

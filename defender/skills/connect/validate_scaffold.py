@@ -12,6 +12,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._corpus import iter_query_templates  # noqa: E402
+from defender._knowledge import KnowledgePaths  # noqa: E402
 from defender._io import TEXT_READ_ERRORS, read_plain, read_text_soft  # noqa: E402
 from defender._paths import process_defender_dir  # noqa: E402
 from defender._scaffold_rules import (  # noqa: E402
@@ -203,7 +204,8 @@ def check_config(report: Report, settings_dir: Path, system: str) -> None:
 
 
 def check_skill(report: Report, defender: Path, system: str) -> None:
-    skill = defender / "skills" / system / "SKILL.md"
+    skill_dir = KnowledgePaths.of_defender_dir(defender).system_skill_dir(system)
+    skill = skill_dir / "SKILL.md"
     if not skill.exists():
         report.add(FAIL, f"per-system skill skills/{system}/SKILL.md is missing")
         return
@@ -215,7 +217,7 @@ def check_skill(report: Report, defender: Path, system: str) -> None:
     else:
         report.add(PASS, f"skills/{system}/SKILL.md has frontmatter name: defender-{system}")
 
-    execution = defender / "skills" / system / "execution.md"
+    execution = skill_dir / "execution.md"
     has_inline = text is not None and "## Execution" in text
     if execution.exists():
         report.add(PASS, f"skills/{system}/execution.md exists")
@@ -233,7 +235,7 @@ def check_templates(report: Report, defender: Path, system: str, verbs) -> None:
     lead-authoring lane writes. The rules are `_scaffold_rules`, shared with the loop's
     commit gate.
     """
-    qdir = defender / "skills" / "gather" / "queries" / system
+    qdir = KnowledgePaths.of_defender_dir(defender).catalog_dir / system
     templates = [t for t in iter_query_templates(qdir.parent) if t.system == system]
     if not templates:
         report.add(WARN, f"no seed query templates under skills/gather/queries/{system}/ (they grow post-merge)")

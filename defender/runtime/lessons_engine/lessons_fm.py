@@ -40,12 +40,13 @@ from pathlib import Path
 
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._git import REPO_ROOT
+from defender._knowledge import CHECKOUT_KNOWLEDGE
 from defender._untrusted import wrap_fresh
 from defender._corpus import Lesson
 from defender.runtime.lessons_engine._lessons_common import iter_lessons, use_utf8_stdio
 from defender._io import read_text_utf8
 
-LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
+LESSONS_DIR = CHECKOUT_KNOWLEDGE.lessons_dir
 
 DIMENSIONS = ("source_signature", "telemetry_source", "attack_phase")
 

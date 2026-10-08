@@ -6,14 +6,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from defender._clock import parse_iso_utc
+from defender._knowledge import LESSON_CORPORA
 from defender.runtime.agent_role import AgentRole
 
-#: Every corpus the author side may touch. Kept separate from `RUNTIME_LESSON_CORPORA` (what
-#: the runtime agent loads at PLAN) so an author-only corpus such as `lessons-questioner` is
-#: never readable by the runtime.
-LESSON_CORPORA = frozenset({"lessons", "lessons-questioner"})
-
-RUNTIME_LESSON_CORPORA = frozenset({"lessons"})
 
 
 def lesson_name(file_path: str, corpora: frozenset[str] = LESSON_CORPORA) -> str | None:

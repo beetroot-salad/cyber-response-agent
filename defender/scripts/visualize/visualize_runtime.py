@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from defender import _git
+from defender._knowledge import CHECKOUT_KNOWLEDGE, LESSONS
 from defender._report import ReportRead
 from defender._vocab import CEILING_DISPOSITION, HOST_ONLY_DISPOSITION, normalized_disposition
 from defender.run_repository import RUN_LAYOUT, RunPaths
@@ -28,6 +29,10 @@ from defender.scripts.visualize.visualize_primitives import (
     pre_text_untrusted,
     section,
 )
+
+
+#: The lessons corpus as a pathspec of the checkout (`defender._knowledge`).
+_LESSONS_PATHSPEC = CHECKOUT_KNOWLEDGE.rel(LESSONS)
 
 
 def _wire_log_rel() -> str:
@@ -727,7 +732,7 @@ def _lesson_changes(run_dir: Path, run_id: str) -> dict:
                 f"--since={since_iso}",
                 "--pretty=format:%H%x09%cI%x09%s",
                 "--name-status",
-                "--", "defender/lessons/",
+                "--", _LESSONS_PATHSPEC,
             ],
             cwd=REPO_ROOT, timeout=10,
         )
@@ -765,7 +770,7 @@ def _parse_git_log_records(stdout: str) -> list[dict]:
 def _git_show_lessons_diff(sha: str) -> str:
     try:
         return _git.git(
-            ["show", sha, "--pretty=format:", "--", "defender/lessons/"], cwd=REPO_ROOT
+            ["show", sha, "--pretty=format:", "--", _LESSONS_PATHSPEC], cwd=REPO_ROOT
         )
     except _git.GitError:
         return ""

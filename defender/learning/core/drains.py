@@ -638,7 +638,7 @@ def _unwind_worktree_start_fault(e: BaseException, wt: Path, branch: AuthorBranc
     with contextlib.suppress(Exception):
         branch.cleanup(wt)
     if isinstance(e, box_mod.BoxFault) and cut_sha:
-        pointer = f"origin/main @ {cut_sha} — check out that commit"
+        pointer = f"{branch.branch_base} @ {cut_sha} — check out that commit"
         pointer += " and run the build from it." if box_mod.carries_build_remedy(e) else "."
         raise box_mod.BoxFault(f"{e}\n\n{pointer}") from e
 
@@ -753,10 +753,10 @@ def _lead_author_pr_title(batch_id: str) -> str:
     return f"learning: lead-author catalog/skill batch {batch_id}"
 
 
-def _lead_author_pr_body(branch: str) -> str:
+def _lead_author_pr_body(branch: str, base: str) -> str:
     return (
         "Automated gather-catalog / system-skill curation from the lead-author drain "
-        f"(branch `{branch}`, off freshly-fetched `origin/main`). May also fold "
+        f"(branch `{branch}`, off freshly-fetched `{base}`). May also fold "
         "agent-fixable execution failures into per-system `execution.md` "
         "`## Common pitfalls`. Touches `defender/skills/` only — distinct from the "
         "lessons PR."

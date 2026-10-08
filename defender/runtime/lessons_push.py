@@ -20,6 +20,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from defender._knowledge import KnowledgePaths
 from defender.hooks.record_lesson_load import LOAD_KIND_PUSH
 
 _logger = logging.getLogger(__name__)
@@ -31,10 +32,10 @@ if TYPE_CHECKING:
 
 
 def corpus_dir(deps: AgentDeps, *, lane: str) -> Path | None:
-    """`defender_dir/lessons`, or `None` with a warning under the caller's `lane` prefix. A
+    """The run's lessons corpus (its `KnowledgePaths`' `lessons_dir`), or `None` with a warning under the caller's `lane` prefix. A
     missing corpus is otherwise silent (the model reads silence as "nothing new matched"), so
     a mis-resolved `defender_dir` would disable the lane unnoticed."""
-    corpus = deps.defender_dir / "lessons"
+    corpus = KnowledgePaths.of_defender_dir(deps.defender_dir).lessons_dir
     if not corpus.is_dir():
         _logger.warning(f"{lane} no lessons corpus at {corpus}; omitting the lessons push")
         return None

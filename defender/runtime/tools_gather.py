@@ -29,7 +29,8 @@ from .tools import (
     LeadStop,
 )
 
-from defender._corpus import QueryTemplate, is_established, iter_query_templates, query_catalog_dir
+from defender._corpus import QueryTemplate, is_established, iter_query_templates
+from defender._knowledge import KnowledgePaths
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED
 from defender.hooks.record_lead import claim_lead as _claim_lead
 from defender._untrusted import wrap_fresh
@@ -107,7 +108,7 @@ def _template_index(
     on_target: list[str] = []
     elsewhere: list[str] = []
     established_seen = 0
-    for t in iter_query_templates(query_catalog_dir(defender_dir)):
+    for t in iter_query_templates(KnowledgePaths.of_defender_dir(defender_dir).catalog_dir):
         if not is_established(t):
             continue
         established_seen += 1
@@ -167,13 +168,13 @@ _INDEX_NONE_GRANTED = (
 )
 
 
-def _execution_surface(defender_dir: Path, system: str) -> str:
+def _execution_surface(knowledge: KnowledgePaths, system: str) -> str:
     """Which file carries `system`'s execution surface (verbs, params, exit codes, pitfalls).
 
     A newly scaffolded system may have a `SKILL.md` but no `execution.md` yet; naming that
     saves gather a turn on a failing read.
     """
-    execution = Path(defender_dir) / "skills" / system / "execution.md"
+    execution = knowledge.system_skill_dir(system) / "execution.md"
     if execution.is_file():
         return f"Its execution surface is the sibling `{execution}`."
     return (
@@ -217,12 +218,12 @@ def _gather_prompt(
             f"progressive disclosure). Your target is `system: {request.system}`, named in the "
             "Dispatch at the end of this message; confirm it here. These descriptions are "
             "usually enough to pick a template or name a measurement — Read the target's full "
-            f"`{deps.defender_dir}/skills/{request.system}/SKILL.md` ONLY on demand, when you "
+            f"`{deps.knowledge.system_skill_dir(request.system)}/SKILL.md` ONLY on demand, when you "
             "need field vocab the descriptor lacks; not on every dispatch. Which verbs you may "
             "run and what params each one binds come from `list_verbs`, not from either file — "
             "but the VALUES a param accepts (an enum, a clamp, a timestamp format) are still "
             "the execution surface's to state. "
-            f"{_execution_surface(deps.defender_dir, request.system)}\n\n"
+            f"{_execution_surface(deps.knowledge, request.system)}\n\n"
             f"{catalog}\n"
         )
     index = _template_index(deps.defender_dir, request.system, verb_grant)
@@ -259,7 +260,7 @@ _SEARCH_LINES_PER_TEMPLATE = 3
 
 
 def _search_root(deps: AgentDeps, system: str | None) -> Path:
-    root = query_catalog_dir(deps.defender_dir)
+    root = deps.knowledge.catalog_dir
     if system is None:
         return root
     systems = sorted({p.name for p in root.iterdir() if p.is_dir()}) if root.is_dir() else []
@@ -286,7 +287,7 @@ def _tool_template_search(deps: AgentDeps, pattern: str, system: str | None = No
     scope = f"system `{system}`" if system else "every system"
 
     hits: list[tuple[QueryTemplate, list[str]]] = []
-    for t in iter_query_templates(query_catalog_dir(deps.defender_dir)):
+    for t in iter_query_templates(deps.knowledge.catalog_dir):
         if root not in t.path.parents:
             continue
         matched = [ln.strip() for ln in t.body.splitlines() if needle in ln.lower()]

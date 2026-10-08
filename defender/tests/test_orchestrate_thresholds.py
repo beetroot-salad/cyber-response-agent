@@ -387,6 +387,9 @@ class _StubBranch:
     raises before finish_batch, so only these three methods are exercised; start_batch
     returns a .git-less dir, on which ClaimGit.reset no-ops."""
 
+    #: What the real `AuthorBranch` cuts a batch from (its default); a box-start fault names it.
+    branch_base = "origin/main"
+
     branch_prefix = "lead-author/"
 
     def __init__(self, wt: object) -> None:

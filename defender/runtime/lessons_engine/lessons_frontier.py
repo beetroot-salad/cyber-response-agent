@@ -48,9 +48,9 @@ from defender.skills.invlang.validate import (
     is_open_slot,
 )
 from defender import _yaml
-from defender._git import REPO_ROOT
+from defender._knowledge import CHECKOUT_KNOWLEDGE
 
-DEFAULT_CORPUS = REPO_ROOT / "defender" / "lessons"
+DEFAULT_CORPUS = CHECKOUT_KNOWLEDGE.lessons_dir
 CORPUS_NAME = DEFAULT_CORPUS.name
 
 #: Selectors are hidden from the rendered block: the `matched` line already names the vertex
