@@ -155,7 +155,7 @@ def build_view(defender_dir: Path = DEFENDER) -> dict:
     for name, spec in GROUPS.items():
         skipped: list[Path] = []
         lessons = [
-            _normalize(lesson.path, lesson.fm, lesson.body, group=name,
+            _normalize(lesson.path, lesson.fm, lesson.body, group=name,  # lint-lesson-text: ok — the HTML view escapes every value it renders (build.py escHtml)
                        title_keys=spec["title_keys"], desc_key=spec["desc_key"],
                        root=defender_dir.parent)
             for lesson in iter_lessons(defender_dir / spec["dir"], on_skip=skipped.append)

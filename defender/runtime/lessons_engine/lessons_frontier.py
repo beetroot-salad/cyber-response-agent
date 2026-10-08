@@ -380,7 +380,7 @@ def match_loaded(
     hits: list[Hit] = []
     candidate_items: list[tuple[str, ...]] = []
     for lesson in lessons:
-        fm = lesson.fm
+        fm = lesson.fm  # lint-lesson-text: ok — matched by selectors; printed only by render(), inside its untrusted frame
         match = _best_match(_parse_selectors(fm), frontier)
         if match is None:
             continue

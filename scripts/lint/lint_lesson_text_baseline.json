@@ -1,0 +1,4 @@
+{
+  "//": "lint_lesson_text baseline — raw lesson-text reads (`.fm`, a lesson's `.raw` / `.body`) outside defender/_corpus.py without `# lint-lesson-text: ok — <reason>`. Ships EMPTY. Regenerate: python scripts/lint/lint_lesson_text.py --update-baseline.",
+  "entries": {}
+}

@@ -663,6 +663,11 @@ jobs:
       - name: Log-setup gate (every program configures logging)
         run: defender/.venv/bin/python scripts/lint/lint_log_setup.py
 
+      # Lesson text is corpus text a model wrote (#1206): it leaves defender/_corpus.py as
+      # Lesson.line / .lines / .match_text, or a raw read says on its line where it goes.
+      - name: Lesson-text gate (raw lesson text is read only where a line says why)
+        run: defender/.venv/bin/python scripts/lint/lint_lesson_text.py
+
       # Small-helper complement to the jscpd gate: jscpd catches large copy-paste
       # blocks (>=60 tokens) but is blind to 1-5 line helpers copied across
       # modules and to divergent same-named copies (#357/#358/#359/#360).

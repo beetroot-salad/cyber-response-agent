@@ -51,6 +51,7 @@ def test_match_text_finds_a_listed_value_and_keeps_fields_apart(tmp_path):
     run from one key into the next."""
     lesson = _lesson(tmp_path, (
         "---\nname: l\n"
+        'description: "d1\\nd2"\n'
         "telemetry_source:\n  - |\n    a\n    b\n"
         "source_signature: [v2-x]\n"
         "attack_phase: [persistence]\n"
@@ -58,6 +59,7 @@ def test_match_text_finds_a_listed_value_and_keeps_fields_apart(tmp_path):
     text = lesson.match_text()
     assert text.splitlines() == [
         "name: l",
+        "description: d1 d2",
         "telemetry_source: [a b]",
         "source_signature: [v2-x]",
         "attack_phase: [persistence]",

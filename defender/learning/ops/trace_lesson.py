@@ -138,7 +138,7 @@ def _print_index(lessons_dir: Path, runs_dir: Path) -> None:
     skipped: list[Path] = []
     for lesson in iter_lessons(lessons_dir, on_skip=skipped.append):
         name = lesson.path.stem
-        raw_created = lesson.fm.get("created_at")
+        raw_created = lesson.fm.get("created_at")  # lint-lesson-text: ok — parsed as a date; a bad value prints through one_line
         created_at = _parse_dt(raw_created)
         cases = in_context_cases(name, created_at, runs_dir)
         desc = lesson.line("description")
