@@ -5394,6 +5394,8 @@ demands:
     the two INCOMPLETE constants at cli.py:97 and episode.py:49, the judge''s absent-record default, the page.'
   resolved_by: human
   provisional_lifted: §7 (70-resolutions.md)
+  amendment_note: 'R-09 (the human, F-loop: keep the rule): a rejected provider key at pre-flight (GPR-01: ModelHTTPError 401, not retried) follows
+    this rule; the test''s rejected-key-401 arm pins it (phase-F re-verify, 93-reverify.md).'
 - id: b_p188
   kind: domain-outcome
   form: test
@@ -15863,8 +15865,9 @@ handoff:
   - 'FOLLOW-UP (N21, auto): poisoned-input detection for a hostile denial pattern.'
   - 'FOLLOW-UP (N19 / N06 #219): a per-tenant rate limit (the limit is per episode in this PR).'
   - 'R-09 (92-reconciliation.md): a rejected provider key at pre-flight (GPR-01: ModelHTTPError 401, not retried by the SDK) follows #187''s rule:
-    every world exhausts its attempts and the episode reads `unusable`, each world''s reason naming the auth failure. Unpinned. Carving it out
-    as a configuration refusal is a human call, not taken here.'
+    every world exhausts its attempts and the episode reads `unusable`, each world''s reason naming the auth failure. RULED by the human (F-loop
+    R-09: keep the rule, no configuration-refusal carve-out); pinned at phase-F re-verify by b_p187''s `rejected-key-401` arm (GPR-01''s 401). That
+    the reason tells the auth failure from an outage (the status) is unpinned: no spelling is coined for it.'
   - 'SR-3 (10-brief, R-13): declaring a tenant-systems resource in .claude/spec-flow.json with the 8 adapters'' readers was named a §7 item and
     never reached one. Profile bookkeeping, no obligation turns on it; recorded beside C13 so it is not silently dropped.'
   - 'RULED, UNPINNED (R-15): N18 (auto) ''once the family is unusable, running siblings are stopped by the launcher acting on per-world records'':
@@ -15874,9 +15877,10 @@ handoff:
   - 'RULED, UNPINNED (blind Part C, p019): a single enormous string value or deep nesting in a base answer is pinned at serving (neither crashes
     nor hangs; the records stay consistent either way); the settled seed''s page-reader clause is not driven by the suite.'
   - 'UNCOINED (s_p212, blind Part C): the rate limiter''s fail-closed raise on unreadable state has no coined exception class; the test pins only
-    that acquire raises. Coin one in _spec1224 if the class should be pinned.'
+    that acquire raises. F-loop ruling (auto, non-material): the implementer coins the class.'
   - 'UNCOINED (b_p193, S10): no reason word is coined for an archive failure after the siblings ran; the test pins that the judge cannot see the
-    failed world (no call, no findings) and that the outcome record keeps its word, not the failed world''s own record.'
+    failed world (no call, no findings) and that the outcome record keeps its word, not the failed world''s own record. F-loop ruling (auto,
+    non-material): the implementer coins the reason word.'
   drops:
   - 'B-01 (20-demands background; design lines 1, 5, 7, 9, 28, 44, 46, 48, 62, 64, 72, 92, 100, 107, 122, 135, 145, 149, 153) — titles, headings
     and the obligation-format preface: document structure, no demand.'
@@ -16099,10 +16103,11 @@ handoff:
   - 'PHASE-F REPAIR (R-07) implementer note: test_oracle_python_scratch_files_and_the_investigators_box drives the production oracle start_box(env=...)
     through a recording `docker` on PATH. It forbids any bind source under or over the sibling''s run dir or the tenant''s agent half and any
     --volumes-from or reference to the investigator''s container; it admits a READ-ONLY bind of the defender checkout (the box image carries no
-    tree and the transport runs `python3 -m defender.runtime.bash_exec` inside it). A refused create may surface as OracleSandboxError or BoxFault.'
+    tree and the transport runs `python3 -m defender.runtime.bash_exec` inside it). A refused create may surface as OracleSandboxError or BoxFault.
+    F-loop ruling (auto): the read-only checkout bind is accepted under M18=A (it is not an investigator mount).'
   - 'PHASE-F REPAIR (b_p207) implementer note: the isolating control assumes oracle-budget exhaustion is checked against spend already made (a
     world with zero spend makes at least one request under a tiny budget). An implementation that pre-charges an affordability estimate turns
-    that control red; D1 leaves the mechanism open.'
+    that control red; D1 leaves the mechanism open. F-loop ruling (auto): the spend-already-made reading is taken.'
   - 'PHASE-F REPAIR (F-01, 41 weak tests, F-05, F-12, U-03, U-04): every verifier-decided test now carries a passing-verifier control and pins
     the verifier''s inputs (never a detection claim); each weak test''s assertions now back its docstring or the docstring is narrowed; no test
     was renamed and no demand id changed. 85-repair-digest.md lists each finding''s disposition.'
@@ -16112,14 +16117,27 @@ handoff:
     honest floor (251 at the v2 manifest load, 83 at cli.main roster=, 5 at pytest.raises over the stubbed OracleUnservable, 41 at the other modify-existing
     surfaces). Supersedes the counts in the AUTHOR (phase E) census lines.'
   - 'RED FLAG (phase F repair, U-04): the foreign-world arm reads #240''s C1 (''z'' never becomes a row or queue key) onto the outcome-record
-    side: an accepted outcome naming an unservable world the manifest lacks is graded and ''z'' appears nowhere. A writer''s inference; the human
-    may confirm.'
+    side: an accepted outcome naming an unservable world the manifest lacks is graded and ''z'' appears nowhere. A writer''s inference, accepted
+    as pinned (F-loop ruling, auto: flags 5-7).'
   - 'NOTE (phase F repair, R-05): the judge gate asserts ONE shared stamp word across an absent, an empty and a torn outcome record, outside {accepted,
     unusable, refused, incomplete}. It reads 70''s M05 line (''an absent or torn record is a distinct "no record" state every reader reports as
     missing'') with the gate as one of those readers (PCO-02''s absent-record default); the test docstring cites it.'
   - 'RED FLAG (phase F repair, b_p239): N03''s recommendation (45) voids a world''s reply on an unknown system name; 70''s reading says only ''validated''.
-    The test pins that ''IDP'' is not recorded and every recorded name is canonical; whether the whole reply is voided is unpinned.'
+    The test pins that ''IDP'' is not recorded and every recorded name is canonical; whether the whole reply is voided is unpinned. Accepted as
+    pinned (F-loop ruling, auto: flags 5-7).'
   - 'RED FLAG (phase F repair, o03, minor): the added ''family.md text reaches the family call'' assertion rests on HEAD''s seam design (the per-call
-    task composed into the user message), not on the seed''s words.'
+    task composed into the user message), not on the seed''s words. Accepted as pinned (F-loop ruling, auto: flags 5-7).'
   - 'RED FLAG (phase F repair, b_p203, minor): the test depends on pre-flight replaying call 1 before call 2 (capture order and params order agree);
-    another replay order fails it for a non-behavioural reason.'
+    another replay order fails it for a non-behavioural reason. Accepted as pinned (F-loop ruling, auto: flags 5-7).'
+  - 'PHASE-F RE-VERIFY (93-reverify.md) repair: the pre-flight file''s call router (`_on_post`, R-01) now hands a request carrying several post-branch
+    call markers to the one occurring LAST in its inbound text, as test_1224_serving._CallRouted already did. A world''s pre-flight may keep one
+    append-only oracle conversation across the calls it replays (d18a pins that shape for the sibling), so the second post-branch call''s requests
+    in s_p228 and b_p203 carried both markers and went unrouted: red for a harness reason under that honest shape. World routing (`_by_world`)
+    keeps its strict one-marker rule. Residual presumption (implementer note, not a pin): in an append-only pre-flight conversation, the pre-flight
+    files'' scenarios presume the post-branch calls replay after the pre-branch ones (capture order); a pre-branch call replayed after a post-branch
+    one would be routed to the post-branch double and the scenario fails for a non-behavioural reason, as b_p203''s accepted red flag already says.'
+  - 'PHASE-F RE-VERIFY (93-reverify.md) census: 451 test functions, 473 collected items (b_p187 now two arms: outage-503 / rejected-key-401, R-09).
+    RED AT BASE: 470 fail, 3 pass (o43, p253, d19c). spec-graph nullstub --target estate.oracle --target estate.limiter: 92 discriminating or
+    recorded, 381 NON-ASSERT honest floor (251 at the v2 manifest load, 84 at cli.main roster= (the 401 arm beside its 503 twin), 5 at pytest.raises
+    over the stubbed OracleUnservable, 41 at the other modify-existing surfaces), 0 NULLSTUB-PASS. spec-graph calls with the 13 --targets of AUTHOR
+    (phase E): 63 NO-CALL, reproduced (the false floor). Supersedes the counts in the PHASE-F REPAIR census line.'

@@ -136,8 +136,14 @@ def _on_post(double: Any, *, name: str, extra: Mapping[str, Any] | None = None) 
     """One world's pre-flight double under M01=A: `double` answers the requests of the
     post-branch call (routed by `_MARK_POST`; `extra` maps further post-branch call markers to
     their doubles), and every pre-branch call is served unchanged (`_passing()`). No marker is
-    a substring of another, and none is carried by a pre-branch call's params."""
-    return _Routed({_MARK_POST: double, **(extra or {})}, default=_passing(), name=name)
+    a substring of another, and none is carried by a pre-branch call's params.
+
+    Routed LAST-WINS (phase-F re-verify): a world's pre-flight may keep one append-only oracle
+    conversation across the calls it replays (d18a pins that shape for the sibling), so a later
+    post-branch call's requests still carry an earlier one's marker; the call a request is
+    about is the one whose marker occurs last, as `test_1224_serving._CallRouted` routes."""
+    return _Routed({_MARK_POST: double, **(extra or {})}, default=_passing(), name=name,
+                   last_wins=True)
 
 
 def _forging_b() -> _Routed:
@@ -153,15 +159,18 @@ class _Routed:
     """A model double that hands each request to the scripted double whose MARKER the
     request's inbound text carries (the world's fact statement, or a call's params). It
     injects nothing of its own: an unmatched or doubly-matched request is answered text-only
-    and recorded in `unrouted`, which the scenario asserts empty."""
+    and recorded in `unrouted`, which the scenario asserts empty. `last_wins` (call routing
+    only, never world routing) hands a request carrying several markers to the one occurring
+    LAST in its inbound text: the current call's turn, after earlier calls' turns."""
 
     __name__ = "Routed"
 
     def __init__(self, routes: Mapping[str, Any], *, default: Any = None,
-                 name: str = "routed") -> None:
+                 name: str = "routed", last_wins: bool = False) -> None:
         self.routes = dict(routes)
         self.default = default
         self.name = name
+        self.last_wins = last_wins
         self.unrouted: list[str] = []
         self._lock = threading.Lock()
         self._model: Any = None
@@ -176,6 +185,9 @@ class _Routed:
     def __call__(self, messages: list[Any], info: Any) -> Any:
         text = S._messages_text(messages) + "\n" + (getattr(info, "instructions", None) or "")
         hits = [double for marker, double in self.routes.items() if marker in text]
+        if len(hits) > 1 and self.last_wins:
+            last = max(self.routes, key=text.rfind)
+            hits = [self.routes[last]]
         if len(hits) == 1:
             return hits[0](messages, info)
         if not hits and self.default is not None:
@@ -1453,7 +1465,8 @@ def test_preflight_one_world_hits_an_oracle_outage_and_the_others_are_fine(tmp_p
     assert down_c.requests >= 2
 
 
-def test_preflight_oracle_provider_is_down_for_every_world(tmp_path):
+@pytest.mark.parametrize("status", [S.OUTAGE, 401], ids=["outage-503", "rejected-key-401"])
+def test_preflight_oracle_provider_is_down_for_every_world(tmp_path, status):
     """b_p187 — a provider outage for the whole pre-flight records `unusable` with each world's reason naming the provider failure, and starts no sibling.
 
     M05=A: an all-world oracle-provider outage follows Amendment 2's rule (`unusable`, each
@@ -1461,9 +1474,16 @@ def test_preflight_oracle_provider_is_down_for_every_world(tmp_path):
     regardless: no sibling starts, and no oracle or tenant error reaches an investigator. The
     outage is the `ModelHTTPError` 503 the client raises once its own retries give up (GPR-01),
     on every request of every world.
+
+    R-09 (the human, F-loop: keep the rule): a provider key that is present but REJECTED at
+    pre-flight follows the same rule — no configuration-refusal carve-out, so the launch is not
+    refused with no world charged; it reads `unusable`, each world's reason naming the provider
+    failure. The fault is GPR-01's 401: the same `ModelHTTPError`, status 401, not retried by
+    the SDK (one request per oracle request). That the reason tells an auth failure from an
+    outage (the status) is not pinned: no spelling is coined for it.
     """
     est = S.estate(tmp_path)
-    down = _Raising(S.OUTAGE)  # GPR-01
+    down = _Raising(status)  # GPR-01
     oracle = _Routed({}, default=down)
     run = _launch(tmp_path, est, oracle=oracle, verifier=S.passing_verifier())
 
