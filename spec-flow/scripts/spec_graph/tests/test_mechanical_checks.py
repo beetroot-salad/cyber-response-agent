@@ -321,6 +321,20 @@ structure:
     assert "unknown facet `content`" in out
 
 
+def test_lint_accepts_the_handoff_principles_and_tensions_keys(make_repo):
+    # write-tests records the principles and the §7 tension rulings in the handoff block.
+    r = make_repo()
+    r.config(code_roots=[])
+    r.write("g.yaml", _MINIMAL.format(v=max(_schema.SCHEMA_VERSIONS)) + """\
+handoff:
+  principles: "host not assumed malicious; fail closed, loud, fast"
+  tensions: ["two owners for one path — one owner — adopted — M01, M04"]
+  forks: []
+""")
+    p = run_script("check_lint.py", "g.yaml", cwd=r.root)
+    assert "handoff key" not in p.stdout, p.stdout
+
+
 def test_lint_clean_minimal_graph_exits_0(make_repo):
     r = make_repo()
     r.config(code_roots=[])

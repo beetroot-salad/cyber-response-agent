@@ -25,7 +25,7 @@ inputs: [40-premises.md, 42-answers.py, 44-probes.md, 20-demands.md, 10-brief.md
 
 - **`phase`** — the phase letter plus your role (`A-ground`, `B-adversarial`, `C-judge`, `E-writer-<slice>` …).
 - **`status`** — `complete`; `design-refuted` when you refuted the design's own ground (stop and say how in the digest); `blocked` when you could not finish (say why in the digest).
-- **`inputs`** — the filenames of the frontiers you consumed, bare (`10-brief.md`). A non-frontier input (the design doc, an issue thread) may be listed too; it is not checked. This list is what lets `--resume` see that your file is stale when an input changes.
+- **`inputs`** — the filenames of the frontiers you consumed, bare (`10-brief.md`). List only files that exist: a numbered name with no file behind it (a skipped phase's output) is a finding. A non-frontier input (the design doc, an issue thread) may be listed too; it is not checked. This list is what lets `--resume` see that your file is stale when an input changes.
 - **Counts** — put them in the digest or the payload where a reader needs them, computed with `grep -c`/`wc` over your own file, never recalled. An optional `inventory: {premises: 212, ...}` mapping is allowed (integers only); nothing reconciles it against other files.
 - **`## Digest`** — at most 15 non-blank lines; it is your inline return to the spine, verbatim. Put detail in the payload.
 - **Sidecar** — when your payload is not markdown (a `.py` premise or answer file), write it beside a `.md` frontier of the same stem that carries the frontmatter and digest.

@@ -49,7 +49,7 @@ The frontmatter is for **checkpoint and resume**, not accounting: `inputs` is wh
 
 | Phase | Steps | Dispatches | Contract | Frontier(s) |
 |---|---|---|---|---|
-| 0 | worktree, principles, resume | spine | — | — |
+| 0 | worktree, principles, resume | spine | — | `00-principles.md` (only when asked) |
 | A | 1–2 ground ∥ extract | grounding leaf (Opus) ∥ extraction leaf (Opus) | phases/ground-extract.md | `10-brief.md`, `20-demands.md` |
 | B | 3 enumerate | strong author (Opus) ∥ 2–3 lensed leaves (Sonnet) | phases/enumerate.md | `30-premises-<lens>.md` |
 | C | 4 answer, probe, judge | answerer (Sonnet) → probe leaf (Sonnet; skipped when nothing to probe) → judge (Opus) | phases/answer.md | `40-premise-file.py` + `40-premises.md`, `42-answers.py`, `44-probes.md`, `45-dispositions.md` |
@@ -66,9 +66,9 @@ Scheduler-enforced constraints: B blocks on A's finished brief; the early-exit c
 
 Work in a **dedicated git worktree** — confirm before starting, create if not; the deliverable is a tests + spec_graph diff (§10) and stays off the main checkout. A reused worktree carries stale `.venv`/`__pycache__`/`.pytest_cache` that corrupt the baseline — clean them or verify the baseline green before phase A (a leaf's job if anything looks off).
 
-**Principles.** Every fork is judged against the threat model and failure posture — the design doc's principles block, on top of the profile's `conventions.principles`. If neither states them, ask the human now, once (AskUserQuestion: what is trusted, what is not, what is *not* assumed hostile; the failure posture), and record the answer in `70-resolutions.md`'s principles section and in the issue thread. Never derive them: twice a run reached §7 without them and the human had to stop it to state them, after the forks they would have dissolved had already been enumerated and answered.
+**Principles.** Every fork is judged against the threat model and failure posture — the design doc's principles block, on top of the profile's `conventions.principles`. If neither states them, ask the human now, once (AskUserQuestion: what is trusted, what is not, what is *not* assumed hostile; the failure posture), and record the answer in `00-principles.md` (a frontier: `phase: 0-principles`) and in the issue thread — not in `70-resolutions.md`, which would read as a finished §7 to a resumed run. Never derive them: twice a run reached §7 without them and the human had to stop it to state them, after the forks they would have dissolved had already been enumerated and answered.
 
-Then run `spec-graph frontiers <worktree>/.spec-flow/frontiers --resume` and enter the phase map where it says.
+Then run `spec-graph frontiers <worktree>/.spec-flow/frontiers --resume` and enter the phase map where it says. A chain begun under the earlier phase map (graph and gate at `50-`/`60-`, before §7) finishes under that map — check out the plugin commit it started on — or restarts at phase A; never splice the two maps.
 
 ## Scale and decomposition
 
@@ -84,7 +84,7 @@ Scale the ceremony to the delta. A small delta (no shared sink, nothing removed,
 
 A fork is **material** when its readings imply a different *data model*, a different *set of bound addresses or surfaces*, or a different *observable outcome at a stated obligation*; when it is genuinely unclear, it is material. Everything else **auto-resolves to the judge's recommendation**, recorded in `70-resolutions.md` and `handoff.forks` with `resolved_by: auto` — decided, not dropped, and visible to the merge-gate human. **Every option states its trade-off** — bare labels make the human pick on wording; the seam exists so they pick on consequence. Relay each item from its frontier, written there for a cold relay. Aim for one or two AskUserQuestion rounds; a third means the dissolve pass missed a root cause — say so, rather than keep asking.
 
-Record every outcome in `70-resolutions.md`: the principles, each tension's ruling, the dropped-as-outside-the-threat-model list, each fork's reading, verbatim free text where the human wrote it. A declined obligation is `Demand {form: waiver}`. The resolved demand list — design-extracted, enumeration-derived, and obligation-minted alike — is the spec.
+Record every outcome in `70-resolutions.md`: the principles in force (profile, doc, `00-principles.md`), each tension's ruling, the dropped-as-outside-the-threat-model list, each fork's reading, verbatim free text where the human wrote it. A declined obligation is `Demand {form: waiver}`. The resolved demand list — design-extracted, enumeration-derived, and obligation-minted alike — is the spec.
 
 **When a ruling amends the design** (a tension adopted, a free-text redesign), write the amendment to `.spec-flow/design-amendments.md`, post it to the issue, and re-enter at C against the amended design — do not restart the chain:
 
@@ -98,4 +98,4 @@ A finding that the design is wrong at its root — not amendable by a ruling —
 
 **The diff** is **tests + spec_graph only** — the suite, plus `spec_graph_<issue-or-slug>.yaml` in the profile's spec corpus (demands, structure, gate record, claims ledger, `handoff:` block); its `tests:` field names the suite it derives and its `base:` field is the fork commit. The frontiers directory stays untracked. Commit and push the spec branch **before the implementation exists** — verify the remote branch contains the commit before posting the handoff. Write-code-from-spec refuses to start otherwise, and a spec phase that never ran discretely can't bite.
 
-**The note** is the baton to a *cold* write-code-from-spec, reachable only through the issue thread — post it there with the `handoff` skill: branch and base commit, the principles and the tensions the human ruled, the forks resolved and which reading was picked, the auto-resolutions and gate-minted obligations for the merge-gate human to scan, anything that ran degraded, the single next action. Write it **for the implementer, not the reviewer** — `finalize` deliberately meets the code cold.
+**The note** is the baton to a *cold* write-code-from-spec, reachable only through the issue thread — post it there with the `handoff` skill: branch and base commit, the principles and the tensions the human ruled, the forks resolved and which reading was picked, the auto-resolutions and the gate-minted obligations (`gate.obligations`) for the merge-gate human to scan, anything that ran degraded, the single next action. Write it **for the implementer, not the reviewer** — `finalize` deliberately meets the code cold.

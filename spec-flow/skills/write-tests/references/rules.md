@@ -9,7 +9,7 @@ The gate computes the join of the behavior layer against the structure layer and
 1. Compute the delta: every structure element or edge the change adds, removes, or modifies. Change kinds are assigned **at extraction, from the design** — a first run needs no prior graph: an element or edge the design introduces is `add`, one whose property or semantics the design alters is `modify`, and `provenance` marks which side each came from (demand-implied structure is `provenance: design`; the grounded neighborhood it attaches to is `code`). Across runs, stable `id`s let the graph diff itself as a second source of change kinds.
 2. For each delta element, fire the matching rules below, and record **every rule's outcome — fired or clean — in `gate.evaluated`**: a rule with no entry reads as skipped, not as clean.
 3. Classify every hit into the typed residue:
-   - **Test obligation** — a demand must exist and doesn't; carries derivable assertion content. Minted as an executable demand from phase D's residue and listed in `handoff` for the merge-gate human.
+   - **Test obligation** — a demand must exist and doesn't; carries derivable assertion content. Minted as an executable demand from phase D's residue and recorded in `gate.obligations`, which the handoff note lists for the merge-gate human.
    - **Design hole** — a decision is missing, not a test: an `unknown` invariant, an unresolvable address, a substitute that structurally cannot discharge its survival demand. Routed to the human (fact-shaped `unknown`s are re-grounded first — phases/graph-gate.md).
    - **Pre-discharged** — an *executable* demand already exists (the design stated it and phase A's extraction leaf extracted it as `form: test`). Credit it explicitly; don't re-litigate. A clause-form binding does not pre-discharge — it leaves the obligation open (that is the worked example's R4 firing).
    - **Waiver candidate** — plausibly acceptable to skip; the human decides, and the decision is recorded as `Demand {form: waiver}`.
@@ -174,12 +174,14 @@ gate:
                         # resolved_to: present when the resolution spawned a demand
   pre_discharged: [{rule: R4, element: <address>, by: <demand id>, edge: <interacts/drives address>, cites: [<claim id>]}]
 handoff:
+  principles: "<the threat model and failure posture the forks were judged against — profile + doc + §0>"
+  tensions:   ["<root cause — the dissolving call proposed — the human's ruling — clusters it dissolved>", ...]
   forks:      ["<the fork, how it was resolved, and `resolved_by: human | auto`>", ...]
                      # auto = §7 judged it non-material and took the recommendation; the entry
                      # is what lets the merge-gate human see the choice and disagree with it
   refuted:    ["<a design claim the ledger refuted, and the correction>", ...]
   deferred:   ["<a claim only the implementation can settle — write-code-from-spec's probe>", ...]
-  drops:      ["<premise name — why no demand was minted>", ...]   # every answered premise not in the suite/forks lands here (phase-F count)
+  drops:      ["<premise name — why no demand was minted>", ...]   # a fork dropped as outside the threat model names the principle   # every answered premise not in the suite/forks lands here (phase-F count)
   nullstub_passes: ["<test name — structure | reuse | parity>", ...]  # each recorded legitimate null-stub pass
   deviations: ["<what this run could not do, and what it costs the suite>", ...]
                      # READ BY the implementer (before writing code) and the adversarial

@@ -26,7 +26,7 @@ Read the principles first and hold them as the yardstick: the threat model (what
 
 Ground every claim about today's code in the brief, the ledger, or `44-probes.md`; a proposal resting on an unprobed fact lists it as a probe obligation (`route: re-ground`) for the orchestrator to settle before §7. When a cluster has no cause beyond the doc's silence, say so — it stays a fork.
 
-**3. Mark what is outside the threat model.** List the forks (any grade) that exist only to handle a condition the principles do not call for — tolerance of a hostile host when the host is not assumed hostile, per-case recovery where the posture is fail loud. Each with the principle it falls outside and what dropping it means (a `rejected:` non-obligation). The human confirms or keeps them in one question.
+**3. Mark what is outside the threat model.** Start from the judge's `outside-threat-model` flags and add what it missed: list the forks (any grade) that exist only to handle a condition the principles do not call for — tolerance of a hostile host when the host is not assumed hostile, per-case recovery where the posture is fail loud. Each with the principle it falls outside and what dropping it means (a `rejected:` non-obligation). The human confirms or keeps them in one question.
 
 **4. List what remains** — material clusters no tension dissolves, unchanged from the judge's relay (cluster id and one line each; the judge's fork section carries the detail).
 
