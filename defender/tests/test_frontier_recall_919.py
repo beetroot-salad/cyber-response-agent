@@ -1219,7 +1219,9 @@ def test_the_block_hands_main_a_path_its_own_gate_will_read(tmp_path):
     assert f"matched {hits[0].matched}" in rendered, (
         f"the block dropped its account of WHY the lesson was pushed:\n{rendered}"
     )
-    quoted = rendered.splitlines()[1].removeprefix("- ").split(" — matched ")[0]
+    # The first hit row (#1206 frames the hits, so it follows the frame's opening line).
+    first = next(ln for ln in rendered.splitlines() if ln.startswith("- "))
+    quoted = first.removeprefix("- ").split(" — matched ")[0]
     body = _tool_read_file(deps, quoted)  # ModelRetry here IS the failure
     assert "lesson body" in body, f"the path the block quoted ({quoted!r}) did not read back"
 

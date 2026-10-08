@@ -35,6 +35,8 @@ RED AGAINST HEAD IS THE EXPECTED STATE: the fold mints a record with no block, r
 """
 from __future__ import annotations
 
+import re
+
 import json
 from collections import Counter
 from collections.abc import Callable
@@ -240,6 +242,8 @@ def test_the_fold_block_is_the_shared_derivation_top_three_and_lead_included(
         tmp_path, monkeypatch, tree=tree, doc=doc,
         turns=lambda rd: _reads(rd, 2) + [Turn(text="done")])
     (_rid, _seq, text), = _frontier_rows(store)
+    # Each render mints its own frame salt (#1206); compared with the salts masked.
+    text, expected = (re.sub(r"run-[0-9a-f]{16}-", "run-<SALT>-", t) for t in (text, expected))
     assert text.endswith("\n\n" + expected), (
         f"the fold block is not the shared derivation:\n{text[-len(expected) - 200:]}")
     assert sorted(r["lesson_name"] for r in _rows(rd)) == sorted([CLASS_LESSON, LOGINUID_LESSON])
