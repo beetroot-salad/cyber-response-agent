@@ -440,13 +440,13 @@ def test_runs_base_record_torn_read(tmp_path, monkeypatch):
 
 def test_tenant_folder_symlink_swapped_between_o11as_construction_time_check_and_first_write(
         tmp_path):
-    """create_tenant's folder creation goes through guarded_mkdir (F12, brief R4(d): _tenant.py
-    is hard-gated for a raw mkdir), which re-judges the path's components at mkdir time,
-    closing the swap window after O11a's construction-time check.
+    """create_tenant makes and holds its folder with `_io.hold_new` off the data root's handle
+    (F12, brief R4(d): _tenant.py is hard-gated for a raw mkdir; #1137 moved it off
+    guarded_mkdir), which judges `<T>` with no link followed at mkdir time, closing the swap
+    window after O11a's construction-time check.
 
     The swap, as it lands on disk: `<root>/<T>` is a symlink to a directory elsewhere by the
-    time the folder is made (C-P5: guarded_mkdir refuses a symlinked component at any depth
-    below its base). The create is refused, nothing is written through the link, and the link
+    time the folder is made (`hold_new` refuses a link at the name it makes or adopts). The create is refused, nothing is written through the link, and the link
     is left as it was; the control is the same id into a fresh root."""
     victim = tmp_path / "victim"
     victim.mkdir()

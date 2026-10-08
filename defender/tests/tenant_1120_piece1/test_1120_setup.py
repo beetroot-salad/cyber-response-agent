@@ -595,8 +595,8 @@ def test_1120_setup_adopts_by_writing_only_the_row_through_the_guarded_lane(
     census. That holds over a plain folder and over a git clone whose agent/.tenant-id is
     untracked (DC2's "no git calls"; V11: the committed-.tenant-id rule is check's, so setup
     exits 0 there). Its one write is the row, through create_tenant's guarded lane
-    (write_guarded in create mode: an unnamed file linked to the row's name, or one exclusive
-    open), which also carries pass-A's o10_fresh_root_writes_exactly_row."""
+    (`Held.write` in create mode off the held `<T>`, #1137: an unnamed file linked to the row's
+    name, or one exclusive open), which also carries pass-A's o10_fresh_root_writes_exactly_row."""
     root = tmp_path / "data"
     place(tmp_path, root)
     before = H.tree_census(root)

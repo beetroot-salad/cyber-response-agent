@@ -716,14 +716,14 @@ def create_tenant(root: Path, tenant_id: TenantId) -> TenantRow:
         held = _real_io.hold_new(root, paths.tenant_id)
     except OSError as blocked:
         raise TenantRefused(f"{paths.dir}: {blocked}") from blocked
-    with held:
-        try:
+    # The close is inside the mapping, as `_read_row`'s is: a failing close is a refusal too.
+    try:
+        with held:
             held.write(ROW_NAME, body, mode="create")
-        except FileExistsError as taken:
-            raise TenantRefused(
-                f"{paths.row} already exists — a tenant is created once") from taken
-        except OSError as blocked:
-            raise TenantRefused(f"{paths.row}: {blocked}") from blocked
+    except FileExistsError as taken:
+        raise TenantRefused(f"{paths.row} already exists — a tenant is created once") from taken
+    except OSError as blocked:
+        raise TenantRefused(f"{paths.row}: {blocked}") from blocked
     return row
 
 

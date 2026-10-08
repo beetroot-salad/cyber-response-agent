@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import errno
 import functools
 import hashlib
 import json
@@ -165,8 +166,9 @@ def _tree_state(top: Path) -> dict[str, tuple[int, int, int, str | None]]:
                 if stat.S_ISLNK(st.st_mode):
                     detail = os.readlink(entry.path)
                 elif stat.S_ISREG(st.st_mode):
-                    detail = hashlib.sha256(
-                        _io.read_bytes_capped(Path(entry.path))).hexdigest()
+                    # Streamed, not read whole: the oversized-row shape is past READ_LIMIT.
+                    with open(entry.path, "rb") as plain:
+                        detail = hashlib.file_digest(plain, "sha256").hexdigest()
                 elif stat.S_ISDIR(st.st_mode):
                     pending.append(Path(entry.path))
                 state[os.path.relpath(entry.path, top)] = (
@@ -282,6 +284,9 @@ def _plant_file_at_dir(w: Where) -> None:
 _UNDECODABLE = (b'{\n  "created_at": "2026-09-26T00:00:00+00:00\xff",\n'
                 b'  "tenant_id": "acme"\n}\n')
 
+#: A good row followed by whitespace past `READ_LIMIT`.
+_OVERSIZED = GOOD_ROW + " " * _io.READ_LIMIT
+
 READ_SHAPES: dict[str, ReadShape] = {
     # Served.
     "good-row": ReadShape(_put_row, None),
@@ -303,6 +308,10 @@ READ_SHAPES: dict[str, ReadShape] = {
     "absent-T": ReadShape(lambda w: w.root.mkdir(parents=True), _restore),
     "file-at-T": ReadShape(_plant_file_at_dir, lambda w: _restore(w, remove=w.dir)),
     "undecodable-row": ReadShape(lambda w: _put_row(w, _UNDECODABLE), _restore),
+    # A good row padded past the read limit with whitespace: valid JSON as a whole, and a
+    # prefix read would serve it. The whole-file read's size bound refuses it, as today.
+    "oversized-row": ReadShape(lambda w: _put_row(w, _OVERSIZED), _restore,
+                               "larger than the read limit"),
     # Refused by the parse, which D1 leaves alone.
     "empty-row": ReadShape(lambda w: _put_row(w, ""), _restore, "is not valid JSON"),
     "malformed-json": ReadShape(lambda w: _put_row(w, "{not json"), _restore,
@@ -563,16 +572,16 @@ CREATE_REFUSED: dict[str, CreateShape] = {
     "foreign-entry-in-rowless-T": CreateShape(lambda w: (w.dir / "runs").mkdir(parents=True),
                                               lambda w: (w.dir / "runs").rmdir(), "root",
                                               _NOT_FRESH),
-    # The data root itself is not a folder. Outside the design's table: the words come from
-    # the folder create's OS error (`hold_new`'s open or `makedirs` of the root) and are not
-    # pinned. Pinned: the verdict, and that the
-    # refusal names `<T>`.
+    # The data root itself is not a folder: the OS error of opening (or making) the root,
+    # naming `<T>`. A file at the root was "File exists" before #1137 (guarded_mkdir's
+    # makedirs) and is "Not a directory" after (hold_new opens it as a folder): a declared
+    # message change. A dangling link at the root is "File exists" both times.
     "root-is-a-file": CreateShape(
         lambda w: w.root.write_text("x\n", encoding="utf-8"), lambda w: w.root.unlink(), "dir",
-        None),
+        os.strerror(errno.ENOTDIR)),
     "root-is-a-dangling-link": CreateShape(
         lambda w: w.root.symlink_to(w.outside / "no-such-root"), lambda w: w.root.unlink(),
-        "dir", None),
+        "dir", os.strerror(errno.EEXIST)),
 }
 
 
@@ -737,8 +746,9 @@ ROW_DOORS = {"_read_row": "bind", "create_tenant": "hold_new"}
 _DYNAMIC_REACH = frozenset({"builtins.getattr", "builtins.vars", "builtins.__import__"})
 
 
-def _row_function_reaches(function: str) -> tuple[set[str], set[str]]:
-    """`(every dotted origin the function references, every scanner census row)` for one row
+def _row_function_reaches(function: str) -> tuple[ast.FunctionDef, set[str], set[str]]:
+    """`(the function's node, every dotted origin it references, every scanner census row)`
+    for one row
     function of `defender/_tenant.py`. Origins are resolved through `scripts/lint/_astlib.py`,
     so an import alias, a function-local import or a shadowing local each resolve to what they
     mean, not to how they are spelled. Only the outermost node of an attribute chain counts, so
@@ -768,7 +778,7 @@ def _row_function_reaches(function: str) -> tuple[set[str], set[str]]:
             origins.add(found)
     census = {callee for _module, where, callee
               in _census1133().census_of(_TENANT_MODULE, tree) if where == function}
-    return origins, census
+    return fn, origins, census
 
 
 @pytest.mark.parametrize("function", sorted(ROW_DOORS))
@@ -779,10 +789,7 @@ def test_o1_each_row_function_enters_through_its_core_door_only(function):
     door (`bind` for the read, `hold_new` for the create), and no `os` name; and #1133's
     scanner, in its full vocabulary, finds nothing in it but that door. The positive half: the
     door is reached, so the function is on the core and not merely off the seams."""
-    fn_origins, census = _row_function_reaches(function)
-    path = _census1133().PACKAGE / _TENANT_MODULE
-    tree = ast.parse(_io.read_text_utf8(path), filename=_TENANT_MODULE)
-    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == function)
+    fn, fn_origins, census = _row_function_reaches(function)
     params = {a.arg for a in (*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs)}
     assert "io" not in params, f"{function} still takes an io= seam"
     assert not fn_origins & _DYNAMIC_REACH, (
@@ -795,3 +802,58 @@ def test_o1_each_row_function_enters_through_its_core_door_only(function):
     os_reach = sorted(o for o in fn_origins if o == "os" or o.startswith("os."))
     assert os_reach == [], f"{function} reaches the os module directly: {os_reach}"
     assert census <= {door}, f"#1133's scanner finds {sorted(census)} in {function}"
+
+
+# ======================================================================================
+# Permission denied: the OSError → TenantRefused mappings. Root ignores permission bits, so
+# these run only unprivileged (CI); each restores the bits before the positive control.
+# ======================================================================================
+
+_UNPRIVILEGED = pytest.mark.skipif(
+    not hasattr(os, "geteuid") or os.geteuid() == 0,
+    reason="root ignores permission bits")
+
+
+@_UNPRIVILEGED
+def test_an_unreadable_row_is_refused_naming_it(tmp_path):
+    """A row the process may not open is refused with TenantRefused naming the row, never a
+    raw PermissionError; readable again, it is served."""
+    w = _where(tmp_path)
+    _put_row(w)
+    w.row.chmod(0)
+    try:
+        _assert_names(_refused(owner.require_tenant, w.root, TID), w.row)
+    finally:
+        w.row.chmod(0o644)
+    assert _served(owner.require_tenant, w.root, TID).tenant_id == TID
+
+
+@_UNPRIVILEGED
+def test_a_row_create_into_an_unwritable_folder_is_refused_naming_the_row(tmp_path):
+    """`<T>` exists (holding only the operator's `knowledge/`) but cannot be written: the row's
+    create is refused with TenantRefused naming the row, and nothing is left at its name;
+    writable again, the same create succeeds."""
+    w = _where(tmp_path)
+    (w.dir / "knowledge").mkdir(parents=True)
+    w.dir.chmod(0o555)
+    try:
+        _assert_names(_refused(owner.create_tenant, w.root, TID), w.row)
+        assert not os.path.lexists(w.row), "the refused create left an entry at the row"
+    finally:
+        w.dir.chmod(0o755)
+    assert _served(owner.create_tenant, w.root, TID).tenant_id == TID
+
+
+@_UNPRIVILEGED
+def test_a_folder_create_into_an_unwritable_root_is_refused_naming_the_folder(tmp_path):
+    """The data root exists but cannot be written: making `<T>` is refused with TenantRefused
+    naming `<T>`, and no `<T>` is made; writable again, the same create succeeds."""
+    w = _where(tmp_path)
+    w.root.mkdir(parents=True)
+    w.root.chmod(0o555)
+    try:
+        _assert_names(_refused(owner.create_tenant, w.root, TID), w.dir, folder=True)
+        assert not os.path.lexists(w.dir), "the refused create made <T>"
+    finally:
+        w.root.chmod(0o755)
+    assert _served(owner.create_tenant, w.root, TID).tenant_id == TID
