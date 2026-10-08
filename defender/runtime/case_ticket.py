@@ -21,10 +21,18 @@ _MAPPING_RELPATH = "systems/case-history/mapping.yaml"
 _SIGNATURE_FALLBACK = "unknown"
 _SUMMARY_FALLBACK = "(no rule description)"
 
-#: The one bound on the rendered comment body, in UTF-8 bytes. The cut rounds down to a whole
-#: character and the ellipsis fits inside the bound.
+#: The one bound on the posted comment body, tag line included, in UTF-8 bytes. The cut rounds
+#: down to a whole character and the ellipsis fits inside the bound.
 WIRE_BOUND_BYTES = 4096
 _ELLIPSIS = "…"
+
+#: How every comment the host posts opens (#1221): one plain-text line marking it model-made and
+#: naming the run that wrote it. A later run's gather reads it as a past case, never a person's
+#: finding, so the teaching (`skills/gather/SKILL.md`, `skills/invlang/SKILL.md`) quotes this
+#: prefix verbatim. Plain text with no markup, JSON escape or line break, so it reads the same
+#: in a vendor UI and in gather's escaped view; at the START of the body because gather's view
+#: keeps only the first characters of a long comment (`payload_view.LEAF_MAX_CHARS`).
+AGENT_TAG_PREFIX = "[defender agent comment, run "
 
 #: The empty-narrative marker, rendered in the narrative segment alone.
 NO_NOTES = "(no notes)"
@@ -399,7 +407,7 @@ def _prepare_narrative(narrative: str) -> str:
 
 
 def _bound_wire_bytes(text: str) -> str:
-    """Bound the whole rendered body to `WIRE_BOUND_BYTES`, cutting at a whole character with
+    """Bound the whole posted body to `WIRE_BOUND_BYTES`, cutting at a whole character with
     the ellipsis inside the bound."""
     encoded = text.encode("utf-8")
     if len(encoded) <= WIRE_BOUND_BYTES:
@@ -413,8 +421,8 @@ def case_record_to_comment(
     rec: CaseRecord, *, mapping: CaseMapping | CaseTicketError,
 ) -> dict[str, Any]:
     """D3 replaces `case_record_to_close`: `{author, body}` and nothing else (S1). `body` is
-    the mapping's own `"{disposition} — {cause}\\n\\n{narrative}"` rendering, fence-stripped
-    and bounded on the wire."""
+    the mapping's own `"{disposition} — {cause}\\n\\n{narrative}"` rendering, fence-stripped.
+    The wire bound is applied once, to the posted body with its tag (`posted_comment`)."""
     plain = _thawed(mapping)
     author = _resolve_comment_author(plain)
     body_template = _resolve_comment_body_template(plain)
@@ -427,7 +435,21 @@ def case_record_to_comment(
         narrative=narrative,
     )
     rendered = _format(body_template, ctx, "comment.body")
-    return {"author": author, "body": _bound_wire_bytes(rendered)}
+    return {"author": author, "body": rendered}
+
+
+def agent_comment_tag(run_id: str) -> str:
+    """The tag line naming the run that wrote a comment: `AGENT_TAG_PREFIX`, the run id, `]`."""
+    return f"{AGENT_TAG_PREFIX}{run_id}]"
+
+
+def posted_comment(payload: Mapping[str, Any], *, run_id: str) -> dict[str, Any]:
+    """@owns comment body — the body as it reaches the store: the agent tag line naming
+    `run_id`, then the comment the mapping rendered, the whole bounded to `WIRE_BOUND_BYTES`.
+    The bound cuts from the end, so the tag line always survives it. `run_id` is the run's, not
+    the case key, which on the platform is the vendor's ticket id."""
+    body = f"{agent_comment_tag(run_id)}\n{payload['body']}"
+    return {**payload, "body": _bound_wire_bytes(body)}
 
 
 def unreadable_comment_payload(*, mapping: CaseMapping | CaseTicketError) -> dict[str, Any]:
@@ -473,14 +495,16 @@ class ReleasePredicate:
 def release_predicate(mapping: CaseMapping | CaseTicketError) -> ReleasePredicate:
     """§7 R1's downstream consequence: the predicate is SAFE BY CONSTRUCTION — this raises in
     every unsafe mapping state rather than merely behaving correctly when configured right.
-    The caller (the read screen) is what degrades on a raise; this function never does.
+    The caller (the writer's released check) is what degrades on a raise; this function never
+    does.
 
     The configured status is stripped ONCE, here, so a quoted YAML scalar with stray
     whitespace configures the same state the ticket carries rather than one nothing can ever
     reach.
 
-    `mapping` is the record's `ticket_mapping` (#1107), handed in by the caller: the screen, the
-    writer and the branching applier each already hold the record, and none reads the file."""
+    `mapping` is the record's `ticket_mapping` (#1107), handed in by the caller, which already
+    holds the record and never reads the file. Since #1221 the writer is its only caller: no read
+    path screens a ticket by its status."""
     section = _thawed(mapping).get("released")
     if not isinstance(section, dict):
         raise CaseTicketError(

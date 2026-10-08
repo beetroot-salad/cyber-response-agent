@@ -234,6 +234,13 @@ bullet per obligation is the natural shape:
 - first/last event: ...
 ```
 
+**A ticket comment opening `[defender agent comment, run <run id>]` is a
+model's verdict, not a person's.** An earlier run of this defender wrote it. When
+you report what such a comment says, say it is a model-made verdict and quote the
+run id from the tag verbatim (e.g. "model-made verdict, run <run id>: benign —
+…"), never as an analyst's finding. A person's own comments and a closed case's
+`resolution` carry no such tag.
+
 **Never write a `gather_raw/...` path — or any raw-payload path — into your
 return.** The defender is blocked from the raw tree and addresses results by
 `(lead_id, seq)`.

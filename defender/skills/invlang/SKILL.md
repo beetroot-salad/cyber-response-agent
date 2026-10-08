@@ -358,6 +358,15 @@ keyed on the contract id. Columns:
   the estate *has been* doing, never what it is *permitted* to do. Record
   that as a `:R consultations` row instead (below). The refusal reads the
   cell case- and separator-folded, so `telemetry_baseline` is refused too.
+- `cites_past_case?` — on a `grounding past-case` row, the id of the earlier
+  run whose verdict this one leans on. A past case is a MODEL's verdict: a
+  ticket comment opening `[defender agent comment, run <run id>]`, which gather
+  reports as a model-made verdict with its run id, is one. Cite it
+  `grounding past-case`, `cites_past_case <run id>` — never as `org-authority`.
+  A past case is precedent, not authority: a contract whose only `authorized`
+  rows are `past-case` stays open, and `disposition: benign` is refused on it
+  (rule #27). Resolve it on an authored record as well, or leave it
+  `indeterminate`.
 - `anchor_id?` — the specific record the verdict cites (a CR id, a policy
   name, a registry entry id). **Required on a `verdict: authorized` row
   whose `anchor_kind` is `tacit-knowledge`**: the citation is the receipt,

@@ -27,7 +27,7 @@ from ..schema import (
 )
 from ._diag import REFUTED_WEIGHT
 from ._refs import _HYPOTHESIS_DECLARING_BLOCKS, _known_ids, _leads
-from ._structure import _cell, _check_vocab
+from ._structure import _cell, _check_vocab, _folded_grounding
 from ._state import (
     _check_benign_authz,
     _check_benign_open_slots,
@@ -191,14 +191,6 @@ TELEMETRY_BASELINE = "telemetry-baseline"
 assert TACIT_KNOWLEDGE in vocab.ANCHOR_KINDS
 assert RUNTIME_EVIDENCE in vocab.ANCHOR_KINDS
 assert TELEMETRY_BASELINE in vocab.CONSULTATION_GROUNDING
-
-
-def _folded_grounding(value: str) -> str:
-    """A `grounding` cell folded for one exact-match refusal: lowercased, with underscores and
-    whitespace read as hyphens. The identity on anything correctly written. Not for a cell
-    another check reads by value, where folding would hide the difference it reads.
-    """
-    return re.sub(r"[\s_]+", "-", value.strip().lower())
 
 
 #: The `:R authz` verdicts rules here branch on: `authorized` is what the benign gate demands

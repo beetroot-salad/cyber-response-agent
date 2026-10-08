@@ -1,8 +1,15 @@
 # Investigation Language
 
-**Status:** Spec v2.23. Implemented.
+**Status:** Spec v2.24. Implemented.
 **Query tool:** `soc-agent/scripts/invlang/` — see `cli.py --help`
 **On-disk surface:** `​```invlang` fenced blocks. `​```yaml` fences in `investigation.md` are rejected by the validator, and so is a write that introduces a block header OUTSIDE any fence — rows written there are not parsed, so they reach no rule and no corpus query. A trailing unterminated `​```invlang` is exempt: that is a write cut off mid-block, which the next append closes. Block-tag grammar (`:V` / `:E` / `:H` / `:L` / `:R` / `:T` / `:G`), row shapes, and the surface-to-canonical-dict projection live in `docs/dense-investigation-format.md`. The canonical companion dict — what the validator and the corpus queries operate on — is what every block projects to via `soc-agent/scripts/handlers/_dense_parser.py`.
+
+**v2.24 delta:** rule #27 is implemented (#1221); no rule is added or struck — **the active count stays at 26**.
+
+- **Rule #27 is armed, reworded to what it can check.** "Must have `org-authority`" becomes "must have a grounding other than `past-case`": the corpus writes specific record types (`iam-policy-binding`) and often no grounding cell at all, and neither is a past case. "Escalation is forced" (vocabulary retired in v2.18) becomes "benign is refused". The check sits in the one reading of "discharged" (`outstanding_authz_contracts`), so a past-case-only contract also stays on the retrieval frontier. Measured before arming: `past-case` appears in no shipped golden or example.
+- **Why now.** Every comment the host posts to a case opens with the agent tag (`[defender agent comment, run <run id>]`), and gather reports such a comment as a model-made verdict. A past case is that verdict cited; #27 keeps a benign close from resting on it alone.
+- **`cites_past_case` is one cell, the cited run's id.** Rule #11's `{run_id, contract_ref}` pair is not what the parser projects and is dropped from #11.
+- **Rule #28 stays unimplemented, deliberately.** Checking it needs the cited run's own companion, which a sandboxed run does not have. Recorded at the rule.
 
 **v2.23 delta:** the unnumbered SURFACE rule gains a clause (a write may not introduce a block header outside a fence); no numbered rule is added or struck — **the active count stays at 26** (#932). The other two bullets are doc-only.
 
@@ -460,9 +467,10 @@ are structural:
   how confidently the past case resolved — rule #14 then caps weight
   effect at `+`/`-`.
 - A past-case consultation cannot be the sole grounding for
-  `disposition: benign` on any contract. If every fulfilling
-  resolution on a benign-eligible contract has
-  `grounding_kind: past-case`, escalation is forced (rule #27).
+  `disposition: benign` on any contract. If every `authorized`
+  resolution on a contract of a live hypothesis has
+  `grounding_kind: past-case`, the contract stays open and benign is
+  refused (rule #27).
 - A past-case consultation cannot cite another past-case consultation
   as its own grounding — `cites_past_case` points to the exact prior
   contract, and that cited resolution must have
@@ -792,10 +800,9 @@ discipline) don't have to be restated.
 
 `grounding_kind: past-case` is a weak-temporal authz source citing a
 prior companion's conclusion. Force-caps `authority_for_question` to
-`partial` (rule #27), cannot be sole grounding for benign disposition
-(rule #27), cannot chain on another past-case consultation (rule #28).
-`cites_past_case.run_id` names the source companion; `contract_ref`
-names the exact contract in that companion being relied upon.
+`partial` (rule #11), cannot be sole grounding for benign disposition
+(rule #27), cannot chain on another past-case consultation (rule #28,
+unimplemented). `cites_past_case` names the source run.
 
 **`failure_reason` enum.** `adapter-error` | `attribution-opaque` |
 `partial-coverage` | `permission-denied` | `timeout` | `other`
@@ -1127,8 +1134,8 @@ The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbe
     `anchor_kind`, `anchor_id`, `grounding_kind`,
     `authority_for_question`, `as_of`, `resolved_by_lead`, and
     `fulfills_contract`. When `grounding_kind: past-case`,
-    `cites_past_case.run_id` and `cites_past_case.contract_ref` are
-    required, AND `authority_for_question` must be `partial` (rule
+    `cites_past_case` (the cited run's id) is required, AND
+    `authority_for_question` must be `partial` (rule
     #14 then caps weight effect at `+`/`-`). Every
     `anchor_consultations[]` entry requires `anchor_id`,
     `anchor_kind`, `grounding_kind`, `result`, `as_of`, and
@@ -1476,14 +1483,17 @@ The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbe
     `fulfills_contract`.
 
 27. **Past-case no-sole-grounding for benign.** On any
-    `authorization_contract` that is load-bearing for
-    `disposition: benign` (i.e., the hypothesis is confirmed-weight at
-    CONCLUDE), at least one fulfilling `authorization_resolutions`
-    entry must have `grounding_kind: org-authority` — if every
-    fulfilling resolution has `grounding_kind: past-case`, the
-    contract is treated as unresolved for rule #21 and escalation is
-    forced. *(Former clause (a) — past-case ⇒ partial — moved to
+    `authorization_contract` of a live hypothesis, at least one
+    `authorized` resolution must have a grounding other than
+    `past-case` (any other value, or none) — if every one has
+    `grounding_kind: past-case`, read case- and separator-folded, the
+    contract is treated as unresolved for rule #21 and
+    `disposition: benign` is refused. A past case is an earlier run's
+    verdict — a model's, e.g. a ticket comment carrying the agent tag
+    (#1221). *(Former clause (a) — past-case ⇒ partial — moved to
     rule #11 as an enum constraint.)*
+    Implemented as `_authz_contract_error` (via
+    `outstanding_authz_contracts`, shared with the retrieval frontier).
 
 28. **Past-case chain depth cap.** An `authorization_resolutions[]`
     entry with `grounding_kind: past-case` references a source
@@ -1494,6 +1504,8 @@ The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbe
     itself cite another past-case as its grounding. Prevents bootstrap
     drift where similar alerts recursively authorize themselves
     without any real policy consultation in the chain.
+    *Not implemented, deliberately (#1221):* checking it needs the
+    cited run's own companion, which a sandboxed run does not have.
 
 29. **Impact prediction structure.** Every `impact_predictions[]`
     entry on a lead has `id` matching `^ip\d+$` and unique within the

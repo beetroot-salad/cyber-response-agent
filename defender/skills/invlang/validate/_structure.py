@@ -34,6 +34,14 @@ def _cell(record: Mapping[str, object], key: str) -> str:
     return _unquote(value.strip()).strip() if isinstance(value, str) else ""
 
 
+def _folded_grounding(value: str) -> str:
+    """A `grounding` cell folded for one exact-match refusal: lowercased, with underscores and
+    whitespace read as hyphens. The identity on anything correctly written. Not for a cell
+    another check reads by value, where folding would hide the difference it reads.
+    """
+    return re.sub(r"[\s_]+", "-", value.strip().lower())
+
+
 #: The two destinations an `advance_to` may name that are not a lead. `CONCLUDE` ends the run;
 #: `HYPOTHESIZE` sends it back for a mechanism the plan did not have. One spelling each (spec
 #: rule #18); aliases like `PREDICT` or `REPORT` are not accepted.

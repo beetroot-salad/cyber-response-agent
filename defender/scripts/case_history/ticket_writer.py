@@ -159,8 +159,8 @@ def _ticket_is_released(  # noqa: PLR0913 — one call site's context, threaded 
     lands between the two still gets the comment. What makes `closed` mean "a person did this"
     is that the host cannot transition a case at all — this module has no transition call, and
     `test_767_writer.py` keeps it that way — not this check. Undecidable reads as released,
-    the direction that writes nothing. The released status's spelling is the mapping's, read
-    through the same predicate the screen decides with (O5)."""
+    the direction that writes nothing. The released status's spelling is the mapping's
+    (`case_ticket.release_predicate`, O5)."""
     status, body = deps.request(config, "GET", f"/tickets/{quoted}", ctx=ctx)
     if status is None or not status.startswith("2"):
         why = f"could not read the case back ({status or 'transport error'}: {body})"
@@ -272,7 +272,9 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
     payload: dict, word: str, ctx: VerbContext,
 ) -> None:
     """The one write the host makes to a case: check `_ticket_is_released`, one
-    `POST /tickets/{key}/comments`, and a receipt on every branch."""
+    `POST /tickets/{key}/comments` whose body opens with the agent tag naming this run
+    (`case_ticket.posted_comment`, #1221 — here, so no comment kind can leave untagged), and a
+    receipt on every branch."""
     quoted = urllib.parse.quote(case_id, safe="")
     released, why_not = _ticket_is_released(config, deps, case_id, quoted, ctx)
     if released is None:
@@ -285,6 +287,7 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
         _write_receipt(run_dir, config, case_id, RECEIPT_REFUSED_RELEASED,
                        "a person has already released this case; no comment was added")
         return
+    payload = case_ticket.posted_comment(payload, run_id=run_dir.name)
     status, body = deps.request(config, "POST", f"/tickets/{quoted}/comments", payload, ctx=ctx)
     ok = status is not None and status.startswith("2")
     if not ok:

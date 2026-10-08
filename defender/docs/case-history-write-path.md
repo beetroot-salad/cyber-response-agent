@@ -109,15 +109,16 @@ what manufactures the read PR's fixtures.
 
 - `runtime/case_ticket.py` — pure: `CaseRecord`, `read_case_record`, the
   mapper (`alert_to_open_payload`, `case_record_to_comment`), the release predicate
-  (`release_predicate` / `is_released`) the read screen and the writer both decide
-  with, rendering from the mapping config.
+  (`release_predicate` / `is_released`) the writer decides with, the agent tag
+  (`agent_comment_tag`, `posted_comment`), rendering from the mapping config.
 - `$DEFENDER_DATA_ROOT/<tenant>/knowledge/settings/systems/case-history/mapping.yaml` — the de-facto schema
   (field mapping + conventions + the released status), editable without touching code.
 - `scripts/case_history/ticket_writer.py` — I/O: `open_case_ticket` (bridge) /
   `record_case_ticket` (one read-back, at most one comment POST, a receipt on every
   branch that called out; no transition call exists), non-fatal.
-- `runtime/ticket_screen.py` + `runtime/query_tool.py` — the read side: an
-  unreleased case's comments are served to no model; a released case is served whole.
+- The read side has no ticket screen (#1221): every ticket is served whole. Each
+  comment the host posts opens with the agent tag naming its run, so a later run
+  reads it as a past case (invlang rule #27), never a person's finding.
 - `run.py` — `--update-ticket`: open after materialize, record after
   `cross_check_tables`.
 - `$DEFENDER_DATA_ROOT/<tenant>/knowledge/settings/systems/case-history/config.env` — `CASE_HISTORY_*`.

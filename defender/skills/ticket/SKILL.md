@@ -49,27 +49,18 @@ into this store.
   present, is the person's own verdict on a closed case (or a legacy record
   from before this store gated comments) — the disposition is the human's
   now, never decoded from an agent's text.
-- **The current investigation's own ticket is excluded by identity.**
-  Gather removes that record from `list-tickets` results before the payload
-  is cached. Other open and in-progress tickets remain available for
-  correlation, including tickets whose free text references the current case.
-- **Comments reach you only from a `closed` case.** Each run that
-  investigates a case records its own findings as a comment; a person
-  reviews the case and closes it, and only then are its comments — the
-  agent's and anyone else's — served to a later run. Until then an open or
-  in-progress case's other fields (summary, status, labels) stay visible
-  for correlation and its comment list is served empty. An agent comment's
-  proposed disposition is a suggestion the person's close does not endorse,
-  and a comment may be visibly truncated (it ends `…`) — what was reviewed
-  is the record as displayed, not the model's full report.
+- **Every ticket is served whole, comments included, whatever its status.**
+  That includes the current investigation's own case and open cases, whose
+  comments may carry enrichment. Each run that investigates a case records
+  its own findings as a comment opening with the agent tag (see the gather
+  briefing): such a comment is a model's verdict, not a person's, and a
+  person's close does not endorse it. A comment may be visibly truncated
+  (it ends `…`).
 - **`labels` are short tags.** Common ones: `brute-force`,
   `false-positive`, `change-window`, `escalated`. Treat them as
   curator-supplied hypothesis hints, not refutations.
 - **`--q` matches against summary OR description, case-insensitive.**
   Use for free-text searches when the precise key isn't known.
-- **Comments are signal-bearing on a closed case.** A released agent
-  comment's own notes typically carry the resolution's rationale and any
-  related-case references, ahead of anything in a structured field.
 
 ### when_to_use
 
