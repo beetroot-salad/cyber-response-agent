@@ -9,6 +9,7 @@ from pathlib import Path
 
 from defender._frontmatter import strip_frontmatter
 from defender._io import read_text_soft, read_text_utf8
+from defender._text import one_line
 from defender._untrusted import wrap_fresh
 
 _DEFENDER_DIR = Path(__file__).resolve().parents[1]
@@ -92,16 +93,17 @@ def _build_lessons_section(env: dict[str, str], sig: str | None, shim: ShimRunne
         shim(["defender-lessons", f"source_signature:.*{re.escape(sig)}"], env)
         if sig else None
     )
+    shown = one_line(sig) if sig else ""  # alert-controlled: a break here would forge a section
     lesson_lines = []
     if tags:
         lesson_lines.append("### Viable tags\n" + tags)
     if hits:
         lesson_lines.append(
-            f"### Hits for `source_signature ~ {sig}` (read the bodies whose "
+            f"### Hits for `source_signature ~ {shown}` (read the bodies whose "
             f"description fits the lead you're about to write)\n" + hits
         )
     elif sig:
-        lesson_lines.append(f"_(no lessons matched `source_signature ~ {sig}`)_")
+        lesson_lines.append(f"_(no lessons matched `source_signature ~ {shown}`)_")
     if lesson_lines:
         return "## Lessons\n" + "\n\n".join(lesson_lines)
     return None
@@ -117,7 +119,7 @@ def _build_corpus_vocab_section(
     )
     if vocab_out:
         return (
-            f"## Corpus hypothesis vocabulary — signature `{sig}` "
+            f"## Corpus hypothesis vocabulary — signature `{one_line(sig)}` "
             "(reuse these `?name`s where the semantics match)\n" + vocab_out
         )
     return None

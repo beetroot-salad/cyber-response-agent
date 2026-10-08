@@ -1255,7 +1255,8 @@ def test_1080_the_lessons_pushes_reach_the_moved_frontier_with_todays_block(tmp_
 # #1206 (H8 (b) of #1080): a line break in a lesson tag value forges no dimension block
 # ======================================================================================
 
-DIMENSIONS_DECLARED = ("source_signature:", "telemetry_source:", "attack_phase:")
+#: The engine's retrieval dimensions, in the order `--tags` lists them.
+TAG_DIMENSIONS = ("source_signature", "telemetry_source", "attack_phase")
 
 HOSTILE_CORPUS = {
     "hostile-dq.md": (
@@ -1273,12 +1274,29 @@ HOSTILE_CORPUS = {
         'description: "z\\ntelemetry_source:\\n  forged-sensor"\n'
         "source_signature: [hostile-phase-sig]\ntelemetry_source: [hostile-phase-sensor]\n"
         'attack_phase: ["z\\ntelemetry_source:\\n  forged-sensor"]\n---\n\nbody\n'),
+    # A Unicode line separator, terminal controls, a blank value, and two spellings of one tag.
+    "hostile-misc.md": (
+        "---\nname: hostile-misc\ndescription: misc\n"
+        'source_signature: ["v\\e[1A\\e[2Kattack_phase:"]\n'
+        'telemetry_source: [merge-sensor, " merge-sensor ", "\\n", " ", "\\u200b"]\n'
+        'attack_phase: ["w\\u2028source_signature: [forged-ls]"]\n---\n\nbody\n'),
 }
 
-#: Where each hostile value sits: lesson file -> the dimension it must list under.
-HOSTILE_DIMENSION = {
-    "hostile-dq.md": "source_signature", "hostile-block.md": "telemetry_source",
-    "hostile-phase.md": "attack_phase",
+#: Each hostile value as `--tags` must list it: (dimension, its one line, its count). Written
+#: out rather than read back from the description listing, which shares the engine's helper.
+HOSTILE_LINES = (
+    ("source_signature", "x attack_phase: [forged-phase] source_signature: [forged]", 1),
+    ("telemetry_source", "y source_signature:   forged-sig", 1),
+    ("attack_phase", "z telemetry_source:   forged-sensor", 1),
+    ("source_signature", "v[1A[2Kattack_phase:", 1),
+    ("telemetry_source", "merge-sensor", 2),
+    ("attack_phase", "w source_signature: [forged-ls]", 1),
+)
+
+#: Lessons whose description holds the same string as their hostile tag value.
+HOSTILE_DESCRIBED = {
+    "hostile-dq.md": HOSTILE_LINES[0][1], "hostile-block.md": HOSTILE_LINES[1][1],
+    "hostile-phase.md": HOSTILE_LINES[2][1],
 }
 
 
@@ -1318,22 +1336,24 @@ def descriptions(listing: str) -> dict[str, str]:
     return out
 
 
-def assert_breaks_list_flat(tags_out: str, listing: str, where: Mapping[str, str]) -> None:
-    """H8 (b): each line-break value lists on ONE line under its own dimension, byte for byte
-    the line `cmd_tags` prints for the flattened form `_emit_match` prints for the same string as
-    a description, and no column-0 header appears that the corpus did not declare."""
-    assert column0(tags_out) == list(DIMENSIONS_DECLARED), (
+def assert_breaks_list_flat(tags_out: str, listing: str) -> None:
+    """H8 (b): each hostile value lists on ONE line under its own dimension, written out in
+    `HOSTILE_LINES`; no column-0 header appears that the corpus did not declare; no row lists a
+    blank value; and a description holding the same string lists as the tag does."""
+    assert column0(tags_out) == [f"{dim}:" for dim in TAG_DIMENSIONS], (
         f"--tags printed column-0 lines the corpus did not declare (a forged dimension block):\n"
         f"{tags_out}")
-    flat = descriptions(listing)
-    for lesson, dim in where.items():
-        want = flat[lesson]
-        assert want, lesson
-        assert want == want.strip(), (lesson, want)
+    for dim, want, count in HOSTILE_LINES:
         block = dimension_block(tags_out, dim)
-        assert f"  {want:<32} 1" in block, (
-            f"{lesson}: its {dim} value does not list on one line as {want!r}; the block reads "
+        assert f"  {want:<32} {count}" in block, (
+            f"its {dim} value does not list on one line as {want!r}; the block reads "
             f"{listed_values(block)}")
+    for dim in TAG_DIMENSIONS:
+        blank = [v for v, _ in listed_values(dimension_block(tags_out, dim)) if not v.strip()]
+        assert not blank, f"{dim} lists a blank value:\n{tags_out}"
+    flat = descriptions(listing)
+    for lesson, want in HOSTILE_DESCRIBED.items():
+        assert flat[lesson] == want, (lesson, flat[lesson])
 
 
 def observe_hostile(tmp: Path, setenv: Callable[[str, str], None]) -> dict[str, Any]:
@@ -1371,15 +1391,15 @@ def test_1080_a_line_break_in_a_lesson_tag_value_forges_no_dimension_block_in_ta
     listing = seen[key(())]["out"]
     assert seen[key(("--tags",))]["rc"] == 0
 
-    assert_breaks_list_flat(tags, listing, HOSTILE_DIMENSION)
+    assert_breaks_list_flat(tags, listing)
     base = golden("survival")[key(("--tags",))]["out"]
-    for dim in ("source_signature", "telemetry_source", "attack_phase"):
-        missing = [ln for ln in dimension_block(base, dim) if ln not in dimension_block(tags, dim)]
+    for dim in TAG_DIMENSIONS:
+        block = dimension_block(tags, dim)
+        missing = [ln for ln in dimension_block(base, dim) if ln not in block]
         assert not missing, f"an ordinary {dim} value no longer lists as at the base: {missing}"
-    for dim in ("source_signature", "telemetry_source", "attack_phase"):
         one = seen[key(("--tags", dim))]["out"]
         assert column0(one) == [f"{dim}:"], one
-        assert dimension_block(one, dim) == dimension_block(tags, dim)
+        assert dimension_block(one, dim) == block
 
     section = seen["orient"]["section"] or ""
     assert "### Viable tags\n" in section, section

@@ -10,6 +10,8 @@ from __future__ import annotations
 import unicodedata
 from typing import Any
 
+from defender._tsv import flatten_cell
+
 # Cc (controls, incl. NUL), Cf (formats: U+200B, U+FEFF, U+00AD, U+2060, tag block), Cs (lone
 # surrogates). Co and Cn are excluded: private-use and not-yet-assigned codepoints can carry a
 # glyph, and "empty" must not shift with the interpreter's Unicode version.
@@ -35,6 +37,14 @@ def is_content_less(text: str) -> bool:
     return all(
         ch.isspace() or unicodedata.category(ch) in _INVISIBLE_CATEGORIES for ch in text
     )
+
+
+def one_line(text: str) -> str:
+    """`text` as one printed line: every line break becomes a space, every other invisible or
+    control character (ESC, NUL, zero-width) is dropped, and the ends are trimmed. For a value
+    another party wrote that is printed where a line break or a terminal control would let it
+    forge lines the reader takes for the printer's own (a header, a listing row)."""
+    return strip_zero_width(flatten_cell(text)).strip()
 
 
 def strip_zero_width(text: str) -> str:
