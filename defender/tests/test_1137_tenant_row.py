@@ -68,6 +68,7 @@ import pytest
 
 from defender import _io
 from defender import _tenant as owner
+from defender.tests._by_path import import_lint_lib
 from defender.tests._create_lane import assert_single_plain
 from defender.tests._umask import umask
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
@@ -562,8 +563,9 @@ CREATE_REFUSED: dict[str, CreateShape] = {
     "foreign-entry-in-rowless-T": CreateShape(lambda w: (w.dir / "runs").mkdir(parents=True),
                                               lambda w: (w.dir / "runs").rmdir(), "root",
                                               _NOT_FRESH),
-    # The data root itself is not a folder. Outside the design's table: base words come from
-    # `guarded_mkdir`'s `makedirs` and are not pinned. Pinned: the verdict, and that the
+    # The data root itself is not a folder. Outside the design's table: the words come from
+    # the folder create's OS error (`hold_new`'s open or `makedirs` of the root) and are not
+    # pinned. Pinned: the verdict, and that the
     # refusal names `<T>`.
     "root-is-a-file": CreateShape(
         lambda w: w.root.write_text("x\n", encoding="utf-8"), lambda w: w.root.unlink(), "dir",
@@ -727,56 +729,69 @@ def test_o1_each_allow_listed_stamp_function_still_reaches_a_seam(function):
         "in this file: the list is meant to empty out as #1105 PR 2 retires the stamp.")
 
 
-#: Everything #1133's scanner collects from `defender/_tenant.py`, not only `PATH_SEAMS`: the
-#: core's own verbs it keys (`hold_new`), raw `os` opens, `getattr(<module>)` and `_io`'s
-#: private internals. Exact, so a reach respelled past `PATH_SEAMS` (an `_io._*` helper inlining
-#: a seam, `os.makedirs`, `getattr(_real_io, ...)`) is a new row here. The stamp's rows leave with
-#: #1105 PR 2, and this set shrinks with them.
-EXPECTED_FULL_CENSUS = frozenset({
-    ("create_tenant", "hold_new"),
-    ("ensure_runs_base_record", "read_guarded"),
-    ("ensure_runs_base_record", "write_guarded"),
-    ("read_tenant", "read_guarded"),
-    ("read_tenant_id_file", "os.open"),
-})
 
-#: The row's two functions, and the one `_io` name each may touch: the core's door to `<T>`.
+#: The row's two functions, and the one `_io` name each may reach: the core's door to `<T>`.
 ROW_DOORS = {"_read_row": "bind", "create_tenant": "hold_new"}
 
+#: Builtins that reach a name dynamically, past any census.
+_DYNAMIC_REACH = frozenset({"builtins.getattr", "builtins.vars", "builtins.__import__"})
 
-def test_o1_the_tenant_module_reaches_exactly_the_expected_io():
-    """O1, closed against respelling (adversary E2): the whole census of `defender/_tenant.py`,
-    in the scanner's full vocabulary, is exactly `EXPECTED_FULL_CENSUS`."""
-    census = _census1133()
-    path = census.PACKAGE / _TENANT_MODULE
+
+def _row_function_reaches(function: str) -> tuple[set[str], set[str]]:
+    """`(every dotted origin the function references, every scanner census row)` for one row
+    function of `defender/_tenant.py`. Origins are resolved through `scripts/lint/_astlib.py`,
+    so an import alias, a function-local import or a shadowing local each resolve to what they
+    mean, not to how they are spelled. Only the outermost node of an attribute chain counts, so
+    `_real_io.bind` reaches `defender._io.bind`, while `_real_io` on its own (bound to a local,
+    say) reaches the whole module. A bare name is resolved as `_astlib.callee` resolves a
+    call's name, so a builtin passed around uncalled (`ga = getattr`) is still seen."""
+    astlib = import_lint_lib("_astlib")
+    path = _census1133().PACKAGE / _TENANT_MODULE
     tree = ast.parse(_io.read_text_utf8(path), filename=_TENANT_MODULE)
-    found = frozenset((where, callee)
-                      for _module, where, callee in census.census_of(_TENANT_MODULE, tree))
-    assert found == EXPECTED_FULL_CENSUS, (
-        f"unexpected: {sorted(found - EXPECTED_FULL_CENSUS)}; "
-        f"missing: {sorted(EXPECTED_FULL_CENSUS - found)}")
-
-
-def _function(tree: ast.Module, name: str) -> ast.FunctionDef:
-    return next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name)
+    env = astlib.module_env(tree, "defender._tenant")
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == function)
+    # A name that is the receiver of an attribute is resolved as part of that attribute's
+    # chain; anywhere else (bound to a local, passed as an argument) it is its own reach.
+    receivers = {id(n.value) for n in ast.walk(fn) if isinstance(n, ast.Attribute)}
+    origins: set[str] = set()
+    for node in ast.walk(fn):
+        if id(node) in receivers:
+            continue
+        if isinstance(node, ast.Attribute):
+            found = astlib.origin(node, env)
+        elif isinstance(node, ast.Name):
+            found = astlib.callee(ast.Call(func=node, args=[], keywords=[]),
+                                  env.scope_of.get(node, env))
+        else:
+            continue
+        if found is not None:
+            origins.add(found)
+    census = {callee for _module, where, callee
+              in _census1133().census_of(_TENANT_MODULE, tree) if where == function}
+    return origins, census
 
 
 @pytest.mark.parametrize("function", sorted(ROW_DOORS))
 def test_o1_each_row_function_enters_through_its_core_door_only(function):
-    """O1, closed against `getattr` (adversary E1), which the scanner keys for a module receiver
-    but not for a parameter: each row function takes no `io` parameter (N4), calls no `getattr`,
-    and touches exactly one name on the `_io` module — its door (`bind` for the read,
-    `hold_new` for the create). The positive half: the door is touched, so the function is on
-    the core and not merely off the seams."""
+    """O1, closed against respelling (adversary E1, `getattr`) and inlining (E2, `_io`'s
+    private internals, `os.*`): a row function takes no `io` parameter (N4); references no
+    builtin that reaches a name dynamically; reaches exactly one `defender._io` name, its core
+    door (`bind` for the read, `hold_new` for the create), and no `os` name; and #1133's
+    scanner, in its full vocabulary, finds nothing in it but that door. The positive half: the
+    door is reached, so the function is on the core and not merely off the seams."""
+    fn_origins, census = _row_function_reaches(function)
     path = _census1133().PACKAGE / _TENANT_MODULE
-    fn = _function(ast.parse(_io.read_text_utf8(path), filename=_TENANT_MODULE), function)
-    params = {a.arg for a in (*fn.args.args, *fn.args.kwonlyargs, *fn.args.posonlyargs)}
+    tree = ast.parse(_io.read_text_utf8(path), filename=_TENANT_MODULE)
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == function)
+    params = {a.arg for a in (*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs)}
     assert "io" not in params, f"{function} still takes an io= seam"
-    getattrs = [n for n in ast.walk(fn) if isinstance(n, ast.Call)
-                and isinstance(n.func, ast.Name) and n.func.id in ("getattr", "vars")]
-    assert getattrs == [], f"{function} reaches a name dynamically"
-    io_names = {n.attr for n in ast.walk(fn) if isinstance(n, ast.Attribute)
-                and isinstance(n.value, ast.Name) and n.value.id in ("_real_io", "_io")}
-    assert io_names == {ROW_DOORS[function]}, (
-        f"{function} touches {sorted(io_names)} on the _io module; only its core door "
-        f"{ROW_DOORS[function]!r} belongs there")
+    assert not fn_origins & _DYNAMIC_REACH, (
+        f"{function} reaches a name dynamically: {sorted(fn_origins & _DYNAMIC_REACH)}")
+    door = ROW_DOORS[function]
+    io_reach = {o for o in fn_origins if o == "defender._io" or o.startswith("defender._io.")}
+    assert io_reach == {f"defender._io.{door}"}, (
+        f"{function} reaches {sorted(io_reach)} on the _io module; only its core door "
+        f"{door!r} belongs there")
+    os_reach = sorted(o for o in fn_origins if o == "os" or o.startswith("os."))
+    assert os_reach == [], f"{function} reaches the os module directly: {os_reach}"
+    assert census <= {door}, f"#1133's scanner finds {sorted(census)} in {function}"

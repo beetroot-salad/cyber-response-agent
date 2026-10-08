@@ -12,10 +12,10 @@ refused rather than stamped.
 
 Both files are created complete-or-absent — the runs-base record through
 `write_guarded(mode="create")`, the row off its held folder (`_io.hold_new`, `Held.write`) — so
-a reader sees them absent or complete. Every refusal is a `TenantRefused` naming the refused value — an id, or the
-content of an `agent/.tenant-id`, escaped and bounded (`_shown`); a path, operator-set, as it
-is — which entry points catch and print verbatim; a corrupt record refuses the run rather than
-reading as `None`. `refuse_colliding_run_id` keeps run ids off the record's filename.
+a reader sees them absent or complete. Every refusal is a `TenantRefused` naming the refused
+value — an id, or the content of an `agent/.tenant-id`, escaped and bounded (`_shown`); a path,
+operator-set, as it is — which entry points catch and print verbatim; a corrupt record refuses
+the run rather than reading as `None`. `refuse_colliding_run_id` keeps run ids off the record's filename.
 
 Acceptance is a point-in-time check: a `Tenant` says the tree passed when it was accepted, not
 that it still does.
@@ -708,14 +708,14 @@ def create_tenant(root: Path, tenant_id: TenantId) -> TenantRow:
     paths = _TenantPaths(root, tenant_id)
     root = Path(root)
     refuse_foreign_data_root(root, paths.tenant_id)
-    try:
-        held = _real_io.hold_new(root, paths.tenant_id)
-    except OSError as blocked:
-        raise TenantRefused(f"{paths.dir}: {blocked}") from blocked
     row = TenantRow(tenant_id=paths.tenant_id, created_at=_now())
     body = json.dumps(
         {"tenant_id": row.tenant_id, "created_at": row.created_at}, indent=2, sort_keys=True,
     ) + "\n"
+    try:
+        held = _real_io.hold_new(root, paths.tenant_id)
+    except OSError as blocked:
+        raise TenantRefused(f"{paths.dir}: {blocked}") from blocked
     with held:
         try:
             held.write(ROW_NAME, body, mode="create")
@@ -770,8 +770,9 @@ def _refuse_foreign_entries(root: Path, tenant_id: TenantId) -> None:
 
 def require_tenant(root: Path, tenant_id: TenantId) -> TenantRow:
     """`tenant_id`'s row, or the refusal: absent, corrupt (bad JSON, a non-object top level, an
-    undecodable byte, a missing or non-string field), a directory or dangling link at the row's
-    name (folded as corrupt/absent, §7 J22), or a row naming another tenant. Every refusal
+    undecodable byte, a missing or non-string field), anything but a plain file at the row's
+    name (a directory, a link live or dangling, a FIFO, a hard link: the core's alias refusal),
+    or a row naming another tenant. Every refusal
     names the row's path."""
     return _read_row(_TenantPaths(root, tenant_id))
 
@@ -783,6 +784,8 @@ def _read_row(paths: _TenantPaths) -> TenantRow:
         with _real_io.bind(paths.dir) as bound:
             answer = bound.read(ROW_NAME)
     except OSError as unreadable:
+        # Only the platform fault reaches here (no `O_PATH`, or a failing close): `bind` and
+        # `read` answer every refused shape with a reason, handled below.
         raise TenantRefused(f"{paths.row}: {unreadable}") from unreadable
     text = answer.text
     if text is None:
