@@ -725,3 +725,58 @@ def test_o1_each_allow_listed_stamp_function_still_reaches_a_seam(function):
         f"{function} is on STAMP_SEAM_CALLERS ({STAMP_SEAM_CALLERS[function]}) but no longer "
         "reaches a path seam in defender/_tenant.py. Delete its entry from STAMP_SEAM_CALLERS "
         "in this file: the list is meant to empty out as #1105 PR 2 retires the stamp.")
+
+
+#: Everything #1133's scanner collects from `defender/_tenant.py`, not only `PATH_SEAMS`: the
+#: core's own verbs it keys (`hold_new`), raw `os` opens, `getattr(<module>)` and `_io`'s
+#: private internals. Exact, so a reach respelled past `PATH_SEAMS` (an `_io._*` helper inlining
+#: a seam, `os.makedirs`, `getattr(_real_io, ...)`) is a new row here. The stamp's rows leave with
+#: #1105 PR 2, and this set shrinks with them.
+EXPECTED_FULL_CENSUS = frozenset({
+    ("create_tenant", "hold_new"),
+    ("ensure_runs_base_record", "read_guarded"),
+    ("ensure_runs_base_record", "write_guarded"),
+    ("read_tenant", "read_guarded"),
+    ("read_tenant_id_file", "os.open"),
+})
+
+#: The row's two functions, and the one `_io` name each may touch: the core's door to `<T>`.
+ROW_DOORS = {"_read_row": "bind", "create_tenant": "hold_new"}
+
+
+def test_o1_the_tenant_module_reaches_exactly_the_expected_io():
+    """O1, closed against respelling (adversary E2): the whole census of `defender/_tenant.py`,
+    in the scanner's full vocabulary, is exactly `EXPECTED_FULL_CENSUS`."""
+    census = _census1133()
+    path = census.PACKAGE / _TENANT_MODULE
+    tree = ast.parse(_io.read_text_utf8(path), filename=_TENANT_MODULE)
+    found = frozenset((where, callee)
+                      for _module, where, callee in census.census_of(_TENANT_MODULE, tree))
+    assert found == EXPECTED_FULL_CENSUS, (
+        f"unexpected: {sorted(found - EXPECTED_FULL_CENSUS)}; "
+        f"missing: {sorted(EXPECTED_FULL_CENSUS - found)}")
+
+
+def _function(tree: ast.Module, name: str) -> ast.FunctionDef:
+    return next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name)
+
+
+@pytest.mark.parametrize("function", sorted(ROW_DOORS))
+def test_o1_each_row_function_enters_through_its_core_door_only(function):
+    """O1, closed against `getattr` (adversary E1), which the scanner keys for a module receiver
+    but not for a parameter: each row function takes no `io` parameter (N4), calls no `getattr`,
+    and touches exactly one name on the `_io` module — its door (`bind` for the read,
+    `hold_new` for the create). The positive half: the door is touched, so the function is on
+    the core and not merely off the seams."""
+    path = _census1133().PACKAGE / _TENANT_MODULE
+    fn = _function(ast.parse(_io.read_text_utf8(path), filename=_TENANT_MODULE), function)
+    params = {a.arg for a in (*fn.args.args, *fn.args.kwonlyargs, *fn.args.posonlyargs)}
+    assert "io" not in params, f"{function} still takes an io= seam"
+    getattrs = [n for n in ast.walk(fn) if isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Name) and n.func.id in ("getattr", "vars")]
+    assert getattrs == [], f"{function} reaches a name dynamically"
+    io_names = {n.attr for n in ast.walk(fn) if isinstance(n, ast.Attribute)
+                and isinstance(n.value, ast.Name) and n.value.id in ("_real_io", "_io")}
+    assert io_names == {ROW_DOORS[function]}, (
+        f"{function} touches {sorted(io_names)} on the _io module; only its core door "
+        f"{ROW_DOORS[function]!r} belongs there")
