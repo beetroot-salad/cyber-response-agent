@@ -17,8 +17,10 @@ investigation (`_drive`, the replay harness with the registry injected as its ve
 REAL sibling entry point (`_resume`: `run.main --resume`, whose lifecycle seam drives the real
 investigation over the world registry). Faults are real inputs (the fixture estate's real
 `AdapterFault` subclasses, GA-40; a removed adapter file; a directory where a store file must be
-written) or scripted model content the design names (O3). A model-provider outage is PR-1
-(`S.provider_outage()`); a box run cut off by its time bound is PR-2.
+written) or scripted model content the design names (O3). A model-provider outage is the
+`ModelHTTPError` the model client raises once its own retries give up (`S.raising(...)`,
+GPR-01); a box run cut off by its time bound raises `subprocess.TimeoutExpired` out of the box
+transport, unwrapped (`_timing_box(cut_off=...)`, GPR-02).
 
 RED at base 96e4cdb0: the coined oracle surface does not exist (the v2 manifest does not load,
 `WorldRegistry` takes no oracle, `oracle_settings` / `RateLimiter` / `OracleUnservable` are
@@ -30,6 +32,7 @@ import contextlib
 import importlib
 import json
 import shutil
+import subprocess
 import threading
 import time
 from dataclasses import dataclass
@@ -369,10 +372,16 @@ class _HangsFirst(S.ScriptedModel):
         return out
 
 
-def _timing_box(out: bytes) -> tuple[Any, list[dict]]:
+def _timing_box(out: bytes, *, cut_off: int = 0) -> tuple[Any, list[dict]]:
     """A SANDBOXED box factory (a `_DockerTransport`, GD-16, as `S.sandboxed_box`) that also
     records the time bound each run is handed; it answers with `out` as the program's stdout
-    (the scripted program's own output: content, not a fault)."""
+    (the scripted program's own output: content, not a fault).
+
+    The first `cut_off` runs outlive their time bound: the transport raises what the docker
+    transport's `subprocess.run(..., timeout=)` raises then, `subprocess.TimeoutExpired` with
+    the docker exec argv and the bound it was handed. `BoxExecutor.run_parsed` passes it
+    through unwrapped, with no `BoxResult` and no exit code (GPR-02, executed on a real
+    container and on the host executor)."""
     spec_mod = S.mod("runtime.box._spec")
     codec = S.mod("runtime.box_codec")
     seen: list[dict] = []
@@ -381,6 +390,10 @@ def _timing_box(out: bytes) -> tuple[Any, list[dict]]:
     class _Recording(spec_mod._DockerTransport):
         def __call__(self, frame: bytes, *, cwd: Path, timeout: float) -> Any:
             seen.append({"frame": frame, "timeout": timeout})
+            if len(seen) <= cut_off:
+                raise subprocess.TimeoutExpired(  # GPR-02
+                    ["docker", "exec", "-i", "-w", str(cwd), self.name,
+                     "python3", "-m", "defender.runtime.bash_exec"], timeout)
             return codec.RawExec(rc=0, stdout=codec.encode_response(
                 codec.BoxResult(rc=0, out=out, err=b"")), stderr=b"")
 
@@ -987,14 +1000,43 @@ def test_oracle_model_call_fails_transiently_then_works(tmp_path):
     retries is one failed attempt. Settled regardless: none of it reaches the investigator's
     transcript or evidence, it is charged to neither the investigator's budget nor the circuit
     breaker (O4), and if the oracle never becomes usable the sibling ends unservable. The fault
-    is a provider outage, which no ledger claim observes: PR-1.
+    is the `ModelHTTPError` 503 the model client raises once its own retries give up (GPR-01):
+    on the oracle's first request, then a valid submission. The driven run is compared with an
+    unbranched run of the same script (budget counters, breaker). Second half: every request
+    fails, so the call ends unservable and nothing is served.
     """
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
-    S.episode_v2(tmp_path)
-    # The oracle's first model request must fail as its provider client fails once its own
-    # bounded retries give up; the class that client raises is PR-1's open question.
-    S.provider_outage()
+    ep = S.episode_v2(tmp_path / "a")
+    # GPR-01: the first oracle request fails as the provider client fails after its retries.
+    o = S.oracle(S.raising(S.OUTAGE), S.submit(ALICE_ROWS))
+    reg = S.world_registry(ep, "b", est, oracle=o, verifier=S.passing_verifier(), retry_cap=2)
+    turns = [_q("user:alice"), S.done_turn()]
+
+    branched = _drive(tmp_path / "w", est, reg, turns)
+    plain = _drive(tmp_path / "p", est, _plain(est), turns)
+
+    assert branched.raised is None
+    assert o.requests == 2, "the failed request was not followed by another"
+    assert not o.overrun
+    assert branched.rows_for("idp", "user:alice")[0]["exit_code"] == 0
+    for leak in ("ModelHTTPError", "provider answered 503"):
+        assert leak not in branched.transcript, leak
+        assert leak not in branched.evidence_text, leak
+    assert branched.failures("idp") == 0, branched.breaker
+    assert branched.breaker.get("total_failures", 0) == 0
+    for key in ("tool_calls", "subagent_spawns"):
+        assert branched.budget[key] == plain.budget[key], (key, branched.budget, plain.budget)
+    assert branched.oracle_side_wire_rows() == []
+
+    ep2 = S.episode_v2(tmp_path / "b")
+    down = S.oracle(then=S.raising(S.OUTAGE))  # GPR-01, on every attempt
+    reg2 = S.world_registry(ep2, "b", est, oracle=down, verifier=S.passing_verifier(),
+                            retry_cap=2)
+    with pytest.raises(S.unservable_cls()):
+        S.call(reg2, "idp", "query", est.ctx(tmp_path / "inv-b"), q="user:alice")
+    assert down.requests >= 2, "the provider failure was not retried up to the cap"
+    assert _served_rows(ep2, "b", "user:alice") == []
 
 
 def test_input_oracle_model_returns_nothing_usable(tmp_path):
@@ -1085,15 +1127,41 @@ def test_verifier_provider_fails_after_the_host_checks_passed(tmp_path):
 
     M03=A: a verifier provider failure re-asks the verifier once inside the attempt (it does
     not consume an oracle attempt by itself). Settled regardless: nothing is served until a
-    verifier pass is obtained and nothing reaches the investigator. The fault is a provider
-    outage on the verifier's client, which no ledger claim observes: PR-1.
+    verifier pass is obtained and nothing reaches the investigator. The fault is the
+    `ModelHTTPError` 503 the verifier's client raises once its own retries give up (GPR-01), on
+    the verifier's first request. Second half: a verifier whose every request fails never
+    passes, so nothing is served or stored and the call ends unservable.
     """
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
-    S.episode_v2(tmp_path)
-    # The verifier's first model request must fail as its provider client fails after its own
-    # bounded retries; the class that client raises is PR-1's open question.
-    S.provider_outage()
+    ep = S.episode_v2(tmp_path / "a")
+    o = S.oracle(S.submit(ALICE_ROWS))
+    # GPR-01: the verifier's first request fails as its provider client fails after retries.
+    v = S.verifier(S.raising(S.OUTAGE), S.verdict(True))
+    reg = S.world_registry(ep, "b", est, oracle=o, verifier=v, retry_cap=2)
+
+    run = _drive(tmp_path / "w", est, reg, [_q("user:alice"), S.done_turn()])
+
+    assert run.raised is None
+    assert run.rows_for("idp", "user:alice")[0]["exit_code"] == 0
+    assert v.requests == 2, "the verifier was not re-asked after its provider failed"
+    assert not v.overrun
+    # M03=A: the re-ask is inside the attempt; it spends no oracle attempt of its own.
+    assert o.submissions() == 1
+    assert not o.overrun
+    for leak in ("ModelHTTPError", "provider answered 503"):
+        assert leak not in run.transcript, leak
+        assert leak not in run.evidence_text, leak
+
+    ep2 = S.episode_v2(tmp_path / "b")
+    o2 = S.oracle(then=S.submit(ALICE_ROWS))
+    v2 = S.verifier(then=S.raising(S.OUTAGE))  # GPR-01, on every request
+    reg2 = S.world_registry(ep2, "b", est, oracle=o2, verifier=v2, retry_cap=2)
+    with pytest.raises(S.unservable_cls()):
+        S.call(reg2, "idp", "query", est.ctx(tmp_path / "inv-b"), q="user:alice")
+    assert v2.requests >= 1
+    assert _served_rows(ep2, "b", "user:alice") == []
+    assert _cached(ep2, "b", "user:alice") == []
 
 
 def test_verifier_replies_with_neither_a_pass_nor_a_failure(tmp_path):
@@ -1216,26 +1284,32 @@ def test_python_runs_past_its_time_limit(tmp_path):
     The run is cut off by a time and output bound, the oracle is told, the attempt fails as an
     oracle-side failure, and the time never counts toward any investigator time limit (O4);
     nothing is served from the cut-off output. Observed here: the sandboxed box is handed a
-    finite time bound; a program printing 12 MB reaches the oracle bounded; the served answer
-    is the later submission's. The time cut-off itself (what the box hands back when a run
-    outlives its bound) has no ledger claim: PR-2. M18=A (sandboxed box).
+    finite time bound; a run that outlives it reaches the oracle as a cut-off it is told about;
+    a program printing 12 MB reaches the oracle bounded; the served answer is the later
+    submission's. The cut-off is what the box hands back when a run outlives its bound:
+    `subprocess.TimeoutExpired` out of the transport, unwrapped by `run_parsed` (GPR-02).
+    M18=A (sandboxed box). Whether the cut-off is in-turn feedback or a failed attempt (M03=A
+    against this demand's "the attempt fails") is pinned neither way: the retry cap leaves room
+    for both.
     """
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     ep = S.episode_v2(tmp_path)
-    box, runs = _timing_box(b"A" * (12 * 1024 * 1024))
-    o = S.oracle(S.python("while True:\n    print('A' * 4096)\n"), S.submit(ALICE_ROWS))
+    box, runs = _timing_box(b"A" * (12 * 1024 * 1024), cut_off=1)
+    o = S.oracle(S.python("import time\nwhile True:\n    time.sleep(1)\n"),
+                 S.python("while True:\n    print('A' * 4096)\n"), S.submit(ALICE_ROWS))
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=S.passing_verifier(), box=box,
-                           retry_cap=2)
+                           retry_cap=3)
 
     assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == ALICE_ROWS
-    assert runs, "the python tool never ran in the box"
+    assert len(runs) >= 2, "the python tool did not run both programs in the box"
     assert all(0 < r["timeout"] < float("inf") for r in runs), runs
-    assert len(_appended(o, 1)) < 2 * 1024 * 1024, "the program's output reached the oracle whole"
-    raise S.ProbeRequired(
-        "PR-2 (80-author-digest.md): the shape a box run cut off by its time bound takes (the docker transport's "
-        "subprocess timeout, or an exit code) has no ledger claim; 'the oracle is told' and "
-        "'the attempt fails' for a cut-off run wait on that probe")
+    assert not o.overrun
+    told = _appended(o, 1).lower()
+    assert told.strip(), "the oracle was told nothing about its cut-off run"
+    assert any(word in told for word in ("time", "deadline", "cut off")), (
+        f"the oracle was not told its run outlived its time bound: {told[:400]!r}")
+    assert len(_appended(o, 2)) < 2 * 1024 * 1024, "the program's output reached the oracle whole"
 
 
 def test_many_oracle_turns_inside_one_investigator_call_and_the_investigators_budget(tmp_path):

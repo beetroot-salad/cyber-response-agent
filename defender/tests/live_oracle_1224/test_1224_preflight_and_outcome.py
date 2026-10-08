@@ -153,17 +153,21 @@ class _Routed:
 
 
 class _Raising:
-    """Answers every request by raising `exc` (a provider failure, once PR-1 names it)."""
+    """Answers every request by raising what the provider client raises once its own retries
+    give up (GPR-01): `S.provider_outage(status)`, a fresh instance per request, recorded."""
 
     __name__ = "Raising"
 
-    def __init__(self, exc: BaseException) -> None:
-        self.exc = exc
+    def __init__(self, status: int | None = S.OUTAGE) -> None:
+        self.status = status
         self.requests = 0
+        self.raised: list[BaseException] = []
 
     def __call__(self, messages: list[Any], info: Any) -> Any:
         self.requests += 1
-        raise self.exc
+        exc = S.provider_outage(self.status)  # GPR-01
+        self.raised.append(exc)
+        raise exc
 
 
 def _assert_routed(*routers: _Routed) -> None:
@@ -889,21 +893,36 @@ def test_oracle_provider_rate_limits_every_sibling_at_once(tmp_path):
 
     M04=A: provider rate limits are absorbed by the model client's bounded retry (M03) and count
     only when that gives up. Settled regardless: per sibling the investigator sees no oracle
-    error and no budget or breaker charge (O4). The rate-limit response is a provider fault no
-    ledger claim observes: PR-1.
+    error and no budget or breaker charge (O4). The rate limit is the `ModelHTTPError` 429 the
+    client raises once its own retries could not absorb it (GPR-01): it meets every sibling's
+    first oracle request at once, and the next request answers. Each sibling's call is served
+    the submission, and neither its answer nor its world ledger carries the provider error.
+    The budget and breaker half is pinned on a driven run by b_p124 (the same failure shape);
+    this test drives the serving seam per sibling.
     """
     est = S.estate(tmp_path)
     ep = S.episode_v2(tmp_path, doc=_family(), base_rows=[S.captured("idp", "query", _Q1, _BASE)])
-    # PR-1: the exception the oracle's model client raises for a rate limit it could not absorb.
-    limited = S.provider_outage()
+    doubles: dict[str, S.ScriptedModel] = {}
     answers = {}
     for w in ("b", "c"):
-        reg = S.world_registry(ep, w, est, oracle=_Routed({}, default=_Raising(limited)),
-                               verifier=S.passing_verifier())
+        # GPR-01: the 429 the provider client raises once its retries could not absorb it.
+        doubles[w] = S.oracle(S.raising(S.RATE_LIMITED), S.submit(_BASE, S.EMPTY_CLAIM))
+        reg = S.world_registry(ep, w, est, oracle=doubles[w], verifier=S.passing_verifier(),
+                               retry_cap=2)
         answers[w] = S.call(reg, "idp", "query", est.ctx(tmp_path / f"sibling-{w}"), **_Q1)
     for w, answer in answers.items():
-        assert "rate" not in _text(answer).lower()
-        assert all(r["source"] not in (S.FAULT, S.REAL_ERROR) for r in S.ledger_rows(ep, w))
+        assert doubles[w].requests == 2, f"{w}: the rate-limited request was not followed"
+        assert not doubles[w].overrun
+        assert answer == _BASE, f"{w}: the submission was not served"
+        text = _text(answer).lower()
+        for leak in ("rate", "modelhttperror", "provider answered"):
+            assert leak not in text, (w, leak)
+        rows = S.ledger_rows(ep, w)
+        assert rows, f"{w}: the served call left no world-ledger row"
+        assert all(r["source"] not in (S.FAULT, S.REAL_ERROR) for r in rows)
+        ledger_text = json.dumps(rows, default=str)
+        assert "ModelHTTPError" not in ledger_text
+        assert "provider answered" not in ledger_text
 
 
 def test_1224_world_dir_holds_both_oracle_state_and_the_archived_run(tmp_path, episodes_root):
@@ -1242,13 +1261,12 @@ def test_preflight_one_world_hits_an_oracle_outage_and_the_others_are_fine(tmp_p
     Settled: when one world's pre-flight fails (the oracle exhausts N attempts on a call) and
     the others replay cleanly, that world is marked unservable and the others' siblings run and
     are graded (O5, O13); the outcome record names the unservable world. The provider failure is
-    PR-1 (no ledger claim names the class the client raises once its retries give up).
+    the `ModelHTTPError` 503 the client raises once its own retries give up (GPR-01), on every
+    request of world c.
     """
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "2")
     est = S.estate(tmp_path)
-    # PR-1: the exception the oracle's model client raises once its bounded retries give up.
-    outage = S.provider_outage()
-    down_c = _Raising(outage)
+    down_c = _Raising(S.OUTAGE)  # GPR-01
     oracle = _by_world(_passing(), down_c)
     run = _launch(tmp_path, est, oracle=oracle, verifier=S.passing_verifier())
 
@@ -1266,18 +1284,19 @@ def test_preflight_oracle_provider_is_down_for_every_world(tmp_path):
     M05=A: an all-world oracle-provider outage follows Amendment 2's rule (`unusable`, each
     world's reason names the provider failure; #187 not carved out as `refused`). Settled
     regardless: no sibling starts, and no oracle or tenant error reaches an investigator. The
-    outage is PR-1.
+    outage is the `ModelHTTPError` 503 the client raises once its own retries give up (GPR-01),
+    on every request of every world.
     """
     est = S.estate(tmp_path)
-    # PR-1: the exception the oracle's model client raises once its bounded retries give up.
-    outage = S.provider_outage()
-    oracle = _Routed({}, default=_Raising(outage))
+    down = _Raising(S.OUTAGE)  # GPR-01
+    oracle = _Routed({}, default=down)
     run = _launch(tmp_path, est, oracle=oracle, verifier=S.passing_verifier())
 
     outcome = S.read_outcome(run.ep)
     assert outcome["outcome"] == "unusable"
     assert _worlds(outcome["unservable_worlds"]) == {"b", "c"}
-    name = type(outage).__name__
+    assert down.raised, "no world's pre-flight reached the oracle"
+    name = type(down.raised[0]).__name__
     assert all(name in e["reason"] or "provider" in e["reason"].lower()
                for e in outcome["unservable_worlds"])
     assert run.spawn.launches == []

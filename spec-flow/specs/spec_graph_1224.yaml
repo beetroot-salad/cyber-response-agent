@@ -4965,6 +4965,10 @@ demands:
   assembly_note: binds derived at assembly from the clause and the premise's obligation tags (O2, O4, O9); the premise carried no `# binds:` line
   source: '45-dispositions ''Bound now'' (untagged: holds under every reading of the cluster)'
   discharged_by: test_conc_18_lead_ended_mid_serve
+  amendment_note: 'GPR-03 (phase E probe fold): the lead is ended by a sibling lead''s BudgetKill while this call is inside serve_one''s live
+    base read of an uncaptured call (key flow step 2), the one cut inside serve_one a time limit can reach: under S12/S13 the clock is paused
+    while a turn is open or queued for, so the literal queued/inside-turn cut is unreachable by any executed mechanism (RunAborted mid-turn is
+    the one unexecuted candidate). Red-flagged in 80-author-digest.md.'
   seed_docstring: 'forged rows already frozen stay immutable and a later identical call is served consistently with them (O2), and no extra or
     missing ledger row results (O9). Resolved reading (N12): resolved_by: auto | reading: #141, #144, #146 settled by S11; for #161 a call whose
     lead ended while queued for or inside the oracle turn still stores its verified answer in the cache, with no ledger or evidence row for the
@@ -14857,6 +14861,87 @@ claims:
   verdict: unrefuted
   source: re-ground leaf (65-regrounds.md)
   feeds: 'R6 source probe (RG-09): M12 (world_view_names deletion) must keep the hyphen refusal somewhere; N02; O-33'
+- id: GPR-01
+  kind: behavior
+  claim: >-
+    When the SDK's own bounded transient retries give up on a provider 5xx, 429 or connection failure, run_stage (the in-process learning-role
+    driver the oracle and verifier clients go through) raises RunUnprocessable whose __cause__ is pydantic_ai.exceptions.ModelHTTPError (any HTTP
+    status, 5xx and 429 alike) or, for a connection that cannot be made, pydantic_ai.exceptions.ModelAPIError.
+  probe: >-
+    cd /tmp && PYTHONPATH=/wt-issue-1224 /workspace/defender/.venv/bin/python /wt-issue-1224/.spec-flow/probes/PR/pr1_provider_outage.py (output
+    .spec-flow/probes/PR/pr1_provider_outage.out.txt); the fake-equivalence re-run .spec-flow/probes/PR/pr1b_fake_equivalence.py (output
+    pr1b_fake_equivalence.out.txt). Real stack end to end (run_stage -> build_stage_agent -> providers.build_for_effort -> pydantic_ai model ->
+    anthropic / openai SDK httpx client) against a local 127.0.0.1 stub HTTP server answering a fixed status, and against a closed local port;
+    dummy credentials; a 200 control per provider.
+  probe_kind: executed
+  observed: >-
+    Both providers the repo builds (Anthropic via AnthropicModel, Fireworks via OpenAIChatModel) give the same outcome. The 200 control returns the
+    text. For 500, 503, 529 (Anthropic) / 502 (Fireworks) and 429 (retry-after 0) the stub saw 3 requests (the first plus the SDK's 2 retries, about
+    1.3 s of backoff), then run_stage raised defender.learning.core.config.RunUnprocessable (a wrapper; message
+    `<stage> (<label>) failed: ModelHTTPError("status_code: 503, model_name: claude-sonnet-4-5, body: {...}")`) whose __cause__ is
+    pydantic_ai.exceptions.ModelHTTPError (MRO ModelHTTPError > ModelAPIError > AgentRunError > RuntimeError; .status_code an int, .model_name,
+    .body the parsed provider body); its own __cause__ is the SDK class (anthropic.InternalServerError / OverloadedError / RateLimitError;
+    openai.InternalServerError / RateLimitError). A 401 is not retried (1 request) and gives the same ModelHTTPError with status_code 401, so the
+    class does not separate an outage from an auth fault; the status does. Connection refused (closed port): 3 attempts in about 1.3 s, then
+    RunUnprocessable with __cause__ pydantic_ai.exceptions.ModelAPIError (str "Connection error.", .model_name set, no status_code; MRO ModelAPIError >
+    AgentRunError), chained to anthropic/openai.APIConnectionError > httpx2.ConnectError > httpcore2.ConnectError. The pydantic-ai layer adds no
+    retry of its own for these. Fake equivalence: a FunctionModel raising ModelHTTPError(503, model_name, body), ModelHTTPError(429, ...) or
+    ModelAPIError(model_name, "Connection error.") through run_stage(make_model=...) yields the identical RunUnprocessable, with the same __cause__
+    class and message shape.
+  verdict: holds
+  source: write-tests probe leaf (82-probe-requests.md, PR-1)
+  feeds: 'b_fu20[exception], b_p124, b_p129, b_p125, s_p186, b_p187 (provider_outage()); M03=A, M04/M05 all-world outage'
+- id: GPR-02
+  kind: behavior
+  claim: >-
+    A box run cut off by its time bound hands back no BoxResult, exit code or field: BoxExecutor.run_parsed raises subprocess.TimeoutExpired, from
+    the docker transport and from the host executor alike.
+  probe: >-
+    cd /tmp && PYTHONPATH=/wt-issue-1224 /workspace/defender/.venv/bin/python /wt-issue-1224/.spec-flow/probes/PR/pr2_box_timeout.py docker|host
+    (outputs .spec-flow/probes/PR/pr2_docker.out.txt and pr2_host.out.txt). docker arm: a real container from start_box(BoxRequest) on the owned
+    defender-box image (runtime runc, because no runsc is installed here; mount /workspace, the only daemon-shared path), the real _DockerTransport.
+    host arm: DEFENDER_ALLOW_UNSANDBOXED=1 with a forced start fault, so the real unboxed_executor and _HostTransport.
+  probe_kind: executed
+  observed: >-
+    docker (sandboxed=True, transport _DockerTransport): the `echo hi` control returns BoxResult(rc=0, out=b"hi\n", err=b""). `sleep 30`,
+    `python3 -c "import time; time.sleep(30)"` and `echo a && sleep 30` each raise subprocess.TimeoutExpired after the 2 s bound (2.01 s elapsed),
+    with cmd=['docker', 'exec', '-i', '-w', '/workspace', '<container>', 'python3', '-m', 'defender.runtime.bash_exec'], timeout=2, and output,
+    stdout and stderr None. BoxExecutor.run_parsed re-raises it unchanged (not wrapped in BoxFault). host (sandboxed=False, transport
+    _HostTransport): the same three commands raise subprocess.TimeoutExpired(cmd='', timeout=about 2.0, the remaining deadline) with output None.
+    Not probed: the in-box DEFENDER_BOX_TIMEOUT arm (default 120 s, past the transport bound); by reading bash_exec._run_box_entrypoint it exits rc 3
+    with a stderr line and no response frame.
+  verdict: holds
+  source: write-tests probe leaf (82-probe-requests.md, PR-2)
+  feeds: 'b_p136 (the time cut-off; tools/_bash.py maps TimeoutExpired to ModelRetry for the investigator, the oracle seam has to map it to a failed attempt); M18=A'
+- id: GPR-03
+  kind: behavior
+  claim: >-
+    When an investigator limit (the wall-clock BudgetKill raised by the budget hook in one lead) ends the run while a sibling lead's query is
+    awaiting its verb on asyncio.to_thread, the sibling's await is cancelled (CancelledError), the worker thread keeps running the verb to
+    completion, the cancelled lead records no query row, no summary and no session terminator, and the run does not return until that worker
+    finishes.
+  probe: >-
+    cd /wt-issue-1224/defender && PYTHONPATH=/wt-issue-1224 flock /tmp/defender-pytest.lock /workspace/defender/.venv/bin/python -m pytest
+    ../.spec-flow/probes/PR/pr3_lead_ended_mid_call_test.py -p defender.tests.conftest -p no:randomly -n 0 -s -q --rootdir=/wt-issue-1224/defender
+    (output .spec-flow/probes/PR/pr3_lead_ended_mid_call.out.txt). Real driver via the replay harness (H.drive), the real budget enforcer with
+    DEFENDER_BUDGET_ENFORCE, the real query tool and QueryCapture, a FakeVerbs registry; the models are FunctionModels. One observer wraps
+    asyncio.to_thread to report CancelledError and re-raises it unchanged. Positive control: the same shape under generous limits.
+  probe_kind: executed
+  observed: >-
+    Wall clock 1.0 s plus grace 0.5 s, two parallel leads dispatched in one turn. The l-001 query enters a 6 s verb on worker thread asyncio_0
+    (t=1.05). l-002's own model takes 2.2 s, then its query meets the budget hook: BudgetKill ("budget tail exhausted at query"). At t=3.27 the l-001
+    to_thread await saw asyncio.CancelledError (the sibling tool call's exception cancelled it); the worker kept running and finished at t=7.05 (the
+    verb's return value discarded); H.drive returned only then (asyncio.run joins the default-executor worker), with summary truncated_by=budget and
+    exit_reason=BudgetKill. Records: executed_queries.jsonl has no row for l-001 (nor for l-002, whose call was killed at the hook); no
+    gather_raw/l-001/0.json; no gather_summaries/l-001.md; the lead stays claimed (gather_raw/l-001.lead.json exists); session table main=budget,
+    gather:l-002=budget (the lead that raised: _run_gather stamps BudgetKill), gather:l-001=NULL (no except arm catches CancelledError, so no
+    terminator); l-001 made exactly 1 model request. Control (limits 600 s): the slow await returned normally; l-001 got its row (exit 0), its
+    summary, a second model request and truncated_by None. By reading, not executed: RunAborted takes the same re-raise path in _run_gather; a
+    request-limit UsageLimitExceeded in one lead is caught inside that lead and cancels no sibling; no asyncio.wait_for wraps a gather lead
+    (wait_for exists only in challenge_gate and _pydantic_stage).
+  verdict: holds
+  source: write-tests probe leaf (82-probe-requests.md, PR-3)
+  feeds: 'test_conc_18_lead_ended_mid_serve (b_p161); N12 lead ended while queued or inside the oracle turn; S12'
 gate:
   evaluated:
   - rule: R0
@@ -15700,13 +15785,6 @@ handoff:
   - 'FOLLOW-UP (M11, human): a per-query load bound on oracle-side tenant queries beyond the adapters'' own caps.'
   - 'FOLLOW-UP (N21, auto): poisoned-input detection for a hostile denial pattern.'
   - 'FOLLOW-UP (N19 / N06 #219): a per-tenant rate limit (the limit is per episode in this PR).'
-  - 'PROBE REQUEST PR-1: the exception the oracle''s / verifier''s model client raises once its own bounded transient retries give up (a provider
-    outage, an unabsorbed rate limit). No claim observes it; S.provider_outage() raises ProbeRequired where 6 tests need it (b_fu20[exception],
-    b_p124, b_p129, b_p125, s_p186, b_p187).'
-  - 'PROBE REQUEST PR-2: what a box run cut off by its time bound hands back (the docker transport''s subprocess.TimeoutExpired, or an exit code).
-    b_p136 pins its observable half, then raises ProbeRequired.'
-  - 'PROBE REQUEST PR-3: how an investigator limit ends a gather lead while its query call is inside serve_one (the cancelled to_thread await
-    with the worker still running). test_conc_18_lead_ended_mid_serve builds the scenario, then raises ProbeRequired.'
   drops:
   - 'B-01 (20-demands background; design lines 1, 5, 7, 9, 28, 44, 46, 48, 62, 64, 72, 92, 100, 107, 122, 135, 145, 149, 153) — titles, headings
     and the obligation-format preface: document structure, no demand.'
@@ -15846,22 +15924,31 @@ handoff:
     keyed by system; ledger words oracle/real-error with base_digest/claim/verifier_verdict/attempts; knobs ORACLE_MODEL/CHECK_MODEL/EFFORT/CHECK_EFFORT/RETRY_CAP/RATE/BUDGET/TURN_DEADLINE;
     budget.json oracle_held_seconds; the child env''s ORACLE_RATE is the sibling''s slice R/k. write-code-from-spec renames THERE, never through
     an alias.'
-  - 'AUTHOR (phase E): RED AT BASE by design: 468 of 471 items fail, 3 pass (the nullstub_passes above). Census at base: 247 stop at the v2 manifest
-    load (FamilyError: served_systems unknown), 80 at cli.main''s missing roster= seam, about 45 at other missing coined surfaces (author_family/_questioner_lessons_section
-    served_systems=, cli.system_samples, cli.preflight_replay, preflight_role_models branching=, Step.PREFLIGHT, AgentRole.ORACLE, JudgeReply
-    bucket/verdict_word, the estate.oracle/limiter modules), 8 at a probe request (ProbeRequired: PR-1 x6, PR-2, PR-3), and about 90 on the demanded
-    behaviour being absent (the judge''s review.yaml gate, the code half, page/reader words, elastic reads past as_of, removals not yet made).
+  - 'AUTHOR (phase E): RED AT BASE by design: 468 of 471 items fail, 3 pass (the nullstub_passes above). Census at base, after the probe fold:
+    249 stop at the v2 manifest load (FamilyError: served_systems unknown), 82 at cli.main''s missing roster= seam, 48 at other missing coined
+    surfaces (author_family/_questioner_lessons_section served_systems=, cli.system_samples, cli.preflight_replay, preflight_role_models branching=,
+    Step.PREFLIGHT, AgentRole.ORACLE, JudgeReply bucket/verdict_word, the estate.oracle/limiter modules), none at a probe request, and 89 on the
+    demanded behaviour being absent (the judge''s review.yaml gate, the code half, page/reader words, elastic reads past as_of, removals not yet made).
     Because most tests stop at the v2 load, the code after it has never executed at base: expect a harness shakeout pass once manifest v2 loads
     (several writers flag it).'
   - 'AUTHOR (phase E): spec-graph calls with 13 --targets (estate.oracle, estate.limiter, estate.registry, branch.cli, runtime.branch._family,
-    learning.judge, run, branch.questioner, branch.ledger, branch.episode, visualize_episode, agent_role, query_tool) reports a FALSE 65/451 NO-CALL
+    learning.judge, run, branch.questioner, branch.ledger, branch.episode, visualize_episode, agent_role, query_tool) reports a FALSE 63/451 NO-CALL
     floor: each reaches its target through _spec1224''s call-time S.mod()/S.sym() or a same-file helper resolving the target by name (the #947/#1107
-    floor class), or is a census over the tree''s text (roles/removals); the 2 PR-1 tests in test_1224_unservable_and_budget.py stop at the probe
-    before the target by design.'
+    floor class), or is a census over the tree''s text (roles/removals). (65 before the probe fold: the 2 PR-1 tests in
+    test_1224_unservable_and_budget.py now drive the registry.)'
   - 'AUTHOR (phase E): spec-graph nullstub --target defender.learning.branch.estate.oracle --target defender.learning.branch.estate.limiter: 93
     discriminating or recorded (90 fail on their own assertion; 3 NULLSTUB-PASS recorded above), 378 NON-ASSERT honest floor: a stub of the two
-    new modules cannot reach the modify-existing seams the suite also pins (261 stop at the v2 manifest load, 80 at cli.main roster=, the rest
-    at the other modify-existing surfaces, 4 at pytest.raises over the stubbed OracleUnservable, 6 at PR-1).'
+    new modules cannot reach the modify-existing seams the suite also pins (252 stop at the v2 manifest load, 82 at cli.main roster=, 4 at
+    pytest.raises over the stubbed OracleUnservable, the other 40 at the other modify-existing surfaces; none at a probe request after the fold).'
+  - 'AUTHOR (phase E, probe fold): PR-1..PR-3 are answered by GPR-01..GPR-03 (82-probe-requests.md, executed) and folded into the 8 tests that
+    raised ProbeRequired; ProbeRequired is gone from the suite. PR-1: S.provider_outage(status) returns ModelHTTPError 503/429 or ModelAPIError
+    "Connection error." (fresh per request; S.raising() moves, Fault.raise_after, the preflight file''s _Raising), used by b_fu20[exception], b_p124,
+    b_p129, b_p125, s_p186, b_p187; no test asserts RunUnprocessable (the wrapper depends on the seam the oracle code uses). PR-2: _timing_box(cut_off=n)
+    raises subprocess.TimeoutExpired(docker exec argv, timeout) out of the transport, which run_parsed passes through unwrapped (b_p136; its
+    feedback-or-failed-attempt reading stays pinned neither way, retry_cap 3). PR-3: test_conc_18 ends lead l-001 by lead l-002''s wall-clock
+    BudgetKill while l-001''s uncaptured call is inside serve_one''s live base read (see b_p161''s amendment_note). b_p125 is recast as a 429 on
+    each sibling''s first oracle request followed by a valid submission (its assertions read a served answer, which an always-failing oracle
+    never yields); its budget and breaker half is pinned on a driven run by b_p124.'
   - 'KNOWN CI HITS (waived by the human, W-01/W-02/W-03/W-07): test_797_retirement rejects the role value ''oracle_check'' (GD-05); the five role-count
     pins move with the two new roles (GD-04); lint_stage_prompt_frames rejects wrap_fresh at the new framing sites (GD-20); deleting staging/stagers/review
     orphans up to 361 spec-graph pointers in 8 graphs plus registry rows, spec-flow.json resource lists and module-naming fences (GB-31, GB-32,

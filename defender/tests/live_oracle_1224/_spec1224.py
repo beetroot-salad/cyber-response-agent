@@ -123,9 +123,12 @@ EVERY FAULT HERE IS A REAL INPUT THROUGH THE REAL PRIMITIVE, OR A FAKE CITING IT
   * a model's bad submission is SCRIPTED CONTENT the design itself names as the failure (O3:
     "an oracle double that adds an undeclared row, edits a base row silently, or drops a
     covered fact's telemetry");
-  * a model provider outage has NO ledger claim naming the class the oracle's client raises
-    once its bounded retries give up: `provider_outage()` raises `ProbeRequired` (probe request
-    PR-1 in 80-author-digest.md) rather than imagining one.
+  * a model provider outage is the exception GPR-01 observed the model client raise once its
+    own bounded retries give up: `provider_outage(status)` builds it (`ModelHTTPError` 503 / 429,
+    or `ModelAPIError` "Connection error." when no connection is made); a model double raises it
+    from a request (`raising(...)` moves, or `Fault(raise_after=n)`);
+  * a box run cut off by its time bound raises `subprocess.TimeoutExpired`, unwrapped, out of
+    `BoxExecutor.run_parsed` — never a `BoxResult`, never an exit code (GPR-02).
 
 Fakes enter through the injection seams above and never by `monkeypatch.setattr` (the project
 profile's `tests.idioms`, `scripts/lint/lint_monkeypatch.py`). Every fake RECORDS what it was
@@ -312,20 +315,28 @@ as_reply_text = J.as_reply_text
 archived_judge_world = J.archived_judge_world
 
 
-class ProbeRequired(AssertionError):
-    """A fault this suite may not imagine: no ledger claim names its shape (author charge,
-    fault hierarchy rule 3). Raised where a scenario needs it, so the test is red for the
-    stated reason until the probe pins the shape and this file grows the fake."""
+#: The model name GPR-01's probe saw on the provider error (Anthropic arm).
+OUTAGE_MODEL = "claude-sonnet-4-5"
+#: HTTP statuses GPR-01 observed: a provider outage (5xx) and a rate limit (429).
+OUTAGE = 503
+RATE_LIMITED = 429
 
 
-def provider_outage() -> BaseException:
-    """PR-1: the exception the oracle/verifier model client raises once its own bounded
-    transient retries give up (a provider outage or a rate limit it could not absorb). No claim
-    in the ledger observes it, so it is a probe request, not a fake."""
-    raise ProbeRequired(
-        "PR-1 (80-author-digest.md): which exception does the oracle's / verifier's model "
-        "client raise after its bounded transient retries give up? No ledger claim observes "
-        "it; this scenario waits on that probe.")
+def provider_outage(status: int | None = OUTAGE, *,
+                    model_name: str = OUTAGE_MODEL) -> Exception:
+    """What the oracle's / verifier's model client raises once its own bounded transient
+    retries give up — GPR-01 (executed against a local stub server, Anthropic and Fireworks
+    alike): `ModelHTTPError(status_code, model_name, body)` for a 5xx outage or a 429 it could
+    not absorb, `ModelAPIError(model_name, "Connection error.")` when no connection is made
+    (`status=None`). The SDK's retries sit below the model layer, so a model double raises
+    this once per request. Returns a FRESH instance each call; the caller raises it."""
+    from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
+
+    if status is None:
+        return ModelAPIError(model_name, "Connection error.")
+    return ModelHTTPError(status, model_name, {
+        "type": "error", "error": {"type": "api_error",
+                                   "message": f"provider answered {status}"}})
 
 
 # --------------------------------------------------------------------------------------
@@ -551,6 +562,15 @@ class Move:
     tool: str | None
     args: dict = field(default_factory=dict)
     text: str = ""
+    #: A provider failure instead of an answer: a zero-argument factory of the exception the
+    #: request raises (`raising(...)`; GPR-01). Called per request, so each raise is fresh.
+    raises: Callable[[], BaseException] | None = None
+
+
+def raising(status: int | None = OUTAGE) -> Move:
+    """A model request that fails as the provider client fails once its retries give up
+    (GPR-01): `provider_outage(status)`, built fresh for each request this move answers."""
+    return Move(None, raises=lambda: provider_outage(status))
 
 
 def run_query(system: str, verb: str, params: Mapping[str, Any] | None = None) -> Move:
@@ -652,7 +672,8 @@ class ScriptedModel:
 
     `fault` is data: `delay` sleeps that many seconds before each answer (oracle latency, O4's
     "an investigator time limit fires because of oracle latency"); `raise_after=n` is a
-    provider outage after n answers — PR-1, a probe request (`provider_outage`).
+    provider outage after n answers (`provider_outage()`, GPR-01). A `raising(...)` move is
+    the same failure at one point of the script.
 
     `then` is the move repeated once the script is spent (e.g. a verifier that always passes);
     without it a spent script answers text-only and sets `overrun`, which a scenario asserts
@@ -699,7 +720,8 @@ class ScriptedModel:
             offered = [*getattr(info, "function_tools", ()), *getattr(info, "output_tools", ())]
             self.tools.append(tuple(sorted(t.name for t in offered)))
             if self.fault.raise_after is not None and self.answered >= self.fault.raise_after:
-                raise provider_outage()
+                self.finished.append(time.monotonic())
+                raise provider_outage()  # GPR-01
             if self.moves:
                 move = self.moves.pop(0)
             elif self.then is not None:
@@ -711,6 +733,8 @@ class ScriptedModel:
         if self.fault.delay:
             time.sleep(self.fault.delay)
         self.finished.append(time.monotonic())
+        if move.raises is not None:
+            raise move.raises()  # GPR-01
         if move.tool is None:
             return ModelResponse(parts=[TextPart(content=move.text)])
         return ModelResponse(parts=[ToolCallPart(tool_name=move.tool, args=dict(move.args))])

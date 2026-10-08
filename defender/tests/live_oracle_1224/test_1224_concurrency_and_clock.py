@@ -1043,9 +1043,10 @@ def test_conc_14_two_leads_both_exhaust_attempts_in_one_world(tmp_path):
     assert records in ([], ["b.yaml"]), f"more than one record for one world: {records}"
 
 
-def test_conc_18_lead_ended_mid_serve(tmp_path):
-    """b_p161 — a call whose lead was ended while it was inside the oracle still stores its
-    verified answer, with no ledger or evidence row for the undelivered call.
+def test_conc_18_lead_ended_mid_serve(tmp_path, monkeypatch):
+    """b_p161 — a call whose lead was ended while the call was inside `serve_one` still stores
+    its verified answer, with no ledger or evidence row for the undelivered call, and a later
+    identical call is served that answer.
 
     N12 reading (auto): a call whose lead ended while queued for or inside the oracle turn still
     stores its verified answer in the cache, with no ledger or evidence row for the undelivered
@@ -1053,20 +1054,92 @@ def test_conc_18_lead_ended_mid_serve(tmp_path):
     regardless: forged rows already frozen stay immutable and a later identical call is served
     consistently with them (O2), and no extra or missing ledger row results (O9).
 
-    WAITS ON A PROBE: no ledger claim observes an investigator limit that ends a gather lead
-    while its query is inside `serve_one`. Under S12 the time limits are paused for the open
-    turn, the count limits refuse before the call rather than ending it mid-call, and X-14 names
-    no per-call deadline; the lead-ending path (the query tool's `to_thread` await cancelled
-    while the worker runs on) is unobserved."""
-    est = S.estate(tmp_path)
-    ep = _episode(tmp_path, [("idp", "query", ALICE, {"rows": [BASE_ROW]})])
-    oracle = S.oracle(*_forge_and_submit("fg-1", _forged(1), [BASE_ROW]),
-                      fault=S.Fault(delay=1.0))
-    S.world_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier(), retry_cap=3)
-    raise S.ProbeRequired(
-        "PR-3 (80-author-digest.md): how is a gather lead ended by an investigator limit while its query call is "
-        "inside serve_one (the cancelled to_thread await, the worker still running)? No claim "
-        "observes it, so the lead cannot be ended mid-turn here.")
+    How a lead ends mid-call is GPR-03 (executed): a sibling lead's `BudgetKill` at its budget
+    hook cancels this lead's `to_thread` await while the worker thread runs the call to its end,
+    and the run returns only once that worker exits. Under S12/S13 the investigator's clock is
+    paused while an oracle turn is open (queue time behind it never counts), so no time limit
+    fires while the call is queued for or inside the turn; the reachable cut inside `serve_one`
+    is the live base read of an uncaptured call (key flow step 2, before the turn), whose
+    real-system latency counts (S14). The planted idp adapter is made slow (a real adapter
+    module, real latency); lead l-001 issues the uncaptured call and is inside that read when
+    lead l-002, after its own model latency, meets its budget hook past wall clock plus grace.
+    The worker then runs the oracle turn (forge + submit) and the verifier pass. Positive
+    control: the same call under generous limits is delivered, with its evidence row and its
+    world-ledger row, so the absences above are read off live channels."""
+    monkeypatch.setenv(ENFORCE, "true")
+    late = S.query_params("user:alice host:db-1")
+    served_answer = {"rows": [BASE_ROW, _forged(1)]}
+
+    def scenario(root: Path, *, read_s: float, limits: dict,
+                 killer_after: float | None) -> dict[str, Any]:
+        est = S.estate(root)
+        _slow_adapter(est, "idp", read_s)
+        est.answer("idp", "query", late, {"rows": [BASE_ROW]})
+        ep = _episode(root, [])
+        oracle = S.oracle(*_forge_and_submit("fg-1", _forged(1), [BASE_ROW]))
+        reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier(),
+                               retry_cap=3)
+        marks: dict[str, float] = {}
+        leads: dict[str, list[Any]] = {"l-001": [_q(late), S.done_turn()]}
+        if killer_after is not None:
+            def own_latency_then_query() -> Any:
+                time.sleep(killer_after)  # l-002's own model latency: the investigator's
+                marks["killing_turn"] = time.monotonic()
+                return _q(S.query_params("user:bob"))
+
+            leads["l-002"] = [own_latency_then_query, S.done_turn()]
+        run_dir, _router, summary = _drive(root, verbs=reg, tenant=est.place(), limits=limits,
+                                           leads=leads)
+        return {"est": est, "ep": ep, "oracle": oracle, "reg": reg, "run_dir": run_dir,
+                "summary": summary, "marks": marks}
+
+    # The order the cut needs: startup < wall clock < l-002's latency (its hook then reads
+    # elapsed past wall clock + grace) < l-001's live read.
+    kill = {**DEFAULT_LIMITS, "wall_clock_timeout": 4.0, "grace_seconds": 0.5,
+            "max_tool_calls": 500}
+    run = scenario(tmp_path / "ended", read_s=7.5, limits=kill, killer_after=5.0)
+    est, ep, oracle, reg = run["est"], run["ep"], run["oracle"], run["reg"]
+
+    assert run["summary"].get("truncated_by") == "budget", (
+        f"no limit ended the run, so no lead was ended mid-call: {run['summary']}")
+    assert "killing_turn" in run["marks"], "lead l-002 never reached its killing query"
+    assert [c["params"] for c in est.calls("idp", "query")] == [late], (
+        "l-001's call never entered the live read, or l-002's query reached the tenant")
+    assert oracle.started, "the worker never reached the oracle turn after its lead ended"
+    assert oracle.started[0] > run["marks"]["killing_turn"], (
+        "the oracle turn began before l-002's killing query: the lead was not ended while its "
+        "call was inside serve_one's live read, so the scenario is moot")
+    assert oracle.submissions() == 1
+    assert not oracle.overrun
+    assert [r for r in _own_rows(run["run_dir"]) if r["lead_id"] == "l-001"] == [], (
+        "the undelivered call left an evidence row")
+    assert not list((run["run_dir"] / "gather_raw").glob("l-001/*")), (
+        "the undelivered call left an evidence payload")
+    stored = [r for r in S.oracle_rows(ep, "b", "answers") if r["params"] == late]
+    assert len(stored) == 1, "the verified answer of the undelivered call was not stored"
+    assert "e-9001" in _as_text(stored[0]), "the stored answer is not the verified one"
+    assert [r for r in S.ledger_rows(ep, "b") if r.get("params") == late] == [], (
+        "the undelivered call left a world-ledger row")
+    assert [r["forged_id"] for r in S.oracle_rows(ep, "b", "forged")] == ["fg-1"]
+
+    # A later identical call is served the stored answer: no turn, no live read, one row.
+    turns_before = oracle.requests
+    again = S.call(reg, "idp", "query", est.ctx(tmp_path / "later"), **late)
+    assert again == served_answer, "the later call was not served consistently with fg-1"
+    assert oracle.requests == turns_before, "the later identical call took a turn"
+    assert len(est.calls("idp", "query")) == 1, "the later identical call read live again"
+    assert len([r for r in S.ledger_rows(ep, "b") if r.get("params") == late]) == 1, (
+        "the delivered call did not leave exactly one world-ledger row")
+    assert [r["forged_id"] for r in S.oracle_rows(ep, "b", "forged")] == ["fg-1"]
+
+    # Positive control: nothing ends the lead, so the call is delivered on the same channels.
+    ctl = scenario(tmp_path / "control", read_s=1.0, limits=_limits(600.0), killer_after=None)
+    assert ctl["summary"].get("truncated_by") != "budget"
+    rows = [r for r in _own_rows(ctl["run_dir"]) if r["lead_id"] == "l-001"]
+    assert [r["exit_code"] for r in rows] == [0], "the control's call was not delivered"
+    assert len([r for r in S.ledger_rows(ctl["ep"], "b") if r.get("params") == late]) == 1
+    assert len([r for r in S.oracle_rows(ctl["ep"], "b", "answers")
+                if r["params"] == late]) == 1
 
 
 def test_conc_22_serving_entered_from_the_tool_event_loop_thread(tmp_path):

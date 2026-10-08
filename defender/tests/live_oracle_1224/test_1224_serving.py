@@ -1768,7 +1768,8 @@ def test_1224_unservable_call_and_the_world_ledger(tmp_path, cause):
     record, S7); the registry's fault-row writer exempts `OracleUnservable` (RF-1). For each of
     the three causes the world ledger holds no row with `source: fault` for that call and no row
     carrying the oracle's error text; no served answer is stored and no served-answer record is
-    written. The oracle-side exception is a model-provider outage, which no claim observes: PR-1.
+    written. The oracle-side exception is a model-provider outage on every attempt: the
+    `ModelHTTPError` 503 the model client raises once its own retries give up (GPR-01).
     """
     est = S.estate(tmp_path)
     ep = _episode(tmp_path)
@@ -1777,8 +1778,8 @@ def test_1224_unservable_call_and_the_world_ledger(tmp_path, cause):
     if cause == "checks":
         oracle = S.oracle(then=S.submit(UNDECLARED, S.EMPTY_CLAIM))
     elif cause == "exception":
-        S.provider_outage()  # PR-1: the outage class is unobserved; raises ProbeRequired here
-        oracle = S.oracle()
+        # GPR-01: every oracle request fails as the provider client fails after its retries.
+        oracle = S.oracle(then=S.raising(S.OUTAGE))
     else:
         oracle = S.oracle(*_forged_moves(), then=S.text_only())
         knobs["budget"] = 1e-9
@@ -1794,6 +1795,8 @@ def test_1224_unservable_call_and_the_world_ledger(tmp_path, cause):
         S.call(reg, "idp", "query", ctx, **ALICE)
     if cause == "budget":
         assert raised.value.reason == S.REASON_BUDGET
+    if cause == "exception":
+        assert oracle.requests >= 2, "the provider failure was not retried up to the cap"
     rows = S.ledger_rows(ep, "b")
     assert _rows_for(ep, "b", "idp", "query", ALICE) == []
     assert not any(r.get("source") == S.FAULT for r in rows)
