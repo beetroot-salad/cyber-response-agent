@@ -12,6 +12,7 @@ from typing import Any, TypeAlias
 
 from defender._io import ENTRY_OTHER, Bound, bind
 from defender._model import model
+from defender._text import one_line
 from defender._tree_listing import TreeListing, list_tree
 
 _logger = logging.getLogger(__name__)
@@ -29,6 +30,15 @@ PROVENANCE_KEYS = frozenset(
 )
 
 
+#: A lesson's text is corpus text a model wrote, so a caller takes it in the form its destination
+#: needs (#1206): `Lesson.line` / `Lesson.lines` for a printed line or listing row, where a line
+#: break or a terminal control would forge rows; `Lesson.match_text` for what a search pattern
+#: runs over, built from the same one-line values so a listed value is a findable one; and, for
+#: model context, that text inside a `defender._untrusted` frame, as the alert is. `fm`, `raw`
+#: and `body` stay for matching, authoring and the HTML views, which need the raw values;
+#: `scripts/lint/lint_lesson_text.py` asks each such use to say so.
+
+
 @model(frozen=True)
 class Lesson:
 
@@ -38,6 +48,31 @@ class Lesson:
     fm: dict[Any, Any]
     raw: str
     body: str
+
+    def line(self, key: str) -> str:
+        """The `key` value as one printed line; `""` when it is absent or empty."""
+        return one_line(str(self.fm.get(key) or ""))
+
+    def lines(self, key: str) -> list[str]:
+        """The `key` list's values (a scalar is a one-item list), each as one printed line,
+        blank ones dropped."""
+        return _one_lines(self.fm.get(key))
+
+    def match_text(self) -> str:
+        """The frontmatter as a search runs over it: one `key: value` line per key in file
+        order, a list as `key: [a, b]`, every key and value one line. A pattern cannot run from
+        one key into the next, and a value matches in the spelling `Lesson.lines` prints."""
+        out = []
+        for key, value in self.fm.items():
+            shown = (f"[{', '.join(_one_lines(value))}]" if isinstance(value, list)
+                     else one_line(str(value if value is not None else "")))
+            out.append(f"{one_line(str(key))}: {shown}")
+        return "\n".join(out)
+
+
+def _one_lines(value: Any) -> list[str]:
+    items = [] if value is None else value if isinstance(value, list) else [value]
+    return [s for s in (one_line(str(v)) for v in items) if s]
 
 
 #: What every shared reader takes as its tree (#1134 A4): a `Bound` the caller holds, or a `Path`.

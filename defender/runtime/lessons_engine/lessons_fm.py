@@ -28,7 +28,8 @@ Usage:
     defender-lessons --show defender/lessons/foo.md    # print just a lesson's frontmatter
 
 PATTERNs are Python regexes matched case-insensitively against the frontmatter
-text. Exit 0 always (no match = no output); a bad regex exits 2.
+as one ``key: value`` line per key, each value in the one-line spelling ``--tags``
+lists (``Lesson.match_text``), so a pattern cannot run from one key into the next. Exit 0 always (no match = no output); a bad regex exits 2.
 """
 from __future__ import annotations
 
@@ -40,7 +41,8 @@ from pathlib import Path
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._git import REPO_ROOT
 from defender._text import one_line
-from defender.runtime.lessons_engine._lessons_common import as_list, iter_lessons, use_utf8_stdio
+from defender._corpus import Lesson
+from defender.runtime.lessons_engine._lessons_common import iter_lessons, use_utf8_stdio
 from defender._io import read_text_utf8
 
 LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
@@ -48,9 +50,9 @@ LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
 DIMENSIONS = ("source_signature", "telemetry_source", "attack_phase")
 
 
-def _emit_match(path: Path, fm: dict) -> None:
-    desc = one_line(str(fm.get("description") or ""))
-    print(f"{path.resolve()}\t{desc}")
+def _emit_match(lesson: Lesson) -> None:
+    # The path is one line too: a break in a file name would start a forged row.
+    print(f"{one_line(str(lesson.path.resolve()))}\t{lesson.line('description')}")
 
 
 def cmd_grep(patterns: list[str]) -> int:
@@ -60,8 +62,9 @@ def cmd_grep(patterns: list[str]) -> int:
         print(f"error: bad regex: {e}", file=sys.stderr)
         return 2
     for lesson in iter_lessons(LESSONS_DIR):
-        if all(rx.search(lesson.raw) for rx in regexes):
-            _emit_match(lesson.path, lesson.fm)
+        text = lesson.match_text()
+        if all(rx.search(text) for rx in regexes):
+            _emit_match(lesson)
     return 0
 
 
@@ -74,10 +77,7 @@ def cmd_tags(field: str | None) -> int:
     for f in fields:
         counts: dict[str, int] = {}
         for lesson in lessons:
-            for val in as_list(lesson.fm.get(f)):
-                tag = one_line(str(val))
-                if not tag:
-                    continue
+            for tag in lesson.lines(f):
                 counts[tag] = counts.get(tag, 0) + 1
         print(f"{f}:")
         for val in sorted(counts):

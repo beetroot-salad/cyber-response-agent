@@ -2,7 +2,7 @@
  "_meta": {
   "base": "80888efb",
   "how": "capture_lessons.py imported test_1080_lessons_engine and ran each observe_* (copies of the base tree's defender/ code over the module's fixture corpora, the real tree's shim for s021, orient through its shim= seam, the frontier library in process) under SPEC1080_AT_BASE=1, normalised by the module's norm()",
-  "revised": "2026-10-04, post-review (human): the shims run their engines as modules. Four values re-observed: s060.{link-outside,copy-outside}, tree variable unset, for --tags and the listing. A shim outside any checkout still resolves no tree, as at the base; python3 now reports the engine module missing (exit 1) instead of the engine file missing (exit 2). Every other value is the base capture, unchanged. 2026-10-08 (#1206, human-decided): orient frames the Lessons section's Viable tags and Hits bodies as untrusted under a one-line note; every s062.orient section was re-observed, and each equals the prior value once the note and the frames are removed. norm() masks the frame salt as <SALT>."
+  "revised": "2026-10-04, post-review (human): the shims run their engines as modules. Four values re-observed: s060.{link-outside,copy-outside}, tree variable unset, for --tags and the listing. A shim outside any checkout still resolves no tree, as at the base; python3 now reports the engine module missing (exit 1) instead of the engine file missing (exit 2). Every other value is the base capture, unchanged. 2026-10-08 (#1206, human-decided): orient frames the Lessons section's Viable tags and Hits bodies as untrusted under a one-line note; every s062.orient section was re-observed, and each equals the prior value once the note and the frames are removed. norm() masks the frame salt as <SALT>. 2026-10-08 (#1206, human-decided): a search now runs over each lesson's frontmatter as one key: value line per key in the one-line spelling --tags lists (Lesson.match_text), not the raw YAML text; s185's escaped-signature search for it's \"quoted\" now finds meta-quotes.md, which the raw text's YAML quoting hid. No other s185 value moved."
  },
  "survival": {
   "[]": {
@@ -800,7 +800,7 @@
   },
   "[\"source_signature:.*it's\\\\ \\\"quoted\\\"\"]": {
    "rc": 0,
-   "out": "",
+   "out": "<TMP>/tree/defender/lessons/meta-quotes.md\the said \"stop\" and it's done\n",
    "err": ""
   },
   "[\"source_signature:.*a:\\\\ b\"]": {

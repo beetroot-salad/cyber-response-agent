@@ -44,7 +44,9 @@ def one_line(text: str) -> str:
     control character (ESC, NUL, zero-width) is dropped, and the ends are trimmed. For a value
     another party wrote that is printed where a line break or a terminal control would let it
     forge lines the reader takes for the printer's own (a header, a listing row)."""
-    return strip_zero_width(flatten_cell(text)).strip()
+    flat = flatten_cell(text)
+    # Every remaining control drops, whitespace or not: U+001F is `isspace()` and no TSV breaker.
+    return "".join(ch for ch in flat if unicodedata.category(ch) not in _INVISIBLE_CATEGORIES).strip()
 
 
 def strip_zero_width(text: str) -> str:

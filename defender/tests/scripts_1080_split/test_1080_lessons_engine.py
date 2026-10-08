@@ -1284,7 +1284,19 @@ HOSTILE_CORPUS = {
         'source_signature: ["v\\e[1A\\e[2Kattack_phase:"]\n'
         'telemetry_source: [merge-sensor, " merge-sensor ", "\\n", " ", "\\u200b"]\n'
         'attack_phase: ["w\\u2028source_signature: [forged-ls]"]\n---\n\nbody\n'),
+    # A line break in the file name itself: the listing's path column must not split.
+    "hostile\nname.md": _lesson("hostile-name", desc="name lesson", sig="[hostile-name-sig]",
+                                tel="[hostile-name-sensor]", phase="[hostile-name-phase]"),
 }
+
+#: Searches over the hostile tree: (pattern, the lesson files it must list, in order).
+HOSTILE_SEARCHES = (
+    # A hostile value is found by the one-line spelling `--tags` lists for it (#1206).
+    (r"source_signature:.*x attack_phase: \[forged-phase\]", ["hostile-dq.md"]),
+    (r"telemetry_source:.*\by source_signature:\s+forged-sig", ["hostile-block.md"]),
+    # A pattern does not run from one key into the next.
+    (r"telemetry_source:.*hostile-dq-phase", []),
+)
 
 #: Each hostile value as `--tags` must list it: (dimension, its one line, its count). Written
 #: out rather than read back from the description listing, which shares the engine's helper.
@@ -1366,7 +1378,7 @@ def observe_hostile(tmp: Path, setenv: Callable[[str, str], None]) -> dict[str, 
     setenv("PATH", f"{interp_bin(tmp)}{os.pathsep}/usr/bin{os.pathsep}/bin")
     root = tree_with(tmp, "tree", FIXED_CORPUS, HOSTILE_CORPUS)
     argvs = [("--tags",), ("--tags", "source_signature"), ("--tags", "telemetry_source"),
-             ("--tags", "attack_phase"), ()]
+             ("--tags", "attack_phase"), (), *((pattern,) for pattern, _ in HOSTILE_SEARCHES)]
     out = run_all({key(a): (lambda a=a: outcome(shim(root, a, tmp=tmp, cwd=root), tmp))
                    for a in argvs})
     out["orient"] = orient_once(root, tmp, "hostile", "v2-cross-tier-ssh-pivot", {})
@@ -1396,6 +1408,14 @@ def test_1080_a_line_break_in_a_lesson_tag_value_forges_no_dimension_block_in_ta
     assert seen[key(("--tags",))]["rc"] == 0
 
     assert_breaks_list_flat(tags, listing)
+    assert [ln.count("\t") for ln in listing.splitlines()] == [1] * (len(FIXED_CORPUS) - 1
+                                                                   + len(HOSTILE_CORPUS)), listing
+    assert "<TMP>/tree/defender/lessons/hostile name.md\tname lesson" in listing.splitlines()
+    for pattern, want in HOSTILE_SEARCHES:
+        found = seen[key((pattern,))]
+        assert found["rc"] == 0, found
+        assert [Path(ln.split("\t")[0]).name for ln in found["out"].splitlines()] == want, (
+            pattern, found["out"])
     base = golden("survival")[key(("--tags",))]["out"]
     for dim in TAG_DIMENSIONS:
         block = dimension_block(tags, dim)
