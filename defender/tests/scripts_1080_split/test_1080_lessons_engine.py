@@ -213,14 +213,18 @@ def tree_with(tmp: Path, name: str, *corpora: Mapping[str, str]) -> Path:
     return root
 
 
+#: An untrusted frame tag (`wrap_fresh` mints a fresh salt per frame, #1206).
+_FRAME_SALT = re.compile(r"<(/?)run-[0-9a-f]{16}-untrusted>")
+
+
 def norm(text: str, tmp: Path) -> str:
     """THE normaliser (capture and test): the tmp dir, this checkout and this interpreter become
-    `<TMP>`, `<REPO>` and `<PY>`, longest spelling first."""
+    `<TMP>`, `<REPO>` and `<PY>`, longest spelling first; a frame's salt becomes `<SALT>`."""
     subs = {str(tmp.resolve()): "<TMP>", str(tmp): "<TMP>", str(S.REPO_ROOT): "<REPO>",
             sys.executable: "<PY>"}
     for real, token in sorted(subs.items(), key=lambda kv: -len(kv[0])):
         text = text.replace(real, token)
-    return text
+    return _FRAME_SALT.sub(r"<\1run-<SALT>-untrusted>", text)
 
 
 def outcome(proc: subprocess.CompletedProcess[bytes], tmp: Path) -> dict[str, Any]:
@@ -1404,4 +1408,5 @@ def test_1080_a_line_break_in_a_lesson_tag_value_forges_no_dimension_block_in_ta
     section = seen["orient"]["section"] or ""
     assert "### Viable tags\n" in section, section
     viable = section.split("### Viable tags\n", 1)[1].split("\n\n", 1)[0]
-    assert viable == tags.strip(), (viable, tags)
+    assert viable == f"<run-<SALT>-untrusted>\n{tags.strip()}\n</run-<SALT>-untrusted>", (
+        viable, tags)
