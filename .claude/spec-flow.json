@@ -603,6 +603,20 @@
           "_MIRROR_WRITER"
         ],
         "note": "DECLARED BY #1080's GROUNDING (base 80888efb). The dev-only run-page mirror: `<main checkout>/run-visualizations/<run_id>/runtime.html` (`visualize_run.mirror_page` composes `RunPaths(mirror_root() / run_id).runtime_html`). The root resolves, in order: the `DEFENDER_RUN_VISUALIZATIONS_DIR` override; else the main checkout reached from `_DEFENDER_DIR.parent`, where `_DEFENDER_DIR = Path(__file__).resolve().parents[2]` (visualize_run.py:62) — a FILE-DEPTH anchor, so a move of visualize_run.py to another depth silently re-roots the default; else `start` itself. Under pytest the default is refused (`MirrorRootRefused`) and the conftest sets the override for every test, so no test exercises the default anchor. Writer paths: in-process `_mirror_write.write_page` when no privilege drop is needed, else a child `[sys.executable, '-I', <_mirror_write.py path>, <dest>]` run as the mirror folder's owner (visualize_run.py:141-144); the child path comes from `_mirror_write.__file__` (visualize_run.py:68) and the module must stay stdlib-only. No code reads it back: the operator opens the pages. Caller chain: `run_common.py:252` (lazy import inside try → `VisualizeFailed`, never the run's exit code) → `visualize_run.publish_page` → `mirror_page`. Under #1080's 2026-10-04 scope cut visualize/* stays in scripts/: its move into the reports module is parked with #1105 (after #1105's rev 4); update these addresses in the commit that moves them."
+      },
+      "questioner_lessons": {
+        "writers": [],
+        "readers": [
+          "defender/learning/branch/cli.py::_author",
+          "defender/learning/branch/questioner/__init__.py::_questioner_lessons_section"
+        ],
+        "grep": [
+          "lessons-questioner",
+          "lessons_questioner_dir",
+          "_questioner_lessons_section",
+          "stageable_patterns"
+        ],
+        "note": "DECLARED BY #1224's GROUNDING (base 96e4cdb0). The questioner-lesson corpus `defender/lessons-questioner/` (`_paths.PATHS.lessons_questioner_dir`, rel `defender/lessons-questioner/`), which no resource named before: `drain_worktree` covers the curator's writes only through its `corpus_dir` grep token and scopes itself to defender/skills, and nothing covered the launcher's read. EMPTY WRITER LIST ON PURPOSE: the only writer is the questioner curator MODEL, through the drain worktree's file tools (`learning/author/questioner/run.py::build_questioner_config` sets `corpus_dir=paths.lessons_questioner_dir`; `learning/author/shared.py::commit_corpus` commits it — both already rows of `drain_worktree`), so no symbol writes a lesson file; the curator prompt `learning/author/questioner/prompt.md:14-22,30` dictates the frontmatter (`name, description, pattern, holding_system, bucket, source_finding_ids, created_at`) and NO code validates `pattern`/`holding_system`/`bucket` on write. Readers: the launcher's `_author` (cli.py:1507; `iter_lesson_paths(lessons_dir)` at :1537, default dir chosen at :1230) feeding `branch/questioner._questioner_lessons_section` (:182-215), which selects a lesson by `pattern in stageable_patterns` and ignores `holding_system`; also the learning page (`learning/frontend/serialize.py:131-149`, a display table naming `pattern`/`holding_system`/`bucket`), `hooks/record_lesson_load.py:14` (`LESSON_CORPORA`), `learning/core/config.py:65` (drain label) and `evals/harness.py:42` (creates the dir in a temp tree). Today the corpus holds one file, `example-seed-lesson.md`, with `pattern: __none__` so it is never selected. #1224 (O12/M10) replaces the `pattern`/`holding_system` keys with `systems: [str]` and selects by served-system overlap — rewrite the reader rows, the page table and the curator prompt in the commit that does it."
       }
     }
   },
