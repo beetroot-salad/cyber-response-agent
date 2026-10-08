@@ -108,6 +108,14 @@ def _strings(obj: object) -> list[str]:
     return []
 
 
+def _malformed_counts(page: E.Page) -> list[int]:
+    """Every `<n> malformed row` count the page shows, read per TEXT NODE: `page.text` joins
+    adjacent nodes with no separator, so a digit ending one node would glue onto the next
+    node's count there."""
+    return [int(n) for node in page.root.descendants() for piece in node.order
+            if isinstance(piece, str) for n in re.findall(r"(\d+)\s+malformed row", piece)]
+
+
 def _empty_decision_slot(raw: str) -> bool:
     return re.search(r'class="[^"]*decision[^"]*"[^>]*>\s*(?:None|-|—)?\s*<', raw) is not None
 
@@ -408,25 +416,38 @@ def test_1224_episode_page_shows_unusable_and_refused_with_their_reason(tmp_path
 
 
 def test_1224_episode_page_counts_oracle_rows_without_a_malformed_row_note(tmp_path):
-    """pco09_page_counts_oracle_rows — served `oracle` and `real-error` rows are counted as rows,
-    never reported as malformed.
+    """pco09_page_counts_oracle_rows — the page's ledger read counts served `oracle` and
+    `real-error` rows as rows: the malformed-row count it shows covers only a torn line, never
+    them.
 
     The episode page counts served `oracle` and `real-error` rows and reports no malformed-row
-    note for them (PCO-09, M16=A). Positive control: a ledger whose last line is torn still
-    gets the malformed-row note, so the note's channel is live."""
+    note for them (PCO-09, M16=A). "Counts" is the page's ledger screening (`read_world_ledger`,
+    65-regrounds PCO-09): every line is either a counted row or a malformed one, and the page
+    shows the malformed count (`<n> malformed row`). Pinned as numbers: a ledger of two `oracle`
+    rows and one `real-error` row shows no malformed note at all, and the same three rows
+    followed by one torn line show a malformed count of exactly 1 — the torn line alone, not 4
+    (today's reader counts every out-of-vocabulary `source` as malformed, GR-06). That twin is
+    also the positive control: the note's channel is live. A per-decision tally on the page
+    (e.g. "2 oracle · 1 real-error") is NOT pinned: no design element names one; the decision
+    words being shown at all is d12k's."""
     rows = [_oracle_row("b"), _oracle_row("b", q="user:bob"),
             S.ledger_row(S.REAL_ERROR, label="b", params=S.query_params("host:db-9"),
                          payload="UpstreamFault: upstream said no")]
     ep = S.judged_episode(tmp_path / "clean", ledgers={"b": rows, "c": []})
     page = _render(ep)
     assert "malformed row" not in page.text, "served oracle/real-error rows read as malformed"
-    assert S.ORACLE_DECISION in page.text, "the page does not count the served rows"
-    assert S.REAL_ERROR in page.text, "the page does not count the served rows"
+    assert S.ORACLE_DECISION in page.text, "the page does not show the served `oracle` rows"
+    assert S.REAL_ERROR in page.text, "the page does not show the served `real-error` row"
 
     control = S.judged_episode(tmp_path / "torn", ledgers={"b": rows, "c": []})
     J.write_ledger(control, "b", [], raw="".join(json.dumps(r) + "\n" for r in rows)
                    + '{"system": "idp", "verb": \n')
-    assert "malformed row" in _render(control).text, "a torn row raised no note (dead channel)"
+    counts = _malformed_counts(_render(control))
+    assert counts, "a torn row raised no malformed-row note (dead channel)"
+    assert counts == [1], (
+        f"the page's malformed-row count is {counts}, not exactly 1 for one torn line beside "
+        f"two served `oracle` rows and one `real-error` row — the served rows were counted as "
+        f"malformed")
 
 
 # --------------------------------------------------------------------------------------

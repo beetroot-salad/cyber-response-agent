@@ -317,6 +317,18 @@ archived_judge_world = J.archived_judge_world
 
 #: The model name GPR-01's probe saw on the provider error (Anthropic arm).
 OUTAGE_MODEL = "claude-sonnet-4-5"
+
+#: A model `defender._pricing` prices (R-08): every model double is named after it, so an oracle
+#: request accrues positive spend whatever unit the implementer picks (USD from pricing, request
+#: count, tokens). D1 dropped the unpriced-model fallback from the spec; no test may lean on it.
+PRICED_MODEL = "claude-sonnet-4-6"
+
+
+def double_model_name(role: str) -> str:
+    """The model name every double carries: `fake-<role>/<PRICED_MODEL>`. `_pricing` keeps only
+    the part after the last `/` (it strips a registry path), so the double is priced, and the
+    `fake-<role>` head still marks its traffic in any log a test reads."""
+    return f"fake-{role}/{PRICED_MODEL}"
 #: HTTP statuses GPR-01 observed: a provider outage (5xx) and a rate limit (429).
 OUTAGE = 503
 RATE_LIMITED = 429
@@ -705,7 +717,7 @@ class ScriptedModel:
         """The pydantic-ai `Model` handed to the seam (one per double, built on first use)."""
         if self._model is None:
             from pydantic_ai.models.function import FunctionModel
-            self._model = FunctionModel(self, model_name=f"fake-{self.name}")
+            self._model = FunctionModel(self, model_name=double_model_name(self.name))
         return self._model
 
     def __call__(self, messages: list[Any], info: Any) -> Any:
@@ -1205,14 +1217,35 @@ def grep_shipped(needle: str, *, suffixes: tuple[str, ...] = (".py",)) -> list[s
 BRANCH_MESSAGE_ID = T.BRANCH_MESSAGE_ID
 
 
+#: The lead a post-branch captured call is landed under (R-01). `l-001` (`LEAD`) carries the
+#: pre-branch calls: no `gather` dispatch accounts for it, so `_frontier.leads_at` always keeps
+#: it (inherited). `l-002`'s `gather` call/return pair lands in MAIN's session AFTER the branch
+#: message, so `leads_at` drops it: its calls are not in the sibling's inherited transcript.
+POST_BRANCH_LEAD = "l-002"
+
+
 @dataclass(frozen=True)
 class Call:
-    """One call the SOURCE run made (and so one call pre-flight replays)."""
+    """One call the SOURCE run made (and so one call pre-flight replays). `post_branch=True`
+    lands it under `POST_BRANCH_LEAD`, a lead dispatched after the branch point, so it is not
+    part of the inherited prefix; the default is a pre-branch call (M01=A: fixed, served
+    unchanged; a world whose facts would change one fails pre-flight)."""
 
     system: str
     verb: str
     params: dict
     payload: Any = None
+    post_branch: bool = False
+
+
+def post_branch_call(q: str = "user:alice host:db-1", payload: Any = None) -> Call:
+    """One idp call the source run made AFTER the branch point (R-01): a call a world may
+    change, because no sibling inherits its real answer. Its params carry `q` as a marker
+    distinct from every default (pre-branch) call."""
+    rows = payload if payload is not None else {"rows": [
+        {"user": "alice", "event_id": "e-200", "action": "logon", "host": "web-2",
+         "ts": "2026-07-28T15:30:00Z"}]}
+    return Call("idp", "query", query_params(q), rows, post_branch=True)
 
 
 def default_calls() -> list[Call]:
@@ -1240,11 +1273,39 @@ def source_run(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = No
     # `runs_base` lands one elastic capture; this tenant has no elastic, so the scenario's own
     # calls replace it.
     (src / "executed_queries.jsonl").write_text("", encoding="utf-8")
-    for i, c in enumerate(calls):
+    seqs = {LEAD: 0, POST_BRANCH_LEAD: 0}
+    for c in calls:
+        lead = POST_BRANCH_LEAD if c.post_branch else LEAD
         T.capture_call(src, system=c.system, verb=c.verb, params=dict(c.params),
-                       payload=c.payload, seq=i)
+                       payload=c.payload, lead=lead, seq=seqs[lead])
+        seqs[lead] += 1
         est.answer(c.system, c.verb, c.params, c.payload)
+    if seqs[POST_BRANCH_LEAD]:
+        _dispatch_after_branch_point(base, src, POST_BRANCH_LEAD)
     return base, src
+
+
+def _dispatch_after_branch_point(base: Path, src: Path, lead: str) -> None:
+    """Append `lead`'s `gather` call/return pair to the source run's MAIN session, after the
+    branch message `T.runs_base` already seeded (R-01). `_frontier.leads_at` dates a lead by
+    that pair's return: past `BRANCH_MESSAGE_ID`, so the lead is not inherited. Only scenarios
+    with a post-branch call get the pair; every other launch keeps `runs_base`'s session as is."""
+    from defender.runtime import session_store as ss
+    from defender.runtime.branch._frontier import session_for_run
+    from defender.tests import _session_store_705 as SS
+
+    store = ss.open_store(case_id=T.SOURCE_CASE_ID, runs_base=base)
+    try:
+        session_id = session_for_run(store, src)
+        call_id = f"gather-{lead}-after-branch"
+        store.append(session_id, [
+            SS.tool_call_response("gather", {
+                "lead_id": lead, "system": "idp", "goal": "a lead dispatched after the branch",
+                "what_to_summarize": ["what idp says"]}, tool_call_id=call_id),
+            SS.tool_return_request("gather", f"lead {lead} returned", tool_call_id=call_id),
+        ], agent_id="main")
+    finally:
+        store.close()
 
 
 def questioner_for(doc: dict | None = None) -> FakeAgent:

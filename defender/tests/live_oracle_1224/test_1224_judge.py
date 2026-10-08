@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -205,8 +206,41 @@ def _prompt_for(judge: Any, label: str) -> str:
         f"the judge model was never called for world {label!r} (calls: {judge.agent_ids})")
 
 
+def _instructions_for(judge: Any, label: str) -> str:
+    """The host-authored instructions of world `label`'s first judge call, as the seam RECEIVED
+    them: its prompt's text outside every untrusted frame, plus the role prompt file its wiring
+    names (`wiring.prompt_path` — the system prompt the real `run_stage` loads)."""
+    prompt = _prompt_for(judge, label)
+    kwargs = next(kw for kw in judge.kwargs if str(kw.get("agent_id")).startswith(f"judge:{label}:"))
+    path = getattr(kwargs.get("wiring"), "prompt_path", None)
+    role = Path(path).read_text(encoding="utf-8") if path and Path(path).is_file() else ""
+    return f"{S.outside_untrusted_frames(prompt)}\n{role}"
+
+
+def _occurrences(text: str, word: str) -> int:
+    """`word` as a whole token (not inside `oracle_dir`, `oracle-side`, `real-errors`)."""
+    return len(re.findall(rf"(?<![\w-]){re.escape(word)}(?![\w-])", text))
+
+
+def _defines(text: str, word: str) -> bool:
+    """`word` in a defining form: backticked, quoted, or followed by `:` (bold markup allowed)."""
+    w = re.escape(word)
+    return re.search(rf"`{w}`|\"{w}\"|'{w}'|(?<![\w-]){w}(?![\w-])\**\s*:", text) is not None
+
+
 def _topics(findings: Any) -> set[str]:
     return {f.get("topic") for f in findings or [] if isinstance(f, dict)}
+
+
+def _worlds_named(doc: Any) -> set[str]:
+    """Every value held under a `world` key anywhere in a loaded record (or list of rows) —
+    the family record's rows, its findings, a queue row."""
+    if isinstance(doc, dict):
+        own = {doc["world"]} if isinstance(doc.get("world"), str) else set()
+        return own.union(*(_worlds_named(v) for v in doc.values()))
+    if isinstance(doc, (list, tuple)):
+        return set().union(*(_worlds_named(v) for v in doc))
+    return set()
 
 
 def _draws_of(ep: Path) -> list[Path]:
@@ -480,14 +514,19 @@ def test_1224_world_bucket_is_the_judge_models_output(tmp_path):
 
 
 def test_1224_no_code_path_computes_a_bucket(tmp_path):
-    """d12b_no_code_bucket — the judge's code half is gone, and nothing assigns a bucket that
-    did not come from the model's reply.
+    """d12b_no_code_bucket — the judge's code-half symbols are absent from the shipped judge
+    package, the episode page and the frontend serializer.
 
-    grade_family, _grade_world, the bucket table, withheld_reason, _holding_system, own_h_rows
-    and doctored_answer_served are gone, and no production module assigns a bucket that did not
-    come from the judge model's reply. Read off the shipped tree (the judge package and its
-    two readers, the episode page and the frontend serializer), which is where the code half and
-    its consumers live today (GC-01, GC-02). The behavioural half is the pair, d12a.
+    STRUCTURAL ONLY (name absence): `def grade_family`, `def _grade_family`, `def
+    _grade_world`, `MECHANICAL_WORLD_BUCKET`, `withheld_reason`, `def _holding_system`,
+    `own_h_rows`, `doctored_answer_served` and `_control_drift_discard` appear nowhere under
+    learning/judge/, scripts/visualize/ or learning/frontend/ — where the code half and its
+    consumers live today (GC-01, GC-02). This test does NOT show that no code path computes a
+    bucket: a renamed code half would pass it. That behavioural half — the recorded bucket is
+    the model's reply's, whatever the ledger decisions and the sibling's verdict — is pinned by
+    `test_1224_world_bucket_is_the_judge_models_output` (d12a), with
+    `test_1224_judge_reads_a_real_error_row_and_an_adapter_cannot_load_fault_row_as_decided`
+    (a `fault` row no longer decides a world by rule).
 
     Positive control: the same scan finds `grade_episode`, so an empty result is not a scan
     that reads nothing.
@@ -800,6 +839,25 @@ def _gate_case(root: Path, word: str | None, *, raw: str | None = None) -> tuple
     judge = _judge({"b": _world_reply(findings=[_finding("gate-finding")])})
     _grade(root, ep, judge, state=_state1135.state_over(root / "state"))
     return ep, judge
+
+
+def _torn_outcome_text(scratch: Path) -> str:
+    """A REAL outcome record torn mid-write (fault rung 1): the record written whole in the
+    coined shape by the suite's writer (`S.outcome_record`), then cut inside its quoted reason —
+    the bytes a crash mid-write leaves. Keys are written sorted, so the cut lands after
+    `outcome: accepted`: the torn bytes still carry the word, and they do not parse."""
+    import yaml
+
+    scratch.mkdir(parents=True, exist_ok=True)
+    reason = "MARKER-TORN: pre-flight calibrated every world"   # the `: ` forces a quoted scalar
+    whole = S.outcome_record(scratch, "accepted", reason=reason).read_text(encoding="utf-8")
+    torn = whole[:whole.index("MARKER-TORN") + len("MARKER-TORN: pre")]
+    assert "outcome: accepted" in torn, f"fixture: the cut fell before the word: {torn!r}"
+    try:
+        _yaml.safe_load(torn)
+    except yaml.YAMLError:
+        return torn
+    raise AssertionError(f"fixture: the torn record still parses: {torn!r}")
 
 
 def test_1224_judge_grades_only_an_accepted_outcome(tmp_path):
@@ -1414,29 +1472,61 @@ def test_judge_reply_leaves_a_world_out(tmp_path):
 
     The coined reply is per world (one call per world), so the three shapes are driven as that
     shape spells them: world c's every reply is invalid (it never answers its own bucket); world
-    d's first reply is invalid and its retry valid; world b's reply carries a finding naming a
-    world "z" the family lacks; a reply giving its world's bucket twice is refused whole.
+    d's first reply is invalid and its retry valid; a reply giving its world's bucket twice is
+    refused whole.
+
+    The foreign world: the only place a per-world reply can name another world is a finding's
+    `world` field, and today's pass copies that model-written field VERBATIM into the draw
+    document and the family record's world findings (`run._draw_document`,
+    `grade_episode`'s `world_findings` append). World b's first reply carries, beside its own
+    two findings, a world-lane finding whose `world` is "z" (a world the family lacks); its
+    retry is the same reply without that finding. Under either reading — the reply is refused
+    whole and retried (N22), or the stray field is ignored — "z" must never be recorded: no
+    `world: z` anywhere in the family record (judge.yaml) or on any queue row, no row keyed
+    "z", no finding id under "/z/". Positive controls: world b is graded from its reply, its own
+    two findings are recorded and queued under b, and the record names its worlds through the
+    same `world` keys the negative reads. Draw files are not pinned (b_p241's scope).
     """
     doc = S.family_v2(worlds=[S.control_world("a"), *[
         S.world_v2(label, facts=[S.fact(f"f-{label}")]) for label in ("b", "c", "d")]])
     ep = S.judged_episode(tmp_path, doc=doc, labels=("a", "b", "c", "d"))
     no_bucket = _world_reply()
     no_bucket.pop("bucket")
+    b_own = [_finding("b-defender"),
+             _finding("b-world-lane", subject="world", bucket="shape-invention",
+                      evidence=["report.md"])]
+    names_z = _finding("names-z", subject="world", bucket="shape-invention",
+                       evidence=["report.md"], world="z")
     judge = _judge({
-        "b": _world_reply(findings=[_finding("names-z", subject="world", bucket="shape-invention",
-                                             evidence=["report.md"], world="z")]),
+        "b": [_text(_world_reply(findings=[*b_own, names_z])),
+              _text(_world_reply(findings=b_own))],
         "c": [_text(no_bucket)],
         "d": [_text(no_bucket), _text(_world_reply("decision-discipline", ("edr",)))]})
     _grade(tmp_path, ep, judge)
 
-    rows = _rows(ep)
+    rec, rows = _record(ep), _rows(ep)
     assert rows.get("b", {}).get("bucket") == "lead-quality", "the positive control: b ungraded"
     assert rows.get("c", {}).get("bucket") is None, (
         f"code supplied a bucket for a world no valid reply answered: {rows.get('c')!r}")
     assert rows.get("d", {}).get("bucket") == "decision-discipline", (
         "an invalid reply was not retried: world d's valid retry was never recorded")
+
+    # The foreign world "z": positive controls first (the channels the negatives read are live).
+    assert {"b-defender", "b-world-lane"} <= _topics(rows["b"].get("findings")), (
+        f"the positive control: world b's own findings were not recorded: {rows['b']!r}")
+    queued = _all_queued()
+    assert {"b-defender", "b-world-lane"} <= {
+        r.get("subject_topic") for r in _from_world(queued, "b")}, (
+        "the positive control: world b's own findings did not reach the queues under b")
+    assert "b" in _worlds_named(rec), (
+        "the positive control: the family record names no world through a `world` key")
     assert "z" not in rows, "a world the family does not have was recorded as one of its worlds"
-    assert not [r for r in _all_queued() if r.get("world") == "z" or "/z/" in str(r.get("finding_id"))]
+    assert "z" not in _worlds_named(rec), (
+        "the family record carries `world: z` — a world the family does not have, recorded off "
+        "a finding's model-written field")
+    assert "z" not in _worlds_named(queued), "a queue row names the foreign world z"
+    assert not [r for r in queued if "/z/" in str(r.get("finding_id"))], (
+        "a queue row's finding id files a finding under the foreign world z")
 
     twice = _text(_world_reply("lead-set", ("idp",))) + "bucket: lead-quality\n"
     with pytest.raises(_refused()):
@@ -1510,16 +1600,31 @@ def test_input_judge_finding_cites_an_unserved_or_misspelled_samples_section(tmp
 
 
 def test_input_outcome_record_is_inconsistent_or_in_legacy_words(tmp_path):
-    """b_p244 — the gate grades only an outcome that is exactly `accepted`, with a reason and
-    fewer than two unservable worlds; the episode reader treats every other record as not
-    usable; nothing crashes.
+    """b_p244 — the gate grades, and the episode reader reads, only an outcome that is exactly
+    `accepted` with a reason and an O5 count under two; an `accepted` record listing two
+    unservable worlds is refused by both; nothing crashes.
 
     Scenario: an outcome record says accepted while listing two unservable worlds, names an
     unservable world the manifest lacks, uses a legacy word (rejected, incomplete) or the right
     word in capitals, or has no reason. N22 reading: the judge grades only when the outcome word
     is exactly `accepted` and its O5 count (S9) is under two. Settled regardless: a legacy word,
     a capitalised or newline-suffixed word, a list or a missing reason is not `accepted`
-    (O13).
+    (O13); the reader treats every such record as not usable (`EpisodeError`).
+
+    Two unservable worlds (U-04): an `accepted` record listing two unservable worlds is a family
+    O5 calls unusable (S9, O5; M04=A), so the reader refuses it with `EpisodeError`, coherent
+    with the gate's zero model calls for the same record. Reader control: the same `accepted`
+    record listing ONE unservable world (b, never archived — pre-flight starts no sibling for
+    it) reads, and the gate grades the rest — so the refusal is the count, not the mere
+    presence of an unservable list.
+
+    The foreign world: an `accepted` record (with a reason) listing one unservable world "z"
+    the manifest lacks. Whether the gate trusts the word or recounts the list is the hedged
+    fork and is NOT pinned: both readings give an O5 count of at most one, so the family is
+    graded either way — the model is asked for world b and b's bucket is the reply's (the
+    positive control) — and "z", a world the family does not have, is never recorded as one of
+    its worlds nor has a finding queued under it. The reader's treatment of that record is not
+    pinned (no ruling says whether an inconsistent list is itself a refusal).
     """
     EpisodeError = S.sym(S.EPISODE, "EpisodeError")
     verdicts = S.sym(S.EPISODE, "verdicts")
@@ -1540,17 +1645,39 @@ def test_input_outcome_record_is_inconsistent_or_in_legacy_words(tmp_path):
         ep, judge = _gate_case(root, None, raw=raw)
         assert judge.calls == 0, f"{case}: the gate graded an outcome that is not exactly accepted"
         assert _all_queued(_state1135.state_over(root / "state")) == []
-        if case != "two-unservable":  # the reader's own recount is unsettled (hedge)
-            with pytest.raises(EpisodeError):
-                verdicts(ep)
+        with pytest.raises(EpisodeError):
+            verdicts(ep)
 
-    # Unsettled (which way it reads), bound only to not crash.
+    # Reader control for the count: ONE unservable world (b, not archived) reads and is graded.
+    root = tmp_path / "one-unservable"
+    ep = S.judged_episode(root, labels=("a", "c"), outcome=None)
+    S.outcome_record(ep, "accepted", reason="pre-flight could not serve world b", unservable=[
+        {"world": "b", "reason": S.REASON_UNSERVABLE, "call": _call("user:alice")}])
+    judge = _judge({"c": _world_reply("decision-discipline", ("edr",))})
+    _grade(root, ep, judge, state=_state1135.state_over(root / "state"))
+    assert _called_for(judge, "c"), (
+        "the control: an accepted record with one unservable world was not graded on the rest")
+    assert verdicts(ep), "the control: the reader read nothing for an O5 count of one"
+
+    # The foreign world: graded under either reading of the fork; "z" is never recorded.
     root = tmp_path / "foreign-world"
     ep = S.judged_episode(root, outcome=None)
-    S.outcome_record(ep, "accepted", unservable=[
+    S.outcome_record(ep, "accepted", reason="pre-flight could not serve world z", unservable=[
         {"world": "z", "reason": S.REASON_UNSERVABLE, "call": _call("user:zed")}])
-    _grade(root, ep, _judge(), state=_state1135.state_over(root / "state"))
-    assert (ep / "judge.yaml").is_file(), "an outcome naming a foreign world left no record"
+    state = _state1135.state_over(root / "state")
+    judge = _judge({"b": _world_reply("lead-quality", ("idp",),
+                                      findings=[_finding("foreign-record-b")])})
+    _grade(root, ep, judge, state=state)
+    rec, rows = _record(ep), _rows(ep)
+    assert _called_for(judge, "b"), (
+        "an accepted record naming one foreign unservable world was not graded (its O5 count is "
+        "at most one whether the word is trusted or the list recounted)")
+    assert "not_graded" not in rec, f"the foreign-world record was stamped: {rec.get('not_graded')!r}"
+    assert rows.get("b", {}).get("bucket") == "lead-quality", (
+        "the positive control: world b's bucket is not the judge model's reply")
+    assert _from_world(_all_queued(state), "b"), "the positive control: b's finding was not queued"
+    assert "z" not in rows, "a world the manifest lacks was recorded as one of the family's worlds"
+    assert not _from_world(_all_queued(state), "z"), "a finding was queued under the foreign world"
 
     root = tmp_path / "accepted"
     ep, judge = _gate_case(root, "accepted")
@@ -1616,7 +1743,8 @@ def test_1224_judge_family_word_outside_what_the_queue_accepts(tmp_path):
 
 
 def test_1224_judge_prompt_over_a_world_with_hundreds_of_verified_claims(tmp_path, monkeypatch):
-    """b_p249 — under the payload cap the judge model still gets every call's decision kind, and
+    """b_p249 — under the payload cap every one of a world's calls still reaches the judge model
+    with its decision kind, the served-answer bytes reaching it stay within the cap knob, and
     the world's bucket is the model's.
 
     Scenario: a sibling made hundreds of calls whose verified claims and served answers exceed
@@ -1624,31 +1752,72 @@ def test_1224_judge_prompt_over_a_world_with_hundreds_of_verified_claims(tmp_pat
     decision kind. Settled regardless: the world's bucket is the judge model's decision from
     what it is given (O11), and an unchanged world is a finding, not a withheld case (world c's
     every call is `passthrough`).
-    """
-    monkeypatch.setenv(J.CAP_KNOB, "20000")
-    bulky = {"rows": [{"user": "alice", "blob": "x" * 2000}]}
-    claim = S.claim(changed=[S.changed("alice", "logon", "absent", "present")])
-    rows = [_oracle_row(f"user:o{i:03d}", claim=claim, verdict={"passed": True, "reason": "ok"})
-            for i in range(120)]
-    for row in rows:
-        row["payload_text"] = json.dumps(bulky)
-    rows += [S.ledger_row(S.PASSTHROUGH, params=S.query_params(f"user:p{i:03d}"), payload=bulky)
-             for i in range(80)]
-    unchanged = [S.ledger_row(S.PASSTHROUGH, params=S.query_params(f"user:c{i}"), label="c")
-                 for i in range(5)]
-    ep = S.judged_episode(tmp_path, ledgers={"b": rows, "c": unchanged})
-    judge = _judge({"b": _world_reply("lead-quality", ("idp",)),
-                    "c": _world_reply("lead-set", ("idp",),
-                                      findings=[_finding("unchanged", bucket="lead-set")])})
-    _grade(tmp_path, ep, judge)
 
+    Rows are counted by UNIQUE per-row markers — `MARKER-ORC-nnn` in the params of each of the
+    120 `oracle` calls, `MARKER-PAS-nnn` in each of the 80 `passthrough` calls — never by
+    occurrences of a common word: every one of the 200 markers must be in world b's prompt (a
+    call cut by the cap is a missing marker). The decision-word counts stay as a secondary floor.
+
+    The bound is relative to the knob and to what it caps: each served answer carries a 2000-byte
+    `QZ` run (400000 bytes over 200 calls), and the `QZ` bytes reaching the prompt are at most
+    the knob's value. The knob is 60000 so that the 200 calls with their decision kinds (about
+    250 rendered bytes each, ~50000) can fit under it however the implementation charges the
+    cap, while the answers (400000) cannot. Positive control: the same episode under a cap too
+    large to bind (10**7) hands the model more `QZ` bytes than 60000 — the answers do reach the
+    judge (b_p245), so the bound is the cap's work and not an absent channel.
+    """
+    cap = 60000
+    blob = "QZ" * 1000                                  # 2000 bytes per served answer
+
+    def blob_bytes(text: str) -> int:
+        return text.count("QZ") * 2
+
+    def ledgers() -> dict[str, list[dict]]:
+        bulky = {"rows": [{"user": "alice", "blob": blob}]}
+        claim = S.claim(changed=[S.changed("alice", "logon", "absent", "present")])
+        rows = [_oracle_row(f"user:MARKER-ORC-{i:03d}", claim=claim,
+                            verdict={"passed": True, "reason": "ok"}) for i in range(120)]
+        for row in rows:
+            row["payload_text"] = json.dumps(bulky)
+        rows += [S.ledger_row(S.PASSTHROUGH, params=S.query_params(f"user:MARKER-PAS-{i:03d}"),
+                              payload=bulky) for i in range(80)]
+        unchanged = [S.ledger_row(S.PASSTHROUGH, params=S.query_params(f"user:c{i}"), label="c")
+                     for i in range(5)]
+        return {"b": rows, "c": unchanged}
+
+    def graded(root: Path) -> tuple[Path, Any]:
+        ep = S.judged_episode(root, ledgers=ledgers())
+        judge = _judge({"b": _world_reply("lead-quality", ("idp",)),
+                        "c": _world_reply("lead-set", ("idp",),
+                                          findings=[_finding("unchanged", bucket="lead-set")])})
+        _grade(root, ep, judge, state=_state1135.state_over(root / "state"))
+        return ep, judge
+
+    monkeypatch.setenv(J.CAP_KNOB, str(cap))
+    ep, judge = graded(tmp_path / "capped")
     prompt = _prompt_for(judge, "b")
-    assert len(prompt) < 120 * 2000, "the payload cap was not applied at all"
+
+    expected = ({f"MARKER-ORC-{i:03d}" for i in range(120)}
+                | {f"MARKER-PAS-{i:03d}" for i in range(80)})
+    seen = set(re.findall(r"MARKER-(?:ORC|PAS)-\d{3}", prompt))
+    assert seen == expected, (
+        f"{len(expected - seen)} of the world's 200 calls were cut from the judge's prompt by the "
+        f"cap (first missing: {sorted(expected - seen)[:5]})")
     assert prompt.count(S.ORACLE_DECISION) >= 120, "a call's `oracle` decision kind was cut by the cap"
     assert prompt.count(S.PASSTHROUGH) >= 80, "a call's `passthrough` decision kind was cut by the cap"
+    assert blob_bytes(prompt) <= cap, (
+        f"{blob_bytes(prompt)} bytes of served answers reached the judge under a {cap}-byte "
+        f"payload cap ({J.CAP_KNOB})")
     assert _row(ep, "b").get("bucket") == "lead-quality"
     assert _row(ep, "c").get("bucket") == "lead-set", "an unchanged world was not graded"
     assert _row(ep, "c").get("withheld_reason") is None, "an unchanged world was withheld"
+
+    # Positive control: a cap that cannot bind lets more than `cap` answer bytes through.
+    monkeypatch.setenv(J.CAP_KNOB, str(10**7))
+    _ep, open_judge = graded(tmp_path / "uncapped")
+    assert blob_bytes(_prompt_for(open_judge, "b")) > cap, (
+        "the positive control: with no binding cap the served answers still never reached the "
+        "judge, so the capped bound above measured an absent channel")
 
 
 def test_judge_is_run_again_on_an_episode_it_already_graded(tmp_path):
@@ -1898,15 +2067,21 @@ def test_1224_judge_reads_the_per_system_samples_record(tmp_path):
 
 def test_1224_judge_stamps_unusable_refused_and_absent_records_not_graded_with_no_model_call(
         tmp_path):
-    """pco02_judge_gate_new_words — the gate stamps `unusable`, `refused` and an absent or empty
-    outcome record not-graded with the word and reason and no model call; the word written for
-    an absent record is never `incomplete`.
+    """pco02_judge_gate_new_words — the gate stamps `unusable` and `refused` not-graded with
+    their word and reason, and an absent, empty or torn outcome record not-graded with one
+    distinct 'no record' word, all with no model call.
 
     The judge's gate stamps `unusable`, `refused` and an absent or empty outcome record
-    not-graded with the word and the reason and makes no model call; the word it writes for an
-    absent record is a member of the new vocabulary, never `incomplete` (PCO-02, M05=A: an
-    absent record is "no record", never read as `accepted`). Positive control: an exactly
-    `accepted` record is graded and carries no stamp.
+    not-graded with the word and the reason and makes no model call (PCO-02). M05=A (R-05): an
+    absent or torn record is a distinct "no record" state, so the word stamped for an absent,
+    an empty and a torn record is in NONE of {`accepted`, `unusable`, `refused`, `incomplete`}
+    — never read as accepted, never conflated with a judged-bad family, never the retired word
+    — and the three share that one word: 70's M05 reading makes them ONE state that "every
+    reader reports as missing", and the gate is one of those readers (PCO-02's absent-record
+    default). The torn record is a REAL torn write
+    (rung 1): pre-flight's record shape written whole by the suite's writer, then cut inside its
+    quoted reason, after `outcome: accepted` — the bytes still carry the word and are no record.
+    Positive control: an exactly `accepted` record is graded and carries no stamp.
     """
     for word in ("unusable", "refused"):
         ep, judge = _gate_case(tmp_path / word, word)
@@ -1914,16 +2089,23 @@ def test_1224_judge_stamps_unusable_refused_and_absent_records_not_graded_with_n
         assert (stamp.get("outcome"), stamp.get("reason")) == (word, f"MARKER-REASON-{word}"), (
             f"{word}: the stamp reads {stamp!r}")
         assert judge.calls == 0, f"{word}: the gate let a model call through"
-    for case, raw in (("absent", None), ("empty", "")):
+    no_record: dict[str, str] = {}
+    for case, raw in (("absent", None), ("empty", ""),
+                      ("torn", _torn_outcome_text(tmp_path / "torn-source"))):
         ep, judge = _gate_case(tmp_path / case, None, raw=raw)
         stamp = _record(ep).get("not_graded") or {}
         word = stamp.get("outcome")
         assert isinstance(word, str), f"{case}: the stamp names no word: {stamp!r}"
         assert word, f"{case}: the stamp names an empty word: {stamp!r}"
-        assert word != S.RETIRED_OUTCOME, f"{case}: the gate wrote the retired word {word!r}"
-        assert word != "accepted", f"{case}: a missing record read as accepted"
+        assert word not in (*S.OUTCOMES, S.RETIRED_OUTCOME), (
+            f"{case}: a missing outcome record was stamped {word!r} — a word of the record's own "
+            f"vocabulary or the retired one, not the distinct 'no record' state (M05=A)")
         assert stamp.get("reason"), f"{case}: the stamp carries no reason"
         assert judge.calls == 0, f"{case}: the gate let a model call through"
+        no_record[case] = word
+    assert len(set(no_record.values())) == 1, (
+        f"absent, empty and torn records are one 'no record' state (M05=A) but were stamped "
+        f"{no_record}")
 
     ep, judge = _gate_case(tmp_path / "accepted", "accepted")
     assert _called_for(judge, "b"), "the positive control: an accepted episode was not graded"
@@ -1985,13 +2167,24 @@ def test_1224_judge_reads_a_real_error_row_and_an_adapter_cannot_load_fault_row_
 
 
 def test_1224_judge_prompt_names_and_explains_passthrough_oracle_and_real_error(tmp_path):
-    """pco08_judge_prompt_explains_words — the judge's rendered rows name each decision word and
-    the judge prompt explains the three.
+    """pco08_judge_prompt_explains_words — the judge's rendered rows name each decision word, and
+    the judge's own instructions name each of the three in a defining form even for a world
+    with no row carrying it.
 
     The judge's rendered rows name each decision word (`passthrough`, `oracle`, `real-error`) and
-    the judge prompt explains the three (PCO-08: none is defined to the model today). The
-    rows' words are read from the world prompt; the explanation is host text, outside every
-    untrusted frame.
+    the judge prompt explains the three (PCO-08: none is defined to the model today).
+
+    Rows: world b's ledger holds one row of each word and world c's holds none, so each word
+    occurs MORE often in b's prompt than in c's — the excess is b's rows, whatever the shared
+    scaffolding says.
+
+    Explanation, made unsatisfiable by row data: it is read from world c's instructions — the
+    host text of c's prompt outside every untrusted frame, plus the role prompt file the judge
+    seam was handed (`wiring.prompt_path`), where a glossary may legitimately live — and c's
+    ledger has no row at all. Each word must appear there in a defining form: backticked,
+    quoted, or followed by `:`. What is NOT pinned: the wording or adequacy of the definition
+    (model-facing prose); an incidental `word:` in host text (a per-kind count line, say) would
+    satisfy the form check.
     """
     ledger = [
         S.ledger_row(S.PASSTHROUGH, params=S.query_params("user:pco8-pass")),
@@ -2001,13 +2194,17 @@ def test_1224_judge_prompt_names_and_explains_passthrough_oracle_and_real_error(
         S.ledger_row(S.REAL_ERROR, params=S.query_params("user:pco8-error"),
                      payload={"error": "upstream said no"}),
     ]
-    ep = S.judged_episode(tmp_path, ledgers={"b": ledger})
-    judge = _judge({"b": _world_reply()})
+    ep = S.judged_episode(tmp_path, ledgers={"b": ledger, "c": []})
+    judge = _judge({"b": _world_reply(), "c": _world_reply("decision-discipline", ("edr",))})
     _grade(tmp_path, ep, judge)
 
-    prompt = _prompt_for(judge, "b")
-    host = S.outside_untrusted_frames(prompt)
+    with_rows, without_rows = _prompt_for(judge, "b"), _prompt_for(judge, "c")
+    instructions = _instructions_for(judge, "c")
     for word in (S.PASSTHROUGH, S.ORACLE_DECISION, S.REAL_ERROR):
-        assert word in prompt, f"the rendered rows never name {word!r}"
-        assert f"`{word}`" in host or f"{word}:" in host or f"{word} " in host, (
-            f"the judge prompt never explains the decision word {word!r}")
+        assert _occurrences(with_rows, word) > _occurrences(without_rows, word), (
+            f"the rendered rows never name {word!r}: world b's prompt (one {word!r} row) names it "
+            f"no more often than world c's (no rows)")
+        assert _defines(instructions, word), (
+            f"the judge's instructions never define the decision word {word!r} (looked for "
+            f"`{word}`, \"{word}\" or {word}: in host text outside frames and the role prompt, "
+            f"for a world with no row carrying it)")

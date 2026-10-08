@@ -27,7 +27,9 @@
 # gate — obligations: one entry per covered element of each minted O-xx / PCO-xx, pointing at its
 #   demand. holes: H-01..H-06 carry `resolution` (+ `resolved_to` where a demand answers), and every
 #   waived R7 edge is a hole resolved to its waiver demand (the spec_graph_1049 precedent).
-# structure — H-01: tenant_adapter's collision-lookup cell deleted (M12=A: no tenant lookup);
+# structure — H-01: tenant_adapter's collision-lookup cell deleted (M12=A: no tenant lookup) [done at the
+#   phase-F repair, R-02, with family_base_cache/exploration_cache dropped, rate_limiter per process and
+#   world_base_store + world_record added: Amendment 2];
 #   H-02: run_query.access[host-check] set to the run-query constraint list; H-06: the five
 #   as_of-blind adapters added as actors with their read edge, closed by the M23 waiver.
 # handoff — forks: every cluster with its resolver and reading; drops: the eight flip-dropped
@@ -126,11 +128,13 @@ demands:
   - interacts(WorldRegistry->world_ledger)
   discharged_by: test_1224_ledger_refuses_staged_and_patched_decisions
   seed_docstring: Ledger.record accepts a served row whose decision is `passthrough`, `oracle` or `real-error` and refuses one whose decision
-    is `staged` or `patched` with LedgerError; `base`, `captured` and `refused` rows are written as today.
+    is `staged` or `patched` with LedgerError; it still accepts `base`, `captured` and `refused` rows at the family tier, while the registry never
+    writes a live-miss `base` row to a world ledger (M16=A, PCO-05).
   forks:
   - F-02
   source: 20-demands
   provisional_lifted: §7 (70-resolutions.md)
+  repinned: 'R-04 (92-reconciliation.md): re-pinned to M16=A and PCO-05; ''written as today'' contradicted the world tier.'
 - id: d00f_served_answer_record_shape
   kind: shape
   form: test
@@ -460,6 +464,10 @@ demands:
     it, the answer is not served, and the oracle is retried with the verdict.
   pair: d04e_honest_answer_served
   source: 20-demands
+  amendment_note: 'F-01 (91-blind.md, spine-routed): the verifier''s judgement is a non-obligation; the test pins the HOST''s handling of the
+    verifier''s verdict (a failing verdict is honoured, the same submission under a passing verifier is served) and what the verifier is handed
+    (the call, base, served answer, the world''s facts and frozen telemetry, framed; never the oracle''s reasoning). The prose above names the
+    situation the verifier judges, not a host guarantee.'
 - id: d04d_counting_arithmetic
   kind: negative
   form: test
@@ -640,6 +648,7 @@ demands:
   - grade_episode
   - family_record
   - unservable_worlds.domain.distinguished[1]
+  - world_record
   discharged_by: test_1224_family_with_one_unservable_sibling_is_graded_on_the_rest
   seed_docstring: 'A family with exactly one unservable sibling is graded: the healthy worlds get the judge model''s buckets and findings, and
     the unservable world gets none.'
@@ -655,6 +664,7 @@ demands:
   - grade_episode
   - family_record
   - unservable_worlds.domain.distinguished[2]
+  - world_record
   discharged_by: test_1224_family_with_two_unservable_siblings_is_unusable_and_yields_no_findings
   seed_docstring: 'RE-PINNED (48: S9; two sites). Two or more failed worlds make the family unusable at both sites: at pre-flight (two failed
     calibrations, no sibling starts) and at the judge stage, which counts pre-flight''s failed worlds plus every world whose own record says unservable
@@ -1166,7 +1176,8 @@ demands:
   kind: behavior
   form: test
   binds:
-  - interacts(preflight_replay->served_cache)
+  - served_cache
+  - preflight_replay
   - interacts(serve_one->served_cache)
   discharged_by: test_1224_sibling_first_issue_of_an_original_call_is_a_fresh_oracle_turn
   seed_docstring: 'INVERTED (48: S1, S3; Amendment 2 change 1). Before the sibling''s first call the world''s served-answer cache holds no entry
@@ -1203,6 +1214,7 @@ demands:
   - episode_outcome.domain.distinguished[accepted]
   - episode_outcome.domain.distinguished[unusable]
   - episode_outcome.domain.distinguished[refused]
+  - world_record
   discharged_by: test_1224_outcome_record_holds_outcome_reason_unservable_worlds_and_drift
   seed_docstring: 'RE-PINNED (48: S6, S7). Pre-flight writes the episode outcome record once, before any sibling starts: the outcome (accepted,
     unusable or refused), a reason, the unservable worlds, the not-replayable calls and the drift calls; no process rewrites it. Facts learned
@@ -1262,10 +1274,11 @@ demands:
   binds:
   - interacts(episode_reader->outcome_record)
   discharged_by: test_1224_episode_reader_reads_the_outcome_record
-  seed_docstring: learning/branch/episode.py's outcome reader returns the outcome and reason from pre-flight's outcome record, and refuses an
-    incomplete episode as it does today.
+  seed_docstring: 'learning/branch/episode.py''s outcome reader returns the outcome and reason from pre-flight''s outcome record, refuses an `unusable`
+    or `refused` episode and one with no readable outcome record (M05=A: `incomplete` is retired), and reads an `accepted` one.'
   amendment_note: 'RF-5: episode.py refuses only `incomplete`, so a new unusable/refused passes it today.'
   source: 20-demands
+  repinned: 'R-04 (92-reconciliation.md): re-pinned to M05=A; ''refuses an incomplete episode'' named a retired word.'
 - id: d15a_oracle_cost_on_its_own_budget
   kind: behavior
   form: test
@@ -1437,8 +1450,8 @@ demands:
   kind: behavior
   form: test
   binds:
-  - family_base_cache
-  - interacts(serve_one->family_base_cache)
+  - world_base_store
+  - interacts(serve_one->world_base_store)
   - interacts(serve_one->tenant_adapter)
   discharged_by: test_1224_uncaptured_call_is_read_live_by_each_world_for_itself
   seed_docstring: 'INVERTED (48: S20, S22). When two worlds of one episode issue the same call the capture never recorded, each world reads it
@@ -1457,8 +1470,8 @@ demands:
   kind: behavior
   form: test
   binds:
-  - exploration_cache
-  - interacts(run_query->exploration_cache)
+  - oracle_ledger
+  - interacts(run_query->oracle_ledger)
   discharged_by: test_1224_exploration_result_never_reaches_another_worlds_oracle
   seed_docstring: 'INVERTED (48: S20). An exploration query one world''s oracle ran is never answered to another world''s oracle from a shared
     store: each world''s run_query reaches the tenant itself, and no exploration result (or query text naming a world''s fact entities) reaches
@@ -1852,6 +1865,7 @@ demands:
   - oracle_retry_cap.domain
   - run_investigation
   - serve_one
+  - world_record
   discharged_by: test_served_system_adapter_cannot_be_loaded_at_call_time
   seed_docstring: 'A served system whose adapter cannot be loaded when the sibling first calls it is a real-system failure of the original query:
     it passes through to the investigator as the system''s error exactly as on a real run, is neither an oracle failure nor a retry, and does
@@ -2042,6 +2056,10 @@ demands:
     that exists nowhere — what must be observable at the host checks and the verifier?
   disposition_provenance: 1 reading; judge-examined, agrees
   source: 45-dispositions (settled)
+  amendment_note: 'F-01 (91-blind.md, spine-routed): the verifier''s judgement is a non-obligation; the test pins the HOST''s handling of the
+    verifier''s verdict (a failing verdict is honoured, the same submission under a passing verifier is served) and what the verifier is handed
+    (the call, base, served answer, the world''s facts and frozen telemetry, framed; never the oracle''s reasoning). The prose above names the
+    situation the verifier judges, not a host guarantee.'
 - id: s_p069
   kind: behavior
   form: test
@@ -2059,6 +2077,10 @@ demands:
   binds_derived: true
   assembly_note: binds derived at assembly from the premise's text and obligation tags (none); the premise carried no `# binds:` line
   source: 45-dispositions (settled)
+  amendment_note: 'F-01 (91-blind.md, spine-routed): the verifier''s judgement is a non-obligation; the test pins the HOST''s handling of the
+    verifier''s verdict (a failing verdict is honoured, the same submission under a passing verifier is served) and what the verifier is handed
+    (the call, base, served answer, the world''s facts and frozen telemetry, framed; never the oracle''s reasoning). The prose above names the
+    situation the verifier judges, not a host guarantee.'
 - id: s_p070
   kind: domain-outcome
   form: test
@@ -2091,6 +2113,10 @@ demands:
     and one starting there — what must be observable about how many times the fact's telemetry appears across the two served answers?
   disposition_provenance: 1 reading; judge-examined, agrees
   source: 45-dispositions (settled)
+  amendment_note: 'F-01 (91-blind.md, spine-routed): the verifier''s judgement is a non-obligation; the test pins the HOST''s handling of the
+    verifier''s verdict (a failing verdict is honoured, the same submission under a passing verifier is served) and what the verifier is handed
+    (the call, base, served answer, the world''s facts and frozen telemetry, framed; never the oracle''s reasoning). The prose above names the
+    situation the verifier judges, not a host guarantee.'
 - id: s_p072
   kind: domain-outcome
   form: test
@@ -2130,7 +2156,7 @@ demands:
   form: test
   binds:
   - forged_store
-  - exploration_cache
+  - oracle_ledger
   - oracle
   - world_facts
   discharged_by: test_base_answer_has_zero_rows_where_a_fact_adds_rows
@@ -2251,6 +2277,10 @@ demands:
   binds_derived: true
   assembly_note: binds derived at assembly from the premise's text and obligation tags (none); the premise carried no `# binds:` line
   source: 45-dispositions (settled)
+  amendment_note: 'F-01 (91-blind.md, spine-routed): the verifier''s judgement is a non-obligation; the test pins the HOST''s handling of the
+    verifier''s verdict (a failing verdict is honoured, the same submission under a passing verifier is served) and what the verifier is handed
+    (the call, base, served answer, the world''s facts and frozen telemetry, framed; never the oracle''s reasoning). The prose above names the
+    situation the verifier judges, not a host guarantee.'
 - id: s_p088
   kind: behavior
   form: test
@@ -2337,6 +2367,10 @@ demands:
     — what must be observable in the oracle's and the verifier's contexts and in the outcome?
   disposition_provenance: 1 reading; judge-examined, agrees
   source: 45-dispositions (settled)
+  amendment_note: 'F-01 (91-blind.md, spine-routed): the verifier''s judgement is a non-obligation; the test pins the HOST''s handling of the
+    verifier''s verdict (a failing verdict is honoured, the same submission under a passing verifier is served) and what the verifier is handed
+    (the call, base, served answer, the world''s facts and frozen telemetry, framed; never the oracle''s reasoning). The prose above names the
+    situation the verifier judges, not a host guarantee.'
 - id: s_p096
   kind: behavior
   form: test
@@ -2431,6 +2465,10 @@ demands:
   binds_derived: true
   assembly_note: binds derived at assembly from the premise's text and obligation tags (none); the premise carried no `# binds:` line
   source: 45-dispositions (settled)
+  amendment_note: 'F-01 (91-blind.md, spine-routed): the verifier''s judgement is a non-obligation; the test pins the HOST''s handling of the
+    verifier''s verdict (a failing verdict is honoured, the same submission under a passing verifier is served) and what the verifier is handed
+    (the call, base, served answer, the world''s facts and frozen telemetry, framed; never the oracle''s reasoning). The prose above names the
+    situation the verifier judges, not a host guarantee.'
 - id: s_p109
   kind: behavior
   form: test
@@ -2446,6 +2484,10 @@ demands:
   binds_derived: true
   assembly_note: binds derived at assembly from the premise's text and obligation tags (none); the premise carried no `# binds:` line
   source: 45-dispositions (settled)
+  amendment_note: 'F-01 (91-blind.md, spine-routed): the verifier''s judgement is a non-obligation; the test pins the HOST''s handling of the
+    verifier''s verdict (a failing verdict is honoured, the same submission under a passing verifier is served) and what the verifier is handed
+    (the call, base, served answer, the world''s facts and frozen telemetry, framed; never the oracle''s reasoning). The prose above names the
+    situation the verifier judges, not a host guarantee.'
 - id: s_p111
   kind: domain-outcome
   form: test
@@ -2509,6 +2551,10 @@ demands:
   binds_derived: true
   assembly_note: binds derived at assembly from the premise's text and obligation tags (none); the premise carried no `# binds:` line
   source: 45-dispositions (settled)
+  amendment_note: 'F-01 (91-blind.md, spine-routed): the verifier''s judgement is a non-obligation; the test pins the HOST''s handling of the
+    verifier''s verdict (a failing verdict is honoured, the same submission under a passing verifier is served) and what the verifier is handed
+    (the call, base, served answer, the world''s facts and frozen telemetry, framed; never the oracle''s reasoning). The prose above names the
+    situation the verifier judges, not a host guarantee.'
 - id: s_p116
   kind: domain-outcome
   form: test
@@ -2567,7 +2613,7 @@ demands:
   binds:
   - preflight_replay
   - rate_limiter
-  - exploration_cache
+  - oracle_ledger
   - oracle
   discharged_by: test_tenant_throttles_the_oracle_side_queries
   seed_docstring: 'A throttle response the tenant system gives to oracle-side queries (exploration, run_query, pre-flight) is an oracle-side error
@@ -2855,6 +2901,7 @@ demands:
   - OracleUnservable
   - oracle_retry_cap.domain
   - run_investigation
+  - world_record
   discharged_by: test_conc_14_two_leads_both_exhaust_attempts_in_one_world
   seed_docstring: Two leads that both exhaust their attempts in the same world count as one unservable world toward the family's validity (O5
     counts worlds/siblings, not calls).
@@ -3060,6 +3107,7 @@ demands:
   - grade_episode
   - render_episode
   - run_investigation
+  - world_record
   discharged_by: test_judge_reads_a_family_whose_unservable_sibling_left_a_partial_ledger
   seed_docstring: An unservable sibling's partial evidence and ledger are archived and readable, but the family is still graded on the other worlds
     without that world contributing findings from its partial records (O5); the episode page and judge show the world as unservable.
@@ -3132,7 +3180,7 @@ demands:
   kind: behavior
   form: test
   binds:
-  - exploration_cache
+  - oracle_ledger
   - run_investigation
   - serve_one
   discharged_by: test_conc_25_one_worlds_served_answer_beside_another_worlds_base_read
@@ -3150,8 +3198,8 @@ demands:
   kind: behavior
   form: test
   binds:
-  - family_base_cache
-  - exploration_cache
+  - world_base_store
+  - oracle_ledger
   - run_investigation
   discharged_by: test_conc_31_reader_meets_a_half_written_shared_entry
   seed_docstring: No sibling writes a store another sibling reads. The base recording is complete before any sibling starts, so no sibling ever
@@ -3170,7 +3218,7 @@ demands:
   binds:
   - forged_store
   - served_cache
-  - exploration_cache
+  - oracle_ledger
   - run_investigation
   discharged_by: test_exploration_result_cached_by_one_world_is_stale_for_another
   seed_docstring: An exploration result one world's oracle obtained is never served to another world's oracle. Each world's forged rows learn
@@ -3187,8 +3235,8 @@ demands:
   kind: behavior
   form: test
   binds:
-  - exploration_cache
-  - interacts(run_query->exploration_cache)
+  - oracle_ledger
+  - interacts(run_query->oracle_ledger)
   - _untrusted.wrap_fresh
   - interacts(serve_one->oracle).payload
   discharged_by: test_input_exploration_result_carries_hostile_text
@@ -3279,6 +3327,7 @@ demands:
   - OracleUnservable
   - preflight_replay
   - run_investigation
+  - world_record
   discharged_by: test_fewer_siblings_start_than_the_family_has_worlds
   seed_docstring: 'After pre-flight excludes one world as unservable, siblings start for the other worlds and run together and finish; the one
     unservable world does not hold the others back or cause them to be dropped (O5: the family is graded on the rest).'
@@ -3348,6 +3397,7 @@ demands:
   - family_record
   - unservable_worlds.domain.distinguished[1]
   - interacts(enqueue->family_record)
+  - world_record
   discharged_by: test_input_judge_gives_an_unservable_world_a_bucket
   seed_docstring: 'A bucket and findings that the judge model gives a world recorded unservable are not recorded as findings: the unservable world
     is not graded, and an unusable family carries no findings (O5).'
@@ -3473,8 +3523,8 @@ demands:
   - preflight_replay
   - forged_store
   - record_fact
-  - exploration_cache
-  - family_base_cache
+  - oracle_ledger
+  - world_base_store
   discharged_by: test_1224_family_block_built_after_another_worlds_oracle_has_run
   seed_docstring: 'The assertion stands: world c''s family block is byte-identical to one built before world b''s oracle ran and carries nothing
     of world b''s work. The rationale is re-pinned: no shared store exists through which world b''s work could reach it (S20).'
@@ -3878,6 +3928,10 @@ demands:
     per world; no statement-entity cross-check at load; contradictory facts are left to the oracle and verifier, ending unservable.'
   resolved_by: auto
   provisional_lifted: §7 (70-resolutions.md)
+  amendment_note: 'F-01 (91-blind.md, spine-routed): the verifier''s judgement is a non-obligation; the test pins the HOST''s handling of the
+    verifier''s verdict (a failing verdict is honoured, the same submission under a passing verifier is served) and what the verifier is handed
+    (the call, base, served answer, the world''s facts and frozen telemetry, framed; never the oracle''s reasoning). The prose above names the
+    situation the verifier judges, not a host guarantee.'
 - id: b_p021
   kind: behavior
   form: test
@@ -4077,7 +4131,7 @@ demands:
   form: test
   binds:
   - interacts(QueryCapture->circuit_breaker)
-  - exploration_cache
+  - oracle_ledger
   - oracle
   - run_investigation
   forks:
@@ -4126,6 +4180,7 @@ demands:
   - oracle
   - ledger_decision.domain.distinguished[real-error]
   - oracle_retry_cap.domain
+  - world_record
   forks:
   - M08
   premise: P051
@@ -4146,7 +4201,7 @@ demands:
   kind: behavior
   form: test
   binds:
-  - family_base_cache
+  - world_base_store
   - oracle
   - run_investigation
   forks:
@@ -4167,7 +4222,7 @@ demands:
   binds:
   - preflight_replay
   - served_cache
-  - family_base_cache
+  - world_base_store
   - family_base
   - run_investigation
   forks:
@@ -4180,10 +4235,12 @@ demands:
     line
   source: '45-dispositions ''Bound now'' (untagged: holds under every reading of the cluster)'
   discharged_by: test_conc_23_two_siblings_ask_one_uncaptured_call_together
-  seed_docstring: 'afterwards the family holds exactly one base answer for that call and every world''s base is that answer (live base answers
-    are cached per family), whether the askers are sibling processes or pre-flight replaying several worlds at once. Resolved reading (—): '
+  seed_docstring: Afterwards each world holds its own base answer for that call, read live by that world for itself (S20/S22), whether the askers
+    are sibling processes or pre-flight replaying several worlds at once; no family-wide cache is written. Resolved reading (S20/S22, M16=A).
   resolved_by: auto
   provisional_lifted: §7 (70-resolutions.md)
+  repinned: 'R-04 (92-reconciliation.md): re-pinned to S20/S22 and M16=A (per-world base store); the earlier ''exactly one base answer, cached
+    per family'' described the cache Amendment 2 abolished.'
 - id: b_p062
   kind: behavior
   form: test
@@ -4408,9 +4465,9 @@ demands:
   form: test
   binds:
   - forged_store
-  - family_base_cache
+  - world_base_store
   - family_base
-  - exploration_cache
+  - oracle_ledger
   - host_checks.domain.distinguished[3]
   - verifier
   forks:
@@ -5025,6 +5082,7 @@ demands:
   binds:
   - OracleUnservable
   - run_investigation
+  - world_record
   forks:
   - N13
   premise: P171
@@ -5072,9 +5130,8 @@ demands:
   form: test
   binds:
   - interacts(QueryCapture->evidence_rows)
-  - exploration_cache
-  - oracle
   - oracle_ledger
+  - oracle
   - run_investigation
   - serve_one
   forks:
@@ -5274,7 +5331,7 @@ demands:
   binds:
   - outcome_record
   - grade_episode
-  - family_base_cache
+  - world_base_store
   - family_base
   - oracle
   forks:
@@ -5391,6 +5448,7 @@ demands:
   - episode_outcome.domain.distinguished[accepted]
   - grade_episode
   - run_investigation
+  - world_record
   forks:
   - M06
   premise: P191
@@ -5416,6 +5474,7 @@ demands:
   - grade_episode
   - oracle
   - run_investigation
+  - world_record
   forks:
   - M06
   premise: P192
@@ -5487,6 +5546,7 @@ demands:
   - oracle_budget
   - oracle
   - run_investigation
+  - world_record
   forks:
   - N18
   premise: P195
@@ -5530,6 +5590,7 @@ demands:
   - grade_episode
   - oracle
   - run_investigation
+  - world_record
   forks:
   - M04
   premise: P197
@@ -5677,7 +5738,7 @@ demands:
   - outcome_record
   - grade_episode
   - oracle_budget
-  - exploration_cache
+  - oracle_ledger
   - verifier
   - oracle
   forks:
@@ -5761,6 +5822,7 @@ demands:
   binds:
   - run_investigation
   - serve_one
+  - world_record
   forks:
   - M11
   premise: P216
@@ -5823,7 +5885,7 @@ demands:
   form: test
   binds:
   - rate_limiter
-  - exploration_cache
+  - oracle_ledger
   - oracle
   - run_investigation
   forks:
@@ -5843,7 +5905,7 @@ demands:
   form: test
   binds:
   - forged_store
-  - exploration_cache
+  - oracle_ledger
   - oracle
   - fact_entity.domain
   - world_facts
@@ -5868,7 +5930,7 @@ demands:
   - parse_family
   - rate_limiter
   - VerbContext.as_of
-  - exploration_cache
+  - oracle_ledger
   - oracle
   forks:
   - N17
@@ -6066,6 +6128,7 @@ demands:
   - grade_episode
   - validate_reply
   - render_episode
+  - world_record
   forks:
   - M26
   premise: P245
@@ -6496,6 +6559,10 @@ demands:
     no stripping | members: FU15, FU16, FU17, FU18, FU19 | d04g provisional on M17 lifted.'
   resolved_by: human
   provisional_lifted: §7 (70-resolutions.md)
+  amendment_note: 'F-01 (91-blind.md, spine-routed): the verifier''s judgement is a non-obligation; the test pins the HOST''s handling of the
+    verifier''s verdict (a failing verdict is honoured, the same submission under a passing verifier is served) and what the verifier is handed
+    (the call, base, served answer, the world''s facts and frozen telemetry, framed; never the oracle''s reasoning). The prose above names the
+    situation the verifier judges, not a host guarantee.'
 - id: b_fu20
   kind: behavior
   form: test
@@ -6531,7 +6598,7 @@ demands:
   form: test
   binds:
   - world_ledger
-  - family_base_cache
+  - world_base_store
   - OracleUnservable
   - tenant_adapter
   forks:
@@ -6635,7 +6702,6 @@ demands:
   - serve_one
   - served_cache
   - forged_store
-  - interacts(preflight_replay->served_cache)
   - ledger_decision.domain.distinguished[passthrough]
   - record_fact
   - host_check
@@ -6801,8 +6867,8 @@ demands:
   kind: behavior
   form: clause
   binds:
-  - family_base_cache.identity
-  - exploration_cache.identity
+  - world_base_store.identity
+  - oracle_ledger.identity
   - drives(start_family->run_investigation)
   outcome:
     nl: 'RESOLVED at §7 — M08 REAL-ERROR-CACHE, resolved_by: human. round: R3 | answer: A | reading: a real-system error is not cached as the
@@ -6904,14 +6970,12 @@ demands:
   - real_data.domain.distinguished[live_base]
   - forged_store
   - real_data.domain.distinguished[exploration]
-  - family_base_cache
-  - rate_limiter
+  - world_base_store
   - oracle_ledger
   - tenant_adapter
   - oracle_retry_cap.domain
   - oracle_rate_limit.domain
   - real_data.domain
-  - tenant_adapter.access[collision-lookup]
   outcome:
     nl: 'RESOLVED at §7 — M12 CHECK3, resolved_by: human. round: R2 | answer: A | reading: narrow in-memory check 3; id-like = a value in a column
       named `*id`, `*_id`, `uuid`, `guid` or `hash`, or a value matching a UUID or a hex string of 16 or more characters; "occurs" = exact whole-value
@@ -7023,7 +7087,7 @@ demands:
   - grade_episode
   - render_episode
   - episode_reader
-  - family_base_cache
+  - world_base_store
   - tenant_adapter
   - world_ledger.identity
   - ledger_decision.domain
@@ -7458,7 +7522,7 @@ demands:
   - run_query.access[oracle]
   - tenant_adapter
   - run_query
-  - exploration_cache
+  - oracle_ledger
   outcome:
     nl: 'RESOLVED at §7 — N06 DOC-DECIDED, resolved_by: auto. reading: the doc''s text decides each: no read past `as_of` on a system with a time
       axis (#57); params pass to the oracle and verifier, framed, and nothing else (#92); N counts failures per call (#202); the limit is per
@@ -8002,6 +8066,7 @@ demands:
   binds:
   - unservable_worlds.domain
   - OracleUnservable
+  - world_record
   discharged_by: test_provider_key_for_the_oracle_is_absent_only_where_the_oracle_runs
   seed_docstring: 'The provider key the oracle role needs is present in the launcher''s environment and absent from the environment a sibling
     inherits. What must pre-flight and the sibling each do? Resolved reading (M04): resolved_by: human | round: R1 | answer: A | reading: for
@@ -8017,17 +8082,20 @@ demands:
   kind: behavior
   form: test
   binds:
-  - family_base_cache.identity
-  - exploration_cache.identity
+  - world_base_store.identity
+  - oracle_ledger.identity
   - drives(start_family->run_investigation)
   discharged_by: test_live_base_answer_for_an_uncaptured_call_changes_between_two_siblings_reads
-  seed_docstring: Each world's base for that call is the same family-cached answer from the first live read; later changes in the tenant's data
-    do not alter it, so every world is served a base consistent with every other world's (live base answers are cached per family).
+  seed_docstring: 'Each world''s base for an uncaptured call is that world''s own live read (S20/S22, Amendment 2 change 2): there is no family-wide
+    cache, the read lands in the world''s own per-world base store (M16=A), and a later change in the tenant''s data reaches a world that reads
+    after it, not a world that already read.'
   premise: P054
   premise_disposition: settled
   resolved_by: settled (48-rejudge.md)
   source: '§7 fold (phase E): a premise with no prior demand, minted to its cluster''s reading'
   binds_from: f_m08_base_cache
+  repinned: 'R-04 (92-reconciliation.md): re-pinned to S20/S22 and M16=A; the earlier ''family-cached answer'' described the cache Amendment 2
+    abolished.'
 - id: b_p057
   kind: behavior
   form: test
@@ -8037,7 +8105,7 @@ demands:
   - run_query.access[oracle]
   - tenant_adapter
   - run_query
-  - exploration_cache
+  - oracle_ledger
   discharged_by: test_p083_call_window_extends_past_the_branch_point
   seed_docstring: 'No branching read path returns a row, event or state dated after as_of, however the window end is spelled: the sibling''s base
     read, the oracle''s and verifier''s run_query, and pre-flight''s replay are all bounded by the branch-point clock (O6). A base answer never
@@ -8124,7 +8192,7 @@ demands:
   - run_query.access[oracle]
   - tenant_adapter
   - run_query
-  - exploration_cache
+  - oracle_ledger
   discharged_by: test_p011_call_params_smuggle_the_investigators_conclusion
   seed_docstring: 'Call params necessarily pass to the oracle and verifier (a query can encode a hypothesis) but only as framed, untrusted text
     and only as the params themselves: no other investigator reasoning, conclusion or message text accompanies them (O10).'
@@ -8152,6 +8220,10 @@ demands:
   resolved_by: settled (48-rejudge.md)
   source: '§7 fold (phase E): a premise with no prior demand, minted to its cluster''s reading'
   binds_from: f_m13_check4
+  amendment_note: 'F-01 (91-blind.md, spine-routed): the verifier''s judgement is a non-obligation; the test pins the HOST''s handling of the
+    verifier''s verdict (a failing verdict is honoured, the same submission under a passing verifier is served) and what the verifier is handed
+    (the call, base, served answer, the world''s facts and frozen telemetry, framed; never the oracle''s reasoning). The prose above names the
+    situation the verifier judges, not a host guarantee.'
 - id: b_p099
   kind: behavior
   form: test
@@ -8162,14 +8234,12 @@ demands:
   - real_data.domain.distinguished[live_base]
   - forged_store
   - real_data.domain.distinguished[exploration]
-  - family_base_cache
-  - rate_limiter
+  - world_base_store
   - oracle_ledger
   - tenant_adapter
   - oracle_retry_cap.domain
   - oracle_rate_limit.domain
   - real_data.domain
-  - tenant_adapter.access[collision-lookup]
   discharged_by: test_input_forged_id_differs_from_a_real_id_only_by_case_or_padding
   seed_docstring: 'a forged row''s id differs from an id in real data (the base recording, a live base answer, an exploration result) only by
     letter case, leading zeros, trailing whitespace or a trailing dot or newline, Unicode normalization form, a confusable character from another
@@ -8195,14 +8265,12 @@ demands:
   - real_data.domain.distinguished[base_recording]
   - forged_store
   - real_data.domain.distinguished[exploration]
-  - family_base_cache
-  - rate_limiter
+  - world_base_store
   - oracle_ledger
   - tenant_adapter
   - oracle_retry_cap.domain
   - oracle_rate_limit.domain
   - real_data.domain
-  - tenant_adapter.access[collision-lookup]
   discharged_by: test_input_forged_id_is_a_substring_of_a_real_id_or_contains_one
   seed_docstring: 'a forged id is a prefix or substring of a real id, a real id is a substring of the forged one, or a real id is embedded in
     a longer forged value in a non-id column (a message, a path, a command line) — what must be observable at host check 3? Resolved reading (M12):
@@ -8224,17 +8292,15 @@ demands:
   - forged_store
   - host_checks.domain.distinguished[3]
   - real_data.domain.distinguished[exploration]
-  - family_base_cache
+  - world_base_store
   - host_check
   - real_data.domain.distinguished[base_recording]
   - real_data.domain.distinguished[live_base]
-  - rate_limiter
   - oracle_ledger
   - tenant_adapter
   - oracle_retry_cap.domain
   - oracle_rate_limit.domain
   - real_data.domain
-  - tenant_adapter.access[collision-lookup]
   discharged_by: test_input_real_id_appears_in_family_data_after_the_forged_id_was_frozen
   seed_docstring: 'a forged row was verified and frozen in one world, and later another sibling''s live base read, an exploration result, or a
     recorded call in the same family returns a real row carrying that same id-like value — what must be observable about the earlier sibling''s
@@ -8260,14 +8326,12 @@ demands:
   - real_data.domain.distinguished[live_base]
   - forged_store
   - real_data.domain.distinguished[exploration]
-  - family_base_cache
-  - rate_limiter
+  - world_base_store
   - oracle_ledger
   - tenant_adapter
   - oracle_retry_cap.domain
   - oracle_rate_limit.domain
   - real_data.domain
-  - tenant_adapter.access[collision-lookup]
   discharged_by: test_1224_forged_row_must_reuse_a_real_entitys_identifier
   seed_docstring: 'to be consistent with a real entity (alice''s SID, db-1''s agent id, a file hash from the alert), a forged event row must carry
     an identifier that occurs in the family''s real data — what must check 3 decide? Resolved reading (M12): resolved_by: human | round: R2 |
@@ -8361,15 +8425,22 @@ demands:
   - oracle
   - host_check
   - oracle_retry_cap.domain
-  - OracleUnservable
+  - box_executor
+  - forged_store
+  - world_ledger
   discharged_by: test_python_runs_past_its_time_limit
-  seed_docstring: The run is cut off by a time and output bound, the oracle is told, the attempt fails as an oracle-side failure, and the time
-    never counts toward any investigator time limit (O4); nothing is served from the cut-off output.
+  seed_docstring: The run is cut off by a time and output bound and the oracle is told; under the human's M03=A a Python timeout is in-turn feedback,
+    not a failed attempt, so with a retry cap of one the later submission is served and its row records one attempt; the time never counts toward
+    any investigator time limit (O4); nothing is served from the cut-off output.
   premise: P136
   premise_disposition: fork
   resolved_by: settled (48-rejudge.md)
   source: '§7 fold (phase E): a premise with no prior demand, minted to its cluster''s reading'
   binds_from: f_m03_retry_accounting
+  repinned: 'R-03 (92-reconciliation.md): re-pinned to the human''s M03=A reading line (tool errors inside a turn, Python errors and timeouts
+    included, are in-turn feedback); the earlier ''the attempt fails'' contradicted it. Binds re-pointed with it: the test no longer reaches OracleUnservable
+    (the cut-off spends no attempt and the later forging submission is served), and it drives the box''s time bound and the world''s forged store
+    and ledger row.'
 - id: s_p150
   kind: behavior
   form: test
@@ -8409,7 +8480,7 @@ demands:
   - grade_episode
   - render_episode
   - episode_reader
-  - family_base_cache
+  - world_base_store
   - tenant_adapter
   - world_ledger.identity
   - ledger_decision.domain
@@ -8433,7 +8504,7 @@ demands:
   - grade_episode
   - render_episode
   - episode_reader
-  - family_base_cache
+  - world_base_store
   - tenant_adapter
   - world_ledger.identity
   - ledger_decision.domain
@@ -8480,6 +8551,7 @@ demands:
   binds:
   - unservable_worlds.domain
   - OracleUnservable
+  - world_record
   discharged_by: test_sibling_cannot_be_spawned
   seed_docstring: 'The launcher cannot start one world''s sibling process at all. What must the family''s validity, the outcome record and the
     judge conclude? Resolved reading (M04): resolved_by: human | round: R1 | answer: A | reading: for O5''s count a world counts if it is unservable
@@ -8500,7 +8572,8 @@ demands:
   - run_query.access[oracle]
   - tenant_adapter
   - run_query
-  - exploration_cache
+  - oracle_ledger
+  - world_record
   discharged_by: test_failure_count_across_many_calls_each_failing_once
   seed_docstring: 'The retry cap N counts failures on one call: a hundred calls that each fail one attempt and then pass do not make the world
     unservable, and only N failures on a single call make the sibling unservable (O4).'
@@ -8653,7 +8726,6 @@ demands:
   - serve_one
   - served_cache
   - forged_store
-  - interacts(preflight_replay->served_cache)
   - ledger_decision.domain.distinguished[passthrough]
   - record_fact
   - host_check
@@ -8678,7 +8750,6 @@ demands:
   - serve_one
   - served_cache
   - forged_store
-  - interacts(preflight_replay->served_cache)
   - ledger_decision.domain.distinguished[passthrough]
   - record_fact
   - host_check
@@ -8728,14 +8799,12 @@ demands:
   - real_data.domain.distinguished[live_base]
   - forged_store
   - real_data.domain.distinguished[exploration]
-  - family_base_cache
-  - rate_limiter
+  - world_base_store
   - oracle_ledger
   - tenant_adapter
   - oracle_retry_cap.domain
   - oracle_rate_limit.domain
   - real_data.domain
-  - tenant_adapter.access[collision-lookup]
   discharged_by: test_1224_forged_id_exists_on_the_tenant_system_but_in_no_family_data
   seed_docstring: 'a forged row''s id-like value occurs in none of the real data the family has seen (the base recording, live base answers, exploration
     results), but it does occur in records on the tenant''s system that no call has read — what must be observable about any tenant query sent
@@ -8762,14 +8831,12 @@ demands:
   - real_data.domain.distinguished[live_base]
   - forged_store
   - real_data.domain.distinguished[exploration]
-  - family_base_cache
-  - rate_limiter
+  - world_base_store
   - oracle_ledger
   - tenant_adapter
   - oracle_retry_cap.domain
   - oracle_rate_limit.domain
   - real_data.domain
-  - tenant_adapter.access[collision-lookup]
   discharged_by: test_1224_collision_check_while_the_tenant_system_is_unreachable
   seed_docstring: 'every query to a tenant system fails because of an outage. A call''s base answer comes from the family recording, and the oracle
     submits an answer with a forged row for it — what must be observable about host check 3''s verdict on that row and the call''s attempt count?
@@ -8795,14 +8862,12 @@ demands:
   - real_data.domain.distinguished[live_base]
   - forged_store
   - real_data.domain.distinguished[exploration]
-  - family_base_cache
-  - rate_limiter
+  - world_base_store
   - oracle_ledger
   - tenant_adapter
   - oracle_retry_cap.domain
   - oracle_rate_limit.domain
   - real_data.domain
-  - tenant_adapter.access[collision-lookup]
   discharged_by: test_1224_collision_check_while_the_rate_limit_is_saturated
   seed_docstring: 'the episode''s oracle-side queries are waiting at the per-episode rate limit when the host runs check 3 on a forged row — what
     must be observable about when check 3 returns its verdict, and about the limiter''s count of queries sent? Resolved reading (M12): resolved_by:
@@ -9030,6 +9095,7 @@ demands:
   binds:
   - outcome_record.identity
   - drives(launcher->preflight_replay)
+  - world_record
   discharged_by: test_1224_outcome_record_is_written_once_and_each_world_record_has_one_writer
   seed_docstring: The episode outcome record is written once, by pre-flight, before any sibling starts, and never rewritten; each world's own
     record holds one reason, written by the sibling (oracle unservable) or by the launcher after that sibling's process exited without a reason
@@ -9301,6 +9367,7 @@ demands:
   binds:
   - outcome_record
   - interacts(preflight_replay->outcome_record).payload
+  - world_record
   discharged_by: test_1224_outcome_and_world_record_reasons_render_inert_on_the_page_and_in_the_judge_record
   seed_docstring: Reason strings that quote a failing call's investigator-influenced params (markup, a newline) in the outcome record, its drift
     calls, and each world's own record render inert on the episode page and in the judge's not-graded record; the reason text is shown (positive
@@ -9736,6 +9803,7 @@ structure:
   - entity
   - field
   - trace_name
+  - process
   actors:
   - id: launcher
     frame: composition
@@ -9860,7 +9928,8 @@ structure:
   - id: rate_limiter
     frame: leg
     provenance: design
-    note: M13's per-episode limiter; also a boundary (its shared state)
+    note: 'the oracle-side rate limiter, one per process (S16/S18): pre-flight''s at R in the launcher, each sibling''s at R/k; also a boundary
+      (its in-process window)'
   - id: budget_enforcer
     frame: leg
     provenance: code
@@ -10005,22 +10074,19 @@ structure:
             - read-endpoint-allowlist
           run-query:
             trust: attacker-influenced
-            constraints: &id001
+            constraints:
             - grant-decide-per-call
             - read-verbs-only
             - as-of-bound
-            - rate-limit-per-episode
+            - rate-limit-per-process-slice
             - oracle-side-ledger
-          collision-lookup:
-            trust: attacker-influenced
-            constraints: unknown
         nl: 'The 8 adapters (elastic, change_mgmt, cmdb, host_state, identity, tacit_knowledge, threat_intel, ticket). sibling-query-tool: today''s
           sibling path; as_of is CARRIED on every call (registry.py:394) but honoured by 3 of 8 adapters only — change_mgmt, cmdb, identity, threat_intel
           and ticket never read it, elastic keeps a caller end past it, esql is bounded only when FROM-leading (RF-2, GA-32/33). launcher-review-read-side:
           seams.EpisodeAdapters dispatches with no per-call decide and as_of None (RF-3, b06) — M8 moves it into pre-flight. run-query: the design''s
-          oracle-side door (O6/O9/O14). collision-lookup: whether host check 3 queries the tenant at all is M12 (F-13) — `unknown`. Removed surfaces
-          not modelled as cells: sibling-base-witness (_base_witness, deleted with STAGED), launcher-staging-door (staging._Door, bypasses guard_outbound;
-          deleted by M12); capture-prime makes no adapter call (reads recordings).'
+          oracle-side door (O6/O9/O14). collision-lookup: deleted (H-01, M12=A: check 3 sends no tenant query; it is in-memory over this world''s
+          real data, S21). Removed surfaces not modelled as cells: sibling-base-witness (_base_witness, deleted with STAGED), launcher-staging-door
+          (staging._Door, bypasses guard_outbound; deleted by M12); capture-prime makes no adapter call (reads recordings).'
     note: brief SR-3; named `tenant_systems` in 10-brief (unified to 20's id)
   - id: run_query
     provenance: design
@@ -10029,7 +10095,12 @@ structure:
         constraints_by_via:
           oracle:
             trust: attacker-influenced
-            constraints: *id001
+            constraints: &id001
+            - grant-decide-per-call
+            - read-verbs-only
+            - as-of-bound
+            - rate-limit-per-episode
+            - oracle-side-ledger
           verifier:
             trust: attacker-influenced
             constraints: *id001
@@ -10095,31 +10166,6 @@ structure:
           nl: served/base.jsonl, written once per episode by capture.prime_base in the launcher (FA-11)
         sharing: unique-key
     note: 'the family''s primed recording; O9: nothing branching sends lands here'
-  - id: family_base_cache
-    provenance: design
-    facets:
-      identity:
-        key_axes:
-        - episode
-        - system
-        - verb
-        - params
-        evidence:
-          nl: 'design non-obligation ''live base answers cached per family''; one entry per uncaptured call per episode, shared by sibling PROCESSES
-            (RF-7, FA-08: today per world, per process)'
-        sharing: unique-key
-  - id: exploration_cache
-    provenance: design
-    facets:
-      identity:
-        key_axes:
-        - episode
-        - system
-        - verb
-        - params
-        evidence:
-          nl: 'design: exploration results shared across siblings (per family); cross-process (RF-7)'
-        sharing: unique-key
   - id: served_cache
     provenance: design
     facets:
@@ -10333,10 +10379,13 @@ structure:
     facets:
       identity:
         key_axes:
-        - episode
+        - process
         evidence:
-          nl: design O14 'per-episode rate limit' spanning pre-flight and every sibling PROCESS (RF-7; no limiter exists, GA-37)
+          nl: 'S16/S18 (Amendment 2 change 2): no limiter state crosses processes; pre-flight holds the episode''s rate R in the launcher process,
+            each sibling holds its own slice R/k (k = worlds launched) in-process; the window is shared only by one process''s concurrent oracle-side
+            queries'
         sharing: serialized-append
+    note: 're-keyed per process at the phase-F repair (R-02): the cross-process limiter was abolished by Amendment 2'
   - id: host_checks
     provenance: design
     facets:
@@ -10372,7 +10421,8 @@ structure:
       domain:
         type: enum
         refinement:
-          nl: 'O8''s ''real data'': every real answer the family has seen (M12 open on tenant lookups)'
+          nl: 'O8''s ''real data'' for check 3, per world (S21, M12=A: in memory, no tenant lookup): this world''s base recording, its live base
+            answers, its exploration results, its verifier run_query results and the source alert'
         default: unknown
         distinguished:
         - base_recording
@@ -10622,6 +10672,37 @@ structure:
     provenance: code
     facets: {}
     note: learning/judge/__init__.py:219 _control_drift_discard — REMOVED (drift left to the judge model)
+  - id: world_base_store
+    provenance: design
+    facets:
+      identity:
+        key_axes:
+        - world
+        - system
+        - verb
+        - params
+        evidence:
+          nl: 'M16=A (human): a world''s live base answers for uncaptured calls live in that world''s own per-world base store (oracle/<label>/base.jsonl),
+            never in the world ledger; Amendment 2 change 2 and S20/S22: no family-wide cache of live base answers, each world reads for itself;
+            one writer, that world''s sibling (S19)'
+        sharing: serialized-append
+    note: replaces the abolished family_base_cache (R-02, 92-reconciliation.md)
+  - id: world_record
+    provenance: design
+    facets:
+      identity:
+        key_axes:
+        - world
+        evidence:
+          nl: 'Amendment 2 change 1, S7, S8, O-11: world_records/<label>.yaml, one per world; written by the sibling''s abort path (reason `oracle
+            unservable` or `budget`, with the failing call) OR by the launcher after the sibling exits without one (`did not finish`), never both'
+        sharing: unique-key
+      payload:
+        parts: []
+        invariants: []
+        nl: one reason per world (oracle unservable | budget | did not finish) and, for an oracle failure, the failing call; read by the judge's
+          O5 count (S9) and shown inert (O-35).
+    note: the per-world record Amendment 2 change 1 introduced (R-02); O-11 pins its one-writer rule
   interacts:
   - from: QueryCapture
     to: WorldRegistry
@@ -10684,26 +10765,11 @@ structure:
     via: fs
     provenance: design
   - from: serve_one
-    to: family_base_cache
-    mode: write
-    via: fs
-    provenance: design
-    interpolates: &id002
-    - episode
-    - system
-    - verb
-    - params
-  - from: serve_one
-    to: family_base_cache
-    mode: read
-    via: fs
-    provenance: design
-  - from: serve_one
     to: served_cache
     mode: write
     via: fs
     provenance: design
-    interpolates: &id003
+    interpolates:
     - world
     - system
     - verb
@@ -10852,16 +10918,6 @@ structure:
     via: fs
     provenance: design
   - from: host_check
-    to: family_base_cache
-    mode: read
-    via: fs
-    provenance: design
-  - from: host_check
-    to: exploration_cache
-    mode: read
-    via: fs
-    provenance: design
-  - from: host_check
     to: real_data
     mode: read
     via: api
@@ -10883,17 +10939,6 @@ structure:
     via: api
     provenance: design
   - from: run_query
-    to: exploration_cache
-    mode: write
-    via: fs
-    provenance: design
-    interpolates: *id002
-  - from: run_query
-    to: exploration_cache
-    mode: read
-    via: fs
-    provenance: design
-  - from: run_query
     to: oracle_ledger
     mode: write
     via: fs
@@ -10906,7 +10951,7 @@ structure:
     via: fs
     provenance: design
     interpolates:
-    - episode
+    - process
   - from: rate_limiter
     to: oracle_rate_limit
     mode: read
@@ -10950,13 +10995,6 @@ structure:
     interpolates:
     - world
   - from: preflight_replay
-    to: served_cache
-    mode: write
-    via: fs
-    provenance: design
-    interpolates: *id003
-    note: M02/F-06 open
-  - from: preflight_replay
     to: oracle_ledger
     mode: write
     via: fs
@@ -10977,7 +11015,7 @@ structure:
     via: fs
     provenance: design
     interpolates:
-    - episode
+    - process
   - from: preflight_replay
     to: VerbContext.as_of
     mode: write
@@ -11599,6 +11637,44 @@ structure:
     via: api
     provenance: code
     note: learning/judge/render.py renders each world's ledger rows for the judge prompt (PCO-08, GR-05)
+  - from: serve_one
+    to: world_base_store
+    mode: write
+    via: fs
+    provenance: design
+    interpolates:
+    - world
+    - system
+    - verb
+    - params
+  - from: serve_one
+    to: world_base_store
+    mode: read
+    via: fs
+    provenance: design
+  - from: run_investigation
+    to: world_record
+    mode: write
+    via: fs
+    provenance: design
+    sends: payload
+    interpolates:
+    - world
+    note: 'the sibling''s abort path (N13, S8): `oracle unservable` / `budget` with the failing call'
+  - from: launcher
+    to: world_record
+    mode: write
+    via: fs
+    provenance: design
+    sends: payload
+    interpolates:
+    - world
+    note: 'after a sibling exits without its own record: `did not finish` (M04=A, S8)'
+  - from: grade_episode
+    to: world_record
+    mode: read
+    via: fs
+    provenance: design
   drives:
   - from: launcher
     to: author_family
@@ -14863,85 +14939,75 @@ claims:
   feeds: 'R6 source probe (RG-09): M12 (world_view_names deletion) must keep the hyphen refusal somewhere; N02; O-33'
 - id: GPR-01
   kind: behavior
-  claim: >-
-    When the SDK's own bounded transient retries give up on a provider 5xx, 429 or connection failure, run_stage (the in-process learning-role
+  claim: When the SDK's own bounded transient retries give up on a provider 5xx, 429 or connection failure, run_stage (the in-process learning-role
     driver the oracle and verifier clients go through) raises RunUnprocessable whose __cause__ is pydantic_ai.exceptions.ModelHTTPError (any HTTP
     status, 5xx and 429 alike) or, for a connection that cannot be made, pydantic_ai.exceptions.ModelAPIError.
-  probe: >-
-    cd /tmp && PYTHONPATH=/wt-issue-1224 /workspace/defender/.venv/bin/python /wt-issue-1224/.spec-flow/probes/PR/pr1_provider_outage.py (output
-    .spec-flow/probes/PR/pr1_provider_outage.out.txt); the fake-equivalence re-run .spec-flow/probes/PR/pr1b_fake_equivalence.py (output
+  probe: cd /tmp && PYTHONPATH=/wt-issue-1224 /workspace/defender/.venv/bin/python /wt-issue-1224/.spec-flow/probes/PR/pr1_provider_outage.py
+    (output .spec-flow/probes/PR/pr1_provider_outage.out.txt); the fake-equivalence re-run .spec-flow/probes/PR/pr1b_fake_equivalence.py (output
     pr1b_fake_equivalence.out.txt). Real stack end to end (run_stage -> build_stage_agent -> providers.build_for_effort -> pydantic_ai model ->
     anthropic / openai SDK httpx client) against a local 127.0.0.1 stub HTTP server answering a fixed status, and against a closed local port;
     dummy credentials; a 200 control per provider.
   probe_kind: executed
-  observed: >-
-    Both providers the repo builds (Anthropic via AnthropicModel, Fireworks via OpenAIChatModel) give the same outcome. The 200 control returns the
-    text. For 500, 503, 529 (Anthropic) / 502 (Fireworks) and 429 (retry-after 0) the stub saw 3 requests (the first plus the SDK's 2 retries, about
-    1.3 s of backoff), then run_stage raised defender.learning.core.config.RunUnprocessable (a wrapper; message
-    `<stage> (<label>) failed: ModelHTTPError("status_code: 503, model_name: claude-sonnet-4-5, body: {...}")`) whose __cause__ is
-    pydantic_ai.exceptions.ModelHTTPError (MRO ModelHTTPError > ModelAPIError > AgentRunError > RuntimeError; .status_code an int, .model_name,
-    .body the parsed provider body); its own __cause__ is the SDK class (anthropic.InternalServerError / OverloadedError / RateLimitError;
-    openai.InternalServerError / RateLimitError). A 401 is not retried (1 request) and gives the same ModelHTTPError with status_code 401, so the
-    class does not separate an outage from an auth fault; the status does. Connection refused (closed port): 3 attempts in about 1.3 s, then
-    RunUnprocessable with __cause__ pydantic_ai.exceptions.ModelAPIError (str "Connection error.", .model_name set, no status_code; MRO ModelAPIError >
-    AgentRunError), chained to anthropic/openai.APIConnectionError > httpx2.ConnectError > httpcore2.ConnectError. The pydantic-ai layer adds no
-    retry of its own for these. Fake equivalence: a FunctionModel raising ModelHTTPError(503, model_name, body), ModelHTTPError(429, ...) or
-    ModelAPIError(model_name, "Connection error.") through run_stage(make_model=...) yields the identical RunUnprocessable, with the same __cause__
-    class and message shape.
+  observed: 'Both providers the repo builds (Anthropic via AnthropicModel, Fireworks via OpenAIChatModel) give the same outcome. The 200 control
+    returns the text. For 500, 503, 529 (Anthropic) / 502 (Fireworks) and 429 (retry-after 0) the stub saw 3 requests (the first plus the SDK''s
+    2 retries, about 1.3 s of backoff), then run_stage raised defender.learning.core.config.RunUnprocessable (a wrapper; message `<stage> (<label>)
+    failed: ModelHTTPError("status_code: 503, model_name: claude-sonnet-4-5, body: {...}")`) whose __cause__ is pydantic_ai.exceptions.ModelHTTPError
+    (MRO ModelHTTPError > ModelAPIError > AgentRunError > RuntimeError; .status_code an int, .model_name, .body the parsed provider body); its
+    own __cause__ is the SDK class (anthropic.InternalServerError / OverloadedError / RateLimitError; openai.InternalServerError / RateLimitError).
+    A 401 is not retried (1 request) and gives the same ModelHTTPError with status_code 401, so the class does not separate an outage from an
+    auth fault; the status does. Connection refused (closed port): 3 attempts in about 1.3 s, then RunUnprocessable with __cause__ pydantic_ai.exceptions.ModelAPIError
+    (str "Connection error.", .model_name set, no status_code; MRO ModelAPIError > AgentRunError), chained to anthropic/openai.APIConnectionError
+    > httpx2.ConnectError > httpcore2.ConnectError. The pydantic-ai layer adds no retry of its own for these. Fake equivalence: a FunctionModel
+    raising ModelHTTPError(503, model_name, body), ModelHTTPError(429, ...) or ModelAPIError(model_name, "Connection error.") through run_stage(make_model=...)
+    yields the identical RunUnprocessable, with the same __cause__ class and message shape.'
   verdict: holds
   source: write-tests probe leaf (82-probe-requests.md, PR-1)
-  feeds: 'b_fu20[exception], b_p124, b_p129, b_p125, s_p186, b_p187 (provider_outage()); M03=A, M04/M05 all-world outage'
+  feeds: b_fu20[exception], b_p124, b_p129, b_p125, s_p186, b_p187 (provider_outage()); M03=A, M04/M05 all-world outage
 - id: GPR-02
   kind: behavior
-  claim: >-
-    A box run cut off by its time bound hands back no BoxResult, exit code or field: BoxExecutor.run_parsed raises subprocess.TimeoutExpired, from
-    the docker transport and from the host executor alike.
-  probe: >-
-    cd /tmp && PYTHONPATH=/wt-issue-1224 /workspace/defender/.venv/bin/python /wt-issue-1224/.spec-flow/probes/PR/pr2_box_timeout.py docker|host
+  claim: 'A box run cut off by its time bound hands back no BoxResult, exit code or field: BoxExecutor.run_parsed raises subprocess.TimeoutExpired,
+    from the docker transport and from the host executor alike.'
+  probe: 'cd /tmp && PYTHONPATH=/wt-issue-1224 /workspace/defender/.venv/bin/python /wt-issue-1224/.spec-flow/probes/PR/pr2_box_timeout.py docker|host
     (outputs .spec-flow/probes/PR/pr2_docker.out.txt and pr2_host.out.txt). docker arm: a real container from start_box(BoxRequest) on the owned
     defender-box image (runtime runc, because no runsc is installed here; mount /workspace, the only daemon-shared path), the real _DockerTransport.
-    host arm: DEFENDER_ALLOW_UNSANDBOXED=1 with a forced start fault, so the real unboxed_executor and _HostTransport.
+    host arm: DEFENDER_ALLOW_UNSANDBOXED=1 with a forced start fault, so the real unboxed_executor and _HostTransport.'
   probe_kind: executed
-  observed: >-
-    docker (sandboxed=True, transport _DockerTransport): the `echo hi` control returns BoxResult(rc=0, out=b"hi\n", err=b""). `sleep 30`,
-    `python3 -c "import time; time.sleep(30)"` and `echo a && sleep 30` each raise subprocess.TimeoutExpired after the 2 s bound (2.01 s elapsed),
-    with cmd=['docker', 'exec', '-i', '-w', '/workspace', '<container>', 'python3', '-m', 'defender.runtime.bash_exec'], timeout=2, and output,
-    stdout and stderr None. BoxExecutor.run_parsed re-raises it unchanged (not wrapped in BoxFault). host (sandboxed=False, transport
-    _HostTransport): the same three commands raise subprocess.TimeoutExpired(cmd='', timeout=about 2.0, the remaining deadline) with output None.
-    Not probed: the in-box DEFENDER_BOX_TIMEOUT arm (default 120 s, past the transport bound); by reading bash_exec._run_box_entrypoint it exits rc 3
-    with a stderr line and no response frame.
+  observed: 'docker (sandboxed=True, transport _DockerTransport): the `echo hi` control returns BoxResult(rc=0, out=b"hi\n", err=b""). `sleep
+    30`, `python3 -c "import time; time.sleep(30)"` and `echo a && sleep 30` each raise subprocess.TimeoutExpired after the 2 s bound (2.01 s
+    elapsed), with cmd=[''docker'', ''exec'', ''-i'', ''-w'', ''/workspace'', ''<container>'', ''python3'', ''-m'', ''defender.runtime.bash_exec''],
+    timeout=2, and output, stdout and stderr None. BoxExecutor.run_parsed re-raises it unchanged (not wrapped in BoxFault). host (sandboxed=False,
+    transport _HostTransport): the same three commands raise subprocess.TimeoutExpired(cmd='''', timeout=about 2.0, the remaining deadline) with
+    output None. Not probed: the in-box DEFENDER_BOX_TIMEOUT arm (default 120 s, past the transport bound); by reading bash_exec._run_box_entrypoint
+    it exits rc 3 with a stderr line and no response frame.'
   verdict: holds
   source: write-tests probe leaf (82-probe-requests.md, PR-2)
-  feeds: 'b_p136 (the time cut-off; tools/_bash.py maps TimeoutExpired to ModelRetry for the investigator, the oracle seam has to map it to a failed attempt); M18=A'
+  feeds: b_p136 (the time cut-off; tools/_bash.py maps TimeoutExpired to ModelRetry for the investigator, the oracle seam has to map it to a failed
+    attempt); M18=A
 - id: GPR-03
   kind: behavior
-  claim: >-
-    When an investigator limit (the wall-clock BudgetKill raised by the budget hook in one lead) ends the run while a sibling lead's query is
-    awaiting its verb on asyncio.to_thread, the sibling's await is cancelled (CancelledError), the worker thread keeps running the verb to
-    completion, the cancelled lead records no query row, no summary and no session terminator, and the run does not return until that worker
-    finishes.
-  probe: >-
-    cd /wt-issue-1224/defender && PYTHONPATH=/wt-issue-1224 flock /tmp/defender-pytest.lock /workspace/defender/.venv/bin/python -m pytest
+  claim: When an investigator limit (the wall-clock BudgetKill raised by the budget hook in one lead) ends the run while a sibling lead's query
+    is awaiting its verb on asyncio.to_thread, the sibling's await is cancelled (CancelledError), the worker thread keeps running the verb to
+    completion, the cancelled lead records no query row, no summary and no session terminator, and the run does not return until that worker finishes.
+  probe: 'cd /wt-issue-1224/defender && PYTHONPATH=/wt-issue-1224 flock /tmp/defender-pytest.lock /workspace/defender/.venv/bin/python -m pytest
     ../.spec-flow/probes/PR/pr3_lead_ended_mid_call_test.py -p defender.tests.conftest -p no:randomly -n 0 -s -q --rootdir=/wt-issue-1224/defender
     (output .spec-flow/probes/PR/pr3_lead_ended_mid_call.out.txt). Real driver via the replay harness (H.drive), the real budget enforcer with
-    DEFENDER_BUDGET_ENFORCE, the real query tool and QueryCapture, a FakeVerbs registry; the models are FunctionModels. One observer wraps
-    asyncio.to_thread to report CancelledError and re-raises it unchanged. Positive control: the same shape under generous limits.
+    DEFENDER_BUDGET_ENFORCE, the real query tool and QueryCapture, a FakeVerbs registry; the models are FunctionModels. One observer wraps asyncio.to_thread
+    to report CancelledError and re-raises it unchanged. Positive control: the same shape under generous limits.'
   probe_kind: executed
-  observed: >-
-    Wall clock 1.0 s plus grace 0.5 s, two parallel leads dispatched in one turn. The l-001 query enters a 6 s verb on worker thread asyncio_0
-    (t=1.05). l-002's own model takes 2.2 s, then its query meets the budget hook: BudgetKill ("budget tail exhausted at query"). At t=3.27 the l-001
-    to_thread await saw asyncio.CancelledError (the sibling tool call's exception cancelled it); the worker kept running and finished at t=7.05 (the
-    verb's return value discarded); H.drive returned only then (asyncio.run joins the default-executor worker), with summary truncated_by=budget and
-    exit_reason=BudgetKill. Records: executed_queries.jsonl has no row for l-001 (nor for l-002, whose call was killed at the hook); no
-    gather_raw/l-001/0.json; no gather_summaries/l-001.md; the lead stays claimed (gather_raw/l-001.lead.json exists); session table main=budget,
-    gather:l-002=budget (the lead that raised: _run_gather stamps BudgetKill), gather:l-001=NULL (no except arm catches CancelledError, so no
-    terminator); l-001 made exactly 1 model request. Control (limits 600 s): the slow await returned normally; l-001 got its row (exit 0), its
-    summary, a second model request and truncated_by None. By reading, not executed: RunAborted takes the same re-raise path in _run_gather; a
-    request-limit UsageLimitExceeded in one lead is caught inside that lead and cancels no sibling; no asyncio.wait_for wraps a gather lead
-    (wait_for exists only in challenge_gate and _pydantic_stage).
+  observed: 'Wall clock 1.0 s plus grace 0.5 s, two parallel leads dispatched in one turn. The l-001 query enters a 6 s verb on worker thread
+    asyncio_0 (t=1.05). l-002''s own model takes 2.2 s, then its query meets the budget hook: BudgetKill ("budget tail exhausted at query"). At
+    t=3.27 the l-001 to_thread await saw asyncio.CancelledError (the sibling tool call''s exception cancelled it); the worker kept running and
+    finished at t=7.05 (the verb''s return value discarded); H.drive returned only then (asyncio.run joins the default-executor worker), with
+    summary truncated_by=budget and exit_reason=BudgetKill. Records: executed_queries.jsonl has no row for l-001 (nor for l-002, whose call was
+    killed at the hook); no gather_raw/l-001/0.json; no gather_summaries/l-001.md; the lead stays claimed (gather_raw/l-001.lead.json exists);
+    session table main=budget, gather:l-002=budget (the lead that raised: _run_gather stamps BudgetKill), gather:l-001=NULL (no except arm catches
+    CancelledError, so no terminator); l-001 made exactly 1 model request. Control (limits 600 s): the slow await returned normally; l-001 got
+    its row (exit 0), its summary, a second model request and truncated_by None. By reading, not executed: RunAborted takes the same re-raise
+    path in _run_gather; a request-limit UsageLimitExceeded in one lead is caught inside that lead and cancels no sibling; no asyncio.wait_for
+    wraps a gather lead (wait_for exists only in challenge_gate and _pydantic_stage).'
   verdict: holds
   source: write-tests probe leaf (82-probe-requests.md, PR-3)
-  feeds: 'test_conc_18_lead_ended_mid_serve (b_p161); N12 lead ended while queued or inside the oracle turn; S12'
+  feeds: test_conc_18_lead_ended_mid_serve (b_p161); N12 lead ended while queued or inside the oracle turn; S12
 gate:
   evaluated:
   - rule: R0
@@ -15288,10 +15354,10 @@ gate:
     discharged_by: o51_judge_samples_read
   - rule: R2
     element: rate_limiter.identity
-    witness: 'The per-episode limiter''s state is shared by pre-flight and every sibling process (X-18, d15e) and is updated read-modify-write:
-      two processes issuing at the same instant when one slot remains must not both pass (a lost update), and N20''s reading (unreadable state
-      resets to a conservative state, a dead holder''s lock is reclaimed after a bound) must hold under it. d15e asserts that the count spans
-      processes, not that an interleaving was driven; d15d asserts the rate with one caller.'
+    witness: 'The limiter''s window is shared only within one process (S16/S18): the concurrent oracle-side queries of one sibling (parallel run_query
+      in one turn) or of pre-flight''s worlds in the launcher; two queries issued at the same instant when one slot remains must not both pass
+      (a lost update), and N20''s reading (unreadable state fails closed) must hold under it. No state crosses processes; each sibling''s slice
+      is R/k (d15e).'
     discharged_by: o52_limiter_in_process_slots
   - rule: R8
     element: interacts(episode_reader->outcome_record)
@@ -15384,6 +15450,17 @@ gate:
       sibling''s loader) and by the judge''s and the page''s read_manifest, so the label reaches no judge prompt and no page; positive control:
       a well-formed label loads through all three.'
     discharged_by: pco11_every_loader_refuses_hostile_label
+  - rule: R2
+    element: world_record.identity
+    witness: 'Two writers reach world_records/<label>.yaml for one world: the sibling''s abort path (oracle unservable / budget, with the failing
+      call) and the launcher after that sibling exits without a record (did not finish). Exactly one must land per world, never both and never
+      a rewrite (S7, S8, O-11).'
+    discharged_by: o11_outcome_and_world_record_writers
+  - rule: R2
+    element: world_base_store.identity
+    witness: 'Each world''s sibling writes only its own live base answers (S20/S22: each world reads for itself, no family-wide cache); concurrent
+      leads of one sibling append under that sibling''s single writer (S19), and no write lands in another world''s store.'
+    discharged_by: d17c_live_base_answer_shared_per_family
   holes:
   - rule: R0
     element: tenant_adapter.access[collision-lookup]
@@ -15785,6 +15862,21 @@ handoff:
   - 'FOLLOW-UP (M11, human): a per-query load bound on oracle-side tenant queries beyond the adapters'' own caps.'
   - 'FOLLOW-UP (N21, auto): poisoned-input detection for a hostile denial pattern.'
   - 'FOLLOW-UP (N19 / N06 #219): a per-tenant rate limit (the limit is per episode in this PR).'
+  - 'R-09 (92-reconciliation.md): a rejected provider key at pre-flight (GPR-01: ModelHTTPError 401, not retried by the SDK) follows #187''s rule:
+    every world exhausts its attempts and the episode reads `unusable`, each world''s reason naming the auth failure. Unpinned. Carving it out
+    as a configuration refusal is a human call, not taken here.'
+  - 'SR-3 (10-brief, R-13): declaring a tenant-systems resource in .claude/spec-flow.json with the 8 adapters'' readers was named a §7 item and
+    never reached one. Profile bookkeeping, no obligation turns on it; recorded beside C13 so it is not silently dropped.'
+  - 'RULED, UNPINNED (R-15): N18 (auto) ''once the family is unusable, running siblings are stopped by the launcher acting on per-world records'':
+    the blocking spawn seam gives the stop no observable (b_p195 pins the records and the judge side only). The implementer meets it as a duty.'
+  - 'RULED, UNPINNED (R-15): s_p158''s run.main half: the abort path''s world record written by run.main is pinned on the registry/record half
+    and through _resume where a test drives run.main; the run.main-only half has no investigator seam.'
+  - 'RULED, UNPINNED (blind Part C, p019): a single enormous string value or deep nesting in a base answer is pinned at serving (neither crashes
+    nor hangs; the records stay consistent either way); the settled seed''s page-reader clause is not driven by the suite.'
+  - 'UNCOINED (s_p212, blind Part C): the rate limiter''s fail-closed raise on unreadable state has no coined exception class; the test pins only
+    that acquire raises. Coin one in _spec1224 if the class should be pinned.'
+  - 'UNCOINED (b_p193, S10): no reason word is coined for an archive failure after the siblings ran; the test pins that the judge cannot see the
+    failed world (no call, no findings) and that the outcome record keeps its word, not the failed world''s own record.'
   drops:
   - 'B-01 (20-demands background; design lines 1, 5, 7, 9, 28, 44, 46, 48, 62, 64, 72, 92, 100, 107, 122, 135, 145, 149, 153) — titles, headings
     and the obligation-format preface: document structure, no demand.'
@@ -15826,6 +15918,9 @@ handoff:
     path, not a core logic''): the unit, the unpriced-model fallback, persistence across crash and resume, and serving at exhaustion are the implementer''s;
     the bound clause is carried by d15a/d15b/d15c and S5. Its bound-now demand b_p208 stays a clause recording the drop.'
   - 'O-05, O-06 (60-residue.md) — dissolved by Amendment 2 change 2 (no family-wide live-base cache, no shared exploration): nothing to mint.'
+  - 'GB-27 experiments/judge-context-921 (R-14): its two committed old-shape manifests are refused as O15 intends and make_family.py keeps writing
+    a shape no reader accepts; the experiment is outside the product, so the confirmed non-obligation ''no old-manifest translation'' extends
+    to it. Its harness breaking is a known, accepted cost.'
   nullstub_passes:
   - 'test_1224_queue_page_renders_a_row_of_the_new_shape — reuse: (o43) the queue page already renders a row of the new shape without depending
     on its keys; green at base by design, never reaches the oracle module.'
@@ -15833,6 +15928,27 @@ handoff:
     beside an old one; green at base by design.'
   - 'test_1224_run_record_label_check_still_refuses_a_reserved_label — structure: (d19c) a survival guard over the run-record label rule M12 must
     leave standing; green at base by design.'
+  - 'test_input_manifest_has_no_branch_point_clock — structure: (s_p019) the loader and the registry already refuse a manifest without a usable
+    `as_of`; red at base only because the harness hands the registry coined keywords, green once those are accepted, before any oracle exists
+    (measured with a throwaway shim that accepted the new keywords and fields and nothing else).'
+  - 'test_input_served_systems_is_empty — structure: (b_p013) the launcher already refuses an empty gather grant before the question-writer (N05);
+    green once the coined keywords are accepted, before any oracle exists (shim-measured).'
+  - 'test_1224_empty_gather_grant_refuses_the_launch_before_the_question_writer — structure: (o20) the same existing empty-grant refusal as b_p013;
+    green once the coined keywords are accepted (shim-measured).'
+  - 'test_input_denied_or_undeclared_call_in_a_fact_world — parity: (s_p090) a denied or undeclared call is refused as on a real run today, and
+    no oracle exists to be consulted; green once the registry accepts its coined keywords (shim-measured). It binds the oracle only after an implementation
+    can consult one. SUPERSEDED by R-12 (phase F repair): the test now also serves one granted call in the same fact world through the same registry
+    and asserts it reaches the oracle and verifier doubles, is rowed passthrough and stored once, so it no longer goes green before an oracle
+    exists; kept as the record of 90-mechanical''s measurement.'
+  - 'test_input_call_params_cannot_be_stored — parity: (s_p089) params nested past the stored-call bound are refused as on a real run today; green
+    once the registry accepts its coined keywords (shim-measured). SUPERSEDED by R-12 (phase F repair): the test now also serves one granted call
+    in the same fact world through the same registry and asserts it reaches the oracle and verifier doubles, is rowed passthrough and stored once,
+    so it no longer goes green before an oracle exists; kept as the record of 90-mechanical''s measurement.'
+  - 'test_conc_31_reader_meets_a_half_written_shared_entry — structure: (s_p222) no sibling writes another world''s files; its positive control
+    is satisfied by the world ledger the registry already writes, so the test is green once the coined keywords are accepted (shim-measured).
+    The oracle-side state it should also see is pinned by the other S19/S20 tests.'
+  - 'test_served_system_adapter_cannot_be_loaded_at_call_time — parity: (s_p046) an adapter that cannot be loaded fails the original query as
+    on a real run and files a `fault` ledger row today; green once the registry accepts its coined keywords (shim-measured).'
   deviations:
   - 'SPINE — decomposition: ran as ONE chain despite size (16 obligations, 14 mechanisms). The oracle core (M3-M8, M11, M13; O2-O4, O9, O13, O14)
     is coupled by spanning invariants (pre-flight seeds the sibling store; one checker shared by host and oracle); the separable periphery (O12
@@ -15928,37 +16044,82 @@ handoff:
     249 stop at the v2 manifest load (FamilyError: served_systems unknown), 82 at cli.main''s missing roster= seam, 48 at other missing coined
     surfaces (author_family/_questioner_lessons_section served_systems=, cli.system_samples, cli.preflight_replay, preflight_role_models branching=,
     Step.PREFLIGHT, AgentRole.ORACLE, JudgeReply bucket/verdict_word, the estate.oracle/limiter modules), none at a probe request, and 89 on the
-    demanded behaviour being absent (the judge''s review.yaml gate, the code half, page/reader words, elastic reads past as_of, removals not yet made).
-    Because most tests stop at the v2 load, the code after it has never executed at base: expect a harness shakeout pass once manifest v2 loads
-    (several writers flag it).'
+    demanded behaviour being absent (the judge''s review.yaml gate, the code half, page/reader words, elastic reads past as_of, removals not yet
+    made). Because most tests stop at the v2 load, the code after it has never executed at base: expect a harness shakeout pass once manifest
+    v2 loads (several writers flag it).'
   - 'AUTHOR (phase E): spec-graph calls with 13 --targets (estate.oracle, estate.limiter, estate.registry, branch.cli, runtime.branch._family,
     learning.judge, run, branch.questioner, branch.ledger, branch.episode, visualize_episode, agent_role, query_tool) reports a FALSE 63/451 NO-CALL
     floor: each reaches its target through _spec1224''s call-time S.mod()/S.sym() or a same-file helper resolving the target by name (the #947/#1107
-    floor class), or is a census over the tree''s text (roles/removals). (65 before the probe fold: the 2 PR-1 tests in
-    test_1224_unservable_and_budget.py now drive the registry.)'
+    floor class), or is a census over the tree''s text (roles/removals). (65 before the probe fold: the 2 PR-1 tests in test_1224_unservable_and_budget.py
+    now drive the registry.)'
   - 'AUTHOR (phase E): spec-graph nullstub --target defender.learning.branch.estate.oracle --target defender.learning.branch.estate.limiter: 93
     discriminating or recorded (90 fail on their own assertion; 3 NULLSTUB-PASS recorded above), 378 NON-ASSERT honest floor: a stub of the two
-    new modules cannot reach the modify-existing seams the suite also pins (252 stop at the v2 manifest load, 82 at cli.main roster=, 4 at
-    pytest.raises over the stubbed OracleUnservable, the other 40 at the other modify-existing surfaces; none at a probe request after the fold).'
+    new modules cannot reach the modify-existing seams the suite also pins (252 stop at the v2 manifest load, 82 at cli.main roster=, 4 at pytest.raises
+    over the stubbed OracleUnservable, the other 40 at the other modify-existing surfaces; none at a probe request after the fold).'
   - 'AUTHOR (phase E, probe fold): PR-1..PR-3 are answered by GPR-01..GPR-03 (82-probe-requests.md, executed) and folded into the 8 tests that
     raised ProbeRequired; ProbeRequired is gone from the suite. PR-1: S.provider_outage(status) returns ModelHTTPError 503/429 or ModelAPIError
-    "Connection error." (fresh per request; S.raising() moves, Fault.raise_after, the preflight file''s _Raising), used by b_fu20[exception], b_p124,
-    b_p129, b_p125, s_p186, b_p187; no test asserts RunUnprocessable (the wrapper depends on the seam the oracle code uses). PR-2: _timing_box(cut_off=n)
-    raises subprocess.TimeoutExpired(docker exec argv, timeout) out of the transport, which run_parsed passes through unwrapped (b_p136; its
-    feedback-or-failed-attempt reading stays pinned neither way, retry_cap 3). PR-3: test_conc_18 ends lead l-001 by lead l-002''s wall-clock
-    BudgetKill while l-001''s uncaptured call is inside serve_one''s live base read (see b_p161''s amendment_note). b_p125 is recast as a 429 on
-    each sibling''s first oracle request followed by a valid submission (its assertions read a served answer, which an always-failing oracle
-    never yields); its budget and breaker half is pinned on a driven run by b_p124.'
+    "Connection error." (fresh per request; S.raising() moves, Fault.raise_after, the preflight file''s _Raising), used by b_fu20[exception],
+    b_p124, b_p129, b_p125, s_p186, b_p187; no test asserts RunUnprocessable (the wrapper depends on the seam the oracle code uses). PR-2: _timing_box(cut_off=n)
+    raises subprocess.TimeoutExpired(docker exec argv, timeout) out of the transport, which run_parsed passes through unwrapped (b_p136; its feedback-or-failed-attempt
+    reading stays pinned neither way, retry_cap 3). PR-3: test_conc_18 ends lead l-001 by lead l-002''s wall-clock BudgetKill while l-001''s uncaptured
+    call is inside serve_one''s live base read (see b_p161''s amendment_note). b_p125 is recast as a 429 on each sibling''s first oracle request
+    followed by a valid submission (its assertions read a served answer, which an always-failing oracle never yields); its budget and breaker
+    half is pinned on a driven run by b_p124.'
   - 'KNOWN CI HITS (waived by the human, W-01/W-02/W-03/W-07): test_797_retirement rejects the role value ''oracle_check'' (GD-05); the five role-count
     pins move with the two new roles (GD-04); lint_stage_prompt_frames rejects wrap_fresh at the new framing sites (GD-20); deleting staging/stagers/review
     orphans up to 361 spec-graph pointers in 8 graphs plus registry rows, spec-flow.json resource lists and module-naming fences (GB-31, GB-32,
     GB-26, GB-29). The hyphen-label rule is NOT waived (O-29, PCO-10).'
-  - 'EXISTING-TEST CONFLICT for the implementer: test_947_clock::test_a_search_that_names_its_own_end_is_never_rewritten requires a caller''s
-    end past T0 to reach the wire untouched, while d07c/O-36/b_p057/s_p058 require no elastic row dated after as_of to be returned; both hold
-    only if the bound filters rows after the read (or the human re-reads one of them).'
   - 'IMPLEMENTER NOTES (writers'' findings, no demand changed): cli._launch refuses a tenant with no corpus-engine part (elastic_problem), which
     contradicts O1 and blocks every fixture-tenant launch until removed; the budget tests force exhaustion with a budget of 1e-9, so a FunctionModel-backed
     oracle''s requests must cost more than zero in whatever unit the implementer picks (D1 leaves the unit open); the abort path''s world record
     must be written by run.main around its lifecycle call or by the serving path (the tests drive run.main''s lifecycle= seam); the box is assumed
     to start lazily, on first python use; S.launch''s episode is the one new directory under the configured episodes root (N17 may mint a fresh
     id per launch).'
+  - 'R-10=A (human, F-loop §7): O6 wins for elastic. Branching reads (a sibling''s lead, the oracle''s and the verifier''s run_query, pre-flight)
+    drop rows dated after as_of by a POST-READ filter, so the request reaching the cluster keeps the caller''s own end and test_947_clock::test_a_search_that_names_its_own_end_is_never_rewritten
+    stays green; non-FROM ES|QL is bounded too. d07c, O-36, b_p057 and s_p058 stand; M23''s ''no adapter logic'' is read as being about time-less
+    systems (H-06''s waiver).'
+  - 'PHASE-F REPAIR (R-02, 92-reconciliation.md): the structure now conserves Amendment 2. Dropped: family_base_cache and exploration_cache (no
+    family-wide cache, no shared exploration), the preflight_replay->served_cache write (S1: pre-flight seeds no served answers), tenant_adapter''s
+    collision-lookup cell (H-01, M12=A). Re-keyed: rate_limiter per process (S16/S18; new axis `process`). Added: world_base_store (M16=A, per-world
+    live base) and world_record (Amendment 2 change 1; two exclusive writers, the sibling''s abort path and the launcher after exit). Rebinds:
+    family_base_cache -> world_base_store, exploration_cache -> oracle_ledger (exploration is recorded oracle-side, per world), the collision
+    cell -> host_checks.domain.distinguished[3], the 8 check-3 demands lose their stale rate_limiter bind, and the 21 demands whose tests read
+    world records bind world_record.'
+  - 'PHASE-F REPAIR (R-01): the source fixture can now place a captured call after the branch point (S.Call(post_branch=True) / S.post_branch_call():
+    lead l-002, whose gather call/return pair lands in MAIN''s session after message 59, so _frontier.leads_at does not inherit it; l-001 stays
+    pre-branch by the no-dispatch rule, kept rather than rebuilding the seeded session). Every launch scenario whose world changes a captured
+    answer now changes a post-branch call; a world that changes a pre-branch call fails pre-flight (M01=A, b_p227). Sweep outside the pre-flight
+    file: the pre-flight halves of b_fu15, o01 and o02 (test_1224_oracle_context_and_box.py), whose pre-flight oracle forges onto the replayed
+    call and which pin what the pre-flight verifier is handed, now replay a post-branch call (S.Call(..., post_branch=True)); every other launch
+    outside that file submits its captured answer unchanged.'
+  - 'PHASE-F REPAIR (R-08): every model double is named fake-<role>/claude-sonnet-4-6 (S.double_model_name). _pricing.normalize_model keeps the
+    part after the last ''/'', so the double is priced and an oracle request accrues positive spend in any unit; no budget test leans on D1''s
+    dropped unpriced-model fallback. The fake-<role> head still marks the doubles'' traffic for the wire-log checks.'
+  - 'PHASE-F REPAIR (R-07) implementer note: test_oracle_python_scratch_files_and_the_investigators_box drives the production oracle start_box(env=...)
+    through a recording `docker` on PATH. It forbids any bind source under or over the sibling''s run dir or the tenant''s agent half and any
+    --volumes-from or reference to the investigator''s container; it admits a READ-ONLY bind of the defender checkout (the box image carries no
+    tree and the transport runs `python3 -m defender.runtime.bash_exec` inside it). A refused create may surface as OracleSandboxError or BoxFault.'
+  - 'PHASE-F REPAIR (b_p207) implementer note: the isolating control assumes oracle-budget exhaustion is checked against spend already made (a
+    world with zero spend makes at least one request under a tiny budget). An implementation that pre-charges an affordability estimate turns
+    that control red; D1 leaves the mechanism open.'
+  - 'PHASE-F REPAIR (F-01, 41 weak tests, F-05, F-12, U-03, U-04): every verifier-decided test now carries a passing-verifier control and pins
+    the verifier''s inputs (never a detection claim); each weak test''s assertions now back its docstring or the docstring is narrowed; no test
+    was renamed and no demand id changed. 85-repair-digest.md lists each finding''s disposition.'
+  - 'PHASE-F REPAIR census: 451 test functions, 472 collected items (b_p227 now three arms: pre-branch / neither / post-branch). RED AT BASE:
+    469 fail, 3 pass (o43, p253 and d19c, the first three nullstub_passes). spec-graph calls with the 13 --targets of AUTHOR (phase E): the same
+    FALSE 63 NO-CALL floor. spec-graph nullstub --target estate.oracle --target estate.limiter: 92 discriminating or recorded, 380 NON-ASSERT
+    honest floor (251 at the v2 manifest load, 83 at cli.main roster=, 5 at pytest.raises over the stubbed OracleUnservable, 41 at the other modify-existing
+    surfaces). Supersedes the counts in the AUTHOR (phase E) census lines.'
+  - 'RED FLAG (phase F repair, U-04): the foreign-world arm reads #240''s C1 (''z'' never becomes a row or queue key) onto the outcome-record
+    side: an accepted outcome naming an unservable world the manifest lacks is graded and ''z'' appears nowhere. A writer''s inference; the human
+    may confirm.'
+  - 'NOTE (phase F repair, R-05): the judge gate asserts ONE shared stamp word across an absent, an empty and a torn outcome record, outside {accepted,
+    unusable, refused, incomplete}. It reads 70''s M05 line (''an absent or torn record is a distinct "no record" state every reader reports as
+    missing'') with the gate as one of those readers (PCO-02''s absent-record default); the test docstring cites it.'
+  - 'RED FLAG (phase F repair, b_p239): N03''s recommendation (45) voids a world''s reply on an unknown system name; 70''s reading says only ''validated''.
+    The test pins that ''IDP'' is not recorded and every recorded name is canonical; whether the whole reply is voided is unpinned.'
+  - 'RED FLAG (phase F repair, o03, minor): the added ''family.md text reaches the family call'' assertion rests on HEAD''s seam design (the per-call
+    task composed into the user message), not on the seed''s words.'
+  - 'RED FLAG (phase F repair, b_p203, minor): the test depends on pre-flight replaying call 1 before call 2 (capture order and params order agree);
+    another replay order fails it for a non-behavioural reason.'

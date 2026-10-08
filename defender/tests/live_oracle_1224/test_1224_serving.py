@@ -27,6 +27,7 @@ import concurrent.futures
 import importlib
 import json
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -201,6 +202,57 @@ def _grade(ep: Path, judge: Any) -> Any:
     episode id in the environment's state can stand in for this one)."""
     return S.sym(S.JUDGE, "grade_episode")(ep, judge=judge, runs_base=ep.parent / "runs-base",
                                            state=state_over(ep.parent.parent / "judge-state"), draws=1)
+
+
+def _judged_label(agent_id: str) -> str | None:
+    """The world a judge call is about, from its agent id: `judge:<label>:<n>` -> `<label>`
+    (the family-scope call is `judge:family:<n>`; the spelling `grade_episode` uses today)."""
+    parts = str(agent_id).split(":")
+    return parts[1] if len(parts) >= 3 and parts[0] == "judge" else None
+
+
+class _CallRouted:
+    """An oracle double answering each request with the scripted double of the CALL the request
+    is about (R-01), told apart by a marker in that call's params. The oracle's context runs
+    stable to volatile (design: static instructions, family block, world block, then the
+    per-call turns), so the call a request is about is the one whose marker occurs LAST in the
+    request's inbound text — whether each call opens a fresh conversation or extends the
+    sibling's one. Markers must not contain one another.
+
+    Tier 2: it routes a script and decides nothing. Each route is a `S.ScriptedModel`, which
+    records what it was handed; a request carrying no marker is answered text-only and recorded
+    in `unrouted`, which the scenario asserts empty. Named after a priced model
+    (`S.double_model_name`, R-08) like every double."""
+
+    __name__ = "CallRouted"
+
+    def __init__(self, routes: Mapping[str, S.ScriptedModel]) -> None:
+        self.routes = dict(routes)
+        self.unrouted: list[str] = []
+        self._lock = threading.Lock()
+        self._model: Any = None
+
+    @property
+    def model(self) -> Any:
+        if self._model is None:
+            from pydantic_ai.models.function import FunctionModel
+            self._model = FunctionModel(self, model_name=S.double_model_name("oracle"))
+        return self._model
+
+    @property
+    def requests(self) -> int:
+        return sum(d.requests for d in self.routes.values()) + len(self.unrouted)
+
+    def __call__(self, messages: list[Any], info: Any) -> Any:
+        text = S._messages_text(messages)
+        last = {marker: text.rfind(marker) for marker in self.routes}
+        marker = max(last, key=last.__getitem__)
+        if last[marker] >= 0:
+            return self.routes[marker](messages, info)
+        with self._lock:
+            self.unrouted.append(text)
+        from pydantic_ai.messages import ModelResponse, TextPart
+        return ModelResponse(parts=[TextPart(content="(no scripted double for this request)")])
 
 
 def _run_alone(fn: Any, *, timeout: float) -> tuple[bool, Any, BaseException | None]:
@@ -482,13 +534,21 @@ def test_1224_oracle_row_carries_call_digest_answer_claim_verdict_and_attempts(t
     The world-ledger row for an `oracle` decision carries the call (system, verb, params), the
     base answer's digest, the served answer, the submitted claim, the verifier's verdict and the
     attempt count that produced it. M16=A. The claim's exact schema is the implementer's; only
-    the added-row entry the submission declared is checked.
+    the added-row entry the submission declared is checked. The digest's algorithm is the
+    implementer's too (R-11: the design says only "the base answer digest" and no reader
+    recomputes it), so `base_digest` is pinned by what a digest must do: present, equal for two
+    `oracle` rows over the same base answer (world b's and world c's answers to one captured
+    call), different for a row over a different base answer (world b's live-read bob call).
     """
     est = S.estate(tmp_path)
     ep = _episode(tmp_path)
+    est.answer("idp", "query", BOB, BOB_BASE)
     reason = "fact f1's TGT for alice at 15:22Z is present and plausible"
-    oracle = S.oracle(S.submit(UNDECLARED, S.EMPTY_CLAIM), *_forged_moves())
-    verifier = S.verifier(S.verdict(True, reason))
+    forged_bob = {"action": "tgt-issued", "event_id": "e-9002", "user": "bob"}
+    oracle = S.oracle(S.submit(UNDECLARED, S.EMPTY_CLAIM), *_forged_moves(),
+                      *_forged_moves("fg-2", row=forged_bob,
+                                     served={"rows": [*BOB_BASE["rows"], forged_bob]}))
+    verifier = S.verifier(S.verdict(True, reason), then=S.verdict(True))
     reg = _registry(ep, "b", est, oracle=oracle, verifier=verifier)
 
     S.call(reg, "idp", "query", est.ctx(tmp_path / "run"), **ALICE)
@@ -497,33 +557,72 @@ def test_1224_oracle_row_carries_call_digest_answer_claim_verdict_and_attempts(t
     row = rows[0]
     assert row["source"] == S.ORACLE_DECISION
     assert (row["system"], row["verb"], _asked(row)) == ("idp", "query", ALICE)
-    assert row["base_digest"] == S.digest(_text(BASE_ALICE))
     assert json.loads(row["payload_text"]) == SERVED_ALICE
     assert {"forged_id": "fg-1", "fact_id": "f1"} in row["claim"]["added"]
     assert reason in json.dumps(row["verifier_verdict"])
     assert row["attempts"] == 2, "one failed check-1 attempt, then the verified one"
+
+    # `base_digest` (R-11, no algorithm): present, equal over the same base answer, different
+    # over a different one.
+    digest = row.get("base_digest")
+    assert digest not in (None, "", [], {}), f"the oracle row carries no base digest: {row}"
+    forged_c = {"action": "password-reset", "event_id": "e-9101", "user": "bob"}
+    world_c = _registry(ep, "c", est, verifier=S.passing_verifier(), oracle=S.oracle(
+        *_forged_moves("fg-c1", "f2", row=forged_c, served={"rows": [ALICE_ROW, forged_c]})))
+    S.call(world_c, "idp", "query", est.ctx(tmp_path / "run-c"), **ALICE)
+    rows_c = _rows_for(ep, "c", "idp", "query", ALICE)
+    assert [r["source"] for r in rows_c] == [S.ORACLE_DECISION]
+    assert rows_c[0].get("base_digest") == digest, (
+        "two oracle rows over the same base answer carry different base digests")
+    S.call(reg, "idp", "query", est.ctx(tmp_path / "run"), **BOB)
+    rows_bob = _rows_for(ep, "b", "idp", "query", BOB)
+    assert [r["source"] for r in rows_bob] == [S.ORACLE_DECISION]
+    assert rows_bob[0].get("base_digest") not in (None, "", [], {})
+    assert rows_bob[0].get("base_digest") != digest, (
+        "an oracle row over a different base answer carries the same base digest")
     assert not oracle.overrun
 
 
 def test_1224_oracle_and_verifier_enter_through_injection_seams(tmp_path):
     """d00g_oracle_and_verifier_seams — scripted oracle and verifier doubles handed to
-    `WorldRegistry` and to the launcher are driven by the real serving path and by pre-flight.
+    `WorldRegistry` and to the launcher are driven by the real serving path and by pre-flight,
+    and what those paths produce is reached through the doubles.
 
     A test hands a scripted oracle and a scripted verifier to WorldRegistry and to the launcher's
-    main, and the real serving path (cache, base answer, host checks 1-5, retry loop, ledger)
-    and pre-flight drive those doubles without monkeypatching. F-01.
+    main, and the real serving path and pre-flight drive those doubles without monkeypatching.
+    F-01. Product observables reached through the seams, serving side: the double is offered
+    the coined tools; a submission failing host check 1 sends the turn back to it with the
+    failure named (the host checks and the retry loop drive it); its `forge` lands in the
+    world's frozen store; the verifier double is handed the served answer; the caller gets the
+    verified answer, rowed `oracle` with two attempts; a repeat is answered from the world's
+    cache with no further turn. Pre-flight side: the captured call and each fact world's
+    statement reach the oracle double, the call's base answer reaches the verifier double, and
+    the launch is `accepted`. The base-answer read itself is pinned by d00a / d00d, not here.
     """
     est = S.estate(tmp_path / "serving")
     ep = _episode(tmp_path / "serving")
-    oracle, verifier = S.oracle(*_forged_moves()), S.passing_verifier()
+    oracle = S.oracle(S.submit(UNDECLARED, S.EMPTY_CLAIM), *_forged_moves())
+    verifier = S.passing_verifier()
     reg = _registry(ep, "b", est, oracle=oracle, verifier=verifier)
-    assert S.call(reg, "idp", "query", est.ctx(tmp_path / "run"), **ALICE) == SERVED_ALICE
-    assert oracle.requests >= 2
-    assert verifier.requests >= 1
+    ctx = est.ctx(tmp_path / "run")
+    assert S.call(reg, "idp", "query", ctx, **ALICE) == SERVED_ALICE
     assert "submit" in oracle.tools[0]
     assert "forge" in oracle.tools[0]
     assert "verdict" in verifier.tools[0]
-    assert _decisions(ep, "b") == [S.ORACLE_DECISION]
+    assert len(oracle.seen) >= 2, "the failed submission was not followed by another request"
+    assert S.verdict_names(oracle.seen[1], "check 1"), (
+        "the host's check-1 failure did not reach the oracle double's next request")
+    assert [(r.get("forged_id"), r.get("row")) for r in S.oracle_rows(ep, "b", "forged")] == [
+        ("fg-1", FORGED)], "the double's forge did not land in the world's frozen store"
+    assert "e-9001" in verifier.all_seen(), "the verifier double was not handed the served answer"
+    rows = S.ledger_rows(ep, "b")
+    assert [r["source"] for r in rows] == [S.ORACLE_DECISION]
+    assert rows[0]["attempts"] == 2
+    turns, checks = oracle.requests, verifier.requests
+    assert S.call(reg, "idp", "query", ctx, **ALICE) == SERVED_ALICE
+    assert (oracle.requests, verifier.requests) == (turns, checks), (
+        "a repeat of a served call reached the doubles instead of the world's cache")
+    assert not oracle.overrun
 
     launch_est = S.estate(tmp_path / "launch")
     pre_oracle = S.oracle(then=S.submit(BASE_ALICE, S.EMPTY_CLAIM))
@@ -534,6 +633,14 @@ def test_1224_oracle_and_verifier_enter_through_injection_seams(tmp_path):
                       judge=S.FakeJudge(default=_judge_reply()))
     assert pre_oracle.requests >= 2, "pre-flight replayed the call through each fact world"
     assert pre_verifier.requests >= 2
+    seen = pre_oracle.all_seen()
+    assert "user:alice" in seen, "the captured call never reached the pre-flight oracle double"
+    for world in S.family_v2()["worlds"]:
+        for fact in world["facts"]:
+            assert fact["statement"] in seen, (
+                f"world {world['world_id']}'s replay never reached the oracle double")
+    assert "e-100" in pre_verifier.all_seen(), (
+        "the replayed call's base answer never reached the verifier double")
     outcome = S.read_outcome(launch.ep)
     assert outcome is not None
     assert outcome["outcome"] == "accepted"
@@ -1012,7 +1119,13 @@ def test_input_fact_lies_outside_every_window_the_investigator_asks_for(tmp_path
     passthrough: all served answers equal their base answers, the ledger decisions are
     passthrough, and the judge's input shows the fact never reached the investigator, which is a
     finding and not a withheld case (no mechanical bucket). M01=A (each call still gets a
-    verifier pass), O11.
+    verifier pass), O11, M19=A (the bucket is the judge model's).
+
+    Judge side, as asserted: world b's own world-scope draw (the judge double's call naming
+    world b) is handed the fact's statement and the `passthrough` decisions, and `judge.yaml`
+    records for world b exactly the bucket the judge model replied (`analyze-discipline`) —
+    graded from the reply, neither withheld (no bucket) nor given a host-computed one. What
+    the judge model concludes about an unreached fact is its judgement and is not pinned.
     """
     est = S.estate(tmp_path)
     ep = _episode(tmp_path, captured=[])
@@ -1038,11 +1151,16 @@ def test_input_fact_lies_outside_every_window_the_investigator_asks_for(tmp_path
     assert "2026-07-27T06:00:00Z" in verifier.seen[0]
 
     judged = S.judged_episode(tmp_path / "judged", ledgers={"b": S.ledger_rows(ep, "b")})
-    judge = S.FakeJudge(default=_judge_reply())
+    judge = S.FakeJudge(default=_judge_reply(bucket="analyze-discipline"))
     _grade(judged, judge)
-    world_b = [p for p in judge.prompts if statement in p]
-    assert world_b, "world b is graded (shown to the judge), not withheld"
-    assert any(S.PASSTHROUGH in p for p in world_b)
+    world_b = [p for p, agent in zip(judge.prompts, judge.agent_ids, strict=True)
+               if _judged_label(agent) == "b"]
+    assert world_b, "world b got no world-scope draw: it was withheld from the judge"
+    assert any(statement in p and S.PASSTHROUGH in p for p in world_b), (
+        "world b's draw was not handed its fact and its passthrough decisions")
+    row_b = J.world_rows(J.judge_record(judged)).get("b") or {}
+    assert row_b.get("bucket") == "analyze-discipline", (
+        f"judge.yaml does not record the judge model's bucket for world b: {row_b!r}")
 
 
 @pytest.mark.parametrize("body", ["html", "truncated", "empty", "null", "error-like",
@@ -1160,12 +1278,20 @@ def test_input_base_answer_is_larger_than_the_oracle_context(tmp_path):
 @pytest.mark.parametrize("shape", ["huge-string", "deep-nesting"])
 def test_p019_base_answer_has_a_single_enormous_string_value(tmp_path, shape):
     """s_p083 — a multi-megabyte string value or a very deeply nested base answer neither
-    crashes nor hangs the sibling: the call is served base-equal or fails oracle-side, and what
-    is recorded stays readable.
+    crashes nor hangs the call, and either admitted outcome leaves the records consistent.
 
-    The sibling neither crashes nor hangs: the call is served within bounds as a base-equal
-    answer or fails as an oracle-side failure that never reaches the investigator (O4), and
-    whatever is stored and recorded stays readable by the ledger and page readers.
+    Settled (P083): the sibling neither crashes nor hangs: the call is served within bounds as a
+    base-equal answer or fails as an oracle-side failure that never reaches the investigator
+    (O4), and whatever is stored and recorded stays readable by the ledger and page readers.
+
+    BOTH outcomes are admitted because the settled assertion itself admits both: whether the
+    oracle can take such an answer is a question of its handle and context (N10) and of its own
+    judgement, not a host rule, so no ruling picks one. Asserted: the call returns within the
+    bound; if it raises, it raises `OracleUnservable` only, with no ledger row and no stored
+    answer for the call; if it is served, the answer is the base byte for byte, rowed once
+    `passthrough` and stored once. Either way the world's file is still read by the ledger's own
+    reader (`Ledger.for_world` absorbs it) and raw off disk. The page-reader half is not driven
+    here: this registry-level scenario builds no archived episode for the page to render.
     """
     if shape == "huge-string":
         base: Any = {"rows": [{"blob": "A" * (3 * 1024 * 1024), "event_id": "e-1",
@@ -1187,12 +1313,14 @@ def test_p019_base_answer_has_a_single_enormous_string_value(tmp_path, shape):
     if raised is not None:
         assert isinstance(raised, S.unservable_cls()), f"crashed: {raised!r}"
         assert _rows_for(ep, "b", "idp", "query", BOB) == []
+        assert _stored(ep, "b", "idp", "query", BOB) == []
     else:
         assert _text(served) == _text(base)
         rows = read_jsonl_rows(S.ledger_path(ep, "b"))
         assert len(rows) == 1
         assert rows[0]["source"] == S.PASSTHROUGH
         assert json.loads(rows[0]["payload_text"]) == base
+        assert len(_stored(ep, "b", "idp", "query", BOB)) == 1
     # The ledger's own reader still reads the world's file.
     S.sym(S.LEDGER, "Ledger").for_world(S.mod("_episode_handle").Episode.create(ep), TOKEN_B)
 
@@ -1262,6 +1390,11 @@ def test_input_call_params_cannot_be_stored(tmp_path):
     row or oracle spend results, and the investigator sees the same refusal as in an ordinary
     run. The unstorable shape the code refuses today is params nested past the stored-call
     bound (`PARAMS_NESTING_LIMIT`).
+
+    Paired positive control (R-12), in the SAME registry: a granted, storable call driven
+    through the query tool afterwards does reach the oracle and verifier doubles and is rowed
+    and stored — so the zero counts above are the refusal's doing, not a registry that never
+    consults its oracle.
     """
     deep: dict = {"leaf": "x"}
     for _ in range(40):
@@ -1275,7 +1408,8 @@ def test_input_call_params_cannot_be_stored(tmp_path):
     real_dir, real_gather = S.drive_gather(tmp_path / "real", verbs=_real_registry(est),
                                            tenant=est.place(), gather_turns=turns())
     ep = _episode(tmp_path / "branch")
-    oracle, verifier = S.oracle(), S.verifier()
+    oracle = S.oracle(S.submit(BASE_ALICE, S.EMPTY_CLAIM))
+    verifier = S.passing_verifier()
     reg = _registry(ep, "b", est, oracle=oracle, verifier=verifier)
     branch_dir, branch_gather = S.drive_gather(tmp_path / "branch", verbs=reg,
                                                tenant=est.place(), gather_turns=turns())
@@ -1291,6 +1425,15 @@ def test_input_call_params_cannot_be_stored(tmp_path):
     assert _complete_rows(S.oracle_dir(ep, "b") / "answers.jsonl") == []
     assert est.calls() == []
 
+    # Positive control (R-12): the same registry, a granted call, the same query-tool path.
+    S.drive_gather(tmp_path / "control", verbs=reg, tenant=est.place(),
+                   gather_turns=[S.query_turn("idp", "query", ALICE), S.done_turn()])
+    assert oracle.requests >= 1, "a granted call never reached this registry's oracle"
+    assert verifier.requests >= 1
+    assert _decisions(ep, "b") == [S.PASSTHROUGH]
+    assert len(_stored(ep, "b", "idp", "query", ALICE)) == 1
+    assert not oracle.overrun
+
 
 def test_input_denied_or_undeclared_call_in_a_fact_world(tmp_path):
     """s_p090 — a call the grant denies, and one naming a system the tenant does not serve, are
@@ -1300,6 +1443,11 @@ def test_input_denied_or_undeclared_call_in_a_fact_world(tmp_path):
     A call the investigator's grant denies, or one naming a system the tenant does not serve, is
     refused by the grant decision before serving exactly as on a real run: no oracle turn, no
     cache entry, no oracle budget spent, and the refusal record is as on a real run (O6).
+
+    Paired positive control (R-12), in the SAME registry: a granted call driven through the
+    query tool afterwards does reach the oracle and verifier doubles and is rowed and stored —
+    so the zero counts above are the grant decision's doing, not a registry that never consults
+    its oracle.
     """
     est = S.estate(tmp_path)
 
@@ -1310,7 +1458,8 @@ def test_input_denied_or_undeclared_call_in_a_fact_world(tmp_path):
     real_dir, _ = S.drive_gather(tmp_path / "real", verbs=_real_registry(est),
                                  tenant=est.place(), gather_turns=turns())
     ep = _episode(tmp_path / "branch")
-    oracle, verifier = S.oracle(), S.verifier()
+    oracle = S.oracle(S.submit(BASE_ALICE, S.EMPTY_CLAIM))
+    verifier = S.passing_verifier()
     reg = _registry(ep, "b", est, oracle=oracle, verifier=verifier)
     branch_dir, _ = S.drive_gather(tmp_path / "branch", verbs=reg, tenant=est.place(),
                                    gather_turns=turns())
@@ -1322,8 +1471,18 @@ def test_input_denied_or_undeclared_call_in_a_fact_world(tmp_path):
     assert oracle.requests == 0
     assert verifier.requests == 0
     assert _complete_rows(S.oracle_dir(ep, "b") / "answers.jsonl") == []
-    assert all(row.get("source") == S.REFUSED for row in S.ledger_rows(ep, "b"))
+    refused_rows = S.ledger_rows(ep, "b")
+    assert all(row.get("source") == S.REFUSED for row in refused_rows)
     assert est.calls() == [], "nothing reached a tenant system"
+
+    # Positive control (R-12): the same registry, a granted call, the same query-tool path.
+    S.drive_gather(tmp_path / "control", verbs=reg, tenant=est.place(),
+                   gather_turns=[S.query_turn("idp", "query", ALICE), S.done_turn()])
+    assert oracle.requests >= 1, "a granted call never reached this registry's oracle"
+    assert verifier.requests >= 1
+    assert _decisions(ep, "b") == [S.REFUSED] * len(refused_rows) + [S.PASSTHROUGH]
+    assert len(_stored(ep, "b", "idp", "query", ALICE)) == 1
+    assert not oracle.overrun
 
 
 def test_oracle_conversation_hits_the_model_context_limit_inside_one_call(tmp_path):
@@ -1719,41 +1878,70 @@ def test_conc_31_reader_meets_a_half_written_shared_entry(tmp_path):
         assert not any(own(other, p) for p in changed)
 
 
-@pytest.mark.parametrize("pre_branch", ["changed", "unchanged"])
+#: R-01: the post-branch call's params marker. Neither it nor the pre-branch call's marker
+#: (`user:alice`) contains the other, so `_CallRouted` tells the two replayed calls apart.
+POST_Q = "tgt:alice"
+POST_BASE = {"rows": [{"action": "logon", "event_id": "e-300", "user": "alice"}]}
+
+
+@pytest.mark.parametrize("edited_call", ["pre-branch", "neither", "post-branch"])
 def test_1224_world_fact_covers_a_call_the_investigator_made_before_the_branch_point(
-        tmp_path, monkeypatch, pre_branch):
+        tmp_path, monkeypatch, edited_call):
     """b_p227 — a pre-branch call is fixed: a world whose oracle would change the answer to a
-    call the original run made before the branch point fails pre-flight; one that serves it
-    unchanged passes.
+    call the original run made before the branch point fails pre-flight, while the same claimed
+    edit to a call made after the branch point is accepted, and serving both unchanged passes.
 
     M01=A: pre-branch calls are fixed (served unchanged), so a world whose facts would change a
     pre-branch answer fails pre-flight (the prefix is fixed, a contradicting world is
-    unservable). Each fact world's submission here changes the captured answer by a declared,
-    claimed edit, so the only thing wrong with it is that the call was made before the branch.
+    unservable); a world may change only a post-branch call.
+
+    One launch shape for every arm (R-01): the source run holds one captured idp call on each
+    side of the branch point — `user:alice` under the inherited lead, `tgt:alice` under a lead
+    dispatched after the branch message (`S.post_branch_call`). The oracle double answers each
+    replayed call by its params marker (`_CallRouted`). `pre-branch`: the pre-branch answer is
+    changed by a declared, claimed edit, the post-branch one served unchanged — both fact worlds
+    fail pre-flight, each record naming the pre-branch call, and nothing launches. `post-branch`:
+    the SAME edit lands on the post-branch answer, the pre-branch one served unchanged — the
+    launch is `accepted` (the paired positive control). `neither`: both unchanged, `accepted`.
+    The arms' scripts differ only in which call carries the edit, so the call's side of the
+    branch point is the only thing that fails the first arm and passes the third.
     """
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     est = S.estate(tmp_path)
-    edited = {"rows": [dict(ALICE_ROW, action="tgt-issued")]}
-    if pre_branch == "changed":
-        submission = S.submit(edited, S.claim(changed=[
-            S.changed("alice", "action", "logon", "tgt-issued")]))
-    else:
-        submission = S.submit(BASE_ALICE, S.EMPTY_CLAIM)
-    oracle = S.oracle(then=submission)
-    launch = S.launch(tmp_path, est, calls=[S.Call("idp", "query", ALICE, BASE_ALICE)],
+    claim = S.claim(changed=[S.changed("alice", "action", "logon", "tgt-issued")])
+
+    def answering(base: dict, *, edit: bool) -> S.ScriptedModel:
+        if not edit:
+            return S.oracle(then=S.submit(base, S.EMPTY_CLAIM))
+        edited = {"rows": [dict(row, action="tgt-issued") for row in base["rows"]]}
+        return S.oracle(then=S.submit(edited, claim))
+
+    pre = answering(BASE_ALICE, edit=edited_call == "pre-branch")
+    post = answering(POST_BASE, edit=edited_call == "post-branch")
+    oracle = _CallRouted({"user:alice": pre, POST_Q: post})
+    launch = S.launch(tmp_path, est,
+                      calls=[S.Call("idp", "query", ALICE, BASE_ALICE),
+                             S.post_branch_call(q=POST_Q, payload=POST_BASE)],
                       oracle=oracle, verifier=S.passing_verifier(),
                       judge=S.FakeJudge(default=_judge_reply()))
 
     outcome = S.read_outcome(launch.ep)
     assert outcome is not None
-    assert oracle.requests >= 2
-    failed = {w["world"] for w in outcome["unservable_worlds"]}
-    if pre_branch == "changed":
-        assert failed == {"b", "c"}
+    assert not oracle.unrouted, "a replayed call reached the oracle carrying neither marker"
+    assert pre.requests >= 2, "pre-flight replayed the pre-branch call through each fact world"
+    failed = {w["world"]: w for w in outcome["unservable_worlds"]}
+    if edited_call == "pre-branch":
+        assert set(failed) == {"b", "c"}
         assert outcome["outcome"] == "unusable"
         assert launch.spawn.launches == []
+        for label, record in failed.items():
+            named = json.dumps(record.get("call"), sort_keys=True, default=str)
+            assert "user:alice" in named, f"world {label} failed on another call: {named}"
+            assert POST_Q not in named, f"world {label} failed on the post-branch call: {named}"
     else:
-        assert failed == set()
+        assert post.requests >= 2, (
+            "pre-flight replayed the post-branch call through each fact world")
+        assert failed == {}, f"a world failed pre-flight: {sorted(failed)}"
         assert outcome["outcome"] == "accepted"
         assert set(launch.spawn.worlds) >= {"b", "c"}
 
@@ -1769,7 +1957,11 @@ def test_1224_unservable_call_and_the_world_ledger(tmp_path, cause):
     the three causes the world ledger holds no row with `source: fault` for that call and no row
     carrying the oracle's error text; no served answer is stored and no served-answer record is
     written. The oracle-side exception is a model-provider outage on every attempt: the
-    `ModelHTTPError` 503 the model client raises once its own retries give up (GPR-01).
+    `ModelHTTPError` 503 the model client raises once its own retries give up (GPR-01). The
+    budget runs out on a tiny per-world budget (`1e-9`): every double is named after a priced
+    model (`S.double_model_name`, R-08), so the oracle's requests accrue positive spend in
+    whatever unit the implementer picks — no unit, and no unpriced-model fallback, is relied on
+    (D1).
     """
     est = S.estate(tmp_path)
     ep = _episode(tmp_path)
@@ -1782,6 +1974,7 @@ def test_1224_unservable_call_and_the_world_ledger(tmp_path, cause):
         oracle = S.oracle(then=S.raising(S.OUTAGE))
     else:
         oracle = S.oracle(*_forged_moves(), then=S.text_only())
+        # D1 / R-08: a priced double's request costs more than this in any unit; none is pinned.
         knobs["budget"] = 1e-9
     reg = _registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier(), **knobs)
     ctx = est.ctx(tmp_path / "run")

@@ -206,10 +206,14 @@ def _warnings_naming(caplog: Any, needle: str) -> list[str]:
 
 class _ScopedJudge:
     """The judge's model seam: a world-scope reply to a world draw, a family-scope reply to the
-    family call. Records every prompt and agent id (tier 2: scripted reply, recorded input)."""
+    family call. Records every prompt and agent id (tier 2: scripted reply, recorded input).
+    `by_world` scripts one world's reply apart from the rest, routed by the label its draw's
+    agent id names (`judge:<label>:<n>`, the spelling `grade_episode` uses today)."""
 
-    def __init__(self, *, world: str, family: str) -> None:
+    def __init__(self, *, world: str, family: str,
+                 by_world: Mapping[str, str] | None = None) -> None:
         self.world, self.family = world, family
+        self.by_world = dict(by_world or {})
         self.prompts: list[str] = []
         self.agent_ids: list[str] = []
 
@@ -217,7 +221,11 @@ class _ScopedJudge:
                  **kw: Any) -> str:
         self.prompts.append(prompt)
         self.agent_ids.append(agent_id)
-        return self.family if "family" in agent_id else self.world
+        if "family" in agent_id:
+            return self.family
+        parts = str(agent_id).split(":")
+        label = parts[1] if len(parts) >= 3 else None
+        return self.by_world.get(label, self.world)
 
 
 def _world_reply(systems: list[Any], *, bucket: str = "lead-quality") -> str:
@@ -542,16 +550,25 @@ def test_input_served_systems_repeats_or_misspells_a_system(tmp_path):
 
 
 def test_judge_reply_names_systems_the_tenant_does_not_serve(tmp_path):
-    """b_p239 — an unserved system the judge reply names is recorded verbatim, a misspelling is
-    never normalised, and a lesson is shown only where one of its systems is served.
+    """b_p239 — a well-formed system the tenant does not serve, named in a judge reply, is
+    recorded as written; a spelling the roster can never accept is neither normalised nor
+    recorded; and a lesson is shown only where one of its systems is served.
 
     N03 (auto): reply systems validated against the roster names, matched exactly. The judge
     reply for every world names idp (served) and cmdb (not served, the couldn't-look evidence):
     judge.yaml records both for the world and the queued world row carries both. Settled
     regardless: a system the facts touched that the tenant does not serve is a legitimate
     entry, and a lesson written from it is shown only to a tenant serving at least one of its
-    systems (O12): [idp, cmdb] is shown to the fixture tenant, [cmdb] alone is not. A reply
-    spelling IDP is never recorded as idp. The judge's prompt half is w08's (d12*).
+    systems (O12): [idp, cmdb] is shown to the fixture tenant, [cmdb] alone is not.
+
+    Misspelling half: in a second grade, world b's reply spells `IDP` (a name `is_system_name`
+    refuses) beside cmdb, while worlds a and c reply the well-formed [idp, cmdb] — the positive
+    control that this very grade records reply systems. For world b, judge.yaml holds neither
+    `idp` (never normalised) nor `IDP` (never recorded as written), and every name it does hold
+    is a well-formed system name. Whether an unacceptable name invalidates world b's whole
+    reply (45-dispositions' N03 recommendation) or only drops that name is not pinned: N03's
+    reading line says only that reply systems are validated. The judge's prompt half is w08's
+    (d12*).
     """
     judge = _ScopedJudge(world=_world_reply(["idp", "cmdb"]), family=_family_reply())
     paths, ep = _grade(tmp_path, judge)
@@ -576,14 +593,21 @@ def test_judge_reply_names_systems_the_tenant_does_not_serve(tmp_path):
 
     spelled = tmp_path / "spelled"
     spelled.mkdir()
-    judge2 = _ScopedJudge(world=_world_reply(["IDP", "cmdb"]), family=_family_reply())
+    judge2 = _ScopedJudge(world=_world_reply(["idp", "cmdb"]), family=_family_reply(),
+                          by_world={"b": _world_reply(["IDP", "cmdb"])})
     _paths2, ep2 = _grade(spelled, judge2)
-    recorded = [s for row in J.world_rows(J.judge_record(ep2)).values()
-                for s in (row.get("systems") or [])]
-    assert "idp" not in recorded, f"a reply spelling IDP was recorded normalised: {recorded}"
+    rows2 = J.world_rows(J.judge_record(ep2))
+    control = rows2.get("c") or {}
+    assert set(control.get("systems") or []) == {"idp", "cmdb"}, (
+        f"positive control: world c's well-formed reply systems were not recorded: {control!r}")
+    recorded_b = list((rows2.get("b") or {}).get("systems") or [])
+    assert "idp" not in recorded_b, (
+        f"world b's reply spelling IDP was recorded normalised to idp: {recorded_b}")
+    assert "IDP" not in recorded_b, (
+        f"world b's reply spelling IDP was recorded as written: {recorded_b}")
     is_system_name = S.sym(S.VERBS, "is_system_name")
-    assert all(is_system_name(s) for s in recorded), (
-        f"a spelling the roster can never accept was recorded verbatim: {recorded}")
+    assert all(isinstance(s, str) and is_system_name(s) for s in recorded_b), (
+        f"world b records a name that is not a well-formed system name: {recorded_b}")
 
 
 def test_1224_questioner_finding_rows_queued_before_the_change(tmp_path, caplog):
@@ -855,6 +879,15 @@ def test_input_more_matching_lessons_than_the_section_holds(tmp_path):
     the fixture tenant and ten do not. The section carries exactly twenty matching lessons and
     no non-matching one, and the section built from the lesson list in reverse order is the
     same text. Settled regardless: every chosen lesson matches at least one served system.
+
+    Where the numbers come from. The cap of 20 is today's `_QUESTIONER_LESSONS_CAP = 20`
+    (`learning/branch/questioner/__init__.py`, "the same 20-row convention as the judge's",
+    applied after selection so matching lessons are never crowded out), which N24 keeps ("the
+    existing 20-lesson cap", 45-dispositions N24). The order-independence is N24's
+    "deterministic": its recommendation orders the selection by the lessons themselves
+    (frontmatter date, then file name), never by the order the candidates arrive in, so the
+    same lessons in reverse order select the same section. WHICH twenty win — the date / name
+    tie-break — is the recommendation's parenthetical, not 70's reading line, and is not pinned.
     """
     corpus = tmp_path / "lessons-questioner"
     matching_systems = (["edr"], ["idp"], ["siem-x", "cmdb"])
@@ -1251,10 +1284,24 @@ def test_1224_question_writer_prompt_parts_share_no_source_and_bind_every_slot(t
     is not passed both as the system prompt and rendered into the user turn), every slot
     (served systems, samples per system, lessons by system) is bound with no brace slot token
     left, and no lab system name survives in the prompt's own scaffolding for a tenant serving
-    edr, idp and siem-x (selected lessons are quoted whole as framed text, N25). The system
-    prompt is the questioner's role.md (the model seam's wiring): none of its paragraphs is in
-    a user turn, and each family.md paragraph appears at most once in the family call.
-    O-03, M26=A.
+    edr, idp and siem-x (selected lessons are quoted whole as framed text, N25).
+
+    The demand: obligation O-03 (kind shape, minted at the §7 fold from 60-residue section D;
+    depends on N25 and M26=A) on the edge `interacts(author_family->questioner_model).payload`.
+    It guards O1 (the question-writer assumes no system name: only the tenant's served systems
+    reach its scaffolding), M26=A (every text the host did not author reaches the model framed)
+    and the dual-prompt escape the residue names (one template sent twice, once as the system
+    prompt and once in the user turn).
+
+    Asserted on what the `invoke` double RECEIVED (the user turns). The system prompt is the
+    questioner's role.md — the model seam's wiring (`learning/branch/seams.py` hands it as the
+    stage's `prompt_path`), which the double cannot see — so the shared-source half is pinned
+    from the user side: no role.md paragraph is in any user turn, and family.md's text IS
+    rendered into the family call (at least one of its paragraphs) and each of its paragraphs
+    at most once. Both files are read and must yield paragraphs to compare, so neither check
+    can pass vacuously. Every call: no `{slot}` token outside the untrusted frames, all three
+    served systems named, no lab system named; the family call frames every system's samples
+    and the selected lesson.
     """
     corpus = tmp_path / "lessons-questioner"
     lesson = _lesson(corpus, "idp", systems=["idp"], body="LESSON-IDP-O03")
@@ -1264,11 +1311,15 @@ def test_1224_question_writer_prompt_parts_share_no_source_and_bind_every_slot(t
     def paragraphs(rel: str) -> list[str]:
         text = S.source_text(rel)
         assert text, f"{rel} is missing"
-        return [p.strip() for p in re.split(r"\n\s*\n", text) if len(p.strip()) >= 60]
+        found = [p.strip() for p in re.split(r"\n\s*\n", text) if len(p.strip()) >= 60]
+        assert found, f"{rel} has no paragraph long enough to compare: the check would be vacuous"
+        return found
 
+    assert agent.prompts, "the question-writer's model was never called"
     family_call = agent.prompts[0]
+    role_paragraphs = paragraphs("learning/branch/questioner/role.md")
     for i, prompt in enumerate(agent.prompts):
-        for para in paragraphs("learning/branch/questioner/role.md"):
+        for para in role_paragraphs:
             assert para not in prompt, f"call {i} repeats the system prompt in its user turn"
         host = S.outside_untrusted_frames(prompt)
         slots = re.findall(r"\{[A-Za-z_][A-Za-z0-9_]*\}", host)
@@ -1276,7 +1327,10 @@ def test_1224_question_writer_prompt_parts_share_no_source_and_bind_every_slot(t
         assert set(_system_names_in(host, S.SYSTEMS)) == set(S.SYSTEMS), (
             f"call {i}'s served-systems slot is not bound")
         assert _system_names_in(host, S.LAB_SYSTEMS) == [], f"call {i} names a lab system"
-    for para in paragraphs("learning/branch/questioner/family.md"):
+    family_paragraphs = paragraphs("learning/branch/questioner/family.md")
+    assert any(para in family_call for para in family_paragraphs), (
+        "family.md's task is not rendered into the family call's user turn")
+    for para in family_paragraphs:
         assert family_call.count(para) <= 1, "family.md is rendered twice into the family call"
     for system in S.SYSTEMS:
         S.assert_wrapped_untrusted(family_call, f"SAMPLE-{system.upper()}-O03",

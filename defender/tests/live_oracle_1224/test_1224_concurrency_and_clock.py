@@ -1015,13 +1015,24 @@ def test_conc_09_conversation_restart_with_a_turn_in_flight(tmp_path):
 
 
 def test_conc_14_two_leads_both_exhaust_attempts_in_one_world(tmp_path):
-    """s_p158 — two leads exhausting their attempts in one world at the same time make that
-    world unservable once.
+    """s_p158 — two leads exhausting their attempts in one world at the same time each raise
+    `OracleUnservable` for their own call, leave no world-ledger row, take sequential turns, and
+    leave at most one record for that world.
 
     Settled: two leads that both exhaust their attempts in the same world count as one
-    unservable world toward the family's validity (O5 counts worlds, not calls). Both calls
-    reach `OracleUnservable` intact (the class, its reason, its own call), neither leaves a
-    world-ledger row (M16=A), and the world's turns stay sequential."""
+    unservable world toward the family's validity (O5 counts worlds, not calls). This test
+    drives the REGISTRY only (two calls released together), so no sibling abort path and no
+    record writer runs here; it pins the registry-level facts: both calls reach
+    `OracleUnservable` intact (the class and its own call), neither leaves a world-ledger row
+    (M16=A), the world's turns stay sequential (S11), and the registry leaves at most one world
+    record for b (none, if the record is the abort path's alone). The count itself is pinned
+    where records are written and read: on the sibling path by
+    `test_resume_after_the_sibling_was_already_unservable` (b_p171: the real `run.main
+    --resume` abort leaves exactly one record, `b.yaml`, naming "oracle unservable") and
+    `test_1224_sibling_aborts_with_an_unservable_reason` (d05d); at the judge by
+    `test_1224_family_with_one_unservable_sibling_is_graded_on_the_rest` (d06a) and
+    `test_1224_family_with_two_unservable_siblings_is_unusable_and_yields_no_findings` (d06b);
+    at the launcher by `test_sibling_becomes_unservable_after_preflight_accepted` (b_p192)."""
     est = S.estate(tmp_path)
     one, two = S.query_params("user:alice-1"), S.query_params("user:alice-2")
     ep = _episode(tmp_path, [("idp", "query", one, EMPTY), ("idp", "query", two, EMPTY)])

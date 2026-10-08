@@ -506,11 +506,16 @@ def test_input_facts_share_a_fact_id_across_worlds(tmp_path):
 
 
 def test_input_fact_statement_names_an_entity_not_in_entities():
-    """b_p007 — a statement naming an entity its list omits, and a list naming an entity its statement never mentions, both load as written.
+    """b_p007 — a statement naming an entity its list omits, and a list naming an entity its statement never mentions, both load as written: no statement-entity cross-check at load.
 
-    Reading (N01, auto): no statement-entity cross-check at load. Applied: both facts load
-    with statement and entities exactly as written. Settled regardless: nothing at load parses
-    the statement; O3 holds either way.
+    Reading (N01, auto): no statement-entity cross-check at load. Asserted: both facts load
+    with statement and entities exactly as written — nothing at load parses the statement
+    against its entity list (the seed's settled "nothing at load parses the statement").
+    Deliberately not pinned here: the seed's "O3 holds either way" (a served answer differs
+    from base only by what the facts imply). Whether a served answer honours a fact whose
+    statement and entity list disagree is the oracle's and verifier's judgement — a
+    non-obligation for this suite; O3's host half, checks 1-5, is pinned by the host-checks
+    tests, and none of it depends on a statement agreeing with its entities.
     """
     omits = S.fact("f1", "alice logged on to db-1 and then db-7 at 15:22Z", ("alice", "db-1"))
     unmentioned = S.fact("f2", "a password reset happened at 10:00Z", ("bob", "carol"))
@@ -519,29 +524,67 @@ def test_input_fact_statement_names_an_entity_not_in_entities():
 
 
 def test_p053_two_facts_in_one_world_contradict_each_other(tmp_path):
-    """b_p020 — contradictory facts load, and a world the oracle and verifier cannot serve consistently ends unservable with no oracle answer served.
+    """b_p020 — contradictory facts load and both reach the verifier, and the host honours the verifier's verdict on them: a failing verdict ends the call unservable with no oracle answer, while the same submission under a passing verdict is served.
 
     Reading (N01, auto): contradictory facts are left to the oracle and verifier, ending
-    unservable. Applied: the world loads; a verifier that fails every submission ends the call
-    in `OracleUnservable` and the world ledger records no `oracle` answer. Settled regardless:
-    no served answer contradicts itself or an earlier one (O2); a world that cannot be served
-    consistently is unservable rather than served with an inconsistency.
+    unservable. Settled regardless: no served answer contradicts itself or an earlier one (O2);
+    a world that cannot be served consistently is unservable rather than served with an
+    inconsistency.
+
+    Asserted (the F-01 pattern): the world loads with both facts. One scripted submission —
+    the base plus a forged 15:22Z logon for f1, which f2 contradicts — is put to the verifier,
+    and the host hands the verifier the call, the base answer, the served answer carrying the
+    frozen forged row, and BOTH fact statements, never the oracle's own text (a sentinel in its
+    python source). Under a verifier whose verdict fails it, the call raises `OracleUnservable`
+    and no `oracle` row is written; under a passing verifier the SAME submission is served and
+    rowed `oracle`. So the verdict, and no host rule about contradictory statements, is what
+    ends the world. Whether a verifier DETECTS the contradiction is model quality — a
+    non-obligation, deliberately not pinned (the verdicts here are scripted).
     """
     on = S.fact("f1", "alice logged on to db-1 at 15:22Z", ("alice", "db-1"))
     never = S.fact("f2", "alice never logged on to any host on 2026-07-28", ("alice",))
     doc = _doc(("b", [on, never]), ("c", [_F2]))
     assert [f["fact_id"] for f in _facts(_loads(doc), "b")] == ["f1", "f2"]
 
-    oracle = S.oracle(then=S.submit(_BASE_PAYLOAD, S.EMPTY_CLAIM))
-    reg, _est, ep, ctx = _serving(tmp_path, doc, "b", oracle=oracle,
-                                  verifier=S.failing_verifier("f1 and f2 cannot both hold"),
-                                  retry_cap=1)
+    sentinel = "ORACLEREASON-P053"
+    forged = {"user": "alice", "event_id": "e-90053", "action": "logon", "host": "db-1",
+              "ts": "2026-07-28T15:22:00Z"}
+    served = {"rows": [*_BASE_PAYLOAD["rows"], forged]}
+
+    def oracle() -> Any:
+        """The one submission both arms make: a forged f1 logon on top of the base answer."""
+        return S.oracle(S.python(f"# {sentinel}: f2 says never, f1 says 15:22Z; serve f1"),
+                        S.forge("fg-53", "f1", "idp", forged),
+                        S.submit(served, S.claim(added=[S.added("fg-53", "f1")])))
+
+    failing_oracle = oracle()
+    failing = S.failing_verifier("f1 and f2 cannot both hold")
+    reg, _est, ep, ctx = _serving(tmp_path / "failing", doc, "b", oracle=failing_oracle,
+                                  verifier=failing, retry_cap=1)
     with pytest.raises(S.unservable_cls()):
         S.call(reg, "idp", "query", ctx, q="user:alice")
-    seen = oracle.all_seen()
+    seen = failing_oracle.all_seen()
     assert on["statement"] in seen, "both facts reach the oracle"
     assert never["statement"] in seen, "both facts reach the oracle"
     assert not [r for r in S.ledger_rows(ep, "b") if r.get("source") == S.ORACLE_DECISION]
+    assert failing.requests >= 1, "the verifier was never consulted"
+    shown = failing.all_seen()
+    for what, needle in (("f1's statement", on["statement"]),
+                         ("f2's statement", never["statement"]),
+                         ("the call's params", "user:alice"),
+                         ("the base answer", "e-100"),
+                         ("the served answer and its frozen forged row", "e-90053")):
+        assert needle in shown, f"the verifier was not handed {what}"
+    assert sentinel not in shown, "the oracle's own text reached the verifier"
+
+    # The control: the SAME submission under a passing verdict is served — the verdict decides.
+    passing_oracle, passing = oracle(), S.passing_verifier()
+    reg, _est, ep, ctx = _serving(tmp_path / "passing", doc, "b", oracle=passing_oracle,
+                                  verifier=passing, retry_cap=1)
+    assert S.call(reg, "idp", "query", ctx, q="user:alice") == served
+    assert [r.get("source") for r in S.ledger_rows(ep, "b")] == [S.ORACLE_DECISION]
+    assert never["statement"] in passing.all_seen()
+    assert not passing_oracle.overrun
 
 
 # ======================================================================================
@@ -1028,9 +1071,17 @@ def test_p066_old_marker_in_one_world_only_or_inside_a_discriminator_that_is_not
 def test_p067_manifest_alias_bomb_or_pathological_nesting(tmp_path, capsys):
     """s_p030 — an alias bomb or a thousand-deep nesting is refused promptly with a named reason at the loader, the judge's reader and the page.
 
-    Settled: a manifest that expands exponentially through YAML aliases or nests a thousand
-    levels deep is refused promptly with a named reason at the loader, the judge's reader and
-    the page; it neither hangs nor exhausts memory.
+    Discharges settled premise s_p030 (P030, 45-dispositions, settled; the graph binds
+    `parse_family`, `grade_episode` and `render_episode`): a manifest that expands
+    exponentially through YAML aliases or nests a thousand levels deep is refused promptly with
+    a named reason at the loader, the judge's reader and the page; it neither hangs nor
+    exhausts memory. The readers it protects are O15's two manifest read paths — the runtime
+    loader (`load_family` over `parse_family`) and the judge's raw `read_manifest`
+    (`learning.judge.family.raw_manifest`), which the episode page reads through — so the
+    old-field refusal O15 demands of them is reached only if a hostile manifest cannot hang or
+    exhaust them first. Asserted per reader: a refusal of the reader's own class with a
+    non-empty reason within 10 s (the page: a non-zero exit with a stderr reason within 30 s);
+    the plain v2 manifest loading is the positive control.
     """
     FamilyError, JudgeRefused = _family_error(), _judge_refused()
     base = _text(_doc())

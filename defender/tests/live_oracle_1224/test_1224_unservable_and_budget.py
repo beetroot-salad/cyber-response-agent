@@ -72,7 +72,12 @@ UNDECLARED = {"user": "alice", "event_id": "e-999", "action": "logon", "host": "
 #: row with the base answer's own columns and value types and an id no real answer holds.
 FORGED_ROW = {"user": "alice", "event_id": "e-9001", "action": "logon", "host": "db-1",
               "ts": "2026-07-28T15:22:00Z"}
-#: D1: exhaustion is forced with a tiny budget; no unit is ever asserted.
+#: D1: exhaustion is forced with a tiny budget; no unit is ever asserted. Every model double
+#: here is named after a PRICED model (`S.double_model_name`, R-08; `_HangsFirst` inherits it
+#: from `S.ScriptedModel`, and this file builds no FunctionModel of its own), so one oracle or
+#: verifier request accrues positive spend whatever unit the implementer picks (USD from
+#: pricing, requests, tokens) and 1e-9 is below it. Nothing here leans on how an UNPRICED model
+#: is charged — D1 dropped that fallback from the spec.
 TINY_BUDGET = 1e-9
 SUBMIT = S.COINED["tool.submit"]
 
@@ -338,6 +343,28 @@ def _appended(model: S.ScriptedModel, i: int) -> str:
             break
         tail.append(msg)
     return _parts_text(list(reversed(tail)))
+
+
+def _tool_result(model: S.ScriptedModel, i: int, tool: str) -> str:
+    """What the host handed back in request `i` AS THE RESULT of the double's `tool` call: the
+    content of the trailing request's tool-return or retry-prompt parts naming `tool` — the
+    in-turn answer to that tool call, as distinct from any verdict or prompt the host appended
+    after a failed attempt. Empty when the host answered the call some other way."""
+    from pydantic_ai.messages import ModelResponse, RetryPromptPart, ToolReturnPart
+
+    tail: list[Any] = []
+    for msg in reversed(model.messages[i]):
+        if isinstance(msg, ModelResponse):
+            break
+        tail.insert(0, msg)
+    out: list[str] = []
+    for msg in tail:
+        for part in getattr(msg, "parts", []):
+            if isinstance(part, ToolReturnPart | RetryPromptPart) and part.tool_name == tool:
+                content = part.content
+                out.append(content if isinstance(content, str)
+                           else json.dumps(content, sort_keys=True, default=str))
+    return "\n".join(out)
 
 
 def _carries_submission(model: S.ScriptedModel, i: int, served: Any) -> bool:
@@ -649,7 +676,8 @@ def test_1224_oracle_verifier_and_exploration_cost_is_charged_to_the_oracle_budg
     explore 25 times, and a verifier that would, are each stopped by a tiny budget before
     their script is spent, the call ending unservable with reason `budget` (D1 (ii)); control:
     with the default budget the same exploration runs to completion and the call is served.
-    No unit is asserted (D1). F-15, M10.
+    No unit is asserted (D1); the doubles are priced, so the tiny budget exhausts in any unit
+    (R-08, `TINY_BUDGET`). F-15, M10.
     """
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
@@ -721,12 +749,21 @@ def test_1224_oracle_cost_is_absent_from_the_siblings_accounted_cost(tmp_path):
 
 
 def test_1224_exhausted_oracle_budget_makes_the_sibling_unservable(tmp_path):
-    """d15c_exhausted_budget_unservable — an exhausted oracle budget raises OracleUnservable with reason budget, and the investigator is shown nothing of it.
+    """d15c_exhausted_budget_unservable — an exhausted oracle budget raises OracleUnservable with reason budget, which escapes the investigation, and the investigator is shown nothing of it.
 
     When the oracle budget is exhausted mid-call, the call raises OracleUnservable and the
     sibling is unservable; the investigator sees no budget error: no row, no breaker charge,
     no further request to the lead's model. Control: the same call under the default budget is
     served and recorded. D1 (ii), S7 (budget exhaustion is reason `budget`).
+
+    Pinned on the driven run: the query tool re-raises OracleUnservable the way it re-raises
+    CONTROL_FLOW_EXCEPTIONS (M6; GA-11, GA-12 — GA-13 is today's plain-exception route, an
+    infra row plus a breaker charge), so the class itself, reason `budget`, naming the failing
+    call, escapes the investigation (`run.raised`; N13: the sibling aborts). "Shown nothing" is
+    pinned by request counts, not by searching the transcript for the exception's message (it
+    may be empty): the lead's model and MAIN were each asked exactly once, and both requests
+    precede the failing call, so neither model was handed anything about it. The tiny budget
+    exhausts in any unit because the doubles are priced (R-08, `TINY_BUDGET`).
     """
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
@@ -743,13 +780,16 @@ def test_1224_exhausted_oracle_budget_makes_the_sibling_unservable(tmp_path):
                             oracle=S.oracle(S.submit(ALICE_ROWS)),
                             verifier=S.passing_verifier(), budget=TINY_BUDGET)
     run = _drive(tmp_path / "w", est, reg2, [_q("user:alice"), S.done_turn()])
-    assert run.raised is None or run.raised.reason == S.REASON_BUDGET
+    assert isinstance(run.raised, U), (
+        f"OracleUnservable did not escape the investigation (raised: {run.raised!r})")
+    assert run.raised.reason == S.REASON_BUDGET, run.raised.reason
+    assert _names_call(run.raised.call, "idp", "query", "user:alice"), run.raised.call
     assert run.rows_for("idp", "user:alice") == []
     assert run.failures("idp") == 0
+    assert run.breaker.get("total_failures", 0) == 0, run.breaker
     assert run.gather.calls == 1, "the lead's model was shown the budget failure"
-    message = str(stopped.value)
-    if message:
-        assert message not in run.transcript
+    assert run.main.calls == 1, "the investigation went on after the budget failure"
+    assert "OracleUnservable" not in run.transcript
 
     ctl = S.world_registry(S.episode_v2(tmp_path / "c"), "b", est,
                            oracle=S.oracle(S.submit(ALICE_ROWS)),
@@ -868,8 +908,9 @@ def test_p018_base_answer_so_large_it_exhausts_the_oracle_budget_on_one_call(tmp
     A base answer whose handling costs more than the oracle's whole budget in one call makes
     that call unservable and, per O14, the sibling unservable; the cost is charged to the oracle
     budget only and never to the investigator's budget or breaker. The base answer is 3000
-    rows; the budget is tiny (D1: no unit asserted). Control for the investigator's counters:
-    an unbranched run of the same script.
+    rows; the budget is tiny (D1: no unit asserted; the doubles are priced, so it exhausts in
+    any unit — R-08, `TINY_BUDGET`). Control for the investigator's counters: an unbranched run
+    of the same script.
     """
     est = S.estate(tmp_path)
     huge = {"rows": [{"user": "alice", "event_id": f"e-{i:05d}", "action": "logon",
@@ -1129,8 +1170,17 @@ def test_verifier_provider_fails_after_the_host_checks_passed(tmp_path):
     not consume an oracle attempt by itself). Settled regardless: nothing is served until a
     verifier pass is obtained and nothing reaches the investigator. The fault is the
     `ModelHTTPError` 503 the verifier's client raises once its own retries give up (GPR-01), on
-    the verifier's first request. Second half: a verifier whose every request fails never
-    passes, so nothing is served or stored and the call ends unservable.
+    the verifier's first request.
+
+    Second half, the arithmetic M03=A fixes: a verifier whose every request fails never passes.
+    Per attempt: the oracle submits once (one request), the host checks pass, the verifier's
+    request fails, the verifier is re-asked ONCE inside the attempt, that request fails too, so
+    the verifier model call has failed after its re-ask and the attempt fails (M03=A: a model
+    call failing after the client's own bounded retries is one failed attempt). With
+    `retry_cap=2`: 2 attempts, so exactly 2 oracle submissions and 2 x 2 = 4 verifier requests,
+    then OracleUnservable; nothing is served or cached. A host that re-asked the verifier more
+    than once, not at all, or charged each verifier failure as an attempt of its own gives
+    other counts.
     """
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
@@ -1159,7 +1209,11 @@ def test_verifier_provider_fails_after_the_host_checks_passed(tmp_path):
     reg2 = S.world_registry(ep2, "b", est, oracle=o2, verifier=v2, retry_cap=2)
     with pytest.raises(S.unservable_cls()):
         S.call(reg2, "idp", "query", est.ctx(tmp_path / "inv-b"), q="user:alice")
-    assert v2.requests >= 1
+    assert o2.submissions() == 2, (
+        f"{o2.submissions()} oracle submissions under retry_cap=2: each attempt's verifier "
+        "failure (after its one re-ask) must fail exactly that attempt")
+    assert v2.requests == 4, (
+        f"{v2.requests} verifier requests: expected 2 attempts x (1 request + 1 re-ask)")
     assert _served_rows(ep2, "b", "user:alice") == []
     assert _cached(ep2, "b", "user:alice") == []
 
@@ -1279,37 +1333,60 @@ def test_exploration_query_errors_on_the_real_system(tmp_path):
 
 
 def test_python_runs_past_its_time_limit(tmp_path):
-    """b_p136 — the oracle's Python is bounded in time and output, the oracle is told, and nothing is served from the cut-off output.
+    """b_p136 — the oracle's Python is bounded in time and output; a run cut off by its time bound is in-turn feedback the oracle is told about, not a failed attempt, and the later submission is served.
 
-    The run is cut off by a time and output bound, the oracle is told, the attempt fails as an
-    oracle-side failure, and the time never counts toward any investigator time limit (O4);
-    nothing is served from the cut-off output. Observed here: the sandboxed box is handed a
-    finite time bound; a run that outlives it reaches the oracle as a cut-off it is told about;
-    a program printing 12 MB reaches the oracle bounded; the served answer is the later
-    submission's. The cut-off is what the box hands back when a run outlives its bound:
-    `subprocess.TimeoutExpired` out of the transport, unwrapped by `run_parsed` (GPR-02).
-    M18=A (sandboxed box). Whether the cut-off is in-turn feedback or a failed attempt (M03=A
-    against this demand's "the attempt fails") is pinned neither way: the retry cap leaves room
-    for both.
+    M03=A (the human's reading line, which wins over this demand's seed "the attempt fails"):
+    tool errors inside a turn — run_query, Python errors AND timeouts — are in-turn feedback,
+    not attempts. So under `retry_cap=1` a cut-off run spends no attempt: the same turn goes on
+    and its later submission is served, and the world-ledger `oracle` row stored for the call
+    records `attempts == 1`. A host that counted the cut-off as a failed attempt would end the
+    call unservable at the cap, and this test would fail on the call.
+
+    Observed here besides: the sandboxed box is handed a finite time bound; the cut-off reaches
+    the oracle as the `python` tool's OWN result inside the turn (a tool return or retry prompt
+    for that call, not a failure verdict appended after an attempt) worded as a time-out; a
+    program printing 12 MB reaches the oracle as a non-empty but bounded `python` result; nothing
+    is served from the cut-off output (the served answer is the later submission's, which
+    forges fact f1's row so the stored row is unambiguously an `oracle` decision). The cut-off
+    is what the box hands back when a run outlives its bound: `subprocess.TimeoutExpired` out
+    of the transport, unwrapped by `run_parsed` (GPR-02). M18=A (sandboxed box). Not observed
+    here: that the cut-off's time never counts toward an investigator time limit (the fake
+    transport raises at once; oracle-held time is pinned by b_p127 and the concurrency file's
+    clock tests).
     """
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     ep = S.episode_v2(tmp_path)
     box, runs = _timing_box(b"A" * (12 * 1024 * 1024), cut_off=1)
+    served = {"rows": [*ALICE_ROWS["rows"], FORGED_ROW]}
     o = S.oracle(S.python("import time\nwhile True:\n    time.sleep(1)\n"),
-                 S.python("while True:\n    print('A' * 4096)\n"), S.submit(ALICE_ROWS))
+                 S.python("while True:\n    print('A' * 4096)\n"),
+                 S.forge("fx-1", "f1", "idp", FORGED_ROW),
+                 S.submit(served, S.claim(added=[S.added("fx-1", "f1")])))
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=S.passing_verifier(), box=box,
-                           retry_cap=3)
+                           retry_cap=1)
 
-    assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == ALICE_ROWS
+    assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == served, (
+        "the cut-off run was charged as a failed attempt (M03=A: it is in-turn feedback)")
+    assert o.submissions() == 1
+    assert not o.overrun
+    stored = [r for r in S.ledger_rows(ep, "b") if r.get("source") == S.ORACLE_DECISION]
+    assert len(stored) == 1, S.ledger_rows(ep, "b")
+    assert stored[0].get("attempts") == 1, (
+        f"the cut-off counted as an attempt: {stored[0].get('attempts')!r}")
     assert len(runs) >= 2, "the python tool did not run both programs in the box"
     assert all(0 < r["timeout"] < float("inf") for r in runs), runs
-    assert not o.overrun
-    told = _appended(o, 1).lower()
-    assert told.strip(), "the oracle was told nothing about its cut-off run"
-    assert any(word in told for word in ("time", "deadline", "cut off")), (
-        f"the oracle was not told its run outlived its time bound: {told[:400]!r}")
-    assert len(_appended(o, 2)) < 2 * 1024 * 1024, "the program's output reached the oracle whole"
+    python_tool = S.COINED["tool.python"]
+    told = _tool_result(o, 1, python_tool).lower().replace("-", " ")
+    assert told.strip(), (
+        "the oracle was not told, as the python tool's own result in the turn, about its "
+        f"cut-off run (host text appended instead: {_appended(o, 1)[:400]!r})")
+    assert any(w in told for w in ("timed out", "timeout", "time limit", "time bound",
+                                   "deadline", "cut off")), (
+        f"the python result does not say the run outlived its time bound: {told[:400]!r}")
+    output = _tool_result(o, 2, python_tool)
+    assert output.strip(), "the 12 MB program's result never reached the oracle"
+    assert len(output) < 2 * 1024 * 1024, "the program's output reached the oracle whole"
 
 
 def test_many_oracle_turns_inside_one_investigator_call_and_the_investigators_budget(tmp_path):
@@ -1440,8 +1517,15 @@ def test_conc_15_calls_issued_after_the_sibling_is_unservable(tmp_path):
     that failed, and no oracle error text reaches the transcript or evidence (O4). After call
     bob fails, a new call (carol), bob again and an already cached call (alice) are issued:
     the oracle receives no further request, carol and bob raise the unservable signal, and the
-    world ledger and the answer cache hold nothing for either. Whether the cached call is still
-    answered is not pinned.
+    world ledger and the answer cache hold nothing for either.
+
+    REGISTRY-LEVEL on purpose: in production no call follows OracleUnservable in the same
+    sibling, because the class escapes the investigation and the sibling aborts (N13; d15c and
+    o45 pin the escape and the abort). The calls issued here after the failure are therefore
+    the registry's own guard, driven directly. Whether the already-cached call (alice) is still
+    answered after that point is INTENTIONALLY UNPINNED (author's dismissal of U-03's second
+    half): it is unreachable in production, so either answer is acceptable and the call is
+    issued under `contextlib.suppress` only to show it gets no oracle turn either.
     """
     est = S.estate(tmp_path)
     for params, rows in ((ALICE, ALICE_ROWS), (BOB, BOB_ROWS), (CAROL, CAROL_ROWS)):
@@ -1511,9 +1595,16 @@ def test_resume_after_the_sibling_was_already_unservable(tmp_path, monkeypatch):
     """b_p171 — an operator's resume of a sibling that exited unservable does not retry the failing call, and the world's validity and its single record are unchanged.
 
     N13: a resume does not retry and validity stays unservable. Settled regardless: the world
-    is never counted twice toward O5's two-or-more — after the resume, world b still has exactly
-    one record, naming the same reason and call, and no other world gained one. The operator
-    clears the dead run dir first, so the resumed sibling can start.
+    is never counted twice toward O5's two-or-more. What the sibling path can show of that, it
+    pins on the records the real abort path (`run.main --resume`) writes: after the first
+    abort the episode holds EXACTLY one world record, `b.yaml`, naming "oracle unservable" and
+    the failing call; after the resume it still holds exactly that one record, unchanged, and
+    no other world gained one. The judge counts O5 from one record per world, and that count is
+    pinned at the judge (`test_1224_family_with_one_unservable_sibling_is_graded_on_the_rest`,
+    d06a: one unservable record leaves the family usable;
+    `test_1224_family_with_two_unservable_siblings_is_unusable_and_yields_no_findings`, d06b)
+    and at the launcher (`test_sibling_becomes_unservable_after_preflight_accepted`, b_p192).
+    The operator clears the dead run dir first, so the resumed sibling can start.
     """
     est = S.estate(tmp_path)
     ep = _sibling_episode(tmp_path, monkeypatch, est)
@@ -1526,6 +1617,9 @@ def test_resume_after_the_sibling_was_already_unservable(tmp_path, monkeypatch):
     rec = first.record("b")
     assert rec is not None
     assert rec["reason"] == S.REASON_UNSERVABLE
+    assert _names_call(rec.get("call"), "idp", "query", "user:bob"), rec
+    after_abort = sorted(p.name for p in (ep / S.WORLD_RECORDS).iterdir())
+    assert after_abort == ["b.yaml"], f"the abort left {after_abort}, not one record for b"
     # The operator clears the dead run dir so the world's sibling can start again (a run dir
     # a run has been in is refused at materialisation, which would end the resume before
     # anything about the world is asked).
@@ -1628,8 +1722,16 @@ def test_oracle_budget_is_spent_by_pre_flight_before_the_sibling_starts(tmp_path
     separate from the investigator's (O14), and a sibling left with too little is unservable
     with that cause named. Pre-flight (the real launcher) runs under a tiny budget, so world b's
     calibration exhausts it and the outcome record names budget for b; a sibling registry over
-    that same world then spends no oracle request at all and raises with reason budget.
-    Control: a world with no pre-flight spend and the default budget is served.
+    that same world then spends no oracle or verifier request at all and raises with reason
+    budget.
+
+    The isolating control: a FRESH world (no pre-flight spend) under the SAME tiny budget does
+    make at least one oracle request before it goes unservable for budget — a world that has
+    spent nothing is not yet exhausted. So the pre-flighted world's zero requests come from the
+    spend pre-flight left on that world's one budget, not from the tiny budget alone. Where and
+    how that spend is kept is the implementer's (D1 / S19 leave persistence unpinned). The
+    tiny budget exhausts in any unit because the doubles are priced (R-08, `TINY_BUDGET`).
+    Control for the default budget: a fresh world is served.
     """
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
@@ -1645,13 +1747,26 @@ def test_oracle_budget_is_spent_by_pre_flight_before_the_sibling_starts(tmp_path
     assert S.REASON_BUDGET in str(b_entries[0].get("reason")), outcome
 
     est.answer("idp", "query", BOB, BOB_ROWS)
-    o2 = S.oracle(S.submit(BOB_ROWS))
-    reg = S.world_registry(launched.ep, "b", est, oracle=o2, verifier=S.passing_verifier(),
-                           budget=TINY_BUDGET)
-    with pytest.raises(S.unservable_cls()) as stopped:
+    U = S.unservable_cls()
+    o2, v2 = S.oracle(S.submit(BOB_ROWS)), S.passing_verifier()
+    reg = S.world_registry(launched.ep, "b", est, oracle=o2, verifier=v2, budget=TINY_BUDGET)
+    with pytest.raises(U) as stopped:
         S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:bob")
     assert stopped.value.reason == S.REASON_BUDGET
     assert o2.requests == 0, "the sibling was handed a fresh budget beside pre-flight's"
+    assert v2.requests == 0, "the sibling was handed a fresh budget beside pre-flight's"
+
+    # The isolating control: the same tiny budget on a world pre-flight never spent from lets
+    # the oracle make its first request, then stops the call for budget.
+    o4 = S.oracle(S.submit(BOB_ROWS))
+    fresh = S.world_registry(S.episode_v2(tmp_path / "fresh-tiny"), "b", est, oracle=o4,
+                             verifier=S.passing_verifier(), budget=TINY_BUDGET)
+    with pytest.raises(U) as fresh_stopped:
+        S.call(fresh, "idp", "query", est.ctx(tmp_path / "inv-t"), q="user:bob")
+    assert fresh_stopped.value.reason == S.REASON_BUDGET
+    assert o4.requests >= 1, (
+        "a world with nothing spent made no oracle request under the tiny budget: the "
+        "pre-flighted world's zero requests do not show carried pre-flight spend")
 
     monkeypatch.delenv(S.KNOB_BUDGET)
     o3 = S.oracle(S.submit(BOB_ROWS))

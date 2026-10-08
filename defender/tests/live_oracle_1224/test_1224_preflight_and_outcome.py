@@ -17,6 +17,15 @@ fact statement (O-01, M26: the fact text reaches the oracle, framed), so a marke
 statement picks the scripted double. The routing decides nothing: each world's double is
 scripted, and a request carrying no marker (or two) is answered text-only and recorded in
 `unrouted`, which every routed scenario asserts empty.
+
+M01=A (R-01): a call the source run made BEFORE the branch point is fixed — served unchanged —
+and a world whose facts would change one fails pre-flight. So every scenario in which a world's
+pre-flight oracle forges or changes an answer puts that change on a POST-branch call (`_POST`,
+captured under `S.POST_BRANCH_LEAD`, which `_frontier.leads_at` does not inherit), routes that
+world's forging double to it by the call's own marker (`_on_post`: only verb params reach the
+oracle, M26), and serves every pre-branch call unchanged. Every double here — `ScriptedModel`
+and `_Routed` alike — carries `S.double_model_name`, a PRICED model's name (R-08), so a tiny
+budget is exhausted whatever unit the implementer picks.
 """
 from __future__ import annotations
 
@@ -31,6 +40,7 @@ from typing import Any
 import pytest
 
 from defender import _yaml
+from defender.tests import _judge_921 as J
 from defender.tests import _state1135
 from defender.tests.live_oracle_1224 import _spec1224 as S
 
@@ -50,8 +60,9 @@ def episodes_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 # --------------------------------------------------------------------------------------
-# The fixture: three original calls sharing ONE recorded answer, so a passing oracle that
-# serves the base unchanged is the same scripted move for every call in every world.
+# The fixture: three pre-branch original calls (and, where a world changes an answer, one
+# post-branch call `_POST`) sharing ONE recorded answer, so a passing oracle that serves the
+# base unchanged is the same scripted move for every call in every world.
 # --------------------------------------------------------------------------------------
 
 _ROW = {"user": "alice", "event_id": "e-100", "action": "logon", "host": "web-1",
@@ -80,9 +91,25 @@ _FACT_D = S.fact("f3", "dave copied the payroll share to removable media", ("dav
 _MARK_B, _MARK_C, _MARK_D = "obtained a TGT", "reset carol", "payroll share"
 
 
+#: The source run's one POST-branch call (R-01): captured under `S.POST_BRANCH_LEAD`, whose
+#: `gather` pair lands after the branch message, so no sibling inherits its real answer and a
+#: world may change it (M01=A). It shares `_BASE`, so `_passing()` serves it unchanged with the
+#: same move as every pre-branch call; its `q` is the marker a world's double routes on.
+_POST = S.post_branch_call(payload=_BASE)
+_QP = _POST.params
+_MARK_POST = _QP["q"]
+
+
 def _calls() -> list[S.Call]:
+    """The three PRE-branch calls (lead `S.LEAD`, inherited): fixed under M01=A."""
     return [S.Call("idp", "query", _Q1, _BASE), S.Call("edr", "query", _Q2, _BASE),
             S.Call("siem-x", "lookup", _L3, _BASE)]
+
+
+def _calls_post() -> list[S.Call]:
+    """`_calls()` plus the post-branch call `_POST`: the source of every scenario in which a
+    world's pre-flight changes an answer (R-01)."""
+    return [*_calls(), _POST]
 
 
 def _family(*, facts_b: list[dict] | None = None, facts_c: list[dict] | None = None,
@@ -105,14 +132,21 @@ def _failing(*, fault: S.Fault = S.CLEAN) -> S.ScriptedModel:
     return S.oracle(then=S.text_only("no served answer fits this world"), fault=fault)
 
 
-def _forging_b() -> S.ScriptedModel:
-    """World b's pre-flight: forge f1's telemetry and serve it on the first (idp) call, then
-    serve the base unchanged."""
-    return S.oracle(
+def _on_post(double: Any, *, name: str, extra: Mapping[str, Any] | None = None) -> _Routed:
+    """One world's pre-flight double under M01=A: `double` answers the requests of the
+    post-branch call (routed by `_MARK_POST`; `extra` maps further post-branch call markers to
+    their doubles), and every pre-branch call is served unchanged (`_passing()`). No marker is
+    a substring of another, and none is carried by a pre-branch call's params."""
+    return _Routed({_MARK_POST: double, **(extra or {})}, default=_passing(), name=name)
+
+
+def _forging_b() -> _Routed:
+    """World b's pre-flight (R-01): forge f1's telemetry, record a fact and serve the forged row
+    on the POST-branch call only; every pre-branch call is served unchanged (M01=A)."""
+    return _on_post(S.oracle(
         S.forge("fg-b-1", "f1", "idp", _FORGED_B),
         S.record_fact("alice", "logon_host", "db-1"),
-        S.submit(_CHANGED_B, S.claim(added=[S.added("fg-b-1", "f1")])),
-        then=S.submit(_BASE, S.EMPTY_CLAIM))
+        S.submit(_CHANGED_B, S.claim(added=[S.added("fg-b-1", "f1")]))), name="oracle-b")
 
 
 class _Routed:
@@ -136,7 +170,7 @@ class _Routed:
     def model(self) -> Any:
         if self._model is None:
             from pydantic_ai.models.function import FunctionModel
-            self._model = FunctionModel(self, model_name=f"fake-{self.name}")
+            self._model = FunctionModel(self, model_name=S.double_model_name(self.name))
         return self._model
 
     def __call__(self, messages: list[Any], info: Any) -> Any:
@@ -154,7 +188,9 @@ class _Routed:
 
 class _Raising:
     """Answers every request by raising what the provider client raises once its own retries
-    give up (GPR-01): `S.provider_outage(status)`, a fresh instance per request, recorded."""
+    give up (GPR-01): `S.provider_outage(status)`, a fresh instance per request, recorded. Not a
+    model of its own: it is always wrapped by a `_Routed`, whose model carries the priced name
+    (R-08)."""
 
     __name__ = "Raising"
 
@@ -171,10 +207,18 @@ class _Raising:
 
 
 def _assert_routed(*routers: _Routed) -> None:
+    """No request went unrouted, in these routers or any router nested in them (a world's
+    `_on_post` double inside `_by_world`)."""
     for r in routers:
         assert not r.unrouted, (
             f"{r.name}: {len(r.unrouted)} request(s) carried no single world/call marker; "
             f"first: {r.unrouted[0][:600]!r}")
+        _assert_routed(*[d for d in (*r.routes.values(), r.default) if isinstance(d, _Routed)])
+
+
+def _routed_to(router: _Routed, marker: str) -> S.ScriptedModel:
+    """The scripted double `router` hands the requests carrying `marker`."""
+    return router.routes[marker]
 
 
 def _by_world(b: Any, c: Any, *, name: str = "oracle", **more: Any) -> _Routed:
@@ -391,6 +435,46 @@ def _snapshot(ep: Path) -> dict[str, str]:
             for p in sorted(Path(ep).rglob("*")) if p.is_file()}
 
 
+#: A well-formed v2 world-scope judge reply carrying one finding (the coined `bucket` and
+#: `systems` on #921's reply document), and a v2 family-scope reply (`verdict_word`).
+_WORLD_REPLY = S.as_reply_text(J.reply_doc(
+    findings=[J.finding_doc(bucket="lead-quality", topic="the lead was never revisited")],
+    bucket="lead-quality", systems=["idp"]))
+_FAMILY_REPLY = S.as_reply_text(J.reply_doc(findings=[], verdict_word="survived"))
+
+
+class _LaunchJudge(S.FakeJudge):
+    """The launch's judge seam: #921's recording `FakeJudge` answering a world-scope call with
+    `_WORLD_REPLY` and the family-scope call (`judge:family:<n>`) with `_FAMILY_REPLY`, so a
+    judge pass that reaches a world records that world's agent id and moves on. Scripted
+    content only: it decides nothing."""
+
+    def __call__(self, prompt: str, *, role: Any = None, agent_id: str = "judge",
+                 **kw: Any) -> str:
+        self.prompts.append(prompt)
+        self.agent_ids.append(agent_id)
+        self.kwargs.append({"role": role, "agent_id": agent_id, **kw})
+        return _FAMILY_REPLY if str(agent_id).startswith("judge:family") else _WORLD_REPLY
+
+
+def _judged(judge: S.FakeJudge, label: str) -> bool:
+    """Whether the judge model was called for world `label` (agent id `judge:<label>:<n>`)."""
+    return any(str(a).startswith(f"judge:{label}:") for a in judge.agent_ids)
+
+
+def _judge_rows(ep: Path) -> dict[str, dict]:
+    """`judge.yaml`'s per-world rows, read raw off disk (absent: no rows)."""
+    path = Path(ep) / "judge.yaml"
+    record = _yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else None
+    return {r["world"]: r for r in (record or {}).get("worlds") or []
+            if isinstance(r, dict) and "world" in r}
+
+
+def _judge_record(ep: Path) -> dict:
+    path = Path(ep) / "judge.yaml"
+    return (_yaml.safe_load(path.read_text(encoding="utf-8")) or {}) if path.is_file() else {}
+
+
 # ======================================================================================
 # d06 — pre-flight results and which siblings start
 # ======================================================================================
@@ -503,12 +587,22 @@ def test_1224_sibling_is_served_the_telemetry_preflight_verified(tmp_path):
     for that world (M15=B: committed with a verified answer), and a sibling call covering the
     same fact is served those same rows (S4: the frozen row is reused, no second row). Observed
     on the stores read raw off disk and on what the sibling's oracle RECEIVED.
+
+    M01=A (R-01): world b forges onto the source run's POST-branch call, the only kind of call a
+    world may change; every pre-branch call is served unchanged, and the world is accepted. The
+    sibling then issues that post-branch call.
     """
     est = S.estate(tmp_path)
-    oracle = _by_world(_forging_b(), _passing())
-    run = _launch(tmp_path, est, oracle=oracle, verifier=S.passing_verifier())
+    ob = _forging_b()
+    oracle = _by_world(ob, _passing())
+    run = _launch(tmp_path, est, calls=_calls_post(), oracle=oracle,
+                  verifier=S.passing_verifier())
 
     _assert_routed(oracle)
+    forging = _routed_to(ob, _MARK_POST)
+    assert forging.submissions() == 1, "b's forge was served on the post-branch call once"
+    assert not forging.overrun
+    assert ob.default.submissions() == len(_calls()), "b served each pre-branch call unchanged"
     assert S.read_outcome(run.ep)["outcome"] == "accepted"
     forged = S.oracle_rows(run.ep, "b", "forged")
     assert [(r["forged_id"], r["fact_id"], r["system"], r["row"]) for r in forged] == [
@@ -520,7 +614,7 @@ def test_1224_sibling_is_served_the_telemetry_preflight_verified(tmp_path):
 
     sib = S.oracle(S.submit(_CHANGED_B, S.claim(added=[S.added("fg-b-1", "f1")])))
     reg = S.world_registry(run.ep, "b", est, oracle=sib, verifier=S.passing_verifier())
-    S.call(reg, "idp", "query", est.ctx(tmp_path / "sibling-b"), **_Q1)
+    S.call(reg, "idp", "query", est.ctx(tmp_path / "sibling-b"), **_QP)
 
     assert sib.requests >= 1
     assert not sib.overrun
@@ -536,13 +630,16 @@ def test_1224_sibling_first_issue_of_an_original_call_is_a_fresh_oracle_turn(tmp
     INVERTED (S1, S3; Amendment 2 change 1). Before the sibling's first call the world's
     served-answer cache holds no entry and the world ledger no row; pre-flight writes neither.
     The sibling's first issue of an original call is a cache miss whether pre-flight served it
-    changed (call 1) or unchanged (call 2), and in a world with facts it spends at least one
+    changed (call 1: the post-branch call, the only kind a world may change under M01=A, R-01)
+    or unchanged (call 2: a pre-branch call), and in a world with facts it spends at least one
     oracle turn and one verifier pass, charged to that world's oracle budget (D1: a tiny budget
-    makes the first issue unservable with reason budget; no unit is asserted).
+    makes the first issue unservable with reason budget; no unit is asserted, and the doubles
+    carry a priced model's name, R-08).
     """
     est = S.estate(tmp_path)
     oracle = _by_world(_forging_b(), _passing())
-    run = _launch(tmp_path, est, oracle=oracle, verifier=S.passing_verifier())
+    run = _launch(tmp_path, est, calls=_calls_post(), oracle=oracle,
+                  verifier=S.passing_verifier())
 
     _assert_routed(oracle)
     assert S.oracle_rows(run.ep, "b", "forged"), "positive control: pre-flight wrote b's state"
@@ -554,7 +651,7 @@ def test_1224_sibling_first_issue_of_an_original_call_is_a_fresh_oracle_turn(tmp
     sv = S.passing_verifier()
     reg = S.world_registry(run.ep, "b", est, oracle=sib, verifier=sv)
     ctx = est.ctx(tmp_path / "sibling-b")
-    S.call(reg, "idp", "query", ctx, **_Q1)
+    S.call(reg, "idp", "query", ctx, **_QP)
     S.call(reg, "edr", "query", ctx, **_Q2)
 
     assert sib.submissions() == 2, "each first issue is a fresh turn (S3)"
@@ -562,7 +659,7 @@ def test_1224_sibling_first_issue_of_an_original_call_is_a_fresh_oracle_turn(tmp
     assert sv.answered >= 2, "each first issue gets a verifier pass (S3)"
     assert len(S.ledger_rows(run.ep, "b")) == 2, "one ledger row per investigator call"
     assert _keys(S.oracle_rows(run.ep, "b", "answers")) == {
-        _key("idp", "query", _Q1), _key("edr", "query", _Q2)}, "the channel: now cached"
+        _key("idp", "query", _QP), _key("edr", "query", _Q2)}, "the channel: now cached"
 
     starved = S.world_registry(run.ep, "c", est, oracle=_passing(),
                                verifier=S.passing_verifier(), budget=1e-9)
@@ -806,13 +903,19 @@ def test_question_writer_model_returns_a_family_that_does_not_parse(tmp_path, re
 
 def test_provider_key_for_the_oracle_is_absent_only_where_the_oracle_runs(tmp_path,
                                                                          episodes_root):
-    """b_p041 — a sibling that exits at start without the oracle's provider key is recorded `did not finish` in its own world record, never as oracle unservable.
+    """b_p041 — a sibling that exits 2 at start without leaving a record, as one its role preflight refuses for a missing oracle provider key would, is recorded `did not finish` in its own world record, never as oracle unservable; the outcome stays accepted.
 
     M04=A: a world counts toward O5 if unservable OR did not finish (missing key at start), and
     its recorded reason distinguishes the two; Amendment 2: the reason lives in the world's own
-    record (S7, S8), written by the launcher when the sibling exits without one. M25=A: the
-    missing key is a configuration failure, never an oracle failure charged to the world.
-    Pre-flight ran in the launcher (which has the key) and accepted.
+    record (S7, S8), written by the launcher when the sibling exits without one. Pre-flight ran
+    in the launcher and accepted.
+
+    Driven here: the spawn seam's sibling for world b exits 2 at start and writes no record —
+    the exit `run.preflight_role_models` gives an unusable provider key. NOT driven: a real
+    missing key. The sibling is the spawn seam's double, so no role preflight runs in it and no
+    seam of this launch reaches one; that the oracle roles' keys are checked only where
+    branching runs, as a configuration failure never charged to a world, is M25=A's own pin
+    (`test_1224_roles_and_removals.py`).
     """
     est = S.estate(tmp_path)
     spawn = _Spawn(root=episodes_root, exits={"b": 2})
@@ -895,34 +998,102 @@ def test_oracle_provider_rate_limits_every_sibling_at_once(tmp_path):
     only when that gives up. Settled regardless: per sibling the investigator sees no oracle
     error and no budget or breaker charge (O4). The rate limit is the `ModelHTTPError` 429 the
     client raises once its own retries could not absorb it (GPR-01): it meets every sibling's
-    first oracle request at once, and the next request answers. Each sibling's call is served
-    the submission, and neither its answer nor its world ledger carries the provider error.
-    The budget and breaker half is pinned on a driven run by b_p124 (the same failure shape);
-    this test drives the serving seam per sibling.
+    first oracle request, and the next request answers. Each sibling's call is served the
+    submission, and neither its evidence, its transcript nor its world ledger carries the
+    provider error.
+
+    Each world's sibling is driven as a WHOLE investigation (one gather lead: the original idp
+    call, then an idp lookup the tenant answers with a real `TransportFault`, then done) and
+    compared with an UNBRANCHED run of the same script over the same estate: its budget.json
+    counters (`tool_calls`, `subagent_spawns`) and its circuit_breaker.json failure counts equal
+    the unbranched run's — the 429 adds no tool call and no breaker failure. Positive control
+    for both channels: the unbranched run counts its own calls and its real infra failure
+    (exit 2, GA-40), so both files are written and read.
     """
     est = S.estate(tmp_path)
+    est.answer("idp", "query", _Q1, _BASE)
+    down = {"entity": "svc-down"}
+    # GA-40: a real TransportFault is an adapter exit 2, an infra failure the breaker counts.
+    est.fail("idp", "lookup", down, fault="TransportFault", detail="idp: connection refused")
     ep = S.episode_v2(tmp_path, doc=_family(), base_rows=[S.captured("idp", "query", _Q1, _BASE)])
-    doubles: dict[str, S.ScriptedModel] = {}
-    answers = {}
+
+    def turns() -> list[Any]:
+        return [S.query_turn("idp", "query", _Q1), S.query_turn("idp", "lookup", down),
+                S.done_turn()]
+
+    rt = est.run_tenant()
+    plain_registry = S.sym(S.VERBS, "ModuleVerbRegistry")(est.roster(), rt.grants.gather,
+                                                          grant_home=rt.table_pointer)
+    plain_dir, _plain_gather = S.drive_gather(tmp_path / "unbranched", verbs=plain_registry,
+                                              tenant=est.place(), gather_turns=turns())
+    plain_budget = _run_json(plain_dir, "budget.json")
+    plain_breaker = _breaker_counts(plain_dir)
+    assert plain_budget.get("tool_calls"), "positive control: the run's calls are counted"
+    assert plain_breaker["total"], "positive control: the real infra failure is on the breaker"
+
     for w in ("b", "c"):
         # GPR-01: the 429 the provider client raises once its retries could not absorb it.
-        doubles[w] = S.oracle(S.raising(S.RATE_LIMITED), S.submit(_BASE, S.EMPTY_CLAIM))
-        reg = S.world_registry(ep, w, est, oracle=doubles[w], verifier=S.passing_verifier(),
+        oracle = S.oracle(S.raising(S.RATE_LIMITED), S.submit(_BASE, S.EMPTY_CLAIM))
+        reg = S.world_registry(ep, w, est, oracle=oracle, verifier=S.passing_verifier(),
                                retry_cap=2)
-        answers[w] = S.call(reg, "idp", "query", est.ctx(tmp_path / f"sibling-{w}"), **_Q1)
-    for w, answer in answers.items():
-        assert doubles[w].requests == 2, f"{w}: the rate-limited request was not followed"
-        assert not doubles[w].overrun
-        assert answer == _BASE, f"{w}: the submission was not served"
-        text = _text(answer).lower()
-        for leak in ("rate", "modelhttperror", "provider answered"):
-            assert leak not in text, (w, leak)
-        rows = S.ledger_rows(ep, w)
+        run_dir, gather = S.drive_gather(tmp_path / f"sibling-{w}", verbs=reg,
+                                         tenant=est.place(), gather_turns=turns())
+
+        assert oracle.requests == 2, f"{w}: the rate-limited request was not followed"
+        assert not oracle.overrun, f"{w}: the oracle was asked for more than the idp query"
+        served = [r for r in _lead_rows(run_dir)
+                  if (r["system"], r["verb"]) == ("idp", "query")]
+        assert len(served) == 1, served
+        assert served[0]["exit_code"] == 0, f"{w}: the investigator's call did not succeed"
+        assert "e-100" in (run_dir / served[0]["payload_path"]).read_text(encoding="utf-8"), (
+            f"{w}: the submission was not served")
+        seen = "\n".join(gather.seen)
+        evidence = _evidence_text(run_dir)
+        for leak in ("ModelHTTPError", f"provider answered {S.RATE_LIMITED}"):
+            assert leak not in seen, (w, "transcript", leak)
+            assert leak not in evidence, (w, "evidence", leak)
+        budget = _run_json(run_dir, "budget.json")
+        for key in ("tool_calls", "subagent_spawns"):
+            assert budget.get(key) == plain_budget.get(key), (w, key, budget, plain_budget)
+        assert _breaker_counts(run_dir) == plain_breaker, (
+            f"{w}: the rate limit reached the circuit breaker")
+        rows = [r for r in S.ledger_rows(ep, w) if r["verb"] == "query"]
         assert rows, f"{w}: the served call left no world-ledger row"
         assert all(r["source"] not in (S.FAULT, S.REAL_ERROR) for r in rows)
-        ledger_text = json.dumps(rows, default=str)
+        ledger_text = json.dumps(S.ledger_rows(ep, w), default=str)
         assert "ModelHTTPError" not in ledger_text
         assert "provider answered" not in ledger_text
+
+
+def _run_json(run_dir: Path, name: str) -> dict:
+    """A run-state JSON file at the run root, read raw off disk (absent: `{}`)."""
+    path = Path(run_dir) / name
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+
+def _breaker_counts(run_dir: Path) -> dict:
+    """circuit_breaker.json's failure counts: per system, and the run total."""
+    doc = _run_json(run_dir, "circuit_breaker.json")
+    return {"systems": {s: (rec or {}).get("failures", 0)
+                        for s, rec in (doc.get("systems") or {}).items()},
+            "total": doc.get("total_failures", 0)}
+
+
+def _lead_rows(run_dir: Path) -> list[dict]:
+    """The evidence rows of the scenario's own gather lead (`S.LEAD`); lead zero's correlation
+    row (`l-000`), which every driven run writes, is not the scenario's."""
+    return [r for r in S.read_jsonl(Path(run_dir) / "executed_queries.jsonl")
+            if r.get("lead_id") == S.LEAD]
+
+
+def _evidence_text(run_dir: Path) -> str:
+    """The lead's evidence rows and every payload sidecar under `gather_raw/`, as text."""
+    parts = [json.dumps(r, sort_keys=True) for r in _lead_rows(run_dir)]
+    raw = Path(run_dir) / "gather_raw"
+    if raw.is_dir():
+        parts += [p.read_text(encoding="utf-8", errors="replace")
+                  for p in sorted(raw.rglob("*")) if p.is_file()]
+    return "\n".join(parts)
 
 
 def test_1224_world_dir_holds_both_oracle_state_and_the_archived_run(tmp_path, episodes_root):
@@ -931,7 +1102,8 @@ def test_1224_world_dir_holds_both_oracle_state_and_the_archived_run(tmp_path, e
     N14: oracle-side state lives in its own per-world directory outside the archive tree and the
     run dir, written by one process at a time (S19). Settled regardless: archiving does not
     remove or overwrite oracle state, and the judge's reader of worlds/<label>/ does not take
-    oracle-side files for the run's own artifacts (none is there).
+    oracle-side files for the run's own artifacts (none is there). World b's pre-flight forges
+    onto the source run's post-branch call (M01=A, R-01), so its frozen store is non-empty.
     """
     est = S.estate(tmp_path)
 
@@ -939,8 +1111,11 @@ def test_1224_world_dir_holds_both_oracle_state_and_the_archived_run(tmp_path, e
         return _snapshot(S.oracle_dir(episodes_root / S.EPISODE_ID, "b"))
 
     spawn = _Spawn(root=episodes_root, probe=at_first_start, plant=True)
-    run = _launch(tmp_path, est, oracle=_by_world(_forging_b(), _passing()),
+    oracle = _by_world(_forging_b(), _passing())
+    run = _launch(tmp_path, est, calls=_calls_post(), oracle=oracle,
                   verifier=S.passing_verifier(), spawn=spawn)
+
+    _assert_routed(oracle)
 
     oracle_b = S.oracle_dir(run.ep, "b").resolve()
     for forbidden in (run.ep / "worlds", S.mod(S.CLI).sibling_runs_base(run.ep)):
@@ -1315,7 +1490,8 @@ def test_launcher_dies_with_some_worlds_preflighted_and_others_not(tmp_path, epi
     N17: a launch never reuses an episode directory; a relaunch is a new episode id; a dead
     launch's state is ignored. Settled regardless: no sibling started before a complete outcome
     record exists, frozen rows are not duplicated or contradicted, and a half-written outcome
-    record is not read as accepted (the dead one has none).
+    record is not read as accepted (the dead one has none). The relaunch's world b forges onto
+    the source run's post-branch call (M01=A, R-01).
     """
     est = S.estate(tmp_path)
     dead = _dead_launch(episodes_root, forged=[
@@ -1323,9 +1499,11 @@ def test_launcher_dies_with_some_worlds_preflighted_and_others_not(tmp_path, epi
     before_dead = _snapshot(dead)
     before = {p.name for p in episodes_root.iterdir()}
     spawn = _Spawn(root=episodes_root)
-    _launch(tmp_path, est, oracle=_by_world(_forging_b(), _passing()),
+    oracle = _by_world(_forging_b(), _passing())
+    _launch(tmp_path, est, calls=_calls_post(), oracle=oracle,
             verifier=S.passing_verifier(), spawn=spawn)
 
+    _assert_routed(oracle)
     fresh = _new_episode(episodes_root, before)
     assert _snapshot(dead) == before_dead, "the dead launch's state is left as it was"
     assert S.read_outcome(dead) is None
@@ -1344,7 +1522,8 @@ def test_launcher_dies_after_the_accepted_record_before_any_sibling_starts(tmp_p
     """b_p189 — a second launch after the first died between its `accepted` record and its first sibling is a new episode, and the first launch's frozen stores are not overwritten.
 
     N17: a relaunch is a new episode id; a dead launch's state is ignored. Settled regardless:
-    the first launch's frozen stores are not overwritten.
+    the first launch's frozen stores are not overwritten. The relaunch's world b forges onto
+    the source run's post-branch call (M01=A, R-01).
     """
     est = S.estate(tmp_path)
     dead = _dead_launch(episodes_root, outcome="accepted", forged=[
@@ -1352,9 +1531,11 @@ def test_launcher_dies_after_the_accepted_record_before_any_sibling_starts(tmp_p
     before_dead = _snapshot(dead)
     before = {p.name for p in episodes_root.iterdir()}
     spawn = _Spawn(root=episodes_root)
-    _launch(tmp_path, est, oracle=_by_world(_forging_b(), _passing()),
+    oracle = _by_world(_forging_b(), _passing())
+    _launch(tmp_path, est, calls=_calls_post(), oracle=oracle,
             verifier=S.passing_verifier(), spawn=spawn)
 
+    _assert_routed(oracle)
     fresh = _new_episode(episodes_root, before)
     assert _snapshot(dead) == before_dead
     assert S.read_outcome(fresh)["outcome"] == "accepted"
@@ -1438,52 +1619,117 @@ def test_sibling_becomes_unservable_after_preflight_accepted(tmp_path, episodes_
 
 
 def test_1224_archive_fails_after_the_siblings_ran(tmp_path, episodes_root):
-    """b_p193 — when archiving fails after the siblings ran, the outcome record keeps pre-flight's word, one of accepted, unusable or refused, and gains no fourth word.
+    """b_p193 — when archiving one world fails after the siblings ran, that world is one the judge cannot see (never graded) while the archived worlds are graded, and the outcome record keeps pre-flight's word, one of accepted, unusable or refused, with no fourth word.
 
-    Settled (S7, S10): an archive failure after the siblings ran counts as a world the judge
-    cannot see; it is not a rewrite of the outcome record. Settled regardless: the outcome words
-    O13 names are accepted, unusable and refused. Here no sibling left a tree, so nothing can be
-    archived.
+    Settled (S7, S10; implied #193 from M04=A): an archive failure after the siblings ran counts
+    as a world the judge cannot see; it is not a rewrite of the outcome record. Settled
+    regardless: the outcome words O13 names are accepted, unusable and refused.
+
+    The failure is a REAL input to the real archive: every sibling leaves a finished tree
+    (`plant`), and once world c's sibling has run its tree holds a symlink where its report
+    belongs — a link wearing an artifact's name, which the archive refuses rather than copies
+    (`ArchiveRefused`). Worlds archive in sorted order, so a and b are archived before c fails.
+    Observed on what the launch's judge double was CALLED for and on the records read raw off
+    disk. Positive control: the judge does grade archived world b. Not pinned: which world
+    record or reason word the launcher writes for c (none is coined for an archive failure).
     """
     est = S.estate(tmp_path)
-    spawn = _Spawn(root=episodes_root)
-    run = _launch(tmp_path, est, oracle=_passing(), verifier=S.passing_verifier(), spawn=spawn)
+    outside = tmp_path / "outside-the-tree.md"
+    outside.write_text("MARKER-1224-NOT-THE-REPORT\n", encoding="utf-8")
+    linked: list[Path] = []
 
+    def link_cs_report(world: str) -> None:
+        if world != "c":
+            return
+        tree = S.mod(S.CLI).sibling_runs_base(spawn.eps[-1]) / f"{S.EPISODE_ID}-{world}"
+        report = tree / "report.md"
+        report.unlink()
+        report.symlink_to(outside)
+        linked.append(report)
+
+    spawn = _Spawn(root=episodes_root, plant=True, hook=link_cs_report)
+    judge = _LaunchJudge()
+    run = _launch(tmp_path, est, oracle=_passing(), verifier=S.passing_verifier(), spawn=spawn,
+                  judge=judge)
+
+    assert linked, "the fault was never planted: world c's sibling did not run"
     text = _outcome_text(run.ep)
     assert text is not None
-    assert all(t == text for t in spawn.outcome_at_start)
+    assert spawn.outcome_at_start
+    assert all(t == text for t in spawn.outcome_at_start), "the archive failure rewrote it"
     record = _yaml.safe_load(text)
     assert record["outcome"] in S.OUTCOMES
     assert record["outcome"] == "accepted"
     assert S.RETIRED_OUTCOME not in text
     assert not (run.ep / "review.yaml").exists()
 
+    assert _judged(judge, "b"), (
+        f"positive control: the judge never graded archived world b ({judge.agent_ids})")
+    assert not _judged(judge, "c"), "the world whose archive failed was graded (S10)"
+    assert not _judge_rows(run.ep).get("c", {}).get("findings"), "world c carries findings"
+    archived = _snapshot(run.ep / "worlds") if (run.ep / "worlds").is_dir() else {}
+    assert not [n for n, body in archived.items() if "MARKER-1224-NOT-THE-REPORT" in body], (
+        "the link's target was archived as world c's report")
 
-def test_second_unservable_world_found_while_other_siblings_still_run(tmp_path, episodes_root):
-    """b_p195 — when two siblings record themselves unservable while a third still runs, both records stand as the siblings wrote them and the outcome record is not rewritten.
+
+def test_second_unservable_world_found_while_other_siblings_still_run(tmp_path, monkeypatch,
+                                                                     episodes_root):
+    """b_p195 — when two siblings record themselves unservable while a third still runs, both records stand as the siblings wrote them, the outcome record is not rewritten, and the unusable family yields no findings: the launch's judge buys no model call.
 
     N18: once the family is unusable, running siblings are stopped by the launcher acting on
     per-world records (not cross-sibling sharing). Settled regardless: an unusable family yields
-    no findings (O5), and an unservable sibling's partial records never become a finding. The
-    stop itself has no observable on the blocking spawn seam (red flag); pinned here: the
-    per-world records the launcher acts on are the siblings' own, never overwritten.
+    no findings (O5), and an unservable sibling's partial records never become a finding.
+
+    Pinned: the per-world records the launcher acts on are the siblings' own, never
+    overwritten; the outcome record keeps pre-flight's word; and the launch's judge pass counts
+    the two siblings' own records (S9), so it makes no model call, records the family
+    `unusable` and carries no finding — though every sibling left a finished tree to grade
+    (`plant`). Positive control: the same source launched with only ONE sibling unservable is
+    graded (the launch's judge seam is called for a healthy world). NOT pinned: N18's stop of a
+    still-running sibling — the spawn seam blocks until each sibling returns, so a stop has no
+    observable here (ruled unpinned; recorded in handoff.deferred).
     """
     est = S.estate(tmp_path)
+    _base, src = S.source_run(tmp_path, est, calls=_calls())
     call = {"system": "idp", "verb": "lookup", "params": {"entity": "x"}}
 
     def slow_a(world: str) -> None:
         if world == "a":
             time.sleep(1.0)
 
-    spawn = _Spawn(root=episodes_root, exits={"b": 1, "c": 1}, hook=slow_a, writes={
-        "b": {"reason": S.REASON_UNSERVABLE, "call": call},
-        "c": {"reason": S.REASON_UNSERVABLE, "call": call}})
-    run = _launch(tmp_path, est, oracle=_passing(), verifier=S.passing_verifier(), spawn=spawn)
+    spawn = _Spawn(root=episodes_root, plant=True, exits={"b": 1, "c": 1}, hook=slow_a,
+                   writes={"b": {"reason": S.REASON_UNSERVABLE, "call": call},
+                           "c": {"reason": S.REASON_UNSERVABLE, "call": call}})
+    judge = _LaunchJudge()
+    run = _main(src, est, oracle=_passing(), verifier=S.passing_verifier(), spawn=spawn,
+                judge=judge)
 
     for w in ("b", "c"):
-        assert S.read_world_record(run.ep, w)["reason"] == S.REASON_UNSERVABLE
+        record = S.read_world_record(run.ep, w)
+        assert record["reason"] == S.REASON_UNSERVABLE
+        assert record["call"] == call, f"{w}'s own record was overwritten"
+    assert spawn.outcome_at_start
     assert all(t == _outcome_text(run.ep) for t in spawn.outcome_at_start)
     assert S.read_outcome(run.ep)["outcome"] == "accepted", "pre-flight's word, never amended"
+    assert judge.calls == 0, f"an unusable family bought judge model calls: {judge.agent_ids}"
+    assert _judge_record(run.ep).get("validity") == "unusable", (
+        "two unservable siblings did not make the family unusable at the judge (S9)")
+    assert all(not r.get("findings") for r in _judge_rows(run.ep).values()), (
+        "an unusable family carries findings")
+
+    # Positive control: one unservable sibling — the family is graded on the rest. Its own
+    # episodes root, so the launch takes the derived episode id the planted trees are named for.
+    control_root = tmp_path / "control-episodes"
+    monkeypatch.setenv(EPISODES_ENV, str(control_root))
+    graded = _LaunchJudge()
+    one = _Spawn(root=control_root, plant=True, exits={"b": 1},
+                 writes={"b": {"reason": S.REASON_UNSERVABLE, "call": call}})
+    control = _main(src, est, oracle=_passing(), verifier=S.passing_verifier(), spawn=one,
+                    judge=graded)
+    assert S.read_outcome(control.ep)["outcome"] == "accepted"
+    assert _judged(graded, "c"), (
+        f"positive control: a family with one unservable sibling was not graded "
+        f"({graded.agent_ids})")
 
 
 def test_1224_second_world_fails_preflight_while_others_remain(tmp_path, monkeypatch):
@@ -1558,24 +1804,35 @@ def test_1224_preflight_world_fails_after_some_calls_verified(tmp_path, monkeypa
 
     N14: a world that fails pre-flight keeps its stores for diagnosis and serves no one; S1: no
     served answer is cached. Settled regardless: that world is unservable, runs no sibling, and
-    its forged rows are served to no investigator. World c forges and verifies on call 1, then
-    exhausts its attempts on call 2.
+    its forged rows are served to no investigator.
+
+    R-01 (M01=A), decided: the verified call that commits the forged row is a POST-branch call.
+    A forge onto a pre-branch call is a change M01=A fails, so it could never be "verified";
+    the test's point — stores committed on a verified answer survive a later failure — needs a
+    call a world may change. World c serves the pre-branch calls unchanged, forges and verifies
+    on post-branch call 1 (`_POST`), then exhausts its attempts on post-branch call 2. Both
+    post-branch calls sit in lead `S.POST_BRANCH_LEAD`, call 1 captured first and sorting first
+    by its params, so any replay in capture or key order verifies call 1 before call 2 fails.
     """
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     est = S.estate(tmp_path)
-    oc = S.oracle(S.forge("fg-c-1", "f2", "idp", _FORGED_C),
-                  S.submit(_CHANGED_C, S.claim(added=[S.added("fg-c-1", "f2")])),
-                  then=S.text_only("nothing fits"))
+    late = S.post_branch_call(q="user:alice host:db-2", payload=_BASE)
+    forging_c = S.oracle(S.forge("fg-c-1", "f2", "idp", _FORGED_C),
+                         S.submit(_CHANGED_C, S.claim(added=[S.added("fg-c-1", "f2")])))
+    oc = _on_post(forging_c, name="oracle-c", extra={late.params["q"]: _failing()})
     oracle = _by_world(_passing(), oc)
-    run = _launch(tmp_path, est, oracle=oracle, verifier=S.passing_verifier())
+    run = _launch(tmp_path, est, calls=[*_calls_post(), late], oracle=oracle,
+                  verifier=S.passing_verifier())
 
     _assert_routed(oracle)
+    assert forging_c.submissions() == 1, "c's forge was verified on post-branch call 1"
+    assert not forging_c.overrun
     outcome = S.read_outcome(run.ep)
     assert outcome["outcome"] == "accepted"
     (failed,) = outcome["unservable_worlds"]
     assert failed["world"] == "c"
-    assert (failed["call"]["system"], failed["call"]["verb"]) == ("edr", "query")
-    assert failed["call"]["params"] == _Q2
+    assert _key(failed["call"]["system"], failed["call"]["verb"], failed["call"]["params"]) == (
+        _key(late.system, late.verb, late.params))
     assert [r["forged_id"] for r in S.oracle_rows(run.ep, "c", "forged")] == ["fg-c-1"]
     assert S.oracle_rows(run.ep, "c", "answers") == []
     assert "c" not in run.spawn.worlds
@@ -1590,12 +1847,15 @@ def test_oracle_model_knob_changes_between_preflight_and_sibling(tmp_path, monke
     Settled: a change of the oracle's model knob between pre-flight and the sibling does not
     alter what is frozen: the forged telemetry and recorded facts pre-flight forged stay binding
     on the sibling, and the sibling is served telemetry no different from what pre-flight
-    verified for the same fact (O2, O13).
+    verified for the same fact (O2, O13). Pre-flight forges onto the source run's post-branch
+    call (M01=A, R-01), which the sibling then issues.
     """
     monkeypatch.setenv(S.KNOB_MODEL, "oracle-model-one")
     est = S.estate(tmp_path)
-    run = _launch(tmp_path, est, oracle=_by_world(_forging_b(), _passing()),
+    oracle = _by_world(_forging_b(), _passing())
+    run = _launch(tmp_path, est, calls=_calls_post(), oracle=oracle,
                   verifier=S.passing_verifier())
+    _assert_routed(oracle)
     frozen = _snapshot(S.oracle_dir(run.ep, "b"))
     assert "forged.jsonl" in frozen
     assert "facts.jsonl" in frozen
@@ -1603,7 +1863,7 @@ def test_oracle_model_knob_changes_between_preflight_and_sibling(tmp_path, monke
     monkeypatch.setenv(S.KNOB_MODEL, "oracle-model-two")
     sib = S.oracle(S.submit(_CHANGED_B, S.claim(added=[S.added("fg-b-1", "f1")])))
     reg = S.world_registry(run.ep, "b", est, oracle=sib, verifier=S.passing_verifier())
-    S.call(reg, "idp", "query", est.ctx(tmp_path / "sibling-b"), **_Q1)
+    S.call(reg, "idp", "query", est.ctx(tmp_path / "sibling-b"), **_QP)
 
     assert "e-1224-f1" in sib.seen[0], "pre-flight's frozen row is binding on the sibling"
     after = _snapshot(S.oracle_dir(run.ep, "b"))
@@ -1616,11 +1876,13 @@ def test_conc_36_second_launch_while_the_first_is_running(tmp_path, episodes_roo
 
     N17: a concurrent second launch gets its own directory. Settled regardless: the two
     launches never corrupt each other's stores, rate-limit state or outcome record (S16: there
-    is no cross-process limiter state to share).
+    is no cross-process limiter state to share). In both launches world b forges onto the
+    source run's post-branch call (M01=A, R-01).
     """
     est = S.estate(tmp_path)
-    _base, src = S.source_run(tmp_path, est, calls=_calls())
+    _base, src = S.source_run(tmp_path, est, calls=_calls_post())
     second: dict[str, Any] = {}
+    routers: list[_Routed] = []
 
     def relaunch_once(world: str) -> None:
         if world == "a" and not second:
@@ -1628,16 +1890,17 @@ def test_conc_36_second_launch_while_the_first_is_running(tmp_path, episodes_roo
             second["first_before"] = _records(first_ep)
             before = {p.name for p in episodes_root.iterdir()}
             spawn2 = _Spawn(root=episodes_root)
-            _main(src, est, oracle=_by_world(_forging_b(), _passing()),
-                  verifier=S.passing_verifier(), spawn=spawn2)
+            routers.append(_by_world(_forging_b(), _passing()))
+            _main(src, est, oracle=routers[-1], verifier=S.passing_verifier(), spawn=spawn2)
             second["ep"] = _new_episode(episodes_root, before)
             second["spawn"] = spawn2
             second["first_after"] = _records(first_ep)
 
     spawn = _Spawn(root=episodes_root, hook=relaunch_once)
-    first = _main(src, est, oracle=_by_world(_forging_b(), _passing()),
-                  verifier=S.passing_verifier(), spawn=spawn)
+    routers.append(_by_world(_forging_b(), _passing()))
+    first = _main(src, est, oracle=routers[0], verifier=S.passing_verifier(), spawn=spawn)
 
+    _assert_routed(*routers)
     assert "ep" in second, "the second launch ran while the first's siblings were starting"
     ep2 = second["ep"]
     assert ep2.resolve() != first.ep.resolve()
@@ -1688,29 +1951,40 @@ def test_siblings_ask_in_a_different_order_from_the_preflight_replay(tmp_path):
 
     Settled: telemetry for a fact is forged once and frozen, so the sibling is served the same
     telemetry for it whichever call first covers it, and in whatever order the investigator
-    makes the covering calls relative to pre-flight's replay order (O13). Pre-flight forges at
-    idp user:alice (the first covering call); the sibling asks idp host:db-1 first.
+    makes the covering calls relative to pre-flight's replay order (O13).
+
+    M01=A (R-01): both covering calls are POST-branch calls (`_POST` and a second one), the only
+    calls a world may change; every pre-branch call is served unchanged. World b's double
+    forges at whichever covering call pre-flight replays first (read off what it RECEIVED) and
+    serves the frozen row on the other; the sibling then asks the OTHER covering call first.
     """
     est = S.estate(tmp_path)
-    q2_idp = S.query_params("host:db-1")
-    calls = [S.Call("idp", "query", _Q1, _BASE), S.Call("idp", "query", q2_idp, _BASE),
-             S.Call("siem-x", "lookup", _L3, _BASE)]
+    other = S.post_branch_call(q="host:db-1 user:alice", payload=_BASE)
+    covering = {_MARK_POST: _POST, other.params["q"]: other}
     claimed = S.claim(added=[S.added("fg-b-1", "f1")])
-    ob = S.oracle(S.forge("fg-b-1", "f1", "idp", _FORGED_B), S.submit(_CHANGED_B, claimed),
-                  S.submit(_CHANGED_B, claimed), then=S.submit(_BASE, S.EMPTY_CLAIM))
-    oracle = _by_world(ob, _passing())
-    run = _launch(tmp_path, est, calls=calls, oracle=oracle, verifier=S.passing_verifier())
+    fb = S.oracle(S.forge("fg-b-1", "f1", "idp", _FORGED_B), S.submit(_CHANGED_B, claimed),
+                  S.submit(_CHANGED_B, claimed))
+    oracle = _by_world(_on_post(fb, name="oracle-b", extra={other.params["q"]: fb}), _passing())
+    run = _launch(tmp_path, est, calls=[*_calls_post(), other], oracle=oracle,
+                  verifier=S.passing_verifier())
     _assert_routed(oracle)
+    assert fb.submissions() == 2, "b served the frozen row on both covering calls"
+    assert not fb.overrun
+    replayed_first = [m for m in covering if m in fb.seen[0]]
+    assert len(replayed_first) == 1, "the forging turn names exactly one covering call"
+    forged_on = covering[replayed_first[0]]
+    (asked_first,) = [c for m, c in covering.items() if m != replayed_first[0]]
     frozen = S.oracle_rows(run.ep, "b", "forged")
     assert [r["forged_id"] for r in frozen] == ["fg-b-1"]
 
     sib = S.oracle(S.submit(_CHANGED_B, claimed), S.submit(_CHANGED_B, claimed))
     reg = S.world_registry(run.ep, "b", est, oracle=sib, verifier=S.passing_verifier())
     ctx = est.ctx(tmp_path / "sibling-b")
-    S.call(reg, "idp", "query", ctx, **q2_idp)
+    S.call(reg, "idp", "query", ctx, **asked_first.params)
     first_seen = sib.all_seen()
-    S.call(reg, "idp", "query", ctx, **_Q1)
+    S.call(reg, "idp", "query", ctx, **forged_on.params)
 
+    assert not sib.overrun
     assert "e-1224-f1" in first_seen, "the frozen row is offered on the first covering call"
     assert S.oracle_rows(run.ep, "b", "forged") == frozen, "forged once, never again"
 
@@ -1830,21 +2104,25 @@ def test_conc_34_preflight_worlds_forge_for_one_original_call(tmp_path):
     forged stores, each holding only its world's rows; neither world's forged rows enter the
     other's store or any world's real data — forged telemetry is not real data (S21, M12=A).
     Both worlds forge a row with the SAME event id: were forged rows real data, the second
-    would collide with the first under check 3 and its world would fail.
+    would collide with the first under check 3 and its world would fail. The one original call
+    both worlds forge for is the source run's POST-branch call (M01=A, R-01: the only kind a
+    world may change); each world serves every pre-branch call unchanged.
     """
     est = S.estate(tmp_path)
     shared_b = {**_FORGED_B, "event_id": "e-1224-shared"}
     shared_c = {**_FORGED_C, "event_id": "e-1224-shared"}
-    ob = S.oracle(S.forge("fg-b-1", "f1", "idp", shared_b),
-                  S.submit({"rows": [_ROW, shared_b]}, S.claim(added=[S.added("fg-b-1", "f1")])),
-                  then=S.submit(_BASE, S.EMPTY_CLAIM))
-    oc = S.oracle(S.forge("fg-c-1", "f2", "idp", shared_c),
-                  S.submit({"rows": [_ROW, shared_c]}, S.claim(added=[S.added("fg-c-1", "f2")])),
-                  then=S.submit(_BASE, S.EMPTY_CLAIM))
-    oracle = _by_world(ob, oc)
-    run = _launch(tmp_path, est, oracle=oracle, verifier=S.passing_verifier())
+    fb = S.oracle(S.forge("fg-b-1", "f1", "idp", shared_b),
+                  S.submit({"rows": [_ROW, shared_b]}, S.claim(added=[S.added("fg-b-1", "f1")])))
+    fc = S.oracle(S.forge("fg-c-1", "f2", "idp", shared_c),
+                  S.submit({"rows": [_ROW, shared_c]}, S.claim(added=[S.added("fg-c-1", "f2")])))
+    oracle = _by_world(_on_post(fb, name="oracle-b"), _on_post(fc, name="oracle-c"))
+    run = _launch(tmp_path, est, calls=_calls_post(), oracle=oracle,
+                  verifier=S.passing_verifier())
 
     _assert_routed(oracle)
+    for forging in (fb, fc):
+        assert forging.submissions() == 1, "each world forged for the post-branch call once"
+        assert not forging.overrun
     outcome = S.read_outcome(run.ep)
     assert outcome["outcome"] == "accepted"
     assert outcome["unservable_worlds"] == []
@@ -1868,11 +2146,15 @@ def test_1224_sibling_reissues_an_original_call_preflight_served_changed(tmp_pat
     Settled (S3, S4, S5; Amendment 2 change 1): the re-issue is uncached, so it spends at least
     one oracle turn and one verifier pass charged to the world's budget; the frozen row is
     reused (same forged_id, same values, no second row); a repeat returns the sibling's own
-    stored answer byte for byte; the call's world-ledger decision is `oracle`.
+    stored answer byte for byte; the call's world-ledger decision is `oracle`. The call
+    pre-flight served changed is the source run's POST-branch call (M01=A, R-01: the only kind
+    a world may change); the sibling re-issues it.
     """
     est = S.estate(tmp_path)
-    run = _launch(tmp_path, est, oracle=_by_world(_forging_b(), _passing()),
+    oracle = _by_world(_forging_b(), _passing())
+    run = _launch(tmp_path, est, calls=_calls_post(), oracle=oracle,
                   verifier=S.passing_verifier())
+    _assert_routed(oracle)
     frozen = S.oracle_rows(run.ep, "b", "forged")
     assert [r["forged_id"] for r in frozen] == ["fg-b-1"]
 
@@ -1880,8 +2162,8 @@ def test_1224_sibling_reissues_an_original_call_preflight_served_changed(tmp_pat
     sv = S.passing_verifier()
     reg = S.world_registry(run.ep, "b", est, oracle=sib, verifier=sv)
     ctx = est.ctx(tmp_path / "sibling-b")
-    first = _text(S.call(reg, "idp", "query", ctx, **_Q1))
-    again = _text(S.call(reg, "idp", "query", ctx, **_Q1))
+    first = _text(S.call(reg, "idp", "query", ctx, **_QP))
+    again = _text(S.call(reg, "idp", "query", ctx, **_QP))
 
     assert sib.submissions() == 1, "one fresh turn, then the stored answer"
     assert not sib.overrun
@@ -1898,11 +2180,16 @@ def test_1224_sibling_reissues_an_original_call_preflight_left_unchanged(tmp_pat
 
     Settled (S3; Amendment 2 change 1, M01=A): at least one oracle turn and one verifier pass;
     zero seeded state answers it. The world-ledger decision is the oracle's (`passthrough` for an
-    unchanged answer, or `oracle`); which of the two is not pinned here.
+    unchanged answer, or `oracle`); which of the two is not pinned here. Pre-flight changed only
+    the source run's post-branch call (M01=A, R-01) and left the pre-branch edr call unchanged;
+    the sibling re-issues the edr call.
     """
     est = S.estate(tmp_path)
-    run = _launch(tmp_path, est, oracle=_by_world(_forging_b(), _passing()),
+    oracle = _by_world(_forging_b(), _passing())
+    run = _launch(tmp_path, est, calls=_calls_post(), oracle=oracle,
                   verifier=S.passing_verifier())
+    _assert_routed(oracle)
+    assert S.oracle_rows(run.ep, "b", "forged"), "positive control: pre-flight wrote b's state"
     assert S.oracle_rows(run.ep, "b", "answers") == []
 
     sib = S.oracle(S.submit(_BASE, S.EMPTY_CLAIM))
@@ -1927,29 +2214,35 @@ def test_1224_siblings_records_before_and_after_it_reissues_a_preflight_call(tmp
     recording is exactly the source's captures (written once by the launcher). After exactly one
     call pre-flight already replayed, the world ledger holds one decision row and the evidence
     rows hold exactly one new row; neither pre-flight's replays nor the call's oracle-side
-    traffic appear in either (O9).
+    traffic appear in either (O9). The re-issued call is the source run's POST-branch call,
+    which pre-flight served changed (M01=A, R-01). The evidence read is the scenario lead's own
+    rows: every driven run also writes lead zero's correlation row (`l-000`), which is not a
+    query of this call.
     """
     est = S.estate(tmp_path)
-    run = _launch(tmp_path, est, oracle=_by_world(_forging_b(), _passing()),
+    oracle = _by_world(_forging_b(), _passing())
+    run = _launch(tmp_path, est, calls=_calls_post(), oracle=oracle,
                   verifier=S.passing_verifier())
+    _assert_routed(oracle)
 
     assert S.ledger_rows(run.ep, "b") == []
     assert S.oracle_rows(run.ep, "b", "ledger"), "pre-flight's traffic is in b's oracle ledger"
     assert S.oracle_rows(run.ep, "b", "answers") == []
     assert {_key(r["system"], r["verb"], r["params"]) for r in S.base_rows(run.ep)} == {
-        _key(c.system, c.verb, c.params) for c in _calls()}
+        _key(c.system, c.verb, c.params) for c in _calls_post()}
 
     sib = S.oracle(S.submit(_CHANGED_B, S.claim(added=[S.added("fg-b-1", "f1")])))
     reg = S.world_registry(run.ep, "b", est, oracle=sib, verifier=S.passing_verifier())
     run_dir, _gather = S.drive_gather(
         tmp_path, verbs=reg, tenant=est.place(), system="idp",
-        gather_turns=[S.query_turn("idp", "query", _Q1), S.done_turn()])
+        gather_turns=[S.query_turn("idp", "query", _QP), S.done_turn()])
 
+    assert not sib.overrun
     ledger = S.ledger_rows(run.ep, "b")
     assert len(ledger) == 1
     assert _key(ledger[0]["system"], ledger[0]["verb"],
-                                     ledger[0]["params"]) == _key("idp", "query", _Q1)
-    evidence = S.read_jsonl(run_dir / "executed_queries.jsonl")
+                ledger[0]["params"]) == _key("idp", "query", _QP)
+    evidence = _lead_rows(run_dir)
     assert [(r["system"], r["verb"]) for r in evidence] == [("idp", "query")]
 
 
