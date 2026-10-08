@@ -1,10 +1,11 @@
-# Phase D — materialize the graph, run the gate (steps 5–6)
+# Phase D — materialize the graph, run the gate (step 7)
 
 ## Topology
 
-- Two leaves in sequence. The orchestrator routes the residue afterwards; it produces none of this — assembly is a leaf's job, never the spine's.
-- **Assembler leaf** (Opus, xhigh effort): inputs = `10-brief.md`, `20-demands.md`, `45-dispositions.md`. Outputs: `spec_graph_<slug>.yaml` at its final committed path in the spec corpus (the profile's `specGraph.artifacts` names the directory — it is a deliverable, not plumbing), carrying `tests:` — the repo-relative suite directory it derives plus `50-graph-digest.md`.
-- **Gate leaf** (Sonnet, high effort — the R1–R5 and R7 triggers are computed by `spec-graph gate`, so this leaf annotates and judges rather than re-derives; Opus here re-buys what the tool already knows): inputs = the assembled artifact. Outputs: the gate record written into the artifact, plus `60-residue.md`.
+- Runs **after §7**, on the decided design: built before, the graph modelled readings the human then rejected (one run's 170 demands were voided by its own §7; another's never took the amendment). The orchestrator routes the residue afterwards; it produces none of this.
+- **Assembler leaf** (Opus, xhigh effort): inputs = `10-brief.md`, `20-demands.md`, `45-dispositions.md`, `47-dissolve.md` (when written), `70-resolutions.md`, `.spec-flow/design-amendments.md` if any. Outputs: `spec_graph_<slug>.yaml` at its final committed path in the spec corpus (the profile's `specGraph.artifacts`), carrying `tests:` — the repo-relative suite directory it derives — plus `75-graph-digest.md`.
+- **Gate leaf** (Sonnet, high effort — the R1–R5 and R7 triggers are computed by `spec-graph gate`, so this leaf annotates and judges rather than re-derives): inputs = the assembled artifact, `70-resolutions.md`. Outputs: the gate record written into the artifact, plus `76-residue.md`.
+- Routing: test obligations are minted into the graph without a question (recorded in `gate.obligations`, which the handoff note lists for the merge-gate human); `route: re-ground` items go to a probe leaf (phases/answer.md, "Charge — the probe leaf"), whose results the gate leaf folds in on resume; **new** design holes and waiver candidates go to a short second human round, recorded by the spine in `78-gate-resolutions.md` — skipped, with no file, when there are none.
 
 ## Charge — the assembler
 
@@ -14,7 +15,7 @@ Resolve every `binds:` target. Resolution is what pulls boundaries, facets, and 
 
 **Reconcile names before the join:** grounding, demand extraction, and the dispositions' address derivations coin ids and axis names independently — unify boundary ids (key by role+origin) across all three coining passes, and declare every axis once in the artifact's `axes:` list; a `key_axes`/`interpolates` member outside that list is an R0 finding. Seed the `claims:` block with every claim the three input frontiers raised, inherited entries keeping their ids.
 
-Digest-frontier inventory: `{demands: n, claims: n, boundaries: n, unknowns: n}`, `inputs` echoing all three input counts — every demand, claim, and settled assertion from the inputs is present in the artifact or named as a drop.
+Digest: demand, claim, boundary, and `unknown` counts. Every demand, claim, settled assertion, and §7 ruling from the inputs is present in the artifact or named as a drop — apply each ruling as the human worded it, and model nothing an adopted tension dissolved.
 
 ## Charge — the gate leaf
 
@@ -32,9 +33,9 @@ Record each rule's outcome — fired or clean — in the artifact's `gate.evalua
 
 Write the residue **typed** (definitions in rules.md; one hit can take more than one route), one entry per hit with the route pre-labelled, because the orchestrator routes this file without re-deriving it:
 
-- **Test obligations** → to be minted as executable demands — kind and binds from the rule's obligation, witness prose included (it seeds the test's docstring in phase E); the human reviews the minted list at §7.
-- **Design holes** → §7, the human. But mark fact-shaped `unknown`s (a knob's default, a key read off the resource — anything an agent can look up) `route: re-ground` — the orchestrator dispatches a lookup leaf first; §7 is for decisions, not lookups.
+- **Test obligations** → minted as executable demands — kind and binds from the rule's obligation, witness prose included (it seeds the test's docstring in phase E); recorded in `gate.obligations` for the merge-gate human, not asked.
+- **Design holes** → the human, but only holes §7 did not already rule on: check `70-resolutions.md` and `45-dispositions.md` first and cite the cluster or ruling that covers a hole instead of re-raising it (in the measured runs every hole the gate raised was already a cluster). But mark fact-shaped `unknown`s (a knob's default, a key read off the resource — anything an agent can look up) `route: re-ground` — the orchestrator dispatches a lookup leaf first; §7 is for decisions, not lookups.
 - **Pre-discharged rules** → credited in the artifact; listed for the record, not for routing.
-- **Waiver candidates** → §7.
+- **Waiver candidates** → the second human round, each with the claim it rests on.
 
-Residue inventory: `{obligations: n, holes: n, re_grounds: n, waiver_candidates: n, pre_discharged: n}` with every rule accounted for in `gate.evaluated`.
+Digest: obligation, new-hole, re-ground, waiver-candidate, and pre-discharged counts, with every rule accounted for in `gate.evaluated`.

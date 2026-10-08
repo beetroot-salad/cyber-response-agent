@@ -216,7 +216,9 @@ def _frontier(path: Path, name: str, meta: str, digest: str = "ok") -> None:
     (path / name).write_text(f"---\n{meta}---\n\n## Digest\n\n{digest}\n", encoding="utf-8")
 
 
-def test_frontiers_echo_mismatch_is_a_conservation_finding(tmp_path):
+def test_frontiers_old_chain_with_echoes_still_passes(tmp_path):
+    # Count echoes were retired (they caught bookkeeping slips, never a dropped item); a
+    # chain written under the old contract must still lint clean, mismatched echo or not.
     d = tmp_path / "frontiers"
     d.mkdir()
     _frontier(d, "10-brief.md", "phase: A\nstatus: complete\ninventory: {claims: 3}\n")
@@ -224,19 +226,18 @@ def test_frontiers_echo_mismatch_is_a_conservation_finding(tmp_path):
               "phase: A\nstatus: complete\ninventory: {demands: 2}\n"
               "inputs: [{path: 10-brief.md, inventory_echo: {claims: 4}}]\n")
     p = run_script("check_frontiers.py", str(d), cwd=tmp_path)
-    assert p.returncode == 1
-    assert "inventory_echo" in p.stdout and "10-brief.md" in p.stdout
+    assert p.returncode == 0, p.stdout
 
 
 def test_frontiers_clean_chain_exits_0_and_external_inputs_are_tolerated(tmp_path):
     d = tmp_path / "frontiers"
     d.mkdir()
     _frontier(d, "10-brief.md",
-              "phase: A\nstatus: complete\ninventory: {claims: 3}\n"
-              'inputs: [{path: "gh-issue-1 thread", inventory_echo: {claims: 1}}]\n')
+              "phase: A\nstatus: complete\n"
+              'inputs: ["gh-issue-1 thread"]\n')
     _frontier(d, "20-demands.md",
-              "phase: A\nstatus: complete\ninventory: {demands: 2}\n"
-              "inputs: [{path: 10-brief.md, inventory_echo: {claims: 3}}]\n")
+              "phase: A\nstatus: complete\n"
+              "inputs: [10-brief.md]\n")
     p = run_script("check_frontiers.py", str(d), cwd=tmp_path)
     assert p.returncode == 0, p.stdout
 
@@ -245,25 +246,12 @@ def test_frontiers_digest_over_cap_and_missing_input_flag(tmp_path):
     d = tmp_path / "frontiers"
     d.mkdir()
     _frontier(d, "30-premises-author.md",
-              "phase: B\nstatus: complete\ninventory: {premises: 1}\n"
-              "inputs: [{path: 10-brief.md, inventory_echo: {claims: 1}}]\n",
+              "phase: B\nstatus: complete\n"
+              "inputs: [10-brief.md]\n",
               digest="\n".join(f"line {i}" for i in range(20)))
     p = run_script("check_frontiers.py", str(d), cwd=tmp_path)
     assert p.returncode == 1
     assert "digest" in p.stdout.lower() and "10-brief.md" in p.stdout
-
-
-def test_frontiers_dispositions_sum_rule(tmp_path):
-    d = tmp_path / "frontiers"
-    d.mkdir()
-    _frontier(d, "40-premises.md", "phase: C\nstatus: complete\ninventory: {premises: 10}\n")
-    _frontier(d, "45-dispositions.md",
-              "phase: C\nstatus: complete\n"
-              "inventory: {consensus: 5, forks: 2, silent_branches: 1, drops: 1}\n"
-              "inputs: [{path: 40-premises.md, inventory_echo: {premises: 10}}]\n")
-    p = run_script("check_frontiers.py", str(d), cwd=tmp_path)
-    assert p.returncode == 1
-    assert "9" in p.stdout and "10" in p.stdout  # 5+2+1+1 = 9 ≠ 10 premises consumed
 
 
 def test_frontiers_resume_reports_design_refuted_as_a_halt(tmp_path):
@@ -331,6 +319,20 @@ structure:
     assert "inlines an `outcome`" in out         # pointer carrying prose
     assert "outcome" in out and "d2" in out      # waiver with no outcome sentence
     assert "unknown facet `content`" in out
+
+
+def test_lint_accepts_the_handoff_principles_and_tensions_keys(make_repo):
+    # write-tests records the principles and the §7 tension rulings in the handoff block.
+    r = make_repo()
+    r.config(code_roots=[])
+    r.write("g.yaml", _MINIMAL.format(v=max(_schema.SCHEMA_VERSIONS)) + """\
+handoff:
+  principles: "host not assumed malicious; fail closed, loud, fast"
+  tensions: ["two owners for one path — one owner — adopted — M01, M04"]
+  forks: []
+""")
+    p = run_script("check_lint.py", "g.yaml", cwd=r.root)
+    assert "handoff key" not in p.stdout, p.stdout
 
 
 def test_lint_clean_minimal_graph_exits_0(make_repo):

@@ -9,7 +9,7 @@ Dispatch hands you: the finding (file:line, class, the evidence the review produ
 - The committed `spec_graph_*.yaml` — demands and their `discharged_by`, the gate record (`handoff.nullstub_passes` included), the claims ledger, waivers, the `handoff:` block.
 - The issue thread (`gh issue view <n> --comments`) — the intent+design doc, write-tests' handoff note, the human's fork resolutions, the adversary's verdict for this PR if one is posted.
 - The spec branch history — what the spec commit pinned, and what changed after.
-- The write-tests worktree's `.spec-flow/frontiers/` chain, if the tree survives — lens premises (`30-*`), dispositions (`45-*`), gate residue (`60-*`), the human's resolutions (`70-*`), verification (`90-*`); the conservation counts show where a premise entered the chain and where it died.
+- The write-tests worktree's `.spec-flow/frontiers/` chain, if the tree survives — lens premises (`30-*`), probes and dispositions (`44-*`, `45-*`), the dissolve pass's tensions (`47-*`), the human's resolutions (`70-*`), gate residue (`76-*`; `60-*` in runs before October 2026), verification (`90-*`) — the reconciler's trail walk (`92-*`) shows where a premise entered the chain and where it died.
 - Session transcripts, where the thread links them.
 
 ## The verdict

@@ -20,53 +20,51 @@ def _frontier(path: Path, name: str, meta: str, digest: str = "ok") -> None:
     (path / name).write_text(f"---\n{meta}---\n\n## Digest\n\n{digest}\n", encoding="utf-8")
 
 
-def test_frontiers_non_dict_input_entry_is_flagged(tmp_path):
-    # `inputs: [10-brief.md]` — the natural shorthand — used to be silently dropped by the
-    # dict filter: no echo reconciliation, no finding. It must now be a finding.
+def test_frontiers_bare_filename_input_is_accepted(tmp_path):
+    # `inputs: [10-brief.md]` — the natural shorthand — is the contract's own spelling now.
     d = tmp_path / "frontiers"
     d.mkdir()
-    _frontier(d, "10-brief.md", "phase: A\nstatus: complete\ninventory: {claims: 3}\n")
+    _frontier(d, "10-brief.md", "phase: A\nstatus: complete\n")
+    _frontier(d, "20-demands.md", "phase: A\nstatus: complete\ninputs: [10-brief.md]\n")
+    p = run_script("check_frontiers.py", str(d), cwd=tmp_path)
+    assert p.returncode == 0, p.stdout + p.stderr
+
+
+def test_frontiers_input_naming_no_file_is_flagged(tmp_path):
+    d = tmp_path / "frontiers"
+    d.mkdir()
+    _frontier(d, "20-demands.md", "phase: A\nstatus: complete\ninputs: [{echo: 3}]\n")
+    p = run_script("check_frontiers.py", str(d), cwd=tmp_path)
+    assert p.returncode == 1, p.stdout + p.stderr
+    assert "20-demands.md" in p.stdout and "names no file" in p.stdout
+
+
+def test_frontiers_path_decorated_ref_to_a_missing_frontier_is_flagged(tmp_path):
+    # `./10-brief.md` must resolve by bare filename — both to find it and to miss it.
+    d = tmp_path / "frontiers"
+    d.mkdir()
     _frontier(d, "20-demands.md",
-              "phase: A\nstatus: complete\ninventory: {demands: 2}\n"
-              "inputs: [10-brief.md]\n")
+              "phase: A\nstatus: complete\ninputs: [{path: ./10-brief.md}]\n")
     p = run_script("check_frontiers.py", str(d), cwd=tmp_path)
     assert p.returncode == 1, p.stdout + p.stderr
-    assert "10-brief.md" in p.stdout and "mapping" in p.stdout
+    assert "10-brief.md" in p.stdout
 
 
-def test_frontiers_path_decorated_ref_still_reconciles_the_echo(tmp_path):
-    # `path: ./10-brief.md` used to miss the bare-filename producer lookup AND the
-    # numeric-prefix classification — a wrong echo behind a decorated ref escaped silently.
+def test_frontiers_resume_reads_bare_filename_inputs_for_staleness(tmp_path):
+    import os
     d = tmp_path / "frontiers"
     d.mkdir()
-    _frontier(d, "10-brief.md", "phase: A\nstatus: complete\ninventory: {claims: 3}\n")
-    _frontier(d, "20-demands.md",
-              "phase: A\nstatus: complete\ninventory: {demands: 2}\n"
-              "inputs: [{path: ./10-brief.md, inventory_echo: {claims: 4}}]\n")
-    p = run_script("check_frontiers.py", str(d), cwd=tmp_path)
-    assert p.returncode == 1, p.stdout + p.stderr
-    assert "inventory_echo" in p.stdout and "10-brief.md" in p.stdout
-
-
-def test_frontiers_partial_dispositions_are_flagged_and_summed(tmp_path):
-    # Three of the four mandated disposition keys, summing 24 against 27 premises consumed:
-    # the old all-four gate skipped the rule entirely and the chain exited 0.
-    d = tmp_path / "frontiers"
-    d.mkdir()
-    _frontier(d, "40-premises.md", "phase: C\nstatus: complete\ninventory: {premises: 27}\n")
-    _frontier(d, "45-dispositions.md",
-              "phase: C\nstatus: complete\n"
-              "inventory: {consensus: 20, forks: 2, drops: 2}\n"
-              "inputs: [{path: 40-premises.md, inventory_echo: {premises: 27}}]\n")
-    p = run_script("check_frontiers.py", str(d), cwd=tmp_path)
-    assert p.returncode == 1, p.stdout + p.stderr
-    assert "silent_branches" in p.stdout          # the missing mandated key is named
-    assert "24" in p.stdout and "27" in p.stdout  # the sum runs over what is present
+    _frontier(d, "10-brief.md", "phase: A\nstatus: complete\n")
+    _frontier(d, "20-demands.md", "phase: A\nstatus: complete\ninputs: [10-brief.md]\n")
+    os.utime(d / "20-demands.md", (1, 1))  # older than its input
+    p = run_script("check_frontiers.py", str(d), "--resume", cwd=tmp_path)
+    assert p.returncode == 0
+    assert "STALE" in p.stdout and "20-demands.md" in p.stdout
 
 
 def test_frontiers_string_count_is_a_finding_not_a_crash(tmp_path):
-    # `consensus: "5"` used to raise TypeError inside the dispositions sum, losing the
-    # whole report behind a traceback. The non-int finding fires; the sum skips it.
+    # An optional inventory still carries integers; `consensus: "5"` is a finding, never
+    # a traceback that loses the whole report.
     d = tmp_path / "frontiers"
     d.mkdir()
     _frontier(d, "40-premises.md", "phase: C\nstatus: complete\ninventory: {premises: 10}\n")
@@ -81,39 +79,6 @@ def test_frontiers_string_count_is_a_finding_not_a_crash(tmp_path):
     assert "[check_frontiers]" in p.stdout        # the report survived to its summary line
 
 
-def test_frontiers_settled_spelling_and_escalation_subset_echo(tmp_path):
-    # phases/answer.md spells the single-reading category `settled`, and the judge echoes
-    # the escalation copies — each a re-consumed SUBSET of the answerer's premises. The
-    # checker used to demand `consensus` and sum the echoes (82 + 42 + 42 = 166), so a
-    # conserved judge frontier exited 1 at the phase boundary.
-    d = tmp_path / "frontiers"
-    d.mkdir()
-    _frontier(d, "40-premises.md", "phase: C\nstatus: complete\ninventory: {premises: 82}\n")
-    _frontier(d, "42-answers-copy1.md",
-              "phase: C\nstatus: complete\ninventory: {premises: 42}\n")
-    _frontier(d, "45-dispositions.md",
-              "phase: C\nstatus: complete\n"
-              "inventory: {settled: 38, forks: 16, silent_branches: 27, drops: 1}\n"
-              "inputs: [{path: 40-premises.md, inventory_echo: {premises: 82}}, "
-              "{path: 42-answers-copy1.md, inventory_echo: {premises: 42}}]\n")
-    p = run_script("check_frontiers.py", str(d), cwd=tmp_path)
-    assert p.returncode == 0, p.stdout + p.stderr
-
-
-def test_frontiers_both_settled_spellings_is_a_finding(tmp_path):
-    # One spelling fills the slot; carrying both double-counts the single-reading premises.
-    d = tmp_path / "frontiers"
-    d.mkdir()
-    _frontier(d, "40-premises.md", "phase: C\nstatus: complete\ninventory: {premises: 10}\n")
-    _frontier(d, "45-dispositions.md",
-              "phase: C\nstatus: complete\n"
-              "inventory: {settled: 5, consensus: 5, forks: 0, silent_branches: 0, drops: 0}\n"
-              "inputs: [{path: 40-premises.md, inventory_echo: {premises: 10}}]\n")
-    p = run_script("check_frontiers.py", str(d), cwd=tmp_path)
-    assert p.returncode == 1, p.stdout + p.stderr
-    assert "consensus" in p.stdout and "settled" in p.stdout
-
-
 # check_frontiers --only: a leaf lints its own frontier before returning, while its
 # phase siblings may still be half-written beside it.
 
@@ -122,7 +87,7 @@ def _only_chain(d: Path) -> None:
     _frontier(d, "20-demands.md", "phase: A\nstatus: complete\ninventory: {demands: 4}\n")
     _frontier(d, "30-premises-author.md",
               "phase: B\nstatus: complete\ninventory: {premises: 7}\n"
-              "inputs: [{path: 20-demands.md, inventory_echo: {demands: 4}}]\n")
+              "inputs: [20-demands.md]\n")
     # A sibling lens mid-write: its digest overruns the cap.
     _frontier(d, "30-premises-dependency.md",
               "phase: B\nstatus: complete\ninventory: {premises: 3}\n",
@@ -147,17 +112,16 @@ def test_frontiers_only_reports_the_named_file(tmp_path):
     assert "30-premises-dependency.md" in p.stdout and "digest" in p.stdout
 
 
-def test_frontiers_only_still_reconciles_echoes_against_the_chain(tmp_path):
-    # The named file's echo is checked against its producer, which the flag must still load.
+def test_frontiers_only_still_resolves_inputs_against_the_chain(tmp_path):
+    # The named file's inputs are looked up in the chain, which the flag must still load.
     d = tmp_path / "frontiers"
     _only_chain(d)
     _frontier(d, "30-premises-author.md",
-              "phase: B\nstatus: complete\ninventory: {premises: 7}\n"
-              "inputs: [{path: 20-demands.md, inventory_echo: {demands: 5}}]\n")
+              "phase: B\nstatus: complete\ninputs: [21-demands.md]\n")
     p = run_script("check_frontiers.py", str(d), "--only", "30-premises-author.md",
                    cwd=tmp_path)
     assert p.returncode == 1, p.stdout + p.stderr
-    assert "20-demands.md" in p.stdout
+    assert "21-demands.md" in p.stdout
 
 
 def test_frontiers_only_naming_no_frontier_exits_2(tmp_path):

@@ -43,7 +43,10 @@ _SHARING = {"unique-key", "serialized-append"}
 _TRUST = {"operator", "attacker-influenced", "derived"}
 _PAYLOAD_INVARIANTS = {"roles-disjoint-sources", "all-slots-bound"}
 _RULES = set(_schema.RULES)
-_HANDOFF = {"forks", "refuted", "deferred", "drops", "nullstub_passes", "deviations"}
+_HANDOFF = {
+    "principles", "tensions", "forks", "refuted", "deferred", "drops", "nullstub_passes",
+    "deviations",
+}
 _GATE = {"evaluated", "obligations", "holes", "pre_discharged"}
 
 

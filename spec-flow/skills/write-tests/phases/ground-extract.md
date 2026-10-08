@@ -3,23 +3,28 @@
 ## Topology
 
 - Two leaves, dispatched in parallel; neither reads the other's output. Both may set `status: design-refuted` (SKILL.md, "Early exit") — the run halts before the next dispatch.
-- **Grounding leaf** (Opus, xhigh effort — the floor-line judgment is where the escaped bugs lived, and the spec-time `actors` net no longer backs the brief; reader posture; it must Write its frontier, so a general leaf — not the read-only Explore agent type): inputs = the intent+design doc with its inherited `claims:` block. Output: `10-brief.md`. If it overruns, dispatch a fresh probe-backed replacement; reconcile when the slow one lands.
+- **Grounding leaf** (Opus, xhigh effort — the floor-line judgment is where the escaped bugs lived; reader posture; it must Write its frontier, so a general leaf — not the read-only Explore agent type): inputs = the intent+design doc with its inherited `claims:` block. Output: `10-brief.md`. If it overruns, dispatch a fresh probe-backed replacement; reconcile when the slow one lands. **It never spawns its own sub-agents.** When the census spans several regions, it writes `10-census-plan.md` (regions, and the symbols and roots each covers) and returns; the spine dispatches one census leaf per region (Opus, high effort, same charge) writing `10-census-<region>.md`, then resumes the grounding leaf (SendMessage) to fold them into `10-brief.md`.
 - **Extraction leaf** (Opus, xhigh effort): content inputs = the doc and its `claims:` block only — but repo probe access is expected; its charge probes behavior claims the doc's sweep missed. Output: `20-demands.md`.
 - Phase B blocks on the finished brief.
+- When A finishes, the spine fetches the base branch: if it moved under the fork since the run started, check whether the move touches the design's targets before dispatching B — a base that moved under a finished brief is a stale brief.
 
 ## Charge — the grounding leaf
 
 Read **references/schema.md**, "Extraction contract" — prompt yourself from it, not from memory of it. Your output is the structure-layer *neighborhood* the change will attach to. Seed from the doc's inherited `claims:` block — what discuss-issue already probed is not re-derived, it is extended; **re-verify rather than inherit** any census the base has moved under, because a plausible-sounding sweep is exactly the shape that arrives wrong. A refuted census or mechanism is your most valuable possible product: set `status: design-refuted`, record the story and the probe, and stop.
 
+A census leaf (dispatched on a census plan) does this section's census for its region only and writes `10-census-<region>.md`.
+
 Stay in the reader's lane: **emit questions as claims, and answer only the discovery-shaped ones yourself.** Every factual list the brief carries — per shared root, the writers and consumers and *how* each list was established (the search you ran) — is a **census claim** in the ledger: the search is its probe, the hit list its observed result, so completeness is re-checkable, not a promise. A census is a trace-back: start at the symbol or resource and close over its references — and start it **with the tools, not with recall**. Before implementation there is no production-code diff for `spec-graph trace drivers --base <base>` to census; identify the intended target symbols/modules from the design and trace their existing callers with **symbol-refs** plus explicit subprocess/harness searches, recording any wholly new target's execution-context census as deferred. `spec-graph trace resource <name>` derives a declared shared root's writers and readers with their call-site path templates (declare the sinks under `specGraph.resources` if this change touches an undeclared root — the entry outlives the run). Your judgment spends where the tools stop: dynamic dispatch, string-composed paths, unparseable files, and cross-process edges no static walk resolves are yours to classify by hand. The implementation-time `spec-graph actors` run (write-code-from-spec §3) is the mechanical net once a real source diff exists. Extraction completeness is the gate's single point of failure — an element the brief misses is invisible to every rule.
 
 Facts only, no judgments — the brief is the one thing the ensemble deliberately shares: facts anchor far less than framings, and a fact left to one enumerator's initiative is a coverage lottery. One classification rides with the facts (else it's that same lottery): a fact of a **consequence-bearing shape** — a side-effecting call on a read/write path, an unbounded sink, a shared trace — leaves the brief tagged with its disposition (the premise it feeds, or an explicit `no-consequence`), never as inert narrative. A closed shape-match, not the design judgment "does this matter" (that stays with the enumerators and the human). Phase F reconciles the tags (grounding-fact→premise conservation).
 
-Frontier inventory: `{claims: n, flagged_facts: n, shared_roots: n}`. Red-flag anything that contradicts the design doc.
+Digest: claim, flagged-fact, and shared-root counts, and every refutation. Red-flag anything that contradicts the design doc.
 
 ## Charge — the extraction leaf
 
 You need only the design doc and the inherited `claims:` block; you return the demand list, the raised claims, and the background classification. Read **references/schema.md** for address forms before starting.
+
+Read the doc's principles first — a demand that contradicts them is a red flag, not a demand. Read every issue or PR the doc cites or defers to that its `claims:` block does not already cover, and red-flag any whose design conflicts with this one: a cited neighbor nobody read once cost a run five hours of phases built on the design it superseded.
 
 Read the doc. Every sentence sorts three ways: a normative sentence becomes a demand, a sentence asserting a fact about existing reality becomes a ledger claim, and the rest is explicitly classified background; a sentence may not fall outside the sort. A demand is `form: test` unless deliberately deferred to prose (`form: clause`) — a clause does not discharge a gate obligation (rules.md), so the downgrade is a recorded choice, never a default.
 
@@ -29,4 +34,4 @@ The **return-value contract is demand #0**: resolve it before anything else — 
 
 A design sentence that asserts a fact about **existing behavior** — the bug story that motivates the change, a stated default, "the helper already skips malformed files" — is a `behavior` claim, not background. The doc's sweep should have probed it already; inherit that claim, and probe what the sweep missed before minting a demand on it. A bug story is a hypothesis; a test pinned to an unexecuted hypothesis inherits its error and hardens it into green. A refuted story is frequently the run's single most valuable finding — set `status: design-refuted`, record both the story and the probe in the frontier, and stop.
 
-Frontier inventory: `{demands: n, claims: n, background: n, forks: n}`, with `inputs` echoing the doc's claim count. Every doc sentence is accounted for — the sort is the conservation.
+Digest: demand, claim, background, and fork counts. Every doc sentence is accounted for — the sort is the conservation.

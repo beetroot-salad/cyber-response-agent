@@ -43,8 +43,8 @@ keeps an `outcome`. The check scans whichever holds the prose — the pointed-to
 (found among the `*.py` beside the graph), or the `outcome` — for each `<concept>=<threaded-value>`
 where the concept is modelled elsewhere in the graph but absent from that demand's `binds`. A
 `discharged_by` that names no test is a dangling pointer, also flagged — as is one pointing at a
-test with no docstring (the prose is required to live there); `shuffle-premises` copies
-(`*.copyN.py`) are excluded from the scan. The canonical catch: a demand
+test with no docstring (the prose is required to live there); leftover premise copies
+(`*.copyN.py`, from the retired answer-escalation step) are excluded from the scan. The canonical catch: a demand
 whose prose read "…threads `salt=deps.salt`…" bound only the anchor tree — the exact under-binding
 that left a prompt-injection defence unguarded, with every test green. Waive a conscious incidental
 mention under a top-level `binds_waivers:` map; prefer *binding* the concept so the test is forced to
@@ -102,14 +102,15 @@ facet vocabularies, unique ids, gate entries naming rules R0–R8 and demands th
 the per-run hand check that used to land in `handoff.deviations`. Grow a vocabulary by growing
 schema.md and this linter's table in one commit.
 
-## check_frontiers.py — frontier-chain conservation + resume (`spec-graph frontiers`)
+## check_frontiers.py — frontier-chain shape + resume (`spec-graph frontiers`)
 
 Walks a write-tests run's `.spec-flow/frontiers/` chain: frontmatter parses, statuses are in
-vocabulary, every `inputs.inventory_echo` equals its producer's actual `inventory` (counts in equal
-counts out), digests hold the ≤15-line cap, and the dispositions sum rule (consensus + forks +
-silent_branches + drops == premises consumed) balances. The orchestrator runs it at every phase
-boundary; each leaf runs `--only <its-file>` before returning, which lints that one frontier (echoes
-still reconciled against the chain) and ignores half-written siblings; `--resume` names the first blocked/stale/unparseable frontier to re-enter at (and treats
+vocabulary, every `inputs` entry names a frontier that exists, an optional `inventory` holds
+integers, and digests hold the ≤15-line cap. It no longer reconciles count echoes across files —
+they caught bookkeeping slips and never a dropped item; conservation is the cold reconciler's
+by-name trail walk now (an old chain's `inventory_echo` entries are ignored). The orchestrator runs
+it at every phase boundary; each leaf runs `--only <its-file>` before returning, which lints that
+one frontier and ignores half-written siblings; `--resume` names the first blocked/stale/unparseable frontier to re-enter at (and treats
 `design-refuted` as the deliberate halt it is).
 
 ## check_calls.py / check_stub.py — the suite drives the target (`spec-graph calls` / `nullstub`)
