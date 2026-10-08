@@ -15954,6 +15954,7 @@ handoff:
   - 'test_served_system_adapter_cannot_be_loaded_at_call_time — parity: (s_p046) an adapter that cannot be loaded fails the original query as
     on a real run and files a `fault` ledger row today; green once the registry accepts its coined keywords (shim-measured).'
   deviations:
+  - 'SPINE — phase F re-verify was scoped: after the repair round, a fresh Opus leaf re-ran the mechanical toolchain and reconciled the repair diff against 91/92 and the human rulings (93-reverify.md); the blind conservation reader was NOT re-run over the repaired suite.'
   - 'SPINE — decomposition: ran as ONE chain despite size (16 obligations, 14 mechanisms). The oracle core (M3-M8, M11, M13; O2-O4, O9, O13, O14)
     is coupled by spanning invariants (pre-flight seeds the sibling store; one checker shared by host and oracle); the separable periphery (O12
     lessons, O15 refusal, O16 samples) cites manifest v2, an interface internal to this design and not yet grounded, so no sound cut had an external
