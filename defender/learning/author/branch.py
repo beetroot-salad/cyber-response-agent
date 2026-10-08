@@ -29,10 +29,10 @@ def _lessons_pr_title(batch_id: str) -> str:
     return f"learning: lesson batch {batch_id}"
 
 
-def _lessons_pr_body(branch: str) -> str:
+def _lessons_pr_body(branch: str, base: str) -> str:
     return (
         "Automated lessons batch from the lessons author drain "
-        f"(branch `{branch}`, off freshly-fetched `{_BRANCH_BASE}`). Touches "
+        f"(branch `{branch}`, off freshly-fetched `{base}`). Touches "
         "`defender/lessons/` only — distinct from the lead-author PR."
     )
 
@@ -48,7 +48,8 @@ class AuthorBranch:
     repo_root: Path = REPO_ROOT
     branch_prefix: str = LESSONS_BRANCH_PREFIX
     pr_title: Callable[[str], str] = _lessons_pr_title
-    pr_body: Callable[[str], str] = _lessons_pr_body
+    #: The PR body from the batch branch and the base it was cut from (`branch_base`).
+    pr_body: Callable[[str, str], str] = _lessons_pr_body
     worktree_base: Path | None = None
     #: What a batch branches from and what its PR targets. Today's values are the product
     #: repo's; #1108 points learning at each tenant's repo, which must carry the same pair.
@@ -144,7 +145,7 @@ class AuthorBranch:
         from the checkout, no worktree needed. Idempotent: an already-open PR is returned.
 
         `None` when there is nothing to deliver (branch gone, or nothing ahead of
-        `origin/main`); the caller may then forget it."""
+        `branch_base`); the caller may then forget it."""
         branch = self.branch_name(batch_id)
         if not _git.git_ok(
             ["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=self.repo_root
@@ -166,7 +167,7 @@ class AuthorBranch:
     def _open_pr(self, batch_id: str, branch: str) -> str:
         ref = self._forge.open_pr(
             base=self.pr_base, head=branch,
-            title=self.pr_title(batch_id), body=self.pr_body(branch),
+            title=self.pr_title(batch_id), body=self.pr_body(branch, self.branch_base),
         )
         return ref or branch
 

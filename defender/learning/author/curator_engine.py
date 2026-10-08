@@ -13,7 +13,7 @@ from uuid import uuid4
 from defender._model import model
 from defender._text import is_content_less
 from defender._untrusted import wrap
-from defender._knowledge import CHECKOUT_AGENT_REL, LESSON_CORPORA as _LESSON_CORPORA, KnowledgePaths
+from defender._knowledge import CHECKOUT_KNOWLEDGE, LESSON_CORPORA as _LESSON_CORPORA, KnowledgePaths
 from defender.learning.author import shared as _shared
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
@@ -102,7 +102,7 @@ def lesson_read_confine(defender_dir: Path) -> tuple[Path, ...]:
 
 
 def _corpus_spellings(corpus_dir: Path) -> str:
-    rel = f"{CHECKOUT_AGENT_REL}/{corpus_dir.name}"
+    rel = f"{CHECKOUT_KNOWLEDGE.agent_rel}/{corpus_dir.name}"
     return "|".join(re.escape(s) for s in (rel, str(corpus_dir)))
 
 

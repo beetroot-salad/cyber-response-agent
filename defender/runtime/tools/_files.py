@@ -18,10 +18,8 @@ from .. import permission
 from ..permission.files import RESOLVE_ERRORS
 
 from defender._untrusted import wrap_fresh
-from defender.hooks.record_lesson_load import (
-    LOAD_KIND_READ as _LOAD_KIND_READ,
-    RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA,
-)
+from defender._knowledge import RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA
+from defender.hooks.record_lesson_load import LOAD_KIND_READ as _LOAD_KIND_READ
 from ._deps import AgentDeps, _bounded_read, _cap_for, _overflow_filter_hint, _record_lesson_load
 from ._bash import _deny_authored_read, _grep_lines, _is_cross_agent_read, _is_learning_role, _resolve_operand, _resolved, _rooted_operand
 

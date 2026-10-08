@@ -5,58 +5,75 @@ corpora, the per-system skills' parent, and the query catalog. Every other reade
 `KnowledgePaths`, so moving the knowledge into each tenant's own repo changes how one is built,
 not forty call sites. This census keeps a new hand-spelled join from slipping back in.
 
-It flags, outside the owner (and outside `tests/`):
-- a `/` join whose right operand is a corpus name, `"skills"` or `"queries"`;
+It counts, per production module outside the owner (and outside `tests/`):
+- a join onto `"skills"`, `"queries"` or a lesson-corpus name: `root / "x"`,
+  `root.joinpath("x")` or `Path(root, "x")`;
+- any other literal that IS a lesson-corpus name (a dict key, a folder list);
 - a string spelling `defender/lessons`, `defender/skills/` or `gather/queries`.
 
-`ALLOWED` holds every hit that is not a knowledge path, each with why. A `"skills"` join is
-allowed only for a GENERAL skill (product code that stays in the checkout) or for a walk that
-#1108's later pieces split; adding one there is a classification someone must state.
+`ALLOWED` names every such literal that is not a knowledge path, with how many times it may
+occur and why; one more occurrence fails. A `"skills"` join is allowed only for a GENERAL skill
+(product code that stays in the checkout) or for a walk #1108's later pieces split.
+
+What it cannot see: a corpus name reached through a variable (`agent_definition.
+_resolve_corpus_dir` joins a name it is handed), and a path built inside a regex; the read
+gate holds both, and #1108 P2 moves it (its folder lists are counted below as bare names).
 """
 from __future__ import annotations
 
 import ast
+from collections import Counter
 from pathlib import Path
 
 from defender._knowledge import (
-    CATALOG, CHECKOUT_AGENT_REL, LESSONS, LESSONS_QUESTIONER, KnowledgePaths, checkout_rel,
+    CATALOG, CHECKOUT_KNOWLEDGE, LESSONS, LESSONS_QUESTIONER, KnowledgePaths,
 )
 from defender._paths import PATHS, DefenderPaths
 
 _DEFENDER = Path(__file__).resolve().parents[1]
 _OWNER = "_knowledge.py"
 
-_JOIN_NAMES = frozenset({
-    "lessons", "lessons-questioner", "lessons-actor", "lessons-environment", "skills", "queries",
-})
+_CORPUS_NAMES = frozenset({"lessons", "lessons-questioner", "lessons-actor", "lessons-environment"})
+_JOIN_NAMES = _CORPUS_NAMES | {"skills", "queries"}
 _SPELLINGS = ("defender/lessons", "defender/skills/", "gather/queries")
+_PATH_TYPES = frozenset({"Path", "PurePath", "PosixPath"})
 
-#: (file, the flagged literal) -> why it is not a knowledge path built outside the owner.
-ALLOWED: dict[tuple[str, str], str] = {
+_P2_GATE = "the read gate's folder list, built under `defender_dir`; #1108 P2 moves the gate"
+_P4_TEXT = "text naming the checkout's corpus; rewritten with the switch (#1108 P4)"
+_KEY = "a dict key or list name, not a path"
+
+#: (file, the literal) -> (how many times it occurs, why it is not a knowledge path).
+ALLOWED: dict[tuple[str, str], tuple[int, str]] = {
+    ("api/app.py", "lessons"): (1, _KEY),
+    ("learning/frontend/build.py", "lessons"): (1, _KEY),
+    ("learning/frontend/serialize.py", "lessons"): (2, _KEY),
+    ("learning/judge/render.py", "lessons"): (1, _KEY),
+    ("learning/judge/run.py", "lessons"): (1, _KEY),
     ("evals/harness.py", "lessons"):
-        "a scenario's own `lessons/` folder and the results folder, not a knowledge root",
+        (2, "a scenario's own `lessons/` folder and the results folder, not a knowledge root"),
     ("learning/author/lessons/run.py", "lessons"):
-        "the `learning/author/lessons/` package's prompt files, code not knowledge",
-    ("runtime/driver/_build.py", "skills"): "gather's own SKILL.md: a general skill",
-    ("runtime/orient.py", "skills"): "invlang's SKILL.md: a general skill",
+        (2, "the `learning/author/lessons/` package's prompt files, code not knowledge"),
+    ("runtime/driver/_build.py", "lessons"): (1, _P2_GATE),
+    ("runtime/permission/policies/_common.py", "lessons"): (1, _P2_GATE),
+    ("runtime/driver/_build.py", "skills"): (1, "gather's own SKILL.md: a general skill"),
+    ("runtime/orient.py", "skills"): (1, "invlang's SKILL.md: a general skill"),
     ("runtime/verb_roster.py", "skills"):
-        "the roster file (gather, a general skill) and the model-read-surface walk, which spans "
-        "general and per-system skills in one tree until #1108 P4 splits it into two roots",
+        (3, "the roster file (gather, a general skill) and the model-read-surface walk, which "
+            "spans general and per-system skills in one tree until #1108 P4 splits it"),
     ("learning/author/branch.py", "`). Touches `defender/lessons/` only — distinct from the "
-     "lead-author PR."): "PR body text; rewritten with the switch (#1108 P4)",
-    ("learning/core/drains.py", "`, off freshly-fetched `origin/main`). May also fold "
-     "agent-fixable execution failures into"): "PR body text; rewritten with the switch (#1108 P4)",
-    ("learning/frontend/serialize.py", "Frozen archive. Both directions that fed it were "
-     "deleted with the four-role pipeline (#922"): "prose on the posture page",
+     "lead-author PR."): (1, _P4_TEXT),
+    ("learning/core/drains.py", "`). May also fold agent-fixable execution failures into "
+     "per-system `execution.md` `## Comm"): (1, _P4_TEXT),
     ("learning/leads/lead_author_engine.py", "Blocked: the lead author curates the gather query "
-     "catalog and the per-SYSTEM skill docs. I"):
-        "model-facing deny text; rewritten with the prompts (#1108 P4)",
+     "catalog and the per-SYSTEM skill docs. I"): (1, "model-facing deny text; " + _P4_TEXT),
+    ("learning/frontend/serialize.py", "Frozen archive. Both directions that fed it were "
+     "deleted with the four-role pipeline (#922"): (1, "prose on the posture page"),
     ("learning/leads/pitfalls_curator.py", "defender/skills/gather/defender-sql.md"):
-        "the shared SQL guide: a general skill",
+        (1, "the shared SQL guide: a general skill"),
     ("learning/ops/trace_lesson.py", "Corpus directory (default: defender/lessons)"):
-        "CLI help text",
+        (1, "CLI help text"),
     ("skills/connect/validate_scaffold.py", "no seed query templates under skills/gather/queries/"):
-        "a report message",
+        (1, "a report message"),
 }
 
 #: Long literals are keyed by their first 90 characters.
@@ -76,47 +93,96 @@ def _docstrings(tree: ast.Module) -> set[int]:
             and isinstance(n.body[0].value, ast.Constant)}
 
 
-def _hits(source: Path) -> list[tuple[str, str, int]]:
+def _joined_operands(node: ast.AST) -> list[ast.expr]:
+    """The operands a node joins onto a path: `a / x`, `a.joinpath(x, ...)`, `Path(a, x, ...)`."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return [node.right]
+    if isinstance(node, ast.Call):
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        if name == "joinpath":
+            return list(node.args)
+        if name in _PATH_TYPES:
+            return list(node.args[1:])
+    return []
+
+
+def _hits(source: Path) -> Counter[tuple[str, str]]:
     rel = source.relative_to(_DEFENDER).as_posix()
     tree = ast.parse(source.read_text(encoding="utf-8"), filename=rel)
     docs = _docstrings(tree)
-    found: list[tuple[str, str, int]] = []
+    found: Counter[tuple[str, str]] = Counter()
+    joined: set[int] = set()
     for node in ast.walk(tree):
-        if (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)
-                and isinstance(node.right, ast.Constant) and node.right.value in _JOIN_NAMES):
-            found.append((rel, node.right.value, node.lineno))
-        elif (isinstance(node, ast.Constant) and isinstance(node.value, str)
-              and id(node) not in docs and any(s in node.value for s in _SPELLINGS)):
-            found.append((rel, node.value[:_KEY_LEN], node.lineno))
+        for operand in _joined_operands(node):
+            if isinstance(operand, ast.Constant) and operand.value in _JOIN_NAMES:
+                found[(rel, operand.value)] += 1
+                joined.add(id(operand))
+    for node in ast.walk(tree):
+        if (not isinstance(node, ast.Constant) or not isinstance(node.value, str)
+                or id(node) in docs or id(node) in joined):
+            continue
+        if node.value in _CORPUS_NAMES:
+            found[(rel, node.value)] += 1
+        elif any(s in node.value for s in _SPELLINGS):
+            found[(rel, node.value[:_KEY_LEN])] += 1
     return found
 
 
+def _all_hits() -> Counter[tuple[str, str]]:
+    total: Counter[tuple[str, str]] = Counter()
+    for src in _production_sources():
+        total.update(_hits(src))
+    return total
+
+
 def test_no_production_module_spells_a_knowledge_path_outside_the_owner() -> None:
-    hits = [h for src in _production_sources() for h in _hits(src)]
-    unexplained = [f"{rel}:{line}: {value!r}" for rel, value, line in hits
-                   if (rel, value) not in ALLOWED]
-    assert unexplained == [], (
-        "build these through `defender._knowledge.KnowledgePaths`, or add the literal to "
-        "ALLOWED with why it is not a knowledge path:\n" + "\n".join(unexplained))
+    hits = _all_hits()
+    wrong = [f"{rel}: {value!r} occurs {n}x, allowed {ALLOWED.get((rel, value), (0, ''))[0]}"
+             for (rel, value), n in sorted(hits.items())
+             if n != ALLOWED.get((rel, value), (0, ""))[0]]
+    assert wrong == [], (
+        "build these through `defender._knowledge.KnowledgePaths`, or record the literal in "
+        "ALLOWED with its count and why it is not a knowledge path:\n" + "\n".join(wrong))
 
 
 def test_every_allowance_still_matches_a_hit() -> None:
     """An allowance whose literal is gone would excuse a future hit it was never about."""
-    seen = {(rel, value) for src in _production_sources() for rel, value, _ in _hits(src)}
-    assert sorted(set(ALLOWED) - seen) == []
+    assert sorted(set(ALLOWED) - set(_all_hits())) == []
+
+
+def test_the_census_sees_every_join_form(tmp_path: Path) -> None:
+    """Positive control: each join form, and a bare corpus name, is counted."""
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        "from pathlib import Path\n"
+        "a = root / 'lessons'\n"
+        "b = root.joinpath('skills', 'x')\n"
+        "c = Path(root, 'queries')\n"
+        "d = ('lessons-questioner', 'examples')\n"
+        "e = 'see defender/skills/elastic'\n",
+        encoding="utf-8",
+    )
+    tree = ast.parse(probe.read_text(encoding="utf-8"))
+    joins = [op.value for node in ast.walk(tree) for op in _joined_operands(node)
+             if isinstance(op, ast.Constant) and op.value in _JOIN_NAMES]
+    assert sorted(joins) == ["lessons", "queries", "skills"]
+    bare = [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant)
+            and isinstance(n.value, str) and n.value in _CORPUS_NAMES]
+    assert "lessons-questioner" in bare
 
 
 def test_the_checkout_paths_pass_through_to_the_owner() -> None:
     """`DefenderPaths` keeps its corpus names, and they are exactly the owner's."""
     knowledge = KnowledgePaths.of_defender_dir(PATHS.defender_dir)
-    assert PATHS.knowledge == knowledge
+    assert PATHS.knowledge == knowledge == CHECKOUT_KNOWLEDGE
     assert PATHS.lessons_dir == knowledge.lessons_dir == PATHS.defender_dir / LESSONS
     assert PATHS.lessons_questioner_dir == knowledge.corpus_dir(LESSONS_QUESTIONER)
     assert PATHS.catalog_dir == knowledge.catalog_dir == PATHS.defender_dir / CATALOG
     assert PATHS.skills_dir == knowledge.skills_dir
-    assert DefenderPaths.lessons_dir_rel == knowledge.rel(LESSONS) == f"{CHECKOUT_AGENT_REL}/lessons/"
+    assert DefenderPaths.lessons_dir_rel == knowledge.rel(LESSONS) == "defender/lessons/"
     assert DefenderPaths.lessons_questioner_dir_rel == knowledge.rel(LESSONS_QUESTIONER)
-    assert DefenderPaths.catalog_rel == knowledge.catalog_rel == checkout_rel(CATALOG)
+    assert DefenderPaths.catalog_rel == knowledge.catalog_rel == CHECKOUT_KNOWLEDGE.rel(CATALOG)
     assert DefenderPaths.skills_rel == knowledge.skills_rel
 
 

@@ -20,7 +20,7 @@ from pydantic_ai.exceptions import (
     ToolRetryError,
 )
 
-from defender._knowledge import SKILLS, checkout_rel
+from defender._knowledge import CHECKOUT_KNOWLEDGE
 from defender.hooks.budget_enforcer import BudgetKill
 from defender._text import as_str
 from defender._untrusted import wrap_fresh
@@ -668,7 +668,7 @@ _LIST_VERBS_UNKNOWN_SYSTEM = (
 )
 
 #: Where a system's skill sits, as the model-facing notes below name it (`defender._knowledge`).
-_SKILLS_REL = checkout_rel(SKILLS)
+_SKILLS_REL = CHECKOUT_KNOWLEDGE.skills_rel
 
 #: Reached only for a name that passed `_adapter_path_under`'s checks, so interpolating it into
 #: a path is safe. `execution.md` holds only value constraints and pitfalls, not verbs.

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from defender._git import REPO_ROOT
 from defender._model import model
 
 #: The defender's runtime corpus: what the runtime agent loads at PLAN and on its pushes.
@@ -43,14 +44,7 @@ SKILLS = "skills"
 CATALOG = f"{SKILLS}/gather/queries"
 
 #: Where the agent root sits inside the product checkout until #1108 moves it out.
-CHECKOUT_AGENT_REL = "defender"
-
-
-def checkout_rel(sub: str) -> str:
-    """The checkout-relative spelling of a knowledge folder, with a trailing slash
-    (`checkout_rel(LESSONS)` is `defender/lessons/`), for a `git` pathspec or a commit gate
-    that names the folder before any `KnowledgePaths` exists."""
-    return f"{CHECKOUT_AGENT_REL}/{sub}/"
+_CHECKOUT_AGENT_REL = "defender"
 
 
 @model(frozen=True)
@@ -67,7 +61,7 @@ class KnowledgePaths:
     def of_defender_dir(cls, defender_dir: Path) -> KnowledgePaths:
         """The knowledge inside the code tree at `defender_dir` (a checkout's or a worktree's
         `defender/`), where it lives until #1108 moves it into the tenant's repo."""
-        return cls(agent_root=Path(defender_dir), agent_rel=CHECKOUT_AGENT_REL)
+        return cls(agent_root=Path(defender_dir), agent_rel=_CHECKOUT_AGENT_REL)
 
     def corpus_dir(self, corpus: str) -> Path:
         """A lesson corpus by name (one of `LESSON_CORPORA`, or a retired corpus)."""
@@ -107,3 +101,9 @@ class KnowledgePaths:
     @property
     def catalog_rel(self) -> str:
         return self.rel(CATALOG)
+
+
+#: The knowledge the running checkout carries. Every import-time reader of the knowledge (a
+#: module-level default, a `git` pathspec, a spelling in model-facing text) goes through this
+#: one value, so #1108's move re-points them in one place.
+CHECKOUT_KNOWLEDGE = KnowledgePaths.of_defender_dir(REPO_ROOT / "defender")

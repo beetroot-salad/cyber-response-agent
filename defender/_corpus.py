@@ -394,13 +394,6 @@ def _memoized_template(text: str, path: Path) -> tuple[QueryTemplate | None, str
     ), ""
 
 
-def query_catalog_dir(defender_dir: Path) -> Path:
-    """The query catalog of the tree at `defender_dir` (its `KnowledgePaths`, #1108)."""
-    from defender._knowledge import KnowledgePaths
-
-    return KnowledgePaths.of_defender_dir(Path(defender_dir)).catalog_dir
-
-
 def _template_names(view: Bound, where: Path) -> list[str]:
     """The catalog's template names, `<sys>/*.md` and `<sys>/_draft/*.md`, by name whatever
     stands there, in path order, from one listing of the catalog's fixed shape (three levels).

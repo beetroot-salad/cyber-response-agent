@@ -5,7 +5,7 @@ from typing import ClassVar
 
 from defender._git import REPO_ROOT
 from defender._knowledge import (
-    CATALOG, LESSONS, LESSONS_QUESTIONER, SKILLS, KnowledgePaths, checkout_rel,
+    CATALOG, CHECKOUT_KNOWLEDGE, LESSONS, LESSONS_QUESTIONER, SKILLS, KnowledgePaths,
 )
 from defender._model import model
 
@@ -34,13 +34,13 @@ class DefenderPaths:
 
     # The corpus spellings and folders below are pass-throughs: `defender._knowledge` owns
     # the knowledge layout (#1108), and the knowledge still sits inside the checkout.
-    catalog_rel: ClassVar[str] = checkout_rel(CATALOG)
-    skills_rel: ClassVar[str] = checkout_rel(SKILLS)
+    catalog_rel: ClassVar[str] = CHECKOUT_KNOWLEDGE.rel(CATALOG)
+    skills_rel: ClassVar[str] = CHECKOUT_KNOWLEDGE.rel(SKILLS)
     adapters_rel: ClassVar[str] = "defender/scripts/adapters/"
-    lessons_dir_rel: ClassVar[str] = checkout_rel(LESSONS)
+    lessons_dir_rel: ClassVar[str] = CHECKOUT_KNOWLEDGE.rel(LESSONS)
     #: The questioner's own corpus — findings about a world, never a lesson for the defender,
     #: so kept separate from `lessons_dir_rel`.
-    lessons_questioner_dir_rel: ClassVar[str] = checkout_rel(LESSONS_QUESTIONER)
+    lessons_questioner_dir_rel: ClassVar[str] = CHECKOUT_KNOWLEDGE.rel(LESSONS_QUESTIONER)
 
     @property
     def defender_dir(self) -> Path:

@@ -198,7 +198,8 @@ def test_one_of_two_consumers_of_a_moved_module_is_repointed_and_the_other_is_no
 
 def test_1080_values_derived_from_a_moved_files_location_resolve_as_before():
     """After the move, each of these resolves to the same directory or file as at the base:
-    `lessons_fm.REPO_ROOT`, `lessons_frontier.REPO_ROOT` and `_venv`'s `_DEFENDER_DIR`. (The
+    `lessons_fm.REPO_ROOT`, `lessons_frontier.DEFAULT_CORPUS`'s checkout and `_venv`'s
+    `_DEFENDER_DIR`. (The
     2026-10-04 scope cut keeps these three cells; `mirror_root()`'s default, `_MIRROR_WRITER`,
     `visualize_primitives.REPO_ROOT` / `ASSETS` and `workspace_map`'s `DEFENDER_DIR` belong to
     modules that stay in `scripts/`, parked with #1105.)
@@ -208,7 +209,9 @@ def test_1080_values_derived_from_a_moved_files_location_resolve_as_before():
     g = _g("location_values")
     assert Path(S.moved_module("cmd_tags").REPO_ROOT).resolve() \
         == (S.REPO_ROOT / g["lessons_fm_REPO_ROOT"]).resolve()
-    assert Path(S.moved_module("WRITE_RETURN_LEAD").REPO_ROOT).resolve() \
+    # `lessons_frontier` no longer derives a root from its own location: its default corpus
+    # comes from `defender._knowledge` (#1108), so the cell checks that corpus's checkout.
+    assert Path(S.moved_module("WRITE_RETURN_LEAD").DEFAULT_CORPUS).resolve().parents[1] \
         == (S.REPO_ROOT / g["lessons_frontier_REPO_ROOT"]).resolve()
     assert Path(S.moved_module("reexec_into_venv", home=S.FLAT_TIER)._DEFENDER_DIR).resolve() \
         == (S.REPO_ROOT / g["venv_DEFENDER_DIR"]).resolve()

@@ -204,7 +204,8 @@ def check_config(report: Report, settings_dir: Path, system: str) -> None:
 
 
 def check_skill(report: Report, defender: Path, system: str) -> None:
-    skill = KnowledgePaths.of_defender_dir(defender).system_skill_dir(system) / "SKILL.md"
+    skill_dir = KnowledgePaths.of_defender_dir(defender).system_skill_dir(system)
+    skill = skill_dir / "SKILL.md"
     if not skill.exists():
         report.add(FAIL, f"per-system skill skills/{system}/SKILL.md is missing")
         return
@@ -216,7 +217,7 @@ def check_skill(report: Report, defender: Path, system: str) -> None:
     else:
         report.add(PASS, f"skills/{system}/SKILL.md has frontmatter name: defender-{system}")
 
-    execution = KnowledgePaths.of_defender_dir(defender).system_skill_dir(system) / "execution.md"
+    execution = skill_dir / "execution.md"
     has_inline = text is not None and "## Execution" in text
     if execution.exists():
         report.add(PASS, f"skills/{system}/execution.md exists")

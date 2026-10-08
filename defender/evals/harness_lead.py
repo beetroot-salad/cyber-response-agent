@@ -45,14 +45,15 @@ def materialize(scenario: Path, tmp: Path) -> Path:
     # The copied learning tree imports this shared frame primitive directly.
     shutil.copy(REAL_DEFENDER / "_untrusted.py", tmp / "defender" / "_untrusted.py")
 
+    real = KnowledgePaths.of_defender_dir(REAL_DEFENDER)
+    scratch = KnowledgePaths.of_defender_dir(tmp / "defender")
     shutil.copytree(
-        KnowledgePaths.of_defender_dir(REAL_DEFENDER).catalog_dir,
-        KnowledgePaths.of_defender_dir(tmp / "defender").catalog_dir,
+        real.catalog_dir, scratch.catalog_dir,
     )
     adapters_dst = tmp / "defender" / "scripts" / "adapters"
     adapters_dst.mkdir(parents=True)
-    for skill in sorted(KnowledgePaths.of_defender_dir(REAL_DEFENDER).skills_dir.glob("*/SKILL.md")):
-        dst = KnowledgePaths.of_defender_dir(tmp / "defender").system_skill_dir(skill.parent.name) / "SKILL.md"
+    for skill in sorted(real.skills_dir.glob("*/SKILL.md")):
+        dst = scratch.system_skill_dir(skill.parent.name) / "SKILL.md"
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(skill, dst)
         # The materialized tree has no adapters dir, so the declared-systems resolver would
@@ -64,7 +65,7 @@ def materialize(scenario: Path, tmp: Path) -> Path:
     overlay = scenario / "catalog_overlay"
     if overlay.is_dir():
         shutil.copytree(
-            overlay, KnowledgePaths.of_defender_dir(tmp / "defender").catalog_dir,
+            overlay, scratch.catalog_dir,
             dirs_exist_ok=True,
         )
 

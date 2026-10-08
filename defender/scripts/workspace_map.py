@@ -10,7 +10,7 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender._corpus import iter_query_templates  # noqa: E402
-from defender._knowledge import KnowledgePaths  # noqa: E402
+from defender._knowledge import CHECKOUT_KNOWLEDGE  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
 from defender.run_repository import RUN_LAYOUT  # noqa: E402
 
@@ -81,7 +81,7 @@ def workspace_map(run_dir: Path, *, systems: Sequence[str]) -> str:
         lines.append("- (not yet materialized)")
     lines.append("")
 
-    skills_dir = KnowledgePaths.of_defender_dir(DEFENDER_DIR).skills_dir
+    skills_dir = CHECKOUT_KNOWLEDGE.skills_dir
     lines.append(f"## System skills — `{_rel(skills_dir)}/`")
     for name in _list_dir(skills_dir):
         sk = skills_dir / name / "SKILL.md"
@@ -97,7 +97,7 @@ def workspace_map(run_dir: Path, *, systems: Sequence[str]) -> str:
         lines.append("- (none declared)")
     lines.append("")
 
-    queries_dir = KnowledgePaths.of_defender_dir(DEFENDER_DIR).catalog_dir
+    queries_dir = CHECKOUT_KNOWLEDGE.catalog_dir
     lines.append(f"## Gather query templates — `{_rel(queries_dir)}/`")
     lines.extend(_template_counts(queries_dir))
     lines.append("")

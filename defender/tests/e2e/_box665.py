@@ -369,6 +369,9 @@ class RecordingBranch:
     `start_batch` mints a real temp leaf dir; `finish_batch` is the supply-chain step
     (commit+push+PR) whose ordering vs box teardown S7 pins."""
 
+    #: What the real `AuthorBranch` cuts a batch from (its default); a box-start fault names it.
+    branch_base = "origin/main"
+
     def __init__(self, worktree_base: Path, *, branch_prefix: str = "lessons/",
                  events: list | None = None, destroy_on_cleanup: bool = False):
         self.branch_prefix = branch_prefix

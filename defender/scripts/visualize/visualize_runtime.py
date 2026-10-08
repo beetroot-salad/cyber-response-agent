@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from defender import _git
-from defender._knowledge import LESSONS, checkout_rel
+from defender._knowledge import CHECKOUT_KNOWLEDGE, LESSONS
 from defender._report import ReportRead
 from defender._vocab import CEILING_DISPOSITION, HOST_ONLY_DISPOSITION, normalized_disposition
 from defender.run_repository import RUN_LAYOUT, RunPaths
@@ -32,7 +32,7 @@ from defender.scripts.visualize.visualize_primitives import (
 
 
 #: The lessons corpus as a pathspec of the checkout (`defender._knowledge`).
-_LESSONS_PATHSPEC = checkout_rel(LESSONS)
+_LESSONS_PATHSPEC = CHECKOUT_KNOWLEDGE.rel(LESSONS)
 
 
 def _wire_log_rel() -> str:

@@ -31,9 +31,9 @@ from defender._knowledge import KnowledgePaths
 from defender.runtime.payload_view import (
     passthrough_max_bytes as _capture_view_cap,
 )
+from defender._knowledge import RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA
 from defender.hooks.record_lesson_load import (
     LOAD_KINDS as _LOAD_KINDS,
-    RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA,
     lesson_name as _lesson_name,
 )
 

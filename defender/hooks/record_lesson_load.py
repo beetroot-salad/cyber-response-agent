@@ -6,12 +6,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from defender._clock import parse_iso_utc
-from defender._knowledge import LESSON_CORPORA, RUNTIME_LESSON_CORPORA
+from defender._knowledge import LESSON_CORPORA
 from defender.runtime.agent_role import AgentRole
 
-# The corpus-name sets are `defender._knowledge`'s (#1108), re-exported for this module's
-# readers.
-__all__ = ["LESSON_CORPORA", "RUNTIME_LESSON_CORPORA"]
 
 
 def lesson_name(file_path: str, corpora: frozenset[str] = LESSON_CORPORA) -> str | None:
