@@ -4906,23 +4906,10 @@ demands:
   source: 70-resolutions.md (section 7, 2026-10-03, human via AskUserQuestion) - the safe-by-construction demand spawned by
     H6 and H7 (R5 tightening extension)
 - id: cmd_tags_flattens_a_hostile_tag_value
-  parked:
-    preserved_test: spec-flow/specs/parked/1080/parked_lessons_engine.py::test_1080_a_line_break_in_a_lesson_tag_value_forges_no_dimension_block_in_tags_output
-    preserved_note: 'Moved out of the suite (not collected: the file name does not match test_*.py) by the 2026-10-04 cut author; the clause carries the seed as its outcome until the owner adopts the test into its own spec and restores form: test.'
-    owner: lessons --tags fix follow-up (new issue, to be filed)
-    cut: 2026-10-04 scope cut (decomposition, human-decided)
-    group: H8 (b)
-    reason: 'H8 (b) is a behavior change, not a move: a newline inside a lesson tag value lets defender-lessons --tags
-      print a forged block (GT7, GR10). With H8 parked the --tags goldens stay at the base for every value.'
+  adopted: '#1206 restored form: test (it was parked by the 2026-10-04 scope cut, owner "lessons --tags fix follow-up", group H8 (b)).'
   kind: negative
-  form: clause
-  outcome:
-    nl: A lesson whose `source_signature`, `telemetry_source` or `attack_phase` frontmatter value contains a line break (a double-quoted YAML string
-      with an escaped newline, and a block scalar) is listed by `defender-lessons --tags` on one line under its own dimension, the break flattened
-      the way `_emit_match` flattens a description. The output holds no column-0 dimension header that the corpus did not declare (no forged `attack_phase:`
-      or `source_signature:` block), and the `### Viable tags` text that orient splices from it into message zero holds the same single line. An
-      ordinary value lists byte for byte as at the base. The deterministic write gate admits such a value (GR10), so the render site is the barrier
-      this change owns.
+  form: test
+  discharged_by: test_1080_a_line_break_in_a_lesson_tag_value_forges_no_dimension_block_in_tags_output
   binds:
   - lessons_fm
   - message_zero

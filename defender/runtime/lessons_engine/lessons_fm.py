@@ -48,8 +48,14 @@ LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
 DIMENSIONS = ("source_signature", "telemetry_source", "attack_phase")
 
 
+def _one_line(value: object) -> str:
+    """A frontmatter value as one printed line: a line break inside it would let a lesson forge
+    lines the caller reads as its own (a `--tags` dimension header, a listing row)."""
+    return flatten_cell(str(value)).strip()
+
+
 def _emit_match(path: Path, fm: dict) -> None:
-    desc = flatten_cell(str(fm.get("description") or "")).strip()
+    desc = _one_line(fm.get("description") or "")
     print(f"{path.resolve()}\t{desc}")
 
 
@@ -75,7 +81,8 @@ def cmd_tags(field: str | None) -> int:
         counts: dict[str, int] = {}
         for lesson in lessons:
             for val in as_list(lesson.fm.get(f)):
-                counts[str(val)] = counts.get(str(val), 0) + 1
+                tag = _one_line(val)
+                counts[tag] = counts.get(tag, 0) + 1
         print(f"{f}:")
         for val in sorted(counts):
             print(f"  {val:<32} {counts[val]}")
