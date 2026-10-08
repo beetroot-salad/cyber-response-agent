@@ -12,6 +12,7 @@ from typing import Any, TypeAlias
 
 from defender._io import ENTRY_OTHER, Bound, bind
 from defender._model import model
+from defender._text import one_line
 from defender._tree_listing import TreeListing, list_tree
 
 _logger = logging.getLogger(__name__)
@@ -29,6 +30,15 @@ PROVENANCE_KEYS = frozenset(
 )
 
 
+#: A lesson's text is corpus text a model wrote, so a caller takes it in the form its destination
+#: needs (#1206): `Lesson.line` / `Lesson.lines` for a printed line or listing row, where a line
+#: break or a terminal control would forge rows; `Lesson.match_text` for what a search pattern
+#: runs over, built from the same one-line values so a listed value is a findable one; and, for
+#: model context, that text inside a `defender._untrusted` frame, as the alert is. `fm`, `raw`
+#: and `body` stay for matching, authoring and the HTML views, which need the raw values;
+#: `scripts/lint/lint_lesson_text.py` asks each such use to say so.
+
+
 @model(frozen=True)
 class Lesson:
 
@@ -38,6 +48,53 @@ class Lesson:
     fm: dict[Any, Any]
     raw: str
     body: str
+
+    def line(self, key: str) -> str:
+        """The `key` value as one printed line; `""` when it is absent."""
+        value = self.fm.get(key)
+        return one_line(str(value)) if value is not None else ""
+
+    def lines(self, key: str) -> list[str]:
+        """The `key` list's values (a scalar is a one-item list), each as one printed line,
+        blank ones dropped."""
+        return _one_lines(self.fm.get(key))
+
+    def match_text(self) -> str:
+        """The frontmatter as a search runs over it: each key twice, on its own line — as the
+        file spells it, its continuation lines joined on, so a search that matched the text as
+        written still matches; and as `Lesson.lines` prints it (`key: [a, b]` for a list), so a
+        listed value is a findable one. A pattern cannot run from one key into the next."""
+        listed = []
+        for key, value in self.fm.items():
+            shown = (f"[{', '.join(_one_lines(value))}]" if isinstance(value, list)
+                     else one_line(str(value)) if value is not None else "")
+            listed.append(f"{one_line(str(key))}: {shown}")
+        return "\n".join(dict.fromkeys([*_written_key_lines(self.raw), *listed]))
+
+
+#: A top-level frontmatter key starting its line; anything else continues the key above it.
+_TOP_KEY = re.compile(r"[^\s#-][^:]*:")
+
+
+def _written_key_lines(raw: str) -> list[str]:
+    keys: list[str] = []
+    for ln in raw.splitlines():
+        if _TOP_KEY.match(ln) or not keys:
+            keys.append(ln)
+        else:
+            keys[-1] += " " + ln
+    return [one_line(k) for k in keys]
+
+
+def as_list(v: Any) -> list:
+    """A frontmatter value as a list: `None` is none, a scalar is one item."""
+    if v is None:
+        return []
+    return v if isinstance(v, list) else [v]
+
+
+def _one_lines(value: Any) -> list[str]:
+    return [s for s in (one_line(str(v)) for v in as_list(value)) if s]
 
 
 #: What every shared reader takes as its tree (#1134 A4): a `Bound` the caller holds, or a `Path`.
@@ -103,6 +160,17 @@ def _lesson_names(view: Bound, where: Path) -> list[str]:
             if name.endswith(".md") and not name.startswith("_")]
 
 
+def _printable_name(path: Path) -> bool:
+    """Whether a lesson's file name prints as itself on one line. A listed path must be one the
+    model can Read as printed (#1206): a line break or control character in a name would print
+    as a forged row, or flattened as a path that is not there. The write gate admits no such
+    name; one placed by hand is refused, loudly, and the walk goes on."""
+    if one_line(path.name) == path.name:
+        return True
+    _logger.error(f"error: refusing lesson {path.name!r} (its file name is not one printable line)")
+    return False
+
+
 def iter_lesson_paths(corpus: Tree, *, where: Path | None = None) -> list[Path]:
     """The corpus' lesson files — every `*.md` directly in it whose name does not start `_` —
     sorted, each spelled `<where>/<name>` (see `Tree`; for a `Path`, today's spelling). Selected
@@ -110,7 +178,8 @@ def iter_lesson_paths(corpus: Tree, *, where: Path | None = None) -> list[Path]:
     lists nothing."""
     spelled = _spelled(corpus, where)
     with _viewed(corpus) as view:
-        return [spelled / name for name in _lesson_names(view, spelled)]
+        return [p for p in (spelled / name for name in _lesson_names(view, spelled))
+                if _printable_name(p)]
 
 
 def iter_lessons(
@@ -135,6 +204,10 @@ def _lessons(corpus: Tree, spelled: Path, label: Callable[[Path], str],
     with _viewed(corpus) as view:
         for name in _lesson_names(view, spelled):
             path = spelled / name
+            if not _printable_name(path):
+                if on_skip is not None:
+                    on_skip(path)
+                continue
             text, reason = _read_text(view, name, path)
             if text is not None:
                 try:

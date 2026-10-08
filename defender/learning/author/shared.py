@@ -64,7 +64,7 @@ def existing_finding_ids(cfg: Any) -> set[str]:
         cfg.corpus.view(), where=cfg.corpus_dir,
         warn_label=lambda p: f"finding-id pre-flight: {p.name}",
     ):
-        sids = lesson.fm.get(field) or []
+        sids = lesson.fm.get(field) or []  # lint-lesson-text: ok — ids compared as set members, never printed
         if isinstance(sids, list):
             ids.update(sid for sid in sids if isinstance(sid, str))
     return ids
@@ -351,7 +351,7 @@ def build_corpus_manifest(
         corpus, where=where, warn_label=lambda p: f"corpus manifest: {p.name}",
         on_skip=skipped.append,
     ):
-        kept = {k: v for k, v in lesson.fm.items() if k not in PROVENANCE_KEYS}
+        kept = {k: v for k, v in lesson.fm.items() if k not in PROVENANCE_KEYS}  # lint-lesson-text: ok — the manifest reaches the curator only inside its curator_context frame
         rendered = _yaml.safe_dump(
             kept, sort_keys=True, default_flow_style=False, allow_unicode=True
         )

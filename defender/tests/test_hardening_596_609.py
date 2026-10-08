@@ -546,7 +546,9 @@ def test_d_a14b_filename_id_columns_survive_breakers(tmp_path, capsys):
     cap = capsys.readouterr()
     assert rc == 0
     [row] = cap.out.splitlines()
-    assert row.split("\t") == ["st em", "d", "1", "0"]
+    # The loader refuses a lesson whose file name is not one printable line (#1206); the index
+    # still counts its loads, on the malformed-lesson row, its name one line.
+    assert row.split("\t") == ["st em", "(malformed lesson — unwindowed count)", "1", "0"]
 
     rc = tl.main(["st\tem", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
     cap = capsys.readouterr()

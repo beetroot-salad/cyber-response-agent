@@ -4,7 +4,7 @@ import argparse
 import os
 from pathlib import Path
 
-from defender._corpus import iter_lessons
+from defender._corpus import as_list, iter_lessons
 from defender._io import use_utf8_stdio
 
 # No `reexec_into_venv` re-export: this module imports pydantic (via `_corpus`/`_io`), which is
@@ -13,12 +13,6 @@ __all__ = [
     "iter_lessons", "use_utf8_stdio",
     "as_list", "as_str_set", "csv_set", "rel_to_repo", "resolve_corpus",
 ]
-
-
-def as_list(v) -> list:
-    if v is None:
-        return []
-    return v if isinstance(v, list) else [v]
 
 
 def as_str_set(v) -> set[str]:

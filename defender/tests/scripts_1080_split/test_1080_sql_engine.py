@@ -145,7 +145,7 @@ _PREFIX_WARNING = re.compile(
 def _norm(text: str, subs: Sequence[tuple[Path | str, str]] = ()) -> str:
     """Tokens for every machine- or run-specific spelling: each `(path, token)` in `subs` (both
     the spelling given and its resolved form) and the checkout root (`<ROOT>`), longest first;
-    duckdb's scratch folder (`<SCRATCH>`); a traceback reduced to its final `Type: message`
+    duckdb's scratch folder (`<SCRATCH>`); an untrusted frame's salt (`<SALT>`); a traceback reduced to its final `Type: message`
     line, since its frames name the file and line that the move changes; and the interpreter's
     prefix warnings (`_PREFIX_WARNING`) dropped."""
     text = _PREFIX_WARNING.sub("", text)
@@ -157,6 +157,8 @@ def _norm(text: str, subs: Sequence[tuple[Path | str, str]] = ()) -> str:
     for real in sorted(pairs, key=len, reverse=True):
         text = text.replace(real, pairs[real])
     text = _SCRATCH.sub("<SCRATCH>", text)
+    # `defender-lessons --show` frames each lesson with a fresh salt (#1206).
+    text = re.sub(r"<(/?)run-[0-9a-f]{16}-untrusted>", r"<\1run-<SALT>-untrusted>", text)
     if _TRACEBACK in text:
         head, _, tail = text.partition(_TRACEBACK)
         last = [ln for ln in tail.splitlines() if ln.strip()][-1]

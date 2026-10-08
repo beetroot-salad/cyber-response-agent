@@ -52,7 +52,7 @@ from defender.hooks.record_lesson_load import EVIDENCE_READ, exposures
 from defender._io import read_jsonl_rows, read_text_soft, use_utf8_stdio
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._report import UNKNOWN_DISPOSITION, read_report
-from defender._tsv import flatten_cell as _flatten
+from defender._text import one_line
 from defender.run_repository import RunPaths
 from defender.learning.core.config import DEFAULT_PATHS
 
@@ -61,7 +61,7 @@ LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
 
 
 def _echo_value(raw: object) -> str:
-    flat = _flatten(str(raw))
+    flat = one_line(str(raw))
     if len(flat) > 80:
         flat = flat[:80] + "…"
     return f'"{flat}"'
@@ -107,7 +107,7 @@ def _report_disposition(run_dir: Path) -> str:
     read = read_report(report)
     if read.reason is not None:
         # Flattened: the reason can quote model-authored bytes, which could forge rows.
-        print(f"warn: {_flatten(run_dir.name)}/{_flatten(read.reason)} — disposition unknown",
+        print(f"warn: {one_line(run_dir.name)}/{one_line(read.reason)} — disposition unknown",
               file=sys.stderr)
     return read.disposition_or_unknown
 
@@ -138,16 +138,16 @@ def _print_index(lessons_dir: Path, runs_dir: Path) -> None:
     skipped: list[Path] = []
     for lesson in iter_lessons(lessons_dir, on_skip=skipped.append):
         name = lesson.path.stem
-        raw_created = lesson.fm.get("created_at")
+        raw_created = lesson.fm.get("created_at")  # lint-lesson-text: ok — parsed as a date; a bad value prints through one_line
         created_at = _parse_dt(raw_created)
         cases = in_context_cases(name, created_at, runs_dir)
-        desc = _flatten(str(lesson.fm.get("description") or "")).strip()
+        desc = lesson.line("description")
         if created_at is None:
             desc = f"{desc} ({_unwindowed_reason(raw_created)} — unwindowed count)"
-        print(f"{_flatten(name)}\t{desc}\t{len(cases)}\t{_main_read_count(cases)}")
+        print(f"{one_line(name)}\t{desc}\t{len(cases)}\t{_main_read_count(cases)}")
     for path in skipped:
         cases = in_context_cases(path.stem, None, runs_dir)
-        print(f"{_flatten(path.stem)}\t(malformed lesson — unwindowed count)\t{len(cases)}"
+        print(f"{one_line(path.stem)}\t(malformed lesson — unwindowed count)\t{len(cases)}"
               f"\t{_main_read_count(cases)}")
 
 
@@ -201,11 +201,11 @@ def main(argv: list[str]) -> int:
               file=sys.stderr)
     hits = in_context_cases(path.stem, created_at, runs_dir)
     since = str(created_at) if created_at is not None else f"? ({_unwindowed_reason(raw_created)})"
-    print(f"# {_flatten(path.stem)} — {len(hits)} case(s) in context since {since}")
+    print(f"# {one_line(path.stem)} — {len(hits)} case(s) in context since {since}")
     for h in hits:
-        # Every cell flattened, closed-vocabulary ones included — one rule for the row.
-        print(f"{_flatten(h.case_id)}\t{_flatten(h.disposition)}\t{_flatten(h.loaded_at)}"
-              f"\t{_flatten(h.evidence)}")
+        # Every cell one line (the lesson loader's rule), closed-vocabulary ones included.
+        print(f"{one_line(h.case_id)}\t{one_line(h.disposition)}\t{one_line(h.loaded_at)}"
+              f"\t{one_line(h.evidence)}")
     return 0
 
 
