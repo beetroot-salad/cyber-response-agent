@@ -116,11 +116,10 @@ def open_case_ticket(
 
 
 #: The receipt words: `commented` (the record) and `escalated` (the cut-short note) are the two
-#: comments the host can make; `refused-released` means a person had already released the case;
-#: `error` is a failed call. There is no `closed`: the host never transitions a case.
+#: comments the host can make; `error` is a failed call. There is no `closed`: the host never
+#: transitions a case.
 RECEIPT_COMMENTED = "commented"
 RECEIPT_ESCALATED = "escalated"
-RECEIPT_REFUSED_RELEASED = "refused-released"
 RECEIPT_ERROR = "error"
 _RECEIPT_OK = frozenset({RECEIPT_COMMENTED, RECEIPT_ESCALATED})
 
@@ -142,46 +141,6 @@ def _build_comment_payload(
                     RECEIPT_ESCALATED)
         return case_ticket.unreadable_comment_payload(mapping=mapping), RECEIPT_COMMENTED
     return case_ticket.case_record_to_comment(rec, mapping=mapping), RECEIPT_COMMENTED
-
-
-def _ticket_is_released(  # noqa: PLR0913 — one call site's context, threaded not re-derived
-    config: dict[str, str], deps: TicketWriterDeps, case_id: str, quoted: str,
-    ctx: VerbContext,
-) -> tuple[bool | None, str]:
-    """Read the case back and answer `(released, why_not)`: whether a person has released it —
-    `None` when that cannot be established (the read failed, the reply is not a ticket object, or
-    the mapping cannot say what "released" is spelled), with `why_not` the reason in the failing
-    check's own words (empty when it could be established).
-
-    A person's close is a statement about the comments ON THE TICKET WHEN THEY CLOSED IT, so
-    the writer looks before it appends and declines when the case is already released.
-    This is a COURTESY, not the gate: it is one read followed by one write, and a close that
-    lands between the two still gets the comment. What makes `closed` mean "a person did this"
-    is that the host cannot transition a case at all — this module has no transition call, and
-    `test_767_writer.py` keeps it that way — not this check. Undecidable reads as released,
-    the direction that writes nothing. The released status's spelling is the mapping's
-    (`case_ticket.release_predicate`, O5)."""
-    status, body = deps.request(config, "GET", f"/tickets/{quoted}", ctx=ctx)
-    if status is None or not status.startswith("2"):
-        why = f"could not read the case back ({status or 'transport error'}: {body})"
-        _logger.warning(f"record {case_id}: {why}; not recording")
-        return None, why
-    try:
-        ticket = json.loads(body)
-    except json.JSONDecodeError:
-        why = "the case read back is not JSON"
-        _logger.warning(f"record {case_id}: {why}; not recording")
-        return None, why
-    if not isinstance(ticket, dict):
-        why = "the case read back is not a ticket object"
-        _logger.warning(f"record {case_id}: {why}; not recording")
-        return None, why
-    try:
-        return case_ticket.release_predicate(ctx.tenant.ticket_mapping).is_released(ticket), ""
-    except case_ticket.CaseTicketError as e:
-        why = f"{e}; cannot tell whether the case is released"
-        _logger.warning(f"record {case_id}: {why}; not recording")
-        return None, why
 
 
 def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exit record (#1047)
@@ -271,22 +230,12 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
     run_dir: Path, deps: TicketWriterDeps, config: dict[str, str], case_id: str,
     payload: dict, word: str, ctx: VerbContext,
 ) -> None:
-    """The one write the host makes to a case: check `_ticket_is_released`, one
-    `POST /tickets/{key}/comments` whose body opens with the agent tag naming this run
-    (`case_ticket.posted_comment`, #1221 — here, so no comment kind can leave untagged), and a
-    receipt on every branch."""
+    """The one write the host makes to a case: one `POST /tickets/{key}/comments` whose body
+    opens with the agent tag naming this run (`case_ticket.posted_comment`, #1221 — here, so no
+    comment kind can leave untagged), and a receipt either way. No read-back first: whether a
+    person has closed the case changes nothing, since every comment is served to later runs
+    and ours are tagged (#1221 A1)."""
     quoted = urllib.parse.quote(case_id, safe="")
-    released, why_not = _ticket_is_released(config, deps, case_id, quoted, ctx)
-    if released is None:
-        _write_receipt(run_dir, config, case_id, RECEIPT_ERROR,
-                       redact_settings_path(why_not, ctx.tenant.settings))
-        return
-    if released:
-        _logger.warning(f"record {case_id}: a person has already released this case; a new comment "
-              "would go out under that release unseen — not recording")
-        _write_receipt(run_dir, config, case_id, RECEIPT_REFUSED_RELEASED,
-                       "a person has already released this case; no comment was added")
-        return
     payload = case_ticket.posted_comment(payload, run_id=run_dir.name)
     status, body = deps.request(config, "POST", f"/tickets/{quoted}/comments", payload, ctx=ctx)
     ok = status is not None and status.startswith("2")

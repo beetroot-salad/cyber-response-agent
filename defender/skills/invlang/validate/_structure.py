@@ -34,12 +34,19 @@ def _cell(record: Mapping[str, object], key: str) -> str:
     return _unquote(value.strip()).strip() if isinstance(value, str) else ""
 
 
+#: The `grounding` that leans on an earlier run's verdict. Whether a `:R authz` row IS a past
+#: case is decided by its `cites_past_case` cell (rule #27), never by this word; the word is
+#: still refused where a past case is never admissible (impact, consultations).
+PAST_CASE = "past-case"
+
+
 def _folded_grounding(value: str) -> str:
-    """A `grounding` cell folded for one exact-match refusal: lowercased, with underscores and
-    whitespace read as hyphens. The identity on anything correctly written. Not for a cell
-    another check reads by value, where folding would hide the difference it reads.
+    """A `grounding` cell folded for one exact-match refusal: lowercased, with any run of
+    underscores, whitespace and hyphens read as one hyphen. The identity on anything correctly
+    written. Not for a cell another check reads by value, where folding would hide the
+    difference it reads.
     """
-    return re.sub(r"[\s_]+", "-", value.strip().lower())
+    return re.sub(r"[\s_-]+", "-", value.strip().lower())
 
 
 #: The two destinations an `advance_to` may name that are not a lead. `CONCLUDE` ends the run;
@@ -241,7 +248,7 @@ def _check_impact_resolution_refs(companion: CompanionBody) -> list[str]:
                 f"landed inside the registered threshold, not what was measured",
             )
             grounding = _cell(row, "grounding_kind")
-            if grounding == "past-case":
+            if _folded_grounding(grounding) == PAST_CASE:
                 errors.append(
                     f"{where}: `grounding past-case` — impact is per-instance reasoning about "
                     f"what THIS event did, and a past case establishes only what a CATEGORY "

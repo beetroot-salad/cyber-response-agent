@@ -24,18 +24,17 @@ what manufactures the read PR's fixtures.
   pre-exists when the alert is raised; the defender investigates and RECORDS its
   findings onto it as a comment; a person reviews the case and closes it. Modeled
   as a thin **bridge** (open ticket at `materialize_run`) + a post-run
-  **comment**. The close is the person's act and doubles as the release: a later
-  run's gather is served a case's comments only once its status is the mapping's
-  `released.status` (`closed`). What makes that status MEAN "a person did this" is
+  **comment**. The close is the person's act. (Until #1221 it also released the
+  case's comments to later runs; now every comment is served, and the host's own
+  open with the agent tag naming their run, so a later run reads them as past
+  cases.) What makes a close MEAN "a person did this" is
   structural, not a check: the defender's client has no transition call at all —
   create and comment are the only writes it can make, and `test_767_writer.py` /
   `test_1047_ticket_lane.py` keep it that way. (In a real store this is the
   agent credential's permission scheme; in the playground, which has no auth, the
-  client is the enforcement.) The writer also looks before it appends — one
-  read-back, and a `refused-released` receipt if the case is already closed — but
-  that is a courtesy against commenting on a case the person has finished with,
-  not the gate: a close landing between the read and the write still gets the
-  comment. Idempotency still falls out: create-once (a replay's `POST /tickets`
+  client is the enforcement.) The writer does not read the case back before it
+  appends (#1221 A1): a comment can land on a case a person already closed.
+  Idempotency still falls out: create-once (a replay's `POST /tickets`
   returns 409 = already there); a re-run of an open case appends a second
   comment, which the person's close then covers too.
 
@@ -61,12 +60,11 @@ what manufactures the read PR's fixtures.
 
 - **The mapping is configuration, not code.** The de-facto schema — which internal
   facts land in which ticket fields, the `sig:` label, the comment body template
-  `{disposition} — {cause}\n\n{narrative}`, the agent's `comment.author`, the
-  `released.status` a person's close moves a case to, and the dotted `source.*`
+  `{disposition} — {cause}\n\n{narrative}`, the agent's `comment.author`, and the dotted `source.*`
   paths into `alert.json` — lives in
   the tenant's `settings/systems/case-history/mapping.yaml` and is *rendered* by
   the mapper. Changing the convention (label prefix, body format, which alert
-  field is the signature, which status means "reviewed") is a config edit, no code
+  field is the signature) is a config edit, no code
   change. Nothing decodes a disposition back out of the store any more: the
   proposed disposition is the comment's first line for a person to read, and the
   person's own verdict is the closed case's `resolution`.
@@ -87,8 +85,7 @@ what manufactures the read PR's fixtures.
   right for a CLI adapter but fatal for an in-process post-step.
 
 - **Never breaks the run.** Like `cross_check_tables` / `visualize`, every failure —
-  missing config, unreachable stub, HTTP error, a mapping that cannot say what
-  "released" is spelled — is a WARN, a receipt and a return, never a raise/exit. A
+  missing config, unreachable stub, HTTP error, a mapping the loader refuses — is a WARN, a receipt and a return, never a raise/exit. A
   report that is missing or carries no parsable disposition still records, with a
   fixed host sentence and no proposal in it — the person sees on the ticket that
   the run ended with nothing to propose, rather than inferring it from silence.
@@ -108,13 +105,12 @@ what manufactures the read PR's fixtures.
 ## Shape
 
 - `runtime/case_ticket.py` — pure: `CaseRecord`, `read_case_record`, the
-  mapper (`alert_to_open_payload`, `case_record_to_comment`), the release predicate
-  (`release_predicate` / `is_released`) the writer decides with, the agent tag
+  mapper (`alert_to_open_payload`, `case_record_to_comment`), the agent tag
   (`agent_comment_tag`, `posted_comment`), rendering from the mapping config.
 - `$DEFENDER_DATA_ROOT/<tenant>/knowledge/settings/systems/case-history/mapping.yaml` — the de-facto schema
-  (field mapping + conventions + the released status), editable without touching code.
+  (field mapping + conventions), editable without touching code.
 - `scripts/case_history/ticket_writer.py` — I/O: `open_case_ticket` (bridge) /
-  `record_case_ticket` (one read-back, at most one comment POST, a receipt on every
+  `record_case_ticket` (at most one comment POST, a receipt on every
   branch that called out; no transition call exists), non-fatal.
 - The read side has no ticket screen (#1221): every ticket is served whole. Each
   comment the host posts opens with the agent tag naming its run, so a later run

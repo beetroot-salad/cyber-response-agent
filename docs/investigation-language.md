@@ -6,7 +6,7 @@
 
 **v2.24 delta:** rule #27 is implemented (#1221); no rule is added or struck — **the active count stays at 26**.
 
-- **Rule #27 is armed, reworded to what it can check.** "Must have `org-authority`" becomes "must have a grounding other than `past-case`": the corpus writes specific record types (`iam-policy-binding`) and often no grounding cell at all, and neither is a past case. "Escalation is forced" (vocabulary retired in v2.18) becomes "benign is refused". The check sits in the one reading of "discharged" (`outstanding_authz_contracts`), so a past-case-only contract also stays on the retrieval frontier. Measured before arming: `past-case` appears in no shipped golden or example.
+- **Rule #27 is armed, reworded to what it can check.** A row is a past case when it fills `cites_past_case` (a run id), whatever its grounding word says — keying on the free-text word made every new spelling a bypass, and a filled cell cannot be misspelled into an empty one. "Must have `org-authority`" becomes "must have an `authorized` row that cites no past case". A row grounded `past-case` (any spelling) with no cite, or a cite that is not a run id, is refused on the row, under any disposition. "Escalation is forced" (vocabulary retired in v2.18) becomes "benign is refused". The check sits in the one reading of "discharged" (`outstanding_authz_contracts`), so a past-case-only contract also stays on the retrieval frontier. Measured before arming: `past-case` appears in no shipped golden or example.
 - **Why now.** Every comment the host posts to a case opens with the agent tag (`[defender agent comment, run <run id>]`), and gather reports such a comment as a model-made verdict. A past case is that verdict cited; #27 keeps a benign close from resting on it alone.
 - **`cites_past_case` is one cell, the cited run's id.** Rule #11's `{run_id, contract_ref}` pair is not what the parser projects and is dropped from #11.
 - **Rule #28 stays unimplemented, deliberately.** Checking it needs the cited run's own companion, which a sandboxed run does not have. Recorded at the rule.
@@ -1484,16 +1484,18 @@ The validator enforces **26 active rules** (rules 1–36 with ten gaps: 36 numbe
 
 27. **Past-case no-sole-grounding for benign.** On any
     `authorization_contract` of a live hypothesis, at least one
-    `authorized` resolution must have a grounding other than
-    `past-case` (any other value, or none) — if every one has
-    `grounding_kind: past-case`, read case- and separator-folded, the
-    contract is treated as unresolved for rule #21 and
-    `disposition: benign` is refused. A past case is an earlier run's
+    `authorized` resolution must cite no past case — a row IS a past
+    case when its `cites_past_case` cell is filled, whatever its
+    grounding word. If every `authorized` row cites one, the contract
+    is treated as unresolved for rule #21 and `disposition: benign` is
+    refused. The cell must be a run id, and a row grounded `past-case`
+    (folded) must fill it; both are refused on the row. A past case is an earlier run's
     verdict — a model's, e.g. a ticket comment carrying the agent tag
     (#1221). *(Former clause (a) — past-case ⇒ partial — moved to
     rule #11 as an enum constraint.)*
     Implemented as `_authz_contract_error` (via
-    `outstanding_authz_contracts`, shared with the retrieval frontier).
+    `outstanding_authz_contracts`, shared with the retrieval frontier)
+    and `_authz_row_grounding_error` (the citation cell).
 
 28. **Past-case chain depth cap.** An `authorization_resolutions[]`
     entry with `grounding_kind: past-case` references a source

@@ -71,8 +71,8 @@ class CaseRecord:
     disposition: str
     #: The host's own sentence (frontmatter `cause`), always present on a close-tool report.
     cause: str
-    #: The report's body, verbatim — fence-stripping and the wire bound are applied at render
-    #: time (`case_record_to_comment`), never here.
+    #: The report's body, verbatim — fence-stripping is applied at render time
+    #: (`case_record_to_comment`) and the wire bound when posted (`posted_comment`), never here.
     narrative: str
 
 
@@ -183,11 +183,10 @@ def check_mapping(settings: Path) -> None:
 
 
 def _check_lifecycle(mapping: dict[str, Any]) -> None:
-    """The invariant the gate rests on, checked in the loader so every reader gets it: nothing
-    the host writes may put a case into the released state. `open.status` must be a literal (a
-    `{placeholder}` would let alert text pick the status) and must differ from
-    `released.status` (cases would open already released). Each is checked only when present;
-    section presence is each consumer's concern."""
+    """Checked in the loader so every reader gets it: nothing rendered from an alert may set a
+    case's status. `open.status` must be a non-empty literal (a `{placeholder}` would let alert
+    text pick it). Checked only when present; section presence is each consumer's concern. A
+    legacy `released:` section is ignored (#1221 A1: nothing reads it)."""
     open_status = _dig(mapping, "open.status")
     if open_status is not None and (not isinstance(open_status, str) or not open_status.strip()):
         raise CaseTicketError("case-history mapping's `open.status` must be a non-empty string")
@@ -196,13 +195,6 @@ def _check_lifecycle(mapping: dict[str, Any]) -> None:
             f"case-history mapping's `open.status` must be a literal, not a template: "
             f"{open_status!r} — nothing rendered from an alert may move a case along its "
             "lifecycle"
-        )
-    released_status = _dig(mapping, "released.status")
-    if (isinstance(open_status, str) and isinstance(released_status, str)
-            and open_status.strip() == released_status.strip()):
-        raise CaseTicketError(
-            f"case-history mapping's `open.status` and `released.status` are both "
-            f"{released_status.strip()!r} — every case would open already released"
         )
 
 
@@ -372,8 +364,7 @@ def _comment_section(mapping: dict[str, Any]) -> dict[str, Any]:
 
 
 def _resolve_comment_author(mapping: dict[str, Any]) -> str:
-    """Fail closed rather than send an unattributable comment. Stripped, like
-    `released.status`."""
+    """Fail closed rather than send an unattributable comment. Stripped."""
     author = _comment_section(mapping).get("author")
     if not isinstance(author, str) or not author.strip():
         raise CaseTicketError("case-history mapping's `comment.author` is missing or empty")
@@ -466,61 +457,6 @@ def escalation_comment_payload(
     the host makes, a fixed host sentence naming the exit class, and no verdict — the case
     stays open for a person."""
     return _host_comment(ESCALATION_COMMENT_BODY.format(exit=truncated_by), mapping)
-
-
-# --------------------------------------------------------------------------------------------
-# The release predicate
-# --------------------------------------------------------------------------------------------
-
-
-@model(frozen=True)
-class ReleasePredicate:
-    """A case is released when a person has moved it to the mapping's `released.status`.
-    Compared exactly (the store canonicalises it); an undecidable ticket reads as unreleased,
-    the direction that serves nothing.
-
-    There is no "who wrote this comment" predicate: a comment's `author` is whatever the
-    posting client sent. Unreleased tickets' comments are served to nobody, released ones'
-    whole."""
-
-    released_status: str
-
-    def is_released(self, ticket: Any) -> bool:
-        if not isinstance(ticket, dict):
-            return False
-        status = ticket.get("status")
-        return isinstance(status, str) and status == self.released_status
-
-
-def release_predicate(mapping: CaseMapping | CaseTicketError) -> ReleasePredicate:
-    """§7 R1's downstream consequence: the predicate is SAFE BY CONSTRUCTION — this raises in
-    every unsafe mapping state rather than merely behaving correctly when configured right.
-    The caller (the writer's released check) is what degrades on a raise; this function never
-    does.
-
-    The configured status is stripped ONCE, here, so a quoted YAML scalar with stray
-    whitespace configures the same state the ticket carries rather than one nothing can ever
-    reach.
-
-    `mapping` is the record's `ticket_mapping` (#1107), handed in by the caller, which already
-    holds the record and never reads the file. Since #1221 the writer is its only caller: no read
-    path screens a ticket by its status."""
-    section = _thawed(mapping).get("released")
-    if not isinstance(section, dict):
-        raise CaseTicketError(
-            "case-history mapping has no `released` section (released.status required)"
-        )
-    status = section.get("status")
-    if not isinstance(status, str) or not status.strip():
-        raise CaseTicketError(
-            "case-history mapping's `released.status` must be a non-empty string"
-        )
-    # The open/released collision and literal-status rules live in `_check_lifecycle`.
-    return ReleasePredicate(released_status=status.strip())
-
-
-def is_released(ticket: Any, *, mapping: CaseMapping | CaseTicketError) -> bool:
-    return release_predicate(mapping).is_released(ticket)
 
 
 # --------------------------------------------------------------------------------------------

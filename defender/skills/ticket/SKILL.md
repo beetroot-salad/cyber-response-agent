@@ -83,10 +83,7 @@ into this store.
   alert is raised and later records the investigation as a comment on it.
   That writer is a learning post-step, not an investigation surface; do
   not call it from a run, and it never sets `status` or `resolution`
-  itself — closing is a person's act. It also never records onto a case a
-  person has already closed: the close is a statement about the comments
-  the person saw, so a re-run of a closed case is refused rather than
-  appended behind it.
+  itself — closing is a person's act.
 - **Not for change-window context.** Use the change-mgmt stub for
   CR-scoped questions; ticket labels may mention CRs but the
   authoritative answer is in change-mgmt.
