@@ -1,29 +1,23 @@
 #!/usr/bin/env python3
-"""spec-graph check #5 — frontier-chain conservation and the resume scan.
+"""spec-graph check #5 — frontier-chain shape and the resume scan.
 
-The write-tests frontier files (SKILL.md, "Frontiers") carry YAML frontmatter with
-`phase`, `status`, `inventory`, and `inputs` echoing the consumed frontiers' inventories.
-Conservation (counts in equal counts out, every drop named) is arithmetic over that
-frontmatter, so it runs at every phase boundary and a broken frontier is caught where it
-was written.
+The write-tests frontier files (SKILL.md, "Frontiers") carry YAML frontmatter with `phase`,
+`status`, and `inputs` naming the frontiers they consumed. The chain is a checkpoint, not an
+accounting ledger: the per-frontier count echoes this check used to reconcile caught
+bookkeeping slips and never a dropped item (the drops were found by the cold reconciler's
+trail walk), so they are gone. An old chain that still carries `inventory_echo` entries
+parses unchanged; the echoes are ignored.
 
 What is checked, per `*.md` file in the frontiers directory:
 
-* frontmatter parses, `status` is in the closed vocabulary, `phase` is present,
-  `inventory` is a mapping of category → integer count;
-* every `inputs` entry names an existing sibling file, and its `inventory_echo` equals
-  the producer's actual `inventory` (a mismatch must be resolved by recomputing from the
-  payload, never by copying either side);
-* the `## Digest` section exists and holds ≤15 lines (the leaf's inline return, verbatim);
-* the dispositions sum rule: an inventory carrying `settled`/`forks`/`silent_branches`/
-  `drops` (`consensus` is the pre-escalation spelling of `settled`) must sum to the source
-  `premises` count it echoed — every premise leaves with a recorded disposition. The
-  source count is the LARGEST `premises` echo, not their sum: an escalation sidecar echoes
-  a subset of the same premises (phases/answer.md, (b)), never new ones.
+* frontmatter parses, `status` is in the closed vocabulary, `phase` is present, and an
+  `inventory` — optional — is a mapping of category → integer count;
+* every `inputs` entry is a frontier filename or a mapping with `path`, and a
+  numeric-prefixed `.md` name it gives exists in the chain;
+* the `## Digest` section exists and holds ≤15 lines (the leaf's inline return, verbatim).
 
 `--only <file>` lints that one frontier and reports nothing else — the leaf's pre-return
-self-check, run while its phase siblings may still be half-written beside it. The rest of
-the chain is still loaded, so the named file's echoes reconcile against their producers.
+self-check, run while its phase siblings may still be half-written beside it.
 
 `--resume` prints the chain's state (file, phase, status, staleness against its inputs)
 and where to re-enter: the first frontier that is blocked, unparseable, or older than an
@@ -48,10 +42,10 @@ import _config
 
 _STATUS = {"complete", "design-refuted", "blocked"}
 _DIGEST_CAP = 15
-_DISPOSITIONS = {"settled", "forks", "silent_branches", "drops"}
-# The pre-escalation contract spelled the single-reading category `consensus`; either
-# spelling fills the slot, never both.
-_SETTLED_SPELLINGS = ("settled", "consensus")
+# One line, so a finding stays one line; write-tests' references/frontier.md has the full shape.
+_FRONTMATTER_EXAMPLE = (
+    "`---` / `phase: C-judge` / `status: complete` / `inputs: [40-premises.md]` / `---`"
+)
 
 
 class Frontier:
@@ -68,7 +62,10 @@ class Frontier:
             return
         m = re.match(r"\A---\s*\n(.*?)\n---\s*\n?", text, re.DOTALL)
         if not m:
-            self.error = "no YAML frontmatter (file must open with a `---` block)"
+            self.error = (
+                "no YAML frontmatter — open the file with a block of lines like "
+                + _FRONTMATTER_EXAMPLE
+            )
             return
         try:
             meta = yaml.safe_load(m.group(1))
@@ -94,9 +91,15 @@ class Frontier:
         return inv if isinstance(inv, dict) else {}
 
     @property
-    def inputs(self) -> list[dict]:
+    def inputs(self) -> list[str]:
+        """The consumed frontiers' names — a bare filename or a mapping's `path`."""
         ins = self.meta.get("inputs")
-        return [i for i in ins if isinstance(i, dict)] if isinstance(ins, list) else []
+        refs = []
+        for i in ins if isinstance(ins, list) else []:
+            ref = i.get("path") if isinstance(i, dict) else i
+            if isinstance(ref, str) and ref:
+                refs.append(ref)
+        return refs
 
 
 def _load(directory: Path) -> dict[str, Frontier]:
@@ -110,79 +113,52 @@ def _lint_frontmatter(name: str, f: Frontier, findings: list[str]) -> None:
             f"{name}: status `{f.status}` is not one of {sorted(_STATUS)}."
         )
     if not f.meta.get("phase"):
-        findings.append(f"{name}: frontmatter carries no `phase`.")
+        findings.append(
+            f"{name}: frontmatter carries no `phase` — e.g. {_FRONTMATTER_EXAMPLE}"
+        )
     for cat, n in f.inventory.items():
         if not isinstance(n, int):
             findings.append(
-                f"{name}: inventory `{cat}: {n!r}` is not an integer count — counts are "
-                f"computed, never recalled."
+                f"{name}: inventory `{cat}: {n!r}` is not an integer count — write the "
+                f"number (computed with grep -c/wc over the payload), or drop the key."
             )
 
 
 def _lint_digest(name: str, f: Frontier, findings: list[str]) -> None:
     """The `## Digest` section — the leaf's inline return, verbatim and capped."""
     if f.digest_lines is None:
-        findings.append(f"{name}: no `## Digest` section — the leaf's inline return has no home.")
+        findings.append(f"{name}: no `## Digest` section — add `## Digest` right after the frontmatter "
+            f"holding the ≤{_DIGEST_CAP}-line summary the leaf returns inline.")
     elif f.digest_lines > _DIGEST_CAP:
         findings.append(
-            f"{name}: digest runs {f.digest_lines} lines (cap {_DIGEST_CAP}) — measured "
-            f"drift runs long, not short."
+            f"{name}: digest runs {f.digest_lines} lines (cap {_DIGEST_CAP}) — move detail "
+            f"into the payload sections below it; the digest is what the spine reads."
         )
 
 
-def _lint_input_shapes(name: str, f: Frontier, findings: list[str]) -> None:
-    """Every `inputs` entry must be a mapping.
-
-    The `inputs` property keeps only mappings, so a bare-string shorthand
-    (`inputs: [10-brief.md]`) would otherwise vanish silently; this pass reads the raw list.
-    """
-    raw_inputs = f.meta.get("inputs")
-    for entry in (raw_inputs if isinstance(raw_inputs, list) else []):
-        if not isinstance(entry, dict):
-            findings.append(
-                f"{name}: input entry {entry!r} is not a mapping — each input must be a "
-                f"mapping with `path` + `inventory_echo`, or its echo is never reconciled."
-            )
-
-
-def _lint_input_echoes(
+def _lint_inputs(
     name: str, f: Frontier, frontiers: dict[str, Frontier], directory: Path,
     findings: list[str],
-) -> int | None:
-    """Each input's `inventory_echo` against its producer's actual `inventory`.
-
-    Returns the premise count this frontier consumed (the largest echo; see below), or
-    `None` when no input declared one, which switches the dispositions rule off.
-    """
-    echoed_premises: int | None = None
-    for inp in f.inputs:
-        ref = str(inp.get("path") or "")
-        if not ref:
+) -> None:
+    """Each `inputs` entry names a frontier: a bare filename, or a mapping with `path`."""
+    raw_inputs = f.meta.get("inputs")
+    if raw_inputs is not None and not isinstance(raw_inputs, list):
+        findings.append(
+            f"{name}: `inputs` is not a list — write it as `inputs: [10-brief.md, ...]`."
+        )
+        return
+    for entry in raw_inputs or []:
+        ref = entry.get("path") if isinstance(entry, dict) else entry
+        if not isinstance(ref, str) or not ref:
             findings.append(
-                f"{name}: input entry carries no `path` — the echo has no producer to "
-                f"reconcile against."
+                f"{name}: input entry {entry!r} names no file — write the consumed "
+                f"frontier's filename, e.g. `inputs: [10-brief.md]`."
             )
             continue
-        # Reconcile by bare filename (`./10-brief.md` == `frontiers/10-brief.md`); messages
-        # keep the author's spelling.
-        norm = Path(ref).name
-        producer = frontiers.get(norm)
-        if producer is None:
-            _lint_absent_producer(name, ref, norm, directory, findings)
-            continue
-        if producer.error:
-            continue  # already reported on the producer
-        echo = inp.get("inventory_echo")
-        if not isinstance(echo, dict):
-            findings.append(f"{name}: input `{ref}` carries no `inventory_echo` mapping.")
-            continue
-        if isinstance(echo.get("premises"), int):
-            # Escalation copies re-consume a subset of the same premises, so the source count
-            # is the largest echo, not the sum.
-            echoed_premises = max(echoed_premises or 0, echo["premises"])
-        if echo != producer.inventory:
-            findings.append(_echo_mismatch(name, ref, echo, producer.inventory))
-    return echoed_premises
+        # Match by bare filename (`./10-brief.md` == `frontiers/10-brief.md`); messages keep
+        # the author's spelling.
+        if Path(ref).name not in frontiers:
+            _lint_absent_producer(name, ref, Path(ref).name, directory, findings)
 
 
 def _lint_absent_producer(
@@ -198,54 +174,6 @@ def _lint_absent_producer(
         findings.append(f"{name}: input `{ref}` does not exist.")
 
 
-def _echo_mismatch(name: str, ref: str, echo: dict, actual: dict) -> str:
-    diff = {
-        k: (echo.get(k), actual.get(k))
-        for k in set(echo) | set(actual)
-        if echo.get(k) != actual.get(k)
-    }
-    return (
-        f"{name}: inventory_echo for `{ref}` disagrees with its actual inventory "
-        f"— (echoed, actual) per category: {diff}. The two declarations disagree: "
-        f"recompute the count from the payload content — never resolve the "
-        f"mismatch by copying either side."
-    )
-
-
-def _lint_dispositions(
-    name: str, f: Frontier, echoed_premises: int | None, findings: list[str]
-) -> None:
-    """The sum rule: settled + forks + silent_branches + drops == premises in.
-
-    Any present disposition key engages the rule (all four are mandated), so a partial
-    inventory cannot skip the sum.
-    """
-    spelled = [k for k in _SETTLED_SPELLINGS if k in f.inventory]
-    present = (_DISPOSITIONS & set(f.inventory)) | set(spelled)
-    if not (present and echoed_premises is not None):
-        return
-    if len(spelled) > 1:
-        findings.append(
-            f"{name}: inventory carries both `settled` and `consensus` — one spelling "
-            f"fills the single-reading slot, never both."
-        )
-    required = _DISPOSITIONS - {"settled"} | ({"settled"} if not spelled else set())
-    for missing in sorted(required - present):
-        findings.append(
-            f"{name}: inventory carries dispositions but omits `{missing}` — all four "
-            f"disposition categories are mandated, and a missing one is an unrecorded "
-            f"exit for a premise."
-        )
-    # Non-int counts were already flagged; skip them rather than raise mid-sum.
-    total = sum(v for k in sorted(present) if isinstance(v := f.inventory[k], int))
-    if total != echoed_premises:
-        findings.append(
-            f"{name}: dispositions sum to {total} but {echoed_premises} premises were "
-            f"consumed — a premise left without a recorded disposition is the one loss "
-            f"no downstream check can see."
-        )
-
-
 def check(directory: Path, only: str | None = None) -> list[str]:
     frontiers = _load(directory)
     findings: list[str] = []
@@ -257,9 +185,7 @@ def check(directory: Path, only: str | None = None) -> list[str]:
             continue
         _lint_frontmatter(name, f, findings)
         _lint_digest(name, f, findings)
-        _lint_input_shapes(name, f, findings)
-        echoed = _lint_input_echoes(name, f, frontiers, directory, findings)
-        _lint_dispositions(name, f, echoed, findings)
+        _lint_inputs(name, f, frontiers, directory, findings)
     return findings
 
 
@@ -277,12 +203,7 @@ def resume(directory: Path) -> int:
         elif f.status != "complete":
             state.append(str(f.status).upper())
         mtime = f.path.stat().st_mtime
-        for inp in f.inputs:
-            ref = str(inp.get("path") or "")
-            if not ref:
-                # `directory / ""` is the directory, whose mtime would false-STALE; check()
-                # flags the entry.
-                continue
+        for ref in f.inputs:
             src = directory / ref
             if src.exists() and src.stat().st_mtime > mtime:
                 state.append(f"STALE (older than {src.name})")
@@ -335,7 +256,7 @@ def main(argv: list[str]) -> int:
         return 2
     findings = check(directory, only)
     for f in findings:
-        print(f"  CONSERVATION {f}")
+        print(f"  FRONTIER {f}")
     scope = f"{directory}/{only}" if only else str(directory)
     print(f"\n[check_frontiers] {len(findings)} finding(s) over {scope}.")
     return 1 if findings else 0

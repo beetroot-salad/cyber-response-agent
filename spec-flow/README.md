@@ -97,8 +97,9 @@ The method is portable; a project's gate is not. Everything repo-specific lives 
 - `specGraph` — read as data by the two checkers: the project's source roots and entrypoint stems.
   (The alias maps are an escape hatch, normally empty — a spec graph is supposed to name things what
   the code names them, and a private synonym silently disables the check for that concept.)
-- `conventions` — the default branch, and the **danger lens**: what kind of hostile reality this
-  system faces, which `write-tests` spends one of four enumeration lenses on.
+- `conventions` — the default branch, the **danger lens** (what kind of hostile reality this system
+  faces; `write-tests` always enumerates through it), and the **principles** (the threat model and
+  failure posture every fork is judged against — asked of the owner, never guessed).
 
 `/spec-flow:init` derives it from the repo and then *runs* what it wrote — a profile that has never
 been executed is a guess.

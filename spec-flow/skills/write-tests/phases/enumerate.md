@@ -2,10 +2,13 @@
 
 ## Topology
 
-- Five parallel leaves, dispatched only after `10-brief.md` is `complete`. Inputs for all: the intent+design doc, `10-brief.md`, `20-demands.md`. Each writes `30-premises-<lens>.md` (the strong author: `30-premises-author.md`).
-- **4 lensed enumerators** (Sonnet, high effort — premise coverage is the product), one lens each as a dispatch parameter: **dependency**, **input surface**, **lifecycle/state**, and a fourth from the design's danger zone — adversarial input, environment/resource, or concurrency; the profile's `conventions.dangerLens` is the standing default unless *this* change's danger zone is plainly elsewhere.
-- **1 strong author** (Opus at xhigh effort, unlensed) — not economizable: cross-cutting, grounding-dependent faults are capability-dominated, and the lenses miss them at any prompt quality. If it genuinely cannot be spawned, run the best derivation available and record the degraded unknown-unknown region in `handoff.deviations`.
+- Parallel leaves, dispatched only after `10-brief.md` is `complete`. Inputs for all: the intent+design doc (principles included), `10-brief.md`, `20-demands.md`. Each writes `30-premises-<lens>.md` (the strong author: `30-premises-author.md`).
+- **1 strong author** (Opus at xhigh effort, unlensed) — not economizable: cross-cutting, grounding-dependent faults are capability-dominated, and the lenses miss them at any prompt quality.
+- **2–3 lensed enumerators** (Sonnet, high effort), one lens each as a dispatch parameter. Always the **danger lens** (the profile's `conventions.dangerLens`, unless *this* change's danger zone is plainly elsewhere); then one or two the spine picks from what the delta touches — **dependency** (it calls out to something that fails), **input surface** (it parses or accepts new input), **lifecycle/state** (it creates, moves, or deletes durable state), **concurrency** (only when the design admits two writers or parallel invocation). Record the picks and why in `handoff.deviations`.
+- Small delta (SKILL.md, "Scale"): the strong author plus the danger lens only.
 - Dispatch prompt names the charge sections: every leaf takes "Charge — every enumerator" plus its role section.
+
+Why not five fixed lenses: in the measured runs extraction had already raised most material forks before any lens ran. In one run, dropping any single Sonnet lens but the danger lens would have lost no question the human was asked; in another, every lens raised something only it saw — each in the territory the delta actually touched. So the spine chooses lenses per run, by territory.
 
 ## Charge — every enumerator
 
@@ -23,7 +26,7 @@ def test_transient_enrich_error():
 
 A premise that names a mechanism-level fact — an exception class, a primitive's return shape, what existing code does — has left its lane: strip the fact into a **probe obligation** listed in your frontier and keep the situation. The one exception: a fact that belongs to the *not-yet-written target* (how it signals failure, what it returns) has no probe to run — that is demand #0's territory or a human fork, never a probe obligation. The fault menu is reality's to supply (phase E), not yours to guess. When a premise's outcome is a known judgment call, mark it `# fork:` so phase C routes it to the human regardless of how the answerers land — a silently-chosen branch otherwise leaves no trace it was ever a choice.
 
-Frontier inventory: `{premises: n, probe_obligations: n, forks_flagged: n}`, `inputs` echoing the brief's `flagged_facts` count (state which facts fed a premise of yours — phase F's conservation walks this edge), and a `## Red flags` entry for anything that smelled like a design hole while enumerating.
+Digest: premise, probe-obligation, and `# fork:` counts. In the payload, name which of the brief's flagged facts fed a premise of yours — the cold reconciler walks that edge — and put anything that smelled like a design hole under `## Red flags`.
 
 ## Charge — a lensed enumerator
 

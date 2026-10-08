@@ -17,7 +17,8 @@ Derive it from the repo, not from the user. Ask only what the repo genuinely can
 - **The traps.** The things that make a green local run a lie: a venv that resolves to the wrong tree from a worktree, an env var the suite needs, a service that must be up. These are what `gate.notes` is for.
 - **The spec_graph targets.** Which source trees an execution-context census should scan (`codeRoots` — the project's own source, not vendored deps or tests) and any entrypoint stems that aren't obvious (`entrypointStems`). If the project has well-known shared roots (a lessons store, a run-artifact dir), declare their sink symbols under `resources` (`{"<name>": {"writers": ["<file>::<symbol>"], "readers": [...]}}`) so `spec-graph trace resource` can derive their writer/reader censuses — entries can also be added later, when a run first touches the root. Leave `contextAliases` / `conceptAliases` **empty** — the graph is supposed to name things what the code names them (schema.md, "Coin ids from the code's name"), and an alias is an escape hatch for the cases where it can't, not a field to populate. Nothing here names an interpreter — the `spec-graph` command discovers its own.
 - **The code graph (Python only).** `symbol-refs` resolves who-references / where-defined via pyrefly, and pyrefly *silently* under-resolves unless its import root is on the search path — so this field is derived, not guessed. Give it `codeGraph`: `configDir`, the directory pyrefly should root at (where a `pyproject.toml` lives, or the package dir), and `searchPath`, the import roots **relative to configDir**. Derive `searchPath` from however the project already puts its package on `sys.path`: pytest's `pythonpath`, mypy's `mypy_path` / `explicit_package_bases`, a `src/` layout, an editable install. The case that bites is a **namespace package** (no `__init__.py`, `pyproject.toml` below the import root) — it needs the parent (`..`) added, mirroring pytest's `pythonpath=['..']`. A package at the repo root is just `configDir: "."`, `searchPath: ["."]`. Omit `codeGraph` entirely for a non-Python repo.
-- **The danger lens.** What kind of hostile reality this system faces — attacker-influenced input, resource exhaustion, concurrency. `write-tests` spends one of four enumeration lenses on it. This one you may have to ask about; the code often shows it (an auth boundary, a parser fed by the network, a job queue).
+- **The danger lens.** What kind of hostile reality this system faces — attacker-influenced input, resource exhaustion, concurrency. `write-tests` always runs this lens alongside its strong author. This one you may have to ask about; the code often shows it (an auth boundary, a parser fed by the network, a job queue).
+- **The principles.** The standing threat model (what is trusted, what is not — and what is *not* assumed hostile) and the failure posture (e.g. fail closed, loud, fast). `write-tests` judges every fork against them: a fork that only exists to handle a condition the threat model doesn't call for gets proposed for dropping, and forks sharing a root cause get one dissolving design call instead of one patch each. The repo rarely states these — **ask the owner**, in their words; a guessed threat model is worse than none, because every later fork is judged against it.
 
 ## Write it, then prove it
 
@@ -52,7 +53,8 @@ Write `.claude/spec-flow.json` in the shape below, then **run what you wrote** �
   },
   "conventions": {
     "defaultBranch": "main",
-    "dangerLens": "<the standing fourth enumeration lens, and why>"
+    "principles": "<the threat model (trusted / untrusted / not assumed hostile) and the failure posture, in the owner's words>",
+    "dangerLens": "<the standing danger-zone enumeration lens, and why>"
   }
 }
 ```

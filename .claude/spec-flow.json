@@ -608,7 +608,8 @@
   },
   "conventions": {
     "defaultBranch": "main",
-    "dangerLens": "adversarial input — alert data is attacker-influenced by definition, and malicious input is well-formed on purpose. Use this as write-tests' fourth enumeration lens unless the change's danger zone is clearly elsewhere (environment/resource, or concurrency when the design admits parallel invocation)."
+    "principles": "The standing threat model and failure posture every design here is judged against (stated by the owner during the #1105 spec run, Oct 2026). Threat model: files on disk are not necessarily trusted — the filesystem can be corrupt, and anything a sandbox can write is attacker-influenced — but the host itself is not assumed malicious. Failure posture: fail closed, loud, and fast; do not write code that apologizes for a condition (per-case recovery, quarantine, tolerance) when refusing loudly is correct. write-tests judges every fork against these: a fork that exists only to handle a condition this threat model does not call for is a candidate to drop, and a cluster of forks sharing one root cause is a candidate for one design call that dissolves them.",
+    "dangerLens": "adversarial input — alert data is attacker-influenced by definition, and malicious input is well-formed on purpose. Use this as write-tests' danger lens unless the change's danger zone is clearly elsewhere (environment/resource, or concurrency when the design admits parallel invocation)."
   },
   "codeGraph": {
     "tool": "pyrefly",
