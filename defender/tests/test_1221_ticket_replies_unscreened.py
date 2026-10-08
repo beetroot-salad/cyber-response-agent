@@ -125,22 +125,25 @@ def test_1221_list_tickets_serves_the_own_case_and_an_open_cases_comments(tmp_pa
     assert OPEN_NOTE in run.gather_delta, "the open case's comment never reached the model"
 
 
-def test_1221_get_ticket_on_the_runs_own_key_is_served(tmp_path):
-    """A `get-ticket` on the run's OWN key reaches the store and its reply — an open case with
-    a comment — reaches gather whole: the verb ran with that key, the capture equals the
-    store's answer, and the comment is in the model's view. No pre-call refusal by key, and
-    no comment withheld because the case is open.
+@pytest.mark.parametrize(("key", "note"), [(OWN, OWN_NOTE), (OPEN_KEY, OPEN_NOTE)],
+                         ids=["own-case", "another-open-case"])
+def test_1221_get_ticket_on_the_runs_own_key_is_served(tmp_path, key, note):
+    """A `get-ticket` on the run's OWN key — and, the sibling surface, on ANOTHER open case's
+    key — reaches the store and its reply (an open case with a comment) reaches gather whole:
+    the verb ran with that key, the capture equals the store's answer, and the comment is in
+    the model's view. No pre-call refusal by key, and no comment withheld because the case is
+    open, whichever case it is.
 
     The grant is not the subject: the tenant planted here grants `get-ticket` to gather (the
     committed fixture withholds it), so a refusal could only come from the query tool."""
     root = tmp_path / "tenants"
     S.plant(root, marker="t1221", table=GET_TICKET_TABLE)
-    own_case = _ticket(OWN, OWN_NOTE)
+    case = _ticket(key, note)
     rec = VerbRecorder()
 
     def get_ticket(ctx: VerbContext, *, key: str) -> Any:
         rec.record("get-ticket", ctx, {"key": key})
-        return copy.deepcopy(own_case)
+        return copy.deepcopy(case)
 
     run_dir = materialize(tmp_path / "run", GOLDEN_AB3)
     main = ReplayFn([
@@ -149,19 +152,19 @@ def test_1221_get_ticket_on_the_runs_own_key_is_served(tmp_path):
                                      "what_to_summarize": ["what the ticket says"]})]),
         Turn(text="Investigation complete."),
     ])
-    gather = ReplayFn([q("ticket", "get-ticket", {"key": OWN}), DONE])
+    gather = ReplayFn([q("ticket", "get-ticket", {"key": key}), DONE])
     drive(run_dir, run_id=OWN, main=main, gather=gather,
           verbs=FakeVerbs({"ticket": {"get-ticket": get_ticket}}),
           tenant=S.tenant_folder_of(root))
 
-    assert [(c.verb, c.params) for c in rec.calls] == [("get-ticket", {"key": OWN})], (
-        "a get-ticket on the run's own key never reached the store"
+    assert [(c.verb, c.params) for c in rec.calls] == [("get-ticket", {"key": key})], (
+        f"a get-ticket on {key} never reached the store"
     )
-    assert _capture(run_dir) == own_case, "the captured reply is not what the store answered"
+    assert _capture(run_dir) == case, "the captured reply is not what the store answered"
     head = gather.seen[0]
     assert gather.seen[-1].startswith(head)
     seen = gather.seen[-1][len(head):]
-    assert OWN_NOTE in seen, "the own case's comment never reached the gather model"
+    assert note in seen, f"{key}'s comment never reached the gather model"
 
 
 def test_1221_the_family_prompt_no_longer_demands_a_released_status_on_a_comment_patch():

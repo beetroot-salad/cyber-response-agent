@@ -81,3 +81,26 @@ def test_1221_main_is_taught_to_cite_a_tagged_precedent_as_past_case(tmp_path):
         "`cites_past_case`"
     )
 
+
+
+def test_1221_the_teaching_says_what_it_must_and_not_its_opposite(tmp_path):
+    """Adversary pass: co-occurring substrings are not teaching. Gather's passage must call a
+    tagged comment a model-made verdict and must not tell gather to report it as an analyst's
+    conclusion; MAIN's passage must spell both citation cells as written
+    (`grounding past-case`, `cites_past_case <run id>`) and must not teach citing it as an
+    authority (`grounding org-authority`)."""
+    prefix = _prefix()
+
+    gather = " ".join(" ".join(_paragraphs_naming(_gather_instructions(DEFENDER), prefix)).split())
+    assert re.search(r"model-made verdict", gather, re.I), (
+        "gather's passage never calls a tagged comment a model-made verdict"
+    )
+    for wrong in ("analyst's conclusion", "confirmed finding", "report it as the analyst"):
+        assert wrong not in gather.lower(), f"gather's passage teaches the opposite ({wrong!r})"
+
+    main = " ".join(" ".join(_paragraphs_naming(_main_orientation(tmp_path), prefix)).split())
+    for needed in ("grounding past-case", "cites_past_case <run id>"):
+        assert needed in main, f"MAIN's passage does not spell {needed!r}"
+    assert "grounding org-authority" not in main, (
+        "MAIN's passage teaches citing a tagged precedent as an authority"
+    )

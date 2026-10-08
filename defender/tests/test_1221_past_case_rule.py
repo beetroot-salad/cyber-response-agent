@@ -128,3 +128,86 @@ def test_1221_the_past_case_rule_is_benign_only(disposition):
         assert _errors(past_case) == [], (
             f"a malicious close citing a past case was refused: {_errors(past_case)}"
         )
+
+
+# =======================================================================================
+# Adversary-pass additions: what the rule keys on, where it lives, how far it reaches
+# =======================================================================================
+
+AC1_DECL = 'ac1|e-001|iam-policy|"metrics-shipper is provisioned and authorized for this source→target SSH path"|escalate|escalate'
+AC2_DECL = 'ac2|e-001|iam-policy|"the SSH path is inside the monitoring role\'s approved scope"|escalate|escalate'
+
+
+def _row(contract: str, grounding: str, cites: str = "") -> str:
+    return f'l-003|e-001|{contract}|authorized|iam-policy|{grounding}|{cites}|"{contract} {grounding or "ungrounded"}"'
+
+
+def _open_contract_ids(doc: str) -> set[str]:
+    from defender.skills.invlang.frontier import frontier_from_text
+    return {c.contract_id for c in frontier_from_text(doc).contracts}
+
+
+@pytest.mark.parametrize("spelling", ["past  case", "past\tcase", "past_ case", " Past-Case "])
+def test_1221_every_separator_run_folds_to_past_case(spelling):
+    """The fold is `_folded_grounding`'s — runs of whitespace and underscores read as one
+    hyphen — not a character-by-character replace."""
+    refusals = [m for m in _errors(_grounded(spelling)) if "ac1" in m]
+    assert refusals, f"grounding {spelling!r} is a past case and validated clean"
+
+
+def test_1221_the_rule_keys_on_grounding_not_on_the_citation():
+    """A past-case row with an EMPTY `cites_past_case` is still a past case and is refused;
+    an `org-authority` row that happens to carry a citation is still an authority and is
+    clean. The cite cell is not what decides."""
+    assert [m for m in _errors(_grounded("past-case", cites="")) if "ac1" in m], (
+        "a past-case row with no citation discharged ac1"
+    )
+    assert _errors(_grounded("org-authority", cites=PRIOR_RUN)) == [], (
+        "an org-authority row carrying a citation was refused"
+    )
+
+
+def test_1221_two_past_case_rows_are_still_past_cases_alone():
+    """Two `authorized` past-case rows on one contract are past cases alone — the count of
+    rows is not the test."""
+    doc = _grounded("past-case", extra_row=_row("ac1", "past-case", "20261002T000000Z-other"))
+    assert [m for m in _errors(doc) if "ac1" in m], "two past-case rows discharged ac1"
+
+
+def test_1221_an_ungrounded_authorized_row_beside_a_past_case_discharges():
+    """The rescue is any grounding other than past-case, or none: an `authorized` row with an
+    empty grounding cell beside the past-case row discharges the contract."""
+    doc = _grounded("past-case", extra_row=_row("ac1", ""))
+    assert _errors(doc) == [], f"an ungrounded authorized row did not rescue ac1: {_errors(doc)}"
+
+
+def test_1221_the_rule_is_per_contract():
+    """Two contracts on the same live hypothesis: ac1 rests on a past case only, ac2 on an
+    authority. Benign is refused, naming ac1 and not ac2. The control: both on authorities
+    validates clean."""
+    def two(g1: str) -> str:
+        doc = _grounded(g1, cites=PRIOR_RUN if g1 == "past-case" else "",
+                        extra_row=_row("ac2", "org-authority"))
+        assert doc.count(AC1_DECL) == 1, "example-b's ac1 declaration moved"
+        return doc.replace(AC1_DECL, f"{AC1_DECL}\n{AC2_DECL}")
+
+    assert _errors(two("org-authority")) == [], (
+        f"the control failed: two authority-grounded contracts draw {_errors(two('org-authority'))}"
+    )
+    refused = _errors(two("past-case"))
+    assert any("ac1" in m and re.search(r"past.case", m, re.I) for m in refused), (
+        f"ac1 rests on a past case alone beside an authorized ac2 and validated: {refused}"
+    )
+    assert not any("ac2" in m for m in refused), f"ac2 was refused too: {refused}"
+
+
+def test_1221_a_past_case_only_contract_stays_on_the_frontier():
+    """The rule lives in the one reading of "discharged", so the retrieval frontier agrees
+    with the gate: a contract resting on a past case alone is still open there (and keeps
+    drawing retrieval), while the same contract on an authority is not."""
+    assert "ac1" in _open_contract_ids(_grounded("past-case")), (
+        "the frontier dropped a contract the benign gate still refuses"
+    )
+    assert "ac1" not in _open_contract_ids(_grounded("org-authority", cites="")), (
+        "the control failed: an authority-discharged contract is still open on the frontier"
+    )

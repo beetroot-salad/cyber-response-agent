@@ -194,6 +194,32 @@ def test_1221_the_tag_names_the_run_not_the_case_key(tmp_path, monkeypatch):
     assert rest == f"[{key}] benign", f"the template's `{{case_id}}` rendered {rest!r}"
 
 
+@pytest.mark.parametrize(
+    ("arm", "report_kw", "record_kw"),
+    [
+        ("the record", {"body": NARRATIVE}, {}),
+        ("the unreadable report", {"text": ""}, {}),
+        ("the escalation note (aborted)", {"body": NARRATIVE}, {"truncated_by": "aborted"}),
+        ("the escalation note (a forced close that left no report)", {"text": ""},
+         {"truncated_by": "request-limit"}),
+    ],
+)
+def test_1221_every_comment_kind_tags_the_run_under_a_vendor_key(
+        tmp_path, arm, report_kw, record_kw):
+    """Every comment kind, written under a case key that is NOT the run id (the platform's
+    vendor ticket id), opens with the tag naming the RUN. The control: the comment goes to the
+    vendor key's path, so the key was in play and the tag still ignored it."""
+    key = "SOC-VENDOR-4242"
+    run_dir = make_run(tmp_path, name=RUN_ID, **report_kw)
+    store = FakeStore()
+    record(run_dir, store, key=key, **record_kw)
+    path, body = _comment_post(store)
+    assert path == f"{TICKETS_PATH}/{key}{COMMENTS_SUFFIX}", f"{arm}: posted to {path}"
+    first, _rest = _tag_and_rest(body)
+    assert first == _tag(RUN_ID), f"{arm}: the tag line is {first!r}, not the run's"
+    assert key not in first, f"{arm}: the tag names the case key"
+
+
 # =======================================================================================
 # The bound, and the model-facing clip
 # =======================================================================================
