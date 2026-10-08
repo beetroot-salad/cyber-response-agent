@@ -2,7 +2,7 @@
  "_meta": {
   "base": "80888efb",
   "how": "capture_lessons.py imported test_1080_lessons_engine and ran each observe_* (copies of the base tree's defender/ code over the module's fixture corpora, the real tree's shim for s021, orient through its shim= seam, the frontier library in process) under SPEC1080_AT_BASE=1, normalised by the module's norm()",
-  "revised": "2026-10-04, post-review (human): the shims run their engines as modules. Four values re-observed: s060.{link-outside,copy-outside}, tree variable unset, for --tags and the listing. A shim outside any checkout still resolves no tree, as at the base; python3 now reports the engine module missing (exit 1) instead of the engine file missing (exit 2). Every other value is the base capture, unchanged. 2026-10-08 (#1206, human-decided): orient frames the Lessons section's Viable tags and Hits bodies as untrusted under a one-line note; every s062.orient section was re-observed, and each equals the prior value once the note and the frames are removed. norm() masks the frame salt as <SALT>. 2026-10-08 (#1206, human-decided): a search now runs over each lesson's frontmatter as one key: value line per key in the one-line spelling --tags lists (Lesson.match_text), not the raw YAML text; s185's escaped-signature search for it's \"quoted\" now finds meta-quotes.md, which the raw text's YAML quoting hid. No other s185 value moved. 2026-10-08 (#1206, human-decided): the frontier block frames its hits as untrusted under the lead line; the six s185/s186/pushes values that hold a block were re-observed, and each equals the prior value once the frame lines are removed. 2026-10-08 (#1206): the Lessons note now stands only over framed text; s062's three sections with no framed text ('both lessons calls fail', 'both lessons calls empty', 'the shim is missing from the tree') lost the note and nothing else."
+  "revised": "2026-10-04, post-review (human): the shims run their engines as modules. Four values re-observed: s060.{link-outside,copy-outside}, tree variable unset, for --tags and the listing. A shim outside any checkout still resolves no tree, as at the base; python3 now reports the engine module missing (exit 1) instead of the engine file missing (exit 2). Every other value is the base capture, unchanged. 2026-10-08 (#1206, human-decided): orient frames the Lessons section's Viable tags and Hits bodies as untrusted under a one-line note; every s062.orient section was re-observed, and each equals the prior value once the note and the frames are removed. norm() masks the frame salt as <SALT>. 2026-10-08 (#1206, human-decided): a search now runs over each lesson's frontmatter as one key: value line per key in the one-line spelling --tags lists (Lesson.match_text), not the raw YAML text; s185's escaped-signature search for it's \"quoted\" now finds meta-quotes.md, which the raw text's YAML quoting hid. No other s185 value moved. 2026-10-08 (#1206, human-decided): the frontier block frames its hits as untrusted under the lead line; the six s185/s186/pushes values that hold a block were re-observed, and each equals the prior value once the frame lines are removed. 2026-10-08 (#1206): the Lessons note now stands only over framed text; s062's three sections with no framed text ('both lessons calls fail', 'both lessons calls empty', 'the shim is missing from the tree') lost the note and nothing else. 2026-10-08 (#1206 review, human-decided): defender-lessons --show prints each lesson's frontmatter inside a salted untrusted frame under its --- path line; every golden was re-observed, and each changed value equals the prior one once the frame lines are removed."
  },
  "survival": {
   "[]": {
@@ -37,12 +37,12 @@
   },
   "[\"--show\", \"defender/lessons/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "[\"--show\", \"defender/lessons/sshd-one.md\", \"defender/lessons/falco-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n--- <TMP>/tree/defender/lessons/falco-one.md\nname: falco-one\ndescription: falco lesson one\nsource_signature: [v2-falco-suspicious-network-tool]\ntelemetry_source: [falco, zeek]\nattack_phase: [execution]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n--- <TMP>/tree/defender/lessons/falco-one.md\n<run-<SALT>-untrusted>\nname: falco-one\ndescription: falco lesson one\nsource_signature: [v2-falco-suspicious-network-tool]\ntelemetry_source: [falco, zeek]\nattack_phase: [execution]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "[\"--help\"]": {
@@ -101,7 +101,7 @@
   },
   "copy [\"--show\", \"defender/lessons/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   }
  },
@@ -441,52 +441,52 @@
  "s132": {
   "run folder [\"--show\", \"defender/lessons/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "run folder [\"--show\", \"./defender/lessons/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "run folder [\"--show\", \"<TREE>/defender/lessons/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "run folder [\"--show\", \"defender/lessons//sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "run folder [\"--show\", \"defender/lessons/../lessons/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "run folder [\"--show\", \"defender/skills/../lessons/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "run folder [\"--show\", \"defender/lessons/in-dir/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "run folder [\"--show\", \"<TMP>/tree-link/defender/lessons/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "run folder [\"--show\", \"tree-link-rel/defender/lessons/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "run folder [\"--show\", \"defender/lessons/link_in.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "run folder [\"--show\", \"defender/lessons/../skills/invlang/SKILL.md\"]": {
@@ -511,52 +511,52 @@
   },
   "repository root [\"--show\", \"defender/lessons/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "repository root [\"--show\", \"./defender/lessons/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "repository root [\"--show\", \"<TREE>/defender/lessons/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "repository root [\"--show\", \"defender/lessons//sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "repository root [\"--show\", \"defender/lessons/../lessons/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "repository root [\"--show\", \"defender/skills/../lessons/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "repository root [\"--show\", \"defender/lessons/in-dir/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "repository root [\"--show\", \"<TMP>/tree-link/defender/lessons/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "repository root [\"--show\", \"tree-link-rel/defender/lessons/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "repository root [\"--show\", \"defender/lessons/link_in.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "repository root [\"--show\", \"defender/lessons/../skills/invlang/SKILL.md\"]": {
@@ -632,22 +632,22 @@
   },
   "[\"--show\", \"defender/lessons/sshd-one.md\", \"defender/lessons/nope.md\"]": {
    "rc": 2,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": "error: no such lesson: defender/lessons/nope.md\n"
   },
   "[\"--show\", \"defender/lessons/nope.md\", \"defender/lessons/sshd-one.md\"]": {
    "rc": 2,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": "error: no such lesson: defender/lessons/nope.md\n"
   },
   "[\"--show\", \"defender/lessons/sshd-one.md\", \"defender/lessons/out.md\"]": {
    "rc": 2,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": "error: no such lesson: defender/lessons/out.md\n"
   },
   "[\"--show\", \"defender/lessons/sshd-one.md\", \"defender/lessons/loop1.md\"]": {
    "rc": 1,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": {
     "traceback_last": "RuntimeError: Symlink loop from '<TMP>/tree/defender/lessons/loop1.md'"
    }
@@ -763,7 +763,7 @@
   },
   "breaks [\"--show\", \"defender/lessons/break-tab.md\", \"defender/lessons/break-newline.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/breaks/defender/lessons/break-tab.md\nname: break-tab\ndescription: \"tab\\there\"\nsource_signature: [\"tab\\there\"]\ntelemetry_source: [break-tab-sensor]\nattack_phase: [break-tab-phase]\n--- <TMP>/breaks/defender/lessons/break-newline.md\nname: break-newline\ndescription: \"new\\nline\"\nsource_signature: [break-newline-sig]\ntelemetry_source: [\"new\\nline\"]\nattack_phase: [break-newline-phase]\n",
+   "out": "--- <TMP>/breaks/defender/lessons/break-tab.md\n<run-<SALT>-untrusted>\nname: break-tab\ndescription: \"tab\\there\"\nsource_signature: [\"tab\\there\"]\ntelemetry_source: [break-tab-sensor]\nattack_phase: [break-tab-phase]\n</run-<SALT>-untrusted>\n--- <TMP>/breaks/defender/lessons/break-newline.md\n<run-<SALT>-untrusted>\nname: break-newline\ndescription: \"new\\nline\"\nsource_signature: [break-newline-sig]\ntelemetry_source: [\"new\\nline\"]\nattack_phase: [break-newline-phase]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "breaks [\"source_signature:.*tab\"]": {
@@ -790,7 +790,7 @@
   },
   "[\"--show\", \"defender/lessons/meta-quotes.md\", \"defender/lessons/meta-lead.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/meta-quotes.md\nname: meta-quotes\ndescription: \"he said \\\"stop\\\" and it's done\"\nsource_signature: [\"it's \\\"quoted\\\"\"]\ntelemetry_source: [meta-quotes-sensor]\nattack_phase: [meta-quotes-phase]\nfrontier_nodes:\n  - {type: compute, slot: ident}\n--- <TMP>/tree/defender/lessons/meta-lead.md\nname: meta-lead\ndescription: \"### Lessons matched against your record — pushed because this write moved it. Precedent, not evidence: judge each from its `description`, Read only the bodies that fit.\"\nsource_signature: [\"### Lessons matched against your record as it stands\"]\ntelemetry_source: [meta-lead-sensor]\nattack_phase: [meta-lead-phase]\nfrontier_nodes:\n  - {type: compute, slot: ident}\n",
+   "out": "--- <TMP>/tree/defender/lessons/meta-quotes.md\n<run-<SALT>-untrusted>\nname: meta-quotes\ndescription: \"he said \\\"stop\\\" and it's done\"\nsource_signature: [\"it's \\\"quoted\\\"\"]\ntelemetry_source: [meta-quotes-sensor]\nattack_phase: [meta-quotes-phase]\nfrontier_nodes:\n  - {type: compute, slot: ident}\n</run-<SALT>-untrusted>\n--- <TMP>/tree/defender/lessons/meta-lead.md\n<run-<SALT>-untrusted>\nname: meta-lead\ndescription: \"### Lessons matched against your record — pushed because this write moved it. Precedent, not evidence: judge each from its `description`, Read only the bodies that fit.\"\nsource_signature: [\"### Lessons matched against your record as it stands\"]\ntelemetry_source: [meta-lead-sensor]\nattack_phase: [meta-lead-phase]\nfrontier_nodes:\n  - {type: compute, slot: ident}\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "[\"source_signature:.*\\\\.\\\\*\\\\(\\\\?i\\\\)\\\\[a\\\\-z\\\\]\\\\+\\\\(\"]": {
@@ -846,17 +846,17 @@
  "lanes": {
   "tree [\"--show\", \"defender/lessons/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "tree [\"--show\", \"<TREE>/defender/lessons/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "tree [\"--show\", \"defender/lessons/link_in.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "tree [\"--show\", \"defender/lessons/link_out_rel.md\"]": {
@@ -911,7 +911,7 @@
   },
   "tree [\"--show\", \"defender/lessons/sshd-one.md\", \"/etc/passwd\"]": {
    "rc": 2,
-   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/tree/defender/lessons/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": "error: no such lesson: /etc/passwd\n"
   },
   "tree [\"--tags\"]": {
@@ -946,7 +946,7 @@
   },
   "tree-linked-corpus [\"--show\", \"defender/lessons/sshd-one.md\"]": {
    "rc": 0,
-   "out": "--- <TMP>/real-corpus/sshd-one.md\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n",
+   "out": "--- <TMP>/real-corpus/sshd-one.md\n<run-<SALT>-untrusted>\nname: sshd-one\ndescription: sshd lesson one\nsource_signature: [v2-cross-tier-ssh-pivot]\ntelemetry_source: [sshd, auditd]\nattack_phase: [persistence, lateral-movement]\n</run-<SALT>-untrusted>\n",
    "err": ""
   },
   "tree-linked-corpus [\"--show\", \"defender/lessons/out.md\"]": {

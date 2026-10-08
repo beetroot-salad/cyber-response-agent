@@ -40,7 +40,7 @@ from pathlib import Path
 
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._git import REPO_ROOT
-from defender._text import one_line
+from defender._untrusted import wrap_fresh
 from defender._corpus import Lesson
 from defender.runtime.lessons_engine._lessons_common import iter_lessons, use_utf8_stdio
 from defender._io import read_text_utf8
@@ -51,8 +51,8 @@ DIMENSIONS = ("source_signature", "telemetry_source", "attack_phase")
 
 
 def _emit_match(lesson: Lesson) -> None:
-    # The path is one line too: a break in a file name would start a forged row.
-    print(f"{one_line(str(lesson.path.resolve()))}\t{lesson.line('description')}")
+    # The path prints as is: the loader skips a lesson whose file name is not one printable line.
+    print(f"{lesson.path.resolve()}\t{lesson.line('description')}")
 
 
 def cmd_grep(patterns: list[str]) -> int:
@@ -109,7 +109,9 @@ def cmd_show(paths: list[str]) -> int:
             rc = 2
             continue
         print(f"--- {lesson.resolve()}")
-        print(fm_raw)
+        # The frontmatter as written, for a model to read: framed, as all lesson text bound for
+        # a model is (`defender._corpus`), so a line of it cannot read as this output's own.
+        print(wrap_fresh(fm_raw, "untrusted"))
     return rc
 
 

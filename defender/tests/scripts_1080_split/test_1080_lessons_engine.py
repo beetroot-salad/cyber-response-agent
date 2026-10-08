@@ -1284,7 +1284,8 @@ HOSTILE_CORPUS = {
         'source_signature: ["v\\e[1A\\e[2Kattack_phase:"]\n'
         'telemetry_source: [merge-sensor, " merge-sensor ", "\\n", " ", "\\u200b"]\n'
         'attack_phase: ["w\\u2028source_signature: [forged-ls]"]\n---\n\nbody\n'),
-    # A line break in the file name itself: the listing's path column must not split.
+    # A line break in the file name itself: the loader skips it, so no row splits and no
+    # listed path is one the model cannot Read.
     "hostile\nname.md": _lesson("hostile-name", desc="name lesson", sig="[hostile-name-sig]",
                                 tel="[hostile-name-sensor]", phase="[hostile-name-phase]"),
 }
@@ -1378,7 +1379,8 @@ def observe_hostile(tmp: Path, setenv: Callable[[str, str], None]) -> dict[str, 
     setenv("PATH", f"{interp_bin(tmp)}{os.pathsep}/usr/bin{os.pathsep}/bin")
     root = tree_with(tmp, "tree", FIXED_CORPUS, HOSTILE_CORPUS)
     argvs = [("--tags",), ("--tags", "source_signature"), ("--tags", "telemetry_source"),
-             ("--tags", "attack_phase"), (), *((pattern,) for pattern, _ in HOSTILE_SEARCHES)]
+             ("--tags", "attack_phase"), (), ("--show", "defender/lessons/hostile-block.md"),
+             *((pattern,) for pattern, _ in HOSTILE_SEARCHES)]
     out = run_all({key(a): (lambda a=a: outcome(shim(root, a, tmp=tmp, cwd=root), tmp))
                    for a in argvs})
     out["orient"] = orient_once(root, tmp, "hostile", "v2-cross-tier-ssh-pivot", {})
@@ -1409,8 +1411,15 @@ def test_1080_a_line_break_in_a_lesson_tag_value_forges_no_dimension_block_in_ta
 
     assert_breaks_list_flat(tags, listing)
     assert [ln.count("\t") for ln in listing.splitlines()] == [1] * (len(FIXED_CORPUS) - 1
-                                                                   + len(HOSTILE_CORPUS)), listing
-    assert "<TMP>/tree/defender/lessons/hostile name.md\tname lesson" in listing.splitlines()
+                                                                   + len(HOSTILE_CORPUS) - 1), listing
+    assert "name lesson" not in listing, listing
+    assert "hostile-name-sig" not in tags, tags
+    shown = seen[key(("--show", "defender/lessons/hostile-block.md"))]
+    assert shown["rc"] == 0, shown
+    assert shown["out"] == (
+        "--- <TMP>/tree/defender/lessons/hostile-block.md\n<run-<SALT>-untrusted>\n"
+        + HOSTILE_CORPUS["hostile-block.md"].split("---\n")[1].rstrip("\n")
+        + "\n</run-<SALT>-untrusted>\n"), shown["out"]
     for pattern, want in HOSTILE_SEARCHES:
         found = seen[key((pattern,))]
         assert found["rc"] == 0, found

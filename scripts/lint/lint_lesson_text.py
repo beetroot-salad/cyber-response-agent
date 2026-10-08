@@ -8,10 +8,16 @@ bound for model context goes inside a `defender._untrusted` frame. The raw field
 lesson's `raw` and `body` — are for matching, authoring and the HTML views, which need the
 values as written.
 
-So every read of `<x>.fm`, and of `.raw` / `.body` on a name that holds a lesson, outside
-`defender/_corpus.py` carries `# lint-lesson-text: ok — <reason>` on its line, the reason saying
-where the raw text goes and what protects it there. The shape is matched by attribute name, not
-type: `fm` is the loader's own field name, and a lesson-holding name is one spelled `lesson…`.
+So every read of `<x>.fm`, of `.raw` / `.body` on a name spelled `lesson…`, and of
+`.frontmatter` on a name spelled `hit…` (a frontier `Hit` carries a lesson's frontmatter) outside
+`defender/_corpus.py` carries `# lint-lesson-text: ok — <reason>` on a line the read spans, the
+reason saying where the raw text goes and what protects it there.
+
+A HEURISTIC, not a proof: the shape is matched by attribute and receiver name, not type, so
+lesson text reached another way passes unseen — a lesson file parsed directly with
+`_frontmatter.split_frontmatter` / `parse_frontmatter` (as `lessons_fm.cmd_show` and
+`trace_lesson`'s one-lesson path do), or a frontmatter dict under another name. Those readers
+are framed or flattened by hand and pinned by their own tests.
 
 Run from repo root:  python scripts/lint/lint_lesson_text.py
 Exit 0 = clean, 1 = a raw read that does not say why, 2 = could not scan.
@@ -19,6 +25,7 @@ Exit 0 = clean, 1 = a raw read that does not say why, 2 = could not scan.
 from __future__ import annotations
 
 import ast
+import re
 import sys
 from pathlib import Path
 
@@ -32,9 +39,10 @@ BASELINE_PATH = Path(__file__).with_name("lint_lesson_text_baseline.json")
 EXCLUDED_DIRS = (".venv", "__pycache__", "tests")
 #: The loader itself: it builds the one-line and match forms from the raw fields.
 OWNER = "defender/_corpus.py"
-SUPPRESS = "lint-lesson-text: ok"
-#: Raw fields read on a lesson-holding name only: `raw` and `body` are common attribute names.
-_ON_A_LESSON = frozenset({"raw", "body"})
+#: The suppression, with its reason: a bare `ok` is not one.
+SUPPRESS = re.compile(r"#\s*lint-lesson-text: ok\s*(?:—|--|-)\s*\S")
+#: Raw fields read only on a receiver spelled with the prefix: common attribute names elsewhere.
+_ON_A_NAMED = {"raw": "lesson", "body": "lesson", "frontmatter": "hit"}
 
 
 def _receiver_name(node: ast.expr) -> str:
@@ -52,11 +60,17 @@ def raw_reads(tree: ast.AST) -> list[ast.Attribute]:
         if not isinstance(node, ast.Attribute) or not isinstance(node.ctx, ast.Load):
             continue
         if node.attr == "fm" or (
-            node.attr in _ON_A_LESSON
-            and _receiver_name(node.value).lower().startswith("lesson")
+            node.attr in _ON_A_NAMED
+            and _receiver_name(node.value).lower().startswith(_ON_A_NAMED[node.attr])
         ):
             found.append(node)
     return found
+
+
+def suppressed(node: ast.Attribute, lines: list[str]) -> bool:
+    """A reasoned suppression on any line the read spans (a call split over lines included)."""
+    last = node.end_lineno or node.lineno
+    return any(SUPPRESS.search(lines[i - 1]) for i in range(node.lineno, last + 1))
 
 
 def _scan() -> list[Finding]:
@@ -69,7 +83,7 @@ def _scan() -> list[Finding]:
         text, tree = read_and_parse(path, rel)
         lines = text.splitlines()
         for node in raw_reads(tree):
-            if SUPPRESS in lines[node.lineno - 1]:
+            if suppressed(node, lines):
                 continue
             findings.append(Finding(
                 fingerprint=f"{rel}:{node.lineno}:{node.attr}",
@@ -79,7 +93,8 @@ def _scan() -> list[Finding]:
 
 
 HEADER = (
-    "lint_lesson_text baseline — raw lesson-text reads (`.fm`, a lesson's `.raw` / `.body`) "
+    "lint_lesson_text baseline — raw lesson-text reads (`.fm`, a lesson's `.raw` / `.body`, "
+    "a hit's `.frontmatter`) "
     "outside defender/_corpus.py without `# lint-lesson-text: ok — <reason>`. Ships EMPTY. "
     "Regenerate: python scripts/lint/lint_lesson_text.py --update-baseline."
 )

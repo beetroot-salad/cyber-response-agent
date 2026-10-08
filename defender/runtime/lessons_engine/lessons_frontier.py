@@ -27,7 +27,6 @@ from pathlib import Path
 
 from defender._corpus import PROVENANCE_KEYS
 from defender._model import model
-from defender._text import one_line
 from defender._untrusted import wrap_fresh
 from defender.runtime.lessons_engine._lessons_common import (
     as_list,
@@ -484,10 +483,9 @@ def render(hits: list[Hit], *, lead: str = WRITE_RETURN_LEAD) -> str:
     # The block is re-injected often, so every line counts.
     lines = []
     for hit in hits:
-        # `matched` is the model's only account of why this lesson was pushed. The path is one
-        # line: a break in a lesson's file name would start a forged row.
-        lines.append(f"- {one_line(str(hit.path.resolve()))} — matched {hit.matched}")
-        if body := _render_frontmatter(hit.frontmatter):
+        # `matched` is the model's only account of why this lesson was pushed.
+        lines.append(f"- {hit.path.resolve()} — matched {hit.matched}")
+        if body := _render_frontmatter(hit.frontmatter):  # lint-lesson-text: ok — inside the untrusted frame below
             lines.append(body)
     # The lead is host text; the hits are lesson text a model wrote, framed as the alert is
     # (`defender._corpus`'s rule), so a description cannot read as a section of this message.
