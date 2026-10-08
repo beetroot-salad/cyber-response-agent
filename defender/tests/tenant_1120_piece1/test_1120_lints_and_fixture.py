@@ -347,8 +347,8 @@ def test_1120_the_fixture_tenant_carries_the_labs_grants_and_lead_zero_outside_d
     assert mapping.read_bytes() == (
         H.TEMPLATE / "settings" / "systems" / "case-history" / "mapping.yaml").read_bytes()
     case_ticket = H.mod("runtime.case_ticket")
-    predicate = case_ticket.release_predicate(case_ticket.load_case_mapping(settings))
-    assert predicate.released_status == "closed"
+    loaded = case_ticket.load_case_mapping(settings)
+    assert (loaded["open"]["status"], loaded["comment"]["author"]) == ("open", "defender")
     configured = {p.parent.name for p in (settings / "systems").glob("*/config.env")}
     assert configured == CONFIGURED_SYSTEMS, configured
     settings_kinds = [p for p in agent.rglob("*")

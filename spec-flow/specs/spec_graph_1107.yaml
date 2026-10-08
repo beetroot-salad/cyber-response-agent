@@ -191,6 +191,9 @@ demands:
     becomes a CaseMapping. A file that is not YAML, not a mapping, or fails the lifecycle check is kept as its CaseTicketError
     and is never raised at resolve.
   source: 20-demands.md (phase B)
+  note: 'AMENDED by #1221''s amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer asks whether a case is closed, so nothing reads `released:` and the
+    lifecycle check is the literal-`open.status` rule alone. A mapping whose `open.status` equals its legacy
+    `released.status` is now a CaseMapping; the lifecycle arm is a templated `open.status`.'
 - id: d_case_ticket_takes_mapping
   kind: seam
   form: test
@@ -204,6 +207,8 @@ demands:
     instead of settings_dir. None of them reads mapping.yaml: called with a CaseMapping while no mapping file exists
     anywhere, they answer from it.'
   source: 20-demands.md (phase B)
+  note: 'AMENDED by #1221''s amendment (issue #1221, reversing its N7, human, 2026-10-08): release_predicate is removed with the writer''s closed-case check, so the consumers
+    are the other five.'
 - id: d_mapping_error_consumers
   kind: coherence
   form: test
@@ -212,11 +217,11 @@ demands:
   - interacts(unservable->ticket_mapping)
   - interacts(record_case_ticket->ticket_mapping)
   discharged_by: test_d_mapping_error_consumers
-  seed_docstring: With record.ticket_mapping a CaseTicketError, each consumer handles it as at base (CX21). The
-    query tool's ticket screen serves no comments, since every ticket reads as unreleased, and logs one warning.
-    The estate applier refuses a comment patch, naming the mapping error. The record step warns and writes an error
-    receipt.
+  seed_docstring: With record.ticket_mapping a CaseTicketError, the record step warns and writes an error receipt
+    (CX21, as at base), and nothing else is touched by it — the query tool reads no mapping, so a ticket listing
+    reaches gather whole, keys and comments, open or closed, with no warning about the mapping.
   source: 20-demands.md (phase B)
+  note: 'REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed — the query tool reads no case-history mapping and serves a ticket reply as the store answered it; the estate applier''s comment-patch refusal (`unservable`) went with the release screen it guarded, and WorldRegistry takes no tenant record for it. Was: the screen served no comments and logged one warning; the applier refused a comment patch naming the mapping error. The record step''s arm is unchanged (#1221 N7).'
 - id: d_one_parser_quote_rule
   kind: behavior
   form: test
@@ -400,11 +405,12 @@ demands:
   binds:
   - interacts(WorldRegistry->ticket_mapping)
   - interacts(unservable->ticket_mapping)
-  discharged_by: test_c_estate_registry_reads_record
-  seed_docstring: A resumed sibling's WorldRegistry, built in run.py, and the estate applier judge a ticket comment
-    patch against the record's ticket_mapping. Editing mapping.yaml's released status after the record is built
-    does not change which patch is refused.
+  discharged_by: test_c_estate_registry_takes_no_mapping
+  seed_docstring: A resumed sibling's WorldRegistry, built in run.py, accepts a ticket comment patch whatever status
+    it moves the case to — the status the record was built with, or one only a mid-run edit of mapping.yaml names —
+    and consults no mapping.
   source: 20-demands.md (phase B)
+  note: 'REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed — the query tool reads no case-history mapping and serves a ticket reply as the store answered it; the estate applier''s comment-patch refusal (`unservable`) went with the release screen it guarded, and WorldRegistry takes no tenant record for it. Was: test_c_estate_registry_reads_record — the registry and the applier judged a comment patch against the record''s ticket_mapping, and a patch releasing only to the edited status was refused.'
 - id: c_lead_zero_reads_record
   kind: coherence
   form: test
@@ -655,6 +661,8 @@ demands:
     writes ticket_write.json with ok false, status 'error', the store's url, and a reason that names the mapping
     problem, and it logs a warning.
   source: 20-demands.md (phase B)
+  note: 'AMENDED by #1221''s amendment (issue #1221, reversing its N7, human, 2026-10-08): the bad mapping is a templated `open.status`, the loader''s one remaining lifecycle
+    refusal; `open.status` equal to `released.status` now loads.'
 - id: o6_transport_fault_receipt
   kind: behavior
   form: test
@@ -994,12 +1002,14 @@ demands:
   - interacts(_screen_ticket_payload->ticket_mapping)
   - ticket_mapping
   - interacts(test_767_writer->mapping_yaml)
-  discharged_by: test_o2_ticket_screen_mapping_snapshot
-  seed_docstring: 'After the record is built, editing mapping.yaml''s released status does not change the next ticket
-    screen: the query tool screens against record.ticket_mapping as built.'
+  discharged_by: test_o2_ticket_replies_ignore_the_mapping
+  seed_docstring: 'Neither the record''s ticket_mapping nor an edit of mapping.yaml after the record is built changes
+    what a ticket reply serves: the query tool reads no mapping, so cases closed under either status and an open
+    one all reach gather with their comments.'
   rejected:
   - the per-call re-read at base (CX9) and test_767_the_mapping_is_parsed_once_per_edit (CX10)
   source: 20-demands.md (phase B)
+  note: 'REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed — the query tool reads no case-history mapping and serves a ticket reply as the store answered it; the estate applier''s comment-patch refusal (`unservable`) went with the release screen it guarded, and WorldRegistry takes no tenant record for it. Was: test_o2_ticket_screen_mapping_snapshot — the query tool screened against record.ticket_mapping as built, so an edit of the released status mid-run changed nothing. The snapshot itself still holds for the record step (scripts_1080_split s217).'
 - id: d7_cli_mode_gone
   kind: negative
   form: test
@@ -1681,6 +1691,9 @@ demands:
     released-by-a-person decline keeps today''s receipt and gains a non-empty reason naming the decline. Assertions
     stay at a non-empty reason and no host path.'
   source: 70-resolutions.draft.md NF-23 (auto, judge's recommendation)
+  note: 'AMENDED by #1221''s amendment (issue #1221, reversing its N7, human, 2026-10-08): there is no released-by-a-person decline any more — a case the store holds as
+    `closed` is recorded like any other (receipt `commented`, ok true, no reason; no read of the case), so the
+    second arm now pins that instead of the `refused-released` receipt (premise #88 is void).'
   premises:
   - '#84 test_case_history_timeout_vs_malformed_response_receipt'
   - '#87 test_multiple_config_faults_in_one_record_step'

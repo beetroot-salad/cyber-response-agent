@@ -256,13 +256,8 @@ def serve_one(world: Any, system: str, verb: str, params: Mapping, *, adapters: 
 class WorldRegistry(ModuleVerbRegistry):
     """A `ModuleVerbRegistry` whose verbs run for real and then answer to the world."""
 
-    def __init__(self, roster, grant, *, world: Any, ledger: Ledger, as_of: datetime,  # noqa: PLR0913 — a world's whole serving identity plus its tenant
-                 applier: Any = None, tenant: Any = None,
-                 grant_home: str = TABLE_POINTER):
-        # `tenant` is the episode tenant's record (#1107), whose `ticket_mapping` the
-        # ticket-comment check below reads the released status from; `None` (a registry no run
-        # built) can release nothing, so such a world's comment patch is refused rather than
-        # judged against some other tenant's mapping.
+    def __init__(self, roster, grant, *, world: Any, ledger: Ledger, as_of: datetime,  # noqa: PLR0913 — a world's whole serving identity
+                 applier: Any = None, grant_home: str = TABLE_POINTER):
         super().__init__(roster, grant, grant_home=grant_home)
         # Validate the clock here, once. A `TypeError` deep inside `served` is not an
         # `AdapterFault`, so the query tool files it as an infra exit code, which trips the
@@ -320,12 +315,6 @@ class WorldRegistry(ModuleVerbRegistry):
                     f"can never apply — `touches` is {declared!r} and a staged system is served "
                     "from its corpus rather than patched, so the overlay would be silently "
                     "dropped while every row still read honestly")
-            unservable = applier_module.unservable(
-                patches, None if tenant is None else tenant.ticket_mapping)
-            if unservable:
-                raise EstateError(
-                    f"world {world_id!r} carries a difference the read screen would empty "
-                    f"before the sibling saw it: {'; '.join(unservable)}")
         self._wrapped: dict[str, dict[str, Any]] = {}
 
     def decide_call(self, system: str, verb: str, params: Mapping[str, Any]) -> VerbDecision:

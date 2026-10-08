@@ -584,13 +584,11 @@ def test_two_forks_from_one_point_share_a_parent_id_and_differ_only_in_session_i
 
 def test_case_id_is_inherited_by_a_fork_and_the_eval_join_key_is_not(tmp_path):
     """A fork's `session` row carries the source's `case_id` and a freshly minted
-    `session_id`, so ticket screening still refuses the source's own ticket, while the
-    eval dir-name join key does not follow the fork.
+    `session_id`, while the eval dir-name join key does not follow the fork.
 
-    FK1b/R17 correct O13's clause: `ticket_screen.self_case_key` returns `deps.run_id`
-    today and its docstring pins that deliberately, so this demand asserts what the store
-    carries — the inheritance — and records the screen's key as #696's gap, never
-    asserting a keying the code contradicts."""
+    This demand asserts what the store carries — the inheritance — and nothing about a
+    ticket screen: the own-case screen that once keyed on `deps.run_id` was removed by
+    #1221, and the learning-path leak it partly covered is #1224's."""
     store = make_store(tmp_path, case_id="case-alpha")
     main = store.new_session(agent_id="main")
     r1 = store.append(main, [user_request("root")], agent_id="main")[0]

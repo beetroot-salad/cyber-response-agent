@@ -20,8 +20,8 @@ receipt shape and the lint's `main(argv) -> int`. It does NOT name:
   * the keyword the ticket writer's two steps take the record, the defender dir and the run env
     under (`tenant=`, `defender_dir=`, `env=` here — `record_step` / `open_step`);
   * the keyword the `case_ticket` mapping consumers take the mapping under (`mapping=` here —
-    `with_mapping`), nor `release_predicate`'s (positional here — `released_status`), nor
-    `applier.unservable`'s (positional second argument, where the settings folder went);
+    `with_mapping`) (`release_predicate`, which took it positionally, and the estate applier's
+    `unservable` were removed by #1221 and its amendment);
   * how `review.verb_context` is handed the episode tenant's record (positionally, where the
     settings folder went — `review_verb_context`);
   * the keyword a transport call names the secrets its one child needs under (`secrets=`, a tuple
@@ -410,10 +410,12 @@ def with_mapping(fn: Any, *args: Any, mapping: Any, **kw: Any) -> Any:
     return fn(*args, mapping=mapping, **kw)
 
 
-def released_status(mapping: Any) -> str:
-    """`case_ticket.release_predicate` over a record's `ticket_mapping`, handed POSITIONALLY
-    (coined), and the `released.status` it keys on."""
-    return mod("runtime.case_ticket").release_predicate(mapping).released_status
+def open_reporter(mapping: Any) -> str:
+    """The `open.reporter` a record's `ticket_mapping` carries — the value a snapshot test plants
+    distinct per edit and watches flow out (`_tenants1106.mapping_text(reporter=...)`). It was
+    the `released.status` read through `case_ticket.release_predicate` until #1221's amendment
+    removed the predicate; the reporter is a field the open leg actually sends."""
+    return mapping["open"]["reporter"]
 
 
 # ======================================================================================
@@ -724,10 +726,11 @@ def receipt(run_dir: Path) -> dict[str, Any] | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-#: The shim answers a record step's two calls: the read-back of the case (not released), then
-#: the comment POST. Canned in curl's body + status-line shape (the transport's own contract).
+#: The shim answers a run's two store calls: the open leg's create, then the record step's one
+#: comment POST (#1221's amendment: the writer reads nothing back first). Canned in curl's
+#: body + status-line shape (the transport's own contract); the last answer repeats.
 def store_answers_ok(key: str) -> list[dict[str, Any]]:
-    return [answer(json.dumps({"key": key, "status": "open", "comments": []}), "200"),
+    return [answer(json.dumps({"key": key}), "201"),
             answer(json.dumps({"id": 1}), "201")]
 
 

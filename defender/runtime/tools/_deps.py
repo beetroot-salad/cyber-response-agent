@@ -129,7 +129,7 @@ class AgentDeps:
     roots: ResolvedRoots | None = field(kw_only=True, default=None)
     tool_config: Any = field(kw_only=True, default=None)
     #: The run's tenant record (#1107) — handed to every verb this role dispatches
-    #: (`VerbContext.tenant`) and to the ticket screen. Set by the run (`run_investigation` onto
+    #: (`VerbContext.tenant`). Set by the run (`run_investigation` onto
     #: MAIN's deps, carried onto each gather lead's), never derived from `defender_dir`: the
     #: settings left the code tree. `None` for a role that dispatches no verb; a verb built over
     #: `None` is refused by `VerbContext`'s own validation. `SkipValidation`: the record is a

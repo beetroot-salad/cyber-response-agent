@@ -18,7 +18,6 @@ from dataclasses import field
 from typing import Any
 
 from defender._model import model
-from defender.runtime import case_ticket
 
 from ..ledger import PASSTHROUGH, PATCHED, STAGED
 from .lookups import apply_patches
@@ -49,48 +48,6 @@ def unappliable(world: Any, patches: Mapping) -> list[str]:
     patch naming it would read as confirmation of a change that never happened.
     """
     return sorted(s for s in patches if not _touches(world, s) or s in STAGERS)
-
-
-#: The one state system whose responses pass a second screen after the patch.
-_TICKET_SYSTEM = "ticket"
-
-
-def unservable(patches: Mapping, mapping: Any | None) -> list[str]:
-    """The `ticket` patches whose difference the read screen would empty before the sibling
-    ever saw it.
-
-    An unreleased ticket serves no comments, and that screen runs after the patch on every
-    ticket response. A patch writing `comments` without moving the ticket to the released status
-    authors a difference no query can reach. The fix is to set `status: <released>` in the
-    patch.
-
-    The released status is the operator mapping's (`case_ticket.release_predicate`), taken from
-    the record's `ticket_mapping` handed in as `mapping` (#1107) — never from the file; a mapping
-    that cannot say what it is (or no mapping at all) refuses every such patch, since nothing
-    could be served."""
-    table = patches.get(_TICKET_SYSTEM)
-    if not isinstance(table, Mapping):
-        return []
-    with_comments = {
-        entity: patch for entity, patch in table.items()
-        if isinstance(patch, Mapping) and "comments" in patch
-    }
-    if not with_comments:
-        return []
-    if mapping is None:
-        return [f"{_TICKET_SYSTEM}/{entity}: patches `comments`, but no tenant record "
-                "was handed in to say which status releases them" for entity in with_comments]
-    try:
-        released = case_ticket.release_predicate(mapping).released_status
-    except case_ticket.CaseTicketError as e:
-        return [f"{_TICKET_SYSTEM}/{entity}: patches `comments`, but the case-history mapping "
-                f"cannot say which status releases them ({e})" for entity in with_comments]
-    return [
-        f"{_TICKET_SYSTEM}/{entity}: patches `comments` on a case it does not also move to "
-        f"the released status ({released!r}) — an unreleased case serves no comments (#767), "
-        "so the sibling could never observe this difference"
-        for entity, patch in with_comments.items() if patch.get("status") != released
-    ]
 
 
 def unnameable(world: Any) -> list[str]:

@@ -1,4 +1,4 @@
-# Case-history field mapping (issue #317, gated by a person's close since #767).
+# Case-history field mapping (issue #317; the host records, never closes, since #767).
 #
 # How the defender's INTERNAL case model (alert.json + report.md) maps onto the
 # EXTERNAL ticket schema — the "de-facto schema". The frozen v1 ticket has no
@@ -21,11 +21,10 @@ source:
 # POST /tickets — the bridge create: an OPEN ticket, when the alert is raised.
 # Keys are external ticket fields (TicketCreate); values are rendered templates.
 # This whole section ships to the wire UNFILTERED (`alert_to_open_payload`).
-# `status` must be a literal and must differ from `released.status` below —
-# the status vocabulary is the store's own closed set, so nothing rendered from
-# an alert can move a case along its lifecycle. Both rules are ENFORCED when
-# this file is loaded (`case_ticket._check_lifecycle`): a templated or colliding
-# `status` refuses the open leg, the record leg and the read screen alike.
+# `status` must be a literal — the status vocabulary is the store's own closed
+# set, so nothing rendered from an alert can move a case along its lifecycle.
+# ENFORCED when this file is loaded (`case_ticket._check_lifecycle`): a templated
+# `status` refuses the open leg and the record leg alike.
 open:
   key: "{case_id}"
   summary: "{summary}"
@@ -42,16 +41,9 @@ open:
 # ticket, and it never sets a disposition itself — closing is a person's (O1).
 # `body` is rendered from a `CaseRecord`'s `disposition` (proposed, never
 # committed by this write), `cause` (the host's own sentence) and `narrative`
-# (the report's body, fence-stripped and bounded on the wire).
+# (the report's body, fence-stripped). The host opens every posted body with
+# the agent tag naming its run, outside this template (#1221), and bounds the
+# whole on the wire.
 comment:
   author: defender
   body: "{disposition} — {cause}\n\n{narrative}"
-
-# The lifecycle state a person moves a case to when they have reviewed it. A
-# later run's gather is served a case's comments ONLY once it is in this state
-# (O2/O5); until then it sees the case — summary, labels, status — with no
-# comments at all. The host never sets this status (it records, never
-# transitions), so the person's close is the one act that releases a case's
-# history, and re-opening it hides that history again.
-released:
-  status: closed

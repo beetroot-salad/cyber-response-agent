@@ -269,9 +269,11 @@ def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
     the narrative into the recorded comment's `body` on every case — that is O4's whole point,
     "the report body (the model's notes)" is what a person needs to approve. So whatever the
     model cited while investigating, baseline consultations included, now legitimately crosses
-    to the outbound comment. What protects a LATER run from reading it back is D4's approval
-    screen (`test_767_screen.py`'s `o2_unapproved_no_agent_comment` and
-    `o2_approved_serves_latest`), never an absence of the content on the wire."""
+    to the outbound comment. A LATER run that reads it back is served it (#1221 removed D4's
+    approval screen); what keeps it from passing as a person's finding is the agent tag line
+    every posted comment opens with and rule #27's refusal of a benign close resting on past
+    cases alone (`test_1221_agent_tag.py`, `test_1221_past_case_rule.py`), never an absence of
+    the content on the wire."""
     from defender.runtime import case_ticket
 
     receipts = _receipts(BENIGN_DOC)

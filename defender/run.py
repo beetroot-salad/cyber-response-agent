@@ -267,7 +267,7 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
             # Declared up front: a world that serves nothing must still leave a ledger.
             world=world, ledger=Ledger.for_world(episode, world.world_id).declare(),
             as_of=world.as_of, applier=WorldApplier(),
-            tenant=tenant, grant_home=tenant.table_pointer,
+            grant_home=tenant.table_pointer,
         )
         resume = branch_mod.BranchSpec(
             source_run_dir=Path(family.source_run_dir),

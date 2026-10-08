@@ -2,9 +2,10 @@
 approval by #767).
 
 Pure layer only — no transport, no network. `alert_to_open_payload` and `read_case_record` are
-the two halves this file drives directly; the render/screen halves D2-D4 add
-(`case_record_to_comment`, `release_predicate`) have their own suite under
-`test_767_writer.py` / `test_767_screen.py`, driven against the spec's own mapping fixtures.
+the two halves this file drives directly; the render half D2-D3 add (`case_record_to_comment`)
+has its own suite under `test_767_writer.py`, driven against the spec's own mapping fixtures
+(#1221 removed the read-side screen and its suite, and its amendment the release predicate the
+writer once asked; the agent tag the writer adds is `test_1221_agent_tag.py`'s).
 """
 from __future__ import annotations
 
