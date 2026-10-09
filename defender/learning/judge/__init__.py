@@ -649,6 +649,8 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orche
         world_findings=[*(prior.world_findings if prior else []), *report.world_rows],
         dispositions=[*((prior.dispositions or []) if prior else []), *report.dispositions],
     )
+    record_out.graded_worlds = frozenset(
+        r["world"] for r in record_out.worlds if family_mod.is_gradable_row(r))
     _write_judge_yaml(episode, record_out)
     return record_out
 

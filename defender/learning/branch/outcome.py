@@ -123,7 +123,8 @@ def failed_worlds(bound: Bound, record: Mapping[str, Any]) -> dict[str, dict[str
     refusal as its detail. Labels come off the records as written; nothing here checks them
     against the manifest."""
     failed: dict[str, dict[str, Any]] = {}
-    for entry in record.get("unservable_worlds") or ():
+    listed = record.get("unservable_worlds")
+    for entry in listed if isinstance(listed, (list, tuple)) else ():
         if isinstance(entry, Mapping) and isinstance(entry.get("world"), str):
             failed[entry["world"]] = {"world": entry["world"], "reason": entry.get("reason"),
                                       "call": entry.get("call"), "detail": entry.get("detail", "")}

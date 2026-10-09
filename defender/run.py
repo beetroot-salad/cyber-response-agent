@@ -638,7 +638,7 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
                     episode=episode,
                     **seams,
                 )
-            except BaseException as escaped:
+            except (ServingAbort, BaseExceptionGroup) as escaped:
                 abort = _serving_abort(escaped)
                 if abort is None or world is None or episode is None:
                     raise
