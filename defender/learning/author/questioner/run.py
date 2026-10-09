@@ -108,9 +108,10 @@ def _gate_questioner(
     carries no defender disposition to gate on, so every row not already attributed to a lesson
     in this corpus is authored — unless it names no systems.
 
-    A row queued before #1224 carries `pattern`/`holding_system` and no `systems`. A lesson
-    authored from it could select a tenant only by guess, so it is drained without authoring
-    (consumed, never held: the row will never change) and named in a warning (N23). Returns
+    A row queued before #1224 carries the old selection keys (a pattern and a holding system)
+    and no `systems`. A lesson authored from it could select a tenant only by guess, so it is
+    drained without authoring (consumed, never held: the row will never change) and named in a
+    warning (N23). Returns
     `(held, consumed_pre, to_author)`."""
     existing_ids = questioner_existing_finding_ids(cfg)
     consumed: list[dict] = []

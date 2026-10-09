@@ -142,20 +142,19 @@ def correlation_key_of(row: Any) -> str | None:
 class ServedCall:
     """One served call, under both the question asked and the question run.
 
-    They differ exactly when a world stages (`prepare` rewrites the call to its corpus).
+    They differed only under staging (retired by #1224), which rewrote a call to its world's
+    corpus. Under the oracle a call runs as asked; rows written before still carry both forms,
+    and their readers read them as written.
 
     `key` is the form that ran, and is what the family tier memoizes on. Keying the memo on the
-    asked form would replay another world's staged answer to a sibling.
+    asked form would have replayed another world's staged answer to a sibling.
 
     `correlation_key` is the form asked, and is what cross-world comparison pairs on. On a
-    staged system the ran forms never match across worlds, so pairing on them would report no
-    difference at all on the event stream.
+    staged system the ran forms never matched across worlds.
 
-    `payload_text` is the answer with the world's staged identity restored out
-    (`WorldApplier.restore`), because responses echo it (`query`/`alerts` return the index,
-    `esql` the query text); otherwise every event-stream row would differ base-vs-sibling in a
-    field no world touched. It is also served back to models from the memo, where a view name
-    would leak and get re-staged. `params` still holds what actually ran.
+    `payload_text` is the answer as served. A staging-era row holds it with the world's staged
+    identity taken back out, because responses echo it (`query`/`alerts` return the index,
+    `esql` the query text). `params` holds what actually ran.
     """
 
     system: str

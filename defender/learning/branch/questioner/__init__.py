@@ -203,8 +203,8 @@ def _questioner_lessons_section(lessons: Any, *, served_systems: Sequence[str]) 
 
     `lessons` is the launcher's unread glob of `defender/lessons-questioner/`. A lesson is
     selected iff its frontmatter `systems` — a non-empty list of strings — shares a member with
-    `served_systems`, matched exactly (no case or separator folding; N03). Its old `pattern` /
-    `holding_system` keys select nothing. A lesson that cannot be read, has no closed
+    `served_systems`, matched exactly (no case or separator folding; N03). Its old pattern and
+    holding-system keys select nothing. A lesson that cannot be read, has no closed
     frontmatter, repeats a top-level key (`safe_load` resolves repeats last-wins silently, which
     would let a model-authored value steer the selector) or carries a malformed `systems` is
     skipped with a warning naming it (N24) — never shown by guess.

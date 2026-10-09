@@ -1,9 +1,10 @@
 """The naming rules a world label is held to, as pure text checks with no dependencies.
 
-Two owners judge a world label: the family model (a label must not claim a reserved name) and
-the world-view adapter (a label must name a search-index view). Each raises its own error type,
-but the rule and its words live here once, so a reader that holds no model stack and no adapter
-(the runs repository's episode-record writer, #1105) judges a label exactly as they do. Each
+The family model judges a world label (a label must not claim a reserved name, and must be in
+the world-token alphabet). The rules and their words live here once, so a reader that holds no
+model stack (the runs repository's episode-record writer, #1105) judges a label the same way.
+That writer also still holds a label to the index-name rule (`world_view_fault`), which the
+retired world-view staging used to name a view (#1224 deleted the staging, not the rule). Each
 `*_fault` function returns the refusal's sentence, or `None` when the label passes; a label is
 shown `quoted`, so a model-authored megabyte cannot flood the refusal.
 """

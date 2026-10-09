@@ -39,11 +39,6 @@ from defender.runtime.verbs import (
     ModuleVerbRegistry,
     VerbDecision,
 )
-from defender.scripts.adapters.confinement import (
-    VIEW_NAMESPACE,
-    ConfinementFault,
-    is_world_view,
-)
 
 from ..outcome import BUDGET, ORACLE_UNSERVABLE
 from ..ledger import (
@@ -69,90 +64,12 @@ from .oracle import (
     request_key,
     start_process_box,
 )
-from .stagers.dispatch import STAGERS
 
 _logger = logging.getLogger(__name__)
 
 
 class EstateError(Exception):
     """A world that cannot be served honestly."""
-
-
-def _configured_for(world: Any, ctx: Any, stager: Any) -> tuple[str, ...]:
-    """The episode tenant's configured corpus patterns, for the own-view test.
-
-    The MANIFEST's record first — the set the launcher judged this family's overlays against,
-    which every production world (`ResumeWorld`) carries on its family — and only for a world
-    with no such record (one assembled without a manifest, or a manifest written before the
-    field) the patterns the serving context's tenant record configures. A frame with neither has
-    no tenant to consult and admits no view as this world's own: the refusal, fail-closed."""
-    recorded = tuple(getattr(getattr(world, "family", None), "configured_patterns", ()) or ())
-    if recorded:
-        return recorded
-    tenant = getattr(ctx, "tenant", None)
-    elastic = getattr(tenant, "elastic", None)  # lint-shippable: ok — the record's field name (#1107)
-    return tuple(stager.configured_patterns(elastic)) if tenant is not None else ()  # lint-shippable: ok — the record's field name (#1107)
-
-
-def refuse_a_foreign_world_view(
-    world: Any, system: str, verb: str, params: Mapping, ctx: Any = None,
-) -> None:
-    """Refuse a call that names another world's staged view, before anything runs.
-
-    Siblings in an episode share a cluster, each staging a private corpus under the view
-    namespace; a world naming a sibling's view by hand would read that sibling's injected
-    documents and exclusions.
-
-    This must sit above per-world staging. A staging world has a foreign name rewritten by its
-    stager into a view of nothing, so a check inside the stager looks fine while the hole stays
-    open: the world that can actually make the read is the control, which stages nothing, whose
-    applier hands the parameters straight back and threads no world label onto the context.
-
-    It cannot live in the outbound HTTP guard either: that guard sees only the URL, and the
-    query-language arm (`/_query`) carries the index in the request body.
-
-    The source is read through the stager's own reader (which parameter addresses a corpus is
-    vendor knowledge). The reader gets no `ctx`: an omitted index resolves to a configured
-    pattern, which cannot be a foreign view. An unparseable body is left to `prepare`, which
-    raises the stager's refusal for a staging world.
-    """
-    stager = STAGERS.get(system)
-    reader = getattr(stager, "source_pattern", None) if stager is not None else None
-    if stager is None or reader is None:
-        return
-    try:
-        source = reader(verb, dict(params), None)
-    except Exception:  # noqa: BLE001 — an unparseable body is `prepare`'s answer, except as below
-        # `prepare` only covers a world that stages this system; for one that stages nothing,
-        # params pass straight through and `esql` carries no index confinement. A multi-source
-        # expression (`FROM logs-*, wv-<other>-logs-`) that the reader refuses to reduce would
-        # reach the transport, so any unreducible call mentioning the namespace is refused.
-        if _names_the_namespace(params):
-            raise ConfinementFault(
-                "the call names the staged view namespace inside an index expression this seam "
-                "cannot reduce to a single corpus — refused before the call was issued, because "
-                "a multi-source read is how a foreign view rides alongside a legal one") from None
-        return
-    if not isinstance(source, str) or not source.startswith(f"{VIEW_NAMESPACE}-"):
-        return
-    # The world's own view stays admissible, but only for a system it actually stages.
-    if system in getattr(world, "touches", ()) and is_world_view(
-            source, _configured_for(world, ctx, stager), world.world_id):
-        return
-    raise ConfinementFault(
-        f"index expression {source!r} names a staged corpus this world does not read — "
-        "refused before the call was issued")
-
-
-def _names_the_namespace(params: Mapping) -> bool:
-    """Does any parameter value mention the staged view namespace at all?
-
-    A last line, not a parser: asked only when the vendor reader could not reduce the call to
-    one corpus. No legitimate model-authored query names the namespace, so any mention is
-    refused.
-    """
-    prefix = f"{VIEW_NAMESPACE}-"
-    return any(prefix in value for value in params.values() if isinstance(value, str))
 
 
 def serve_one(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any,

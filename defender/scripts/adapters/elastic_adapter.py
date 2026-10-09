@@ -269,12 +269,8 @@ def _search_verb(  # noqa: PLR0913 — the two search verbs' shared body, one pa
 ) -> dict:
     config = load_config(ctx)
     resolved = index or config[index_key]
-    # `world_id` lets a branched run's staged world view (named outside every configured
-    # pattern) be confined rather than refused. `None` on ordinary runs.
     resolved = confine_index(
-        resolved, (config["ELASTIC_EVENTS_INDEX"], config["ELASTIC_ALERTS_INDEX"]),
-        world_id=getattr(ctx, "world_id", None),
-    )
+        resolved, (config["ELASTIC_EVENTS_INDEX"], config["ELASTIC_ALERTS_INDEX"]))
     docs, total, truncated = _search(
         ctx, config, resolved,
         _search_body(
@@ -315,9 +311,7 @@ def _bounded_end(ctx: VerbContext, end: str | None) -> str | None:
     clock, and the caller has already bounded the query. The start stays open because the past
     does not change.
 
-    Returns a new value rather than editing `params`: the estate seam compares
-    `prepared != params` to detect staging, and a filled window would make an unstaged call
-    look staged.
+    Returns a new value rather than editing `params`, so the caller's params stay as asked.
     """
     at = getattr(ctx, "as_of", None)
     return end if _bound_set(end) or at is None else _clock.z_seconds(at)
