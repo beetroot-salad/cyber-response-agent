@@ -237,10 +237,25 @@ def _search_body(  # noqa: PLR0913 — one search body's parameters, threaded wh
     """The search body, with the window's open end closed at the run's clock.
 
     The clock is consulted here, where every search body is built, rather than at call sites.
-    `_bounded_end` decides what the bound is.
+    `_bounded_end` decides what the bound is. A branched read also carries the clock as a
+    `post_filter` (`_before_clock`): the caller's own window stays in `query` exactly as spelled
+    (R-10=A), and the cluster drops the later hits before it sorts, pages and counts — so a
+    page is never emptied, nor its total inflated, by rows past the branch point.
     """
-    return OutboundBody(_build_search_body(
-        query_string, time_start, _bounded_end(ctx, time_end), time_field, limit, sort))
+    body = _build_search_body(
+        query_string, time_start, _bounded_end(ctx, time_end), time_field, limit, sort)
+    at = getattr(ctx, "as_of", None)
+    if at is not None:
+        body["post_filter"] = _before_clock(time_field, at)
+    return OutboundBody(body)
+
+
+def _before_clock(time_field: str, at: _dt.datetime) -> dict:
+    """Hits dated at or before `at`, and undated ones (as `_after_clock` keeps them)."""
+    return {"bool": {"minimum_should_match": 1, "should": [
+        {"range": {time_field: {"lte": _clock.as_utc(at).isoformat()}}},
+        {"bool": {"must_not": {"exists": {"field": time_field}}}},
+    ]}}
 
 
 def _search(
@@ -278,14 +293,16 @@ def _search_verb(  # noqa: PLR0913 — the two search verbs' shared body, one pa
             time_field="@timestamp", limit=limit, sort=sort,
         ),
     )
+    # The cluster already dropped later hits (`post_filter`); this is the backstop for one that
+    # did not, and finds nothing to drop against Elasticsearch itself.
     kept = [d for d in docs if not _after_clock(ctx, d.get("@timestamp"))]
     return search_envelope(resolved, kept, total - (len(docs) - len(kept)), truncated, sort)
 
 
 def _after_clock(ctx: VerbContext, stamp: object) -> bool:
-    """Is `stamp` dated after the run's clock? A branched read is bounded AFTER the read (#1224,
-    R-10=A): the request keeps the caller's own window end on the wire, however it is spelled,
-    and the rows dated past the branch point are dropped here. Unbranched runs (no clock) and
+    """Is `stamp` dated after the run's clock? A branched read keeps the caller's own window end
+    on the wire, however it is spelled (#1224, R-10=A); the cluster drops later hits by
+    `post_filter`, and any that still arrive are dropped here. Unbranched runs (no clock) and
     undated rows keep every row."""
     at = getattr(ctx, "as_of", None)
     if at is None:

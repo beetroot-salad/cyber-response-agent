@@ -40,7 +40,7 @@ from defender.learning.core.config import (
     author_timeout as _author_timeout,
 )
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
-from defender.learning.core.state import QUESTIONER_FINDINGS, LearningState
+from defender.learning.core.state import QUESTIONER_FINDINGS, LearningState, names_systems
 
 
 AuthorError = _shared.AuthorError
@@ -123,7 +123,7 @@ def _gate_questioner(
             rec["consumed_category"] = "consumed_idempotent"
             consumed.append(rec)
             continue
-        if not _names_systems(entry.get("systems")):
+        if not names_systems(entry.get("systems")):
             _logger.warning(
                 f"{_LOG_PREFIX}: world finding {fid} names no systems (systems="
                 f"{entry.get('systems')!r}) — a row queued before lessons were keyed by "
@@ -135,12 +135,6 @@ def _gate_questioner(
             continue
         to_author.append(entry)
     return [], consumed, to_author
-
-
-def _names_systems(value: Any) -> bool:
-    """A non-empty list of non-empty strings: the only `systems` a lesson can be selected by."""
-    return (isinstance(value, list) and bool(value)
-            and all(isinstance(s, str) and s.strip() for s in value))
 
 
 def build_questioner_user_prompt(

@@ -1624,7 +1624,7 @@ def test_sibling_becomes_unservable_after_preflight_accepted(tmp_path, episodes_
     """
     est = S.estate(tmp_path)
     failing_call = {"system": "edr", "verb": "lookup", "params": {"entity": "never-seen"}}
-    spawn = _Spawn(root=episodes_root, exits={"b": 1}, writes={
+    spawn = _Spawn(root=episodes_root, exits={"b": 1}, plant=True, writes={
         "b": {"reason": S.REASON_UNSERVABLE, "call": failing_call}})
     run = _launch(tmp_path, est, oracle=_passing(), verifier=S.passing_verifier(), spawn=spawn)
 
@@ -2099,7 +2099,7 @@ def test_conc_33_preflight_worlds_finish_out_of_order(tmp_path, monkeypatch, epi
     assert all(t == _outcome_text(run.ep) for t in spawn.outcome_at_start)
 
 
-def test_fewer_siblings_start_than_the_family_has_worlds(tmp_path, monkeypatch):
+def test_fewer_siblings_start_than_the_family_has_worlds(tmp_path, monkeypatch, episodes_root):
     """s_p234 — after pre-flight excludes one world, the other worlds' siblings start together and finish, unheld by the excluded one.
 
     Settled: after pre-flight excludes one world as unservable, siblings start for the other
@@ -2109,7 +2109,7 @@ def test_fewer_siblings_start_than_the_family_has_worlds(tmp_path, monkeypatch):
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     est = S.estate(tmp_path)
     oracle = _by_world(_passing(), _failing())
-    spawn = S.FakeSpawn(fault=S.Fault(delay=0.3))
+    spawn = _Spawn(root=episodes_root, plant=True, fault=S.Fault(delay=0.3))
     run = _launch(tmp_path, est, oracle=oracle, verifier=S.passing_verifier(), spawn=spawn)
 
     _assert_routed(oracle)
@@ -2288,7 +2288,7 @@ def test_1224_outcome_record_is_written_once_and_each_world_record_has_one_write
     est = S.estate(tmp_path)
     _base, src = S.source_run(tmp_path, est, calls=_calls())
     unservable_call = {"system": "idp", "verb": "lookup", "params": {"entity": "late"}}
-    spawn = _Spawn(root=episodes_root, exits={"b": 1, "c": 1}, writes={
+    spawn = _Spawn(root=episodes_root, exits={"b": 1, "c": 1}, plant=True, writes={
         "b": {"reason": S.REASON_UNSERVABLE, "call": unservable_call}})
     first = _main(src, est, oracle=_passing(), verifier=S.passing_verifier(), spawn=spawn)
 

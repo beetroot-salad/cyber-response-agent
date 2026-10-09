@@ -700,6 +700,21 @@ def test_a_world_row_missing_systems_or_subject_is_refused_at_the_appender(tmp_p
     assert len(W.queue_rows(paths, QUESTIONER_FINDINGS)) == 1
 
 
+def test_a_world_row_naming_no_system_is_refused_at_the_queue(tmp_path):
+    """A world row whose `systems` names nothing is refused on the way in, with that reason.
+
+    A lesson is selected for a tenant by system, so such a row can never yield one. Queued
+    anyway, the questioner's drain later sets it aside as a row from before #1224 — a reason
+    that is false, and found far from the judge pass that could have said why."""
+    enqueue = W.mod("learning.judge.enqueue")
+    paths = W.loop_paths(tmp_path)
+
+    with pytest.raises(W.refusals(), match="names no system"):
+        enqueue.append_world_rows(tmp_path, [world_row(systems=[])],
+                                  state=W.learning_state(paths))
+    assert W.queue_rows(paths, QUESTIONER_FINDINGS) == []
+
+
 def test_an_unqueueable_defender_finding_does_not_suppress_the_world_findings(
         tmp_path, monkeypatch):
     """The world lane does NOT share the defender lane's unqueueable early return.

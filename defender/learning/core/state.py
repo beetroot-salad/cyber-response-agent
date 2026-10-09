@@ -189,6 +189,17 @@ QUESTIONER_FINDINGS = Channel(
     reads_on_append=True,
     report=_join_record(_PENDING, "questioner_findings.skip_report.log"),
 )
+
+
+def names_systems(value: object) -> bool:
+    """Whether a questioner-channel row's `systems` can key a lesson: a non-empty list of
+    non-empty names (a lesson is selected for a tenant by system). The one rule for both ends of
+    the channel — the judge's enqueue refuses a row that fails it, and the questioner's drain
+    only ever meets such a row from before #1224."""
+    return (isinstance(value, list) and bool(value)
+            and all(isinstance(s, str) and s.strip() for s in value))
+
+
 PITFALLS = Channel(
     name="pitfalls",
     queue=_join_record(_PENDING_PITFALLS, "pitfalls.jsonl"),

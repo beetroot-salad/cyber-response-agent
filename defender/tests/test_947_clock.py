@@ -781,6 +781,33 @@ def test_a_search_that_names_its_own_end_is_never_rewritten(tmp_path, start, end
     assert range_filter(search_body(tmp_path)) == expected
 
 
+@pytest.mark.parametrize("verb", ["query", "alerts"])
+def test_a_branched_search_bounds_its_hits_at_the_cluster_and_keeps_its_window(tmp_path, verb):
+    """    A branched search carries the clock as a `post_filter`, beside a `query` window left as
+    the caller spelled it (R-10=A) — so the cluster drops later hits before it sorts, pages and
+    counts. Dropped only after the reply instead, a window past T0 fills the page (and the
+    total) with later rows and the read comes back emptied of the rows it could have had."""
+    ctx = elastic_ctx(tmp_path, as_of=T0)
+
+    getattr(elastic_adapter, verb)(ctx, native_query="event.action:ssh_login",
+                                   start="2026-05-01T00:00:00Z", end="2026-06-01T00:00:00Z")
+
+    body = search_body(tmp_path)
+    assert range_filter(body) == {"gte": "2026-05-01T00:00:00Z", "lte": "2026-06-01T00:00:00Z"}
+    bounds = [c["range"]["@timestamp"] for c in body["post_filter"]["bool"]["should"]
+              if "range" in c]
+    assert [dt.datetime.fromisoformat(b["lte"]) for b in bounds] == [T0]
+
+
+def test_an_ordinary_search_carries_no_clock_filter(tmp_path):
+    """    No clock, no `post_filter`: an unbranched run reads what the cluster holds now."""
+    ctx = elastic_ctx(tmp_path, as_of=None)
+
+    elastic_adapter.query(ctx, native_query="event.action:ssh_login")
+
+    assert "post_filter" not in search_body(tmp_path)
+
+
 def test_filling_the_window_does_not_edit_the_callers_own_arguments(tmp_path):
     """    Two searches in a row through one context give the same window, so the fill went into a
     FRESH local rather than into anything the caller (or the next call) can see.

@@ -26,7 +26,13 @@ from defender._vocab import normalized_judge_outcome
 from defender._episode_paths import LAYOUT
 from defender.learning.core.config import QUEUEABLE_FINDING_TYPES
 from defender.learning.core.persist import derive_alert_rule_key
-from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS, Channel, LearningState
+from defender.learning.core.state import (
+    FINDINGS,
+    QUESTIONER_FINDINGS,
+    Channel,
+    LearningState,
+    names_systems,
+)
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.judge.family import is_gradable_row, read_manifest, read_samples_record
 from defender.learning.judge.render import episode_alert
@@ -116,6 +122,14 @@ def _validate_world_row(row: dict[str, Any], *, episode_dir: Path | None = None)
         raise JudgeRefused(
             f"{where}a questioner finding row's systems must be a list of system names, not "
             f"{systems!r}")
+    if not names_systems(systems):
+        # Refused here, where the reason is known (the judge named no system for the world, or
+        # the manifest's served systems could not be read), rather than drained later as a
+        # pre-#1224 row: a lesson is selected by system, so none could ever be authored.
+        raise JudgeRefused(
+            f"{where}a questioner finding row names no system, so no lesson authored from it "
+            "could be selected for a tenant (the judge named none for this world, or the "
+            "family's served systems could not be read)")
     # Open, not untyped. A bare re-enqueue reads draw YAML unvalidated, so e.g. a date arrives
     # as `datetime.date` and would raise `TypeError` in `json.dumps` inside the queue lock.
     row_type = row.get("type")

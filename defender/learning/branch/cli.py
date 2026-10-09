@@ -1201,8 +1201,9 @@ def verify_family(
 
     Runs only after an `accepted` pre-flight (no sibling starts otherwise), and never touches
     the outcome record pre-flight wrote (S6). Only scrub-verified worlds are archived, each on
-    its own: a world whose tree the archive refuses is one the judge cannot see, and gets its
-    own `not archived` record (S10) while the others are still archived. Any fault withholds
+    its own: a world whose tree the archive refuses, or that has no scrub verdict, is one the
+    judge cannot see, and gets its own `not archived` record (S10) while the others are still
+    archived. Any fault withholds
     the family stamp, and is returned (and logged by the caller) as the reason.
     """
     from defender.learning.branch import archive as archive_mod
@@ -1230,9 +1231,17 @@ def verify_family(
         reasons.append(cross_tenant)
 
     # `worlds/` exists whatever happens below; a world's own record says why one is missing.
+    # Every finished world ends archived or with its own `not archived` record — never neither,
+    # since the judge counts a world it cannot see only through that record (S10, O5).
     episode.worlds.ensure()
     archived: list[str] = []
-    for label in sorted(scrub_verified):
+    for label in sorted(dirs):
+        if label in unverified:
+            outcome_mod.write_world_record(
+                episode, label, outcome_mod.NOT_ARCHIVED,
+                detail="no scrub verdict records a completed walk of its tree, so it was not "
+                       "archived")
+            continue
         try:
             archive_mod.archive_episode(episode, {label: dirs[label]})
         except Exception as refused:  # noqa: BLE001 — one world's archive, recorded; the rest go on

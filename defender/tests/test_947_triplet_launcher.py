@@ -24,10 +24,12 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 import pytest
 
 from defender._episode_handle import Episode
+from defender._io import bind
 from defender.tests import _triplet_947 as T
 from defender.tests.live_oracle_1224 import _spec1224 as S
 
@@ -445,6 +447,25 @@ def test_947_a_sibling_without_a_ran_true_scrub_marks_the_episode_incomplete(tmp
         report = _verify_family(ep, dirs, source=T.provenance_record())
         assert report["comparable"] is False
         assert world in report["reason"]
+
+
+def test_a_finished_sibling_without_a_scrub_verdict_gets_its_own_not_archived_record(tmp_path):
+    """A sibling that exited cleanly but has no scrub verdict is never archived, so the judge
+    cannot see it — and it carries its own `not archived` record, the only way the judge
+    counts a world it cannot see toward O5. A verified sibling beside it gets none."""
+    outcome = T.mod("learning.branch.outcome")
+    base, _src = T.runs_base(tmp_path)
+    ep = T.episode(tmp_path)
+    dirs = [T.sibling_run_dir(base, w, scrub_ran=None if w == "b" else True)
+            for w in T.WORLDS]
+
+    report = _verify_family(ep, dirs, source=T.provenance_record())
+
+    assert "b" not in report["archived"]
+    with bind(Path(ep)) as bound:
+        failed = outcome.failed_worlds(bound, {})
+    assert sorted(failed) == ["b"]
+    assert failed["b"]["reason"] == outcome.NOT_ARCHIVED
 
 
 def test_947_agreeing_sibling_stamps_write_the_family_stamp(tmp_path):
