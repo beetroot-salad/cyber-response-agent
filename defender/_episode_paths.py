@@ -28,6 +28,8 @@ SAMPLES_NAME = "samples.yaml"
 JUDGE_NAME = "judge.yaml"
 TIMING_NAME = "timing.json"
 STAGED_NAME = "staged.yaml"
+#: Pre-flight's write-once episode outcome record (#1224): accepted, unusable or refused.
+OUTCOME_NAME = "outcome.yaml"
 LEARNING_HTML_NAME = "learning.html"
 
 WORLDS_DIRNAME = "worlds"
@@ -267,6 +269,10 @@ class EpisodeLayout:
         return PurePosixPath(STAGED_NAME)
 
     @property
+    def outcome(self) -> PurePosixPath:
+        return PurePosixPath(OUTCOME_NAME)
+
+    @property
     def learning_html(self) -> PurePosixPath:
         return PurePosixPath(LEARNING_HTML_NAME)
 
@@ -446,6 +452,10 @@ class EpisodePaths:
     @property
     def staged(self) -> Path:
         return self.episode_dir / LAYOUT.staged
+
+    @property
+    def outcome(self) -> Path:
+        return self.episode_dir / LAYOUT.outcome
 
     @property
     def learning_html(self) -> Path:

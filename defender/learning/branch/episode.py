@@ -9,13 +9,12 @@ gone by grading time, so `verdicts` reads the archived report, `delta_o` pairs t
 `served/` ledgers, and the archived `run_dir` pointer is informational only — never opened or
 followed.
 
-Both refuse an episode whose recorded outcome is `incomplete`. The launcher records that (with a
-reason) when a sibling's scrub or stamp could not be verified, and withholds the family stamp.
-The archived worlds are individually readable but not comparable, since nothing guarantees they
-ran against one tree; refusing keeps "no differences" distinct from "no comparison possible".
+Both refuse an episode whose outcome record (`outcome.yaml`, written once by the launcher's
+pre-flight) says anything but exactly `accepted`: an `unusable` or `refused` family measured
+nothing, and an absent or torn record is the distinct "no record" state, never `accepted`
+(M05=A). Refusing keeps "no differences" distinct from "no comparison possible".
 
-An episode with no archived worlds answers empty rather than refusing: one rejected before
-`Step.RUNS` (`branch/steps.py`) never ran a sibling, and `{}` is the honest answer. That is safe
+An `accepted` episode with no archived worlds answers empty rather than refusing; that is safe
 only because the recorded outcome distinguishes it from "the worlds ran and agreed".
 """
 
@@ -32,6 +31,7 @@ from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import Bound, bind
 from defender._vocab import DISPOSITION_ENUM, normalized_disposition
 from defender._episode_paths import LAYOUT
+from defender.learning.branch import outcome as outcome_mod
 from defender.learning.branch.comparator import DELTA_SEAT, Verdict, canonical, compare
 from defender.learning.branch.ledger import (
     LedgerError,
@@ -45,9 +45,6 @@ from defender.runtime.branch._family import (
     world_token_for,
 )
 
-#: The outcome that withholds comparability; the launcher writes it and both readers refuse on it.
-INCOMPLETE = "incomplete"
-
 #: What a difference is called when nothing attributed it: "differs, and not shown to be the
 #: declared axis". Reporting `mutation` would claim a measurement nobody made. Borrowed from the
 #: comparator's delta-seat vocabulary rather than re-spelled.
@@ -59,7 +56,8 @@ Invoke = Callable[..., Any]
 class EpisodeError(ValueError):
     """An episode these readers cannot answer over honestly.
 
-    Raised for a recorded `incomplete` outcome, an archived disposition outside the shipped
+    Raised for an outcome other than `accepted` (or no outcome record), an archived disposition
+    outside the shipped
     vocabulary, or an archived world the manifest does not declare. A `ValueError` so callers
     can catch this design's refusals at one boundary.
     """
@@ -70,54 +68,29 @@ class EpisodeError(ValueError):
 # ---------------------------------------------------------------------------------------
 
 
-def _recorded_outcome(bound: Bound) -> tuple[str | None, str]:
-    """The episode's recorded outcome and its reason, or `(None, "")` when none is recorded.
-
-    An absent or unparseable record is not an outcome: it is an episode the launcher has not
-    written yet, and must not gate the readers. Only a recorded `incomplete` refuses. A refused
-    record (a link, a non-plain entry, undecodable bytes, a YAML alias) is not "none recorded":
-    it may be hiding one, so it refuses.
-    """
-    rec = bound.read(LAYOUT.review)
-    if rec.text is None and not rec.absent:
-        raise EpisodeError(
-            f"the review record ({LAYOUT.review}) is refused ({rec.reason}) — it is where an "
-            f"{INCOMPLETE!r} outcome is recorded, so whether this episode is comparable cannot "
-            "be read")
-    text = rec.text
-    if text is None:
-        return None, ""
+def _recorded_outcome(bound: Bound) -> tuple[str, str]:
+    """The episode's outcome word and its reason, from pre-flight's outcome record
+    (`outcome.yaml`). An absent, torn or refused record is the "no record" state, refused
+    rather than read as any word (M05=A)."""
     try:
-        record = _yaml.safe_load(text)
-    except _yaml.AliasRefused as refused:
-        # A document, refused for its aliases (the pre-#1127 writer wrote them), may record an
-        # `incomplete` outcome: refused like any refused record, never read as none.
+        record = outcome_mod.read_outcome(bound)
+    except outcome_mod.OutcomeUnreadable as missing:
         raise EpisodeError(
-            f"the review record ({LAYOUT.review}) is refused ({refused}) — it is where an "
-            f"{INCOMPLETE!r} outcome is recorded, so whether this episode is comparable cannot "
-            "be read") from refused
-    except yaml.YAMLError:
-        return None, ""
-    if not isinstance(record, dict):
-        return None, ""
-    episode = record.get("episode")
-    if not isinstance(episode, dict):
-        return None, ""
-    outcome = episode.get("outcome")
-    reason = episode.get("reason")
-    return (outcome if isinstance(outcome, str) else None,
-            reason if isinstance(reason, str) else "")
+            f"the episode has no outcome record to read ({missing}) — an episode is comparable "
+            "only once pre-flight recorded it accepted") from None
+    reason = record.get("reason")
+    return record["outcome"], reason if isinstance(reason, str) else ""
 
 
 def _refuse_incomplete(bound: Bound) -> None:
-    """Refuse an episode the launcher recorded as `incomplete`."""
-    outcome, reason = _recorded_outcome(bound)
-    if outcome == INCOMPLETE:
+    """Refuse an episode whose outcome record is not exactly `accepted`, naming the word and
+    its reason, or the missing record."""
+    word, reason = _recorded_outcome(bound)
+    if word != outcome_mod.ACCEPTED:
         raise EpisodeError(
-            f"the episode recorded outcome {INCOMPLETE!r}"
-            f"{f' ({reason})' if reason else ''} — the family stamp was withheld, so the "
-            "worlds that ARE archived did not demonstrably run against one tree and a per-key "
-            "answer over them would read as a measurement nobody made")
+            f"the episode's outcome is {word!r}{f' ({reason})' if reason else ''} — only an "
+            "accepted family's worlds are compared; an answer over these would read as a "
+            "measurement nobody made")
 
 
 def _archived_labels(bound: Bound) -> list[str]:
@@ -354,7 +327,6 @@ def _delta_o(bound: Bound, invoke: Invoke | None) -> dict[str, dict[str, str]]:
 
 
 __all__ = [
-    "INCOMPLETE",
     "EpisodeError",
     "delta_o",
     "verdicts",

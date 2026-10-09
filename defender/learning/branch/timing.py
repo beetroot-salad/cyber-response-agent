@@ -120,11 +120,22 @@ def read_stage_timings(bound: Bound) -> list[dict[str, Any]] | None:
     except (ValueError, RecursionError) as malformed:
         raise ValueError(f"{LAYOUT.timing} is not a JSON document: {malformed}") from malformed
     rows = document.get("steps") if isinstance(document, dict) else None
+    retired = sorted({row["step"] for row in rows if isinstance(row, dict)
+                      and row.get("step") in RETIRED_STEPS}) if isinstance(rows, list) else []
+    if retired:
+        raise ValueError(
+            f"{LAYOUT.timing} records the {', '.join(retired)} step(s), which predates the "
+            "oracle (#1224: staging and review were replaced by pre-flight); an episode timed "
+            "before the change is not read as this one's record")
     if not isinstance(rows, list) or not all(_is_entry(row) for row in rows):
         raise ValueError(f'{LAYOUT.timing} is not the timing record: expected {{"steps": [...]}} '
                          "with one {step, started_at, ended_at} entry per completed step, the "
                          f"step one of {', '.join(STEPS)} and both moments ISO-8601")
     return rows
+
+
+#: Steps an episode launched before the oracle recorded, and no launch records now.
+RETIRED_STEPS: frozenset[str] = frozenset({"staging", "review"})
 
 
 def _is_entry(row: Any) -> bool:

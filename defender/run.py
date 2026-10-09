@@ -708,21 +708,19 @@ def _serving_abort(exc: BaseException) -> ServingAbort | None:
 
 
 def _record_unservable_world(episode: Episode, world: Any, abort: ServingAbort) -> None:
-    """Write the world's own record, once: a resumed sibling never rewrites it (N13).
-
-    @owns world_records"""
-    from defender import _yaml
+    """Write the world's own record, once: a resumed sibling never rewrites it (N13). The
+    record's shape is `outcome.write_world_record`'s."""
+    from defender.learning.branch import outcome as outcome_mod
 
     call = getattr(abort, "call", None)
     system, verb, params = call if isinstance(call, tuple) and len(call) == 3 else ("", "", {})
     reason = getattr(abort, "reason", "")
-    doc = {"world": world.label,
-           "reason": "budget" if reason == "budget" else "oracle unservable",
-           "call": {"system": system, "verb": verb, "params": dict(params)},
-           "detail": str(getattr(abort, "detail", "") or reason)}
-    try:
-        episode.world_record(world.label).create(_yaml.safe_dump(doc))
-    except FileExistsError:
+    written = outcome_mod.write_world_record(
+        episode, world.label,
+        outcome_mod.BUDGET if reason == "budget" else outcome_mod.ORACLE_UNSERVABLE,
+        call={"system": system, "verb": verb, "params": dict(params)},
+        detail=str(getattr(abort, "detail", "") or reason))
+    if not written:
         _logger.info(f"--resume: world {world.label} already has its record; left as it is")
 
 

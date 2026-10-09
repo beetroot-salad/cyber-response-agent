@@ -301,8 +301,8 @@ def _declared_base_world(family: dict[str, Any]) -> dict[str, Any]:
 def _base_world(family: dict[str, Any], source_run_dir: Path) -> dict[str, Any]:
     """World A, composed rather than authored by a call of its own.
 
-    Empty overlay, null axis and the base role are imposed, never read from a reply: they make A
-    the control, and a non-empty overlay would edit the world the others are measured against.
+    No facts, a null axis and the base role are imposed, never read from a reply: they make A
+    the control, and a fact would change the world the others are measured against.
 
     The declared disposition is taken from, in order: Call 1's `base_disposition`, the base
     entry in Call 1's `worlds`, the source run's `report.md`. If all are silent the key is left
@@ -324,7 +324,8 @@ def _base_world(family: dict[str, Any], source_run_dir: Path) -> dict[str, Any]:
         "world_id": BASE_WORLD_ID,
         "role": BASE_WORLD_ROLE,
         "axis": None,
-        "overlay": {},
+        # M07=A: the control world carries an explicit empty fact list.
+        "facts": [],
     })
     return world
 

@@ -45,6 +45,7 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "world.draw": ("write", "delete"),
     "world.run_dir_pointer": ("write",),
     "world_record": ("create",),
+    "outcome": ("create",),
 }
 
 #: Every folder the handle hands out, keyed the same way.
@@ -175,11 +176,17 @@ class Episode:
         return cls(io.hold(episode_dir), episode_dir, _door=_DOOR)
 
     @classmethod
-    def create(cls, episode_dir: Path, *, io: Any = _real_io) -> Episode:
+    def create(cls, episode_dir: Path, *, io: Any = _real_io, exclusive: bool = False) -> Episode:
         """Make (or adopt) the episode dir, judged from its parent — a link, file or FIFO at
-        its name is refused — and hold it. The episodes root's entry for it is synced."""
+        its name is refused — and hold it. The episodes root's entry for it is synced.
+        `exclusive` adopts nothing: an entry already at the name is `FileExistsError` (#1224
+        N17, a launch's claim)."""
         episode_dir = Path(episode_dir)
-        return cls(io.hold_new(episode_dir.parent, episode_dir.name), episode_dir, _door=_DOOR)
+        if exclusive:
+            held = io.hold_new(episode_dir.parent, episode_dir.name, exclusive=True)
+        else:
+            held = io.hold_new(episode_dir.parent, episode_dir.name)
+        return cls(held, episode_dir, _door=_DOOR)
 
     def close(self) -> None:
         self._held.close()
@@ -230,6 +237,11 @@ class Episode:
     @property
     def staged(self) -> StagedRecord:
         return StagedRecord(*self._at(LAYOUT.staged))
+
+    @property
+    def outcome(self) -> CreateRecord:
+        """`outcome.yaml`, pre-flight's episode outcome (#1224): created once, never rewritten."""
+        return CreateRecord(*self._at(LAYOUT.outcome))
 
     @property
     def learning_html(self) -> WriteRecord:

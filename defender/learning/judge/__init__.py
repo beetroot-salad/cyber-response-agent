@@ -177,13 +177,18 @@ def _existing_grade(episode_dir: Path) -> dict[str, Any] | None:
         return family_mod.screened_yaml_mapping(bound, LAYOUT.judge, what="the family grade")
 
 
-def _episode_outcome_from_review(review: dict[str, Any]) -> tuple[str, str]:
-    if not review:
-        return "incomplete", f"no {LAYOUT.review} on disk"
-    episode = review.get("episode")
-    outcome = episode.get("outcome") if isinstance(episode, dict) else None
-    reason = episode.get("reason") if isinstance(episode, dict) else None
-    return (str(outcome) if isinstance(outcome, str) else "incomplete", str(reason or ""))
+def _episode_outcome(bound: Bound) -> tuple[str, str]:
+    """Pre-flight's outcome word and reason (`outcome.yaml`). An absent or torn record is the
+    "no record" state: never `accepted`, reported as `refused` naming the missing record
+    (M05=A, PCO-02)."""
+    from defender.learning.branch import outcome as outcome_mod
+
+    try:
+        record = outcome_mod.read_outcome(bound)
+    except outcome_mod.OutcomeUnreadable as missing:
+        return outcome_mod.REFUSED, str(missing)
+    reason = record.get("reason")
+    return str(record["outcome"]), reason if isinstance(reason, str) else ""
 
 
 #: Where the review records the capture's disagreement with itself: on each world's
@@ -438,9 +443,9 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_gra
     # before any other record is consulted or anything is stamped.
     manifest = family_mod.read_manifest(bound)
     review = family_mod.read_review_record(bound) or {}
-    outcome, reason = _episode_outcome_from_review(review)
+    outcome, reason = _episode_outcome(bound)
     if outcome != "accepted":
-        reason = reason or f"the episode's {LAYOUT.review} outcome is {outcome!r}, not 'accepted'"
+        reason = reason or f"the episode's {LAYOUT.outcome} outcome is {outcome!r}, not 'accepted'"
         # Never the `gradable` default: an unexamined episode must not read like a cleared one.
         record = EpisodeGrade(episode_dir=episode_dir, episode_outcome=NOT_GRADED,
                               not_graded=NotGradedStamp(outcome=outcome, reason=reason))

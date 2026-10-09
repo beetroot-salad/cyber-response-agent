@@ -45,6 +45,7 @@ from defender.scripts.adapters.confinement import (
     is_world_view,
 )
 
+from ..outcome import BUDGET, ORACLE_UNSERVABLE
 from ..ledger import (
     FAULT,
     ORACLE,
@@ -203,6 +204,43 @@ def serve_one(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any
         return registry._record_answer(system, verb, asked, committed["answer"])
 
 
+class PrebranchChanged(Exception):
+    """Pre-flight: a world's verified answer changes a call the source run made before the
+    branch point (M01=A: that prefix is fixed, so the world cannot be served)."""
+
+
+def calibrate_one(registry: WorldRegistry, ctx: Any, system: str, verb: str,
+                  params: Mapping[str, Any], base: Any, *, fixed: bool) -> None:
+    """Pre-flight's replay of one original call through `registry`'s world (#1224, Amendment 2
+    change 1): one oracle turn and verifier pass against the call's base answer, under the same
+    turn lock, checks and budget as a sibling's call. It only CALIBRATES: a verified attempt
+    freezes its forged rows and recorded facts in the world's store, and no served answer is
+    cached and no world-ledger row written (S1). The replay itself is one `preflight` row of
+    the world's oracle-side ledger (N14).
+
+    `fixed` marks a call the source run made before the branch point: a verified answer that
+    differs from its base raises `PrebranchChanged` before anything is frozen. An unservable
+    call raises `OracleUnservable` as it would in a sibling. `ctx` is pre-flight's own verb
+    context; every oracle-side query of the turn runs in it, at the branch-point clock."""
+    asked = dict(params)
+    registry.store.log_query("preflight", system, verb, asked)
+    registry._last_ctx = _carrying(ctx, as_of=registry.as_of)
+
+    def commit(served: Any, _claim: dict, _verdict: dict, _attempts: int, staged: Any) -> None:
+        if fixed and canonical_json(served) != canonical_json(base):
+            raise PrebranchChanged(
+                f"the world's verified answer changes {system}.{verb}, a call the source run "
+                "made before the branch point — that prefix is fixed (M01=A)")
+        registry.store.commit(forged=list(staged.forged.values()),
+                              facts=[{"entity": e, "field": f, "value": v}
+                                     for (e, f), v in staged.facts.items()],
+                              answer=None)
+
+    with registry._turn(None):
+        registry.oracle.serve((system, verb, asked), base,
+                              lambda: registry._real(system, base), commit)
+
+
 class WorldRegistry(ModuleVerbRegistry):
     """A `ModuleVerbRegistry` whose verbs answer as the world's live oracle serves them."""
 
@@ -211,7 +249,8 @@ class WorldRegistry(ModuleVerbRegistry):
                  verifier: Any = None, oracle_dir: Path | None = None,
                  retry_cap: int | None = None, turn_deadline: float | None = None,
                  budget: float | None = None, rate: float | None = None,
-                 box: Callable[[], Any] | None = None, restart_after: int | None = None):
+                 box: Callable[[], Any] | None = None, restart_after: int | None = None,
+                 limiter: RateLimiter | None = None):
         super().__init__(roster, grant, grant_home=grant_home)
         # Validate the clock here, once: every query this world issues, the oracle's own
         # included, carries it, so no oracle-side context is ever built without it (O-31).
@@ -251,7 +290,10 @@ class WorldRegistry(ModuleVerbRegistry):
         door = QueryDoor(
             decide=lambda system, verb: ModuleVerbRegistry.decide(self, system, verb),
             real_verbs=lambda system: ModuleVerbRegistry.verbs(self, system),
-            limiter=RateLimiter(settings.rate if rate is None else rate),
+            # One limiter per process (S16): pre-flight hands every world the launcher's own,
+            # held at the episode rate; a sibling builds its slice's here.
+            limiter=limiter if limiter is not None else RateLimiter(
+                settings.rate if rate is None else rate),
             store=self.store, context=self._oracle_context)
         self.oracle = Oracle(
             world=world, store=self.store, door=door,
@@ -470,13 +512,13 @@ def _world_record(world: Any) -> OracleUnservable | None:
         doc = _yaml.safe_load(read_text_utf8(Path(episode_dir) / LAYOUT.world_record(label)))
     except (OSError, ValueError):
         return None
-    if not isinstance(doc, Mapping) or doc.get("reason") not in ("oracle unservable", "budget"):
+    if not isinstance(doc, Mapping) or doc.get("reason") not in (ORACLE_UNSERVABLE, BUDGET):
         return None
     raw_call = doc.get("call")
     call: Mapping[str, Any] = raw_call if isinstance(raw_call, Mapping) else {}
     raw_params = call.get("params")
     params: Mapping[str, Any] = raw_params if isinstance(raw_params, Mapping) else {}
-    return OracleUnservable("budget" if doc["reason"] == "budget" else "retries",
+    return OracleUnservable("budget" if doc["reason"] == BUDGET else "retries",
                             (str(call.get("system", "")), str(call.get("verb", "")),
                              dict(params)), "recorded before this process started")
 

@@ -30,7 +30,7 @@ from typing import Any, ClassVar
 from defender._episode_paths import OracleStorePaths
 from defender._io import guarded_mkdir, read_bytes_capped, read_jsonl_rows, write_guarded
 from defender._pricing import usage_cost
-from defender._untrusted import wrap_fresh
+from defender._untrusted import wrap, wrap_fresh
 from defender.learning.branch.ledger import request_key
 from defender.learning.core import config
 from defender.learning.core.config import (
@@ -224,9 +224,11 @@ class OracleStore:
             self.spent += cost
         return cost
 
-    def commit(self, *, forged: list[dict], facts: list[dict], answer: dict) -> None:
+    def commit(self, *, forged: list[dict], facts: list[dict], answer: dict | None) -> None:
         """Freeze this attempt's forged rows and facts with the verified answer (M15=B): rows
-        and facts first, then the answer that cites them."""
+        and facts first, then the answer that cites them. `answer=None` is pre-flight's
+        calibration (Amendment 2, S1): the rows and facts are frozen, no served answer is
+        cached."""
         with self._lock:
             new_rows = [r for r in forged if r["forged_id"] not in self.frozen]
             new_facts = [f for f in facts if (f["entity"], f["field"]) not in self.facts]
@@ -234,12 +236,15 @@ class OracleStore:
                 self._append(self.paths.forged, new_rows)
             if new_facts:
                 self._append(self.paths.facts, new_facts)
-            self._append(self.paths.answers, [answer])
+            if answer is not None:
+                self._append(self.paths.answers, [answer])
             for r in new_rows:
                 self.frozen[r["forged_id"]] = r
             for f in new_facts:
                 self.facts[(f["entity"], f["field"])] = f["value"]
-            self.answers[request_key(answer["system"], answer["verb"], answer["params"])] = answer
+            if answer is not None:
+                key = request_key(answer["system"], answer["verb"], answer["params"])
+                self.answers[key] = answer
 
 
 # --------------------------------------------------------------------------------------------
@@ -370,6 +375,24 @@ def _verifier_tools() -> list[Any]:
               {"passed": {"type": "boolean"}, "reason": {"type": "string"}},
               ["passed", "reason"]),
     ]
+
+
+def family_salt(bodies: list[str]) -> str:
+    """The family block's one frame salt: a digest of the block's own bodies, re-derived until
+    no body contains it.
+
+    Every sibling of a family builds its block from the same manifest and base recording, so
+    the block is byte-identical across siblings, a shared prefix for prompt caching (the design's
+    "family block, shared by siblings"). A body's author cannot close a frame early: the salt is
+    a digest over that very body. Every other frame (world block, call turns, tool returns)
+    keeps `wrap_fresh`'s random salt."""
+    joined = "\x00".join(bodies)
+    n = 0
+    while True:
+        salt = hashlib.sha256(f"{n}\x00{joined}".encode()).hexdigest()[:16]
+        if salt not in joined:
+            return salt
+        n += 1
 
 
 def _framed(label: str, value: Any) -> str:
@@ -531,10 +554,13 @@ class Oracle:
 
         family = getattr(self.world, "family", None)
         story = getattr(family, "base_story", "") or ""
-        lines = ["The family's base story and example answers of the systems it serves:",
-                 _framed("Base story", story)]
-        for system, verb, payload in self.family_examples:
-            lines.append(_framed(f"Example {system}.{verb} answer", payload))
+        framed = [("Base story", story), *(
+            (f"Example {system}.{verb} answer",
+             payload if isinstance(payload, str) else canonical_json(payload))
+            for system, verb, payload in self.family_examples)]
+        salt = family_salt([body for _label, body in framed])
+        lines = ["The family's base story and example answers of the systems it serves:"]
+        lines += [f"{label}:\n{wrap(body, 'untrusted', salt)}" for label, body in framed]
         world_lines = ["This world's facts:"]
         for fact in getattr(self.world, "facts", ()) or ():
             world_lines.append(_framed(
@@ -565,6 +591,12 @@ class Oracle:
             self._conversation = []
             self._in_conversation = 0
             parts = self._prefix()
+            if self.store.frozen:
+                # O2/S4: a fact's telemetry is forged once; a later call covering it is served
+                # these same rows (same forged_id, same values), never a second row.
+                parts.append(UserPromptPart(content=_framed(
+                    "Telemetry frozen in this world so far (reuse these rows as they are)",
+                    list(self.store.frozen.values()))))
             if self.store.facts:
                 parts.append(UserPromptPart(content=_framed(
                     "Facts recorded in this world so far",

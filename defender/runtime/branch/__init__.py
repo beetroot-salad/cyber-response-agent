@@ -80,13 +80,15 @@ from ._seed import (
 )
 
 
-def validate(store: Any, spec: BranchSpec) -> None:
+def validate(store: Any, spec: BranchSpec, *, require_capture: bool = True) -> None:
     """Refuse a branch point that cannot carry a sibling world.
 
     Beyond the branch point being a complete message on MAIN's path with a matching clock, a
     world is only meaningfully "consistent with the evidence" when:
 
-    - the capture is non-empty (branching at message 0 makes every world trivially consistent);
+    - the capture is non-empty (branching at message 0 makes every world trivially consistent).
+      The launcher passes `require_capture=False`: an empty capture is pre-flight's to record
+      as a `refused` episode (#1224, M05=A), so it is asked after the episode exists;
     - something is open in the frontier — `slots` or `contracts`, not `not is_empty()`, which
       also counts settled `held` facts and would admit a finished investigation;
     - the frontier was not snapped: the session's appends account for more fences than the
@@ -141,7 +143,7 @@ def validate(store: Any, spec: BranchSpec) -> None:
         row for row in read_jsonl_rows(RunPaths(run_dir).executed_queries)
         if not is_reserved_query_id(str(row.get("query_id", "")))
     ]
-    if not rows:
+    if not rows and require_capture:
         raise BranchError(
             f"{run_dir} captured no query that reached a system — a sibling world would be "
             "consistent with an empty prefix by construction, which is the generated-world "

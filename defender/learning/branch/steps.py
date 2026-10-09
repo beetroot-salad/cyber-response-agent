@@ -9,12 +9,9 @@ not this enum's positions.
 A leaf module because the launcher sits at the top of the import graph and the record cannot
 import it without a cycle.
 
-Not steps: preflight (costs nothing and refuses before the episode has a directory to record
-into); the claim and prime in `prepare_episode` (run before `QUESTIONER`, so a total over the
-six rows excludes the prime); and teardown, which runs on every exit — from `_launch`'s
-`finally` on a rejection or abort, and on the clean path as the hand-back frame
-(`cli._cluster_released`) around `JUDGE`, so the cluster is released before the judge's clock
-starts and the judge's entry is written before a held hand-back failure is raised.
+Not steps: the launch checks (they cost nothing and refuse before the episode has a directory
+to record into), and the claim and prime in `prepare_episode` (run before `QUESTIONER`, so a
+total over the five rows excludes the prime).
 """
 from __future__ import annotations
 
@@ -27,21 +24,22 @@ class Step(StrEnum):
     @owns step — the timing row's `step` field takes its value from here and nowhere else.
 
     The wire-log stage labels that share a word (`stage="questioner"`, `stage="judge"`) belong
-    to `AgentRole`, not this enum: the comparator's calls carry the questioner label from inside
-    `REVIEW`.
+    to `AgentRole`, not this enum.
 
-    `VERIFY` and `JUDGE` are one numbered step in the launcher's prose; the judge runs after the
-    cluster is handed back so its model calls hold no staged name live. They are two members
+    `PREFLIGHT` is the launcher's calibration replay (#1224): every original call through each
+    world's oracle and verifier, ending in the write-once outcome record. It is not the
+    refusal block the launcher runs before `QUESTIONER` (that one has no row).
+
+    `VERIFY` and `JUDGE` are one numbered step in the launcher's prose. They are two members
     because they are two rows on the clock.
     """
 
     QUESTIONER = "questioner"
-    STAGING = "staging"
-    REVIEW = "review"
+    PREFLIGHT = "preflight"
     RUNS = "runs"
     VERIFY = "verify"
     JUDGE = "judge"
 
 
-#: The same six, as the ordered tuple a record validates against and a page iterates.
+#: The same five, as the ordered tuple a record validates against and a page iterates.
 STEPS: tuple[Step, ...] = tuple(Step)
