@@ -50,7 +50,9 @@ from defender.learning.judge.enqueue import (
 )
 from defender.learning.judge.render import episode_alert
 from defender.learning.judge.run import SUBJECT_DEFENDER, SUBJECT_WORLD
-from defender.runtime.branch._family import BASE_ROLE, episode_token_for
+from defender.runtime.branch._family import (
+    BASE_ROLE, ManifestPredatesOracle, episode_token_for,
+)
 from defender._pricing import UnknownModel, model_key, usage_cost
 from defender.scripts.visualize.visualize_primitives import (
     ASSETS,
@@ -1245,7 +1247,15 @@ def render_episode(episode_dir: Path) -> Path:
     except FileNotFoundError as missing:
         raise JudgeRefused(f"episode {episode_dir}: no such episode directory") from missing
     with episode:
-        return _write_page(episode, build_page(episode_dir))
+        try:
+            html_text = build_page(episode_dir)
+        except JudgeRefused as bad:
+            # An archive of the pre-oracle design gets a page saying so; any other manifest
+            # refusal stays a refusal.
+            if not isinstance(bad.__cause__, ManifestPredatesOracle):
+                raise
+            html_text = _render_refusal(episode_dir, bad)
+        return _write_page(episode, html_text)
 
 
 def build_page(episode_dir: Path) -> str:
@@ -1273,6 +1283,24 @@ def _render_document(ep: _Episode) -> str:
 {nav}
 <article class="content episode">
 {body}
+</article>
+</div>
+</body></html>
+"""
+
+
+def _render_refusal(episode_dir: Path, refusal: JudgeRefused) -> str:
+    """The whole page for an episode the manifest reader refused: the reason, as text, and
+    nothing read from the archive."""
+    title = f"episode — {esc(Path(episode_dir).name)}"
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>{title}</title>
+<style>{CSS}
+{EPISODE_CSS}</style></head><body id="top">
+<div class="layout">
+<article class="content episode">
+<h1>{title}</h1>
+<div class="refusal">{_uv(str(refusal))}</div>
 </article>
 </div>
 </body></html>

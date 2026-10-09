@@ -43,7 +43,6 @@ from defender._io import read_jsonl_rows, read_jsonl_rows_report
 from defender.run_common import DEFENDER_DIR, run_env
 from defender.runtime.branch._family import (
     BASE_ROLE,
-    ElasticEntry,
     Family,
     World,
     episode_token_for,
@@ -713,7 +712,7 @@ def _bound_rows(rows: list, columns: Any) -> list[dict] | None:
     return [dict(zip(names, row, strict=False)) for row in positional]
 
 
-def _elastic_entries(world: World) -> list[tuple[str, ElasticEntry]]:
+def _elastic_entries(world: World) -> list[tuple[str, Any]]:
     """This world's staged patterns, in a stable order."""
     return sorted(world.overlay.elastic.items())  # lint-shippable: ok — the manifest schema's own field name, owned by `runtime/branch/_family.Overlay`  # noqa: E501
 
@@ -735,7 +734,7 @@ def _injected_counts(world: World, *, rows: Sequence[dict]) -> tuple[int, int]:
     return retrieved, present
 
 
-def _hit_count(entry: ElasticEntry, rows: Sequence[dict]) -> int:
+def _hit_count(entry: Any, rows: Sequence[dict]) -> int:
     """How many retrieved rows are one of this entry's injected documents.
 
     Matched on `_id`, or on the document's body being wholly contained in the row (ids are not

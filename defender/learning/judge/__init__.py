@@ -434,6 +434,9 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_gra
     git_show: Any, state: LearningState,
 ) -> EpisodeGrade:
     episode_dir = episode.dir
+    # The manifest first: one that predates the oracle, or that any reader refuses, is refused
+    # before any other record is consulted or anything is stamped.
+    manifest = family_mod.read_manifest(bound)
     review = family_mod.read_review_record(bound) or {}
     outcome, reason = _episode_outcome_from_review(review)
     if outcome != "accepted":
@@ -448,7 +451,6 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — see `_gra
     model, effort, cap = _judge_model(), _judge_effort(), _judge_cap()
     knobs = {"draws": configured_draws, "model": model, "effort": effort, "payload_cap": cap}
 
-    manifest = family_mod.read_manifest(bound)
     # Manifest, review and samples are each parsed once and threaded into both `grade_family`
     # and every `render`, so the mechanical rows and the prompt come off the same documents.
     samples = family_mod.read_samples_record(bound)

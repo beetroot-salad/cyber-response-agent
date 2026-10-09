@@ -269,6 +269,73 @@ def compose(text: str) -> Any:
     return yaml.compose(text, Loader=_TreeLoader)
 
 
+#: The path step a sequence item contributes in `written_locations`: items are not told apart.
+ITEM = "[]"
+
+
+def written_locations(text: str) -> Iterator[tuple[tuple[str, ...], str | None]]:  # noqa: C901 — one event loop; its frame state is shared by every branch
+    """Every node `text` WRITES, as `(path, scalar)`: the path of mapping keys (a sequence item
+    is `ITEM`) and the node's scalar text, or `None` for a collection or an alias.
+
+    Read off the parser's event stream, never the constructed document, so it sees what
+    construction collapses: both of two repeated keys, the keys inside a `<<:` merge (each
+    under its own `<<` step), and a key whose value is an alias (aliases are not expanded, so
+    a few hundred bytes of them cost a few hundred bytes of work). Iterative, so a
+    thousand-deep nesting is walked, not recursed. A key that is not a scalar is `?`, and
+    nothing inside it is reported. Stops quietly where the text stops parsing: the caller's own
+    load reports that.
+    """
+    # One frame per open collection: [is_mapping, path, the key awaiting its value or None].
+    stack: list[list[Any]] = []
+    inside_key = 0  # depth inside a collection used as a mapping key
+
+    def at() -> tuple[str, ...] | None:
+        """The path of the node starting now, or `None` when it is a mapping key."""
+        if not stack:
+            return ()
+        is_mapping, path, key = stack[-1]
+        if not is_mapping:
+            return (*path, ITEM)
+        return None if key is None else (*path, key)
+
+    def ended() -> None:
+        """A whole value ended: its mapping now awaits the next key."""
+        if stack and stack[-1][0]:
+            stack[-1][2] = None
+
+    try:
+        for event in yaml.parse(text, Loader=yaml.SafeLoader):
+            opens = isinstance(event, (yaml.MappingStartEvent, yaml.SequenceStartEvent))
+            closes = isinstance(event, (yaml.MappingEndEvent, yaml.SequenceEndEvent))
+            node = isinstance(event, (yaml.ScalarEvent, yaml.AliasEvent))
+            if inside_key:
+                inside_key += 1 if opens else -1 if closes else 0
+                if not inside_key:
+                    stack[-1][2] = "?"
+                continue
+            if not (opens or closes or node):
+                continue
+            if closes:
+                stack.pop()
+                ended()
+                continue
+            path = at()
+            if path is None:  # a mapping key
+                if opens:
+                    inside_key = 1
+                else:
+                    stack[-1][2] = event.value if isinstance(event, yaml.ScalarEvent) else "?"
+                continue
+            scalar = event.value if isinstance(event, yaml.ScalarEvent) else None
+            yield path, scalar
+            if opens:
+                stack.append([isinstance(event, yaml.MappingStartEvent), path, None])
+            else:
+                ended()
+    except yaml.YAMLError:
+        return
+
+
 def reject_unread_keys(
     where: str, mapping: Mapping[object, object], known: tuple[str, ...],
     *, error: type[Exception],

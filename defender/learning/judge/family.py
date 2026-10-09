@@ -71,7 +71,9 @@ from defender.learning.judge._errors import JudgeRefused
 from defender.learning.lead_repository import JoinedLead, QueryRow, joined
 from defender.runtime.branch._family import (
     BASE_ROLE,
+    FamilyError,
     episode_token_for,
+    load_manifest_document,
     is_reserved_world_label,
     world_token_for,
 )
@@ -338,12 +340,14 @@ def raw_manifest(episode_dir: Path) -> dict[str, Any]:
 
 
 def read_manifest(bound: Bound) -> dict[str, Any]:
-    """`raw_manifest` through the pass's own bound reader."""
-    doc = screened_yaml_mapping(bound, LAYOUT.family, what="the manifest")
-    if doc is None:
-        raise JudgeRefused(
-            f"the manifest ({LAYOUT.family}) could not be read: nothing is at that name")
-    return doc
+    """`raw_manifest` through the pass's own bound reader: the runtime loader's own gate
+    (`_family.load_manifest_document`), so a manifest the sibling refuses — one predating the
+    oracle, a label off the world-token rule, a hostile system name — is refused here too,
+    before any of it reaches a prompt or a page."""
+    try:
+        return load_manifest_document(bound)
+    except FamilyError as refused:
+        raise JudgeRefused(str(refused)) from refused
 
 
 def leads_by_id(world_dir: Path) -> dict[str, JoinedLead]:

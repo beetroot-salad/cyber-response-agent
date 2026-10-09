@@ -394,26 +394,17 @@ def _announce_provenance(run_dir: Path) -> None:
 
 
 def resume_world(episode: Episode, world_label: str, *, tenant: Callable[[], Any]) -> Any:
-    """The world this process is, from `episode`'s manifest — judged against the episode
-    tenant's configured corpus patterns only where the manifest does not record them.
+    """The world this process is, from `episode`'s manifest alone.
 
     The episode dir is the manifest's own, so the world ledger sits beside the family's
-    primed recording and depends on nothing the manifest does not say.
-
-    A manifest that records no `configured_patterns` was judged against the checkout's corpus
-    config when it was authored. That config now lives in the tenant's record (#1107), so for
-    such a manifest — and only for one — the loader asks `tenant` for the sibling's own
-    `RunTenant` (resolved from the record the launcher seeded its runs base with, naming the
-    source's tenant) and takes its corpus patterns from the record's corpus-engine view. A
-    manifest that records its set is judged by the manifest, and no tenant is looked up.
+    primed recording and depends on nothing the manifest does not say. The manifest records
+    its served systems, so no tenant is resolved to read it: `tenant` is never called here.
     """
-    from defender.learning.branch.estate.stagers.elastic import configured_patterns  # lint-shippable: ok — the tenant's configured corpus patterns an older manifest's overlays were judged against
     from defender.runtime.branch import _family
 
+    del tenant  # the manifest is the whole record; see the docstring
     return _family.resume_world_from(
-        _family.load_family(
-            episode.view(), configured_patterns=lambda: configured_patterns(tenant().elastic)),  # lint-shippable: ok — the record's field name (#1107)
-        world_label, episode.dir)
+        _family.load_family(episode.view()), world_label, episode.dir)
 
 
 def _screened_source_alert(source_run_dir: Path) -> Path:

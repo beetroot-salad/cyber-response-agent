@@ -277,13 +277,6 @@ def _nameable(part: str, origin: str) -> str:
     return part
 
 
-def refuse_unnameable_world(world_id: str) -> str:
-    """`world_id`, or the `ViewNameError` every view built from it would raise — for callers
-    holding a world but no corpus pattern yet, so a bad id fails once rather than per call.
-    """
-    return _nameable_world(world_id)
-
-
 def _nameable_world(world_id: str) -> str:
     """`world_id`, held to the alias name rule plus one more: no `-`
     (`_world_label.world_view_fault`)."""
@@ -332,7 +325,6 @@ __all__ = [
     "confine_read_endpoint",
     "guard_outbound",
     "is_world_view",
-    "refuse_unnameable_world",
     "normalize_endpoint",
     "world_view",
 ]

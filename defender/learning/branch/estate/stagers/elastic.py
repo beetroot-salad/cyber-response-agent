@@ -34,9 +34,9 @@ import re
 from defender._model import model
 from typing import Any
 
+from defender._world_label import world_view_fault
 from defender.scripts.adapters.confinement import (
     ViewNameError,
-    refuse_unnameable_world,
     world_view,
 )
 from defender.scripts.adapters.esql_text import split_first_command
@@ -93,10 +93,8 @@ def check_world_id(world_id: str) -> None:
     The id reaches `world_view` unfiltered on every staged call, so a bad id (a space, `*`,
     upper case) would refuse the whole event stream and read as a sibling that asked nothing.
     """
-    try:
-        refuse_unnameable_world(world_id)
-    except ViewNameError as bad_name:
-        raise StagingError(str(bad_name)) from bad_name
+    if (why := world_view_fault(world_id)) is not None:
+        raise StagingError(why)
 
 
 def stages(verb: str) -> bool:

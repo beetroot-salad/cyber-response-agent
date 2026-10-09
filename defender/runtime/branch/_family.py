@@ -1,8 +1,8 @@
 """The family manifest: the one document a sibling is told, and the schema that gates it.
 
 `episodes/<id>/family.yaml` carries three authors: the launcher's derived half (episode id,
-source run, branch point, T0), the operator's `continuation_prompt`, and the questioner's
-authored half (base story, discriminator, worlds). `run.py --resume <manifest> --world X`
+source run, branch point, T0, the served systems), the operator's `continuation_prompt`, and the
+questioner's authored half (base story, discriminator, worlds and their facts). `run.py --resume <manifest> --world X`
 derives everything else from it.
 
 The schema lives in the runtime because a resumed run must not import the learning tree to know
@@ -11,7 +11,9 @@ which world it is. Learning validates the questioner's output through the same l
 Strict both ways: an unknown top-level field is refused (a manifest edited after review must not
 load as if the edit were part of the contract), and every closed vocabulary is the shipped one.
 Model-authored scalars are written through a structured dumper, never string interpolation, so a
-`base_story` carrying `episode_id: hijacked` round-trips as one opaque scalar.
+`base_story` carrying `episode_id: hijacked` round-trips as one opaque scalar. A manifest written
+before the oracle (a world as a patch table and a staged corpus) is refused as such, at every
+reader, before any other fault is reported.
 """
 
 from __future__ import annotations
@@ -19,11 +21,10 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import re
-from dataclasses import field
+from collections.abc import Iterator
 from defender._model import model
 from pathlib import Path
-from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -32,8 +33,9 @@ from defender._episode_handle import Episode
 from defender._episode_paths import LAYOUT
 from defender._io import Bound
 from defender._run_id import episode_id_fault
+from defender._shown import quoted
 from defender._world_label import (
-    RESERVED_WORLD_LABELS, is_reserved_world_label, reserved_label_fault,
+    RESERVED_WORLD_LABELS, is_reserved_world_label, reserved_label_fault, world_label_fault,
 )
 from defender.run_repository import run_name_fault
 from defender._vocab import (
@@ -42,42 +44,49 @@ from defender._vocab import (
     HOST_ONLY_DISPOSITION,
     normalized_disposition,
 )
-from defender.scripts.adapters.confinement import ViewNameError, refuse_unnameable_world
-from defender._query_rules import ParamsTooDeep, _json_safe_params
+from defender.runtime.verbs import SYSTEM_MAX_LEN, is_system_name
 
 #: The base world's role: the control every other world is compared against. Exactly one world
-#: claims it.
+#: claims it, and it declares `facts: []` — it has no oracle.
 BASE_ROLE = "A"
-
-#: The system whose difference is staged rather than patched. The loader refuses a patch table
-#: naming it, where the field can still be named.
-STAGED_SYSTEM = "elastic"  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
-
-#: The six state systems an entity patch may name — the serving roster minus the staged one.
-#: Spelled here rather than imported from `runtime.driver`: the resume path must not pull the
-#: driver in to read a manifest.
-PATCHABLE_SYSTEMS: frozenset[str] = frozenset({
-    "cmdb", "identity", "threat-intel", "change-mgmt", "ticket", "host-state",
-})
 
 #: The two bases a world's declared disposition may rest on; `policy-rule` is the default.
 LABEL_BASES: frozenset[str] = frozenset({"policy-rule", "judgment"})
 
-#: What a patch-table entity key may be. The entity is rendered as a key in a model-authored
-#: document, so it is bounded to hostname-like spelling: no whitespace, `:`, or `/`.
-_ENTITY_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+#: Bounds on a fact's model-authored parts. Every fact reaches an oracle and a verifier prompt
+#: verbatim, so each is bounded where it is read rather than wherever it is next rendered.
+STATEMENT_MAX_LEN = 4000
+ENTITY_MAX_LEN = 256
+ENTITIES_MAX = 64
+FACT_ID_MAX_LEN = 64
 
 #: Every top-level field the manifest declares. Unknown ones refuse.
 _FAMILY_FIELDS = (
     "episode_id", "source_run_dir", "source_run_id", "branch_message_id", "fences_at",
-    "as_of", "continuation_prompt", "captured_patterns", "configured_patterns", "base_story",
-    "discriminator", "worlds",
+    "as_of", "continuation_prompt", "served_systems", "base_story", "discriminator", "worlds",
 )
 
 #: Every field a world entry declares.
 _WORLD_FIELDS = (
-    "world_id", "role", "story", "axis", "disposition_declared", "label_basis", "overlay",
+    "world_id", "role", "story", "axis", "disposition_declared", "label_basis", "facts",
 )
+
+#: Every field a fact declares.
+_FACT_FIELDS = ("fact_id", "statement", "entities")
+
+#: The fields a manifest written before the oracle carries, by where they sit (sequence items
+#: and `<<` merges collapsed). Their presence refuses the manifest, empty or null included:
+#: such a manifest describes a world as a patch table and a staged corpus, and is not translated.
+_PREDATING: dict[tuple[str, ...], str] = {
+    ("worlds", "overlay"): "overlay",
+    ("discriminator", "holding_system"): "discriminator.holding_system",
+    ("discriminator", "envelope"): "discriminator.envelope",
+    ("captured_patterns",): "captured_patterns",
+    ("configured_patterns",): "configured_patterns",
+}
+
+#: The discriminator's two old fields, as words inside a discriminator written as text.
+_PREDATING_IN_TEXT = re.compile(r"\b(holding_system|envelope)\b")
 
 
 class FamilyError(Exception):
@@ -88,159 +97,175 @@ class FamilyError(Exception):
     """
 
 
+class ManifestPredatesOracle(FamilyError):
+    """A manifest written before the oracle: it carries a field only the staging design had.
+
+    Its own class so a reader that shows a refusal (the episode page) can tell an archive of
+    the old design from a damaged manifest."""
+
+
 def is_contradiction(_error: BaseException) -> bool:
     """Is this refusal a corpus contradiction? Never, for a manifest fault."""
     return False
 
 
 # ---------------------------------------------------------------------------------------
-# the overlay
+# a manifest that predates the oracle
+# ---------------------------------------------------------------------------------------
+
+
+def _predating_fields(locations: Iterator[tuple[tuple[str, ...], str | None]]) -> list[str]:
+    """The old fields among `locations` (`_yaml.written_locations`' shape), in first-seen order."""
+    found: dict[str, None] = {}
+    for path, scalar in locations:
+        where = tuple(step for step in path if step not in (_yaml.ITEM, "<<"))
+        if (name := _PREDATING.get(where)) is not None:
+            found[name] = None
+        elif where == ("discriminator",) and isinstance(scalar, str):
+            for word in _PREDATING_IN_TEXT.findall(scalar):
+                found[f"discriminator.{word}"] = None
+    return list(found)
+
+
+def _document_locations(doc: Any) -> Iterator[tuple[tuple[str, ...], str | None]]:
+    """`_yaml.written_locations` over a document already in memory: every node's path and its
+    text when it is a string. Iterative and identity-guarded, so a cyclic document ends."""
+    stack: list[tuple[tuple[str, ...], Any]] = [((), doc)]
+    seen: set[int] = set()
+    while stack:
+        path, node = stack.pop()
+        yield path, node if isinstance(node, str) else None
+        if isinstance(node, (dict, list)):
+            if id(node) in seen:
+                continue
+            seen.add(id(node))
+        if isinstance(node, dict):
+            stack.extend(((*path, k if isinstance(k, str) else "?"), v) for k, v in node.items())
+        elif isinstance(node, list):
+            stack.extend(((*path, _yaml.ITEM), v) for v in node)
+
+
+def _refuse_predating(fields: list[str]) -> None:
+    if fields:
+        raise ManifestPredatesOracle(
+            f"the manifest predates the oracle: it carries {', '.join(fields)} — a world is now "
+            "the natural-language `facts` it asserts and the family records its "
+            "`served_systems`; a manifest written for staging and patching is not translated, "
+            "so author the family again")
+
+
+def refuse_predating_text(text: str) -> None:
+    """Refuse manifest TEXT carrying any pre-oracle field, before it is loaded.
+
+    Read off what the text writes, not what loading keeps: a repeated `discriminator:` would
+    otherwise hide one carrying `holding_system`, and an aliased value would refuse the load
+    for the alias before the old field was ever named. Checked first, so the reason a reader
+    reports for an old manifest is always that it predates the oracle."""
+    _refuse_predating(_predating_fields(_yaml.written_locations(text)))
+
+
+# ---------------------------------------------------------------------------------------
+# facts
 # ---------------------------------------------------------------------------------------
 
 
 @model(frozen=True)
-class ElasticEntry:
-    """One base pattern's staged difference: what is added, and what is taken away."""
+class Fact:
+    """One thing a world asserts about the estate, in words, and the entities it is about."""
 
-    inject: list[dict] = field(default_factory=list)
-    #: The exclusion predicate, left unnarrowed: `staging.check_exclusion_predicate`'s allow-list
-    #: decides admissibility and can only refuse a shape by name if that shape reaches it.
-    exclude: Any = None
-
-
-@model(frozen=True)
-class Overlay:
-    """A world's difference, as data.
-
-    `patches` is keyed system → entity → field; the staged half by base pattern. Both normalise
-    to absent when empty (an empty overlay is world A), so `touches_of` derives from the keys.
-    """
-
-    patches: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
-    elastic: dict[str, ElasticEntry] = field(default_factory=dict)  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
+    fact_id: str
+    statement: str
+    entities: tuple[str, ...]
 
 
-def parse_overlay(raw: Any, *, where: str = "overlay") -> Overlay:
-    """Validate one overlay document into `Overlay`, naming the field that refused."""
+def _not_text(value: Any) -> str:
+    """How a refusal names a value that is not a string: YAML reads an unquoted `no`, `007` or
+    `2026-05-25` as something other than its spelling."""
+    return (f"{quoted(value)} (a {type(value).__name__}, not text — YAML reads an unquoted "
+            "`no`, `007` or date as something other than its spelling; write it quoted)")
+
+
+def _printable_fault(value: Any, *, bound: int) -> str | None:
+    """Why `value` is not a bounded printable name, or `None`."""
+    if not isinstance(value, str):
+        return _not_text(value)
+    if not value:
+        return f"{quoted(value)}, which is empty"
+    if len(value) > bound:
+        return f"{quoted(value)}, which is over the {bound}-character bound"
+    if not value.isprintable():
+        return f"{quoted(value)}, which carries a control character"
+    return None
+
+
+def _parse_fact(raw: Any, at: str) -> Fact:
+    """One fact, refused naming the field (and the entity) that failed."""
+    if not isinstance(raw, dict):
+        raise FamilyError(f"{at} must be a mapping of fact_id, statement and entities, got "
+                          f"{type(raw).__name__}")
+    unknown = [quoted(k) for k in raw if k not in _FACT_FIELDS]
+    if unknown:
+        raise FamilyError(f"{at} names unknown field(s) {', '.join(unknown)}")
+    for name in _FACT_FIELDS:
+        if name not in raw:
+            raise FamilyError(f"{at} carries no {name}")
+    fact_id = raw["fact_id"]
+    if (why := _printable_fault(fact_id, bound=FACT_ID_MAX_LEN)) is not None:
+        raise FamilyError(f"{at}.fact_id is {why}")
+    return Fact(fact_id=fact_id, statement=_checked_statement(raw["statement"], at),
+                entities=_checked_entities(raw["entities"], at))
+
+
+def _checked_statement(statement: Any, at: str) -> str:
+    if not isinstance(statement, str):
+        raise FamilyError(f"{at}.statement is {_not_text(statement)}")
+    # Length first, so a megabyte statement is refused without a scan.
+    if len(statement) > STATEMENT_MAX_LEN:
+        raise FamilyError(f"{at}.statement is {len(statement)} characters, over the "
+                          f"{STATEMENT_MAX_LEN}-character bound")
+    if not statement.strip():
+        raise FamilyError(f"{at}.statement is blank — a fact is the sentence the world asserts")
+    return statement
+
+
+def _checked_entities(entities: Any, at: str) -> tuple[str, ...]:
+    """A fact's entities: any printable names, bounded. Refused, never dropped, and the refusal
+    names the entity — an entity is data everywhere and is never a path component."""
+    if not isinstance(entities, list):
+        raise FamilyError(f"{at}.entities must be a list of entity names, got "
+                          f"{type(entities).__name__}")
+    if not entities:
+        raise FamilyError(f"{at}.entities is empty — a fact names the entities it is about")
+    if len(entities) > ENTITIES_MAX:
+        raise FamilyError(f"{at}.entities names {len(entities)} entities, over the "
+                          f"{ENTITIES_MAX}-entity bound")
+    for entity in entities:
+        if (why := _printable_fault(entity, bound=ENTITY_MAX_LEN)) is not None:
+            raise FamilyError(
+                f"{at}.entities names {why} — an entity is any printable name up to "
+                f"{ENTITY_MAX_LEN} characters")
+    return tuple(entities)
+
+
+def _parse_facts(raw: Any, at: str) -> tuple[Fact, ...]:
+    """A world's facts: a list (the control world's is the explicit `[]`), fact_ids unique."""
     if raw is None:
-        return Overlay()
-    if not isinstance(raw, dict):
-        raise FamilyError(f"{where} must be a mapping, got {type(raw).__name__}")
-    unknown = sorted(set(raw) - {"patches", "elastic"})  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
-    if unknown:
-        raise FamilyError(f"{where} names unknown field(s) {unknown}")
-    return Overlay(patches=_parse_patches(raw.get("patches"), where),
-                   elastic=_parse_elastic(raw.get("elastic"), where))  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
-
-
-def _parse_patches(raw: Any, where: str) -> dict[str, dict[str, dict[str, Any]]]:
-    if not raw:
-        return {}
-    if not isinstance(raw, dict):
-        raise FamilyError(f"{where}.patches must be a mapping, got {type(raw).__name__}")
-    out: dict[str, dict[str, dict[str, Any]]] = {}
-    for system, table in raw.items():
-        if system == STAGED_SYSTEM:
-            raise FamilyError(
-                f"{where}.patches names {system!r}, which is STAGED rather than patched — its "
-                "difference lives in the documents the engine read, so a patch table naming it "
-                "would be dropped in silence while every row still read honestly")
-        if system not in PATCHABLE_SYSTEMS:
-            raise FamilyError(
-                f"{where}.patches names {system!r}, which is not one of the six state systems "
-                f"{sorted(PATCHABLE_SYSTEMS)}")
-        if not isinstance(table, dict):
-            raise FamilyError(
-                f"{where}.patches[{system!r}] must be a mapping of entity to fields")
-        entities: dict[str, dict[str, Any]] = {}
-        for entity, fields_ in table.items():
-            _check_entity(entity, where, system)
-            entities[entity] = _checked_fields(fields_, f"{where}.patches[{system!r}][{entity!r}]")
-        if entities:
-            out[system] = entities
-    return out
-
-
-def _check_entity(entity: Any, where: str, system: str) -> None:
-    """Refuse an entity key outside `_ENTITY_RE`.
-
-    Refused rather than escaped: the entity is written back as a mapping key, and one carrying
-    structural or path syntax would be resolved differently by a later reader.
-    """
-    if not isinstance(entity, str) or not _ENTITY_RE.match(entity):
         raise FamilyError(
-            f"{where}.patches[{system!r}] names entity {entity!r}, which is outside the entity "
-            "domain — an entity is rendered as a KEY, so it may carry only alphanumerics and "
-            "'.', '_', '-' after a leading alphanumeric")
-
-
-def _checked_fields(fields_: Any, at: str) -> dict[str, Any]:
-    """One entity's field table, refused as `FamilyError` unless it is a mapping keyed by str.
-
-    YAML 1.1 reads a bare `on:`/`yes:`/`1:` key as a bool or int; unchecked, that would surface
-    as pydantic's `ValidationError` from `Overlay(...)`, which no caller handles.
-    """
-    if not isinstance(fields_, dict):
-        raise FamilyError(f"{at} must be a mapping of field to value")
-    bad = [k for k in fields_ if not isinstance(k, str)]
-    if bad:
-        raise FamilyError(
-            f"{at} names non-string field(s) {bad!r} — a field is a key in a model-authored "
-            "document, and YAML reads a bare `on`/`yes`/`1` as something other than its "
-            "spelling")
-    return dict(fields_)
-
-
-def _parse_elastic(raw: Any, where: str) -> dict[str, ElasticEntry]:
-    if not raw:
-        return {}
-    if not isinstance(raw, dict):
-        raise FamilyError(f"{where}.elastic must be a mapping, got {type(raw).__name__}")  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
-    out: dict[str, ElasticEntry] = {}
-    for pattern, entry in raw.items():
-        if not isinstance(pattern, str) or not pattern:
-            raise FamilyError(f"{where}.elastic names a non-string base pattern {pattern!r}")  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
-        parsed = _parse_elastic_entry(entry, f"{where}.elastic[{pattern!r}]")  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
-        if parsed is not None:
-            out[pattern] = parsed
-    return out
-
-
-def _parse_elastic_entry(entry: Any, at: str) -> ElasticEntry | None:
-    """One base pattern's staged difference, or `None` when it stages nothing.
-
-    Normalising empty to absent keeps `touches_of` derivable from the overlay's keys alone.
-    """
-    if entry is None:
-        return None
-    if not isinstance(entry, dict):
-        raise FamilyError(f"{at} must be a mapping")
-    unknown = sorted(set(entry) - {"inject", "exclude"})
-    if unknown:
-        raise FamilyError(f"{at} names unknown field(s) {unknown}")
-    # `is None`, not `or`: `inject: {}` / `0` / `""` are falsy non-lists that must reach the
-    # isinstance check and be refused, not coalesce to an empty injection.
-    inject = entry.get("inject")
-    inject = [] if inject is None else inject
-    if not isinstance(inject, list) or any(not isinstance(d, dict) for d in inject):
-        raise FamilyError(f"{at}.inject must be a list of documents")
-    exclude = entry.get("exclude")
-    if exclude is not None and not isinstance(exclude, (dict, list, str)):
-        raise FamilyError(f"{at}.exclude must be a query document or null")
-    if not inject and exclude is None:
-        return None
-    return ElasticEntry(inject=[dict(d) for d in inject], exclude=exclude)
-
-
-def touches_of(overlay: Overlay) -> tuple[str, ...]:
-    """The systems this overlay touches, derived on every read (a stored copy could drift).
-
-    The patch systems plus the staged system when that half is non-empty, sorted.
-    """
-    systems = set(overlay.patches)
-    if overlay.elastic:  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
-        systems.add(STAGED_SYSTEM)
-    return tuple(sorted(systems))
+            f"{at}.facts is absent or null — every world declares its facts, and the control "
+            "world declares `facts: []`")
+    if not isinstance(raw, list):
+        raise FamilyError(f"{at}.facts must be a list of facts, got {type(raw).__name__}")
+    facts: list[Fact] = []
+    seen: set[str] = set()
+    for i, entry in enumerate(raw):
+        fact = _parse_fact(entry, f"{at}.facts[{i}]")
+        if fact.fact_id in seen:
+            raise FamilyError(
+                f"{at}.facts names fact_id {quoted(fact.fact_id)} twice — a fact_id is how a "
+                "served row is attributed to its fact, so it is unique within a world")
+        seen.add(fact.fact_id)
+        facts.append(fact)
+    return tuple(facts)
 
 
 # ---------------------------------------------------------------------------------------
@@ -250,7 +275,7 @@ def touches_of(overlay: Overlay) -> tuple[str, ...]:
 
 @model(frozen=True)
 class World:
-    """One sibling's declaration: what it is, what it asserts, and how it differs."""
+    """One sibling's declaration: what it is, what it asserts, and the facts that make it differ."""
 
     world_id: str
     role: str | None
@@ -258,38 +283,39 @@ class World:
     axis: str | None
     disposition_declared: str
     label_basis: str
-    overlay: Overlay
-
-    @property
-    def touches(self) -> tuple[str, ...]:  # noqa: D401 — derived, never stored
-        """The systems this world's difference touches, from its overlay alone."""
-        return touches_of(self.overlay)
+    facts: tuple[Fact, ...]
 
 
 def parse_world(raw: Any, *, where: str = "worlds") -> World:
     """Validate one world entry, naming the field that refused."""
     if not isinstance(raw, dict):
         raise FamilyError(f"{where} entry must be a mapping, got {type(raw).__name__}")
-    unknown = sorted(set(raw) - set(_WORLD_FIELDS))
-    if unknown:
-        raise FamilyError(f"{where} entry names unknown field(s) {unknown}")
     world_id = raw.get("world_id")
-    if not isinstance(world_id, str) or not world_id:
+    if world_id is None or world_id == "":
         raise FamilyError(f"{where} entry carries no world_id")
-    at = f"{where}[{world_id!r}]"
-    refuse_reserved_world_label(world_id, at=at)
+    if (why := world_label_fault(world_id, at=where)) is not None:
+        raise FamilyError(why)
+    at = f"{where}[{quoted(world_id)}]"
+    unknown = [quoted(k) for k in raw if k not in _WORLD_FIELDS]
+    if unknown:
+        raise FamilyError(f"{at} names unknown field(s) {', '.join(unknown)}")
     role = raw.get("role")
     if role is not None and (not isinstance(role, str) or not role):
         raise FamilyError(f"{at}.role must be a label or the null replicate sentinel")
     story = raw.get("story")
     if not isinstance(story, str):
         raise FamilyError(f"{at}.story must be a string")
+    facts = _parse_facts(raw.get("facts"), at)
+    if role == BASE_ROLE and facts:
+        raise FamilyError(
+            f"{at} is the control world (role {BASE_ROLE!r}) but declares facts — the control "
+            "is served the base answers with no oracle, so it declares `facts: []`")
     return World(
         world_id=world_id, role=role, story=story,
         axis=_check_axis(raw.get("axis"), at, role),
         disposition_declared=_check_disposition(raw.get("disposition_declared"), at),
         label_basis=_check_label_basis(raw.get("label_basis"), at),
-        overlay=parse_overlay(raw.get("overlay"), where=f"{at}.overlay"),
+        facts=facts,
     )
 
 
@@ -359,23 +385,20 @@ class Family:
     fences_at: int
     as_of: dt.datetime
     continuation_prompt: str
-    #: The base patterns the capture's own queries addressed, recorded by the launcher. Stored
-    #: rather than re-derived so every later reader judges overlays against the same set; a
-    #: source run that changed since would otherwise make a sibling refuse its own manifest.
-    captured_patterns: tuple[str, ...]
+    #: The systems the tenant's gather grant served when the launcher authored the family,
+    #: recorded so no later reader resolves a tenant. The live grant still governs every query.
+    served_systems: tuple[str, ...]
     base_story: str
+    #: The discriminator's text, `{"predicate": ...}`.
     discriminator: dict
     worlds: list[World]
-    #: The episode tenant's configured corpus patterns the launcher judged the overlays against,
-    #: recorded for the same reason as `captured_patterns`; no later reader resolves a tenant.
-    configured_patterns: tuple[str, ...] = ()
 
     def world(self, world_id: str) -> World:
         for candidate in self.worlds:
             if candidate.world_id == world_id:
                 return candidate
         raise FamilyError(
-            f"the manifest declares no world {world_id!r}; it declares "
+            f"the manifest declares no world {quoted(world_id)}; it declares "
             f"{[w.world_id for w in self.worlds]}")
 
 
@@ -419,8 +442,46 @@ def _check_scalars(doc: dict) -> None:
             raise FamilyError(f"the manifest's {number} must be an integer")
 
 
-def _parse_worlds(raw_worlds: Any) -> list[World]:
-    """The declared worlds: non-empty, with exactly one base (the control)."""
+def _parse_served_systems(raw: Any) -> tuple[str, ...]:
+    """The recorded served systems: text system names, de-duplicated in order.
+
+    Shape only: the launcher records the grant's own systems, and the live grant still decides
+    every query. A name is text in the roster's alphabet because each keys a samples section, a
+    judge prompt section and a lesson's selection, and is compared exactly."""
+    if not isinstance(raw, list):
+        raise FamilyError(
+            f"the manifest's served_systems must be a list of system names, got "
+            f"{type(raw).__name__}")
+    for name in raw:
+        if not isinstance(name, str):
+            raise FamilyError(f"the manifest's served_systems names {_not_text(name)}")
+        if not is_system_name(name):
+            raise FamilyError(
+                f"the manifest's served_systems names {quoted(name)}, which is not a system "
+                "name (lower-case ASCII letters, digits and '-', starting with a letter or "
+                f"digit, at most {SYSTEM_MAX_LEN} characters)")
+    return tuple(dict.fromkeys(raw))
+
+
+def _parse_discriminator(raw: Any) -> dict:
+    """The discriminator: its `predicate` text and nothing else."""
+    if not isinstance(raw, dict):
+        raise FamilyError(
+            f"the manifest's discriminator must be a mapping holding its predicate, got "
+            f"{type(raw).__name__}")
+    unknown = [quoted(k) for k in raw if k != "predicate"]
+    if unknown:
+        raise FamilyError(
+            f"the manifest's discriminator names unknown field(s) {', '.join(unknown)} — it "
+            "holds only its predicate")
+    predicate = raw.get("predicate")
+    if not isinstance(predicate, str) or not predicate.strip():
+        raise FamilyError("the manifest's discriminator.predicate must be a non-empty string")
+    return {"predicate": predicate}
+
+
+def _parse_worlds(raw_worlds: Any, episode_id: str) -> list[World]:
+    """The declared worlds: non-empty, labels usable and distinct, exactly one base."""
     if not isinstance(raw_worlds, list):
         raise FamilyError(
             f"the manifest's worlds must be a list, got {type(raw_worlds).__name__}")
@@ -429,6 +490,7 @@ def _parse_worlds(raw_worlds: Any) -> list[World]:
             "the manifest declares no worlds — the questioner's flow produces the base plus "
             "two by construction, and the family would have nothing to run")
     worlds = [parse_world(entry) for entry in raw_worlds]
+    _check_labels(episode_id, [w.world_id for w in worlds])
     bases = [w.world_id for w in worlds if w.role == BASE_ROLE]
     if len(bases) != 1:
         raise FamilyError(
@@ -437,92 +499,54 @@ def _parse_worlds(raw_worlds: Any) -> list[World]:
     return worlds
 
 
-def _check_overlay_keys(
-    worlds: list[World], captured_patterns: tuple[str, ...],
-    configured_patterns: tuple[str, ...],
-) -> None:
-    """Every staged overlay key names a configured pattern or one the capture's FROM names.
-
-    An invented pattern would stage a difference no query in this episode can observe.
-    """
-    allowed = set(captured_patterns) | set(configured_patterns)
-    for world in worlds:
-        for pattern in world.overlay.elastic:  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
-            if pattern not in allowed:
-                raise FamilyError(
-                    f"worlds[{world.world_id!r}].overlay.elastic names {pattern!r}, which is "  # lint-shippable: ok — the manifest's own field name for the overlay's staged half
-                    "neither a configured corpus pattern nor one the capture's own FROM "
-                    f"sources name ({sorted(allowed)})")
-
-
-
-def _parse_captured_patterns(raw: Any, *, field: str = "captured_patterns") -> tuple[str, ...]:
-    """A recorded pattern list (`captured_patterns` or `configured_patterns`), deduplicated.
-
-    Absent is empty (older manifests lack the field). A present value that is not a list of
-    non-empty strings is refused rather than read as empty.
-    """
-    if raw is None:
-        return ()
-    if not isinstance(raw, (list, tuple)):
-        raise FamilyError(
-            f"the manifest's {field} must be a list, got {type(raw).__name__}")
-    out: list[str] = []
-    for entry in raw:
-        if not isinstance(entry, str) or not entry:
+def _check_labels(episode_id: str, labels: list[str]) -> None:
+    """The world-token rule over a family's labels: each in the alphabet and not reserved
+    (`_world_label.world_label_fault`), each naming this episode's sibling run, and no two one
+    label wherever the filesystem folds case."""
+    seen: dict[str, str] = {}
+    for label in labels:
+        if (why := world_label_fault(label)) is not None:
+            raise FamilyError(why)
+        # Each sibling's run dir is `{episode_id}-{label}`: a label the runs repository would not
+        # admit as a run name fails in every child after the family has been launched.
+        if (why := run_name_fault(f"{episode_id}-{label}")) is not None:
             raise FamilyError(
-                f"the manifest's {field} names {entry!r}, which is not a pattern")
-        out.append(entry)
-    return tuple(dict.fromkeys(out))
+                f"world label {quoted(label)} cannot name this episode's sibling run: {why}")
+        folded = label.casefold()
+        if folded in seen:
+            raise FamilyError(
+                f"world labels {quoted(seen[folded])} and {quoted(label)} are one label "
+                "wherever the filesystem folds case, and each names a run dir, a ledger file "
+                "and an oracle-side store")
+        seen[folded] = label
 
-def parse_family(
-    doc: Any, *, captured_patterns: tuple[str, ...] = (),
-    configured_patterns: Callable[[], tuple[str, ...]] = lambda: (),
-) -> Family:
+
+def parse_family(doc: Any) -> Family:
     """Validate a raw manifest document into `Family`, naming the field that refused.
 
-    `captured_patterns` are the capture's FROM sources; `configured_patterns` supplies the
-    tenant's corpus patterns (this loader reads no settings). An overlay's staged half may key
-    only one of those. Sets recorded in the document win over the arguments, so a re-reader
-    judges against what authored it. `configured_patterns` is called only for a manifest that
-    records no configured set; a reader passing none admits only the captured set.
-    """
+    A document carrying a pre-oracle field is refused for that first, whatever else is wrong
+    with it."""
     if not isinstance(doc, dict):
         raise FamilyError(f"the manifest must be a mapping, got {type(doc).__name__}")
-    unknown = sorted(set(doc) - set(_FAMILY_FIELDS))
+    _refuse_predating(_predating_fields(_document_locations(doc)))
+    unknown = [quoted(k) for k in doc if k not in _FAMILY_FIELDS]
     if unknown:
         raise FamilyError(
-            f"the manifest names unknown top-level field(s) {unknown} — a document edited "
-            "after review must not load as if the edit were part of the contract")
+            f"the manifest names unknown top-level field(s) {', '.join(unknown)} — a document "
+            "edited after review must not load as if the edit were part of the contract")
     _check_scalars(doc)
-    discriminator = doc.get("discriminator")
-    if not isinstance(discriminator, dict) or not discriminator:
-        raise FamilyError("the manifest's discriminator must be a non-empty mapping")
-    envelope = discriminator.get("envelope")
-    # The envelope is a model-authored call the review runs before any ledger could refuse it.
-    if isinstance(envelope, dict):
-        try:
-            _json_safe_params(envelope.get("params"), field="discriminator.envelope.params")
-        except ParamsTooDeep as too_deep:
-            raise FamilyError(f"the manifest's {too_deep}") from too_deep
+    served_systems = _parse_served_systems(doc.get("served_systems"))
+    discriminator = _parse_discriminator(doc.get("discriminator"))
     as_of = parse_as_of(doc.get("as_of"))
-    worlds = _parse_worlds(doc.get("worlds"))
-    # The document's own record first: only the authoring call, which has no record yet, relies
-    # on the argument.
-    recorded = _parse_captured_patterns(doc.get("captured_patterns"))
-    recorded_configured = _parse_captured_patterns(
-        doc.get("configured_patterns"), field="configured_patterns")
-    configured = recorded_configured or tuple(configured_patterns())
-    _check_overlay_keys(worlds, recorded or tuple(captured_patterns), configured)
+    worlds = _parse_worlds(doc.get("worlds"), doc["episode_id"])
     return Family(
         episode_id=doc["episode_id"], source_run_dir=doc["source_run_dir"],
         source_run_id=doc["source_run_id"], branch_message_id=doc["branch_message_id"],
         fences_at=doc["fences_at"], as_of=as_of,
         continuation_prompt=doc["continuation_prompt"],
-        captured_patterns=recorded or tuple(captured_patterns),
+        served_systems=served_systems,
         base_story=doc["base_story"],
-        discriminator=dict(discriminator), worlds=worlds,
-        configured_patterns=configured,
+        discriminator=discriminator, worlds=worlds,
     )
 
 
@@ -532,13 +556,19 @@ def runnable_worlds(family: Family) -> list[World]:
     return [w for w in family.worlds if w.role is not None]
 
 
-def load_family(
-    view: Bound, *, captured_patterns: tuple[str, ...] = (),
-    configured_patterns: Callable[[], tuple[str, ...]] = lambda: (),
-) -> Family:
+def load_family(view: Bound) -> Family:
     """Read and validate the manifest of the episode `view` is bound at."""
-    return parse_family(_read_document(view), captured_patterns=captured_patterns,
-                        configured_patterns=configured_patterns)
+    return parse_family(_read_document(view))
+
+
+def load_manifest_document(view: Bound) -> dict:
+    """The manifest as the mapping it is on disk, held to every rule `load_family` holds it to.
+
+    For a reader that keeps the document's own spelling (the judge, the episode page): it reads
+    through the same gate as the sibling, so no reader accepts a manifest another refuses."""
+    doc = _read_document(view)
+    parse_family(doc)  # refuses anything but a mapping
+    return cast(dict, doc)
 
 
 def _read_manifest(view: Bound) -> str:
@@ -554,8 +584,10 @@ def _read_manifest(view: Bound) -> str:
 
 def _read_document(view: Bound) -> object:
     """The manifest deserialized but not yet narrowed; typed `object` so only `parse_family`
-    produces a `Family`."""
+    produces a `Family`. A pre-oracle field is refused off the text first, before the load can
+    collapse or refuse what carries it."""
     text = _read_manifest(view)
+    refuse_predating_text(text)
     try:
         return _yaml.safe_load(text)
     except yaml.YAMLError as bad:
@@ -566,7 +598,8 @@ def write_family(episode: Episode, doc: dict) -> Path:
     """Render the manifest into `episode` through a structured dumper, never by hand.
 
     Scalars are model-authored; an f-string writer would let one carrying `episode_id: hijacked`
-    on a second line inject a key.
+    on a second line inject a key. The dumper quotes any string YAML would read as something
+    else (`on`, `null`, `007`), so every name reads back as the text it was.
     """
     manifest = episode.family
     manifest.write(
@@ -593,7 +626,7 @@ def check_manifest_digest(view: Bound, recorded: str) -> None:
 
 
 # ---------------------------------------------------------------------------------------
-# identity: one gate, before anything is staged
+# identity: one gate, before anything is launched
 # ---------------------------------------------------------------------------------------
 
 def refuse_reserved_world_label(label: str, *, at: str) -> None:
@@ -603,12 +636,12 @@ def refuse_reserved_world_label(label: str, *, at: str) -> None:
         raise FamilyError(why)
 
 
-def check_identities(family: Family) -> None:  # noqa: C901 — one gate over the whole manifest, kept together
-    """One gate over every identity rule, before anything is staged.
+def check_identities(family: Family) -> None:
+    """One gate over every identity rule, before anything is launched.
 
-    Each rule would otherwise refuse downstream after a primed episode and running siblings: the
-    label must name a view and a run, labels must be distinct case-folded and not reserved,
-    roles must be distinct, and each composed world token must be nameable.
+    Roles must be distinct; and, as defense in depth for a `Family` built directly rather than
+    loaded, the labels are held to the world-token rule `parse_family` applies and each
+    composed world token is built once.
     """
     # Roles first: that rule is the family's, and two arms sharing a role make every report
     # unreadable — the more fundamental fault to report.
@@ -622,41 +655,15 @@ def check_identities(family: Family) -> None:  # noqa: C901 — one gate over th
                 f"{world.role!r} — a family is a set of DIFFERENT worlds, and two arms sharing "
                 "a role cannot be told apart in any report")
         roles[world.role] = world.world_id
-    seen: dict[str, str] = {}
+    labels = [w.world_id for w in family.worlds]
+    _check_labels(family.episode_id, labels)
     token_head = episode_token_for(family.episode_id)
-    for world in family.worlds:
-        label = world.world_id
-        # Defense in depth: `parse_world` already refuses this, but a `Family` can be built
-        # directly.
-        refuse_reserved_world_label(label, at="")
-        try:
-            refuse_unnameable_world(label)
-        except ViewNameError as bad:
-            raise FamilyError(f"world label {label!r} cannot name a view: {bad}") from bad
-        # The label must also name a run: each sibling's run dir is `{episode_id}-{label}`. The
-        # view and run-id grammars overlap but neither contains the other (the view rule admits
-        # `wörld`, `a+b`, `a:b`), and the label is model-authored, so one off the run-id grammar
-        # would otherwise fail in every child after the family is staged.
-        if (why := run_name_fault(f"{family.episode_id}-{label}")) is not None:
-            raise FamilyError(
-                f"world label {label!r} cannot name this episode's sibling run: {why} — each "
-                "sibling is a run dir named for its world, so a label the runs repository would "
-                "not admit as a run name (its length and the sidecar shapes included) is "
-                "refused by every child after the whole family has been authored, staged and "
-                "reviewed")
-        folded = label.casefold()
-        if folded in seen:
-            raise FamilyError(
-                f"world labels {seen[folded]!r} and {label!r} are one label wherever the "
-                "filesystem folds case, and each names a run dir, a ledger file and a staged "
-                "corpus")
-        seen[folded] = label
-        # Check the composed token itself, built the same way the comparing sites build it.
-        token = world_token_for(token_head, label)
-        try:
-            refuse_unnameable_world(token)
-        except ViewNameError as bad:
-            raise FamilyError(f"world token {token!r} does not round-trip: {bad}") from bad
+    for label in labels:
+        world_token_for(token_head, label)
+
+
+#: What an episode token may be: the run-id alphabet with `-` folded away, lower case.
+_EPISODE_TOKEN = re.compile(r"\A[a-z0-9][a-z0-9._]*\Z")
 
 
 def episode_token_for(episode_id: str) -> str:
@@ -664,48 +671,33 @@ def episode_token_for(episode_id: str) -> str:
 
     The run-id grammar admits `-`, `_` and `.`, so `_` escapes to `__` and `.` to `_p` before
     `-` folds onto `.`; otherwise two ids (e.g. `...-2026.01-n5` and `...-2026-01-n5`) would
-    share a token, and the sweep would tear down one episode's live names for another's.
+    share a token, and two episodes' world ledgers would be one file.
 
     Takes no override: an episode's namespace derives from its id alone, and ids this could
     refuse are already refused by `refuse_bad_episode_id`.
     """
-    # Casefolded because an alias cannot carry upper case, and the cluster answers such a view
-    # with an empty result rather than an error. Injectivity holds for launcher-accepted ids,
-    # which `refuse_bad_episode_id` requires to be case-stable.
+    # Casefolded: injectivity holds for launcher-accepted ids, which `refuse_bad_episode_id`
+    # requires to be case-stable.
     # Order matters: `_` doubles first, then `.` becomes `_p`, then `-` takes the freed `.`.
-    escaped = episode_id.replace("_", "__").replace(".", "_p").replace("-", ".").casefold()
-    return _nameable_token(escaped, f"episode id {episode_id!r}")
-
-
-def _nameable_token(token: str, origin: str) -> str:
-    """`token`, or the fault every alias built from it would have raised.
-
-    Held to the world-id rule because the whole composed world token is rendered into an alias.
-    """
-    try:
-        refuse_unnameable_world(token)
-    except ViewNameError as bad:
+    token = episode_id.replace("_", "__").replace(".", "_p").replace("-", ".").casefold()
+    if not _EPISODE_TOKEN.match(token):
         raise FamilyError(
-            f"{origin} does not render to a nameable episode token ({bad}) — name a fresh "
-            "source run or branch point; every world token and every staged alias is built "
-            "from it") from bad
-    if not token or not token[0].isalnum():
-        raise FamilyError(
-            f"{origin} does not render to a nameable episode token: {token!r} does not start "
-            "with an alphanumeric")
+            f"episode id {quoted(episode_id)} does not render to a usable episode token "
+            f"({quoted(token)}) — name a fresh source run or branch point; every world token "
+            "is built from it")
     return token
 
 
 def world_token_for(episode_token: str, world_label: str) -> str:
     """The one spelling of a world's identity: `f"{episode_token}.{label}"`.
 
-    Used by every site that compares worlds (alias head, ledger filename and rows, applier). The
-    label may not contain `.`: the episode token already does, so a dotted label would let two
+    Used by every site that compares worlds (ledger filename and rows). The label may not
+    contain `.`: the episode token already does, so a dotted label would let two
     (episode, label) pairs compose to one token.
     """
     if "." in world_label:
         raise FamilyError(
-            f"world label {world_label!r} carries '.', the world token's own delimiter — "
+            f"world label {quoted(world_label)} carries '.', the world token's own delimiter — "
             "two distinct (episode, label) pairs would compose to one world token")
     return f"{episode_token}.{world_label}"
 
@@ -714,15 +706,15 @@ def world_token_for(episode_token: str, world_label: str) -> str:
 class ResumeWorld:
     """What a sibling process is, from the manifest alone.
 
-    `world_id` is the composed token, not the short label: the estate seam turns it into alias
-    names, ledger filenames and row keys, which must carry the episode. `label` is what the
-    manifest, run id and archive directory are keyed on.
+    `world_id` is the composed token, not the short label: it names the world's ledger file and
+    row keys, which must carry the episode. `label` is what the manifest, run id and archive
+    directory are keyed on.
     """
 
     world_id: str
     label: str
     episode_dir: Path
-    overlay: Overlay
+    facts: tuple[Fact, ...]
     as_of: dt.datetime
     family: Family
 
@@ -730,11 +722,6 @@ class ResumeWorld:
     def token(self) -> str:
         """The composed world token (same as `world_id`)."""
         return self.world_id
-
-    @property
-    def touches(self) -> tuple[str, ...]:
-        """Derived from the overlay on every read."""
-        return touches_of(self.overlay)
 
     @property
     def ledger_path(self) -> Path:
@@ -755,7 +742,7 @@ def resume_world_from(family: Family, world_label: str, episode_dir: Path) -> Re
     world = family.world(world_label)
     return ResumeWorld(
         world_id=world_token_for(episode_token_for(family.episode_id), world_label),
-        label=world_label, episode_dir=Path(episode_dir), overlay=world.overlay,
+        label=world_label, episode_dir=Path(episode_dir), facts=world.facts,
         as_of=family.as_of, family=family,
     )
 
@@ -773,12 +760,11 @@ def refuse_bad_episode_id(episode_id: str) -> None:
 
 __all__ = [
     "BASE_ROLE",
-    "ElasticEntry",
+    "Fact",
     "Family",
     "FamilyError",
     "LABEL_BASES",
-    "Overlay",
-    "PATCHABLE_SYSTEMS",
+    "ManifestPredatesOracle",
     "RESERVED_WORLD_LABELS",
     "ResumeWorld",
     "World",
@@ -789,15 +775,15 @@ __all__ = [
     "is_reserved_world_label",
     "refuse_reserved_world_label",
     "load_family",
+    "load_manifest_document",
     "manifest_digest",
     "parse_as_of",
     "parse_family",
-    "parse_overlay",
     "parse_world",
     "refuse_bad_episode_id",
+    "refuse_predating_text",
     "resume_world_from",
     "runnable_worlds",
-    "touches_of",
     "world_token_for",
     "write_family",
 ]

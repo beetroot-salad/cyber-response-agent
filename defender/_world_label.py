@@ -53,6 +53,29 @@ def reserved_label_fault(label: str, *, at: str = "") -> str | None:
     return None
 
 
+#: The world-token rule's alphabet: lower-case ASCII letters, digits and `_`, starting with a
+#: letter or digit. No `-`: a sibling's run id is `<episode id>-<label>` and the launcher reads
+#: the label back after the last `-`. No `.`: the world token is `<episode token>.<label>`. Lower
+#: case only: a label names a run dir, a ledger file and an oracle-side store, and two labels one
+#: case fold apart would be one file wherever the filesystem folds case.
+_WORLD_LABEL = re.compile(r"\A[a-z0-9][a-z0-9_]*\Z")
+
+
+def world_label_fault(label: object, *, at: str = "") -> str | None:
+    """Why `label` cannot be a world label, or `None`: a string in the world-token alphabet
+    that does not claim a reserved name. `at` prefixes where the label was found.
+
+    The one statement of the shape rule; the manifest loader asks it of every world, so every
+    reader of a manifest (the launcher, the sibling, the judge, the page) holds labels to it."""
+    where = f"{at} " if at else ""
+    if not isinstance(label, str) or not _WORLD_LABEL.match(label):
+        return (f"{where}world label {quoted(label)} is outside the world-token alphabet (lower-"
+                "case ASCII letters, digits and '_', starting with a letter or digit) — a label "
+                "names a run dir, a ledger file and an oracle-side store, and is read back out "
+                "of `<episode id>-<label>` after the last '-'")
+    return reserved_label_fault(label, at=at)
+
+
 def view_name_fault(part: str, origin: str) -> str | None:
     """Why `part` cannot name an index or alias, or `None`; `origin` says what it came from."""
     if not part:
