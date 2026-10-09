@@ -251,9 +251,10 @@ def _search_body(  # noqa: PLR0913 — one search body's parameters, threaded wh
 
 
 def _before_clock(time_field: str, at: _dt.datetime) -> dict:
-    """Hits dated at or before `at`, and undated ones (as `_after_clock` keeps them)."""
+    """Hits dated at or before `at`, and undated ones (as `_after_clock` keeps them). Spelled as
+    `_bounded_end` and `bounded_esql` spell the clock, so every path cuts at the same moment."""
     return {"bool": {"minimum_should_match": 1, "should": [
-        {"range": {time_field: {"lte": _clock.as_utc(at).isoformat()}}},
+        {"range": {time_field: {"lte": _clock.z_seconds(at)}}},
         {"bool": {"must_not": {"exists": {"field": time_field}}}},
     ]}}
 

@@ -796,7 +796,7 @@ def test_a_branched_search_bounds_its_hits_at_the_cluster_and_keeps_its_window(t
     assert range_filter(body) == {"gte": "2026-05-01T00:00:00Z", "lte": "2026-06-01T00:00:00Z"}
     bounds = [c["range"]["@timestamp"] for c in body["post_filter"]["bool"]["should"]
               if "range" in c]
-    assert [dt.datetime.fromisoformat(b["lte"]) for b in bounds] == [T0]
+    assert bounds == [{"lte": T0_Z}]
 
 
 def test_an_ordinary_search_carries_no_clock_filter(tmp_path):
