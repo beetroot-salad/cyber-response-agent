@@ -224,12 +224,15 @@ def test_1224_launch_over_a_tenant_with_no_elastic_system(tmp_path, elastic):
 
     doc = _family(S.SYSTEMS, S.fact("f1"), S.fact("f2", "bob reset carol's password from "
                                                         "10.0.0.9", ("bob", "carol", "10.0.0.9")))
-    idp_row = {"action": "logon", "event_id": "e-100", "user": "alice"}
+    # Check 2's reference is the union of every real idp answer at this path, so the sibling's
+    # base and the forged row carry the captured answers' columns (SHARED) beside their own.
+    idp_row = {"action": "logon", "event_id": "e-100", "user": "alice", "entity": "alice",
+               "kind": "seen"}
     run = _branch_end_to_end(tmp_path, est, doc=doc, calls=_default_calls(), system="idp",
                              sibling_params=_windowed("user:alice"),
                              sibling_base={"rows": [idp_row]},
                              forged_row={"action": "tgt-issued", "event_id": "e-9001",
-                                         "user": "alice"})
+                                         "user": "alice", "entity": "alice", "kind": "seen"})
     _assert_every_layer(run, systems=S.SYSTEMS, system="idp")
     assert "elastic" not in run.launch.message.lower()
 
