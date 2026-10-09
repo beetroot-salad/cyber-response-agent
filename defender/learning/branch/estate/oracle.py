@@ -865,7 +865,10 @@ class Oracle:
             self._start_call(call, base)
         self._in_conversation += 1
         run = _Run(door=self.door, deadline=self.turn_deadline, call=call, base=base, real=real)
-        history = [*self._conversation, ModelRequest(parts=self._pending)]
+        # A verdict already handed over as a tool's result leaves nothing pending: the
+        # conversation then ends on that request, and the run continues from it.
+        history = [*self._conversation, *([ModelRequest(parts=self._pending)]
+                                          if self._pending else [])]
         self._pending = []
         held: list[list[Any]] = [history]
 
@@ -915,10 +918,13 @@ class Oracle:
         try:
             outcome = await self._submitted(run.call, run.base, dict(args), run.attempt, run.real)
         except StoreFailure as lost:
-            verdict = f"Attempt failed: {lost}."
-            return _Outcome(call_id, verdict, failure=verdict, told=True)
+            outcome = f"Attempt failed: {lost}."
+        # The attempt ends here: a tool the same reply calls after `submit` is answered, not run
+        # (no tenant read, no box time for an attempt already decided).
         if isinstance(outcome, _Submitted):
-            return _Outcome(call_id, "Accepted: the answer was served.", submitted=outcome)
+            run.ended = "Accepted: the answer was served."
+            return _Outcome(call_id, run.ended, submitted=outcome)
+        run.ended = outcome
         return _Outcome(call_id, outcome, failure=outcome, told=True)
 
     def _fail_text(self, text: str) -> str:

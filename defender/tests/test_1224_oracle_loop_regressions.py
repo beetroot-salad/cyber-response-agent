@@ -102,6 +102,24 @@ def test_a_tool_called_after_a_refused_submit_is_still_answered(tmp_path):
     assert model.refused == [], model.refused
 
 
+def test_a_tool_called_after_submit_is_answered_but_not_run(tmp_path):
+    """The attempt ends at its `submit`: a `run_query` the same reply calls after it gets an
+    answer (the conversation stays valid) but reads nothing from the tenant."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    est.answer("idp", "lookup", {"entity": "alice"}, LOOKUP_ALICE)
+    model = ProviderLikeModel(
+        [("submit", {"served": _with_undeclared(ALICE_ROWS), "claim": S.EMPTY_CLAIM}),
+         ("run_query", {"system": "idp", "verb": "lookup", "params": {"entity": "alice"}})],
+        [("submit", {"served": ALICE_ROWS, "claim": S.EMPTY_CLAIM})])
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=model,
+                           verifier=S.passing_verifier(), retry_cap=3)
+
+    assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == ALICE_ROWS
+    assert model.refused == [], model.refused
+    assert est.calls("idp", "lookup") == [], "a query called after submit reached the tenant"
+
+
 def test_a_tool_called_after_one_that_ended_the_attempt_is_still_answered(tmp_path):
     """Finding 1, the tool path: `python` with no sandboxed box ends the attempt; a forge in
     the same reply after it was never answered. It now is (as not run), and the next attempt
