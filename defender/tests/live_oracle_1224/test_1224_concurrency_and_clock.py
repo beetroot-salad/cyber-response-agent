@@ -579,7 +579,10 @@ def test_resumed_sibling_investigator_clock_after_oracle_time_was_credited(tmp_p
                                verifier=S.passing_verifier(), retry_cap=3)
 
     def own_latency() -> Any:
-        time.sleep(1.5)
+        # Past the 2.5 s limit on its own: the pre-crash non-oracle time is not a quantity this
+        # scenario controls (each oracle answer sleeps 1.3 s, so the first run's held total is
+        # ~3.2 s, not 1.9 s, leaving ~0.7 s of uncredited time — not the ~1 s a 1.5 s sleep needed).
+        time.sleep(2.6)
         return _q(other)
 
     _, router, _ = _drive(tmp_path, verbs=resumed, tenant=tenant, limits=_limits(2.5),

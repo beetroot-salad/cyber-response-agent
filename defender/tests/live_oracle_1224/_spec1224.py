@@ -673,6 +673,26 @@ def _messages_text(messages: Any) -> str:
     return "\n".join(out)
 
 
+def _usage_without_utf8(messages: list[Any], response: Any) -> None:
+    """Give `response` a usage estimate when its tool-call args cannot be encoded as UTF-8
+    JSON (a lone surrogate, s_p084). `FunctionModel` estimates usage itself by UTF-8-encoding
+    the args and raises on such a value before the host ever sees the response — a limit of
+    the double, not of a provider (a real provider reports usage and hands the args over). The
+    estimate is the one `FunctionModel` would make over the JSON-escaped form; any response
+    whose args do encode is left untouched (FunctionModel estimates it as before)."""
+    import pydantic_core
+    from pydantic_ai.messages import ModelResponse, ToolCallPart
+    from pydantic_ai.models.function import _estimate_usage
+
+    part = response.parts[0]
+    try:
+        pydantic_core.to_json(part.args)
+    except pydantic_core.PydanticSerializationError:
+        escaped = ModelResponse(parts=[ToolCallPart(tool_name=part.tool_name,
+                                                    args=json.dumps(part.args))])
+        response.usage = _estimate_usage([*messages, escaped])
+
+
 class ScriptedModel:
     """A recording, fault-injecting model double: each model request pops the next `Move`.
 
@@ -749,7 +769,9 @@ class ScriptedModel:
             raise move.raises()  # GPR-01
         if move.tool is None:
             return ModelResponse(parts=[TextPart(content=move.text)])
-        return ModelResponse(parts=[ToolCallPart(tool_name=move.tool, args=dict(move.args))])
+        response = ModelResponse(parts=[ToolCallPart(tool_name=move.tool, args=dict(move.args))])
+        _usage_without_utf8(messages, response)
+        return response
 
     # --- observing ---------------------------------------------------------------------
     @property

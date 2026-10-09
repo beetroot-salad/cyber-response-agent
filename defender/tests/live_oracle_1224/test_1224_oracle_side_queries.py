@@ -1153,8 +1153,11 @@ def test_1224_family_as_of_lies_after_the_original_runs_calls(tmp_path, monkeypa
         f"drift changed the episode outcome (N16): {outcome.get('outcome')!r}")
     # The sibling's base for a captured call is the family recording, not the moved answer.
     oracle = S.oracle(S.run_query("edr", "query", EXPLORE), S.submit(BASE))
-    _e, _ep, reg = _scene(tmp_path / "sibling", oracle, est=est, ep=launched.ep)
-    _ask(reg, est, tmp_path / "run")
+    # The captured call (ALICE's full params), with the clock the real loader hands the sibling
+    # (`resume_world_from`, as `run.py` does) — not the harness default `AS_OF_DT`.
+    _e, _ep, reg = _scene(tmp_path / "sibling", oracle, est=est, ep=launched.ep,
+                          as_of=S.load_world(launched.ep, "b").as_of)
+    _ask(reg, est, tmp_path / "run", **ALICE)
     sibling = est.calls()[len(preflight):]
     assert sibling
     assert [r["as_of"] for r in sibling] == [clock] * len(sibling)
