@@ -25,9 +25,13 @@ class RateLimiter:
 
     def __init__(self, rate: float, *, clock: Callable[[], float] = time.monotonic,
                  sleep: Callable[[float], None] = time.sleep) -> None:
-        if not (isinstance(rate, int | float) and math.isfinite(rate) and rate > 0):
+        if isinstance(rate, bool) or not (
+                isinstance(rate, int | float) and math.isfinite(rate) and rate > 0):
             raise ValueError(f"a rate limiter needs a positive finite rate, got {rate!r}")
-        self._interval = 1.0 / float(rate)
+        interval = 1.0 / float(rate)
+        if not math.isfinite(interval):  # a subnormal rate's spacing overflows to inf
+            raise ValueError(f"a rate limiter's rate {rate!r} is too small to space permits")
+        self._interval = interval
         self._clock = clock
         self._sleep = sleep
         self._lock = threading.Lock()

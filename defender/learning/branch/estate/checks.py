@@ -12,9 +12,14 @@ failure texts, each naming the check it failed (`check <n>`); an empty list pass
      place, with their value types (M14=B); with no real example there is nothing to compare
      (D2).
   3. Ids: no id-like value of a newly forged row equals a value in this world's real data,
-     unless the claim declares it a reference to an entity (M12=A, S21). In memory, no lookup.
-  4. Facts: every recorded fact holds wherever its entity and field appear, and every frozen
-     row a claim names is served exactly as frozen (M13=A, S4).
+     unless the claim declares it a reference to an entity (M12=A, S21). "Id-like" is judged
+     by column name and value shape only: a column whose name ends in id/hash/uuid/guid, or a
+     value shaped like a UUID or 16+ hex digits; placeholders ("", "none", "n/a", ...) never
+     are. In memory, no lookup.
+  4. Facts: a recorded fact is contradicted only by a served mapping whose own string values
+     include the entity and which itself carries the field with a different value — the same
+     mapping, no nesting or cross-row linkage — and every frozen row a claim names is served
+     exactly as frozen (M13=A, S4).
   5. Counting: the claim's counts add up, and each removal's side query, re-run through the
      run-query door, selects the claimed count (H-02).
 """
@@ -264,13 +269,14 @@ def _check_structure(base: Any, served: Any, claim: _Claim, store: CheckStore,  
     remaining = list(claimed)
     matched: list[tuple[tuple[str, ...], Any, Mapping[str, Any]]] = []
     counts = list(claim.counts)
+    buckets = list(counts)  # each count entry claims at most one new bucket row
     for path, element in diff.added:
         text = canonical_json(element)
         hit = next((i for i, (t, _r) in enumerate(remaining) if t == text), None)
         if hit is not None:
             matched.append((path, element, remaining.pop(hit)[1]))
             continue
-        if isinstance(element, Mapping) and _bucket_counted(element, counts):
+        if isinstance(element, Mapping) and _bucket_counted(element, buckets):
             continue
         failures.append(f"an unclaimed row was added at {_where(path)}: "
                         f"{wrap_fresh(text, 'untrusted')}")
@@ -296,14 +302,10 @@ def _check_structure(base: Any, served: Any, claim: _Claim, store: CheckStore,  
             continue
         failures.append(f"field {key!r} changed from {wrap_fresh(canonical_json(old), 'untrusted')} "
                         f"to {wrap_fresh(canonical_json(new), 'untrusted')} without a claimed change")
-    missing: list[Mapping[str, Any]] = []
-    if remaining:
-        covered = sum(c["added"] for c in counts
-                      if isinstance(c.get("added"), int) and not isinstance(c.get("added"), bool))
-        if len(remaining) > covered:
-            missing = [r for _t, r in remaining]
-            names = sorted(str(r.get("forged_id")) for r in missing)
-            failures.append(f"claimed forged row(s) {names} are not in the served answer")
+    missing = _uncounted([r for _t, r in remaining], counts)
+    if missing:
+        names = sorted(str(r.get("forged_id")) for r in missing)
+        failures.append(f"claimed forged row(s) {names} are not in the served answer")
     if removals:
         failures.append(f"{len(removals)} claimed removal(s) name rows the base answer does not "
                         "lose in the served answer")
@@ -313,10 +315,37 @@ def _check_structure(base: Any, served: Any, claim: _Claim, store: CheckStore,  
     return [f"check 1: {f}" for f in failures], matched, missing
 
 
-def _bucket_counted(element: Mapping[str, Any], counts: list[dict]) -> bool:
+def _bucket_counted(element: Mapping[str, Any], buckets: list[dict]) -> bool:
+    """A new row that is a count's new bucket: a base-0 count whose group is a value the row
+    itself carries, and whose served count the row carries too. The entry is consumed, so one
+    count claims one bucket row; "*" names no bucket and claims none."""
     values = set(_scalar_values(element))
-    return any(c.get("base") == 0 and (c.get("group") == "*" or canonical_json(c.get("group")) in values)
-               and canonical_json(c.get("served")) in values for c in counts)
+    for i, c in enumerate(buckets):
+        group = c.get("group")
+        if (_is_int(c.get("base")) and c.get("base") == 0 and _is_int(c.get("served"))
+                and group != "*" and canonical_json(group) in values
+                and canonical_json(c.get("served")) in values):
+            buckets.pop(i)
+            return True
+    return False
+
+
+def _uncounted(records: list[Mapping[str, Any]], counts: list[dict]) -> list[Mapping[str, Any]]:
+    """The claimed forged rows absent from the served answer that no count accounts for. A
+    count covers a row only within its own group — "*" (the whole answer) or a group value the
+    forged row itself carries — and at most `added` rows."""
+    left = {i: c["added"] for i, c in enumerate(counts) if _is_int(c.get("added")) and c["added"] > 0}
+    uncovered: list[Mapping[str, Any]] = []
+    for record in records:
+        row = record.get("row")
+        values = set(_scalar_values(row)) if isinstance(row, Mapping) else set()
+        hit = next((i for i, n in left.items() if n > 0 and (
+            counts[i].get("group") == "*" or canonical_json(counts[i].get("group")) in values)), None)
+        if hit is None:
+            uncovered.append(record)
+        else:
+            left[hit] -= 1
+    return uncovered
 
 
 def _counts_change(entry: Mapping[str, Any], key: str, old: Any, new: Any,
