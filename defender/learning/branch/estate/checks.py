@@ -466,6 +466,38 @@ def _check_ids(matched: list[tuple[tuple[str, ...], Any, Mapping[str, Any]]], cl
     return failures
 
 
+def frozen_id_collisions(base: Any, served: Any, claim: Any, *, world: Any, store: CheckStore,
+                         real_data: RealData) -> list[dict[str, Any]]:
+    """Every identifier a FROZEN forged row serves in this answer that this world's real data
+    carries too, with the real rows carrying it (M12=A): the row stays frozen and is still
+    served — check 3 only judges fresh rows — and the collision is recorded for the judge.
+
+    `[]` for a claim the host cannot read; called on a submission that already passed."""
+    parsed, _malformed = parse_claim(claim)
+    if parsed is None:
+        return []
+    world_facts = {str(getattr(f, "fact_id", None) or (f.get("fact_id") if isinstance(f, Mapping) else ""))
+                   for f in (getattr(world, "facts", None) or ())}
+    _failures, matched, _missing = _check_structure(base, served, parsed, store, world_facts)
+    real_maps = [m for _s, payload in real_data.answers for m in _mappings(payload)]
+    real_maps += [m for loose in real_data.loose for m in _mappings(loose)]
+    found: list[dict[str, Any]] = []
+    for _path, element, record in matched:
+        fid = str(record.get("forged_id"))
+        if not isinstance(element, Mapping) or fid not in store.frozen or fid in store.staged:
+            continue
+        for column, value in element.items():
+            if not _id_like(str(column), value):
+                continue
+            text = _value_text(value)
+            rows = [dict(m) for m in real_maps if any(_value_text(v) == text for v in m.values())
+                    and canonical_json(m) != canonical_json(element)]
+            if rows:
+                found.append({"forged_id": fid, "column": str(column), "value": text,
+                              "system": record.get("system"), "real_rows": rows[:3]})
+    return found
+
+
 def _declared_reference(fid: str, column: str, value: Any, claim: _Claim,
                         real_maps: list[dict]) -> bool:
     for ref in claim.entity_refs:

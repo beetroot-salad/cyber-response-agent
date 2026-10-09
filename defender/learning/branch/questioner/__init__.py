@@ -2,7 +2,7 @@
 
 An operator names a finished run and a branch point; sibling worlds are then run from that
 point. This module owns the authoring half — the model calls that turn the captured past into a
-`family.yaml` the launcher validates, stages and runs. It opens no cluster, spawns no process
+`family.yaml` the launcher validates, calibrates and runs. It opens no cluster, spawns no process
 and writes no manifest.
 
 The role grants nothing, by omission: `tools=ToolSet()`, no `bash_shapes`, `write_shapes` or
@@ -41,6 +41,8 @@ from collections.abc import Sequence
 from typing import Any, ClassVar
 
 import json
+import logging
+
 import yaml
 
 from defender import _yaml
@@ -56,6 +58,8 @@ from defender.runtime.agent_role import AgentRole
 from defender.runtime.branch import BranchError
 from defender.skills.invlang.parser import scan_fences
 
+_logger = logging.getLogger(__name__)
+
 #: One model call per seat, no retries: a retry loop would spend money with no operator present.
 QUESTIONER_REQUEST_LIMIT = 1
 
@@ -66,7 +70,7 @@ UNTRUSTED_TAG = "untrusted"
 #: so roles are always distinct (a model could return two `B`s).
 WORLD_SEATS: tuple[str, ...] = ("B", "C")
 
-#: World A is not authored: it is the capture (empty overlay, null axis), which makes it the
+#: World A is not authored: it is the capture (no facts, null axis), which makes it the
 #: control.
 BASE_WORLD_ID = "a"
 BASE_WORLD_ROLE = "A"
@@ -118,46 +122,61 @@ def _prompt(name: str) -> str:
 
 
 def _measurement_header(source_run_dir: Path, episode_dir: Path,
-                       stageable_patterns: Sequence[str] = ()) -> str:
+                        served_systems: Sequence[str] = ()) -> str:
     """The names this family is being authored for, as host text.
 
-    Unframed because the operator and host chose these names (run, episode, configured
-    patterns); none is attacker-influenced. The run and episode let the story identify which
-    episode it belongs to.
+    Unframed because the operator and host chose these names (run, episode, the served systems
+    the launch's gather grant decided); none is attacker-influenced. The run and episode let the
+    story identify which episode it belongs to.
 
-    The stageable patterns are stated explicitly: `parse_family` refuses an overlay keyed on
-    any other pattern, after all calls have been paid for, so the model must not guess.
+    The served systems are stated explicitly and alike — no system gets guidance another does
+    not: they are the whole of what the investigator can ask, so a fact placed anywhere else is
+    one no query in the episode can show.
     """
-    stageable = ", ".join(f"`{p}`" for p in stageable_patterns)
+    served = ", ".join(f"`{s}`" for s in served_systems)
     return (
         "## The measurement\n\n"
         f"This family is authored for episode `{episode_dir.name}`, "
         f"branching the finished run `{source_run_dir.name}`.\n"
-        + (f"\nThe corpus half of an overlay may key ONLY these base patterns: {stageable}. "
-           "Any other pattern names a corpus this episode cannot address, and the family is "
-           "refused.\n" if stageable else "")
+        + (f"\nThe tenant serves exactly these systems: {served}. They are the whole of what "
+           "the investigator can ask, so every fact a world asserts must be one at least one of "
+           "them would reflect.\n" if served else "")
     )
 
 
-def _corpus_section(samples: Any) -> str:
-    """One real document per corpus, so the author can match field names and value shapes.
+def _samples_section(samples: Any, served_systems: Sequence[str]) -> str:
+    """The samples document (`samples.yaml`): real example answers from the capture, per served
+    system and per verb, so the author sees what each system actually returns.
 
-    Untrusted like the rest of the capture. A pattern whose queries all came back empty is
-    listed with no document rather than omitted: "asked, and held nothing" distinguishes a dead
-    corpus from a live one.
+    Untrusted like the rest of the capture. Every served system is listed: one whose section is
+    unavailable carries its reason, one the capture never asked says so, rather than vanishing.
     """
-    if not isinstance(samples, dict) or not samples:
+    if not isinstance(samples, dict) or not served_systems:
         return ""
-    lines: list[str] = []
-    for pattern, document in samples.items():
-        if document:
-            lines.append(f"{pattern}:\n{json.dumps(document, indent=2, default=str)}")
-        else:
-            lines.append(f"{pattern}:\n(every query against this corpus returned no rows)")
+    blocks: list[str] = []
+    for system in served_systems:
+        section = samples.get(system)
+        if not isinstance(section, dict):
+            blocks.append(f"system {system}: no example was recorded")
+            continue
+        reason = section.get("unavailable")
+        if isinstance(reason, str):
+            blocks.append(f"system {system}: unavailable — {reason}")
+            continue
+        verbs = section.get("verbs")
+        if not isinstance(verbs, dict) or not verbs:
+            blocks.append(f"system {system}: the capture never asked this system")
+            continue
+        lines = [f"system {system}:"]
+        for verb, texts in verbs.items():
+            lines.append(f"  verb {verb}:")
+            for text in texts if isinstance(texts, list) else [texts]:
+                lines.append(f"    {text if isinstance(text, str) else json.dumps(text, default=str)}")
+        blocks.append("\n".join(lines))
     return titled_section(
-        "One real document from each corpus this investigation queried — match these field "
-        "names and value shapes when you author documents to inject",
-        "\n\n".join(lines))
+        "Real example answers from each served system, taken from the capture, grouped by verb "
+        "— what a fact you author will look like when the investigator asks",
+        "\n\n".join(blocks))
 
 
 @model(frozen=True)
@@ -171,7 +190,7 @@ class _Capture:
     leads: str
     alert: str
     frontier: str
-    corpora: str = ""
+    samples: str = ""
     lessons: str = ""
 
 
@@ -179,14 +198,21 @@ class _Capture:
 _QUESTIONER_LESSONS_CAP = 20
 
 
-def _questioner_lessons_section(lessons: Any, *, stageable_patterns: Sequence[str]) -> str:
+def _questioner_lessons_section(lessons: Any, *, served_systems: Sequence[str]) -> str:
     """Every candidate lesson path, read, screened and selected — the section body, or "".
 
-    `lessons` is the launcher's unread glob of `defender/lessons-questioner/`. A lesson with a
-    duplicated top-level frontmatter key is skipped (`safe_load` resolves repeats last-wins
-    silently, which would let a model-authored value steer the `pattern` selector). A lesson
-    whose `pattern` is not stageable in this episode is not selected. The cap applies after
-    selection, so matching lessons are never crowded out.
+    `lessons` is the launcher's unread glob of `defender/lessons-questioner/`. A lesson is
+    selected iff its frontmatter `systems` — a non-empty list of strings — shares a member with
+    `served_systems`, matched exactly (no case or separator folding; N03). Its old `pattern` /
+    `holding_system` keys select nothing. A lesson that cannot be read, has no closed
+    frontmatter, repeats a top-level key (`safe_load` resolves repeats last-wins silently, which
+    would let a model-authored value steer the selector) or carries a malformed `systems` is
+    skipped with a warning naming it (N24) — never shown by guess.
+
+    Each file is read once, whole, so a lesson replaced while this runs is selected from one
+    version or not at all. The chosen lessons are ordered by file name, never by the order the
+    candidates arrive in, and the cap applies after selection, so matching lessons are never
+    crowded out and the same lessons always make the same section.
     """
     if not lessons:
         return ""
@@ -194,46 +220,58 @@ def _questioner_lessons_section(lessons: Any, *, stageable_patterns: Sequence[st
     from defender._io import TEXT_READ_ERRORS, read_text_utf8
     from defender._yaml import duplicate_top_level_key
 
-    stageable = set(stageable_patterns)
-    bodies: list[str] = []
+    served = set(served_systems)
+    chosen: dict[str, str] = {}
     for path in lessons:
+        path = Path(path)
         try:
-            text = read_text_utf8(Path(path))
-        except TEXT_READ_ERRORS:
+            text = read_text_utf8(path)
+        except TEXT_READ_ERRORS as unreadable:
+            _logger.warning(f"questioner lesson {path.name} skipped: it could not be read "
+                            f"({type(unreadable).__name__})")
             continue
         try:
             fm, raw, body = split_frontmatter(text)
-        except FrontmatterError:
+        except FrontmatterError as bad:
+            _logger.warning(f"questioner lesson {path.name} skipped: {bad}")
             continue
         # The raw frontmatter only: on the whole file (markdown body included) the YAML parse
         # fails and `duplicate_top_level_key` returns `False`, so the guard would never fire.
         if duplicate_top_level_key(raw):
+            _logger.warning(f"questioner lesson {path.name} skipped: its frontmatter repeats a "
+                            "top-level key")
             continue
-        # `isinstance` first: `pattern` is unchecked model-authored frontmatter, and an
-        # unhashable value (`[logs-*]`) would raise `TypeError` on the set lookup, breaking
-        # every later episode until the file is deleted.
-        pattern = fm.get("pattern")
-        if not isinstance(pattern, str) or pattern not in stageable:
+        systems = fm.get("systems")
+        if "systems" in fm and not _lesson_systems_ok(systems):
+            _logger.warning(f"questioner lesson {path.name} skipped: its systems is {systems!r}, "
+                            "not a list of system names")
+            continue
+        if not isinstance(systems, list) or not served.intersection(systems):
             continue
         if body:
-            bodies.append(body)
-    if not bodies:
+            chosen[path.name] = body
+    if not chosen:
         return ""
-    capped = bodies[:_QUESTIONER_LESSONS_CAP]
+    capped = [chosen[name] for name in sorted(chosen)][:_QUESTIONER_LESSONS_CAP]
     return titled_section(
         "Pitfalls this questioner corpus recorded about worlds it authored before",
         "\n\n---\n\n".join(capped))
 
 
-def _capture_sections(*, leads: Any, alert: Any, frontier: str,
-                      corpus_samples: Any = None, lessons: Any = None,
-                      stageable_patterns: Sequence[str] = ()) -> _Capture:
+def _lesson_systems_ok(systems: Any) -> bool:
+    """A lesson's `systems`: a list of non-empty strings. An empty list is well-formed (the
+    seed lesson's) and selects nothing."""
+    return isinstance(systems, list) and all(isinstance(s, str) and s for s in systems)
+
+
+def _capture_sections(*, leads: Any, alert: Any, frontier: str, samples: Any = None,
+                      lessons: Any = None, served_systems: Sequence[str] = ()) -> _Capture:
     return _Capture(
         leads=titled_section("The joined leads at the branch point", leads),
         alert=titled_section("The alert this investigation started from", alert),
         frontier=titled_section("The investigation document at the branch point", frontier),
-        corpora=_corpus_section(corpus_samples),
-        lessons=_questioner_lessons_section(lessons, stageable_patterns=stageable_patterns),
+        samples=_samples_section(samples, served_systems),
+        lessons=_questioner_lessons_section(lessons, served_systems=served_systems),
     )
 
 
@@ -334,7 +372,7 @@ def _family_prompt(header: str, capture: _Capture) -> str:
     """Call 1's whole message: the task and header (host text, unframed), then the framed
     capture.
     """
-    salt = message_salt(capture.leads, capture.alert, capture.frontier, capture.corpora,
+    salt = message_salt(capture.leads, capture.alert, capture.frontier, capture.samples,
                         capture.lessons)
     return (
         f"{_prompt('family.md')}\n{header}\n"
@@ -343,7 +381,7 @@ def _family_prompt(header: str, capture: _Capture) -> str:
             wrap(capture.leads, UNTRUSTED_TAG, salt),
             wrap(capture.alert, UNTRUSTED_TAG, salt),
             wrap(capture.frontier, UNTRUSTED_TAG, salt),
-            *([wrap(capture.corpora, UNTRUSTED_TAG, salt)] if capture.corpora else []),
+            *([wrap(capture.samples, UNTRUSTED_TAG, salt)] if capture.samples else []),
             # Lessons go to Call 1 only: it names the discriminator and base story, which is
             # what the lessons are about.
             *([wrap(capture.lessons, UNTRUSTED_TAG, salt)] if capture.lessons else []),
@@ -358,7 +396,7 @@ def _world_prompt(seat: str, *, axis: Any, family_reply: Any, header: str,
     `family_reply` is re-wrapped as untrusted (Call 1 read attacker-influenced text), in this
     message's own salt, minted after the reply exists so Call 1's model has never seen it."""
     seeded = titled_section(f"Call 1's output (seat {seat} authors against this)", family_reply)
-    salt = message_salt(seeded, capture.leads, capture.alert, capture.frontier, capture.corpora)
+    salt = message_salt(seeded, capture.leads, capture.alert, capture.frontier, capture.samples)
     axis_line = f"Your axis, as call 1 named it: {axis}\n" if axis is not None else ""
     return (
         f"{_prompt('world.md')}\n"
@@ -370,9 +408,8 @@ def _world_prompt(seat: str, *, axis: Any, family_reply: Any, header: str,
             wrap(capture.leads, UNTRUSTED_TAG, salt),
             wrap(capture.alert, UNTRUSTED_TAG, salt),
             wrap(capture.frontier, UNTRUSTED_TAG, salt),
-            # The seat sees the corpora too: its story must match the fields and value shapes
-            # of the staged documents.
-            *([wrap(capture.corpora, UNTRUSTED_TAG, salt)] if capture.corpora else []),
+            # The seat sees the samples too: its story must be one the served systems can tell.
+            *([wrap(capture.samples, UNTRUSTED_TAG, salt)] if capture.samples else []),
         )
     )
 
@@ -402,7 +439,7 @@ def read_frontier(source_run_dir: Path, *, fences_at: int) -> str:
     return "\n\n".join(f"```invlang\n{body}\n```" for body in kept)
 
 
-#: The fields a seat authors. Everything else (world id, overlay) is Call 1's plan, which must be
+#: The fields a seat authors. Everything else (world id, facts) is Call 1's plan, which must be
 #: coherent across worlds; a seat elaborates, it does not re-plan.
 SEAT_AUTHORED_FIELDS: frozenset[str] = frozenset({"story", "axis", "disposition_declared",
                                                   "label_basis"})
@@ -411,7 +448,7 @@ SEAT_AUTHORED_FIELDS: frozenset[str] = frozenset({"story", "axis", "disposition_
 def _planned_worlds(family: dict[str, Any]) -> list[dict[str, Any]]:
     """The non-base worlds Call 1 planned, in order.
 
-    Call 1 decides ids, axes and overlays so the worlds form one comparison around a
+    Call 1 decides ids, axes and facts so the worlds form one comparison around a
     discriminator; each seat call then writes one world's story. The fan-out is as wide as the
     plan.
     """
@@ -440,14 +477,14 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
     leads: Any,
     alert: Any,
     frontier: str,
-    stageable_patterns: Sequence[str] = (),
-    corpus_samples: Any = None,
+    served_systems: Sequence[str] = (),
+    samples: Any = None,
     lessons: Any = None,
 ) -> dict[str, Any]:
     """Author one family document: one family call plus one call per planned world.
 
     Returns the raw composed dict; the launcher validates it with `parse_family`, the single
-    validator, before anything is staged.
+    validator, before anything is served.
 
     `source_run_dir` and `episode_dir` are only named in the prompt, never read. The captured
     inputs arrive already read: the host owns every read of a model-writable tree.
@@ -456,15 +493,16 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
     seat. The launcher adds the measurement facts (`episode_id`, `source_run_dir`,
     `source_run_id`, `branch_message_id`, `fences_at`, `as_of`, `continuation_prompt`).
 
-    `lessons` is the unread candidate list of questioner-corpus paths; they are screened and
-    selected against `stageable_patterns` and reach Call 1 only.
+    `served_systems` is the manifest's recorded list (M21), named in every call's host text;
+    `samples` is the per-system samples document (`samples.yaml`). `lessons` is the unread
+    candidate list of questioner-corpus paths; they are screened and selected by system against
+    `served_systems` and reach Call 1 only.
     """
-    header = _measurement_header(Path(source_run_dir), Path(episode_dir),
-                                 stageable_patterns)
+    served = list(dict.fromkeys(served_systems))
+    header = _measurement_header(Path(source_run_dir), Path(episode_dir), served)
     # Rendered once for all calls; framing is per call because the salt is.
-    capture = _capture_sections(leads=leads, alert=alert, frontier=frontier,
-                                corpus_samples=corpus_samples, lessons=lessons,
-                                stageable_patterns=stageable_patterns)
+    capture = _capture_sections(leads=leads, alert=alert, frontier=frontier, samples=samples,
+                                lessons=lessons, served_systems=served)
     family_reply = invoke(
         _family_prompt(header, capture),
         role=AgentRole.QUESTIONER,
@@ -492,7 +530,7 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
         )
         authored = _reply_document(reply, what=f"the call authoring seat {seat}")
         # Plan underneath, only seat-authored fields on top, role last: otherwise a seat that
-        # echoed the prompt's example overlay would stage a difference nobody planned.
+        # echoed the prompt's example facts would assert a difference nobody planned.
         world = {**plan,
                  **{k: v for k, v in authored.items() if k in SEAT_AUTHORED_FIELDS},
                  "role": seat}

@@ -5,8 +5,8 @@ from __future__ import annotations
 
 class JudgeRefused(Exception):
     """A judge pass that cannot honestly run: a malformed archived input, a manifest failing the
-    judge's load-time validation (holding system, duplicate or colliding labels), or a reply
-    failing `JudgeReply` validation. An absent per-world input is not a refusal: that world is
+    judge's load-time validation (a predating or unreadable manifest, duplicate or colliding
+    labels), or a reply failing `JudgeReply` validation. An absent per-world input is not a refusal: that world is
     marked `ungradable` instead.
 
     A bare `Exception`, not a `ValueError`: pydantic wraps a `ValueError` raised in a `@model`

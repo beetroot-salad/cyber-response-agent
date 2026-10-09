@@ -43,6 +43,10 @@ WORLD_REASONS: tuple[str, ...] = (ORACLE_UNSERVABLE, BUDGET, DID_NOT_FINISH, NOT
 #: How many failed worlds make a family unusable (O5).
 UNUSABLE_AT = 2
 
+#: The word a reader states for an absent, empty or torn outcome record: the distinct "no record"
+#: state (M05=A), never one of `OUTCOMES` and never the retired `incomplete`.
+NO_RECORD = "no record"
+
 
 class OutcomeUnreadable(ValueError):
     """The outcome record is absent, torn or not a record: the "no record" state."""
@@ -104,11 +108,56 @@ def read_outcome(bound: Bound) -> dict[str, Any]:
     if not isinstance(record, dict) or record.get("outcome") not in OUTCOMES:
         raise OutcomeUnreadable(
             f"no record: {LAYOUT.outcome} holds no outcome word ({', '.join(OUTCOMES)})")
+    if not isinstance(record.get("reason"), str):
+        # `write_outcome` always writes one; a record without it is not one pre-flight wrote.
+        raise OutcomeUnreadable(f"no record: {LAYOUT.outcome} carries no reason")
     return record
 
 
+def failed_worlds(bound: Bound, record: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Every world O5 counts as failed, by label: pre-flight's `unservable_worlds` plus every
+    world whose own record (`world_records/<label>.yaml`) exists (S9, M04=A). Each value is
+    `{world, reason, call, detail}`; a world named by both keeps its own record's entry.
+
+    A world record that cannot be read still counts — its presence is the fact — with the
+    refusal as its detail. Labels come off the records as written; nothing here checks them
+    against the manifest."""
+    failed: dict[str, dict[str, Any]] = {}
+    for entry in record.get("unservable_worlds") or ():
+        if isinstance(entry, Mapping) and isinstance(entry.get("world"), str):
+            failed[entry["world"]] = {"world": entry["world"], "reason": entry.get("reason"),
+                                      "call": entry.get("call"), "detail": entry.get("detail", "")}
+    records = bound.under(LAYOUT.world_records)
+    for name in records.entries().files():
+        if not name.endswith(".yaml") or len(name) <= len(".yaml"):
+            continue
+        label = name[:-len(".yaml")]
+        rec = records.read(name)
+        try:
+            doc = _yaml.safe_load(rec.text) if rec.text is not None else None
+        except (yaml.YAMLError, _yaml.AliasRefused):
+            doc = None
+        if isinstance(doc, dict):
+            failed[label] = {"world": label, "reason": doc.get("reason"), "call": doc.get("call"),
+                             "detail": doc.get("detail", "")}
+        else:
+            failed[label] = {"world": label, "reason": None, "call": None,
+                             "detail": f"its record ({name}) could not be read"}
+    return failed
+
+
+def unusable_reason(failed: Mapping[str, Mapping[str, Any]]) -> str | None:
+    """O5's verdict on `failed_worlds`: the reason the family is unusable, or `None` while
+    fewer than `UNUSABLE_AT` worlds failed."""
+    if len(failed) < UNUSABLE_AT:
+        return None
+    named = ", ".join(f"{label} ({entry.get('reason')})" for label, entry in sorted(failed.items()))
+    return (f"{len(failed)} worlds could not be judged ({named}) — O5 calls a family with two or "
+            "more unusable")
+
+
 __all__ = [
-    "ACCEPTED", "BUDGET", "DID_NOT_FINISH", "NOT_ARCHIVED", "ORACLE_UNSERVABLE", "OUTCOMES",
-    "REFUSED", "UNUSABLE", "UNUSABLE_AT", "WORLD_REASONS", "OutcomeUnreadable", "read_outcome",
-    "write_outcome", "write_world_record",
+    "ACCEPTED", "BUDGET", "DID_NOT_FINISH", "NOT_ARCHIVED", "NO_RECORD", "ORACLE_UNSERVABLE",
+    "OUTCOMES", "REFUSED", "UNUSABLE", "UNUSABLE_AT", "WORLD_REASONS", "OutcomeUnreadable",
+    "failed_worlds", "read_outcome", "unusable_reason", "write_outcome", "write_world_record",
 ]

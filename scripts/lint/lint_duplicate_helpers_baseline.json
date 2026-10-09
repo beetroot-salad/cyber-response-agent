@@ -1,7 +1,6 @@
 {
   "//": "lint_duplicate_helpers baseline — module-level helper names defined in >=2 in-scope defender/ modules. Fingerprint is the bare name. CI fails on a dup name absent here. Regenerate: python scripts/lint/lint_duplicate_helpers.py --update-baseline. Shrink as dups are consolidated; annotate intentional entries, \"\" = un-triaged. Never hand-add to silence a new dup — fix it or use `# lint-dup: ok — <reason>`.",
   "entries": {
-    "_json_safe": "distinct-ok: serialize.py coerces YAML scalars (dates/sets) for JSON; sql.py maps non-finite floats to null for DuckDB — different problems",
     "_next_seq": "distinct-ok: session_store's is the per-(session,agent,synthesized) seq minter for the store's own message table; record_query's is the per-(lead_id) query seq minter for executed_queries.jsonl — different tables, same generic name (#705)",
     "_policy": "distinct-ok: bash_policy._policy loads the read-denylist JSON (no args); policy_cli._policy compiles an AgentPolicy for a given definition+run dir. Unrelated. Newly visible because policy_cli.py ends in _cli.py and was hidden by the retired suffix exclusion — pre-existing, not introduced by #619",
     "_render_section": "distinct-ok: lead_zero._render_section(body, salt) wraps item 1's rendered text in ONE untrusted trust-boundary frame (`wrap(text, \"untrusted\", salt)`) for the pre-ORIENT harness step (#808); invlang/advisory._render_section(section, frontier) renders an AdvisorySection's header+body lines for the advisory document — unrelated domains, same generic \"render a section\" name",
@@ -14,6 +13,7 @@
     "load_config": "distinct-ok: _stub_transport.load_config reads a docker-exec-curl system's three-key template from the record (`ctx.tenant.systems`); elastic_adapter.load_config keeps its own because its keys are the Elastic entry's (URL, indices, containers), not the shared URL_BASE/BASTION_HOST/TIMEOUT_SEC template (#619, #1107)",
     "materialize": "distinct-ok: the two eval harnesses build tmp trees from different fixtures (findings/lessons vs query-catalog/run-dir)",
     "render": "distinct-ok: frontend/build.py's render(view) stamps the standalone lessons.html page from a JSON view dict; selection.render(store, ...) is the store's send-role renderer for the runtime loop — unrelated domains, same generic verb (#705)",
-    "run_batch": "distinct-ok: per-direction public entrypoint — each direction module wraps the one shared drain body with its own config, and the actor/benign modules forward to the observation direction's entrypoint (#719)"
+    "run_batch": "distinct-ok: per-direction public entrypoint — each direction module wraps the one shared drain body with its own config, and the actor/benign modules forward to the observation direction's entrypoint (#719)",
+    "start_box": "distinct-ok: oracle.start_box(*, env) is #1224's coined name for the branching oracle's sandboxed box (a thin wrapper over runtime/box/_oracle.start_oracle_box that converts a refused start to OracleSandboxError); box/_lifecycle.start_box starts the investigator's run box \u2014 different boxes, the spec fixes the name"
   }
 }

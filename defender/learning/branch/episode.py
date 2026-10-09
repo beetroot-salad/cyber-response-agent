@@ -71,15 +71,18 @@ class EpisodeError(ValueError):
 def _recorded_outcome(bound: Bound) -> tuple[str, str]:
     """The episode's outcome word and its reason, from pre-flight's outcome record
     (`outcome.yaml`). An absent, torn or refused record is the "no record" state, refused
-    rather than read as any word (M05=A)."""
+    rather than read as any word (M05=A). An `accepted` record whose O5 count
+    (`outcome.failed_worlds`) reaches two reads as `unusable`, as the judge's gate reads it."""
     try:
         record = outcome_mod.read_outcome(bound)
     except outcome_mod.OutcomeUnreadable as missing:
         raise EpisodeError(
             f"the episode has no outcome record to read ({missing}) — an episode is comparable "
             "only once pre-flight recorded it accepted") from None
-    reason = record.get("reason")
-    return record["outcome"], reason if isinstance(reason, str) else ""
+    unusable = outcome_mod.unusable_reason(outcome_mod.failed_worlds(bound, record))
+    if record["outcome"] == outcome_mod.ACCEPTED and unusable is not None:
+        return outcome_mod.UNUSABLE, unusable
+    return record["outcome"], record["reason"]
 
 
 def _refuse_incomplete(bound: Bound) -> None:

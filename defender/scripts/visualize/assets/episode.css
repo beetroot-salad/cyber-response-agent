@@ -189,3 +189,14 @@
   font-size: 12px; color: var(--text-dim); padding: 2px 0; overflow-wrap: anywhere;
 }
 .episode .rc-teardown-fail { font-size: 12px; color: var(--bad); padding: 2px 0 2px 12px; overflow-wrap: anywhere; }
+
+/* #1224: a world's facts and its served calls; pre-flight's outcome record, world records and
+   the per-system samples record. */
+.episode .w-facts, .episode .w-calls { margin: 4px 0; }
+.episode .w-fact, .episode .w-call { font-size: 0.9em; }
+.episode .w-entities { color: var(--text-dim); }
+.episode .rc-served, .episode .rc-outcome, .episode .rc-outcome-call, .episode .rc-world-record,
+.episode .rc-sample-system, .episode .rc-sample {
+  font-size: 0.9em;
+}
+.episode .rc-sample { margin-left: 1em; }

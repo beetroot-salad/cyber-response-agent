@@ -296,6 +296,11 @@ class EpisodeLayout:
     def worlds(self) -> PurePosixPath:
         return PurePosixPath(WORLDS_DIRNAME)
 
+    @property
+    def world_records(self) -> PurePosixPath:
+        """`world_records/` — every world's own record (#1224)."""
+        return PurePosixPath(WORLD_RECORDS_DIRNAME)
+
     def world_record(self, label: str) -> PurePosixPath:
         """`world_records/<label>.yaml` — one world's own record (#1224). Shape check only."""
         return PurePosixPath(WORLD_RECORDS_DIRNAME) / f"{_check_component(label, what='label')}.yaml"
@@ -358,6 +363,10 @@ class EpisodeLayout:
 LAYOUT = EpisodeLayout()
 
 
+#: `oracle/<label>/collisions.jsonl` — see `OracleStorePaths.collisions`.
+COLLISIONS_FILENAME = "collisions.jsonl"
+
+
 @dataclasses.dataclass(frozen=True)
 class OracleStorePaths:
     """The records of one world's oracle-side store, rooted at `root` (`oracle/<label>/` under
@@ -391,8 +400,15 @@ class OracleStorePaths:
     def trace(self) -> Path:
         return Path(self.root) / "trace.jsonl"
 
+    @property
+    def collisions(self) -> Path:
+        """A frozen forged row's identifier that this world's real data later carried too
+        (M12=A: the row stays frozen; the collision is recorded for the judge)."""
+        return Path(self.root) / COLLISIONS_FILENAME
+
     def all(self) -> tuple[Path, ...]:
-        return (self.forged, self.facts, self.answers, self.ledger, self.base, self.trace)
+        return (self.forged, self.facts, self.answers, self.ledger, self.base, self.trace,
+                self.collisions)
 
 
 @dataclasses.dataclass(frozen=True)

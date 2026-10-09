@@ -29,13 +29,12 @@ are writing the ordinary alternative case — the one where the host really is a
 the account really was rotated, where the beacon interval really is a backup job. It has to hang
 together as a real situation, because a competent defender is going to work through it.
 
-**A difference that can be observed.** Two mechanisms build a world, and nothing else changes:
-documents added to or removed from the corpus the investigation reads, at the branch point, and
-re-answering another system's view of a named entity. So a difference no query could surface is
-not a difference — it is a preference. The same holds for a world that contradicts what the
-investigation already saw: the capture is fixed, and a world disagreeing with it is a different
-case rather than a variant of this one. Either fault is caught before anything runs, and it
-ends the whole family, not just the world that carried it.
+**A difference that can be observed.** A world is a set of facts — plain statements of what is
+true in it — and nothing else changes. When the investigator asks one of the tenant's served
+systems about an entity a fact names, the answer it gets reflects that fact. So a fact no served
+system would reflect is not a difference — it is a preference. The same holds for a world that
+contradicts what the investigation already saw: the capture is fixed, and a world disagreeing
+with it is a different case rather than a variant of this one.
 
 **A difference that bears on the verdict.** The point is to move the conclusion, or to fail to
 move it and show why. A variation nobody's disposition could turn on costs a full investigation

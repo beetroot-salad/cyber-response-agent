@@ -19,6 +19,7 @@ import concurrent.futures
 import contextlib
 import hashlib
 import json
+import logging
 import subprocess
 import threading
 import time
@@ -44,8 +45,19 @@ from defender.runtime.box._oracle import SCRATCH as _SCRATCH
 from defender.runtime.box._oracle import BoxStartRefused, start_oracle_box, start_process_oracle_box
 from defender.runtime.verbs import ServingAbort
 
-from .checks import CheckStore, RealData, Refused, canonical_json, check_submission, parse_claim, structured
+from .checks import (
+    CheckStore,
+    RealData,
+    Refused,
+    canonical_json,
+    check_submission,
+    frozen_id_collisions,
+    parse_claim,
+    structured,
+)
 from .limiter import RateLimiter
+
+_logger = logging.getLogger(__name__)
 
 __all__ = [
     "ORACLE_CHECK_DEF", "ORACLE_DEF", "OracleSandboxError", "OracleSettings", "OracleStore",
@@ -223,6 +235,19 @@ class OracleStore:
                                   "cost_usd": cost, "at": time.time()}])
             self.spent += cost
         return cost
+
+    def record_collisions(self, entries: list[dict]) -> None:
+        """Append each frozen-row collision not already recorded (M12=A), keyed on
+        `(forged_id, column, value)` — the judge reads them off `collisions.jsonl`.
+
+        @owns collisions — the shipped `oracle/<label>/collisions.jsonl` rows are produced here."""
+        with self._lock:
+            seen = {(r.get("forged_id"), r.get("column"), r.get("value"))
+                    for r in read_jsonl_rows(self.paths.collisions)}
+            new = [e for e in entries
+                   if (e["forged_id"], e["column"], e["value"]) not in seen]
+            if new:
+                self._append(self.paths.collisions, new)
 
     def commit(self, *, forged: list[dict], facts: list[dict], answer: dict | None) -> None:
         """Freeze this attempt's forged rows and facts with the verified answer (M15=B): rows
@@ -812,6 +837,24 @@ class Oracle:
         return check_submission(base, served, claim, world=self.world, store=store,
                                 real_data=data)
 
+    def _note_collisions(self, base: Any, served: Any, claim: Any, attempt: _Attempt,
+                         real: Callable[[], RealData]) -> None:
+        """Record, for the judge, every identifier a frozen row serves that this world's real
+        data now carries too (M12=A). Best-effort: the answer is served either way."""
+        store = CheckStore(frozen=self.store.frozen, staged=attempt.forged,
+                           facts={**self.store.facts, **attempt.facts}, rerun=self._rerun)
+        data = real()
+        data.answers.extend(self.explored)
+        entries = frozen_id_collisions(base, served, claim, world=self.world, store=store,
+                                       real_data=data)
+        if not entries:
+            return
+        try:
+            self.store.record_collisions(entries)
+        except OSError as unwritable:
+            _logger.warning(f"the oracle could not record {len(entries)} frozen-row id "
+                         f"collision(s) for the judge ({unwritable!r}); the answer is served")
+
     def _rerun(self, system: str, verb: str, params: dict) -> Any:
         return self.door.run("host-check", system, verb, params)
 
@@ -833,6 +876,7 @@ class Oracle:
         if not verdict.get("passed"):
             return self._verdict([f"the verifier failed the answer: "
                                   f"{wrap_fresh(str(verdict.get('reason') or ''), 'untrusted')}"])
+        self._note_collisions(base, served, claim, attempt, real)
         return _Submitted(served=served, claim=structured(parsed), verdict=verdict,
                           attempt=attempt)
 

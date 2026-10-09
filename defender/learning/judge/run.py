@@ -40,7 +40,7 @@ from defender.learning.judge._errors import JudgeRefused
 from defender.learning.judge.render import UNTRUSTED_TAG, JudgeInput
 from defender.runtime.agent_definition import AgentDefinition
 from defender.runtime.agent_role import AgentRole
-from defender import _yaml
+from defender._vocab import JUDGE_OUTCOME_ENUM, normalized_judge_outcome
 
 #: The judge's refusal text, carried on its compiled policy. Only the bash gate reads it, which
 #: this tool-less role never invokes, so it surfaces to operators rather than to a draw.
@@ -82,8 +82,8 @@ JUDGE_DEF = AgentDefinition(
 )
 
 #: The judge's reply-level outcome vocabulary — not `_vocab.JUDGE_OUTCOME_ENUM`, which is the
-#: family's word. A reply never emits `caught`/`survived`/`undecidable` (the mechanical pass
-#: computes those) and can emit `gradable`, which is not a family word.
+#: family's word (the family-scope reply's `verdict_word`). A world reply says whether its world
+#: can be judged at all.
 _REPLY_OUTCOME_ENUM = frozenset({"gradable", "discard", "corpus-contradiction"})
 
 #: What each reply-level outcome means, keyed by the word, so every member reaches the prompt
@@ -91,20 +91,20 @@ _REPLY_OUTCOME_ENUM = frozenset({"gradable", "discard", "corpus-contradiction"})
 _OUTCOME_GUIDANCE: dict[str, str] = {
     "gradable": (
         "this world ran and its record can be judged. THIS IS THE ORDINARY ANSWER, and it is "
-        "still the answer when the defender did badly: a world whose defender never queried "
-        "the discriminating system, never re-opened a lead, or closed over an open hypothesis "
-        "is a world you can grade, and those are exactly the findings worth having"
+        "still the answer when the investigator did badly: a world whose investigator never "
+        "asked where the facts would show, never re-opened a lead, or closed over an open "
+        "hypothesis is a world you can judge, and those are exactly the findings worth having"
     ),
     "discard": (
-        "this world cannot be measured because the MEASUREMENT is spoilt — the control "
-        "drifted, or what the world was asked is not what it served. Nothing about the "
-        "defender's conduct puts an episode here"
+        "this world cannot be measured because the MEASUREMENT is spoilt — the live systems "
+        "drifted from the capture on the calls that matter, or what the world was asked is not "
+        "what it was answered. Nothing about the investigator's conduct puts an episode here"
     ),
     "corpus-contradiction": (
-        "the world's own staged corpus contradicts the capture it was branched from, so the "
-        "archive disagrees with itself and no verdict read off it means anything. Evidence "
-        "the defender never looked at is NOT a contradiction; it is a gradable world in which "
-        "the defender did not look"
+        "the world's own facts contradict the capture it was branched from, so the archive "
+        "disagrees with itself and no verdict read off it means anything. Evidence the "
+        "investigator never looked at is NOT a contradiction; it is a gradable world in which "
+        "the investigator did not look"
     ),
 }
 
@@ -129,10 +129,61 @@ def _outcome_guidance() -> str:
 SUBJECT_DEFENDER = "defender"
 SUBJECT_WORLD = "world"
 
-#: Examples of a world-subject bucket shown in the prompt — not a closed set.
-EXAMPLE_WORLD_BUCKETS = (
-    "unreachable-difference", "shape-invention", "story-overlay-gap", "undiscriminating-family",
-)
+#: The bucket a world-scope reply gives when the world shows no investigator failure (M19=A):
+#: recorded on the family record, never enqueued (the queue's own set refuses it).
+NO_BUCKET = "none"
+#: The one bucket the host refuses for a world whose reply names no served system (M20=A).
+LEAD_SET = "lead-set"
+
+#: A world's bucket — the judge model's own answer (O11), never computed: the queue's defender
+#: finding types (O11's four plus `observability`, M19=A) and the explicit `none`.
+WORLD_BUCKETS = frozenset(QUEUEABLE_FINDING_TYPES) | {NO_BUCKET}
+
+#: What each world bucket means, keyed by the word, so every member reaches the prompt with a
+#: criterion; `_bucket_guidance` refuses if the two sets disagree.
+_BUCKET_GUIDANCE: dict[str, str] = {
+    "lead-set": (
+        "the investigator never asked a SERVED system where this world's facts would show — "
+        "its lead set missed them. Only a served system can be missed: if every system the "
+        "facts touch is outside SERVED SYSTEMS, the investigator could not have looked, and "
+        "this bucket is refused for that world"
+    ),
+    "lead-quality": (
+        "it asked the right served system, but in a way that could not show the facts — the "
+        "wrong window, scope or entity"
+    ),
+    "analyze-discipline": (
+        "it was shown the facts and did not carry them into its conclusion; its resolutions "
+        "did not move"
+    ),
+    "decision-discipline": (
+        "it was shown the facts and its resolutions moved, yet its verdict still disagrees with "
+        "the world's declared verdict"
+    ),
+    "observability": (
+        "the facts could not reach it for a reason outside its own conduct — the grant refused "
+        "the call, an adapter could not load — so the gap is in what the deployment lets an "
+        "investigator see"
+    ),
+    "none": (
+        "no investigator failure — it reached the declared verdict, or nothing here shows it "
+        "went wrong. Recorded, never queued"
+    ),
+}
+
+
+def _bucket_guidance() -> str:
+    """The world buckets and their criteria, one line each; refuses a partial list."""
+    missing = sorted(WORLD_BUCKETS - set(_BUCKET_GUIDANCE))
+    if missing:
+        raise JudgeRefused(
+            f"the judge's prompt has no criterion for bucket {missing} — the validator accepts "
+            "them and the model would be choosing by guesswork")
+    return "".join(f"- `{word}` — {_BUCKET_GUIDANCE[word]}.\n" for word in sorted(WORLD_BUCKETS))
+
+
+#: Examples of a world-subject finding bucket shown in the prompt — not a closed set.
+EXAMPLE_WORLD_BUCKETS = ("shape-invention", "fact-story-gap", "undiscriminating-family")
 
 
 class _OpenBucketVocabulary:
@@ -155,26 +206,30 @@ _BUCKET_ENUM: dict[str, Any] = {
 
 _ROLE_PROMPT = Path(__file__).resolve().parent / "role.md"
 
-#: Each rendered section's heading. The four "joined views" are numbered so a reply can name
-#: which view a finding came from.
+#: Each rendered section's heading. Titles sit inside the frame with their bodies.
 SECTION_TITLES: dict[str, str] = {
-    "manifest": "THE FAMILY MANIFEST (the graded world last; every other world counterfactual)",
-    "leads": "VIEW 1 — PER-LEAD CHAIN (goal -> params -> payload -> refused -> summary -> "
+    "manifest": "THE FAMILY (the judged world's facts and declared verdict; every other "
+                "world's facts withheld; the systems this tenant serves)",
+    "family": "PRE-FLIGHT'S RECORD OF THE FAMILY (its outcome, the worlds that could not be "
+              "judged, the calls it could not replay, and the calls whose live answer drifted "
+              "from the capture)",
+    "calls": "VIEW 1 — EVERY CALL THE JUDGED WORLD'S INVESTIGATOR MADE (its decision word, and "
+             "for a changed answer its claim and verifier verdict)",
+    "answers": "VIEW 2 — THE ANSWERS THOSE CALLS WERE SERVED, by call number",
+    "leads": "VIEW 3 — PER-LEAD CHAIN (goal -> params -> payload -> refused -> summary -> "
              "resolutions)",
-    "coverage": "VIEW 2 — COVERAGE (what this world asked on the family's holding system)",
-    "siblings": "VIEW 3 — SIBLING TRIALS OF THIS SAME ALERT",
-    "lessons": "VIEW 4 — LESSONS THAT REACHED THIS WORLD (name, how it reached the model — "
+    "siblings": "VIEW 4 — SIBLING TRIALS OF THIS SAME ALERT",
+    "lessons": "VIEW 5 — LESSONS THAT REACHED THIS WORLD (name, how it reached the model — "
                "read, or pushed as a description only — and the body at its recorded commit "
-               "for you to grade against, whether or not the model read it)",
+               "for you to judge against, whether or not the model read it)",
     "spread": "TRIAL SPREAD (the dispositions those sibling trials reached, tallied)",
-    "document": "THE GRADED WORLD'S OWN investigation.md",  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-    "report": "THE GRADED WORLD'S OWN report.md",  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-    "sample": "THE QUESTIONER'S OWN SAMPLE (the real document, per staged pattern, this "
-              "world's overlay was authored from)",
-    "review": "THIS WORLD'S OWN REVIEW RECORD (what the capture's own vocabulary could and "
-              "could not show)",
+    "document": "THE JUDGED WORLD'S OWN investigation.md",  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+    "report": "THE JUDGED WORLD'S OWN report.md",  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+    "oracle": "THE JUDGED WORLD'S FROZEN TELEMETRY AND IDENTIFIER COLLISIONS (its oracle-side "
+              "record)",
+    "samples": "REAL EXAMPLE ANSWERS PER SERVED SYSTEM (the samples record, one section per "
+               "system)",
 }
-
 
 
 def _normalize_reply_outcome(value: Any) -> str | None:
@@ -194,21 +249,22 @@ class Finding:
     topic: str
     evidence: list[str] = field(default_factory=list)
     discriminator_related: bool = False
-    #: World-lane-only content, carried to build a questioner-channel row. `world` is never
-    #: trusted as identity; the pass stamps its own.
-    pattern: str | None = None
-    holding_system: str | None = None
-    world: str | None = None
 
 
 @model(frozen=True)
 class JudgeReply:
+    """One validated reply. `bucket`/`systems` are the world scope's (O11: the model's own
+    answer); `verdict_word` is the family scope's (a `JUDGE_OUTCOME_ENUM` member, M19=A)."""
+
     episode_outcome: str
     noise_floor_note: str
     correlations: list[Any]
     scope_checks: list[Any]
     derivations: list[Any]
     findings: list[Finding]
+    bucket: str | None = None
+    systems: list[str] = field(default_factory=list)
+    verdict_word: str | None = None
 
 
 def _require_dict(doc: Any) -> dict[str, Any]:
@@ -248,17 +304,10 @@ def _parse_finding(raw: Any, index: int, *, scope: str) -> Finding:  # noqa: C90
             f"finding[{index}].subject={subject!r} is not one of "
             f"{sorted((SUBJECT_DEFENDER, SUBJECT_WORLD))!r} — no case-fold and no trim, so a "
             "finding whose subject nobody stated exactly is a finding no channel can route")
-    if scope == "family":
-        # The family reply is entirely `subject: world` and may name no world; a model naming
-        # one is refused rather than silently overridden.
-        if subject != SUBJECT_WORLD:
-            raise JudgeRefused(
-                f"finding[{index}].subject={subject!r} — the family call may emit only "
-                f"subject: {SUBJECT_WORLD!r} findings; it never grades the defender")
-        if raw.get("world") is not None:
-            raise JudgeRefused(
-                f"finding[{index}] names world={raw.get('world')!r} — a family-level finding "
-                "is about the family and may not name a member of it")
+    if scope == "family" and subject != SUBJECT_WORLD:
+        raise JudgeRefused(
+            f"finding[{index}].subject={subject!r} — the family call may emit only "
+            f"subject: {SUBJECT_WORLD!r} findings; it never judges the investigator")
     bucket = raw["bucket"]
     bucket_enum = _BUCKET_ENUM[subject]
     if not isinstance(bucket, str) or bucket not in bucket_enum:
@@ -268,31 +317,69 @@ def _parse_finding(raw: Any, index: int, *, scope: str) -> Finding:  # noqa: C90
     evidence = raw["evidence"]
     if not isinstance(evidence, list):
         raise JudgeRefused(f"finding[{index}].evidence must be a list")
-    for key in ("pattern", "holding_system", "world"):
-        if key in raw and raw[key] is not None and not isinstance(raw[key], str):
-            raise JudgeRefused(f"finding[{index}].{key} must be a string when present")
+    # Keys an older prompt asked for (a world, a pattern, a holding system) are ignored, never
+    # carried: the pass stamps the world itself, and nothing downstream reads the other two.
     return Finding(
         bucket=bucket, subject=subject, claim=str(raw["claim"]),
         root_cause=str(raw["root_cause"]), anchor=str(raw["anchor"]), topic=str(raw["topic"]),
         evidence=[str(e) for e in evidence],
         discriminator_related=bool(raw.get("discriminator_related", False)),
-        pattern=raw.get("pattern"), holding_system=raw.get("holding_system"),
-        world=raw.get("world"),
     )
 
 
-def validate_reply(text: str, *, scope: str = "world") -> JudgeReply:
+def _world_verdict(doc: dict[str, Any], *,
+                   served_systems: Any) -> tuple[str, list[str]]:
+    """A world reply's own `bucket` and `systems`, exactly as written, or `JudgeRefused`.
+
+    The host's one rule on the bucket (M20=A): `lead-set` is refused when the reply's systems
+    share nothing with `served_systems` — an investigator cannot miss what it could not ask. It
+    refuses; it never substitutes a bucket. `served_systems=None` (a bare validation, no family
+    in hand) skips that rule."""
+    if "bucket" not in doc:
+        raise JudgeRefused("the judge's reply carries no bucket for its world")
+    bucket = doc["bucket"]
+    if not isinstance(bucket, str) or bucket not in WORLD_BUCKETS:
+        raise JudgeRefused(
+            f"the judge's reply's bucket={bucket!r} is not one of {sorted(WORLD_BUCKETS)} — a "
+            "lookalike is rejected, never coerced to the nearest member")
+    from defender.runtime.verbs import is_system_name
+
+    systems = doc.get("systems")
+    if not isinstance(systems, list) or not all(isinstance(s, str) for s in systems):
+        raise JudgeRefused(
+            f"the judge's reply's systems={systems!r} must be a list of system names")
+    # Matched exactly against the roster's own name rule (N03): a spelling no roster can hold
+    # (`IDP`) is refused, never normalised onto the name it resembles.
+    misspelled = [s for s in systems if not is_system_name(s)]
+    if misspelled:
+        raise JudgeRefused(
+            f"the judge's reply's systems name {misspelled!r}, which no roster can hold as a "
+            "system name — refused rather than normalised")
+    if bucket == LEAD_SET and served_systems is not None \
+            and not set(systems) & {str(s) for s in served_systems}:
+        raise JudgeRefused(
+            f"the judge's reply says bucket={LEAD_SET!r} for a world whose systems {systems!r} "
+            f"share nothing with the served systems {sorted(served_systems)!r} — the "
+            "investigator could not have looked, so the lead set cannot have missed it (M20)")
+    return bucket, list(systems)
+
+
+def validate_reply(text: str, *, scope: str = "world",
+                   served_systems: Any = None) -> JudgeReply:
     """Read `text` as one bare document and validate strictly: nothing is read off the reply
     before this returns.
 
-    `scope` is which call the reply came from: `"world"` may emit either subject; `"family"`
-    may emit only `subject: world` findings naming no world.
+    `scope` is which call the reply came from: `"world"` carries the world's `bucket` and
+    `systems` and may emit either finding subject; `"family"` carries the family's
+    `verdict_word` and may emit only `subject: world` findings. `served_systems` is the
+    family's recorded list, for the `lead-set` refusal (`_world_verdict`).
 
     The shape rule is `reply_document_text`'s: exactly one document (bare, or in exactly one
-    code fence), else refused — never guessed at."""
+    code fence), else refused — never guessed at. A repeated key is refused too: YAML keeps
+    the last copy silently, so the reply would mean whichever one won."""
     import yaml
 
-    from defender._yaml import safe_load
+    from defender._yaml import duplicate_key_paths, safe_load
 
     # An injected seam may return a non-string; refuse it as this draw's failure rather than
     # raising an `AttributeError` the draw loop does not contain.
@@ -309,15 +396,29 @@ def validate_reply(text: str, *, scope: str = "world") -> JudgeReply:
         # `ValueError`s (e.g. out-of-range timestamps) into `yaml.YAMLError`, so a bad reply
         # costs only its draw.
         doc = safe_load(cleaned)
+        repeated = duplicate_key_paths(cleaned)
     except yaml.YAMLError as bad:
         raise JudgeRefused(f"the judge's reply is not valid YAML: {bad}") from bad
     doc = _require_dict(doc)
+    if repeated:
+        raise JudgeRefused(f"the judge's reply repeats key(s) {list(repeated)}")
 
     outcome = _normalize_reply_outcome(doc.get("episode_outcome"))
     if outcome is None:
         raise JudgeRefused(
             f"the judge's reply's episode_outcome={doc.get('episode_outcome')!r} is not one "
             f"of {sorted(_REPLY_OUTCOME_ENUM)}")
+    bucket: str | None = None
+    systems: list[str] = []
+    verdict_word: str | None = None
+    if scope == "family":
+        verdict_word = normalized_judge_outcome(doc.get("verdict_word"))
+        if verdict_word is None:
+            raise JudgeRefused(
+                f"the family reply's verdict_word={doc.get('verdict_word')!r} is not one of "
+                f"{sorted(JUDGE_OUTCOME_ENUM)}")
+    else:
+        bucket, systems = _world_verdict(doc, served_systems=served_systems)
     correlations = _require_list(doc, "correlations")
     scope_checks = _require_list(doc, "scope_checks")
     derivations = _require_list(doc, "derivations")
@@ -329,18 +430,17 @@ def validate_reply(text: str, *, scope: str = "world") -> JudgeReply:
     return JudgeReply(
         episode_outcome=outcome, noise_floor_note=str(noise) if noise is not None else "",
         correlations=correlations, scope_checks=scope_checks, derivations=derivations,
-        findings=findings,
+        findings=findings, bucket=bucket, systems=systems, verdict_word=verdict_word,
     )
 
 
 def _world_evidence_files() -> tuple[str, ...]:
-    """The three episode-level files a `subject: world` evidence pointer may also name, by
-    bare name only (never a prefix a traversal could pass). Defender findings stay
-    world-subtree-only.
+    """The episode-level files a `subject: world` evidence pointer may also name, by bare name
+    only (never a prefix a traversal could pass). Defender findings stay world-subtree-only.
 
     A function rather than an import-time tuple, so it follows renames of the records.
     """
-    return tuple(str(name) for name in (LAYOUT.samples, LAYOUT.review, LAYOUT.judge))
+    return tuple(str(name) for name in (LAYOUT.samples, LAYOUT.outcome, LAYOUT.judge))
 
 
 def _family_evidence_files() -> tuple[str, ...]:
@@ -352,7 +452,7 @@ def _family_evidence_files() -> tuple[str, ...]:
 
 def _resolves(pointer: str, world_dir: Path, *, subject: str = SUBJECT_DEFENDER,
               scope: str = "world") -> bool:
-    """Does this evidence pointer resolve inside the graded world's own subtree (never a
+    """Does this evidence pointer resolve inside the judged world's own subtree (never a
     sibling's archive)? For a `subject: world` finding only, the episode-level allowlist is
     also admitted, by name.
 
@@ -381,29 +481,29 @@ def _resolves(pointer: str, world_dir: Path, *, subject: str = SUBJECT_DEFENDER,
         and Path(path_part).name == path_part
 
 
-def cites_sample(finding: dict[str, Any], *, unavailable_patterns: Any = None) -> bool:
-    """Does this finding's evidence cite `samples.yaml` for a pattern this world's row says had
-    no sample?
+def cites_sample(finding: dict[str, Any], *, samples: Any,
+                 served_systems: Any = None) -> bool:
+    """Does this finding cite `samples.yaml` anywhere but a served system's own section?
+
+    A citation passes only as `samples.yaml#<system>` where `<system>` is a key of the samples
+    record (exact spelling — no case-fold, no trim) holding real answers (`verbs`), and, when
+    `served_systems` is given, one of them (O16). A section the record marks `unavailable`, a
+    lookalike, an old pattern key, a dot-dot fragment or a bare `samples.yaml` all fail.
 
     Keyed on the evidence, not the bucket, since the world vocabulary is open and a bucket
-    check is evadable by rewording.
-
-    `unavailable_patterns` is the row's `sample_unavailable_patterns`: a citation of an
-    available pattern is admitted; one with no fragment is refused iff any pattern was
-    unavailable; `None` (never recorded) refuses every `samples.yaml` citation."""
+    check is evadable by rewording. `True` means the finding must not be queued."""
+    record = samples if isinstance(samples, dict) else {}
+    served = None if served_systems is None else {str(s) for s in served_systems}
     for pointer in finding.get("evidence") or ():
         if not isinstance(pointer, str):
             continue
-        prefix, has_fragment, fragment = pointer.partition("#")
+        prefix, _has_fragment, system = pointer.partition("#")
         if prefix != str(LAYOUT.samples):
             continue
-        if unavailable_patterns is None:
+        section = record.get(system)
+        if not (isinstance(section, dict) and isinstance(section.get("verbs"), dict)):
             return True
-        if not has_fragment:
-            if unavailable_patterns:
-                return True
-            continue
-        if fragment in unavailable_patterns:
+        if served is not None and system not in served:
             return True
     return False
 
@@ -412,7 +512,10 @@ def _draw_document(reply: JudgeReply, *, world_dir: Path,
                    scope: str = "world") -> dict[str, Any]:
     """The draw document: a finding with no resolving pointer is dropped and counted; one with
     any resolving pointer stands, with its unresolved pointers recorded. `scope` goes to
-    `_resolves`."""
+    `_resolves`.
+
+    @owns bucket — a world draw's `bucket`/`systems` are the reply's own, written here and
+    nowhere else; the pass and the page read them back off this document."""
     kept: list[dict[str, Any]] = []
     dropped = 0
     for finding in reply.findings:
@@ -426,18 +529,41 @@ def _draw_document(reply: JudgeReply, *, world_dir: Path,
             "root_cause": finding.root_cause, "anchor": finding.anchor, "topic": finding.topic,
             "evidence": finding.evidence, "unresolved_evidence": unresolved,
             "discriminator_related": finding.discriminator_related,
-            "pattern": finding.pattern, "holding_system": finding.holding_system,
-            "world": finding.world,
         })
-    return {
-        "episode_outcome": reply.episode_outcome, "noise_floor_note": reply.noise_floor_note,
+    doc: dict[str, Any] = {"episode_outcome": reply.episode_outcome}
+    if scope == "family":
+        doc["verdict_word"] = reply.verdict_word
+    else:
+        doc["bucket"] = reply.bucket
+        doc["systems"] = list(reply.systems)
+    doc.update({
+        "noise_floor_note": reply.noise_floor_note,
         "correlations": reply.correlations, "scope_checks": reply.scope_checks,
         "derivations": reply.derivations, "findings": kept, "dropped_findings": dropped,
-    }
+    })
+    return doc
+
+
+#: The ledger's decision words as the judge is told them — every call row in VIEW 1 names one.
+_DECISION_GLOSSARY = (
+    "HOW EACH CALL WAS ANSWERED. Every call in VIEW 1 names one of these decision words:\n"
+    "- `passthrough`: the live system's own answer, unchanged — the world's facts did not "
+    "touch this call.\n"
+    "- `oracle`: an answer changed so this world's facts show in it. Its claim says what was "
+    "added, removed or changed, and its verifier verdict whether an independent check passed. "
+    "\"claim unavailable\" means no claim was stored for that call: never treat such an answer "
+    "as verified.\n"
+    "- `real-error`: the live system answered with an error, and the investigator saw that "
+    "error. An outage of a served system is telemetry the investigator could have reasoned "
+    "about — it is not a reason the investigator could not look.\n"
+    "- `refused`: the call was turned away before it reached any system (a verb the grant does "
+    "not hold); the world asked and was not answered.\n"
+    "- `fault`: the system's adapter could not load; nothing was asked.\n\n"
+)
 
 
 def _build_prompt(judge_input: JudgeInput) -> str:
-    """The correlating prompt for the graded world. Wording names hand-offs, never entities
+    """The correlating prompt for the judged world. Wording names hand-offs, never entities
     or systems; the 20-row cap and the quote-any-colon rule are what make replies parse
     strictly.
 
@@ -445,43 +571,48 @@ def _build_prompt(judge_input: JudgeInput) -> str:
     from the one rendered."""
     label = judge_input.world_label
     task = (
-        f"World {label} has run; grade it.\n\n"  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-        "Compare it against the four joined views below: its per-lead chain (goal, params, "
-        "payload, refused, summary, resolutions), its coverage of the family's "
-        "discriminator, the sibling trials of this same alert, and the lessons it loaded — "
-        "plus the trial spread. Every OTHER world is marked counterfactual: withhold its "
-        "overlay from your reasoning and never cite its facts as facts about the graded "
-        "world.\n\n"
+        f"World {label} has run; judge it.\n\n"  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+        "This family was branched from a captured investigation. Each non-control world carries "
+        "natural-language FACTS that hold in that world and not in the capture. While the "
+        "world's investigator ran, every call it made was answered live, and an answer was "
+        "changed only where the world's facts touch it. You are shown the judged world's facts "
+        "and declared verdict, the systems this tenant serves, every call its investigator made "
+        "and how each was answered, its leads, document and verdict, the sibling trials of this "
+        "same alert with their spread, the lessons it loaded, real example answers per served "
+        "system, and pre-flight's record of the family. Every OTHER world's facts are withheld: "
+        "never cite another world as a fact about the judged world.\n\n"
+        f"{_DECISION_GLOSSARY}"
         # What a `refused:` entry means, in host text. Otherwise a harness refusal reads as
-        # "never queried", yielding a `lead-set` lesson telling the defender to run a query it
-        # is not granted. Spelled the way `family.render_refused` prints it.
-        "READ A LEAD'S `refused:` LINE BEFORE GRADING ITS COVERAGE. Each entry there is an "
+        # "never queried", yielding a `lead-set` lesson telling the investigator to run a query
+        # it is not granted. Spelled the way `family.render_refused` prints it.
+        "READ A LEAD'S `refused:` LINE BEFORE JUDGING ITS COVERAGE. Each entry there is an "
         "attempt that reached NO system — it is not a query, and it is not the absence of "
-        "one. `external=true` means the harness or the estate withheld it (a verb the "
-        "defender's role is not granted, an adapter that could not load): the defender asked "
-        "and was refused before the call was made, so for a lead whose refusal is external "
-        "on the family's holding system the finding is `observability` (subject: "
-        f"{SUBJECT_DEFENDER}) and NEVER `lead-set` — do not author a lesson telling the "
-        "defender to run a query it is not granted. `external=false` is the defender's own "
-        "conduct (a rejected call, a repeat the guard refused, a reducer it broke) and grades "
-        "as such. Every refused entry is a `∅.`-prefixed row in this world's own "
-        "`executed_queries.jsonl`, which is the `evidence` pointer for a finding about it. "
-        "A `source: refused` row in VIEW 2 is the served ledger's word for the same event "
-        "(a denied call), or for a call the estate seam itself turned away; either way the "
-        "world asked and was not answered — it counts as having queried, not as a query "
-        "that ran, and it is not a second refusal to grade.\n\n"
+        "one. `external=true` means the harness or the deployment withheld it (a verb the "
+        "investigator's role is not granted, an adapter that could not load): the investigator "
+        "asked and was refused before the call was made, so the finding is `observability` "
+        f"(subject: {SUBJECT_DEFENDER}) and NEVER `lead-set` — do not author a lesson telling "
+        "the investigator to run a query it is not granted. `external=false` is the "
+        "investigator's own conduct (a rejected call, a repeat the guard refused, a reducer it "
+        "broke) and is judged as such. Every refused entry is a `∅.`-prefixed row in this "
+        "world's own `executed_queries.jsonl`, which is the `evidence` pointer for a finding "
+        "about it.\n\n"
+        "YOUR VERDICT ON THIS WORLD IS ONE `bucket`, chosen by you from exactly these:\n"
+        f"{_bucket_guidance()}"
+        "and `systems`: the list of systems this world's facts touch, by name (a system outside "
+        "SERVED SYSTEMS is named too — that is how a world nobody could have looked at is "
+        "told apart).\n\n"
         "Before findings, run three passes and report each as its own table:\n"
-        "1. CORRELATION — for every fact reachable across two joined rows, name the hand-off.\n"
-        "2. SCOPE — for every lead touching the holding system, name the index, window and "
-        "scope key it actually used.\n"
-        "3. DERIVATION — for every held row, say whether it was derived from a payload the "
-        "defender actually read, or invented.\n\n"
+        "1. CORRELATION — for every fact that can be followed across two joined rows, name the "
+        "hand-off.\n"
+        "2. SCOPE — for every lead touching a system the facts touch, name the window, scope "
+        "and entity it actually used.\n"
+        "3. DERIVATION — for every held row, say whether it was derived from an answer the "
+        "investigator actually read, or invented.\n\n"
         "Cap any table at 20 rows. Quote any YAML scalar containing a colon — that is what "
         "made every reply of the correlating prompt's own trial parse strictly.\n\n"
-        # The validator's own outcome set, rendered with criteria below, so the model neither
-        # guesses the literals nor picks a discarding outcome for a defender failure.
         f"Reply as one YAML mapping, bare — not inside a code fence, with nothing before or "
-        f"after it: episode_outcome (exactly one of "
+        f"after it: bucket (exactly one of {' | '.join(sorted(WORLD_BUCKETS))}), systems (a "
+        "list), episode_outcome (exactly one of "
         f"{' | '.join(sorted(_REPLY_OUTCOME_ENUM))}), "
         "noise_floor_note, correlations, scope_checks, derivations, findings (each: bucket, "
         f"subject [{SUBJECT_DEFENDER}|{SUBJECT_WORLD}], claim, "
@@ -490,35 +621,30 @@ def _build_prompt(judge_input: JudgeInput) -> str:
         f"a subject: {SUBJECT_DEFENDER} finding's bucket is one of "
         f"[{'|'.join(sorted(_BUCKET_ENUM[SUBJECT_DEFENDER]))}]; a subject: {SUBJECT_WORLD} "
         f"finding's bucket is your own free text naming what is wrong with the WORLD itself "
-        f"rather than the defender — for example {', '.join(EXAMPLE_WORLD_BUCKETS)} — "
+        f"rather than the investigator — for example {', '.join(EXAMPLE_WORLD_BUCKETS)} — "
         "root_cause, anchor, topic, evidence, discriminator_related). Every finding names its "
-        f"subject: {SUBJECT_DEFENDER} finding is about how the defender investigated; a "
-        f"{SUBJECT_WORLD} finding is about the instrument itself — an invented shape, a story "
-        "the overlay does not back, or (family call only) that the family failed to "
-        "discriminate at all — and is never authored as a lesson for the defender.\n\n"
-        # `enqueue._validate_world_row` requires both; the pass can fill them in from the row,
-        # but the reply is where they belong.
-        f"A subject: {SUBJECT_WORLD} finding MUST also carry `pattern` (the staged corpus "
-        "pattern the observation is about, copied verbatim from the manifest overlay or the "
-        "sample header — never invented) and `holding_system` (the discriminator's own holding "
-        "system). Both are non-empty strings; a world finding without them cannot be "
-        "routed.\n\n"
+        f"subject: a {SUBJECT_DEFENDER} finding is about how the investigator investigated; a "
+        f"{SUBJECT_WORLD} finding is about the instrument itself — an invented answer shape, a "
+        "story the facts do not back, or (family call only) that the family failed to "
+        "discriminate at all — and is never authored as a lesson for the investigator.\n\n"
         # The shape of `evidence`, stated: otherwise a model writes prose, which either fails
         # validation or is discarded as unresolvable, silently losing every finding.
-        "`evidence` IS A LIST OF POINTERS INTO THE GRADED WORLD'S OWN FILES, never prose and "
+        "`evidence` IS A LIST OF POINTERS INTO THE JUDGED WORLD'S OWN FILES, never prose and "
         "never a quotation. Each entry is a path RELATIVE to that world's directory, "
         "optionally with a `#fragment` naming what in the file you mean — for example "
-        "`report.md`, `investigation.md#ANALYZE`, `gather_summaries/l-001.md`. An absolute "
-        "path, a path climbing out of the world, and a path naming a file that is not there "
-        "all fail to resolve, and A FINDING WHOSE POINTERS ALL FAIL TO RESOLVE IS DISCARDED — "
-        "so put what you actually read in this world's archive here, and put the words you "
-        "would have quoted in `claim` and `root_cause` instead. "
+        "`report.md`, `investigation.md#ANALYZE`, `gather_summaries/l-001.md`. A "
+        f"{SUBJECT_WORLD} finding may also cite `{LAYOUT.samples}#<system>` — one served "
+        "system's own section of the example answers, spelled exactly as its heading. An "
+        "absolute path, a path climbing out of the world, and a path naming a file that is not "
+        "there all fail to resolve, and A FINDING WHOSE POINTERS ALL FAIL TO RESOLVE IS "
+        "DISCARDED — so put what you actually read in this world's archive here, and put the "
+        "words you would have quoted in `claim` and `root_cause` instead. "
         "`discriminator_related` is a boolean.\n\n"
         "WHICH episode_outcome, and it decides whether your findings are kept at all:\n"
         f"{_outcome_guidance()}"
         f"{' and '.join(sorted(_REPLY_OUTCOME_ENUM - {'gradable'}))} DISCARD EVERY FINDING YOU "
         "WRITE — the family record becomes the only artifact. Choose one of them for a fault "
-        "in the archive, never as a comment on how the defender performed.\n"
+        "in the archive, never as a comment on how the investigator performed.\n"
     )
     sections = judge_input.as_prompt_sections()
     # Iterate the sections, not the titles: `as_prompt_sections` owns the set the payload cap
@@ -535,11 +661,12 @@ def _build_prompt(judge_input: JudgeInput) -> str:
 
 
 def _render_family_manifest(manifest: dict[str, Any]) -> str:
-    """Every world's story, axis, declared disposition and overlay, withholding none: unlike
-    the per-world call, the family call asks whether the whole set separates."""
+    """Every world's story, axis, declared verdict and facts, withholding none: unlike the
+    per-world call, the family call asks whether the whole set separates."""
     from defender.learning.judge.family import _control_declared
 
-    lines = [f"discriminator: {manifest.get('discriminator')}",
+    lines = [f"discriminator: {family_predicate(manifest)}",
+             f"served systems: {', '.join(served_systems_of(manifest)) or '(none recorded)'}",
              f"source disposition (base/control world): {_control_declared(manifest)!r}"]
     for world in manifest.get("worlds") or ():
         if not isinstance(world, dict):
@@ -547,81 +674,103 @@ def _render_family_manifest(manifest: dict[str, Any]) -> str:
         lines.append(
             f"world {world.get('world_id')} (role {world.get('role')}): "
             f"story={world.get('story')!r} axis={world.get('axis')!r} "
-            f"disposition_declared={world.get('disposition_declared')!r} "
-            f"overlay={world.get('overlay')}")
+            f"disposition_declared={world.get('disposition_declared')!r}")
+        for fact in world.get("facts") or ():
+            if isinstance(fact, dict):
+                lines.append(f"  fact {fact.get('fact_id')}: {fact.get('statement')}")
     return "\n".join(lines) + "\n"
 
 
-def _render_family_mechanical_rows(grade: Any) -> str:
-    """Every world's mechanical row, joined across the family, with each world's verdict."""
-    worlds = grade["worlds"] if isinstance(grade, dict) else grade.worlds
+def _render_family_rows(rows: list[dict[str, Any]]) -> str:
+    """Every world's judged row, joined across the family: declared and reached verdicts, the
+    bucket and systems the per-world calls gave, or why the world was not judged."""
     lines = []
-    for row in worlds:
+    for row in rows:
+        if row.get("ungradable"):
+            lines.append(f"world {row.get('world')}: NOT JUDGED — {row.get('ungradable_reason')}")
+            continue
         lines.append(
             f"world {row.get('world')}: declared={row.get('declared')!r} "
             f"verdict={row.get('verdict')!r} bucket={row.get('bucket')!r} "
-            f"withheld_reason={row.get('withheld_reason')!r} "
-            f"difference_shown={row.get('difference_shown')!r} "
-            f"reachable_by_capture={row.get('reachable_by_capture')!r} "
-            f"ungradable={row.get('ungradable', False)!r}")
+            f"systems={row.get('systems')!r}")
     return "\n".join(lines) + "\n" if lines else "No worlds are recorded.\n"
 
 
-def _build_family_prompt(*, manifest: dict[str, Any], grade: Any,
-                         review: dict[str, Any]) -> str:
-    """The family-level prompt: whether the family separates on the discriminator. Shown every
-    world's overlay, the review record and every mechanical row.
+def family_predicate(manifest: dict[str, Any]) -> str:
+    """The discriminator's predicate text (the only field a v2 discriminator keeps)."""
+    block = manifest.get("discriminator")
+    predicate = block.get("predicate") if isinstance(block, dict) else None
+    return str(predicate) if predicate is not None else "(no predicate recorded)"
 
-    The reply is entirely `subject: world` and may name no `world`."""
 
+def served_systems_of(manifest: dict[str, Any]) -> list[str]:
+    """The manifest's recorded `served_systems` (M21=A: the recorded list governs the judge,
+    never a tenant lookup)."""
+    raw = manifest.get("served_systems")
+    return [str(s) for s in raw] if isinstance(raw, list) else []
+
+
+def _build_family_prompt(*, manifest: dict[str, Any], rows: list[dict[str, Any]],
+                         family_text: str) -> str:
+    """The family-level prompt: whether the family separates on the discriminator, and the
+    family's word. Shown every world's facts, pre-flight's record and every world's row.
+
+    The reply is entirely `subject: world` findings plus the family's `verdict_word`."""
+    words = sorted(JUDGE_OUTCOME_ENUM)
     task = (
         # The shared role prompt is written for the per-world call; its one-world framing and
         # withheld-sibling rule are overridden here, since the role file's text is pinned.
         "This is the FAMILY-LEVEL call. The role prompt's \"one archived, branched world\" "
         "framing and its withheld-sibling rule DO NOT APPLY here: you are shown every world "
-        "deliberately, and citing one world's overlay while reasoning about another is the "
+        "deliberately, and citing one world's facts while reasoning about another is the "
         "whole point of this call.\n\n"
         "Judge this WHOLE FAMILY of sibling worlds — never any single world. You are shown "
-        "every world's overlay, the family's review record and every world's own mechanical "
-        "facts; nothing here is withheld.\n\n"
-        "Answer only family-level questions: did the worlds SEPARATE on the discriminator (did "
-        "at least one measuring world's verdict disagree from another's, or from what its own "
-        "difference should have produced), and did the envelope actually ask it?\n\n"
+        "every world's facts, pre-flight's record of the family and every world's judged row; "
+        "nothing here is withheld.\n\n"
+        "Answer family-level questions: did the worlds SEPARATE on the discriminator (did the "
+        "investigators' verdicts follow each world's declared verdict), and did the family ask "
+        "it at all?\n\n"
+        "Give the family's word as `verdict_word`, exactly one of "
+        f"{' | '.join(words)}:\n"
+        "- `caught` — every judged world's investigator reached its declared verdict.\n"
+        "- `survived` — at least one judged world's investigator did not, in a family that "
+        "separates: this is the word lessons are authored from.\n"
+        "- `undecidable` — the family cannot say (no world contrasts with the control, or too "
+        "little was judged).\n"
+        "- `discard` — the measurement is spoilt (the live systems drifted on the calls that "
+        "matter).\n"
+        "- `corpus-contradiction` — the worlds' facts contradict the capture they were branched "
+        "from.\n\n"
         f"Reply as one YAML mapping, bare — not inside a code fence, with nothing before or "
-        f"after it: episode_outcome (exactly one of "
+        f"after it: verdict_word, episode_outcome (exactly one of "
         f"{' | '.join(sorted(_REPLY_OUTCOME_ENUM))}), noise_floor_note, correlations, "
         "scope_checks, derivations, findings (each: bucket [your own free text — for example "
         f"{', '.join(EXAMPLE_WORLD_BUCKETS)}], subject (always {SUBJECT_WORLD!r} — this call "
-        "never grades the defender), claim, root_cause, anchor, topic, evidence, "
-        "discriminator_related). A family-level finding is about the FAMILY as a whole and "
-        "must NEVER name a `world` — do not add a `world` key to any finding. It MUST carry "
-        "`pattern` (a staged corpus pattern this family is about) and `holding_system` (the "
-        "discriminator's own holding system), both non-empty strings: the questioner channel's "
-        "appender refuses a row without them.\n\n"
+        "never judges the investigator), claim, root_cause, anchor, topic, evidence, "
+        "discriminator_related). A family-level finding is about the FAMILY as a whole.\n\n"
         # Family pointers resolve against `worlds/family/`, which holds only draw files, so
         # only the allowlisted episode-level files can resolve.
         "`evidence` IS A LIST OF POINTERS, never prose and never a quotation. A family-level "
         f"finding may cite ONLY these episode-level files by bare name: "
         f"{', '.join(f'`{name}`' for name in _family_evidence_files())}, optionally with a "
-        "`#fragment` naming what in the file you mean (for example "
-        f"`{LAYOUT.review}#worlds.b.reachability`). Any other path fails to resolve, and A FINDING "
-        "WHOSE POINTERS ALL FAIL TO RESOLVE IS DISCARDED.\n\n"
+        "`#fragment` naming what in the file you mean. Any other path fails to resolve, and A "
+        "FINDING WHOSE POINTERS ALL FAIL TO RESOLVE IS DISCARDED.\n\n"
         f"{_outcome_guidance()}"
     )
     sections = {
         "manifest": _render_family_manifest(manifest),
-        "review": _yaml.safe_dump(review, sort_keys=False) if review else
-                 f"no {LAYOUT.review} is recorded for this episode\n",
-        "mechanical": _render_family_mechanical_rows(grade),
+        "family": family_text,
+        "worlds": _render_family_rows(rows),
     }
-    titled = [titled_section(name.upper(), body) for name, body in sections.items()]
+    titled = [titled_section(SECTION_TITLES.get(name, name.upper()), body)
+              for name, body in sections.items()]
     salt = message_salt(task, *titled)
     body = stage_user_message(salt, *(wrap(section, UNTRUSTED_TAG, salt) for section in titled))
     return task + body
 
 
 __all__ = [
-    "EXAMPLE_WORLD_BUCKETS", "Finding", "JUDGE_DEF", "JudgeDeps", "JudgeReply",
-    "SUBJECT_DEFENDER", "SUBJECT_WORLD", "_build_family_prompt", "_build_prompt",
-    "validate_reply",
+    "EXAMPLE_WORLD_BUCKETS", "Finding", "JUDGE_DEF", "JudgeDeps", "JudgeReply", "LEAD_SET",
+    "NO_BUCKET", "SUBJECT_DEFENDER", "SUBJECT_WORLD", "WORLD_BUCKETS", "_build_family_prompt",
+    "_build_prompt", "cites_sample", "family_predicate", "served_systems_of", "validate_reply",
 ]

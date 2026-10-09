@@ -29,20 +29,21 @@ disposition_declared: malicious | benign | false-positive | inconclusive
 label_basis: policy-rule | judgment
 ```
 
-THOSE FOUR KEYS AND NOTHING ELSE. The world's id and its `overlay` — the difference staging
-will actually build — belong to call 1's plan, which is above in this message, because the plan
-has to be coherent ACROSS the worlds: two seats each choosing their own id, or each staging
-their own corpus, compose into a family whose arms are not a comparison of anything. Anything
-else you return is discarded, so restating the id or the overlay only makes your document
-disagree with the family it will be composed into.
+THOSE FOUR KEYS AND NOTHING ELSE. The world's id and its `facts` — the difference the
+investigator will actually be served — belong to call 1's plan, which is above in this message,
+because the plan has to be coherent ACROSS the worlds: two seats each choosing their own id, or
+each asserting their own facts, compose into a family whose arms are not a comparison of
+anything. Anything else you return is discarded, so restating the id or the facts only makes
+your document disagree with the family it will be composed into.
 
 Your `axis` elaborates the one call 1 planned for this seat; your `story` is what makes that
-axis a world an investigator could land in. Change the least that makes your axis true.
+axis and its facts a world an investigator could land in. Change the least that makes your axis
+true, and tell it only through things the served systems named in the measurement section could
+show.
 
 If your axis is an ABSENCE — something the capture shows and this world does not — say so
-plainly in your story rather than inventing a document that never existed: call 1's `overlay`
-expresses "this world does not hold X" with `exclude`, the same way it expresses "this world
-holds a new Y" with `inject`.
+plainly in your story rather than inventing an event that never happened: call 1's facts state
+"this world does not hold X" as plainly as they state "this world holds a new Y".
 
 `disposition_declared` is what a competent investigator SHOULD reach in your world, given the
 same alert and the same history. It is a claim about the world you wrote, not about the one that

@@ -66,7 +66,7 @@ from defender._io import (
     read_text_utf8,
 )
 from defender._paths import PATHS
-from defender.run_repository import RunPaths, artifact_file
+from defender.run_repository import RunPaths, artifact_dir, artifact_file
 from defender.runtime.run_tenant import RunTenant
 from defender.learning.branch import outcome as outcome_mod
 from defender.learning.branch import seams
@@ -1688,19 +1688,20 @@ def _author(  # noqa: PLR0913 — the step's inputs
     samples = system_samples(source, served)
     # Archived before the model call, so the judge sees exactly what the questioner saw.
     write_questioner_samples(episode, samples)
-    # Paths only; `author_family` opens and screens them.
+    # Paths only; `author_family` opens and screens them. A missing corpus is not a refusal
+    # (N24): the launch goes on with no lessons, and says so.
+    if not artifact_dir(Path(lessons_dir)):
+        _logger.warning(f"the questioner lessons directory {lessons_dir} is not a directory; "
+                        "the question-writer is shown no lessons this launch")
     lessons = iter_lesson_paths(lessons_dir)
-    # The question-writer's own keywords (`stageable_patterns`, `corpus_samples`) are renamed
-    # with its prompt (#1224's question-writer stage); handed the served systems and the
-    # per-system samples here.
     document = questioner_mod.author_family(
         source_run_dir=source, episode_dir=episode.dir,
         invoke=questioner,
         leads=questioner_leads(leads),
         alert=_alert_document(source),
         frontier=questioner_mod.read_frontier(source, fences_at=fences),
-        stageable_patterns=tuple(served),
-        corpus_samples=samples,
+        served_systems=tuple(served),
+        samples=samples,
         lessons=lessons,
     )
     document.update({
