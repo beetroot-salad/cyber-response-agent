@@ -549,7 +549,7 @@ requires-dist = [
     { name = "markdown-it-py", marker = "extra == 'dev'" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "pydantic", specifier = ">=2" },
-    { name = "pydantic-ai-slim", extras = ["anthropic", "mcp", "openai"], marker = "extra == 'runtime'", specifier = ">=2.19" },
+    { name = "pydantic-ai-slim", extras = ["anthropic", "mcp", "openai"], marker = "extra == 'runtime'", specifier = ">=2.43" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-cov", marker = "extra == 'dev'" },
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.5" },

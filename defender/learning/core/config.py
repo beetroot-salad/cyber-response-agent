@@ -268,6 +268,13 @@ def process_oracle_settings() -> OracleSettings:
     return oracle_settings(os.environ)
 
 
+def oracle_settings_with(**given: Any) -> OracleSettings:
+    """This process's oracle knobs with each `given` value that is not `None` in its place: the
+    one place a caller's explicit knob and the environment's default are reconciled."""
+    return dataclasses.replace(process_oracle_settings(),
+                               **{name: value for name, value in given.items() if value is not None})
+
+
 
 
 @model(frozen=True)

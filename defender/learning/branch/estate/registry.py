@@ -30,7 +30,7 @@ from defender._episode_paths import LAYOUT
 from defender.runtime.branch import source_alert
 from defender._io import read_jsonl_rows, read_text_utf8
 from defender._query_rules import ParamsTooDeep, _json_safe_params
-from defender.learning.core.config import process_oracle_settings
+from defender.learning.core.config import oracle_settings_with
 from defender.hooks.budget_enforcer import oracle_turn_closed, oracle_turn_opened
 from defender.runtime.verbs import (
     CALL_DELIVERY,
@@ -95,7 +95,7 @@ def serve_one(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any
             system=system, verb=verb, params=asked, payload_text=base_text, source=PASSTHROUGH,
             world_id=registry.world.world_id))
         return json.loads(base_text)
-    with registry._turn(ctx):
+    with registry._turn(ctx, pauses_clock=True):
         hit = registry.store.answers.get(key)
         if hit is not None:
             return registry._from_store(system, verb, asked, hit)
@@ -141,7 +141,6 @@ def calibrate_one(registry: WorldRegistry, ctx: Any, system: str, verb: str,
     context; every oracle-side query of the turn runs in it, at the branch-point clock."""
     asked = dict(params)
     registry.store.log_query("preflight", system, verb, asked)
-    registry._last_ctx = _carrying(ctx, as_of=registry.as_of)
 
     def commit(served: Any, _claim: dict, _verdict: dict, _attempts: int, staged: Any) -> None:
         if fixed and canonical_json(served) != canonical_json(base):
@@ -153,7 +152,7 @@ def calibrate_one(registry: WorldRegistry, ctx: Any, system: str, verb: str,
                                      for (e, f), v in staged.facts.items()],
                               answer=None)
 
-    with registry._turn(None):
+    with registry._turn(_carrying(ctx, as_of=registry.as_of), pauses_clock=False):
         registry.oracle.serve((system, verb, asked), base,
                               lambda: registry._real(system, base), commit)
 
@@ -166,7 +165,7 @@ class WorldRegistry(ModuleVerbRegistry):
                  verifier: Any = None, oracle_dir: Path | None = None,
                  retry_cap: int | None = None, turn_deadline: float | None = None,
                  budget: float | None = None, rate: float | None = None,
-                 box: Callable[[], Any] | None = None, restart_after: int | None = None,
+                 box: Callable[[], Any] | None = None, restart_after: int = DEFAULT_RESTART_AFTER,
                  limiter: RateLimiter | None = None):
         super().__init__(roster, grant, grant_home=grant_home)
         # Validate the clock here, once: every query this world issues, the oracle's own
@@ -195,22 +194,29 @@ class WorldRegistry(ModuleVerbRegistry):
         self.ledger = ledger
         self.tenant = tenant
         self.world_facts = tuple(getattr(world, "facts", ()) or ())
-        settings = process_oracle_settings()
+        settings = oracle_settings_with(retry_cap=retry_cap, turn_deadline=turn_deadline,
+                                        budget=budget, rate=rate)
         if oracle_dir is None:
             oracle_dir = _default_oracle_dir(world, ledger)
         self.store = OracleStore(Path(oracle_dir))
         self._turn_lock = threading.Lock()
-        self._last_ctx: Any = None
-        self._family_rows = [r for r in read_jsonl_rows(ledger.base_path)
-                             if isinstance(r.get("system"), str)
-                             and isinstance(r.get("payload_text"), str)]
+        #: The context of the call whose turn holds the lock: every oracle-side query of that
+        #: turn runs in it. Set and cleared only under the lock.
+        self._turn_ctx: Any = None
+        #: The family's base recording as `(system, verb, answer)`, parsed once: every host
+        #: check reads it, and it does not change while the world is served.
+        self._family_answers = [(r["system"], str(r.get("verb")), _parsed(r["payload_text"]))
+                                for r in read_jsonl_rows(ledger.base_path)
+                                if isinstance(r.get("system"), str)
+                                and isinstance(r.get("payload_text"), str)]
+        #: This world's own live base answers, parsed once each as the store gains them.
+        self._kept_answers: list[tuple[str, Any]] = []
         door = QueryDoor(
             decide=lambda system, verb: ModuleVerbRegistry.decide(self, system, verb),
             real_verbs=lambda system: ModuleVerbRegistry.verbs(self, system),
             # One limiter per process (S16): pre-flight hands every world the launcher's own,
             # held at the episode rate; a sibling builds its slice's here.
-            limiter=limiter if limiter is not None else RateLimiter(
-                settings.rate if rate is None else rate),
+            limiter=limiter if limiter is not None else RateLimiter(settings.rate),
             store=self.store, context=self._oracle_context)
         self.oracle = Oracle(
             world=world, store=self.store, door=door,
@@ -219,10 +225,8 @@ class WorldRegistry(ModuleVerbRegistry):
             verifier_model=verifier if verifier is not None else _LazyModel(
                 settings.check_model, settings.check_effort),
             box_factory=box if box is not None else start_process_box,
-            retry_cap=settings.retry_cap if retry_cap is None else retry_cap,
-            turn_deadline=settings.turn_deadline if turn_deadline is None else turn_deadline,
-            budget=settings.budget if budget is None else budget,
-            restart_after=DEFAULT_RESTART_AFTER if restart_after is None else restart_after,
+            retry_cap=settings.retry_cap, turn_deadline=settings.turn_deadline,
+            budget=settings.budget, restart_after=restart_after,
             family_examples=self._examples(), real_extra=self._alert())
         # A world whose sibling already went unservable stays so on resume: its failing call
         # is never retried (N13). Its record is the sibling's own (`run.py`), read here.
@@ -286,7 +290,6 @@ class WorldRegistry(ModuleVerbRegistry):
             # The clock is set on every call: every read this world makes, the oracle's own
             # included, is bounded by the branch point (O6).
             ctx = _carrying(ctx, as_of=self.as_of)
-            self._last_ctx = ctx
             return serve_one(self, system, verb, fn, ctx, params)
 
         return served
@@ -335,31 +338,35 @@ class WorldRegistry(ModuleVerbRegistry):
         return json.loads(text)
 
     @contextlib.contextmanager
-    def _turn(self, ctx: Any) -> Iterator[None]:
-        """One oracle turn at a time in this world (S11), with the investigator's clock paused
-        for as long as the turn is held (S12-S15)."""
-        run_dir = getattr(ctx, "run_dir", None)
+    def _turn(self, ctx: Any, *, pauses_clock: bool) -> Iterator[None]:
+        """One oracle turn at a time in this world (S11), its oracle-side queries run in `ctx`,
+        and — for an investigator's call (`pauses_clock`) — the investigator's clock paused for
+        as long as the turn is held (S12-S15). Pre-flight's replay has no investigator clock."""
+        run_dir = getattr(ctx, "run_dir", None) if pauses_clock else None
         with self._turn_lock:
+            self._turn_ctx = ctx
             if run_dir is not None:
                 oracle_turn_opened(Path(run_dir))
             try:
                 yield
             finally:
+                self._turn_ctx = None
                 if run_dir is not None:
                     oracle_turn_closed(Path(run_dir))
 
     def _oracle_context(self) -> Any:
-        """The context an oracle-side query runs in: the investigator call's own, carrying the
-        branch-point clock."""
-        return _carrying(self._last_ctx, as_of=self.as_of)
+        """The context an oracle-side query runs in: that of the call whose turn is held,
+        carrying the branch-point clock."""
+        return _carrying(self._turn_ctx, as_of=self.as_of)
 
     def _real(self, system: str, base: Any) -> RealData:
-        answers: list[tuple[str, Any]] = [(system, base)]
-        for row in self._family_rows:
-            answers.append((row["system"], _parsed(row["payload_text"])))
-        for kept_system, text in list(self.store.base_answers):
-            answers.append((kept_system, _parsed(text)))
-        return RealData(answers=answers, loose=list(self.oracle.real_extra))
+        kept = self.store.base_answers
+        self._kept_answers.extend(
+            (kept_system, _parsed(text)) for kept_system, text in kept[len(self._kept_answers):])
+        return RealData(answers=[(system, base),
+                                 *((s, answer) for s, _verb, answer in self._family_answers),
+                                 *self._kept_answers],
+                        loose=list(self.oracle.real_extra))
 
     def _examples(self) -> list[tuple[str, str, Any]]:
         """Example answers per system from the family's base recording, for the oracle's
@@ -367,12 +374,11 @@ class WorldRegistry(ModuleVerbRegistry):
         must not enter this call's turn)."""
         out: list[tuple[str, str, Any]] = []
         per_system: dict[str, int] = {}
-        for row in self._family_rows:
-            system = row["system"]
+        for system, verb, answer in self._family_answers:
             if per_system.get(system, 0) >= _EXAMPLES_PER_SYSTEM:
                 continue
             per_system[system] = per_system.get(system, 0) + 1
-            out.append((system, str(row.get("verb")), _parsed(row["payload_text"])))
+            out.append((system, verb, answer))
         return out
 
     def _alert(self) -> list[Any]:

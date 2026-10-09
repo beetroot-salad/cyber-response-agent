@@ -602,7 +602,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     )
     from defender.learning.branch.estate.checks import canonical_json
     from defender.learning.branch.ledger import payload_text
-    from defender.learning.core.config import process_oracle_settings
+    from defender.learning.core.config import oracle_settings_with
     from defender.runtime.verbs import ModuleVerbRegistry
 
     # The reader first, unguarded: a tenant with no gather grant refuses here (`GrantError`),
@@ -646,8 +646,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
                                "replayed: the live gather grant admits none of them (see "
                                "not_replayable)")
 
-    rate = knobs.pop("rate", None)
-    limiter = RateLimiter(process_oracle_settings().rate if rate is None else rate)
+    limiter = RateLimiter(oracle_settings_with(rate=knobs.pop("rate", None)).rate)
     ctx = _preflight_context(episode.dir, tenant, family.as_of)
     resumed = {w.world_id: _family.resume_world_from(family, w.world_id, episode.dir)
                for w in fact_worlds}

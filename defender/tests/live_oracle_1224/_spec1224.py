@@ -737,8 +737,16 @@ class ScriptedModel:
         """The pydantic-ai `Model` handed to the seam (one per double, built on first use)."""
         if self._model is None:
             from pydantic_ai.models.function import FunctionModel
-            self._model = FunctionModel(self, model_name=double_model_name(self.name))
+            self._model = FunctionModel(self._answer, model_name=double_model_name(self.name))
         return self._model
+
+    async def _answer(self, messages: list[Any], info: Any) -> Any:
+        """The scripted answer from a worker thread the caller may stop waiting on, as a real
+        provider's request can be cancelled mid-flight: a host deadline cuts a slow (`delay`)
+        answer off when it passes, not when the double's sleep happens to end."""
+        import anyio.to_thread
+
+        return await anyio.to_thread.run_sync(self, messages, info, abandon_on_cancel=True)
 
     def __call__(self, messages: list[Any], info: Any) -> Any:
         from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart

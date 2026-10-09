@@ -10,17 +10,23 @@ import secrets
 import shutil
 import tempfile
 from collections.abc import Mapping
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
 from . import _lifecycle
-from ._spec import BoxRequest, BoxSpec, Mount
+from ._spec import BoxExecutor, BoxRequest, BoxSpec, Mount
 
 #: The checkout the in-box Python runs from (`python3 -m defender.runtime.bash_exec`).
 CHECKOUT = Path(__file__).resolve().parents[3]
 
-#: Each started oracle box's scratch folder, by box name: where its frames run.
-SCRATCH: dict[str, Path] = {}
+
+@dataclass
+class OracleBox(BoxExecutor):
+    """A started oracle box and the host scratch folder bound into it, where its frames run.
+    The folder lives exactly as long as the box: `stop_oracle_box` removes both."""
+
+    scratch: Path | None = None
 
 
 class BoxStartRefused(RuntimeError):
@@ -55,8 +61,19 @@ def start_oracle_box(*, env: Mapping[str, str]) -> Any:
     if not getattr(box, "sandboxed", False):
         shutil.rmtree(scratch, ignore_errors=True)
         raise BoxStartRefused("the oracle's box is not sandboxed")
-    SCRATCH[box.name] = scratch
-    return box
+    return OracleBox(**{f.name: getattr(box, f.name) for f in fields(BoxExecutor)},
+                     scratch=scratch)
+
+
+def stop_oracle_box(box: Any) -> None:
+    """Remove the box's container, then its scratch folder (the folder goes even when the
+    container's removal fails: nothing runs in it once the box is being torn down)."""
+    try:
+        _lifecycle.stop_box(box)
+    finally:
+        scratch = getattr(box, "scratch", None)
+        if scratch is not None:
+            shutil.rmtree(scratch, ignore_errors=True)
 
 
 def start_process_oracle_box() -> Any:
