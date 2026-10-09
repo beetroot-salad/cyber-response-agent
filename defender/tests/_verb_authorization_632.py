@@ -237,12 +237,10 @@ WITHHELD_FROM_GATHER: tuple[tuple[str, str], ...] = (
 HEALTH_CHECK = "health-check"
 GATHER_ROLE = "gather"
 
-# The store's real list envelope. `list_tickets` answers `{"total", "tickets"}` and the
-# gather-side screen enforces that shape as a CONTRACT (`ticket_screen.screen_list` files a
-# bare array as malformed), so a fake handing back a bare list is not a lighter fixture — it
-# is a different observable, and one no correct implementation can score as a clean read.
-# Written here once because two demands share it: the granted-call positive control and the
-# self-case exclusion.
+# The store's real list envelope. `list_tickets` answers `{"total", "tickets"}`, so the
+# granted-call positive control answers in that shape rather than a lighter fixture of its
+# own. (#1221 removed the gather-side ticket screen that once enforced the shape and the
+# self-case exclusion that shared this helper; a reply is now served as the store answered.)
 def ticket_envelope(*keys: str) -> dict:
     return {"tickets": [{"key": k, "status": "closed"} for k in keys], "total": len(keys)}
 

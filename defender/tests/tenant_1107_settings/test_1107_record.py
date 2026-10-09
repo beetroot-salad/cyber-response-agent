@@ -385,15 +385,20 @@ def test_d_elastic_view(tmp_path):
 
 def test_d_ticket_mapping_kept(tmp_path):
     """resolve_tenant loads systems/case-history/mapping.yaml once into ticket_mapping. A valid file
-    becomes a CaseMapping. A file that is not YAML, not a mapping, or fails the lifecycle check is
-    kept as its CaseTicketError and is never raised at resolve."""
+    becomes a CaseMapping. A file that is not YAML, not a mapping, or fails the lifecycle check (a
+    templated open.status) is kept as its CaseTicketError and is never raised at resolve.
+
+    #1221's amendment: the lifecycle check is the literal-open.status rule alone. A mapping whose
+    open.status equals its legacy released.status is no longer a fault — nothing reads `released:`
+    — so it becomes a CaseMapping like any valid file."""
     root = tmp_path / "tenants"
     CaseTicketError = S.case_ticket_error()
     cases = {
         "valid": T1106.mapping_text(),
+        "open-is-released": T1106.mapping_text(open_status="closed"),  # == the legacy released
         "not-yaml": "open: [unclosed\n  status: : :\n",
         "not-a-mapping": "- open\n- released\n",
-        "lifecycle": T1106.mapping_text(released_status="open"),  # open == released
+        "lifecycle": T1106.mapping_text(open_status="{summary}"),  # a templated open.status
     }
     got = {}
     for tenant_id, text in cases.items():
@@ -401,7 +406,8 @@ def test_d_ticket_mapping_kept(tmp_path):
         S.mapping_path(folder).write_text(text, encoding="utf-8")
         got[tenant_id] = _resolve(root, tenant_id).ticket_mapping  # never raised
 
-    assert isinstance(got["valid"], S.record_type("CaseMapping")), got["valid"]
+    for good in ("valid", "open-is-released"):
+        assert isinstance(got[good], S.record_type("CaseMapping")), (good, got[good])
     for bad in ("not-yaml", "not-a-mapping", "lifecycle"):
         assert isinstance(got[bad], CaseTicketError), (bad, got[bad])
 
@@ -547,7 +553,7 @@ def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
     # resolve_tenant / resolve_run_tenant, twice around an edit (RG5, refuted: no cache).
     first = _resolve(root)
     S.set_key(folder, "cmdb", "CMDB_URL_BASE", "http://cmdb-edited:1")
-    S.mapping_path(folder).write_text(T1106.mapping_text(released_status="done"),
+    S.mapping_path(folder).write_text(T1106.mapping_text(reporter="done"),
                                       encoding="utf-8")
     second = _resolve(root)
     direct = run_tenant.run_tenant_for(
@@ -555,10 +561,8 @@ def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
     assert first.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-nf4:8080"
     assert second.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-edited:1"
     assert direct.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-edited:1"
-    case_ticket = S.mod("runtime.case_ticket")
-    assert case_ticket.release_predicate(second.ticket_mapping).is_released({"status": "done"})
-    assert not case_ticket.release_predicate(first.ticket_mapping).is_released(
-        {"status": "done"})
+    assert S.open_reporter(second.ticket_mapping) == "done"
+    assert S.open_reporter(first.ticket_mapping) == "defender"
     # ...and across tenants: resolving another tenant in between memoizes nothing.
     assert _resolve(root, "other").systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-nf4o:8080"
     assert _resolve(root).systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-edited:1"
@@ -858,7 +862,6 @@ def test_s7_mf11_record_parts_read_only(tmp_path):
     root = tmp_path / "tenants"
     S.plant(root, marker="mf11")
     rec = _resolve(root)
-    case_ticket = S.mod("runtime.case_ticket")
     registry = S.mod("learning.branch.estate.registry")
     ctx = _ctx(rec, tmp_path)
     carried = registry._carrying(ctx, world_id="w-mf11")  # the estate applier's VerbContext copy
@@ -869,9 +872,9 @@ def test_s7_mf11_record_parts_read_only(tmp_path):
     for attempt in (
         lambda: rec.systems["cmdb"].__setitem__("CMDB_URL_BASE", "http://hijacked:1"),
         lambda: rec.systems.__setitem__("cmdb", {"CMDB_URL_BASE": "http://hijacked:1"}),
-        lambda: rec.ticket_mapping["released"].__setitem__("status", "hijacked"),
-        lambda: rec.ticket_mapping.__setitem__("released", {"status": "hijacked"}),
-        lambda: setattr(rec.ticket_mapping, "released", {"status": "hijacked"}),
+        lambda: rec.ticket_mapping["open"].__setitem__("reporter", "hijacked"),
+        lambda: rec.ticket_mapping.__setitem__("open", {"reporter": "hijacked"}),
+        lambda: setattr(rec.ticket_mapping, "open", {"reporter": "hijacked"}),
     ):
         # raising is one of the two outcomes the demand allows
         with contextlib.suppress(Exception):
@@ -880,6 +883,5 @@ def test_s7_mf11_record_parts_read_only(tmp_path):
     for reader in (rec, S.record_on(carried)):
         assert reader.systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-mf11:8080", dict(
             reader.systems["cmdb"])
-        predicate = case_ticket.release_predicate(reader.ticket_mapping)
-        assert predicate.is_released({"status": "closed"}), "resolve-time released status lost"
-        assert not predicate.is_released({"status": "hijacked"}), "an in-place edit leaked"
+        assert S.open_reporter(reader.ticket_mapping) == "defender", (
+            "an in-place edit leaked, or the resolve-time reporter was lost")

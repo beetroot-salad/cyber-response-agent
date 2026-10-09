@@ -1036,6 +1036,8 @@ CENSUS: tuple[Writer, ...] = (
     Writer("tenant_writer", "../_tenant.json", "guarded", "unmeasured",
            _invoke_tenant_writer, "_tenant.py", cite="§7 decision 16"),
     # #1078 D1: create_tenant's own row, a second _tenant.py writer with its own artifact.
+    # Still the guarded idiom since #1137: `Held.write`'s create lane off the held `<T>`, which
+    # refuses an alias at the row as `write_guarded`'s did.
     Writer("tenant_row_writer", "tenant-root/census-tenant/tenant.json", "guarded", "unmeasured",
            _invoke_tenant_row_writer, "_tenant.py", cite="#1078 D1"),
 )

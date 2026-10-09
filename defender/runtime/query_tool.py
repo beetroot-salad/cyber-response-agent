@@ -20,12 +20,12 @@ from pydantic_ai.exceptions import (
     ToolRetryError,
 )
 
+from defender._knowledge import CHECKOUT_KNOWLEDGE
 from defender.hooks.budget_enforcer import BudgetKill
 from defender._text import as_str
 from defender._untrusted import wrap_fresh
 from defender.learning.branch.redaction import redact_model_visible
 from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
-from defender.runtime import case_ticket
 from defender.runtime.payload_view import render as _render_payload
 from defender.runtime.request_ceiling import WRITE_SUMMARY_NOW
 from defender.runtime.tools import DeadEnd
@@ -62,16 +62,6 @@ from defender._query_rules import (
 )
 
 from . import circuit_breaker
-from .ticket_screen import (
-    TICKET_GET,
-    TICKET_LIST,
-    TICKET_SYSTEM,
-    screen_get,
-    screen_list,
-    screen_release_get,
-    screen_release_list,
-    self_case_key,
-)
 from .verbs import (
     CALL_DELIVERY,
     DENIED,
@@ -155,84 +145,6 @@ def _fault_exit(e: BaseException) -> int:
     if isinstance(e, SystemExit) and isinstance(e.code, int) and e.code != 0:
         return e.code
     return DEFAULT_FAULT_EXIT
-
-
-def _self_ticket_reject_reason(
-    self_key: str, system: str, verb: str, params: dict,
-) -> str | None:
-    """Reject a direct gather read of its own case before the ticket store is contacted.
-
-    Gather keeps access to other tickets, including open ones used for correlation. The case key
-    is carried on deps (``ticket_screen.self_case_key``), not inferred from a path.
-    """
-    if system == TICKET_SYSTEM and verb == TICKET_GET and params.get("key") == self_key:
-        return (
-            "that key is the current investigation's own ticket and cannot be read through "
-            "gather. Correlate a different ticket; open and in-progress related cases remain "
-            "available."
-        )
-    return None
-
-
-def _release_predicate(tenant: Any) -> Any:
-    """The ticket release predicate, built per call from the run's record (#1107: the mapping
-    is the one resolved when the run began, so a mid-run file edit changes nothing).
-
-    Any construction failure (no mapping, or a mapping the loader kept as its error) degrades to
-    "nothing released", so no comment is served (fail closed), rather than refusing the query as
-    infra and charging the `ticket` breaker for a config defect. The warning is logged because
-    otherwise a broken mapping looks like a store with no comments."""
-    try:
-        return case_ticket.release_predicate(tenant.ticket_mapping).is_released
-    except Exception as e:  # noqa: BLE001 — degrade on every construction failure, see docstring
-        _logger.warning(
-            f"ticket release predicate unavailable ({e}); serving no "
-            "ticket comments this call",
-        )
-        return lambda _ticket: False
-
-
-def _screen_ticket_payload(
-    self_key: str, system: str, verb: str, payload: Any, *, tenant: Any,
-) -> tuple[Any, int, str]:
-    """Apply gather's current-case exclusion, then the per-ticket release step, before capture
-    and model display.
-
-    The exclusion is identity-only: another ticket mentioning ``self_key`` is still useful
-    correlation evidence, since gather is not scoring the case. A record whose key cannot be
-    established is withheld. The release step runs only after a served payload (``code == 0``),
-    so a malformed envelope is never patched. `tenant` is the run's record (#1107): the
-    released status is that tenant's mapping's, as of the run's start.
-    """
-    if system != TICKET_SYSTEM:
-        return payload, 0, ""
-
-    if verb == TICKET_GET:
-        payload, code, detail = screen_get(
-            payload,
-            require_key=True,
-            withhold=lambda ticket: (
-                "the ticket store returned the current investigation's own ticket; its "
-                "content was withheld from gather."
-                if ticket["key"] == self_key else None
-            ),
-        )
-        if code != 0:
-            return payload, code, detail
-        return screen_release_get(payload, is_released=_release_predicate(tenant)), 0, ""
-
-    if verb == TICKET_LIST:
-        payload, code, detail = screen_list(
-            payload,
-            keep=lambda ticket: (
-                isinstance(ticket.get("key"), str) and ticket["key"] != self_key
-            ),
-        )
-        if code != 0:
-            return payload, code, detail
-        return screen_release_list(payload, is_released=_release_predicate(tenant)), 0, ""
-
-    return payload, 0, ""
 
 
 def _dispatched_lead(deps: Any) -> str:
@@ -568,15 +480,13 @@ class QueryCapture(AbstractCapability[Any]):
 
     async def _screen(
         self, deps, decision: Any, system: str, verb: str, params: dict,
-        model_query_id: Any, self_key: str,
+        model_query_id: Any,
     ) -> None:
-        """The per-call screens below the grant and the breaker (query_id, params, self-ticket).
+        """The per-call screens below the grant and the breaker (query_id, params).
         Raises `ModelRetry` after writing a usage row when one refuses."""
         reason = self._forbidden_reject(model_query_id)
         if reason is None:
             reason = validate_params(decision.fn, params)
-        if reason is None:
-            reason = _self_ticket_reject_reason(self_key, system, verb, params)
         if reason is not None:
             await self._record(
                 deps, system=system, verb=verb,
@@ -623,7 +533,6 @@ class QueryCapture(AbstractCapability[Any]):
         verb = as_str(args.get("verb"))
         params = _as_dict(args.get("params"))
         model_query_id = args.get("query_id")
-        self_key = self_case_key(deps)
 
         decision, early_result = await self._grant_check(deps, system, verb, params)
         if early_result is not None:
@@ -654,7 +563,7 @@ class QueryCapture(AbstractCapability[Any]):
             )
 
         await self._screen(
-            deps, decision, system, verb, params, model_query_id, self_key,
+            deps, decision, system, verb, params, model_query_id,
         )
 
         query_id = resolve_query_id(system, verb, as_str(model_query_id) or None)
@@ -662,9 +571,7 @@ class QueryCapture(AbstractCapability[Any]):
         payload: Any = None
         try:
             payload = await handler(args)
-            payload, exit_code, detail = _screen_ticket_payload(
-                self_key, system, verb, payload, tenant=deps.tenant,
-            )
+            exit_code, detail = 0, ""
         except CONTROL_FLOW_EXCEPTIONS:
             raise
         except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
@@ -765,13 +672,16 @@ _LIST_VERBS_UNKNOWN_SYSTEM = (
     "to; confirm it there and call this again with that name."
 )
 
+#: Where a system's skill sits, as the model-facing notes below name it (`defender._knowledge`).
+_SKILLS_REL = CHECKOUT_KNOWLEDGE.skills_rel
+
 #: Reached only for a name that passed `_adapter_path_under`'s checks, so interpolating it into
 #: a path is safe. `execution.md` holds only value constraints and pitfalls, not verbs.
 _LIST_VERBS_UNLOADABLE = (
     "`{system}` — UNAVAILABLE: its adapter could not be loaded ({err}). No verb surface can be "
     "derived for it right now, and no file carries a copy — the verb roster and its params are "
     "read from the live signatures and nowhere else. "
-    "`defender/skills/{system}/execution.md` still states this system's value constraints and "
+    f"`{_SKILLS_REL}{{system}}/execution.md` still states this system's value constraints and "
     "recorded pitfalls; report the failure in your summary rather than guessing a verb or a "
     "param name."
 )
@@ -781,7 +691,7 @@ _LIST_VERBS_UNLOADABLE = (
 _LIST_VERBS_UNDERIVABLE = (
     "`{system}` — UNAVAILABLE: its verb surface could not be derived ({err}). That is a "
     "defender-side fault, not something your call can fix, and no file carries a copy of the "
-    "surface. `defender/skills/{system}/execution.md` still states this system's value "
+    f"surface. `{_SKILLS_REL}{{system}}/execution.md` still states this system's value "
     "constraints and recorded pitfalls; report the failure in your summary rather than guessing "
     "a verb or a param name."
 )
@@ -790,7 +700,7 @@ _LIST_VERBS_UNDERIVABLE = (
 _LIST_VERBS_NO_VERBS = (
     "`{system}` — UNAVAILABLE: its adapter declares no verbs at all, so no verb surface can be "
     "derived for it, and no file carries a copy. "
-    "`defender/skills/{system}/execution.md` still states this system's value constraints and "
+    f"`{_SKILLS_REL}{{system}}/execution.md` still states this system's value constraints and "
     "recorded pitfalls; report the failure in your summary rather than guessing a verb or a "
     "param name."
 )

@@ -9,6 +9,9 @@ tests: defender/tests   # the suite this graph derives (project profile, `tests.
                         #   defender/tests/_spec767.py                 the fakes + fixtures
                         #   defender/tests/test_767_writer.py          D1-D3, O1/O3/O4/O7/O8/S1/S4/S5
                         #   defender/tests/test_767_screen.py          D4, O2/S3, the predicate, Scale
+                        #                                              (DELETED by #1221 with both read
+                        #                                              screens; the predicate's tests
+                        #                                              moved to test_767_writer.py)
                         #   defender/tests/test_767_surfaces.py        O6/N9/D5/D6-reach, the censuses, D7
                         #   defender/tests/test_767_run_tail.py        O4/N1/N7 against run.py's real tail
                         #   defender/tests/test_767_gather_read.py     the three capture-edge demands
@@ -198,6 +201,7 @@ demands:
   # ---- Demand #0 — the return-value contract (20-demands.md, provisional on four forks) -------
   - {id: d0_record_return, kind: behavior, form: test, stakeholder: operator,
      discharged_by: test_767_record_case_ticket_returns_and_receipts,
+     note: "AMENDED by #1221's amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer reads a case back or declines a closed one: the check existed because a person's close released a case's comments to later runs, and the release screen is gone (every comment is served, the host's own tagged); the mapping names no released status, and a `released:` section an un-migrated tenant carries loads and is ignored. The writer's one call to the store is now the comment POST, with no read-back before it.",
      binds: [record_case_ticket, "interacts(record_case_ticket->case_history_store).response",
              ticket_write_receipt, "interacts(record_case_ticket->ticket_write_receipt).payload"],
      fork: FK29, unknown: "the receipt's success `status` word — `\"closed\"` (r1, today's literal)
@@ -211,7 +215,8 @@ demands:
        segment or the whole `\\n\\n{narrative}` tail) and what an EMPTY report renders (FK06);
        both move the whole asserted body string."}
   - {id: d0_screen_shape, kind: behavior, form: test, stakeholder: a later run,
-     discharged_by: test_767_screen_ticket_comment_shape,
+     discharged_by: test_1221_list_tickets_serves_the_own_case_and_an_open_cases_comments,
+     note: "REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed, the own-case exclusion and the release screen; a ticket reply is served and captured as the store answered it, and model-made precedent is handled by the agent tag (O1) and rule #27 (O2) instead. Was: test_767_screen_ticket_comment_shape — an unreleased ticket's comments emptied in place, every other field untouched.",
      binds: [ticket_screen, "interacts(query_tool->ticket_screen).response",
              "interacts(query_tool->ticket_screen).payload"],
      fork: "FK02, FK05, FK14, FK16", unknown: "which agent comment is `the latest` (FK02), whether
@@ -241,7 +246,7 @@ demands:
              "alert_json.domain.distinguished[rule-id-rendering-to-the-released-status]",
              "alert_json.domain.distinguished[timestamp-rendering-to-the-released-status]"],
      positive_control: d_loader_refusal_positive_control,
-     note: "REWORK — replaces `o1_loader_refuses_approved_label` (FAM-2, FK24-FK27). The release
+     note: "AMENDED by #1221's amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer reads a case back or declines a closed one: the check existed because a person's close released a case's comments to later runs, and the release screen is gone (every comment is served, the host's own tagged); the mapping names no released status, and a `released:` section an un-migrated tenant carries loads and is ignored. So the one refusal this demand kept, `open.status` equal to `released.status`, is dropped — that mapping loads and its open carries its own literal status; the literal-`open.status` rule stays (test_767_the_loader_still_refuses_a_non_literal_open_status). Earlier note: REWORK — replaces `o1_loader_refuses_approved_label` (FAM-2, FK24-FK27). The release
        signal has no surface an alert can reach: a status is not templated from an alert in the
        shipped mapping and, on the store's side, is a closed vocabulary (c8). So the loader walks
        no label templates and refuses nothing about labels — an operator may template any label,
@@ -251,7 +256,7 @@ demands:
 
   # ---- O2 / S3 / S3′ — comments only from released (closed) cases ----------------------------
   - {id: o2_unreleased_no_comment, kind: negative, form: test, stakeholder: a later run,
-     discharged_by: test_767_unreleased_ticket_serves_no_comment,
+     discharged_by: test_1221_list_tickets_serves_the_own_case_and_an_open_cases_comments,
      binds: [ticket_screen, "interacts(query_tool->ticket_screen).response", is_released,
              "ticket_screen.access[list-tickets]", "ticket_screen.access[get-ticket]",
              "is_released.domain.distinguished[no-status-field]",
@@ -259,23 +264,23 @@ demands:
              "is_released.domain.distinguished[confusable-status]",
              "is_released.domain.distinguished[undecidable-record-in-a-listing]"],
      positive_control: o2_released_serves_whole,
-     note: "REWORK — replaces `o2_unapproved_no_agent_comment` (FAM-1, FK10, FK22). No comment
+     note: "REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed, the own-case exclusion and the release screen; a ticket reply is served and captured as the store answered it, and model-made precedent is handled by the agent tag (O1) and rule #27 (O2) instead. Was: test_767_unreleased_ticket_serves_no_comment — no comment from an unreleased case reached a model. Earlier note: REWORK — replaces `o2_unapproved_no_agent_comment` (FAM-1, FK10, FK22). No comment
        from an unreleased case reaches a model, whoever wrote it and whatever shape it has; the
        comment list is emptied whole, so there is no author to match and no undecidable element
        to classify. The status matches EXACTLY — the store's vocabulary is canonical, so there is
        no whitespace concession to make and a padded status is a NEGATIVE arm, not a control."}
   - {id: o2_released_serves_whole, kind: behavior, form: test, stakeholder: a later run,
-     discharged_by: test_767_released_ticket_serves_comments_whole,
+     discharged_by: test_1221_list_tickets_serves_the_own_case_and_an_open_cases_comments,
      binds: [ticket_screen, is_released],
-     note: "REWORK — replaces `o2_approved_serves_latest` (FK02, FK03). A released case is served
+     note: "REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed, the own-case exclusion and the release screen; a ticket reply is served and captured as the store answered it, and model-made precedent is handled by the agent tag (O1) and rule #27 (O2) instead. Every case is now served whole, released or not. Was: test_767_released_ticket_serves_comments_whole. Earlier note: REWORK — replaces `o2_approved_serves_latest` (FK02, FK03). A released case is served
        WHOLE: every comment, in the store's own order, untouched. The person's close covers the
        list as it stood, and the writer never appends behind a close; the 'latest agent comment'
        rule, and the ordering and tie-break forks it carried, have nothing left to decide."}
   - {id: o2_both_verbs_screened, kind: parity, form: test, stakeholder: a later run,
-     discharged_by: test_767_release_screen_applies_on_both_ticket_verbs,
+     discharged_by: test_1221_get_ticket_on_the_runs_own_key_is_served,
      binds: [ticket_screen, query_tool, "interacts(query_tool->case_history_store)",
              "ticket_screen.access[list-tickets]", "ticket_screen.access[get-ticket]"],
-     note: "per-cell binding added at phase D: R3's discharge is per (constraint × via), never
+     note: "REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed, the own-case exclusion and the release screen; a ticket reply is served and captured as the store answered it, and model-made precedent is handled by the agent tag (O1) and rule #27 (O2) instead. The parity now holds by absence: neither verb is screened, and get-ticket on the run's own key reaches the store. Was: test_767_release_screen_applies_on_both_ticket_verbs. Earlier note: per-cell binding added at phase D: R3's discharge is per (constraint × via), never
        facet-wide — a constraint pinned on `list-tickets` and silently absent on `get-ticket` is
        the canonical fail-open this demand exists for."}
   - {id: s3p_single_model_facing_reader, kind: negative, form: test, stakeholder: a later run,
@@ -283,7 +288,7 @@ demands:
      binds: [query_tool, ticket_screen, cited_covering_policy, forward_check,
              "interacts(forward_check->case_history_store)"],
      positive_control: o2_released_serves_whole,
-     note: "census demand over c5/c13. RFJ5: O2's own text ('on every read path into the store,
+     note: "AMENDED by #1221 (issue #1221 D3/M2, human, 2026-10-08): the census now pins ZERO screen consumers and no ticket_screen module (#1221 S2). Earlier note: census demand over c5/c13. RFJ5: O2's own text ('on every read path into the store,
        not only the query tool's') already DECIDES the second-consumer question (FK49); this
        demand is the census that pins the population at one."}
 
@@ -341,6 +346,7 @@ demands:
   # ---- O5 — vendor spellings live in the mapping ----------------------------------------------
   - {id: o5_no_vendor_literals_in_code, kind: coherence, form: test, stakeholder: operator,
      discharged_by: test_767_no_status_or_author_literal_in_writer_or_screen,
+     note: "AMENDED by #1221's amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer reads a case back or declines a closed one: the check existed because a person's close released a case's comments to later runs, and the release screen is gone (every comment is served, the host's own tagged); the mapping names no released status, and a `released:` section an un-migrated tenant carries loads and is ignored. The writer follows the mapping's comment author and asks no status, so a case held as `closed` or in a vendor-coined status is commented on alike. Earlier note: AMENDED by #1221 (issue #1221 D3/M2, human, 2026-10-08): the screen half is removed; the writer still follows the mapping and neither the writer nor the query tool spells a vendor literal.",
      binds: [case_history_mapping, mapping_released, mapping_comment, ticket_screen, is_released,
              record_case_ticket, "interacts(record_case_ticket->case_history_mapping)",
              "interacts(query_tool->case_history_mapping)",
@@ -353,7 +359,8 @@ demands:
      rejected: [{nl: "N8 — ticket_screen's existing envelope binding (tickets, key, comments,
        author) is the stub adapter's own and stays bound in code."}]}
   - {id: d4_predicates_in_mapper, kind: seam, form: test, stakeholder: operator,
-     discharged_by: test_767_release_predicate_lives_in_the_mapper,
+     discharged_by: test_767_the_release_predicate_and_its_refusal_are_gone,
+     note: "REVERSED by #1221's amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer reads a case back or declines a closed one: the check existed because a person's close released a case's comments to later runs, and the release screen is gone (every comment is served, the host's own tagged); the mapping names no released status, and a `released:` section an un-migrated tenant carries loads and is ignored. The predicate's last consumer went with the check, so `ReleasePredicate`, `release_predicate`, `is_released` and the `refused-released` receipt word are removed. Was: test_767_release_predicate_lives_in_the_mapper. Earlier note: AMENDED by #1221 (issue #1221 D3/M2, human, 2026-10-08): the read screen this predicate also fed is removed; the writer's release check (#1221 N7) is its one consumer, and the test, re-homed to test_767_writer.py, observes the wiring there.",
      binds: [is_released, ticket_screen, case_ticket, "interacts(query_tool->is_released)"]}
 
   # ---- O6 / S2 / N9 — no model role can reach a write -----------------------------------------
@@ -398,13 +405,13 @@ demands:
        The exit-code observable itself is settled; the arm list is not."}
   - {id: d_writer_never_records_behind_a_release, kind: negative, form: test, stakeholder: analyst,
      minted_from: "the review's fourth rule (84a091ff), re-grounded by the REWORK on the lifecycle",
-     discharged_by: test_767_writer_never_records_behind_a_release,
+     discharged_by: test_767_writer_comments_on_a_closed_case,
      binds: [record_case_ticket, is_released, mapping_released, ticket_write_receipt,
              "case_history_store.identity", "interacts(record_case_ticket->case_history_store)",
              "interacts(record_case_ticket->case_history_store).response",
              "case_history_mapping.domain.distinguished[missing-released-section]"],
      positive_control: d0_record_return,
-     note: "the writer's half of the release invariant, and what answers the R2 hole on
+     note: "REVERSED by #1221's amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer reads a case back or declines a closed one: the check existed because a person's close released a case's comments to later runs, and the release screen is gone (every comment is served, the host's own tagged); the mapping names no released status, and a `released:` section an un-migrated tenant carries loads and is ignored. A case the store holds as `closed` gets the comment like any other — one POST, no GET, receipt `commented` — and every former undecidable arm (an unreadable case, a non-ticket reply, a mapping with no `released:` section) is moot. Was: test_767_writer_never_records_behind_a_release. Earlier note: the writer's half of the release invariant, and what answers the R2 hole on
        `case_history_store.identity` now that the read side picks no comment: a person's close
        covers the comments on the case WHEN THEY CLOSED IT, so the writer reads the case back
        first and refuses — receipt `refused-released`, a warning, no POST — when it is already in
@@ -434,15 +441,16 @@ demands:
        strip runs before or after the cut — the boundary-planted fence only survives one ordering."}
   # REWORK — `o8_one_agent_comment_per_ticket` (FK02, FK03, FK35) is DELETED: the read side no
   # longer picks a comment, and what bounds a closed case's comment count is the writer, which
-  # never records behind a close (`test_767_writer_never_records_behind_a_release`). The
-  # model-view bound survives as `scale_model_view_stays_bounded`.
+  # never records behind a close (`test_767_writer_never_records_behind_a_release` — itself
+  # REVERSED by #1221's amendment: the writer now comments on a closed case too, so nothing bounds
+  # a closed case's comment count). The model-view bound survives as `scale_model_view_stays_bounded`.
   - {id: p_o8_beats_o4, kind: domain-outcome, form: test, stakeholder: a later run,
      discharged_by: test_767_wire_bound_wins_and_the_cut_is_visible,
      binds: [case_record_to_comment, "interacts(record_case_ticket->case_history_store).payload",
              "case_record_to_comment.domain.distinguished[narrative-over-the-bound]"],
      fork: FK01}
   - {id: scale_model_view_stays_bounded, kind: behavior, form: test, stakeholder: a later run,
-     discharged_by: test_767_many_commented_tickets_stay_within_the_listing_ceiling,
+     discharged_by: test_1221_the_tag_survives_the_listing_view_clip,
      binds: [payload_view, ticket_screen, "interacts(query_tool->ticket_screen).response",
              "interacts(query_tool->payload_view).payload",
              "payload_view.domain.distinguished[8192-boundary]",
@@ -452,7 +460,7 @@ demands:
        delivery at the wire bound, which c7 (executed twice) refutes: 2x4096 (8421 B) ELIDES.
        Whether the demand asserts boundedness-by-elision, and what one enormous unapproved ticket
        does to a listing (FK47), are both open.",
-     note: "rests on c7 (executed)."}
+     note: "AMENDED by #1221 (issue #1221 D3/M2, human, 2026-10-08): the boundary facts (one maximal comment verbatim, two elided) are now asserted over the writer's own tagged bodies, with the agent tag surviving the leaf clip. Was: test_767_many_commented_tickets_stay_within_the_listing_ceiling. Earlier note: rests on c7 (executed)."}
 
   # ---- S1 / S5 — payload confinement and the honest limit -------------------------------------
   - {id: s1_payload_keys_subset, kind: shape, form: test, stakeholder: analyst,
@@ -473,7 +481,8 @@ demands:
 
   # ---- Mechanism demands (D1–D6) and the N-rows that are independently observable --------------
   - {id: d1_mapping_sections, kind: shape, form: test, stakeholder: operator,
-     discharged_by: test_767_mapping_carries_comment_and_released_and_no_close_lane,
+     discharged_by: test_767_mapping_carries_comment_and_no_close_or_released_lane,
+     note: "AMENDED by #1221's amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer reads a case back or declines a closed one: the check existed because a person's close released a case's comments to later runs, and the release screen is gone (every comment is served, the host's own tagged); the mapping names no released status, and a `released:` section an un-migrated tenant carries loads and is ignored. The shipped mapping drops the `released: {status}` section D1 added. Was: test_767_mapping_carries_comment_and_released_and_no_close_lane.",
      binds: [case_history_mapping, mapping_comment, mapping_released,
              "interacts(record_case_ticket->case_history_mapping)",
              "case_history_mapping.domain.distinguished[retains-close-section]"],
@@ -496,10 +505,12 @@ demands:
        `cause` and `narrative` in the render context and `case_ticket._ctx` does not carry them
        today (probe auth_P5)."}
   - {id: d4_screen_after_own_case, kind: behavior, form: test, stakeholder: a later run,
-     discharged_by: test_767_release_screen_runs_after_the_own_case_exclusion,
+     discharged_by: test_1221_list_tickets_serves_the_own_case_and_an_open_cases_comments,
+     note: "REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed, the own-case exclusion and the release screen; a ticket reply is served and captured as the store answered it, and model-made precedent is handled by the agent tag (O1) and rule #27 (O2) instead. Was: test_767_release_screen_runs_after_the_own_case_exclusion.",
      binds: [ticket_screen, query_tool, "interacts(query_tool->ticket_screen)"]}
   - {id: d4_no_marker, kind: negative, form: test, stakeholder: a later run,
-     discharged_by: test_767_screen_leaves_no_marker,
+     discharged_by: test_1221_list_tickets_serves_the_own_case_and_an_open_cases_comments,
+     note: "REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed, the own-case exclusion and the release screen; a ticket reply is served and captured as the store answered it, and model-made precedent is handled by the agent tag (O1) and rule #27 (O2) instead. The capture equals the store's answer exactly, so nothing is marked or restated. Was: test_767_screen_leaves_no_marker.",
      binds: [ticket_screen, payload_view, "interacts(query_tool->ticket_screen).response"],
      positive_control: o2_released_serves_whole}
   - {id: d5_resolution_lane_deleted, kind: survival, form: test, stakeholder: a later run,
@@ -512,6 +523,7 @@ demands:
        not c15's seven — D5 retires exactly four and leaves exactly four."}
   - {id: n10_hand_typed_resolution_is_inert, kind: negative, form: test, stakeholder: analyst,
      discharged_by: test_767_a_typed_resolution_reaches_no_reader,
+     note: "AMENDED by #1221 (issue #1221 D3/M2, human, 2026-10-08): the screened-listing half is removed; the census half stays.",
      binds: [case_ticket, authoring_surfaces_census],
      positive_control: d0_screen_shape,
      fork: FK05, unknown: "a legacy `resolution` written by the pre-#767 close lane is still SERVED
@@ -519,10 +531,10 @@ demands:
        must screen is undecided."}
   - {id: n5_unreleased_non_comment_fields_visible, kind: behavior, form: test,
      stakeholder: a later run,
-     discharged_by: test_767_unreleased_tickets_stay_visible_for_correlation,
+     discharged_by: test_1221_list_tickets_serves_the_own_case_and_an_open_cases_comments,
      binds: [ticket_screen, "interacts(query_tool->ticket_screen).response", is_released],
      rejected: [{nl: "N5 — withholding unreleased tickets entirely was examined and rejected."}],
-     note: "REWORK — replaces `n5_unapproved_non_agent_fields_visible`. The fields that stay
+     note: "REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed, the own-case exclusion and the release screen; a ticket reply is served and captured as the store answered it, and model-made precedent is handled by the agent tag (O1) and rule #27 (O2) instead. An unreleased case is served whole, comments included. Was: test_767_unreleased_tickets_stay_visible_for_correlation. Earlier note: REWORK — replaces `n5_unapproved_non_agent_fields_visible`. The fields that stay
        visible are every field but `comments`; an analyst's own note on an OPEN case is no longer
        served either, because nothing sound tells it from an agent's."}
   - {id: n7_writes_only_under_the_flag, kind: domain-outcome, form: test, stakeholder: operator,
@@ -556,9 +568,9 @@ demands:
        (adapter-http's confinement facts) and g2 (guard_outbound's two callers, both adapter transports)."}
   - {id: d_ticket_adapter_read_stays_non_model_facing, kind: coherence, form: test,
      stakeholder: a later run,
-     discharged_by: test_767_ticket_adapter_edge_carries_no_model_reachable_comment_content,
+     discharged_by: test_1221_list_tickets_serves_the_own_case_and_an_open_cases_comments,
      binds: ["interacts(ticket_adapter->case_history_store)"],
-     note: "R7 obligation: ticket_adapter is the unmoved reader of case_history_store (SR1) — D4's
+     note: "REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed, the own-case exclusion and the release screen; a ticket reply is served and captured as the store answered it, and model-made precedent is handled by the agent tag (O1) and rule #27 (O2) instead. The coherence join (every reachable ticket verb is a screened one) has nothing left to join. Was: test_767_ticket_adapter_edge_carries_no_model_reachable_comment_content. Earlier note: R7 obligation: ticket_adapter is the unmoved reader of case_history_store (SR1) — D4's
        screen wraps only query_tool's own edge. Bound at the reader's OWN edge per R7's rule (a
        boundary-altitude demand reads green when only the moved reader is observed). Cites c13
        (unrefuted: query_tool is the only code that hands ticket-store content to a model) and the
@@ -590,15 +602,15 @@ demands:
        reached; the writer's blanket envelope turns that into warn-and-skip (O7/c14)."}
   - {id: d_released_ticket_unchanged, kind: behavior, form: test,
      stakeholder: a later run, settled_premise: 39,
-     discharged_by: test_767_released_ticket_is_unchanged,
+     discharged_by: test_1221_list_tickets_serves_the_own_case_and_an_open_cases_comments,
      binds: [ticket_screen, is_released, "interacts(query_tool->ticket_screen).response"],
-     note: "REWORK — replaces `d_approved_ticket_without_agent_comment_unchanged`: a released case
+     note: "REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed, the own-case exclusion and the release screen; a ticket reply is served and captured as the store answered it, and model-made precedent is handled by the agent tag (O1) and rule #27 (O2) instead. Every case is served unchanged. Was: test_767_released_ticket_is_unchanged. Earlier note: REWORK — replaces `d_approved_ticket_without_agent_comment_unchanged`: a released case
        is served exactly as the store answered it, comments or no comments."}
   - {id: d_each_query_screened_at_call_time, kind: behavior, form: test,
      stakeholder: a later run, settled_premise: 40,
-     discharged_by: test_767_each_query_is_screened_against_the_store_at_call_time,
+     discharged_by: test_1221_list_tickets_serves_the_own_case_and_an_open_cases_comments,
      binds: [ticket_screen, "interacts(query_tool->ticket_screen)", is_released],
-     note: "D4 is a per-payload step (F8) and the doc names no snapshot or cache: two queries in
+     note: "REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed, the own-case exclusion and the release screen; a ticket reply is served and captured as the store answered it, and model-made precedent is handled by the agent tag (O1) and rule #27 (O2) instead. Nothing is screened at any time. Was: test_767_each_query_is_screened_against_the_store_at_call_time. Earlier note: D4 is a per-payload step (F8) and the doc names no snapshot or cache: two queries in
        one run may legitimately see different release outcomes — and a RE-OPEN between them is
        the lifecycle's own revoke. `life_PO4` stays a MECHANISM
        probe, not a design fork."}
@@ -607,27 +619,28 @@ demands:
      discharged_by: test_767_a_later_revocation_does_not_touch_an_existing_capture,
      binds: [query_capture, ticket_screen, "interacts(query_tool->query_capture)"],
      positive_control: d_capture_carries_the_screened_payload,
-     note: "O2 binds each read AT READ TIME; nothing in D1–D8 is a retroactive scrub. Future reads
+     note: "AMENDED by #1221 (issue #1221 D3/M2, human, 2026-10-08): the no-scrub half stands; a re-opened case's later read is now served whole, since lifecycle state decides nothing about what is served. Earlier note: O2 binds each read AT READ TIME; nothing in D1–D8 is a retroactive scrub. Future reads
        correctly stop serving."}
   - {id: d_sibling_world_reads_through_the_same_screen, kind: parity, form: test,
      stakeholder: a later run, settled_premise: 43,
-     discharged_by: test_767_a_sibling_world_reads_through_the_same_screen,
+     discharged_by: test_1221_list_tickets_serves_the_own_case_and_an_open_cases_comments,
      binds: [ticket_screen, query_tool, "interacts(query_tool->ticket_screen)",
              "interacts(query_tool->case_history_store)"],
-     note: "g12/SR4: no sibling exemption exists anywhere in D1–D8 — a sibling's gather reaches the
+     note: "REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed, the own-case exclusion and the release screen; a ticket reply is served and captured as the store answered it, and model-made precedent is handled by the agent tag (O1) and rule #27 (O2) instead. No reader is screened, parent or sibling; the learning-path leak into branch runs is #1224's (#1221 N4). Was: test_767_a_sibling_world_reads_through_the_same_screen. Earlier note: g12/SR4: no sibling exemption exists anywhere in D1–D8 — a sibling's gather reaches the
        store through the identical own-case exclusion, D4 screen, capture and payload view. PROBE
        PR1 (open, route: re-ground) decides WHICH of the two filters removes the parent's fresh
        comment; if it lands the other way, premise 43 re-classifies as a silent branch."}
   - {id: d_archived_world_carries_only_screened_capture, kind: behavior, form: test,
      stakeholder: a later run, settled_premise: 44,
-     discharged_by: test_767_an_archived_world_carries_only_the_screened_capture,
+     discharged_by: test_767_an_archived_world_carries_the_capture_whole,
+     note: "REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed, the own-case exclusion and the release screen; a ticket reply is served and captured as the store answered it, and model-made precedent is handled by the agent tag (O1) and rule #27 (O2) instead. A world's archive still carries only what the capture wrote, which is now the whole reply. Was: test_767_an_archived_world_carries_only_the_screened_capture.",
      binds: [query_capture, ticket_screen, "query_capture.identity"]}
   - {id: d_capture_carries_the_screened_payload, kind: coherence, form: test,
      stakeholder: a later run, settled_premise: 49,
-     discharged_by: test_767_the_capture_carries_the_screened_payload,
+     discharged_by: test_767_the_capture_carries_the_store_payload,
      binds: ["interacts(query_tool->query_capture)", "interacts(query_tool->query_capture).payload",
              "interacts(offline_collectors->query_capture)", query_capture],
-     note: "F8/F9: the screen runs before `_record`, so a comment D4 dropped is as absent from
+     note: "REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed, the own-case exclusion and the release screen; a ticket reply is served and captured as the store answered it, and model-made precedent is handled by the agent tag (O1) and rule #27 (O2) instead. The capture equals the store's answer, an open case's comments included. Was: test_767_the_capture_carries_the_screened_payload. Earlier note: F8/F9: the screen runs before `_record`, so a comment D4 dropped is as absent from
        `executed_queries.jsonl` / `gather_raw/` as from the model's turn. Bound at the unmoved
        reader's own edge — a demand at the boundary's altitude reads green when only the writer
        moved."}
@@ -648,11 +661,11 @@ demands:
        or neutralising is demanded (S5's 'nothing further is claimed', N11)."}
   - {id: d_two_hop_chain_closed_by_release, kind: negative, form: test,
      stakeholder: a later run, settled_premise: 61,
-     discharged_by: test_767_a_served_comment_cannot_re_enter_without_a_second_human_act,
+     discharged_by: test_1221_a_benign_close_resting_on_past_cases_alone_is_refused,
      binds: [ticket_screen, is_released, "interacts(query_tool->ticket_screen).response",
              "interacts(record_case_ticket->case_history_store).payload"],
      positive_control: o2_released_serves_whole,
-     note: "the chain is closed by the person's CLOSE, not by content inspection: a run's own
+     note: "REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed, the own-case exclusion and the release screen; a ticket reply is served and captured as the store answered it, and model-made precedent is handled by the agent tag (O1) and rule #27 (O2) instead. The two-hop chain is now closed by the tag and rule #27: a model-made comment is a past case, and a benign verdict cannot rest on past cases alone. Was: test_767_a_served_comment_cannot_re_enter_without_a_second_human_act. Earlier note: the chain is closed by the person's CLOSE, not by content inspection: a run's own
        fresh comment lands on its own case, open until a person closes it. The doc requires no
        detection of novel-vs-reproduced content (S5)."}
   - {id: d_checked_in_censuses_move_together, kind: coherence, form: test,
@@ -666,9 +679,9 @@ demands:
        change makes and the transition it hands to a person."}
   - {id: d_status_is_served_to_the_model, kind: behavior, form: test,
      stakeholder: a later run, settled_premise: 70,
-     discharged_by: test_767_the_lifecycle_state_is_served_to_the_model,
+     discharged_by: test_1221_list_tickets_serves_the_own_case_and_an_open_cases_comments,
      binds: [ticket_screen, mapping_released, "interacts(query_tool->ticket_screen).response"],
-     note: "REWORK — replaces `d_approved_label_is_served_to_the_model`. D4 filters COMMENTS only
+     note: "REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed, the own-case exclusion and the release screen; a ticket reply is served and captured as the store answered it, and model-made precedent is handled by the agent tag (O1) and rule #27 (O2) instead. Was: test_767_the_lifecycle_state_is_served_to_the_model. Earlier note: REWORK — replaces `d_approved_label_is_served_to_the_model`. D4 filters COMMENTS only
        and N5 keeps the other fields, so the status that governs the screen is itself in the
        record the model reads, with the person's `resolution` beside it on a closed case.
        Harmless: the model cannot transition a case (O6/c2) and text cannot become a status (S5)."}
@@ -677,6 +690,7 @@ demands:
   - {id: d_loader_refusal_positive_control, kind: domain-outcome, form: test,
      stakeholder: operator, minted_from: "40-premises.md red flag 1 (FK-X1)",
      discharged_by: test_767_the_shipped_mapping_loads_and_a_broken_one_skips_the_write,
+     note: "AMENDED by #1221's amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer reads a case back or declines a closed one: the check existed because a person's close released a case's comments to later runs, and the release screen is gone (every comment is served, the host's own tagged); the mapping names no released status, and a `released:` section an un-migrated tenant carries loads and is ignored. The refused arm is now a templated `open.status` (the loader's one remaining lifecycle rule), since an `open.status == released.status` mapping loads.",
      binds: [case_history_mapping, record_case_ticket, mapping_open, mapping_released, is_released,
              "case_history_mapping.domain.distinguished[shipped-default]",
              "case_history_mapping.domain.distinguished[open-status-is-the-released-status]"],
@@ -759,11 +773,11 @@ demands:
        (FK44's cheap version is a fixed host-authored prefix line — new mechanism, not a test).",
      note: "downgraded: the testable half is s5_text_cannot_become_a_field."}
   - {id: d7_briefing_rewrite, kind: coherence, form: test, stakeholder: a later run,
-     discharged_by: test_767_ticket_skill_md_describes_the_release_lane,
+     discharged_by: test_1221_ticket_skill_md_claims_no_read_screen,
      binds: [ticket_skill_md],
      settled_premise: 69,
      fork: FK43,
-     note: "UPGRADED AT PHASE E from `form: clause`. §7 FK55 split the item in two and kept this
+     note: "AMENDED by #1221's amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer reads a case back or declines a closed one: the check existed because a person's close released a case's comments to later runs, and the release screen is gone (every comment is served, the host's own tagged); the mapping names no released status, and a `released:` section an un-migrated tenant carries loads and is ignored. The briefing's write-side sentence — a re-run of a case a person already closed is refused rather than appended — is false too and must go. Earlier note: REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed, the own-case exclusion and the release screen; a ticket reply is served and captured as the store answered it, and model-made precedent is handled by the agent tag (O1) and rule #27 (O2) instead. The release-lane sentences, with the endorsement and truncation notes inside them, are deleted with the screens, and the briefing must no longer claim either screen. Was: test_767_ticket_skill_md_describes_the_release_lane. Earlier note: UPGRADED AT PHASE E from `form: clause`. §7 FK55 split the item in two and kept this
        half IN the suite: SKILL.md is MODEL-FACING prose and D4 makes three of its sentences
        false, so its rewrite is an observable obligation rather than a deferral. FK43 is applied
        in the test — the tag is RELEASE-FOR-READING, not an endorsement of the verdict — and so
@@ -787,7 +801,7 @@ demands:
   # resolution it comes from; none of them existed at the gate, because each is an answer.
   - {id: d_predicates_fail_closed_by_construction, kind: seam, form: test, stakeholder: a later run,
      minted_from: "70-resolutions.md R1 (FAM-1's downstream consequence)",
-     discharged_by: test_767_release_predicate_cannot_be_built_in_a_serving_state,
+     discharged_by: test_767_a_legacy_released_section_is_ignored,
      binds: [is_released, case_ticket, case_history_mapping, ticket_screen,
              "case_history_mapping.domain.distinguished[invalid-yaml]",
              "case_history_mapping.domain.distinguished[missing-released-section]",
@@ -799,7 +813,7 @@ demands:
              "mapping_released.domain.distinguished[blank]",
              "mapping_released.domain.distinguished[padded]",
              "is_released.domain.distinguished[released-section-missing]"],
-     note: "the R5 judgment hole's `resolved_to`. §7 R1 decided FAM-1 fail-closed on both sides
+     note: "REVERSED by #1221's amendment (issue #1221, reversing its N7, human, 2026-10-08): the writer no longer reads a case back or declines a closed one: the check existed because a person's close released a case's comments to later runs, and the release screen is gone (every comment is served, the host's own tagged); the mapping names no released status, and a `released:` section an un-migrated tenant carries loads and is ignored. There is no predicate to build, so every mapping state this demand refused — no `released:` section, a non-string, blank or padded `released.status`, `open.status` equal to it — now loads and is recorded under; the one rule kept, a literal `open.status`, is test_767_the_loader_still_refuses_a_non_literal_open_status. Was: test_767_release_predicate_cannot_be_built_in_a_serving_state. Earlier note: AMENDED by #1221 (issue #1221 D3/M2, human, 2026-10-08): the read-side degrade (FK20) went with the screen; the test, re-homed to test_767_writer.py, pins the constructor's refusals and the writer appending nothing under them. Earlier note: the R5 judgment hole's `resolved_to`. §7 R1 decided FAM-1 fail-closed on both sides
        AND, along with it, that the predicate must be SAFE BY CONSTRUCTION once it lands: the
        constructor raises in the unsafe state rather than merely behaving when configured right.
        The test carries FK20's read-side extension too — O7 is stated for the WRITE only, so the
@@ -813,11 +827,11 @@ demands:
   # crosses no validation at all on the read side; on the write side it is o5's concern.
   - {id: d_failed_ticket_read_puts_no_content_in_the_turn, kind: negative, form: test,
      stakeholder: a later run, minted_from: "70-resolutions.md Part 2, FK36",
-     discharged_by: test_767_a_failed_ticket_read_puts_no_content_in_the_turn,
+     discharged_by: test_1221_list_tickets_serves_the_own_case_and_an_open_cases_comments,
      binds: [ticket_screen, "interacts(query_tool->case_history_store).response",
              "interacts(query_tool->ticket_screen).response"],
      positive_control: o2_released_serves_whole,
-     note: "FK36's resolution, exactly as written: assert only what O2 gives — a failed ticket
+     note: "REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): both gather read screens are removed, the own-case exclusion and the release screen; a ticket reply is served and captured as the store answered it, and model-made precedent is handled by the agent tag (O1) and rule #27 (O2) instead. A non-object listing is no longer a ticket-specific malformed refusal; it is served as answered, as for every system. Was: test_767_a_failed_ticket_read_puts_no_content_in_the_turn. Earlier note: FK36's resolution, exactly as written: assert only what O2 gives — a failed ticket
        read puts NO ticket content into the model's turn or the capture — and leave the error's
        class and the run's fate to the query tool's pre-existing envelope, which this lane
        changes neither of."}

@@ -27,12 +27,13 @@ from ..agent_definition import ResolvedRoots
 from ..agent_role import AgentRole
 
 from defender._env import env_int
+from defender._knowledge import KnowledgePaths
 from defender.runtime.payload_view import (
     passthrough_max_bytes as _capture_view_cap,
 )
+from defender._knowledge import RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA
 from defender.hooks.record_lesson_load import (
     LOAD_KINDS as _LOAD_KINDS,
-    RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA,
     lesson_name as _lesson_name,
 )
 
@@ -129,7 +130,7 @@ class AgentDeps:
     roots: ResolvedRoots | None = field(kw_only=True, default=None)
     tool_config: Any = field(kw_only=True, default=None)
     #: The run's tenant record (#1107) — handed to every verb this role dispatches
-    #: (`VerbContext.tenant`) and to the ticket screen. Set by the run (`run_investigation` onto
+    #: (`VerbContext.tenant`). Set by the run (`run_investigation` onto
     #: MAIN's deps, carried onto each gather lead's), never derived from `defender_dir`: the
     #: settings left the code tree. `None` for a role that dispatches no verb; a verb built over
     #: `None` is refused by `VerbContext`'s own validation. `SkipValidation`: the record is a
@@ -137,6 +138,11 @@ class AgentDeps:
     tenant: Annotated[_RunTenant | None, SkipValidation] = field(kw_only=True, default=None)
 
     role: ClassVar[AgentRole] = AgentRole.MAIN
+
+    @property
+    def knowledge(self) -> KnowledgePaths:
+        """The agent knowledge this role reads (#1108): today the corpus inside `defender_dir`."""
+        return KnowledgePaths.of_defender_dir(self.defender_dir)
 
     @classmethod
     def _for_run(

@@ -665,7 +665,12 @@ demands:
     # run's own id; the store now returns it beside a foreign key, the exclusion is asserted on
     # the model-visible delta and on the captured payload, and a second drive pins that a bare
     # array is filed as malformed rather than forwarded unscreened.
-    discharged_by: test_the_self_case_list_filter_still_excludes_the_current_ticket
+    discharged_by: test_1221_list_tickets_serves_the_own_case_and_an_open_cases_comments
+    note: "REVERSED by #1221 (issue #1221 D3/M2, human, 2026-10-08): the own-case identity exclusion is
+      removed with the release screen — gather is served the run's own case, an open case's comments
+      and a bare-array listing as the store answered them; model-made precedent is handled by the agent
+      tag (O1) and rule #27 (O2) instead. Was: test_the_self_case_list_filter_still_excludes_the_current_ticket
+      — the run's own key was removed from the listing and a bare array filed as malformed."
 
   - id: d27_health_check_granted_uniformly
     kind: domain-outcome

@@ -1042,7 +1042,7 @@ def _authz_contract_error(
     hid: str,
     contract: AuthorizationContract,
     declarers: dict[str, list[tuple[str, str]]],
-    verdicts: dict[str, list[tuple[str, str]]],
+    verdicts: dict[str, list[tuple[str, str, bool]]],
 ) -> str | None:
     """Why this ONE contract on this LIVE hypothesis does not close benign — or `None`."""
     cid = _cell(contract, "id") or "?"
@@ -1062,7 +1062,7 @@ def _authz_contract_error(
                 f"fulfills, so no row can be attributed to this one and none discharges "
                 f"it; number `ac*` across the document, not per hypothesis"
             )
-        rows = [v for v, a in candidates if a == anchor]
+        rows = [(v, cited) for v, a, cited in candidates if a == anchor]
         if not rows:
             return (
                 f"disposition benign blocked: authz contract {cid} on live hypothesis "
@@ -1071,7 +1071,7 @@ def _authz_contract_error(
                 f"carrying anchor kind {anchor!r} discharges it, and the document has none"
             )
     else:
-        rows = [v for v, _a in candidates]
+        rows = [(v, cited) for v, _a, cited in candidates]
 
     if not rows:
         return (
@@ -1082,12 +1082,23 @@ def _authz_contract_error(
         )
     # A list, not `next(..., None)`: `None` is a verdict a row can carry, and would be
     # indistinguishable from "no row".
-    bad = [v for v in rows if v != "authorized"]
+    bad = [v for v, _cited in rows if v != "authorized"]
     if bad:
         return (
             f"disposition benign blocked: authz contract {cid} on "
             f"live hypothesis {hid} resolved {bad[0]!r}, not 'authorized' "
             f"— benign requires every contract authorized"
+        )
+    # Spec rule #27: a past case (an earlier run's verdict) is precedent, never the whole of
+    # an authorization. A row is a past case when it cites one (`cites_past_case`), whatever
+    # its grounding word says: a filled cell cannot be misspelled into an empty one.
+    if all(cited for _v, cited in rows):
+        return (
+            f"disposition benign blocked: authz contract {cid} on live hypothesis {hid} is "
+            f"authorized only by rows citing a past case (`cites_past_case`) — a past case is an earlier "
+            f"run's verdict, and benign cannot rest on past cases alone (rule #27). Resolve "
+            f"{cid} on an authored record too (an iam-policy, a change-mgmt hit, a "
+            f"tacit-knowledge registry entry), or leave it `indeterminate`"
         )
     return None
 
@@ -1108,14 +1119,15 @@ def outstanding_authz_contracts(
     hyps = _walkers.all_hypotheses(companion)
     declarers = _declarers_by_contract_id(companion)
 
-    verdicts: dict[str, list[tuple[str, str]]] = {}
+    verdicts: dict[str, list[tuple[str, str, bool]]] = {}
     for row in _walkers.iter_authz_resolutions(companion):
         # `_cell` (unquoted), matching `_check_authz_contract_closure`; read raw, a quoted
         # `fulfills` would make the two disagree about whether the contract is discharged.
         cid = _cell(row, "fulfills_contract")
         if cid:
             verdicts.setdefault(cid, []).append(
-                (row.get("verdict", "indeterminate"), _anchor_kind(row))
+                (row.get("verdict", "indeterminate"), _anchor_kind(row),
+                 bool(_cell(row, "cites_past_case")))
             )
 
     out: list[tuple[str, AuthorizationContract, str]] = []

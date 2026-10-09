@@ -28,7 +28,8 @@ Usage:
     defender-lessons --show defender/lessons/foo.md    # print just a lesson's frontmatter
 
 PATTERNs are Python regexes matched case-insensitively against the frontmatter
-text. Exit 0 always (no match = no output); a bad regex exits 2.
+as one ``key: value`` line per key, each value in the one-line spelling ``--tags``
+lists (``Lesson.match_text``), so a pattern cannot run from one key into the next. Exit 0 always (no match = no output); a bad regex exits 2.
 """
 from __future__ import annotations
 
@@ -39,18 +40,20 @@ from pathlib import Path
 
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._git import REPO_ROOT
-from defender._tsv import flatten_cell
-from defender.runtime.lessons_engine._lessons_common import as_list, iter_lessons, use_utf8_stdio
+from defender._knowledge import CHECKOUT_KNOWLEDGE
+from defender._untrusted import wrap_fresh
+from defender._corpus import Lesson
+from defender.runtime.lessons_engine._lessons_common import iter_lessons, use_utf8_stdio
 from defender._io import read_text_utf8
 
-LESSONS_DIR = REPO_ROOT / "defender" / "lessons"
+LESSONS_DIR = CHECKOUT_KNOWLEDGE.lessons_dir
 
 DIMENSIONS = ("source_signature", "telemetry_source", "attack_phase")
 
 
-def _emit_match(path: Path, fm: dict) -> None:
-    desc = flatten_cell(str(fm.get("description") or "")).strip()
-    print(f"{path.resolve()}\t{desc}")
+def _emit_match(lesson: Lesson) -> None:
+    # The path prints as is: the loader skips a lesson whose file name is not one printable line.
+    print(f"{lesson.path.resolve()}\t{lesson.line('description')}")
 
 
 def cmd_grep(patterns: list[str]) -> int:
@@ -60,8 +63,9 @@ def cmd_grep(patterns: list[str]) -> int:
         print(f"error: bad regex: {e}", file=sys.stderr)
         return 2
     for lesson in iter_lessons(LESSONS_DIR):
-        if all(rx.search(lesson.raw) for rx in regexes):
-            _emit_match(lesson.path, lesson.fm)
+        text = lesson.match_text()
+        if all(rx.search(text) for rx in regexes):
+            _emit_match(lesson)
     return 0
 
 
@@ -74,8 +78,8 @@ def cmd_tags(field: str | None) -> int:
     for f in fields:
         counts: dict[str, int] = {}
         for lesson in lessons:
-            for val in as_list(lesson.fm.get(f)):
-                counts[str(val)] = counts.get(str(val), 0) + 1
+            for tag in lesson.lines(f):
+                counts[tag] = counts.get(tag, 0) + 1
         print(f"{f}:")
         for val in sorted(counts):
             print(f"  {val:<32} {counts[val]}")
@@ -106,7 +110,9 @@ def cmd_show(paths: list[str]) -> int:
             rc = 2
             continue
         print(f"--- {lesson.resolve()}")
-        print(fm_raw)
+        # The frontmatter as written, for a model to read: framed, as all lesson text bound for
+        # a model is (`defender._corpus`), so a line of it cannot read as this output's own.
+        print(wrap_fresh(fm_raw, "untrusted"))
     return rc
 
 

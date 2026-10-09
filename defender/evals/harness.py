@@ -15,6 +15,7 @@ from pathlib import Path
 from _harness_util import init_git
 
 from defender import _git
+from defender._knowledge import KnowledgePaths
 from defender._model import model
 
 _logger = logging.getLogger(__name__)
@@ -36,10 +37,11 @@ class AuthorRun:
 
 def materialize(scenario: Path, tmp: Path) -> None:
     (tmp / "defender" / "learning" / "_pending").mkdir(parents=True)
-    (tmp / "defender" / "lessons").mkdir(parents=True)
+    knowledge = KnowledgePaths.of_defender_dir(tmp / "defender")
+    knowledge.lessons_dir.mkdir(parents=True)
     # The author lane's other mount: a working copy always has it, and the lane's trees hold
     # both corpora (`open_drain_trees`, #1134).
-    (tmp / "defender" / "lessons-questioner").mkdir(parents=True)
+    knowledge.lessons_questioner_dir.mkdir(parents=True)
 
     learning_dir = tmp / "defender" / "learning"
 
@@ -55,7 +57,7 @@ def materialize(scenario: Path, tmp: Path) -> None:
     src_lessons = scenario / "lessons"
     if src_lessons.is_dir():
         for path in src_lessons.glob("*.md"):
-            shutil.copy(path, tmp / "defender" / "lessons" / path.name)
+            shutil.copy(path, knowledge.lessons_dir / path.name)
 
 
 def run_author(tmp: Path) -> tuple[AuthorRun, float]:
@@ -89,7 +91,7 @@ def capture_results(tmp: Path, scenario_name: str, proc: AuthorRun,
 
     lessons_out = out / "lessons"
     lessons_out.mkdir()
-    for path in (tmp / "defender" / "lessons").glob("*.md"):
+    for path in KnowledgePaths.of_defender_dir(tmp / "defender").lessons_dir.glob("*.md"):
         shutil.copy(path, lessons_out / path.name)
 
     pending_out = out / "_pending"

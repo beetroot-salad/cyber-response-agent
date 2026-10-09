@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic_ai import RunContext
 
 from defender._frontmatter import FrontmatterError, parse_frontmatter
-from defender.hooks.record_lesson_load import LESSON_CORPORA
+from defender._knowledge import LESSON_CORPORA
 from defender.runtime.tools import AgentDeps, _bound_and_wrap, _gated_read, _grep_lines
 
 

@@ -9,10 +9,14 @@ the page being byte-equal to the page of the same run dir with no receipt at all
 deterministic across renders and carries no ticket text — measured before writing).
 
 The mapping half drives the `case_ticket` consumers with the record's `ticket_mapping` (coined
-keyword `mapping=`, `release_predicate` positional — `S.with_mapping`), the query tool's
+keyword `mapping=` — `S.with_mapping`; `release_predicate`, once positional here, was removed by
+#1221's amendment), the query tool's
 ticket screen through the replay harness (`verbs=` / `tenant=`; the served payload is what the
-gather model was shown) and the ticket writer's record step. (#1224 retired the estate applier,
-and with it the world patches a resumed sibling's registry once judged against the mapping.)
+gather model was shown), and a resumed sibling's `WorldRegistry` through `run.main --resume`,
+whose `lifecycle` seam hands the REAL `_drive_investigation` a recording `investigate`. (#1224
+retired the estate applier and the world patches it once judged against the mapping; a world
+now carries facts its live oracle serves.) "After the record is built" is the `preflight` seam, which `run.main` calls after
+`tenant = tenant_of()`.
 
 Nothing here reaches the real docker: the only transport that forks (the record step in
 `test_d_mapping_error_consumers`) is handed a `DockerShim` env, and every `run.main` drive puts the
@@ -29,6 +33,7 @@ from typing import Any
 
 from defender import run_common
 from defender.run_repository import RunPaths
+from defender.learning.branch.estate.registry import EstateError
 from defender.runtime import case_ticket
 from defender.runtime import run_tenant
 from defender.tests import _spec767 as M
@@ -43,6 +48,7 @@ from defender.tests.e2e._replay_harness import (
     drive,
     materialize,
 )
+from defender.tests.tenant_1078_pass_a import _spec1078 as H
 from defender.run_repository import Run as _Run
 from defender.tests.tenant_1107_settings import _spec1107 as S
 
@@ -164,11 +170,12 @@ def _plain(value: Any) -> Any:
     return value
 
 
-def _mapping_1107(released_status: str) -> str:
+def _mapping_1107() -> str:
     """The `_tenants1106` mapping with every value a consumer answers from made distinctive:
-    the signature read from `rule.name` (not the `rule.id` fallback), the reporter, the comment
-    author and the released status."""
-    return (T1106.mapping_text(released_status=released_status, reporter="rep-1107")
+    the signature read from `rule.name` (not the `rule.id` fallback), the reporter and the
+    comment author. (It made the released status distinctive too, until #1221's amendment left
+    nothing that reads one.)"""
+    return (T1106.mapping_text(reporter="rep-1107")
             .replace("signature: rule.id", "signature: rule.name")
             .replace("author: defender", "author: author-1107"))
 
@@ -419,24 +426,21 @@ def test_s7pg_box_planted_flag_and_receipt_render_no_ticket_line(tmp_path, monke
 # ======================================================================================
 
 def test_d_case_ticket_takes_mapping(tmp_path):
-    """The case_ticket functions that consume the mapping (release_predicate, alert_to_open_payload,
+    """The case_ticket functions that consume the mapping (alert_to_open_payload,
     read_case_record, case_record_to_comment, escalation_comment_payload,
-    unreadable_comment_payload) take a CaseMapping instead of settings_dir. None of them reads
+    unreadable_comment_payload — and release_predicate, until #1221's amendment removed it) take
+    a CaseMapping instead of settings_dir. None of them reads
     mapping.yaml: called with a CaseMapping while no mapping file exists anywhere, they answer from
     it."""
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="map")
-    S.mapping_path(folder).write_text(_mapping_1107("released-1107"), encoding="utf-8")
+    S.mapping_path(folder).write_text(_mapping_1107(), encoding="utf-8")
     record = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                                        dispatches_lead_zero=False)
     mapping = record.ticket_mapping
     assert isinstance(mapping, S.record_type("CaseMapping")), f"ticket_mapping is {mapping!r}"
     S.mapping_path(folder).unlink()
     assert not S.mapping_path(folder).exists(), "the mapping file is still there"
-
-    predicate = case_ticket.release_predicate(mapping)
-    assert predicate.is_released({"status": "released-1107"}), "the mapping's released status"
-    assert not predicate.is_released({"status": "closed"}), "a status the mapping does not name"
 
     alert = _alert_1107("sig-name-1107", "summary-1107")
     payload = S.with_mapping(case_ticket.alert_to_open_payload, alert, "case-1107", mapping=mapping)
@@ -463,7 +467,7 @@ def test_s7_mf11_mutating_callers_copy_locally(tmp_path):
     a local copy."""
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="mf11")
-    S.mapping_path(folder).write_text(_mapping_1107("released-1107"), encoding="utf-8")
+    S.mapping_path(folder).write_text(_mapping_1107(), encoding="utf-8")
     record = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                                        dispatches_lead_zero=False)
     mapping = record.ticket_mapping
@@ -493,25 +497,28 @@ def test_s7_mf11_mutating_callers_copy_locally(tmp_path):
     assert unreadable["author"] == "author-1107", unreadable
     assert S.with_mapping(case_ticket.case_record_to_comment, rec,
                         mapping=mapping)["author"] == "author-1107", "a comment edit leaked"
-    assert case_ticket.release_predicate(mapping).released_status == "released-1107"
+    assert S.open_reporter(mapping) == "rep-1107"
     assert _plain(mapping) == before, "building payloads changed the record's mapping"
 
 
 def test_d_mapping_error_consumers(tmp_path, caplog):
-    """With record.ticket_mapping a CaseTicketError, each consumer handles it as at base (CX21). The
-    query tool's ticket screen serves no comments, since every ticket reads as unreleased, and logs
-    one warning. The record step warns and writes an error receipt."""
+    """With record.ticket_mapping a CaseTicketError, the record step warns and writes an error
+    receipt (CX21, as at base), and nothing else is touched by it: the query tool reads no
+    mapping, so a ticket listing reaches gather whole — keys and comments, open or closed — with
+    no warning about the mapping. (#1221 removed the query tool's release screen, which degraded
+    to serving no comments here, and the estate applier's comment-patch refusal.)"""
     root = tmp_path / "tenants"
-    # `open.status` and `released.status` both 'open': the loader's own lifecycle refusal (#767),
-    # a mapping file present (so the tenant is accepted, REQUIRED_SETTINGS) and unusable.
-    S.plant(root, marker="bad", table=TICKET_TABLE, released_status="open")
+    # A templated `open.status`: the loader's own lifecycle refusal (#767; since #1221's amendment
+    # its only one), a mapping file present (so the tenant is accepted, REQUIRED_SETTINGS) and
+    # unusable.
+    S.plant(root, marker="bad", table=TICKET_TABLE, open_status="{summary}")
     record = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                                        dispatches_lead_zero=False)
     error = record.ticket_mapping
     assert isinstance(error, S.case_ticket_error()), f"ticket_mapping is {error!r}"
     said = str(error)
 
-    # (a) The screen: every ticket unreleased, keys served, comments not; one warning.
+    # (a) The query tool: no mapping is read, so every ticket is served whole; no warning.
     caplog.set_level(logging.WARNING)
     tickets = [M.ticket("SOC-OPEN-1107", status="open", comments=[M.comment("MARK-OPEN-1107")]),
                M.ticket("SOC-CLOSED-1107", status="closed",
@@ -519,21 +526,17 @@ def test_d_mapping_error_consumers(tmp_path, caplog):
     caplog.clear()
     run_dir, gather, calls = _screen_leg(tmp_path, root, "screen-err", tickets)
     assert len(calls) == 1, f"the ticket verb ran {len(calls)} times"
-    assert _shown(gather, "SOC-OPEN-1107"), "the screen dropped the tickets themselves"
-    assert _shown(gather, "SOC-CLOSED-1107"), "the screen dropped the tickets themselves"
-    for marker in ("MARK-OPEN-1107", "MARK-CLOSED-1107"):
-        assert not _shown(gather, marker), f"a comment ({marker}) was served off a bad mapping"
-        assert S.holders(run_dir, marker) == [], f"{marker} reached the run dir"
-    # The screen's own warning: the query tool's logger, naming the kept error (CX21, as at base).
+    for shown in ("SOC-OPEN-1107", "SOC-CLOSED-1107", "MARK-OPEN-1107", "MARK-CLOSED-1107"):
+        assert _shown(gather, shown), f"{shown} was withheld from gather under a bad mapping"
     warned = [r for r in caplog.records
               if r.name == "defender.runtime.query_tool" and r.levelno >= logging.WARNING
               and said in r.getMessage()]
-    assert len(warned) == 1, f"the screen warned {len(warned)} times naming the mapping error"
+    assert warned == [], "the query tool still reads the case-history mapping"
 
     # (b) The record step: a warning and an error receipt, no comment sent.
     case_dir = M.make_run(tmp_path / "runs", "case-err-1107")
-    # CX8: the shim on the child's PATH receives argv + env; it answers the read-back as an open
-    # case (not released) and a POST as created, in curl's body + status-line shape.
+    # CX8: the shim on the child's PATH receives argv + env; it answers a POST as created, in
+    # curl's body + status-line shape.
     shim = S.DockerShim(tmp_path / "docker", S.store_answers_ok(case_dir.name))
     caplog.clear()
     assert S.record_step(case_dir, record, env=shim.env()) is None
@@ -548,32 +551,108 @@ def test_d_mapping_error_consumers(tmp_path, caplog):
         "a comment was sent off a bad mapping")
 
 
-def test_o2_ticket_screen_mapping_snapshot(tmp_path):
-    """After the record is built, editing mapping.yaml's released status does not change the next
-    ticket screen: the query tool screens against record.ticket_mapping as built."""
-    # rejected: the per-call re-read at base (CX9) and test_767_the_mapping_is_parsed_once_per_edit (CX10)
+def test_o2_ticket_replies_ignore_the_mapping(tmp_path):
+    """Neither the record's ticket_mapping nor an edit of mapping.yaml after the record is built
+    changes what a ticket reply serves: the query tool reads no mapping, so a case closed under
+    the mapping as built, one closed only under the edited file, and an open one all reach
+    gather with their comments. (#1221 removed the release screen that once read the record's
+    released status here; its amendment removed the released status itself, so the mid-run edit
+    moves the reporter, and the "edited" case's status is one only that edit names.)"""
     root = tmp_path / "tenants"
-    folder = S.plant(root, marker="o2", table=TICKET_TABLE, released_status="closed")
+    folder = S.plant(root, marker="o2", table=TICKET_TABLE)
     record = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                                        dispatches_lead_zero=False)
-    assert case_ticket.release_predicate(record.ticket_mapping).released_status == "closed"
+    assert S.open_reporter(record.ticket_mapping) == "defender"
 
     def edit_mapping() -> None:
-        # Mid-run, after the record was built: an operator moves the released status.
+        # Mid-run, after the record was built: an operator edits the mapping.
         S.mapping_path(folder).write_text(
-            T1106.mapping_text(released_status="done-edited-1107"), encoding="utf-8")
+            T1106.mapping_text(reporter="done-edited-1107"), encoding="utf-8")
 
     tickets = [M.ticket("SOC-CLOSED-O2", status="closed", comments=[M.comment("MARK-CLOSED-O2")]),
                M.ticket("SOC-EDITED-O2", status="done-edited-1107",
-                        comments=[M.comment("MARK-EDITED-O2")])]
+                        comments=[M.comment("MARK-EDITED-O2")]),
+               M.ticket("SOC-OPEN-O2", status="open", comments=[M.comment("MARK-OPEN-O2")])]
     run_dir, gather, calls = _screen_leg(tmp_path, root, "screen-o2", tickets,
                                          while_serving=edit_mapping)
     assert len(calls) == 1, f"the ticket verb ran {len(calls)} times"
     assert "done-edited-1107" in S.mapping_path(folder).read_text(encoding="utf-8"), (
         "the mid-run edit did not land")
-    assert _shown(gather, "SOC-EDITED-O2"), "the screen dropped the edited-status ticket itself"
-    assert _shown(gather, "MARK-CLOSED-O2"), (
-        "a ticket released under the mapping as built was screened by the edited file")
-    assert not _shown(gather, "MARK-EDITED-O2"), (
-        "a ticket released only under the edited file was served its comments")
-    assert S.holders(run_dir, "MARK-EDITED-O2") == [], "the edited-file release reached the run"
+    for marker in ("MARK-CLOSED-O2", "MARK-EDITED-O2", "MARK-OPEN-O2"):
+        assert _shown(gather, marker), f"{marker} was withheld — a ticket reply read the mapping"
+        assert S.holders(run_dir, marker), f"{marker} never reached the run's capture"
+
+
+def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
+    """A resumed sibling's WorldRegistry, built in run.py, builds a world whose facts put a note
+    on a case whatever status the case is in — the status the record was built with, or one only
+    a mid-run edit of mapping.yaml names: no ticket reply is screened any more, so the registry
+    consults no mapping. (#1221 removed the estate applier's refusal, which judged a comment
+    patch against the record's ticket_mapping; #1224 replaced the patches with world facts.)"""
+    # #1120: the resumed sibling reads its tenant from `DEFENDER_DATA_ROOT` alone.
+    root = current_data_root()
+    folder = S.plant(root, marker="est", table=TICKET_TABLE)
+    probe = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
+                                      dispatches_lead_zero=False)
+    assert S.open_reporter(probe.ticket_mapping) == "defender"
+
+    def note(entity: str, status: str) -> list[dict[str, Any]]:
+        return [T.fact("f1", f"case {entity} is in status {status} and carries a defender note "
+                             "that the same binary was benign last quarter", (entity,))]
+
+    _base, src = T.runs_base(tmp_path)
+    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src), worlds=[
+        T.base_world(),
+        T.world_doc("b", facts=note("SOC-1", "closed")),
+        T.world_doc("c", facts=note("SOC-2", "done-edited-1107")),
+    ]))
+    shim = S.DockerShim(tmp_path / "docker")
+    monkeypatch.setenv("PATH", shim.path_value())
+    run = S.run_py()
+
+    def resume(world: str) -> tuple[Any, list[dict[str, Any]], dict[str, Any]]:
+        # The record is built from the file as planted; the edit lands after (preflight runs
+        # after `tenant = tenant_of()`), each run afresh.
+        S.mapping_path(folder).write_text(T1106.mapping_text(),
+                                          encoding="utf-8")
+        investigated: list[dict[str, Any]] = []
+        handed: dict[str, Any] = {}
+
+        def edit_after_record(_model: str | None = None, *, branching: bool = False) -> int:
+            S.mapping_path(folder).write_text(
+                T1106.mapping_text(reporter="done-edited-1107"), encoding="utf-8")
+            return 0
+
+        def lifecycle(**kw: Any) -> dict[str, Any]:
+            handed.update(kw)
+            rd = kw["run_dir"]
+            return run._drive_investigation(
+                alert_path=RunPaths(rd).alert, run_dir=rd, run_id=rd.name,
+                defender_dir=kw["defender_dir"], model_name=kw["model"],
+                model_override=kw["model_override"], box=None, tenant=kw["tenant"],
+                world=kw["world"], episode=kw["episode"],
+                investigate=lambda **ikw: investigated.append(ikw) or {
+                    "output": "spec1107", "requests": 0, "truncated_by": None})
+
+        rec = S.RunRecorder(tmp_path / "siblings" / world)
+        try:
+            outcome: Any = S.drive_run(
+                H.resume_argv(ep / "family.yaml", world, "--tenant", S.PLAYGROUND_ID,
+                              "--no-learn"),
+                rec, preflight=edit_after_record, lifecycle=lifecycle)
+        except EstateError as refused:
+            outcome = refused
+        return outcome, investigated, handed
+
+    got_b, investigated_b, _ = resume("b")
+    assert "done-edited-1107" in S.mapping_path(folder).read_text(encoding="utf-8"), (
+        "the post-record edit did not land")
+    assert got_b == (0, None), (
+        f"world b (comments on a case moved to the status the record was built with) was "
+        f"refused: {got_b}")
+    assert len(investigated_b) == 1, "world b's WorldRegistry was built but nothing ran on it"
+
+    got_c, investigated_c, _ = resume("c")
+    assert got_c == (0, None), (
+        f"world c (comments on a status only the edited file names) was refused: {got_c}")
+    assert len(investigated_c) == 1, "world c's WorldRegistry was built but nothing ran on it"

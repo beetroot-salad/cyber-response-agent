@@ -711,6 +711,10 @@ def test_1224_served_answer_is_recorded_and_screened_as_real_data(tmp_path):
     one evidence row in the run's queries table carrying the served payload with exit code 0,
     and the query tool's screens (the ticket self-reference screen) applied to it exactly as to a
     real answer.
+
+    Merged with #1221, which removed the ticket self-reference screen from real answers: a real
+    `list-tickets` answer now reaches gather whole, so the served one must too — the
+    investigation's own case included.
     """
     est = _TicketEstate(tmp_path / "estate")
     est.answer("ticket", "list-tickets", TICKETS, TICKETS_BASE)
@@ -726,9 +730,9 @@ def test_1224_served_answer_is_recorded_and_screened_as_real_data(tmp_path):
     assert len(rows) == 1
     assert rows[0]["exit_code"] == 0
     shown = json.loads(_evidence_payload(run_dir, rows[0]))
-    assert [t["key"] for t in shown["tickets"]] == ["INC-7", "INC-9001"], (
-        "the served (forged) ticket reaches the investigator; its own case is screened out")
-    assert shown["total"] == 2
+    assert [t["key"] for t in shown["tickets"]] == [RUN_ID, "INC-7", "INC-9001"], (
+        "the served (forged) ticket reaches the investigator whole, as a real answer would")
+    assert shown["total"] == 3
     assert _decisions(ep, "b") == [S.ORACLE_DECISION]
 
 
@@ -1361,6 +1365,9 @@ def test_input_base_answer_would_trip_a_query_tool_screen(tmp_path):
     citing the investigation's own alert) re-served unchanged by the oracle gets exactly the
     same evidence row and screen outcome as on a real run, because the served answer goes back
     through the query tool exactly as real data does.
+
+    Merged with #1221, which removed the self-reference screen from real answers: the real run
+    now shows the investigation's own ticket, so the re-served answer must show it too.
     """
     est = _TicketEstate(tmp_path / "estate")
     est.answer("ticket", "list-tickets", TICKETS, TICKETS_BASE)
@@ -1376,7 +1383,8 @@ def test_input_base_answer_would_trip_a_query_tool_screen(tmp_path):
     assert _row_view(branch_rows[0]) == _row_view(real_rows[0])
     shown = json.loads(_evidence_payload(branch_dir, branch_rows[0]))
     assert json.loads(_evidence_payload(real_dir, real_rows[0])) == shown
-    assert RUN_ID not in json.dumps(shown), "the screen withheld the investigation's own ticket"
+    assert RUN_ID in json.dumps(shown), (
+        "the investigation's own ticket was withheld, though no real answer screens it any more")
     assert oracle.requests >= 1
     assert _decisions(ep, "b") == [S.PASSTHROUGH]
 

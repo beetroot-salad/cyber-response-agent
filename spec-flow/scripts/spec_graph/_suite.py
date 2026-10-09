@@ -104,8 +104,9 @@ def no_tests_refusal(tool: str, dirs: list[Path]) -> str:
 
 
 def suite_files(suite_dir: Path) -> list[Path]:
-    """The suite's `*.py`, minus `shuffle-premises` copies (`*.copyN.py`), which reuse test
-    names with premise-only docstrings and would shadow the real file."""
+    """The suite's `*.py`, minus leftover premise copies (`*.copyN.py`, written by the retired
+    answer-escalation step), which reuse test names with premise-only docstrings and would
+    shadow the real file."""
     return [p for p in sorted(suite_dir.glob("*.py")) if not _COPY.search(p.name)]
 
 

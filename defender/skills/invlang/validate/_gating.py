@@ -27,7 +27,9 @@ from ..schema import (
 )
 from ._diag import REFUTED_WEIGHT
 from ._refs import _HYPOTHESIS_DECLARING_BLOCKS, _known_ids, _leads
-from ._structure import _cell, _check_vocab
+from defender._run_id import is_valid_run_id
+
+from ._structure import PAST_CASE, _cell, _check_vocab, _folded_grounding
 from ._state import (
     _check_benign_authz,
     _check_benign_open_slots,
@@ -193,14 +195,6 @@ assert RUNTIME_EVIDENCE in vocab.ANCHOR_KINDS
 assert TELEMETRY_BASELINE in vocab.CONSULTATION_GROUNDING
 
 
-def _folded_grounding(value: str) -> str:
-    """A `grounding` cell folded for one exact-match refusal: lowercased, with underscores and
-    whitespace read as hyphens. The identity on anything correctly written. Not for a cell
-    another check reads by value, where folding would hide the difference it reads.
-    """
-    return re.sub(r"[\s_]+", "-", value.strip().lower())
-
-
 #: The `:R authz` verdicts rules here branch on: `authorized` is what the benign gate demands
 #: (and so what a fabricated citation is worth writing); `indeterminate` is the one `basis`
 #: qualifies.
@@ -295,6 +289,21 @@ def _authz_row_grounding_error(companion: CompanionBody, row: Any) -> str | None
     closed cell that says which registry answered.
     """
     where = f"`:R authz` row for contract {_cell(row, 'fulfills_contract') or '?'}"
+    # Rule #27 reads `cites_past_case` to decide what is a past case, so the cell must be one
+    # it can read: a run id when filled, and filled whenever the row says it rests on one.
+    cites = _cell(row, "cites_past_case")
+    if cites and not is_valid_run_id(cites):
+        return (
+            f"{where}: `cites_past_case {cites}` is not a run id — the cell names the earlier "
+            f"run whose verdict this row leans on, as the agent tag on its comment spells it "
+            f"(`[defender agent comment, run <run id>]`)"
+        )
+    if not cites and _folded_grounding(_cell(row, "grounding_kind")) == PAST_CASE:
+        return (
+            f"{where}: `grounding {PAST_CASE}` with no `cites_past_case` — a past case names "
+            f"the run it cites. Fill `cites_past_case <run id>` from the tag on the comment "
+            f"you are leaning on"
+        )
     if _folded_grounding(_cell(row, "grounding_kind")) == TELEMETRY_BASELINE:
         return (
             f"{where}: `grounding {TELEMETRY_BASELINE}` — a telemetry baseline is what the "

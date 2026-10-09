@@ -30,18 +30,13 @@ from defender.scripts.adapters.confinement import ConfinementFault
 from defender.tests._spec767 import (
     AGENT_AUTHOR,
     COMMENTS_SUFFIX,
-    RELEASED_STATUS,
+    CLOSED_STATUS,
     TICKETS_PATH,
     TRANSITIONS_SUFFIX,
     FakeStore,
-    comment,
-    listing,
     make_run,
     mapping_doc,
     record,
-    screen_list,
-    served_comments,
-    served_tickets,
     ticket,
     use_mapping,
 )
@@ -260,48 +255,6 @@ def test_767_adapter_http_confinement_and_capture_hold(tmp_path):
     )
 
 
-def test_767_ticket_adapter_edge_carries_no_model_reachable_comment_content(tmp_path):
-    """d_ticket_adapter_read_stays_non_model_facing — COHERENCE, bound at the UNMOVED reader's
-    own edge (R7). `ticket_adapter` reads the same store D4's screen now wraps, and the screen
-    wraps only `query_tool`'s edge — so this reader has to be dismissed on its own evidence,
-    not on a demand at the boundary's altitude that reads green when only the moved reader was
-    observed.
-
-    The evidence is a JOIN, asserted rather than recalled: every ticket verb the adapter
-    exposes that ANY role can reach must be one D4's screen covers. `health-check` carries no
-    ticket content at all; `list-tickets` and `get-ticket` are the two the screen dispatches
-    on (r5). A newly-granted adapter verb the screen does not cover — a `key-pattern` or a
-    `case-opened-at` re-grant — fails here, which is exactly the coherence break R7 exists to
-    catch.
-
-    Cites c13 (after D5 the query tool is the only code handing ticket-store content to a
-    model) and the grant census."""
-    from defender.runtime.ticket_screen import TICKET_GET, TICKET_LIST
-
-    screened = {TICKET_LIST, TICKET_GET}
-    contentless = {"health-check"}
-
-    rows = _shipped_rows()
-    reachable = {
-        d.verb for d in rows
-        if d.system == "ticket" and d.roles
-    }
-    assert reachable, "no ticket verb reaches any role — the coherence check is vacuous"
-    unscreened = reachable - screened - contentless
-    assert not unscreened, (
-        f"the unmoved reader exposes {sorted(unscreened)} to a role, and D4's screen covers "
-        f"only {sorted(screened)}: a ticket verb reaching a model outside the screened pair is "
-        "O2's failure witness on a path nothing else in this suite observes"
-    )
-
-    adapter = _text(DEFENDER_DIR / "scripts" / "adapters" / "ticket_adapter.py")
-    for seam in ("screen_list", "screen_get"):
-        assert seam not in adapter, (
-            f"the adapter calls `{seam}` itself: D4 attaches at the query tool's single "
-            "insertion point (r5), and a second screen is a second policy to keep in step"
-        )
-
-
 # =======================================================================================
 # D5 / N10 / S3′ — the resolution-decoding lane, closed structurally
 # =======================================================================================
@@ -406,7 +359,8 @@ def test_767_a_typed_resolution_reaches_no_reader(tmp_path, monkeypatch):
     that census move — the module and its named entry point.
 
     Its positive control is `d0_screen_shape`: a `resolution` field is still SERVED untouched
-    (§7 R9/FK05's examined no, on c3's ground), so "no reader" is not "no field"."""
+    (since #1221 every ticket reply is served as the store answered it), so "no reader" is not
+    "no field"."""
     from defender.tests import test_923_authoring_surfaces as census
 
     rel = "runtime/case_ticket.py"
@@ -419,38 +373,27 @@ def test_767_a_typed_resolution_reaches_no_reader(tmp_path, monkeypatch):
         "parse_disposition_from_resolution`, which D5 deletes"
     )
 
-    use_mapping(monkeypatch, tmp_path / "dfn", mapping_doc())
-    typed = ticket("SOC-TYPED", labels=["sig:5710"],
-                   comments=[comment("agent notes")])
-    typed["resolution"] = "unresolved — whatever an analyst felt like typing"
-    payload, code, _ = screen_list(listing(typed))
-    assert code == 0
-    assert served_tickets(payload)[0]["resolution"] == typed["resolution"], (
-        "the served record's `resolution` was rewritten — it is inert, not screened"
-    )
     assert not _shipped_hits(r"\bparse_disposition_from_resolution\b"), (
         "a shipped module still decodes a hand-typed resolution"
     )
 
 
 def test_767_query_tool_is_only_ticket_reader(tmp_path):
-    """s3p_single_model_facing_reader — NEGATIVE, the path census O2's own text demands: "on
-    every read path into the store, not only the query tool's". After D5 the query tool is the
-    only code that hands ticket-store content to a model (c13, S3′).
+    """s3p_single_model_facing_reader — NEGATIVE, the path census: after D5 the query tool is
+    the only code that hands ticket-store content to a model (c13, S3′), and since #1221 it
+    hands it over as the store answered it — no shipped module calls a ticket screen at all
+    (#1221 S2: no product path removes or alters content in a reply by system, verb or
+    content; the generic size view is not keyed on either).
 
-    RFJ5 is why this is a CENSUS test and not a behavioural one: all three readers treated the
-    second-consumer question as unaddressed, and O2 decides it — O2 binds any consumer by
-    construction, and this demand is what pins the current population at ONE. The probe
-    `auth_P16` remains open on whether `ticket_screen`'s own docstring still advertises two
-    consumers; a stale docstring is doc-vs-code drift for `finalize`, not a design fork, and
-    this test does not assert prose.
-
-    Its positive control is `o2_released_serves_whole`: the one reader in the census DOES
-    hand screened ticket content to a model."""
-    consumers = _shipped_hits(r"(?<!def )\bscreen_(?:list|get)\s*\(")
-    assert set(consumers) == {"defender/runtime/query_tool.py"}, (
-        f"the screen protocol has consumers beyond the query tool: {sorted(consumers)} — O2 "
-        "binds every one of them, and this census is what says how many there are"
+    Its positive control is `o2_released_serves_whole`: the one reader in the census DOES hand
+    ticket content to a model, the own case and an open case's comments included."""
+    consumers = _shipped_hits(r"(?<!def )\bscreen_(?:list|get|release_list|release_get)\s*\(")
+    assert consumers == {}, (
+        f"a shipped module still screens ticket replies: {consumers} — #1221 removed both "
+        "read screens"
+    )
+    assert not (DEFENDER_DIR / "runtime" / "ticket_screen.py").exists(), (
+        "runtime/ticket_screen.py survives #1221's removal of both read screens"
     )
 
     forward_dir = DEFENDER_DIR / "learning" / "author" / "verify_forward"
@@ -463,7 +406,6 @@ def test_767_query_tool_is_only_ticket_reader(tmp_path):
     subprocess_readers = _shipped_hits(r"get-ticket")
     allowed = {
         "defender/scripts/adapters/ticket_adapter.py",
-        "defender/runtime/ticket_screen.py",
         "defender/runtime/query_tool.py",
         # A pre-existing, unrelated docstring example — `render_refused`'s illustration of one
         # rendered denial line, predating #767 and untouched by D1-D8. Not a reader of the
@@ -471,7 +413,7 @@ def test_767_query_tool_is_only_ticket_reader(tmp_path):
         "defender/learning/judge/family.py",
     }
     assert set(subprocess_readers) <= allowed, (
-        "a shipped module outside the adapter/screen/query-tool trio names `get-ticket`: "
+        "a shipped module outside the adapter and the query tool names `get-ticket`: "
         f"{sorted(set(subprocess_readers) - allowed)}"
     )
 
@@ -535,52 +477,38 @@ def test_767_every_checked_in_census_of_this_surface_moves_together(tmp_path):
 
 def test_767_no_status_or_author_literal_in_writer_or_screen(tmp_path, monkeypatch):
     """o5_no_vendor_literals_in_code — COHERENCE. The vendor spellings this lane introduces —
-    the released status, the agent author identity, the comment field — live in the mapping,
-    and changing them there changes what the WRITER sends, what the WRITER refuses behind, AND
-    what the SCREEN keeps, with no code edit.
+    the agent author identity, the comment field — live in the mapping, and changing them there
+    changes what the WRITER sends, with no code edit; and neither the writer nor the query tool
+    spells them, or the store's lifecycle words, as a literal.
 
-    §7 FK54 settled the shape: ONE loader, one resolution, asserted as a single test that
-    changes the mapping ONCE and observes both sides. That test fails if the two sides ever
-    diverge, which is the observable worth having — the probe `auth_P6` (does every execution
-    context resolve the same root?) stays open, and a divergence there surfaces here.
-
-    REJECTED, and deliberately not asserted (N8): `ticket_screen`'s existing binding of the
-    stub's envelope — `tickets`, `key`, `comments`, `author` — is the stub adapter's own and
-    stays in code, outside O5's scope."""
+    #1221 removed the read-side screen, which was the other side this test once observed
+    following the same mapping, and its amendment removed the writer's release check, which
+    followed the mapping's released status: a case the store holds as `closed`, or in a status
+    a vendor coined, is commented on the same way — the writer asks no status at all."""
     use_mapping(monkeypatch, tmp_path / "dfn",
-                mapping_doc(comment_author="acme-bot", released_status="acme-done"))
+                mapping_doc(comment_author="acme-bot", released={"status": "acme-done"}))
 
     run_dir = make_run(tmp_path, name="20260101T000000Z-acme")
     store = FakeStore()
     record(run_dir, store)
     assert store.only_comment()["author"] == "acme-bot", "the writer did not follow the mapping"
 
-    behind = FakeStore(ticket=ticket("any", status="acme-done"))
-    record(make_run(tmp_path, name="20260101T000001Z-acme"), behind)
-    assert behind.writes() == [], "the writer's release check did not follow the mapping"
-
-    done = ticket("SOC-ACME", status="acme-done",
-                  comments=[comment("prior notes", author="acme-bot")])
-    payload, code, _ = screen_list(listing(done))
-    assert code == 0
-    assert [c["body"] for c in served_comments(served_tickets(payload)[0])] == ["prior notes"], (
-        "the screen did not follow the same mapping the writer did"
-    )
-    stock, code, _ = screen_list(listing(ticket("SOC-STOCK", status=RELEASED_STATUS,
-                                                comments=[comment("prior notes")])))
-    assert code == 0
-    assert served_comments(served_tickets(stock)[0]) == [], (
-        "the store's stock status still releases under a mapping that named another"
-    )
+    for n, status in enumerate(("acme-done", CLOSED_STATUS), start=1):
+        held = FakeStore(ticket=ticket("any", status=status))
+        held_dir = make_run(tmp_path, name=f"20260101T00000{n}Z-acme")
+        record(held_dir, held)
+        assert [(c.method, c.path) for c in held.calls] == [
+            ("POST", f"{TICKETS_PATH}/{held_dir.name}{COMMENTS_SUFFIX}"),
+        ], f"a case held as {status!r}: the writer did more than post its comment"
+        assert held.only_comment()["author"] == "acme-bot"
 
     for path, why in (
         (DEFENDER_DIR / "scripts" / "case_history" / "ticket_writer.py", "the writer"),
-        (DEFENDER_DIR / "runtime" / "ticket_screen.py", "the screen"),
         (DEFENDER_DIR / "runtime" / "query_tool.py", "the query tool"),
     ):
         source = _text(path)
-        for quoted in (f'"{RELEASED_STATUS}"', f"'{RELEASED_STATUS}'"):
-            assert quoted not in source, f"{why} spells the released status as a code literal"
+        for quoted in (f'"{CLOSED_STATUS}"', f"'{CLOSED_STATUS}'"):
+            assert quoted not in source, f"{why} spells the closed status as a code literal"
         for quoted in (f'"{AGENT_AUTHOR}"', f"'{AGENT_AUTHOR}'"):
             assert quoted not in source, (
                 f"{why} spells the agent author identity as a code literal"
@@ -592,48 +520,45 @@ def test_767_no_status_or_author_literal_in_writer_or_screen(tmp_path, monkeypat
 # =======================================================================================
 
 
-def test_767_ticket_skill_md_describes_the_release_lane(tmp_path):
-    """d7_briefing_rewrite — settled premise 69 (and §7 FK55's first half, which keeps the
-    SKILL.md rewrite IN the suite). `skills/ticket/SKILL.md` is MODEL-FACING prose, and D4
-    makes three of its sentences false.
+def test_1221_ticket_skill_md_claims_no_read_screen(tmp_path):
+    """d7_briefing_rewrite, after #1221. `skills/ticket/SKILL.md` is MODEL-FACING prose, and
+    #1221 makes its read-screen sentences false: gather is no longer kept from the run's own
+    case, and an open case's comments are no longer withheld until a person closes it. A model
+    told otherwise would read its own case's enrichment, or an open case's notes, as something
+    the store could not have served — so the stale claims must go.
 
-    RF3/g14 is the finding this carries: D7's own line ranges omit lines 58-60 — "Comments are
-    signal-bearing. Resolution rationale and related-ticket references typically live in
-    comment bodies, not in structured fields." — which is exactly the read_guidance sentence
-    D4 falsifies for unreleased cases. The close-by-the-host text goes with D5, and
-    line 78's duplicated "`run.py` / `run.py`" is a stale-reference artifact the same rewrite
-    should clear.
+    #1221's amendment makes the write-side sentence false too: the writer no longer declines to
+    record onto a case a person has closed (it asks no status), so a briefing still saying a
+    re-run of a closed case is refused would misdescribe where that run's notes go.
 
-    §7 FK43 adds the meaning that must be said out loud: a person's close RELEASES the case
-    for reading and does not endorse the agent's proposed verdict. §7 FK42 adds the other:
-    what a person reviewed is the record AS DISPLAYED, visibly truncated when cut.
-
-    FK55's second half is NOT here and deliberately so: `defender/docs/case-history-write-path.md`
-    is human-facing architecture prose named by no D-row, and stale prose there is a
-    `finalize`-stage concern (probe `auth_P9` is open on whether the file exists at all)."""
+    What stays true stays said: a case's status is its lifecycle, a person closes it, and the
+    disposition is the human's. Matched over the text with its line breaks folded, so a
+    sentence wrapped across lines is still found."""
     skill = _text(DEFENDER_DIR / "skills" / "ticket" / "SKILL.md")
-    lowered = skill.lower()
+    lowered = " ".join(skill.lower().split())
 
     stale = {
+        "the own-case exclusion": "excluded by identity",
+        "the release screen": "comments reach you only from a",
+        "the emptied comment list": "comment list is served empty",
+        "a comment served only once released": "released agent",
         "the close-lifecycle sentence": "closes it with the disposition",
         "the RF3 read_guidance sentence": "resolution rationale and related-ticket references",
         "the duplicated run.py artifact": "`run.py` / `run.py`",
         "the retired approval tag": "`approved`",
+        "the writer declining a closed case": "a person has already closed",
+        "a re-run of a closed case refused": "refused rather than appended",
     }
     for why, text in stale.items():
         assert text.lower() not in lowered, (
-            f"{why} survives the rewrite: D4/D5 make it false, and this file is what a MODEL "
-            "reads about where rationale lives"
+            f"{why} survives: #1221 (or its amendment, or D4/D5 before it) removed it, and this "
+            "file is what a MODEL reads about the ticket store"
         )
 
     for why, needle in (
-        ("the released status's own spelling", RELEASED_STATUS),
-        ("that comments reach the model only from a closed case", "closed"),
-        ("that a close is a release to read, not an endorsement", "endors"),
-        ("that the comment a person reviewed may be visibly truncated", "truncat"),
         ("that the disposition is the human's", "disposition"),
-        ("that a person's close is what releases a case", "person"),
+        ("that a person closes a case", "person"),
     ):
         assert needle.lower() in lowered, (
-            f"the rewritten briefing never says {why} ({needle!r} appears nowhere)"
+            f"the briefing no longer says {why} ({needle!r} appears nowhere)"
         )

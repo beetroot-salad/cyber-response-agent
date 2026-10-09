@@ -224,9 +224,15 @@ def lead_zero_text(template_id: str = SHIPPED_CORRELATION_TEMPLATE) -> str:
     return f"correlation_template: {template_id}\n"
 
 
-def mapping_text(released_status: str = "closed", reporter: str = "defender") -> str:
-    """A complete, valid case-history mapping whose `released.status` is the one value a
-    reader test watches flow out."""
+def mapping_text(reporter: str = "defender", open_status: str = "open") -> str:
+    """A complete case-history mapping whose `open.reporter` is the one value a reader test
+    watches flow out. `open_status` is written quoted and as given, so a template
+    (`"{summary}"`) makes the one mapping the loader still refuses (#1221's amendment kept only
+    the literal-`open.status` rule).
+
+    It still carries #767's `released:` section, as an un-migrated tenant repo does: the loader
+    accepts it and nothing reads it (#1221, amended), so every tenant planted from this text
+    exercises that tolerance."""
     return f"""\
 source:
   signature: rule.id
@@ -236,7 +242,7 @@ open:
   key: "{{case_id}}"
   summary: "{{summary}}"
   description: "Auto-created from alert {{case_id}} (rule {{signature}})."
-  status: open
+  status: "{open_status}"
   reporter: {reporter}
   labels:
     - "sig:{{signature}}"
@@ -245,7 +251,7 @@ comment:
   author: defender
   body: "{{disposition}} — {{cause}}\\n\\n{{narrative}}"
 released:
-  status: {released_status}
+  status: closed
 """
 
 
@@ -291,8 +297,8 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     root: Path, tenant_id: str, *,
     table: str = TABLE_A,
     lead_zero: str | None = None,
-    released_status: str = "closed",
     reporter: str = "defender",
+    open_status: str = "open",
     marker: str | None = None,
     configs: dict[str, str] | None = None,
     omit: tuple[str, ...] = (),
@@ -311,7 +317,7 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     files: dict[str, str] = {
         "verb-grants.yaml": table,
         "lead-zero.yaml": lead_zero if lead_zero is not None else lead_zero_text(),
-        "systems/case-history/mapping.yaml": mapping_text(released_status, reporter),
+        "systems/case-history/mapping.yaml": mapping_text(reporter, open_status),
     }
     for system, text in (configs if configs is not None
                          else config_texts(marker or tenant_id)).items():

@@ -166,7 +166,7 @@ Every field earns its place by naming its consumer; a field nothing consumes is 
 | `Demand.kind` / `.form`, `binds` | the gate's join (`executable` is derived from `form`) | rule input |
 | `Demand.discharged_by` (form: test) + the named test's docstring | check_binds's prose⊄binds scan; phase-F test-existence check | pointer + rule input |
 | `Demand.outcome` (form: clause / waiver only) | check_binds's prose⊄binds scan for those forms; the cold reconciler | obligation content + readability |
-| `Demand.rejected` (clause/waiver) / a test `# rejected:` / a premise `# fork:` | §7 decision record; a `# fork:` routes a known-decision premise regardless of answerer spread | decision channel |
+| `Demand.rejected` (clause/waiver) / a test `# rejected:` / a premise `# fork:` | §7 decision record; a `# fork:` routes a known-decision premise to the fork list regardless of how it was answered | decision channel |
 | element `provenance` | R0 routing; "which artifact do I fix" | completeness forcer |
 | mandatory-with-`unknown` on invariants; `identity.evidence` | forces claim-or-confess, with the claim's source cited | completeness forcer |
 | `id` | graph diff across runs; witness text | identity |

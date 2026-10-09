@@ -83,6 +83,21 @@ def test_all_flattens_tab_and_newline_in_description(tmp_path, capsys):
     assert lines == ["L\ta b c\t0\t0"]
 
 
+def test_all_drops_terminal_controls_from_the_description(tmp_path, capsys):
+    """#1206: the row follows the lesson loader's one-line rule, so an escape sequence or a
+    U+001F in a lesson-written cell cannot redraw the operator's terminal. (A control in the
+    file name itself is refused by the loader: see test_1206_lesson_text.)"""
+    tl = _load()
+    _mk_lesson(tmp_path / "lessons", "L",
+               body_frontmatter='name: L\ndescription: "a\\e[2Kb\\x1fc"\ncreated_at: 2026-06-04')
+    runs = tmp_path / "runs"
+    runs.mkdir()
+
+    rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
+    assert rc == 0
+    assert capsys.readouterr().out.splitlines() == ["L\ta[2Kbc\t0\t0"]
+
+
 def test_in_context_cases_missing_runs_dir_is_empty(tmp_path):
     tl = _load()
     assert tl.in_context_cases("L", None, tmp_path / "nope") == []

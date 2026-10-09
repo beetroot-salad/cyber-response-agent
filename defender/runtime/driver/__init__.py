@@ -35,6 +35,7 @@ from pydantic_ai.usage import UsageLimits
 
 from defender._io import read_text_utf8, write_guarded
 from defender import _git
+from defender._knowledge import KnowledgePaths
 from defender._paths import DefenderPaths, adapters_under
 from defender._vocab import HOST_ONLY_DISPOSITION
 
@@ -354,7 +355,7 @@ def _dispatch_catalogs(
 
     Built once at run start so a roster fault fails here, not mid-tool. Uses the run's grants,
     not the injected `verbs=` registry, so a narrower registry does not narrow the catalog."""
-    skills = defender_dir / "skills"
+    skills = KnowledgePaths.of_defender_dir(defender_dir).skills_dir
     return (
         descriptor_catalog(skills, roster, grants.gather),
         descriptor_catalog(skills, roster, grants.correlation),

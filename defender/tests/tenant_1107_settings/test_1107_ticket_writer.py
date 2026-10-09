@@ -18,8 +18,8 @@ this process's environment — so the shim goes onto PATH with `monkeypatch.sete
 `run.main` runs.
 
 Every other fault is a REAL input through the real primitive: the deleted `config.env`, the
-missing key, the non-integer timeout, a mapping whose `open.status` equals its `released.status`
-(the loader's own lifecycle refusal), a forged receipt and a symlink planted at the receipt's name
+missing key, the non-integer timeout, a mapping whose `open.status` is a template (the loader's
+own lifecycle refusal — since #1221's amendment its only one), a forged receipt and a symlink planted at the receipt's name
 inside the run dir, a directory squatting that name, an exported `CASE_HISTORY_URL_BASE`.
 
 Coined here (the design does not spell them; `_spec1107` holds the rest): none beyond
@@ -55,14 +55,18 @@ MARKER = "tw1107"
 # Fixture plumbing — returns, never asserts.
 # ======================================================================================
 
-def _world(tmp_path: Path, *, marker: str = MARKER, released_status: str = "closed",
+#: An `open.status` the loader refuses: a template, so alert text would pick the case's status.
+BAD_OPEN_STATUS = "{summary}"
+
+
+def _world(tmp_path: Path, *, marker: str = MARKER, open_status: str = "open",
            name: str = "tenants") -> tuple[Path, Path, Path]:
     """The data-root row (#1078), a complete #1107 tenant set up under this test's data root
     (#1120: `run.py` reads its tenants from `DEFENDER_DATA_ROOT` alone; a second call replaces the
     first's knowledge whole), and an alert. Returns (data root, tenant knowledge folder, alert)."""
     ensure_d9_tenant()
     root = current_data_root()
-    folder = S.plant(root, marker=marker, released_status=released_status)
+    folder = S.plant(root, marker=marker, open_status=open_status)
     alert = S.plant_alert(tmp_path / f"alert-{name}")
     return root, folder, alert
 
@@ -343,11 +347,11 @@ def test_o6_mapping_fault_receipt(tmp_path, monkeypatch, caplog):
     caplog.set_level(logging.INFO)
     run_id = "r-mapping"
     shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(run_id))
-    # The loader's own lifecycle refusal: `open.status` equal to `released.status`
-    # (`case_ticket._check_lifecycle`, read at base: "case-history mapping's `open.status` and
-    # `released.status` are both 'open' — …") — a real bad file, not a fake error. NF-23: the
-    # reason is that check's own text, so it names the mapping.
-    root, _folder, alert = _world(tmp_path, released_status="open")
+    # The loader's own lifecycle refusal: a templated `open.status` ("case-history mapping's
+    # `open.status` must be a literal, not a template: …") — a real bad file, not a fake error.
+    # (Until #1221's amendment this arm was `open.status` equal to `released.status`, a rule the
+    # amendment dropped.) NF-23: the reason is that check's own text, so it names the mapping.
+    root, _folder, alert = _world(tmp_path, open_status=BAD_OPEN_STATUS)
     rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id=run_id)
     assert refused is None, f"rc={rc} refused={refused}"
     assert rc == 0, f"rc={rc} refused={refused}"
@@ -401,7 +405,7 @@ def test_o6_reason_no_host_path(tmp_path, monkeypatch):
         _shim(tmp_path, monkeypatch, *answers, name=f"docker-{arm}")
         root, folder, alert = _world(
             tmp_path, name=f"tenants-{arm}",
-            released_status="open" if arm == "bad-mapping" else "closed")
+            open_status=BAD_OPEN_STATUS if arm == "bad-mapping" else "open")
         if arm == "missing-config":
             S.config_path(folder, "case-history").unlink()
         elif arm == "bad-config":
@@ -474,7 +478,7 @@ def test_o6_open_step_no_receipt(tmp_path, monkeypatch, caplog):
         shim = _shim(tmp_path, monkeypatch, *answers, name=f"docker-{arm}")
         root, folder, alert = _world(
             tmp_path, name=f"tenants-{arm}",
-            released_status="open" if arm == "bad-mapping" else "closed")
+            open_status=BAD_OPEN_STATUS if arm == "bad-mapping" else "open")
         if arm == "missing-config":
             S.config_path(folder, "case-history").unlink()
         elif arm == "bad-config":
@@ -535,8 +539,12 @@ def test_store_answers_the_record_step_with_an_http_error(tmp_path, monkeypatch,
 def test_s7_nf23_reason_is_the_redacted_fault_text(tmp_path, monkeypatch, caplog):
     """The receipt reason is the failing check's own fault text passed through the settings-path
     redaction: the warning log line for the same failure carries the same redacted reason and no
-    host settings path, and a released-by-a-person decline keeps today's receipt and gains a
-    non-empty reason naming the decline. Assertions stay at a non-empty reason and no host path."""
+    host settings path. Assertions stay at a non-empty reason and no host path.
+
+    The second arm was a released-by-a-person decline (`refused-released`, with a reason) until
+    #1221's amendment removed the writer's closed-case check: a case the store holds as `closed`
+    is now recorded like any other — receipt `commented`, `ok` true, no reason — and the writer's
+    calls to the store are the open and its one comment POST, never a read of the case."""
     caplog.set_level(logging.INFO)
     _shim(tmp_path, monkeypatch)
     root, folder, alert = _world(tmp_path, name="tenants-bad")
@@ -555,20 +563,24 @@ def test_s7_nf23_reason_is_the_redacted_fault_text(tmp_path, monkeypatch, caplog
         for w in warned:
             assert host not in w, f"a warning line carries the host path {host}: {w!r}"
 
-    # A person already released the case (the mapping's released status is `closed`): today's
-    # `refused-released` receipt, now with a reason.
-    root2, _folder2, alert2 = _world(tmp_path, name="tenants-released")
-    run_id = "r-released"
-    _shim(tmp_path, monkeypatch,
-          S.answer(json.dumps({"key": run_id, "status": "closed", "comments": []}), "200"),
-          name="docker-released")
+    # A person has already closed the case: the store holds it `closed`, and every answer it
+    # gives says so. The writer never asks, so the record lands as on any case (#1221, amended).
+    root2, _folder2, alert2 = _world(tmp_path, name="tenants-closed")
+    run_id = "r-closed"
+    shim2 = _shim(tmp_path, monkeypatch,
+                  S.answer(json.dumps({"key": run_id, "status": "closed", "comments": []}), "200"),
+                  name="docker-closed")
     _rc2, _ref2, run_dir2, _rec2 = _run(tmp_path, root2, alert2, run_id=run_id)
-    declined = S.receipt(run_dir2)
-    assert declined is not None, "the released-case decline wrote no receipt"
-    assert declined.get("status") == ticket_writer.RECEIPT_REFUSED_RELEASED, declined
-    assert declined.get("ok") is False, declined
-    assert (declined.get("reason") or "").strip(), (
-        f"the released-case decline carries no reason: {declined}")
+    recorded = S.receipt(run_dir2)
+    assert recorded is not None, "a closed case's record wrote no receipt"
+    assert (recorded.get("status"), recorded.get("ok"), recorded.get("reason")) == (
+        ticket_writer.RECEIPT_COMMENTED, True, None), (
+        f"a case the store holds closed was not recorded like any other: {recorded}")
+    methods = [c["argv"][c["argv"].index("-X") + 1] for c in shim2.calls() if "-X" in c["argv"]]
+    assert "GET" not in methods, f"the writer read the case back: {methods}"
+    comments = [c["argv"] for c in shim2.calls()
+                if "POST" in c["argv"] and any(a.endswith("/comments") for a in c["argv"])]
+    assert len(comments) == 1, f"expected one comment POST, saw {len(comments)}: {methods}"
 
 
 def test_s7_nf24_receipt_write_failure_is_harmless(tmp_path, monkeypatch, caplog):

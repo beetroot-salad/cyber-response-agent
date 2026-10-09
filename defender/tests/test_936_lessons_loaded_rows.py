@@ -7,6 +7,8 @@ mint — is `test_936_fold_lessons_push.py`. Obligations by name in each docstri
 """
 from __future__ import annotations
 
+import re
+
 import json
 from collections import Counter
 from pathlib import Path
@@ -165,7 +167,9 @@ def test_render_takes_a_lead_and_the_default_is_the_write_return_header(tmp_path
     assert WRITE_RETURN_HEADER in default.splitlines()[0]
     custom = render(hits, lead="### Lessons — custom lead 936")
     assert custom.splitlines()[0] == "### Lessons — custom lead 936"
-    assert custom.splitlines()[1:] == default.splitlines()[1:]
+    # Each render mints its own frame salt (#1206); the rest is the same.
+    unsalted = lambda text: re.sub(r"run-[0-9a-f]{16}-", "run-<SALT>-", text)  # noqa: E731
+    assert unsalted(custom).splitlines()[1:] == unsalted(default).splitlines()[1:]
     assert WRITE_RETURN_HEADER not in custom
     assert render([], lead="### Lessons — custom lead 936") == ""
 

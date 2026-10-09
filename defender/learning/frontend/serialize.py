@@ -22,6 +22,9 @@ if __name__ == "__main__":
 from defender._clock import z_seconds
 from defender._corpus import iter_lessons
 from defender._io import json_safe, use_utf8_stdio
+from defender._knowledge import (
+    LESSONS, LESSONS_ACTOR, LESSONS_ENVIRONMENT, LESSONS_QUESTIONER, KnowledgePaths,
+)
 
 
 def _json_safe(obj):
@@ -77,7 +80,7 @@ class GroupSpec(TypedDict):
 GROUPS: dict[str, GroupSpec] = {
     "defender": {
         "label": "Defender lessons",
-        "dir": "lessons",
+        "dir": LESSONS,
         "blurb": "Pitfalls the runtime defender agent learned to avoid — folded from the "
                  "branched episode's judged findings, and read at PLAN time.",
         "retired": False,
@@ -91,7 +94,7 @@ GROUPS: dict[str, GroupSpec] = {
     },
     "actor": {
         "label": "Actor lessons",
-        "dir": "lessons-actor",
+        "dir": LESSONS_ACTOR,
         "blurb": "Pattern/tradecraft lessons the adversarial actor learned — what cover held "
                  "and what tripped the defender.",
         "retired": True,
@@ -110,7 +113,7 @@ GROUPS: dict[str, GroupSpec] = {
     },
     "environment": {
         "label": "Environment lessons",
-        "dir": "lessons-environment",
+        "dir": LESSONS_ENVIRONMENT,
         "blurb": "Standing deployment facts the two actors retrieved to ground their stories, "
                  "fed by the benign and adversarial directions alike (issue #298).",
         "retired": True,
@@ -130,7 +133,7 @@ GROUPS: dict[str, GroupSpec] = {
     },
     "questioner": {
         "label": "Questioner lessons",
-        "dir": "lessons-questioner",
+        "dir": LESSONS_QUESTIONER,
         "blurb": "Pitfalls about the WORLDS the questioner authors — a fact placed where no "
                  "served system could show it, an under-scoped story, a family that failed to "
                  "discriminate — folded from the family judge's own world findings (#1007) and "
@@ -152,13 +155,14 @@ GROUPS: dict[str, GroupSpec] = {
 
 def build_view(defender_dir: Path = DEFENDER) -> dict:
     groups: dict[str, dict] = {}
+    knowledge = KnowledgePaths.of_defender_dir(defender_dir)
     for name, spec in GROUPS.items():
         skipped: list[Path] = []
         lessons = [
-            _normalize(lesson.path, lesson.fm, lesson.body, group=name,
+            _normalize(lesson.path, lesson.fm, lesson.body, group=name,  # lint-lesson-text: ok — the HTML view escapes every value it renders (build.py escHtml)
                        title_keys=spec["title_keys"], desc_key=spec["desc_key"],
                        root=defender_dir.parent)
-            for lesson in iter_lessons(defender_dir / spec["dir"], on_skip=skipped.append)
+            for lesson in iter_lessons(knowledge.corpus_dir(spec["dir"]), on_skip=skipped.append)
         ]
         lessons += [
             _skipped_record(path, group=name, root=defender_dir.parent) for path in skipped

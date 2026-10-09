@@ -49,10 +49,8 @@ from defender.scripts.gather_tools import record_query
 from defender.runtime.payload_view import (
     passthrough_max_bytes as _capture_view_cap,
 )
-from defender.hooks.record_lesson_load import (
-    RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA,
-    lesson_name as _lesson_name,
-)
+from defender._knowledge import RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA
+from defender.hooks.record_lesson_load import lesson_name as _lesson_name
 from ._deps import (
     AgentDeps,
     DeadEnd,

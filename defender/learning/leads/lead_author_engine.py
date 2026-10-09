@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ClassVar
 
+from defender._knowledge import KnowledgePaths
 from defender._model import model
 from defender._paths import adapters_under
 from defender.learning.core import config
@@ -147,14 +148,16 @@ def _rm_skills_grant(skills_dir: Path, systems: tuple[str, ...]) -> Grant:
 def _lead_author_bash_shapes(roots: ResolvedRoots) -> tuple[Grant, ...]:
     return (
         _rm_skills_grant(
-            roots.defender_dir / "skills", _systems_or_raise(roots.defender_dir)
+            KnowledgePaths.of_defender_dir(roots.defender_dir).skills_dir,
+            _systems_or_raise(roots.defender_dir),
         ),
     )
 
 
 def _lead_author_write_shape(roots: ResolvedRoots) -> tuple[re.Pattern[str], ...]:
     return _skill_write_lanes(
-        roots.defender_dir / "skills", _systems_or_raise(roots.defender_dir)
+        KnowledgePaths.of_defender_dir(roots.defender_dir).skills_dir,
+        _systems_or_raise(roots.defender_dir),
     )
 
 

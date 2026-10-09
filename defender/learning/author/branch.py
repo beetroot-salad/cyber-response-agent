@@ -29,10 +29,10 @@ def _lessons_pr_title(batch_id: str) -> str:
     return f"learning: lesson batch {batch_id}"
 
 
-def _lessons_pr_body(branch: str) -> str:
+def _lessons_pr_body(branch: str, base: str) -> str:
     return (
         "Automated lessons batch from the lessons author drain "
-        f"(branch `{branch}`, off freshly-fetched `{_BRANCH_BASE}`). Touches "
+        f"(branch `{branch}`, off freshly-fetched `{base}`). Touches "
         "`defender/lessons/` only — distinct from the lead-author PR."
     )
 
@@ -48,8 +48,13 @@ class AuthorBranch:
     repo_root: Path = REPO_ROOT
     branch_prefix: str = LESSONS_BRANCH_PREFIX
     pr_title: Callable[[str], str] = _lessons_pr_title
-    pr_body: Callable[[str], str] = _lessons_pr_body
+    #: The PR body from the batch branch and the base it was cut from (`branch_base`).
+    pr_body: Callable[[str, str], str] = _lessons_pr_body
     worktree_base: Path | None = None
+    #: What a batch branches from and what its PR targets. Today's values are the product
+    #: repo's; #1108 points learning at each tenant's repo, which must carry the same pair.
+    branch_base: str = _BRANCH_BASE
+    pr_base: str = _PR_BASE
 
     @property
     def _forge(self) -> Forge:
@@ -80,7 +85,7 @@ class AuthorBranch:
         return self._worktree_base / f"{slug}-{batch_id}"
 
     def commits_ahead(self, wt: Path) -> int:
-        return _git.git_rev_list_count(wt, rev_range=f"{_BRANCH_BASE}..HEAD")
+        return _git.git_rev_list_count(wt, rev_range=f"{self.branch_base}..HEAD")
 
 
     def open_pr_exists(self) -> bool:
@@ -114,7 +119,7 @@ class AuthorBranch:
             _git.git_fetch(self.repo_root)
             self._worktree_base.mkdir(parents=True, exist_ok=True)
             _git.git_worktree_add(
-                self.repo_root, wt, _BRANCH_BASE, branch=self.branch_name(batch_id)
+                self.repo_root, wt, self.branch_base, branch=self.branch_name(batch_id)
             )
         except GitError as e:
             self.cleanup(wt)
@@ -140,7 +145,7 @@ class AuthorBranch:
         from the checkout, no worktree needed. Idempotent: an already-open PR is returned.
 
         `None` when there is nothing to deliver (branch gone, or nothing ahead of
-        `origin/main`); the caller may then forget it."""
+        `branch_base`); the caller may then forget it."""
         branch = self.branch_name(batch_id)
         if not _git.git_ok(
             ["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=self.repo_root
@@ -149,7 +154,7 @@ class AuthorBranch:
         try:
             _git.git_fetch(self.repo_root)
             if _git.git_rev_list_count(
-                self.repo_root, rev_range=f"{_BRANCH_BASE}..{branch}"
+                self.repo_root, rev_range=f"{self.branch_base}..{branch}"
             ) == 0:
                 return None
             _git.git_push(self.repo_root, branch)
@@ -161,8 +166,8 @@ class AuthorBranch:
 
     def _open_pr(self, batch_id: str, branch: str) -> str:
         ref = self._forge.open_pr(
-            base=_PR_BASE, head=branch,
-            title=self.pr_title(batch_id), body=self.pr_body(branch),
+            base=self.pr_base, head=branch,
+            title=self.pr_title(batch_id), body=self.pr_body(branch, self.branch_base),
         )
         return ref or branch
 
@@ -192,11 +197,11 @@ class AuthorBranch:
         try:
             _git.git_fetch(self.repo_root)
             if not _git.git_ok(
-                ["cat-file", "-e", f"{_BRANCH_BASE}:{lesson_rel_path}"], cwd=self.repo_root
+                ["cat-file", "-e", f"{self.branch_base}:{lesson_rel_path}"], cwd=self.repo_root
             ):
-                raise BranchError(f"no such lesson on {_BRANCH_BASE}: {lesson_rel_path}")
+                raise BranchError(f"no such lesson on {self.branch_base}: {lesson_rel_path}")
             self._worktree_base.mkdir(parents=True, exist_ok=True)
-            _git.git_worktree_add(self.repo_root, wt, _BRANCH_BASE, branch=branch)
+            _git.git_worktree_add(self.repo_root, wt, self.branch_base, branch=branch)
             _git.git(["rm", lesson_rel_path], cwd=wt)
             _git.git(["commit", "-m", f"revert lesson: {lesson_name}"], cwd=wt)
             try:
@@ -210,7 +215,7 @@ class AuthorBranch:
                     ) from e
                 raise
             return self._forge.open_pr(
-                base=_PR_BASE, head=branch,
+                base=self.pr_base, head=branch,
                 title=f"revert lesson: {lesson_name}",
                 body=(
                     f"One-click revert of `{lesson_rel_path}` (recommend-only/reversible "
