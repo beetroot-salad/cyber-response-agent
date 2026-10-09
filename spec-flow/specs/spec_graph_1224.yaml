@@ -126,7 +126,7 @@ demands:
   - ledger_decision.domain.alternatives[staged]
   - ledger_decision.domain.alternatives[patched]
   - interacts(WorldRegistry->world_ledger)
-  discharged_by: test_1224_ledger_refuses_staged_and_patched_decisions
+  discharged_by: test_1224_ledger_records_oracle_and_real_error_at_the_world_tier_only
   seed_docstring: Ledger.record accepts a served row whose decision is `passthrough`, `oracle` or `real-error` and refuses one whose decision
     is `staged` or `patched` with LedgerError; it still accepts `base`, `captured` and `refused` rows at the family tier, while the registry never
     writes a live-miss `base` row to a world ledger (M16=A, PCO-05).
@@ -497,7 +497,7 @@ demands:
   form: test
   binds:
   - interacts(serve_one->verifier).payload
-  discharged_by: test_1224_verifier_context_carries_no_oracle_reasoning
+  discharged_by: test_1224_verifier_context_after_an_oracle_turn_with_reasoning_and_tool_use
   seed_docstring: A sentinel string planted in the oracle double's own reasoning text and messages appears nowhere in the verifier's context.
   forks:
   - M17
@@ -699,7 +699,7 @@ demands:
   - episode_outcome.domain.distinguished[accepted]
   - unservable_worlds.domain.distinguished[1]
   - interacts(launcher->start_family)
-  discharged_by: test_1224_one_preflight_failure_skips_that_sibling_and_runs_the_rest
+  discharged_by: test_1224_two_preflight_failures_write_unusable_and_start_no_sibling
   seed_docstring: When pre-flight fails exactly one world, the outcome record says `accepted` and lists that world unservable; the spawn seam
     starts every other runnable world and never the failed one.
   source: 20-demands
@@ -710,7 +710,7 @@ demands:
   - preflight_replay
   - unservable_worlds.domain.distinguished[0]
   - episode_outcome.domain.distinguished[accepted]
-  discharged_by: test_1224_clean_preflight_accepts_and_starts_every_sibling
+  discharged_by: test_1224_two_preflight_failures_write_unusable_and_start_no_sibling
   seed_docstring: When every world passes pre-flight, the outcome record says `accepted` with no unservable world and every runnable world's sibling
     is started.
   source: 20-demands
@@ -826,7 +826,7 @@ demands:
   form: test
   binds:
   - python
-  discharged_by: test_1224_oracle_python_never_starts_a_host_process
+  discharged_by: test_1224_oracle_python_tool_cannot_be_built_over_an_unsandboxed_executor
   seed_docstring: Driving the oracle's python tool starts no host subprocess and evaluates no code in the host interpreter; with no box executor
     available the tool fails as an oracle failure rather than running on the host.
   forks:
@@ -930,7 +930,7 @@ demands:
   binds:
   - interacts(serve_one->oracle).payload
   - _untrusted.wrap_fresh
-  discharged_by: test_1224_call_params_reach_the_oracle_framed_as_untrusted
+  discharged_by: test_1224_oracle_input_type_carries_call_fields_and_an_answer_handle_only
   seed_docstring: The investigator's call params do reach the oracle, inside an untrusted frame.
   touched_by:
   - M26
@@ -970,7 +970,7 @@ demands:
   form: test
   binds:
   - grade_episode
-  discharged_by: test_1224_no_code_path_computes_a_bucket
+  discharged_by: test_1224_staging_stagers_applier_lookups_and_review_are_gone
   seed_docstring: grade_family, _grade_world, the bucket table, withheld_reason, _holding_system, own_h_rows and doctored_answer_served are gone,
     and no production module assigns a bucket that did not come from the judge model's reply.
   pair: d12a_bucket_is_the_models
@@ -1233,7 +1233,7 @@ demands:
   binds:
   - episode_outcome.domain.distinguished[refused]
   - interacts(launcher->start_family)
-  discharged_by: test_1224_refused_outcome_starts_no_sibling_and_names_its_reason
+  discharged_by: test_input_every_world_has_no_facts
   seed_docstring: When pre-flight refuses the episode, the outcome record says `refused` with a reason naming why, and no sibling starts.
   forks:
   - F-07
@@ -1348,7 +1348,7 @@ demands:
   binds:
   - rate_limiter
   - rate_limiter.identity
-  discharged_by: test_1224_preflight_holds_the_rate_and_each_sibling_its_slice
+  discharged_by: test_conc_28_aggregate_rate_across_all_processes
   seed_docstring: 'RE-PINNED (48: S16, S18). No limiter state or lock is shared across processes: the launcher''s limiter holds R during pre-flight,
     then each sibling holds its own in-process slice R/k; the sum over any window stays at or below R.'
   forks:
@@ -1491,7 +1491,7 @@ demands:
   - grade_episode
   - validate_reply
   - _questioner_lessons_section
-  discharged_by: test_1224_no_production_code_names_holding_system_outside_the_refusal
+  discharged_by: test_1224_staging_stagers_applier_lookups_and_review_are_gone
   seed_docstring: No production module names holding_system except the old-manifest refusal that names it as a field predating the oracle; no
     `system == H` rule remains.
   pair: d01g_old_manifest_refused_at_loader
@@ -1572,7 +1572,7 @@ demands:
   binds:
   - serve_one
   - tenant_adapter
-  discharged_by: test_1224_world_view_hooks_have_no_remaining_production_user
+  discharged_by: test_1224_staging_stagers_applier_lookups_and_review_are_gone
   seed_docstring: VIEW_NAMESPACE, is_world_view, refuse_unnameable_world and refuse_a_foreign_world_view are gone from the adapters wherever nothing
     but staging used them, and esql_text keeps no staging use.
   pair: d02a_any_tenant_branches_end_to_end
@@ -1648,7 +1648,7 @@ demands:
   - render_episode
   - world_facts
   - old_manifest_field.domain.distinguished[overlay]
-  discharged_by: test_input_manifest_mixes_old_and_new_shapes
+  discharged_by: test_input_old_manifest_field_is_empty_or_null
   seed_docstring: Any manifest carrying an old field is refused with the predates-the-oracle reason at the runtime loader, the judge's reader
     and the episode page, whether or not it also carries the new fields; the new fields do not rescue it.
   settled_premise: P025
@@ -1664,7 +1664,7 @@ demands:
   - render_episode
   - old_manifest_field.domain.distinguished[discriminator.holding_system]
   - old_manifest_field.domain.distinguished[configured_patterns]
-  discharged_by: test_input_judge_and_page_read_an_old_manifest_with_only_holding_system
+  discharged_by: test_1224_judge_refuses_an_old_manifest_naming_the_reason
   seed_docstring: The judge refuses to grade it with a named reason saying the manifest predates the oracle, and the episode page shows that same
     reason; neither renders the episode, and neither raises a generic error or crashes (O15 covers the judge and the page, and the judge's reader
     is separate from the runtime loader).
@@ -1694,7 +1694,7 @@ demands:
   binds:
   - grade_episode
   - parse_family
-  discharged_by: test_p065_old_field_introduced_via_alias_merge_key_or_duplicate_key
+  discharged_by: test_1224_old_manifest_field_is_refused_at_the_loader_as_predating_the_oracle
   seed_docstring: An old field that enters the manifest through a YAML anchor, merge key or duplicate key is refused with the predates-the-oracle
     reason exactly as a written-out field would be, and the runtime loader and the judge's raw reader agree on every such manifest.
   settled_premise: P028
@@ -1709,7 +1709,7 @@ demands:
   form: test
   binds:
   - parse_family
-  discharged_by: test_p066_old_marker_in_one_world_only_or_inside_a_discriminator_that_is_not_a_mapping
+  discharged_by: test_1224_old_manifest_field_is_refused_at_the_loader_as_predating_the_oracle
   seed_docstring: An old field in only one world of several, or markers sitting inside a discriminator that is a string, list or null, still refuses
     the whole manifest with the predates-the-oracle reason at both read paths; a non-mapping discriminator never causes a crash instead of the
     named refusal.
@@ -2651,7 +2651,7 @@ demands:
   - world_facts
   - oracle_retry_cap.domain
   - oracle_context
-  discharged_by: test_verifier_fails_with_no_reason
+  discharged_by: test_verifier_and_oracle_disagree_across_every_attempt
   seed_docstring: A verifier rejection with no reason is still appended to the oracle's conversation as a failure with the plain fact that the
     verifier rejected, and the attempt counts; N bounds the loop (O4).
   settled_premise: P131
@@ -2841,7 +2841,7 @@ demands:
   - oracle_budget
   - verifier
   - oracle
-  discharged_by: test_many_oracle_turns_inside_one_investigator_call_and_the_investigators_budget
+  discharged_by: test_1224_oracle_retries_charge_no_investigator_budget
   seed_docstring: However many oracle and verifier model turns one investigator call takes, the investigator's own budget counters, logs and request
     count show exactly that one tool call and no oracle or verifier request (O4, O14, O9).
   settled_premise: P154
@@ -3201,7 +3201,7 @@ demands:
   - world_base_store
   - oracle_ledger
   - run_investigation
-  discharged_by: test_conc_31_reader_meets_a_half_written_shared_entry
+  discharged_by: test_conc_25_one_worlds_served_answer_beside_another_worlds_base_read
   seed_docstring: No sibling writes a store another sibling reads. The base recording is complete before any sibling starts, so no sibling ever
     reads a partial shared entry (S19, S20).
   settled_premise: P222
@@ -3362,7 +3362,7 @@ demands:
   - render_episode
   - oracle
   - run_investigation
-  discharged_by: test_conc_35_page_rendered_while_siblings_are_writing
+  discharged_by: test_1224_episode_page_counts_oracle_rows_without_a_malformed_row_note
   seed_docstring: 'An episode page rendered while siblings are still appending shows a consistent snapshot: it never shows a torn partial row,
     and rows from oracle-side stores are not shown as the sibling''s own ledger (O9).'
   settled_premise: P236
@@ -3380,7 +3380,7 @@ demands:
   - cites_sample
   - samples_record
   - validate_reply
-  discharged_by: test_input_judge_finding_cites_an_unserved_or_misspelled_samples_section
+  discharged_by: test_1224_judge_citation_check_matches_samples_by_system
   seed_docstring: 'A finding that cites a samples section of a system the world''s row says was unavailable, of a differently spelled or lookalike
     system, of a pattern as the old format keyed it, or a path with dot-dot segments fails the citation check: citations resolve only to a served
     system''s own section (O16).'
@@ -3543,7 +3543,7 @@ demands:
   - oracle_context
   - record_fact
   - forged_store
-  discharged_by: test_1224_family_block_after_a_conversation_restart
+  discharged_by: test_1224_restarted_oracle_conversation_keeps_the_prefix_recorded_facts_and_recent_failures
   seed_docstring: The restarted conversation's family block is identical to its own family block before the restart and to world c's family block.
     A restart keeps 'the same prefix' (Oracle context), and the shared prefix is the stable part. World b's recorded facts are not inside the
     family block, so the family block still carries no world content after the restart. They are appended to the conversation after the family
@@ -3781,10 +3781,10 @@ demands:
   forks:
   - N05
   premise: P013
-  premise_test: test_input_served_systems_is_empty
+  premise_test: test_1224_empty_gather_grant_refuses_the_launch_before_the_question_writer
   premise_disposition: fork
   source: '45-dispositions ''Bound now'' (untagged: holds under every reading of the cluster)'
-  discharged_by: test_input_served_systems_is_empty
+  discharged_by: test_1224_empty_gather_grant_refuses_the_launch_before_the_question_writer
   seed_docstring: 'no generic crash, no world is served a changed answer, no world is graded lead-set (every world is couldn''t-look), and lesson
     selection shows no system-keyed lesson (O12: shown only when the tenant serves at least one of the lesson''s systems). Resolved reading (N05):
     resolved_by: auto | reading: an empty grant refuses the launch before the question-writer runs; an unparseable question-writer reply stops
@@ -4028,10 +4028,10 @@ demands:
   forks:
   - M25
   premise: P040
-  premise_test: test_input_oracle_model_knob_is_empty_or_unroutable
+  premise_test: test_1224_oracle_model_knob_is_preflighted_only_where_branching_runs
   premise_disposition: fork
   source: '45-dispositions ''Bound now'' (untagged: holds under every reading of the cluster)'
-  discharged_by: test_input_oracle_model_knob_is_empty_or_unroutable
+  discharged_by: test_1224_oracle_model_knob_is_preflighted_only_where_branching_runs
   seed_docstring: 'a branch launch with an unusable oracle model refuses with a named reason before pre-flight spends anything, and it is not
     a per-call oracle failure charged to a world. Resolved reading (M25): resolved_by: human | round: R6b (asked to clarify the rule''s purpose,
     then answered) | answer: A | reading: role preflight is scoped to the roles a run uses; the oracle roles are checked only at branch launch
@@ -4228,13 +4228,13 @@ demands:
   forks:
   - M08
   premise: P055
-  premise_test: test_conc_23_two_siblings_ask_one_uncaptured_call_together
+  premise_test: test_1224_uncaptured_call_is_read_live_by_each_world_for_itself
   premise_disposition: fork
   binds_derived: true
   assembly_note: binds derived at assembly from the clause and the premise's obligation tags (O2, O3, O13, O14); the premise carried no `# binds:`
     line
   source: '45-dispositions ''Bound now'' (untagged: holds under every reading of the cluster)'
-  discharged_by: test_conc_23_two_siblings_ask_one_uncaptured_call_together
+  discharged_by: test_1224_uncaptured_call_is_read_live_by_each_world_for_itself
   seed_docstring: Afterwards each world holds its own base answer for that call, read live by that world for itself (S20/S22), whether the askers
     are sibling processes or pre-flight replaying several worlds at once; no family-wide cache is written. Resolved reading (S20/S22, M16=A).
   resolved_by: auto
@@ -4686,12 +4686,12 @@ demands:
   forks:
   - M03
   premise: P127
-  premise_test: test_oracle_model_never_answers
+  premise_test: test_1224_retry_cap_zero_is_refused_and_one_allows_exactly_one_failed_attempt
   premise_disposition: fork
   binds_derived: true
   assembly_note: binds derived at assembly from the clause and the premise's obligation tags (O4, O14); the premise carried no `# binds:` line
   source: '45-dispositions ''Bound now'' (untagged: holds under every reading of the cluster)'
-  discharged_by: test_oracle_model_never_answers
+  discharged_by: test_1224_retry_cap_zero_is_refused_and_one_allows_exactly_one_failed_attempt
   seed_docstring: 'the time spent never counts toward any investigator time limit (O4). Resolved reading (M03): resolved_by: human | round: R1
     | answer: A | reading: one failed attempt = the turn ends without a valid submission, or the submission fails a host check or the verifier,
     or the oracle/verifier model call fails after the model client''s own bounded transient retries, or a per-turn deadline expires, or a store/ledger
@@ -4863,12 +4863,12 @@ demands:
   forks:
   - N12
   premise: P141
-  premise_test: test_conc_01_identical_call_two_leads_same_instant
+  premise_test: test_1224_two_identical_concurrent_calls_get_one_turn_and_identical_bytes
   premise_disposition: fork
   binds_derived: true
   assembly_note: binds derived at assembly from the clause and the premise's obligation tags (O2, O9); the premise carried no `# binds:` line
   source: '45-dispositions ''Bound now'' (untagged: holds under every reading of the cluster)'
-  discharged_by: test_conc_01_identical_call_two_leads_same_instant
+  discharged_by: test_1224_two_identical_concurrent_calls_get_one_turn_and_identical_bytes
   seed_docstring: 'both leads receive byte-identical answers (O2), the world holds exactly one served answer and one set of forged rows for that
     call, and the world ledger records both investigator calls (O9: one row per call). Resolved reading (—): '
   resolved_by: auto
@@ -4904,13 +4904,13 @@ demands:
   forks:
   - N12
   premise: P146
-  premise_test: test_conc_07_oracle_conversation_entered_concurrently
+  premise_test: test_1224_two_concurrent_calls_take_sequential_oracle_turns_that_never_interleave
   premise_disposition: fork
   binds_derived: true
   assembly_note: binds derived at assembly from the clause and the premise's obligation tags (O4, O7, O10); the premise carried no `# binds:`
     line
   source: '45-dispositions ''Bound now'' (untagged: holds under every reading of the cluster)'
-  discharged_by: test_conc_07_oracle_conversation_entered_concurrently
+  discharged_by: test_1224_two_concurrent_calls_take_sequential_oracle_turns_that_never_interleave
   seed_docstring: 'nothing but call fields and answer handles reaches either turn (O10), payloads stay framed (O7), and any wait behind another
     lead''s turn never counts toward an investigator limit (O4). Resolved reading (—): '
   resolved_by: auto
@@ -5791,10 +5791,10 @@ demands:
   forks:
   - N19
   premise: P211
-  premise_test: test_rate_limit_knob_set_to_zero_or_below
+  premise_test: test_1224_rate_zero_is_refused_and_a_positive_rate_gives_a_positive_slice
   premise_disposition: fork
   source: '45-dispositions ''Bound now'' (untagged: holds under every reading of the cluster)'
-  discharged_by: test_rate_limit_knob_set_to_zero_or_below
+  discharged_by: test_1224_rate_zero_is_refused_and_a_positive_rate_gives_a_positive_slice
   seed_docstring: 'it is never silently read as unlimited, because oracle-side queries exceeding the configured rate is an observed failure (O14).
     Resolved reading (N19): resolved_by: auto | reading: N must be an integer of at least 1 and the rate a positive number, anything else refused
     at configuration, nothing read as unlimited; a sibling''s slice R/k may be fractional (one query per 1/(R/k) of the interval, never rounded
@@ -8036,7 +8036,7 @@ demands:
   - old_manifest_field.domain.distinguished[overlay]
   - old_manifest_field.domain.distinguished[captured_patterns]
   - old_manifest_field.domain.distinguished[discriminator.envelope]
-  discharged_by: test_input_manifest_is_both_old_and_malformed
+  discharged_by: test_1224_old_manifest_field_is_refused_at_the_loader_as_predating_the_oracle
   seed_docstring: 'A manifest that carries an old field and is also malformed another way is refused with the reason that it predates the oracle
     (O15: a generic schema error is the failure), and that reason is not displaced by the other malformation.'
   premise: P024
@@ -8087,7 +8087,7 @@ demands:
   - world_base_store.identity
   - oracle_ledger.identity
   - drives(start_family->run_investigation)
-  discharged_by: test_live_base_answer_for_an_uncaptured_call_changes_between_two_siblings_reads
+  discharged_by: test_1224_uncaptured_call_is_read_live_by_each_world_for_itself
   seed_docstring: 'Each world''s base for an uncaptured call is that world''s own live read (S20/S22, Amendment 2 change 2): there is no family-wide
     cache, the read lands in the world''s own per-world base store (M16=A), and a later change in the tenant''s data reaches a world that reads
     after it, not a world that already read.'
@@ -8619,7 +8619,7 @@ demands:
   - oracle_retry_cap.domain.distinguished[0]
   - oracle_retry_cap.domain.distinguished[1]
   - oracle_rate_limit.domain.distinguished[0]
-  discharged_by: test_input_retry_cap_is_zero_one_or_not_a_number
+  discharged_by: test_1224_retry_cap_zero_is_refused_and_one_allows_exactly_one_failed_attempt
   seed_docstring: 'the retry cap is set to zero, to one, to a negative number, and to text — what must be observable about the number of oracle
     consultations per call and about unservability? Resolved reading (N19): resolved_by: auto | reading: N must be an integer of at least 1 and
     the rate a positive number, anything else refused at configuration, nothing read as unlimited; a sibling''s slice R/k may be fractional (one
@@ -8895,7 +8895,7 @@ demands:
   - served_systems.domain.alternatives[edr,idp,siem-x]
   - lessons_questioner
   - lesson_systems.domain.distinguished[overlap]
-  discharged_by: test_1224_question_writer_prompt_for_a_tenant_serving_no_lab_system
+  discharged_by: test_1224_question_writer_prompt_names_no_hardcoded_system
   seed_docstring: 'the tenant serves exactly edr, idp and siem-x and none of the lab''s systems, and the question-writer authors the family call
     and then each world call — what system names must each call''s prompt text carry, across its header, its role and call instructions, its examples,
     its samples sections and its selected lessons? Resolved reading (N25): resolved_by: auto | reading: the served-systems rule binds the prompt''s
@@ -8937,7 +8937,7 @@ demands:
   - served_systems.domain.alternatives[edr,idp,siem-x]
   - lessons_questioner
   - lesson_systems.domain.distinguished[overlap]
-  discharged_by: test_1224_question_writer_prompt_quotes_a_lesson_naming_an_unserved_system
+  discharged_by: test_1224_question_writer_prompt_names_no_hardcoded_system
   seed_docstring: 'a lesson is selected for the tenant because its systems list includes edr, which the tenant serves. The same lesson also lists
     cmdb, which the tenant does not serve, and names cmdb in its body — what system names must the question-writer''s prompt carry from that lesson?
     Resolved reading (N25): resolved_by: auto | reading: the served-systems rule binds the prompt''s own scaffolding; selected lessons are quoted
@@ -9025,7 +9025,7 @@ demands:
   form: test
   binds:
   - interacts(author_family->questioner_model).payload
-  discharged_by: test_1224_question_writer_prompt_parts_share_no_source_and_bind_every_slot
+  discharged_by: test_1224_question_writer_prompt_names_no_hardcoded_system
   seed_docstring: The prompt the question-writer's model receives has parts that share no source (family.md is not passed both as the system prompt
     and rendered into the user turn), every slot (served systems, samples per system, lessons by system) is bound with no `{slot}` token left,
     and no lab system name survives in the prompt's own scaffolding for a tenant serving edr, idp and siem-x (selected lessons are quoted whole
@@ -9251,7 +9251,7 @@ demands:
   form: test
   binds:
   - interacts(lint_shippable_surface->stagers)
-  discharged_by: test_1224_shippable_surface_lint_carries_no_stale_stagers_carve_out
+  discharged_by: test_1224_staging_stagers_applier_lookups_and_review_are_gone
   seed_docstring: lint_shippable_surface names no carve-out for the deleted estate/stagers/ path, passes over the post-change tree, and still
     flags a violation planted in the surface that remains.
   obligation: O-25
@@ -9292,7 +9292,7 @@ demands:
   form: test
   binds:
   - interacts(cli_world_label_of->world_view_fault)
-  discharged_by: test_1224_world_label_with_a_hyphen_is_refused_so_the_label_round_trips
+  discharged_by: test_1224_forbidden_world_label_is_refused_by_the_launcher_and_the_sibling_loader
   seed_docstring: After the view-name arm is removed, a world label containing '-' (siem-x, -edr) is refused at launch with a named reason, so
     every admitted label round-trips through the launcher's run-dir label reader (siem_x reads back as siem_x) (GR-12, GR-13).
   obligation: O-29
@@ -9402,7 +9402,7 @@ demands:
   form: test
   binds:
   - interacts(read_manifest->family_manifest)
-  discharged_by: test_1224_judges_raw_manifest_reader_reads_v2_and_refuses_every_old_field
+  discharged_by: test_1224_old_manifest_field_is_refused_at_the_loader_as_predating_the_oracle
   seed_docstring: The judge's raw read_manifest reads a v2 manifest's facts and served_systems, and fails every manifest carrying overlay, discriminator.holding_system,
     discriminator.envelope, captured_patterns or configured_patterns with the predates-the-oracle reason (F-11, N04).
   obligation: O-38
@@ -9496,7 +9496,7 @@ demands:
   form: test
   binds:
   - interacts(preflight_role_models->oracle_check_model)
-  discharged_by: test_1224_oracle_check_model_knob_is_preflighted_on_its_own_edge
+  discharged_by: test_1224_oracle_model_knob_is_preflighted_only_where_branching_runs
   seed_docstring: 'As O-46 for the verifier role''s knob, driven separately: an unroutable oracle-check model with a routable oracle model still
     refuses the branch launch before pre-flight spends, and does not stop an alert run (M25=A).'
   obligation: O-47
@@ -9527,7 +9527,7 @@ demands:
   binds:
   - wire_log
   - interacts(run_investigation->wire_log)
-  discharged_by: test_1224_oracle_and_verifier_turns_leave_the_siblings_wire_log_and_budget_untouched
+  discharged_by: test_1224_oracle_retries_charge_no_investigator_budget
   seed_docstring: Driving a served call whose oracle and verifier take several turns leaves the sibling's wire_logs/llm_requests.jsonl with no
     oracle or verifier request and budget.json's tool_calls moved only by the investigator's call, with no FileExistsError surfacing; the investigator's
     own requests are logged (positive control) (GA-22, GD-34).
@@ -9572,7 +9572,7 @@ demands:
   form: test
   binds:
   - interacts(grade_episode->outcome_record)
-  discharged_by: test_1224_judge_stamps_unusable_refused_and_absent_records_not_graded_with_no_model_call
+  discharged_by: test_1224_judge_grades_only_an_accepted_outcome
   seed_docstring: The judge's gate stamps `unusable`, `refused` and an absent or empty outcome record not-graded with the word and the reason
     and makes no model call; the word it writes for an absent record is a member of the new vocabulary, never `incomplete`.
   obligation: PCO-02
@@ -9656,7 +9656,7 @@ demands:
   binds:
   - interacts(parse_family->family_manifest)
   - cli_world_label_of
-  discharged_by: test_1224_launcher_identity_gate_refuses_hyphenated_labels
+  discharged_by: test_1224_forbidden_world_label_is_refused_by_the_launcher_and_the_sibling_loader
   seed_docstring: 'The launcher''s identity gate (or its successor) refuses the labels `siem-x` and `-edr` with a named reason; positive control:
     `siem_x` is admitted and round-trips through the run-dir label reader.'
   obligation: PCO-10
@@ -9668,7 +9668,7 @@ demands:
   binds:
   - interacts(resume_world->family_manifest)
   - interacts(read_manifest->family_manifest)
-  discharged_by: test_1224_sibling_loader_and_raw_manifest_reader_refuse_a_label_outside_the_alphabet
+  discharged_by: test_1224_forbidden_world_label_is_refused_by_the_launcher_and_the_sibling_loader
   seed_docstring: 'A manifest whose world label lies outside the launcher alphabet is refused by resume_world (the sibling''s loader) and by the
     judge''s and the page''s read_manifest, so the label reaches no judge prompt and no page; positive control: a well-formed label loads through
     all three.'
@@ -15935,7 +15935,7 @@ handoff:
   - 'test_input_manifest_has_no_branch_point_clock — structure: (s_p019) the loader and the registry already refuse a manifest without a usable
     `as_of`; red at base only because the harness hands the registry coined keywords, green once those are accepted, before any oracle exists
     (measured with a throwaway shim that accepted the new keywords and fields and nothing else).'
-  - 'test_input_served_systems_is_empty — structure: (b_p013) the launcher already refuses an empty gather grant before the question-writer (N05);
+  - 'test_1224_empty_gather_grant_refuses_the_launch_before_the_question_writer — structure: (b_p013) the launcher already refuses an empty gather grant before the question-writer (N05);
     green once the coined keywords are accepted, before any oracle exists (shim-measured).'
   - 'test_1224_empty_gather_grant_refuses_the_launch_before_the_question_writer — structure: (o20) the same existing empty-grant refusal as b_p013;
     green once the coined keywords are accepted (shim-measured).'
@@ -15948,7 +15948,7 @@ handoff:
     once the registry accepts its coined keywords (shim-measured). SUPERSEDED by R-12 (phase F repair): the test now also serves one granted call
     in the same fact world through the same registry and asserts it reaches the oracle and verifier doubles, is rowed passthrough and stored once,
     so it no longer goes green before an oracle exists; kept as the record of 90-mechanical''s measurement.'
-  - 'test_conc_31_reader_meets_a_half_written_shared_entry — structure: (s_p222) no sibling writes another world''s files; its positive control
+  - 'test_conc_25_one_worlds_served_answer_beside_another_worlds_base_read — structure: (s_p222) no sibling writes another world''s files; its positive control
     is satisfied by the world ledger the registry already writes, so the test is green once the coined keywords are accepted (shim-measured).
     The oracle-side state it should also see is pinned by the other S19/S20 tests.'
   - 'test_served_system_adapter_cannot_be_loaded_at_call_time — parity: (s_p046) an adapter that cannot be loaded fails the original query as

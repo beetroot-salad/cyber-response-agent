@@ -487,66 +487,39 @@ def _judge_record(ep: Path) -> dict:
 # ======================================================================================
 
 
-def test_1224_two_preflight_failures_write_unusable_and_start_no_sibling(tmp_path, monkeypatch):
+@pytest.mark.parametrize("failing", [("b", "c"), ("c",), ()], ids=["two", "one", "none"])
+def test_1224_two_preflight_failures_write_unusable_and_start_no_sibling(tmp_path, monkeypatch,
+                                                                         failing):
     """d06c_two_preflight_failures_start_no_sibling — two pre-flight failures write `unusable` naming both worlds and the spawn seam is never called.
+    d06d_one_preflight_failure_skips_that_sibling — one pre-flight failure is `accepted` with that world listed unservable, and every other world's sibling starts.
+    d06e_clean_preflight_starts_every_sibling — a clean pre-flight is `accepted` with no unservable world and starts every runnable world.
 
-    When pre-flight fails two worlds, the outcome record says `unusable`, naming both worlds,
-    and the spawn seam is never called (O5, O13; Amendment 2 change 1). Both fact-carrying
-    worlds' oracle turns end without a submission (M03=A), with a retry cap of one.
-    Positive control: the oracle WAS asked, so pre-flight ran.
+    O5, O13; Amendment 2 change 1. A failing world's oracle turns end without a submission
+    (M03=A), with a retry cap of one; a passing world serves every call verified. The control
+    world a always starts when the family is accepted.
+    Positive control: a failing world's oracle WAS asked, so pre-flight ran.
     """
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     est = S.estate(tmp_path)
-    oracle = _failing()
-    run = _launch(tmp_path, est, oracle=oracle, verifier=S.passing_verifier())
-
-    outcome = S.read_outcome(run.ep)
-    assert outcome is not None, "pre-flight must write the outcome record"
-    assert outcome["outcome"] == "unusable"
-    assert _worlds(outcome["unservable_worlds"]) == {"b", "c"}
-    assert run.spawn.launches == [], "no sibling may start for an unusable family"
-    assert oracle.requests > 0, "pre-flight must have replayed through the oracle"
-
-
-def test_1224_one_preflight_failure_skips_that_sibling_and_runs_the_rest(tmp_path, monkeypatch):
-    """d06d_one_preflight_failure_skips_that_sibling — one pre-flight failure is `accepted` with that world listed unservable, and every other world's sibling starts.
-
-    When pre-flight fails exactly one world, the outcome record says `accepted` and lists that
-    world unservable; the spawn seam starts every other runnable world and never the failed one
-    (O5, O13). World c's turns end without a submission; world b serves every call verified.
-    """
-    monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
-    est = S.estate(tmp_path)
-    ok_b, bad_c = _passing(), _failing()
-    oracle = _by_world(ok_b, bad_c)
+    doubles = {w: (_failing() if w in failing else _passing()) for w in ("b", "c")}
+    oracle = _by_world(doubles["b"], doubles["c"])
     run = _launch(tmp_path, est, oracle=oracle, verifier=S.passing_verifier())
 
     _assert_routed(oracle)
     outcome = S.read_outcome(run.ep)
-    assert outcome is not None
-    assert outcome["outcome"] == "accepted"
-    assert _worlds(outcome["unservable_worlds"]) == {"c"}
-    assert sorted(run.spawn.worlds) == ["a", "b"]
-    assert bad_c.requests > 0
-    assert ok_b.submissions() == len(_calls())
-
-
-def test_1224_clean_preflight_accepts_and_starts_every_sibling(tmp_path):
-    """d06e_clean_preflight_starts_every_sibling — a clean pre-flight is `accepted` with no unservable world and starts every runnable world.
-
-    When every world passes pre-flight, the outcome record says `accepted` with no unservable
-    world and every runnable world's sibling is started (the control world included).
-    """
-    est = S.estate(tmp_path)
-    oracle = _passing()
-    run = _launch(tmp_path, est, oracle=oracle, verifier=S.passing_verifier())
-
-    outcome = S.read_outcome(run.ep)
-    assert outcome is not None
-    assert outcome["outcome"] == "accepted"
-    assert outcome["unservable_worlds"] == []
-    assert sorted(run.spawn.worlds) == ["a", "b", "c"]
-    assert oracle.submissions() == 2 * len(_calls()), "b and c each replayed every call"
+    assert outcome is not None, "pre-flight must write the outcome record"
+    assert _worlds(outcome["unservable_worlds"]) == set(failing)
+    if len(failing) >= 2:
+        assert outcome["outcome"] == "unusable"
+        assert run.spawn.launches == [], "no sibling may start for an unusable family"
+    else:
+        assert outcome["outcome"] == "accepted"
+        assert sorted(run.spawn.worlds) == sorted({"a", "b", "c"} - set(failing))
+    for w, double in doubles.items():
+        if w in failing:
+            assert double.requests > 0, "pre-flight must have replayed through the oracle"
+        else:
+            assert double.submissions() == len(_calls()), f"{w} did not replay every call"
 
 
 # ======================================================================================
@@ -558,11 +531,9 @@ def test_1224_preflight_replays_every_original_call_through_each_worlds_oracle_b
         tmp_path, episodes_root):
     """d14a_preflight_replays_every_original_call — before the first sibling start, every original call has passed once through each fact-carrying world's oracle and verifier.
 
-    Before the spawn seam is first called, every call the original run made has passed through
-    each runnable world's oracle and verifier once (M22=A: every replayed call goes through
-    `decide`; M07=A: the control world spends no oracle or verifier turn, so its requests would
-    land in `unrouted`). Observed on what each world's doubles RECEIVED, snapshotted at the
-    first start.
+    M22=A: every replayed call goes through `decide`; M07=A: the control world spends no oracle
+    or verifier turn, so its requests would land in `unrouted`. Observed on what each world's
+    doubles RECEIVED, snapshotted at the first start.
     """
     est = S.estate(tmp_path)
     ob, oc = _passing(), _passing()
@@ -590,10 +561,8 @@ def test_1224_preflight_replays_every_original_call_through_each_worlds_oracle_b
 def test_1224_sibling_is_served_the_telemetry_preflight_verified(tmp_path):
     """d14b_preflight_seeds_the_sibling_store — the sibling's forged store starts with pre-flight's committed rows and facts, and a sibling call covering the fact is offered those same rows.
 
-    A sibling's forged store starts with the forged rows and recorded facts pre-flight produced
-    for that world (M15=B: committed with a verified answer), and a sibling call covering the
-    same fact is served those same rows (S4: the frozen row is reused, no second row). Observed
-    on the stores read raw off disk and on what the sibling's oracle RECEIVED.
+    M15=B: committed with a verified answer; S4: the frozen row is reused, no second row.
+    Observed on the stores read raw off disk and on what the sibling's oracle RECEIVED.
 
     M01=A (R-01): world b forges onto the source run's POST-branch call, the only kind of call a
     world may change; every pre-branch call is served unchanged, and the world is accepted. The
@@ -634,14 +603,11 @@ def test_1224_sibling_is_served_the_telemetry_preflight_verified(tmp_path):
 def test_1224_sibling_first_issue_of_an_original_call_is_a_fresh_oracle_turn(tmp_path):
     """d14c_preflight_seeds_the_served_cache — pre-flight leaves no cached answer and no ledger row; the sibling's first issue of an original call spends a fresh oracle turn and verifier pass charged to its world's budget.
 
-    INVERTED (S1, S3; Amendment 2 change 1). Before the sibling's first call the world's
-    served-answer cache holds no entry and the world ledger no row; pre-flight writes neither.
-    The sibling's first issue of an original call is a cache miss whether pre-flight served it
-    changed (call 1: the post-branch call, the only kind a world may change under M01=A, R-01)
-    or unchanged (call 2: a pre-branch call), and in a world with facts it spends at least one
-    oracle turn and one verifier pass, charged to that world's oracle budget (D1: a tiny budget
-    makes the first issue unservable with reason budget; no unit is asserted, and the doubles
-    carry a priced model's name, R-08).
+    INVERTED (S1, S3; Amendment 2 change 1). The first issue is a cache miss whether pre-flight
+    served it changed (call 1: the post-branch call, the only kind a world may change under
+    M01=A, R-01) or unchanged (call 2: a pre-branch call). D1: a tiny budget makes the first
+    issue unservable with reason budget; no unit is asserted, and the doubles carry a priced
+    model's name, R-08.
     """
     est = S.estate(tmp_path)
     oracle = _by_world(_forging_b(), _passing())
@@ -678,10 +644,8 @@ def test_1224_sibling_first_issue_of_an_original_call_is_a_fresh_oracle_turn(tmp
 def test_1224_preflight_records_original_calls_whose_live_base_answer_drifted(tmp_path):
     """d14d_drift_recorded — pre-flight reads every recorded call live at as_of and lists as drift exactly the calls whose live answer differs.
 
-    Pre-flight reads each recorded original call live at as_of, and the outcome record lists, as
-    drift, exactly the calls whose live answer differs from the recording (N16: check 1's
-    comparator). D3: on this tenant the stub adapters only log `ctx.as_of`, so the bound is
-    observed as the manifest's as_of on every live read.
+    N16: check 1's comparator. D3: on this tenant the stub adapters only log `ctx.as_of`, so the
+    bound is observed as the manifest's as_of on every live read.
     """
     est = S.estate(tmp_path)
     run = _launch(tmp_path, est, oracle=_passing(), verifier=S.passing_verifier(),
@@ -703,11 +667,8 @@ def test_1224_outcome_record_holds_outcome_reason_unservable_worlds_and_drift(
         tmp_path, monkeypatch, episodes_root, word):
     """d14e_outcome_record_shape — pre-flight writes the outcome record once, before any sibling, holding the outcome, reason, unservable worlds, not-replayable calls and drift; later facts go in world records.
 
-    RE-PINNED (S6, S7). Pre-flight writes the episode outcome record once, before any sibling
-    starts: the outcome (accepted, unusable or refused), a reason, the unservable worlds, the
-    not-replayable calls and the drift calls; no process rewrites it. Facts learned after launch
-    go in each world's own record (one reason: oracle unservable with the failing call, did not
-    finish, or budget). M05=A: refused here is a family where no world carries a fact.
+    RE-PINNED (S6, S7). A world record holds one reason: oracle unservable with the failing call,
+    did not finish, or budget. M05=A: refused here is a family where no world carries a fact.
     """
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     est = S.estate(tmp_path)
@@ -749,31 +710,11 @@ def test_1224_outcome_record_holds_outcome_reason_unservable_worlds_and_drift(
         assert record["reason"]
 
 
-def test_1224_refused_outcome_starts_no_sibling_and_names_its_reason(tmp_path):
-    """d14f_refused_outcome — a refused pre-flight records `refused` with a reason naming why and starts no sibling.
-
-    When pre-flight refuses the episode, the outcome record says `refused` with a reason naming
-    why, and no sibling starts (M05=A: nothing to calibrate for a reason that belongs to no
-    world — here no world carries a fact).
-    """
-    est = S.estate(tmp_path)
-    oracle = S.oracle()
-    run = _launch(tmp_path, est, doc=_family(facts_b=[], facts_c=[]), oracle=oracle,
-                  verifier=S.verifier())
-
-    outcome = S.read_outcome(run.ep)
-    assert outcome is not None, "pre-flight records the refusal"
-    assert outcome["outcome"] == "refused"
-    assert "fact" in outcome["reason"].lower(), outcome["reason"]
-    assert run.spawn.launches == []
-    assert oracle.requests == 0
-
-
 def test_1224_launch_writes_neither_review_yaml_nor_staged_yaml(tmp_path):
     """d14g_no_review_or_staged_record — a full launch leaves no review.yaml and no staged.yaml in the episode directory.
 
-    A full launch leaves no review.yaml and no staged.yaml (the outcome record replaces both).
-    Positive control (pair d14e): the outcome record and the manifest ARE there.
+    The outcome record replaces both. Positive control (pair d14e): the outcome record and the
+    manifest ARE there.
     """
     est = S.estate(tmp_path)
     run = _launch(tmp_path, est, oracle=_passing(), verifier=S.passing_verifier())
@@ -787,9 +728,7 @@ def test_1224_launch_writes_neither_review_yaml_nor_staged_yaml(tmp_path):
 def test_1224_launcher_runs_preflight_and_has_no_staging_or_review_step(tmp_path):
     """d17f_launcher_steps — the stage clock records a pre-flight step between the questioner and the runs, and no staging or review step.
 
-    The launcher's stage clock records a pre-flight step between the questioner and the runs,
-    and no staging or review step (F-21: `Step.PREFLIGHT` coined; today's review step and its
-    rejections are not kept).
+    F-21: `Step.PREFLIGHT` coined; today's review step and its rejections are not kept.
     """
     step = S.sym(S.STEPS, "Step")
     members = list(step)
@@ -816,12 +755,11 @@ def test_1224_launcher_runs_preflight_and_has_no_staging_or_review_step(tmp_path
 
 def test_input_every_world_has_no_facts(tmp_path):
     """b_p010 — a family in which no world carries a fact loads, is refused by pre-flight, spends no oracle turn, records no world change, and is not graded.
+    d14f_refused_outcome — a refused pre-flight records `refused` with a reason naming why and starts no sibling.
 
     M05=A: `refused` = pre-flight had nothing to calibrate for a reason that belongs to no world
-    (#10 no world carries a fact), and no sibling starts. Settled regardless: every served
-    answer in every world equals the base answer and nothing in the family is recorded as a
-    world change — no forged row, no recorded fact, no world-ledger row. The judge does not
-    grade it (no model call). The manifest loads (the refusal is pre-flight's, not the loader's).
+    (#10 no world carries a fact). No world change means no forged row, no recorded fact, no
+    world-ledger row. The manifest loads (the refusal is pre-flight's, not the loader's).
     """
     est = S.estate(tmp_path)
     oracle, verifier = S.oracle(), S.verifier()
@@ -832,6 +770,7 @@ def test_input_every_world_has_no_facts(tmp_path):
     outcome = S.read_outcome(run.ep)
     assert outcome is not None
     assert outcome["outcome"] == "refused"
+    assert "fact" in outcome["reason"].lower(), outcome["reason"]
     assert run.spawn.launches == []
     assert oracle.requests == 0
     assert verifier.requests == 0
@@ -850,40 +789,12 @@ def _empty_grant_estate(tmp_path: Path) -> S.Estate:
     return S.estate(tmp_path, withheld=tuple((s, v) for s in S.SYSTEMS for v in S.READ_VERBS))
 
 
-def test_input_served_systems_is_empty(tmp_path):
-    """b_p013 — a tenant whose gather grant serves no system is refused with a named reason before the question-writer, with no crash, no spend and no world served.
-
-    N05: an empty grant refuses the launch before the question-writer runs. Settled regardless:
-    no generic crash (an operator refusal, not a traceback), no world is served a changed
-    answer (no sibling, no ledger row), and no lesson selection happens (the question-writer
-    never ran).
-    """
-    est = _empty_grant_estate(tmp_path)
-    assert est.served_systems() == []
-    questioner = S.questioner_for(_family())
-    oracle = S.oracle()
-    run = _launch(tmp_path, est, questioner=questioner, oracle=oracle,
-                  verifier=S.verifier())
-
-    assert run.rc != 0, "refused"
-    assert run.message, "refused with an operator message"
-    assert any(w in run.message.lower() for w in ("grant", "served")), run.message
-    assert questioner.calls == 0
-    assert oracle.requests == 0
-    assert est.calls() == []
-    assert run.spawn.launches == []
-    outcome = S.read_outcome(run.ep) if run.ep.is_dir() else None
-    assert outcome is None or outcome["outcome"] != "accepted"
-
-
 @pytest.mark.parametrize("reply", ["broken-document", "facts-bare-string"])
 def test_question_writer_model_returns_a_family_that_does_not_parse(tmp_path, reply):
     """b_p035 — an unparseable question-writer reply stops the launch with a named reason, keeps the episode directory and records `refused`, with no pre-flight spend and no sibling.
 
-    N05: an unparseable question-writer reply stops the launch with a named reason, keeps the
-    directory, and records the outcome per M05=A (`refused`: nothing to calibrate, for a reason
-    that belongs to no world). Settled regardless: the launcher stops with a named reason, no
-    pre-flight replay spends oracle budget and no sibling starts.
+    N05; the outcome is recorded per M05=A (`refused`: nothing to calibrate, for a reason that
+    belongs to no world).
     """
     est = S.estate(tmp_path)
     if reply == "broken-document":
@@ -912,10 +823,9 @@ def test_provider_key_for_the_oracle_is_absent_only_where_the_oracle_runs(tmp_pa
                                                                          episodes_root):
     """b_p041 — a sibling that exits 2 at start without leaving a record, as one its role preflight refuses for a missing oracle provider key would, is recorded `did not finish` in its own world record, never as oracle unservable; the outcome stays accepted.
 
-    M04=A: a world counts toward O5 if unservable OR did not finish (missing key at start), and
-    its recorded reason distinguishes the two; Amendment 2: the reason lives in the world's own
-    record (S7, S8), written by the launcher when the sibling exits without one. Pre-flight ran
-    in the launcher and accepted.
+    M04=A: a world counts toward O5 if unservable OR did not finish (missing key at start);
+    Amendment 2: the reason lives in the world's own record (S7, S8), written by the launcher
+    when the sibling exits without one. Pre-flight ran in the launcher and accepted.
 
     Driven here: the spawn seam's sibling for world b exits 2 at start and writes no record —
     the exit `run.preflight_role_models` gives an unusable provider key. NOT driven: a real
@@ -941,10 +851,9 @@ def test_provider_key_for_the_oracle_is_absent_only_where_the_oracle_runs(tmp_pa
 def test_preflight_original_call_names_a_system_that_is_no_longer_served(tmp_path):
     """b_p045 — a recorded call the live grant no longer admits is never sent and is listed as not replayable, beside drift.
 
-    M22=A: every replayed call goes through `decide`; a call no longer admitted is not sent and
-    is listed in the outcome record as not replayable. Settled regardless: no query for it
-    reaches a tenant system (O6), nothing about it is charged to the investigator, and the
-    outcome records which calls were not replayed. Here siem-x is no longer served at all.
+    M22=A: every replayed call goes through `decide`. No query for it reaches a tenant system
+    (O6) and nothing about it is charged to the investigator. Here siem-x is no longer served at
+    all.
     """
     est = S.estate(tmp_path, withheld=tuple(("siem-x", v) for v in S.READ_VERBS))
     oracle = _passing()
@@ -966,10 +875,7 @@ def test_preflight_original_call_names_a_system_that_is_no_longer_served(tmp_pat
 def test_1224_preflight_live_drift_read_and_the_siblings_base_answer(tmp_path):
     """s_p056 — the sibling's base for an original call is the family's recording, not pre-flight's live drift read, which lands only in the drift record.
 
-    Settled: for a call the original run made, the sibling's base is the family's base
-    recording, not the live answer pre-flight read for drift: the live answer lands only in the
-    drift record, and a later change in the live system alters neither the recording nor the
-    drift entry.
+    A later change in the live system alters neither the recording nor the drift entry.
     """
     est = S.estate(tmp_path)
     run = _launch(tmp_path, est, oracle=_passing(), verifier=S.passing_verifier(),
@@ -1002,12 +908,10 @@ def test_oracle_provider_rate_limits_every_sibling_at_once(tmp_path):
     """b_p125 — when the provider rate-limits every sibling at once, each investigator sees no oracle error and no budget or breaker charge.
 
     M04=A: provider rate limits are absorbed by the model client's bounded retry (M03) and count
-    only when that gives up. Settled regardless: per sibling the investigator sees no oracle
-    error and no budget or breaker charge (O4). The rate limit is the `ModelHTTPError` 429 the
-    client raises once its own retries could not absorb it (GPR-01): it meets every sibling's
-    first oracle request, and the next request answers. Each sibling's call is served the
-    submission, and neither its evidence, its transcript nor its world ledger carries the
-    provider error.
+    only when that gives up (O4). The rate limit is the `ModelHTTPError` 429 the client raises
+    once its own retries could not absorb it (GPR-01): it meets every sibling's first oracle
+    request, and the next request answers. Each sibling's call is served the submission, and
+    neither its evidence, its transcript nor its world ledger carries the provider error.
 
     Each world's sibling is driven as a WHOLE investigation (one gather lead: the original idp
     call, then an idp lookup the tenant answers with a real `TransportFault`, then done) and
@@ -1099,11 +1003,10 @@ def _evidence_text(run_dir: Path) -> str:
 def test_1224_world_dir_holds_both_oracle_state_and_the_archived_run(tmp_path, episodes_root):
     """b_p175 — each world's oracle-side state lives in its own directory outside the archive tree and the run dir, and the launch's archiving leaves it untouched.
 
-    N14: oracle-side state lives in its own per-world directory outside the archive tree and the
-    run dir, written by one process at a time (S19). Settled regardless: archiving does not
-    remove or overwrite oracle state, and the judge's reader of worlds/<label>/ does not take
-    oracle-side files for the run's own artifacts (none is there). World b's pre-flight forges
-    onto the source run's post-branch call (M01=A, R-01), so its frozen store is non-empty.
+    N14: written by one process at a time (S19). The judge's reader of worlds/<label>/ does not
+    take oracle-side files for the run's own artifacts (none is there). World b's pre-flight
+    forges onto the source run's post-branch call (M01=A, R-01), so its frozen store is
+    non-empty.
     """
     est = S.estate(tmp_path)
 
@@ -1136,9 +1039,8 @@ def test_preflight_the_original_run_made_no_calls(tmp_path):
     """b_p176 — a source with no calls is `refused` by pre-flight, with no oracle spend, no unservable world and a record that nothing was replayed.
 
     M05=A: `refused` = nothing to calibrate for a reason that belongs to no world (#176 no
-    calls); no sibling starts. Settled regardless: no oracle spend occurs, no world is marked
-    unservable, and the outcome record states that nothing was replayed. (Today the source is
-    refused earlier, by `branch.validate`, before any episode directory exists.)
+    calls). (Today the source is refused earlier, by `branch.validate`, before any episode
+    directory exists.)
     """
     est = S.estate(tmp_path)
     oracle, verifier = S.oracle(), S.verifier()
@@ -1159,8 +1061,7 @@ def test_1224_original_run_with_no_replayable_call(tmp_path):
     """b_p177 — a capture holding only a sentinel and a call the grant no longer admits is `refused`, lists the unadmitted call as not replayable, and spends nothing on either.
 
     M05=A: `refused` when none is replayable (#177); N15: sentinels are not replayed; M22=A: an
-    unadmitted call is not sent and is listed as not replayable. Settled regardless: the outcome
-    record says which calls were not replayable and no oracle spend is made for them.
+    unadmitted call is not sent.
     """
     est = S.estate(tmp_path, withheld=(("idp", "query"),))
 
@@ -1186,10 +1087,8 @@ def test_1224_original_run_with_no_replayable_call(tmp_path):
 def test_preflight_original_call_was_itself_an_error(tmp_path, live):
     """b_p178 — a captured failure is read live: still erroring, it passes through as `real-error` and is no oracle unservability; now answering, it is calibrated like any call and recorded as drift.
 
-    M22=A: a captured failure is read live (passes through as `real-error` if it still errors;
-    calibrated like any call and recorded as drift if it now answers). Settled regardless: the
-    original error is world telemetry and passes through unchanged (O4), it is never retried or
-    swallowed, and it is not counted as oracle unservability.
+    M22=A. The original error is world telemetry and passes through unchanged (O4), never retried
+    or swallowed.
     """
     params = {"entity": "svc-err"}
     est = S.estate(tmp_path)
@@ -1231,8 +1130,8 @@ def test_input_original_run_repeats_a_call(tmp_path):
     """b_p179 — a call the original run made twice is replayed once, its base is the first captured answer, and the sibling's repeats get the same bytes.
 
     N15: replay once per distinct call key; the base is the first captured answer (P-01, GP-01:
-    first key wins), so drift compares the live answer against it. Settled regardless: the
-    sibling's repeat of that call is served the same bytes every time (O2), with one oracle turn.
+    first key wins), so drift compares the live answer against it. The repeat costs one oracle
+    turn (O2).
     """
     est = S.estate(tmp_path)
     second = {"rows": [{**_ROW, "event_id": "e-second-2"}]}
@@ -1262,9 +1161,8 @@ def test_input_original_run_repeats_a_call(tmp_path):
 def test_1224_original_calls_that_never_reached_a_system(tmp_path):
     """b_p180 — sentinel rows in the original run's query table are not replayed: no query is issued for them and no oracle sees them.
 
-    N15: sentinels are not replayed. Settled regardless: no query is issued for a call that
-    never reached a system (policy denials, schema rejections, repeat trips). Positive control:
-    the real captures are read live and reach the oracle.
+    N15. Sentinels are policy denials, schema rejections, repeat trips. Positive control: the
+    real captures are read live and reach the oracle.
     """
     est = S.estate(tmp_path)
     sentinels = [("edr", "lookup", {"entity": "sent-1"}, "∅.denied"),
@@ -1294,10 +1192,8 @@ def test_1224_original_calls_that_never_reached_a_system(tmp_path):
 def test_input_original_calls_are_numerous(tmp_path, monkeypatch):
     """b_p181 — with many original calls and a budget that runs out, each exhausted world fails calibration with reason budget, spend stays bounded per world, and two such worlds make the family unusable.
 
-    Settled (A2 c2, D1): a world whose budget runs out during its pre-flight fails calibration
-    with reason budget; exhaustion makes the affected world unservable (O14), two or more
-    unservable worlds make the family unusable, and the outcome record names which worlds were
-    judged unservable. The control world spends nothing and is untouched. No unit is asserted.
+    Settled (A2 c2, D1; O14). The control world spends nothing and is untouched. No unit is
+    asserted.
     """
     monkeypatch.setenv(S.KNOB_BUDGET, "1e-9")
     est = S.estate(tmp_path)
@@ -1320,10 +1216,8 @@ def test_input_original_calls_are_numerous(tmp_path, monkeypatch):
 def test_preflight_runs_out_of_oracle_budget_midway(tmp_path, monkeypatch):
     """b_p182 — only the world whose budget runs out fails calibration; the others proceed on their own budgets, the episode is accepted, and nothing is charged to an investigator.
 
-    Settled (A2 c2, D1): only the exhausted world fails calibration; unjudged worlds proceed on
-    their own budgets; the episode is not refused for it; O5 counts that one world. World c
-    carries no fact, so it spends no oracle budget at all. Settled regardless: oracle spend is
-    never charged to the investigator (no world-ledger row exists for any of it).
+    Settled (A2 c2, D1); O5 counts that one world. World c carries no fact, so it spends no
+    oracle budget at all. No world-ledger row exists for any of the spend.
     """
     monkeypatch.setenv(S.KNOB_BUDGET, "1e-9")
     est = S.estate(tmp_path)
@@ -1344,10 +1238,8 @@ def test_preflight_runs_out_of_oracle_budget_midway(tmp_path, monkeypatch):
 def test_preflight_drift_read_fails_on_the_real_system(tmp_path):
     """b_p183 — a drift read the real system errors on is recorded as drift-unknown, goes through the grant and as_of, and makes no world unservable.
 
-    N16: a failed drift read is recorded as drift-unknown; drift never changes the outcome.
-    Settled regardless: the drift read is a tenant query that goes through the gather grant,
-    as_of bound and rate limit (O6, O14); the failure is not an oracle failure and does not by
-    itself make any world unservable. D3: as_of is observed as logged by the stub adapter.
+    N16: drift never changes the outcome; the rate limit applies too (O6, O14). D3: as_of is
+    observed as logged by the stub adapter.
     """
     est = S.estate(tmp_path)
     oracle = _passing()
@@ -1373,9 +1265,7 @@ def test_preflight_drift_read_fails_on_the_real_system(tmp_path):
 def test_preflight_live_answers_have_drifted_for_many_calls(tmp_path):
     """b_p184 — drift on most calls is recorded per call and changes nothing mechanically: the outcome stays accepted, the oracle's base stays the recording, every sibling starts.
 
-    N16: drift never changes the outcome and is recorded in the write-once outcome record.
-    Settled regardless: whether drift discards a family is the judge model's call, not a
-    mechanical rule.
+    N16. Whether drift discards a family is the judge model's call, not a mechanical rule.
     """
     est = S.estate(tmp_path)
 
@@ -1402,10 +1292,9 @@ def test_preflight_live_answers_have_drifted_for_many_calls(tmp_path):
 def test_input_drift_differs_only_in_volatile_fields(tmp_path):
     """b_p185 — drift uses check 1's comparator: a timing counter or a row-order change is drift, an identical answer is not, and the record names each call it counts.
 
-    N16 (with N09): drift uses check 1's structural comparator — mapping key order and
-    whitespace are not differences, list order is, volatile metadata counts. Settled
-    regardless: the drift record names the calls it counts. (Key order cannot differ through
-    the stub, whose answer table is stored key-sorted.)
+    N16 (with N09): mapping key order and whitespace are not differences, list order is,
+    volatile metadata counts. (Key order cannot differ through the stub, whose answer table is
+    stored key-sorted.)
     """
     est = S.estate(tmp_path)
     rows = [_ROW, {**_ROW, "event_id": "e-101"}]
@@ -1433,11 +1322,8 @@ def test_preflight_one_world_hits_an_oracle_outage_and_the_others_are_fine(tmp_p
                                                                            monkeypatch):
     """s_p186 — when the provider fails every attempt of one world's call, that world is unservable, the outcome names it, and the other worlds' siblings run.
 
-    Settled: when one world's pre-flight fails (the oracle exhausts N attempts on a call) and
-    the others replay cleanly, that world is marked unservable and the others' siblings run and
-    are graded (O5, O13); the outcome record names the unservable world. The provider failure is
-    the `ModelHTTPError` 503 the client raises once its own retries give up (GPR-01), on every
-    request of world c.
+    O5, O13. The provider failure is the `ModelHTTPError` 503 the client raises once its own
+    retries give up (GPR-01), on every request of world c.
     """
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "2")
     est = S.estate(tmp_path)
@@ -1457,11 +1343,10 @@ def test_preflight_one_world_hits_an_oracle_outage_and_the_others_are_fine(tmp_p
 def test_preflight_oracle_provider_is_down_for_every_world(tmp_path, status):
     """b_p187 — a provider outage for the whole pre-flight records `unusable` with each world's reason naming the provider failure, and starts no sibling.
 
-    M05=A: an all-world oracle-provider outage follows Amendment 2's rule (`unusable`, each
-    world's reason names the provider failure; #187 not carved out as `refused`). Settled
-    regardless: no sibling starts, and no oracle or tenant error reaches an investigator. The
-    outage is the `ModelHTTPError` 503 the client raises once its own retries give up (GPR-01),
-    on every request of every world.
+    M05=A: an all-world oracle-provider outage follows Amendment 2's rule (#187 not carved out as
+    `refused`). No oracle or tenant error reaches an investigator. The outage is the
+    `ModelHTTPError` 503 the client raises once its own retries give up (GPR-01), on every
+    request of every world.
 
     R-09 (the human, F-loop: keep the rule): a provider key that is present but REJECTED at
     pre-flight follows the same rule — no configuration-refusal carve-out, so the launch is not
@@ -1495,11 +1380,9 @@ def test_preflight_oracle_provider_is_down_for_every_world(tmp_path, status):
 def test_launcher_dies_with_some_worlds_preflighted_and_others_not(tmp_path, episodes_root):
     """b_p188 — a relaunch after a launcher died mid pre-flight is a new episode that ignores the dead one's stores, writes its own complete outcome before any sibling, and duplicates no frozen row.
 
-    N17: a launch never reuses an episode directory; a relaunch is a new episode id; a dead
-    launch's state is ignored. Settled regardless: no sibling started before a complete outcome
-    record exists, frozen rows are not duplicated or contradicted, and a half-written outcome
-    record is not read as accepted (the dead one has none). The relaunch's world b forges onto
-    the source run's post-branch call (M01=A, R-01).
+    N17: a launch never reuses an episode directory. A half-written outcome record is not read
+    as accepted (the dead one has none). The relaunch's world b forges onto the source run's
+    post-branch call (M01=A, R-01).
     """
     est = S.estate(tmp_path)
     dead = _dead_launch(episodes_root, forged=[
@@ -1529,9 +1412,7 @@ def test_launcher_dies_after_the_accepted_record_before_any_sibling_starts(tmp_p
                                                                            episodes_root):
     """b_p189 — a second launch after the first died between its `accepted` record and its first sibling is a new episode, and the first launch's frozen stores are not overwritten.
 
-    N17: a relaunch is a new episode id; a dead launch's state is ignored. Settled regardless:
-    the first launch's frozen stores are not overwritten. The relaunch's world b forges onto
-    the source run's post-branch call (M01=A, R-01).
+    N17. The relaunch's world b forges onto the source run's post-branch call (M01=A, R-01).
     """
     est = S.estate(tmp_path)
     dead = _dead_launch(episodes_root, outcome="accepted", forged=[
@@ -1555,10 +1436,7 @@ def test_launcher_dies_after_the_accepted_record_before_any_sibling_starts(tmp_p
 def test_outcome_record_is_cut_short_by_a_launcher_crash(tmp_path, state):
     """s_p190 — a torn or missing outcome record is never read as accepted: the judge does not grade it, and the episode reader and the page report it rather than crash.
 
-    Settled: a torn or missing episode outcome record is never read as `accepted`: the judge's
-    gate grades only an episode with an intact `accepted` outcome (O13), and the judge, the
-    episode reader and the page report the record as missing or unreadable rather than crash
-    (M05=A: the distinct "no record" state).
+    O13; M05=A: the distinct "no record" state.
     """
     ep = S.judged_episode(tmp_path, outcome=None)
     if state == "torn":
@@ -1587,9 +1465,8 @@ def test_outcome_record_is_cut_short_by_a_launcher_crash(tmp_path, state):
 def test_outcome_record_is_rewritten_after_the_siblings_finish(tmp_path, episodes_root):
     """b_p191 — the outcome record pre-flight wrote is never rewritten after the siblings run; a later fact lands in the world's own record.
 
-    Settled (S6, S9): the outcome record is written once and never rewritten; a judge pass
-    reads the write-once outcome plus the per-world records. Settled regardless: the judge's
-    gate reads an `accepted` outcome to grade, and never a record that is mid-rewrite.
+    Settled (S6, S9): a judge pass reads the write-once outcome plus the per-world records, and
+    never a record that is mid-rewrite.
     """
     est = S.estate(tmp_path)
     spawn = _Spawn(root=episodes_root, exits={"b": 1})
@@ -1606,9 +1483,7 @@ def test_outcome_record_is_rewritten_after_the_siblings_finish(tmp_path, episode
 def test_sibling_becomes_unservable_after_preflight_accepted(tmp_path, episodes_root):
     """b_p192 — a sibling that goes unservable after an accepted pre-flight leaves its own `oracle unservable` record, the outcome record stays as pre-flight wrote it, and the rest still run.
 
-    Settled (S7, S8, S9): the sibling writes its own unservable reason with the failing call;
-    the outcome record is not amended; the judge counts O5 from both. Settled regardless: one
-    unservable sibling leaves the rest graded (their siblings ran).
+    Settled (S7, S8, S9): the judge counts O5 from both records.
     """
     est = S.estate(tmp_path)
     failing_call = {"system": "edr", "verb": "lookup", "params": {"entity": "never-seen"}}
@@ -1629,9 +1504,7 @@ def test_sibling_becomes_unservable_after_preflight_accepted(tmp_path, episodes_
 def test_1224_archive_fails_after_the_siblings_ran(tmp_path, episodes_root):
     """b_p193 — when archiving one world fails after the siblings ran, that world is one the judge cannot see (never graded) while the archived worlds are graded, and the outcome record keeps pre-flight's word, one of accepted, unusable or refused, with no fourth word.
 
-    Settled (S7, S10; implied #193 from M04=A): an archive failure after the siblings ran counts
-    as a world the judge cannot see; it is not a rewrite of the outcome record. Settled
-    regardless: the outcome words O13 names are accepted, unusable and refused.
+    Settled (S7, S10; implied #193 from M04=A).
 
     The failure is a REAL input to the real archive: every sibling leaves a finished tree
     (`plant`), and once world c's sibling has run its tree holds a symlink where its report
@@ -1685,17 +1558,14 @@ def test_second_unservable_world_found_while_other_siblings_still_run(tmp_path, 
     """b_p195 — when two siblings record themselves unservable while a third still runs, both records stand as the siblings wrote them, the outcome record is not rewritten, and the unusable family yields no findings: the launch's judge buys no model call.
 
     N18: once the family is unusable, running siblings are stopped by the launcher acting on
-    per-world records (not cross-sibling sharing). Settled regardless: an unusable family yields
-    no findings (O5), and an unservable sibling's partial records never become a finding.
+    per-world records (not cross-sibling sharing). An unservable sibling's partial records never
+    become a finding (O5).
 
-    Pinned: the per-world records the launcher acts on are the siblings' own, never
-    overwritten; the outcome record keeps pre-flight's word; and the launch's judge pass counts
-    the two siblings' own records (S9), so it makes no model call, records the family
-    `unusable` and carries no finding — though every sibling left a finished tree to grade
-    (`plant`). Positive control: the same source launched with only ONE sibling unservable is
-    graded (the launch's judge seam is called for a healthy world). NOT pinned: N18's stop of a
-    still-running sibling — the spawn seam blocks until each sibling returns, so a stop has no
-    observable here (ruled unpinned; recorded in handoff.deferred).
+    The launch's judge pass counts the two siblings' own records (S9), though every sibling left
+    a finished tree to grade (`plant`). Positive control: the same source launched with only ONE
+    sibling unservable is graded (the launch's judge seam is called for a healthy world). NOT
+    pinned: N18's stop of a still-running sibling — the spawn seam blocks until each sibling
+    returns, so a stop has no observable here (ruled unpinned; recorded in handoff.deferred).
     """
     est = S.estate(tmp_path)
     _base, src = S.source_run(tmp_path, est, calls=_calls())
@@ -1743,10 +1613,8 @@ def test_second_unservable_world_found_while_other_siblings_still_run(tmp_path, 
 def test_1224_second_world_fails_preflight_while_others_remain(tmp_path, monkeypatch):
     """b_p196 — once a second world has failed pre-flight, pre-flight spends no further oracle turn on a world still being replayed, and no sibling starts.
 
-    N18: pre-flight spends nothing more on unreplayed worlds once the family is unusable.
-    Settled regardless: two or more unservable worlds mean no sibling starts (O5, O13). Worlds
-    b and c fail on their first call; world d's turns are slow (real latency), so a pre-flight
-    that kept going would replay all of d's calls.
+    N18; O5, O13. Worlds b and c fail on their first call; world d's turns are slow (real
+    latency), so a pre-flight that kept going would replay all of d's calls.
     """
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     est = S.estate(tmp_path)
@@ -1769,10 +1637,8 @@ def test_1224_second_world_fails_preflight_while_others_remain(tmp_path, monkeyp
 def test_sibling_is_killed_without_leaving_an_unservable_reason(tmp_path, episodes_root):
     """b_p197 — a sibling killed without a record is recorded by the launcher as `did not finish`, never as oracle unservable.
 
-    M04=A: a world that did not finish counts toward O5, and its recorded reason distinguishes
-    "oracle unservable" from "did not run"; S8: the launcher writes "did not finish" after the
-    process exits without a record. Settled regardless: only an oracle failure may be called
-    unservable, and nothing reaches an investigator.
+    M04=A: a world that did not finish counts toward O5; S8: the launcher writes "did not finish"
+    after the process exits without a record. Nothing reaches an investigator.
     """
     est = S.estate(tmp_path)
     spawn = _Spawn(root=episodes_root, exits={"c": -9})
@@ -1791,9 +1657,7 @@ def test_sibling_is_killed_without_leaving_an_unservable_reason(tmp_path, episod
 def test_sibling_cannot_be_spawned(tmp_path, episodes_root):
     """b_p198 — a sibling that cannot be spawned is recorded `did not finish` in its own world record, and the outcome record is not rewritten.
 
-    M04=A: a spawn failure is a world that did not finish, counted toward O5, its reason
-    distinct from oracle unservable; Amendment 2 puts the reason in the world's own record
-    (S7, S8). Settled regardless: the world and the reason are named.
+    M04=A: counted toward O5; Amendment 2 puts the reason in the world's own record (S7, S8).
     """
     est = S.estate(tmp_path)
     spawn = _Spawn(root=episodes_root, fault=S.Fault(fail_on=("c",)))
@@ -1810,9 +1674,7 @@ def test_sibling_cannot_be_spawned(tmp_path, episodes_root):
 def test_1224_preflight_world_fails_after_some_calls_verified(tmp_path, monkeypatch):
     """b_p203 — a world that fails pre-flight after verifying its first call keeps its committed stores for diagnosis, caches no answer, runs no sibling, and its forged rows reach no one.
 
-    N14: a world that fails pre-flight keeps its stores for diagnosis and serves no one; S1: no
-    served answer is cached. Settled regardless: that world is unservable, runs no sibling, and
-    its forged rows are served to no investigator.
+    N14; S1.
 
     R-01 (M01=A), decided: the verified call that commits the forged row is a POST-branch call.
     A forge onto a pre-branch call is a change M01=A fails, so it could never be "verified";
@@ -1852,11 +1714,8 @@ def test_1224_preflight_world_fails_after_some_calls_verified(tmp_path, monkeypa
 def test_oracle_model_knob_changes_between_preflight_and_sibling(tmp_path, monkeypatch):
     """s_p204 — changing the oracle's model knob between pre-flight and the sibling changes nothing frozen: the sibling's oracle is handed pre-flight's rows and the stores stay as pre-flight committed them.
 
-    Settled: a change of the oracle's model knob between pre-flight and the sibling does not
-    alter what is frozen: the forged telemetry and recorded facts pre-flight forged stay binding
-    on the sibling, and the sibling is served telemetry no different from what pre-flight
-    verified for the same fact (O2, O13). Pre-flight forges onto the source run's post-branch
-    call (M01=A, R-01), which the sibling then issues.
+    O2, O13. Pre-flight forges onto the source run's post-branch call (M01=A, R-01), which the
+    sibling then issues.
     """
     monkeypatch.setenv(S.KNOB_MODEL, "oracle-model-one")
     est = S.estate(tmp_path)
@@ -1882,10 +1741,8 @@ def test_oracle_model_knob_changes_between_preflight_and_sibling(tmp_path, monke
 def test_conc_36_second_launch_while_the_first_is_running(tmp_path, episodes_root):
     """b_p218 — a second launch for the same branch point while the first's siblings run gets its own episode directory, and neither launch touches the other's stores or outcome record.
 
-    N17: a concurrent second launch gets its own directory. Settled regardless: the two
-    launches never corrupt each other's stores, rate-limit state or outcome record (S16: there
-    is no cross-process limiter state to share). In both launches world b forges onto the
-    source run's post-branch call (M01=A, R-01).
+    N17. Rate-limit state is not shared either (S16: there is no cross-process limiter state).
+    In both launches world b forges onto the source run's post-branch call (M01=A, R-01).
     """
     est = S.estate(tmp_path)
     _base, src = S.source_run(tmp_path, est, calls=_calls_post())
@@ -1924,9 +1781,7 @@ def test_1224_family_state_written_before_the_manifest_then_relaunch(tmp_path, e
     """b_p226 — a relaunch over a dead launch's pre-manifest state adopts none of it: the new episode's base is the source's own recording and no stale answer reaches its oracle.
 
     Settled (S16, S20): no family-level live state exists (no live-base cache, shared
-    exploration or shared limiter); a relaunch is a new episode and adopts nothing. Settled
-    regardless: stale state does not make the relaunch serve a base answer from a different
-    branch point.
+    exploration or shared limiter).
     """
     est = S.estate(tmp_path)
     dead = _dead_launch(episodes_root, manifest=False)
@@ -1957,9 +1812,7 @@ def test_1224_family_state_written_before_the_manifest_then_relaunch(tmp_path, e
 def test_siblings_ask_in_a_different_order_from_the_preflight_replay(tmp_path):
     """s_p228 — telemetry for a fact is forged once and frozen, so the sibling is offered the same rows whichever covering call it makes first.
 
-    Settled: telemetry for a fact is forged once and frozen, so the sibling is served the same
-    telemetry for it whichever call first covers it, and in whatever order the investigator
-    makes the covering calls relative to pre-flight's replay order (O13).
+    O13.
 
     M01=A (R-01): both covering calls are POST-branch calls (`_POST` and a second one), the only
     calls a world may change; every pre-branch call is served unchanged. World b's double
@@ -2000,10 +1853,7 @@ def test_siblings_ask_in_a_different_order_from_the_preflight_replay(tmp_path):
 def test_p090_one_poisoned_original_answer_defeats_every_worlds_oracle(tmp_path, monkeypatch):
     """b_p231 — one hostile original answer that every world's oracle fails on makes the family unusable like any other, each world's reason naming that call, and reaches no investigator.
 
-    N21: recorded like any unusable family, each world's reason naming the failing call;
-    poisoned-input detection is a follow-up. Settled regardless: two or more unservable worlds
-    make the family unusable and recorded as such (O5), and nothing reaches an investigator (no
-    sibling starts).
+    N21: poisoned-input detection is a follow-up. O5.
     """
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     est = S.estate(tmp_path)
@@ -2032,8 +1882,7 @@ def test_p095_relaunch_over_an_episode_folder_holding_a_prior_outcome(tmp_path, 
                                                                       prior):
     """b_p232 — a launch over an episode folder that already holds an outcome gets a new episode directory and leaves the existing outcome untouched.
 
-    N17: a launch never reuses an episode directory; a relaunch is a new episode id. Settled
-    regardless: an existing complete outcome is not silently overwritten with a different one.
+    N17.
     """
     est = S.estate(tmp_path)
     old = _dead_launch(episodes_root, outcome=prior)
@@ -2053,11 +1902,8 @@ def test_conc_33_preflight_worlds_finish_out_of_order(tmp_path, monkeypatch, epi
                                                       failures):
     """s_p233 — no sibling starts until pre-flight has judged every world; the outcome is recorded once from all results, and siblings start only for servable worlds when fewer than two failed.
 
-    Settled: no sibling starts until pre-flight has judged every world: if one world finishes
-    clean while another is still running and then fails (and a third after it), the outcome is
-    recorded once for the family from all worlds' results, and siblings start only for servable
-    worlds if fewer than two failed (O13, O5). World b finishes clean at once; c fails late;
-    d fails later still (two failures) or passes slowly (one failure).
+    O13, O5. World b finishes clean at once; c fails late; d fails later still (two failures) or
+    passes slowly (one failure).
     """
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     est = S.estate(tmp_path)
@@ -2090,9 +1936,7 @@ def test_conc_33_preflight_worlds_finish_out_of_order(tmp_path, monkeypatch, epi
 def test_fewer_siblings_start_than_the_family_has_worlds(tmp_path, monkeypatch, episodes_root):
     """s_p234 — after pre-flight excludes one world, the other worlds' siblings start together and finish, unheld by the excluded one.
 
-    Settled: after pre-flight excludes one world as unservable, siblings start for the other
-    worlds and run together and finish; the one unservable world does not hold the others back
-    or cause them to be dropped (O5: the family is graded on the rest).
+    O5: the family is graded on the rest.
     """
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     est = S.estate(tmp_path)
@@ -2111,13 +1955,11 @@ def test_fewer_siblings_start_than_the_family_has_worlds(tmp_path, monkeypatch, 
 def test_conc_34_preflight_worlds_forge_for_one_original_call(tmp_path):
     """s_p235 — two worlds forging for one original call keep separate stores, and neither world's forged rows enter the other's store or any world's real data.
 
-    Settled (re-pinned): replaying one original call through two worlds' oracles yields separate
-    forged stores, each holding only its world's rows; neither world's forged rows enter the
-    other's store or any world's real data — forged telemetry is not real data (S21, M12=A).
-    Both worlds forge a row with the SAME event id: were forged rows real data, the second
-    would collide with the first under check 3 and its world would fail. The one original call
-    both worlds forge for is the source run's POST-branch call (M01=A, R-01: the only kind a
-    world may change); each world serves every pre-branch call unchanged.
+    Settled (re-pinned; S21, M12=A): forged telemetry is not real data. Both worlds forge a row
+    with the SAME event id: were forged rows real data, the second would collide with the first
+    under check 3 and its world would fail. The one original call both worlds forge for is the
+    source run's POST-branch call (M01=A, R-01: the only kind a world may change); each world
+    serves every pre-branch call unchanged.
     """
     est = S.estate(tmp_path)
     shared_b = {**_FORGED_B, "event_id": "e-1224-shared"}
@@ -2154,12 +1996,10 @@ def test_conc_34_preflight_worlds_forge_for_one_original_call(tmp_path):
 def test_1224_sibling_reissues_an_original_call_preflight_served_changed(tmp_path):
     """s_fu01 — a sibling re-issuing a call pre-flight served changed spends a fresh oracle turn and verifier pass, reuses the frozen row, records an `oracle` decision, and gets its own stored answer byte for byte on a repeat.
 
-    Settled (S3, S4, S5; Amendment 2 change 1): the re-issue is uncached, so it spends at least
-    one oracle turn and one verifier pass charged to the world's budget; the frozen row is
-    reused (same forged_id, same values, no second row); a repeat returns the sibling's own
-    stored answer byte for byte; the call's world-ledger decision is `oracle`. The call
-    pre-flight served changed is the source run's POST-branch call (M01=A, R-01: the only kind
-    a world may change); the sibling re-issues it.
+    Settled (S3, S4, S5; Amendment 2 change 1): the oracle turn and verifier pass are charged to
+    the world's budget; the reused row has the same forged_id and values. The call pre-flight
+    served changed is the source run's POST-branch call (M01=A, R-01: the only kind a world may
+    change).
     """
     est = S.estate(tmp_path)
     oracle = _by_world(_forging_b(), _passing())
@@ -2189,11 +2029,10 @@ def test_1224_sibling_reissues_an_original_call_preflight_served_changed(tmp_pat
 def test_1224_sibling_reissues_an_original_call_preflight_left_unchanged(tmp_path):
     """s_fu02 — a sibling re-issuing a call pre-flight left unchanged still spends an oracle turn and a verifier pass, and no seeded state answers it.
 
-    Settled (S3; Amendment 2 change 1, M01=A): at least one oracle turn and one verifier pass;
-    zero seeded state answers it. The world-ledger decision is the oracle's (`passthrough` for an
-    unchanged answer, or `oracle`); which of the two is not pinned here. Pre-flight changed only
-    the source run's post-branch call (M01=A, R-01) and left the pre-branch edr call unchanged;
-    the sibling re-issues the edr call.
+    Settled (S3; Amendment 2 change 1, M01=A). The world-ledger decision is the oracle's
+    (`passthrough` for an unchanged answer, or `oracle`); which of the two is not pinned here.
+    Pre-flight changed only the source run's post-branch call (M01=A, R-01) and left the
+    pre-branch edr call unchanged; the sibling re-issues the edr call.
     """
     est = S.estate(tmp_path)
     oracle = _by_world(_forging_b(), _passing())
@@ -2219,16 +2058,13 @@ def test_1224_sibling_reissues_an_original_call_preflight_left_unchanged(tmp_pat
 def test_1224_siblings_records_before_and_after_it_reissues_a_preflight_call(tmp_path):
     """b_fu03 — before the sibling's first call its world ledger is empty while its oracle-side ledger already holds pre-flight's traffic; after one re-issued call the ledger and evidence each hold exactly that call.
 
-    Settled (S1, S19; N14): pre-flight's oracle-side traffic lands in that world's own
-    oracle-side ledger, non-empty before the first call; no seeded served record exists.
-    Before the first call the world ledger holds no pre-flight row and the family's base
-    recording is exactly the source's captures (written once by the launcher). After exactly one
-    call pre-flight already replayed, the world ledger holds one decision row and the evidence
-    rows hold exactly one new row; neither pre-flight's replays nor the call's oracle-side
-    traffic appear in either (O9). The re-issued call is the source run's POST-branch call,
-    which pre-flight served changed (M01=A, R-01). The evidence read is the scenario lead's own
-    rows: every driven run also writes lead zero's correlation row (`l-000`), which is not a
-    query of this call.
+    Settled (S1, S19; N14): no seeded served record exists. Before the first call the family's
+    base recording is exactly the source's captures (written once by the launcher). Neither
+    pre-flight's replays nor the call's oracle-side traffic appear in the world ledger or the
+    evidence (O9). The re-issued call is the source run's POST-branch call, which pre-flight
+    served changed (M01=A, R-01). The evidence read is the scenario lead's own rows: every
+    driven run also writes lead zero's correlation row (`l-000`), which is not a query of this
+    call.
     """
     est = S.estate(tmp_path)
     oracle = _by_world(_forging_b(), _passing())
@@ -2266,11 +2102,9 @@ def test_1224_outcome_record_is_written_once_and_each_world_record_has_one_write
         tmp_path, episodes_root):
     """o11_outcome_and_world_record_writers — pre-flight writes the outcome record once, before any sibling, never rewritten; each world record holds one reason from one writer; two launches give two episodes.
 
-    O-11: the episode outcome record is written once, by pre-flight, before any sibling starts,
-    and never rewritten; each world's own record holds one reason, written by the sibling
-    (oracle unservable) or by the launcher after that sibling's process exited without a reason
-    (did not finish), never both and never torn; two launches of one source give two episodes
-    with two records (N17). The launcher drives pre-flight's replay entry.
+    O-11; N17. A world record's reason is written by the sibling (oracle unservable) or by the
+    launcher after that sibling's process exited without a reason (did not finish), never both
+    and never torn. The launcher drives pre-flight's replay entry.
     """
     replay = S.sym(S.CLI, "preflight_replay")
     est = S.estate(tmp_path)
@@ -2303,16 +2137,18 @@ def test_1224_outcome_record_is_written_once_and_each_world_record_has_one_write
 
 def test_1224_empty_gather_grant_refuses_the_launch_before_the_question_writer(tmp_path):
     """o20_empty_grant_refuses_launch — a tenant whose gather grant names no system is refused with a named reason before the question-writer runs, with no pre-flight spend and no sibling.
+    b_p013 — a tenant whose gather grant serves no system is refused with a named reason before the question-writer, with no crash, no spend and no world served.
 
-    O-20 (N05): a tenant whose gather grant names no system refuses the launch with a named
-    reason before the question-writer runs: no question-writer call, no pre-flight spend, no
-    sibling.
+    O-20 (N05). The refusal is an operator refusal, not a traceback, and no lesson selection
+    happens (the question-writer never ran).
     """
     est = _empty_grant_estate(tmp_path)
+    assert est.served_systems() == []
     questioner = S.questioner_for(_family())
     oracle, verifier = S.oracle(), S.verifier()
     run = _launch(tmp_path, est, questioner=questioner, oracle=oracle, verifier=verifier)
 
+    assert run.rc != 0, "refused"
     assert run.message, "refused with a named reason"
     assert any(w in run.message.lower() for w in ("grant", "served")), run.message
     assert questioner.calls == 0
@@ -2320,16 +2156,16 @@ def test_1224_empty_gather_grant_refuses_the_launch_before_the_question_writer(t
     assert verifier.requests == 0
     assert est.calls() == []
     assert run.spawn.launches == []
+    outcome = S.read_outcome(run.ep) if run.ep.is_dir() else None
+    assert outcome is None or outcome["outcome"] != "accepted"
 
 
 def test_1224_launcher_writes_only_shared_outcome_words_and_stamps_only_accepted(
         tmp_path, monkeypatch, episodes_root):
     """pco04_launcher_writes_shared_words — the launcher writes only accepted, unusable or refused, no `incomplete` constant survives, and the family stamp is written only for accepted.
 
-    PCO-04 (M05=A): the word the launcher writes into the outcome record is one every reader
-    shares (accepted, unusable or refused; the INCOMPLETE constants at cli.py:97 and
-    episode.py:49 are gone or agree), and the family stamp is written only for `accepted`.
-    Positive control: an accepted launch whose planted siblings verify does write it.
+    PCO-04 (M05=A): the INCOMPLETE constants at cli.py:97 and episode.py:49 are gone or agree.
+    Positive control: an accepted launch whose planted siblings verify does write the stamp.
     """
     cli, episode = S.mod(S.CLI), S.mod(S.EPISODE)
     for module in (cli, episode):

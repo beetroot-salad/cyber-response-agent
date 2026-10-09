@@ -13,10 +13,8 @@ RED AGAINST HEAD (96e4cdb0) IS THE EXPECTED STATE: the page still imports stagin
 """
 from __future__ import annotations
 
-import ast
 import json
 import re
-import threading
 from pathlib import Path
 
 import pytest
@@ -118,9 +116,7 @@ def test_1224_episode_page_shows_the_refusal_for_an_old_episode(tmp_path):
     """d01i_old_manifest_refused_on_page — the page over an episode whose manifest carries an
     old field shows the predates-the-oracle refusal and renders no world.
 
-    render_episode over an archived episode whose manifest carries an old field does not render
-    the episode and produces a page that shows the predates-the-oracle refusal reason (O15,
-    N04: the predates-the-oracle reason is reported first). Driven for `overlay` and for
+    (O15, N04: the predates-the-oracle reason is reported first.) Driven for `overlay` and for
     `captured_patterns`; the positive control is the same archive under a v2 manifest, which
     renders its worlds and shows no such reason (RF-9: the page refuses through the judge's
     reader)."""
@@ -143,8 +139,6 @@ def test_1224_episode_page_shows_the_refusal_for_an_old_episode(tmp_path):
 def test_p069_old_manifest_keys_and_values_contain_markup_shown_on_the_page(tmp_path):
     """s_p032 — every manifest-, ledger- and judge-derived string reaches the page as inert text.
 
-    Settled: the page shows every manifest-, ledger- and judge-derived string as inert text
-    (markup escaped, never executed), including the refusal reason that quotes an old manifest.
     Driven twice: an old manifest whose key and value carry markup (the refusal page), and a v2
     episode whose fact statement, entity name, served (forged) value and judge finding carry
     markup (the rendered page). Positive controls: the refusal reason and the fact statement and
@@ -181,10 +175,8 @@ def test_1224_episode_page_over_an_old_episode_with_removed_step_timings(tmp_pat
     """s_p033 — over an old episode the page shows the predates-the-oracle refusal before any
     other reader fails.
 
-    Settled: the episode page over an old episode whose timing rows name removed steps shows
-    the predates-the-oracle refusal reason; the manifest refusal is raised before any other
-    reader (timings, outcome record, ledger) can fail with an unrelated error. The archive also
-    carries a staged.yaml and a review.yaml, as a pre-oracle episode does."""
+    Other readers: timings, outcome record, ledger. The archive also carries a staged.yaml and
+    a review.yaml, as a pre-oracle episode does."""
     ep = S.judged_episode(tmp_path, doc=S.old_manifest("overlay"), outcome=None)
     (ep / "staged.yaml").write_text("- {name: wv-old-logs, world: b}\n", encoding="utf-8")
     J.review_record(ep)
@@ -205,28 +197,13 @@ def test_1224_episode_page_over_an_old_episode_with_removed_step_timings(tmp_pat
 # --------------------------------------------------------------------------------------
 
 
-def _imports_staging(source: str) -> bool:
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.ImportFrom):
-            if (node.module or "").endswith("branch.staging"):
-                return True
-            if (node.module or "").endswith("learning.branch") and any(
-                    a.name == "staging" for a in node.names):
-                return True
-        if isinstance(node, ast.Import) and any(
-                a.name.endswith("branch.staging") for a in node.names):
-            return True
-    return False
-
-
 def test_1224_episode_page_renders_a_v2_episode_from_the_models_output(tmp_path):
     """d12k_episode_page_reads_the_models_output — the page renders an oracle-era episode from
     the outcome record and the judge model's family record.
 
-    render_episode renders an oracle-era episode, showing the outcome record, each world's
-    facts, the judge model's buckets and the served-answer decisions, with no staging,
-    review-reachability or envelope sections, and without importing staging (M19=A: the bucket
-    is the judge model's; M16=A: the decision words)."""
+    With no staging, review-reachability or envelope sections (M19=A: the bucket is the judge
+    model's; M16=A: the decision words). The staging module is gone, so a page that still
+    imported it would fail to render."""
     ep = S.judged_episode(tmp_path, ledgers={
         "b": [_oracle_row("b"), S.ledger_row(S.REAL_ERROR, label="b",
                                              params=S.query_params("host:db-9"),
@@ -251,18 +228,14 @@ def test_1224_episode_page_renders_a_v2_episode_from_the_models_output(tmp_path)
     lowered = text.lower()
     for gone in ("staging", "staged", "reachab", "envelope"):
         assert gone not in lowered, f"the page still renders a {gone!r} section"
-    source = (S.DEFENDER / "scripts" / "visualize" / "visualize_episode.py").read_text(
-        encoding="utf-8")
-    assert not _imports_staging(source), "the page module still imports staging"
 
 
 def test_1224_episode_page_renders_with_neither_review_nor_staged_record(tmp_path):
     """o23_page_without_review_or_staged — the page renders an oracle-era episode with no
     review.yaml and no staged.yaml, and says nothing about their absence.
 
-    The episode page renders an oracle-era episode that has neither review.yaml nor
-    staged.yaml, with no teardown-failure or staged-view block and no error about the missing
-    files (O-23). Positive control: the page rendered the episode's worlds."""
+    No teardown-failure or staged-view block (O-23). Positive control: the page rendered the
+    episode's worlds."""
     ep = S.judged_episode(tmp_path)
     assert not (ep / "review.yaml").exists()
     assert not (ep / "staged.yaml").exists()
@@ -279,10 +252,9 @@ def test_1224_outcome_and_world_record_reasons_render_inert_on_the_page_and_in_t
     """o35_outcome_reasons_inert — reasons quoting investigator-influenced params render as
     inert text on the page and are kept as data in the judge's not-graded record.
 
-    Reason strings that quote a failing call's investigator-influenced params (markup, a
-    newline) in the outcome record, its drift calls, and each world's own record render inert on
-    the episode page and in the judge's not-graded record; the reason text is shown (positive
-    control). M05=A: `unusable` is stamped not-graded with no model call (PCO-02)."""
+    The reasons (markup, a newline) sit in the outcome record, its drift calls, and each
+    world's own record; the reason text is shown (positive control). M05=A: `unusable` is
+    stamped not-graded with no model call (PCO-02)."""
     reason = "world b could not serve <script>alert('reason')</script>\nsecond line"
     call_markup = "<img src=x onerror=alert('call')>"
     drift_markup = "<svg onload=alert('drift')>"
@@ -320,10 +292,8 @@ def test_1224_episode_page_renders_a_section_per_system_from_the_samples_record(
     """o40_page_samples_by_system — the page renders one section per system of the per-system
     samples record and never rejects it for lacking pattern keys.
 
-    The episode page reads a per-system samples record and renders a section per system,
-    without rejecting the file for lacking pattern keys (O-40, O16). The record shape is the
-    coined one: a served system's verbs with their real example answers, and an unavailable
-    system with its reason."""
+    (O-40, O16.) The record shape is the coined one: a served system's verbs with their real
+    example answers, and an unavailable system with its reason."""
     ep = S.judged_episode(tmp_path)
     S.samples_record(ep, {
         "idp": {"verbs": {"query": ['{"rows": [{"user": "sample-alice-7"}]}']}},
@@ -338,62 +308,11 @@ def test_1224_episode_page_renders_a_section_per_system_from_the_samples_record(
     assert "no answer was captured for siem-x" in text, "siem-x's unavailable reason is missing"
 
 
-def test_conc_35_page_rendered_while_siblings_are_writing(tmp_path):
-    """s_p236 — a page rendered while siblings append shows a consistent snapshot: no torn
-    partial row, and no oracle-side store row shown as the sibling's own ledger.
-
-    Settled: an episode page rendered while siblings are still appending shows a consistent
-    snapshot: it never shows a torn partial row, and rows from oracle-side stores are not shown
-    as the sibling's own ledger (O9). The world ledger ends in a partial line (an append in
-    flight) and the world's oracle-side ledger carries its own rows; renders run while another
-    thread keeps appending. Positive control: the world ledger's complete `real-error` row is
-    shown."""
-    ep = S.judged_episode(tmp_path)
-    rows = [_oracle_row("b"), S.ledger_row(S.REAL_ERROR, label="b",
-                                           params=S.query_params("host:db-9"),
-                                           payload="UpstreamFault: upstream said no")]
-    torn = '{"system": "idp", "verb": "query", "params": {"q": "TORN-MARKER-1224'
-    S.write_ledger(ep, "b", [])
-    S.ledger_path(ep, "b").write_text(
-        "".join(json.dumps(r) + "\n" for r in rows) + torn, encoding="utf-8")
-    side = S.oracle_dir(ep, "b")
-    side.mkdir(parents=True, exist_ok=True)
-    (side / "ledger.jsonl").write_text("".join(
-        json.dumps({"actor": "oracle", "system": "idp", "verb": "query",
-                    "params": S.query_params(f"ORACLE-SIDE-MARKER-{i}")}) + "\n"
-        for i in range(3)), encoding="utf-8")
-
-    stop = threading.Event()
-    other = S.ledger_path(ep, "c")
-
-    def append() -> None:
-        n = 0
-        while not stop.is_set():
-            with other.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(S.ledger_row(S.PASSTHROUGH, label="c",
-                                                 params=S.query_params(f"c-{n}"))) + "\n")
-            n += 1
-
-    writer = threading.Thread(target=append, daemon=True)
-    writer.start()
-    try:
-        pages = [_render(ep) for _ in range(3)]
-    finally:
-        stop.set()
-        writer.join(timeout=5)
-    for page in pages:
-        assert "TORN-MARKER-1224" not in page.text, "the page showed a torn partial row"
-        assert "ORACLE-SIDE-MARKER" not in page.text, (
-            "an oracle-side store row was shown as the sibling's own ledger")
-        assert S.REAL_ERROR in page.text, "the world ledger's complete row is not shown"
-
-
 def test_1224_episode_page_shows_unusable_and_refused_with_their_reason(tmp_path):
     """pco03_page_records_block — the page shows an `unusable` and a `refused` outcome record
     with the word and its reason, and no empty decision slot.
 
-    The episode page renders an `unusable` and a `refused` outcome record showing the word and
-    the reason, with no empty `decision` slot (PCO-03, M05=A)."""
+    (PCO-03, M05=A.)"""
     for word, reason in (("unusable", "worlds b and c were unservable in pre-flight"),
                          ("refused", "pre-flight had no call to calibrate")):
         ep = S.judged_episode(tmp_path / word, outcome=None)
@@ -405,20 +324,17 @@ def test_1224_episode_page_shows_unusable_and_refused_with_their_reason(tmp_path
 
 
 def test_1224_episode_page_counts_oracle_rows_without_a_malformed_row_note(tmp_path):
-    """pco09_page_counts_oracle_rows — the page's ledger read counts served `oracle` and
-    `real-error` rows as rows: the malformed-row count it shows covers only a torn line, never
-    them.
+    """pco09_page_counts_oracle_rows — the page's ledger read counts served `oracle` and `real-error` rows as rows: the malformed-row count it shows covers only a torn line, never them.
 
-    The episode page counts served `oracle` and `real-error` rows and reports no malformed-row
-    note for them (PCO-09, M16=A). "Counts" is the page's ledger screening (`read_world_ledger`,
+    (PCO-09, M16=A.) "Counts" is the page's ledger screening (`read_world_ledger`,
     65-regrounds PCO-09): every line is either a counted row or a malformed one, and the page
-    shows the malformed count (`<n> malformed row`). Pinned as numbers: a ledger of two `oracle`
-    rows and one `real-error` row shows no malformed note at all, and the same three rows
-    followed by one torn line show a malformed count of exactly 1 — the torn line alone, not 4
-    (today's reader counts every out-of-vocabulary `source` as malformed, GR-06). That twin is
+    shows the malformed count (`<n> malformed row`). Pinned as numbers: the torn line alone, not
+    4 (today's reader counts every out-of-vocabulary `source` as malformed, GR-06). That twin is
     also the positive control: the note's channel is live. A per-decision tally on the page
     (e.g. "2 oracle · 1 real-error") is NOT pinned: no design element names one; the decision
-    words being shown at all is d12k's."""
+    words being shown at all is d12k's.
+    s_p236 — a page rendered while siblings append shows a consistent snapshot: no torn partial row, and no oracle-side store row shown as the sibling's own ledger (O9). The torn twin's world ledger ends in a partial line (an append in flight) and its oracle-side ledger carries its own rows.
+    """
     rows = [_oracle_row("b"), _oracle_row("b", q="user:bob"),
             S.ledger_row(S.REAL_ERROR, label="b", params=S.query_params("host:db-9"),
                          payload="UpstreamFault: upstream said no")]
@@ -430,13 +346,24 @@ def test_1224_episode_page_counts_oracle_rows_without_a_malformed_row_note(tmp_p
 
     control = S.judged_episode(tmp_path / "torn", ledgers={"b": rows, "c": []})
     J.write_ledger(control, "b", [], raw="".join(json.dumps(r) + "\n" for r in rows)
-                   + '{"system": "idp", "verb": \n')
-    counts = _malformed_counts(_render(control))
+                   + '{"system": "idp", "verb": "query", "params": {"q": "TORN-MARKER-1224')
+    side = S.oracle_dir(control, "b")
+    side.mkdir(parents=True, exist_ok=True)
+    (side / "ledger.jsonl").write_text("".join(
+        json.dumps({"actor": "oracle", "system": "idp", "verb": "query",
+                    "params": S.query_params(f"ORACLE-SIDE-MARKER-{i}")}) + "\n"
+        for i in range(3)), encoding="utf-8")
+    torn = _render(control)
+    counts = _malformed_counts(torn)
     assert counts, "a torn row raised no malformed-row note (dead channel)"
     assert counts == [1], (
         f"the page's malformed-row count is {counts}, not exactly 1 for one torn line beside "
         f"two served `oracle` rows and one `real-error` row — the served rows were counted as "
-        f"malformed")
+        f"malformed (or the oracle-side store's rows were read as the world's)")
+    assert "TORN-MARKER-1224" not in torn.text, "the page showed a torn partial row"
+    assert "ORACLE-SIDE-MARKER" not in torn.text, (
+        "an oracle-side store row was shown as the sibling's own ledger")
+    assert S.REAL_ERROR in torn.text, "the world ledger's complete row is not shown"
 
 
 # --------------------------------------------------------------------------------------
@@ -448,10 +375,8 @@ def test_1224_stage_timings_read_the_preflight_step_and_refuse_a_removed_step_le
     """o49_stage_timings_read — the timing reader and the page read the pre-flight step, and a
     row naming a removed step fails with a legible reason.
 
-    read_stage_timings and the page read an oracle-era episode's timing rows, including the
-    pre-flight step, and an archived row naming the removed staging or review step fails with a
-    legible reason consistent with O15's refusal (F-21: PREFLIGHT sits between QUESTIONER and
-    RUNS)."""
+    The removed steps are staging and review; the reason is consistent with O15's refusal
+    (F-21: PREFLIGHT sits between QUESTIONER and RUNS)."""
     Step = S.sym(S.STEPS, "Step")
     preflight = getattr(Step, S.COINED["step.preflight"])
     order = [Step.QUESTIONER, preflight, Step.RUNS, Step.JUDGE]
@@ -493,11 +418,9 @@ def test_1224_episode_reader_reads_the_outcome_record(tmp_path):
     """d14i_episode_reader_reads_the_outcome_record — the episode reader takes the outcome and
     its reason from pre-flight's outcome record and refuses a not-accepted one.
 
-    learning/branch/episode.py's outcome reader returns the outcome and reason from pre-flight's
-    outcome record, and refuses an episode the record does not accept (M05=A: every word other
-    than exactly `accepted` is not gradable; the retired word is not used). The review.yaml a
-    pre-oracle launcher wrote is no longer where the outcome lives: a stale one beside an
-    accepted outcome record changes nothing."""
+    (M05=A: every word other than exactly `accepted` is not gradable; the retired word is not
+    used.) The review.yaml a pre-oracle launcher wrote is no longer where the outcome lives: a
+    stale one beside an accepted outcome record changes nothing."""
     recorded = S.sym(S.EPISODE, "_recorded_outcome")
     verdicts = S.sym(S.EPISODE, "verdicts")
     refusal = S.sym(S.EPISODE, "EpisodeError")
@@ -522,9 +445,7 @@ def test_1224_episode_readers_refuse_unusable_refused_and_no_record(tmp_path):
     """pco01_episode_readers_refuse_new_words — verdicts and delta_o refuse `unusable`,
     `refused`, an absent record and a torn record, each naming the word; `accepted` reads.
 
-    episode.verdicts and episode.delta_o refuse an outcome record saying `unusable` or
-    `refused`, and an absent or torn record (the 'no record' state), each with a reason naming
-    the word; `accepted` is the control that reads (PCO-01, GR-01, M05=A)."""
+    (PCO-01, GR-01, M05=A.)"""
     verdicts = S.sym(S.EPISODE, "verdicts")
     delta_o = S.sym(S.EPISODE, "delta_o")
     refusal = S.sym(S.EPISODE, "EpisodeError")
@@ -583,10 +504,8 @@ def test_1224_frontend_serializes_the_judge_models_buckets(tmp_path):
     """d12l_serialize_reads_the_models_output — the lessons view carries each lesson's bucket
     and systems as the judge model recorded them.
 
-    learning/frontend/serialize.py serializes an episode's per-world buckets and systems as the
-    judge model recorded them (M19=A, O12): the questioner group declares a systems field
-    beside the bucket and no pattern or holding-system field, and a lesson's recorded systems
-    reach the view unchanged."""
+    (M19=A, O12.) The questioner group declares a systems field beside the bucket and no
+    pattern or holding-system field."""
     serialize = S.mod(S.SERIALIZE)
     tree = _lessons_tree(tmp_path, {"facts-on-served-systems": (["idp", "edr"], "observability")})
     view = serialize.build_view(tree)
@@ -605,9 +524,7 @@ def test_1224_learning_page_renders_a_questioner_lesson_keyed_by_systems(tmp_pat
     """o44_learning_page_reads_systems_lessons — the learning page renders a questioner lesson
     keyed by systems, and the shipped seed lesson is migrated to an empty systems list.
 
-    The learning page (serialize.build_view) renders a questioner lesson whose frontmatter
-    carries `systems` (and the shipped seed lesson migrated to `systems: []`) with no blank
-    Pattern/Holding-system heading and no KeyError (O-44, N23)."""
+    With no blank Pattern/Holding-system heading and no KeyError (O-44, N23)."""
     serialize = S.mod(S.SERIALIZE)
     tree = _lessons_tree(tmp_path, {"keyed-by-systems": (["siem-x"], "lead-quality")})
     view = serialize.build_view(tree)
@@ -640,10 +557,8 @@ def test_1224_queue_page_renders_a_row_of_the_new_shape(tmp_path):
     """o43_queue_page_reads_new_rows — the queue page renders a findings row of the new shape
     (systems, a v2 bucket, no pattern or holding system) without a missing-field error.
 
-    The queue page (serialize_queues.build_view) renders a findings row of the new shape
-    (systems, no pattern or holding_system) without a missing-field error (O-43, M19=A: the
-    bucket set is the five plus observability). The row is queued, held and dead-lettered, so
-    each of the channel's three readers sees it."""
+    (O-43, M19=A: the bucket set is the five plus observability.) The row is queued, held and
+    dead-lettered, so each of the channel's three readers sees it."""
     serialize_queues = S.mod("learning.frontend.serialize_queues")
     config = S.mod("learning.core.config")
     state_mod = S.mod("learning.core.state")

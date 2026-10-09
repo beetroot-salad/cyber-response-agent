@@ -177,11 +177,9 @@ def test_1224_a_tenant_with_no_lab_systems_branches_and_serves_a_world_change(tm
     """d02a_any_tenant_branches_end_to_end — a branch over a tenant serving only edr, idp and
     siem-x is refused by no layer and serves a verified world change on edr.
 
-    A branch launched over a fixture tenant whose gather grant serves only edr, idp and siem-x
-    through stub adapters is refused by no layer: the manifest loads, the question-writer runs,
-    pre-flight accepts, a sibling call on edr receives an `oracle` answer that differs from the
-    base answer, the judge grades, and a lesson with systems [edr] is selected for a later
-    episode of that tenant. O1.
+    The manifest loads, the question-writer runs, pre-flight accepts, a sibling call on edr
+    receives an `oracle` answer that differs from the base answer, the judge grades, and a
+    lesson with systems [edr] is selected for a later episode of that tenant. O1.
     """
     est = S.estate(tmp_path)
     doc = _family(S.SYSTEMS, S.fact("f1"), S.fact("f2", "bob reset carol's password from "
@@ -200,10 +198,7 @@ def test_1224_launch_over_a_tenant_with_no_elastic_system(tmp_path, elastic):
     fails to resolve while elastic is not in its gather grant, is not refused for lack of
     elastic: every stage from tenant acceptance to lesson selection proceeds.
 
-    A branch over a tenant that configures no elastic system and serves edr, idp and siem-x is
-    not refused at launch for lack of elastic: tenant acceptance, the question-writer,
-    pre-flight, serving, the judge and lesson selection all proceed (O1: a branch over such a
-    tenant refused or serving no world change is the observed failure).
+    O1: a branch over such a tenant refused or serving no world change is the observed failure.
     """
     est = S.estate(tmp_path)
     if elastic == "fails-to-resolve":
@@ -234,9 +229,7 @@ def test_input_tenant_system_replaces_a_lab_system_with_another_shape(tmp_path):
     """s_p037 — a tenant system named like a lab system (identity, ticket) whose verbs, params
     and answer shapes are nothing like the lab's is branched end to end with no lab assumption.
 
-    A tenant system named like a lab system (identity, ticket) whose verbs, params and answer
-    shapes are nothing like the lab's is branched end to end with no lab assumption: the
-    question-writer authors facts against the tenant's own systems, the oracle serves world
+    The question-writer authors facts against the tenant's own systems, the oracle serves world
     changes from the tenant's own verbs and shapes, and the judge buckets from the model's
     reading (O1).
     """
@@ -262,10 +255,6 @@ def test_input_all_worlds_fact_the_same_single_system(tmp_path):
     """s_p038 — a tenant serving exactly one system, with every world's facts on it, launches,
     pre-flights, serves and is graded like any other, and the samples record, the oracle's
     family block and lesson selection work from that one system.
-
-    A tenant that serves exactly one system, with every world's facts on it, launches,
-    pre-flights, serves and is graded like any other: no step assumes more than one system, and
-    the oracle's family block, the samples record and lesson selection work from that one system.
     """
     systems = ("edr",)
     est = S.estate(tmp_path, systems=systems)

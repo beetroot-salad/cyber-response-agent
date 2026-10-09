@@ -17,7 +17,6 @@ collection time.
 """
 from __future__ import annotations
 
-import contextlib
 import json
 import re
 import time
@@ -237,11 +236,7 @@ def _in_text(value: str, text: str) -> bool:
 def test_1224_v2_manifest_with_facts_and_served_systems_loads(tmp_path):
     """d01a_v2_manifest_loads — parse_family and load_family load a v2 manifest and expose each world's facts, the family's served_systems and a discriminator holding only its text.
 
-    parse_family and load_family load a manifest whose worlds carry facts
-    [{fact_id, statement, entities}] and which records served_systems, exposing each world's
-    facts and the family's served_systems, and whose discriminator keeps its text without
-    holding_system or envelope (M1, M07=A: the control world's explicit empty facts list).
-    """
+    (M1, M07=A: the control world's explicit empty facts list.)"""
     doc = _doc()
     for family in (_parse(doc), _load(_episode(tmp_path, doc))):
         assert _served(family) == list(S.SYSTEMS)
@@ -257,12 +252,8 @@ def test_1224_v2_manifest_with_facts_and_served_systems_loads(tmp_path):
 def test_1224_malformed_fact_is_refused_naming_the_field():
     """d01b_malformed_fact_refused — a fact missing a field or naming an entity outside the widened domain is refused naming the world, the field and the entity, while UPN, DOMAIN\\user and IPv6 entities load.
 
-    RE-PINNED (M24=A; GD-25 refutes `_ENTITY_RE` as the entity domain). A fact missing
-    fact_id, statement or entities, or naming an entity outside the widened entity domain
-    (empty, over the length bound, or carrying a control character), fails to load with
-    FamilyError naming the world, the field and the entity; a UPN, a DOMAIN\\user name and an
-    IPv6 address load (F-16, M24=A).
-    """
+    RE-PINNED (M24=A; GD-25 refutes `_ENTITY_RE` as the entity domain). Outside the domain:
+    empty, over the length bound, or carrying a control character (F-16, M24=A)."""
     FamilyError = _family_error()
     _loads(_doc())
     for entity in ("alice@corp.example", "CORP\\alice", "fe80::1%eth0", "2001:db8::7"):
@@ -288,10 +279,8 @@ def test_1224_malformed_fact_is_refused_naming_the_field():
 def test_1224_manifest_load_assumes_no_system_name():
     """d01c_manifest_assumes_no_system_names — a manifest serving edr, idp and siem-x loads, and the loader keeps no lab-system rule.
 
-    A manifest whose served_systems are [edr, idp, siem-x] loads, and nothing at load refuses
-    a system for not being one of the lab's (the C1 refusal 'not one of the six state systems'
-    is gone, with PATCHABLE_SYSTEMS and STAGED_SYSTEM) (O1, M1).
-    """
+    The C1 refusal 'not one of the six state systems' is gone, with PATCHABLE_SYSTEMS and
+    STAGED_SYSTEM (O1, M1)."""
     family = _loads(_doc(served_systems=["edr", "idp", "siem-x"]))
     assert _served(family) == ["edr", "idp", "siem-x"]
     # A lab system is no more special than a tenant's own: nothing keys on the name.
@@ -308,35 +297,95 @@ def test_1224_manifest_load_assumes_no_system_name():
 def test_1224_sibling_resume_resolves_no_tenant_for_the_manifest(tmp_path):
     """d01e_resume_reads_served_systems_not_a_tenant — the sibling's resume_world loads a v2 manifest without ever calling its tenant callable, and run.py keeps no configured_patterns fallback.
 
-    resume_world loads a v2 manifest and builds the world with a tenant callable that raises
-    if called, so no reader after the launcher resolves a tenant for the manifest (run.py's
-    configured_patterns fallback is gone) (M1, C5).
-    """
+    The tenant callable raises if called, so no reader after the launcher resolves a tenant for
+    the manifest; a configured_patterns fallback would have to call it (M1, C5)."""
     ep = _episode(tmp_path, _doc())
     world = _resume(ep, "b")
     assert world.label == "b"
     assert _served(world.family) == list(S.SYSTEMS)
     assert _facts(world.family, "b") == [_fact_view(_F1)]
-    src = S.source_text("run.py")
-    assert "def resume_world" in src, "the census did not read the sibling's loader"
-    assert "configured_patterns" not in src
 
 
-def test_1224_old_manifest_field_is_refused_at_the_loader_as_predating_the_oracle(tmp_path):
+def _also_unknown(key: str) -> dict:
+    doc = S.old_manifest(key)
+    doc["zzz_unknown_1224"] = "x"
+    doc["worlds"][2]["touches"] = ["idp"]
+    return doc
+
+
+def _five_worlds() -> dict:
+    return _doc(("b", [_F1]), ("c", [_F2]), ("d", [S.fact("f3")]), ("e", [S.fact("f4")]))
+
+
+def _old_in_third_of_five() -> dict:
+    doc = _five_worlds()
+    doc["worlds"][2]["overlay"] = {"patches": {"idp": {"alice": {"mfa": "off"}}}}
+    return doc
+
+
+def _discriminator(value: Any, *, overlay_world: int | None = None) -> dict:
+    doc = _doc(("b", [_F1]), ("c", [_F2]), ("d", [S.fact("f3")])) if overlay_world else _doc()
+    doc["discriminator"] = value
+    if overlay_world:
+        doc["worlds"][overlay_world]["overlay"] = {}
+    return doc
+
+
+def _aliased_text() -> str:
+    base = _text(_doc())
+    aliased = base.replace("served_systems:\n", "served_systems: &systems_1224\n", 1)
+    assert aliased != base
+    return aliased + "configured_patterns: *systems_1224\n"
+
+
+#: Every old-manifest shape, as `(id, builder)`; a builder returns a document or raw YAML text.
+_OLD_MANIFESTS: list[tuple[str, Any]] = [
+    *[(f"field-{k}", lambda k=k: S.old_manifest(k)) for k in S.OLD_MANIFEST_KEYS],
+    *[(f"also-unknown-{k}", lambda k=k: _also_unknown(k)) for k in S.OLD_MANIFEST_KEYS],
+    ("alias", _aliased_text),
+    ("merge-key", lambda: _text(_doc()) + '<<: {captured_patterns: ["logs-*"]}\n'),
+    ("duplicate-key", lambda: _text(_old_doc("discriminator.holding_system", "elastic"))
+     + f"discriminator:\n  predicate: {_PREDICATE}\n"),
+    ("third-of-five", _old_in_third_of_five),
+    ("discriminator-string", lambda: _discriminator("holding_system: elastic")),
+    ("discriminator-list", lambda: _discriminator(
+        [{"predicate": _PREDICATE}, {"holding_system": "elastic"}])),
+    ("discriminator-null", lambda: _discriminator(None, overlay_world=3)),
+]
+
+
+@pytest.mark.parametrize("reader", ["loader", "judge"])
+@pytest.mark.parametrize("case", ["v2-control", *[c for c, _ in _OLD_MANIFESTS]])
+def test_1224_old_manifest_field_is_refused_at_the_loader_as_predating_the_oracle(
+        tmp_path, case, reader):
     """d01g_old_manifest_refused_at_loader — each of the five pre-oracle fields refuses the manifest at the runtime loader with a message saying it predates the oracle.
 
-    For each of overlay, discriminator.holding_system, discriminator.envelope,
-    captured_patterns and configured_patterns, a manifest carrying that field fails to load at
-    the runtime loader with a FamilyError whose message says the manifest predates the oracle,
-    not a generic unknown-field or schema error and not a crash (O15). Old manifests are not
-    translated (non-obligation).
+    Not a generic unknown-field or schema error and not a crash (O15). Old manifests are not
+    translated (non-obligation). Each document below is read by both read paths, the runtime
+    loader and the judge's raw read_manifest; `v2-control` is the positive control.
+    o38_read_manifest_refuses_old — the judge's raw read_manifest reads a v2 manifest's facts and served_systems and refuses each old field as predating the oracle (F-11, N04).
+    b_p024 — a manifest carrying an old field and also an unknown field is refused with the predates-the-oracle reason, not the other malformation (the unknown-field-only control is in b_p031's test).
+    s_p028 — an old field arriving through an alias, a merge key or a hidden duplicate key is refused as predating the oracle by both read paths alike.
+    s_p029 — an old field in one world of five, or old markers inside a string, list or null discriminator, refuse the whole manifest as predating the oracle at both read paths, never crashing.
     """
-    FamilyError = _family_error()
-    assert _served(_load(_episode(tmp_path / "v2", _doc()))) == list(S.SYSTEMS)
-    for key in S.OLD_MANIFEST_KEYS:
-        ep = _episode(tmp_path / key.replace(".", "_"), S.old_manifest(key))
-        msg = _refused(lambda ep=ep: _load(ep), FamilyError)
-        assert S.PREDATES in msg, (key, msg)
+    if case == "v2-control":
+        ep = _episode(tmp_path, _five_worlds())
+        if reader == "loader":
+            family = _load(ep)
+            assert _served(family) == list(S.SYSTEMS)
+            assert _facts(family, "b") == [_fact_view(_F1)]
+        else:
+            doc = _judge_read(ep)
+            assert doc["served_systems"] == list(S.SYSTEMS)
+            assert doc["worlds"][1]["facts"] == [_F1]
+        return
+    built = dict(_OLD_MANIFESTS)[case]()
+    ep = _episode(tmp_path, text=built) if isinstance(built, str) else _episode(tmp_path, built)
+    if reader == "loader":
+        msg = _refused(lambda: _load(ep), _family_error())
+    else:
+        msg = _refused(lambda: _judge_read(ep), S.judge_refused_cls())
+    assert S.PREDATES in msg, (case, reader, msg)
 
 
 # ======================================================================================
@@ -349,12 +398,7 @@ def test_input_fact_entity_is_an_idp_principal(tmp_path):
 
     Reading (M24=A, human R6): the entity domain is any non-empty printable string within a
     length bound, no control characters, never a path component; entity strings are data
-    everywhere; an entity the loader refuses is named in the message, never dropped. Applied: a
-    UPN, DOMAIN\\user, a link-local IPv6 address and a non-ASCII name load as written and
-    reach the oracle unchanged. Settled regardless: the load never fails with a generic error
-    or crash on such an entity, and a fact naming an entity the loader does not accept is
-    refused with a message naming the entity.
-    """
+    everywhere. Driven with a UPN, DOMAIN\\user, a link-local IPv6 address and a non-ASCII name."""
     entities = ["alice@corp.example", "CORP\\alice", "fe80::1%eth0", "élodie"]
     fact = S.fact("f1", "alice@corp.example (CORP\\alice, élodie) logged on from fe80::1%eth0 "
                   "at 15:22Z", entities)
@@ -378,12 +422,8 @@ def test_input_fact_entity_is_an_idp_principal(tmp_path):
 def test_input_fact_has_empty_entities():
     """b_p002 — a fact with no entities, a blank statement, or an oversized statement or entity list is refused promptly at load with a named reason.
 
-    Reading (N01, auto): refuse at load, with a named reason, a fact with no entities, a blank
-    statement, or a statement or entity list over a size bound. Settled regardless: such a fact
-    never causes a served answer to differ from the base answer (it never loads), an oversized
-    fact is refused with a named reason rather than hanging the load, and nothing fails with a
-    generic error.
-    """
+    Reading (N01, auto). Settled regardless: such a fact never causes a served answer to differ
+    from the base answer (it never loads), and nothing fails with a generic error."""
     FamilyError = _family_error()
     _loads(_doc())
     cases = [
@@ -405,10 +445,7 @@ def test_input_fact_has_empty_entities():
 def test_input_fact_with_wrong_types(tmp_path):
     """s_p003 — a facts mapping, a single-string entities and a numeric fact_id each fail the load naming the field, and no world is served from the half-parsed manifest.
 
-    Settled: a world whose facts is a mapping, whose entities is a single string, or whose
-    fact_id is a number fails manifest load with a message naming the malformed field; no world
-    is served from a half-parsed manifest and no sibling or oracle turn starts for it.
-    """
+    No sibling or oracle turn starts for it."""
     FamilyError = _family_error()
     cases = [
         ("facts", {"f1": dict(_F1)}),
@@ -444,12 +481,8 @@ def test_input_fact_with_wrong_types(tmp_path):
 def test_input_facts_share_a_fact_id_within_one_world():
     """b_p004 — two facts sharing one fact_id in one world are refused at load naming the duplicate id.
 
-    Reading (N01, auto): refuse a duplicate fact_id within a world; fact_id is per world.
-    Applied: two facts `f1` with different statements in one world fail the load naming the
-    world and the id; distinct ids load, each its own fact. Settled regardless: a forged row is
-    never attributed to a fact other than the one the claim names (an ambiguous id never
-    loads).
-    """
+    Reading (N01, auto): fact_id is per world. Settled regardless: a forged row is never
+    attributed to a fact other than the one the claim names (an ambiguous id never loads)."""
     first = S.fact("f1", "alice logged on to db-1 at 15:22Z", ("alice", "db-1"))
     second = S.fact("f1", "alice logged on to db-2 at 15:40Z", ("alice", "db-2"))
     msg = _refused(lambda: _parse(_doc(("dupworld", [first, second]), ("c", [_F2]))),
@@ -464,12 +497,8 @@ def test_input_facts_share_a_fact_id_within_one_world():
 def test_input_facts_share_a_fact_id_across_worlds(tmp_path):
     """b_p005 — two worlds may each carry fact f1, and one world's frozen telemetry and statement never reach the other world's oracle or verifier.
 
-    Reading (N01, auto): fact_id is per world. Applied: worlds b and c each carrying `f1` with
-    different statements load, each world keeping its own; world b's frozen forged row (as
-    pre-flight leaves it in b's store) never reaches world c's oracle or verifier, while c's
-    own `f1` statement does. Settled regardless: served answers are per world, so one world's
-    forged rows never appear in another world's answers.
-    """
+    Reading (N01, auto): fact_id is per world. World b's frozen forged row sits in b's store as
+    pre-flight leaves it, while c's own `f1` statement does reach c's oracle."""
     fact_b = S.fact("f1", "alice logged on to db-1 at 15:22Z", ("alice", "db-1"))
     fact_c = S.fact("f1", "bob reset carol's password from 10.0.0.9", ("bob", "carol",
                                                                         "10.0.0.9"))
@@ -504,15 +533,11 @@ def test_input_facts_share_a_fact_id_across_worlds(tmp_path):
 def test_input_fact_statement_names_an_entity_not_in_entities():
     """b_p007 — a statement naming an entity its list omits, and a list naming an entity its statement never mentions, both load as written: no statement-entity cross-check at load.
 
-    Reading (N01, auto): no statement-entity cross-check at load. Asserted: both facts load
-    with statement and entities exactly as written — nothing at load parses the statement
-    against its entity list (the seed's settled "nothing at load parses the statement").
     Deliberately not pinned here: the seed's "O3 holds either way" (a served answer differs
     from base only by what the facts imply). Whether a served answer honours a fact whose
     statement and entity list disagree is the oracle's and verifier's judgement — a
     non-obligation for this suite; O3's host half, checks 1-5, is pinned by the host-checks
-    tests, and none of it depends on a statement agreeing with its entities.
-    """
+    tests, and none of it depends on a statement agreeing with its entities."""
     omits = S.fact("f1", "alice logged on to db-1 and then db-7 at 15:22Z", ("alice", "db-1"))
     unmentioned = S.fact("f2", "a password reset happened at 10:00Z", ("bob", "carol"))
     family = _loads(_doc(("b", [omits, unmentioned]), ("c", [_F2])))
@@ -523,20 +548,14 @@ def test_p053_two_facts_in_one_world_contradict_each_other(tmp_path):
     """b_p020 — contradictory facts load and both reach the verifier, and the host honours the verifier's verdict on them: a failing verdict ends the call unservable with no oracle answer, while the same submission under a passing verdict is served.
 
     Reading (N01, auto): contradictory facts are left to the oracle and verifier, ending
-    unservable. Settled regardless: no served answer contradicts itself or an earlier one (O2);
-    a world that cannot be served consistently is unservable rather than served with an
-    inconsistency.
+    unservable. Settled regardless: no served answer contradicts itself or an earlier one (O2).
 
-    Asserted (the F-01 pattern): the world loads with both facts. One scripted submission —
-    the base plus a forged 15:22Z logon for f1, which f2 contradicts — is put to the verifier,
-    and the host hands the verifier the call, the base answer, the served answer carrying the
-    frozen forged row, and BOTH fact statements, never the oracle's own text (a sentinel in its
-    python source). Under a verifier whose verdict fails it, the call raises `OracleUnservable`
-    and no `oracle` row is written; under a passing verifier the SAME submission is served and
-    rowed `oracle`. So the verdict, and no host rule about contradictory statements, is what
-    ends the world. Whether a verifier DETECTS the contradiction is model quality — a
-    non-obligation, deliberately not pinned (the verdicts here are scripted).
-    """
+    Asserted (the F-01 pattern): the host hands the verifier the call, the base answer, the
+    served answer carrying the frozen forged row, and BOTH fact statements, never the oracle's
+    own text (a sentinel in its python source). So the verdict, and no host rule about
+    contradictory statements, is what ends the world. Whether a verifier DETECTS the
+    contradiction is model quality — a non-obligation, deliberately not pinned (the verdicts
+    here are scripted)."""
     on = S.fact("f1", "alice logged on to db-1 at 15:22Z", ("alice", "db-1"))
     never = S.fact("f2", "alice never logged on to any host on 2026-07-28", ("alice",))
     doc = _doc(("b", [on, never]), ("c", [_F2]))
@@ -591,13 +610,10 @@ def test_p053_two_facts_in_one_world_contradict_each_other(tmp_path):
 def test_input_served_system_name_is_path_hostile():
     """b_p015 — a served system name or world label holding a slash, a dot-dot, a space, an over-long run or a reserved token is refused at load naming it, and duplicate systems collapse to one.
 
-    Reading (N02, auto): refuse at load, with a named reason, any system name the roster does
-    not accept and any world label outside the world-token rule; N03: served_systems is
-    de-duplicated and roster-validated. Settled regardless: no file outside the episode's own
-    directories is read or written from such a name (it never loads, so nothing is keyed by
-    it), and two distinct names never share one file or key. The samples record and the
-    run-record labels are keyed only by names that loaded (d19c pins the run-record rule).
-    """
+    Reading (N02, auto); N03: served_systems is de-duplicated and roster-validated. Settled
+    regardless: no file outside the episode's own directories is read or written from such a
+    name (it never loads, so nothing is keyed by it). The samples record and the run-record
+    labels are keyed only by names that loaded (d19c pins the run-record rule)."""
     FamilyError = _family_error()
     _loads(_doc())
     served = _served(_parse(_doc(served_systems=["idp", "edr", "idp"])))
@@ -618,12 +634,8 @@ def test_input_served_system_name_is_path_hostile():
 def test_input_world_labels_collide_or_are_reserved(tmp_path):
     """b_p016 — colliding, case-folded, hyphenated, traversing, drive-lettered, NUL-bearing, trailing-dot and reserved world labels are refused by the loader the sibling shares, and admitted labels keep distinct locations inside the episode.
 
-    Reading (N02, auto): refuse at load any world label outside the world-token rule (unique
-    case-insensitively, `base` reserved, no `-`); the rule lives in the loader every reader
-    shares (`parse_family`, so the sibling's `resume_world` applies it too). Settled
-    regardless: every world has a distinct ledger, store and archive location, none outside
-    the episode directory, and one world's records are never read as another's.
-    """
+    Reading (N02, auto): the world-token rule is unique case-insensitively, `base` reserved, no
+    `-`; it lives in `parse_family`, so the sibling's `resume_world` applies it too."""
     FamilyError = _family_error()
     _loads(_doc())
     cases = [
@@ -659,13 +671,9 @@ def test_input_world_labels_collide_or_are_reserved(tmp_path):
 def test_p055_system_name_spelled_as_a_yaml_boolean_null_or_number(tmp_path):
     """b_p017 — a served system name that YAML reads as a boolean or null is refused at load, and the launcher's writer quotes such names so they read back as text.
 
-    Reading (N02, auto): names are read and written as quoted strings; a non-string scalar is
-    refused. Applied: unquoted `on`, `no` and `null` in served_systems refuse the load naming
-    the field; `1e3`, which YAML reads as text, loads as its text; the same four names written
-    by the manifest writer read back as text. Settled regardless: served_systems holds only text
-    names, so lesson selection, the judge and the oracle's run_query door compare the intended
-    name, never True or None.
-    """
+    Reading (N02, auto). `1e3`, which YAML reads as text, loads as its text. Settled
+    regardless: served_systems holds only text names, so lesson selection, the judge and the
+    oracle's run_query door compare the intended name, never True or None."""
     FamilyError = _family_error()
     _loads(_doc())
     for i, literal in enumerate(("on", "no", "null", "1e3")):
@@ -691,12 +699,7 @@ def test_p055_system_name_spelled_as_a_yaml_boolean_null_or_number(tmp_path):
 def test_p056_entity_or_fact_id_spelled_as_a_yaml_literal(tmp_path):
     """b_p018 — an entity or fact_id that YAML reads as a boolean, number or date is refused at load, and quoted 007 and 7 stay two distinct values.
 
-    Reading (N02, auto): names, entities and fact_ids are read and written as quoted strings;
-    a non-string scalar is refused. Applied: unquoted `no`, `007` and `2026-05-25` as an entity
-    refuse the load naming `entities`, and as a fact_id naming `fact_id`; `1e3` reads as text
-    and loads as it. Settled regardless: an entity or fact_id is never silently turned into a
-    different value, so `007` and `7` stay distinct.
-    """
+    Reading (N02, auto). `1e3` reads as text and loads as it."""
     FamilyError = _family_error()
     _loads(_doc())
     for i, literal in enumerate(("no", "007", "1e3", "2026-05-25")):
@@ -726,97 +729,63 @@ def test_p056_entity_or_fact_id_spelled_as_a_yaml_literal(tmp_path):
     assert facts[0]["entities"] == ["007", "7"]
 
 
-def test_1224_forbidden_world_label_is_refused_by_the_launcher_and_the_sibling_loader(tmp_path):
+#: World labels outside the launcher alphabet: o26's shapes, o33's forged heading, pco11's
+#: upper case, o29/pco10's hyphens.
+_HOSTILE_LABELS = ["b\nx", "b\n## forged", "b#x", "b<x", "b/x", "Bx", "b-x", "siem-x", "-edr"]
+#: The labels the launcher itself is driven with (each launch is a full source run).
+_LAUNCHED_LABELS = {"b#x", "siem-x", "-edr"}
+
+
+@pytest.mark.parametrize("label", ["siem_x", *_HOSTILE_LABELS])
+def test_1224_forbidden_world_label_is_refused_by_the_launcher_and_the_sibling_loader(
+        tmp_path, monkeypatch, label):
     """o26_label_rule_at_every_loader — a world label with a newline, '#', '<', '/', upper case or '-' is refused with a named reason by the shared loader, the sibling's loader and the launcher.
 
-    After the world-view hooks are gone, a world label of a forbidden shape (a newline, '#',
-    '<', '/', upper case, '-') is still refused at load with a named reason, by the launcher's
-    check and by the sibling's loader (resume_world through parse_family) (N02, GR-09, GR-11).
+    (N02, GR-09, GR-11.)
+    o29_label_hyphen_rule — with the view-name arm gone, a label carrying '-' is refused at load naming it, and an admitted label round-trips through the launcher's run-dir label reader (siem_x reads back as siem_x) (N02 re-homes the hyphen rule; GR-12, GR-13).
+    pco10_hyphen_label_rule — the launcher refuses an authored family whose labels are siem-x or -edr, naming the label, before any sibling starts; siem_x is admitted and round-trips (N02, PCO-10).
+    pco11_every_loader_refuses_hostile_label — the sibling's resume_world, the judge's raw read_manifest and the page's loader each refuse a label outside the launcher alphabet; a well-formed label reads through all three (N02, PCO-11).
+    `siem_x` is the positive control at every reader.
     """
-    FamilyError = _family_error()
-    _loads(_doc())
-    assert _resume(_episode(tmp_path / "well-formed", _doc()), "b").label == "b"
-    for i, label in enumerate(("b\nx", "b#x", "b<x", "b/x", "Bx", "b-x")):
-        doc = _doc((label, [_F1]), ("c", [_F2]))
-        assert _names(_refused(lambda doc=doc: _parse(doc), FamilyError), label), label
-        ep = _episode(tmp_path / f"label-{i}", doc)
-        assert _names(_refused(lambda ep=ep, label=label: _resume(ep, label), FamilyError),
-                      label), label
+    FamilyError, JudgeRefused = _family_error(), S.judge_refused_cls()
+    load_page = S.sym(S.VISUALIZE, "load_episode")
+    doc = _doc((label, [_F1]), ("c", [_F2]))
+    ep = _episode(tmp_path / "ep", doc)
+    if label == "siem_x":
+        family = _loads(doc)
+        assert [w.world_id for w in family.worlds] == ["a", "siem_x", "c"]
+        assert _resume(ep, label).label == label
+        assert [w["world_id"] for w in _judge_read(ep)["worlds"]] == ["a", "siem_x", "c"]
+        load_page(ep)
+        label_of = S.sym(S.CLI, "_world_label_of")
+        assert label_of(Path("/runs") / f"{S.EPISODE_ID}-siem_x") == "siem_x"
+        return
+    assert _names(_refused(lambda: _parse(doc), FamilyError), label)
+    assert _names(_refused(lambda: _resume(ep, label), FamilyError), label)
+    assert _names(_refused(lambda: _judge_read(ep), JudgeRefused), label)
+    assert _names(_refused(lambda: load_page(ep), JudgeRefused), label)
+    if label in _LAUNCHED_LABELS:
+        from defender.tests._data_root_1078 import DATA_ROOT_ENV
 
-    est = S.estate(tmp_path)
-    launch = S.launch(tmp_path, est, questioner=S.questioner_for(_doc(("b#x", [_F1]),
-                                                                      ("c", [_F2]))))
-    assert launch.rc != 0
-    assert launch.spawn.launches == []
-    assert _names(launch.message, "b#x"), launch.message
-
-
-def test_1224_world_label_with_a_hyphen_is_refused_so_the_label_round_trips():
-    """o29_label_hyphen_rule — with the view-name arm gone, a label carrying '-' is refused at load naming it, and an admitted label round-trips through the launcher's run-dir label reader.
-
-    After the view-name arm is removed, a world label containing '-' (siem-x, -edr) is refused
-    at launch with a named reason, so every admitted label round-trips through the launcher's
-    run-dir label reader (siem_x reads back as siem_x) (N02 re-homes the hyphen rule; GR-12,
-    GR-13).
-    """
-    FamilyError = _family_error()
-    confinement = S.mod("scripts.adapters.confinement")
-    assert hasattr(confinement, "confine_index"), "the census did not reach confinement"
-    assert not hasattr(confinement, "refuse_unnameable_world"), "the view-name arm survives"
-    src = S.source_text("runtime/branch/_family.py")
-    assert "def parse_family" in src, "the census did not read the loader"
-    assert "refuse_unnameable_world" not in src
-    for label in ("siem-x", "-edr"):
-        msg = _refused(lambda label=label: _parse(_doc((label, [_F1]), ("c", [_F2]))),
-                       FamilyError)
-        assert _names(msg, label), (label, msg)
-    family = _loads(_doc(("siem_x", [_F1]), ("c", [_F2])))
-    assert [w.world_id for w in family.worlds] == ["a", "siem_x", "c"]
-    label_of = S.sym(S.CLI, "_world_label_of")
-    assert label_of(Path("/runs") / f"{S.EPISODE_ID}-siem_x") == "siem_x"
-
-
-def test_1224_launcher_identity_gate_refuses_hyphenated_labels(tmp_path, monkeypatch):
-    """pco10_hyphen_label_rule — the launcher refuses an authored family whose labels are siem-x or -edr, naming the label, before any sibling starts; siem_x is admitted and round-trips.
-
-    The launcher's identity gate (or its successor) refuses the labels `siem-x` and `-edr`
-    with a named reason; positive control: `siem_x` is admitted and round-trips through the
-    run-dir label reader (N02, PCO-10).
-    """
-    from defender.tests._data_root_1078 import DATA_ROOT_ENV
-
-    for label in ("siem-x", "-edr"):
-        where = tmp_path / f"launch{label}"
+        where = tmp_path / "launch"
         (where / "data-root").mkdir(parents=True)
         monkeypatch.setenv(DATA_ROOT_ENV, str(where / "data-root"))
-        est = S.estate(where)
-        launch = S.launch(where, est, questioner=S.questioner_for(_doc((label, [_F1]),
-                                                                       ("c", [_F2]))))
-        assert launch.rc != 0, label
-        assert launch.spawn.launches == [], label
-        assert _names(launch.message, label), (label, launch.message)
-    _loads(_doc(("siem_x", [_F1]), ("c", [_F2])))
-    label_of = S.sym(S.CLI, "_world_label_of")
-    assert label_of(Path("/runs") / f"{S.EPISODE_ID}-siem_x") == "siem_x"
+        launch = S.launch(where, S.estate(where), questioner=S.questioner_for(doc))
+        assert launch.rc != 0
+        assert launch.spawn.launches == [], "a sibling started for a refused label"
+        assert _names(launch.message, label), launch.message
 
 
 def test_1224_hostile_world_label_or_system_name_never_forges_a_section_or_leaves_its_directory(
         tmp_path, capsys):
     """o33_hostile_names_inert — a label or system name carrying a newline, '#', '<' or '/' is refused at every manifest reader and never reaches a judge prompt or a page, while a well-formed system's samples render as its own section.
 
-    A world label or system name carrying a newline, '#', '<' or '/' is refused at every
-    manifest reader (the launcher, the sibling's loader, the judge's and the page's
-    read_manifest) and so never forges a samples, judge or page section nor names a path
-    outside its directory; a well-formed name renders as its own section (positive control)
-    (N02, GR-08, GR-09).
+    So it never forges a samples, judge or page section nor names a path outside its
+    directory (N02, GR-08, GR-09). The label shapes at the launcher and the sibling's loader are
+    driven by o26's test; here the system names at the loader, and a hostile label and system
+    through the real judge and the page.
     """
     FamilyError, JudgeRefused = _family_error(), S.judge_refused_cls()
-    for i, label in enumerate(("b\n## forged", "b#x", "b<x", "b/x")):
-        doc = _doc((label, [_F1]), ("c", [_F2]))
-        assert _names(_refused(lambda doc=doc: _parse(doc), FamilyError), label)
-        ep = _episode(tmp_path / f"label-{i}", doc)
-        assert _names(_refused(lambda ep=ep, label=label: _resume(ep, label), FamilyError),
-                      label)
     for name in ("idp\n## forged", "idp#x", "idp<x", "idp/../x"):
         msg = _refused(lambda name=name: _parse(_doc(served_systems=["edr", name])),
                        FamilyError)
@@ -828,8 +797,7 @@ def test_1224_hostile_world_label_or_system_name_never_forges_a_section_or_leave
     good = S.judged_episode(tmp_path / "well-formed", doc=_doc())
     S.samples_record(good, _samples(siem_x=["WELL-FORMED-SAMPLE-1224"]))
     judge = S.FakeJudge(default=S.as_reply_text(J.reply_doc()))
-    with contextlib.suppress(Exception):
-        _grade(good, judge, tmp_path / "well-formed")
+    _grade(good, judge, tmp_path / "well-formed")
     assert any("WELL-FORMED-SAMPLE-1224" in p for p in judge.prompts), "no samples section"
     rc, err = _page(good, capsys)
     assert rc == 0, err
@@ -852,29 +820,6 @@ def test_1224_hostile_world_label_or_system_name_never_forges_a_section_or_leave
         assert not _page_file(ep).exists()
 
 
-def test_1224_sibling_loader_and_raw_manifest_reader_refuse_a_label_outside_the_alphabet(
-        tmp_path):
-    """pco11_every_loader_refuses_hostile_label — the sibling's resume_world, the judge's raw read_manifest and the page's loader each refuse a label outside the launcher alphabet; a well-formed label reads through all three.
-
-    A manifest whose world label lies outside the launcher alphabet is refused by
-    resume_world (the sibling's loader) and by the judge's and the page's read_manifest, so the
-    label reaches no judge prompt and no page; positive control: a well-formed label loads
-    through all three (N02, PCO-11).
-    """
-    FamilyError, JudgeRefused = _family_error(), S.judge_refused_cls()
-    load_page = S.sym(S.VISUALIZE, "load_episode")
-    good = _episode(tmp_path / "well-formed", _doc())
-    assert _resume(good, "b").label == "b"
-    assert [w["world_id"] for w in _judge_read(good)["worlds"]] == list(S.WORLDS)
-    load_page(good)
-    for i, label in enumerate(("b\nx", "b#x", "Bx")):
-        ep = _episode(tmp_path / f"label-{i}", _doc((label, [_F1]), ("c", [_F2])))
-        assert _names(_refused(lambda ep=ep, label=label: _resume(ep, label), FamilyError),
-                      label), label
-        assert _names(_refused(lambda ep=ep: _judge_read(ep), JudgeRefused), label), label
-        assert _names(_refused(lambda ep=ep: load_page(ep), JudgeRefused), label), label
-
-
 # ======================================================================================
 # The branch-point clock.
 # ======================================================================================
@@ -883,13 +828,10 @@ def test_1224_sibling_loader_and_raw_manifest_reader_refuse_a_label_outside_the_
 def test_input_manifest_has_no_branch_point_clock(tmp_path):
     """s_p019 — a manifest with no branch-point clock, or one that is not a time, is refused naming as_of before any world registry, oracle turn or read exists.
 
-    Settled: a manifest with no branch-point clock, or one that does not parse as a time, is
-    refused with a named reason before any sibling, oracle exploration or pre-flight replay; no
-    read is ever issued unbounded because the clock is missing (O6). Observed at the shared
+    No read is ever issued unbounded because the clock is missing (O6). Observed at the shared
     loader, the sibling's loader and the world registry a sibling builds; the positive control
     is a well-formed clock bounding the one read a control-world call makes. (The launcher
-    writes the clock itself; a manifest without one reaches a reader only by being edited.)
-    """
+    writes the clock itself; a manifest without one reaches a reader only by being edited.)"""
     FamilyError = _family_error()
     control_oracle = S.oracle()
     reg, est, _ep, ctx = _serving(tmp_path / "clocked", _doc(), "a", oracle=control_oracle,
@@ -921,164 +863,72 @@ def test_input_manifest_has_no_branch_point_clock(tmp_path):
 # ======================================================================================
 
 
-def test_input_old_manifest_field_is_empty_or_null(tmp_path, capsys):
+def _beside_new(key: str) -> dict:
+    doc = _doc()
+    if key == "overlay":
+        doc["worlds"][1]["overlay"] = {"patches": {"idp": {"alice": {"mfa": "off"}}}}
+    else:
+        doc["configured_patterns"] = ["logs-*"]
+    return doc
+
+
+#: Old fields present as empty or null (b_p023), and beside the new fields (s_p025).
+_OLD_AT_EVERY_READER: list[tuple[str, Any]] = [
+    ("overlay-empty", lambda: _old_doc("overlay", {})),
+    ("overlay-null", lambda: _old_doc("overlay", None)),
+    ("captured-empty", lambda: _old_doc("captured_patterns", [])),
+    ("configured-empty", lambda: _old_doc("configured_patterns", [])),
+    ("envelope-null", lambda: _old_doc("discriminator.envelope", None)),
+    ("holding-null", lambda: _old_doc("discriminator.holding_system", None)),
+    ("overlay-beside-facts", lambda: _beside_new("overlay")),
+    ("configured-beside-served", lambda: _beside_new("configured_patterns")),
+]
+
+
+@pytest.mark.parametrize("case", ["v2-control", *[c for c, _ in _OLD_AT_EVERY_READER]])
+def test_input_old_manifest_field_is_empty_or_null(tmp_path, capsys, case):
     """b_p023 — an old field present as an empty mapping, an empty list or null still refuses the manifest as predating the oracle at the loader, the judge's reader and the page.
 
     Reading (N04, auto): the presence of an old key refuses the manifest (empty or null
-    included) and the predates-the-oracle reason is reported first. Settled regardless: a
-    manifest that triggers it fails with a message saying it predates the oracle, never a
-    generic schema error.
+    included) and the predates-the-oracle reason is reported first.
+    s_p025 — a manifest carrying the new fields and an old one is refused as predating the oracle at the runtime loader, the judge and the episode page; the new fields do not rescue it (O15).
+    Each document is read by the runtime loader, the judge's raw reader, the real judge
+    (`grade_episode`: no judge prompt is sent) and the episode page (non-zero exit, no page
+    written); `v2-control` is the positive control through all four.
     """
-    FamilyError, JudgeRefused = _family_error(), S.judge_refused_cls()
-    good = S.judged_episode(tmp_path / "v2", doc=_doc())
-    assert _served(_load(good)) == list(S.SYSTEMS)
-    assert _judge_read(good)["served_systems"] == list(S.SYSTEMS)
-    rc, err = _page(good, capsys)
-    assert rc == 0, err
-
-    cases = [("overlay", {}), ("overlay", None), ("captured_patterns", []),
-             ("configured_patterns", []), ("discriminator.envelope", None),
-             ("discriminator.holding_system", None)]
-    for i, (key, value) in enumerate(cases):
-        ep = _episode(tmp_path / f"old-{i}", _old_doc(key, value))
-        assert S.PREDATES in _refused(lambda ep=ep: _load(ep), FamilyError), (key, value)
-        assert S.PREDATES in _refused(lambda ep=ep: _judge_read(ep), JudgeRefused), (key, value)
-        rc, err = _page(ep, capsys)
-        assert rc != 0, (key, value, err)
-        assert S.PREDATES in err, (key, value, err)
-
-
-def test_input_manifest_is_both_old_and_malformed(tmp_path):
-    """b_p024 — a manifest carrying an old field and also an unknown field is refused with the predates-the-oracle reason, not the other malformation.
-
-    Settled: a manifest that carries an old field and is also malformed another way is refused
-    with the reason that it predates the oracle (O15: a generic schema error is the failure),
-    and that reason is not displaced by the other malformation. Control: the same unknown
-    field with no old field is refused naming it, without the predates reason.
-    """
-    FamilyError, JudgeRefused = _family_error(), S.judge_refused_cls()
-    _loads(_doc())
-    only_unknown = _doc()
-    only_unknown["zzz_unknown_1224"] = "x"
-    msg = _refused(lambda: _parse(only_unknown), FamilyError)
-    assert "zzz_unknown_1224" in msg, msg
-    assert S.PREDATES not in msg, msg
-    for key in S.OLD_MANIFEST_KEYS:
-        doc = S.old_manifest(key)
-        doc["zzz_unknown_1224"] = "x"
-        doc["worlds"][2]["touches"] = ["idp"]
-        ep = _episode(tmp_path / key.replace(".", "_"), doc)
-        assert S.PREDATES in _refused(lambda ep=ep: _load(ep), FamilyError), key
-        assert S.PREDATES in _refused(lambda ep=ep: _judge_read(ep), JudgeRefused), key
-
-
-def test_input_manifest_mixes_old_and_new_shapes(tmp_path, capsys):
-    """s_p025 — a manifest carrying the new fields and an old one is refused as predating the oracle at the runtime loader, the judge and the episode page.
-
-    Settled: any manifest carrying an old field is refused with the predates-the-oracle reason
-    at the runtime loader, the judge's reader and the episode page, whether or not it also
-    carries the new fields; the new fields do not rescue it (O15).
-    """
-    FamilyError, JudgeRefused = _family_error(), S.judge_refused_cls()
-    good = S.judged_episode(tmp_path / "v2", doc=_doc())
-    S.samples_record(good, _samples())
+    ep = S.judged_episode(tmp_path / "ep", doc=_doc())
+    S.samples_record(ep, _samples())
     judge = S.FakeJudge(default=S.as_reply_text(J.reply_doc()))
-    with contextlib.suppress(Exception):
-        _grade(good, judge, tmp_path / "v2")
-    assert judge.prompts, "the v2 episode never reached the judge"
-    rc, err = _page(good, capsys)
-    assert rc == 0, err
-
-    beside_facts = _doc()
-    beside_facts["worlds"][1]["overlay"] = {"patches": {"idp": {"alice": {"mfa": "off"}}}}
-    beside_served = _doc()
-    beside_served["configured_patterns"] = ["logs-*"]
-    for name, doc in (("overlay", beside_facts), ("configured", beside_served)):
-        ep = S.judged_episode(tmp_path / name, doc=_doc())
-        S.write_manifest(ep, doc)
-        assert S.PREDATES in _refused(lambda ep=ep: _load(ep), FamilyError), name
-        judge = S.FakeJudge(default=S.as_reply_text(J.reply_doc()))
-        msg = _refused(lambda ep=ep, judge=judge: _grade(ep, judge, ep.parent), JudgeRefused)
-        assert S.PREDATES in msg, (name, msg)
-        assert judge.prompts == [], (name, "an old manifest reached the judge")
+    if case == "v2-control":
+        assert _served(_load(ep)) == list(S.SYSTEMS)
+        assert _judge_read(ep)["served_systems"] == list(S.SYSTEMS)
+        _grade(ep, judge, tmp_path)
+        assert judge.prompts, "the v2 episode never reached the judge"
         rc, err = _page(ep, capsys)
-        assert rc != 0, (name, err)
-        assert S.PREDATES in err, (name, err)
-        assert not _page_file(ep).exists()
-
-
-def test_p065_old_field_introduced_via_alias_merge_key_or_duplicate_key(tmp_path):
-    """s_p028 — an old field arriving through an alias, a merge key or a hidden duplicate key is refused as predating the oracle by both read paths alike.
-
-    Settled: an old field that enters the manifest through a YAML anchor, merge key or
-    duplicate key is refused with the predates-the-oracle reason exactly as a written-out field
-    would be, and the runtime loader and the judge's raw reader agree on every such manifest.
-    """
-    FamilyError, JudgeRefused = _family_error(), S.judge_refused_cls()
-    base = _text(_doc())
-    plain = _episode(tmp_path / "plain", text=base)
-    assert _served(_load(plain)) == list(S.SYSTEMS)
-    assert _judge_read(plain)["served_systems"] == list(S.SYSTEMS)
-
-    aliased = base.replace("served_systems:\n", "served_systems: &systems_1224\n", 1)
-    assert aliased != base
-    hidden = _old_doc("discriminator.holding_system", "elastic")
-    variants = {
-        "alias": aliased + "configured_patterns: *systems_1224\n",
-        "merge": base + '<<: {captured_patterns: ["logs-*"]}\n',
-        "duplicate": _text(hidden) + f"discriminator:\n  predicate: {_PREDICATE}\n",
-    }
-    for name, text in variants.items():
-        ep = _episode(tmp_path / name, text=text)
-        loader = _refused(lambda ep=ep: _load(ep), FamilyError)
-        judge = _refused(lambda ep=ep: _judge_read(ep), JudgeRefused)
-        assert S.PREDATES in loader, (name, loader)
-        assert S.PREDATES in judge, (name, judge)
-
-
-def test_p066_old_marker_in_one_world_only_or_inside_a_discriminator_that_is_not_a_mapping(
-        tmp_path):
-    """s_p029 — an old field in one world of five, or old markers inside a string, list or null discriminator, refuse the whole manifest as predating the oracle at both read paths, never crashing.
-
-    Settled: an old field in only one world of several, or markers sitting inside a
-    discriminator that is a string, list or null, still refuses the whole manifest with the
-    predates-the-oracle reason at both read paths; a non-mapping discriminator never causes a
-    crash instead of the named refusal.
-    """
-    FamilyError, JudgeRefused = _family_error(), S.judge_refused_cls()
-    five = _doc(("b", [_F1]), ("c", [_F2]), ("d", [S.fact("f3")]), ("e", [S.fact("f4")]))
-    _loads(five)
-    third = _doc(("b", [_F1]), ("c", [_F2]), ("d", [S.fact("f3")]), ("e", [S.fact("f4")]))
-    third["worlds"][2]["overlay"] = {"patches": {"idp": {"alice": {"mfa": "off"}}}}
-    as_string = _doc()
-    as_string["discriminator"] = "holding_system: elastic"
-    as_list = _doc()
-    as_list["discriminator"] = [{"predicate": _PREDICATE}, {"holding_system": "elastic"}]
-    as_null = _doc(("b", [_F1]), ("c", [_F2]), ("d", [S.fact("f3")]))
-    as_null["discriminator"] = None
-    as_null["worlds"][3]["overlay"] = {}
-    for name, doc in (("third-of-five", third), ("string", as_string), ("list", as_list),
-                      ("null", as_null)):
-        ep = _episode(tmp_path / name, doc)
-        assert S.PREDATES in _refused(lambda ep=ep: _load(ep), FamilyError), name
-        assert S.PREDATES in _refused(lambda ep=ep: _judge_read(ep), JudgeRefused), name
+        assert rc == 0, err
+        return
+    S.write_manifest(ep, dict(_OLD_AT_EVERY_READER)[case]())
+    assert S.PREDATES in _refused(lambda: _load(ep), _family_error())
+    assert S.PREDATES in _refused(lambda: _judge_read(ep), S.judge_refused_cls())
+    msg = _refused(lambda: _grade(ep, judge, tmp_path), S.judge_refused_cls())
+    assert S.PREDATES in msg, msg
+    assert judge.prompts == [], "an old manifest reached the judge"
+    rc, err = _page(ep, capsys)
+    assert rc != 0, err
+    assert S.PREDATES in err, err
+    assert not _page_file(ep).exists()
 
 
 def test_p067_manifest_alias_bomb_or_pathological_nesting(tmp_path, capsys):
     """s_p030 — an alias bomb or a thousand-deep nesting is refused promptly with a named reason at the loader, the judge's reader and the page.
 
-    Discharges settled premise s_p030 (P030, 45-dispositions, settled; the graph binds
-    `parse_family`, `grade_episode` and `render_episode`): a manifest that expands
-    exponentially through YAML aliases or nests a thousand levels deep is refused promptly with
-    a named reason at the loader, the judge's reader and the page; it neither hangs nor
-    exhausts memory. The readers it protects are O15's two manifest read paths — the runtime
-    loader (`load_family` over `parse_family`) and the judge's raw `read_manifest`
-    (`learning.judge.family.raw_manifest`), which the episode page reads through — so the
-    old-field refusal O15 demands of them is reached only if a hostile manifest cannot hang or
-    exhaust them first. Asserted per reader: a refusal of the reader's own class with a
-    non-empty reason within 10 s (the page: a non-zero exit with a stderr reason within 30 s);
-    the plain v2 manifest loading is the positive control.
-    """
+    It neither hangs nor exhausts memory. The readers it protects are O15's two manifest read
+    paths — the runtime loader (`load_family` over `parse_family`) and the judge's raw
+    `read_manifest` (`learning.judge.family.raw_manifest`), which the episode page reads
+    through — so the old-field refusal O15 demands of them is reached only if a hostile manifest
+    cannot hang or exhaust them first. Asserted per reader: a refusal of the reader's own class
+    with a non-empty reason within 10 s (the page: a non-zero exit with a stderr reason within
+    30 s); the plain v2 manifest loading is the positive control."""
     FamilyError, JudgeRefused = _family_error(), S.judge_refused_cls()
     base = _text(_doc())
     assert _served(_load(_episode(tmp_path / "plain", text=base))) == list(S.SYSTEMS)
@@ -1105,10 +955,14 @@ def test_p068_old_field_spelled_with_case_or_whitespace_variants():
     """b_p031 — Overlay, "overlay " and holding-system are unknown fields: the manifest is refused naming the variant, not as predating the oracle.
 
     Reading (N04, auto): spelling variants of an old field are unknown fields (O15 names the
-    exact field names). Settled regardless: such a manifest is not loaded.
+    exact field names).
+    Also b_p024's control: an unknown field with no old field is refused naming it, without the
+    predates reason.
     """
     FamilyError = _family_error()
     _loads(_doc())
+    only_unknown = _doc()
+    only_unknown["zzz_unknown_1224"] = "x"
     in_world = []
     for variant in ("Overlay", "overlay "):
         doc = _doc()
@@ -1116,23 +970,8 @@ def test_p068_old_field_spelled_with_case_or_whitespace_variants():
         in_world.append((variant, doc))
     in_discriminator = _doc()
     in_discriminator["discriminator"]["holding-system"] = "elastic"
-    for variant, doc in [*in_world, ("holding-system", in_discriminator)]:
+    for variant, doc in [*in_world, ("holding-system", in_discriminator),
+                         ("zzz_unknown_1224", only_unknown)]:
         msg = _refused(lambda doc=doc: _parse(doc), FamilyError)
         assert variant.strip() in msg, (variant, msg)
         assert S.PREDATES not in msg, (variant, msg)
-
-
-def test_1224_judges_raw_manifest_reader_reads_v2_and_refuses_every_old_field(tmp_path):
-    """o38_read_manifest_refuses_old — the judge's raw read_manifest reads a v2 manifest's facts and served_systems and refuses each old field as predating the oracle.
-
-    The judge's raw read_manifest reads a v2 manifest's facts and served_systems, and fails
-    every manifest carrying overlay, discriminator.holding_system, discriminator.envelope,
-    captured_patterns or configured_patterns with the predates-the-oracle reason (F-11, N04).
-    """
-    JudgeRefused = S.judge_refused_cls()
-    doc = _judge_read(_episode(tmp_path / "v2", _doc()))
-    assert doc["served_systems"] == list(S.SYSTEMS)
-    assert doc["worlds"][1]["facts"] == [_F1]
-    for key in S.OLD_MANIFEST_KEYS:
-        ep = _episode(tmp_path / key.replace(".", "_"), S.old_manifest(key))
-        assert S.PREDATES in _refused(lambda ep=ep: _judge_read(ep), JudgeRefused), key
