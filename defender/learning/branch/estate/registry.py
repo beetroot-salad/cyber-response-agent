@@ -91,10 +91,9 @@ def serve_one(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any
         return registry._from_store(system, verb, asked, hit)
     base_text = registry._base(system, verb, fn, ctx, asked)
     if not registry.world_facts:
-        registry.ledger.record(ServedCall(
+        return registry._deliver(ServedCall(
             system=system, verb=verb, params=asked, payload_text=base_text, source=PASSTHROUGH,
             world_id=registry.world.world_id))
-        return json.loads(base_text)
     with registry._turn(ctx, pauses_clock=True):
         hit = registry.store.answers.get(key)
         if hit is not None:
@@ -209,8 +208,14 @@ class WorldRegistry(ModuleVerbRegistry):
                                 for r in read_jsonl_rows(ledger.base_path)
                                 if isinstance(r.get("system"), str)
                                 and isinstance(r.get("payload_text"), str)]
-        #: This world's own live base answers, parsed once each as the store gains them.
-        self._kept_answers: list[tuple[str, Any]] = []
+        #: This world's real data, indexed once and grown as answers arrive (`_real`).
+        self._real_data = RealData(
+            answers=[(s, answer) for s, _verb, answer in self._family_answers])
+        self._kept_seen = 0
+        self._explored_seen = 0
+        #: A host check abandoned by a passed deadline may still be reading on its own thread
+        #: while the next attempt checks: the index grows under one lock.
+        self._real_lock = threading.Lock()
         door = QueryDoor(
             decide=lambda system, verb: ModuleVerbRegistry.decide(self, system, verb),
             real_verbs=lambda system: ModuleVerbRegistry.verbs(self, system),
@@ -322,20 +327,22 @@ class WorldRegistry(ModuleVerbRegistry):
         return self._record_answer(system, verb, params, answer)
 
     def _record_answer(self, system: str, verb: str, params: dict, answer: dict) -> Any:
-        """The stored answer, recorded as served to this call — unless its caller stopped
-        waiting (the lead was ended mid-call): the answer stays stored, and an undelivered call
-        leaves no row (N12)."""
-        text = payload_text(answer.get("served"))
-        decision = answer.get("decision") or ORACLE
+        """The stored answer, delivered to this call (`_deliver`)."""
+        return self._deliver(ServedCall(
+            system=system, verb=verb, params=params,
+            payload_text=payload_text(answer.get("served")),
+            source=answer.get("decision") or ORACLE, world_id=self.world.world_id,
+            base_digest=answer.get("base_digest"), claim=answer.get("claim"),
+            verifier_verdict=answer.get("verifier_verdict"), attempts=answer.get("attempts")))
+
+    def _deliver(self, call: ServedCall) -> Any:
+        """`call`'s payload, handed to the caller and recorded as served — unless its caller
+        stopped waiting (the lead was ended mid-call): an undelivered call leaves no row (N12).
+        The one writer of a delivered call's row, whatever served it."""
         delivery = CALL_DELIVERY.get()
-        if delivery is not None and delivery.abandoned:
-            return json.loads(text)
-        self.ledger.record(ServedCall(
-            system=system, verb=verb, params=params, payload_text=text, source=decision,
-            world_id=self.world.world_id, base_digest=answer.get("base_digest"),
-            claim=answer.get("claim"), verifier_verdict=answer.get("verifier_verdict"),
-            attempts=answer.get("attempts")))
-        return json.loads(text)
+        if delivery is None or not delivery.abandoned:
+            self.ledger.record(call)
+        return json.loads(call.payload_text)
 
     @contextlib.contextmanager
     def _turn(self, ctx: Any, *, pauses_clock: bool) -> Iterator[None]:
@@ -360,13 +367,23 @@ class WorldRegistry(ModuleVerbRegistry):
         return _carrying(self._turn_ctx, as_of=self.as_of)
 
     def _real(self, system: str, base: Any) -> RealData:
-        kept = self.store.base_answers
-        self._kept_answers.extend(
-            (kept_system, _parsed(text)) for kept_system, text in kept[len(self._kept_answers):])
-        return RealData(answers=[(system, base),
-                                 *((s, answer) for s, _verb, answer in self._family_answers),
-                                 *self._kept_answers],
-                        loose=list(self.oracle.real_extra))
+        """This world's real data as the host checks read it: the family recording, every base
+        answer kept and every answer the oracle or verifier read so far, this call's base and
+        the source alert — one index, added to rather than rebuilt."""
+        data = self._real_data
+        with self._real_lock:
+            kept = self.store.base_answers[self._kept_seen:]
+            explored = self.oracle.explored[self._explored_seen:]
+            self._kept_seen += len(kept)
+            self._explored_seen += len(explored)
+            for kept_system, text in kept:
+                data.add(kept_system, _parsed(text))
+            for explored_system, answer in explored:
+                data.add(explored_system, answer)
+            data.add(system, base)
+            if not data.loose:
+                data.add_loose(self.oracle.real_extra)
+        return data
 
     def _examples(self) -> list[tuple[str, str, Any]]:
         """Example answers per system from the family's base recording, for the oracle's

@@ -1,9 +1,11 @@
-"""Regressions for PR #1232's review findings that the oracle's move onto the agent loop, the
-turn-held context and the box-owned scratch folder dissolve (#1224).
+"""Regressions for PR #1232's review findings that structural changes dissolve (#1224).
 
-Each test is red on the hand-rolled loop it replaces: a reply whose tool calls were left
-unanswered, a verifier no deadline bounded, a `check` that read `$BASE` literally, an oracle-side
-query run in whichever call entered last, a scratch folder no teardown removed.
+First round: the oracle on the agent loop (no unanswered tool call, a bounded verifier, no
+private import, one host checker), the turn-held context, the box-owned scratch folder.
+Second round: a forged row is fresh or frozen, never both (a frozen row is not re-judged, and a
+re-forged one is reused); one deadline over the whole attempt, tools included; one framing,
+with its size cap, for every prompt; one recorder for every delivered row; a price settled
+before any request. Each test is red on the code it replaces.
 """
 from __future__ import annotations
 
@@ -12,11 +14,14 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from defender.learning.branch.estate import oracle as oracle_mod
+from defender.learning.branch.estate.checks import CheckStore, RealData, check_submission
+from defender.runtime.verbs import CALL_DELIVERY, CallDelivery
 from defender.runtime.box._oracle import OracleBox, stop_oracle_box
 from defender.runtime.box._spec import BoxSpec, _DockerTransport
 from defender.tests.live_oracle_1224 import _spec1224 as S
@@ -35,8 +40,10 @@ class ProviderLikeModel:
     request right after it. Its replies are raw `ModelResponse` parts, so one reply can carry
     several tool calls — what a real model does and `ScriptedModel` cannot."""
 
-    def __init__(self, *replies: list[tuple[str, dict]]) -> None:
+    def __init__(self, *replies: list[tuple[str, dict]],
+                 name: str = S.double_model_name("provider-like")) -> None:
         self.replies = list(replies)
+        self.name = name
         self.refused: list[str] = []
         self.requests = 0
         self._model: Any = None
@@ -45,7 +52,7 @@ class ProviderLikeModel:
     def model(self) -> Any:
         if self._model is None:
             from pydantic_ai.models.function import FunctionModel
-            self._model = FunctionModel(self._answer, model_name="provider-like")
+            self._model = FunctionModel(self._answer, model_name=self.name)
         return self._model
 
     async def _answer(self, messages: list[Any], _info: Any) -> Any:
@@ -257,3 +264,124 @@ def _tool_result(messages: list[Any], tool: str) -> str:
     last = [m for m in messages if isinstance(m, ModelRequest)][-1]
     return "\n".join(str(p.content) for p in last.parts
                      if isinstance(p, ToolReturnPart) and p.tool_name == tool)
+
+
+# --- second round ---------------------------------------------------------------------------
+
+_REAL_ROW = {"user": "alice", "event_id": "e-100", "action": "logon"}
+_FROZEN = {"forged_id": "fg-1", "fact_id": "F", "system": "s",
+           "row": {"user": "alice", "event_id": "e-9001", "action": "tgt"}}
+_SEEN_SINCE = RealData(answers=[("s", {"rows": [{**_REAL_ROW, "src_ip": "10.0.0.1"}]})])
+
+
+def _shape_failures(*, frozen: dict, staged: dict) -> list[str]:
+    store = CheckStore(frozen=frozen, staged=staged, facts={}, rerun=lambda *_a: {})
+    failures = check_submission(
+        {"rows": [_REAL_ROW]}, {"rows": [_REAL_ROW, _FROZEN["row"]]},
+        {"added": [{"forged_id": "fg-1", "fact_id": "F"}]},
+        world=SimpleNamespace(facts=[SimpleNamespace(fact_id="F")]), store=store,
+        real_data=_SEEN_SINCE)
+    return [f for f in failures if f.startswith("check 2")]
+
+
+def test_a_frozen_row_is_not_re_judged_against_real_data_seen_since_it_froze():
+    """Second-round finding 1: real data seen after a row froze (a column it lacks) failed
+    check 2 on every later call serving it, and a frozen row cannot be changed — the world went
+    unservable. Check 2 judges fresh rows only; the same row fresh still fails (control)."""
+    assert _shape_failures(frozen={"fg-1": _FROZEN}, staged={}) == []
+    assert _shape_failures(frozen={}, staged={"fg-1": _FROZEN}) != []
+
+
+def test_re_forging_a_frozen_row_reuses_it_instead_of_staging_a_copy(tmp_path):
+    """Second-round finding 9: re-forging a frozen row with its exact content staged a copy,
+    and a row both frozen and staged escaped check 3 (frozen) and the collision recorder
+    (staged). A row is now fresh or frozen, never both."""
+    est = S.estate(tmp_path)
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=S.oracle(),
+                           verifier=S.passing_verifier())
+    frozen = {**_FROZEN, "fact_id": "f1", "system": "idp"}
+    reg.store.commit(forged=[frozen], facts=[], answer=None)
+    attempt = oracle_mod._Attempt()
+
+    told = reg.oracle._forge(dict(frozen), attempt)
+
+    assert attempt.forged == {}, "the frozen row was staged as a fresh copy"
+    assert "already frozen" in told, told
+
+
+def test_the_verifier_is_shown_a_large_unchanged_answer_once_and_capped(tmp_path):
+    """Second-round finding 2: the oracle saw a large base answer capped, but the verifier was
+    handed it in full twice (base and served), past what a request carries. Every prompt frames
+    answers through one capped renderer, and an unchanged answer is not sent a second time."""
+    est = S.estate(tmp_path)
+    big = {"rows": [{**_REAL_ROW, "event_id": f"e-{n:06d}", "note": "x" * 60}
+                    for n in range(4000)]}
+    est.answer("idp", "query", ALICE, big)
+    v = S.passing_verifier()
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, verifier=v, retry_cap=1,
+                           oracle=S.oracle(S.submit(oracle_mod.BASE_HANDLE, S.EMPTY_CLAIM)))
+
+    assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == big
+    shown = v.seen[0]
+    assert len(shown) < oracle_mod._CONTEXT_CAP * 1.5, len(shown)
+    assert "unchanged" in shown
+
+
+def test_a_slow_tool_is_cut_off_by_the_attempt_deadline(tmp_path):
+    """Second-round finding 6: the deadline bounded model requests only, so a tool running
+    long (a hung tenant read, a box run) held the turn — and the investigator's paused clock —
+    past it. One deadline now covers the whole attempt, tools included."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+
+    def slow_box() -> Any:
+        def run_parsed(*_a: Any, **_kw: Any) -> Any:
+            time.sleep(4.0)
+            return SimpleNamespace(out=b"", err=b"", rc=0)
+        return SimpleNamespace(sandboxed=True, name="slow-box", run_parsed=run_parsed)
+
+    o = S.oracle(S.python("print('slow')"), S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, box=slow_box,
+                           verifier=S.passing_verifier(), retry_cap=2, turn_deadline=0.5)
+
+    began = time.monotonic()
+    served = S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
+
+    assert served == ALICE_ROWS
+    assert time.monotonic() - began < 3.0, "the attempt waited out the slow tool"
+
+
+def test_an_unpriced_model_is_refused_before_any_request(tmp_path):
+    """Second-round finding 5: a model with no pricing row was charged $0 per response, so the
+    oracle's budget never bounded it. Its price is settled when its agent is built, and a model
+    with none is refused before any request goes out."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    model = ProviderLikeModel([("submit", {"served": ALICE_ROWS, "claim": S.EMPTY_CLAIM})],
+                              name="no-such-model")
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=model,
+                           verifier=S.passing_verifier(), retry_cap=1)
+
+    with pytest.raises(oracle_mod.OraclePricingError):
+        S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
+    assert model.requests == 0
+
+
+def test_an_undelivered_control_world_call_leaves_no_row(tmp_path):
+    """Second-round finding 7: the no-facts (control) world wrote its passthrough row itself,
+    without the rule that an undelivered call leaves no row (N12). Every delivered row now goes
+    through one recorder."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    ep = S.episode_v2(tmp_path)
+    reg = S.world_registry(ep, "a", est)
+    delivery = CallDelivery()
+    delivery.abandoned = True
+    token = CALL_DELIVERY.set(delivery)
+    try:
+        served = S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
+    finally:
+        CALL_DELIVERY.reset(token)
+
+    assert served == ALICE_ROWS
+    assert S.ledger_rows(ep, "a") == []

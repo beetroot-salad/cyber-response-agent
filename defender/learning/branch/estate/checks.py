@@ -57,7 +57,11 @@ def canonical_json(value: Any) -> str:
 @dataclass
 class CheckStore:
     """What the checks read beside the submission: the world's frozen forged rows, the rows
-    staged this attempt, the recorded facts (committed and staged), and the side-query door."""
+    staged this attempt, the recorded facts (committed and staged), and the side-query door.
+
+    A forged row is fresh (`staged`: forged this attempt, judged by checks 2 and 3) or frozen
+    (committed with an earlier verified answer: judged once, then served as it is), never
+    both — re-forging a frozen row reuses it (`Oracle._forge`)."""
 
     frozen: Mapping[str, Mapping[str, Any]]
     staged: Mapping[str, Mapping[str, Any]]
@@ -71,10 +75,50 @@ class CheckStore:
 @dataclass
 class RealData:
     """This world's real answers: `(system, payload)` pairs (base answers, the base recording,
-    exploration and verifier reads) plus loose real values (the source alert's)."""
+    exploration and verifier reads) plus loose real values (the source alert's).
+
+    Indexed as answers arrive (`add`, `add_loose`; an answer already held is not added twice):
+    every check reads the index, so a check costs the size of its submission, not of all the
+    real data the world has seen."""
 
     answers: list[tuple[str, Any]] = field(default_factory=list)
     loose: list[Any] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        given, self.answers = list(self.answers), []
+        loose, self.loose = list(self.loose), []
+        self._held: set[str] = set()
+        #: Every scalar's text; every mapping; the mappings carrying each value's text; the
+        #: rows of each `(system, path)` row list (answers only, not loose values).
+        self.values: set[str] = set()
+        self.maps: list[dict] = []
+        self.by_value: dict[str, list[dict]] = {}
+        self.rows: dict[tuple[str, tuple[str, ...]], list[dict]] = {}
+        for system, payload in given:
+            self.add(system, payload)
+        self.add_loose(loose)
+
+    def add(self, system: str, payload: Any) -> None:
+        key = f"{system}\x00{canonical_json(payload)}"
+        if key in self._held:
+            return
+        self._held.add(key)
+        self.answers.append((system, payload))
+        self._index(payload)
+        for path, row in _row_lists(payload):
+            self.rows.setdefault((system, path), []).append(row)
+
+    def add_loose(self, values: list[Any]) -> None:
+        for value in values:
+            self.loose.append(value)
+            self._index(value)
+
+    def _index(self, payload: Any) -> None:
+        self.values.update(_value_text(v) for v in _scalars(payload))
+        for mapping in _mappings(payload):
+            self.maps.append(mapping)
+            for text in {_value_text(v) for v in mapping.values()}:
+                self.by_value.setdefault(text, []).append(mapping)
 
 
 @dataclass
@@ -424,17 +468,21 @@ def _value_text(value: Any) -> str:
 # --------------------------------------------------------------------------------------------
 
 
+def _fresh(matched: list[tuple[tuple[str, ...], Any, Mapping[str, Any]]],
+           store: CheckStore) -> list[tuple[tuple[str, ...], Any, Mapping[str, Any]]]:
+    """The served forged rows forged this attempt. A frozen row was judged when it froze; real
+    data seen since cannot make it fail, since it can never be changed (only its collisions
+    are recorded, `frozen_id_collisions`)."""
+    return [m for m in matched if str(m[2].get("forged_id")) in store.staged]
+
+
 def _check_shape(matched: list[tuple[tuple[str, ...], Any, Mapping[str, Any]]],  # noqa: C901 — check 2's per-row rules
                  real: RealData) -> list[str]:
-    examples: dict[tuple[str, tuple[str, ...]], list[dict]] = {}
-    for system, payload in real.answers:
-        for path, row in _row_lists(payload):
-            examples.setdefault((system, path), []).append(row)
     failures: list[str] = []
     for path, element, record in matched:
         if not isinstance(element, Mapping):
             continue
-        rows = examples.get((str(record.get("system")), path))
+        rows = real.rows.get((str(record.get("system")), path))
         if not rows:
             continue  # D2: no real example, nothing to compare
         columns = set().union(*(set(r) for r in rows))
@@ -473,22 +521,17 @@ def _id_like(column: str, value: Any) -> bool:
 
 def _check_ids(matched: list[tuple[tuple[str, ...], Any, Mapping[str, Any]]], claim: _Claim,
                store: CheckStore, real: RealData) -> list[str]:
-    fresh = [(element, record) for _p, element, record in matched
-             if isinstance(element, Mapping) and str(record.get("forged_id")) in store.staged
-             and str(record.get("forged_id")) not in store.frozen]
+    fresh = [(element, record) for _p, element, record in _fresh(matched, store)
+             if isinstance(element, Mapping)]
     if not fresh:
         return []
-    real_values = {_value_text(v) for _s, payload in real.answers for v in _scalars(payload)}
-    real_values |= {_value_text(v) for loose in real.loose for v in _scalars(loose)}
-    real_maps = [m for _s, payload in real.answers for m in _mappings(payload)]
-    real_maps += [m for loose in real.loose for m in _mappings(loose)]
     failures: list[str] = []
     for element, record in fresh:
         fid = str(record.get("forged_id"))
         for column, value in element.items():
-            if not _id_like(str(column), value) or _value_text(value) not in real_values:
+            if not _id_like(str(column), value) or _value_text(value) not in real.values:
                 continue
-            if _declared_reference(fid, str(column), value, claim, real_maps):
+            if _declared_reference(fid, str(column), value, claim, real.maps):
                 continue
             failures.append(f"check 3: forged row {fid!r} reuses a real identifier in column "
                             f"{column!r} {wrap_fresh(_value_text(value), 'untrusted')}")
@@ -508,19 +551,17 @@ def frozen_id_collisions(base: Any, served: Any, claim: Any, *, world: Any, stor
     world_facts = {str(getattr(f, "fact_id", None) or (f.get("fact_id") if isinstance(f, Mapping) else ""))
                    for f in (getattr(world, "facts", None) or ())}
     _failures, matched, _missing = _check_structure(base, served, parsed, store, world_facts)
-    real_maps = [m for _s, payload in real_data.answers for m in _mappings(payload)]
-    real_maps += [m for loose in real_data.loose for m in _mappings(loose)]
     found: list[dict[str, Any]] = []
     for _path, element, record in matched:
         fid = str(record.get("forged_id"))
-        if not isinstance(element, Mapping) or fid not in store.frozen or fid in store.staged:
+        if not isinstance(element, Mapping) or fid not in store.frozen:
             continue
         for column, value in element.items():
             if not _id_like(str(column), value):
                 continue
             text = _value_text(value)
-            rows = [dict(m) for m in real_maps if any(_value_text(v) == text for v in m.values())
-                    and canonical_json(m) != canonical_json(element)]
+            rows = [dict(m) for m in real_data.by_value.get(text, ())
+                    if canonical_json(m) != canonical_json(element)]
             if rows:
                 found.append({"forged_id": fid, "column": str(column), "value": text,
                               "system": record.get("system"), "real_rows": rows[:3]})
@@ -565,7 +606,7 @@ def _check_facts(served: Any, claim: _Claim, store: CheckStore,
                             f"{frozen.get('fact_id')!r}, not {entry['fact_id']!r}")
     for record in missing:
         fid = str(record.get("forged_id"))
-        if fid in store.frozen and fid not in store.staged:
+        if fid in store.frozen:
             failures.append(f"check 4: frozen row {fid!r} is not served exactly as frozen")
     return failures
 
@@ -633,7 +674,7 @@ def check_submission(base: Any, served: Any, claim: Any, *, world: Any, store: C
     world_facts = {str(getattr(f, "fact_id", None) or (f.get("fact_id") if isinstance(f, Mapping) else ""))
                    for f in (getattr(world, "facts", None) or ())}
     failures, matched, missing = _check_structure(base, served, parsed, store, world_facts)
-    failures += _check_shape(matched, real_data)
+    failures += _check_shape(_fresh(matched, store), real_data)
     failures += _check_ids(matched, parsed, store, real_data)
     failures += _check_facts(served, parsed, store, missing)
     failures += _check_counts(parsed, store)
