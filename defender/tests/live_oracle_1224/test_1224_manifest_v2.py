@@ -39,10 +39,6 @@ def _family_error() -> type[BaseException]:
     return S.sym(S.FAMILY, "FamilyError")
 
 
-def _judge_refused() -> type[BaseException]:
-    return S.sym(S.JUDGE, "JudgeRefused")
-
-
 def _episode_cls() -> Any:
     return S.sym("_episode_handle", "Episode")
 
@@ -814,7 +810,7 @@ def test_1224_hostile_world_label_or_system_name_never_forges_a_section_or_leave
     outside its directory; a well-formed name renders as its own section (positive control)
     (N02, GR-08, GR-09).
     """
-    FamilyError, JudgeRefused = _family_error(), _judge_refused()
+    FamilyError, JudgeRefused = _family_error(), S.judge_refused_cls()
     for i, label in enumerate(("b\n## forged", "b#x", "b<x", "b/x")):
         doc = _doc((label, [_F1]), ("c", [_F2]))
         assert _names(_refused(lambda doc=doc: _parse(doc), FamilyError), label)
@@ -865,7 +861,7 @@ def test_1224_sibling_loader_and_raw_manifest_reader_refuse_a_label_outside_the_
     label reaches no judge prompt and no page; positive control: a well-formed label loads
     through all three (N02, PCO-11).
     """
-    FamilyError, JudgeRefused = _family_error(), _judge_refused()
+    FamilyError, JudgeRefused = _family_error(), S.judge_refused_cls()
     load_page = S.sym(S.VISUALIZE, "load_episode")
     good = _episode(tmp_path / "well-formed", _doc())
     assert _resume(good, "b").label == "b"
@@ -933,7 +929,7 @@ def test_input_old_manifest_field_is_empty_or_null(tmp_path, capsys):
     manifest that triggers it fails with a message saying it predates the oracle, never a
     generic schema error.
     """
-    FamilyError, JudgeRefused = _family_error(), _judge_refused()
+    FamilyError, JudgeRefused = _family_error(), S.judge_refused_cls()
     good = S.judged_episode(tmp_path / "v2", doc=_doc())
     assert _served(_load(good)) == list(S.SYSTEMS)
     assert _judge_read(good)["served_systems"] == list(S.SYSTEMS)
@@ -960,7 +956,7 @@ def test_input_manifest_is_both_old_and_malformed(tmp_path):
     and that reason is not displaced by the other malformation. Control: the same unknown
     field with no old field is refused naming it, without the predates reason.
     """
-    FamilyError, JudgeRefused = _family_error(), _judge_refused()
+    FamilyError, JudgeRefused = _family_error(), S.judge_refused_cls()
     _loads(_doc())
     only_unknown = _doc()
     only_unknown["zzz_unknown_1224"] = "x"
@@ -983,7 +979,7 @@ def test_input_manifest_mixes_old_and_new_shapes(tmp_path, capsys):
     at the runtime loader, the judge's reader and the episode page, whether or not it also
     carries the new fields; the new fields do not rescue it (O15).
     """
-    FamilyError, JudgeRefused = _family_error(), _judge_refused()
+    FamilyError, JudgeRefused = _family_error(), S.judge_refused_cls()
     good = S.judged_episode(tmp_path / "v2", doc=_doc())
     S.samples_record(good, _samples())
     judge = S.FakeJudge(default=S.as_reply_text(J.reply_doc()))
@@ -1018,7 +1014,7 @@ def test_p065_old_field_introduced_via_alias_merge_key_or_duplicate_key(tmp_path
     duplicate key is refused with the predates-the-oracle reason exactly as a written-out field
     would be, and the runtime loader and the judge's raw reader agree on every such manifest.
     """
-    FamilyError, JudgeRefused = _family_error(), _judge_refused()
+    FamilyError, JudgeRefused = _family_error(), S.judge_refused_cls()
     base = _text(_doc())
     plain = _episode(tmp_path / "plain", text=base)
     assert _served(_load(plain)) == list(S.SYSTEMS)
@@ -1049,7 +1045,7 @@ def test_p066_old_marker_in_one_world_only_or_inside_a_discriminator_that_is_not
     predates-the-oracle reason at both read paths; a non-mapping discriminator never causes a
     crash instead of the named refusal.
     """
-    FamilyError, JudgeRefused = _family_error(), _judge_refused()
+    FamilyError, JudgeRefused = _family_error(), S.judge_refused_cls()
     five = _doc(("b", [_F1]), ("c", [_F2]), ("d", [S.fact("f3")]), ("e", [S.fact("f4")]))
     _loads(five)
     third = _doc(("b", [_F1]), ("c", [_F2]), ("d", [S.fact("f3")]), ("e", [S.fact("f4")]))
@@ -1083,7 +1079,7 @@ def test_p067_manifest_alias_bomb_or_pathological_nesting(tmp_path, capsys):
     non-empty reason within 10 s (the page: a non-zero exit with a stderr reason within 30 s);
     the plain v2 manifest loading is the positive control.
     """
-    FamilyError, JudgeRefused = _family_error(), _judge_refused()
+    FamilyError, JudgeRefused = _family_error(), S.judge_refused_cls()
     base = _text(_doc())
     assert _served(_load(_episode(tmp_path / "plain", text=base))) == list(S.SYSTEMS)
     bomb = ["lol0: &lol0 [lol, lol, lol, lol, lol, lol, lol, lol, lol]"] + [
@@ -1133,7 +1129,7 @@ def test_1224_judges_raw_manifest_reader_reads_v2_and_refuses_every_old_field(tm
     every manifest carrying overlay, discriminator.holding_system, discriminator.envelope,
     captured_patterns or configured_patterns with the predates-the-oracle reason (F-11, N04).
     """
-    JudgeRefused = _judge_refused()
+    JudgeRefused = S.judge_refused_cls()
     doc = _judge_read(_episode(tmp_path / "v2", _doc()))
     assert doc["served_systems"] == list(S.SYSTEMS)
     assert doc["worlds"][1]["facts"] == [_F1]

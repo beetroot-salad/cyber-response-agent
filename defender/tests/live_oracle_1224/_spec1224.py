@@ -287,6 +287,10 @@ def sandbox_error_cls() -> type[BaseException]:
     return sym(ORACLE, COINED["exc.sandbox"])
 
 
+def judge_refused_cls() -> type[BaseException]:
+    return sym(JUDGE, "JudgeRefused")
+
+
 # Re-exported from the #947 / #921 machinery, unchanged.
 EPISODE_ID = T.EPISODE_ID
 EPISODE_TOKEN = T.EPISODE_TOKEN
@@ -312,6 +316,25 @@ untrusted_frames = T.untrusted_frames
 outside_untrusted_frames = T.outside_untrusted_frames
 assert_wrapped_untrusted = T.assert_wrapped_untrusted
 as_reply_text = J.as_reply_text
+
+
+def judge_reply(*, systems: tuple[str, ...] = ("idp",), bucket: str = "lead-set") -> str:
+    """A judge reply in the coined v2 shape: a world-scope `bucket` and `systems`, plus the
+    family-scope `verdict_word`, so one default answers both scopes."""
+    return as_reply_text(J.reply_doc(findings=[], bucket=bucket, systems=list(systems),
+                                     verdict_word="caught"))
+
+
+def judge_label(agent_id: str) -> str | None:
+    """The world a judge call is about, from its agent id: `judge:<label>:<n>` -> `<label>`
+    (the family-scope call is `judge:family:<n>`)."""
+    parts = str(agent_id).split(":")
+    return parts[1] if len(parts) >= 3 and parts[0] == "judge" else None
+
+
+def judge_called_for(judge: FakeJudge, label: str) -> bool:
+    """Whether the judge model was called for world `label` (agent id `judge:<label>:<n>`)."""
+    return any(str(a).startswith(f"judge:{label}:") for a in judge.agent_ids)
 archived_judge_world = J.archived_judge_world
 
 
@@ -826,6 +849,45 @@ def verdict_names(text: str, what: str) -> bool:
     return what.lower() in text.lower()
 
 
+def all_parts_text(messages: list[Any]) -> str:
+    """Every part of one request's message list, the model's own replies (text and tool-call
+    args) included — for asserting something is NOWHERE in a context. `ScriptedModel.seen`
+    (host-authored request parts only) skips a handed-down history; this does not."""
+    out: list[str] = []
+    for msg in messages:
+        for part in getattr(msg, "parts", []):
+            for attr in ("content", "args"):
+                value = getattr(part, attr, None)
+                if value is not None:
+                    out.append(value if isinstance(value, str)
+                               else json.dumps(value, sort_keys=True, default=str))
+    return "\n".join(out)
+
+
+def host_tail(messages: list[Any]) -> str:
+    """The host-authored request parts after the model's last response in one request's
+    message list — the tool return, retry prompt or verdict the host appended to the move just
+    made. The static instructions are not in it, so a verdict naming a check is the host's
+    verdict, not the prompt's prose."""
+    from pydantic_ai.messages import ModelRequest, ModelResponse
+
+    last = -1
+    for i, msg in enumerate(messages):
+        if isinstance(msg, ModelResponse):
+            last = i
+    out: list[str] = []
+    for msg in messages[last + 1:]:
+        if not isinstance(msg, ModelRequest):
+            continue
+        for part in msg.parts:
+            content = getattr(part, "content", None)
+            if content is None:
+                continue
+            out.append(content if isinstance(content, str)
+                       else json.dumps(content, sort_keys=True, default=str))
+    return "\n".join(out)
+
+
 # --------------------------------------------------------------------------------------
 # The oracle's box (M18): sandboxed and recording, or the real unsandboxed executor.
 # --------------------------------------------------------------------------------------
@@ -1088,6 +1150,17 @@ def read_jsonl(path: Path) -> list[dict]:
     return read_jsonl_rows(Path(path))
 
 
+def strings_in(value: Any) -> list[str]:
+    """Every string inside a nested loaded YAML/JSON document (keys and values)."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, Mapping):
+        return [s for k, v in value.items() for s in (*strings_in(k), *strings_in(v))]
+    if isinstance(value, (list, tuple)):
+        return [s for v in value for s in strings_in(v)]
+    return []
+
+
 def judged_episode(tmp_path: Path, *, doc: dict | None = None,
                    labels: tuple[str, ...] = WORLDS, outcome: str | None = "accepted",
                    ledgers: dict[str, list[dict]] | None = None,
@@ -1156,6 +1229,25 @@ def world_registry(ep: Path, label: str, est: Estate, *, oracle: ScriptedModel |
     return sym(REGISTRY, "WorldRegistry")(est.roster(), rt.grants.gather, **kw)
 
 
+def sandboxed_registry(ep: Path, label: str, est: Estate, oracle: ScriptedModel | None = None,
+                       verifier: ScriptedModel | None = None, *,
+                       box: Callable[[], Any] | None = None, **knobs: Any) -> Any:
+    """`world_registry` with `retry_cap=3` by default and the oracle box a recording SANDBOXED
+    factory unless the scenario hands its own (so no test reaches the production box)."""
+    knobs.setdefault("retry_cap", 3)
+    if box is None:
+        box, _log = sandboxed_box()
+    return world_registry(ep, label, est, oracle=oracle, verifier=verifier, box=box, **knobs)
+
+
+def plain_registry(est: Estate) -> Any:
+    """The registry an ordinary UNBRANCHED run queries through over the same estate — the
+    "as on a real run" parity reference."""
+    rt = est.run_tenant()
+    return sym(VERBS, "ModuleVerbRegistry")(est.roster(), rt.grants.gather,
+                                            grant_home=rt.table_pointer)
+
+
 def call(registry: Any, system: str, verb: str, ctx: Any, **params: Any) -> Any:
     """One investigator call through the registry's wrapped verb — the production frame the
     query tool calls (`registry.verbs(system)[verb](ctx, **params)`)."""
@@ -1165,6 +1257,18 @@ def call(registry: Any, system: str, verb: str, ctx: Any, **params: Any) -> Any:
 LEAD = "l-001"
 
 
+def replay_harness() -> Any:
+    """The replay harness module (`defender.tests.e2e._replay_harness`)."""
+    return importlib.import_module("defender.tests.e2e._replay_harness")
+
+
+def lead_rows(run_dir: Path) -> list[dict]:
+    """The evidence rows of the scenario's own gather lead (`LEAD`); lead zero's correlation
+    row (`l-000`), which every driven run writes, is not the scenario's."""
+    return [r for r in read_jsonl(Path(run_dir) / "executed_queries.jsonl")
+            if r.get("lead_id") == LEAD]
+
+
 def drive_gather(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system: str = "idp",
                  run_id: str = "run-1224", limits: Any = None, tenant: Any = None,
                  **kw: Any) -> tuple[Path, Any]:
@@ -1172,7 +1276,7 @@ def drive_gather(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system:
     the main loop dispatches ONE gather lead on `system`, whose scripted turns are
     `gather_turns` (`query_turn(...)`s then `DONE`), with the registry injected as `verbs=`.
     Returns `(run dir, the gather ReplayFn)` — `gather.seen` is what the investigator saw."""
-    H = importlib.import_module("defender.tests.e2e._replay_harness")
+    H = replay_harness()
     run_dir = H.materialize(tmp_path / run_id, H.GOLDEN_AB3)
     main = H.ReplayFn([
         H.Turn(tool_calls=[("gather", {
@@ -1187,13 +1291,13 @@ def drive_gather(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system:
 
 
 def done_turn() -> Any:
-    H = importlib.import_module("defender.tests.e2e._replay_harness")
+    H = replay_harness()
     return H.Turn(text="Summary: measured the lead.")
 
 
 def query_turn(system: str, verb: str, params: Mapping[str, Any]) -> Any:
     """One gather-agent `query` tool call, as the replay harness scripts it."""
-    H = importlib.import_module("defender.tests.e2e._replay_harness")
+    H = replay_harness()
     return H.Turn(tool_calls=[("query", {"system": system, "verb": verb,
                                          "params": dict(params)})])
 

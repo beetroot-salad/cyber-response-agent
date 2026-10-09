@@ -29,7 +29,6 @@ launcher no `roster` / `oracle` / `verifier`.
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
 import threading
 import time
@@ -60,10 +59,6 @@ EDR_ROW = {"event_id": "x-7", "host": "db-1", "process": "sshd", "ts": "2026-07-
 # --------------------------------------------------------------------------------------
 # Private helpers.
 # --------------------------------------------------------------------------------------
-
-
-def _harness() -> Any:
-    return importlib.import_module("defender.tests.e2e._replay_harness")
 
 
 def _episode(tmp_path: Path, calls: list[tuple[str, str, dict, Any]]) -> Path:
@@ -242,7 +237,7 @@ class _Router:
     def __call__(self, messages: list[Any], info: Any) -> Any:
         from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 
-        text = _harness().messages_text(messages)
+        text = S.replay_harness().messages_text(messages)
         lead = next(k for k, mark in self.marks.items() if mark in text)
         self.seen[lead].append(text)
         script = self.scripts[lead]
@@ -269,7 +264,7 @@ def _drive(tmp_path: Path, *, verbs: Any, tenant: Any, leads: dict[str, list[Any
     """One investigation through the real driver: MAIN dispatches every lead in `leads` in ONE
     turn (parallel gather leads), each lead runs its own scripted turns. Returns the run dir,
     the router (what each lead was shown) and the run's summary."""
-    H = _harness()
+    H = S.replay_harness()
     run_dir = run_dir if run_dir is not None else H.materialize(tmp_path / run_id, H.GOLDEN_AB3)  # lint-default: ok — a test builder's fresh per-call double or fixture, never a shared instance
     marks = {lead: _mark(lead) for lead in leads}
     main = H.ReplayFn([
@@ -1485,7 +1480,7 @@ def test_oracle_trace_sink_is_already_open_when_a_second_oracle_turn_starts(tmp_
     oracle = S.oracle(then=S.submit(EMPTY, S.EMPTY_CLAIM), fault=S.Fault(delay=0.3))
     verifier = S.passing_verifier(fault=S.Fault(delay=0.2))
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=verifier, retry_cap=3)
-    H = _harness()
+    H = S.replay_harness()
     both = H.Turn(tool_calls=[("query", {"system": "idp", "verb": "query", "params": one}),
                               ("query", {"system": "idp", "verb": "query", "params": two})])
     run_dir, _router, summary = _drive(tmp_path, verbs=reg, tenant=est.place(),

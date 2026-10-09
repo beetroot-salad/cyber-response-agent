@@ -64,12 +64,6 @@ def _roots(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------------------
 
 
-def _label_of(agent_id: str) -> str | None:
-    """`judge:<label>:<n>` -> `<label>` (the family call is `judge:family:<n>`)."""
-    parts = str(agent_id).split(":")
-    return parts[1] if len(parts) >= 3 and parts[0] == "judge" else None
-
-
 @dataclass
 class _JudgeByScope(S.FakeJudge):
     """#921's recording `FakeJudge`, whose reply is chosen by the world (or the family scope)
@@ -85,7 +79,7 @@ class _JudgeByScope(S.FakeJudge):
 
     def __call__(self, prompt: str, *, role: Any = None, agent_id: str = "judge",
                  **kw: Any) -> str:
-        label = _label_of(agent_id)
+        label = S.judge_label(agent_id)
         scripted = self.family if label == "family" else self.worlds.get(label)
         if scripted is None:
             return super().__call__(prompt, role=role, agent_id=agent_id, **kw)
@@ -193,10 +187,6 @@ def _from_world(rows: list[dict], label: str) -> list[dict]:
     return [r for r in rows if f"/{label}/" in str(r.get("finding_id"))]
 
 
-def _called_for(judge: Any, label: str) -> bool:
-    return any(str(a).startswith(f"judge:{label}:") for a in judge.agent_ids)
-
-
 def _prompt_for(judge: Any, label: str) -> str:
     """The first prompt the double was handed for world `label`."""
     for prompt, agent_id in zip(judge.prompts, judge.agent_ids, strict=True):
@@ -272,15 +262,11 @@ def _oracle_row(q: str, *, label: str = "b", claim: dict | None = None,
     return row
 
 
-def _refused() -> type[BaseException]:
-    return S.sym(S.JUDGE, "JudgeRefused")
-
-
 def _page(ep: Path) -> tuple[str | None, str | None]:
     """The episode page: `(html, None)` when it renders, `(None, refusal text)` when it refuses
     by name (`JudgeRefused`). Any other exception propagates — that is a crash."""
     render = S.sym(S.VISUALIZE, "render_episode")
-    refused = _refused()
+    refused = S.judge_refused_cls()
     try:
         path = render(ep)
     except refused as refusal:
@@ -430,7 +416,7 @@ def test_1224_family_with_two_unservable_siblings_is_unusable_and_yields_no_find
         {"world": "b", "reason": S.REASON_UNSERVABLE, "call": _call("user:alice")}])
     judge1 = _judge({"c": _world_reply("decision-discipline", ("edr",))})
     _grade(one, ep1, judge1, state=_state1135.state_over(one / "state"))
-    assert _called_for(judge1, "c"), "the positive control: a one-unservable family was not graded"
+    assert S.judge_called_for(judge1, "c"), "the positive control: a one-unservable family was not graded"
     assert _record(ep1).get("validity") == "usable"
 
     # The judge site: pre-flight's failed world plus a world whose own record says it did not
@@ -571,7 +557,7 @@ def test_1224_world_whose_facts_sit_only_on_unserved_systems_is_never_lead_set(t
     _grade(tmp_path, ep, judge)
 
     assert _row(ep, "b").get("bucket") == "lead-set", "the positive control: b was not lead-set"
-    assert _called_for(judge, "c"), "a couldn't-look world was not admitted to the judge (M20=A)"
+    assert S.judge_called_for(judge, "c"), "a couldn't-look world was not admitted to the judge (M20=A)"
     assert _row(ep, "c").get("bucket") != "lead-set", (
         "a world whose facts sit only on unserved systems was recorded lead-set (O11)")
     assert _row(ep, "c").get("bucket") is None, (
@@ -665,7 +651,7 @@ def test_1224_world_whose_change_never_reached_the_investigator_is_judged_not_wi
                                       findings=[_finding("never-queried", bucket="lead-set")])})
     _grade(tmp_path, ep, judge)
 
-    assert _called_for(judge, "b"), "a world whose change never reached the investigator was not judged"
+    assert S.judge_called_for(judge, "b"), "a world whose change never reached the investigator was not judged"
     row = _row(ep, "b")
     assert row.get("bucket") == "lead-set"
     assert "never-queried" in _topics(row.get("findings"))
@@ -892,7 +878,7 @@ def test_1224_judge_grades_only_an_accepted_outcome(tmp_path):
 
     root = tmp_path / "accepted"
     ep, judge = _gate_case(root, "accepted")
-    assert _called_for(judge, "b"), "the positive control: an accepted episode was not graded"
+    assert S.judge_called_for(judge, "b"), "the positive control: an accepted episode was not graded"
     assert "not_graded" not in _record(ep)
 
 
@@ -996,7 +982,7 @@ def test_input_facts_sit_only_on_unserved_systems_at_launch(tmp_path):
                     "c": _world_reply("lead-set", ("badge",),
                                       findings=[_finding("c-badge", bucket="lead-set")])})
     _grade(tmp_path / "judged", graded, judge)
-    assert _called_for(judge, "c"), "the couldn't-look world was not admitted to the judge"
+    assert S.judge_called_for(judge, "c"), "the couldn't-look world was not admitted to the judge"
     assert _row(graded, "c").get("bucket") != "lead-set", (
         "a world whose facts sit only on unserved systems was recorded lead-set")
     assert _row(graded, "b").get("bucket") == "lead-quality", "the positive control: b ungraded"
@@ -1029,7 +1015,7 @@ def test_p078_judge_reply_lead_set_for_a_world_whose_facts_are_only_partly_serva
     assert _row(ep, "b").get("bucket") == "lead-set", (
         "a world whose reply touches one served system was refused lead-set")
     for label in ("c", "d"):
-        assert _called_for(judge, label), f"world {label} was not admitted to the judge"
+        assert S.judge_called_for(judge, label), f"world {label} was not admitted to the judge"
         assert _row(ep, label).get("bucket") != "lead-set", (
             f"world {label}, whose reply touches no served system, was recorded lead-set")
         assert _row(ep, label).get("bucket") is None, (
@@ -1173,7 +1159,7 @@ def test_input_manifest_cannot_be_parsed_at_judge_or_page(tmp_path):
         ep = S.judged_episode(root)
         (ep / "family.yaml").write_text(text, encoding="utf-8")
         judge = _judge()
-        refused = _refused()
+        refused = S.judge_refused_cls()
         try:
             _grade(root, ep, judge, state=_state1135.state_over(root / "state"))
             said = str((_record(ep).get("not_graded") or {}).get("reason", ""))
@@ -1218,7 +1204,7 @@ def test_p093_old_review_record_says_accepted_with_no_new_outcome_record(tmp_pat
     ok = S.judged_episode(tmp_path / "new")
     judge = _judge({"b": _world_reply()})
     _grade(tmp_path / "new", ok, judge, state=_state1135.state_over(tmp_path / "new" / "state"))
-    assert _called_for(judge, "b"), "the positive control: an accepted outcome record was not graded"
+    assert S.judge_called_for(judge, "b"), "the positive control: an accepted outcome record was not graded"
     assert verdicts(ok), "the positive control: the episode reader refused an accepted episode"
 
 
@@ -1354,7 +1340,7 @@ def test_1224_original_call_unservable_in_preflight_and_the_worlds_ledger(tmp_pa
         {"world": "b", "reason": S.REASON_UNSERVABLE, "call": _call("user:MARKER-FU22")}])
     judge = _judge({"c": _world_reply("decision-discipline", ("edr",))})
     _grade(root, ep, judge)
-    assert not _called_for(judge, "b"), "the unservable world was graded"
+    assert not S.judge_called_for(judge, "b"), "the unservable world was graded"
     assert not _row(ep, "b").get("bucket"), "the unservable world was bucketed"
     assert _row(ep, "c").get("bucket") == "decision-discipline", "the rest of the family was not graded"
     assert _record(ep).get("validity") == "usable", "one unservable world made the family unusable"
@@ -1422,7 +1408,7 @@ def test_judge_model_call_fails_for_one_world_but_not_the_rest(tmp_path):
 
     second = _judge({"b": reply_b, "c": reply_c})
     _grade(tmp_path, ep, second)
-    world_calls = {_label_of(a) for a in second.agent_ids if _label_of(a) != "family"}
+    world_calls = {S.judge_label(a) for a in second.agent_ids if S.judge_label(a) != "family"}
     assert world_calls == {"b"}, f"a bare re-run regraded {sorted(world_calls)}, not only b"
     assert _row(ep, "b").get("bucket") == "analyze-discipline", "the re-run did not grade b"
     assert _row(ep, "c").get("bucket") == "lead-quality", "the re-run disturbed c's grade"
@@ -1438,7 +1424,7 @@ def test_judge_reply_gives_a_bucket_outside_the_five(tmp_path):
     explicit member. Settled regardless: a bucket outside the accepted set is never recorded or
     enqueued as written.
     """
-    refused = _refused()
+    refused = S.judge_refused_cls()
     for bad in ("lead_set", "Lead-Set", " lead-set ", "lead-set\n", None,
                 ["lead-set", "lead-quality"], "missed-lead", ""):
         with pytest.raises(refused) as refusal:
@@ -1529,7 +1515,7 @@ def test_judge_reply_leaves_a_world_out(tmp_path):
         "a queue row's finding id files a finding under the foreign world z")
 
     twice = _text(_world_reply("lead-set", ("idp",))) + "bucket: lead-quality\n"
-    with pytest.raises(_refused()):
+    with pytest.raises(S.judge_refused_cls()):
         _validate(twice)
 
 
@@ -1655,7 +1641,7 @@ def test_input_outcome_record_is_inconsistent_or_in_legacy_words(tmp_path):
         {"world": "b", "reason": S.REASON_UNSERVABLE, "call": _call("user:alice")}])
     judge = _judge({"c": _world_reply("decision-discipline", ("edr",))})
     _grade(root, ep, judge, state=_state1135.state_over(root / "state"))
-    assert _called_for(judge, "c"), (
+    assert S.judge_called_for(judge, "c"), (
         "the control: an accepted record with one unservable world was not graded on the rest")
     assert verdicts(ep), "the control: the reader read nothing for an O5 count of one"
 
@@ -1669,7 +1655,7 @@ def test_input_outcome_record_is_inconsistent_or_in_legacy_words(tmp_path):
                                       findings=[_finding("foreign-record-b")])})
     _grade(root, ep, judge, state=state)
     rec, rows = _record(ep), _rows(ep)
-    assert _called_for(judge, "b"), (
+    assert S.judge_called_for(judge, "b"), (
         "an accepted record naming one foreign unservable world was not graded (its O5 count is "
         "at most one whether the word is trusted or the list recounted)")
     assert "not_graded" not in rec, f"the foreign-world record was stamped: {rec.get('not_graded')!r}"
@@ -1681,7 +1667,7 @@ def test_input_outcome_record_is_inconsistent_or_in_legacy_words(tmp_path):
 
     root = tmp_path / "accepted"
     ep, judge = _gate_case(root, "accepted")
-    assert _called_for(judge, "b"), "the positive control: an exactly-accepted episode was not graded"
+    assert S.judge_called_for(judge, "b"), "the positive control: an exactly-accepted episode was not graded"
     assert verdicts(ep), "the positive control: the episode reader refused an accepted episode"
 
 
@@ -1729,7 +1715,7 @@ def test_1224_judge_family_word_outside_what_the_queue_accepts(tmp_path):
     for word in sorted(enum):
         assert _validate(_text(_family_reply(word)), scope="family").verdict_word == word
     for bad in ("survivd", "unusable", "promoted"):
-        with pytest.raises(_refused()):
+        with pytest.raises(S.judge_refused_cls()):
             _validate(_text(_family_reply(bad)), scope="family")
 
     ep = S.judged_episode(tmp_path)
@@ -1833,7 +1819,7 @@ def test_judge_is_run_again_on_an_episode_it_already_graded(tmp_path):
     ep = S.judged_episode(tmp_path / "graded")
     first = _judge({"b": _world_reply(findings=[_finding("once")])})
     _grade(tmp_path, ep, first)
-    assert _called_for(first, "b"), "the positive control: the first pass did not grade"
+    assert S.judge_called_for(first, "b"), "the positive control: the first pass did not grade"
     before, queued = (ep / "judge.yaml").read_text(encoding="utf-8"), _all_queued()
 
     S.outcome_record(ep, "unusable", reason="rewritten after grading")
@@ -1853,7 +1839,7 @@ def test_judge_is_run_again_on_an_episode_it_already_graded(tmp_path):
     third = _judge({"b": _world_reply()})
     try:
         _grade(tmp_path / "old", old, third, state=state)
-    except _refused():
+    except S.judge_refused_cls():
         pass  # a named refusal is "not graded"; any other exception is a crash and propagates
     assert third.calls == 0, "an old-manifest episode bought model calls"
     assert _all_queued(state) == [], "an old-manifest episode enqueued findings"
@@ -2108,7 +2094,7 @@ def test_1224_judge_stamps_unusable_refused_and_absent_records_not_graded_with_n
         f"{no_record}")
 
     ep, judge = _gate_case(tmp_path / "accepted", "accepted")
-    assert _called_for(judge, "b"), "the positive control: an accepted episode was not graded"
+    assert S.judge_called_for(judge, "b"), "the positive control: an accepted episode was not graded"
     assert "not_graded" not in _record(ep), "the positive control: an accepted episode was stamped"
 
 

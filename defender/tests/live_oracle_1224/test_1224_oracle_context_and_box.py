@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import gc
 import html
-import importlib
 import inspect
 import json
 import os
@@ -132,17 +131,6 @@ def _estate(where: Path, *, rows: tuple[dict, ...] = BASE_ROWS, **kw: Any) -> S.
     return est
 
 
-def _registry(ep: Path, label: str, est: S.Estate, oracle: S.ScriptedModel,
-              verifier: S.ScriptedModel, *, box: Any = None, retry_cap: int = 3,
-              **knobs: Any) -> Any:
-    """`WorldRegistry` for `label`, its oracle box a recording SANDBOXED factory unless the
-    scenario hands its own (so no test ever reaches the production box factory by default)."""
-    if box is None:
-        box, _log = S.sandboxed_box()
-    return S.world_registry(ep, label, est, oracle=oracle, verifier=verifier, box=box,
-                            retry_cap=retry_cap, **knobs)
-
-
 def _doc(value: Any) -> Any:
     if isinstance(value, bytes):
         value = value.decode("utf-8")
@@ -196,25 +184,11 @@ def _salts(text: str) -> set[str]:
     return set(_OPEN.findall(text))
 
 
-def _everything(messages: list[Any]) -> str:
-    """Every part of a message list, the model's own replies (text and tool-call args)
-    included — for asserting something is NOWHERE in a context."""
-    out: list[str] = []
-    for msg in messages:
-        for part in getattr(msg, "parts", []):
-            for attr in ("content", "args"):
-                value = getattr(part, attr, None)
-                if value is not None:
-                    out.append(value if isinstance(value, str)
-                               else json.dumps(value, sort_keys=True, default=str))
-    return "\n".join(out)
-
-
 def _context(model: S.ScriptedModel, start: int = 0, stop: int | None = None) -> str:
     """Everything requests `start:stop` handed the model, instructions and history included."""
     seen = model.seen[start:stop]
     msgs = model.messages[start:stop]
-    return "\n".join(seen) + "\n" + "\n".join(_everything(m) for m in msgs)
+    return "\n".join(seen) + "\n" + "\n".join(S.all_parts_text(m) for m in msgs)
 
 
 def _carries_history(messages: list[Any]) -> bool:
@@ -548,7 +522,7 @@ def _drive(  # noqa: PLR0913 — one keyword per piece of investigator text a sc
     read. `bash` is a command the main loop runs through its own bash tool before it
     dispatches the lead — through `box`, the investigator's executor (the harness's third
     seam), so a scenario can show that box receiving the investigator's own frames."""
-    H = importlib.import_module("defender.tests.e2e._replay_harness")
+    H = S.replay_harness()
     run_dir = H.materialize(Path(where) / "run-1224", H.GOLDEN_AB3)
     lead = [H.Turn(tool_calls=[("bash", {"command": bash})])] if bash is not None else []
     main = H.ReplayFn([
@@ -673,7 +647,7 @@ def test_1224_verifier_context_carries_no_oracle_reasoning(tmp_path):
         *_forge_submit(),
     )
     v = S.passing_verifier()
-    reg = _registry(ep, "b", est, o, v, retry_cap=3)
+    reg = S.sandboxed_registry(ep, "b", est, o, v, retry_cap=3)
 
     served = _ask(reg, est, tmp_path)
 
@@ -715,7 +689,7 @@ def test_1224_verifier_gets_call_base_served_facts_and_frozen_telemetry(tmp_path
         S.run_query("edr", "lookup", {"entity": "alice"}),
         S.verdict(True),
         then=S.verdict(True))
-    reg = _registry(ep, "b", est, o, v, retry_cap=2)
+    reg = S.sandboxed_registry(ep, "b", est, o, v, retry_cap=2)
 
     assert _ask(reg, est, tmp_path) == _valid(forged=frozen)
     first_pass = v.requests
@@ -771,7 +745,7 @@ def test_1224_answer_payloads_reach_oracle_and_verifier_only_inside_fresh_frames
     o = S.oracle(S.run_query("idp", "lookup", {"entity": "alice"}),
                  *_forge_submit(base_rows, forged))
     v = S.passing_verifier()
-    reg = _registry(ep, "b", est, o, v)
+    reg = S.sandboxed_registry(ep, "b", est, o, v)
 
     assert _ask(reg, est, tmp_path) == _valid(base_rows, forged)
 
@@ -804,7 +778,7 @@ def test_1224_no_investigator_message_text_reaches_oracle_or_verifier(tmp_path):
     ep = _episode(tmp_path)
     o = S.oracle(*_forge_submit())
     v = S.passing_verifier()
-    reg = _registry(ep, "b", est, o, v)
+    reg = S.sandboxed_registry(ep, "b", est, o, v)
 
     _drive(tmp_path, reg, est, params=params,
            main_text="MAINSENT-1101 I suspect alice is the attacker; send a gather on idp",
@@ -833,7 +807,7 @@ def test_1224_call_params_reach_the_oracle_framed_as_untrusted(tmp_path):
     ep = _episode(tmp_path)
     o = S.oracle(*_forge_submit())
     v = S.passing_verifier()
-    reg = _registry(ep, "b", est, o, v)
+    reg = S.sandboxed_registry(ep, "b", est, o, v)
 
     assert _ask(reg, est, tmp_path, params=params) == _valid()
 
@@ -859,7 +833,7 @@ def test_1224_oracle_input_type_carries_call_fields_and_an_answer_handle_only(tm
     ep = _episode(tmp_path)
     o = S.oracle(*_forge_submit())
     v = S.passing_verifier()
-    reg = _registry(ep, "b", est, o, v)
+    reg = S.sandboxed_registry(ep, "b", est, o, v)
     run_dir = tmp_path / "run-CTXDIR4410"
     run_dir.mkdir()
     ctx = S.sym(S.VERBS, "VerbContext")(
@@ -925,8 +899,8 @@ def test_1224_oracle_conversation_is_static_family_world_then_calls(tmp_path):
     est.answer("siem-x", "lookup", {"entity": "alice"}, lookup)
     ob = S.oracle(_passthrough(_answer(*idp_rows)), _passthrough(lookup))
     oc = S.oracle(_passthrough(_answer(*idp_rows)))
-    reg_b = _registry(ep, "b", est, ob, S.passing_verifier())
-    reg_c = _registry(ep, "c", est, oc, S.passing_verifier())
+    reg_b = S.sandboxed_registry(ep, "b", est, ob, S.passing_verifier())
+    reg_c = S.sandboxed_registry(ep, "c", est, oc, S.passing_verifier())
 
     _ask(reg_b, est, tmp_path, params=q_b)
     first_call = ob.requests
@@ -971,7 +945,7 @@ def _restart_scenario(where: Path, *, record: str) -> tuple[Path, S.Estate, S.Sc
         *_forge_submit(idp_rows),
         _passthrough(_events(_edr_event(note="EXAMPLEEDR-1801"))),
     )
-    reg = _registry(ep, "b", est, o, S.passing_verifier(), retry_cap=3, restart_after=1)
+    reg = S.sandboxed_registry(ep, "b", est, o, S.passing_verifier(), retry_cap=3, restart_after=1)
     assert _ask(reg, est, where) == _valid(idp_rows)
     second = o.requests
     assert _ask(reg, est, where, "edr", "query", Q_EDR) == _events(
@@ -1031,7 +1005,7 @@ def test_1224_oracle_turn_offers_run_query_forge_record_fact_python_check_and_su
         S.check(_valid(), claim),
         S.submit(_valid(), claim),
     )
-    reg = _registry(ep, "b", est, o, S.passing_verifier(), box=box)
+    reg = S.sandboxed_registry(ep, "b", est, o, S.passing_verifier(), box=box)
 
     assert _ask(reg, est, tmp_path) == _valid()
 
@@ -1080,7 +1054,7 @@ def test_input_fact_statement_carries_instructions(tmp_path):
     )
     v = S.verifier(S.verdict(False, "fact f1's TGT row is implausible for a kerberos logon"),
                    S.verdict(True))
-    reg = _registry(ep, "b", est, o, v, retry_cap=3)
+    reg = S.sandboxed_registry(ep, "b", est, o, v, retry_cap=3)
 
     assert _ask(reg, est, tmp_path) == _valid(), "an unclaimed removal or a failed verdict served"
 
@@ -1124,7 +1098,7 @@ def test_input_call_params_address_the_oracle_and_the_checks(tmp_path):
         *_forge_submit(),
     )
     v = S.passing_verifier()
-    reg = _registry(ep, "b", est, o, v, retry_cap=3)
+    reg = S.sandboxed_registry(ep, "b", est, o, v, retry_cap=3)
 
     assert _ask(reg, est, tmp_path, params=params) == _valid(), "the params changed the checks"
 
@@ -1154,7 +1128,7 @@ def test_p012_query_call_carries_free_text_beside_its_verb_params(tmp_path):
     ep = _episode(tmp_path)
     o = S.oracle(*_forge_submit())
     v = S.passing_verifier()
-    reg = _registry(ep, "b", est, o, v)
+    reg = S.sandboxed_registry(ep, "b", est, o, v)
 
     _drive(tmp_path, reg, est, params=params, query_id="idp.labelmark-9931",
            gather_text="REASONMARK-9932 if alice pivoted, the TGT row will be there")
@@ -1202,7 +1176,7 @@ def test_input_base_cell_carries_hostile_text(tmp_path):
     est_c = _estate(where, rows=base_rows)
     ep_c = _episode(where, rows=base_rows)
     o_c = S.oracle(*script())
-    reg_c = _registry(ep_c, "b", est_c, o_c, S.passing_verifier(), retry_cap=3)
+    reg_c = S.sandboxed_registry(ep_c, "b", est_c, o_c, S.passing_verifier(), retry_cap=3)
     assert _ask(reg_c, est_c, where) == _valid(base_rows, forged)
     control_rows = _oracle_rows_of(ep_c)
     assert len(control_rows) == 1, control_rows
@@ -1214,7 +1188,7 @@ def test_input_base_cell_carries_hostile_text(tmp_path):
     o = S.oracle(*script(), *_forge_submit(base_rows, forged))
     v = S.verifier(S.verdict(False, "VFAIL-6655 fact f1's TGT row is missing its kerberos "
                                     "context"), S.verdict(True))
-    reg = _registry(ep, "b", est, o, v, retry_cap=3)
+    reg = S.sandboxed_registry(ep, "b", est, o, v, retry_cap=3)
 
     assert _ask(reg, est, tmp_path) == _valid(base_rows, forged)
 
@@ -1266,7 +1240,7 @@ def test_p005_base_answer_text_asks_the_oracle_to_read_files_or_the_environment_
         S.submit(_answer(*base_rows, leaked), S.EMPTY_CLAIM),
         *_forge_submit(base_rows),
     )
-    reg = _registry(ep, "b", est, o, S.passing_verifier(), box=box, retry_cap=2)
+    reg = S.sandboxed_registry(ep, "b", est, o, S.passing_verifier(), box=box, retry_cap=2)
 
     served = _ask(reg, est, tmp_path)
 
@@ -1304,7 +1278,7 @@ def test_p007_served_answer_text_addresses_the_verifier(tmp_path):
         *_forge_submit(forged=forged),
     )
     v = S.passing_verifier()
-    reg = _registry(ep, "b", est, o, v, retry_cap=2)
+    reg = S.sandboxed_registry(ep, "b", est, o, v, retry_cap=2)
 
     assert _ask(reg, est, tmp_path) == _valid(forged=forged)
 
@@ -1339,7 +1313,7 @@ def test_1224_oracle_python_runs_through_a_box_executor(tmp_path):
     ep = _episode(tmp_path)
     box, log = S.sandboxed_box(out=b"BOXOUT-6620\n")
     o = S.oracle(S.python("print('PYCODE-3391')"), _passthrough(_answer(*BASE_ROWS)))
-    reg = _registry(ep, "b", est, o, S.passing_verifier(), box=box)
+    reg = S.sandboxed_registry(ep, "b", est, o, S.passing_verifier(), box=box)
 
     assert _ask(reg, est, tmp_path) == _answer(*BASE_ROWS)
 
@@ -1366,7 +1340,7 @@ def test_1224_oracle_python_never_starts_a_host_process(tmp_path, monkeypatch):
     ep = _episode(tmp_path)
     box, log = _host_box()
     o = S.oracle(S.python(_host_run_code(marker)), *_forge_submit())
-    reg = _registry(ep, "b", est, o, S.passing_verifier(), box=box, retry_cap=1)
+    reg = S.sandboxed_registry(ep, "b", est, o, S.passing_verifier(), box=box, retry_cap=1)
 
     with pytest.raises(S.unservable_cls()):
         _ask(reg, est, tmp_path)
@@ -1402,7 +1376,7 @@ def test_1224_oracle_python_tool_cannot_be_built_over_an_unsandboxed_executor(tm
         ep = _episode(where)
         box, log = _host_box()
         o = S.oracle(S.python(_host_run_code(marker)), *_forge_submit())
-        reg = _registry(ep, "b", est, o, S.passing_verifier(), box=box, retry_cap=1)
+        reg = S.sandboxed_registry(ep, "b", est, o, S.passing_verifier(), box=box, retry_cap=1)
         with pytest.raises(S.unservable_cls()):
             _ask(reg, est, where)
         assert o.consumed
@@ -1417,7 +1391,7 @@ def test_1224_oracle_python_tool_cannot_be_built_over_an_unsandboxed_executor(tm
     ep = _episode(where)
     box, log = S.sandboxed_box(out=b"ok\n")
     o = S.oracle(S.python("print('PYCODE-3030')"), _passthrough(_answer(*BASE_ROWS)))
-    reg = _registry(ep, "b", est, o, S.passing_verifier(), box=box, retry_cap=1)
+    reg = S.sandboxed_registry(ep, "b", est, o, S.passing_verifier(), box=box, retry_cap=1)
     assert _ask(reg, est, where) == _answer(*BASE_ROWS)
     assert any("PYCODE-3030" in arg for arg in _argvs(log))
 
@@ -1452,7 +1426,7 @@ def test_python_box_cannot_be_started(tmp_path, monkeypatch):
         est = _estate(where)
         ep = _episode(where)
         o = S.oracle(S.python(_host_run_code(marker)), *_forge_submit())
-        reg = _registry(ep, "b", est, o, S.passing_verifier(), box=box, retry_cap=1)
+        reg = S.sandboxed_registry(ep, "b", est, o, S.passing_verifier(), box=box, retry_cap=1)
         with pytest.raises(S.unservable_cls()):
             _ask(reg, est, where)
         assert o.consumed, arm
@@ -1467,7 +1441,7 @@ def test_python_box_cannot_be_started(tmp_path, monkeypatch):
     ep = _episode(where)
     box, log = _host_box()
     o = S.oracle(S.python(_host_run_code(marker)), *_forge_submit())
-    reg = _registry(ep, "b", est, o, S.passing_verifier(), box=box, retry_cap=1)
+    reg = S.sandboxed_registry(ep, "b", est, o, S.passing_verifier(), box=box, retry_cap=1)
     holder: list = []
     try:
         _drive(where, reg, est, params=Q_ALICE, holder=holder)
@@ -1497,7 +1471,7 @@ def test_python_box_is_killed_while_running(tmp_path):
     box, log = S.sandboxed_box(kill_after=1)
     o = S.oracle(S.python("print('one')"), S.python("print('two')"), S.python("print('three')"),
                  *_forge_submit())
-    reg = _registry(ep, "b", est, o, S.passing_verifier(), box=box, retry_cap=1)
+    reg = S.sandboxed_registry(ep, "b", est, o, S.passing_verifier(), box=box, retry_cap=1)
 
     assert _ask(reg, est, tmp_path) == _valid(), "a killed box failed the attempt"
 
@@ -1527,7 +1501,7 @@ def test_python_output_is_not_the_requested_shape(tmp_path):
     box, log = S.sandboxed_box(out=half, rc=1)
     o = S.oracle(S.python("print(json.dumps(answer))"), S.submit(half.decode(), S.EMPTY_CLAIM),
                  *_forge_submit())
-    reg = _registry(ep, "b", est, o, S.passing_verifier(), box=box, retry_cap=2)
+    reg = S.sandboxed_registry(ep, "b", est, o, S.passing_verifier(), box=box, retry_cap=2)
 
     served = _ask(reg, est, tmp_path)
 
@@ -1619,7 +1593,7 @@ def test_oracle_python_scratch_files_and_the_investigators_box(tmp_path, monkeyp
     oc = S.oracle(S.forge("fg-c", "f2", "idp", c_row),
                   S.submit(_answer(_row("e-200", user="bob"), c_row),
                            S.claim(added=[S.added("fg-c", "f2")])))
-    reg_c = _registry(ep, "c", est, oc, S.passing_verifier())
+    reg_c = S.sandboxed_registry(ep, "c", est, oc, S.passing_verifier())
     _ask(reg_c, est, tmp_path / "c", params=Q_BOB)
     assert [r["forged_id"] for r in S.oracle_rows(ep, "c", "forged")] == ["fg-c"]
     assert "CWORLDMARK-1381" in json.dumps(S.oracle_rows(ep, "c", "forged"))
@@ -1643,7 +1617,7 @@ def test_oracle_python_scratch_files_and_the_investigators_box(tmp_path, monkeyp
         *edr_attempt,
     )
     vb = S.passing_verifier()
-    reg_b = _registry(ep, "b", est, ob, vb, box=o_box, retry_cap=2)
+    reg_b = S.sandboxed_registry(ep, "b", est, ob, vb, box=o_box, retry_cap=2)
     _drive(tmp_path, reg_b, est, params=Q_ALICE, box=inv_factory(), bash="echo INVBASH-1383")
 
     assert any("ORSCRATCH-1" in arg for arg in _argvs(o_log)), "oracle code missed its box"
@@ -1689,7 +1663,7 @@ def test_files_left_in_the_oracle_box_by_an_earlier_call(tmp_path):
     ep = _episode(tmp_path)
     box, log = S.sandboxed_box(out=b"SCRATCHSTATE-A\n")
     o = S.oracle(S.python("open('state.txt', 'w').write('A')"), *_forge_submit())
-    reg = _registry(ep, "b", est, o, S.passing_verifier(), box=box)
+    reg = S.sandboxed_registry(ep, "b", est, o, S.passing_verifier(), box=box)
     first = _ask(reg, est, tmp_path)
     assert first == _valid()
     turns, frames = o.requests, len(log.frames)
@@ -1703,7 +1677,7 @@ def test_files_left_in_the_oracle_box_by_an_earlier_call(tmp_path):
     box2, log2 = S.sandboxed_box(out=b"SCRATCHSTATE-B\n")
     o2 = S.oracle(S.python("print(open('state.txt').read())"),
                   *_forge_submit(forged=_forged(msg="a different forgery", event_id="e-9009")))
-    reg2 = _registry(ep, "b", est, o2, S.passing_verifier(), box=box2)
+    reg2 = S.sandboxed_registry(ep, "b", est, o2, S.passing_verifier(), box=box2)
     assert _ask(reg2, est, tmp_path) == first, "a resumed sibling was served something else"
     assert o2.requests == 0, "the resumed call spent an oracle turn"
     assert log2.frames == [], "the resumed call spent an oracle turn"
@@ -1723,7 +1697,7 @@ def test_oracle_box_when_the_sibling_aborts_or_is_killed_mid_python_call(tmp_pat
     ep = _episode(tmp_path)
     box, log = _torn_down_box(delay=2.0)
     o = S.oracle(S.python("import time; time.sleep(60)"), *_forge_submit())
-    reg = _registry(ep, "b", est, o, S.passing_verifier(), box=box, retry_cap=1,
+    reg = S.sandboxed_registry(ep, "b", est, o, S.passing_verifier(), box=box, retry_cap=1,
                     turn_deadline=1)
 
     with pytest.raises(S.unservable_cls()):
@@ -1751,7 +1725,7 @@ def test_oracle_side_files_and_the_investigators_filesystem_view(tmp_path):
     doc = _family(b_statement="FACTSTMT-6060 alice obtained a TGT on db-1 at 15:22Z")
     ep = _episode(tmp_path, doc=doc)
     o = S.oracle(S.record_fact("alice", "department", "RECFACT-6061"), *_forge_submit())
-    reg = _registry(ep, "b", est, o, S.passing_verifier())
+    reg = S.sandboxed_registry(ep, "b", est, o, S.passing_verifier())
 
     run_dir, _gather = _drive(tmp_path, reg, est, params=Q_ALICE)
 
@@ -1782,11 +1756,11 @@ def test_input_exploration_result_carries_hostile_text(tmp_path):
     ob = S.oracle(S.run_query("idp", "lookup", {"entity": "alice"}), *_forge_submit(),
                   S.run_query("idp", "lookup", {"entity": "alice"}), _passthrough(edr_base))
     vb = S.passing_verifier()
-    reg_b = _registry(ep, "b", est, ob, vb)
+    reg_b = S.sandboxed_registry(ep, "b", est, ob, vb)
     _ask(reg_b, est, tmp_path)
     _ask(reg_b, est, tmp_path, "edr", "query", Q_EDR)
     oc = S.oracle(_passthrough(_answer(*BASE_ROWS)))
-    reg_c = _registry(ep, "c", est, oc, S.passing_verifier())
+    reg_c = S.sandboxed_registry(ep, "c", est, oc, S.passing_verifier())
     _ask(reg_c, est, tmp_path / "c")
 
     reached = [t for t in ob.seen if "EXPLHOSTILE-2290" in t]
@@ -1920,18 +1894,18 @@ def test_1224_family_blocks_compared_across_worlds_with_different_facts(tmp_path
                   c_statement="FACTC-1212 bob reset carol's password")
     ep, est, idp_rows = _family_episode(tmp_path, doc)
     oa = S.oracle()
-    reg_a = _registry(ep, "a", est, oa, S.passing_verifier())
+    reg_a = S.sandboxed_registry(ep, "a", est, oa, S.passing_verifier())
     assert _ask(reg_a, est, tmp_path / "a") == _answer(*idp_rows)
     assert oa.requests == 0, "the control world was given an oracle turn"
 
     b_row = _forged(msg="FORGEDB-1212")
     ob = S.oracle(S.record_fact("alice", "department", "RECB-1212"),
                   *_forge_submit(idp_rows, b_row))
-    reg_b = _registry(ep, "b", est, ob, S.passing_verifier())
+    reg_b = S.sandboxed_registry(ep, "b", est, ob, S.passing_verifier())
     assert _ask(reg_b, est, tmp_path / "b") == _valid(idp_rows, b_row)
     oc = S.oracle(S.record_fact("bob", "password_reset_by", "RECC-1212"),
                   _passthrough(_answer(*idp_rows)))
-    reg_c = _registry(ep, "c", est, oc, S.passing_verifier())
+    reg_c = S.sandboxed_registry(ep, "c", est, oc, S.passing_verifier())
     assert _ask(reg_c, est, tmp_path / "c") == _answer(*idp_rows)
 
     assert ob.seen
@@ -1962,7 +1936,7 @@ def test_1224_family_block_built_after_another_worlds_oracle_has_run(tmp_path):
     fresh = tmp_path / "fresh"
     ep1, est1, idp_rows = _family_episode(fresh, doc)
     oc1 = S.oracle(_passthrough(_answer(*idp_rows)))
-    _ask(_registry(ep1, "c", est1, oc1, S.passing_verifier()), est1, fresh)
+    _ask(S.sandboxed_registry(ep1, "c", est1, oc1, S.passing_verifier()), est1, fresh)
 
     after = tmp_path / "after"
     ep2, est2, _rows = _family_episode(after, doc)
@@ -1973,12 +1947,12 @@ def test_1224_family_block_built_after_another_worlds_oracle_has_run(tmp_path):
                   S.record_fact("alice", "department", "RECB-1313"),
                   *_forge_submit(idp_rows, b_row),
                   _passthrough(_answer(_row("e-300", msg="LIVEBASEB-1313"))))
-    reg_b = _registry(ep2, "b", est2, ob, S.passing_verifier())
+    reg_b = S.sandboxed_registry(ep2, "b", est2, ob, S.passing_verifier())
     _ask(reg_b, est2, after / "b")
     _ask(reg_b, est2, after / "b", params=q_live)
     assert [r["forged_id"] for r in S.oracle_rows(ep2, "b", "forged")] == ["fg-1"]
     oc2 = S.oracle(_passthrough(_answer(*idp_rows)))
-    _ask(_registry(ep2, "c", est2, oc2, S.passing_verifier()), est2, after / "c")
+    _ask(S.sandboxed_registry(ep2, "c", est2, oc2, S.passing_verifier()), est2, after / "c")
 
     assert oc1.seen
     assert oc2.seen
@@ -2002,7 +1976,7 @@ def test_1224_family_block_after_a_conversation_restart(tmp_path):
     """
     ep, est, o, second = _restart_scenario(tmp_path, record="RECB-1414")
     oc = S.oracle(_passthrough(_answer(*_family_rows()[0])))
-    _ask(_registry(ep, "c", est, oc, S.passing_verifier()), est, tmp_path / "c")
+    _ask(S.sandboxed_registry(ep, "c", est, oc, S.passing_verifier()), est, tmp_path / "c")
 
     before, restarted, other = _ordered(o, 0), _ordered(o, second), _ordered(oc, 0)
     assert not _host(o, second).startswith(_host(o, second - 1)), "it never restarted"
@@ -2056,7 +2030,7 @@ def test_1224_verifier_context_after_an_oracle_turn_with_reasoning_and_tool_use(
     box, _log = S.sandboxed_box(out=b"OPYOUT-1515\n")
     o = S.oracle(*_rich_turn("1515", python=True))
     v = S.passing_verifier()
-    reg = _registry(ep, "b", est, o, v, box=box, retry_cap=3)
+    reg = S.sandboxed_registry(ep, "b", est, o, v, box=box, retry_cap=3)
     assert _ask(reg, est, tmp_path / "sibling") == _valid()
 
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "3")
@@ -2099,7 +2073,7 @@ def test_1224_claim_carries_free_text_beside_its_structured_entries(tmp_path):
     o = S.oracle(S.forge("fg-1", "f1", "idp", _forged()), S.submit(_valid(), loud),
                  *_forge_submit())
     v = S.passing_verifier()
-    reg = _registry(ep, "b", est, o, v, retry_cap=2)
+    reg = S.sandboxed_registry(ep, "b", est, o, v, retry_cap=2)
 
     assert _ask(reg, est, tmp_path) == _valid()
 
@@ -2129,7 +2103,7 @@ def test_1224_second_verifier_pass_after_the_first_failed(tmp_path):
                  S.python("# OREPLY-1717 the verifier found the TGT row implausible; fix it"),
                  *_forge_submit(forged=second, fid="fg-2"))
     v = S.verifier(S.verdict(False, "VFAIL-1717 the TGT row is implausible"), S.verdict(True))
-    reg = _registry(ep, "b", est, o, v, retry_cap=2)
+    reg = S.sandboxed_registry(ep, "b", est, o, v, retry_cap=2)
 
     assert _ask(reg, est, tmp_path) == _valid(forged=second)
 
@@ -2139,7 +2113,7 @@ def test_1224_second_verifier_pass_after_the_first_failed(tmp_path):
     assert S.verdict_names(retried[0], "verifier"), "the failure never reached it"
     cold = v.messages[1]
     assert not _carries_history(cold), "the second pass carried the first pass's conversation"
-    shown = _everything(cold) + "\n" + v.seen[1]
+    shown = S.all_parts_text(cold) + "\n" + v.seen[1]
     for marker in ("VFAIL-1717", "OREPLY-1717", "FIRSTSERVED-1717"):
         assert marker not in shown, f"the second pass holds {marker} of the first attempt"
     S.assert_wrapped_untrusted(v.seen[1], "SECONDSERVED-1717", "the second served answer")
@@ -2175,7 +2149,7 @@ def test_1224_verifier_for_a_later_call_in_a_long_oracle_conversation(tmp_path):
     )
     v = S.verifier(S.verdict(False, "VFAIL-1818 the TGT row lacks a ticket id"),
                    then=S.verdict(True))
-    reg = _registry(ep, "b", est, o, v, retry_cap=4)
+    reg = S.sandboxed_registry(ep, "b", est, o, v, retry_cap=4)
 
     assert _ask(reg, est, tmp_path) == _valid(forged=frozen)
     assert _ask(reg, est, tmp_path, "edr", "query", Q_EDR) == edr_answer
@@ -2184,7 +2158,7 @@ def test_1224_verifier_for_a_later_call_in_a_long_oracle_conversation(tmp_path):
 
     later = "\n".join(v.seen[third:])
     assert later, "the verifier was never asked about the later call"
-    shown = later + "\n" + "\n".join(_everything(m) for m in v.messages[third:])
+    shown = later + "\n" + "\n".join(S.all_parts_text(m) for m in v.messages[third:])
     S.assert_wrapped_untrusted(later, "SIEMBASE-1818", "the later call's answer")
     S.assert_wrapped_untrusted(later, "FROZEN-1818", "the frozen telemetry of an earlier call")
     for marker in ("OREASON-1818", "OEXPLORE-1818", "VFAIL-1818", "EDRSERVED-1818"):
@@ -2221,7 +2195,7 @@ def test_1224_oracle_reasoning_carried_in_a_recorded_fact_or_a_forged_field(tmp_
     est_c = _estate(where)
     ep_c = _episode(where)
     o_c = S.oracle(*attempt())
-    reg_c = _registry(ep_c, "b", est_c, o_c, S.passing_verifier(), retry_cap=2)
+    reg_c = S.sandboxed_registry(ep_c, "b", est_c, o_c, S.passing_verifier(), retry_cap=2)
     assert _ask(reg_c, est_c, where) == _valid(forged=row_prose)
     control_rows = _oracle_rows_of(ep_c)
     assert len(control_rows) == 1, control_rows
@@ -2235,7 +2209,7 @@ def test_1224_oracle_reasoning_carried_in_a_recorded_fact_or_a_forged_field(tmp_
     o = S.oracle(*attempt(), *attempt(), _passthrough(edr_answer))
     v = S.verifier(S.verdict(False, "ARGNOTTELEMETRY-1919 fact f1's TGT row is argument"),
                    then=S.verdict(True))
-    reg = _registry(ep, "b", est, o, v, retry_cap=2)
+    reg = S.sandboxed_registry(ep, "b", est, o, v, retry_cap=2)
 
     assert _ask(reg, est, tmp_path) == _valid(forged=row_prose)
     later = v.requests
@@ -2289,7 +2263,7 @@ def test_1224_oracle_turn_input_parts_share_no_source_and_frame_every_payload(tm
     est.answer("idp", "query", params, _answer(*rows))
     ep = _episode(tmp_path / "sibling", doc=doc, rows=rows)
     o = S.oracle(*_forge_submit(rows))
-    reg = _registry(ep, "b", est, o, S.passing_verifier())
+    reg = S.sandboxed_registry(ep, "b", est, o, S.passing_verifier())
     run_dir = tmp_path / "sibling" / "run-CTXO01"
     run_dir.mkdir()
     ctx = S.sym(S.VERBS, "VerbContext")(
@@ -2353,7 +2327,7 @@ def test_1224_preflight_verifier_context_carries_the_fact_side_and_no_oracle_rea
     assert "fg-1" in last, "the claim's structured entry is missing"
     assert "ORSENT-0202" not in _context(v), "the oracle's reasoning reached the verifier"
     assert not _carries_history(v.messages[-1]), "the second pass was not cold"
-    assert "VREASON-0202" not in _everything(v.messages[-1]) + last
+    assert "VREASON-0202" not in S.all_parts_text(v.messages[-1]) + last
 
 
 def test_1224_hostile_fact_statement_stays_inside_its_frame_in_oracle_verifier_and_judge_prompts(
@@ -2371,7 +2345,7 @@ def test_1224_hostile_fact_statement_stays_inside_its_frame_in_oracle_verifier_a
     ep = _episode(tmp_path / "serve", doc=doc)
     o = S.oracle(*_forge_submit())
     v = S.passing_verifier()
-    reg = _registry(ep, "b", est, o, v)
+    reg = S.sandboxed_registry(ep, "b", est, o, v)
     assert _ask(reg, est, tmp_path) == _valid()
 
     judged = S.judged_episode(tmp_path / "judged", doc=doc)
@@ -2405,7 +2379,7 @@ def test_1224_claim_text_cannot_close_the_verifiers_or_the_judges_frame(tmp_path
     o = S.oracle(S.forge("fg-1", "f1", "idp", _forged()), S.submit(served, loud),
                  S.forge("fg-1", "f1", "idp", _forged()), S.submit(served, claim))
     v = S.passing_verifier()
-    reg = _registry(ep, "b", est, o, v, retry_cap=2)
+    reg = S.sandboxed_registry(ep, "b", est, o, v, retry_cap=2)
     assert _ask(reg, est, tmp_path) == served
 
     assert v.seen, "the verifier was never asked"

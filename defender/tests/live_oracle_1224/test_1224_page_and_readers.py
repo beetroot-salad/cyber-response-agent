@@ -97,17 +97,6 @@ def _raw_has_live(raw: str, markup: str) -> bool:
     return markup in raw
 
 
-def _strings(obj: object) -> list[str]:
-    """Every string anywhere in a loaded YAML/JSON document."""
-    if isinstance(obj, str):
-        return [obj]
-    if isinstance(obj, dict):
-        return [s for k, v in obj.items() for s in (*_strings(k), *_strings(v))]
-    if isinstance(obj, (list, tuple)):
-        return [s for v in obj for s in _strings(v)]
-    return []
-
-
 def _malformed_counts(page: E.Page) -> list[int]:
     """Every `<n> malformed row` count the page shows, read per TEXT NODE: `page.text` joins
     adjacent nodes with no separator, so a digit ending one node would glue onto the next
@@ -313,9 +302,9 @@ def test_1224_outcome_and_world_record_reasons_render_inert_on_the_page_and_in_t
     _grade(ep, tmp_path, judge)
     assert judge.calls == 0, "an unusable episode reached the judge model"
     record = J.judge_record(ep)
-    assert any(reason in s for s in _strings(record)), (
+    assert any(reason in s for s in S.strings_in(record)), (
         "the not-graded record does not carry the outcome reason, verbatim, as data")
-    assert any("unusable" in s for s in _strings(record)), (
+    assert any("unusable" in s for s in S.strings_in(record)), (
         "the not-graded record does not name the word")
 
     page = _render(ep)

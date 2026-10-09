@@ -20,4 +20,7 @@ def _configured_roots_1224(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> P
     root = tmp_path / "episodes-root"
     monkeypatch.setenv(S.T.EPISODES_BASE_ENV, str(root))
     S.T.isolate_learning_state(tmp_path, monkeypatch)
+    # The default oracle rate (5/s) really sleeps between oracle-side queries, so every launch
+    # paid it. A test about the rate sets its own (`rate=`, its own limiter, or this knob).
+    monkeypatch.setenv(S.KNOB_RATE, "1e6")
     return root

@@ -29,7 +29,6 @@ missing, `run.main` has no oracle seam).
 from __future__ import annotations
 
 import contextlib
-import importlib
 import json
 import shutil
 import subprocess
@@ -99,7 +98,7 @@ def _explore(q: str = "host:db-1") -> S.Move:
 def _parallel(*calls: tuple[str, str]) -> Any:
     """ONE gather turn carrying several `query` calls — run concurrently by the agent loop
     (GD-33: parallel tool calls run their verb functions on concurrent worker threads)."""
-    H = _harness()
+    H = S.replay_harness()
     return H.Turn(tool_calls=[("query", {"system": system, "verb": "query",
                                          "params": {"q": q}}) for system, q in calls])
 
@@ -140,12 +139,8 @@ def _no_visualize(*_a: Any, **_k: Any) -> None:
 # --------------------------------------------------------------------------------------
 
 
-def _harness():
-    return importlib.import_module("defender.tests.e2e._replay_harness")
-
-
 def _main_fn(system: str = "idp") -> Any:
-    H = _harness()
+    H = S.replay_harness()
     return H.ReplayFn([
         H.Turn(tool_calls=[("gather", {
             "lead_id": S.LEAD, "system": system, "goal": f"measure the {system} lead",
@@ -229,7 +224,7 @@ def _drive(root: Path, est: S.Estate, verbs: Any, turns: list[Any], *,
     """One whole investigation: MAIN dispatches one gather lead whose scripted turns are
     `turns`, with `verbs` injected as the run's verb registry. `OracleUnservable` escaping the
     run is kept on `.raised`; any other exception propagates."""
-    H = _harness()
+    H = S.replay_harness()
     run_dir = H.materialize(root / RUN_ID, H.GOLDEN_AB3)
     run = _Run(run_dir, _main_fn(system), H.ReplayFn(list(turns)))
     try:
@@ -240,13 +235,6 @@ def _drive(root: Path, est: S.Estate, verbs: Any, turns: list[Any], *,
             raise
         run.raised = _the_unservable(exc)
     return run
-
-
-def _plain(est: S.Estate) -> Any:
-    """An UNBRANCHED run's registry over the same estate: the parity reference."""
-    rt = est.run_tenant()
-    return S.sym(S.VERBS, "ModuleVerbRegistry")(est.roster(), rt.grants.gather,
-                                                 grant_home=rt.table_pointer)
 
 
 # --------------------------------------------------------------------------------------
@@ -285,7 +273,7 @@ def _resume(ep: Path, est: S.Estate, *, oracle: S.ScriptedModel, verifier: S.Scr
     through its coined seams; its lifecycle seam drives the real investigation (replay
     harness) over the world registry, so whatever escapes the investigation reaches the
     sibling's own abort path as it would in production."""
-    H = _harness()
+    H = S.replay_harness()
     sib = _Sibling(ep)
 
     def lifecycle(**kw: Any) -> Any:
@@ -321,28 +309,10 @@ def _names_call(call: Any, system: str, verb: str, q: str) -> bool:
 # --------------------------------------------------------------------------------------
 
 
-def _parts_text(messages: list[Any]) -> str:
-    out = []
-    for msg in messages:
-        for part in getattr(msg, "parts", []):
-            content = getattr(part, "content", None)
-            if content is not None:
-                out.append(content if isinstance(content, str)
-                           else json.dumps(content, sort_keys=True, default=str))
-    return "\n".join(out)
-
-
 def _appended(model: S.ScriptedModel, i: int) -> str:
     """The host text appended to the conversation since the double's last reply, as request
     `i` carried it (request `j+1` follows the double's `j`-th scripted move)."""
-    from pydantic_ai.messages import ModelResponse
-
-    tail: list[Any] = []
-    for msg in reversed(model.messages[i]):
-        if isinstance(msg, ModelResponse):
-            break
-        tail.append(msg)
-    return _parts_text(list(reversed(tail)))
+    return S.host_tail(model.messages[i])
 
 
 def _tool_result(model: S.ScriptedModel, i: int, tool: str) -> str:
@@ -532,7 +502,7 @@ def test_1224_real_system_error_is_recorded_and_charged_as_on_a_real_run(tmp_pat
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=S.passing_verifier())
 
     branched = _drive(tmp_path / "w", est, reg, [_q("user:alice"), S.done_turn()])
-    plain = _drive(tmp_path / "p", est, _plain(est), [_q("user:alice"), S.done_turn()])
+    plain = _drive(tmp_path / "p", est, S.plain_registry(est), [_q("user:alice"), S.done_turn()])
 
     assert plain.raised is None
     assert branched.raised is None
@@ -630,7 +600,7 @@ def test_1224_oracle_retries_charge_no_investigator_budget(tmp_path):
     turns = [_q("user:alice"), S.done_turn()]
 
     branched = _drive(tmp_path / "w", est, reg, turns)
-    plain = _drive(tmp_path / "p", est, _plain(est), turns)
+    plain = _drive(tmp_path / "p", est, S.plain_registry(est), turns)
 
     assert o.requests >= 4, "the oracle and verifier took no extra turns"
     assert v.requests >= 2, "the oracle and verifier took no extra turns"
@@ -655,8 +625,8 @@ def test_1224_investigator_query_is_charged_once_whatever_the_oracle_did(tmp_pat
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=S.passing_verifier(), retry_cap=3)
 
     branched = _drive(tmp_path / "w", est, reg, [_q("user:alice"), S.done_turn()])
-    plain = _drive(tmp_path / "p", est, _plain(est), [_q("user:alice"), S.done_turn()])
-    none = _drive(tmp_path / "n", est, _plain(est), [S.done_turn()])
+    plain = _drive(tmp_path / "p", est, S.plain_registry(est), [_q("user:alice"), S.done_turn()])
+    none = _drive(tmp_path / "n", est, S.plain_registry(est), [S.done_turn()])
 
     assert o.submissions() == 2, "the oracle took a single attempt; the scenario is moot"
     assert plain.budget["tool_calls"] == none.budget["tool_calls"] + 1
@@ -736,7 +706,7 @@ def test_1224_oracle_cost_is_absent_from_the_siblings_accounted_cost(tmp_path):
     turns = [_q("user:alice"), S.done_turn()]
 
     branched = _drive(tmp_path / "w", est, reg, turns)
-    plain = _drive(tmp_path / "p", est, _plain(est), turns)
+    plain = _drive(tmp_path / "p", est, S.plain_registry(est), turns)
 
     assert o.requests >= 4
     assert v.requests >= 2
@@ -818,7 +788,7 @@ def test_served_system_adapter_cannot_be_loaded_at_call_time(tmp_path):
     ep = S.episode_v2(tmp_path)
     o = S.oracle(S.submit(ALICE_ROWS))
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=S.passing_verifier())
-    plain_reg = _plain(est)
+    plain_reg = S.plain_registry(est)
     (est.adapters / "edr_adapter.py").unlink()
     turns = [_q("host:db-1", "edr"), _q("user:alice"), S.done_turn()]
 
@@ -856,7 +826,7 @@ def test_base_query_times_out_on_the_real_system(tmp_path):
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=S.passing_verifier())
 
     branched = _drive(tmp_path / "w", est, reg, [_q("user:alice"), S.done_turn()])
-    plain = _drive(tmp_path / "p", est, _plain(est), [_q("user:alice"), S.done_turn()])
+    plain = _drive(tmp_path / "p", est, S.plain_registry(est), [_q("user:alice"), S.done_turn()])
 
     asked = [c for c in est.calls("idp", "query") if c["as_of"] is not None]
     assert len(asked) == 1, f"the timed-out query was retried: {asked}"
@@ -892,7 +862,7 @@ def test_one_system_rejects_every_call_for_the_whole_run(tmp_path):
              _q("host:db-3", "edr"), S.done_turn()]
 
     branched = _drive(tmp_path / "w", est, reg, turns)
-    plain = _drive(tmp_path / "p", est, _plain(est), turns)
+    plain = _drive(tmp_path / "p", est, S.plain_registry(est), turns)
 
     assert o.submissions() == 3, "the oracle's failed attempt was not exercised"
     assert branched.failures("edr") == plain.failures("edr") == 2
@@ -930,7 +900,7 @@ def test_p018_base_answer_so_large_it_exhausts_the_oracle_budget_on_one_call(tmp
                             oracle=S.oracle(S.submit(huge)), verifier=S.passing_verifier(),
                             budget=TINY_BUDGET)
     branched = _drive(tmp_path / "w", est, reg2, [_q("user:alice"), S.done_turn()])
-    plain = _drive(tmp_path / "p", est, _plain(est), [_q("user:alice"), S.done_turn()])
+    plain = _drive(tmp_path / "p", est, S.plain_registry(est), [_q("user:alice"), S.done_turn()])
     assert branched.rows_for("idp", "user:alice") == []
     assert branched.gather.calls == 1, "the sibling went on after its call was unservable"
     assert branched.failures("idp") == 0
@@ -1055,7 +1025,7 @@ def test_oracle_model_call_fails_transiently_then_works(tmp_path):
     turns = [_q("user:alice"), S.done_turn()]
 
     branched = _drive(tmp_path / "w", est, reg, turns)
-    plain = _drive(tmp_path / "p", est, _plain(est), turns)
+    plain = _drive(tmp_path / "p", est, S.plain_registry(est), turns)
 
     assert branched.raised is None
     assert o.requests == 2, "the failed request was not followed by another"
@@ -1150,14 +1120,14 @@ def test_oracle_model_never_answers(tmp_path, monkeypatch):
     # Control: the same wall clock DOES fire on time the investigator's own call spends — an
     # unbranched run whose real system takes 3 s to answer (real latency in front of the real
     # adapter) has the lead's next query refused.
-    real = _plain(est).verbs("idp")["query"]
+    real = S.plain_registry(est).verbs("idp")["query"]
 
     def slow_query(ctx: Any, *, q: str = "*", start: str = "", end: str = "",
                    limit: int = 50) -> Any:
         time.sleep(3.0)
         return real(ctx, q=q, start=start, end=end, limit=limit)
 
-    slow = _drive(tmp_path / "s", est, _harness().FakeVerbs({"idp": {"query": slow_query}}),
+    slow = _drive(tmp_path / "s", est, S.replay_harness().FakeVerbs({"idp": {"query": slow_query}}),
                   [_q("user:alice"), _q("user:bob"), S.done_turn()], limits=limits)
     assert slow.rows_for("idp", "user:alice"), "the control's first query never ran"
     assert slow.rows_for("idp", "user:bob") == [], "the wall clock never fires in this harness"
@@ -1409,7 +1379,7 @@ def test_many_oracle_turns_inside_one_investigator_call_and_the_investigators_bu
     turns = [_q("user:alice"), S.done_turn()]
 
     branched = _drive(tmp_path / "w", est, reg, turns)
-    plain = _drive(tmp_path / "p", est, _plain(est), turns)
+    plain = _drive(tmp_path / "p", est, S.plain_registry(est), turns)
 
     assert o.requests >= 6
     assert v.requests >= 2
@@ -1866,7 +1836,7 @@ def test_p096_real_error_text_looks_like_an_oracle_failure(tmp_path):
              S.done_turn()]
 
     branched = _drive(tmp_path / "w", est, reg, turns)
-    plain = _drive(tmp_path / "p", est, _plain(est), turns)
+    plain = _drive(tmp_path / "p", est, S.plain_registry(est), turns)
 
     assert branched.raised is None, "a real error was mistaken for an oracle failure"
     (b_row,) = branched.rows_for("idp", "user:mallory")
@@ -2043,7 +2013,7 @@ def test_1224_oracle_and_verifier_turns_leave_the_siblings_wire_log_and_budget_u
     turns = [_q("user:alice"), S.done_turn()]
 
     branched = _drive(tmp_path / "w", est, reg, turns)
-    plain = _drive(tmp_path / "p", est, _plain(est), turns)
+    plain = _drive(tmp_path / "p", est, S.plain_registry(est), turns)
 
     assert o.requests >= 4
     assert v.requests >= 2

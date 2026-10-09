@@ -469,11 +469,6 @@ class _LaunchJudge(S.FakeJudge):
         return _FAMILY_REPLY if str(agent_id).startswith("judge:family") else _WORLD_REPLY
 
 
-def _judged(judge: S.FakeJudge, label: str) -> bool:
-    """Whether the judge model was called for world `label` (agent id `judge:<label>:<n>`)."""
-    return any(str(a).startswith(f"judge:{label}:") for a in judge.agent_ids)
-
-
 def _judge_rows(ep: Path) -> dict[str, dict]:
     """`judge.yaml`'s per-world rows, read raw off disk (absent: no rows)."""
     path = Path(ep) / "judge.yaml"
@@ -1053,7 +1048,7 @@ def test_oracle_provider_rate_limits_every_sibling_at_once(tmp_path):
 
         assert oracle.requests == 2, f"{w}: the rate-limited request was not followed"
         assert not oracle.overrun, f"{w}: the oracle was asked for more than the idp query"
-        served = [r for r in _lead_rows(run_dir)
+        served = [r for r in S.lead_rows(run_dir)
                   if (r["system"], r["verb"]) == ("idp", "query")]
         assert len(served) == 1, served
         assert served[0]["exit_code"] == 0, f"{w}: the investigator's call did not succeed"
@@ -1091,16 +1086,9 @@ def _breaker_counts(run_dir: Path) -> dict:
             "total": doc.get("total_failures", 0)}
 
 
-def _lead_rows(run_dir: Path) -> list[dict]:
-    """The evidence rows of the scenario's own gather lead (`S.LEAD`); lead zero's correlation
-    row (`l-000`), which every driven run writes, is not the scenario's."""
-    return [r for r in S.read_jsonl(Path(run_dir) / "executed_queries.jsonl")
-            if r.get("lead_id") == S.LEAD]
-
-
 def _evidence_text(run_dir: Path) -> str:
     """The lead's evidence rows and every payload sidecar under `gather_raw/`, as text."""
-    parts = [json.dumps(r, sort_keys=True) for r in _lead_rows(run_dir)]
+    parts = [json.dumps(r, sort_keys=True) for r in S.lead_rows(run_dir)]
     raw = Path(run_dir) / "gather_raw"
     if raw.is_dir():
         parts += [p.read_text(encoding="utf-8", errors="replace")
@@ -1683,9 +1671,9 @@ def test_1224_archive_fails_after_the_siblings_ran(tmp_path, episodes_root):
     assert S.RETIRED_OUTCOME not in text
     assert not (run.ep / "review.yaml").exists()
 
-    assert _judged(judge, "b"), (
+    assert S.judge_called_for(judge, "b"), (
         f"positive control: the judge never graded archived world b ({judge.agent_ids})")
-    assert not _judged(judge, "c"), "the world whose archive failed was graded (S10)"
+    assert not S.judge_called_for(judge, "c"), "the world whose archive failed was graded (S10)"
     assert not _judge_rows(run.ep).get("c", {}).get("findings"), "world c carries findings"
     archived = _snapshot(run.ep / "worlds") if (run.ep / "worlds").is_dir() else {}
     assert not [n for n, body in archived.items() if "MARKER-1224-NOT-THE-REPORT" in body], (
@@ -1747,7 +1735,7 @@ def test_second_unservable_world_found_while_other_siblings_still_run(tmp_path, 
     control = _main(src, est, oracle=_passing(), verifier=S.passing_verifier(), spawn=one,
                     judge=graded)
     assert S.read_outcome(control.ep)["outcome"] == "accepted"
-    assert _judged(graded, "c"), (
+    assert S.judge_called_for(graded, "c"), (
         f"positive control: a family with one unservable sibling was not graded "
         f"({graded.agent_ids})")
 
@@ -2265,7 +2253,7 @@ def test_1224_siblings_records_before_and_after_it_reissues_a_preflight_call(tmp
     assert len(ledger) == 1
     assert _key(ledger[0]["system"], ledger[0]["verb"],
                 ledger[0]["params"]) == _key("idp", "query", _QP)
-    evidence = _lead_rows(run_dir)
+    evidence = S.lead_rows(run_dir)
     assert [(r["system"], r["verb"]) for r in evidence] == [("idp", "query")]
 
 

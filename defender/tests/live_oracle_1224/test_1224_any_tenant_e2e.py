@@ -58,13 +58,6 @@ class _Branch:
     foreign_marker: str
 
 
-def _judge_reply(*, systems: tuple[str, ...], bucket: str) -> str:
-    """A judge reply in the coined v2 shape: a world-scope `bucket` and `systems`, plus the
-    family-scope `verdict_word`, so one default answers both scopes."""
-    return S.as_reply_text(J.reply_doc(findings=[], bucket=bucket, systems=list(systems),
-                                       verdict_word="caught"))
-
-
 def _judge_world(record: dict, label: str) -> dict:
     """World `label`'s entry in the family record (`judge.yaml`), whether the record lists its
     worlds as rows naming `world` or maps them by label."""
@@ -92,7 +85,7 @@ def _branch_end_to_end(tmp_path: Path, est: S.Estate, *, doc: dict, calls: list,
     pre_verifier = S.passing_verifier()
     launch = S.launch(tmp_path, est, calls=calls, questioner=questioner, oracle=pre_oracle,
                       verifier=pre_verifier,
-                      judge=S.FakeJudge(default=_judge_reply(systems=(system,), bucket=bucket)))
+                      judge=S.FakeJudge(default=S.judge_reply(systems=(system,), bucket=bucket)))
 
     est.answer(system, "query", sibling_params, sibling_base)
     key = next(iter(sibling_base))
@@ -106,7 +99,7 @@ def _branch_end_to_end(tmp_path: Path, est: S.Estate, *, doc: dict, calls: list,
 
     judged = S.judged_episode(tmp_path / "judged", doc=doc,
                               ledgers={"b": S.ledger_rows(launch.ep, "b")})
-    judge = S.FakeJudge(default=_judge_reply(systems=(system,), bucket=bucket))
+    judge = S.FakeJudge(default=S.judge_reply(systems=(system,), bucket=bucket))
     S.sym(S.JUDGE, "grade_episode")(judged, judge=judge, runs_base=judged.parent / "runs-base",
                                     state=state_over(tmp_path / "judge-state"), draws=1)
     judge_world = _judge_world(J.judge_record(judged), "b")

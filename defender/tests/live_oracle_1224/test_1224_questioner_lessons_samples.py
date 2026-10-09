@@ -78,17 +78,6 @@ def _system_names_in(text: str, names: Iterable[str]) -> list[str]:
     return found
 
 
-def _strings(value: Any) -> list[str]:
-    """Every string inside a nested document (keys and values)."""
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, Mapping):
-        return [s for k, v in value.items() for s in (*_strings(k), *_strings(v))]
-    if isinstance(value, (list, tuple)):
-        return [s for v in value for s in _strings(v)]
-    return []
-
-
 def _framed(text: str) -> str:
     """Everything inside a closed untrusted frame of `text`."""
     return "\n".join(text[open_end:close_start]
@@ -1058,7 +1047,7 @@ def test_capture_holds_a_system_answer_that_cannot_be_shown_as_a_sample(tmp_path
     assert len(stored) < len(original) // 2, f"edr's {len(original)}-char answer was not cut"
     assert not original.startswith(stored), "edr's answer was cut with no marker saying so"
     assert isinstance(samples["idp"], dict), f"idp's section is gone: {samples['idp']!r}"
-    assert not [t for t in _strings(samples) if "\x00" in t or "\x89PNG" in t], (
+    assert not [t for t in S.strings_in(samples) if "\x00" in t or "\x89PNG" in t], (
         "the samples record carries idp's raw binary answer")
     agent, _doc = _author(tmp_path / "author", samples=samples)
     S.assert_wrapped_untrusted(agent.prompts[0], "MARKUP-262", "siem-x's markup-laden sample")

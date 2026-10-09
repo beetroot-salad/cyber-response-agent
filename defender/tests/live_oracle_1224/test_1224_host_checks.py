@@ -159,30 +159,6 @@ def _honest(fid: str = "fg-1", *, row: dict = FORGED_ROW, base_rows: tuple = (BA
 # --------------------------------------------------------------------------------------
 
 
-def _tail_text(messages: list[Any]) -> str:
-    """The host-authored request parts after the model's last response in one request's
-    message list — the tool return, retry prompt or verdict the host appended to the move just
-    made. The static instructions (which may well enumerate "check 1".."check 5") are not in it,
-    so a verdict naming a check is the host's verdict, not the prompt's prose."""
-    from pydantic_ai.messages import ModelRequest, ModelResponse
-
-    last = -1
-    for i, msg in enumerate(messages):
-        if isinstance(msg, ModelResponse):
-            last = i
-    out: list[str] = []
-    for msg in messages[last + 1:]:
-        if not isinstance(msg, ModelRequest):
-            continue
-        for part in msg.parts:
-            content = getattr(part, "content", None)
-            if content is None:
-                continue
-            out.append(content if isinstance(content, str)
-                       else json.dumps(content, sort_keys=True, default=str))
-    return "\n".join(out)
-
-
 def _move_index(o: S.ScriptedModel, tool: str, k: int) -> int:
     n = 0
     for i, move in enumerate(o.consumed):
@@ -199,7 +175,7 @@ def _after(o: S.ScriptedModel, tool: str, k: int = 1) -> str:
     i = _move_index(o, tool, k)
     assert i + 1 < len(o.messages), (
         f"the oracle was never asked again after its #{k} `{tool}` move — no verdict reached it")
-    return _tail_text(o.messages[i + 1])
+    return S.host_tail(o.messages[i + 1])
 
 
 def _named(text: str) -> set[int]:
@@ -277,21 +253,6 @@ def _scratch() -> S.Move:
     return S.python(f"# {SCRATCH}: does this answer hold the fact's row?\nprint('checked')")
 
 
-def _everything(messages: list[Any]) -> str:
-    """Every part of one request's message list, the model responses' text and tool-call args
-    included: a handed-down oracle history, or an earlier verifier pass carried into this one,
-    arrives as those, and `ScriptedModel.seen` (host-authored request parts only) skips them."""
-    out: list[str] = []
-    for msg in messages:
-        for part in getattr(msg, "parts", []):
-            for attr in ("content", "args"):
-                value = getattr(part, attr, None)
-                if value is not None:
-                    out.append(value if isinstance(value, str)
-                               else json.dumps(value, sort_keys=True, default=str))
-    return "\n".join(out)
-
-
 def _assert_handed(v: S.ScriptedModel, k: int, *, framed: dict[str, str] | None = None,
                    never: tuple[str, ...] = (SCRATCH,)) -> None:
     """The verifier's k-th request (one per pass here: each pass answers with a lone
@@ -301,7 +262,7 @@ def _assert_handed(v: S.ScriptedModel, k: int, *, framed: dict[str, str] | None 
     assert len(v.seen) > k, f"the verifier was asked {len(v.seen)} time(s), never pass #{k + 1}"
     for what, token in (framed or {}).items():
         S.assert_wrapped_untrusted(v.seen[k], token, f"verifier pass #{k + 1}, {what}")
-    shown = v.seen[k] + "\n" + _everything(v.messages[k])
+    shown = v.seen[k] + "\n" + S.all_parts_text(v.messages[k])
     for token in never:
         assert token not in shown, (
             f"verifier pass #{k + 1} was handed {token!r}: the oracle's own transcript, or an "
