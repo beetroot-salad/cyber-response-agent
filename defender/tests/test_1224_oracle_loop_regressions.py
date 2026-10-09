@@ -19,6 +19,8 @@ from typing import Any
 
 import pytest
 
+from defender import run as run_mod
+from defender._episode_handle import Episode
 from defender.learning.branch.estate import oracle as oracle_mod
 from defender.learning.branch.estate.checks import CheckStore, RealData, check_submission
 from defender.runtime.verbs import CALL_DELIVERY, CallDelivery
@@ -165,6 +167,30 @@ def test_a_hung_verifier_is_cut_off_by_the_turn_deadline(tmp_path):
 
     assert time.monotonic() - began < 4.0, "the verifier ran to the end of its hang"
     assert "deadline" in stopped.value.detail, stopped.value.detail
+
+
+def test_a_call_after_the_world_went_unservable_reports_the_failing_call(tmp_path):
+    """CI race (test_conc_13): a call queued behind the failing one raises unservable for its
+    own call (s_p158). Both aborts surface together and the first one found writes the world's
+    record, which then named a call the oracle never saw. A later call's abort now carries the
+    world's first failure, and the record is written from it."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    est.answer("idp", "query", BOB, BOB_ROWS)
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=S.oracle(S.text_only("no.")),
+                           verifier=S.passing_verifier(), retry_cap=1)
+    ctx = est.ctx(tmp_path / "inv")
+    with pytest.raises(oracle_mod.OracleUnservable) as first:
+        S.call(reg, "idp", "query", ctx, q="user:alice")
+
+    with pytest.raises(oracle_mod.OracleUnservable) as later:
+        S.call(reg, "idp", "query", ctx, q="user:bob")
+
+    assert dict(later.value.call[2])["q"] == "user:bob"
+    assert later.value.world is first.value
+    with Episode.open(S.episode_v2(tmp_path / "rec")) as episode:
+        run_mod._record_unservable_world(episode, SimpleNamespace(label="b"), later.value)
+        assert S.read_world_record(episode.dir, "b")["call"]["params"]["q"] == "user:alice"
 
 
 def test_the_oracle_imports_nothing_private_from_pydantic_ai():
