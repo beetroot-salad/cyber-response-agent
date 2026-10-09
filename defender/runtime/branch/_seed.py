@@ -120,6 +120,20 @@ def seed_investigation(store: Any, spec: BranchSpec | None, run_dir: Path) -> in
     return fences
 
 
+def source_alert(source_run_dir: Path) -> dict[str, Any] | None:
+    """The source run's alert (the case input) as a JSON object, or `None` when it is absent,
+    not a plain file or not a JSON object. A reader for the branching oracle's real data
+    (#1224): never raises."""
+    alert = RunPaths(source_run_dir).alert
+    try:
+        if not artifact_file(alert):
+            return None
+        doc = json.loads(_plain_bytes(alert))
+    except (OSError, ValueError, BranchError):
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
 def _inherit_evidence(source_run_dir: Path, run_dir: Path, leads: set[str]) -> None:
     """Copy the evidence the inherited prefix refers to into the sibling's run dir.
 

@@ -411,6 +411,16 @@ def _alert_doc_soft(alert_path: Path) -> dict:
     return doc if isinstance(doc, dict) else {}
 
 
+async def _drive_releasing_log(logger: Any, *args: Any) -> Any:
+    """`_drive_agent`, releasing the wire log when the run ends by an escaping exception (a
+    world that went unservable, #1224), so a resume into the same run dir can open it again."""
+    try:
+        return await _drive_agent(*args)
+    except BaseException:
+        logger.close()
+        raise
+
+
 async def run_investigation(  # noqa: PLR0913 — a composition root: every parameter is a
     *,
     alert_path: Path,
@@ -554,8 +564,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     )
 
     t0 = time.time()
-    run, end, exit_reason = await _drive_agent(
-        agent, prompt, deps, store, session_id, gate_bounds, resume_history,
+    run, end, exit_reason = await _drive_releasing_log(
+        logger, agent, prompt, deps, store, session_id, gate_bounds, resume_history,
     )
     wall_ms = (time.time() - t0) * 1000.0
     await _reap_correlation_task(correlation_task)

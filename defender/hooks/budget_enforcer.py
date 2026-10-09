@@ -205,6 +205,59 @@ def _wall_origin(state: dict) -> datetime | None:
     return None
 
 
+#: S15 (#1224): the seconds a branched world's oracle held the turn, which every investigator
+#: time limit excludes, and the wall-clock moment the turn now open began (absent when none is).
+ORACLE_HELD_KEY = "oracle_held_seconds"
+ORACLE_OPEN_KEY = "oracle_open_since"
+
+
+def _number(value: object) -> float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
+def oracle_turn_opened(run_dir: Path) -> None:
+    """Pause the investigator's clock: an oracle turn holds the world from now. A run with no
+    budget record (no enforcer) has no clock to pause."""
+    path = RunPaths(run_dir).budget
+    if not path.is_file():
+        return
+
+    def _mutate(state: dict) -> None:
+        state[ORACLE_OPEN_KEY] = time.time()
+
+    update_json_locked(path, _mutate, default=dict)
+
+
+def oracle_turn_closed(run_dir: Path) -> None:
+    """Resume the investigator's clock, crediting the closed turn's interval to the excluded
+    total, once.
+
+    @owns oracle_held_seconds"""
+    path = RunPaths(run_dir).budget
+    if not path.is_file():
+        return
+
+    def _mutate(state: dict) -> None:
+        opened = _number(state.pop(ORACLE_OPEN_KEY, None))
+        held = _number(state.get(ORACLE_HELD_KEY)) or 0.0
+        if opened is not None:
+            held += max(0.0, time.time() - opened)
+        state[ORACLE_HELD_KEY] = held
+
+    update_json_locked(path, _mutate, default=dict)
+
+
+def _oracle_held(state: dict) -> float:
+    """The excluded oracle time: the credited total plus the turn open now, if any."""
+    held = _number(state.get(ORACLE_HELD_KEY)) or 0.0
+    opened = _number(state.get(ORACLE_OPEN_KEY))
+    if opened is not None:
+        held += max(0.0, time.time() - opened)
+    return held
+
+
 def _elapsed(state: dict) -> float | None:
     deltas: list[float] = []
     origin = _wall_origin(state)
@@ -213,7 +266,7 @@ def _elapsed(state: dict) -> float | None:
     mono = state.get("started_monotonic")
     if isinstance(mono, (int, float)) and not isinstance(mono, bool):
         deltas.append(time.monotonic() - mono)
-    return max(deltas) if deltas else None
+    return max(deltas) - _oracle_held(state) if deltas else None
 
 
 def tail_exhausted(state: dict, limits: dict) -> bool:

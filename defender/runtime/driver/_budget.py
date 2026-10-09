@@ -13,6 +13,7 @@ from pydantic_ai.capabilities.hooks import Hooks
 
 
 from .. import observe
+from ..verbs import ServingAbort
 from ..tools import (
     AgentDeps,
 )
@@ -97,7 +98,13 @@ def _make_hooks(  # noqa: PLR0913 — the hook set's full wiring: logging, budge
             refusal = _budget_short_circuit(deps, tool_name, limits, logger, agent_id)
             if refusal is not None:
                 return refusal
-        result = await handler(args)
+        try:
+            result = await handler(args)
+        except ServingAbort:
+            # The call was made, and its world gave up under it (#1224): it still counts as
+            # the one investigator call it was, as on a run whose world served it.
+            _account_executed_call(deps, tool_name, active=enforce, limits=limits)
+            raise
         _account_executed_call(deps, tool_name, active=enforce, limits=limits)
         return result
 

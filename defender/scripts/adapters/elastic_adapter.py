@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import urllib.parse
 
@@ -281,7 +282,26 @@ def _search_verb(  # noqa: PLR0913 — the two search verbs' shared body, one pa
             time_field="@timestamp", limit=limit, sort=sort,
         ),
     )
-    return search_envelope(resolved, docs, total, truncated, sort)
+    kept = [d for d in docs if not _after_clock(ctx, d.get("@timestamp"))]
+    return search_envelope(resolved, kept, total - (len(docs) - len(kept)), truncated, sort)
+
+
+def _after_clock(ctx: VerbContext, stamp: object) -> bool:
+    """Is `stamp` dated after the run's clock? A branched read is bounded AFTER the read (#1224,
+    R-10=A): the request keeps the caller's own window end on the wire, however it is spelled,
+    and the rows dated past the branch point are dropped here. Unbranched runs (no clock) and
+    undated rows keep every row."""
+    at = getattr(ctx, "as_of", None)
+    if at is None:
+        return False
+    if isinstance(stamp, (int, float)) and not isinstance(stamp, bool):
+        moment = _dt.datetime.fromtimestamp(stamp / 1000, _dt.UTC)
+    else:
+        parsed = _clock.parse_iso_utc(stamp)
+        if parsed is None:
+            return False
+        moment = parsed
+    return moment > _clock.as_utc(at)
 
 
 def _bounded_end(ctx: VerbContext, end: str | None) -> str | None:
@@ -444,7 +464,21 @@ def esql(ctx: VerbContext, *, query: str) -> dict:  # noqa: A002 — shadows the
     # capture (`stagers/elastic.restore` only repairs the corpus identity in the echo).
     status, resp = _http_json(ctx, "POST", url, config, body=_esql_body(ctx, query))
     _raise_on_es_error(status, resp, "ES|QL query")
-    return esql_payload(query, resp)
+    return esql_payload(query, _esql_within_clock(ctx, resp))
+
+
+def _esql_within_clock(ctx: VerbContext, resp: dict) -> dict:
+    """`resp` with every row whose `@timestamp` column is dated after the run's clock dropped
+    (R-10=A): the spliced bound covers only a query opening with `FROM`, this covers any
+    source command."""
+    columns = resp.get("columns") or []
+    names = [c.get("name") if isinstance(c, dict) else None for c in columns]
+    if getattr(ctx, "as_of", None) is None or "@timestamp" not in names:
+        return resp
+    at = names.index("@timestamp")
+    values = [row for row in resp.get("values", [])
+              if not (isinstance(row, list) and len(row) > at and _after_clock(ctx, row[at]))]
+    return {**resp, "values": values}
 
 
 VERBS = {

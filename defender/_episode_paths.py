@@ -31,6 +31,11 @@ STAGED_NAME = "staged.yaml"
 LEARNING_HTML_NAME = "learning.html"
 
 WORLDS_DIRNAME = "worlds"
+#: Each sibling's own record of why its world ended without a full run (#1224):
+#: `world_records/<label>.yaml`, written once by the sibling that went unservable.
+WORLD_RECORDS_DIRNAME = "world_records"
+#: Each world's oracle-side store (#1224): `oracle/<label>/`, one writer per world.
+ORACLE_DIRNAME = "oracle"
 RUNS_DIRNAME = "runs"
 SERVED_DIRNAME = SERVED_PREFIX.rstrip("/")
 JUDGE_DRAWS_DIRNAME = "judge"
@@ -285,6 +290,14 @@ class EpisodeLayout:
     def worlds(self) -> PurePosixPath:
         return PurePosixPath(WORLDS_DIRNAME)
 
+    def world_record(self, label: str) -> PurePosixPath:
+        """`world_records/<label>.yaml` — one world's own record (#1224). Shape check only."""
+        return PurePosixPath(WORLD_RECORDS_DIRNAME) / f"{_check_component(label, what='label')}.yaml"
+
+    def oracle_dir(self, label: str) -> PurePosixPath:
+        """`oracle/<label>/` — one world's oracle-side store (#1224). Shape check only."""
+        return PurePosixPath(ORACLE_DIRNAME) / _check_component(label, what="label")
+
     # -- composing ------------------------------------------------------------------------------
 
     def run(self, run_dir_name: str) -> PurePosixPath:
@@ -337,6 +350,43 @@ class EpisodeLayout:
 
 #: The layout, as one value. Stateless, so one instance serves every caller.
 LAYOUT = EpisodeLayout()
+
+
+@dataclasses.dataclass(frozen=True)
+class OracleStorePaths:
+    """The records of one world's oracle-side store, rooted at `root` (`oracle/<label>/` under
+    the episode, or wherever the caller placed the store): frozen forged rows, recorded facts,
+    the served-answer cache, the oracle-side ledger, the world's live base answers and the
+    oracle's spend trace (#1224)."""
+
+    root: Path
+
+    @property
+    def forged(self) -> Path:
+        return Path(self.root) / "forged.jsonl"
+
+    @property
+    def facts(self) -> Path:
+        return Path(self.root) / "facts.jsonl"
+
+    @property
+    def answers(self) -> Path:
+        return Path(self.root) / "answers.jsonl"
+
+    @property
+    def ledger(self) -> Path:
+        return Path(self.root) / "ledger.jsonl"
+
+    @property
+    def base(self) -> Path:
+        return Path(self.root) / BASE_FILENAME
+
+    @property
+    def trace(self) -> Path:
+        return Path(self.root) / "trace.jsonl"
+
+    def all(self) -> tuple[Path, ...]:
+        return (self.forged, self.facts, self.answers, self.ledger, self.base, self.trace)
 
 
 @dataclasses.dataclass(frozen=True)

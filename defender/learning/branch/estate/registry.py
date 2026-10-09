@@ -1,44 +1,73 @@
-"""The verb registry a branched run queries through.
+"""The verb registry a branched run queries through (#1224: served by the world's live oracle).
 
-Every query executes against the real adapter and the world's difference is applied on top of
-what comes back; nothing here composes a query result. The event stream's corpus is staged
-before the query runs and the engine does its own filtering; the six state systems get an entity
-patch authored once and applied wherever that entity appears. A result composed per call would
-be mid-run authoring.
+Every investigator call reads its real base answer (the family's recording, else live) and,
+in a world with facts, is served by one oracle turn whose submission passed the host checks and
+a verifier (`estate.oracle`). Nothing reaches the investigator unverified, and every response
+lands in the world ledger with the decision that produced it.
 
 Subclassing `ModuleVerbRegistry` is required: `driver.build_agent_core` refuses anything failing
 `isinstance(verbs, VerbRegistry)`, and `VerbRegistry.decide` compares `verb_class_of(fn)` against
 the grant, so the served callables must carry the real adapter bodies' decoration
-(`functools.wraps`). Every served verb is a wrapped one, so coverage of all seven systems is
+(`functools.wraps`). Every served verb is a wrapped one, so coverage of every system is
 structural.
 """
 
 from __future__ import annotations
 
+import contextlib
 import functools
-import hashlib
 import json
 import logging
-from collections.abc import Iterable, Mapping
+import threading
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import fields, is_dataclass, replace
-from defender._model import model
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
-from defender.runtime.verbs import DENIED, TABLE_POINTER, ModuleVerbRegistry, VerbDecision
-from defender.runtime.verb_grant import VerbGrant
+from defender import _yaml
+from defender._episode_paths import LAYOUT
+from defender.runtime.branch import source_alert
+from defender._io import read_jsonl_rows, read_text_utf8
+from defender._query_rules import ParamsTooDeep, _json_safe_params
+from defender.learning.core.config import process_oracle_settings
+from defender.hooks.budget_enforcer import oracle_turn_closed, oracle_turn_opened
+from defender.runtime.verbs import (
+    CALL_DELIVERY,
+    DENIED,
+    TABLE_POINTER,
+    ModuleVerbRegistry,
+    VerbDecision,
+)
 from defender.scripts.adapters.confinement import (
     VIEW_NAMESPACE,
     ConfinementFault,
     is_world_view,
 )
-from defender.scripts.adapters.faults import USAGE_EXIT_CODE
 
-from ..comparator import Verdict, canonical, mechanical
-from ..ledger import BASE, FAULT, REFUSED, STAGED, Ledger, LedgerError, ServedCall, payload_text
-from defender._query_rules import ParamsTooDeep, _json_safe_params
-from . import applier as applier_module
-from .applier import WorldApplier
+from ..ledger import (
+    FAULT,
+    ORACLE,
+    PASSTHROUGH,
+    REAL_ERROR,
+    REFUSED,
+    Ledger,
+    LedgerError,
+    ServedCall,
+    payload_text,
+)
+from .checks import RealData, canonical_json
+from .limiter import RateLimiter
+from .oracle import (
+    DEFAULT_RESTART_AFTER,
+    Oracle,
+    OracleStore,
+    OracleUnservable,
+    QueryDoor,
+    base_digest,
+    request_key,
+    start_process_box,
+)
 from .stagers.dispatch import STAGERS
 
 _logger = logging.getLogger(__name__)
@@ -46,74 +75,6 @@ _logger = logging.getLogger(__name__)
 
 class EstateError(Exception):
     """A world that cannot be served honestly."""
-
-
-def validate_world_touches(derived: Any, grant: VerbGrant) -> tuple[str, ...]:
-    """Validate the systems a world's difference touches against its serving grant.
-
-    The set is derived from the overlay (`_family.touches_of`), not authored, but a derived name
-    can still be one this role may not query, and an overlay keyed on a system outside the grant
-    would apply no difference while every ledger row read honestly as `passthrough`.
-
-    Shared by the manifest boundary (so the launcher refuses before priming an episode) and the
-    registry boundary (so programmatic callers cannot bypass it).
-
-    Typed `Any` because the input is unvalidated: the shapes refused below (a bare string, a
-    non-sequence, a non-string name) are what an `Iterable[str]` annotation would hide.
-    """
-    declared = derived
-    if not isinstance(declared, (str, list, tuple, set, frozenset)):
-        raise EstateError(
-            f"a world's `touches` must be a sequence of system names (or one name), got "
-            f"{declared!r} — an unreadable `touches` routes every response to `passthrough` "
-            "and the run then measures nothing with every row still reading honestly")
-
-    names = (declared,) if isinstance(declared, str) else tuple(declared)
-    malformed = [name for name in names if not isinstance(name, str) or not name]
-    if malformed:
-        raise EstateError(
-            f"a world's `touches` contains invalid system name(s) {malformed!r} — every name "
-            "must be a non-empty string from the serving role's grant")
-
-    unknown = sorted(set(names) - grant.systems)
-    if unknown:
-        raise EstateError(
-            f"a world's `touches` names unknown or unavailable system(s) {unknown}; systems "
-            f"served to role {grant.role!r} are {sorted(grant.systems)} — an unknown name "
-            "would apply no difference and record only `passthrough` rows")
-    return names
-
-
-@model(frozen=True)
-class ServingWorld:
-    """A world as the serving path needs it: a token, the systems it touches, its difference.
-
-    Lets a caller serving one call (a replay, a probe) skip materialising an episode directory
-    and a `Family`. `touches` is passed rather than re-derived because a world may touch less
-    than its overlay implies — the control world has an empty overlay and an empty set.
-    """
-
-    world_id: str
-    touches: tuple[str, ...]
-    overlay: Any
-
-
-def world_for(*, token: str, touches: Iterable[str], overlay: Any) -> ServingWorld:
-    """Build a serving world from the three things a served call needs to know.
-
-    `token` must be the episode-qualified token, never the short manifest label: `world_id`
-    reaches the stager's view name, the ledger's row key and the confinement declaration
-    unfiltered, and two episodes' world `b` would otherwise collide in all three.
-
-    A document overlay is parsed by the manifest's own parser so the applier sees one shape.
-    `{}` (the base world's overlay) is legal.
-    """
-    # Local import: the manifest module reads corpus patterns off this package's stager, so a
-    # top-level import would be a cycle, and the estate must import without the manifest.
-    from defender.runtime.branch._family import Overlay, parse_overlay
-
-    parsed = overlay if isinstance(overlay, Overlay) else parse_overlay(overlay)
-    return ServingWorld(world_id=token, touches=tuple(touches), overlay=parsed)
 
 
 def _configured_for(world: Any, ctx: Any, stager: Any) -> tuple[str, ...]:
@@ -193,88 +154,75 @@ def _names_the_namespace(params: Mapping) -> bool:
     return any(prefix in value for value in params.values() if isinstance(value, str))
 
 
-@model(frozen=True)
-class Served:
-    """One call's whole passage through the serve point.
+def serve_one(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any,
+              params: Mapping[str, Any]) -> Any:
+    """Serve one investigator call for `registry`'s world: the single definition of the serve
+    order (#1224).
 
-    `serve_one`'s simple callers want `out`; the registry also needs `prepared`, `moved` and
-    `decision` for its ledger rows, and must not re-derive them.
-    """
-
-    #: The params as the caller asked them, before any retarget.
-    asked: dict
-    #: The params the adapter was actually called with.
-    prepared: dict
-    #: `asked`, but only when staging moved the call — the condition the ledger records
-    #: `asked_params` under and `restore` un-echoes on.
-    moved: dict | None
-    #: What came back, with the world's corpus identity taken back out.
-    payload: Any
-    #: The ledger's word for what this world did to the call.
-    decision: str
-    #: What the caller gets.
-    out: Any
-
-
-def serve_one(world: Any, system: str, verb: str, params: Mapping, *, adapters: Any = None,
-              applier: Any = None, ctx: Any = None, run: Any = None) -> Served:
-    """Serve one call for `world`: the single definition of the serve order.
-
-    Refuse, let the applier point the call at the world's corpus, run it, restore the corpus
-    identity out of the result, then ask the world what it did. `WorldRegistry._served` calls
-    this rather than re-spelling it, so the ordering tests exercise the production frame.
-
-    The refusal runs before `prepare` (so no stager can rewrite a foreign name into a harmless
-    one) and before the adapter (so a refused read leaves no call on the wire and no row).
-
-    `run` is the one seam: the registry puts its family tier in front of the adapter (a
-    recorded key issues no call) with the restore inside the miss. It takes `(prepared, moved)`
-    and returns the restored payload.
-    """
-    refuse_a_foreign_world_view(world, system, verb, params, ctx)
-    applier = (  # lint-default: ok — DI seam owning its default, the same one `WorldRegistry` resolves at construction  # noqa: E501
-        applier if applier is not None else WorldApplier())
+    The world's stored answer first (a repeated call is served byte for byte, no turn). Then
+    the call's base answer: the family's recording, else this world's own live base store,
+    else one live read (kept in that store, never in the world ledger, M16). A real error on
+    that read passes through as itself (`real-error`, not cached, O4). A world with no facts is
+    served its base (`passthrough`). Otherwise one oracle turn at a time (S11): the stored
+    answer is looked up again under the turn, then the oracle serves, the host checks and the
+    verifier pass it, and its rows, facts and answer are committed before the ledger row."""
     asked = dict(params)
-    prepared = applier.prepare(system, verb, dict(asked), world, ctx)
-    moved = asked if prepared != asked else None
-    if run is None:
-        if adapters is None:
-            raise EstateError(
-                "serve_one needs either an adapter layer or a `run` seam — with neither there "
-                "is nothing to make the call, and a frame that returned the prepared params as "
-                "if they were an answer would be a served response with no call behind it")
-        payload = applier.restore(
-            system, verb, adapters(system, verb, **prepared), moved, prepared, ctx)
-    else:
-        payload = run(prepared, moved)
-    # `moved`, not `asked`: the row must say whether staging moved this call.
-    decision, out = applier.apply(system, verb, prepared, payload, world, moved)
-    return Served(asked=asked, prepared=prepared, moved=moved, payload=payload,
-                  decision=decision, out=out)
+    key = request_key(system, verb, asked)
+    hit = registry.store.answers.get(key)
+    if hit is not None:
+        return registry._from_store(system, verb, asked, hit)
+    base_text = registry._base(system, verb, fn, ctx, asked)
+    if not registry.world_facts:
+        registry.ledger.record(ServedCall(
+            system=system, verb=verb, params=asked, payload_text=base_text, source=PASSTHROUGH,
+            world_id=registry.world.world_id))
+        return json.loads(base_text)
+    with registry._turn(ctx):
+        hit = registry.store.answers.get(key)
+        if hit is not None:
+            return registry._from_store(system, verb, asked, hit)
+        base = json.loads(base_text)
+        digest = base_digest(base_text)
+        committed: dict[str, Any] = {}
+
+        def commit(served: Any, claim: dict, verdict: dict, attempts: int, staged: Any) -> None:
+            served_text = payload_text(served)
+            decision = PASSTHROUGH if canonical_json(served) == canonical_json(base) else ORACLE
+            answer = {"system": system, "verb": verb, "params": asked,
+                      "served": json.loads(served_text), "decision": decision,
+                      "base_digest": digest, "claim": claim, "verifier_verdict": verdict,
+                      "attempts": attempts}
+            registry.store.commit(forged=list(staged.forged.values()),
+                                  facts=[{"entity": e, "field": f, "value": v}
+                                         for (e, f), v in staged.facts.items()],
+                                  answer=answer)
+            committed["answer"] = answer
+
+        registry.oracle.serve((system, verb, asked), base,
+                              lambda: registry._real(system, base), commit)
+        return registry._record_answer(system, verb, asked, committed["answer"])
 
 
 class WorldRegistry(ModuleVerbRegistry):
-    """A `ModuleVerbRegistry` whose verbs run for real and then answer to the world."""
+    """A `ModuleVerbRegistry` whose verbs answer as the world's live oracle serves them."""
 
-    def __init__(self, roster, grant, *, world: Any, ledger: Ledger, as_of: datetime,  # noqa: PLR0913 — a world's whole serving identity plus its tenant
-                 applier: Any = None, tenant: Any = None,
-                 grant_home: str = TABLE_POINTER):
-        # `tenant` is the episode tenant's record (#1107), whose `ticket_mapping` the
-        # ticket-comment check below reads the released status from; `None` (a registry no run
-        # built) can release nothing, so such a world's comment patch is refused rather than
-        # judged against some other tenant's mapping.
+    def __init__(self, roster, grant, *, world: Any, ledger: Ledger, as_of: datetime,  # noqa: PLR0913 — a world's whole serving identity, its tenant and the oracle's coined knobs
+                 tenant: Any = None, grant_home: str = TABLE_POINTER, oracle: Any = None,
+                 verifier: Any = None, oracle_dir: Path | None = None,
+                 retry_cap: int | None = None, turn_deadline: float | None = None,
+                 budget: float | None = None, rate: float | None = None,
+                 box: Callable[[], Any] | None = None, restart_after: int | None = None):
         super().__init__(roster, grant, grant_home=grant_home)
-        # Validate the clock here, once. A `TypeError` deep inside `served` is not an
-        # `AdapterFault`, so the query tool files it as an infra exit code, which trips the
-        # circuit breaker in the sibling but not its base — contaminating the comparison.
+        # Validate the clock here, once: every query this world issues, the oracle's own
+        # included, carries it, so no oracle-side context is ever built without it (O-31).
         #
         # `utcoffset() == timedelta(0)`, not `tzinfo is not None`: an aware non-UTC datetime
         # would format a trailing `Z` that is wrong by its offset.
         if not isinstance(as_of, datetime):
             raise EstateError(
                 f"a world needs the moment it is being served as of, got {as_of!r} — without it "
-                "every timestamp a sibling mints is the afternoon it executed rather than the "
-                "branch point it resumed into, and the episode cannot be replayed")
+                "every read a sibling or its oracle makes is the afternoon it executed rather "
+                "than the branch point it resumed into, and the episode cannot be replayed")
         if as_of.tzinfo is None or as_of.utcoffset() != timedelta(0):
             raise EstateError(
                 f"as_of must be an aware UTC datetime, got {as_of!r} (offset "
@@ -283,50 +231,48 @@ class WorldRegistry(ModuleVerbRegistry):
         self.as_of = as_of
         world_id = getattr(world, "world_id", None)
         if not isinstance(world_id, str) or not world_id:
-            # `None` is the family tier's key. A world answering to it would write its applied
-            # payload into the shared base slot, and every sibling would replay that difference
-            # as the estate while its own rows honestly said `passthrough`.
             raise EstateError(
                 f"a world needs a non-empty string id, got {world_id!r} — `None` is how the "
                 "family tier spells 'the shared base', and a world claiming it would overwrite "
                 "the recording its siblings replay")
-        # Unknown names would route every response to `passthrough`; this is the
-        # non-bypassable boundary for programmatic worlds (the CLI also checks before priming).
-        declared = validate_world_touches(getattr(world, "touches", ()), grant)
-        # The id must also be nameable: a staged system derives its per-world view name from
-        # it, and an id the stager cannot carry fails every query on that system.
-        unnameable = applier_module.unnameable(world)
-        if unnameable:
-            raise EstateError(
-                f"world {world_id!r} declares a staged system whose view it cannot be named "
-                f"in ({unnameable}) — the id reaches the corpus name unfiltered, so every "
-                "staged call would be refused and the sibling would measure nothing")
         self.world = world
         self.ledger = ledger
-        self.applier = (  # lint-default: ok — DI seam owning its default (with no patches and a world touching nothing it is the identity a base world wants)  # noqa: E501
-            applier if applier is not None else WorldApplier())
-        # A patch the applier can never apply (a system the world does not declare, or a
-        # staged system, whose difference lives in its corpus) would be dropped silently, so
-        # refuse it here. Check the effective table — the world's own overlay where it has one —
-        # not the constructor field. `Mapping`, not `dict`: an applier may hand back a
-        # read-only mapping.
-        table = getattr(self.applier, "patch_table", None)
-        patches = table(world) if callable(table) else getattr(self.applier, "patches", None)
-        if isinstance(patches, Mapping):
-            unappliable = applier_module.unappliable(world, patches)
-            if unappliable:
-                raise EstateError(
-                    f"world {world_id!r} carries patches for {unappliable}, which its applier "
-                    f"can never apply — `touches` is {declared!r} and a staged system is served "
-                    "from its corpus rather than patched, so the overlay would be silently "
-                    "dropped while every row still read honestly")
-            unservable = applier_module.unservable(
-                patches, None if tenant is None else tenant.ticket_mapping)
-            if unservable:
-                raise EstateError(
-                    f"world {world_id!r} carries a difference the read screen would empty "
-                    f"before the sibling saw it: {'; '.join(unservable)}")
+        self.tenant = tenant
+        self.world_facts = tuple(getattr(world, "facts", ()) or ())
+        settings = process_oracle_settings()
+        if oracle_dir is None:
+            oracle_dir = _default_oracle_dir(world, ledger)
+        self.store = OracleStore(Path(oracle_dir))
+        self._turn_lock = threading.Lock()
+        self._last_ctx: Any = None
+        self._family_rows = [r for r in read_jsonl_rows(ledger.base_path)
+                             if isinstance(r.get("system"), str)
+                             and isinstance(r.get("payload_text"), str)]
+        door = QueryDoor(
+            decide=lambda system, verb: ModuleVerbRegistry.decide(self, system, verb),
+            real_verbs=lambda system: ModuleVerbRegistry.verbs(self, system),
+            limiter=RateLimiter(settings.rate if rate is None else rate),
+            store=self.store, context=self._oracle_context)
+        self.oracle = Oracle(
+            world=world, store=self.store, door=door,
+            oracle_model=oracle if oracle is not None else _LazyModel(
+                settings.model, settings.effort),
+            verifier_model=verifier if verifier is not None else _LazyModel(
+                settings.check_model, settings.check_effort),
+            box_factory=box if box is not None else start_process_box,
+            retry_cap=settings.retry_cap if retry_cap is None else retry_cap,
+            turn_deadline=settings.turn_deadline if turn_deadline is None else turn_deadline,
+            budget=settings.budget if budget is None else budget,
+            restart_after=DEFAULT_RESTART_AFTER if restart_after is None else restart_after,
+            family_examples=self._examples(), real_extra=self._alert())
+        # A world whose sibling already went unservable stays so on resume: its failing call
+        # is never retried (N13). Its record is the sibling's own (`run.py`), read here.
+        recorded = _world_record(world)
+        if recorded is not None:
+            self.oracle.unservable = recorded
         self._wrapped: dict[str, dict[str, Any]] = {}
+
+    # -- the grant door -------------------------------------------------------------------------
 
     def decide_call(self, system: str, verb: str, params: Mapping[str, Any]) -> VerbDecision:
         """The grant decision for a call, recorded as a `refused` row when it denies the call.
@@ -364,12 +310,8 @@ class WorldRegistry(ModuleVerbRegistry):
         """Every verb this system declares, wrapped so no body reaches the caller unwrapped.
 
         Both `decide()` and the query tool's own lookup resolve through here, so every route to
-        a callable is wrapped.
-
-        Wrapped once per system: `list_verbs` would otherwise build N(N+1) closures. The memo is
-        safe because `served` reads its collaborators off `self` at call time. `super().verbs`
-        still raises `KeyError` for an unknown system, which `_list_verbs_declared` depends on.
-        Returns a copy so one caller's edit cannot reach later lookups.
+        a callable is wrapped. Wrapped once per system; `super().verbs` still raises `KeyError`
+        for an unknown system. Returns a copy so one caller's edit cannot reach later lookups.
         """
         if system not in self._wrapped:
             real = super().verbs(system)
@@ -381,125 +323,173 @@ class WorldRegistry(ModuleVerbRegistry):
     def _served(self, system: str, verb: str, fn: Any) -> Any:
         @functools.wraps(fn)
         def served(ctx: Any, **params: Any) -> Any:
-            applier, ledger, world = self.applier, self.ledger, self.world
             _refuse_unstorable(system, verb, params)
-            # The clock is set on every call, unlike `world_id`, which is set only where staging
-            # moved the call: a `world_id` declaration widens what `confine_index` admits, while
-            # a clock admits nothing. Host-state (never staged) is the adapter that stamps the
-            # clock, so a clock scoped to staged calls would miss it.
-            #
-            # Set before `prepare` so the stager, `restore` and the adapter see one moment. This
-            # line is outside the refusal handler; it cannot raise (`_carrying` is total and
-            # `as_of` was validated at construction).
+            # The clock is set on every call: every read this world makes, the oracle's own
+            # included, is bounded by the branch point (O6).
             ctx = _carrying(ctx, as_of=self.as_of)
-            # How far the call got, so the failure handlers below know which row to write.
-            # Empty until `run` is entered.
-            reached: dict[str, Any] = {}
-
-            def run(prepared: dict, moved: dict | None) -> Any:
-                """The family tier in front of the adapter, and the restore inside its miss."""
-                reached.update(prepared=prepared, moved=moved)
-                payload, reached["base_text"] = _base_payload(
-                    fn, _carrying(ctx, world_id=world.world_id) if moved is not None else ctx,
-                    prepared, system, verb, ledger, moved,
-                    # Restore before the base row is written: that row is replayed by every
-                    # sibling, so it must carry no world's view name.
-                    lambda served_payload: applier.restore(
-                        system, verb, served_payload, moved, prepared, ctx),
-                )
-                return payload
-
-            try:
-                # `serve_one` owns the order; this frame adds the family tier and ledger rows.
-                # It also hands `prepare` a copy, so an applier that retargets in place still
-                # yields a `moved` (which drives the `world_id` declaration, `restore`'s
-                # un-echo and the `asked_params` column).
-                passage = serve_one(world, system, verb, params,
-                                    applier=applier, ctx=ctx, run=run)
-            except LedgerError:
-                # The table's own refusal; recording another row for it would be another write.
-                raise
-            except Exception as failure:
-                if "prepared" not in reached:
-                    # Before the call was made: the isolation refusal or the retarget failed.
-                    # Record it against the params as asked (an unrecorded refusal reads as
-                    # never asking), then re-raise.
-                    #
-                    # The exit code picks the class: `prepare` reads config, so an environment
-                    # fault surfaces here too, and the base world records the same outage as
-                    # `fault`. Only a usage-class failure is `refused`.
-                    _record_beside(ledger, ServedCall(
-                        system=system, verb=verb, params=dict(params),
-                        payload_text=str(failure),
-                        source=(
-                            REFUSED if getattr(failure, "exit_code", None) == USAGE_EXIT_CODE
-                            else FAULT
-                        ),
-                        world_id=world.world_id,
-                    ))
-                    raise
-                # An estate fault is a response: the query tool hands the model a fault row, so
-                # this must write one too. Recorded against the params as run, with
-                # `asked_params` so a staged fault can still be paired.
-                _record_beside(ledger, ServedCall(
-                    system=system, verb=verb, params=dict(reached["prepared"]),
-                    payload_text=str(failure) or type(failure).__name__, source=FAULT,
-                    world_id=world.world_id,
-                    asked_params=reached["moved"],
-                ))
-                raise
-            prepared, asked, out = passage.prepared, passage.moved, passage.out
-            payload, decision, base_text = (
-                passage.payload, passage.decision, reached["base_text"])
-            # When nothing changed the payload, the base text is already the served text;
-            # re-dumping a large result was the seam's most expensive per-call step.
-            served_text = base_text if out is payload else payload_text(out)
-            # One extra live read on a staged decision, at the plain ctx (a `world_id`-carrying
-            # ctx would admit this world's staged views). The result goes on the staged row
-            # itself: a separate witness row would be the first row under this correlation key
-            # and shadow the served one under `episode._answers`' first-row-wins.
-            differs_from_base: bool | None = None
-            base_pattern_digest: str | None = None
-            if decision == STAGED and asked is not None:
-                differs_from_base, base_pattern_digest = _base_witness(fn, ctx, asked, served_text)
-            # `Ledger.record` validates the decision and raises before `out` is returned.
-            ledger.record(ServedCall(
-                system=system, verb=verb, params=dict(prepared),
-                payload_text=served_text,
-                source=decision, world_id=world.world_id,
-                # Only when staging moved it: prepared forms differ by construction on a staged
-                # system, so pairing needs the asked form.
-                asked_params=asked,
-                differs_from_base=differs_from_base,
-                base_pattern_digest=base_pattern_digest,
-            ))
-            return out
+            self._last_ctx = ctx
+            return serve_one(self, system, verb, fn, ctx, params)
 
         return served
 
+    # -- the serve order's parts ------------------------------------------------------------
 
-def _base_witness(
-    fn: Any, ctx: Any, moved: dict, staged_text: str,
-) -> tuple[bool | None, str | None]:
-    """One live read of the un-rewritten base pattern, and how it compares to the staged text.
+    def _base(self, system: str, verb: str, fn: Any, ctx: Any, params: dict) -> str:
+        """The call's base answer text: the family's recording, else this world's own base
+        store, else one live read kept in that store (never a world-ledger row, M16). A real
+        error on the read is recorded `real-error` and passes through untouched."""
+        recorded = self.ledger.base_payload(system, verb, params)
+        if recorded is not None:
+            return recorded
+        kept = self.store.base.get(request_key(system, verb, params))
+        if kept is not None:
+            return kept
+        try:
+            answer = fn(ctx, **params)
+        except Exception as failure:
+            _record_beside(self.ledger, ServedCall(
+                system=system, verb=verb, params=dict(params),
+                payload_text=str(failure) or type(failure).__name__, source=REAL_ERROR,
+                world_id=self.world.world_id))
+            raise
+        text = payload_text(answer)
+        self.store.keep_base(system, verb, params, text)
+        return text
 
-    `moved` is the world's question as asked, before the retarget; `ctx` must be the plain ctx
-    (no `world_id`), so the read reaches the base pattern.
+    def _from_store(self, system: str, verb: str, params: dict, answer: dict) -> Any:
+        return self._record_answer(system, verb, params, answer)
 
-    Returns `(None, None)` when unmeasurable: `differs_from_base` means a comparison was made,
-    and recording `False` would charge the world for an estate outage. The digest is `sha256` of
-    the base text through `comparator.canonical`, the same canonicalisation the verdict uses.
-    """
-    # Everything, not just the read, is inside the try: `payload_text`, `canonical` and
-    # `mechanical` can all raise, and an escape would fault the sibling's own served query.
+    def _record_answer(self, system: str, verb: str, params: dict, answer: dict) -> Any:
+        """The stored answer, recorded as served to this call — unless its caller stopped
+        waiting (the lead was ended mid-call): the answer stays stored, and an undelivered call
+        leaves no row (N12)."""
+        text = payload_text(answer.get("served"))
+        decision = answer.get("decision") or ORACLE
+        delivery = CALL_DELIVERY.get()
+        if delivery is not None and delivery.abandoned:
+            return json.loads(text)
+        self.ledger.record(ServedCall(
+            system=system, verb=verb, params=params, payload_text=text, source=decision,
+            world_id=self.world.world_id, base_digest=answer.get("base_digest"),
+            claim=answer.get("claim"), verifier_verdict=answer.get("verifier_verdict"),
+            attempts=answer.get("attempts")))
+        return json.loads(text)
+
+    @contextlib.contextmanager
+    def _turn(self, ctx: Any) -> Iterator[None]:
+        """One oracle turn at a time in this world (S11), with the investigator's clock paused
+        for as long as the turn is held (S12-S15)."""
+        run_dir = getattr(ctx, "run_dir", None)
+        with self._turn_lock:
+            if run_dir is not None:
+                oracle_turn_opened(Path(run_dir))
+            try:
+                yield
+            finally:
+                if run_dir is not None:
+                    oracle_turn_closed(Path(run_dir))
+
+    def _oracle_context(self) -> Any:
+        """The context an oracle-side query runs in: the investigator call's own, carrying the
+        branch-point clock."""
+        return _carrying(self._last_ctx, as_of=self.as_of)
+
+    def _real(self, system: str, base: Any) -> RealData:
+        answers: list[tuple[str, Any]] = [(system, base)]
+        for row in self._family_rows:
+            answers.append((row["system"], _parsed(row["payload_text"])))
+        for kept_system, text in list(self.store.base_answers):
+            answers.append((kept_system, _parsed(text)))
+        return RealData(answers=answers, loose=list(self.oracle.real_extra))
+
+    def _examples(self) -> list[tuple[str, str, Any]]:
+        """Example answers per system from the family's base recording, for the oracle's
+        family block: answers only, never the params that asked them (another call's params
+        must not enter this call's turn)."""
+        out: list[tuple[str, str, Any]] = []
+        per_system: dict[str, int] = {}
+        for row in self._family_rows:
+            system = row["system"]
+            if per_system.get(system, 0) >= _EXAMPLES_PER_SYSTEM:
+                continue
+            per_system[system] = per_system.get(system, 0) + 1
+            out.append((system, str(row.get("verb")), _parsed(row["payload_text"])))
+        return out
+
+    def _alert(self) -> list[Any]:
+        family = getattr(self.world, "family", None)
+        source = getattr(family, "source_run_dir", None)
+        if not source:
+            return []
+        alert = source_alert(Path(source))
+        return [alert] if alert is not None else []
+
+    def close(self) -> None:
+        """Tear down the oracle's boxes (the sibling is ending)."""
+        self.oracle.close()
+
+
+class _LazyModel:
+    """A role's production model, built from its knobs on first use, so a world that never
+    takes a turn needs no provider key."""
+
+    def __init__(self, name: str, effort: str) -> None:
+        self.name, self.effort = name, effort
+        self._built: Any = None
+
+    @property
+    def model(self) -> Any:
+        return self._resolve().model
+
+    @property
+    def settings(self) -> Any:
+        return self._resolve().settings
+
+    def _resolve(self) -> Any:
+        if self._built is None:
+            from defender.runtime.providers import build_for_effort
+
+            self._built = build_for_effort(self.name, self.effort)
+        return self._built
+
+
+def _default_oracle_dir(world: Any, ledger: Ledger) -> Path:
+    """The world's oracle store: under its episode, by label, when the world names one; else
+    beside the world's own ledger rows (a world served outside an episode)."""
+    episode_dir, label = getattr(world, "episode_dir", None), getattr(world, "label", None)
+    if episode_dir is not None and isinstance(label, str):
+        return Path(episode_dir) / LAYOUT.oracle_dir(label)
+    return Path(ledger.path).parent / LAYOUT.oracle_dir(str(world.world_id))
+
+
+def _world_record(world: Any) -> OracleUnservable | None:
+    episode_dir, label = getattr(world, "episode_dir", None), getattr(world, "label", None)
+    if episode_dir is None or not isinstance(label, str):
+        return None
     try:
-        served = fn(ctx, **moved)
-        base_text = payload_text(served)
-        digest = hashlib.sha256(canonical(base_text).encode("utf-8")).hexdigest()
-        verdict = mechanical(staged_text, base_text)
-    except Exception:  # noqa: BLE001 — an unanswerable witness is unmeasured, not "no difference"
-        return None, None
-    return verdict not in (Verdict.SAME, Verdict.FORMATTING), digest
+        doc = _yaml.safe_load(read_text_utf8(Path(episode_dir) / LAYOUT.world_record(label)))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(doc, Mapping) or doc.get("reason") not in ("oracle unservable", "budget"):
+        return None
+    raw_call = doc.get("call")
+    call: Mapping[str, Any] = raw_call if isinstance(raw_call, Mapping) else {}
+    raw_params = call.get("params")
+    params: Mapping[str, Any] = raw_params if isinstance(raw_params, Mapping) else {}
+    return OracleUnservable("budget" if doc["reason"] == "budget" else "retries",
+                            (str(call.get("system", "")), str(call.get("verb", "")),
+                             dict(params)), "recorded before this process started")
+
+
+def _parsed(text: str) -> Any:
+    try:
+        return json.loads(text)
+    except ValueError:
+        return text
+
+
+_EXAMPLES_PER_SYSTEM = 2
+#: The episode folder holding each world's oracle-side state (`oracle/<label>/`).
 
 
 def _refuse_unstorable(system: str, verb: str, params: Mapping[str, Any]) -> None:
@@ -547,41 +537,3 @@ def _carrying(ctx: Any, **values: Any) -> Any:
     declared = {f.name for f in fields(ctx) if f.init}
     settable = {name: value for name, value in values.items() if name in declared}
     return replace(ctx, **settable) if settable else ctx
-
-
-def _base_payload(  # noqa: PLR0913 — one call's whole identity: what runs it, where, as what
-    fn: Any, ctx: Any, params: dict, system: str, verb: str, ledger: Ledger,
-    asked: dict | None = None, restore: Any = None,
-) -> tuple[Any, str]:
-    """This key's base answer and its canonical text: the family's recording, else the adapter.
-
-    A hit issues no adapter call; the base file was primed before any sibling forked, so every
-    sibling replays the same bytes for a captured key. A miss (a key a sibling invented) goes
-    live and its `base` row lands in this world's own file, which no sibling reads — so two
-    worlds asking the same invented question may see different answers.
-
-    Returns the text too because the caller needs it for the served row.
-
-    The live arm also round-trips through JSON so both arms return the same shape:
-    `payload_text` writes with `default=str`, and without this a `datetime` or tuple would
-    differ between the world that ran live and those replaying, changing whether a string-
-    matching entity patch applies.
-    """
-    recorded = ledger.base_payload(system, verb, params)
-    if recorded is not None:
-        # lint-parse: ok — the payload is the adapter's own untyped answer; there is no shape
-        # the seven systems share, and the text half is typed.
-        return json.loads(recorded), recorded
-    served = fn(ctx, **params)
-    # Restore before taking the text, so the recording carries no world's identity.
-    text = payload_text(served if restore is None else restore(served))
-    ledger.record(ServedCall(
-        system=system, verb=verb, params=dict(params),
-        payload_text=text, source=BASE, world_id=None,
-        # The base key is taken after `prepare`, so on a staged system two siblings record
-        # base rows under different staged spellings; the asked form lets `correlation_key`
-        # pair them. `None` on unstaged calls.
-        asked_params=asked,
-    ))
-    # lint-parse: ok — same reason as the replay arm: the adapter's untyped answer.
-    return json.loads(text), text

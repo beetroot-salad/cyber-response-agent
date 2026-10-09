@@ -48,7 +48,14 @@ FAULT = "fault"
 #: Only the primer writes it, bypassing `record` (which refuses it): a served call labelled
 #: `captured` would be a live read wearing capture provenance.
 CAPTURED = "captured"
-SOURCES = frozenset({BASE, STAGED, PATCHED, PASSTHROUGH, REFUSED, FAULT, CAPTURED})
+#: The live oracle served this call (#1224): its submission passed the host checks and the
+#: verifier, and it differs from the base answer.
+ORACLE = "oracle"
+#: The real system errored on the call's base read; the error passed through untouched (O4).
+REAL_ERROR = "real-error"
+#: `staged` and `patched` are the retired staging decisions (#1224): kept as names for readers
+#: of archived ledgers, refused as a new row's decision.
+SOURCES = frozenset({BASE, PASSTHROUGH, REFUSED, FAULT, CAPTURED, ORACLE, REAL_ERROR})
 #: The family-tier labels — rows every sibling replays, with `world_id=None`. `base` is a live
 #: read of a key the capture never recorded, so counting `base` rows measures the residual a
 #: primed base cannot make deterministic.
@@ -166,6 +173,12 @@ class ServedCall:
     differs_from_base: bool | None = None
     #: `sha256` of the base pattern's own canonicalised text — see `differs_from_base`.
     base_pattern_digest: str | None = None
+    #: An `oracle` turn's record (#1224): the digest of the base answer it was served
+    #: against, the claim it made, the verifier's verdict and how many attempts it took.
+    base_digest: str | None = None
+    claim: dict | None = None
+    verifier_verdict: dict | None = None
+    attempts: int | None = None
 
     @field_validator("params", "asked_params")
     @classmethod
@@ -208,6 +221,10 @@ class ServedCall:
             # is decided by `judge/family._grade_world` alone.
             row["differs_from_base"] = self.differs_from_base
             row["base_pattern_digest"] = self.base_pattern_digest
+        for name in ("base_digest", "claim", "verifier_verdict", "attempts"):
+            value = getattr(self, name)
+            if value is not None:
+                row[name] = value
         return row
 
 

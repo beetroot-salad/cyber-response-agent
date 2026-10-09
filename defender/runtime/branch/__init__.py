@@ -75,6 +75,7 @@ from ._seed import (
     _inherit_lead_dir,
     _not_a_plain_file,
     refuse_seeded_run_dir,
+    source_alert,
     seed_investigation,
 )
 
@@ -309,6 +310,7 @@ __all__ = [
     "read_jsonl_rows",
     "read_text_soft",
     "refuse_seeded_run_dir",
+    "source_alert",
     "seed_investigation",
     "session_for_run",
     "session_store",

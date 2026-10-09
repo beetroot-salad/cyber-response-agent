@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import contextvars
 import importlib.util
 import inspect
 import os
@@ -36,6 +37,29 @@ class RegistryError(Exception):
     Raised by `read_roster` at process start so an unreadable tree fails before any model call
     instead of becoming an empty roster. Not a `GrantError`, which points at the disposition
     table."""
+
+
+class CallDelivery:
+    """Whether the caller of a served verb is still waiting for its answer.
+
+    The query tool runs a verb on a worker thread; when the awaiting lead is cancelled (a
+    sibling lead's budget kill) the worker still runs the call to its end. A registry that
+    records delivered calls reads `abandoned` before writing a row for one (#1224, N12)."""
+
+    def __init__(self) -> None:
+        self.abandoned = False
+
+
+#: The current served call's delivery, set by the query tool around the worker thread.
+CALL_DELIVERY: contextvars.ContextVar[CallDelivery | None] = contextvars.ContextVar(
+    "verb_call_delivery", default=None)
+
+
+class ServingAbort(Exception):
+    """A served verb that will not answer at all: the registry serving it has given up on the
+    world it serves (#1224: `estate.oracle.OracleUnservable`). The query tool re-raises it as
+    control flow, so it is never filed as a fault row or charged to the circuit breaker; the
+    process it ends records why."""
 
 #: The alphabet of a system name, unanchored, for scanners that find a name inside text. A
 #: fragment rather than a compiled pattern so nobody matches with it and skips the length bound
@@ -667,7 +691,10 @@ __all__ = [
     "UNDECLARED",
     "ModuleVerbRegistry",
     "RegistryError",
+    "CALL_DELIVERY",
+    "CallDelivery",
     "RosterRead",
+    "ServingAbort",
     "Verb",
     "VerbContext",
     "VerbDecision",

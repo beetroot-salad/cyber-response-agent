@@ -44,6 +44,7 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "wire_log": ("write",),
     "world.draw": ("write", "delete"),
     "world.run_dir_pointer": ("write",),
+    "world_record": ("create",),
 }
 
 #: Every folder the handle hands out, keyed the same way.
@@ -246,6 +247,11 @@ class Episode:
         """`served/<token>.jsonl`, a world's replay ledger; the token's label must be
         case-stable (the minting check)."""
         return AppendRecord(*self._at(LAYOUT.served_world(check_minted_token(token))))
+
+    def world_record(self, label: str) -> CreateRecord:
+        """`world_records/<label>.yaml`, written once (#1224): a second write is refused, so a
+        resumed sibling never rewrites its world's record."""
+        return CreateRecord(*self._at(LAYOUT.world_record(label)))
 
     def wire_log(self, name: str) -> WriteRecord:
         """`wire_logs/<name>`, by the full file name `WIRE_LOG_NAMES` gives."""
