@@ -137,10 +137,9 @@ MAPPING = textwrap.dedent("""\
 #: A mapping the loader refuses for its own lifecycle rule (open.status == released.status).
 MAPPING_COLLIDING = MAPPING.replace("  status: closed\n", "  status: open\n")
 
-#: A ticket patch that writes comments without releasing the case — what `applier.unservable`
-#: judges with the mapping's released status.
-TICKET_PATCH: dict[str, Any] = {"ticket": {"C-1": {"comments": [{"body": "x"}],
-                                                   "status": "open"}}}
+#: The frozen golden's cells for the estate applier, retired with cluster staging (#1224): no
+#: reader of the mapping is left behind them, so the comparison leaves them out.
+_RETIRED_CELLS = ("applier_good", "applier_bad")
 
 
 def report_text(disposition: str = "benign",
@@ -270,7 +269,6 @@ def _records_at_run_start() -> tuple[Any, Any]:
 
 
 def _view_at_run_start(good: Any, bad: Any, tmp: Path) -> dict[str, Any]:
-    from defender.learning.branch.estate import applier
     from defender.runtime import query_tool
 
     released = {"status": "closed"}
@@ -282,8 +280,6 @@ def _view_at_run_start(good: Any, bad: Any, tmp: Path) -> dict[str, Any]:
         "record_bad": _held(bad.ticket_mapping),
         "query_tool_good": [pred_good(released), pred_good(unreleased)],
         "query_tool_bad": [pred_bad(released), pred_bad(unreleased)],
-        "applier_good": _outcome_of(applier.unservable, TICKET_PATCH, good.ticket_mapping),
-        "applier_bad": _outcome_of(applier.unservable, TICKET_PATCH, bad.ticket_mapping),
     }, tmp)
 
 
@@ -294,16 +290,14 @@ def _observe_mapping_at_run_start(tmp: Path, mp: Any) -> dict[str, Any]:
 def test_1080_the_case_mapping_is_read_at_run_start_from_the_tenants_home(tmp_path):
     """The run-start record build (`run_tenant`) loads `CaseMapping` through `load_case_mapping`
     in its new home under `defender/runtime/`. A fixture tenant's mapping reads as at the base,
-    and a bad mapping surfaces the moved `CaseTicketError`. `query_tool` and `estate/applier`
-    reach the same module.
+    and a bad mapping surfaces the moved `CaseTicketError`. `query_tool` reaches the same module
+    (`estate/applier`, its other reader, went with cluster staging, #1224).
 
     Observed through the unmoved readers: `run_tenant.resolve_tenant` over a planted tenant holds
     an instance of the moved `CaseMapping` (content as at the base), and over a mapping the
     loader refuses (open and released status equal) an instance of the moved `CaseTicketError`
     (text as at the base). `query_tool._release_predicate` answers through the moved
-    `ReleasePredicate`, and `applier.unservable` handed the record's kept error lists the
-    refusal rather than letting it escape — which it would if the applier caught another copy of
-    the error class. Every moved name is found under `defender/runtime/`, so a home anywhere
+    `ReleasePredicate`. Every moved name is found under `defender/runtime/`, so a home anywhere
     else fails here."""
     home = _case_module()
     case_mapping, case_error = _moved("CaseMapping"), _moved("CaseTicketError")
@@ -322,8 +316,10 @@ def test_1080_the_case_mapping_is_read_at_run_start_from_the_tenants_home(tmp_pa
         f"a refused mapping is held as {type(bad.ticket_mapping)!r}, not the moved "
         "CaseTicketError")
 
-    assert _view_at_run_start(good, bad, tmp_path) == _golden(
-        "s_case_mapping_read_at_run_start")
+    golden = _golden("s_case_mapping_read_at_run_start")
+    assert set(_RETIRED_CELLS) <= set(golden)
+    assert _view_at_run_start(good, bad, tmp_path) == {
+        k: v for k, v in golden.items() if k not in _RETIRED_CELLS}
 
 
 # ======================================================================================
@@ -337,10 +333,9 @@ importlib.import_module(first)
 print(json.dumps(sorted(m for m in watch if m in sys.modules)))
 """
 
-#: The three modules that import the case-mapping module and that #1190 is about: the run-start
-#: record build, the query door and the estate applier.
-_NAMED_IMPORTERS = ("defender.runtime.run_tenant", "defender.runtime.query_tool",
-                    "defender.learning.branch.estate.applier")
+#: The modules that import the case-mapping module and that #1190 is about: the run-start
+#: record build and the query door (the estate applier went with cluster staging, #1224).
+_NAMED_IMPORTERS = ("defender.runtime.run_tenant", "defender.runtime.query_tool")
 _SETTINGS = "defender.runtime.tenant_settings"
 
 
@@ -360,15 +355,15 @@ def _module_level_importers(module: str) -> set[str]:
 
 
 def test_case_mapping_module_is_imported_by_the_run_tenant_record_and_itself_imports_the_settings_module():  # noqa: E501
-    """No import cycle among the case-mapping module, tenant settings, the run-tenant record, the
-    query tool and the applier, so every first-import order of them works.
+    """No import cycle among the case-mapping module, tenant settings, the run-tenant record and
+    the query tool, so every first-import order of them works.
 
-    Shown without enumerating orders. For each of the five modules, a fresh interpreter imports
+    Shown without enumerating orders. For each of the four modules, a fresh interpreter imports
     it ALONE and has then loaded none of its module-level importers (read off the tree, not
     listed by hand). A cycle through a module means loading it reaches something that imports
-    it back at load time, so this covers every cycle that touches any of the five, whether or not
+    it back at load time, so this covers every cycle that touches any of the four, whether or not
     it runs through the case-mapping module. Positive controls: the case-mapping module's import
-    loads `runtime/tenant_settings`, and each of the three named importers, imported first,
+    loads `runtime/tenant_settings`, and each of the two named importers, imported first,
     loads the case-mapping module."""
     case_mod = S.dotted(S.home_of("load_case_mapping", home=S.RUNTIME))
     modules = (case_mod, _SETTINGS, *_NAMED_IMPORTERS)

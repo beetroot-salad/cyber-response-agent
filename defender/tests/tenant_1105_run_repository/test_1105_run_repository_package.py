@@ -788,9 +788,9 @@ def test_1105_tree_read_lint_lists_the_new_submodules_and_not_the_moved_ones(tmp
 
 
 def test_1105_lint_baselines_name_no_deleted_path_and_unused_public_names_cite_pr_2():
-    """No lint list or baseline names defender/_run_paths.py or defender/_run_handle.py; the five
-    vulture entries keyed on them are keyed on run_repository/_layout.py and _handle.py with their
-    reasons, a sixth entry covers the door's own __getattr__ (RG-05-c), and every vulture entry
+    """No lint list or baseline names defender/_run_paths.py or defender/_run_handle.py; the
+    vulture entries keyed on them that vulture still reports are keyed on run_repository/_handle.py
+    with their reasons, a sixth entry covers the door's own __getattr__ (RG-05-c), and every vulture entry
     for a public repository name with no PR 1 caller gives a reason naming PR 2."""
     lint_dir = H.WORKTREE / "scripts" / "lint"
     baseline = json.loads((lint_dir / "lint_vulture_baseline.json").read_text("utf-8"))["entries"]
@@ -799,11 +799,11 @@ def test_1105_lint_baselines_name_no_deleted_path_and_unused_public_names_cite_p
         "defender/run_repository/_handle.py: unused property 'subcollections' (60% confidence)",
         "defender/run_repository/_handle.py: unused variable 'alert_ref' (60% confidence)",
         "defender/run_repository/_handle.py: unused variable 'tables' (60% confidence)",
-        "defender/run_repository/_layout.py: unused function 'resolve_run_bundle' "
-        "(60% confidence)",
     }
+    # #1224: the fifth, `_layout.py`'s `resolve_run_bundle`, left the baseline — vulture no
+    # longer reports it.
     assert moved <= set(baseline), (
-        f"the five moved vulture entries are not re-keyed: {sorted(moved - set(baseline))}")
+        f"the moved vulture entries are not re-keyed: {sorted(moved - set(baseline))}")
     assert all(str(baseline[k]).strip() for k in moved), "a re-keyed entry lost its reason"
     door = [k for k in baseline
             if k.startswith("defender/run_repository/__init__.py:") and "'__getattr__'" in k]

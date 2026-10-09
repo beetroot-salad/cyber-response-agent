@@ -79,7 +79,7 @@ OUT_ENV = "GARBAGE_PAGE_1025_OUT"
 SUITE = tuple(f"defender/tests/test_1025_page_{part}.py"
               for part in ("contract", "verdict", "worlds", "stages", "records"))
 CONTENT_FILES = tuple(Path(p).name for p in SUITE) + ("_episode_1025.py",)
-STEPS = ("questioner", "staging", "review", "verify", "runs", "judge")
+STEPS = ("questioner", "preflight", "runs", "verify", "judge")
 
 #: Tests whose red against the stub is a HEAD-missing dependency or an instrument limit — a
 #: reason INDEPENDENT of the page's content — keyed by a test-name fragment and verified by
@@ -91,7 +91,6 @@ STEPS = ("questioner", "staging", "review", "verify", "runs", "judge")
 HEAD_REASONS: tuple[tuple[str, str, str], ...] = (
     ("the_launcher_renders_the_page_after_the_judge_frame", "the launcher did not write", "launcher hook absent on HEAD"),
     ("a_render_fault_is_printed_and_changes_neither", "", "launcher hook absent on HEAD"),
-    ("held_teardown_fault_after_a_completed_grade", "the launcher did not write", "launcher hook absent on HEAD"),
     ("how_the_operator_learns_where_the_page_is", "", "launcher hook absent on HEAD"),
     ("an_episode_with_no_judge_yaml_still_renders", "the launcher did not write", "launcher hook absent on HEAD"),
     ("a_sibling_process_exited_non_zero", "the launcher did not write", "launcher hook absent on HEAD"),

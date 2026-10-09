@@ -645,7 +645,7 @@ demands:
   form: test
   pass: A
   binds: [verb_context, adapter_seam, interacts(verb_context->runs_base), interacts(adapter_seam->runs_base)]
-  discharged_by: test_d4_review_env_threaded
+  discharged_by: test_d4_preflight_env_threaded
   seed_docstring: >-
     verb_context(episode_dir, *, runs_base) and seams.adapter_seam(episode_dir, *, runs_base) take the
     runs base; the launcher passes runs_base_for(T), and the replay env's DEFENDER_RUNS_BASE is that base;
@@ -2296,7 +2296,7 @@ demands:
   form: test
   pass: A
   binds: [verb_context, interacts(verb_context->runs_base), interacts(verb_context->DEFENDER_RUNS_BASE)]
-  discharged_by: test_review_replay_runs_base_for_an_old_base_episode
+  discharged_by: test_preflight_replay_runs_base_for_an_old_base_episode
   seed_docstring: >-
     The review replay is handed runs_base_for(T) wherever the episode lives; its adapter subprocesses
     see DEFENDER_RUNS_BASE=<T>/runs (D4 review row).

@@ -1,8 +1,9 @@
 """#1007 — M5: the family-level call, and the identity it must not collide with.
 
 One call per draw, judging what no single world can: whether the family as a whole separated
-anything. It is shown every world's overlay, the review record and every mechanical row,
-withholding none — and its reply may name no world.
+anything. It is shown every world's facts, pre-flight's outcome record and every world's judged
+row, withholding none (#1224: facts and the outcome record replaced the overlays, the review
+record and the mechanical rows).
 
 A1 (§7) STRUCK O6's bucket clause: the family reply is itself `subject: world` and takes the
 freeform arm of the selector, so a falsifier phrased as "its reply carries a per-world bucket"
@@ -24,26 +25,27 @@ from defender.tests._state1135 import env_state
 
 
 #: A pointer the FAMILY-level call is actually shown. Its default evidence is
-#: `samples.yaml#<pattern>`, and `_build_family_prompt` renders no sample section at
+#: `samples.yaml#<system>`, and `_build_family_prompt` renders no sample section at
 #: all — so a family finding citing one is grounded in a document that call never saw,
-#: which `_resolves` now refuses for `scope="family"`. These cells are about `world`,
+#: which `_resolves` refuses for `scope="family"`. These cells are about `world`,
 #: `source_run_dir` and who mints the id; the pointer is incidental to every one of them.
-FAMILY_EVIDENCE = ["review.yaml#worlds"]
+FAMILY_EVIDENCE = ["outcome.yaml#outcome"]
 
 
 def family_episode(tmp_path: Path, monkeypatch, *, labels=("b", "c"),
-                   stories=None) -> Path:
+                   stories=None, disposition: str | None = None) -> Path:
     _base, _src, root = W.configured_layout(tmp_path, monkeypatch)
     docs = [W.base_world()] + [
         W.world_doc(x, story=(stories or {}).get(x, f"world {x}'s story"),
-                    ov=W.overlay(elastic=W.elastic_overlay(inject=[{"_id": f"i{x}"}])))
+                    facts=[W.fact(f"f-{x}", f"fact-of-world-{x}", (f"host-{x}",))],
+                    **({"disposition_declared": disposition} if disposition else {}))
         for x in labels]
     ep = W.episode(tmp_path, doc=W.family_doc(worlds=docs), root=root)
     for label in labels:
         W.archived_world(ep, label)
         W.write_served(ep, label, [W.served_row(world=label)])
-    W.write_review(ep, worlds={label: W.reviewed_world(label=label) for label in labels})
     W.write_samples(ep)
+    W.write_outcome(ep)
     return ep
 
 
@@ -57,11 +59,11 @@ def grade(ep: Path, judge, **kw):
 
 
 def test_the_family_call_is_shown_every_world(tmp_path, monkeypatch):
-    """The family prompt carries EVERY world — overlays, the review record, every mechanical
-    row, and the base disposition — withholding none.
+    """The family prompt carries EVERY world — stories, facts, pre-flight's outcome record, and
+    the base disposition — withholding none.
 
     Observably true: the family draw's prompt names each world's own story and each world's
-    label, and carries the review record's per-world entries. The per-world calls are the ones
+    own fact, and carries pre-flight's outcome record. The per-world calls are the ones
     that must not see siblings; the family call's whole question is about the set, so
     withholding any member makes the question unanswerable.
 
@@ -80,28 +82,37 @@ def test_the_family_call_is_shown_every_world(tmp_path, monkeypatch):
     for marker in stories.values():
         assert marker in prompt[0], (
             f"the family prompt withholds {marker!r} — it is shown fewer than every world")
-    assert "reachability" in prompt[0], "the family prompt carries no review record"
+    for label in ("b", "c"):
+        assert f"fact-of-world-{label}" in prompt[0], (
+            f"the family prompt withholds world {label}'s facts")
+    assert "outcome: accepted" in prompt[0], "the family prompt carries no pre-flight record"
 
 
-def test_the_family_reply_may_not_name_a_world(tmp_path):
-    """A family-level finding may not carry a per-world `world` value.
+def test_the_family_reply_may_not_name_a_world(tmp_path, monkeypatch):
+    """A family-level finding may not attribute itself to a world: the pass owns identity.
 
-    Observably true: a reply from the family call whose finding names a world is refused — the
-    pass owns identity, and a family finding is about the family. The parity control is that
-    the same finding from a per-world draw is accepted, so the refusal is about the CALL, not
-    about the field.
+    Observably true: a family reply whose finding carries `world: b` validates — #1224's
+    validator ignores a model's own `world` key rather than refusing the reply
+    (`run._parse_finding`: "the pass stamps the world itself") — and the queue row it becomes
+    is stamped `world: null`, the family's, whatever the model wrote. The parity control is
+    that the same reply's finding reaches the questioner channel at all, so the null is a
+    stamp, not an empty pass.
 
     What failure looks like: a model attributes a family-level observation to whichever world
     it found most memorable, and the questioner corpus grows a lesson about a world that did
     not have the property.
     """
-    run = W.mod("learning.judge.run")
+    paths = W.loop_paths(tmp_path)
+    ep = family_episode(tmp_path, monkeypatch)
+    judge = W.FakeJudge(W.reply_document(findings=[W.world_finding(
+        bucket="names-a-world", world="b", evidence=FAMILY_EVIDENCE)]))
 
-    with pytest.raises(W.refusals()):
-        run.validate_reply(W.reply_text(findings=[W.world_finding(world="b")]),
-                           scope="family")
-    parsed = run.validate_reply(W.reply_text(findings=[W.world_finding()]), scope="world")
-    assert parsed.findings[0].subject == W.SUBJECT_WORLD
+    grade(ep, judge, state=W.learning_state(paths))
+
+    rows = [r for r in W.queue_rows(paths, QUESTIONER_FINDINGS) if "/family/" in r["finding_id"]]
+    assert rows, "the family finding reached no queue row, so the stamp below proves nothing"
+    assert {r["world"] for r in rows} == {None}, (
+        f"a family finding carried the model's own world onto the queue: {rows}")
 
 
 def test_the_family_reply_admits_a_family_level_finding(tmp_path, monkeypatch):
@@ -207,8 +218,8 @@ def test_the_family_call_emits_no_defender_finding(tmp_path, monkeypatch):
 def test_disagreeing_family_draws_resolve_by_majority_as_today(tmp_path, monkeypatch):
     """Family draws that disagree resolve by majority — the same rule the per-world draws use.
 
-    Observably true: three family draws returning two `gradable` and one `discard` resolve to
-    `gradable`, and the record says so. The resolution rule is the incumbent one; this change
+    Observably true: three family draws returning two `survived` and one `caught` (#1224: the
+    family call's word is its `verdict_word`) resolve to `survived`, and the record says so. The resolution rule is the incumbent one; this change
     adds a second call to the fan-out, not a second way of settling it.
 
     What failure looks like: the family draw is treated as authoritative on its own, so a
@@ -217,21 +228,18 @@ def test_disagreeing_family_draws_resolve_by_majority_as_today(tmp_path, monkeyp
     """
     ep = family_episode(tmp_path, monkeypatch)
     judge = W.FakeJudge(
-        W.reply_document(outcome="gradable"),
-        W.reply_document(outcome="gradable"),
-        W.reply_document(outcome="gradable"),
-        W.reply_document(outcome="gradable"),
-        W.reply_document(outcome="gradable"),
-        W.reply_document(outcome="gradable"),
-        W.reply_document(outcome="gradable"),
-        W.reply_document(outcome="gradable"),
-        W.reply_document(outcome="discard"),
+        *[W.reply_document() for _ in range(6)],      # two worlds x three draws
+        W.reply_document(verdict_word="survived"),
+        W.reply_document(verdict_word="survived"),
+        W.reply_document(verdict_word="caught"),
     )
 
     result = grade(ep, judge, draws=3)
 
-    assert result.family_outcome == "gradable", (
-        f"three family draws (2 gradable, 1 discard) resolved to {result.family_outcome!r}")
+    assert [a.split(":")[1] for a in judge.agent_ids[-3:]] == ["family"] * 3, (
+        f"the last three calls were not the family draws: {judge.agent_ids}")
+    assert result.family_outcome == "survived", (
+        f"three family draws (2 survived, 1 caught) resolved to {result.family_outcome!r}")
 
 
 def test_the_family_call_is_made_even_when_there_is_nothing_to_separate(
@@ -239,8 +247,8 @@ def test_the_family_call_is_made_even_when_there_is_nothing_to_separate(
     """The family call is UNCONDITIONAL — an episode with nothing to separate is exactly the
     episode it exists to say so about.
 
-    Observably true: an episode whose worlds all agree, all reach the same disposition and show
-    no difference still makes the family call. "Nothing separated these worlds" is the family
+    Observably true: an episode whose worlds all tell one story, declare the control's
+    disposition, and are all judged to have no bucket (`none`) still makes the family call. "Nothing separated these worlds" is the family
     judge's own most useful answer; gating the call on there being something to say makes it
     unsayable.
 
@@ -248,13 +256,9 @@ def test_the_family_call_is_made_even_when_there_is_nothing_to_separate(
     families — the ones the questioner most needs to learn from — are the only ones never
     graded.
     """
-    ep = family_episode(tmp_path, monkeypatch)
-    doc = W.read_yaml(ep / W.REVIEW_NAME)
-    for label in ("b", "c"):
-        doc["worlds"][label]["reachability"] = W.reachability_block(
-            reachable_by_capture=False, capture_replays=[W.replay_entry("k1", differs=False)])
-    W.write_yaml(ep / W.REVIEW_NAME, doc)
-    judge = W.FakeJudge(W.reply_document())
+    ep = family_episode(tmp_path, monkeypatch, disposition="benign",
+                        stories={"b": "the same story", "c": "the same story"})
+    judge = W.FakeJudge(W.reply_document(bucket="none", systems=[]))
 
     grade(ep, judge)
 
@@ -262,17 +266,19 @@ def test_the_family_call_is_made_even_when_there_is_nothing_to_separate(
         f"no family call was made for an undiscriminating episode: {judge.agent_ids}")
 
 
-def test_a_faulted_family_draw_isolates_and_leaves_verdict_word_intact(
+def test_a_faulted_family_draw_isolates_and_leaves_the_per_world_rows_intact(
         tmp_path, monkeypatch):
     """A faulted family draw costs its own draw and nothing else.
 
     Observably true: with the family call raising and every per-world draw completing, the
     per-world rows are equal FIELD FOR FIELD to the rows the same episode grades without the
-    family call, `verdict_word` is unchanged, and `judge.yaml` is still written. Whole rows and
-    not one column: `withheld_reason`, `world_findings`, `sample_unavailable` and every other
-    per-world field are as much a part of "the per-world rows are what they are" as the bucket
-    is, and a comparison of one field is green for a family fault that corrupted the rest.
-    The family call is an addition to the pass, so its failure may not unwind the pass.
+    family call, `judge.yaml` is still written, and the family call is recorded as having
+    completed no draw. Whole rows and not
+    one column: `bucket`, `systems`, `findings` and every other per-world field are as much a
+    part of "the per-world rows are what they are" as any one is, and a comparison of one field
+    is green for a family fault that corrupted the rest. (#1224 made `verdict_word` the family
+    call's own word, so a faulted family call leaves it `undecidable` — never a word nobody
+    answered.)
 
     What failure looks like: the exception escapes the draw loop and the whole episode's grade
     is thrown away AFTER every per-world model call has been paid for — the blast radius the
@@ -290,7 +296,12 @@ def test_a_faulted_family_draw_isolates_and_leaves_verdict_word_intact(
         f"no family call was attempted, so no family fault was induced and the equalities "
         f"below hold vacuously: {faulting.agent_ids}")
     assert (ep / W.JUDGE_NAME).is_file(), "a faulted family draw took the whole pass down"
-    assert result.verdict_word == baseline.verdict_word
+    assert baseline.verdict_word == "survived", baseline.verdict_word
+    assert result.verdict_word == "undecidable", (
+        f"a family call that answered nothing yielded verdict_word {result.verdict_word!r}")
+    assert (result.family_outcome, result.family_completed_draws) == (None, 0), (
+        "the faulted family call was recorded as having answered: "
+        f"{(result.family_outcome, result.family_completed_draws)}")
     faulted_rows = {r["world"]: r for r in result.worlds}
     clean_rows = {r["world"]: r for r in baseline.worlds}
     drifted = {

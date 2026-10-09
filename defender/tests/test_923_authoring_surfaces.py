@@ -85,12 +85,17 @@ _VOCABULARY_READERS = {
     "skills/invlang/cli.py",                    # read-only query filters
     "skills/invlang/queries.py",                # corpus rendering
     "skills/invlang/validate/_gating.py",       # the entry-price dispatch
-    # READER, not an authoring surface: #921's mechanical pass reads a world's archived
+    # READER, not an authoring surface: #921's family judge reads a world's archived
     # headline (through `_report.read_report`) and the manifest's `disposition_declared`, and
     # asks the owner whether each is in the vocabulary. It writes no disposition anywhere, so
     # it owes an in-or-out verdict and nothing else — and it gives one: a value outside the
     # vocabulary makes that world `ungradable`, named on the record, never coerced.
-    "learning/judge/family.py",                 # the family judge's mechanical pass
+    "learning/judge/family.py",                 # the family judge's per-world row
+    # READER: #1224's judge pass writes the row of a world O5 counts as failed (`_failed_row`),
+    # carrying the manifest's `disposition_declared` through the owner's normalizer exactly as
+    # `family.read_world` does for a judged world. It authors no disposition: a value outside
+    # the vocabulary lands on the row as `None`, never coerced into a member.
+    "learning/judge/__init__.py",               # a failed world's row
     # READER, and the counterpart of the manifest surface above: #920's archive reader takes
     # each world's headline from that world's OWN committed `report.md` — written by the host's
     # report gate, never by this module — and asks the owner whether it is in the vocabulary. A
@@ -367,7 +372,9 @@ def test_every_authoring_surface_refuses_the_host_only_verdict(tmp_path):
 
     def _world(disposition: str) -> dict:
         return {"world_id": "b", "role": "b", "story": "a sibling's story",
-                "axis": "an axis", "disposition_declared": disposition}
+                "axis": "an axis", "disposition_declared": disposition,
+                "facts": [{"fact_id": "f1", "statement": "web-1's owner is the platform team",
+                           "entities": ["web-1"]}]}
 
     with pytest.raises(FamilyError) as world_refusal:
         parse_world(_world(MEMBER))

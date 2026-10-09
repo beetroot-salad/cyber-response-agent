@@ -124,7 +124,8 @@ def test_moved_exception_type_raised_on_one_side_and_caught_on_the_other():
     """Each moved exception type has one definition. Under the 2026-10-04 scope cut that is
     `ParamsTooDeep`, which rides with the query-rule slice into the flat tier; the code that
     raises it and the code that catches it bind the same class object, with every catch site
-    repointed (capture, estate registry, _family, query_tool). A second definition or a catch
+    repointed (capture, estate registry, query_tool; _family's catch went with the manifest
+    envelope, #1224). A second definition or a catch
     site left on the old path is a failure. (The VisualizeFailed, CaseTicketError, ViewNameError
     and fault-type cells read modules the cut leaves in place; they are parked with #1105, the
     case_ticket follow-up #1190 and #1172.)
@@ -139,7 +140,7 @@ def test_moved_exception_type_raised_on_one_side_and_caught_on_the_other():
     too_deep = S.moved("ParamsTooDeep")
     for relpath in ("defender/learning/branch/capture.py",
                     "defender/learning/branch/estate/registry.py",
-                    "defender/runtime/branch/_family.py", "defender/runtime/query_tool.py"):
+                    "defender/runtime/query_tool.py"):
         _assert_bound_to(relpath, "ParamsTooDeep", too_deep)
     deep: Any = []
     for _ in range(40):

@@ -63,8 +63,18 @@ def _episode():
     return T.mod("learning.branch.episode")
 
 
-def _archived(tmp_path, worlds=T.WORLDS, **kw):
+def _accepted(tmp_path, *, outcome="accepted", reason="every fact world calibrated"):
+    """An episode pre-flight recorded (`outcome.yaml`, through its production writer): the
+    readers compare only an `accepted` family (#1224 M05=A), so every reader scenario that is
+    not about that gate starts from one."""
     ep = T.episode(tmp_path)
+    with Episode.open(ep) as episode:
+        T.mod("learning.branch.outcome").write_outcome(episode, outcome, reason=reason)
+    return ep
+
+
+def _archived(tmp_path, worlds=T.WORLDS, **kw):
+    ep = _accepted(tmp_path)
     for w in worlds:
         T.archived_world(ep, w, **kw)
     return ep
@@ -130,7 +140,7 @@ def test_947_the_archived_run_dir_pointer_is_never_followed(tmp_path):
     """The archived run-dir pointer is informational only: it is a text file, not a link, and
     both derived readers answer identically when the path it names no longer exists."""
     base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path)
+    ep = _accepted(tmp_path)
     dirs = {w: T.sibling_run_dir(base, w) for w in T.WORLDS}
     with Episode.open(ep) as episode:
         _archive().archive_episode(episode, dirs)
@@ -151,7 +161,7 @@ def test_947_readers_compute_from_the_episode_dir_with_run_dirs_removed(tmp_path
     import shutil
 
     base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path)
+    ep = _accepted(tmp_path)
     dirs = {w: T.sibling_run_dir(base, w) for w in T.WORLDS}
     with Episode.open(ep) as episode:
         _archive().archive_episode(episode, dirs)
@@ -199,24 +209,10 @@ def test_947_delta_o_returns_class_per_shared_correlation_key(tmp_path):
     assert out["b"]["k2"] in {"mutation", "undeclared"}
 
 
-def test_947_delta_o_pairs_on_asked_form_not_run_form(tmp_path):
-    """The per-key reader pairs on the form ASKED, never on the prepared form: a staged world's
-    prepared parameters differ from the base's by construction, so a pairing keyed on them would
-    match nothing at all."""
-    ep = _archived(tmp_path)
-    T.base_capture(ep, [T.captured_row(key="k1", params={"index": T.EVENTS_PATTERN})])
-    staged = T.captured_row(key="k1", params={"index": f"wv-{T.world_token('b')}-logs-"})
-    staged["asked_params"] = {"index": T.EVENTS_PATTERN}
-    (ep / "served" / f"{T.world_token('b')}.jsonl").write_text(
-        json.dumps(staged) + "\n", encoding="utf-8")
-    out = _episode().delta_o(ep, invoke=T.FakeAgent("mutation"))
-    assert "k1" in out["b"], "the staged row never paired with its base row"
-
-
 def test_947_delta_o_subtracts_the_controls_drift_keys(tmp_path):
-    """The per-key reader subtracts the control's drift keys the way the review does: a key the
-    control world also differs on is not reported as a world's own difference, or the one
-    measurement the downstream judge consumes becomes noise."""
+    """The per-key reader subtracts the control's drift keys: a key the control world also
+    differs on is not reported as a world's own difference, or the one measurement the
+    downstream judge consumes becomes noise."""
     ep = _archived(tmp_path)
     T.base_capture(ep, [T.captured_row(key="k1"), T.captured_row(key="k2")])
     drifted = json.dumps(T.captured_row(key="k1", payload={"hits": [{"_id": "drift"}]}))
@@ -230,7 +226,7 @@ def test_947_delta_o_subtracts_the_controls_drift_keys(tmp_path):
 def test_947_verdicts_returns_disposition_per_world(tmp_path):
     """The per-world reader returns one disposition per archived world, read from that world's
     own archived report."""
-    ep = T.episode(tmp_path)
+    ep = _accepted(tmp_path)
     T.archived_world(ep, "a", disposition="benign")
     T.archived_world(ep, "b", disposition="malicious")
     assert _episode().verdicts(ep) == {"a": "benign", "b": "malicious"}
@@ -239,7 +235,7 @@ def test_947_verdicts_returns_disposition_per_world(tmp_path):
 def test_947_verdicts_refuses_disposition_outside_enum(tmp_path):
     """The per-world reader inherits the shipped disposition membership gate rather than
     re-implementing it: an archived report naming a value outside that vocabulary refuses."""
-    ep = T.episode(tmp_path)
+    ep = _accepted(tmp_path)
     T.archived_world(ep, "a", disposition="probably-bad")
     with pytest.raises(T.refusals()) as bad:
         _episode().verdicts(ep)
@@ -247,26 +243,31 @@ def test_947_verdicts_refuses_disposition_outside_enum(tmp_path):
 
 
 def test_947_readers_over_an_episode_with_no_archived_worlds_return_empty(tmp_path):
-    """Both readers answer EMPTY on an archived episode holding no worlds rather than raising:
-    an episode rejected before `Step.RUNS` is a legitimate archived state, and the episode's own
-    recorded outcome is what tells "no worlds" apart from "no differences"."""
-    ep = T.episode(tmp_path)
+    """Both readers answer EMPTY on an accepted episode holding no archived worlds rather than
+    raising: a family whose every sibling failed is a legitimate archived state, and the
+    episode's own recorded outcome is what tells "no worlds" apart from "no differences"."""
+    ep = _accepted(tmp_path)
     (ep / "worlds").mkdir(exist_ok=True)
     assert _episode().verdicts(ep) == {}
     assert _episode().delta_o(ep) == {}
 
 
-def test_947_the_derived_readers_refuse_to_compare_an_incomplete_episode(tmp_path):
-    """The derived readers refuse to compare an episode whose recorded outcome is incomplete:
-    the family stamp was withheld, so the worlds that ARE archived are not comparable and a
-    silent per-key answer over them would read as a measurement."""
-    ep = _archived(tmp_path, worlds=("a", "b"))
-    (ep / "review.yaml").write_text(
-        json.dumps({"episode": {"outcome": "incomplete", "reason": "one scrub unverified"}}),
-        encoding="utf-8")
-    with pytest.raises(T.refusals()) as bad:
-        _episode().delta_o(ep)
-    assert "incomplete" in str(bad.value)
+@pytest.mark.parametrize("outcome", ["unusable", "refused", None])
+def test_947_the_derived_readers_refuse_to_compare_an_incomplete_episode(tmp_path, outcome):
+    """The derived readers refuse to compare an episode whose recorded outcome is anything but
+    `accepted` — `unusable`, `refused`, or no record at all (#1224 M05=A retired `incomplete`;
+    the outcome record is pre-flight's `outcome.yaml`): the worlds that ARE archived are not
+    comparable and a silent per-key answer over them would read as a measurement."""
+    if outcome is None:
+        ep = T.episode(tmp_path)
+    else:
+        ep = _accepted(tmp_path, outcome=outcome, reason="two worlds failed calibration")
+    for w in ("a", "b"):
+        T.archived_world(ep, w)
+    for reader in (_episode().delta_o, _episode().verdicts):
+        with pytest.raises(T.refusals()) as bad:
+            reader(ep)
+        assert (outcome or "no outcome record") in str(bad.value), reader.__name__
 
 
 # ---------------------------------------------------------------------------------------

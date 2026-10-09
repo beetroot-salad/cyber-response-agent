@@ -23,7 +23,8 @@ under a directory named `tests`, or a `conftest.py`) and minus `defender/scripts
 THE EXCEPTION LISTS ARE DATA HERE AND ASSERTED BY TESTS: O1's named (importer, target) pairs
 (`O1_EXCEPTIONS`) — since the 2026-10-04 scope cut, the pairs into the `scripts/` modules the cut
 leaves where they are, each tagged with the issue that retires it: 35 pairs (37 import statements)
-at the cut, 32 (33) since #1190 moved `case_ticket` under `defender/runtime/` and retired its 3;
+at the cut, 32 (33) since #1190 moved `case_ticket` under `defender/runtime/` and retired its 3,
+22 (22) since the live oracle (#1224) retired cluster staging and its 10;
 O2's N5 edges (dF7 (a)): learning's page entry points importing reports (the O2 tests are parked
 with #1105 / #1172; their helpers stay here for the preserved copies). A listed edge that no
 longer exists is a finding ([218]), never a silent widening, so the list can only shrink.
@@ -82,34 +83,24 @@ OUT_STAYING = (
 
 _S = "defender.scripts."
 _FAULTS = _S + "adapters.faults"
-_CONFINEMENT = _S + "adapters.confinement"
 _RECORD_QUERY = _S + "gather_tools.record_query"
 
 #: E1: O1's named exceptions — every (importer, target module) pair into `scripts/` the cut
-#: leaves standing, each with the owner that retires it: 32 pairs, 33 import statements. A pair
+#: leaves standing, each with the owner that retires it: 22 pairs, 22 import statements. A pair
 #: covers every import statement between the two files. Derived from `census()` at the base
 #: (59 statements) minus the 22 edges the cut's IN moves retire (`_venv`, `pricing`,
 #: `payload_view`, `sql`, `lessons_frontier`, and the ten importers of `record_query`'s query
 #: rules) and the 4 the case_ticket follow-up #1190 retires (its 3 pairs: `run_tenant` (two
 #: statements), `query_tool`, `estate/applier`). H4 (i)'s `ticket_writer -> _stub_transport`
 #: edge is inside `scripts/`, not listed; neither is `tenant.py`'s or `ticket_writer`'s import of
-#: the moved `case_ticket` (an importer inside `scripts/` is free).
+#: the moved `case_ticket` (an importer inside `scripts/` is free). The live oracle (#1224)
+#: retired 10 pairs (11 statements): cluster staging and its elastic stager went, and the
+#: estate registry, redaction and `_family` no longer import `confinement` / `faults`.
 O1_EXCEPTIONS: tuple[tuple[str, str, str], ...] = (
-    # #1172 / #1121 (20)
-    ("defender/learning/branch/staging.py", STUB_TRANSPORT, "#1172/#1121"),
+    # #1172 / #1121 (10)
     ("defender/skills/connect/examples/example_adapter.py", STUB_TRANSPORT, "#1172/#1121"),
-    ("defender/learning/branch/estate/registry.py", _CONFINEMENT, "#1172/#1121"),
-    ("defender/learning/branch/estate/stagers/elastic.py", _CONFINEMENT, "#1172/#1121"),
-    ("defender/learning/branch/redaction.py", _CONFINEMENT, "#1172/#1121"),
-    ("defender/learning/branch/staging.py", _CONFINEMENT, "#1172/#1121"),
-    ("defender/runtime/branch/_family.py", _CONFINEMENT, "#1172/#1121"),
     ("defender/evals/oracle_golden/controls.py", _S + "adapters.elastic_adapter", "#1172/#1121"),
     ("defender/evals/oracle_golden/controls.py", _S + "adapters.esql_text", "#1172/#1121"),
-    ("defender/learning/branch/estate/stagers/elastic.py", _S + "adapters.esql_text",
-     "#1172/#1121"),
-    ("defender/learning/branch/estate/registry.py", _FAULTS, "#1172/#1121"),
-    ("defender/learning/branch/estate/stagers/elastic.py", _FAULTS, "#1172/#1121"),
-    ("defender/learning/branch/staging.py", _FAULTS, "#1172/#1121"),
     ("defender/runtime/lead_zero/_capture.py", _FAULTS, "#1172/#1121"),
     ("defender/runtime/query_tool.py", _FAULTS, "#1172/#1121"),
     ("defender/runtime/run_tenant.py", _FAULTS, "#1172/#1121"),

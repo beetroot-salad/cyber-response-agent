@@ -33,11 +33,10 @@ CALL to and every other REFERENCE to a write-capable callee:
 A reference is anything that is not a call's callee (a module-level alias, a keyword or default
 value, a branch of an expression) and is keyed exactly as a call is. Each hit is keyed
 `(module, enclosing scope, callee)`, never by line. The collected set must EQUAL the residue:
-the queue writer (N-d), the archive's copy lane (N-a), the review's temp-dir cleanup, and the
-link-following reads of things that are not episode records. D6' removes `scratch_ledger`'s
-`.mkdir` / `.write_text` (the scratch base is `served_base.create("")` on a scratch `Episode`)
-and `Ledger._append`'s `rooted_*` (every `Ledger` is built by `for_world` or `scratch_ledger`,
-so it appends through its episode's record).
+the queue writer (N-d), the archive's copy lane (N-a), and the link-following reads of things
+that are not episode records. `Ledger._append` makes no `rooted_*` write: every `Ledger` is
+built by `for_world`, so it appends through its episode's record. (#1224 retired the staging
+and review modules, and the review's scratch with them.)
 
 **The handle scan** holds `defender/_episode_handle.py` to D1'/D2': it reaches the core only
 through `hold` and `hold_new` (its `io=` seam), and does I/O only through the `Held` it gets
@@ -73,7 +72,7 @@ call `hold` and `hold_new`, so the check is not vacuous.
   the root-binding readers and path-typed functions D3' names, and the O5 carve-outs.
 * *Doors.* `Episode.open` / `Episode.create` are used — called, or referenced any other way
   (a module-level alias's right-hand side, an argument, a local alias) — only in the doors D3'
-  names (`DOORS`) plus `review.review` / `replay_one` for the scratch. The scan resolves import
+  names (`DOORS`, #1224's pre-flight `preflight_replay` among them). The scan resolves import
   aliases, module attributes and module-level assignment aliases of the class or of a door
   (`module_aliases`, keyed by the door scan's own resolver), counts a door verb on a value's
   class (`type(ep).open`), and keys any `getattr` / `vars` reach into the class as a hit of
@@ -111,12 +110,11 @@ PACKAGE = Path(_io.__file__).resolve().parent
 #: them too: none may make an episode write around the handle).
 MODULES = (
     "learning/branch/cli.py",
-    "learning/branch/staging.py",
     "learning/branch/timing.py",
     "learning/branch/archive.py",
     "learning/branch/capture.py",
     "learning/branch/ledger.py",
-    "learning/branch/review.py",
+    "learning/branch/outcome.py",
     "learning/judge/__init__.py",
     "learning/judge/enqueue.py",
     "runtime/branch/_family.py",
@@ -170,10 +168,6 @@ RESIDUE = frozenset({
     ("learning.branch.archive", "_screen_destinations", ".unlink"),
     ("learning.branch.archive", "archive_episode", "shutil.copy2"),
     ("learning.branch.archive", "archive_episode", "shutil.copytree"),
-    # The cleanup of the review's fresh system temp tree, which holds its scratch `Episode`
-    # (D4'). The scratch ledger itself now writes through that `Episode`, and `Ledger._append`
-    # through its episode's record: D6' removes both from the residue.
-    ("learning.branch.review", "review", "shutil.rmtree"),
     # Link-following reads of things that are not episode records: a sibling's scrub verdict,
     # the sidecar beside its run dir (screened by `artifact_file` first); the source run's
     # investigation and alert (run records, #1105); the episode page's own stylesheet asset.
@@ -957,8 +951,6 @@ PARAM_ALLOWLIST = frozenset({
     ("learning.judge.family", "leads_by_id", "world_dir", _CARVE_READ),
     ("learning.judge.run", "_resolves", "world_dir", _CARVE_ARITH),
     ("learning.judge.run", "_draw_document", "world_dir", _CARVE_ARITH),
-    ("learning.branch.staging", "_Door._call", "path",
-     "the host staging door's HTTP request path, not a file"),
     ("learning.judge", "_memoized_show.invoke", "path", _GIT),
     ("learning.judge.render", "_git_show_default", "path", _GIT),
     ("run", "_Investigate.__call__", "alert_path", _ALERT),
@@ -982,11 +974,6 @@ NB_READERS = frozenset({
     ("learning.branch.cli", "episode_dir_for"),
     ("learning.branch.cli", "sibling_runs_base"),
     ("learning.branch.cli", "sibling_argv"),
-    ("learning.branch.staging", "sweep"),
-    ("learning.branch.staging", "staged_path"),
-    ("learning.branch.review", "verb_context"),
-    ("learning.branch.review", "replay_one"),
-    ("learning.branch.review", "_review_world"),
     ("runtime.branch._family", "resume_world_from"),
     ("run", "main"),
     # The root-binding readers (O3, N-b).
@@ -1004,13 +991,11 @@ NB_READERS = frozenset({
     ("scripts.visualize.visualize_episode", "load_episode"),
     ("scripts.visualize.visualize_episode", "_read_grade"),
     ("scripts.visualize.visualize_episode", "_Episode"),
-    # The O5 carve-outs: `read_jsonl_rows_report(base_file(...))` (the review's capture read),
-    # the stale-`served/*.jsonl` glob (the launcher's door), `base_file` itself, the path-taking
-    # readers and their one caller each, and the containment arithmetic. Rev 3 (R1) removes
+    # The O5 carve-outs: the stale-`served/*.jsonl` glob (the launcher's door), `base_file`
+    # itself, the path-taking readers and their one caller each, and the containment arithmetic. Rev 3 (R1) removes
     # `episode._answers` and `episode.delta_o`: `delta_o` reads the base and each world's served
     # file through its one `bind` (`read_jsonl(LAYOUT.served_base)`, `read_jsonl(LAYOUT.
     # served_world(token))`), naming no path.
-    ("learning.branch.review", "review"),
     ("learning.branch.cli", "prepare_episode"),
     ("learning.branch.ledger", "base_file"),
     ("learning.branch.ledger", "Ledger._absorb"),
@@ -1021,7 +1006,7 @@ NB_READERS = frozenset({
 })
 _O5_CALLS = frozenset({"EpisodePaths", "base_file", "staged_path"})
 
-#: The doors D3' names, and the review's scratch: where `Episode.open` / `Episode.create` may be
+#: The doors D3' names, and #1224's pre-flight: where `Episode.open` / `Episode.create` may be
 #: called. `grade_episode`'s one orchestration body `_grade_episode` (where its `bind` is today)
 #: counts as the door.
 DOORS = frozenset({
@@ -1030,8 +1015,7 @@ DOORS = frozenset({
     ("learning.judge", "grade_episode"),
     ("learning.judge", "_grade_episode"),
     ("scripts.visualize.visualize_episode", "render_episode"),
-    ("learning.branch.review", "review"),
-    ("learning.branch.review", "replay_one"),
+    ("learning.branch.cli", "preflight_replay"),
 })
 #: Callers D3' does not place but whose callees take the `Episode`: the page script's `main`
 #: hands one to `_write_page`, and may open its own. Rev 3 (R1) removes `delta_o`: it opens no
@@ -1046,7 +1030,7 @@ DOORS_REQUIRED = (
     ("run", ("main",), "open"),
     ("learning.judge", ("grade_episode", "_grade_episode"), "open"),
     ("scripts.visualize.visualize_episode", ("render_episode",), "open"),
-    ("learning.branch.review", ("review",), "create"),
+    ("learning.branch.cli", ("preflight_replay",), "open"),
 )
 
 
@@ -1478,9 +1462,9 @@ def test_o5_episode_paths_base_file_and_staged_path_are_called_only_by_root_read
 
 def test_o5_only_the_doors_open_or_create_an_episode():
     """O5 / D3' / D6' (doors): `Episode.open` / `Episode.create` are called only in the doors
-    (plus the review's scratch, and the tolerated callers D3' does not place); and
-    `cli.prepare_episode` creates, `run.main`, `grade_episode` and `render_episode` open, and
-    `review.review` creates its scratch, so the scan is not vacuous."""
+    (plus the tolerated callers D3' does not place); and `cli.prepare_episode` creates, and
+    `run.main`, `grade_episode`, `render_episode` and `cli.preflight_replay` open, so the scan
+    is not vacuous."""
     found = _o5_collect(o5_doors)
     extra = sorted(hit for hit in found if not _allowed(hit, DOORS | DOORS_TOLERATED))
     missing = [

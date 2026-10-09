@@ -2,16 +2,10 @@
 the real migrated entry point, with its rev-2 signature (D3').
 
 One section per item, each driven through the smallest real entry point with its own injection
-seams (`cli.main`'s `questioner=` / `door=` / `adapters=` / `spawn=`, `cli.prepare_episode`'s
-`prime=`, `grade_episode`'s `judge=`, `run.main`'s `lifecycle=` / `materialize=`, the
+seams (`cli.prepare_episode`'s `prime=`, `grade_episode`'s `judge=`, `run.main`'s `lifecycle=` / `materialize=`, the
 `Episode`'s `io=`), never `monkeypatch.setattr`. Every plant is a real filesystem entry, and
 every negative has a positive control on the same address.
 
-- O4.1 `staged.yaml`'s header is an exclusive create, tolerating `FileExistsError` (through
-  `cli.main`, whose signature is unchanged).
-- O4.2 `staging.merge_review(episode, key, block)` reads the record through the view without
-  following links, then replaces it. Rev 3 (R1): a REFUSED record (a link, a non-plain entry,
-  undecodable bytes) is `StagingRefused` naming the reason, and nothing is written.
 - O4.3 / O4.8.3 `capture.prime_base(source_run_dir, episode)` creates the base whole with one
   exclusive create. Rev 3 (R3): anything named `base.jsonl` in the `served/` listing (a plain
   file, a link, a hard link, a FIFO, a directory) is the one "already holds a primed base"
@@ -24,28 +18,28 @@ every negative has a positive control on the same address.
   construction, before anything is written — every id the owner's minting check refuses (a
   newline, a NUL, an over-long name among them), not only the ones a hand-rolled check sees;
   since rev 3 the WHOLE token must be case-stable (a dot-less `Control`, an upper-case head).
-- D4' the scratch ledger: one scratch `Episode` serves two worlds; its base is created empty
-  once; a base holding rows is still the review's refusal.
 - O4.5 the priming claim, through `cli.prepare_episode`, which now returns the `Episode` (and
-  closes it on its own exception); the `prime=` seam is handed `(source_run_dir, episode)`.
+  closes it on its own exception); the `prime=` seam is handed `(source_run_dir, episode)`. An
+  occupied claim is reached through `cli._prime_once`: a launch never adopts a taken directory.
 - O4.6 / S1 the judge's draw removal: a non-plain draw (the core's leaf refusal, rev 3's
   `NotPlainEntry`) is refused, logged and left, and the pass goes on; any OTHER `OSError` from
   the removal (EACCES, EPERM, EROFS, and equally EIO or ENOTDIR, injected through the
-  `Episode`'s `io=` seam) stops the pass and the stale draw stays. (A linked `judge/` folder is
+  `Episode`'s `io=` seam) stops the pass and the stale draw stays. A draw writes nothing only
+  once every ask of it (N22's re-asks) was refused. (A linked `judge/` folder is
   not the leaf class: `test_1133_rev3.py`.)
 - D3' `enqueue.draws_on_disk(view, label)` / `draws_on_disk_report(view, label)`: every `.yaml`
   entry of any kind is counted, and a link at `worlds/`, `worlds/<label>` or its `judge/` yields
   no draws (C13: `worlds/b -> worlds/c` never yields c's draws under b).
 - O4.8.2 `grade_episode` / `render_episode` on a missing episode dir are `JudgeRefused`, and the
   dir is not recreated (C14).
-- D3' "Changed": `learning/branch/episode.py`'s served-world read makes no minting check (a
-  legacy, non-case-stable world label still reads).
 - The sibling door: `run.py --resume <manifest>` refuses a manifest not named `family.yaml`
   before anything is spent; and it holds ONE descriptor on the episode dir for the run — the
   `Episode` it hands the lifecycle.
 
-Red before rev 3 (on the rev-2 tree): the O4.2 refusal rows (today an `OSError` from the
-replace), the linked-`served/` prime (today mapped to "already primed"), the dot-less and
+(#1224 retired O4.1, O4.2 and D4' with the staging and review records and the review's scratch,
+and D3' "Changed" with the world-token alphabet the manifest now enforces.)
+
+Red before rev 3 (on the rev-2 tree): the linked-`served/` prime (today mapped to "already primed"), the dot-less and
 upper-case-head O4.8.1 rows, and every leaf-plant row checked with `assert_refusal` (no
 `_io.NotPlainEntry`). Everything else holds today and is pinned to keep holding.
 """
@@ -93,165 +87,6 @@ def bare_episode(tmp_path: Path) -> tuple[Path, Path]:
     host = tmp_path / "host"
     host.mkdir()
     return ep, host
-
-
-# =======================================================================================
-# O4.1 — the staging record's header (through cli.main; unchanged signature)
-# =======================================================================================
-
-class PlantsOnFirstCall:
-    """The questioner seam, answering as `inner` does, that plants `plant()` on its first call:
-    after the launcher's sweep has read the staging record and before the staging step writes
-    it."""
-
-    def __init__(self, inner: Any, plant: Any) -> None:
-        self.inner = inner
-        self.plant = plant
-        self.planted = False
-
-    def __call__(self, prompt: str, **kw: Any) -> Any:
-        if not self.planted:
-            self.planted = True
-            self.plant()
-        return self.inner(prompt, **kw)
-
-
-def launch(tmp_path: Path, *, questioner: Any, before: Any = None) -> tuple[Any, Path, Any, Any]:
-    """One episode through the real launcher (`cli.main`), every model and cluster seam faked."""
-    cli = T.mod("learning.branch.cli")
-    _base, src = T.runs_base(tmp_path)
-    ep = cli.episode_dir_for(T.EPISODE_ID, tenant=T.current_tenant())
-    if before is not None:
-        before(ep)
-    door, adapters, spawn = T.FakeDoor(), T.FakeAdapters(), T.FakeSpawn()
-    try:
-        outcome: Any = cli.main(
-            [str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
-            spawn=spawn, door=door, questioner=questioner, adapters=adapters,
-            invoke=T.FakeAgent(*["same"] * 24), preflight=T.no_preflight,
-            live_tree=T.source_capture())
-    except (SystemExit, Exception) as refused:  # noqa: BLE001 — the refusal is the observation
-        outcome = refused
-    return outcome, ep, door, adapters
-
-
-def test_o4_1_a_link_at_staged_yaml_refuses_the_staging_step_even_when_no_world_stages_a_name(
-        tmp_path, roots):
-    """The header is `staged.create(header)`, which refuses a link at the name: a link planted
-    there ends the episode at staging — the review never runs, no cluster name is created — and
-    the link and its target are left as they were."""
-    host = tmp_path / "host"
-    host.mkdir()
-    target = host / "staged-target.yaml"
-    target.write_bytes(S.HOST_BYTES)
-    family = T.family_doc(worlds=[
-        T.base_world(),
-        T.world_doc("b", ov=T.overlay(patches={"identity": {"web-2": {"owner": "platform"}}})),
-        T.world_doc("c", ov=T.overlay(patches={"identity": {"web-1": {"owner": "platform"}}})),
-    ])
-    holder: dict[str, Path] = {}
-    questioner = PlantsOnFirstCall(
-        T.FakeAgent(family, T.world_doc("b"), T.world_doc("c")),
-        lambda: (holder["ep"] / "staged.yaml").symlink_to(target))
-
-    rc, ep, door, adapters = launch(tmp_path, questioner=questioner,
-                                    before=lambda ep: holder.setdefault("ep", ep))
-
-    staged = ep / "staged.yaml"
-    assert questioner.planted, "the scenario never reached the questioner"
-    assert staged.is_symlink(), "the link planted at staged.yaml was replaced or removed"
-    assert os.readlink(staged) == str(target), "the link planted at staged.yaml was repointed"
-    assert target.read_bytes() == S.HOST_BYTES, "the header was written through the link"
-    assert adapters.calls == [], f"the review ran over a link at staged.yaml: {adapters.calls}"
-    assert door.created() == [], f"a cluster name was created: {door.created()}"
-    assert rc != 0, f"the episode reported success over a refused staging record: {rc!r}"
-
-
-def test_o4_1_a_staging_record_already_there_is_kept_and_appended_to_not_rewritten(
-        tmp_path, roots):
-    """A re-entered episode finds its staging record already there: the exclusive create's
-    `FileExistsError` is tolerated, the record is kept byte for byte and this attempt's rows are
-    appended after it. (Positive control for the test above, on the same address.)"""
-    earlier = "# an earlier attempt's staging record, rows appended below\n"
-
-    def keep_a_record(ep: Path) -> None:
-        ep.mkdir(parents=True, exist_ok=True)
-        (ep / "staged.yaml").write_text(earlier, encoding="utf-8")
-
-    rc, ep, door, _adapters = launch(
-        tmp_path, questioner=T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c")),
-        before=keep_a_record)
-
-    text = (ep / "staged.yaml").read_text(encoding="utf-8")
-    assert text.startswith(earlier), "the existing staging record was replaced"
-    assert "staged names for episode" not in text, "a second header was written"
-    rows = T.staged_rows(ep)
-    assert rows, "this attempt's rows were not appended to the kept record"
-    assert {r["name"] for r in rows} == set(door.created())
-    assert os.lstat(ep / "staged.yaml").st_nlink == 1
-    assert rc == 0
-
-
-# =======================================================================================
-# O4.2 — the review merge takes the Episode
-# =======================================================================================
-
-def test_o4_2_merge_review_keeps_every_other_key_and_replaces_the_record_whole(tmp_path):
-    """Positive control: a plain record's other keys are kept, the block merges into an
-    existing key, and the record is a plain single-linked file afterwards."""
-    staging = T.mod("learning.branch.staging")
-    ep, _host = bare_episode(tmp_path)
-    review = ep / "review.yaml"
-    review.write_text(yaml.safe_dump({
-        "worlds": {"b": {"decision": "accepted"}},
-        "episode": {"outcome": "accepted", "reason": "all worlds agreed"}}), encoding="utf-8")
-
-    with S.open_episode(ep) as episode:
-        staging.merge_review(episode, "episode", {"decision": "rejected"})
-
-    doc = yaml.safe_load(review.read_text(encoding="utf-8"))
-    assert doc == {"worlds": {"b": {"decision": "accepted"}},
-                   "episode": {"outcome": "accepted", "reason": "all worlds agreed",
-                               "decision": "rejected"}}
-    assert stat.S_ISREG(os.lstat(review).st_mode)
-    assert os.lstat(review).st_nlink == 1
-
-
-def test_o4_2_merge_review_does_not_read_through_a_hard_link_at_the_record(tmp_path):
-    """A hard link at `review.yaml` whose other name holds bytes that are not text is the
-    view's refusal — the other name's bytes are never decoded — so the merge is
-    `StagingRefused` naming the alias reason (R1), and nothing changes."""
-    staging = T.mod("learning.branch.staging")
-    ep, host = bare_episode(tmp_path)
-    other = host / "other-name-of-review.yaml"
-    other.write_bytes(b"\xff\xfe host bytes, not text\n")
-    os.link(other, ep / "review.yaml")
-    before = S.census(tmp_path)
-
-    with S.open_episode(ep) as episode:
-        raised = S.raised_by(lambda: staging.merge_review(episode, "teardown", {"ok": False}))
-
-    assert isinstance(raised, staging.StagingRefused), f"merge over a hard link: {raised!r}"
-    assert "aliased" in str(raised), raised
-    assert "codec" not in str(raised), f"the other name's bytes were decoded: {raised}"
-    assert S.census(tmp_path) == before, "a refused merge changed the tree"
-    assert os.lstat(other).st_nlink == 2
-
-
-def test_o4_2_merge_review_refuses_a_symlink_at_the_record_and_leaves_it(tmp_path):
-    """A symlink at `review.yaml` is the view's refusal: `StagingRefused` naming the alias
-    reason (R1), nothing written, the link and what it reaches left as they were."""
-    staging = T.mod("learning.branch.staging")
-    ep, host = bare_episode(tmp_path)
-    target = host / "review-target.yaml"
-    target.write_text(yaml.safe_dump({"worlds": {"x": 1}}), encoding="utf-8")
-    (ep / "review.yaml").symlink_to(target)
-    before = S.census(tmp_path)
-    with S.open_episode(ep) as episode:
-        raised = S.raised_by(lambda: staging.merge_review(episode, "episode", {"o": 1}))
-    assert isinstance(raised, staging.StagingRefused), f"merge over a symlink: {raised!r}"
-    assert "aliased" in str(raised), raised
-    assert S.census(tmp_path) == before
 
 
 # =======================================================================================
@@ -441,43 +276,6 @@ def test_o4_8_1_a_bad_world_id_is_a_ledger_error_at_construction(tmp_path, world
 
 
 # =======================================================================================
-# D4' — one scratch Episode serves every world of a review
-# =======================================================================================
-
-def _base_call(ledger: Any, host: str) -> Any:
-    return ledger.ServedCall(system="cmdb", verb="get-host", params={"host": host},
-                             payload_text=json.dumps({"owner": host}),
-                             source=ledger.BASE, world_id=None)
-
-
-def test_d4_the_scratch_ledger_serves_two_worlds_on_one_scratch_episode(tmp_path):
-    """`review.scratch_ledger(scratch, world_label=...)` takes the review's one scratch
-    `Episode`: two worlds' ledgers share its base (created empty once, the second call
-    tolerating the existing file) and each writes only its own `served/<label>.jsonl`.
-    A scratch whose base holds rows is still the review's refusal (a replay through a recording
-    agrees with itself) — control for the two ledgers above, on the same address."""
-    ledger = T.mod("learning.branch.ledger")
-    review = T.mod("learning.branch.review")
-    with S.create_episode(tmp_path / "review-scratch" / "scratch") as scratch:
-        b = review.scratch_ledger(scratch, world_label="b")
-        c = review.scratch_ledger(scratch, world_label="c")
-        base = scratch.dir / "served" / "base.jsonl"
-        assert Path(b.base_path) == Path(c.base_path) == base
-        assert base.read_bytes() == b"", "the scratch base is not empty"
-        assert Path(b.path) != Path(c.path)
-        b.record(_base_call(ledger, "for-b"))
-        c.record(_base_call(ledger, "for-c"))
-        assert read_jsonl_rows(Path(b.path)) == [_base_call(ledger, "for-b").row()]
-        assert read_jsonl_rows(Path(c.path)) == [_base_call(ledger, "for-c").row()]
-        assert base.read_bytes() == b"", "a world's rows reached the scratch base"
-
-        base.write_text(json.dumps(_base_call(ledger, "recorded").row()) + "\n",
-                        encoding="utf-8")
-        with pytest.raises(review.ReviewError, match="holds rows"):
-            review.scratch_ledger(scratch, world_label="d")
-
-
-# =======================================================================================
 # O4.5 — the priming claim; prepare_episode returns the Episode
 # =======================================================================================
 
@@ -535,10 +333,11 @@ def test_o4_5_prepare_episode_returns_the_held_episode_and_the_claim_is_released
 def test_o4_5_an_occupied_or_aliased_claim_is_the_same_ledger_error_and_primes_nothing(
         tmp_path, roots, kind):
     """An occupied claim (a plain file: another launcher) and an alias at the claim are the one
-    `LedgerError` naming another launcher; the primer never runs, the claim is left exactly as
-    it was, and `prepare_episode` closed the episode it created before raising (no descriptor
-    is left open on the episode dir while the refusal is still alive)."""
-    cli, src, tenant, ep = _prime_setup(tmp_path)
+    `LedgerError` naming another launcher; the primer never runs and the claim is left exactly
+    as it was. Driven through `_prime_once` on an `Episode` held over the planted directory:
+    since #1224 `prepare_episode` never adopts an existing directory (a taken name mints
+    `-r<n>`), so only the claim stands between two primers of one episode."""
+    cli, src, _tenant, ep = _prime_setup(tmp_path)
     host = tmp_path / "host"
     host.mkdir()
     claim = ep / "served" / ".priming"
@@ -552,12 +351,13 @@ def test_o4_5_an_occupied_or_aliased_claim_is_the_same_ledger_error_and_primes_n
     def never(*_a: Any, **_kw: Any) -> Any:
         pytest.fail("the primer ran past an occupied or aliased claim")
 
-    with pytest.raises(T.mod("learning.branch.ledger").LedgerError,
-                       match="another launcher is priming") as refused:
-        cli.prepare_episode(T.EPISODE_ID, src, tenant=tenant, prime=never)
+    with S.open_episode(ep) as episode, pytest.raises(
+            T.mod("learning.branch.ledger").LedgerError,
+            match="another launcher is priming") as refused:
+        cli._prime_once(episode, T.EPISODE_ID, src, never)
     assert S.census(tmp_path) == before
     assert refused.value is not None
-    assert S.open_fds_on(ep) == [], "prepare_episode left its episode open on its own refusal"
+    assert S.open_fds_on(ep) == [], "the refused claim left a descriptor open on the episode dir"
 
 
 class PrimerFailed(Exception):
@@ -669,15 +469,24 @@ class ScriptedJudge:
         return self.by_agent.get(agent_id, self.default)
 
 
+def _draw0_asks() -> list[str]:
+    """Every ask of world `b`'s draw 0: the first and its re-asks after a refused reply (N22,
+    `judge._REPLY_ATTEMPTS` asks per draw)."""
+    attempts = J.mod("learning.judge")._REPLY_ATTEMPTS
+    return ["judge:b:0", *(f"judge:b:0:{a}" for a in range(1, attempts))]
+
+
 def _malformed_first() -> ScriptedJudge:
+    """Every ask of draw 0 answered malformed, so the draw writes nothing (its stale file is
+    removed) and each ask counts a malformed reply; every other ask answered well."""
     good = J.as_reply_text(J.reply_doc())
     bad = J.as_reply_text(J.reply_doc(), malformed="lookalike-bucket")
-    return ScriptedJudge({"judge:b:0": bad}, default=good)
+    return ScriptedJudge(dict.fromkeys(_draw0_asks(), bad), default=good)
 
 
 def _judged_episode(tmp_path: Path) -> Path:
-    """An accepted, archived episode whose world `b` is graded (it carries a staged row)."""
-    return J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    """An accepted, archived episode whose world `b` is graded (it carries an oracle row)."""
+    return J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
 
 
 @pytest.mark.parametrize("target", ["inside", "outside"])
@@ -709,7 +518,7 @@ def test_o4_6_a_link_at_a_malformed_draws_name_is_refused_logged_and_left_and_th
     assert outside.read_text(encoding="utf-8") == "findings: [{bucket: planted}]\n"
     assert (draw_dir / "1.yaml").is_file(), "the loop did not go on to write draw 1"
     row = J.world_rows(J.judge_record(ep))["b"]
-    assert (row["malformed_replies"], row["completed_draws"]) == (1, 1), row
+    assert (row["malformed_replies"], row["completed_draws"]) == (len(_draw0_asks()), 1), row
     assert S.warned(caplog, "0.yaml", "aliased"), "the refused draw removal was not logged"
     with _io.bind(ep) as view:
         draws, report = enqueue.draws_on_disk_report(view, "b")
@@ -775,15 +584,15 @@ def test_s1_any_other_error_removing_a_stale_draw_stops_the_pass_and_keeps_nothi
     refused = S.refusal_in(raised)
     assert refused is not None, f"a {errno.errorcode[code]} removing a draw was contained: {raised!r}"
     assert refused.errno == code, raised
-    assert judge.agent_ids == ["judge:b:0"], (
+    assert judge.agent_ids == _draw0_asks(), (
         f"the loop went on past a {errno.errorcode[code]}: {judge.agent_ids}")
     assert draw.read_text(encoding="utf-8") == "findings: [{bucket: stale}]\n"
 
     judge = _malformed_first()
     with S.open_episode(ep) as episode:
-        completed, _spread, documents, malformed = _run_draws(episode, judge)
-    assert judge.agent_ids == ["judge:b:0", "judge:b:1"]
-    assert (completed, malformed) == (1, 1)
+        completed, documents, malformed = _run_draws(episode, judge)
+    assert judge.agent_ids == [*_draw0_asks(), "judge:b:1"]
+    assert (completed, malformed) == (1, len(_draw0_asks()))
     assert sorted(documents) == [1]
     assert not os.path.lexists(draw), "control: the stale plain draw survived"
 
@@ -802,10 +611,11 @@ def test_s1_a_non_plain_draw_is_contained_logged_and_left(tmp_path, caplog, kind
 
     judge = _malformed_first()
     with S.open_episode(ep) as episode:
-        completed, _spread, _docs, malformed = S.in_time(lambda: _run_draws(episode, judge),
+        completed, _docs, malformed = S.in_time(lambda: _run_draws(episode, judge),
                                                          fifo=planted.fifo)
-    assert judge.agent_ids == ["judge:b:0", "judge:b:1"], "the loop stopped at a contained row"
-    assert (completed, malformed) == (1, 1)
+    assert judge.agent_ids == [*_draw0_asks(), "judge:b:1"], (
+        "the loop stopped at a contained row")
+    assert (completed, malformed) == (1, len(_draw0_asks()))
     assert os.path.lexists(draw), f"the {kind} at the draw's name was removed"
     assert S.warned(caplog, "0.yaml"), "the refused removal was not logged"
 
@@ -939,33 +749,6 @@ def test_o4_8_2_render_episode_refuses_a_missing_episode_dir_and_does_not_recrea
 
 
 # =======================================================================================
-# D3' "Changed" — episode.py's served-world read makes no minting check
-# =======================================================================================
-
-def test_d3_the_episode_reader_reads_a_legacy_non_case_stable_worlds_served_file(tmp_path):
-    """`episode.delta_o` reads each world's served file by its layout name (an N-b read), not
-    through `Ledger.for_world`, whose construction now applies the minting check: an episode
-    written before labels had to be case-stable — a world `B` whose token's label is not
-    case-stable — still reads, and its keys are classified. Holds today; pinned so the rev-2
-    `for_world` refusal does not reach the reader."""
-    episode_mod = T.mod("learning.branch.episode")
-    doc = T.family_doc(worlds=[T.base_world(), T.world_doc("B")])
-    ep = T.episode(tmp_path, doc=doc)
-    for label in ("a", "B"):
-        T.archived_world(ep, label)
-    T.base_capture(ep, [T.captured_row(key="k1"), T.captured_row(key="k2")])
-    (ep / "served" / f"{T.world_token('B')}.jsonl").write_text(
-        json.dumps(T.captured_row(key="k1")) + "\n"
-        + json.dumps(T.captured_row(key="k2", payload={"hits": [{"_id": "planted"}]})) + "\n",
-        encoding="utf-8")
-
-    out = episode_mod.delta_o(ep)
-
-    assert out["B"]["k1"] == "same", out
-    assert "k2" in out["B"], f"the legacy world's served file was not read: {out}"
-
-
-# =======================================================================================
 # The sibling door — run.py --resume refuses a manifest not named family.yaml
 # =======================================================================================
 
@@ -979,6 +762,11 @@ class Recorder:
         self.calls.append(kw)
         (kw["run_dir"] / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
         return {"output": "done", "requests": 1, "truncated_by": None}
+
+
+def _no_preflight(*_a: Any, **_kw: Any) -> int:
+    """`run.main`'s role-preflight seam, passing (it is asked with `branching=`)."""
+    return 0
 
 
 def _resume_argv(manifest: Path) -> list[str]:
@@ -1007,7 +795,7 @@ def test_the_sibling_door_refuses_a_resume_manifest_not_named_family_yaml(tmp_pa
 
     with pytest.raises(SystemExit) as refused:
         run.main(_resume_argv(other), lifecycle=lifecycle, visualize=lambda _run, **kw: None,
-                 preflight=T.no_preflight, materialize=materialize)
+                 preflight=_no_preflight, materialize=materialize)
     assert refused.value.code not in (0, None), refused.value.code
     assert str(LAYOUT.family) in str(refused.value.code), (
         f"the refusal does not name the manifest's own name: {refused.value.code!r}")
@@ -1016,7 +804,7 @@ def test_the_sibling_door_refuses_a_resume_manifest_not_named_family_yaml(tmp_pa
 
     lifecycle = Recorder()
     rc = run.main(_resume_argv(ep / "family.yaml"), lifecycle=lifecycle,
-                  visualize=lambda _run, **kw: None, preflight=T.no_preflight)
+                  visualize=lambda _run, **kw: None, preflight=_no_preflight)
     assert rc == 0
     assert len(lifecycle.calls) == 1
 
@@ -1038,7 +826,7 @@ def test_the_sibling_door_holds_one_descriptor_on_the_episode_for_the_whole_run(
             return super().__call__(**kw)
 
     rc = run.main(_resume_argv(ep / "family.yaml"), lifecycle=Holding(),
-                  visualize=lambda _run, **kw: None, preflight=T.no_preflight)
+                  visualize=lambda _run, **kw: None, preflight=_no_preflight)
     assert rc == 0
     assert "fds" in seen, "the lifecycle never ran"
     assert len(seen["fds"]) == 1, (

@@ -33,9 +33,9 @@ from defender._episode_handle import Episode  # noqa: E402
 #: (the run's resolved `RunTenant` — its settings and grants, which the query tool needs) — D3:
 #: "The `materialize` seam gains `tenant_id`; `_Investigate` does not." It gains no tenant ID.
 # `episode` (#1133 rev 2): the sibling's held episode, threaded beside `world` for the world
-# ledger's writes.
+# ledger's writes. `oracle` / `verifier` (#1224): a fact world's oracle and verifier models.
 INVESTIGATE_PARAMS = ["self", "alert_path", "run_dir", "run_id", "defender_dir", "model_name",
-                      "model_override", "box", "tenant", "world", "episode"]
+                      "model_override", "box", "tenant", "world", "episode", "oracle", "verifier"]
 
 
 # ======================================================================================
@@ -200,7 +200,7 @@ def test_d3_materialize_seam_tenant(tmp_path, data_root):
     For a fresh run AND for a `--resume` sibling (which names T too, checked against its
     source's record): the seam is handed the tenant by keyword. `_Investigate` gains no tenant
     id — everything it drives follows from `run_dir` (C24, C29); the resolved `RunTenant` it
-    takes is #1106's."""
+    takes is #1106's, and the `oracle` / `verifier` model seams #1224's."""
     H.make_tenant(data_root, H.VALID_ID)
     alert = H.plant_alert(tmp_path / "in")
     fresh = _accepted([str(alert), "--tenant", H.VALID_ID], H.Recorder(tmp_path / "run"))

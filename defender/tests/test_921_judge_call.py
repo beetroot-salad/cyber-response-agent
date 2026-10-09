@@ -225,7 +225,7 @@ def test_921_no_two_judge_calls_of_one_family_share_a_trace_name(tmp_path):
     family and assert one trace name per call.
     """
     ep = _episode(tmp_path)
-    judge = _grade(tmp_path, ep, J.FakeJudge(default=J.as_reply_text(J.reply_doc())), draws=3)
+    judge = _grade(tmp_path, ep, J.scripted_judge(), draws=3)
 
     # #1007 M5 added a THIRD caller (the family-level draw, `judge:family:<n>`) to the fan-out
     # beside the two per-world ones — 3 callers x 3 draws = 9, not 6.
@@ -341,7 +341,7 @@ def test_921_reply_is_validated_into_JudgeReply_before_anything_reads_it(tmp_pat
     """
     ep = _episode(tmp_path)
     bad = J.as_reply_text(J.reply_doc(), malformed="lookalike-bucket")
-    judge = J.FakeJudge(default=bad)
+    judge = J.FakeJudge(default=bad, family_default=J.as_reply_text(J.family_reply()))
     _grade(tmp_path, ep, judge, draws=1)
 
     assert not J.draw_files(ep, "b"), (
@@ -349,7 +349,9 @@ def test_921_reply_is_validated_into_JudgeReply_before_anything_reads_it(tmp_pat
     record = J.judge_record(ep)
     rows = J.world_rows(record)
     assert rows["b"]["completed_draws"] == 0, "an invalid reply counted as a completed draw"
-    assert rows["b"]["malformed_replies"] == 1, (
+    # #1224 (N22): a refused reply is asked again, up to three asks per draw, and every
+    # refused ask is counted — one draw, three malformed replies.
+    assert rows["b"]["malformed_replies"] == 3, (
         "the malformed reply was skipped without a count; a silent skip and a counted skip are "
         "the same pass and different evidence")
     assert record["enqueued_rows"] == 0, "a finding was enqueued off a reply that never parsed"
@@ -451,7 +453,7 @@ def test_921_judge_call_is_zero_grant_and_deny_all(tmp_path):
     pass on a judge that never calls anything.
     """
     ep = _episode(tmp_path)
-    judge = _grade(tmp_path, ep, J.FakeJudge(default=J.as_reply_text(J.reply_doc())), draws=1)
+    judge = _grade(tmp_path, ep, J.scripted_judge(), draws=1)
 
     # #1007 M5 adds a THIRD call (the family-level draw) beside the two per-world ones.
     assert judge.calls == 3, "the positive control failed: the model was never reached"
@@ -527,21 +529,30 @@ def test_921_draw_count_is_a_knob_and_the_family_record_reports_the_spread(tmp_p
     """
     monkeypatch.setenv(J.DRAWS_KNOB, "3")
     ep = _episode(tmp_path)
-    varied = [J.as_reply_text(J.reply_doc(findings=[J.finding_doc(bucket=bucket)]))
+    # #1224: the bucket is the model's own per draw (`bucket` on the reply), and the row
+    # reports every draw's answer on `draws`, naming a row bucket only where all draws agree.
+    varied = [J.as_reply_text(J.reply_doc(bucket=bucket,
+                                          findings=[J.finding_doc(bucket=bucket)]))
               for bucket in ("lead-set", "lead-quality", "lead-set")]
-    _grade(tmp_path, ep, J.FakeJudge(replies=varied * 2, default=varied[0]))
+    family = J.as_reply_text(J.family_reply())
+    _grade(tmp_path, ep, J.FakeJudge(replies=varied * 2, default=varied[0],
+                                     family_default=family))
 
     record = J.judge_record(ep)
     assert record["draws"]["configured"] == 3
-    spread = J.world_rows(record)["b"]["spread"]
-    assert spread == {"lead-set": 2, "lead-quality": 1}, (
+    row = J.world_rows(record)["b"]
+    spread = [d["bucket"] for d in row["draws"]]
+    assert spread == ["lead-set", "lead-quality", "lead-set"], (
         f"the spread was averaged away rather than reported: {spread}")
+    assert row["bucket"] is None, (
+        f"disagreeing draws were reduced to one bucket: {row['bucket']!r}")
+    assert row["draws_disagree"] is True, "disagreeing draws were not flagged on the row"
 
     # The knob SHRINKS on a retry: the stale draw file from the wider attempt is still there and
     # the record says how many draws this pass completed, so the two are distinguishable.
     (ep / "judge.yaml").unlink()
     monkeypatch.setenv(J.DRAWS_KNOB, "2")
-    _grade(tmp_path, ep, J.FakeJudge(default=varied[0]))
+    _grade(tmp_path, ep, J.FakeJudge(default=varied[0], family_default=family))
     assert len(J.draw_files(ep, "b")) == 3, "P4 says a retry clobbers rather than cleans up"
     assert J.judge_record(ep)["draws"] == {"configured": 2, "completed": 2}, (
         "the record does not distinguish this pass's draws from the files on disk")

@@ -391,10 +391,12 @@ class Recorder:
         self.order: list[str] = []
         self.materialize_calls: list[dict[str, Any]] = []
         self.preflight_calls: list[Any] = []
+        self.preflight_branching: list[bool] = []
 
-    def preflight(self, model: str | None = None) -> int:
+    def preflight(self, model: str | None = None, *, branching: bool = False) -> int:
         self.order.append("preflight")
         self.preflight_calls.append(model)
+        self.preflight_branching.append(branching)
         return 0
 
     def materialize(self, alert: Path, run_id: str | None, **kw: Any) -> Any:
@@ -477,11 +479,31 @@ def launch_argv(source: Path, message_id: int = T.BRANCH_MESSAGE_ID) -> list[str
     return [str(source), str(message_id), "--continuation-prompt", CONTINUATION]
 
 
+def no_preflight(_model: str | None = None, *, branching: bool = False) -> int:
+    """The role-model preflight, neutralised (`_triplet_947.no_preflight`), taking the
+    launcher's `branching=` (#1224: a branching process also preflights its oracle roles)."""
+    return 0
+
+
+#: The answer `source_run`'s one captured call carries (`_triplet_947.capture_call`'s default).
+SOURCE_ANSWER = {"hits": [{"_id": "d1"}]}
+
+
+def serving_oracle() -> dict[str, Any]:
+    """Pre-flight's model seams (#1224) for a launch that must start its siblings: an oracle
+    serving `source_run`'s one captured call unchanged and a verifier passing it, so every
+    fact world calibrates and the family is accepted."""
+    from defender.tests.live_oracle_1224 import _spec1224 as S
+
+    return {"oracle": S.oracle(then=S.submit(SOURCE_ANSWER, S.EMPTY_CLAIM)).model,
+            "verifier": S.passing_verifier().model}
+
+
 def drive_launch(source: Path, *, spawn: Any = None, **seams: Any) -> BaseException | int:
     """Drive the REAL `learning/branch/cli.main` over one source, the role preflight
-    neutralised (`_triplet_947.no_preflight`) so a refusal is never the host's credentials.
+    neutralised (`no_preflight`) so a refusal is never the host's credentials.
     Returns the exit status, or the refusal it raised."""
-    seams.setdefault("preflight", T.no_preflight)
+    seams.setdefault("preflight", no_preflight)
     try:
         return branch_cli().main(launch_argv(source), spawn=spawn, **seams)
     except SystemExit as refused:

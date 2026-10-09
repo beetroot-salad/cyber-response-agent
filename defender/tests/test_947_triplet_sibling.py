@@ -1,7 +1,7 @@
 """#947 — a sibling is a `run.py --resume` PROCESS (M6, M7, O6, O9, O10).
 
-D1's whole content: the launcher writes the manifest, stages the corpus and starts N processes;
-learning never executes the driver in its own process. So `run.py` grows `--resume <manifest>
+D1's whole content: the launcher writes the manifest, pre-flights the family and starts N
+processes; learning never executes the driver in its own process. So `run.py` grows `--resume <manifest>
 --world X` and otherwise runs an ordinary run — its own preflight, run-dir materialisation and
 stamp, box, scrub and verdict, in that order — while the resume path refuses the ticket flag and
 forces the no-learn branch so a synthetic sibling never writes a ticket row or a queue marker.
@@ -43,6 +43,12 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 def _run():
     return T.mod("run")
+
+
+def _no_preflight(*_args, **_kw) -> int:
+    """`T.no_preflight`'s neutralised role preflight, taking the `branching=` keyword #1224's
+    `run.py` passes."""
+    return 0
 
 
 def _resume_argv(manifest, world="b", tenant=T.SOURCE_TENANT):
@@ -106,7 +112,7 @@ def test_947_sibling_runs_from_manifest_and_what_it_points_at(tmp_path):
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     order: list[str] = []
     rc = _run().main(_resume_argv(ep / "family.yaml"), lifecycle=_Recorder(order),
-                     visualize=lambda p, **kw: None, preflight=T.no_preflight)
+                     visualize=lambda p, **kw: None, preflight=_no_preflight)
     assert rc == 0
     assert order == ["lifecycle"]
 
@@ -119,7 +125,7 @@ def test_947_resume_run_returns_its_own_run_dir_and_verdict(tmp_path):
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     rec = _Recorder([])
     rc = _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec,
-                     visualize=lambda p, **kw: None, preflight=T.no_preflight)
+                     visualize=lambda p, **kw: None, preflight=_no_preflight)
     run_dir = rec.kwargs["run_dir"]
     assert rc == 0
     assert (run_dir / "report.md").is_file()
@@ -135,7 +141,7 @@ def test_947_resume_with_a_world_the_manifest_does_not_declare_refuses_before_ma
     with pytest.raises(SystemExit) as bad:
         _run().main(_resume_argv(ep / "family.yaml", world="zzz"),
                     lifecycle=_Recorder([]), visualize=lambda p, **kw: None,
-                    preflight=T.no_preflight)
+                    preflight=_no_preflight)
     assert "zzz" in str(bad.value)
     assert sorted(p.name for p in base.iterdir()) == before
 
@@ -150,7 +156,7 @@ def test_947_resume_refuses_update_ticket(tmp_path, d9_tenant):
     with pytest.raises(SystemExit) as bad:
         _run().main([*_resume_argv(manifest), "--update-ticket"],
                     lifecycle=_Recorder([]), visualize=lambda p, **kw: None,
-                    preflight=T.no_preflight)
+                    preflight=_no_preflight)
     assert "--update-ticket" in str(bad.value)
 
 
@@ -180,7 +186,7 @@ def test_947_a_sibling_run_writes_no_ticket_row(tmp_path):
 
     writer = Writer()
     _run().main(_resume_argv(ep / "family.yaml"), lifecycle=_Recorder([]),
-                visualize=lambda p, **kw: None, preflight=T.no_preflight, ticket_writer=writer)
+                visualize=lambda p, **kw: None, preflight=_no_preflight, ticket_writer=writer)
     assert writer.calls == []
 
 
@@ -194,7 +200,7 @@ def test_947_a_sibling_run_writes_no_queue_marker(tmp_path):
     seen: list[str] = []
     rec = _Recorder([])
     _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
-                preflight=T.no_preflight,
+                preflight=_no_preflight,
                 enqueue=lambda run_dir, alert, truncated_by=None: seen.append(run_dir.name))
     assert seen == [], "a sibling reached the curation lane"
     assert rec.kwargs["run_dir"].name == f"{T.EPISODE_ID}-b"
@@ -208,7 +214,7 @@ def test_947_an_ordinary_run_still_enqueues_for_curation(tmp_path):
     tenant_id = T.mod("_tenant").tenant_of_run_dir(current_data_root(), src)
     seen: list[str] = []
     _run().main([str(src / "alert.json"), "--tenant", tenant_id], lifecycle=_Recorder([]),
-                visualize=lambda p, **kw: None, preflight=T.no_preflight,
+                visualize=lambda p, **kw: None, preflight=_no_preflight,
                 enqueue=lambda run_dir, alert, truncated_by=None: seen.append(run_dir.name))
     assert seen, "an ordinary run reached no curation lane"
 
@@ -235,7 +241,7 @@ def test_947_world_is_threaded_through_investigate_drive_and_lifecycle(tmp_path)
 
 def test_947_resume_path_builds_a_world_registry_and_world_ledger(tmp_path):
     """On the resume path the drive function builds a world registry over the world's own
-    ledger file and the world's overlay, and hands it to the driver as the injected verb
+    ledger file and the world's facts, and hands it to the driver as the injected verb
     registry."""
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
@@ -308,42 +314,17 @@ def test_947_episode_dir_is_derived_as_the_manifest_parent(tmp_path):
     assert world.ledger_path == ep / "served" / f"{TOKEN_B}.jsonl"
 
 
-def test_a_manifest_written_before_1106_resumes_against_its_tenants_configured_patterns(
-        tmp_path):
-    """A manifest authored before #1106 records no `configured_patterns`: its overlays were
-    judged against the checkout's elastic config, which now lives in the tenant's settings.
-    World b's overlay is keyed on a configured-only pattern (`logs-*`, which the capture never
-    named), so a loader handed no configured set refuses it — the control — while the sibling's
-    own resume, which hands its tenant's patterns in, loads the world."""
-    import pytest
-
-    from defender.runtime.branch import _family
-
+def test_a_sibling_resumes_through_its_requested_tenant(tmp_path):
+    """The entry point end to end: `run.py --resume --tenant T` reaches the lifecycle with the
+    world as the manifest records it — its served systems read off the document, no settings
+    looked up — and with T as the run's tenant."""
     base, src = T.runs_base(tmp_path)
-    doc = T.family_doc(source_run_dir=str(src))
-    del doc["configured_patterns"]
-    assert "captured_patterns" not in doc, "the capture must not name the pattern on its own"
-    ep = T.episode(tmp_path, doc=doc)
-    with Episode.open(ep) as episode, pytest.raises(_family.FamilyError, match="logs"):
-        _family.load_family(episode.view())
-    world = _run().resume_world(
-        Episode.open(ep), "b", tenant=T1106.fixture_run_tenant)
-    assert world.family.configured_patterns == T.CONFIGURED
-
-
-def test_a_sibling_resumes_a_pre_1106_manifest_through_its_requested_tenant(tmp_path):
-    """The entry point end to end: `run.py --resume --tenant T` on a manifest that records no
-    configured set looks T's settings up and judges the overlays against its patterns,
-    reaching the lifecycle with the world. The loader-level control is the test above."""
-    base, src = T.runs_base(tmp_path)
-    doc = T.family_doc(source_run_dir=str(src))
-    del doc["configured_patterns"]
-    ep = T.episode(tmp_path, doc=doc)
+    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     lifecycle = _Recorder([])
     rc = _run().main([*_resume_argv(ep / "family.yaml"), "--no-learn"],
-                     lifecycle=lifecycle, visualize=lambda p, **kw: None, preflight=T.no_preflight)
+                     lifecycle=lifecycle, visualize=lambda p, **kw: None, preflight=_no_preflight)
     assert rc == 0
-    assert lifecycle.kwargs["world"].family.configured_patterns == T.CONFIGURED
+    assert lifecycle.kwargs["world"].family.served_systems == T.SERVED_SYSTEMS
     assert lifecycle.kwargs["tenant"].tenant_id == T1106.PLAYGROUND_ID
 
 
@@ -352,7 +333,7 @@ def test_a_sibling_whose_runs_base_names_another_tenant_than_the_episodes_is_ref
     """A sibling runs on the EPISODE's tenant — the one its request names, which the source
     run's runs-base record agrees with. Its own runs base (`<episode>/runs`) holding a record
     that names another tenant must refuse naming both, not stamp that tenant's record over a
-    run of the episode's staged corpus. The control is the resume above."""
+    run of the episode's world. The control is the resume above."""
     from defender import _tenant
 
     base, src = T.runs_base(tmp_path)
@@ -364,7 +345,7 @@ def test_a_sibling_whose_runs_base_names_another_tenant_than_the_episodes_is_ref
     lifecycle = _Recorder([])
     with pytest.raises(SystemExit) as refused:
         _run().main([*_resume_argv(ep / "family.yaml"), "--no-learn"],
-                    lifecycle=lifecycle, visualize=lambda p, **kw: None, preflight=T.no_preflight)
+                    lifecycle=lifecycle, visualize=lambda p, **kw: None, preflight=_no_preflight)
     text = str(refused.value)
     assert "'acme'" in text, text
     assert repr(T1106.PLAYGROUND_ID) in text, text
@@ -372,32 +353,19 @@ def test_a_sibling_whose_runs_base_names_another_tenant_than_the_episodes_is_ref
 
 
 def test_947_every_comparing_site_reads_the_same_world_token(tmp_path):
-    """Every site that compares a world reads ONE spelling of the world token: the alias name's
-    head, the world ledger's filename, the ledger rows a sibling writes, and the registry's own
-    recorded identity all carry the same composed token."""
-    confinement = T.mod("scripts.adapters.confinement")
+    """Every site that compares a world reads ONE spelling of the world token: the resumed
+    world's identity, the world ledger's filename, and the ledger the episode derives for that
+    identity all carry the same composed token."""
+    ledger_mod = T.mod("learning.branch.ledger")
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     world = _run().resume_world(
         Episode.open(ep), "b", tenant=T1106.fixture_run_tenant)
     assert world.token == TOKEN_B
-    assert confinement.world_view(T.EVENTS_PATTERN, world.token).startswith(f"wv-{TOKEN_B}-")
+    assert world.world_id == TOKEN_B
     assert world.ledger_path.name == f"{TOKEN_B}.jsonl"
-    assert confinement.is_world_view(f"wv-{TOKEN_B}-logs-", T.CONFIGURED, world.token)
-
-
-def test_947_world_applier_compares_the_same_world_token_the_other_three_sites_use(tmp_path):
-    """The applier compares the SAME world token the other three sites do: a call it stages
-    carries the composed token, and a call carrying the short label alone is not this world's."""
-    applier_mod = T.mod("learning.branch.estate.applier")
-    base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
-    world = _run().resume_world(
-        Episode.open(ep), "b", tenant=T1106.fixture_run_tenant)
-    applier = applier_mod.WorldApplier()
-    prepared = applier.prepare("elastic", "query", {"index": T.EVENTS_PATTERN}, world, None)
-    assert prepared["index"] == f"wv-{TOKEN_B}-logs-"
-    assert applier._staging_world(world, "elastic") == TOKEN_B
+    with Episode.open(ep) as episode:
+        assert ledger_mod.Ledger.for_world(episode, world.world_id).path == world.ledger_path
 
 
 # ---------------------------------------------------------------------------------------
@@ -425,7 +393,7 @@ def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path
             tenant.tenant_id, run_dir.name, runs_base=base)
 
     _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
-                preflight=lambda m: order.append("preflight") or 0,
+                preflight=lambda m, **_kw: order.append("preflight") or 0,
                 materialize=materialize)
     assert order == ["preflight", "materialize", "lifecycle"]
     assert rec.kwargs["run_dir"] == base / f"{T.EPISODE_ID}-b", (
@@ -461,7 +429,7 @@ def test_947_each_sibling_captures_its_own_provenance_stamp(tmp_path):
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     rec = _Recorder([])
     _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
-                preflight=T.no_preflight)
+                preflight=_no_preflight)
     stamp = rec.kwargs["run_dir"] / "provenance.json"
     assert stamp.is_file()
     assert "commit" in json.loads(stamp.read_text(encoding="utf-8"))
@@ -474,7 +442,7 @@ def test_947_sibling_run_id_is_episode_id_dash_x_beside_the_source(tmp_path):
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     rec = _Recorder([])
     _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
-                preflight=T.no_preflight)
+                preflight=_no_preflight)
     assert rec.kwargs["run_dir"].name == f"{T.EPISODE_ID}-b"
     assert T.sym("_run_id", "is_valid_run_id")(f"{T.EPISODE_ID}-b")
 
@@ -491,5 +459,5 @@ def test_947_run_py_screens_the_source_alert_before_reading_it(tmp_path):
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     with pytest.raises(SystemExit) as bad:
         _run().main(_resume_argv(ep / "family.yaml"), lifecycle=_Recorder([]),
-                    visualize=lambda p, **kw: None, preflight=T.no_preflight)
+                    visualize=lambda p, **kw: None, preflight=_no_preflight)
     assert "alert" in str(bad.value)

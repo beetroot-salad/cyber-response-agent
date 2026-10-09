@@ -106,7 +106,7 @@ demands:
       - "drives(run_episode->render_episode)"
       - "interacts(render_episode->timing_json)"
       - "interacts(render_episode->judge_yaml)"
-    discharged_by: test_1025_the_launcher_renders_the_page_after_the_judge_frame_with_all_six_steps_on_it
+    discharged_by: test_1025_the_launcher_renders_the_page_after_the_judge_frame_with_every_step_on_it
     seed_docstring: >-
       After `cli.main` returns 0 on a full fake-seamed episode, `learning.html` sits beside
       `judge.yaml` and its stage table carries all six `Step` rows with a wall each, `judge`
@@ -212,7 +212,7 @@ demands:
     binds:
       - "interacts(render_episode->judge_yaml)"
       - "interacts(render_episode->sec_worlds)"
-    discharged_by: test_1025_the_ladder_block_walks_the_stored_flags_in_ladder_order_and_shows_the_stored_bucket_even_when_the_flags_would_not_derive_it
+    discharged_by: test_1025_the_world_block_shows_the_verdict_line_and_the_stored_bucket_never_a_recomputed_one
     seed_docstring: >-
       For `prior_fake_key_precedent` the ladder lists `holding_queried → doctored_answer_served
       (+has_refused) → difference_shown → verdict==declared → resolution_moved` in that order
@@ -222,12 +222,13 @@ demands:
 
   - id: d09_ladder_caveat_only_when_has_refused_branch_reached
     kind: domain-outcome
-    form: test
+    form: clause
     source: "amendment 5 (archives predate prep 2b); F11"
     binds:
       - "judge_yaml.domain.distinguished[has_refused-absent]"
       - "interacts(render_episode->sec_worlds)"
-    discharged_by: test_1025_a_row_without_has_refused_gets_the_caveat_only_on_the_not_doctored_branch_and_never_an_invented_value
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the page's review, staging, withheld-finding and mechanical-ladder sections; `test_1025_a_row_without_has_refused_gets_the_caveat_only_on_the_not_doctored_branch_and_never_an_invented_value`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       A row `{holding_queried: True, doctored_answer_served: False}` with no `has_refused`
       renders the caveat sentence and no `has_refused = …` value; the same row with
@@ -243,7 +244,7 @@ demands:
       - "interacts(render_episode->judge_yaml)"
       - "judge_yaml.domain.distinguished[pre-1007-row]"
       - "interacts(render_episode->sec_worlds)"
-    discharged_by: test_1025_world_chips_are_the_named_fields_say_unrecorded_when_absent_and_sit_beside_the_ladder_not_instead_of_it
+    discharged_by: test_1025_world_chips_carry_the_judge_models_systems_and_every_draws_answer_and_never_a_default
     seed_docstring: >-
       Each graded world renders chips for exactly `holding_queried, doctored_answer_served,
       difference_shown, injected_present/injected_retrieved, capture_reasks_faulted,
@@ -281,7 +282,7 @@ demands:
       - "interacts(render_episode->draw_documents)"
       - "interacts(render_episode->judge_yaml)"
       - "judge_yaml.domain.distinguished[mechanical-world-findings-row]"
-    discharged_by: test_1025_every_finding_across_per_draw_docs_family_draws_and_mechanical_rows_renders_exactly_once_keyed_world_draw_index
+    discharged_by: test_1025_every_finding_across_per_draw_docs_and_family_draws_renders_exactly_once_keyed_world_draw_index
     seed_docstring: >-
       On the sample the page carries exactly 13 `f-<world>-<draw>-<index>` rows, each id once
       (4 defender enqueued, 4 withheld, 5 world-author across `no_remote_session/0/4`,
@@ -303,7 +304,7 @@ demands:
       - "judge_yaml.domain.distinguished[withheld-row]"
       - "interacts(render_episode->judge_yaml)"
       - "interacts(render_episode->sec_findings)"
-    discharged_by: test_1025_a_findings_disposition_reproduces_the_enqueues_partition_withheld_unqueueable_blocked_by_verdict_or_enqueued
+    discharged_by: test_1025_a_findings_disposition_reproduces_the_enqueues_partition_unqueueable_blocked_by_verdict_or_enqueued
     seed_docstring: >-
       Sample: `no_remote_session`'s 4 defender findings read "withheld —
       reachability_unmeasured", `prior_fake_key_precedent`'s 4 read enqueued (the episode has
@@ -343,12 +344,13 @@ demands:
 
   - id: d14_withheld_never_reads_as_rejected
     kind: negative
-    form: test
+    form: clause
     source: "issue fork 4; grounding recommendation (withheld grouping)"
     binds:
       - "interacts(render_episode->sec_findings)"
       - "judge_yaml.domain.distinguished[withheld-row]"
-    discharged_by: test_1025_withheld_findings_are_grouped_under_their_reason_apart_from_enqueued_rows_and_never_worded_as_rejected
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the page's review, staging, withheld-finding and mechanical-ladder sections; `test_1025_withheld_findings_are_grouped_under_their_reason_apart_from_enqueued_rows_and_never_worded_as_rejected`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       The withheld group's heading carries `reachability_unmeasured`, none of its rows share a
       group with an enqueued row, and the words "rejected"/"dropped" do not appear in a
@@ -408,7 +410,7 @@ demands:
       - "interacts(render_episode->sec_verdict)"
       - "interacts(render_episode->family_yaml)"
       - "interacts(render_episode->judge_yaml)"
-    discharged_by: test_1025_the_verdict_tile_carries_measuring_contrasting_and_verdict_equals_declared_counts_on_both_archives
+    discharged_by: test_1025_the_verdict_tile_carries_judged_and_verdict_equals_declared_counts_on_both_archives
     seed_docstring: >-
       Sample tile 1: "1 of 2 graded measuring · 0 of 1 contrast the control · verdict =
       declared on 0 of 1" beside `undecidable`; live-996: "1 of 1 graded measuring · 1 of 1
@@ -423,7 +425,7 @@ demands:
     binds:
       - "interacts(render_episode->sec_verdict)"
       - "judge_yaml.domain.distinguished[ungradable-row]"
-    discharged_by: test_1025_tiles_two_to_four_carry_measuring_of_graded_with_reasons_queued_of_total_split_and_cost_with_the_labelled_lower_bound
+    discharged_by: test_1025_tiles_two_to_four_carry_judged_of_rows_with_reasons_queued_of_total_split_and_cost_with_the_labelled_lower_bound
     seed_docstring: >-
       Sample: tile 2 "1 of 2" with caption "no_remote_session — reachability_unmeasured";
       tile 3 "9 of 13" split 4 defender / 5 world author / 4 withheld / 0 unqueueable /
@@ -479,7 +481,7 @@ demands:
     binds:
       - "interacts(render_episode->sec_verdict)"
       - "interacts(render_episode->judge_yaml)"
-    discharged_by: test_1025_queue_accounting_lists_per_queue_rows_destination_as_recorded_withheld_reasons_unqueueable_malformed_and_dropped_counts
+    discharged_by: test_1025_queue_accounting_lists_per_queue_rows_destination_as_recorded_unqueueable_malformed_and_dropped_counts
     seed_docstring: >-
       The collapsed details carry "defender: 4 enqueued to
       `/workspace/.claude/worktrees/episode-authkeys/.../findings.jsonl`" (the path as
@@ -495,7 +497,7 @@ demands:
       - "interacts(render_episode->sec_verdict)"
       - "judge_yaml.domain.distinguished[ungradable-row]"
       - "interacts(render_episode->review_yaml)"
-    discharged_by: test_1025_one_card_per_graded_world_with_declared_to_verdict_reason_or_bucket_heading_chips_and_a_footer_linking_its_findings_group
+    discharged_by: test_1025_one_card_per_graded_world_with_declared_to_verdict_bucket_and_systems_heading_and_a_footer_linking_its_findings_group
     seed_docstring: >-
       Sample: two cards; `no_remote_session`'s header "benign → inconclusive", heading
       "reachability_unmeasured", body the chips plus the first line of `envelope_failed`,
@@ -839,7 +841,7 @@ demands:
       - "drives(visualize_episode_main->render_episode)"
       - "interacts(render_episode->sec_stages)"
       - "interacts(render_episode->sec_records)"
-    discharged_by: test_1025_questioner_or_staging_abort_leaves_a_partial_directory
+    discharged_by: test_1025_questioner_or_preflight_abort_leaves_a_partial_directory
     seed_docstring: >-
       The launcher writes no page (the hook is after JUDGE). The standalone CLI renders when
       `family.yaml` exists: no-grade band, a stage row per `STEPS` member with walls for the
@@ -1123,14 +1125,15 @@ demands:
 
   - id: s_a_worlds_row_mechanical_world_findings_entry_and_a_real_numeric_draw_coexist_for_the_same_world
     kind: uniqueness
-    form: test
+    form: clause
     source: "45-dispositions (settled): a_worlds_row_mechanical_world_findings_entry_and_a_real_numeric_draw_coexist_for_the_same_world"
     binds:
       - "draw_documents.domain.distinguished[mechanical-and-numeric-coexist]"
       - "judge_yaml.domain.distinguished[mechanical-world-findings-row]"
       - "interacts(render_episode->sec_findings)"
       - "sec_findings.identity"
-    discharged_by: test_1025_a_worlds_row_mechanical_world_findings_entry_and_a_real_numeric_draw_coexist_for_the_same_world
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the page's review, staging, withheld-finding and mechanical-ladder sections; `test_1025_a_worlds_row_mechanical_world_findings_entry_and_a_real_numeric_draw_coexist_for_the_same_world`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       Both render: the numeric draws' rows at `f-<world>-<n>-<i>` and each
       `mechanical_world_findings` entry at `f-<world>-mechanical-<i>`; the sets are disjoint
@@ -1209,12 +1212,13 @@ demands:
 
   - id: s_review_record_lacks_a_worlds_block_for_a_world
     kind: domain-outcome
-    form: test
+    form: clause
     source: "45-dispositions (settled): review_record_lacks_a_worlds_block_for_a_world; x08"
     binds:
       - "review_yaml.domain.distinguished[world-block-absent]"
       - "interacts(render_episode->sec_worlds)"
-    discharged_by: test_1025_review_record_lacks_a_worlds_block_for_a_world
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the page's review, staging, withheld-finding and mechanical-ladder sections; `test_1025_review_record_lacks_a_worlds_block_for_a_world`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       `world_review_block` → `None` (x08): the world's review block reads "no review record
       for this world", its review-derived chips read "unrecorded", its card and ladder render
@@ -1394,12 +1398,13 @@ demands:
 
   - id: s_a_comparator_trace_from_the_review_step
     kind: domain-outcome
-    form: test
+    form: clause
     source: "45-dispositions (settled): a_comparator_trace_from_the_review_step; correction 3, F12, g19"
     binds:
       - "wire_logs.domain.distinguished[comparator-trace]"
       - "interacts(render_episode->sec_stages)"
-    discharged_by: test_1025_a_comparator_trace_from_the_review_step
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the page's review, staging, withheld-finding and mechanical-ladder sections; `test_1025_a_comparator_trace_from_the_review_step`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       The comparator trace's transcript block sits inside the review stage block; its
       response rows' cost is summed into the review row and the total; "staging/review/
@@ -1749,17 +1754,18 @@ demands:
       - "judge_yaml.domain.distinguished[absent]"
       - "interacts(render_episode->sec_stages)"
       - "interacts(render_episode->sec_verdict)"
-    discharged_by: test_1025_review_rejected_episode_and_the_page
+    discharged_by: test_1025_preflight_refused_episode_and_the_page
   - id: r_held_teardown_fault_after_a_completed_grade
     kind: behavior
-    form: test
+    form: clause
     source: "§7 J1 (human); 45-dispositions fork family J1; 70-resolutions.md"
     binds:
       - "drives(run_episode->render_episode)"
       - "interacts(render_episode->timing_json)"
       - "interacts(render_episode->sec_stages)"
       - "interacts(render_episode->learning_html)"
-    discharged_by: test_1025_held_teardown_fault_after_a_completed_grade
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the page's review, staging, withheld-finding and mechanical-ladder sections; `test_1025_held_teardown_fault_after_a_completed_grade`, which discharged this demand, was deleted with the behaviour it pinned."}
   - id: r_how_the_operator_learns_where_the_page_is
     kind: behavior
     form: test
@@ -1843,7 +1849,7 @@ demands:
       - "interacts(render_episode->sec_worlds)"
       - "interacts(render_episode->nav)"
       - "sec_worlds.identity"
-    discharged_by: test_1025_manifest_labels_as_frame_slots_on_an_ungated_manifest
+    discharged_by: test_1025_a_manifest_label_off_the_token_alphabet_never_reaches_a_frame_slot
   - id: r_world_or_lead_directory_name_carries_attribute_or_tag_breaking_characters
     kind: negative
     form: test
@@ -1913,13 +1919,14 @@ demands:
     discharged_by: test_1025_timing_json_names_a_step_outside_the_steps_vocabulary
   - id: r_review_yaml_is_present_but_its_worlds_key_is_absent
     kind: domain-outcome
-    form: test
+    form: clause
     source: "§7 J6 (human); 45-dispositions fork family J6; 70-resolutions.md"
     binds:
       - "review_yaml.domain.distinguished[worlds-key-absent]"
       - "interacts(render_episode->sec_worlds)"
       - "interacts(render_episode->sec_records)"
-    discharged_by: test_1025_review_yaml_is_present_but_its_worlds_key_is_absent
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the page's review, staging, withheld-finding and mechanical-ladder sections; `test_1025_review_yaml_is_present_but_its_worlds_key_is_absent`, which discharged this demand, was deleted with the behaviour it pinned."}
   - id: r_review_yaml_cannot_be_read_as_the_expected_record
     kind: domain-outcome
     form: test
@@ -1930,7 +1937,7 @@ demands:
       - "interacts(render_episode->sec_worlds)"
       - "interacts(render_episode->sec_findings)"
       - "interacts(render_episode->sec_stages)"
-    discharged_by: test_1025_review_yaml_cannot_be_read_as_the_expected_record
+    discharged_by: test_1025_outcome_yaml_cannot_be_read_as_the_record
   - id: r_malformed_samples_or_provenance_reads_as_absent
     kind: domain-outcome
     form: test
@@ -1971,13 +1978,14 @@ demands:
     discharged_by: test_1025_a_malformed_record_versus_an_absent_one
   - id: r_a_torn_staging_record
     kind: domain-outcome
-    form: test
+    form: clause
     source: "§7 J6 (human); 45-dispositions fork family J6; 70-resolutions.md"
     binds:
       - "staged_yaml.domain.distinguished[torn]"
       - "interacts(render_episode->sec_records)"
       - "interacts(render_episode->sec_stages)"
-    discharged_by: test_1025_a_torn_staging_record
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the page's review, staging, withheld-finding and mechanical-ladder sections; `test_1025_a_torn_staging_record`, which discharged this demand, was deleted with the behaviour it pinned."}
   - id: r_an_unreadable_regular_file_at_a_record_name
     kind: domain-outcome
     form: test
@@ -2006,13 +2014,14 @@ demands:
     discharged_by: test_1025_a_served_ledger_present_but_truncated
   - id: r_family_yaml_declares_two_worlds_under_the_same_label
     kind: domain-outcome
-    form: test
+    form: clause
     source: "§7 J7 (human); 45-dispositions fork family J7; 70-resolutions.md"
     binds:
       - "family_yaml.domain.distinguished[duplicate-label]"
       - "sec_worlds.identity"
       - "interacts(render_episode->sec_worlds)"
-    discharged_by: test_1025_family_yaml_declares_two_worlds_under_the_same_label
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the page's review, staging, withheld-finding and mechanical-ladder sections; `test_1025_family_yaml_declares_two_worlds_under_the_same_label`, which discharged this demand, was deleted with the behaviour it pinned."}
   - id: r_judge_yaml_worlds_row_names_a_label_absent_from_family_yaml_and_runs
     kind: domain-outcome
     form: test
@@ -2157,13 +2166,14 @@ demands:
     discharged_by: test_1025_top_level_enqueue_counts_disagree_with_the_rows_the_page_walks
   - id: r_withheld_cross_check_fails
     kind: domain-outcome
-    form: test
+    form: clause
     source: "§7 J9c (human); 45-dispositions fork family J9c; 70-resolutions.md"
     binds:
       - "judge_yaml.domain.distinguished[withheld-cross-check-fails]"
       - "interacts(render_episode->sec_verdict)"
       - "interacts(render_episode->sec_findings)"
-    discharged_by: test_1025_withheld_cross_check_fails
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the page's review, staging, withheld-finding and mechanical-ladder sections; `test_1025_withheld_cross_check_fails`, which discharged this demand, was deleted with the behaviour it pinned."}
   - id: r_a_draw_document_is_torn_mid_write
     kind: domain-outcome
     form: test
@@ -2309,13 +2319,14 @@ demands:
     discharged_by: test_1025_manifest_fields_the_slot_bindings_never_name
   - id: r_withheld_reason_outside_the_four_known_values
     kind: domain-outcome
-    form: test
+    form: clause
     source: "§7 J11 (auto); 45-dispositions fork family J11; 70-resolutions.md"
     binds:
       - "judge_yaml.domain.distinguished[withheld_reason=unknown]"
       - "interacts(render_episode->sec_findings)"
       - "interacts(render_episode->sec_verdict)"
-    discharged_by: test_1025_withheld_reason_outside_the_four_known_values
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the page's review, staging, withheld-finding and mechanical-ladder sections; `test_1025_withheld_reason_outside_the_four_known_values`, which discharged this demand, was deleted with the behaviour it pinned."}
   - id: r_verdict_word_outside_the_five_known_values
     kind: domain-outcome
     form: test
@@ -2370,12 +2381,13 @@ demands:
     discharged_by: test_1025_a_trace_whose_last_line_is_torn
   - id: r_comparator_trace_present_but_empty
     kind: domain-outcome
-    form: test
+    form: clause
     source: "§7 J13b (human); 45-dispositions fork family J13b; 70-resolutions.md"
     binds:
       - "wire_logs.domain.distinguished[empty-comparator-trace]"
       - "interacts(render_episode->sec_stages)"
-    discharged_by: test_1025_comparator_trace_present_but_empty
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the page's review, staging, withheld-finding and mechanical-ladder sections; `test_1025_comparator_trace_present_but_empty`, which discharged this demand, was deleted with the behaviour it pinned."}
   - id: r_six_transcript_streams_and_one_set_of_controls
     kind: shape
     form: test
@@ -2433,7 +2445,7 @@ demands:
       - "interacts(render_episode->review_yaml)"
       - "interacts(render_episode->sec_worlds)"
       - "interacts(render_episode->sec_leads)"
-    discharged_by: test_1025_the_control_worlds_chips_and_review_block
+    discharged_by: test_1025_the_control_world_renders_no_row_derived_parts
   - id: r_render_before_a_worlds_scrub_verdict_sidecar_is_written
     kind: domain-outcome
     form: test
@@ -2444,13 +2456,14 @@ demands:
     discharged_by: test_1025_render_before_a_worlds_scrub_verdict_sidecar_is_written
   - id: r_two_world_labels_differ_only_by_case_or_a_lookalike_character
     kind: domain-outcome
-    form: test
+    form: clause
     source: "§7 J16 (auto); 45-dispositions fork family J16; 70-resolutions.md"
     binds:
       - "family_yaml.domain.distinguished[lookalike-labels]"
       - "sec_worlds.identity"
       - "interacts(render_episode->sec_worlds)"
-    discharged_by: test_1025_two_world_labels_differ_only_by_case_or_a_lookalike_character
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the page's review, staging, withheld-finding and mechanical-ladder sections; `test_1025_two_world_labels_differ_only_by_case_or_a_lookalike_character`, which discharged this demand, was deleted with the behaviour it pinned."}
   - id: r_a_result_event_that_is_forged_or_misplaced
     kind: domain-outcome
     form: test

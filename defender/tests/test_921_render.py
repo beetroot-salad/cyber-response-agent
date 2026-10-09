@@ -16,7 +16,7 @@ THREE §7 RESOLUTIONS ARE APPLIED HERE AS SETTLED:
 * **J9** — the union is the OPERATOR's runs base, the source run the episode branched from is
   EXCLUDED and said to be, only runs that reached a close are included, an unreadable sibling is
   skipped with a counted note, and the union is computed once per pass.
-* **J14** — the withholding's scope is stated across ALL FOUR views, not the overlay alone.
+* **J14** — the withholding's scope is stated across ALL FOUR views, not the manifest alone.
 
 RED against `d1b8b06a`: `learning/judge/render.py` does not exist, no reader anywhere indexes
 the runs base by `alert_id`, and `archive.py` copies none of D7's three inputs.
@@ -81,7 +81,7 @@ def test_921_judge_input_carries_per_lead_chain_coverage_siblings_lessons_spread
     out real evidence. `params` and `payload` are the semantic content and stay;
     `tests/e2e/test_1017_query_row_surface.py` pins what the leads view may and may not carry.
     """
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     base, _src = J.runs_base(tmp_path)
     judge_input = _render().render(ep, "b", runs_base=base)
 
@@ -90,28 +90,33 @@ def test_921_judge_input_carries_per_lead_chain_coverage_siblings_lessons_spread
         assert link in chain, f"the per-lead chain is missing its {link} link"
     assert "document_rows" not in chain, \
         "the per-lead chain still carries the raw row dump #1017 removed"
-    assert judge_input.coverage, "the coverage view is empty"
+    assert judge_input.calls, "the per-call view (#1224's successor to coverage) is empty"
     assert judge_input.siblings is not None, "the sibling-trials view is absent, not empty"
     assert judge_input.lessons, "the lessons-loaded view is empty"
     assert judge_input.spread is not None, "the trial spread is absent"
 
 
-def test_921_coverage_rows_carry_window_and_scope_key_against_the_discriminator(tmp_path):
-    """Every coverage row names its window and its scope key, against the family's
-    discriminator.
+def test_921_call_rows_carry_window_and_scope_key_against_the_discriminator(tmp_path):
+    """Every call the judged world made reaches the prompt with its decision word and the
+    params it ran with — window and scope key included — beside the family's discriminator.
 
-    Those two columns are what M1 adds to the ported view, and they are what makes
-    `scope_discriminated` legible to a reader of the reply rather than a number it has to trust.
+    Those two columns are what M1 added to the ported view; since #1224 the per-call view
+    (`JudgeInput.calls`, never cut by the cap) carries them, and the discriminator is the
+    family's predicate (`holding_system` is retired with cluster staging).
     """
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     base, _src = J.runs_base(tmp_path)
     judge_input = _render().render(ep, "b", runs_base=base)
 
-    assert judge_input.coverage, "no coverage rows to check"
-    for row in judge_input.coverage:
-        assert "window" in row, f"coverage row without a window: {row}"
-        assert "scope_key" in row, f"coverage row without a scope key: {row}"
-    assert judge_input.discriminator["holding_system"] == J.HOLDING_SYSTEM
+    assert judge_input.calls, "no call rows to check"
+    for row in judge_input.calls:
+        assert "window" in row["params"], f"call row without a window: {row}"
+        assert "scope_key" in row["params"], f"call row without a scope key: {row}"
+    calls = judge_input.as_prompt_sections()["calls"]
+    assert "[oracle]" in calls, f"the call view does not name the decision word: {calls!r}"
+    assert '"scope_key": "host.name"' in calls, calls
+    assert '"window": "24h"' in calls, calls
+    assert judge_input.discriminator["predicate"] in judge_input.manifest_text
 
 
 def test_921_sibling_union_is_the_runs_base_trials_sharing_the_alert_id(tmp_path):
@@ -122,7 +127,7 @@ def test_921_sibling_union_is_the_runs_base_trials_sharing_the_alert_id(tmp_path
     `alert.json`, a file that is model-writable by construction. Driven with two runs under one
     alert id and one under another, so the union is a selection rather than "everything found".
     """
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     base, _src = J.runs_base(tmp_path)
     for name, alert in (("trial-1", J.ALERT_ID), ("trial-2", J.ALERT_ID),
                         ("other", "unrelated-rule")):
@@ -144,7 +149,7 @@ def test_921_reply_without_the_three_pass_tables_is_refused(tmp_path):
     replies, went 0/5 -> 5/5 once a derivation pass was demanded (C10). The demand has both
     halves — the prompt ASKS for the three passes, and a reply that omits them does not stand.
     """
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     judge = _prompts(tmp_path, ep)
     prompt = judge.prompts[0]
     for pass_name in ("correlation", "scope", "derivation"):
@@ -165,8 +170,8 @@ def test_921_prompt_names_the_graded_world_and_keeps_the_cap_and_quoting_rule(tm
     The parameterisation is what makes one call about one trajectory: the experiment's own text
     said "world A", and that sentence becomes "world X has run; grade it".
     """
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")],
-                                               "c": [J.staged_row("c")]})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")],
+                                               "c": [J.oracle_row("c")]})
     judge = _prompts(tmp_path, ep, draws=1)
     # #1007 M5 adds a THIRD call (`judge:family:<n>`) beside the two per-world ones; excluded
     # here, since this test is about the per-world prompt's own parameterisation.
@@ -189,33 +194,32 @@ def test_921_prompt_names_the_graded_world_and_keeps_the_cap_and_quoting_rule(tm
 # ---------------------------------------------------------------------------------------
 
 
-def test_921_no_sibling_overlay_reaches_the_prompt(tmp_path):
-    """Every world but the graded one is marked `counterfactual: true` in the RENDERED manifest
-    and its overlay is WITHHELD: no sibling's injected facts reach the prompt.
+def test_921_no_sibling_facts_reach_the_prompt(tmp_path):
+    """Every world but the graded one has its FACTS WITHHELD in the rendered manifest: no
+    sibling's facts reach the prompt.
 
-    `counterfactual` is render-layer only — `_WORLD_FIELDS` is closed and `parse_world` refuses
-    unknown fields (run1/G17), so it can never be a manifest field. Measured failing mode: 5/5
-    replies cited sibling facts as facts about world A and 2/5 declared a corpus contradiction
-    that does not exist (C11).
+    The marking is render-layer only — the manifest's world fields are closed, so it can never
+    be a manifest field. Measured failing mode: 5/5 replies cited sibling facts as facts about
+    world A and 2/5 declared a corpus contradiction that does not exist (C11). (#1224: a world
+    is natural-language `facts`, where it was an overlay.)
 
-    J14, settled: the withholding's scope is stated across ALL FOUR views, not the overlay
-    alone. A negative that bound only the manifest would leave the coverage rows, the lessons
-    view and the trial spread ungoverned, and those three carry sibling-derived content too —
-    which is the surface a leak actually ships through. The marker string is planted inside
-    the sibling's own overlay AND inside each of the other three views' sibling-derived slots,
-    and none of them may appear anywhere in the prompt.
+    J14, settled: the withholding's scope is stated across ALL FOUR views, not the manifest
+    alone. A negative that bound only the manifest would leave the summaries, the lessons view
+    and the trial spread ungoverned, and those carry sibling-derived content too — which is the
+    surface a leak actually ships through. The marker string is planted inside the sibling's
+    own fact AND inside the other views' sibling-derived slots, and none of them may appear
+    anywhere in the prompt.
     """
     secret = "SIBLING-ONLY-INJECTED-FACT"
     worlds = [
-        J.world_doc("a", role="A", axis=None, disposition_declared="benign", ov={}),
-        J.world_doc("b", disposition_declared="malicious",
-                    ov=J.overlay(elastic=J.elastic_overlay(inject=[{"_id": "i-b"}]))),
+        J.world_doc("a", role="A", axis=None, disposition_declared="benign", facts=[]),
+        J.world_doc("b", disposition_declared="malicious", facts=[J.fact("f-b")]),
         J.world_doc("c", disposition_declared="malicious",
-                    ov=J.overlay(patches={"identity": {"web-1": {"owner": secret}}})),
+                    facts=[J.fact("f-c", f"web-1's owner is {secret}")]),
     ]
     ep = J.accepted_episode(tmp_path, worlds=worlds,
-                            ledgers={"b": [J.staged_row("b")], "c": [J.staged_row("c")]})
-    # The other three views' sibling-derived slots carry the same marker.
+                            ledgers={"b": [J.oracle_row("b")], "c": [J.oracle_row("c")]})
+    # The other views' sibling-derived slots carry the same marker.
     (ep / "worlds" / "c" / "gather_summaries" / "l-001.md").write_text(
         f"world c saw {secret}\n", encoding="utf-8")
     (ep / "worlds" / "c" / "lessons_loaded.jsonl").write_text(
@@ -226,34 +230,33 @@ def test_921_no_sibling_overlay_reaches_the_prompt(tmp_path):
     graded_b = judge.prompts[judge.agent_ids.index("judge:b:0")]
     assert secret not in graded_b, (
         "a sibling world's content reached the prompt of a different world")
-    assert "counterfactual" in graded_b, "no world is marked counterfactual at all"
-    assert graded_b.count("counterfactual") >= 2, (
-        "only one of the two non-graded worlds was marked")
+    assert "facts are withheld" in graded_b, "no world has its facts withheld at all"
+    assert graded_b.count("facts are withheld") >= 2, (
+        "only one of the two non-graded worlds had its facts withheld")
 
 
-def test_921_graded_world_keeps_its_own_overlay_and_is_not_marked_counterfactual(tmp_path):
-    """The paired positive control: the graded world keeps its OWN overlay and is not marked
-    counterfactual, so the withholding demand cannot pass on a render that withholds
-    everything.
+def test_921_graded_world_keeps_its_own_facts_and_is_not_withheld(tmp_path):
+    """The paired positive control: the graded world keeps its OWN facts and is not marked
+    withheld, so the withholding demand cannot pass on a render that withholds everything.
 
     Without it, `assert secret not in prompt` is also green on an empty prompt — which is the
     shape a bare negative fails in.
     """
     mine = "GRADED-WORLD-OWN-INJECTED-FACT"
     worlds = [
-        J.world_doc("a", role="A", axis=None, disposition_declared="benign", ov={}),
+        J.world_doc("a", role="A", axis=None, disposition_declared="benign", facts=[]),
         J.world_doc("b", disposition_declared="malicious",
-                    ov=J.overlay(patches={"identity": {"web-1": {"owner": mine}}})),
+                    facts=[J.fact("f-b", f"web-1's owner is {mine}")]),
     ]
     ep = J.accepted_episode(tmp_path, worlds=worlds, labels=("a", "b"),
                             dispositions={"a": "benign", "b": "malicious"},
-                            ledgers={"b": [J.staged_row("b")]})
+                            ledgers={"b": [J.oracle_row("b")]})
     judge = _prompts(tmp_path, ep, draws=1)
     prompt = judge.prompts[judge.agent_ids.index("judge:b:0")]
 
-    assert mine in prompt, "the graded world's own overlay was withheld from its own grading"
-    graded_block = prompt[prompt.index("world b"):prompt.index("world b") + 400]
-    assert "counterfactual" not in graded_block, "the graded world was marked counterfactual"
+    assert mine in prompt, "the graded world's own facts were withheld from its own grading"
+    graded_block = prompt[prompt.index("world b (role"):prompt.index("world b (role") + 400]
+    assert "withheld" not in graded_block, "the graded world's facts were marked withheld"
 
 
 def test_921_first_run_alert_coverage_view_states_the_empty_union(tmp_path):
@@ -264,16 +267,17 @@ def test_921_first_run_alert_coverage_view_states_the_empty_union(tmp_path):
     C11 measured what a model fills a gap with. Driven against a runs base holding no run under
     this alert id at all.
     """
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     empty_base = tmp_path / "empty-runs"
     empty_base.mkdir(parents=True, exist_ok=True)
     judge_input = _render().render(ep, "b", runs_base=empty_base)
 
     assert judge_input.siblings == []
     assert judge_input.spread == []
-    rendered = judge_input.as_prompt_sections()["coverage"]
+    rendered = judge_input.as_prompt_sections()["calls"]
     assert "no sibling" in rendered.lower() or "first run" in rendered.lower(), (
-        "the coverage view is silent about an empty union; silence is what a model fills in")
+        "the call view (#1224's successor to coverage) is silent about an empty union; "
+        "silence is what a model fills in")
 
 
 def test_921_the_sibling_union_excludes_the_source_run_and_unclosed_siblings(tmp_path):
@@ -290,8 +294,8 @@ def test_921_the_sibling_union_excludes_the_source_run_and_unclosed_siblings(tmp
     The episode's own `{episode_dir}/runs/` are the graded trajectories themselves, not
     independent trials, and are not the root scanned.
     """
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")],
-                                               "c": [J.staged_row("c")]})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")],
+                                               "c": [J.oracle_row("c")]})
     base, src = J.runs_base(tmp_path)
     (src / "alert.json").write_text(json.dumps({"alert_id": J.ALERT_ID}), encoding="utf-8")
 
@@ -345,7 +349,7 @@ def test_921_render_reads_no_sibling_run_dir(tmp_path):
     """
     import shutil
 
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     base, _src = J.runs_base(tmp_path)
     runs = ep / "runs"
     runs.mkdir(parents=True, exist_ok=True)
@@ -367,7 +371,7 @@ def test_921_render_builds_the_input_from_the_archive_the_runs_base_and_the_comm
     """
     import shutil
 
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     base, _src = J.runs_base(tmp_path)
     runs = ep / "runs"
     J.sibling_run_dir(runs, "b")
@@ -466,13 +470,15 @@ def test_921_the_archived_directory_input_refuses_a_non_artifact_entry_and_keeps
     # rather than induced by an imagined disk fault, and the assertion is that the pass excludes
     # that world LOUDLY and says which input was short.
     partial = J.accepted_episode(tmp_path / "partial",
-                                 ledgers={"b": [J.staged_row("b")], "c": []})
-    family = J.mod("learning.judge.family")
-    assert J.rows(family.grade_family(partial))["b"].get("ungradable") is not True, (
+                                 ledgers={"b": [J.oracle_row("b")], "c": []})
+    assert J.rows(J.grade(partial, runs_base=tmp_path / "defender-runs"))["b"].get(
+        "ungradable") is not True, (
         "the control failed: the intact episode did not grade world b at all")
+    # The control's final grade would short-circuit the re-grade (`judge.yaml` is idempotent).
+    (partial / "judge.yaml").unlink()
     (partial / "worlds" / "b" / "gather_summaries" / "l-001.md").unlink()
 
-    rows = J.rows(family.grade_family(partial))
+    rows = J.rows(J.grade(partial, runs_base=tmp_path / "defender-runs"))
     assert rows["b"].get("malformed") is True, (
         "a world the archive left short graded normally, on a thinner view than it appears to "
         "have")
@@ -492,7 +498,7 @@ def test_921_lesson_bodies_are_not_archived_and_are_read_at_the_recorded_commit(
     render: the body IS carried into the lessons view, so "not archived" cannot pass on a render
     that shows no lesson at all.
     """
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     base, _src = J.runs_base(tmp_path)
     git_show = J.FakeGitShow(
         bodies={("deadbee", "defender/lessons/L1.md"): "# L1\n\nthe body\n"})
@@ -514,7 +520,7 @@ def test_921_a_lesson_recorded_on_several_rows_renders_its_body_once_and_says_ho
     and a `push` row means the model saw a description, not the body, which the judge must be
     told or it weighs the body as read. Control on the same render: two DIFFERENT lessons
     still render two bodies."""
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     base, _src = J.runs_base(tmp_path)
     rows = [
         {"lesson_name": "L1", "ts": "2026-07-28T17:00:00Z", "kind": "read", "role": "main"},
@@ -560,7 +566,7 @@ def test_921_an_unavailable_lesson_body_is_marked_rather_than_rendered_as_nothin
     Both indistinguishable causes are driven, because the demand is that the render marks the
     absence without being able to tell them apart.
     """
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     base, _src = J.runs_base(tmp_path)
 
     for commit, note in (("cafebabe", "absent commit"), ("deadbee", "absent path")):
@@ -587,8 +593,8 @@ def test_921_the_lesson_commit_is_pinned_once_per_pass_and_allow_dirty_is_a_cave
     with nothing saying so, and `allow_dirty` appears nowhere in the design at all — so both
     halves are contract rather than style.
     """
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")],
-                                               "c": [J.staged_row("c")]})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")],
+                                               "c": [J.oracle_row("c")]})
     git_show = J.FakeGitShow(bodies={("deadbee", "defender/lessons/L1.md"): "# L1 body\n"})
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
@@ -601,7 +607,7 @@ def test_921_the_lesson_commit_is_pinned_once_per_pass_and_allow_dirty_is_a_cave
         "the pass did not record the ref it pinned, so a later reader cannot reproduce it")
 
     # A dirty sibling tree is a caveat in the judge's own input, not a silent equivalence.
-    dirty = J.accepted_episode(tmp_path / "dirty", ledgers={"b": [J.staged_row("b")], "c": []},
+    dirty = J.accepted_episode(tmp_path / "dirty", ledgers={"b": [J.oracle_row("b")], "c": []},
                                dirty=True)
     base, _src = J.runs_base(tmp_path / "dirty")
     lessons = _render().render(dirty, "b", runs_base=base,

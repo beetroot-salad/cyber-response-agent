@@ -220,7 +220,7 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
     ids = [row["finding_id"] for row in first]
     assert len(ids) == len(set(ids)), f"colliding finding ids inside one pass: {ids}"
 
-    retried = enqueue.enqueue(ep, J.mod("learning.judge.family").grade_family(ep), state=env_state())
+    retried = enqueue.enqueue(ep, J.mod("learning.judge").read_grade(ep), state=env_state())
     again = [row["finding_id"] for row in J.enqueued_rows(record)][len(ids):]
     assert retried == len(ids)
     assert again == ids, (
@@ -239,7 +239,7 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
     own_root.mkdir(parents=True)
     own = LearningState.open(LoopPaths(repo_root=tmp_path / "two", state_dir=own_root))
     J.mod("learning.judge").grade_episode(
-        ep2, judge=J.FakeJudge(default=two), runs_base=tmp_path / "two" / "defender-runs",
+        ep2, judge=J.scripted_judge(default=two), runs_base=tmp_path / "two" / "defender-runs",
         draws=2, state=own)
     fresh = [row["finding_id"] for row in J.enqueued_rows(J.judge_record(ep2))]
     assert len(fresh) == len(set(fresh)) == 8, (
@@ -579,33 +579,33 @@ def test_921_self_contradicting_episode_is_discard_and_the_record_is_the_artifac
     """A self-contradicting episode yields `discard`, no defender finding is authored, and the
     family record is the artifact.
 
-    A finding row authored against a `discard` episode is O7's stated failing mode. Driven
-    through the mechanical arm — the discriminator envelope's key among the review's
-    control-drift keys — so the word comes from the archive rather than from a draw's say-so.
+    A finding row authored against a `discard` episode is O7's stated failing mode. #1224
+    retired the mechanical arm (the review's control-drift keys): pre-flight records the calls
+    whose live answer drifted from the capture on `outcome.yaml`, the host renders that list
+    into the judge's prompt, and the word comes from the family call. Both halves are pinned:
+    the recorded drift reaches the model as host text, and the model's `discard` closes the
+    defender lane while the per-world grading stays on the record.
     """
-    import yaml
+    from defender._episode_handle import Episode
+    from defender.learning.branch.outcome import write_outcome
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
-    # See the sibling test above: the doctored world's `verdict` must differ from its
-    # `declared` disposition for its bucket to be non-`None`.
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-    # THE DRIFT IS WRITTEN WHERE `review.py` WRITES IT, and keyed the way it keys it. Both
-    # halves were wrong here and the production reader agreed with the fixture rather than with
-    # the writer, so the mechanical arm this test claims to drive could not fire on a real
-    # episode at all: `review._record` files each world's result under `worlds[<label>]` and
-    # the drift list is `consistency.control_mismatch_keys` on the CONTROL arm — never
-    # `episode.control_drift_keys`, a key nothing in this repo has ever emitted. And the key
-    # itself is minted by `ledger.request_key`, the one canonical encoding (it sorts the params;
-    # a hand-written `json.dumps` matches a recorded key only by luck of dict order).
-    review = yaml.safe_load((ep / "review.yaml").read_text(encoding="utf-8"))
-    review["worlds"] = {"a": {"consistency": {"control_mismatch_keys": [
-        J.request_key("elastic", "esql", {"query": f"FROM {J.EVENTS_PATTERN} | LIMIT 5"})]}}}
-    (ep / "review.yaml").write_text(yaml.safe_dump(review), encoding="utf-8")
+    (ep / "outcome.yaml").unlink()
+    with Episode.open(ep) as handle:
+        write_outcome(handle, "accepted", reason="", drift=[{
+            "system": "elastic", "verb": "esql",
+            "params": {"query": f"FROM {J.EVENTS_PATTERN} | LIMIT 5"},
+            "reason": "DRIFT-MARKER-921"}])
 
+    judge = J.scripted_judge(
+        family_default=J.as_reply_text(J.family_reply(verdict_word="discard",
+                                                      episode_outcome="discard")))
     J.mod("learning.judge").grade_episode(
-        ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        runs_base=tmp_path / "defender-runs", draws=1, state=env_state())
+        ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=1, state=env_state())
 
+    assert any("DRIFT-MARKER-921" in p for p in judge.prompts), (
+        "pre-flight's recorded drift never reached the judge, so its `discard` is a guess")
     record = J.judge_record(ep)
     assert record["episode_outcome"] == "discard"
     assert J.enqueued_rows(record) == []
@@ -646,15 +646,14 @@ def test_921_world_contradicted_by_the_corpus_is_corpus_contradiction(tmp_path):
     assert J.enqueued_rows(J.judge_record(ok)), "the positive control enqueued nothing"
 
 
-def test_921_discard_needs_the_control_drift_key_or_a_majority_of_draws(tmp_path):
-    """`discard` is MECHANICAL-FIRST: the discriminator envelope's key among the review's
-    control-drift keys, OR a majority of a world's draws answering `discard` citing the same
-    ledger or review pointer.
+def test_921_discard_needs_a_majority_of_draws(tmp_path):
+    """`discard` needs a MAJORITY of a world's draws answering it (#1224 retired the
+    mechanical control-drift arm and its review pointer: drift now reaches the model as host
+    text, see the test above).
 
     A MINORITY answering `discard` does not meet the bar and the episode stays `gradable`; one
     draw's say-so never suppresses an episode. The majority's denominator is COMPLETED draws
-    (J6), and the review pointer is recorded beside the key test so a human can see whether the
-    disagreement was injected.
+    (J6).
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
@@ -662,7 +661,8 @@ def test_921_discard_needs_the_control_drift_key_or_a_majority_of_draws(tmp_path
     minority = J.FakeJudge(
         replies=[J.as_reply_text(J.reply_doc(episode_outcome="discard")),
                  J.as_reply_text(J.reply_doc()), J.as_reply_text(J.reply_doc())],
-        default=J.as_reply_text(J.reply_doc()))
+        default=J.as_reply_text(J.reply_doc()),
+        family_default=J.as_reply_text(J.family_reply()))
     J.mod("learning.judge").grade_episode(
         ep, judge=minority, runs_base=tmp_path / "defender-runs", draws=3, state=env_state())
 
@@ -670,9 +670,17 @@ def test_921_discard_needs_the_control_drift_key_or_a_majority_of_draws(tmp_path
     assert record["episode_outcome"] == "gradable", (
         "one draw of three suppressed the whole episode's findings")
     assert J.enqueued_rows(record), "a gradable episode enqueued nothing"
-    assert record["discard_evidence"]["review_pointer"], (
-        "the review pointer is not recorded beside the key test, so a human cannot see whether "
-        "the disagreement was injected")
+
+    majority = J.accepted_episode(tmp_path / "majority",
+                                  ledgers={"b": [J.staged_row("b")], "c": []})
+    discard = J.as_reply_text(J.reply_doc(episode_outcome="discard"))
+    J.mod("learning.judge").grade_episode(
+        majority, judge=J.FakeJudge(replies=[discard, discard, J.as_reply_text(J.reply_doc())],
+                                    default=J.as_reply_text(J.reply_doc()),
+                                    family_default=J.as_reply_text(J.family_reply())),
+        runs_base=tmp_path / "majority" / "defender-runs", draws=3, state=env_state())
+    assert J.judge_record(majority)["episode_outcome"] == "discard", (
+        "positive control: two draws of three answering `discard` did not spoil the episode")
 
 
 # ---------------------------------------------------------------------------------------

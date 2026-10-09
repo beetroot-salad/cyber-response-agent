@@ -289,9 +289,9 @@ LEAD_ID = "l-abc123"
 SEQ = 7
 TURN = 3
 ROLE = "support"
-#: Delimiter-free, as every production label is: `confinement._nameable_world` refuses `-`
-#: (the view name's own delimiter) and `_family.world_token_for` refuses `.` (the world
-#: token's), and the sibling run id `<episode>-<label>` is recoverable only because of it.
+#: Delimiter-free, as every production label is: `_world_label.world_label_fault` refuses `-`
+#: (the sibling run id's delimiter) and `.` (the world token's), and the sibling run id
+#: `<episode>-<label>` is recoverable only because of it.
 LABEL = "overlay_a"
 EPISODE_ID = "ep-2026-09-21"
 LINEAGE_ID = "case-0011223344556677"

@@ -141,16 +141,20 @@ def graded_episode(tmp_path: Path, paths, *, reply=None):
     """One accepted episode graded by the REAL family judge, its rows on the REAL queue.
 
     Returns `(episode_dir, family record)`. The model is the only fake — `FakeJudge` records
-    the prompts it was handed and answers with the reply document the scenario names.
+    the prompts it was handed and answers with the reply document the scenario names. The
+    family's word is the family-scope call's (#1224), scripted `survived` so the rows are ones
+    the `direction: family` partition authors.
     """
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     from defender.learning.core.state import LearningState
 
     with LearningState.open(paths) as state:
         J.mod("learning.judge").grade_episode(
-            ep, judge=J.FakeJudge(default=reply or J.as_reply_text(J.reply_doc())),
+            ep, judge=J.FakeJudge(
+                default=reply or J.as_reply_text(J.reply_doc()),
+                family_default=J.as_reply_text(J.family_reply(verdict_word="survived"))),
             runs_base=tmp_path / "defender-runs", draws=1, state=state)
     return ep, J.judge_record(ep)
 

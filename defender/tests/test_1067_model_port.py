@@ -117,13 +117,12 @@ def test_complete_finishes_a_schema_that_names_a_later_class():
 @pytest.mark.parametrize(("module", "name"), [
     ("defender.learning.core.drains", "BatchDisposition"),
     ("defender.learning.author.verify_forward.checks", "CheckContext"),
-    ("defender.learning.judge.family", "FamilyGrade"),
 ])
 def test_every_ported_record_with_a_forward_reference_is_complete_at_import(module, name):
-    """The three records whose field names a class the module defines later, or another
-    module owns: `BatchDisposition.pitfalls` (now `core/pitfalls_disposition`, imported at
-    top), `CheckContext.check` (mutually referential with `ForwardCheck`, `complete`d at module
-    end) and `FamilyGrade.world_facts` (moved below `WorldFacts`). Each was left for pydantic
+    """The records whose field names a class the module defines later, or another module
+    owns: `BatchDisposition.pitfalls` (now `core/pitfalls_disposition`, imported at top) and
+    `CheckContext.check` (mutually referential with `ForwardCheck`, `complete`d at module end).
+    (#1224 retired the third, the mechanical judge's family grade.) Each was left for pydantic
     to finish on the first construction — for `CheckContext`, inside `_Judgement.mint`'s
     worker pool, N threads at once with no lock.
 
@@ -186,19 +185,20 @@ def test_branch_spec_has_one_as_of_type_refusal_not_two():
 
 
 # ---------------------------------------------------------------------------------------
-# the family manifest: a non-string patch field key is a `FamilyError`
+# the family manifest: a non-string fact entity is a `FamilyError`
 # ---------------------------------------------------------------------------------------
 
 
-def test_family_overlay_refuses_a_non_string_patch_field_as_family_error():
-    """YAML 1.1 reads a bare `on:`/`yes:`/`1:` key as a bool or an int; `Overlay.patches` is
-    strictly `dict[str, ...]` all the way down, so without the loader's own check this
-    surfaced as pydantic's `ValidationError` — a class `run.py --resume` and the branch CLI's
-    handlers do not name."""
-    from defender.runtime.branch._family import FamilyError, parse_overlay
+def test_family_fact_refuses_a_non_string_entity_as_family_error():
+    """YAML 1.1 reads a bare `on`/`yes`/`1` as a bool or an int; `Fact.entities` is strictly
+    `tuple[str, ...]`, so without the loader's own check this surfaced as pydantic's
+    `ValidationError` — a class `run.py --resume` and the branch CLI's handlers do not name."""
+    from defender.runtime.branch._family import FamilyError, parse_world
 
-    with pytest.raises(FamilyError, match=r"patches\['cmdb'\]\['host1'\] names non-string field"):
-        parse_overlay({"patches": {"cmdb": {"host1": {True: 1}}}})
+    with pytest.raises(FamilyError, match=r"worlds\['b'\]\.facts\[0\]\.entities names True"):
+        parse_world({"world_id": "b", "role": "B", "story": "s", "axis": "x",
+                     "disposition_declared": "malicious", "label_basis": "policy-rule",
+                     "facts": [{"fact_id": "f1", "statement": "s", "entities": [True]}]})
 
 
 # ---------------------------------------------------------------------------------------

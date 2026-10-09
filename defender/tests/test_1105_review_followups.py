@@ -224,17 +224,17 @@ def test_a_shown_name_is_bounded_by_what_is_shown(name):
 
 def _family_doc(episode_id: str, label: str) -> dict:
     world = {"world_id": label, "role": "A", "story": "s", "axis": None,
-             "disposition_declared": "malicious", "label_basis": "policy-rule", "overlay": {}}
+             "disposition_declared": "malicious", "label_basis": "policy-rule", "facts": []}
     return {"episode_id": episode_id, "source_run_dir": "/runs/src", "source_run_id": "src",
             "branch_message_id": 1, "fences_at": 1, "as_of": "2026-07-28T16:18:45Z",
-            "continuation_prompt": "go", "base_story": "b",
+            "continuation_prompt": "go", "base_story": "b", "served_systems": ["elastic"],
             "discriminator": {"predicate": "p"}, "worlds": [world]}
 
 
 def test_a_sibling_id_over_the_bound_is_refused_before_anything_is_staged():
     """The family gate judges `<episode_id>-<label>` by the whole run-id rule, its 206-byte
     bound included, so an over-long sibling is refused with the manifest, not by each child
-    after authoring and staging. The episode id itself must leave room for a sibling."""
+    after authoring. The episode id itself must leave room for a sibling."""
     from defender.runtime.branch import _family
     episode = "e" * 190
     with pytest.raises(_family.FamilyError, match="206-byte bound"):
@@ -314,9 +314,10 @@ def test_the_run_name_rule_is_one_answer_for_every_caller():
 
 def test_a_sidecar_shaped_label_is_refused_at_the_family_gate():
     """The xhigh review's case: a label that passes the view and run-id rules but makes the
-    sibling id sidecar-shaped is refused with the manifest, not by every child."""
+    sibling id sidecar-shaped is refused with the manifest, not by every child. (#1224: the
+    world-token alphabet admits no '.', so such a label is refused by that rule first.)"""
     from defender.runtime.branch import _family
-    with pytest.raises(_family.FamilyError, match="sidecar"):
+    with pytest.raises(_family.FamilyError, match="world-token alphabet"):
         _family.check_identities(_family.parse_family(
             _family_doc("ep", "x.accounting_failures.json")))
 

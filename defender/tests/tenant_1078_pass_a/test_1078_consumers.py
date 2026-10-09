@@ -8,8 +8,8 @@ The consumers, each driven through its REAL entry point:
   human, design correction R-A3) — threads the base into BOTH readers, the world-label
   collision probe (`family._check_world_labels`, whose `except Exception: return` fallback goes,
   C26) and the sibling union (`render.sibling_union`);
-* the review replay (`learning/branch/review.verb_context`, `seams.adapter_seam`): the replay
-  env's `DEFENDER_RUNS_BASE` is the threaded base (F3);
+* the pre-flight replay (`learning/branch/cli._preflight_context`): the replay env's
+  `DEFENDER_RUNS_BASE` is the run tenant's runs base (F3; the review replay's successor, #1224);
 * `evals/held_out.py`: the positional runs dir, required, and never resolving the data root
   (§7 J50, human), `--help` never resolving a runs base (C-R17). Its `--tenant` (C27, N9) is
   gone: an evaluation tool outside the application takes no tenant (human, #1120 / PR #1157);
@@ -21,6 +21,8 @@ held_out scores are written to disk in the test. The judge's model seam is `_jud
 (tier 2: an LLM), whose PROMPTS are what the union assertions read.
 """
 from __future__ import annotations
+
+from datetime import datetime
 
 import ast
 import json
@@ -39,6 +41,8 @@ from defender.tests import _state1135
 from defender.tests._state1135 import env_state
 
 TENANT = H.VALID_ID
+#: The family's branch-point clock pre-flight's context carries.
+_AS_OF = datetime.fromisoformat(T.AS_OF)
 
 
 # ======================================================================================
@@ -226,43 +230,39 @@ def test_judge_sibling_union_after_the_switch(tmp_path, monkeypatch):
 
 
 # ======================================================================================
-# The review replay (D4 row 5)
+# The pre-flight replay (D4 row 5; the review replay's successor, #1224)
 # ======================================================================================
 
-def test_d4_review_env_threaded(tmp_path, monkeypatch):
-    """verb_context(episode_dir, *, runs_base) and seams.adapter_seam(episode_dir, *, runs_base)
-    take the runs base; the launcher passes runs_base_for(T), and the replay env's
-    DEFENDER_RUNS_BASE is that base; review.py's fallback and its :299 caller pass their
-    caller's base.
+def _preflight_context(ep: Path, tenant: Any) -> Any:
+    """The context pre-flight's host-side reads run in (`cli._preflight_context`)."""
+    return H.branch_cli()._preflight_context(ep, tenant, _AS_OF)
 
-    "Take" is observed twice: the replay env carries exactly the base handed in (not the
-    episode dir's parent `run_env` would export, not the retired knob), and a call that hands
-    in NO base is a TypeError — so neither the `replay_one` fallback nor `review`'s own call can
-    compose a context without being handed one by their caller."""
+
+def test_d4_preflight_env_threaded(tmp_path, monkeypatch):
+    """The pre-flight replay's context takes the run's tenant, and its env's
+    DEFENDER_RUNS_BASE is that tenant's runs base — not the episode dir's parent `run_env`
+    would export, not the retired knob. A call handed no tenant is a TypeError, so no caller
+    can compose the context without one."""
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
+    H.make_tenant(root, TENANT)
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(tmp_path / "stale"))
     ep = tmp_path / "episodes-root" / "ep-1"
     ep.mkdir(parents=True)
-    base = tmp_path / "data" / TENANT / "runs"
+    base = root.resolve() / TENANT / "runs"
 
-    review = H.mod("learning.branch.review")
-    seams = H.mod("learning.branch.seams")
-    ctx = review.verb_context(ep, H.T1106.FIXTURE_SETTINGS, runs_base=base)
+    ctx = _preflight_context(ep, H.T1106.run_tenant(H.accept(root, TENANT)))
     assert ctx.env["DEFENDER_RUNS_BASE"] == str(base)
+    assert ctx.env["DEFENDER_RUNS_BASE"] != str(ep.parent)
     assert ctx.run_dir == ep, "the replay context stopped being the episode dir"
-    side = seams.adapter_seam(ep, H.T1106.fixture_run_tenant(), runs_base=base)
-    assert side.ctx.env["DEFENDER_RUNS_BASE"] == str(base)
 
     with pytest.raises(TypeError):
-        review.verb_context(ep, H.T1106.FIXTURE_SETTINGS)
-    with pytest.raises(TypeError):
-        seams.adapter_seam(ep, H.T1106.fixture_run_tenant())
+        H.branch_cli()._preflight_context(ep, as_of=_AS_OF)
 
 
-def test_review_replay_runs_base_for_an_old_base_episode(tmp_path, monkeypatch):
-    """The review replay is handed runs_base_for(T) wherever the episode lives; its adapter
-    subprocesses see DEFENDER_RUNS_BASE=<T>/runs (D4 review row).
+def test_preflight_replay_runs_base_for_an_old_base_episode(tmp_path, monkeypatch):
+    """The pre-flight replay is handed the tenant's runs base wherever the episode lives; its
+    adapter subprocesses see DEFENDER_RUNS_BASE=<T>/runs (D4 replay row).
 
     The episode lives under an OLD episodes base outside the data root (pass A's gap until
     (B)); a child process started with the replay context's env — the env every adapter
@@ -274,8 +274,7 @@ def test_review_replay_runs_base_for_an_old_base_episode(tmp_path, monkeypatch):
     ep = tmp_path / "old-episodes-base" / "src-run-n5"
     ep.mkdir(parents=True)
 
-    ctx = H.mod("learning.branch.review").verb_context(
-        ep, H.T1106.FIXTURE_SETTINGS, runs_base=H.runs_base_for(TENANT))
+    ctx = _preflight_context(ep, H.T1106.run_tenant(H.accept(root, TENANT)))
     child = subprocess.run(  # noqa: S603 — fixed argv, the test's own interpreter
         [sys.executable, "-c", "import os; print(os.environ['DEFENDER_RUNS_BASE'])"],
         env=ctx.env, capture_output=True, text=True, check=True, timeout=60)
@@ -365,14 +364,15 @@ KNOB = "DEFENDER_RUNS_BASE"
 RESOLVER = "resolve_runs_base"
 
 #: F2's allowlist (§7 F2, auto): the derived EXPORTS — a store into a child's env mapping —
-#: inside the functions that build a child's env, and the box env allowlist entry. The review
-#: replay's `verb_context` is on it for the same reason `run_env` is: D4's review row makes it
-#: export the THREADED base into the replay env (`d4_review_env_threaded`), which is a derived
-#: export of `runs_base_for(T)`, never a read of the knob.
+#: inside the functions that build a child's env, and the box env allowlist entry. The
+#: pre-flight replay's `_preflight_context` is on it for the same reason `run_env` is: D4's
+#: replay row makes it export the tenant's base into the replay env
+#: (`d4_preflight_env_threaded`), a derived export of the tenant's runs base, never a read of
+#: the knob.
 EXPORTING_FUNCTIONS = {
     ("run_common.py", "run_env"),
     ("runtime/box/_docker.py", "infra_env"),
-    ("learning/branch/review.py", "verb_context"),
+    ("learning/branch/cli.py", "_preflight_context"),
 }
 ALLOWLIST_MODULES = {"runtime/box_codec.py"}
 

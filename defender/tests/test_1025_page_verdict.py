@@ -29,6 +29,7 @@ import pytest
 import yaml
 
 from defender.tests import _episode_1025 as E
+from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests import test_1025_stage_timing as ST
 from defender.tests import _state1135
@@ -36,9 +37,9 @@ from defender.tests import _state1135
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
 S = E.SAMPLE
-LEDE_LINE = f"undecidable · {S.queued} findings queued · {S.defender_withheld} withheld ({S.withheld_reason})"
-TILE_ONE = (f"{S.measuring} of {S.graded} graded measuring · {S.contrasting} of {S.measuring} "
-            f"contrast the control · verdict = declared on 0 of {S.measuring}")
+LEDE_LINE = f"undecidable · {S.queued} findings queued"
+#: Neither sample sibling's report verdict (`inconclusive`) is its declared disposition.
+TILE_ONE = f"{S.graded} worlds judged · verdict = declared on 0 of {S.graded}"
 
 
 @pytest.fixture(autouse=True)
@@ -121,23 +122,23 @@ def _cards(page: E.Page) -> list[E.Node]:
     return page.elements(cls="vd-cause")
 
 
+#: The ungradable world's reason on the live-996 shape's record.
+UNGRADABLE_REASON = E.ungradable_row(E.PASSTHROUGH_WORLD)["ungradable_reason"]
+
+
 def _live996(tmp_path: Path, **kw) -> E.Episode:
     """The second archive's shape: no family draw, no `samples.yaml`, an ungradable row, a
-    pre-#1007 record (no `family_outcome`), the control declared `benign` so the one measuring
-    world contrasts it."""
+    pre-#1007 record (no `family_outcome`, no family call at all)."""
     ep = E.sample_episode(tmp_path, family_draw=False, samples=False, judge=False, **kw)
-    manifest = E.sample_manifest()
-    manifest["worlds"][0]["disposition_declared"] = "benign"
-    T.write_family(ep.dir, manifest)
     doc = E.sample_grade()
-    doc["worlds"] = [E.ungradable_row(E.WITHHELD_WORLD, declared="benign"),
-                     E.world_row(E.GRADED_WORLD, declared="malicious", has_refused=None,
-                                 world_findings=[E.finding(subject="world")])]
+    doc["worlds"] = [E.ungradable_row(E.PASSTHROUGH_WORLD, declared="benign"),
+                     E.world_row(E.GRADED_WORLD, declared="malicious",
+                                 findings=[E.finding(subject="world")])]
     doc["verdict_word"] = "survived"
     doc["world_findings"] = [E.world_finding_queue_row(
         f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/4", "the world finding")]
     for key in ("family_outcome", "family_failed_reason", "family_malformed_replies",
-                "world_enqueued_rows", "world_enqueued_to", "withheld_findings",
+                "family_completed_draws", "world_enqueued_rows", "world_enqueued_to",
                 "dispositions"):
         del doc[key]
     E.write_judge(ep.dir, doc)
@@ -152,8 +153,7 @@ def _live996(tmp_path: Path, **kw) -> E.Episode:
 def test_1025_the_lede_lists_family_draw_findings_verbatim_grouped_by_draw_or_opens_with_the_templated_line_when_there_is_no_family_draw(
         tmp_path):
     """Sample: the lede's first line carries the three family findings as `topic: claim`
-    escaped, then the templated line "undecidable · 9 findings queued · 4 withheld
-    (reachability_unmeasured)"; a synthetic two-draw family renders two groups in draw order
+    escaped, then the templated line "undecidable · 13 findings queued"; a synthetic two-draw family renders two groups in draw order
     without merging; the live-996 shape (no `worlds/family/`) opens with the templated line; a
     synthetic `family_failed_reason` renders where the first line would be.
     """
@@ -191,8 +191,9 @@ def test_1025_the_lede_lists_family_draw_findings_verbatim_grouped_by_draw_or_op
 
 def test_1025_the_badge_is_family_outcome_falling_back_to_verdict_word_and_the_meta_line_carries_episode_outcome_and_verdict_word(
         tmp_path):
-    """Sample badge reads `discard`, meta `gradable · undecidable`; the live-996 shape's badge
-    reads `survived` (its `family_outcome` is None), meta `gradable · survived`.
+    """Sample badge reads `discard`, meta `gradable · undecidable · validity usable` (the
+    record's O5 word); the live-996 shape's badge reads `survived` (its `family_outcome` is
+    None), meta `gradable · survived`.
     """
     page = render(E.sample_episode(tmp_path))
     badge = page.elements(cls="vd-badge")
@@ -200,55 +201,51 @@ def test_1025_the_badge_is_family_outcome_falling_back_to_verdict_word_and_the_m
     assert "discard" in badge[0].text(), [b.text() for b in badge]
     meta = page.elements(cls="vd-meta")
     assert meta, [m.text() for m in meta]
-    assert "gradable · undecidable" in meta[0].text(), [m.text() for m in meta]
+    assert "gradable · undecidable · validity usable" in meta[0].text(), [m.text() for m in meta]
 
     live = render(_live996(tmp_path / "live"))
     assert "survived" in live.one(cls="vd-badge").text()
     assert "gradable · survived" in live.one(cls="vd-meta").text()
 
 
-def test_1025_the_verdict_tile_carries_measuring_contrasting_and_verdict_equals_declared_counts_on_both_archives(
+def test_1025_the_verdict_tile_carries_judged_and_verdict_equals_declared_counts_on_both_archives(
         tmp_path):
-    """Sample tile 1: "1 of 2 graded measuring · 0 of 1 contrast the control · verdict =
-    declared on 0 of 1" beside `undecidable`; the live-996 shape: "1 of 1 graded measuring ·
-    1 of 1 contrast the control · verdict = declared on 0 of 1" beside `survived`, the
-    control's declared disposition read from `family.yaml` role `A`.
+    """Sample tile 1: "2 worlds judged · verdict = declared on 0 of 2" beside `undecidable`;
+    the live-996 shape (one row ungradable, so not judged): "1 worlds judged · verdict =
+    declared on 0 of 1" beside `survived`.
     """
     tile = _tile(render(E.sample_episode(tmp_path)), 0)
     assert TILE_ONE in tile.text(), tile.text()
     assert "undecidable" in tile.text(), tile.text()
 
     live = _tile(render(_live996(tmp_path / "live")), 0)
-    assert ("1 of 1 graded measuring · 1 of 1 contrast the control · verdict = declared on 0 of 1"
-            in live.text()), live.text()
+    assert "1 worlds judged · verdict = declared on 0 of 1" in live.text(), live.text()
     assert "survived" in live.text()
 
 
-def test_1025_tiles_two_to_four_carry_measuring_of_graded_with_reasons_queued_of_total_split_and_cost_with_the_labelled_lower_bound(
+def test_1025_tiles_two_to_four_carry_judged_of_rows_with_reasons_queued_of_total_split_and_cost_with_the_labelled_lower_bound(
         tmp_path):
-    """Sample: tile 2 "1 of 2" with caption "no_remote_session — reachability_unmeasured";
-    tile 3 "9 of 13" split 4 defender / 5 world author / 4 withheld / 0 unqueueable / 0 dropped;
-    tile 4 "$3.5500" with the worlds' wall range 3m00s–10m00s and "≈ 16m00s lower bound on
-    wall: model calls + longest world"; the live-996 shape's ungradable world is in neither the
-    measuring nor the withheld count and is named as ungradable in tile 2's caption.
+    """Sample: tile 2 "2 of 2" (judged of the record's rows) with no caption; tile 3 "13 of
+    13" split 8 defender / 5 world author / 0 unqueueable / 0 dropped; tile 4 "$3.5500" with
+    the worlds' wall range 3m00s–10m00s and "≈ 16m00s lower bound on wall: model calls +
+    longest world"; the live-996 shape's ungradable world is not in the judged count and is
+    named with its reason in tile 2's caption.
     """
     page = render(E.sample_episode(tmp_path))
     two, three, four = (_tile(page, i).text() for i in (1, 2, 3))
-    assert f"{S.measuring} of {S.graded}" in two, two
-    assert f"{E.WITHHELD_WORLD} — {S.withheld_reason}" in two, two
+    assert two == f"{S.graded} of {S.graded}", two
     assert f"{S.queued} of {S.findings}" in three, three
     for part in (f"{S.defender_enqueued} defender", f"{S.world_author} world author",
-                 f"{S.defender_withheld} withheld", "0 unqueueable", "0 dropped"):
+                 "0 unqueueable", "0 dropped"):
         assert part in three, (part, three)
     assert S.total_cost in four, four
     assert f"{S.shortest_world}–{S.longest_world}" in four, four
     assert f"≈ {S.lower_bound} lower bound on wall: model calls + longest world" in four, four
 
     live = render(_live996(tmp_path / "live"))
-    assert "1 of 1" in _tile(live, 1).text(), _tile(live, 1).text()
-    assert E.WITHHELD_WORLD in _tile(live, 1).text()
-    assert "ungradable" in _tile(live, 1).text()
-    assert "0 withheld" in _tile(live, 2).text(), _tile(live, 2).text()
+    assert "1 of 2" in _tile(live, 1).text(), _tile(live, 1).text()
+    assert f"{E.PASSTHROUGH_WORLD} — {UNGRADABLE_REASON}" in _tile(live, 1).text(), (
+        _tile(live, 1).text())
 
 
 def test_1025_a_not_graded_stamp_renders_its_reason_and_no_tiles_cards_or_findings_table(tmp_path):
@@ -263,10 +260,10 @@ def test_1025_a_not_graded_stamp_renders_its_reason_and_no_tiles_cards_or_findin
     assert len(_rows(page)) == S.findings
 
     doc = E.sample_grade()
-    doc["not_graded"] = {"outcome": "rejected", "reason": "the review rejected world b: contradiction"}
+    doc["not_graded"] = {"outcome": "unusable", "reason": "2 worlds could not be judged (b, c)"}
     E.write_judge(ep.dir, doc)
     page = render(ep)
-    assert "the review rejected world b: contradiction" in page.text_of("sec-verdict")
+    assert "2 worlds could not be judged (b, c)" in page.text_of("sec-verdict")
     assert _tiles(page) == []
     assert _cards(page) == []
     assert _rows(page) == []
@@ -280,7 +277,7 @@ def test_1025_a_not_graded_page_below_the_band(tmp_path):
     """
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
-    doc["not_graded"] = {"outcome": "rejected", "reason": "STAMP-REASON"}
+    doc["not_graded"] = {"outcome": "unusable", "reason": "STAMP-REASON"}
     E.write_judge(ep.dir, doc)
     page = render(ep)
     band = page.text_of("sec-verdict")
@@ -302,7 +299,7 @@ def test_1025_an_episode_with_no_judge_yaml_still_renders_its_stages_and_worlds_
     """A launcher-produced episode whose judge pass failed after its draws — the findings queue
     root is a regular file, so the enqueue is refused and `judge.yaml` (written last, c10) never
     lands — still renders: the band says no grade record, every world is "not graded", the
-    stage table has its six rows, and the draw documents the judge DID write before the enqueue
+    stage table has a row per step, and the draw documents the judge DID write before the enqueue
     failed (`worlds/b/judge/0.yaml`, `worlds/c/judge/0.yaml`, one `subject: defender` finding
     each — the state 92-reconciliation F-1 executed) render as J9a says: their rows under ONE
     group headed "no grade record — not enqueued", no disposition claimed, band unchanged.
@@ -311,7 +308,11 @@ def test_1025_an_episode_with_no_judge_yaml_still_renders_its_stages_and_worlds_
     # so the post-draw refusal this scenario needs is the queue's holding folder being a
     # regular file: the root opens, the draws run, and only the enqueue is refused.
     (tmp_path / "learning-state" / "_pending").write_text("not a directory", encoding="utf-8")
-    launch = ST._launch(tmp_path)
+    # One `subject: defender` finding per world draw; the family scope refuses that subject,
+    # so the family call completes no draw and only the two world documents land.
+    judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc(
+        bucket="decision-discipline", systems=["idp"])))
+    launch = ST._launch(tmp_path, judge=judge)
     assert launch.rc == 0
     assert launch.judge.calls > 0
     ep = launch.episode_dir
@@ -331,7 +332,6 @@ def test_1025_an_episode_with_no_judge_yaml_still_renders_its_stages_and_worlds_
     heading = _heading(page.section(groups.pop()))
     assert "no grade record — not enqueued" in heading, heading
     assert "enqueued" not in heading.replace("not enqueued", ""), heading
-    assert "withheld" not in heading, heading
 
 
 def test_1025_draw_documents_exist_but_judge_yaml_does_not(tmp_path):
@@ -357,71 +357,53 @@ def test_1025_draw_documents_exist_but_judge_yaml_does_not(tmp_path):
 # ---------------------------------------------------------------------------------------
 
 
-def test_1025_every_finding_across_per_draw_docs_family_draws_and_mechanical_rows_renders_exactly_once_keyed_world_draw_index(
+def test_1025_every_finding_across_per_draw_docs_and_family_draws_renders_exactly_once_keyed_world_draw_index(
         tmp_path):
     """On the sample the page carries exactly 13 `f-<world>-<draw>-<index>` rows, each id once
-    (4 defender enqueued, 4 withheld, 5 world-author across `no_remote_session/0/4`,
-    `prior_fake_key_precedent/0/4`, `family/0/{0,1,2}`); a synthetic episode adding a row-level
-    `mechanical_world_findings` entry renders one more row at `f-<world>-mechanical-0`; the
-    per-world `world_findings` copy on the row adds nothing.
+    (8 defender enqueued, 5 world-author across `no_remote_session/0/4`,
+    `prior_fake_key_precedent/0/4`, `family/0/{0,1,2}`); the grade row's own `findings` copy
+    of its draws adds nothing.
     """
     ep = E.sample_episode(tmp_path)
     page = render(ep)
     rows = _rows(page)
     assert len(rows) == S.findings, rows
     assert len(set(rows)) == S.findings, rows
-    expected = {f"f-{E.WITHHELD_WORLD}-0-{i}" for i in range(5)}
+    expected = {f"f-{E.PASSTHROUGH_WORLD}-0-{i}" for i in range(5)}
     expected |= {f"f-{E.GRADED_WORLD}-0-{i}" for i in range(5)}
     expected |= {f"f-{E.FAMILY}-0-{i}" for i in range(3)}
     assert set(rows) == expected, set(rows) ^ expected
     assert page.all_ids.count(f"f-{E.GRADED_WORLD}-0-4") == 1
 
-    doc = E.sample_grade()
-    mechanical = E.finding(subject="world", bucket="unreachable-difference",
-                           claim="MECHANICAL CLAIM", topic="unreachable difference")
-    doc["worlds"][1]["mechanical_world_findings"] = [mechanical]
-    doc["world_findings"].append(E.world_finding_queue_row(
-        f"{E.EPISODE_ID}/{E.GRADED_WORLD}/mechanical/0", "MECHANICAL CLAIM — root"))
-    E.write_judge(ep.dir, doc)
-    rows = _rows(render(ep))
-    assert len(rows) == S.findings + 1, rows
-    assert f"f-{E.GRADED_WORLD}-mechanical-0" in rows, rows
 
-
-def test_1025_a_findings_disposition_reproduces_the_enqueues_partition_withheld_unqueueable_blocked_by_verdict_or_enqueued(
+def test_1025_a_findings_disposition_reproduces_the_enqueues_partition_unqueueable_blocked_by_verdict_or_enqueued(
         tmp_path):
-    """Sample: `no_remote_session`'s 4 defender findings read "withheld —
-    reachability_unmeasured", `prior_fake_key_precedent`'s 4 read enqueued (the episode has
+    """Sample: both siblings' 4 defender findings read enqueued (the episode has
     `family_outcome: discard` and `verdict_word: undecidable`, and the rows still read
     enqueued), the 5 world-author rows read enqueued; a ledger entry re-filed unqueueable
-    marks that id unqueueable with its reason; the record of a discard episode marks the
-    MEASURING world's defender findings "never eligible — verdict discard", neither enqueued
-    nor withheld, while the withheld world's four stay "withheld — reachability_unmeasured"
-    exactly as the record's `withheld_findings` carries them; counts equal `enqueued_rows`,
-    `len(withheld_findings)`, `world_enqueued_rows`; on that discard episode tile 3's split
-    reads 0 defender / 5 world author / 4 withheld / 0 unqueueable and gains a fifth part,
-    "4 never eligible" — the measuring world's count.
+    marks that id unqueueable with its reason; the record of a discard episode marks every
+    judged world's defender findings "never eligible — verdict discard", never enqueued; counts
+    equal `enqueued_rows`, `world_enqueued_rows`; on that discard episode tile 3's split reads
+    0 defender / 5 world author / 0 unqueueable and gains a fifth part, "8 never eligible".
 
     EVERY DISPOSITION IS THE RECORD'S LEDGER (`judge.yaml.dispositions`, what the enqueue pass
     wrote down as it filed each finding), never a rule the page runs over the rows: the page
     used to carry a copy of the enqueue's lane rule, then the rule itself fed with inputs it
     rebuilt from the record, and both drifted from the pass at the edges. The enqueue's
-    precedence — subject → withheld → blocked → enqueued — is therefore visible here only as
-    the ledger the fixture writes in the pass's shape (`block_defender_lane` re-files the
-    defender entries and leaves the withheld ones; 92-reconciliation F-2), and
-    `test_1025_the_fixture_ledger_is_the_passes_own` holds that fixture to the real pass.
+    precedence — subject → blocked → enqueued — is therefore visible here only as the ledger
+    the fixture writes in the pass's shape (`block_defender_lane` re-files the defender
+    entries), and `test_1025_the_fixture_ledger_is_the_passes_own` holds that fixture to the
+    real pass.
     """
     ep = E.sample_episode(tmp_path)
     page = render(ep)
-    for i in range(4):
-        group = _group_of(page, f"f-{E.WITHHELD_WORLD}-0-{i}").text()
-        assert "withheld" in group, group
-        assert S.withheld_reason in group, group
-        group = _group_of(page, f"f-{E.GRADED_WORLD}-0-{i}").text()
-        assert "enqueued" in group, group
-        assert "withheld" not in group, group
-    for row in (f"f-{E.WITHHELD_WORLD}-0-4", f"f-{E.GRADED_WORLD}-0-4", f"f-{E.FAMILY}-0-0"):
-        assert "enqueued" in _group_of(page, row).text(), row
+    for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD):
+        for i in range(4):
+            group = _group_of(page, f"f-{label}-0-{i}").text()
+            assert "defender: enqueued" in group, group
+            assert "never eligible" not in group, group
+    for row in (f"f-{E.PASSTHROUGH_WORLD}-0-4", f"f-{E.GRADED_WORLD}-0-4", f"f-{E.FAMILY}-0-0"):
+        assert "world author: enqueued" in _group_of(page, row).text(), row
 
     doc = E.set_lane(E.sample_grade(), E.GRADED_WORLD, 0, 1, "unqueueable",
                      "the citation names no file")
@@ -431,36 +413,27 @@ def test_1025_a_findings_disposition_reproduces_the_enqueues_partition_withheld_
     assert "unqueueable" in group, group
     assert "the citation names no file" in group, group
 
-    # the record as the enqueue writes it on a discard episode: `enqueued_rows` 0, the
-    # defender entries re-filed never eligible, and the withheld world's four findings STILL
-    # on `withheld_findings` and the ledger (withheld before blocked)
+    # the record as the enqueue writes it on a discard episode: `enqueued_rows` 0 and the
+    # defender entries re-filed never eligible
     doc = E.block_defender_lane(E.sample_grade(), "discard")
-    assert len(doc["withheld_findings"]) == S.defender_withheld, "fixture: the withheld list"
     E.write_judge(ep.dir, doc)
     page = render(ep)
-    for i in range(4):
-        group = _group_of(page, f"f-{E.GRADED_WORLD}-0-{i}").text()
-        assert "never eligible — verdict discard" in group, group
-        assert "enqueued" not in group, group
-        assert "withheld" not in group, group
-        group = _group_of(page, f"f-{E.WITHHELD_WORLD}-0-{i}").text()
-        assert "withheld" in group, group
-        assert S.withheld_reason in group, group
-        assert "never eligible" not in group, group
-    acct = page.one(cls="vd-acct").text()
-    assert f"withheld list: {S.defender_withheld} entries · {S.defender_withheld} matched" in acct, acct
+    for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD):
+        for i in range(4):
+            group = _group_of(page, f"f-{label}-0-{i}").text()
+            assert "never eligible — verdict discard" in group, group
+            assert "enqueued" not in group, group
     # tile 3's split on the discard episode (95-reconciliation-2 N-4, auto-resolved): the split
-    # gains a fifth part, "never eligible", carrying the measuring world's count; the other four
-    # parts are the record's — 0 defender enqueued / world author as recorded / withheld = the
-    # withheld world's / unqueueable as recorded
+    # gains a fifth part, "never eligible", carrying the blocked defender count; the other
+    # parts are the record's — 0 defender enqueued / world author as recorded / unqueueable as
+    # recorded
     three = _tile(page, 2).text()
-    for part in ("0 defender", f"{S.world_author} world author",
-                 f"{S.defender_withheld} withheld", "0 unqueueable",
+    for part in ("0 defender", f"{S.world_author} world author", "0 unqueueable",
                  f"{S.defender_enqueued} never eligible"):
         assert part in three, (part, three)
 
 
-def test_1025_a_non_canonically_spelled_verdict_word_still_blocks_the_measuring_worlds_defender_findings(
+def test_1025_a_non_canonically_spelled_verdict_word_still_blocks_the_judged_worlds_defender_findings(
         tmp_path):
     """The O7 gate reads `verdict_word` through `normalized_judge_outcome` — case-folded and
     trimmed — so a record whose `verdict_word` is `"Discard"` blocks the enqueue pass exactly
@@ -479,30 +452,6 @@ def test_1025_a_non_canonically_spelled_verdict_word_still_blocks_the_measuring_
         assert "enqueued" not in group, group
 
 
-def test_1025_withheld_findings_are_grouped_under_their_reason_apart_from_enqueued_rows_and_never_worded_as_rejected(
-        tmp_path):
-    """The withheld group's heading carries `reachability_unmeasured`, none of its rows share a
-    group with an enqueued row, and the words "rejected" / "dropped" do not appear in a
-    withheld row or its heading; positive control: the enqueued group exists with 4 rows.
-    """
-    page = render(E.sample_episode(tmp_path))
-    withheld = {_group_id(page, f"f-{E.WITHHELD_WORLD}-0-{i}") for i in range(4)}
-    enqueued = {_group_id(page, f"f-{E.GRADED_WORLD}-0-{i}") for i in range(4)}
-    assert len(withheld) == 1
-    assert len(enqueued) == 1
-    assert withheld.isdisjoint(enqueued)
-    heading = _heading(page.section(withheld.pop()))
-    assert S.withheld_reason in heading, heading
-    assert "rejected" not in heading.lower(), heading
-    assert "dropped" not in heading.lower(), heading
-    for i in range(4):
-        row = page.text_of(f"f-{E.WITHHELD_WORLD}-0-{i}").lower()
-        assert "rejected" not in row, row
-        assert "dropped" not in row, row
-    enqueued_group = page.section(enqueued.pop())
-    assert len([n for n in enqueued_group.descendants() if n.id and n.id.startswith("f-")]) == 4
-
-
 def test_1025_findings_render_one_table_per_addressee_with_the_seven_columns_family_rows_at_family_level_and_dropped_counts_per_draw(
         tmp_path):
     """Two addressee tables (defender / world author): the defender rows and the world-author
@@ -515,7 +464,7 @@ def test_1025_findings_render_one_table_per_addressee_with_the_seven_columns_fam
     ep = E.sample_episode(tmp_path)
     page = render(ep)
     defender = {_group_id(page, f"f-{E.GRADED_WORLD}-0-{i}") for i in range(4)}
-    authors = {_group_id(page, f"f-{w}-0-4") for w in (E.WITHHELD_WORLD, E.GRADED_WORLD)}
+    authors = {_group_id(page, f"f-{w}-0-4") for w in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD)}
     authors |= {_group_id(page, f"f-{E.FAMILY}-0-{i}") for i in range(3)}
     assert defender.isdisjoint(authors), (defender, authors)
     assert all("defender" in _heading(page.section(g)) for g in defender)
@@ -531,7 +480,7 @@ def test_1025_findings_render_one_table_per_addressee_with_the_seven_columns_fam
         text = page.text_of(f"f-{E.FAMILY}-0-{i}")
         assert row["anchor"] in text, text
         assert "family" in text, text
-        assert E.WITHHELD_WORLD not in text.replace(row["anchor"], ""), text
+        assert E.PASSTHROUGH_WORLD not in text.replace(row["anchor"], ""), text
     assert "0 dropped" in page.text_of("sec-findings")
 
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=graded_findings, dropped=2))
@@ -568,12 +517,11 @@ def test_1025_a_world_drawn_twice_renders_both_draws_findings_once_each_in_numer
 # ---------------------------------------------------------------------------------------
 
 
-def test_1025_queue_accounting_lists_per_queue_rows_destination_as_recorded_withheld_reasons_unqueueable_malformed_and_dropped_counts(
+def test_1025_queue_accounting_lists_per_queue_rows_destination_as_recorded_unqueueable_malformed_and_dropped_counts(
         tmp_path):
-    """The collapsed details carry "defender: 4 enqueued to <the recorded path>" (the path as
-    recorded, escaped, not a link), "questioner: 5 enqueued to …", withheld 4
-    (reachability_unmeasured), unqueueable 0, malformed 0 / 0, dropped 0 per draw, and
-    `discard_evidence` rendered because `family_outcome` is discard.
+    """The collapsed details carry "defender: 8 enqueued to <the recorded path>" (the path as
+    recorded, escaped, not a link), "questioner: 5 enqueued to …", unqueueable 0, malformed
+    0 / 0 and dropped 0 per draw.
     """
     page = render(E.sample_episode(tmp_path))
     acct = page.elements(cls="vd-acct")
@@ -581,37 +529,31 @@ def test_1025_queue_accounting_lists_per_queue_rows_destination_as_recorded_with
     text = acct[0].text()
     assert f"defender: {S.defender_enqueued} enqueued to {E.ENQUEUED_TO}" in text, text
     assert f"questioner: {S.world_author} enqueued to {E.WORLD_ENQUEUED_TO}" in text, text
-    assert f"withheld {S.defender_withheld}" in text, text
-    assert S.withheld_reason in text, text
     assert "unqueueable 0" in text, text
     assert "malformed 0 / 0" in text, text
     assert "dropped 0" in text, text
-    assert "review.yaml#worlds.*.consistency.control_mismatch_keys" in text, text
     assert not [h for h in page.hrefs if "_pending/findings.jsonl" in h], "the path became a link"
 
 
-def test_1025_one_card_per_graded_world_with_declared_to_verdict_reason_or_bucket_heading_chips_and_a_footer_linking_its_findings_group(
+def test_1025_one_card_per_graded_world_with_declared_to_verdict_bucket_and_systems_heading_and_a_footer_linking_its_findings_group(
         tmp_path):
-    """Sample: two cards; `no_remote_session`'s header "benign → inconclusive", heading
-    "reachability_unmeasured", body the chips plus the first line of `envelope_failed`, footer
-    "4 findings · withheld" linking to its `fg-<n>`; `prior_fake_key_precedent`'s heading
-    "decision-discipline" and footer "4 findings · enqueued"; the live-996 shape renders one
-    card (none for the ungradable world or the control); no card contains a family finding's
-    claim.
+    """Sample: two cards; `no_remote_session`'s header "benign → inconclusive", heading the
+    judge model's bucket "lead-set" and its systems, footer "4 findings · enqueued" linking to
+    its `fg-<n>`; `prior_fake_key_precedent`'s heading "decision-discipline" and footer "4
+    findings · enqueued"; the live-996 shape renders one card (none for the ungradable world or
+    the control); no card contains a family finding's claim.
     """
     page = render(E.sample_episode(tmp_path))
     cards = {c.text(): c for c in _cards(page)}
     assert len(cards) == 2, list(cards)
-    withheld = next(t for t in cards if E.WITHHELD_WORLD in t)
+    quiet = next(t for t in cards if E.PASSTHROUGH_WORLD in t)
     graded = next(t for t in cards if E.GRADED_WORLD in t)
-    assert re.search(r"benign\s*→\s*(said\s+)?inconclusive", withheld), withheld
-    assert S.withheld_reason in withheld, withheld
-    assert "holding_queried" in withheld, withheld
-    assert E.ENVELOPE_FAILED.splitlines()[0] in withheld, withheld
-    assert E.ENVELOPE_FAILED.splitlines()[1] not in withheld, withheld
-    assert "4 findings · withheld" in withheld, withheld
-    withheld_group = _group_id(page, f"f-{E.WITHHELD_WORLD}-0-0")
-    assert f"#{withheld_group}" in [a.attrs.get("href") for a in cards[withheld].find_all("a")]
+    assert re.search(r"benign\s*→\s*(said\s+)?inconclusive", quiet), quiet
+    assert "lead-set" in quiet, quiet
+    assert f"systems: {E.SYSTEM}" in quiet, quiet
+    assert "4 findings · enqueued" in quiet, quiet
+    quiet_group = _group_id(page, f"f-{E.PASSTHROUGH_WORLD}-0-0")
+    assert f"#{quiet_group}" in [a.attrs.get("href") for a in cards[quiet].find_all("a")]
     assert "decision-discipline" in graded, graded
     assert "4 findings · enqueued" in graded, graded
     graded_group = _group_id(page, f"f-{E.GRADED_WORLD}-0-0")
@@ -640,7 +582,7 @@ def test_1025_no_hand_written_sentence_from_the_artifact_appears_while_every_tem
     leads_heading = _heading(page.section("sec-leads")).lower()
     assert "3" in leads_heading or "three" in leads_heading, leads_heading
     stages_heading = _heading(page.section("sec-stages")).lower()
-    assert "6" in stages_heading or "six" in stages_heading, stages_heading
+    assert str(len(ST.EXPECTED_STEPS)) in stages_heading, stages_heading
 
 
 # ---------------------------------------------------------------------------------------
@@ -651,12 +593,12 @@ def test_1025_no_hand_written_sentence_from_the_artifact_appears_while_every_tem
 def test_1025_a_finding_id_recorded_in_judge_yaml_names_a_world_draw_index_triple_absent_from_every_draw_document(
         tmp_path):
     """A record row whose draw document is gone (J9b): `judge.yaml.world_findings` carries its
-    own `finding` text and `withheld_findings` entries the whole finding dict, so the page
-    renders a stub row from the record — that text, its recorded disposition, and a "draw
-    document absent" marker — and tile 3 counts it; an `unqueueable_findings` line with no
-    document renders in queue accounting only. A withheld entry carries no draw / index
-    (amendment 1), so its stub is found by its text, under a withheld group; the recorded
-    `world_findings` row keeps its `f-<world>-<draw>-<index>` id from the recorded id's suffix.
+    own `finding` text, so the page renders a stub row from the record — that text, its
+    recorded disposition, and a "draw document absent" marker — and tile 3 counts it; a
+    defender entry, whose text the record does not carry, renders no stub; an
+    `unqueueable_findings` line with no document renders in queue accounting only. The
+    recorded `world_findings` row keeps its `f-<world>-<draw>-<index>` id from the recorded
+    id's suffix.
 
     THE GRAIN IS THE DOCUMENT (92-reconciliation F-5): a stub is rendered iff the draw DOCUMENT
     named by the recorded triple is absent; a triple missing from a PRESENT document — a
@@ -667,7 +609,7 @@ def test_1025_a_finding_id_recorded_in_judge_yaml_names_a_world_draw_index_tripl
     """
     ep = E.sample_episode(tmp_path)
     (ep.world(E.GRADED_WORLD) / "judge" / "0.yaml").unlink()
-    (ep.world(E.WITHHELD_WORLD) / "judge" / "0.yaml").unlink()
+    (ep.world(E.PASSTHROUGH_WORLD) / "judge" / "0.yaml").unlink()
     doc = E.sample_grade()
     doc["unqueueable_findings"] = [f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/7: no document either"]
     E.write_judge(ep.dir, doc)
@@ -676,15 +618,14 @@ def test_1025_a_finding_id_recorded_in_judge_yaml_names_a_world_draw_index_tripl
     assert "draw document absent" in stub, stub
     assert doc["world_findings"][4]["finding"] in stub, stub
     assert "enqueued" in _group_of(page, f"f-{E.GRADED_WORLD}-0-4").text()
-    withheld_stubs = [n for n in page.section("sec-findings").descendants()
-                      if n.id and n.id.startswith("f-") and "defender claim 0" in n.text()]
-    assert len(withheld_stubs) == 1, [n.id for n in withheld_stubs]
-    assert "draw document absent" in withheld_stubs[0].text()
-    assert "withheld" in page.group_of(withheld_stubs[0].id or "").text()
+    assert "draw document absent" in page.text_of(f"f-{E.PASSTHROUGH_WORLD}-0-4")
     rows = _rows(page)
+    assert not [r for r in rows if r.endswith(tuple(f"-0-{i}" for i in range(4)))
+                and not r.startswith(f"f-{E.FAMILY}-")], rows
+    assert "defender claim 0" not in page.text_of("sec-findings")
     assert f"f-{E.GRADED_WORLD}-0-7" not in rows, rows
-    # family 3 + the recorded prior/0/4 stub + no_remote_session's 0/4 stub + 4 withheld stubs
-    assert f"of {3 + 1 + 1 + 4}" in _tile(page, 2).text(), _tile(page, 2).text()
+    # family 3 + the recorded prior/0/4 stub + no_remote_session's 0/4 stub
+    assert f"of {3 + 1 + 1}" in _tile(page, 2).text(), _tile(page, 2).text()
     assert "no document either" in page.one(cls="vd-acct").text()
 
     # the grain: the graded world's document is back with ONE finding while the record still
@@ -696,9 +637,9 @@ def test_1025_a_finding_id_recorded_in_judge_yaml_names_a_world_draw_index_tripl
     assert graded_rows == [f"f-{E.GRADED_WORLD}-0-0"], graded_rows
     assert "THE ONLY FINDING LEFT" in page.text_of(f"f-{E.GRADED_WORLD}-0-0")
     assert "draw document absent" not in page.text_of(f"f-{E.GRADED_WORLD}-0-0")
-    # family 3 + the one row on disk + no_remote_session's 0/4 stub + 4 withheld stubs — not
-    # 10: no stub for the recorded `prior_fake_key_precedent/0/4`
-    assert f"of {3 + 1 + 1 + 4}" in _tile(page, 2).text(), _tile(page, 2).text()
+    # family 3 + the one row on disk + no_remote_session's 0/4 stub — not 6: no stub for the
+    # recorded `prior_fake_key_precedent/0/4`
+    assert f"of {3 + 1 + 1}" in _tile(page, 2).text(), _tile(page, 2).text()
 
 
 def test_1025_top_level_enqueue_counts_disagree_with_the_rows_the_page_walks(tmp_path):
@@ -713,33 +654,14 @@ def test_1025_top_level_enqueue_counts_disagree_with_the_rows_the_page_walks(tmp
     assert "disagree" not in acct, acct
 
     doc = E.sample_grade()
-    doc["enqueued_rows"] = 7
+    doc["enqueued_rows"] = S.defender_enqueued + 3
     E.write_judge(ep.dir, doc)
     page = render(ep)
     acct = page.one(cls="vd-acct").text()
-    assert "record: 7 enqueued · page found: 4" in acct, acct
+    assert (f"record: {S.defender_enqueued + 3} enqueued · page found: {S.defender_enqueued}"
+            in acct), acct
     assert "record and page disagree by 3" in acct, acct
     assert f"{S.queued} of {S.findings}" in _tile(page, 2).text()
-
-
-def test_1025_withheld_cross_check_fails(tmp_path):
-    """The withheld cross-check is run and reported the same way — "withheld list: N entries ·
-    M matched" — with the disagreement line when the record's list and the page's walk differ;
-    every defender finding of a withheld world still renders as withheld regardless (J9c).
-    """
-    ep = E.sample_episode(tmp_path)
-    acct = render(ep).one(cls="vd-acct").text()
-    assert f"withheld list: {S.defender_withheld} entries · {S.defender_withheld} matched" in acct, acct
-
-    full = E.sample_grade()
-    short = E.sample_grade(withheld_findings=full["withheld_findings"][:3])
-    E.write_judge(ep.dir, short)
-    page = render(ep)
-    acct = page.one(cls="vd-acct").text()
-    assert "withheld list: 3 entries · 3 matched" in acct, acct
-    assert "record and page disagree by 1" in acct, acct
-    for i in range(4):
-        assert "withheld" in _group_of(page, f"f-{E.WITHHELD_WORLD}-0-{i}").text()
 
 
 def test_1025_a_draw_document_is_torn_mid_write(tmp_path):
@@ -918,19 +840,16 @@ def test_1025_a_draw_document_that_is_only_a_failure_reason(tmp_path):
 
 
 def test_1025_a_world_finding_refused_for_citing_an_unavailable_sample(tmp_path):
-    """A world finding the enqueue refused for citing a pattern its row lists under
-    `sample_unavailable_patterns` (absent from `world_findings`, present in
-    `unqueueable_findings` with the A1(b) reason) renders in the world-author table under an
+    """A world finding the enqueue refused for citing a samples section the record marks
+    `unavailable` (`cites_sample`; absent from `world_findings`, present in
+    `unqueueable_findings` with that reason) renders in the world-author table under an
     "unqueueable — <reason>" group — never dropped from the table (O2).
     """
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
-    doc["worlds"][1]["sample_unavailable"] = True
-    doc["worlds"][1]["sample_unavailable_patterns"] = ["logs-system.auth-*"]
-    doc["worlds"][1]["world_findings"] = []
     doc["world_findings"] = [r for r in doc["world_findings"]
                              if not r["finding_id"].endswith(f"/{E.GRADED_WORLD}/0/4")]
-    reason = "cites logs-system.auth-*, whose sample was unavailable"
+    reason = "cites samples.yaml#identity, whose section holds no real answers"
     E.set_lane(doc, E.GRADED_WORLD, 0, 4, "unqueueable", reason)
     doc["world_enqueued_rows"] = 4
     E.write_judge(ep.dir, doc)
@@ -950,12 +869,10 @@ def test_1025_a_world_finding_refused_for_citing_an_unavailable_sample(tmp_path)
 
 def test_1025_the_episode_level_verdicts_justification(tmp_path):
     """The episode-level words are justified from record values only (J10): each draw group in
-    the lede and in the findings section carries that draw's own `episode_outcome` word, and
-    `discard_evidence` renders when it is set.
+    the lede and in the findings section carries that draw's own `episode_outcome` word.
     """
     page = render(E.sample_episode(tmp_path))
     band = page.text_of("sec-verdict")
-    assert "review.yaml#worlds.*.consistency.control_mismatch_keys" in band, band
     family_group = _group_of(page, f"f-{E.FAMILY}-0-0").text()
     assert "discard" in family_group, family_group
     world_group = _group_of(page, f"f-{E.GRADED_WORLD}-0-0").text()
@@ -966,7 +883,7 @@ def test_1025_the_episode_level_verdicts_justification(tmp_path):
 
 def test_1025_record_fields_no_slot_binds(tmp_path):
     """Bound slots only (J10): the record fields no slot names — the draw's `noise_floor_note`,
-    the row's `spread` and `integrity_notes` — do not reach the page; the raw-record fold is a
+    the row's `integrity_notes` — do not reach the page; the raw-record fold is a
     recorded follow-up, not this page. Positive control: the draw's own `episode_outcome` word,
     which the resolution binds, does render with its group.
     """
@@ -977,10 +894,9 @@ def test_1025_record_fields_no_slot_binds(tmp_path):
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, doc)
     grade = E.sample_grade()
     grade["worlds"][1]["integrity_notes"] = ["INTEGRITY-NOTE-UNBOUND"]
-    grade["worlds"][1]["spread"] = {"SPREAD-KEY-UNBOUND": 1}
     E.write_judge(ep.dir, grade)
     page = render(ep)
-    for unbound in ("NOISE-FLOOR-NOTE-UNBOUND", "INTEGRITY-NOTE-UNBOUND", "SPREAD-KEY-UNBOUND"):
+    for unbound in ("NOISE-FLOOR-NOTE-UNBOUND", "INTEGRITY-NOTE-UNBOUND"):
         assert unbound not in page.raw, unbound
     assert "gradable" in _group_of(page, f"f-{E.GRADED_WORLD}-0-0").text()
 
@@ -1012,7 +928,7 @@ def test_1025_family_drawn_several_times_with_a_dissenting_draw(tmp_path):
 
 def test_1025_manifest_fields_the_slot_bindings_never_name(tmp_path):
     """The manifest fields no slot binds — `source_run_dir` (an absolute path outside the
-    archive), `continuation_prompt`, `as_of`, `fences_at`, `captured_patterns` — stay off the
+    archive), `continuation_prompt`, `as_of`, `fences_at` — stay off the
     page; `source_run_dir` is never a link source. Positive control: the bound `base_story` and
     each sibling's `axis` render.
     """
@@ -1020,11 +936,11 @@ def test_1025_manifest_fields_the_slot_bindings_never_name(tmp_path):
     manifest = E.sample_manifest(source_run_dir="/runs/SOURCE-RUN-DIR-UNBOUND",
                                  continuation_prompt="CONTINUATION-PROMPT-UNBOUND",
                                  as_of="2099-01-01T00:00:00Z",
-                                 captured_patterns=["CAPTURED-PATTERN-UNBOUND"])
+                                 fences_at=98765)
     T.write_family(ep.dir, manifest)
     page = render(ep)
     for unbound in ("SOURCE-RUN-DIR-UNBOUND", "CONTINUATION-PROMPT-UNBOUND",
-                    "2099-01-01T00:00:00Z", "CAPTURED-PATTERN-UNBOUND"):
+                    "2099-01-01T00:00:00Z", "98765"):
         assert unbound not in page.raw, unbound
     assert E.BASE_STORY in page.text_of("sec-records")
     assert E.AXIS_GRADED in page.text_of("sec-worlds")
@@ -1035,40 +951,21 @@ def _class_carries(page: E.Page, word: str) -> list[str]:
             if word.lower() in (n.attrs.get("class") or "").lower()]
 
 
-def test_1025_withheld_reason_outside_the_four_known_values(tmp_path):
-    """A `withheld_reason` outside the four members renders as its raw word, escaped, with no
-    decoding gloss, in the withheld group's heading and the world's card; the class comes from
-    the closed map's neutral fallback, so the word appears in no `class` attribute (J11/J5).
-    """
-    ep = E.sample_episode(tmp_path)
-    doc = E.sample_grade()
-    doc["worlds"][0]["withheld_reason"] = "weird<reason>"
-    for entry in doc["withheld_findings"] + doc["dispositions"]:
-        if entry.get("reason") == S.withheld_reason:
-            entry["reason"] = "weird<reason>"
-    E.write_judge(ep.dir, doc)
-    page = render(ep)
-    heading = _heading(_group_of(page, f"f-{E.WITHHELD_WORLD}-0-0"))
-    assert "weird<reason>" in heading, heading
-    assert "&lt;reason&gt;" in page.raw, heading
-    assert _class_carries(page, "weird") == []
-
-
 def test_1025_verdict_word_outside_the_five_known_values(tmp_path):
     """A `verdict_word` outside {undecidable, caught, survived, discard, corpus-contradiction}
-    renders as its raw word, escaped, in the meta line and tile 1, tile 1 carries "(family
-    outcome, not the ladder)" as it does for any non-ladder word (fk-9), and the word drives no
+    renders as its raw word, escaped, in the meta line and tile 1, tile 1 carries "(not a
+    family word)" as it does for any word outside the vocabulary (fk-9), and the word drives no
     class. Positive control: `undecidable` carries no such note.
     """
     ep = E.sample_episode(tmp_path)
-    assert "(family outcome, not the ladder)" not in _tile(render(ep), 0).text()
+    assert "(not a family word)" not in _tile(render(ep), 0).text()
     doc = E.sample_grade()
     doc["verdict_word"] = "mystery<word>"
     E.write_judge(ep.dir, doc)
     page = render(ep)
     assert "mystery<word>" in page.one(cls="vd-meta").text()
     assert "mystery<word>" in _tile(page, 0).text()
-    assert "(family outcome, not the ladder)" in _tile(page, 0).text(), _tile(page, 0).text()
+    assert "(not a family word)" in _tile(page, 0).text(), _tile(page, 0).text()
     assert "&lt;word&gt;" in page.raw
     assert _class_carries(page, "mystery") == []
 
@@ -1117,22 +1014,21 @@ def test_1025_judge_yaml_is_a_symlink_whose_target_is_a_different_episodes_judge
 
 
 def test_1025_judge_yaml_is_present_with_an_empty_worlds_array_and_no_not_graded_stamp(tmp_path):
-    """Renders as a graded record with zero rows: tile 1 "0 of 0 graded measuring · 0 of 0
-    contrast the control · verdict = declared on 0 of 0", no cards, findings section carrying
+    """Renders as a graded record with zero rows: tile 1 "0 worlds judged · verdict =
+    declared on 0 of 0", no cards, findings section carrying
     family-draw rows only, the control alone in the worlds guide — not the not_graded band.
     """
     ep = E.sample_episode(tmp_path)
-    for label in (E.WITHHELD_WORLD, E.GRADED_WORLD):
+    for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD):
         shutil.rmtree(ep.world(label) / "judge")
     doc = E.sample_grade()
     doc["worlds"] = []
-    doc["withheld_findings"] = []
     doc["enqueued_rows"] = 0
     doc["world_findings"] = doc["world_findings"][:3]
     doc["world_enqueued_rows"] = 3
     E.write_judge(ep.dir, doc)
     page = render(ep)
-    assert "0 of 0 graded measuring · 0 of 0 contrast the control · verdict = declared on 0 of 0" in _tile(page, 0).text()
+    assert "0 worlds judged · verdict = declared on 0 of 0" in _tile(page, 0).text()
     assert _cards(page) == []
     assert set(_rows(page)) == {f"f-{E.FAMILY}-0-{i}" for i in range(3)}, _rows(page)
     assert "no grade record" not in page.text_of("sec-verdict")
@@ -1162,7 +1058,7 @@ def test_1025_a_not_graded_stamp_carries_a_field_this_readers_schema_has_never_s
     """
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
-    doc["not_graded"] = {"outcome": "rejected", "reason": "STAMP-REASON"}
+    doc["not_graded"] = {"outcome": "unusable", "reason": "STAMP-REASON"}
     E.write_judge(ep.dir, doc)
     render(ep)
     baseline = ep.page.read_bytes()
@@ -1246,27 +1142,6 @@ def test_1025_malformed_replies_and_gaps_in_draw_numbering(tmp_path):
         assert f"tx-judge_{E.GRADED_WORLD}_{n}_trace" in page.by_id, page.ids_with("tx-")
 
 
-def test_1025_a_worlds_row_mechanical_world_findings_entry_and_a_real_numeric_draw_coexist_for_the_same_world(
-        tmp_path):
-    """Both render: the numeric draws' rows at `f-<world>-<n>-<i>` and each
-    `mechanical_world_findings` entry at `f-<world>-mechanical-<i>`; the sets are disjoint and
-    additive (correction 1).
-    """
-    ep = E.sample_episode(tmp_path)
-    doc = E.sample_grade()
-    doc["worlds"][1]["mechanical_world_findings"] = [
-        E.finding(subject="world", bucket="unreachable-difference", claim=f"MECH {i}")
-        for i in range(2)]
-    for i in range(2):
-        doc["world_findings"].append(E.world_finding_queue_row(
-            f"{E.EPISODE_ID}/{E.GRADED_WORLD}/mechanical/{i}", f"MECH {i} — root"))
-    E.write_judge(ep.dir, doc)
-    rows = [r for r in _rows(render(ep)) if r.startswith(f"f-{E.GRADED_WORLD}-")]
-    assert {f"f-{E.GRADED_WORLD}-mechanical-0", f"f-{E.GRADED_WORLD}-mechanical-1"} <= set(rows)
-    assert {f"f-{E.GRADED_WORLD}-0-{i}" for i in range(5)} <= set(rows)
-    assert len(rows) == 7, rows
-
-
 def test_1025_unqueueable_reason_text_contains_the_page_join_delimiter(tmp_path):
     """The split is on the FIRST `": "` (a run id admits no `:`, F9): the reason keeps any later
     `": "`, rendered escaped; a line with no separator is rendered whole in the queue accounting
@@ -1337,8 +1212,8 @@ def test_1025_family_call_faulted_after_writing_a_draw(tmp_path):
 
 def test_1025_a_gradable_row_whose_draws_never_ran(tmp_path):
     """A gradable row whose draws never ran (no draw document, no trace) is graded on the page
-    (`is_gradable_row`): verdict, bucket, ladder and a card render from the row; no transcript
-    block for it and an empty findings group.
+    (`is_gradable_row`): verdict, bucket, systems and a card render from the row; no
+    transcript block for it and an empty findings group.
     """
     ep = E.sample_episode(tmp_path)
     (ep.world(E.GRADED_WORLD) / "judge" / "0.yaml").unlink()
@@ -1347,7 +1222,7 @@ def test_1025_a_gradable_row_whose_draws_never_ran(tmp_path):
     doc = E.sample_grade()
     doc["worlds"][1]["completed_draws"] = 0
     doc["worlds"][1]["draws_failed_reason"] = "no draw completed"
-    doc["worlds"][1]["world_findings"] = []
+    doc["worlds"][1]["findings"] = []
     doc["world_findings"] = [r for r in doc["world_findings"]
                              if not r["finding_id"].endswith(f"/{E.GRADED_WORLD}/0/4")]
     doc["world_enqueued_rows"] = 4
@@ -1356,15 +1231,14 @@ def test_1025_a_gradable_row_whose_draws_never_ran(tmp_path):
     world = page.text_of(f"world-{E.GRADED_WORLD}")
     assert "inconclusive" in world
     assert "decision-discipline" in world
-    assert "holding_queried" in world
+    assert f"systems: {E.SYSTEM}" in world
     assert any(E.GRADED_WORLD in c.text() for c in _cards(page))
     assert f"tx-judge_{E.GRADED_WORLD}_0_trace" not in page.by_id
     assert not [r for r in _rows(page) if r.startswith(f"f-{E.GRADED_WORLD}-")]
 
 
 def test_1025_an_episode_with_only_the_control(tmp_path):
-    """Tile 1 "0 of 0 graded measuring · 0 of 0 contrast the control · verdict = declared on
-    0 of 0" beside `undecidable`; no cards; the findings section carries family-draw rows
+    """Tile 1 "0 worlds judged · verdict = declared on 0 of 0" beside `undecidable`; no cards; the findings section carries family-draw rows
     only; the worlds guide names the control alone as "the branch point untouched, not
     graded"; renders without raising.
     """
@@ -1372,15 +1246,15 @@ def test_1025_an_episode_with_only_the_control(tmp_path):
     manifest = E.sample_manifest()
     manifest["worlds"] = manifest["worlds"][:1]
     T.write_family(ep.dir, manifest)
-    for label in (E.WITHHELD_WORLD, E.GRADED_WORLD):
+    for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD):
         shutil.rmtree(ep.world(label))
         shutil.rmtree(ep.run(label))
     doc = E.sample_grade()
-    doc["worlds"], doc["withheld_findings"], doc["enqueued_rows"] = [], [], 0
+    doc["worlds"], doc["enqueued_rows"] = [], 0
     doc["world_findings"] = doc["world_findings"][:3]
     E.write_judge(ep.dir, doc)
     page = render(ep)
-    assert "0 of 0 graded measuring · 0 of 0 contrast the control · verdict = declared on 0 of 0" in _tile(page, 0).text()
+    assert "0 worlds judged · verdict = declared on 0 of 0" in _tile(page, 0).text()
     assert "undecidable" in _tile(page, 0).text()
     assert _cards(page) == []
     assert set(_rows(page)) == {f"f-{E.FAMILY}-0-{i}" for i in range(3)}
@@ -1412,7 +1286,7 @@ def test_1025_render_reflects_a_not_graded_to_graded_transition_across_two_calls
     """
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
-    doc["not_graded"] = {"outcome": "rejected", "reason": "STAMP-REASON-EARLIER"}
+    doc["not_graded"] = {"outcome": "unusable", "reason": "STAMP-REASON-EARLIER"}
     E.write_judge(ep.dir, doc)
     first = render(ep)
     assert "STAMP-REASON-EARLIER" in first.text_of("sec-verdict")
@@ -1429,11 +1303,10 @@ def test_1025_render_reflects_a_not_graded_to_graded_transition_across_two_calls
 # ---------------------------------------------------------------------------------------
 
 
-def test_1025_tile_one_reads_verdict_and_declared_through_the_one_normalizer_the_contrast_uses(tmp_path):
-    """`verdict: ' benign '` against `declared: 'benign'` is the same disposition on BOTH of
-    tile 1's figures — the contrast count already put both sides through the vocabulary's
-    normalizer (which strips); the agreement count compared the raw strings and read "verdict
-    = declared on 0 of 1" beside a contrast figure that treated them as one word."""
+def test_1025_tile_one_reads_verdict_and_declared_through_the_vocabularys_normalizer(tmp_path):
+    """`verdict: ' benign '` against `declared: 'benign'` is the same disposition: tile 1's
+    agreement count puts both sides through the vocabulary's normalizer (which strips) — it
+    once compared the raw strings and read the pair as a disagreement."""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     graded = next(w for w in doc["worlds"] if w["world"] == E.GRADED_WORLD)
@@ -1441,7 +1314,7 @@ def test_1025_tile_one_reads_verdict_and_declared_through_the_one_normalizer_the
     graded["verdict"] = " benign "
     E.write_judge(ep.dir, doc)
     tile = _tile(render(ep), 0).text()
-    assert "verdict = declared on 1 of 1" in tile, tile
+    assert f"verdict = declared on 1 of {S.graded}" in tile, tile
 
 
 def test_1025_an_empty_family_outcome_is_the_badge_word_not_an_absence(tmp_path):

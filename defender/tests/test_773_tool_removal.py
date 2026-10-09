@@ -19,6 +19,7 @@ LESSON = "defender/lessons/l1.md"
 QLESSON = "defender/lessons-questioner/w1.md"
 
 
+
 # ---------------------------------------------------------------------------
 # M1 — the curator writes, never checks
 # ---------------------------------------------------------------------------

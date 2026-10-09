@@ -11,10 +11,8 @@ deterministic across renders and carries no ticket text — measured before writ
 The mapping half drives the `case_ticket` consumers with the record's `ticket_mapping` (coined
 keyword `mapping=`, `release_predicate` positional — `S.with_mapping`), the query tool's
 ticket screen through the replay harness (`verbs=` / `tenant=`; the served payload is what the
-gather model was shown), the estate applier, and a resumed sibling's `WorldRegistry` through
-`run.main --resume`, whose `lifecycle` seam hands the REAL `_drive_investigation` a recording
-`investigate`. "After the record is built" is the `preflight` seam, which `run.main` calls after
-`tenant = tenant_of()`.
+gather model was shown) and the ticket writer's record step. (#1224 retired the estate applier,
+and with it the world patches a resumed sibling's registry once judged against the mapping.)
 
 Nothing here reaches the real docker: the only transport that forks (the record step in
 `test_d_mapping_error_consumers`) is handed a `DockerShim` env, and every `run.main` drive puts the
@@ -31,8 +29,6 @@ from typing import Any
 
 from defender import run_common
 from defender.run_repository import RunPaths
-from defender.learning.branch.estate import applier
-from defender.learning.branch.estate.registry import EstateError
 from defender.runtime import case_ticket
 from defender.runtime import run_tenant
 from defender.tests import _spec767 as M
@@ -47,7 +43,6 @@ from defender.tests.e2e._replay_harness import (
     drive,
     materialize,
 )
-from defender.tests.tenant_1078_pass_a import _spec1078 as H
 from defender.run_repository import Run as _Run
 from defender.tests.tenant_1107_settings import _spec1107 as S
 
@@ -505,8 +500,7 @@ def test_s7_mf11_mutating_callers_copy_locally(tmp_path):
 def test_d_mapping_error_consumers(tmp_path, caplog):
     """With record.ticket_mapping a CaseTicketError, each consumer handles it as at base (CX21). The
     query tool's ticket screen serves no comments, since every ticket reads as unreleased, and logs
-    one warning. The estate applier refuses a comment patch, naming the mapping error. The record
-    step warns and writes an error receipt."""
+    one warning. The record step warns and writes an error receipt."""
     root = tmp_path / "tenants"
     # `open.status` and `released.status` both 'open': the loader's own lifecycle refusal (#767),
     # a mapping file present (so the tenant is accepted, REQUIRED_SETTINGS) and unusable.
@@ -536,15 +530,7 @@ def test_d_mapping_error_consumers(tmp_path, caplog):
               and said in r.getMessage()]
     assert len(warned) == 1, f"the screen warned {len(warned)} times naming the mapping error"
 
-    # (b) The estate applier: a comment patch is refused, naming the error.
-    patches = {"ticket": {"SOC-9": {"status": "closed",
-                                    "comments": [{"author": "defender", "body": "a note"}]}}}
-    refused = applier.unservable(patches, record.ticket_mapping)
-    assert refused, refused
-    assert all("SOC-9" in r for r in refused), refused
-    assert any(said in r for r in refused), f"the refusal does not name the error: {refused}"
-
-    # (c) The record step: a warning and an error receipt, no comment sent.
+    # (b) The record step: a warning and an error receipt, no comment sent.
     case_dir = M.make_run(tmp_path / "runs", "case-err-1107")
     # CX8: the shim on the child's PATH receives argv + env; it answers the read-back as an open
     # case (not released) and a POST as created, in curl's body + status-line shape.
@@ -591,86 +577,3 @@ def test_o2_ticket_screen_mapping_snapshot(tmp_path):
     assert not _shown(gather, "MARK-EDITED-O2"), (
         "a ticket released only under the edited file was served its comments")
     assert S.holders(run_dir, "MARK-EDITED-O2") == [], "the edited-file release reached the run"
-
-
-def test_c_estate_registry_reads_record(tmp_path, monkeypatch):
-    """A resumed sibling's WorldRegistry, built in run.py, and the estate applier judge a ticket
-    comment patch against the record's ticket_mapping. Editing mapping.yaml's released status after
-    the record is built does not change which patch is refused."""
-    # #1120: the resumed sibling reads its tenant from `DEFENDER_DATA_ROOT` alone.
-    root = current_data_root()
-    folder = S.plant(root, marker="est", table=TICKET_TABLE, released_status="closed")
-    probe = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
-                                      dispatches_lead_zero=False)
-    assert case_ticket.release_predicate(probe.ticket_mapping).released_status == "closed"
-
-    def patch(entity: str, status: str) -> dict[str, Any]:
-        return {"ticket": {entity: {"status": status, "comments": [
-            {"author": "defender", "body": f"a world's note on {entity}"}]}}}
-
-    as_built, as_edited = patch("SOC-1", "closed"), patch("SOC-2", "done-edited-1107")
-    _base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src), worlds=[
-        T.base_world(),
-        T.world_doc("b", ov=T.overlay(patches=as_built)),
-        T.world_doc("c", ov=T.overlay(patches=as_edited)),
-    ]))
-    shim = S.DockerShim(tmp_path / "docker")
-    monkeypatch.setenv("PATH", shim.path_value())
-    run = S.run_py()
-
-    def resume(world: str) -> tuple[Any, list[dict[str, Any]], dict[str, Any]]:
-        # The record is built from the file as planted; the edit lands after (preflight runs
-        # after `tenant = tenant_of()`), each run afresh.
-        S.mapping_path(folder).write_text(T1106.mapping_text(released_status="closed"),
-                                          encoding="utf-8")
-        investigated: list[dict[str, Any]] = []
-        handed: dict[str, Any] = {}
-
-        def edit_after_record(_model: str | None = None) -> int:
-            S.mapping_path(folder).write_text(
-                T1106.mapping_text(released_status="done-edited-1107"), encoding="utf-8")
-            return 0
-
-        def lifecycle(**kw: Any) -> dict[str, Any]:
-            handed.update(kw)
-            rd = kw["run_dir"]
-            return run._drive_investigation(
-                alert_path=RunPaths(rd).alert, run_dir=rd, run_id=rd.name,
-                defender_dir=kw["defender_dir"], model_name=kw["model"],
-                model_override=kw["model_override"], box=None, tenant=kw["tenant"],
-                world=kw["world"], episode=kw["episode"],
-                investigate=lambda **ikw: investigated.append(ikw) or {
-                    "output": "spec1107", "requests": 0, "truncated_by": None})
-
-        rec = S.RunRecorder(tmp_path / "siblings" / world)
-        try:
-            outcome: Any = S.drive_run(
-                H.resume_argv(ep / "family.yaml", world, "--tenant", S.PLAYGROUND_ID,
-                              "--no-learn"),
-                rec, preflight=edit_after_record, lifecycle=lifecycle)
-        except EstateError as refused:
-            outcome = refused
-        return outcome, investigated, handed
-
-    got_b, investigated_b, handed_b = resume("b")
-    assert "done-edited-1107" in S.mapping_path(folder).read_text(encoding="utf-8"), (
-        "the post-record edit did not land")
-    assert got_b == (0, None), (
-        f"world b (comments on a case moved to the status the record was built with) was "
-        f"refused: {got_b}")
-    assert len(investigated_b) == 1, "world b's WorldRegistry was built but nothing ran on it"
-
-    got_c, investigated_c, _ = resume("c")
-    assert isinstance(got_c, EstateError), (
-        f"world c (comments on a status only the edited file releases) was accepted: {got_c}")
-    assert "SOC-2" in str(got_c), got_c
-    assert investigated_c == [], "world c's refused registry still ran the investigation"
-
-    # The applier itself, handed the record run.py built (before the edit), agrees.
-    record = handed_b["tenant"]
-    assert applier.unservable(as_built, record.ticket_mapping) == [], (
-        "the applier refused a patch releasing to the record's status")
-    refused = applier.unservable(as_edited, record.ticket_mapping)
-    assert refused, refused
-    assert "SOC-2" in refused[0], refused

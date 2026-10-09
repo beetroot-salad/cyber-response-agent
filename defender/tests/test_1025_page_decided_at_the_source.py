@@ -88,7 +88,7 @@ def test_1025_the_runs_launcher_line_and_the_runs_row_show_one_wall(tmp_path):
     a row that said 4m00s, or 1m00s under 4m00s with the entries swapped (review of
     PR #1042, J15/p5)."""
     ep = E.sample_episode(tmp_path)
-    steps = [s for s in E.six_steps() if s[0] != "runs"]
+    steps = [s for s in E.every_step() if s[0] != "runs"]
     steps += [("runs", "2026-09-09T10:20:00Z", "2026-09-09T10:19:00Z"),
               ("runs", "2026-09-09T10:21:00Z", "2026-09-09T10:25:00Z")]
     E.write_timing(ep.dir, steps)
@@ -111,7 +111,7 @@ def test_1025_no_grand_total_when_no_call_priced(tmp_path):
     """An episode with no runs, no judge traces and one questioner trace whose `model` the
     pricing table does not know has priced nothing: the questioner row reads "partial — 0 of
     1 calls priced" and there is NO grand-total line — not "$0.0000 — excludes…". `costed`
-    is gated on priced calls, as the review row already was (review of PR #1042)."""
+    is gated on priced calls (review of PR #1042)."""
     ep = E.sample_episode(tmp_path, traces=False, runs=False)
     E.write_trace(ep.dir, "questioner", model="nobody/prices-this")
     page = render(ep)

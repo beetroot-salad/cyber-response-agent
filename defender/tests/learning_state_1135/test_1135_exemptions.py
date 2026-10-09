@@ -67,7 +67,7 @@ def _judge_roots(tmp_path: Path, monkeypatch, root: Path) -> Path:
 
 def _gradable_episode(tmp_path: Path) -> Path:
     """One accepted episode whose grade enqueues finding rows (the e2e spine's episode)."""
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     return ep

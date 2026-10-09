@@ -5,17 +5,17 @@ The spec's demand #0 (§7 Q1): `render_episode(episode_dir) -> Path` in
 `scripts/visualize/visualize_episode.py` writes the WHOLE page through `write_guarded`'s replace
 lane at `<episode_dir>/learning.html`; `main(argv)` exits 0 with the path on stdout, 1 with one
 stderr line and no page when there is no argument, the argument is not a directory, or the
-directory holds no readable `family.yaml`; the launcher (`cli._run_episode`) calls it INSIDE
-`_cluster_released`'s body after the `clock.step(Step.JUDGE)` frame closes, under its own
-`except Exception` boundary (Q2 / J1) — a graded episode always gets its page, a held teardown
-fault is still raised afterwards unchanged, the review-rejected exit renders nothing.
+directory holds no readable `family.yaml`; the launcher (`cli._run_episode`, through
+`_render_page`) calls it after the `clock.step(Step.JUDGE)` frame closes, under its own
+`except Exception` boundary (Q2 / J1) — a graded episode always gets its page, and the exit
+before any sibling starts (an outcome other than `accepted`) renders nothing.
 
 Every fault here is a real input through the real primitive: a symlink at the page's name, a
 read-only directory, a manifest that is a directory / empty / a list / unparseable, an interrupt
 landing INSIDE the render (a signal handler that fires only when the page module's frame is on
 the stack — `E.when_inside` — because the renderer has no seam of its own, d40). The launcher is
 driven through `test_1025_stage_timing._launch` with every seam faked (`FakeSibling`,
-`FakeJudge`, `FakeDoor`, `FakeAgent`) and `DEFENDER_EPISODES_BASE` / `DEFENDER_RUNS_BASE` / the
+`FakeJudge`, the question-writer and pre-flight's oracle/verifier doubles) and `DEFENDER_EPISODES_BASE` / `DEFENDER_RUNS_BASE` / the
 learning state root under `tmp_path`.
 
 RED AGAINST HEAD by construction: the page module does not exist, and every test imports it per
@@ -198,9 +198,9 @@ def test_1025_a_render_creates_or_changes_exactly_one_file_learning_html_and_tou
 # ---------------------------------------------------------------------------------------
 
 
-def test_1025_the_launcher_renders_the_page_after_the_judge_frame_with_all_six_steps_on_it(tmp_path):
+def test_1025_the_launcher_renders_the_page_after_the_judge_frame_with_every_step_on_it(tmp_path):
     """After `cli.main` returns 0 on a full fake-seamed episode, `learning.html` sits beside
-    `judge.yaml` and its stage table carries all six `Step` rows on the record — none reads
+    `judge.yaml` and its stage table carries every `Step` row on the record — none reads
     "not on the record", the `judge` row included — which is only possible if the render ran
     after the JUDGE clock frame closed.
     """
@@ -257,45 +257,31 @@ def test_1025_a_render_fault_is_printed_and_changes_neither_the_exit_status_nor_
     assert hook_page(control.episode_dir).by_id, "the control launch did not write a real page"
 
 
-def test_1025_review_rejected_episode_and_the_page(tmp_path, capsys):
-    """The review-rejected path returns 1 before RUNS with no `judge.yaml` and no `runs/`, and
-    the launcher writes no `learning.html` there — there is no second hook on that exit (J1).
-    The standalone CLI still accepts that directory (only `family.yaml` refuses, d01): exit 0,
-    the band says there is no grade record, the stage table carries the three recorded steps'
-    rows and "not on the record" for the other three, and no world section exists.
+def test_1025_preflight_refused_episode_and_the_page(tmp_path, capsys):
+    """The pre-flight-refused path returns 1 before RUNS with no `judge.yaml` and no `runs/`,
+    and the launcher writes no `learning.html` there — there is no second hook on that exit
+    (J1). The standalone CLI still accepts that directory (only `family.yaml` refuses, d01):
+    exit 0, the band says there is no grade record, the records section carries the outcome
+    record's `refused` word, the stage table carries the two recorded steps' rows and "not on
+    the record" for the other three, and no world section exists.
     """
-    launch = ST._launch(tmp_path, **ST._rejecting_seams())
-    assert launch.rc == 1, "the control failed: the review did not reject"
+    launch = ST._launch(tmp_path, **ST._refusing_seams())
+    assert launch.rc == 1, "the control failed: pre-flight did not refuse"
     ep = launch.episode_dir
     assert not (ep / "judge.yaml").exists()
     assert not (ep / "runs").exists()
-    assert not (ep / E.PAGE_NAME).exists(), "the launcher rendered on the rejected exit"
+    assert not (ep / E.PAGE_NAME).exists(), "the launcher rendered on the refused exit"
 
     rc, out, err = cli([str(ep)], capsys)
     assert rc == 0, (out, err)
     page = E.read_page(ep)
     assert "no grade record" in page.text_of("sec-verdict")
+    assert "outcome: refused" in page.text_of("sec-records"), page.text_of("sec-records")
     timing = page.text_of("stage-timing")
-    assert timing.count("not on the record") == 3, timing
-    for step in ("questioner", "staging", "review"):
+    assert timing.count("not on the record") == len(ST.EXPECTED_STEPS) - 2, timing
+    for step in ("questioner", "preflight"):
         assert step in timing
     assert page.ids_with("world-") == [], page.ids_with("world-")
-
-
-def test_1025_held_teardown_fault_after_a_completed_grade(tmp_path):
-    """A teardown fault held by `_cluster_released` is raised AFTER the render: the launch still
-    leaves through `LauncherRefused` naming the teardown, `judge.yaml` is on disk, and so is
-    `learning.html` with the `judge` row on its stage table — the renderer was called inside the
-    held-fault frame once the `clock.step(Step.JUDGE)` frame had closed (J1), not after the
-    outer `with` where the held fault would have skipped it.
-    """
-    with pytest.raises(_cli().LauncherRefused, match="teardown did not verify"):
-        ST._launch(tmp_path, door=ST._StickyDoor())
-    ep = _cli().episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths())
-    assert (ep / "judge.yaml").is_file(), "the control failed: the grade did not land"
-    timing = hook_page(ep).text_of("stage-timing")
-    assert "judge" in timing, timing
-    assert "not on the record" not in timing, timing
 
 
 def test_1025_how_the_operator_learns_where_the_page_is(tmp_path, capsys):
@@ -474,11 +460,12 @@ def _live996_shaped(tmp_path: Path, root: Path) -> E.Episode:
     ungradable row and `family_outcome` absent."""
     ep = E.sample_episode(tmp_path, root=root, family_draw=False, samples=False, judge=False)
     doc = E.sample_grade()
-    doc["worlds"] = [E.ungradable_row(E.WITHHELD_WORLD, declared="benign"),
-                     E.world_row(E.GRADED_WORLD, declared="malicious", has_refused=None)]
+    doc["worlds"] = [E.ungradable_row(E.PASSTHROUGH_WORLD, declared="benign"),
+                     E.world_row(E.GRADED_WORLD, declared="malicious")]
     doc["verdict_word"] = "survived"
     for key in ("family_outcome", "family_failed_reason", "family_malformed_replies",
-                "world_enqueued_rows", "world_enqueued_to", "world_findings", "withheld_findings"):
+                "family_completed_draws", "world_enqueued_rows", "world_enqueued_to",
+                "world_findings"):
         del doc[key]
     E.write_judge(ep.dir, doc)
     return ep
@@ -647,29 +634,38 @@ def test_1025_episode_dir_given_through_a_symlink(tmp_path, capsys):
 # ---------------------------------------------------------------------------------------
 
 
-def test_1025_questioner_or_staging_abort_leaves_a_partial_directory(tmp_path, monkeypatch, capsys):
+def test_1025_questioner_or_preflight_abort_leaves_a_partial_directory(tmp_path, monkeypatch, capsys):
     """The launcher writes no page on an abort (the hook is after JUDGE). The standalone CLI
-    renders when `family.yaml` exists — a staging abort: no-grade band, a stage row per `STEPS`
-    member with a wall for the recorded step (`questioner`) and "not on the record" for the
-    other five, no world sections (no `runs/`), records section "absent" per record. When the
-    abort preceded `write_family` (the questioner interrupted) there is no `family.yaml` and
-    d01's exit-1 / no-page arm applies.
+    renders when `family.yaml` exists — a pre-flight abort (its oracle interrupted mid-replay):
+    no-grade band, a stage row per `STEPS` member with a wall for the recorded step
+    (`questioner`) and "not on the record" for the other four, no world sections (no `runs/`),
+    the outcome record's "no record" state (pre-flight never wrote it), "absent" for the family
+    stamp nothing wrote, and the samples the questioner step recorded. When the abort preceded `write_family` (the questioner interrupted)
+    there is no `family.yaml` and d01's exit-1 / no-page arm applies.
     """
     launcher = _cli()
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-staging"))
+    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-preflight"))
+    oracle_seam = ST._Interrupting(launcher.episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths()))
     ep, _b, _a = ST._abort(tmp_path, launcher.LauncherRefused,
-                           door=T.FakeDoor(fault=T.Fault(raise_after=2)))
+                           oracle=ST.S.oracle(then=ST.S.Move(None, raises=oracle_seam)))
+    assert oracle_seam.calls > 0, "the control failed: pre-flight's oracle was never reached"
     assert not (ep / E.PAGE_NAME).exists(), "the launcher rendered on an abort"
     assert (ep / "family.yaml").is_file()
+    assert not (ep / "outcome.yaml").exists()
     assert not (ep / "runs").exists()
     rc, out, err = cli([str(ep)], capsys)
     assert rc == 0, (out, err)
     page = E.read_page(ep)
     assert "no grade record" in page.text_of("sec-verdict")
     timing = page.text_of("stage-timing")
-    assert timing.count("not on the record") == 5, timing
+    assert timing.count("not on the record") == len(ST.EXPECTED_STEPS) - 1, timing
     assert page.ids_with("world-") == []
-    assert page.text_of("sec-records").count("absent") >= 3, page.text_of("sec-records")
+    records = page.text_of("sec-records")
+    assert "no record: outcome.yaml is absent" in records, records
+    # the outcome's and the family stamp's (written only by `verify`); the samples record is
+    # the questioner step's own, so it is present
+    assert records.count("absent") == 2, records
+    assert page.elements(cls="rc-sample-system"), records
 
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-questioner"))
     questioner = ST._Interrupting(launcher.episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths()))
@@ -717,24 +713,26 @@ def test_1025_an_interrupt_during_the_render(tmp_path):
 
 def test_1025_standalone_render_of_a_live_episode(tmp_path):
     """The renderer writes nothing but `learning.html` and mutates no record: on an episode
-    still being written — no `judge.yaml` yet, a trace whose last row is torn, a `staged.yaml`
-    caught mid-append — it renders each record as read at that instant through the readers'
-    own fault arms (the torn row dropped and counted, the staging record refused, the no-grade
-    band) and the tree snapshot differs in exactly the page. No "live" indicator is owed.
+    still being written — no `judge.yaml` yet, a trace whose last row is torn, a sibling's
+    served ledger caught mid-append — it renders each record as read at that instant through
+    the readers' own fault arms (the torn rows dropped and counted, the no-grade band) and the
+    tree snapshot differs in exactly the page. No "live" indicator is owed.
     """
     ep = E.sample_episode(tmp_path, judge=False)
     trace = ep.dir / "wire_logs" / "questioner_trace.jsonl"
     torn = trace.read_text(encoding="utf-8").rstrip("\n")
     trace.write_text(torn[: len(torn) // 2], encoding="utf-8")
-    with (ep.dir / "staged.yaml").open("a", encoding="utf-8") as fh:
-        fh.write("- world: {half\n")
+    with (ep.dir / "served" / f"{T.world_token(E.GRADED_WORLD)}.jsonl").open(
+            "a", encoding="utf-8") as fh:
+        fh.write('{"system": "elastic", "verb": "es')
     before = E.snapshot(ep.dir)
     page = render(ep)
     after = E.snapshot(ep.dir)
     assert {k for k in set(before) | set(after) if before.get(k) != after.get(k)} == {E.PAGE_NAME}
     assert "no grade record" in page.text_of("sec-verdict")
     assert "1 unreadable row" in page.text_of("tx-questioner_trace"), page.text_of("tx-questioner_trace")
-    assert "staging record unreadable" in page.text_of("sec-records")
+    assert "1 malformed row" in page.text_of(f"leads-{E.GRADED_WORLD}"), page.text_of(
+        f"leads-{E.GRADED_WORLD}")
 
 
 def test_1025_a_refused_write_leaves_no_residue(tmp_path):
@@ -853,7 +851,10 @@ def test_1025_every_class_the_page_emits_has_a_rule_in_the_css_it_ships(tmp_path
     ep = E.sample_episode(tmp_path, timing=True)
     (ep.dir / "runs" / "stray_run_dir" / "gather_raw").mkdir(parents=True)
     (ep.dir / "runs" / "bad name!" / "gather_raw").mkdir(parents=True)
-    E.plant_raw(ep.dir / "staged.yaml", b"\xff\xfe not text")
+    E.plant_raw(ep.dir / "provenance.json", b"\xff\xfe not text")
+    call = {"system": E.SYSTEM, "verb": "esql", "params": {"query": "FROM x"}}
+    E.write_outcome(ep.dir, drift=[{**call, "status": "drifted"}])
+    E.write_world_record(ep.dir, E.CONTROL, "did not finish", call=call, detail="exited 1")
     E.write_trace(ep.dir, "judge:nobody:0", prompt="an unattributed draw")
     E.write_trace(ep.dir, "questioner:z", usage=None, duration_ms=None, model=None)
     doc = E.sample_grade()
@@ -865,7 +866,8 @@ def test_1025_every_class_the_page_emits_has_a_rule_in_the_css_it_ships(tmp_path
     emitted = _page_classes(page)
     assert emitted >= {"vd-tile", "w-section", "fr-row", "st-row", "ld-lead", "rc-story",
                        "tx-entry", "tx-request", "stage-block", "leads-section", "unnameable",
-                       "st-unattributed"}, "positive control: the shapes this test is about"
+                       "st-unattributed", "w-fact", "w-call", "rc-outcome-call",
+                       "rc-world-record", "rc-sample"}, "positive control: the shapes this test is about"
     unstyled = sorted(emitted - styled)
     assert not unstyled, f"classes with no rule in the shipped CSS: {unstyled}"
     # the run pages' transcript vocabulary the page reuses must be this page's own rule
@@ -903,13 +905,13 @@ def test_1025_the_standalone_script_runs_with_no_pythonpath_from_any_cwd(tmp_pat
 
 def _unhealthy(ep: E.Episode) -> None:
     """Every refusal sentence the page can render, planted at once: undecodable bytes at the
-    five episode-root records, a link at a world's report, a torn document at another's
+    episode-root records, a link at a world's report, a torn document at another's
     investigation, the served ledger gone for a third, a bad timing document."""
-    for name in ("staged.yaml", "review.yaml", "samples.yaml", "provenance.json"):
+    for name in ("outcome.yaml", "samples.yaml", "provenance.json"):
         E.plant_raw(ep.dir / name, b"\xff\xfe\x00 not text")
     E.plant_raw(ep.dir / "timing.json", b"[not the record")
     E.plant_link(ep.world(E.GRADED_WORLD) / "report.md", ep.dir / "family.yaml")
-    E.plant_raw(ep.world(E.WITHHELD_WORLD) / "investigation.md", b"\xff\xfe\x00 not text")
+    E.plant_raw(ep.world(E.PASSTHROUGH_WORLD) / "investigation.md", b"\xff\xfe\x00 not text")
     (ep.dir / "served" / f"{T.world_token(E.CONTROL)}.jsonl").unlink()
     E.plant_link(ep.dir / "served" / f"{T.world_token(E.GRADED_WORLD)}.jsonl",
                  ep.dir / "family.yaml")
@@ -936,13 +938,13 @@ def test_1025_an_unhealthy_episode_renders_no_absolute_path_and_byte_identically
     assert one.page.read_bytes() == two.page.read_bytes(), "the two copies rendered differently"
     # positive control: every refusal is still said, in its slot
     records = page.text_of("sec-records")
-    for slot in ("staging record unreadable", "review record unreadable",
-                 "samples record unreadable", "provenance record unreadable"):
+    for slot in ("no record: outcome.yaml is refused", "samples record unreadable",
+                 "provenance record unreadable"):
         assert slot in records, records
     assert "timing record unreadable" in page.text_of("sec-stages")
     assert "could not be read" in page.section(f"world-{E.GRADED_WORLD}").find_all(
         cls="w-report")[0].text()
-    assert "investigation record unavailable" in page.text_of(f"leads-{E.WITHHELD_WORLD}")
+    assert "investigation record unavailable" in page.text_of(f"leads-{E.PASSTHROUGH_WORLD}")
     assert "served ledger: absent" in page.text_of(f"leads-{E.CONTROL}")
     assert "served ledger unreadable" in page.text_of(f"leads-{E.GRADED_WORLD}")
 
@@ -951,14 +953,14 @@ def test_1025_an_unhealthy_episode_renders_no_absolute_path_and_byte_identically
 def test_1025_a_link_into_an_unreadable_directory_at_a_records_name_is_that_slots_refusal(tmp_path):
     """`Path.exists()` follows a link and, on 3.11, re-raises a permission fault from the
     directory above — which is why `_io.entry_present` exists. The readers this page borrows
-    (`read_staged`, `read_family_stamp`, `read_stage_timings`, the YAML screens) asked
-    `exists() or is_symlink()` anyway, so a link planted at `staged.yaml` into a mode-000
-    directory escaped as a bare `PermissionError`, past the page's `StagingRefused` boundary,
-    and took the whole render down. Now each is its own slot's refusal, and the page renders."""
+    (`read_outcome`, `read_family_stamp`, `read_stage_timings`, the YAML screens) must not ask
+    `exists() or is_symlink()`, or a link planted at a record's name into a mode-000 directory
+    escapes as a bare `PermissionError` past the page's per-record boundary and takes the whole
+    render down. Each is its own slot's refusal, and the page renders."""
     ep = E.sample_episode(tmp_path, timing=True)
     vault = tmp_path / "vault"
     vault.mkdir()
-    for name in ("staged.yaml", "provenance.json", "timing.json", "review.yaml", "samples.yaml"):
+    for name in ("outcome.yaml", "provenance.json", "timing.json", "samples.yaml"):
         (ep.dir / name).unlink()
         (vault / name).write_text("planted", encoding="utf-8")
         E.plant_link(ep.dir / name, vault / name)
@@ -968,8 +970,8 @@ def test_1025_a_link_into_an_unreadable_directory_at_a_records_name_is_that_slot
     finally:
         vault.chmod(0o700)
     records = page.text_of("sec-records")
-    for slot in ("staging record unreadable", "provenance record unreadable",
-                 "review record unreadable", "samples record unreadable"):
+    for slot in ("no record: outcome.yaml is refused", "provenance record unreadable",
+                 "samples record unreadable"):
         assert slot in records, records
     assert "timing record unreadable" in page.text_of("sec-stages")
     assert str(tmp_path) not in page.raw

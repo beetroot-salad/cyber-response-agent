@@ -4,15 +4,14 @@ refuses a planted link and writes nothing where it points (O1, O2, O3, O4, D1', 
 `test_1133_episode_handle.py` pins the handle's guard matrix on the handle itself; this suite
 pins that each MIGRATED SITE still reaches it. A site silently reverted to a link-following
 write (builtin `open(path, "w")`, `os.makedirs`) passes every handle test, so each site is driven
-here through the smallest real entry point, with its own injection seams (`cli.main`'s
-`questioner=` / `door=` / `adapters=` / `invoke=` / `spawn=`, `start_family`'s `spawn=`,
-`prepare_episode`'s `prime=`, `grade_episode`'s `judge=`, the `Episode`'s `io=`) and never
+here through the smallest real entry point, with its own injection seams (`start_family`'s
+`spawn=`, `_prime_once`'s `prime`, `grade_episode`'s `judge=`, the `Episode`'s `io=`) and never
 `monkeypatch.setattr`. Every plant is a real filesystem entry, and every negative is paired with
 a positive control on the same address.
 
 The writers take the `Episode` now (D3'): `start_family(episode, ...)`,
 `verify_family(episode, ...)`, `archive_episode(episode, run_dirs)`,
-`record_staged(episode, row)`, `prime_base(source_run_dir, episode)`; the manifest readers
+`prime_base(source_run_dir, episode)`; the manifest readers
 take a view (rev 3, R1): `load_family(view)` / `manifest_digest(view)` /
 `check_manifest_digest(view, digest)`; `prepare_episode(...)` returns the `Episode`. The doors
 keep their path signatures: `cli.main`, `grade_episode(episode_dir, ...)`.
@@ -25,17 +24,12 @@ only the inside one reaches a reverted write, and only the handle's no-follow wa
   a symlink (live or dangling) at a record the site writes. The entry point refuses (or, where
   the site is best-effort, contains the refusal), what the link reaches is unchanged, and the
   plant is left in place: `cli.start_family`'s `runs.ensure()`, `cli.verify_family`'s
-  `worlds.ensure()` and family stamp, the rejected episode's `worlds.ensure()`,
-  `archive.archive_episode`'s `world.dir.ensure()` and run-dir pointer, the judge's two
+  `worlds.ensure()` and family stamp, `archive.archive_episode`'s `world.dir.ensure()` and run-dir pointer, the judge's two
   `draws.ensure()`, its draw write, its framed wire log (contained) and `judge.yaml`.
 - O3 / O6 through the judge's door: while the judge is paid, exactly one descriptor is open on
   the episode dir (the pass reads through its own `Episode`'s view, never a second `bind` by
   path); and a pass whose episode dir is renamed mid-pass writes its draws and `judge.yaml` in
   the moved folder (no writer reopens the episode by name).
-- H2 `review.review`'s default write (no seam injected) is the episode's `review` record.
-- H3 `staging.record_staged(episode, row)` is D1's `staged: append_durable`: through the `io=`
-  seam, its ONE held call is `write(LAYOUT.staged, <row>, mode="append", durable=True)`, on the
-  episode the caller holds (no second `hold`).
 - H4 the priming claim alone keeps a second launcher out while the first primes; the primed base
   alone refuses a rival base that lands after its listing and just before its create (a
   recording `Held` plants it, then delegates the create — D7' replaces rev 1's FIFO
@@ -50,8 +44,9 @@ The census that holds every migrated module to the handle is `test_1133_census.p
 
 Red before rev 3 (on the rev-2 tree): H5 (the readers take the `Episode` and read its
 `family.read()`; a `Bound` has no `family`), and every leaf-link row checked with
-`assert_refusal` (no `_io.NotPlainEntry`). The folder-link rows, H3, H4 and H7 hold today and are
-pinned to keep holding.
+`assert_refusal` (no `_io.NotPlainEntry`). The folder-link rows, H4 and H7 hold today and are
+pinned to keep holding. (#1224 retired H2 and H3 with the review and staging records, and the
+rejected episode's `worlds/` row with the review's rejection.)
 """
 from __future__ import annotations
 
@@ -288,7 +283,7 @@ def test_h1_verify_family_refuses_a_linked_worlds_folder_before_anything_is_arch
     planted.remove()
     with S.open_episode(ep) as episode:
         report = cli.verify_family(episode, dirs, source=T.provenance_record())
-    assert report["outcome"] == ("accepted" if scrub_ran else "incomplete")
+    assert report["comparable"] is scrub_ran, report
     assert_real_folder(ep / "worlds")
     if scrub_ran:
         assert sorted(p.name for p in (ep / "worlds").iterdir()) == sorted(T.WORLDS)
@@ -327,88 +322,6 @@ def test_h1_the_family_stamp_refuses_a_link_at_its_name_and_writes_nothing_throu
     stamp = ep / "provenance.json"
     assert_plain_file(stamp)
     assert json.loads(stamp.read_text(encoding="utf-8"))["agreed"]["commit"] == "cafe1"
-
-
-# ---- the rejected episode, through the launcher --------------------------------------------
-
-def launch(tmp_path: Path, *, before: Any = None, **seams: Any) -> tuple[Any, Path, Any]:
-    """One episode through the real launcher (`cli.main`), every model and cluster seam faked.
-    `before(ep)` runs once the episode's path is known and before the launch. Answers the exit
-    status, or the refusal `main` raised (an operator exit is a `SystemExit`)."""
-    cli = branch_cli()
-    _base, src = T.runs_base(tmp_path)
-    ep = cli.episode_dir_for(T.EPISODE_ID, tenant=T.current_tenant())
-    if before is not None:
-        before(ep)
-    spawn = T.FakeSpawn()
-    seams.setdefault("questioner", T.FakeAgent(T.family_doc(), T.world_doc("b"),
-                                               T.world_doc("c")))
-    seams.setdefault("adapters", T.FakeAdapters())
-    seams.setdefault("invoke", T.FakeAgent(*["same"] * 24))
-    try:
-        outcome: Any = cli.main(
-            [str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
-            spawn=spawn, door=T.FakeDoor(), preflight=T.no_preflight,
-            live_tree=T.source_capture(), **seams)
-    except (SystemExit, Exception) as refused:  # noqa: BLE001 — the refusal is the observation
-        outcome = refused
-    return outcome, ep, spawn
-
-
-def rejecting_seams() -> dict[str, Any]:
-    """A family whose world `b` the review rejects (an exclusion matching no base document,
-    `test_947_a_rejected_world_ends_the_episode_and_the_record_archives`)."""
-    fam = T.family_doc(worlds=[
-        T.base_world(),
-        T.world_doc("b", ov=T.overlay(elastic=T.elastic_overlay(exclude={"match_all": {}}))),
-    ])
-    return {
-        "adapters": T.FakeAdapters(by_target={T.world_token("b"): {"hits": [{"_id": "p"}]}}),
-        "questioner": T.FakeAgent(fam, T.world_doc("b")),
-        "invoke": T.FakeAgent(*["contradiction"] * 24),
-    }
-
-
-@pytest.mark.parametrize("reach", REACH)
-def test_h1_a_rejected_episode_refuses_a_linked_worlds_folder(tmp_path, roots, host, reach):
-    """A rejected episode still makes `worlds/`, with `episode.worlds.ensure()`: a link planted
-    there before the launch is refused, which ends the launch as a refusal (not the quiet
-    rejected exit); no sibling starts, the folder the link reaches gains nothing and the link
-    is left.
-
-    A reverted `os.makedirs(worlds, exist_ok=True)` accepts the link and the launch exits 1 as
-    if nothing were planted."""
-    holder: dict[str, Any] = {}
-
-    def plant(ep: Path) -> None:
-        ep.mkdir(parents=True, exist_ok=True)
-        holder["planted"] = link_folder(ep / "worlds", reach=reach, ep=ep, host=host)
-        holder["before"], holder["host"] = holder["planted"].state(), S.census(host)
-
-    outcome, ep, spawn = launch(tmp_path, before=plant, **rejecting_seams())
-    planted = holder["planted"]
-
-    assert T.review_doc(ep)["episode"]["decision"] == "rejected", (
-        "the scenario did not reach the rejected-episode path")
-    assert isinstance(outcome, BaseException), (
-        f"the launch exited {outcome!r} over a linked worlds/ — the rejected episode's "
-        "worlds.ensure() accepted the link instead of refusing it")
-    assert_folder_refusal(outcome, planted, where="the rejected episode's worlds/ ensure")
-    assert spawn.launches == []
-    assert planted.state() == holder["before"], (
-        "the rejected episode wrote into the folder the worlds/ link reaches")
-    assert S.census(host) == holder["host"]
-    planted.assert_left()
-
-
-def test_h1_a_rejected_episode_makes_a_real_worlds_folder(tmp_path, roots):
-    """Control for the test above, on the same address: nothing planted, the same family is
-    the ordinary rejected exit and `worlds/` is a real folder."""
-    outcome, ep, spawn = launch(tmp_path, **rejecting_seams())
-    assert outcome == 1, outcome
-    assert T.review_doc(ep)["episode"]["decision"] == "rejected"
-    assert spawn.launches == []
-    assert_real_folder(ep / "worlds")
 
 
 # =======================================================================================
@@ -516,8 +429,8 @@ class ScriptedJudge:
 
 
 def judged_episode(tmp_path: Path) -> Path:
-    """An accepted, archived episode whose world `b` is graded (it carries a staged row)."""
-    return J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    """An accepted, archived episode whose world `b` is graded (it carries an oracle row)."""
+    return J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
 
 
 def grade(tmp_path: Path, ep: Path, judge: ScriptedJudge) -> Any:
@@ -776,106 +689,24 @@ def test_o6_a_judge_pass_whose_episode_dir_is_renamed_mid_pass_records_in_the_mo
 
 
 # =======================================================================================
-# H2 — `review.review`'s default write
-# =======================================================================================
-
-@pytest.mark.parametrize(("kind", "reach"), [
-    ("symlink", "outside"), ("symlink", "inside"), ("dangling", "outside"),
-    ("dangling", "inside"), ("hardlink", "outside")])
-def test_h2_the_reviews_default_write_refuses_a_link_at_review_yaml(
-        tmp_path, roots, host, kind, reach):
-    """With no `write=` injected (the launcher's own call), `review.review` writes through the
-    episode's `review` record: a link at `review.yaml` (planted before the launch) ends the
-    launch at the review step as a refusal of the core's row, no sibling starts, what the link
-    reaches keeps its bytes (a dangling link's target is not created) and the plant is left.
-
-    Control on the same address: `test_h2_the_reviews_default_write_lands_a_plain_record`."""
-    holder: dict[str, Any] = {}
-
-    def plant(ep: Path) -> None:
-        ep.mkdir(parents=True, exist_ok=True)
-        if kind == "hardlink":
-            S.plant_leaf(ep / "review.yaml", kind, host=host)
-        else:
-            holder["planted"] = link_file(ep / "review.yaml", kind, reach=reach, ep=ep,
-                                          host=host)
-            holder["before"] = holder["planted"].state()
-        holder["host"] = S.census(host)
-
-    outcome, ep, spawn = launch(tmp_path, before=plant)
-
-    assert isinstance(outcome, BaseException), (
-        f"the launch exited {outcome!r} over a {kind} at review.yaml")
-    S.assert_refusal(refusal_in(outcome), kind, where=f"the review's write over a {kind}")
-    assert spawn.launches == []
-    assert S.census(host) == holder["host"], "the review was written through the plant"
-    if kind == "hardlink":
-        assert os.lstat(ep / "review.yaml").st_nlink == 2, "the hard link was replaced"
-    else:
-        assert holder["planted"].state() == holder["before"], (
-            "the review was written through the link")
-        holder["planted"].assert_left()
-
-
-def test_h2_the_reviews_default_write_lands_a_plain_record(tmp_path, roots):
-    """Control for the test above, on the same address."""
-    outcome, ep, _spawn = launch(tmp_path)
-    assert outcome == 0, outcome
-    assert_plain_file(ep / "review.yaml")
-    assert set(T.review_doc(ep)["worlds"]) == {"a", "b", "c"}
-
-
-# =======================================================================================
-# H3 — the staging record's durable append
-# =======================================================================================
-
-def test_h3_record_staged_is_one_durable_append_on_the_episode_the_caller_holds(tmp_path):
-    """D1's row `staged: create, append_durable`: `record_staged(episode, row)` makes ONE call
-    on the held root — `write(LAYOUT.staged, <the row as a YAML list item>, mode="append",
-    durable=True)`, synced to disk before it returns, since this row is the only record that a
-    cluster name is about to exist — and opens nothing itself (the episode it was handed is the
-    only `hold_new` / `hold`). The row is on disk afterwards."""
-    staging = T.mod("learning.branch.staging")
-    ep = tmp_path / "episodes" / EPISODE_ID
-    rec_io = S.RecordingIo()
-    row = {"name": "wv-e1133.b-logs-x", "kind": "index", "world": "b"}
-
-    with S.create_episode(ep, io=rec_io) as episode:
-        mark = len(rec_io.calls)
-        got = staging.record_staged(episode, row)
-        calls = rec_io.calls[mark:]
-
-    assert [c.method for c in calls] == ["write"], f"record_staged made {calls}"
-    [call] = calls
-    assert call.name == LAYOUT.staged, call.name
-    assert call.kwargs.get("mode") == "append", call.kwargs
-    assert call.kwargs.get("durable") is True, "the staging row is appended without a sync"
-    assert yaml.safe_load(call.text) == [row]
-    assert rec_io.opened == [("hold_new", (ep.parent, EPISODE_ID))], (
-        f"record_staged opened the episode again: {rec_io.opened}")
-    assert got == row
-    assert (ep / "staged.yaml").read_text(encoding="utf-8") == call.text
-
-
-# =======================================================================================
 # H4 — the priming claim alone; the primed base alone
 # =======================================================================================
 
 def test_h4_the_priming_claim_alone_keeps_a_second_launcher_out_while_the_first_primes(
         tmp_path, roots):
-    """Two launchers on one episode. The first holds the claim and its primer waits until the
-    second has finished (the primer writes no base, so nothing but the claim stands between
-    them): the second is the "another launcher is priming" `LedgerError` and its primer never
-    runs. The first then completes, releases the claim and returns its `Episode`.
+    """Two primers on one episode, each through its own `Episode` on the same directory. The
+    first holds the claim and its primer waits until the second has finished (the primer writes
+    no base, so nothing but the claim stands between them): the second is the "another launcher
+    is priming" `LedgerError` and its primer never runs. The first then completes and releases
+    the claim. (`prepare_episode` itself never reaches a taken directory since #1224: a launch
+    mints a fresh `-r<n>` episode, so the claim is driven through `_prime_once` directly.)
 
-    Control on the same address: once released, the next launcher's primer runs, handed the
-    episode `prepare_episode` returns."""
+    Control on the same address: once released, the next primer runs, handed its episode."""
     cli = branch_cli()
     capture = T.mod("learning.branch.capture")
     ledger = T.mod("learning.branch.ledger")
     _base, src = T.runs_base(tmp_path)
-    tenant = T.current_tenant()
-    ep = cli.episode_dir_for(T.EPISODE_ID, tenant=tenant)
+    ep = cli.episode_dir_for(T.EPISODE_ID, tenant=T.current_tenant())
     claim = ep / "served" / ".priming"
     priming, second_done = threading.Event(), threading.Event()
     first: dict[str, Any] = {}
@@ -886,33 +717,31 @@ def test_h4_the_priming_claim_alone_keeps_a_second_launcher_out_while_the_first_
             raise AssertionError("the second launcher never finished")
         return capture.PrimeReport(primed=1)
 
-    def run_first() -> None:
-        try:
-            first["value"] = cli.prepare_episode(T.EPISODE_ID, src, tenant=tenant,
-                                                 prime=waits_for_the_second)
-        except BaseException as e:  # noqa: BLE001 — handed back to the test's thread
-            first["error"] = e
+    with S.create_episode(ep) as first_ep:
+        def run_first() -> None:
+            try:
+                first["value"] = cli._prime_once(first_ep, T.EPISODE_ID, src,
+                                                 waits_for_the_second)
+            except BaseException as e:  # noqa: BLE001 — handed back to the test's thread
+                first["error"] = e
 
-    thread = threading.Thread(target=run_first, daemon=True)
-    thread.start()
-    second_primed: list[Any] = []
-    try:
-        assert priming.wait(WAIT), f"the first launcher never reached its primer: {first}"
-        assert stat.S_ISREG(os.lstat(claim).st_mode), "the first launcher holds no claim"
-        with pytest.raises(ledger.LedgerError, match="another launcher is priming"):
-            cli.prepare_episode(T.EPISODE_ID, src, tenant=tenant,
-                                prime=lambda *a: second_primed.append(a))
-        assert second_primed == [], "the second launcher's primer ran past a held claim"
-    finally:
-        second_done.set()
-        thread.join(WAIT)
-    assert not thread.is_alive()
-    assert "error" not in first, first
-    assert isinstance(first["value"], S.Episode()), (
-        f"prepare_episode returned {first['value']!r}, not the Episode it opened")
-    with first["value"] as held:
-        assert Path(held.dir) == ep
-    assert not os.path.lexists(claim), "the first launcher did not release its claim"
+        thread = threading.Thread(target=run_first, daemon=True)
+        thread.start()
+        second_primed: list[Any] = []
+        try:
+            assert priming.wait(WAIT), f"the first launcher never reached its primer: {first}"
+            assert stat.S_ISREG(os.lstat(claim).st_mode), "the first launcher holds no claim"
+            with S.open_episode(ep) as second_ep, pytest.raises(
+                    ledger.LedgerError, match="another launcher is priming"):
+                cli._prime_once(second_ep, T.EPISODE_ID, src,
+                                lambda *a: second_primed.append(a))
+            assert second_primed == [], "the second launcher's primer ran past a held claim"
+        finally:
+            second_done.set()
+            thread.join(WAIT)
+        assert not thread.is_alive()
+        assert "error" not in first, first
+        assert not os.path.lexists(claim), "the first launcher did not release its claim"
 
     third: list[Any] = []
 
@@ -920,9 +749,9 @@ def test_h4_the_priming_claim_alone_keeps_a_second_launcher_out_while_the_first_
         third.append(episode)
         return capture.PrimeReport(primed=1)
 
-    with cli.prepare_episode(T.EPISODE_ID, src, tenant=tenant, prime=records) as got:
-        assert Path(got.dir) == ep
-        assert third == [got], "the primer was not handed the episode prepare_episode returns"
+    with S.open_episode(ep) as got:
+        cli._prime_once(got, T.EPISODE_ID, src, records)
+        assert third == [got], "the primer was not handed the episode it primes"
 
 
 def test_h4_the_primed_base_alone_refuses_a_rival_base_that_lands_just_before_its_create(

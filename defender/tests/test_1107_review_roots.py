@@ -2,7 +2,8 @@
 
 1. How a system is reached is never guessed, and a missing Kibana container is a health-check
    RESULT, not a fault that discards the Elasticsearch answer and trips the breaker.
-2. A stored fault is never re-raised as the same object, and no settings fault names a host path.
+2. No settings fault names a host path. (Its other half — a stored fault is never re-raised as the
+   same object — guarded the branch's elastic stager, retired with cluster staging in #1224.)
 3. Every settings file is read one way: capped, single-linked, no-follow at the leaf, and split
    on the same line endings the connect validator reads with.
 4. (Secret delivery — one read of `secrets.env`, `{{NAME}}` header slots — moved to #1163.)
@@ -75,7 +76,7 @@ def test_transport_lanes_require_a_named_system(tmp_path, call):
 
 
 # ======================================================================================
-# 2 — faults: fresh on every raise, and worded without the host path.
+# 2 — faults: worded without the host path.
 # ======================================================================================
 
 def test_settings_faults_name_no_host_path(tmp_path):
@@ -104,25 +105,6 @@ def test_settings_faults_name_no_host_path(tmp_path):
     for arm, text in texts.items():
         assert host not in text, f"{arm}: the fault names the host path: {text!r}"
         assert _POINTER in text, f"{arm}: the fault does not name the file by the pointer: {text!r}"
-
-
-def test_stager_raises_a_fresh_fault_each_call(tmp_path):
-    """The branch stager's index-less lookup on a tenant whose Elastic part is a fault raises a
-    NEW fault each call: the record's own object is never raised (its traceback would grow)."""
-    from defender.learning.branch.estate.stagers import elastic as stager
-
-    root, folder = _tenant(tmp_path, "stg")
-    S.drop_key(folder, "elastic", "ELASTIC_EVENTS_INDEX")
-    record = S.resolve(root)
-    stored = record.elastic
-    assert isinstance(stored, ConfigFault)
-    ctx = _ctx(record, tmp_path, S.DockerShim(tmp_path / "shim"))
-
-    raised = [_raised(stager.source_pattern, "query", {}, ctx) for _ in range(3)]
-
-    assert all(isinstance(r, ConfigFault) for r in raised), raised
-    assert all(r is not stored for r in raised), "the record's stored fault was raised"
-    assert stored.__traceback__ is None, "the stored fault picked up a traceback"
 
 
 # ======================================================================================

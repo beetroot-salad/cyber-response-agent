@@ -111,7 +111,7 @@ def test_1025_a_world_directory_with_no_search_permission_is_that_worlds_refusal
         "could not be read" in page.text_of(f"world-{E.GRADED_WORLD}"), \
         page.text_of(f"world-{E.GRADED_WORLD}")
     assert f"f-{E.GRADED_WORLD}-0-0" not in page.ids  # its draws are unreadable too
-    assert f"f-{E.WITHHELD_WORLD}-0-0" in page.ids
+    assert f"f-{E.PASSTHROUGH_WORLD}-0-0" in page.ids
 
 
 @NOT_ROOT
@@ -132,10 +132,10 @@ def test_1025_an_unreadable_report_md_is_named_as_unreadable_not_as_an_alias(tmp
 
     target = tmp_path / "elsewhere.md"
     target.write_text("---\ndisposition: benign\n---\n", encoding="utf-8")
-    link = ep.world(E.WITHHELD_WORLD) / "report.md"
+    link = ep.world(E.PASSTHROUGH_WORLD) / "report.md"
     link.unlink()
     link.symlink_to(target)
-    got = family.read_archived_report(bound, f"worlds/{E.WITHHELD_WORLD}/report.md")
+    got = family.read_archived_report(bound, f"worlds/{E.PASSTHROUGH_WORLD}/report.md")
     assert got.disposition is None
     assert got.reason.count("non-plain or aliased") == 1, got.reason
 
@@ -180,51 +180,16 @@ def test_1025_read_world_facts_refuses_an_absent_ledger_on_every_path(tmp_path):
 # ---------------------------------------------------------------------------------------
 
 
-def test_1025_an_ungradable_worlds_mechanical_finding_is_queued_and_the_page_says_so(tmp_path):
-    """`enqueue_report` walks `mechanical_world_findings` for EVERY row, the ungradable ones
-    included (M3: the finding IS the record of why the world could not be graded). The page
-    renders that row "world author: enqueued" with the recorded id, and tile 3's world-author
-    count includes it. Before, the page's mirror answered "not enqueued — world ungradable"
-    for a finding `judge.yaml`'s own `world_findings` shows as queued."""
-    enqueue = E.mod("learning.judge.enqueue")
-    ep = E.sample_episode(tmp_path)
-    doc = E.sample_grade()
-    # the pass's own mint (`family._mechanical_world_finding`): the finding carries its
-    # `pattern`/`holding_system`, which is what lets the questioner row validate
-    mechanical = E.mod("learning.judge.family")._mechanical_world_finding(
-        label=E.WITHHELD_WORLD, pattern="logs-system.auth-*", holding_system="elastic")
-    row = E.ungradable_row(E.WITHHELD_WORLD, declared="benign")
-    row["mechanical_world_findings"] = [mechanical]
-    doc["worlds"][0] = row
-    # what the pass itself does with that row — the oracle the page must agree with
-    report = enqueue.enqueue_report(ep.dir, doc, state=_state1135.state_over(tmp_path / "queue"), drawn={},
-                                    family_drawn={})
-    coord = f"{E.EPISODE_ID}/{E.WITHHELD_WORLD}/mechanical/0"
-    assert coord in [r["finding_id"] for r in report.world_rows], report.world_rows
-    doc["world_findings"] = [r for r in report.world_rows if r["finding_id"] == coord]
-    doc["withheld_findings"] = []
-    doc["dispositions"] = report.dispositions
-    E.write_judge(ep.dir, doc)
-
-    page = render(ep)
-    row_id = f"f-{E.WITHHELD_WORLD}-mechanical-0"
-    assert row_id in page.ids, page.ids_with("f-")
-    group = page.group_of(row_id).text()
-    assert "world author: enqueued" in group, group
-    assert "world ungradable" not in group, group
-    assert coord in page.text_of(row_id), page.text_of(row_id)
-
-
 def test_1025_route_finding_is_the_rule_enqueue_report_walks(tmp_path):
     """For every finding on the sample the lane `route_finding` names is the lane the pass
-    put it on: the graded world's four defender findings → defender rows; its world finding
-    → a world row; the withheld world's four → `withheld_findings`; a `subject` naming
-    neither channel → `unqueueable_findings`; under `verdict_word: discard` the graded
-    world's defender findings vanish (never eligible) and nothing else moves."""
+    put it on: each judged world's four defender findings → defender rows; its world finding
+    → a world row; a `subject` naming neither channel → `unqueueable_findings`; under
+    `verdict_word: discard` both worlds' defender findings vanish (never eligible) and nothing
+    else moves."""
     enqueue = E.mod("learning.judge.enqueue")
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
-    graded = E._world_findings_rows(withheld=False)
+    graded = E._world_findings_rows()
     graded.append(E.finding(subject="Nobody", claim="off-channel"))
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=graded))
 
@@ -232,76 +197,47 @@ def test_1025_route_finding_is_the_rule_enqueue_report_walks(tmp_path):
         d = dict(doc, verdict_word=verdict_word)
         report = enqueue.enqueue_report(ep.dir, d, state=_state1135.state_over(tmp_path / f"q-{verdict_word}"))
         rows_by_row = {w["world"]: w for w in d["worlds"]}
-        withheld = enqueue.withheld_reasons_of(d["worlds"])
         blocked = enqueue.defender_lane_blocked(verdict_word)
         routed = {}
         for label, docs in ((E.GRADED_WORLD, graded),
-                            (E.WITHHELD_WORLD, E._world_findings_rows(withheld=True))):
+                            (E.PASSTHROUGH_WORLD, E._world_findings_rows())):
             for i, f in enumerate(docs):
                 routed[f"{label}/0/{i}"] = enqueue.route_finding(
                     label=label, finding=f, kind=enqueue.KIND_DRAW,
-                    world_row=rows_by_row.get(label), withheld_reasons=withheld,
-                    defender_blocked=blocked)[0]
+                    world_row=rows_by_row.get(label), defender_blocked=blocked)[0]
         return report, routed
 
     report, routed = lanes("undecidable")
     world_ids = {r["finding_id"].split("/", 1)[1] for r in report.world_rows}
-    withheld_ids = {f"{w['world']}/0/{E._world_findings_rows(withheld=True).index(w['finding'])}"
-                    for w in report.withheld_findings}
     unqueueable_ids = {line.split(": ", 1)[0].split("/", 1)[1] for line in report.unqueueable}
+    assert unqueueable_ids == {f"{E.GRADED_WORLD}/0/5"}, report.unqueueable
     for coord, lane in routed.items():
         if lane == enqueue.ROUTE_WORLD:
             assert coord in world_ids, (coord, lane)
-        elif lane == enqueue.ROUTE_WITHHELD:
-            assert coord in withheld_ids, (coord, lane)
         elif lane == enqueue.ROUTE_NO_CHANNEL:
             assert coord in unqueueable_ids, (coord, lane)
         else:
             assert lane == enqueue.ROUTE_DEFENDER, (coord, lane)
-            assert coord not in world_ids | withheld_ids | unqueueable_ids, (coord, lane)
-    assert report.appended == 4, report
-    assert sum(1 for lane in routed.values() if lane == enqueue.ROUTE_DEFENDER) == 4
+            assert coord not in world_ids | unqueueable_ids, (coord, lane)
+    assert report.appended == S.defender_enqueued, report
+    assert sum(1 for lane in routed.values() if lane == enqueue.ROUTE_DEFENDER) == S.defender_enqueued
 
     report, routed = lanes("discard")
     assert report.appended == 0, report
-    assert sum(1 for lane in routed.values() if lane == enqueue.ROUTE_NEVER_ELIGIBLE) == 4
-    assert len(report.withheld_findings) == 4, report.withheld_findings
-
-
-def test_1025_a_withheld_entry_tagged_family_renders_beside_the_family_draws(tmp_path):
-    """A `withheld_findings` entry carrying `world: family` and no ledger entry — a record the
-    pass never writes (family findings are never withheld) — is no row: the ledger names no
-    such finding, so the page shows the family draws as usual and says in the queue
-    accounting that the withheld list and the ledger disagree by one. Before, the entry
-    became a draw-less stub whose `None` draw key the lede's sort compared against `0`, and
-    the whole page raised `TypeError` (d01: only `family.yaml` is fatal)."""
-    ep = E.sample_episode(tmp_path)
-    doc = E.sample_grade()
-    doc["withheld_findings"].append(
-        {"finding": E.finding(subject="defender", claim="a family-tagged withheld claim"),
-         "world": E.FAMILY, "reason": S.withheld_reason})
-    E.write_judge(ep.dir, doc)
-    page = render(ep)
-    assert f"f-{E.FAMILY}-0-0" in page.ids
-    assert "a family-tagged withheld claim" not in page.text_of("sec-findings")
-    acct = page.one(cls="vd-acct").text()
-    assert "withheld list: 5 entries · 4 matched" in acct, acct
-    assert "record and page disagree by 1" in acct, acct
+    assert sum(1 for lane in routed.values()
+               if lane == enqueue.ROUTE_NEVER_ELIGIBLE) == S.defender_enqueued
+    assert {r["finding_id"].split("/", 1)[1] for r in report.world_rows} == world_ids
 
 
 def test_1025_a_world_spelled_family_never_doubles_the_family_lane(tmp_path):
     """`family` is the reserved label the family-level draws live under, never a world: a
-    manifest row, a grade row or a `runs/<ep>-family` directory carrying the name makes no
-    world section, and the family draws are walked exactly once — three `f-family-0-*` ids,
-    each once, and tile 3's count unchanged."""
+    grade row or a `runs/<ep>-family` directory carrying the name makes no world section, and
+    the family draws are walked exactly once — three `f-family-0-*` ids, each once, and tile
+    3's count unchanged. A manifest world carrying it is refused by the manifest reader (the
+    runtime loader's gate) before anything is rendered."""
     ep = E.sample_episode(tmp_path)
-    manifest = E.sample_manifest()
-    manifest["worlds"].append(T.world_doc(
-        E.FAMILY, role="D", axis="a world wearing the reserved label",
-        disposition_declared="benign", ov={}))
-    T.write_family(ep.dir, manifest)
     doc = E.sample_grade()
-    doc["worlds"].append(E.world_row(E.FAMILY, declared="benign", has_refused=None))
+    doc["worlds"].append(E.world_row(E.FAMILY, declared="benign"))
     E.write_judge(ep.dir, doc)
     (ep.dir / "runs" / f"{E.EPISODE_ID}-{E.FAMILY}").mkdir()
     page = render(ep)
@@ -311,6 +247,14 @@ def test_1025_a_world_spelled_family_never_doubles_the_family_lane(tmp_path):
         f"f-{E.FAMILY}-0-{i}" for i in range(3)], rows
     assert f"world-{E.FAMILY}" not in page.ids, page.ids_with("world-")
     assert len(rows) == S.findings, rows
+
+    manifest = E.sample_manifest()
+    manifest["worlds"].append(T.world_doc(
+        E.FAMILY, role="D", axis="a world wearing the reserved label",
+        disposition_declared="benign"))
+    T.write_family(ep.dir, manifest)
+    with pytest.raises(J.sym("learning.judge", "JudgeRefused"), match="reserved"):
+        visualize_episode().render_episode(ep.dir)
 
 
 # ---------------------------------------------------------------------------------------
@@ -323,7 +267,7 @@ def test_1025_the_page_module_does_not_import_the_launcher():
     writer and the reader reach it through one accessor (#1077 D7; it was a constant on
     `branch/archive.py` before, and a second one on the page before that) — importing the page
     must not pull `branch/cli.py` (the whole launcher: argparse, the estate registry, the
-    review runtime) into a static renderer, nor execute `cli.py` a second time when the
+    oracle runtime) into a static renderer, nor execute `cli.py` a second time when the
     launcher itself runs as a script."""
     code = ("import sys; import defender.scripts.visualize.visualize_episode; "
             "print('defender.learning.branch.cli' in sys.modules)")
@@ -370,7 +314,8 @@ def test_1025_a_record_naming_one_world_twice_never_files_its_world_finding_as_a
                     E.draw_doc(findings=[E.finding(subject="world", claim="about the world")]))
     report = enqueue.enqueue_report(ep.dir, doc, state=_state1135.state_over(tmp_path / "queue"))
     coord = f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/0"
-    assert report.appended == 0, report
+    # Only the other judged world's four defender findings are queued; nothing of this one.
+    assert report.appended == S.defender_enqueued - 4, report
     assert not [r for r in report.world_rows if r["finding_id"] == coord], report.world_rows
     assert any(line.startswith(coord) and "ungradable" in line for line in report.unqueueable), \
         report.unqueueable
@@ -391,8 +336,7 @@ def _ledger_of(doc: dict) -> dict[str, tuple[str, str | None]]:
 def test_1025_the_fixture_ledger_is_the_passes_own(tmp_path):
     """`sample_grade()["dispositions"]` — the ledger every page test renders from — is,
     entry for entry AND in walk order, what the real `enqueue_report` writes over the sample
-    episode's own draw documents and rows; and the `withheld_findings` it hands the record
-    carry the same `finding_id` the ledger keys them by. A fixture ledger the pass would not
+    episode's own draw documents and rows. A fixture ledger the pass would not
     write is a fixture bug, and it fails here rather than as a page test that passed against
     a record no pass produces."""
     enqueue = E.mod("learning.judge.enqueue")
@@ -400,8 +344,7 @@ def test_1025_the_fixture_ledger_is_the_passes_own(tmp_path):
     doc = E.sample_grade()
     report = enqueue.enqueue_report(ep.dir, doc, state=_state1135.state_over(tmp_path / "queue"))
     assert report.dispositions == doc["dispositions"]
-    assert [w["finding_id"] for w in report.withheld_findings] == [
-        w["finding_id"] for w in doc["withheld_findings"]]
+    assert report.appended == doc["enqueued_rows"] == S.defender_enqueued
     assert report.unqueueable == doc["unqueueable_findings"] == []
 
     report = enqueue.enqueue_report(ep.dir, dict(doc, verdict_word="discard"),
@@ -444,66 +387,70 @@ def test_1025_the_ledger_is_on_the_record_and_read_back_validated(tmp_path):
 
 
 def test_1025_the_page_shows_the_ledger_and_never_re_decides_a_lane(tmp_path):
-    """The page's disposition for a finding is the ledger's entry, full stop — the rows, the
-    verdict word and the withheld map are NOT consulted a second time. Pinned by a record no
-    pass writes: the withheld world's row still says `withheld_reason: reachability_
-    unmeasured` while its ledger entries are re-filed `defender`, and the measuring world's
-    say `withheld` under a `verdict_word: discard`. A page that re-ran the lane rule over the
-    rows would show the rows' answer; this one shows the ledger's, and the queue accounting
-    says the withheld list and the ledger disagree."""
+    """The page's disposition for a finding is the ledger's entry, full stop — the rows and
+    the verdict word are NOT consulted a second time. Pinned by a record no pass writes:
+    under `verdict_word: discard` (which closes the defender lane) one world's defender
+    entries are filed `defender` and the other's `unqueueable` with a reason no row gave. A
+    page that re-ran the lane rule over the rows would show "never eligible" for both; this one
+    shows the ledger's answer, and the accounting agrees with the record."""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     doc["verdict_word"] = "discard"
+    doc["enqueued_rows"] = 4
     for i in range(4):
-        E.set_lane(doc, E.WITHHELD_WORLD, 0, i, "defender")
-        E.set_lane(doc, E.GRADED_WORLD, 0, i, "withheld", "a reason the rows never gave")
+        E.set_lane(doc, E.PASSTHROUGH_WORLD, 0, i, "defender")
+        E.set_lane(doc, E.GRADED_WORLD, 0, i, "unqueueable", "a reason the rows never gave")
     E.write_judge(ep.dir, doc)
     page = render(ep)
     for i in range(4):
-        assert "defender: enqueued" in page.group_of(f"f-{E.WITHHELD_WORLD}-0-{i}").text()
+        passthrough = page.group_of(f"f-{E.PASSTHROUGH_WORLD}-0-{i}").text()
+        assert "defender: enqueued" in passthrough, passthrough
         graded = page.group_of(f"f-{E.GRADED_WORLD}-0-{i}").text()
-        assert "withheld — a reason the rows never gave" in graded, graded
+        assert "defender: unqueueable — a reason the rows never gave" in graded, graded
         assert "never eligible" not in graded, graded
     acct = page.one(cls="vd-acct").text()
-    assert "withheld list: 4 entries · 4 matched" in acct, acct
+    assert "record: 4 enqueued · page found: 4" in acct, acct
     assert "record and page disagree" not in acct, acct
     three = page.text_of("vd-tile-3")
-    for part in ("4 defender", "4 withheld"):
+    for part in ("4 defender", "4 unqueueable"):
         assert part in three, (part, three)
     assert "never eligible" not in three, three
 
 
 def test_1025_a_record_naming_one_world_twice_renders_exactly_what_the_pass_filed(tmp_path):
-    """The #1042 review's case: `judge.yaml` names the withheld world on TWO rows — the first
-    with `withheld_reason` set, the second without. The pass takes every row into its
-    withheld map (the first wins) and files the world's four defender findings withheld; a
-    page that rebuilt that map from one row per label (the last) filed them enqueued, and
-    tile 3 read "8 defender / 4 withheld" against a record of 4 and 8. With the ledger the
-    page cannot disagree: it shows four withheld and four enqueued, exactly the pass's
-    entries, and the accounting matches on both counts."""
+    """The #1042 review's case: `judge.yaml` names one judged world on TWO rows — the first
+    gradable, the second ungradable. The pass walks the label off the first gradable row but
+    routes its findings against the last row it keeps, so it files the world's findings
+    unqueueable (ungradable) rather than enqueued; a page that rebuilt the lane from one row per
+    label would disagree. With the ledger the page cannot: every finding of that world shows
+    the lane the pass filed, the other world's four show enqueued, and tile 3 and the
+    accounting carry the pass's own counts."""
     enqueue = E.mod("learning.judge.enqueue")
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
-    doc["worlds"].append(E.world_row(E.WITHHELD_WORLD, declared="benign", has_refused=None,
-                                     bucket="lead-set"))
+    doc["worlds"].append(E.ungradable_row(E.PASSTHROUGH_WORLD, declared="benign",
+                                          reason="the second row says ungradable"))
     report = enqueue.enqueue_report(ep.dir, doc, state=_state1135.state_over(tmp_path / "queue"))
     doc["dispositions"] = report.dispositions
-    doc["withheld_findings"] = report.withheld_findings
+    doc["unqueueable_findings"] = report.unqueueable
     doc["enqueued_rows"] = report.appended
+    doc["world_findings"] = report.world_rows
     E.write_judge(ep.dir, doc)
     page = render(ep)
-    withheld = [e for e in report.dispositions if e["lane"] == enqueue.LANE_WITHHELD]
-    assert len(withheld) == 4, report.dispositions
+    filed = {e["finding_id"]: e for e in report.dispositions}
+    quiet = [filed[E.finding_id(E.PASSTHROUGH_WORLD, 0, i)] for i in range(5)]
+    assert [e["lane"] for e in quiet] == [enqueue.LANE_UNQUEUEABLE] * 5, quiet
     assert report.appended == 4, report
     for i in range(4):
-        assert "withheld" in page.group_of(f"f-{E.WITHHELD_WORLD}-0-{i}").text()
+        group = page.group_of(f"f-{E.PASSTHROUGH_WORLD}-0-{i}").text()
+        assert "defender: unqueueable" in group, group
+        assert "the second row says ungradable" in group, group
         assert "defender: enqueued" in page.group_of(f"f-{E.GRADED_WORLD}-0-{i}").text()
     three = page.text_of("vd-tile-3")
-    for part in ("4 defender", "4 withheld"):
+    for part in ("4 defender", "5 unqueueable"):
         assert part in three, (part, three)
     acct = page.one(cls="vd-acct").text()
     assert "record: 4 enqueued · page found: 4" in acct, acct
-    assert "withheld list: 4 entries · 4 matched" in acct, acct
     assert "disagree" not in acct, acct
 
 
@@ -518,7 +465,7 @@ def test_1025_a_record_with_no_ledger_says_so_instead_of_guessing(tmp_path):
     E.write_judge(ep.dir, doc)
     (ep.world(E.GRADED_WORLD) / "judge" / "0.yaml").unlink()
     page = render(ep)
-    for row_id in (f"f-{E.WITHHELD_WORLD}-0-0", f"f-{E.FAMILY}-0-0"):
+    for row_id in (f"f-{E.PASSTHROUGH_WORLD}-0-0", f"f-{E.FAMILY}-0-0"):
         heading = page.group_of(row_id).text()
         assert "record carries no disposition ledger" in heading, heading
     assert not [i for i in page.ids if i.startswith(f"f-{E.GRADED_WORLD}-")], page.ids_with("f-")

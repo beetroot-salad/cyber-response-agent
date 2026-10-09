@@ -54,14 +54,11 @@ from defender.scripts.adapters.confinement import (  # noqa: E402
     READ_ENDPOINT_ALLOWLIST,
     AllowlistError,
     ConfinementFault,
-    VIEW_NAMESPACE,
     ReadEndpointAllowlist,
     TransportCapture,
-    ViewNameError,
     confine_index,
     confine_read_endpoint,
     normalize_endpoint,
-    world_view,
 )
 from defender.scripts.adapters.faults import TransportFault  # noqa: E402
 from defender.scripts.adapters.host_state_adapter import (  # noqa: E402
@@ -324,114 +321,27 @@ def test_an_in_bounds_calls_backend_outage_is_recorded_exactly_as_today(tmp_path
 
 
 
-def test_a_world_view_is_out_of_bounds_until_a_world_declares_it(tmp_path: Path):
-    """A branched world's view is refused by REACH and admitted only by DECLARATION.
+@pytest.mark.parametrize("outside", [".security-7", "wv-a-logs-", "logsecret-*"])
+def test_a_branched_runs_queries_are_confined_exactly_as_an_ordinary_runs(
+    tmp_path: Path, outside: str,
+):
+    """A sibling's context — one declaring its world — is confined exactly as an ordinary
+    run's: the declaration admits nothing the base run's reach does not.
 
-    The view is named outside every configured pattern on purpose — a view the corpus pattern
-    still reaches is one the base run and every unstaged sibling read too, so the pair would
-    measure contamination rather than a difference. That deliberate exclusion is what makes
-    the declaration necessary: without a world, the staged name is exactly as out of bounds as
-    `.security-7`, and the run it belongs to could not read its own corpus.
-
-    Both halves, because either alone is a rule that cannot be wrong: the refusal without the
-    acceptance would pass against a confinement that admitted nothing, and the acceptance
-    without the refusal against one that admitted everything."""
-    view = world_view("logs-*", "a")
+    #1224 retired cluster staging and its per-world `wv-` views, and with them the rule that a
+    world's declaration admitted that world's view. What survives is the confinement itself,
+    and the one way it could quietly widen for a branched run: a declaration still read as
+    admitting something. So the refusals run under a declared world — a former view name among
+    them — and the positive control proves the same context still reaches its transport."""
+    ctx = replace(_ctx(tmp_path), world_id="a")
 
     with pytest.raises(ConfinementFault):
-        confine_index(view, CONFIGURED_PATTERNS)
-
-    assert confine_index(view, CONFIGURED_PATTERNS, world_id="a") == view
-
-    ctx = _ctx(tmp_path)
+        confine_index(outside, CONFIGURED_PATTERNS)
     with pytest.raises(ConfinementFault):
-        elastic_adapter.VERBS["query"](ctx, native_query="FROM x", index=view)
-    # The declaration reaches the verb through the ctx and nothing else — past the gate, the
-    # unreachable tree's transport fault is what remains, which is the ordering test's proof
-    # that confinement is not what refused.
+        elastic_adapter.VERBS["query"](ctx, native_query="FROM x", index=outside)
+    # Past the gate, the unreachable tree's transport fault is what remains.
     with pytest.raises(TransportFault):
-        elastic_adapter.VERBS["query"](
-            replace(ctx, world_id="a"), native_query="FROM x", index=view)
-
-
-@pytest.mark.parametrize("asked", ["logs-system.auth-*", "logs-zeek.connection", "logs-*"])
-def test_a_view_of_any_index_the_base_run_may_reach_is_admitted(asked: str):
-    """    The stager builds its view from the index the CALL named, so this boundary has to admit
-    every view that index could produce — not only the views of the configured patterns.
-
-    THE SEAM BETWEEN TWO TESTED HALVES, and it is where the two disagreed. A shipped template
-    scopes to a data stream through its `index` param (`elastic.doc-fetch-by-id`,
-    `elastic.sshd-auth-event-by-id`) and `_reach_ok` admits that index on the base run; the
-    stager then names `wv-a-logs-system.auth` for it. Admitting only the configured patterns'
-    own views refused exactly those calls in every sibling while the base answered them — a
-    base-vs-sibling difference belonging to the harness rather than the world, which is the one
-    kind the branch seam must never manufacture, and neither half's own tests could see it."""
-    assert confine_index(asked, CONFIGURED_PATTERNS) == asked
-
-    view = world_view(asked, "a")
-
-    assert confine_index(view, CONFIGURED_PATTERNS, world_id="a") == view
-
-
-def test_a_declaration_admits_that_worlds_views_and_no_siblings(tmp_path: Path):
-    """A world declares ITS views, never the namespace.
-
-    A sibling reading another world's view sees the documents that world staged, which is the
-    contamination the per-world name exists to prevent — so a declaration that opened the
-    whole `wv-` namespace would hand back through confinement exactly what the naming rule
-    just took away. And a view of a corpus this run does not configure is outside the reach
-    the declaration is scoped to: the world moves which NAME is admissible, never which corpus
-    is."""
-    ctx = replace(_ctx(tmp_path), world_id="a")
-
-    for refused in (world_view("logs-*", "b"), world_view("other-*", "a")):
-        with pytest.raises(ConfinementFault):
-            confine_index(refused, CONFIGURED_PATTERNS, world_id="a")
-        with pytest.raises(ConfinementFault):
-            elastic_adapter.VERBS["query"](ctx, native_query="FROM x", index=refused)
-
-
-def test_a_view_of_a_corpus_the_run_does_not_configure_is_refused(tmp_path: Path):
-    """    A world view is admitted only where the CORPUS it names is in bounds for the base run.
-
-    The declaration moves which NAME is admissible, never which corpus is. A stem test that
-    merely prefix-matched the pattern's stem — `logs` from `logs-*` — admitted `wv-a-logsecret`,
-    a view of `logsecret-*`, which the base run refuses outright: D3 widened for exactly the
-    calls a branched run makes, which is the inverse of what declaring a world is for. The stem
-    is held to `_reach_ok`, the same rule every unstaged name goes through."""
-    ctx = replace(_ctx(tmp_path), world_id="a")
-
-    for refused in (f"{VIEW_NAMESPACE}-a-logsecret", f"{VIEW_NAMESPACE}-a-log"):
-        with pytest.raises(ConfinementFault):
-            confine_index(refused, CONFIGURED_PATTERNS, world_id="a")
-        with pytest.raises(ConfinementFault):
-            elastic_adapter.VERBS["query"](ctx, native_query="FROM x", index=refused)
-
-    # The positive control: a NARROWER corpus inside a configured pattern is still admitted,
-    # which is the case an enumeration of the patterns got wrong.
-    assert confine_index(
-        f"{VIEW_NAMESPACE}-a-logs-system.auth-", CONFIGURED_PATTERNS, world_id="a")
-
-
-def test_a_sibling_id_cannot_extend_this_worlds_prefix(tmp_path: Path):
-    """    The world id is matched as a whole segment, so no id can prefix its way into another's.
-
-    `wv-{id}-{stem}` was read back with `startswith(f"wv-{world_id}-")`, which is not a segment
-    test: from world `a`, an id like `a-logs-nginx` yields `wv-a-logs-nginx-logs-`, whose
-    remainder `logs-nginx-logs-` is reachable under `logs-*` — so A was handed a name B staged
-    into, by the boundary built to keep them apart. Barred at BOTH ends: an id carrying the
-    delimiter is refused where a world is named, and the read here is a segment split."""
-    ambiguous = f"{VIEW_NAMESPACE}-a-logs-nginx-logs-"
-
-    with pytest.raises(ViewNameError, match="delimiter"):
-        world_view("logs-*", "a-logs-nginx")
-    # And even were such a name to reach the boundary, it is not admitted as world `a`'s
-    # unless `a` is the whole segment — which here it is, so this is `a`'s own view of a
-    # narrower corpus, not `a-logs-nginx`'s of a wider one. The two are no longer confusable
-    # because only one of them can exist.
-    assert confine_index(ambiguous, CONFIGURED_PATTERNS, world_id="a") == ambiguous
-    with pytest.raises(ConfinementFault):
-        confine_index(ambiguous, CONFIGURED_PATTERNS, world_id="a-logs")
+        elastic_adapter.VERBS["query"](ctx, native_query="FROM x", index="logs-system.auth-*")
 
 
 def test_the_transport_capture_seam_records_every_resolved_request(tmp_path: Path):

@@ -194,10 +194,12 @@ def test_no_episode_layout_constant_survives_outside_the_owner(episode_dir):
     """
     rehomed = {
         "learning/branch/archive.py", "learning/branch/ledger.py", "learning/branch/timing.py",
-        "learning/branch/staging.py", "runtime/branch/_family.py",
+        "learning/branch/outcome.py", "runtime/branch/_family.py",
         "scripts/visualize/visualize_episode.py", "learning/branch/cli.py"}
-    names = ("family.yaml", "review.yaml", "samples.yaml", "judge.yaml", "timing.json",
-             "staged.yaml", "base.jsonl", "learning.html", ".priming")
+    # #1224: the episode outcome moved from `review.yaml` to `outcome.yaml` (written by
+    # `learning/branch/outcome.py`); `staged.yaml` and its writer retired with cluster staging.
+    names = ("family.yaml", "outcome.yaml", "samples.yaml", "judge.yaml", "timing.json",
+             "base.jsonl", "learning.html", ".priming")
     offenders = []
     for rel in sorted(rehomed):
         text = (DEFENDER / rel).read_text(encoding="utf-8")

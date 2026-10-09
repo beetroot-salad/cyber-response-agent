@@ -25,6 +25,11 @@ would compare the suite's own HEAD against the fixture's `deadbee` and refuse ev
 Every negative is paired with a positive control on the same address; every fault is the real
 one (an unlinked file, a real symlink, real forged JSON).
 
+#1224: verify no longer writes the episode outcome (pre-flight writes it, once, before any
+sibling starts). A family this suite calls `incomplete` is a report with `comparable: False`
+and no family stamp; end to end, the launcher logs that reason. An accepted launch now passes
+pre-flight's calibration, so `_prepare` builds the live-oracle suite's estate and source run.
+
 RED against ed890678: `main` has no `live_tree=` seam, `preflight_episode` reads no source
 stamp, `verify_family` takes no `source=`, and the family stamp has no `source` key.
 """
@@ -40,6 +45,7 @@ import pytest
 from defender._episode_handle import Episode
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
+from defender.tests.live_oracle_1224 import _spec1224 as S
 
 
 @pytest.fixture(autouse=True)
@@ -63,23 +69,35 @@ def _tenant_paths():
 #: value whose absence from every launch payload is a fact about the launcher, not about luck.
 ANCHOR = "c0ffee976anchor"
 
+#: The source run's one captured call and its answer (the live estate answers it the same).
+QUERY = S.query_params("user:alice")
+BASE = {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon", "host": "web-1",
+                  "ts": "2026-07-28T15:00:00Z"}]}
+
 
 @dataclass
 class Launch:
     """One launch's fakes, built BEFORE `main` runs so a refusal can still be asked what it
-    cost: the questioner's calls, the door's created names, the capture's call count, and the
-    role preflights that ran are all readable after `run()` has raised."""
+    cost: the questioner's calls, the capture's call count, and the role preflights that ran
+    are all readable after `run()` has raised."""
 
     src: Path
     episode_dir: Path
     spawn: Any
-    door: Any
     questioner: Any
     live_tree: Any
-    invoke: Any = field(default_factory=lambda: T.FakeAgent(*["same"] * 24))
+    #: The fixture tenant's estate (#1224): pre-flight replays the source's one captured call
+    #: through it, under the tenant's own gather grant.
+    estate: Any
+    #: Pre-flight's oracle and verifier (#1224), scripted: the oracle serves the base answer
+    #: unchanged and the verifier passes it, so every fact world calibrates and pre-flight
+    #: records `accepted`. Left to their production values each turn is a real model call.
+    oracle: Any = field(default_factory=lambda: S.oracle(then=S.submit(BASE, S.EMPTY_CLAIM)))
+    verifier: Any = field(default_factory=S.passing_verifier)
     #: The judge's model seam, scripted: an ACCEPTED family is graded at the tail of the
     #: launch, and left to its production value that grade is a real model call.
-    judge: Any = field(default_factory=lambda: J.FakeJudge(default=J.as_reply_text(J.reply_doc())))
+    judge: Any = field(default_factory=lambda: J.FakeJudge(
+        default=J.as_reply_text(J.reply_doc(bucket="none", systems=[]))))
     roles: list = field(default_factory=list)
     rc: int | None = None
 
@@ -87,9 +105,10 @@ class Launch:
         self.rc = _cli().main(
             [str(self.src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go",
              *argv_extra],
-            spawn=self.spawn, door=self.door, questioner=self.questioner,
-            adapters=T.FakeAdapters(), invoke=self.invoke, judge=self.judge,
-            preflight=lambda model: self.roles.append(model) or 0, live_tree=self.live_tree)
+            spawn=self.spawn, questioner=self.questioner, judge=self.judge,
+            preflight=lambda model, **_kw: self.roles.append(model) or 0,
+            live_tree=self.live_tree, roster=self.estate.roster(), oracle=self.oracle.model,
+            verifier=self.verifier.model)
         return self.rc
 
     @property
@@ -103,37 +122,66 @@ def _prepare(tmp_path, *, live_tree=None, siblings_at: str | None = "deadbee",
 
     The siblings are `J.FakeSibling`, which MATERIALISES finished run dirs stamped at
     `siblings_at`, so an accepted launch is one whose family really was verified and archived
-    — `T.FakeSpawn` runs nothing, and a verify tier over three absent run dirs is
-    `incomplete` for a reason this suite is not about.
+    — `T.FakeSpawn` runs nothing, and a verify tier over three absent run dirs is not
+    comparable for a reason this suite is not about.
+
+    #1224: the source run is the live-oracle suite's (`S.source_run`) over its fixture tenant,
+    with one captured call the estate answers the same way, so pre-flight has an original call
+    to calibrate every fact world against.
     """
-    _base, src = T.runs_base(tmp_path)
+    est = S.estate(tmp_path)
+    _base, src = S.source_run(tmp_path, est, calls=[S.Call("idp", "query", QUERY, BASE)])
     episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
     return Launch(
-        src=src, episode_dir=episode_dir,
+        src=src, episode_dir=episode_dir, estate=est,
         spawn=J.FakeSibling(episode_dir, commit=siblings_at) if spawn is None else spawn,
-        door=T.FakeDoor(),
-        questioner=T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c")),
+        questioner=S.questioner_for(),
         live_tree=T.source_capture() if live_tree is None else live_tree)
+
+
+def _restamp(src: Path, **overrides: Any) -> Path:
+    """`T.source_stamp` for `_prepare`'s source run, whose tenant is the fixture tenant's."""
+    overrides.setdefault("tenant_id", S.FIXTURE_TENANT)
+    return T.source_stamp(src, **overrides)
 
 
 def _refused_before_spending(launch: Launch, *argv_extra: str) -> str:
     """Run the launch, require the preflight's own refusal class, and require that NOTHING was
     spent: no questioner call, no role-model preflight (the one in-process pass that sources a
-    billable key), no cluster call at all — not the probe, not the sweep — no staged name, no
+    billable key), no tenant read and no oracle or verifier turn (#1224's pre-flight spend), no
     episode directory. Returns the message.
 
-    The role and cluster pins are here, on EVERY refusal, because an anchor check sited after
-    the role preflight and the sweep greens every message assertion while sourcing keys and
-    touching the namespace first (adversary H4)."""
+    The role and pre-flight pins are here, on EVERY refusal, because an anchor check sited
+    after the role preflight greens every message assertion while sourcing keys and spending
+    model turns first (adversary H4)."""
     with pytest.raises(_cli().LauncherRefused) as refusal:
         launch.run(*argv_extra)
     assert launch.questioner.calls == 0, "the questioner was paid before the refusal"
     assert launch.roles == [], "the paid role preflight ran before the anchor was judged"
-    assert launch.door.ops == [], "the cluster was touched before the anchor was judged"
-    assert launch.door.created() == [], "a name was staged before the refusal"
+    assert launch.estate.calls() == [], "the tenant was read before the anchor was judged"
+    assert launch.oracle.requests == 0, "an oracle turn was spent before the anchor was judged"
+    assert launch.verifier.requests == 0, "a verifier pass was spent before the refusal"
     assert launch.spawn.launches == [], "a sibling started after the refusal"
     assert not launch.episode_dir.exists(), "an episode directory was claimed for a refused launch"
     return str(refusal.value)
+
+
+def _outcome(episode_dir: Path) -> dict:
+    """Pre-flight's outcome record (`outcome.yaml`), read through the production reader."""
+    from defender._io import bind
+    from defender.learning.branch.outcome import read_outcome
+
+    with bind(Path(episode_dir)) as bound:
+        return read_outcome(bound)
+
+
+def _withheld_reason(caplog: Any) -> str:
+    """The reason the launcher logged when verify withheld the family stamp (#1224: verify's
+    verdict is no longer written into the outcome record)."""
+    withheld = [r.getMessage() for r in caplog.records
+                if "the family stamp is withheld" in r.getMessage()]
+    assert len(withheld) == 1, [r.getMessage() for r in caplog.records]
+    return withheld[0]
 
 
 def _never_waivable(message: str, *phrases: str) -> None:
@@ -161,7 +209,7 @@ def _accepted(launch: Launch, *argv_extra: str) -> dict:
     assert launch.run(*argv_extra) == 0
     assert launch.questioner.calls > 0, "the launch never reached the questioner"
     assert sorted(launch.spawn.worlds) == list(T.WORLDS)
-    assert T.review_doc(launch.episode_dir)["episode"]["outcome"] == "accepted"
+    assert _outcome(launch.episode_dir)["outcome"] == "accepted"
     return launch.family_stamp
 
 
@@ -172,7 +220,7 @@ def _accepted(launch: Launch, *argv_extra: str) -> dict:
 
 def test_976_a_source_with_no_stamp_is_refused_before_the_questioner_and_never_waived(tmp_path):
     """O2/M1: a source run carrying no `provenance.json` refuses at preflight — no questioner
-    call, no staged name, no episode dir — and `--allow-dirty` does not waive it: an absent
+    call, no oracle turn, no episode dir — and `--allow-dirty` does not waive it: an absent
     stamp is not dirt. The refusal names the source and its stamp. Without this, a launch from
     an un-stamped source pays the questioner and archives a family anchored to nothing."""
     for argv in ((), ("--allow-dirty",)):
@@ -193,7 +241,7 @@ def test_976_a_source_whose_git_could_not_be_asked_is_refused_and_never_waived(t
     the code of."""
     for argv in ((), ("--allow-dirty",)):
         launch = _prepare(tmp_path)
-        T.source_stamp(launch.src, commit=None, dirty=None, unavailable=T.GIT_UNAVAILABLE)
+        _restamp(launch.src, commit=None, dirty=None, unavailable=T.GIT_UNAVAILABLE)
         message = _refused_before_spending(launch, *argv)
         _never_waivable(message, "source", "names no commit", T.GIT_UNAVAILABLE)
         # AND THE LIVE TREE WAS NOT ASKED: the capture is two git subprocesses on a 60 s
@@ -210,12 +258,12 @@ def test_976_a_dirty_source_is_refused_without_the_override_and_proceeds_with_it
     not name its bytes silently anchors a family; without the positive, the override would be
     dead for the source side."""
     launch = _prepare(tmp_path)
-    T.source_stamp(launch.src, dirty=True)
+    _restamp(launch.src, dirty=True)
     message = _refused_before_spending(launch)
     _waivable(message, "source", "not certified clean", "dirty=True")
 
     waived = _prepare(tmp_path)
-    T.source_stamp(waived.src, dirty=True)
+    _restamp(waived.src, dirty=True)
     stamp = _accepted(waived, "--allow-dirty")
     assert stamp["source"]["dirty"] is True
     assert stamp["allow_dirty"] is True
@@ -227,12 +275,12 @@ def test_976_a_source_whose_tree_state_is_unknown_is_refused_without_the_overrid
     with it. Without this, `dirty is not True` would be read as clean — the one error a
     provenance comparison must never make."""
     launch = _prepare(tmp_path)
-    T.source_stamp(launch.src, dirty=None, unavailable=T.GIT_STATUS_FAILED)
+    _restamp(launch.src, dirty=None, unavailable=T.GIT_STATUS_FAILED)
     message = _refused_before_spending(launch)
     _waivable(message, "source", "not certified clean", "dirty=None", T.GIT_STATUS_FAILED)
 
     waived = _prepare(tmp_path)
-    T.source_stamp(waived.src, dirty=None, unavailable=T.GIT_STATUS_FAILED)
+    _restamp(waived.src, dirty=None, unavailable=T.GIT_STATUS_FAILED)
     stamp = _accepted(waived, "--allow-dirty")
     assert stamp["source"]["dirty"] is None
     assert stamp["source"]["unavailable"] == T.GIT_STATUS_FAILED
@@ -336,7 +384,7 @@ def test_976_a_source_stamped_before_scope_existed_is_compared_on_commit_alone(t
     pre-scope source run becomes unbranchable, or the mismatch surfaces later as a paid
     `incomplete`."""
     launch = _prepare(tmp_path)
-    T.source_stamp(launch.src, scope=None)
+    _restamp(launch.src, scope=None)
     stamp = _accepted(launch)
     assert stamp["source"]["scope"] is None
     assert stamp["agreed"]["scope"] == "repo"
@@ -359,12 +407,12 @@ def test_976_siblings_agreeing_at_a_commit_the_source_did_not_run_are_incomplete
     ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-drifted")
     with Episode.open(ep) as episode:
         report = _cli().verify_family(episode, dirs, source=T.provenance_record(commit="deadbee"))
-    assert report["outcome"] == "incomplete"
+    assert report["comparable"] is False
     assert "source" in report["reason"], report["reason"]
     assert "commit" in report["reason"], report["reason"]
     assert not (ep / "provenance.json").exists()
     assert sorted(p.name for p in (ep / "worlds").iterdir()) == list(T.WORLDS)
-    assert T.review_doc(ep)["episode"]["outcome"] == "incomplete"
+    assert not (ep / "outcome.yaml").exists(), "verify wrote the outcome pre-flight owns"
 
     # EQUALITY, NOT PREFIX (adversary H2): siblings at `cafe10` and at `cafe` are not siblings
     # of a `cafe1` source, whichever side an abbreviated sha would be read as extending.
@@ -373,14 +421,14 @@ def test_976_siblings_agreeing_at_a_commit_the_source_did_not_run_are_incomplete
         ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{extended}")
         with Episode.open(ep) as episode:
             report = _cli().verify_family(episode, near, source=T.provenance_record(commit="cafe1"))
-        assert report["outcome"] == "incomplete", extended
+        assert report["comparable"] is False, extended
         assert "commit" in report["reason"], report["reason"]
         assert not (ep / "provenance.json").exists()
 
     ok = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-anchored")
     with Episode.open(ok) as episode:
         report = _cli().verify_family(episode, dirs, source=T.provenance_record(commit="cafe1"))
-    assert report["outcome"] == "accepted"
+    assert report["comparable"] is True
     stamp = json.loads((ok / "provenance.json").read_text(encoding="utf-8"))
     assert stamp["agreed"]["commit"] == "cafe1"
     assert stamp["source"]["commit"] == "cafe1"
@@ -401,7 +449,7 @@ def test_976_siblings_whose_scope_differs_from_the_sources_are_incomplete(tmp_pa
         with Episode.open(ep) as episode:
             report = _cli().verify_family(episode, dirs, source=T.provenance_record(scope="defender"),
                                           allow_dirty=allow_dirty)
-        assert report["outcome"] == "incomplete", allow_dirty
+        assert report["comparable"] is False, allow_dirty
         assert "scope" in report["reason"], report["reason"]
         # The sibling label is quoted (`sibling 'b'`), so a possessive built onto it renders
         # `'b''s` in the archived reason.
@@ -411,7 +459,7 @@ def test_976_siblings_whose_scope_differs_from_the_sources_are_incomplete(tmp_pa
     ok = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-unscoped")
     with Episode.open(ok) as episode:
         report = _cli().verify_family(episode, dirs, source=T.provenance_record(scope=None))
-    assert report["outcome"] == "accepted"
+    assert report["comparable"] is True
     stamp = json.loads((ok / "provenance.json").read_text(encoding="utf-8"))
     assert stamp["source"]["scope"] is None
 
@@ -429,7 +477,7 @@ def test_976_a_dirty_source_under_the_override_is_still_held_to_its_commit(tmp_p
     with Episode.open(ok) as episode:
         report = _cli().verify_family(episode, at_source, source=T.provenance_record(dirty=True),
                                       allow_dirty=True)
-    assert report["outcome"] == "accepted"
+    assert report["comparable"] is True
     stamp = json.loads((ok / "provenance.json").read_text(encoding="utf-8"))
     assert stamp["source"]["dirty"] is True
     assert stamp["allow_dirty"] is True
@@ -438,15 +486,16 @@ def test_976_a_dirty_source_under_the_override_is_still_held_to_its_commit(tmp_p
     with Episode.open(ep) as episode:
         report = _cli().verify_family(episode, elsewhere, source=T.provenance_record(dirty=True),
                                       allow_dirty=True)
-    assert report["outcome"] == "incomplete"
+    assert report["comparable"] is False
     assert "commit" in report["reason"], report["reason"]
     assert not (ep / "provenance.json").exists()
 
 
-def test_976_a_launch_whose_siblings_ran_another_commit_ends_incomplete_end_to_end(tmp_path):
+def test_976_a_launch_whose_siblings_ran_another_commit_ends_incomplete_end_to_end(
+        tmp_path, caplog):
     """O1/M3/M5 through the real launcher: the live tree matches the source (`deadbee`), so
     the preflight passes and the family runs — but each sibling's own stamp says `cafe1`, so
-    the verify tier ends the family `incomplete` with no family stamp. This is C5's
+    the verify tier withholds the family stamp and logs why. This is C5's
     reachability closed at the authority tier, and the pin that `_run_episode` actually
     threads the source stamp into `verify_family`. Without it the preflight's live capture
     could be mistaken for the authority, or the source returned from preflight dropped on the
@@ -455,9 +504,11 @@ def test_976_a_launch_whose_siblings_ran_another_commit_ends_incomplete_end_to_e
     assert launch.run() == 0, "the exit is about the launch; the outcome is about the family"
     assert launch.questioner.calls > 0, "the launch was refused at preflight instead"
     assert sorted(launch.spawn.worlds) == list(T.WORLDS)
-    record = T.review_doc(launch.episode_dir)["episode"]
-    assert record["outcome"] == "incomplete"
-    assert "commit" in record["reason"], record["reason"]
+    # #1224: the outcome record is pre-flight's (written once, before any sibling started);
+    # verify's verdict is the withheld stamp and the reason it logs.
+    assert _outcome(launch.episode_dir)["outcome"] == "accepted"
+    withheld = _withheld_reason(caplog)
+    assert "commit" in withheld, withheld
     assert not (launch.episode_dir / "provenance.json").exists()
 
 
@@ -474,26 +525,27 @@ def test_976_the_anchor_verify_judges_is_the_one_preflight_read_not_a_second_rea
     honest = launch.spawn
 
     def rewrite_then_run(argv, **kw):
-        T.source_stamp(launch.src, commit="cafe1")
+        _restamp(launch.src, commit="cafe1")
         return honest(argv, **kw)
 
     launch.spawn = rewrite_then_run
     assert launch.run() == 0
     assert honest.launches, "no sibling was launched — the rewrite never happened"
-    assert T.review_doc(launch.episode_dir)["episode"]["outcome"] == "accepted"
+    assert _outcome(launch.episode_dir)["outcome"] == "accepted"
     stamp = launch.family_stamp
     assert stamp["source"]["commit"] == "deadbee"
     assert stamp["agreed"]["commit"] == "deadbee"
 
 
-def test_976_the_override_does_not_waive_a_sibling_commit_mismatch_end_to_end(tmp_path):
+def test_976_the_override_does_not_waive_a_sibling_commit_mismatch_end_to_end(
+        tmp_path, caplog):
     """O4 through the real launcher: `--allow-dirty` with siblings at `cafe1` against a
-    `deadbee` source is still `incomplete`. Without this the override would waive the very
+    `deadbee` source still has its family stamp withheld. Without this the override would waive the very
     confound — a code difference between the source and the family — that it must never."""
     launch = _prepare(tmp_path, siblings_at="cafe1")
     assert launch.run("--allow-dirty") == 0
     assert launch.questioner.calls > 0
-    assert T.review_doc(launch.episode_dir)["episode"]["outcome"] == "incomplete"
+    assert "commit" in _withheld_reason(caplog)
     assert not (launch.episode_dir / "provenance.json").exists()
 
 
@@ -509,7 +561,7 @@ def test_976_the_override_waives_dirt_on_both_sides_and_the_family_is_accepted(t
     archive never reads as anchored to a clean sha. Without this the override could be made
     a no-op and every O4 negative would still pass."""
     launch = _prepare(tmp_path, live_tree=T.source_capture(dirty=True))
-    T.source_stamp(launch.src, dirty=True)
+    _restamp(launch.src, dirty=True)
     stamp = _accepted(launch, "--allow-dirty")
     assert stamp["source"]["dirty"] is True
     assert stamp["source"]["dirty_paths"] == ["defender/runtime/driver/__init__.py"]
@@ -537,7 +589,7 @@ def test_976_the_authority_judges_the_sources_own_dirt_not_only_the_siblings(tmp
     ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-dirty-source-unwaived")
     with Episode.open(ep) as episode:
         report = _cli().verify_family(episode, dirs, source=T.provenance_record(dirty=True))
-    assert report["outcome"] == "incomplete"
+    assert report["comparable"] is False
     assert "source" in report["reason"], report["reason"]
     assert "dirty=True" in report["reason"], report["reason"]
     assert not (ep / "provenance.json").exists()
@@ -546,7 +598,7 @@ def test_976_the_authority_judges_the_sources_own_dirt_not_only_the_siblings(tmp
     with Episode.open(ok) as episode:
         report = _cli().verify_family(episode, dirs, source=T.provenance_record(dirty=True),
                                       allow_dirty=True)
-    assert report["outcome"] == "accepted"
+    assert report["comparable"] is True
     stamp = json.loads((ok / "provenance.json").read_text(encoding="utf-8"))
     assert stamp["source"]["dirty"] is True
     assert stamp["allow_dirty"] is True
@@ -561,7 +613,7 @@ def test_976_two_problems_are_reported_at_once_never_waivable_first_and_without_
     first, named `--allow-dirty`, and the operator met the never-waivable one only after
     passing a flag that could not help."""
     launch = _prepare(tmp_path, live_tree=T.source_capture(commit="0ther"))
-    T.source_stamp(launch.src, dirty=True)
+    _restamp(launch.src, dirty=True)
     message = _refused_before_spending(launch)
     _never_waivable(message, "live tree is at commit '0ther'", "not certified clean",
                     "dirty=True")
@@ -569,7 +621,7 @@ def test_976_two_problems_are_reported_at_once_never_waivable_first_and_without_
     assert launch.live_tree.calls == 1
     # Under the override the dirt is waived and the commit alone remains — still refused.
     waived = _prepare(tmp_path, live_tree=T.source_capture(commit="0ther"))
-    T.source_stamp(waived.src, dirty=True)
+    _restamp(waived.src, dirty=True)
     message = _refused_before_spending(waived, "--allow-dirty")
     _never_waivable(message, "live tree is at commit '0ther'")
     assert "not certified clean" not in message, message
@@ -580,7 +632,7 @@ def test_976_a_verify_reason_the_override_cannot_reach_never_names_the_flag(tmp_
     `--allow-dirty` appears exactly when passing it would let the family through. A dirty
     sibling beside a commit mismatch, a silent sibling, and siblings off the source's commit
     are each never-waivable families, and none of their archived reasons names the flag; a
-    family whose only fault is dirt does. Without this `review.yaml` sends the operator at a
+    family whose only fault is dirt does. Without this the logged reason sends the operator at a
     knob that does not turn (adversary H1, surviving at the tier whose messages are archived)."""
     base, _src = T.runs_base(tmp_path)
     never = {
@@ -596,15 +648,15 @@ def test_976_a_verify_reason_the_override_cannot_reach_never_names_the_flag(tmp_
         ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{name}")
         with Episode.open(ep) as episode:
             report = _cli().verify_family(episode, dirs, source=T.provenance_record())
-        assert report["outcome"] == "incomplete", name
-        reason = T.review_doc(ep)["episode"]["reason"]
+        assert report["comparable"] is False, name
+        reason = report["reason"]
         assert "allow-dirty" not in reason, (name, reason)
     only_dirt = [T.sibling_run_dir(base / "od", w, dirty=(w == "b")) for w in T.WORLDS]
     ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-only-dirt")
     with Episode.open(ep) as episode:
         report = _cli().verify_family(episode, only_dirt, source=T.provenance_record())
-    assert report["outcome"] == "incomplete"
-    assert "allow-dirty" in T.review_doc(ep)["episode"]["reason"]
+    assert report["comparable"] is False
+    assert "allow-dirty" in report["reason"]
 
 
 def test_976_siblings_off_the_anchor_are_named_against_the_source_once_each(tmp_path):
@@ -612,14 +664,14 @@ def test_976_siblings_off_the_anchor_are_named_against_the_source_once_each(tmp_
     source's, are two anchor faults — each named against the source — and NOT also a third
     sentence that the siblings disagree with each other, which the two already said. The
     sibling-to-sibling agreement covers only what the anchor does not pin: the model always,
-    and the scope when the source stamped none. Without this `review.yaml` carries the same
+    and the scope when the source stamped none. Without this the reason carries the same
     drift two or three times and an operator reads three problems where there is one."""
     base, _src = T.runs_base(tmp_path)
     two_commits = [T.sibling_run_dir(base / "tc", w, commit=f"c-{w}") for w in T.WORLDS]
     ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-two-commits")
     with Episode.open(ep) as episode:
         report = _cli().verify_family(episode, two_commits, source=T.provenance_record(commit="s"))
-    assert report["outcome"] == "incomplete"
+    assert report["comparable"] is False
     reason = report["reason"]
     assert reason.count("while the source run it continues ran at") == len(T.WORLDS), reason
     assert "siblings disagree on commit" not in reason, reason
@@ -633,7 +685,7 @@ def test_976_siblings_off_the_anchor_are_named_against_the_source_once_each(tmp_
     ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-two-scopes")
     with Episode.open(ep) as episode:
         report = _cli().verify_family(episode, two_scopes, source=T.provenance_record(scope=None))
-    assert report["outcome"] == "incomplete"
+    assert report["comparable"] is False
     assert "siblings disagree on scope" in report["reason"], report["reason"]
     assert "measured over scope" not in report["reason"], report["reason"]
 
@@ -643,33 +695,24 @@ def test_976_siblings_off_the_anchor_are_named_against_the_source_once_each(tmp_
     ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-two-models")
     with Episode.open(ep) as episode:
         report = _cli().verify_family(episode, two_models, source=T.provenance_record())
-    assert report["outcome"] == "incomplete"
+    assert report["comparable"] is False
     assert report["reason"].count("siblings disagree on model") == 1, report["reason"]
 
 
 def test_976_a_family_of_no_siblings_is_incomplete_not_a_crash(tmp_path):
-    """`verify_family` over NO run dirs, against a clean source, is `incomplete` with a reason
-    — not `accepted` with an agreed record of nobody, and not a `StopIteration` out of the
-    family-stamp writer after the archive directory was made and before the outcome was
-    recorded or the door torn down. The launcher never gets here (a manifest always has a
-    base world), so this is the public entry's own answer; the door pin is what a caller
-    holding staged names needs from it."""
-    staged = f"wv-{T.world_token('b')}-logs-"
-    door = T.FakeDoor(existing=(staged,))
+    """`verify_family` over NO run dirs, against a clean source, is not comparable with a
+    reason — not comparable with an agreed record of nobody, and not a `StopIteration` out of
+    the family-stamp writer after the archive directory was made. The launcher never gets here
+    (a manifest always has a base world), so this is the public entry's own answer."""
     ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-nobody")
-    (ep / "staged.yaml").write_text(
-        json.dumps([{"world": T.world_token("b"), "name": staged, "kind": "alias",
-                     "derived_from": T.EVENTS_PATTERN, "created_at": T.AS_OF}]),
-        encoding="utf-8")
     with Episode.open(ep) as episode:
-        report = _cli().verify_family(episode, [], source=T.provenance_record(), door=door)
-    assert report["outcome"] == "incomplete"
+        report = _cli().verify_family(episode, [], source=T.provenance_record())
+    assert report["comparable"] is False
     assert "no sibling" in report["reason"], report["reason"]
     assert report["worlds"] == []
     assert not (ep / "provenance.json").exists()
     assert (ep / "worlds").is_dir()
-    assert T.review_doc(ep)["episode"]["outcome"] == "incomplete"
-    assert door.deleted() == [staged], "the staged name outlived the empty family"
+    assert not (ep / "outcome.yaml").exists(), "verify wrote the outcome pre-flight owns"
 
 
 # ---------------------------------------------------------------------------------------
@@ -765,12 +808,12 @@ def test_976_a_forged_source_commit_is_refused_at_preflight_not_raised_out_of_th
 def test_976_the_source_commit_reaches_only_comparisons_and_the_family_stamp(tmp_path):
     """C13: the source's commit string is read at preflight and verify and lands in the family
     stamp's JSON — and NOWHERE ELSE: not in any sibling's argv or env, not in the questioner's
-    or the comparator's prompts. A distinctive commit on the source, the live capture and the
+    or pre-flight's oracle and verifier prompts. A distinctive commit on the source, the live capture and the
     siblings makes the launch accepted (the positive half: the stamp carries it), and the sweep
     over every outbound payload is the negative. Without this a forged source commit would be
     a string an operator's shell or a model gets to see."""
     launch = _prepare(tmp_path, live_tree=T.source_capture(commit=ANCHOR), siblings_at=ANCHOR)
-    T.source_stamp(launch.src, commit=ANCHOR)
+    _restamp(launch.src, commit=ANCHOR)
     stamp = _accepted(launch)
     assert stamp["source"]["commit"] == ANCHOR
     assert stamp["agreed"]["commit"] == ANCHOR
@@ -778,9 +821,11 @@ def test_976_the_source_commit_reaches_only_comparisons_and_the_family_stamp(tmp
     for launched in launch.spawn.launches:
         assert all(ANCHOR not in arg for arg in launched["argv"]), launched["argv"]
         assert all(ANCHOR not in value for value in launched["env"].values()), launched["env"]
-    # The questioner is prompted three times per family; the comparator only when the review
-    # has a captured row to replay, which this family (no `rows`) does not — so the control is
-    # on the questioner and the comparator's sweep is over whatever it was handed.
+    # The questioner is prompted once per family call and seat; pre-flight's oracle and
+    # verifier are shown the source's one captured call per fact world (#1224).
     assert launch.questioner.prompts, "the questioner was never prompted — the sweep is vacuous"
     assert all(ANCHOR not in prompt for prompt in launch.questioner.prompts)
-    assert all(ANCHOR not in prompt for prompt in launch.invoke.prompts)
+    assert launch.oracle.requests, "the oracle was never prompted — the sweep is vacuous"
+    assert launch.verifier.requests, "the verifier was never prompted — the sweep is vacuous"
+    assert ANCHOR not in launch.oracle.all_seen()
+    assert ANCHOR not in launch.verifier.all_seen()

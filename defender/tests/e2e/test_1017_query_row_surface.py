@@ -288,7 +288,7 @@ def _judge_world(tmp_path: Path, rows: list[dict], *, goal: str = "GOAL_MARKER")
     `lead_repository.joined` reads off a run-dir-shaped tree (C10), written through the unit
     suite's own builders (`_table`, `_lead_file`), since the world dir IS run-dir shaped.
     Returns `(episode_dir, runs_base, world_dir)`."""
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     base, _src = J.runs_base(tmp_path)
     world = ep / "worlds" / "b"
     _lead_file(world, goal)

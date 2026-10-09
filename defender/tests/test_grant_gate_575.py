@@ -173,7 +173,7 @@ def _all_policies(env) -> dict[str, permission.AgentPolicy]:
     # HERE rather than at module scope because it was written before the definition existed,
     # and a missing name in the module-level import block fails COLLECTION, hiding every other
     # test in this file behind one error.
-    from defender.agents import JUDGE_DEF
+    from defender.agents import JUDGE_DEF, ORACLE_CHECK_DEF, ORACLE_DEF
 
     return {
         "main": env.main,
@@ -202,6 +202,11 @@ def _all_policies(env) -> dict[str, permission.AgentPolicy]:
         # its policy — and above all its deny_reason, which g1 sweeps as prompt surface — is a
         # second compiled object the audit would otherwise never look at.
         "judge": compile_policy_for(JUDGE_DEF, run_dir=env.run, defender_dir=env.dfn),
+        # #1224's live oracle and its verifier: two more deny-all roles, each its own key, so
+        # each is a compiled policy (and a deny_reason) the audit must look at.
+        "oracle": compile_policy_for(ORACLE_DEF, run_dir=env.run, defender_dir=env.dfn),
+        "oracle_check": compile_policy_for(ORACLE_CHECK_DEF, run_dir=env.run,
+                                           defender_dir=env.dfn),
     }
 
 
@@ -426,18 +431,19 @@ def test_b3_every_registered_agents_policy_passes_the_table_check(env):
     #691). It is the one denylist-free lane, so an untabled (=ungated) program there is the worst
     place for the fail-open to hide."""
     pols = _all_policies(env)
-    # 9, and the number has moved six times: #797 retired the review's three roles
+    # 12, and the number has moved seven times: #797 retired the review's three roles
     # (CHALLENGER, COHERENCE_CHECKER, PROJECTION) with the stages that ran under them; #796
     # added three of its own (DISCRIMINATION, SUPPORT, COMPOSER); DISCRIMINATION was then
     # retired for producing nothing the composer could route; #947 added QUESTIONER; #922
     # retired ACTOR, ORACLE and JUDGE with the pipeline they were the only callers of; and
     # #1008 re-added JUDGE, bound to the FAMILY judge, which until then ran under the
     # questioner's definition; #773 added CORPUS_REPAIR, M4's one bounded repair spawn (a
-    # fixed, separate definition rather than a per-spawn override of CORPUS_AUTHOR's own).
+    # fixed, separate definition rather than a per-spawn override of CORPUS_AUTHOR's own);
+    # #1224 added ORACLE and ORACLE_CHECK, a branched world's live oracle and its verifier.
     # SUPPORT is claimed by two calls and QUESTIONER by four, so roles and calls have not
     # matched here since #796. This counts registered roles, so a deliberately added or
     # retired role moves it; what the test checks is the table property below.
-    assert len(AGENTS) == 10
+    assert len(AGENTS) == 12
     # ...AND `_all_policies` covers every one of them. The count alone does not say so: this
     # dict is hand-enumerated, and its own note says a role registered in AGENTS but absent
     # here is "a compiled policy the audit never looks at" — a2/a4/b3/b8/g1 all sweep THIS,

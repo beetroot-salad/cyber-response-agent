@@ -2,17 +2,17 @@
 `Step.VERIFY`; M7, M9).
 
 The launcher is a composition, and under D1 everything it composes is a PROCESS: it writes the
-manifest, stages the corpus, reviews, starts N `run.py --resume` children together, waits, then
-verifies each sibling's scrub and stamp before archiving. It never executes an investigation in
-its own process.
+manifest, has pre-flight calibrate each world's oracle (#1224, which retired #947's cluster
+staging and replay review), starts N `run.py --resume` children together, waits, then verifies
+each sibling's scrub and stamp before archiving. It never executes an investigation in its own
+process.
 
 Three readings the §7 seam settled and this file pins:
 
-* **Any rejected world ends the EPISODE.** Nothing runs, the record archives, and no sibling
-  process starts — recorded as an examined no rather than as an unexamined mechanism sentence.
-* **`incomplete` is a modelled outcome**, not the absence of a file: an outcome field with a
-  reason, a fourth teardown trigger, per-world archiving with only the family stamp and the
-  comparability claim withheld.
+* **An episode pre-flight does not accept ends the EPISODE.** Nothing runs, the record
+  archives, and no sibling process starts.
+* **A family that fails verification withholds comparability**: per-world archiving with only
+  the family stamp and the comparability claim withheld, and the reason returned.
 * **The family holds the resolved MODEL constant as well as the commit.** The role preflight
   resolves per process, so three siblings launched into a changed environment can be a
   comparison across two models with a perfectly agreeing stamp.
@@ -22,15 +22,14 @@ RED against b8a63e66: none of the seams below exists, the launcher runs siblings
 """
 from __future__ import annotations
 
-from defender.tests import _tenants1106  # noqa: E402 — #1106: the episode tenant
-
-import contextlib
 import json
+import re
 
 import pytest
 
 from defender._episode_handle import Episode
 from defender.tests import _triplet_947 as T
+from defender.tests.live_oracle_1224 import _spec1224 as S
 
 
 @pytest.fixture(autouse=True)
@@ -64,39 +63,35 @@ def _tenant_paths():
     return T.current_tenant()
 
 
-def _launch(tmp_path, *, spawn=None, door=None, argv_extra=(), rows=(), **seams):
-    """Drive one episode through the real launcher.
+#: The one answer every captured call of `_launch`'s source run carries, so a single scripted
+#: oracle submission (`_PASSING`) serves every call unchanged and every fact world calibrates.
+_BASE = {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon", "host": "web-1",
+                   "ts": "2026-07-28T15:00:00Z"}]}
 
-    `rows` lands rows in the SOURCE run's queries table before the launch, which is the only
-    way to give an episode a primed base: the launcher primes from the source, so a scenario
-    that needs the review to have something to replay has to put it there.
 
-    `live_tree` (a seam, defaulted below) is #976's live-tree capture: production asks git about
-    the checkout the launcher runs in, so every scenario here injects one that matches the
-    fixture source's stamp — otherwise the suite's own HEAD is what the preflight compares.
+def _calls() -> list:
+    """The source run's captured calls: two pre-branch reads over `_spec1224`'s fixture tenant."""
+    return [S.Call("idp", "query", S.query_params("user:alice"), _BASE),
+            S.Call("edr", "query", S.query_params("host:db-1"), _BASE)]
+
+
+def _launch(tmp_path, *, spawn=None, argv_extra=(), oracle=None, verifier=None, **seams):
+    """Drive one episode through the real launcher over `_spec1224`'s fixture tenant (#1224).
+
+    Pre-flight replays the source run's captured calls (`_calls`) through each fact world's
+    oracle: by default an oracle serving every call unchanged and a verifier passing it, so the
+    family is accepted and its siblings start. Every other seam defaults to a recording double
+    (`S.launch`): the role preflight is neutralised for every scenario not about it, and
+    `live_tree` is #976's live-tree capture matching the fixture source's stamp — otherwise the
+    suite's own HEAD is what the preflight compares.
+
+    Returns `(rc, spawn, episode_dir, message)`; `message` is a refusal's `sys.exit` text.
     """
-    base, src = T.runs_base(tmp_path)
-    for row in rows:
-        T.capture_call(src, **row)
-    if spawn is None:
-        spawn = T.FakeSpawn()
-    if door is None:
-        door = T.FakeDoor()
-    seams.setdefault("questioner",
-                     T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c")))
-    seams.setdefault("adapters", T.FakeAdapters())
-    seams.setdefault("invoke", T.FakeAgent(*["same"] * 24))
-    # The role-model preflight is injected for every scenario that is not about it: left to the
-    # ambient environment it decides these tests on whether the host holds a billable key, and
-    # it SATISFIES the ones that assert a refusal without their reaching the check they name.
-    # `test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling` injects its
-    # own recording seam and is what discharges the demand.
-    seams.setdefault("preflight", T.no_preflight)
-    seams.setdefault("live_tree", T.source_capture())
-    rc = _cli().main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go",
-                      *argv_extra],
-                     spawn=spawn, door=door, **seams)
-    return rc, spawn, _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
+    run = S.launch(
+        tmp_path, S.estate(tmp_path), calls=_calls(), spawn=spawn, argv_extra=argv_extra,
+        oracle=oracle if oracle is not None else S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM)),
+        verifier=verifier if verifier is not None else S.passing_verifier(), **seams)
+    return run.rc, run.spawn, run.ep, run.message
 
 
 # ---------------------------------------------------------------------------------------
@@ -106,71 +101,52 @@ def _launch(tmp_path, *, spawn=None, door=None, argv_extra=(), rows=(), **seams)
 
 def test_947_launcher_returns_episode_dir_and_status(tmp_path):
     """The launcher returns a zero status with a fully archived episode dir, and a non-zero one
-    otherwise — leaving the manifest, the staging record and the review on disk either way, so
-    an operator reading the exit status and the directory sees the same answer."""
-    rc, _spawn, ep = _launch(tmp_path)
+    otherwise — leaving the manifest and pre-flight's outcome record on disk either way, so an
+    operator reading the exit status and the directory sees the same answer."""
+    rc, _spawn, ep, _message = _launch(tmp_path)
     assert rc == 0
     assert (ep / "family.yaml").is_file()
-    assert (ep / "review.yaml").is_file()
+    assert (ep / "outcome.yaml").is_file()
     assert (ep / "worlds").is_dir()
 
 
 def test_947_un_nameable_episode_token_is_refused_before_the_questioner_runs(tmp_path):
     """An episode whose token cannot be rendered nameable is refused before the questioner is
-    called at all: the refusal costs no model call, no staged name and no primed capture."""
+    called at all: the refusal costs no model call and no primed capture."""
     base, src = T.runs_base(tmp_path, source_run_id="FRESH CASE")
     agent = T.FakeAgent()
     with pytest.raises(SystemExit):
         _cli().main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
-                    spawn=T.FakeSpawn(), door=T.FakeDoor(), questioner=agent,
-                    preflight=T.no_preflight, live_tree=T.source_capture())
+                    spawn=T.FakeSpawn(), questioner=agent,
+                    preflight=S.no_preflight, live_tree=T.source_capture())
     assert agent.calls == 0
 
 
 def test_947_episode_token_rendering_is_injective_and_nameable(tmp_path):
     """The episode token's rendering is injective and nameable: two distinct episode ids never
-    render to one token, and every token it produces is one the naming rules admit — a plain
-    character replacement is not enough, because the run-id grammar admits both delimiters."""
+    render to one token, and every token it produces composes a world token that names one
+    world-ledger file — a plain character replacement is not enough, because the run-id grammar
+    admits both delimiters. (#1224 retired the `wv-` view names the token once also had to
+    admit; the world ledger's filename is what still carries it.)"""
     fam = T.mod("runtime.branch._family")
-    confinement = T.mod("scripts.adapters.confinement")
     ids = ["a-b_c-n1", "a_b-c-n1", "a-b-c_n1", "A-B-n1", "20260728T161845Z-fresh-case-n59"]
     tokens = [fam.episode_token_for(i) for i in ids]
     assert len(set(tokens)) == len(set(ids))
     for token in tokens:
-        assert confinement._nameable_world(f"{token}.b")
-
-
-def test_947_sweep_runs_before_the_questioner_is_called(tmp_path):
-    """The launcher's first act is the sweep: leftover names from an earlier death are removed
-    before the questioner is called, so an episode never authors worlds into a namespace still
-    holding another attempt's aliases."""
-    order: list[str] = []
-
-    class Ordered(T.FakeDoor):
-        def list_names(self, glob):
-            order.append("sweep")
-            return super().list_names(glob)
-
-    class Watched(T.FakeAgent):
-        def __call__(self, prompt, **kw):
-            order.append("questioner")
-            return super().__call__(prompt, **kw)
-
-    watched = Watched(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
-    _launch(tmp_path, door=Ordered(), questioner=watched)
-    assert order[:1] == ["sweep"]
-    assert "questioner" in order
+        world = fam.world_token_for(token, "b")
+        assert world == f"{token}.b"
+        assert re.fullmatch(r"[a-z0-9][a-z0-9._]*", world), world
 
 
 def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_path):
     """Preflight checks every precondition in ONE block before anything is spent, and EACH of them
     refuses before the questioner is called: the branch point out of range for the derived fence
-    count, an absent source alert, a cluster the write door cannot reach, and a sweep that did
-    not complete. (The alert's LINK SCREEN is the same block's fifth check and has its own
-    demand — a screen names which reader applies it, which an ordering assertion cannot.)"""
+    count, and an absent source alert. (The alert's LINK SCREEN is the same block's third check
+    and has its own demand — a screen names which reader applies it, which an ordering
+    assertion cannot. #1224 retired the cluster-reachability and sweep arms with staging.)"""
     base, src = T.runs_base(tmp_path)
 
-    def refuses(argv_extra, *, door, prepare=lambda: None):
+    def refuses(argv_extra, *, prepare=lambda: None):
         agent = T.FakeAgent()
         prepare()
         with pytest.raises(SystemExit):
@@ -178,22 +154,14 @@ def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_pa
             # names, and an uncredentialed host would otherwise satisfy every one of them with
             # the preflight's own refusal before the check under test was ever reached.
             _cli().main([str(src), *argv_extra, "--continuation-prompt", "go"],
-                        spawn=T.FakeSpawn(), door=door, questioner=agent,
-                        preflight=T.no_preflight, live_tree=T.source_capture())
+                        spawn=T.FakeSpawn(), questioner=agent,
+                        preflight=S.no_preflight, live_tree=T.source_capture())
         assert agent.calls == 0, "the questioner was paid for before the preflight refused"
 
     for out_of_range in ("-1", str(10 ** 9)):
-        refuses([out_of_range], door=T.FakeDoor())
+        refuses([out_of_range])
     # the alert is PRESENT — the launcher reads it for the questioner's own prompt
-    refuses([str(T.BRANCH_MESSAGE_ID)], door=T.FakeDoor(),
-            prepare=lambda: (src / "alert.json").unlink())
-    (src / "alert.json").write_text('{"rule": {"id": "r"}}', encoding="utf-8")
-    # the cluster / the write door's own environment
-    refuses([str(T.BRANCH_MESSAGE_ID)], door=T.FakeDoor(fault=T.Fault(raise_after=0)))
-    # the sweep COMPLETED: a leftover name inside this episode's own token that will not delete
-    leftover = f"wv-{T.EPISODE_TOKEN}.a-logs-"
-    refuses([str(T.BRANCH_MESSAGE_ID)],
-            door=T.FakeDoor(existing=(leftover,), fault=T.Fault(fail_on=(f"{T.EPISODE_TOKEN}.a",))))
+    refuses([str(T.BRANCH_MESSAGE_ID)], prepare=lambda: (src / "alert.json").unlink())
 
 
 def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_it(tmp_path):
@@ -210,8 +178,8 @@ def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_i
     agent = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
     with pytest.raises(T.refusals()) as refusal:
         _cli().main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
-                    spawn=T.FakeSpawn(), door=T.FakeDoor(), questioner=agent,
-                    preflight=T.no_preflight, live_tree=T.source_capture())
+                    spawn=T.FakeSpawn(), questioner=agent,
+                    preflight=S.no_preflight, live_tree=T.source_capture())
     assert "alert" in str(refusal.value)
     assert agent.prompts == [], "the planted link reached the questioner's prompt"
     assert "ROOT-PRIVATE-KEY" not in str(refusal.value)
@@ -240,7 +208,7 @@ def test_947_all_siblings_in_one_family_share_one_continuation_prompt(tmp_path):
     a comparison across two different instructions."""
     import yaml
 
-    rc, spawn, ep = _launch(tmp_path)
+    rc, spawn, ep, _message = _launch(tmp_path)
     manifest = yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
     assert manifest["continuation_prompt"] == "go"
     assert len(spawn.launches) >= 2
@@ -249,7 +217,7 @@ def test_947_all_siblings_in_one_family_share_one_continuation_prompt(tmp_path):
 
 
 # ---------------------------------------------------------------------------------------
-# `Step.REVIEW` / `Step.RUNS` — rejection, and starting the family
+# `Step.PREFLIGHT` / `Step.RUNS` — an unaccepted episode, and starting the family
 # ---------------------------------------------------------------------------------------
 
 
@@ -264,7 +232,7 @@ def test_947_accepted_siblings_are_started_together_as_processes(tmp_path):
     real `run.py` child blocks for the length of an investigation; `Fault(delay=…)` is the
     fake's stand-in for that."""
     slow = T.FakeSpawn(fault=T.Fault(delay=0.25))
-    rc, spawn, ep = _launch(tmp_path, spawn=slow)
+    rc, spawn, ep, _message = _launch(tmp_path, spawn=slow)
     assert sorted(spawn.worlds) == ["a", "b", "c"]
     for launch in spawn.launches:
         assert "--resume" in launch["argv"]
@@ -284,10 +252,11 @@ def test_947_the_launcher_globs_and_passes_its_own_questioner_lessons(tmp_path):
     passing.
 
     Observably true: with a lesson file in a `lessons_dir` the launcher is handed (the same
-    injection-seam discipline `door`/`preflight`/`spawn` already use — never `monkeypatch.
-    setattr` on the production corpus path), whose `pattern` matches this episode's captured
-    pattern, the lesson's body reaches the FIRST prompt the questioner's fake agent records
-    (call 1, the family-authoring call).
+    injection-seam discipline `preflight`/`spawn` already use — never `monkeypatch.setattr` on
+    the production corpus path), whose `systems` names one of this episode's served systems
+    (#1224: `systems` replaced the lesson's `pattern` / `holding_system`), the lesson's body
+    reaches the FIRST prompt the questioner's fake agent records (call 1, the family-authoring
+    call).
 
     What failure looks like: the launcher resolves its own production corpus path but never
     globs it, or globs it and drops the result on the floor instead of passing it through
@@ -298,14 +267,13 @@ def test_947_the_launcher_globs_and_passes_its_own_questioner_lessons(tmp_path):
     lessons_dir = tmp_path / "lessons-questioner"
     lessons_dir.mkdir(parents=True)
     body = "QUESTIONER-LAUNCHER-LESSON-BODY"
-    meta = {"name": "l1", "pattern": T.EVENTS_PATTERN, "holding_system": "elastic"}
+    meta = {"name": "l1", "systems": ["idp"]}
     (lessons_dir / "l1.md").write_text(
         "---\n" + yaml.safe_dump(meta, sort_keys=False) + "---\n" + body + "\n",
         encoding="utf-8")
 
-    questioner = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
-    rc, _spawn, _ep = _launch(
-        tmp_path, questioner=questioner, rows=[{}], lessons_dir=lessons_dir)
+    questioner = S.questioner_for()
+    rc, _spawn, _ep, _message = _launch(tmp_path, questioner=questioner, lessons_dir=lessons_dir)
 
     assert rc == 0, "the episode did not complete cleanly"
     assert questioner.prompts, "the questioner was never called"
@@ -321,7 +289,7 @@ def test_947_launcher_has_no_import_or_await_of_run_investigation(tmp_path):
     src = (T.DEFENDER / "learning" / "branch" / "cli.py").read_text(encoding="utf-8")
     assert "run_investigation" not in src
     assert "asyncio.gather" not in src
-    rc, spawn, ep = _launch(tmp_path)
+    rc, spawn, ep, _message = _launch(tmp_path)
     assert spawn.launches, "the launcher started no child process"
 
 
@@ -329,32 +297,43 @@ def test_947_every_injected_seam_has_a_production_value(tmp_path):
     """Every seam the launcher injects has a value it resolves for itself, so the shipped entry
     point can run an episode with nothing hand-supplied (O1).
 
-    THE SEAM STAYS A SEAM — all three parameters still default to `None`, which is what lets
+    THE SEAM STAYS A SEAM — every parameter below still defaults to `None`, which is what lets
     every scenario in this file drive the launcher without a provider — and the launcher answers
-    for them at its own boundary, the way it already does for the write door and the role
-    preflight. Injected-with-no-production-value is not a seam but a hole: it reached
+    for them at its own boundary, the way it already does for the role preflight.
+    Injected-with-no-production-value is not a seam but a hole: it reached
     `author_family(invoke=None)` as a bare `TypeError` with an episode id already burned, and
     refusing instead of crashing left the entry point still unable to launch anything.
 
-    The MODEL seam is asserted structurally and by construction rather than by driving it: a
+    The MODEL seams are asserted structurally and by construction rather than by driving them: a
     real call costs money and needs a provider, and what can go wrong without one is what is
     checked here — that the shipped role prompt exists and the agent builds from it through the
-    same builder every other stage uses. The ADAPTER seam is built for real, because building it
-    is the check: the registry reads and parses every system the gather grant names."""
+    same builder every other stage uses, and that pre-flight's oracle and verifier resolve from
+    their knobs when none is handed in. The ROSTER seam (#1224: pre-flight's grant-decided
+    reader, which replaced the review's adapter layer) is read for real, because reading it is
+    the check: it is the checkout's adapters directory, parsed."""
     import inspect
 
     cli = _cli()
     seams = T.mod("learning.branch.seams")
-    for name in ("questioner", "adapters", "invoke"):
+    for name in ("questioner", "oracle", "verifier", "roster"):
         assert inspect.signature(cli.main).parameters[name].default is None, (
             f"{name} is no longer an injectable seam, so every scenario in this file would "
             "need a provider")
     src = (T.DEFENDER / "learning" / "branch" / "cli.py").read_text(encoding="utf-8")
-    for builder in ("seams.model_seam", "seams.adapter_seam"):
+    for builder in ("seams.model_seam", "read_roster(adapters_under(_DEFENDER_DIR))"):
         assert builder in src, f"the launcher never reaches {builder}"
+    registry = (T.DEFENDER / "learning" / "branch" / "estate" / "registry.py").read_text(
+        encoding="utf-8")
+    assert "_LazyModel(" in registry, "pre-flight's model seams have no production value"
+    for knob in ("settings.model, settings.effort", "settings.check_model, settings.check_effort"):
+        assert knob in registry, f"pre-flight's model seam is not built from {knob}"
+
+    from defender._paths import adapters_under
+    from defender.runtime.verbs import read_roster
 
     ep = T.episode(tmp_path)
-    assert callable(seams.adapter_seam(ep, _tenants1106.fixture_run_tenant(), runs_base=tmp_path / "runs")), "the review has no production adapter layer"
+    assert read_roster(adapters_under(T.DEFENDER)).accepted, (
+        "pre-flight has no production roster to read through")
     assert callable(seams.model_seam(ep)), "the questioner has no production model call"
 
     # The agent the model seam drives, built the way `run_stage` builds it — the structural half
@@ -364,7 +343,7 @@ def test_947_every_injected_seam_has_a_production_value(tmp_path):
     # THE MODEL BUILDER IS INJECTED, and it is not a convenience: `build_agent_core`'s default
     # is `providers.build_for_effort`, which SOURCES A BILLABLE KEY. Left to the ambient
     # environment this test asserts whether the HOST is credentialed — green on a developer's
-    # machine, red on CI — which is the same trap `T.no_preflight` exists for one seam over.
+    # machine, red on CI — which is the same trap `S.no_preflight` exists for one seam over.
     # The seam under test is the wiring, and the provider is what the family-level role
     # preflight is for.
     from pydantic_ai.models.function import FunctionModel
@@ -395,141 +374,51 @@ def test_947_every_injected_seam_has_a_production_value(tmp_path):
         logger.close()
 
 
-def test_947_a_rejected_world_ends_the_episode_and_the_record_archives(tmp_path):
-    """Any rejected world ends the EPISODE: no world runs, the manifest, staging record and
-    review are archived, and the episode's recorded outcome is rejected — an examined no, not a
-    per-world refusal that would leave a two-world family running.
+def _bare_family() -> dict:
+    """A family no world of which carries a fact: pre-flight has nothing to calibrate."""
+    return S.family_v2(worlds=[S.control_world("a"), S.world_v2("b", facts=[]),
+                               S.world_v2("c", role="C", facts=[])])
 
-    #1007/N4: the fixture used to reject through the injection-unreachable branch (world b's
-    envelope retrieving none of its injected documents). That branch retires under N4 — a world
-    is no longer rejected on `injected_retrieved` alone. Rejected here through a still-live
-    reason instead: an exclusion that matches zero base documents. Call 1 (the family reply) is
-    where an overlay is actually authored — `SEAT_AUTHORED_FIELDS` covers only the per-seat
-    STORY fields, so a seat reply's own `overlay` is silently ignored; the exclusion has to be
-    declared on the family document's `worlds` plan.
-    """
-    adapters = T.FakeAdapters(by_target={T.world_token("b"): {"hits": [{"_id": "planted"}]}})
-    fam = T.family_doc(worlds=[
-        T.base_world(),
-        T.world_doc("b", ov=T.overlay(elastic=T.elastic_overlay(exclude={"match_all": {}}))),
-    ])
-    rc, spawn, ep = _launch(tmp_path, adapters=adapters,
-                            questioner=T.FakeAgent(fam, T.world_doc("b")),
-                            invoke=T.FakeAgent(*["contradiction"] * 24))
+
+@pytest.mark.parametrize("outcome", ["refused", "unusable"])
+def test_947_an_unaccepted_episode_starts_no_sibling_and_its_record_archives(
+        tmp_path, monkeypatch, outcome):
+    """An episode pre-flight does not accept ends the EPISODE: no sibling process starts, the
+    status is non-zero, and the manifest and pre-flight's outcome record are archived on disk —
+    an examined no, recorded with its reason. Both non-accepting outcomes are driven (#1224,
+    which retired the replay review's rejection): `refused` (no world carries a fact, so there
+    is nothing to calibrate) and `unusable` (two worlds failed calibration — the oracle never
+    submits an answer)."""
+    import yaml
+
+    monkeypatch.setenv("ORACLE_RETRY_CAP", "1")
+    seams = ({"questioner": S.questioner_for(_bare_family())} if outcome == "refused" else
+             {"oracle": S.oracle(then=S.text_only("no served answer fits this world"))})
+    rc, spawn, ep, _message = _launch(tmp_path, **seams)
     assert rc != 0
-    assert spawn.launches == []
-    assert T.review_doc(ep)["episode"]["decision"] == "rejected"
-    for name in ("family.yaml", "staged.yaml", "review.yaml"):
-        assert (ep / name).is_file(), name
+    assert spawn.launches == [], "a sibling started"
+    record = yaml.safe_load((ep / "outcome.yaml").read_text(encoding="utf-8"))
+    assert record["outcome"] == outcome
+    assert record["reason"]
+    assert (ep / "family.yaml").read_text(encoding="utf-8").strip()
 
 
-def test_947_no_sibling_process_starts_when_any_world_is_rejected(tmp_path):
-    """No sibling process starts when ANY world is rejected — not the rejected one and not its
-    accepted siblings: the process seam records no launch at all, which is the observable that
-    separates "the episode stopped" from "one world was skipped".
-
-    World C is the one rejected, and it is rejected on REACHABILITY rather than on a live read:
-    it declares a patch on `web-1`, the discriminating envelope comes back holding a different
-    host, so the difference C declares is not visible in the world C would run in. A review does
-    not gather evidence — nothing here matches a world token against a call that a patches-only
-    overlay never retargets — and the base world, which declares nothing, stays accepted
-    throughout."""
-    adapters = T.FakeAdapters({("elastic", "esql"): {"hits": [{"host": "other-host"}]}})
-    rc, spawn, ep = _launch(tmp_path, adapters=adapters,
-                            invoke=T.FakeAgent(*["contradiction"] * 24))
-    record = T.review_doc(ep)
-    assert record["worlds"]["c"]["decision"] == "rejected"
-    assert record["worlds"]["c"]["reachability"]["patched_visible"] is False
-    assert record["worlds"]["a"]["decision"] == "accepted"
-    assert spawn.launches == []
-    assert spawn.worlds == []
-
-
-def test_947_rejected_episode_archives_manifest_staging_and_review(tmp_path):
-    """A rejected episode archives its inputs rather than deleting the directory: the manifest,
-    the staging record and the review record are all still readable afterwards, because a
-    family that did not run is the second thing the drift obligation is observed by."""
-    adapters = T.FakeAdapters(by_target={T.world_token("b"): {"hits": [{"_id": "planted"}]}})
-    rc, spawn, ep = _launch(tmp_path, adapters=adapters,
-                            invoke=T.FakeAgent(*["contradiction"] * 24))
-    for name in ("family.yaml", "staged.yaml", "review.yaml"):
-        assert (ep / name).read_text(encoding="utf-8").strip(), name
-
-
-def test_947_any_failure_in_steps_two_to_four_aborts_the_episode(tmp_path, monkeypatch):
-    """ONE rule for all three steps, not a six-way taxonomy: a questioner call that fails
-    (`Step.QUESTIONER`), a staging door that fails mid-way (`Step.STAGING`) and a review whose
-    replay cannot reach the cluster (`Step.REVIEW`) each abort the episode the same way —
-    teardown fires and no sibling process starts."""
-    cases = {
-        # `staged` is whether the abort happens AFTER the first name was created. It is not a
-        # softer expectation for the questioner arm: teardown removes exactly what the staging
-        # record names, so an abort in `Step.QUESTIONER` leaves an empty record and a correct
-        # teardown makes no delete call at all. What that arm can be held to — and is — is the
-        # stronger claim that nothing was created in the first place.
-        "questioner": ({"questioner": T.FakeAgent(T.family_doc(),
-                                                  fault=T.Fault(raise_after=1))}, False),
-        # `raise_after=2` and not 1: preflight's own reachability probe and the sweep each open a
-        # connection, so a door that dies on the second one never reaches `Step.STAGING` at all
-        # and this arm would be a second reading of the preflight rather than of staging.
-        "staging": ({"door": T.FakeDoor(fault=T.Fault(raise_after=2))}, True),
-        # `Step.REVIEW` FAILS ON THE COMPARATOR, not on a cluster the review cannot reach: a review
-        # replays and does not gather evidence, so its only outbound call is the discriminating
-        # envelope and a failing one is a recorded reachability result rather than an abort. What
-        # can still end `Step.REVIEW` is the judgment itself — here the model answers `mutation`
-        # on the review seat, which admits three verdicts and not that one, and the comparator
-        # refuses a wrong-seat answer rather than filing it as a contradiction.
-        "review": ({"rows": [{"system": "identity", "verb": "get-user",
-                                 "payload": {"hits": [{"host": "web-1", "owner": "soc"}]}}],
-                    "invoke": T.FakeAgent(*["mutation"] * 8)}, True),
-    }
-    for step, (seams, staged) in cases.items():
-        # Each arm gets its own episodes root: three aborts sharing one would make the second
-        # and third meet a directory the first left behind, and the ordering — not the abort
-        # rule — would be what they observed.
-        monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / f"episodes-{step}"))
-        door = seams.pop("door", None) or T.FakeDoor()
-        rows = seams.pop("rows", ())
-        spawn = T.FakeSpawn()
-        with pytest.raises(SystemExit):
-            _launch(tmp_path, spawn=spawn, door=door, rows=rows, **seams)
-        assert spawn.launches == [], f"{step}: a sibling started after the abort"
-        if staged:
-            assert door.deleted(), f"{step}: teardown left the names it recorded on the cluster"
-            assert set(door.deleted()) >= set(door.created()), (
-                f"{step}: teardown removed fewer names than the abort created")
-        else:
-            assert door.created() == [], f"{step}: a name was created before the abort"
-
-
-def test_947_teardown_runs_on_rejection_completion_and_exception(tmp_path, monkeypatch):
-    """Teardown runs on every exit the launcher has: on a rejection, on a clean completion, and
-    on an exception raised after the first staging append.
-
-    EACH EXIT GETS ITS OWN EPISODE. An episode id is derived from (source run, branch point), so
-    three launches from one source share one — and the first leaves a manifest behind, which the
-    relaunch rule refuses on purpose. Sharing a root would make the second and third arms observe
-    that refusal rather than the exit they are about."""
-    rejecting = T.FakeAdapters(by_target={T.world_token("b"): {"hits": [{"_id": "planted"}]}})
-    exits = [
-        ("clean", {}),
-        ("rejection", {"adapters": rejecting, "invoke": T.FakeAgent(*["contradiction"] * 24)}),
-    ]
-    for name, kwargs in exits:
-        monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / f"episodes-{name}"))
-        door = T.FakeDoor()
-        with contextlib.suppress(SystemExit):
-            _launch(tmp_path, door=door, **kwargs)
-        assert door.deleted(), f"teardown did not run for the {name} exit"
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-exception"))
-    crashing = T.FakeDoor(fault=T.Fault(raise_after=2))
-    with pytest.raises(SystemExit):
-        _launch(tmp_path, door=crashing)
-    assert crashing.deleted()
+def test_947_any_failure_in_steps_two_to_four_aborts_the_episode(tmp_path):
+    """ONE rule, not a taxonomy: a step that fails before the first sibling starts aborts the
+    episode — the launch refuses and no sibling process starts. Driven through a questioner call
+    that fails (`Step.QUESTIONER`). (#1224 retired the staging and review arms with their steps;
+    a world's own failure in `Step.PREFLIGHT` is a recorded outcome, not an abort.)"""
+    spawn = T.FakeSpawn()
+    rc, spawn, _ep, message = _launch(
+        tmp_path, spawn=spawn,
+        questioner=T.FakeAgent(S.family_v2(), fault=T.Fault(raise_after=1)))
+    assert rc != 0
+    assert message, "the abort was not reported as a refusal"
+    assert spawn.launches == [], "a sibling started after the abort"
 
 
 # ---------------------------------------------------------------------------------------
-# `Step.VERIFY` — verification, the family stamp and the incomplete outcome
+# `Step.VERIFY` — verification, the family stamp and withheld comparability
 # ---------------------------------------------------------------------------------------
 
 
@@ -547,14 +436,14 @@ def test_947_launcher_verifies_each_siblings_scrub_verdict(tmp_path):
 
 def test_947_a_sibling_without_a_ran_true_scrub_marks_the_episode_incomplete(tmp_path):
     """A sibling whose scrub verdict is absent, or present but not recording a completed walk,
-    marks the episode incomplete with the reason — never archived as comparable."""
+    withholds the family's comparability with the reason — never archived as comparable."""
     base, src = T.runs_base(tmp_path)
     for scrub_ran, world in ((None, "b"), (False, "c")):
         ep = T.episode(tmp_path)
         dirs = [T.sibling_run_dir(base, w, scrub_ran=True if w != world else scrub_ran)
                 for w in T.WORLDS]
         report = _verify_family(ep, dirs, source=T.provenance_record())
-        assert report["outcome"] == "incomplete"
+        assert report["comparable"] is False
         assert world in report["reason"]
 
 
@@ -594,23 +483,23 @@ def test_947_family_stamp_carries_agreed_and_override_as_disjoint_roles(tmp_path
 
 
 def test_947_disagreeing_sibling_stamps_mark_the_episode_incomplete_with_a_reason(tmp_path):
-    """Sibling stamps recording different commits mark the episode incomplete with the reason,
-    and no family stamp is written: the tree moved between the first and last sibling, which is
+    """Sibling stamps recording different commits withhold the family's comparability with the
+    reason, and no family stamp is written: the tree moved between the first and last sibling, which is
     exactly the catch per-process stamps exist for."""
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
     dirs = [T.sibling_run_dir(base, w, commit=("cafe1" if w == "a" else "cafe2"))
             for w in T.WORLDS]
     report = _verify_family(ep, dirs, source=T.provenance_record(commit="cafe1"))
-    assert report["outcome"] == "incomplete"
+    assert report["comparable"] is False
     assert "commit" in report["reason"]
     assert not (ep / "provenance.json").exists()
 
 
 def test_947_an_absent_or_unreadable_sibling_stamp_marks_the_episode_incomplete(tmp_path):
     """A sibling stamp that is absent, or present but unreadable, is not an agreeing stamp: the
-    episode is marked incomplete with the reason exactly as a disagreeing one is, and no family
-    stamp is written."""
+    family's comparability is withheld with the reason exactly as for a disagreeing one, and no
+    family stamp is written."""
     base, src = T.runs_base(tmp_path)
     for mutate in ("absent", "truncated"):
         ep = T.episode(tmp_path)
@@ -618,7 +507,7 @@ def test_947_an_absent_or_unreadable_sibling_stamp_marks_the_episode_incomplete(
         if mutate == "truncated":
             (dirs[1] / "provenance.json").write_text('{"commit": "cafe', encoding="utf-8")
         report = _verify_family(ep, dirs, source=T.provenance_record())
-        assert report["outcome"] == "incomplete"
+        assert report["comparable"] is False
         assert not (ep / "provenance.json").exists()
 
 
@@ -642,7 +531,7 @@ def test_947_a_cross_model_family_refuses_rather_than_agreeing(tmp_path):
     ep = T.episode(tmp_path)
     dirs = [T.sibling_run_dir(base, w, model=("m-1" if w == "a" else "m-2")) for w in T.WORLDS]
     report = _verify_family(ep, dirs, source=T.provenance_record())
-    assert report["outcome"] == "incomplete"
+    assert report["comparable"] is False
     assert "model" in report["reason"]
     assert not (ep / "provenance.json").exists()
 
@@ -670,12 +559,12 @@ def test_947_a_dirty_sibling_tree_is_refused_without_the_override(tmp_path):
         dirs = [T.sibling_run_dir(base / name, w, **(stamp if w == "b" else {}))
                 for w in T.WORLDS]
         report = _verify_family(ep, dirs, source=T.provenance_record())
-        assert report["outcome"] == "incomplete", name
+        assert report["comparable"] is False, name
         assert "b" in report["reason"], (name, report["reason"])
         assert not (ep / "provenance.json").exists(), name
         ok = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{name}-ok")
         waived = _verify_family(ok, dirs, source=T.provenance_record(), allow_dirty=True)
-        assert waived["outcome"] == "accepted", name
+        assert waived["comparable"] is True, name
         assert (ok / "provenance.json").is_file(), name
     silent = {"commit": None, "dirty": None, "unavailable": T.GIT_UNAVAILABLE}
     dirs = [T.sibling_run_dir(base / "silent", w, **(silent if w == "b" else {}))
@@ -684,7 +573,7 @@ def test_947_a_dirty_sibling_tree_is_refused_without_the_override(tmp_path):
         ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-silent-{allow_dirty}")
         report = _verify_family(ep, dirs, source=T.provenance_record(),
                                 allow_dirty=allow_dirty)
-        assert report["outcome"] == "incomplete", f"allow_dirty={allow_dirty}"
+        assert report["comparable"] is False, f"allow_dirty={allow_dirty}"
         assert "b" in report["reason"], (allow_dirty, report["reason"])
         assert not (ep / "provenance.json").exists(), (
             f"allow_dirty={allow_dirty}: a family with a silent arm was stamped as comparable")
@@ -716,18 +605,20 @@ def test_947_launcher_no_longer_hoists_one_capture_above_the_family(tmp_path):
     half carries the siblings' clean answer and their model — not the launcher-moment's dirt,
     not its `model=None`. Observed failing by: `agreed.dirty` True, `agreed.dirty_paths`
     naming the launcher's path, or `agreed.model` None."""
+    import yaml
+
     from defender.tests import _judge_921 as J
 
     ep = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
     launcher_moment = T.source_capture(dirty=True, model=None)
-    # The judge seam is scripted because an ACCEPTED family is graded at the tail of the
-    # launch, and its production value is a real model call.
-    rc, spawn, ep = _launch(tmp_path, spawn=J.FakeSibling(ep), live_tree=launcher_moment,
-                            judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-                            argv_extra=("--allow-dirty",))
+    # The judge seam is `_launch`'s scripted default: an ACCEPTED family is graded at the tail
+    # of the launch, and its production value is a real model call.
+    rc, spawn, ep, _message = _launch(tmp_path, spawn=J.FakeSibling(ep),
+                                      live_tree=launcher_moment, argv_extra=("--allow-dirty",))
     assert rc == 0
     assert launcher_moment.calls == 1, "the live tree was captured other than once per launch"
-    assert T.review_doc(ep)["episode"]["outcome"] == "accepted"
+    assert yaml.safe_load((ep / "outcome.yaml").read_text(encoding="utf-8"))["outcome"] == \
+        "accepted"
     stamp = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
     assert stamp["agreed"]["dirty"] is False
     assert stamp["agreed"]["dirty_paths"] == []
@@ -738,49 +629,24 @@ def test_947_launcher_no_longer_hoists_one_capture_above_the_family(tmp_path):
 
 
 # ---------------------------------------------------------------------------------------
-# §7 FORK-1 — `incomplete` is a modelled outcome
+# §7 FORK-1 — a family that fails verification withholds comparability
 # ---------------------------------------------------------------------------------------
 
 
-def test_947_the_episode_outcome_is_a_recorded_field_with_a_reason(tmp_path):
-    """The episode's outcome is a recorded field carrying accepted, rejected or incomplete plus
-    a reason — never the ABSENCE of a file, which is what left every question about a partially
-    good family falling through."""
-    base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path)
-    dirs = [T.sibling_run_dir(base, w, scrub_ran=(w != "c")) for w in T.WORLDS]
-    _verify_family(ep, dirs, source=T.provenance_record())
-    record = T.review_doc(ep)["episode"]
-    assert record["outcome"] == "incomplete"
-    assert record["reason"]
-
-
-def test_947_an_incomplete_family_is_a_fourth_teardown_trigger(tmp_path):
-    """`incomplete` is a fourth teardown trigger: a family that cannot be stamped still has its
-    staged names removed, because the cluster does not care why the episode ended."""
-    base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path)
-    door = T.FakeDoor(existing=(f"wv-{T.world_token('b')}-logs-",))
-    (ep / "staged.yaml").write_text(
-        json.dumps([{"world": T.world_token("b"), "name": f"wv-{T.world_token('b')}-logs-",
-                     "kind": "alias", "derived_from": T.EVENTS_PATTERN,
-                     "created_at": T.AS_OF}]), encoding="utf-8")
-    dirs = [T.sibling_run_dir(base, w, scrub_ran=(w != "c")) for w in T.WORLDS]
-    _verify_family(ep, dirs, source=T.provenance_record(), door=door)
-    assert door.deleted() == [f"wv-{T.world_token('b')}-logs-"]
-
-
 def test_947_an_incomplete_family_archives_per_world_and_withholds_comparability(tmp_path):
-    """An incomplete family archives each individually clean sibling and withholds only the
-    family stamp and the comparability claim: the clean worlds are on disk, the stamp is not,
-    and the episode's recorded outcome says why."""
+    """A family that fails verification archives each individually clean sibling and withholds
+    only the family stamp and the comparability claim: the clean worlds are on disk, the stamp
+    is not, and the verification report says why. (#1224 retired `incomplete` as an outcome
+    word: the outcome record is pre-flight's, and verification never touches it.)"""
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
     dirs = [T.sibling_run_dir(base, w, scrub_ran=(w != "c")) for w in T.WORLDS]
-    _verify_family(ep, dirs, source=T.provenance_record())
+    report = _verify_family(ep, dirs, source=T.provenance_record())
     assert sorted(p.name for p in (ep / "worlds").iterdir()) == ["a", "b"]
     assert not (ep / "provenance.json").exists()
-    assert T.review_doc(ep)["episode"]["outcome"] == "incomplete"
+    assert report["comparable"] is False
+    assert "c" in report["reason"]
+    assert not (ep / "outcome.yaml").exists(), "verification wrote pre-flight's outcome record"
 
 
 # ---------------------------------------------------------------------------------------
@@ -790,8 +656,9 @@ def test_947_an_incomplete_family_archives_per_world_and_withholds_comparability
 
 def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
     """The episode directory's creation is an exclusive create, not a check-then-act: two
-    launchers racing on one source and branch point produce ONE primed episode and one refusal,
-    never two captures stacked into a single base recording that both callers read as clean."""
+    launchers racing on one source and branch point each claim their OWN episode directory
+    (N17: a launch never reuses one — the loser moves on to `<id>-r2`), never two captures
+    stacked into a single base recording that both callers read as clean."""
     import threading
 
     base, src = T.runs_base(tmp_path)
@@ -812,25 +679,12 @@ def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
         t.start()
     for t in threads:
         t.join()
-    assert sum(isinstance(r, Exception) for r in results) == 1, results
-    rows = (cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()) / "served" / "base.jsonl")
-    assert not rows.exists() or len(rows.read_text(encoding="utf-8").splitlines()) == \
-        len({line for line in rows.read_text(encoding="utf-8").splitlines()})
-
-
-def test_947_a_relaunch_adopts_an_episode_dir_holding_no_manifest(tmp_path):
-    """A relaunch ADOPTS an episode directory that holds no manifest: a mid-prime death would
-    otherwise make that source and branch point permanently unbranchable with no documented
-    remedy, while a directory that DOES hold a manifest is still refused."""
-    base, src = T.runs_base(tmp_path)
-    cli = _cli()
-    ep = cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
-    (ep / "served").mkdir(parents=True, exist_ok=True)
-    with cli.prepare_episode(T.EPISODE_ID, src, tenant=_tenant_paths()) as episode:
-        assert episode is not None
-    T.write_family(ep)
-    with pytest.raises(T.refusals()):
-        cli.prepare_episode(T.EPISODE_ID, src, tenant=_tenant_paths())
+    assert not any(isinstance(r, Exception) for r in results), results
+    first = cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
+    assert sorted(r.dir for r in results) == [first, first.parent / f"{T.EPISODE_ID}-r2"]
+    for episode in results:
+        lines = (episode.dir / "served" / "base.jsonl").read_text(encoding="utf-8").splitlines()
+        assert len(lines) == len(set(lines)) == 1, (episode.dir, lines)
 
 
 # ---------------------------------------------------------------------------------------

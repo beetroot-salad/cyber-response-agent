@@ -1,5 +1,4 @@
-"""#1025 O8 (prep 2 / 2b) — one episode reader, one home for each file name, and the stored
-`has_refused` flag.
+"""#1025 O8 (prep 2) — one episode reader and one home for each file name.
 
 O8 (maintainer): the page, the grading pass and the judge input builder read the episode
 archive through ONE reader — one spelling of each file name, one home for each derived
@@ -18,9 +17,9 @@ input builder already computes. Three decisions are pinned here:
    cousins, and by CONTAINMENT, because the spellings that actually drift are embedded ones
    (`f"{ep}/review.yaml#..."`, "for example `review.yaml#worlds.b...`").
 2. **The derived accessors live in `learning/judge/family.py` under PUBLIC names** —
-   `world_review_block`, `staged_patterns`, `world_pattern`, `own_h_rows`, `raw_manifest`, and,
-   moved off `render.py`, `leads_by_id`, `lead_chain` and `json_mapping`. Those seven
-   private spellings are gone, the input builder IMPORTS the lead-chain trio
+   `raw_manifest` and, moved off `render.py`, `leads_by_id`, `lead_chain` and `json_mapping`
+   (the overlay, holding-system and review accessors retired with #1224). Those private
+   spellings are gone, the input builder IMPORTS the lead-chain trio
    (its attributes are `family`'s objects, and no constant in `render.py` names the queries
    table or the lead files), and the `leads` view a real `render()` produces equals what
    `family.lead_chain` answers over the same world. `leads_by_id` is the canonical
@@ -30,23 +29,11 @@ input builder already computes. Three decisions are pinned here:
    archived world, so the move is a move and not a rename plus a rewrite.
 3. **The tolerant `judge.yaml` reader is public: `judge.read_grade(episode_dir)`** — `None`
    for an ungraded episode, a refusal for a planted link or a non-mapping (real faults through
-   the real primitive), a pre-#1007 record read with today's defaults and nothing invented,
+   the real primitive), a pre-#1224 record read with today's defaults and nothing invented,
    and the SAME record `grade_episode` returns on an already-graded episode.
 
-Prep 2b / O3: the `lead-quality` vs `None` branch of the bucket ladder turns on `has_refused`,
-which the pass computed and never wrote. It is now on every world row `judge.yaml` writes
-that carries the other ladder flags (a tier-1/tier-2 ungradable early return carries none of
-them, as before) — true iff the world's served ledger holds a row on the holding system
-whose `source` is the ledger's own `refused` — and it survives the round trip through
-`read_grade`. The ladder pairing (a refused H row buckets `None`, the same world without one
-buckets `lead-quality`) is the positive/negative control, driven through the real pass; the
-flag is then pinned as a fact about the ROWS on every ladder branch where a bucket-derived
-reading would answer differently (doctored + refused, fault-only, `" Elastic "`), and J3's
-first-row-wins dedup — a refused row sharing the served row's pair-key never reaches the
-ladder — is made explicit so a change to it is visible here.
-
-RED AGAINST THE PRE-CHANGE TREE was the expected state (the constants, the public names and
-the field did not exist; the census found five modules spelling `review.yaml`), and the tests
+RED AGAINST THE PRE-CHANGE TREE was the expected state (the constants and the public names
+did not exist; the census found five modules spelling `review.yaml`), and the tests
 were then tightened against an adversarial implementation. Every import goes through `J.mod`
 / `J.sym` PER TEST so a missing target is one failure per test, never a collection error.
 """
@@ -116,11 +103,6 @@ def _grade(ep: Path, tmp_path: Path):
                                    state=_state1135.env_state())
 
 
-def _passthrough(label: str) -> dict:
-    """A queried-and-undoctored H row: the shape that lands in `lead-quality` on its own."""
-    return J.ledger_row(source="passthrough", world_label=label)
-
-
 def _write_issued(world_dir: Path, rows: list[dict]) -> Path:
     """The world's queries table, written the one way this file writes it: one JSON object per
     line at the writer's own path (`RunPaths.executed_queries`), so the four scenarios that
@@ -129,19 +111,6 @@ def _write_issued(world_dir: Path, rows: list[dict]) -> Path:
     table.write_text(
         "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
     return table
-
-
-def _refused_row(label: str, *, system: str = J.HOLDING_SYSTEM) -> dict:
-    """The ledger's own `refused` word, imported rather than re-spelled — the flag keys on it.
-
-    Its OWN params: the ledger reader is first-row-wins on a duplicate pair-key (J3), so a
-    refused row sharing the passthrough row's query would be read as that row's duplicate and
-    never reach the flag — a real refusal is of a different query than the one that was served.
-    """
-    refused = J.sym("learning.branch.ledger", "REFUSED")
-    return J.ledger_row(source=refused, world_label=label, system=system,
-                        params={"index": f"{J.EVENTS_PATTERN},audit-*"},
-                        payload="this ES|QL query's FROM clause addresses several corpora")
 
 
 # ---------------------------------------------------------------------------------------
@@ -175,7 +144,6 @@ _IMPORTERS: tuple[tuple[str, str], ...] = (
     ("learning.branch.cli", "REVIEW_NAME"),
     ("learning.branch.cli", "SAMPLES_NAME"),
     ("learning.branch.episode", "REVIEW_NAME"),
-    ("learning.branch.review", "REVIEW_NAME"),
     ("learning.judge.enqueue", "SAMPLES_NAME"),
     ("learning.judge.family", "REVIEW_NAME"),
     ("learning.judge.family", "SAMPLES_NAME"),
@@ -354,13 +322,11 @@ def test_no_reader_of_a_record_name_holds_one_at_all():
 # Decision 2 — the derived accessors: one home, public names, the same behaviour
 # ---------------------------------------------------------------------------------------
 
-#: The five `family.py` privates `render.py` imported across the module line, and the two
-#: `render.py` privates the page needs — each as `(private spelling, public spelling)`.
+#: The `family.py` private `render.py` imported across the module line, and the two
+#: `render.py` privates the page needs — each as `(private spelling, public spelling)`. The
+#: overlay and holding-system accessors (`staged_patterns`, `world_pattern`, `own_h_rows`) and
+#: the review join retired with #1224.
 _MOVED = (
-    ("_world_review_block", "world_review_block"),
-    ("_staged_patterns", "staged_patterns"),
-    ("_world_pattern", "world_pattern"),
-    ("_own_h_rows", "own_h_rows"),
     ("_raw_manifest", "raw_manifest"),
     ("_leads_by_id", "leads_by_id"),
     ("_lead_chain", "lead_chain"),
@@ -371,9 +337,8 @@ def test_family_is_the_one_home_for_the_derived_accessors_under_public_names():
     """The episode reader's derived accessors have ONE home, `judge/family.py`, and public
     names — nothing crosses a module line as a private any more.
 
-    Observably true: `family` exposes `world_review_block`, `staged_patterns`, `world_pattern`,
-    `own_h_rows`, `raw_manifest`, `leads_by_id`, `lead_chain` and `json_mapping` as
-    callables; neither `family` nor `render` carries the underscore spelling of any of them;
+    Observably true: `family` exposes `raw_manifest`, `leads_by_id`, `lead_chain` and
+    `json_mapping` as callables; neither `family` nor `render` carries the underscore spelling of any of them;
     the input builder IMPORTS the lead-chain pair — `render.lead_chain` and
     `render.json_mapping` are `family`'s own objects (since #860's finalize the leads
     themselves reach the render on `WorldFacts.leads`, the pass's one read, so `render`
@@ -381,7 +346,7 @@ def test_family_is_the_one_home_for_the_derived_accessors_under_public_names():
     `executed_queries.jsonl` or `gather_raw`, the two reads that belong to `lead_repository`,
     the canonical surface `leads_by_id` indexes (#1017).
 
-    This is a name census over the seven accessors the design named (`render.py`'s other
+    This is a name census over the accessors the design named that survive #1224 (`render.py`'s other
     readers — `episode_alert`, `_read_provenance` — and `enqueue.draws_on_disk` stay where they
     are for now), which is what O8's observable is. What failure looks like: the page
     imports `render._lead_chain` (a private, across a module line — the state before this
@@ -683,74 +648,6 @@ def test_lead_chain_refuses_a_planted_link_at_the_gather_raw_directory(tmp_path)
         "a link planted at gather_raw/ was followed to another tree's lead file")
 
 
-def test_world_review_block_joins_by_label_and_answers_none_for_an_absent_or_odd_entry():
-    """`world_review_block(review, label)` is this world's `reachability` sub-block off the
-    review record, joined BY NAME — or `None` when there is no mapping there to read.
-
-    Observably true: a labelled entry with a mapping block is returned; an entry that is a
-    string, an entry whose block is a list, a label the review never names, and a `worlds`
-    that is not a mapping all read `None`.
-    """
-    family = _family()
-    review = {"worlds": {
-        "b": {"reachability": {"reachable_by_capture": True}},
-        "c": "not an entry",
-        "d": {"reachability": [1]},
-    }}
-
-    assert family.world_review_block(review, "b") == {"reachable_by_capture": True}
-    for label in ("c", "d", "zz"):
-        assert family.world_review_block(review, label) is None, (
-            f"label {label!r} read a block where the review holds none")
-    assert family.world_review_block({"worlds": []}, "b") is None
-
-
-def test_staged_patterns_and_world_pattern_read_the_overlay_the_same_way():
-    """`staged_patterns(overlay)` is EVERY staged pattern in a stable (sorted) order — O5's
-    per-pattern domain; `world_pattern(overlay, *, holding_system=)` is the single
-    representative anchor: the first of those, or the holding system's own name for a
-    patch-only world; and `sample_patterns(overlay, *, holding_system=)` is the list the row's
-    `sample_unavailable_patterns` and the prompt's sample section BOTH quantify over — every
-    staged pattern, or the fallback — spelled ONCE (at each site as `staged_patterns(o) or
-    [...]`, the patch-only fallback could change in one and not the other with no test between).
-
-    Observably true: a two-pattern overlay enumerates both, sorted, and anchors on the first;
-    a patch-only overlay enumerates nothing and anchors on `holding_system`; an overlay that is
-    not a mapping enumerates nothing; `sample_patterns` is the enumeration or `[holding_system]`,
-    and `world_pattern` is its first element for both shapes.
-    """
-    family = _family()
-    two = J.overlay(elastic={
-        **J.elastic_overlay("logs-b", inject=[{"_id": 1}]),
-        **J.elastic_overlay("alerts-a", exclude={"term": {"x": 1}}),
-    })
-    patch_only = J.overlay(patches={"p": "patched"})
-
-    assert family.staged_patterns(two) == ["alerts-a", "logs-b"]
-    assert family.world_pattern(two, holding_system="elastic") == "alerts-a"
-    assert family.staged_patterns(patch_only) == []
-    assert family.world_pattern(patch_only, holding_system="elastic") == "elastic"
-    assert family.staged_patterns(None) == []
-    assert family.staged_patterns({"elastic": {}}) == []
-    assert family.sample_patterns(two, holding_system="elastic") == ["alerts-a", "logs-b"]
-    assert family.sample_patterns(patch_only, holding_system="elastic") == ["elastic"]
-    for overlay in (two, patch_only):
-        assert family.world_pattern(overlay, holding_system="elastic") == (
-            family.sample_patterns(overlay, holding_system="elastic")[0])
-
-
-def test_own_h_rows_selects_the_holding_systems_rows_after_strip_and_casefold():
-    """`own_h_rows(rows, holding_system)` is the world's rows ON H — `system` compared after
-    strip+casefold, the same normalisation J1 validated H under; a row with no usable `system`
-    is not H's.
-    """
-    family = _family()
-    rows = [{"system": "elastic", "n": 1}, {"system": " Elastic ", "n": 2},
-            {"system": "cmdb", "n": 3}, {"system": None, "n": 4}, {"n": 5}]
-
-    assert [r["n"] for r in family.own_h_rows(rows, "elastic")] == [1, 2]
-
-
 def test_raw_manifest_reads_the_screened_manifest_and_refuses_a_link_or_a_non_mapping(tmp_path):
     """`raw_manifest(episode_dir)` is the judge's own screened read of `family.yaml`: the
     document as a mapping, or this design's refusal.
@@ -792,7 +689,7 @@ def test_read_grade_is_none_before_a_grade_and_the_same_record_grade_episode_ret
     an already-graded episode, because that path reads through the same function.
 
     Observably true: before any pass `read_grade` is `None`; after one, `read_grade`'s
-    `worlds`, `verdict_word`, `family_outcome` and `withheld_findings` equal the live pass's,
+    `worlds`, `verdict_word`, `family_outcome` and `dispositions` equal the live pass's,
     and a second `grade_episode` (the existing-record path) equals `read_grade`.
 
     What failure looks like: the page parses YAML itself and disagrees with the pass on a
@@ -807,7 +704,7 @@ def test_read_grade_is_none_before_a_grade_and_the_same_record_grade_episode_ret
     again = _grade(ep, tmp_path)
 
     assert stored is not None
-    for field in ("worlds", "verdict_word", "family_outcome", "withheld_findings"):
+    for field in ("worlds", "verdict_word", "family_outcome", "dispositions"):
         assert getattr(stored, field) == getattr(live, field), (
             f"read_grade's {field!r} differs from the pass that wrote it")
         assert getattr(again, field) == getattr(stored, field), (
@@ -857,19 +754,17 @@ def test_read_grade_refuses_a_planted_link_a_non_mapping_and_a_torn_record(tmp_p
         read_grade(ep)
 
 
-def test_read_grade_reads_a_pre_1007_record_with_defaults_and_invents_nothing(tmp_path):
-    """A record in the pre-#1007 shape — no `family_outcome`, no `world_enqueued_rows`, no
-    `withheld_findings`, world rows without `has_refused` — reads without raising, with the
-    reader's defaults for the family-level absences and NOTHING invented on the rows.
+def test_read_grade_reads_a_pre_oracle_record_with_defaults_and_invents_nothing(tmp_path):
+    """A record in the pre-#1224 shape — no `validity`, no `family_outcome`, no
+    `world_enqueued_rows`, a retired `withheld_findings` list, world rows carrying the retired
+    ladder flags and no `systems` — reads without raising, with the reader's defaults for the
+    family-level absences, the retired key ignored, and NOTHING invented on the rows.
 
-    Observably true: `family_outcome is None`, `world_enqueued_rows == 0`,
-    `withheld_findings == []`, `graded_worlds == {"b", "c"}`, and BOTH world rows come back
-    as written — no `has_refused` key the archive never stored (O3: where the ladder's branch
-    depends on a fact the archive does not store, the page says so rather than inventing one).
-    Row `c` is the TEMPTING one: queried, undoctored, `bucket: None` — exactly the shape the
-    ladder's refused branch produces, and exactly the shape a fault-adjacent or pre-#1007 row
-    also has; a reader that back-fills `has_refused: True` there is inventing the fact, and
-    the page then reports a refusal the archive never recorded. Positive control: the same
+    Observably true: `validity is None`, `family_outcome is None`, `world_enqueued_rows == 0`,
+    `graded_worlds == {"b", "c"}`, and BOTH world rows come back as written — no `systems` the
+    archive never stored. Row `c` is the TEMPTING one: `bucket: None` and no `systems`, the
+    shape a reply that named no system would leave; a reader that back-fills `systems: []`
+    there is inventing an answer the judge model never gave. Positive control: the same
     record carrying the fields reads them back.
     """
     read_grade = J.sym("learning.judge", "read_grade")
@@ -884,31 +779,32 @@ def test_read_grade_reads_a_pre_1007_record_with_defaults_and_invents_nothing(tm
            "episode_outcome": "gradable",
            "enqueued_rows": 0, "enqueued_to": "", "draws": {"completed": 1}, "knobs": {},
            "lessons_commit": None, "discard_evidence": {}, "queue_malformed_rows": 0,
-           "unqueueable_findings": []}
+           "unqueueable_findings": [], "withheld_findings": [{"world": "b"}]}
     (ep / "judge.yaml").write_text(yaml.safe_dump(old, sort_keys=False), encoding="utf-8")
 
     grade = read_grade(ep)
 
+    assert grade.validity is None
     assert grade.family_outcome is None
     assert grade.world_enqueued_rows == 0
-    assert grade.withheld_findings == []
     assert grade.graded_worlds == frozenset({"b", "c"})
     assert J.rows(grade)["b"] == old_row, (
-        "the reader rewrote a pre-#1007 world row — it invented a fact the archive never stored")
+        "the reader rewrote a pre-#1224 world row — it invented a fact the archive never stored")
     assert J.rows(grade)["c"] == tempting_row, (
-        "the reader rewrote a queried, undoctored, bucket-None row — it back-filled a "
-        f"`has_refused` the archive never stored: {J.rows(grade)['c']}")
+        "the reader rewrote a bucket-None row — it back-filled a `systems` answer the archive "
+        f"never stored: {J.rows(grade)['c']}")
     for label in ("b", "c"):
-        assert "has_refused" not in J.rows(grade)[label]
+        assert "systems" not in J.rows(grade)[label]
 
-    new = dict(old, family_outcome="gradable", withheld_findings=[{"world": "b"}],
-               worlds=[dict(old_row, has_refused=True), dict(tempting_row, has_refused=False)])
+    new = dict(old, family_outcome="gradable", validity="usable",
+               worlds=[dict(old_row, systems=["elastic"]), dict(tempting_row, systems=[])])
     (ep / "judge.yaml").write_text(yaml.safe_dump(new, sort_keys=False), encoding="utf-8")
     grade = read_grade(ep)
-    assert (grade.family_outcome, grade.withheld_findings) == ("gradable", [{"world": "b"}])
-    assert J.rows(grade)["b"]["has_refused"] is True, "positive control: a stored flag read back"
-    assert J.rows(grade)["c"]["has_refused"] is False, (
-        "a stored `has_refused: False` on a bucket-None row was overridden by the reader")
+    assert (grade.family_outcome, grade.validity) == ("gradable", "usable")
+    assert J.rows(grade)["b"]["systems"] == ["elastic"], (
+        "positive control: a stored answer read back")
+    assert J.rows(grade)["c"]["systems"] == [], (
+        "a stored empty `systems` on a bucket-None row was overridden by the reader")
 
 
 def test_read_grade_reads_back_a_not_graded_stamp(tmp_path):
@@ -916,14 +812,15 @@ def test_read_grade_reads_back_a_not_graded_stamp(tmp_path):
     it back as one — `not_graded` set, `episode_outcome` the not-graded word — so a page can
     say "not graded, and here is why" rather than "graded, undecidable".
 
-    Observably true: after a pass over an `incomplete` review, `read_grade(ep).not_graded` is
-    the `NotGradedStamp` the pass wrote, carrying the review's outcome word, and
+    Observably true: after a pass over an episode whose `outcome.yaml` says `refused`,
+    `read_grade(ep).not_graded` is the `NotGradedStamp` the pass wrote, carrying that outcome
+    word, and
     `episode_outcome == judge.NOT_GRADED`; positive control — a graded episode reads
     `not_graded is None`.
     """
     judge = _judge()
     read_grade = J.sym("learning.judge", "read_grade")
-    skipped = J.accepted_episode(tmp_path, outcome="incomplete")
+    skipped = J.accepted_episode(tmp_path, outcome="refused")
     graded = J.accepted_episode(tmp_path / "graded")
 
     _grade(skipped, tmp_path)
@@ -931,7 +828,7 @@ def test_read_grade_reads_back_a_not_graded_stamp(tmp_path):
 
     stamp = read_grade(skipped)
     assert stamp.not_graded is not None, "the not-graded stamp did not read back"
-    assert stamp.not_graded.outcome == "incomplete", repr(stamp.not_graded)
+    assert stamp.not_graded.outcome == "refused", repr(stamp.not_graded)
     assert stamp.episode_outcome == judge.NOT_GRADED
     assert read_grade(graded).not_graded is None, "positive control: a graded episode"
 
@@ -944,7 +841,7 @@ def test_read_grade_reads_back_a_not_graded_stamp(tmp_path):
     pytest.param({"worlds": [{"bucket": None}]}, id="row-naming-no-world"),
     pytest.param({"not_graded": {}}, id="empty-stamp"),
     pytest.param({"not_graded": "yes"}, id="non-mapping-stamp"),
-    pytest.param({"not_graded": {"outcome": "incomplete", "reason": "x"},
+    pytest.param({"not_graded": {"outcome": "refused", "reason": "x"},
                   "episode_outcome": "not-graded", "world_findings": 5}, id="damaged-stamp"),
     # A YAML mapping may key on `1:` — splatted as keywords that is `TypeError: keywords must
     # be strings` out of the constructor, a class no handler on the path converts.
@@ -1067,181 +964,3 @@ def test_draws_on_disk_skips_a_link_planted_at_a_draws_name(tmp_path):
     with bind(episode_dir) as view:
         assert sorted(enqueue.draws_on_disk(view, label)) == [0, 1], (
             "positive control: the same bytes as a regular file were not read")
-
-
-# ---------------------------------------------------------------------------------------
-# Prep 2b / O3 — `has_refused`, stored beside the flags the ladder reads
-# ---------------------------------------------------------------------------------------
-
-
-def test_every_graded_world_row_stores_has_refused_beside_the_other_flags(tmp_path):
-    """`has_refused: bool` is on every world row the pass writes that carries the other ladder
-    flags — beside `holding_queried`, `doctored_answer_served` and `difference_shown`; a tier-1
-    or tier-2 ungradable early return carries none of the four — true iff the world's served
-    ledger holds
-    a row on the HOLDING SYSTEM whose `source` is the ledger's `refused`.
-
-    Observably true, three worlds through the real pass: `b` (a passthrough plus a refused row
-    on H) stores `True`; `c` (the passthrough alone) stores `False`; `d` (the passthrough plus
-    a refused row on ANOTHER system) stores `False` — the flag keys on H, as the ladder does.
-    Every row carrying `holding_queried` carries `has_refused` as a bool, in the returned
-    record and in the `judge.yaml` on disk.
-
-    What failure looks like: the bucket ladder branches on a fact the record never shows, so a
-    page reading the row cannot say why an undoctored, queried world has no bucket (O3).
-    """
-    ep = J.accepted_episode(
-        tmp_path, labels=("a", "b", "c", "d"),
-        dispositions={"a": "benign", "b": "malicious", "c": "malicious", "d": "malicious"},
-        ledgers={
-            "b": [_passthrough("b"), _refused_row("b")],
-            "c": [_passthrough("c")],
-            "d": [_passthrough("d"), _refused_row("d", system="cmdb")],
-        })
-
-    grade = _grade(ep, tmp_path)
-
-    for rows in (J.rows(grade), J.world_rows(J.judge_record(ep))):
-        for label, row in rows.items():
-            if "holding_queried" in row:
-                assert isinstance(row.get("has_refused"), bool), (
-                    f"world {label!r} carries holding_queried but no bool has_refused: "
-                    f"{sorted(row)}")
-        assert rows["b"]["has_refused"] is True, "a refused row on H did not set the flag"
-        assert rows["c"]["has_refused"] is False, "no refused row anywhere, yet the flag is set"
-        assert rows["d"]["has_refused"] is False, (
-            "a refused row on a system that is NOT H set the flag; the ladder keys on H's rows")
-
-
-def test_a_refused_h_row_is_the_stored_fact_that_turns_lead_quality_into_no_bucket(tmp_path):
-    """The ladder's own pairing, driven through the real pass: a queried, undoctored world
-    buckets `lead-quality`; the same world with one `refused` row on H buckets `None` (F-1) —
-    and the row now SAYS which case it is.
-
-    Observably true: `c` (`has_refused: False`) reads `bucket: "lead-quality"`; `b`
-    (`has_refused: True`) reads `bucket: None`; both have `holding_queried: True` and
-    `doctored_answer_served: False`, so `has_refused` is the one stored fact that separates
-    them.
-
-    What failure looks like: the bucket and the flag disagree — a row saying `has_refused:
-    True` under `lead-quality`, or `False` under no bucket — which is a flag computed from
-    something other than what the ladder read.
-    """
-    ep = J.accepted_episode(tmp_path, ledgers={
-        "b": [_passthrough("b"), _refused_row("b")],
-        "c": [_passthrough("c")],
-    })
-
-    rows = J.rows(_grade(ep, tmp_path))
-
-    for label in ("b", "c"):
-        assert rows[label]["holding_queried"] is True
-        assert rows[label]["doctored_answer_served"] is False
-        assert rows[label].get("ungradable") is not True
-    assert (rows["c"]["has_refused"], rows["c"]["bucket"]) == (False, "lead-quality")
-    assert (rows["b"]["has_refused"], rows["b"]["bucket"]) == (True, None), (
-        f"a refused H row: {rows['b'].get('has_refused')!r} / {rows['b']['bucket']!r}")
-
-
-def test_has_refused_is_read_off_the_refused_rows_on_every_ladder_branch(tmp_path):
-    """`has_refused` is a fact about the ROWS — "is there a `refused` row on H" — and not a
-    reading of the bucket the ladder landed in. Three worlds through the real pass, one per
-    branch where a bucket-derived flag would answer differently:
-
-    * `b` — a `staged` row AND a `refused` row on H: the ladder takes the DOCTORED branch (the
-      refused row plays no part in its bucket), and the row still stores `has_refused: True`.
-    * `c` — a `fault` row as its ONLY H interaction: J5's tier rule makes it ungradable with
-      `bucket: None`, `holding_queried: True`, `doctored_answer_served: False` — the exact shape
-      a refused world has — and it stores `has_refused: False`, because nothing was refused.
-    * `d` — a `refused` row whose `system` is spelled `" Elastic "`: `own_h_rows`' own
-      strip+casefold rule makes it an H row, so it stores `has_refused: True` and buckets
-      `None`.
-
-    What failure looks like: `has_refused = holding_queried and not doctored and bucket is
-    None` — a flag re-derived from the bucket, which reads `False` on `b` and `True` on `c`,
-    and reports the ladder's OUTPUT as the fact it was supposed to have branched on (O3).
-    """
-    fault = J.sym("learning.branch.ledger", "FAULT")
-    ep = J.accepted_episode(
-        tmp_path, labels=("a", "b", "c", "d"),
-        dispositions={"a": "benign", "b": "malicious", "c": "malicious", "d": "malicious"},
-        ledgers={
-            "b": [J.staged_row("b"), _refused_row("b")],
-            "c": [J.ledger_row(source=fault, world_label="c",
-                               payload="missing required config keys: ELASTIC_EVENTS_INDEX")],
-            "d": [_passthrough("d"), _refused_row("d", system=" Elastic ")],
-        })
-
-    rows = J.rows(_grade(ep, tmp_path))
-
-    assert rows["b"]["doctored_answer_served"] is True, "the doctored branch was not taken"
-    assert rows["b"]["has_refused"] is True, (
-        "a refused H row beside a staged one was not recorded — the flag follows the bucket, "
-        "not the rows")
-    assert rows["c"]["ungradable"] is True, "positive control: the faulted world is ungradable"
-    assert (rows["c"]["holding_queried"], rows["c"]["doctored_answer_served"],
-            rows["c"]["bucket"]) == (True, False, None)
-    assert rows["c"]["has_refused"] is False, (
-        "a world whose only H row FAULTED stores has_refused: True — the flag was read off the "
-        "bucket-None shape, and a fault is not a refusal")
-    assert (rows["d"]["has_refused"], rows["d"]["bucket"]) == (True, None), (
-        "a refused row on `\" Elastic \"` did not count as H's — the flag compares `system` "
-        "differently from own_h_rows' strip+casefold rule")
-
-
-def test_a_refused_row_sharing_a_served_rows_key_is_the_duplicate_j3_drops(tmp_path):
-    """J3's first-row-wins reading, made explicit so a later change to the dedup rule is
-    visible here rather than silently moving this flag: a `refused` row that carries the SAME
-    pair-key as the `passthrough` row before it is read as that row's duplicate and never
-    reaches the ladder — `has_refused: False`, bucket `lead-quality`.
-
-    This is TODAY's reading, pinned, not a claim that it is the right one: a refusal of the
-    very query that was also served is a shape the seam does not produce (a call is refused
-    or answered, not both), and the fixture in `_refused_row` gives the refused row its own
-    params for that reason. Positive control: the same two rows with distinct params read
-    `has_refused: True`, bucket `None`.
-    """
-    refused = J.sym("learning.branch.ledger", "REFUSED")
-    same_key = J.ledger_row(source=refused, world_label="b",
-                            payload="this ES|QL query's FROM clause addresses several corpora")
-    key_of = _family().mapping_key
-    assert key_of(same_key) == key_of(_passthrough("b")), "the fixture's keys do not collide"
-    assert key_of(_refused_row("c")) != key_of(_passthrough("c")), "the control's keys collide"
-    ep = J.accepted_episode(tmp_path, ledgers={
-        "b": [_passthrough("b"), same_key],
-        "c": [_passthrough("c"), _refused_row("c")],
-    })
-
-    rows = J.rows(_grade(ep, tmp_path))
-
-    assert (rows["c"]["has_refused"], rows["c"]["bucket"]) == (True, None), (
-        "positive control: a refused row with its own key did not reach the ladder")
-    assert (rows["b"]["has_refused"], rows["b"]["bucket"]) == (False, "lead-quality"), (
-        "a refused row sharing the served row's pair-key reached the ladder — J3's first-row-"
-        f"wins dedup changed: {rows['b'].get('has_refused')!r} / {rows['b']['bucket']!r}")
-
-
-def test_has_refused_survives_the_round_trip_through_read_grade(tmp_path):
-    """The flag is WRITTEN, not re-derived: the `judge.yaml` on disk carries it, and
-    `read_grade` hands back the same value on every row the pass returned.
-
-    Observably true: after one pass, the raw document's world rows carry `has_refused` with
-    the pass's values, and `read_grade(ep)`'s rows equal the live pass's rows key for key.
-
-    What failure looks like: the field is on the returned record and not in the file, so a
-    re-read episode (the existing-record path, the page) grades as if the fact was never known.
-    """
-    read_grade = J.sym("learning.judge", "read_grade")
-    ep = J.accepted_episode(tmp_path, ledgers={
-        "b": [_passthrough("b"), _refused_row("b")],
-        "c": [_passthrough("c")],
-    })
-
-    live = J.rows(_grade(ep, tmp_path))
-    on_disk = J.world_rows(J.judge_record(ep))
-    stored = J.rows(read_grade(ep))
-
-    assert {label: row.get("has_refused") for label, row in on_disk.items()} == {
-        "b": True, "c": False}, "judge.yaml does not carry the flag the pass computed"
-    assert stored == live, (
-        "a per-world field written to judge.yaml did not survive the re-read through read_grade")

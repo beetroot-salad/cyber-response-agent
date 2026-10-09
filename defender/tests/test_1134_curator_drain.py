@@ -127,6 +127,7 @@ def _plain_os_error(exc: BaseException | None, code: int) -> bool:
 # ---------------------------------------------------------------------------------------
 
 
+
 @pytest.mark.parametrize("channel", ["lessons", "questioner"])
 def test_a_link_lesson_citing_the_batch_is_unattributable_and_left_for_the_scrub(
     tmp_path, caplog, channel,
@@ -150,7 +151,7 @@ def test_a_link_lesson_citing_the_batch_is_unattributable_and_left_for_the_scrub
 
     curator = S.FakeCurator(also=plant)
     sc = (_scene(tmp_path, curator=curator) if channel == "lessons"
-          else S.build_questioner_scene(tmp_path, curator=curator))
+          else S.build_questioner_scene(tmp_path, curator=curator, rows=[S.world_row(fid)]))
     before = census(target.parent)
 
     with kernel_watch(opens=[target]) as events:

@@ -155,7 +155,7 @@ demands:
     form: test
     source: "20-demands.md"
     binds: ["grade_family", "verdict_word"]
-    discharged_by: test_a_cut_short_world_does_not_move_the_family_verdict_word
+    discharged_by: test_a_cut_short_world_does_not_reach_the_family_call_as_a_verdict
     seed_docstring: >-
       verdict_word is computed over the remaining measuring worlds: the control episode's word
       is unchanged by world b's run being cut short, where today a host-forced unresolved report

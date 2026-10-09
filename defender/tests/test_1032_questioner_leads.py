@@ -60,7 +60,9 @@ from defender._query_rules import (
     REPEAT_TRIP_QUERY_ID,
     RESERVED_QUERY_ID_PREFIX,
 )
+from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
+from defender.tests.live_oracle_1224 import _spec1224 as S
 from defender.tests.test_1017_row_schema import (
     KEY_MARKER,
     LEAD,
@@ -480,8 +482,8 @@ def launcher_roots(tmp_path, monkeypatch):
 
 def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, launcher_roots):
     """M2, and O1/O3 at the shipped surface — the real launcher (`cli.main`, every seam from
-    the #947 harness, a recording `FakeAgent` as the questioner) over a source run whose table
-    holds the harness's primed capture, a real row with markers in `params`, `raw_command` and
+    the #1224 harness `_spec1224`, a recording `FakeAgent` as the questioner) over a source run
+    whose table holds the harness's primed capture, a real row with markers in `params`, `raw_command` and
     `payload_path`, and an above-guard sentinel with its own `params` marker. Call 1's prompt is
     what the questioner was HANDED; its leads section — the one frame whose body OPENS on the
     section title, cut at that frame's close — carries the real row's params marker, the goal
@@ -497,19 +499,27 @@ def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, lau
     Observed failing by: the sentinel's marker, a `raw_command` / path marker, the host path,
     or `raw_ref` / `sentinels` / `orphan` in the section the questioner was handed — today's
     dump carries every one of them; or the real row's marker missing from it."""
-    _base, src = T.runs_base(tmp_path)
+    # #1224: the launcher's pre-flight replays the source run's captured calls through each
+    # world's live oracle, over `_spec1224`'s fixture tenant and estate: one captured call,
+    # which the scripted oracle serves unchanged so every fact world calibrates.
+    answer = {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon"}]}
+    est = S.estate(tmp_path)
+    _base, src = S.source_run(
+        tmp_path, est, calls=[S.Call("idp", "query", S.query_params("user:alice"), answer)])
     _lead_file(src, "GOAL_MARKER")
     _table(src, [
         _searchable_row(1, params={"index": T.EVENTS_PATTERN,
                                    "native_query": "REAL_PARAMS_MARKER"}),
         _above_guard_row(2, "SENTINEL_PARAMS_MARKER"),
     ])
-    questioner = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
+    questioner = S.questioner_for()
     rc = T.mod("learning.branch.cli").main(
         [str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
-        spawn=T.FakeSpawn(), door=T.FakeDoor(), questioner=questioner,
-        adapters=T.FakeAdapters(), invoke=T.FakeAgent(*["same"] * 24),
-        preflight=T.no_preflight, live_tree=T.source_capture(),
+        spawn=T.FakeSpawn(), questioner=questioner,
+        oracle=S.oracle(then=S.submit(answer, S.EMPTY_CLAIM)).model,
+        verifier=S.passing_verifier().model, roster=est.roster(),
+        judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc(bucket="none", systems=[]))),
+        preflight=S.no_preflight, live_tree=T.source_capture(),
     )
     assert rc == 0, "the episode did not complete cleanly"
     assert questioner.prompts, "the questioner was never called"
@@ -523,7 +533,8 @@ def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, lau
     start = prompt.index(opened) + len(opened)
     section = f"## {SECTION_TITLE}\n" + prompt[start:prompt.index("</run-", start)]
 
-    for kept in ("REAL_PARAMS_MARKER", "GOAL_MARKER", "elastic.ad-hoc", "elastic.query",
+    # `idp.query` is the primed capture's own query id (the source run's one captured call).
+    for kept in ("REAL_PARAMS_MARKER", "GOAL_MARKER", "elastic.ad-hoc", "idp.query",
                  T.EVENTS_PATTERN):
         assert kept in section, f"the questioner was not shown {kept!r} — the negatives are vacuous"
     for dropped in (

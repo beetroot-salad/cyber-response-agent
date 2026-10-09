@@ -14,6 +14,8 @@ answers T, and that the launcher still refuses, writing nothing.
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 import json
 import shutil
 from pathlib import Path
@@ -29,6 +31,8 @@ from defender.tests.tenant_1078_pass_a import _spec1078 as H
 from defender.tests import _state1135
 
 TID = H.VALID_ID
+#: The family's branch-point clock pre-flight's context carries.
+_AS_OF = datetime.fromisoformat(T.AS_OF)
 
 
 # ======================================================================================
@@ -45,10 +49,9 @@ def _episodes_root(tmp_path: Path, monkeypatch) -> Path:
 def _seams(**over):
     """Every launcher seam a scenario is not about, faked: nothing here decides a refusal."""
     seams = {
-        "spawn": T.FakeSpawn(), "door": T.FakeDoor(),
+        "spawn": T.FakeSpawn(),
         "questioner": T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c")),
-        "adapters": T.FakeAdapters(), "invoke": T.FakeAgent(*["same"] * 24),
-        "live_tree": T.source_capture(),
+        "live_tree": T.source_capture(), **H.serving_oracle(),
     }
     seams.update(over)
     return seams
@@ -267,11 +270,9 @@ def _graded_launch(tmp_path: Path, monkeypatch, root: Path, *, collide: bool):
     episode_dir = episodes.resolve() / T.EPISODE_ID
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
     result = H.drive_launch(src, spawn=J.FakeSibling(episode_dir), judge=judge,
-                            door=T.FakeDoor(),
                             questioner=T.FakeAgent(T.family_doc(), T.world_doc("b"),
                                                    T.world_doc("c")),
-                            adapters=T.FakeAdapters(), invoke=T.FakeAgent(*["same"] * 24),
-                            live_tree=T.source_capture())
+                            live_tree=T.source_capture(), **H.serving_oracle())
     return result, episode_dir
 
 
@@ -600,8 +601,8 @@ def test_d2_launcher_no_runs_base_export(tmp_path, monkeypatch):
 
 def test_947_pins_under_a_clean_environment(tmp_path, monkeypatch, d9_tenant):
     """The two #947 pins are rewritten: test_947_triplet_archive.py asserts the launcher sets no
-    DEFENDER_RUNS_BASE of its own; test_947_triplet_review.py's ctx.env value is runs_base_for(T)
-    from the tenant fixture.
+    DEFENDER_RUNS_BASE of its own; the replay context's env value (#947's review replay, now
+    pre-flight's `_preflight_context`, #1224) is runs_base_for(T) from the tenant fixture.
 
     Pinned here under the CLEAN environment the old pins could not survive (brief R2): no
     DEFENDER_RUNS_BASE in the parent at all. The sibling's env then carries none (a `KeyError`
@@ -616,8 +617,8 @@ def test_947_pins_under_a_clean_environment(tmp_path, monkeypatch, d9_tenant):
     assert all(T.RUNS_BASE_ENV not in la["env"] for la in spawn.launches)
 
     runs_base = H.runs_base_for(d9_tenant)
-    ctx = H.mod("learning.branch.review").verb_context(
-        ep, H.T1106.run_tenant(H.accept(current_data_root(), d9_tenant)), runs_base=runs_base)
+    ctx = H.branch_cli()._preflight_context(
+        ep, H.T1106.run_tenant(H.accept(current_data_root(), d9_tenant)), _AS_OF)
     assert ctx.env[T.RUNS_BASE_ENV] == str(runs_base)
     assert runs_base == current_data_root().resolve() / d9_tenant / "runs"
     assert ctx.env[T.RUNS_BASE_ENV] != str(ep.parent)
@@ -765,21 +766,17 @@ def test_episodes_base_reached_through_a_symlink_into_the_data_root(
 
 
 def test_g_r7_episode_dir_reader_coherence(tmp_path, monkeypatch, data_root):
-    """episodes_root, refuse_claimed_episode and visualize_episode — the three existing readers of
-    episode_dir left unmoved while materialize_run's sibling arm
-    (EpisodePaths(world.episode_dir).runs, C8) newly reads it this pass — resolve the same path
-    materialize_run now threads; driving a sibling run and then each of the three readers
-    over the same episode_dir observes agreement, not a stale copy."""
+    """episodes_root and visualize_episode — the existing readers of episode_dir left unmoved
+    while materialize_run's sibling arm (EpisodePaths(world.episode_dir).runs, C8) newly reads
+    it this pass — resolve the same path materialize_run now threads; driving a sibling run and
+    then each reader over the same episode_dir observes agreement, not a stale copy. (The third
+    reader, the claimed-episode refusal, went with episode adoption in #1224.)"""
     episodes = _episodes_root(tmp_path, monkeypatch)
     monkeypatch.delenv(T.RUNS_BASE_ENV, raising=False)
     ep, run_dir, world = _materialize_sibling(data_root, episodes, "b")
     assert run_dir.parent == H.mod("_episode_paths").EpisodePaths(world.episode_dir).runs
     assert run_dir.parent == ep / "runs"
-    cli = H.branch_cli()
     assert _episodes_root_for(_accepted(data_root)) / T.EPISODE_ID == ep.resolve()
-    with pytest.raises(H.mod("learning.branch.ledger").LedgerError) as claimed:
-        cli.refuse_claimed_episode(ep, T.EPISODE_ID)
-    assert str(ep / "family.yaml") in str(claimed.value)
     page = H.mod("scripts.visualize.visualize_episode").load_episode(ep)
     assert page.entries["b"].run_dir_name == run_dir.name, (
         "the episode page does not see the run dir the sibling's materialize made")

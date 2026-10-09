@@ -7,16 +7,11 @@ amendment "rev 3" on #1133; every name the suite calls is gathered in `_spec1133
   surface is `write` / `mkdir` / `unlink` / `view` / `close`, and a record is read with
   `episode.view().read(LAYOUT.<record>)` — present, absent or refused. The view reads through a
   private dup taken under the lock `close` takes, so a close landing mid-read never redirects
-  it (the E-race shape: the freed number is taken by a decoy with `dup2`). `merge_review` over a
-  REFUSED review record is `StagingRefused` and writes nothing (absent and unparseable still
-  merge from `{}`); in `teardown` the refusal rides on the raised `StagingRefused` with the
-  unverified names, and the aborting launcher's log line stops claiming the names are in the
-  record; in `verify_family`'s archive-refused path the archive's exception stays the one raised,
-  the merge's refusal attached as a note; after a completed family a refused merge raises.
+  it (the E-race shape: the freed number is taken by a decoy with `dup2`).
   `delta_o` reads everything through one `bind`: an absent or refused base is `LedgerError`
   ("no primed base"), a refused world file `EpisodeError`, an absent one `{}`, a refused
-  `review.yaml` at the incomplete gate `EpisodeError`; with no archived worlds it answers `{}`
-  before the base is read. `load_family(view)` names `family.yaml`, never an absolute path.
+  `outcome.yaml` at the outcome gate `EpisodeError` (#1224 moved the gate off `review.yaml`);
+  with no archived worlds it answers `{}` before the base is read. `load_family(view)` names `family.yaml`, never an absolute path.
 - **R2, the leaf refusal is its own class.** `_io.NotPlainEntry(OSError)` keeps its errno and
   alias mark, and a linked folder on the way is NOT it. Placed at the doors, with the link
   planted after the relevant `ensure`: at the judge's stale-draw removal (S1) a `judge/` folder
@@ -27,13 +22,12 @@ amendment "rev 3" on #1133; every name the suite calls is gathered in `_spec1133
   lists `served/` first: anything named `base.jsonl` is "already holds a primed base" before the
   capture is read (a FIFO at the capture's payload sidecar makes the read observable) and without
   opening the base. Zero rows are refused by default and primed empty with `allow_empty=True`, in
-  one create. A retry through `prepare_episode` over an existing base is that `LedgerError`,
-  never a raw `FileExistsError`.
+  one create.
 - **R4, one leaf writer; a durable write never makes a folder.** An encode failure in a durable
   append leaves no descriptor open; a durable append into a missing holding folder is
   `FileNotFoundError` and makes nothing.
 - **Patches.** The minting check judges the WHOLE token (`Control` is refused by
-  `check_minted_token`, `Ledger.for_world`, `scratch_ledger`); `--resume` with no held episode is
+  `check_minted_token`, `Ledger.for_world`); `--resume` with no held episode is
   `SystemExit` (driven through `run._resume_target`: `run.main` always holds one).
 
 Every plant is a real filesystem entry, every fault a real primitive or the entry point's own
@@ -42,15 +36,17 @@ address. Nothing is monkeypatched (the `roots` fixture steers configured roots t
 environment, the resolvers' own seam).
 
 Red on the rev-2 tree (PR #1143's head), each for its own reason: `Held` still has `read` and the
-records still answer it; the view takes no dup (the decoy's bytes come back); `merge_review` over
-a refused record raises the replace's `OSError` or overwrites undecodable bytes; `delta_o`
-answers `{}` over a missing or linked base and world file and skips the gate over a linked
-review; `load_family` wants an `Episode` (a `Bound` has no `family`); there is no
+records still answer it; the view takes no dup (the decoy's bytes come back); `delta_o`
+answers `{}` over a missing or linked base and world file; `load_family` wants an `Episode` (a `Bound` has no `family`); there is no
 `_io.NotPlainEntry` and ELOOP is contained by errno (a linked folder read as a planted leaf);
 `prime_base` reads the capture before the "already primed" check, has no `allow_empty`, and the
 launcher's downgrade creates the base a second time; a durable append leaks its fd on an encode
 failure and makes missing folders; a dot-less token skips the case check; `_resume_target`
 answers `None` for `--resume` without an episode.
+
+#1224 retired the review merge and the staging teardown (and their R1 rows), `prepare_episode`
+adopting an existing episode (R3's retry row: a launch mints a fresh `-r<n>` directory) and the
+review's scratch ledger (its minting patch row).
 """
 from __future__ import annotations
 
@@ -65,7 +61,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 import pytest
-import yaml
 
 from defender import _io
 from defender._episode_paths import LAYOUT
@@ -76,10 +71,8 @@ from defender.tests.test_947_capture_prime import append_call, call_row, source_
 from defender.tests import _state1135
 
 EPISODE_ID = "ep-1133"
-#: A staged cluster name, as the staging step records one.
-STAGED_NAME = "wv-e1133.b-logs-x"
 #: Bytes that are not UTF-8: a plain file holding them is a refused text read.
-UNDECODABLE = b"\xff\xfe review bytes, not text\n"
+UNDECODABLE = b"\xff\xfe record bytes, not text\n"
 #: A string no UTF-8 encoder accepts (a lone surrogate).
 UNENCODABLE = "a row \udcff that cannot be encoded\n"
 
@@ -120,7 +113,7 @@ def view_reason(ep: Path, rel: PurePosixPath) -> str:
 
 def plant_record(at: Path, kind: str, *, host: Path) -> S.Planted:
     """`kind` at a record's own name: a leaf plant, or `undecodable` (a plain, single-linked
-    file whose bytes are not UTF-8 — refused by a text read, replaced by a naive merge)."""
+    file whose bytes are not UTF-8 — refused by a text read)."""
     if kind == "undecodable":
         at.parent.mkdir(parents=True, exist_ok=True)
         at.write_bytes(UNDECODABLE)
@@ -378,250 +371,14 @@ def test_r1_a_close_landing_as_the_view_takes_its_dup_never_redirects_the_read(t
         held.close()
 
 
-# ---- merge_review over a refused record ---------------------------------------------------
-
-REFUSED_REVIEWS = ("symlink", "dangling", "hardlink", "fifo", "directory", "undecodable")
-
-
-@pytest.mark.parametrize("kind", REFUSED_REVIEWS)
-def test_r1_merge_review_over_a_refused_record_is_staging_refused_and_writes_nothing(
-        tmp_path, host, kind):
-    """`merge_review(episode, key, block)` reads `review.yaml` through the episode's view. A
-    REFUSED record — a link (live or dangling), a hard link, a FIFO, a directory, or a plain file
-    whose bytes are not UTF-8 — is `StagingRefused` naming the view's reason, and nothing is
-    written: the record is never replaced by the merge (today undecodable bytes are silently
-    overwritten with a fresh document). Control on the same address: a plain mapping merges,
-    keeping every other key."""
-    staging = mod("learning.branch.staging")
-    ep = bare_episode(tmp_path)
-    planted = plant_record(ep / LAYOUT.review, kind, host=host)
-    reason = view_reason(ep, LAYOUT.review)
-    before = S.census(tmp_path)
-
-    with S.open_episode(ep) as episode:
-        raised = S.raised_by(lambda: staging.merge_review(episode, "episode", {"outcome": "x"}),
-                             fifo=planted.fifo)
-    assert isinstance(raised, staging.StagingRefused), (
-        f"merge_review over a {kind} review record: {raised!r}")
-    assert reason in str(raised), f"the refusal does not name the view's reason ({reason!r}): {raised}"
-    assert S.census(tmp_path) == before, f"merge_review over a {kind} changed the tree"
-
-    planted.remove()
-    (ep / LAYOUT.review).write_text(yaml.safe_dump({"worlds": {"b": {"decision": "accepted"}}}),
-                                    encoding="utf-8")
-    with S.open_episode(ep) as episode:
-        staging.merge_review(episode, "episode", {"outcome": "x"})
-    assert yaml.safe_load((ep / LAYOUT.review).read_text(encoding="utf-8")) == {
-        "worlds": {"b": {"decision": "accepted"}}, "episode": {"outcome": "x"}}
-
-
-@pytest.mark.parametrize("state", ["absent", "not-yaml", "not-a-mapping", "empty"])
-def test_r1_merge_review_starts_from_nothing_over_an_absent_or_unparseable_record(
-        tmp_path, state):
-    """Controls for the refusal above: an ABSENT record starts from `{}`, and so does a present
-    one that is not parseable as a YAML mapping (as on main) — the merge lands as a plain,
-    single-linked record holding only the merged block."""
-    staging = mod("learning.branch.staging")
-    ep = bare_episode(tmp_path)
-    review = ep / LAYOUT.review
-    if state != "absent":
-        review.write_text({"not-yaml": "episode: [unclosed\n", "not-a-mapping": "- a\n- b\n",
-                           "empty": ""}[state], encoding="utf-8")
-    with S.open_episode(ep) as episode:
-        staging.merge_review(episode, "teardown", {"ok": True})
-    assert yaml.safe_load(review.read_text(encoding="utf-8")) == {"teardown": {"ok": True}}
-    assert stat.S_ISREG(os.lstat(review).st_mode)
-    assert os.lstat(review).st_nlink == 1
-
-
-class StuckDoor:
-    """The staging door, faked: every delete returns, but the name is still there after."""
-
-    def __init__(self) -> None:
-        self.deleted: list[str] = []
-
-    def delete(self, name: str) -> None:
-        self.deleted.append(name)
-
-    def exists(self, name: str) -> bool:
-        return True
-
-
-def _staged_episode(ep: Path) -> None:
-    with S.open_episode(ep) as episode:
-        episode.staged.create("# staged names\n")
-        mod("learning.branch.staging").record_staged(
-            episode, {"name": STAGED_NAME, "kind": "index", "world": "b"})
-
-
-@pytest.mark.parametrize("kind", ["plain", "symlink", "undecodable"])
-def test_r1_a_teardown_failure_over_a_refused_review_carries_the_names_and_the_refusal(
-        tmp_path, host, kind):
-    """`teardown` records its unverified names in the review record, then raises. When that
-    record is REFUSED (a link, undecodable bytes), the refused merge does not hide the teardown
-    failure: the raised `StagingRefused` carries both the unverified names and the merge's
-    refusal, and the record is left as it was.
-
-    Control on the same address (`plain`): the names are merged into the review record under
-    `teardown`, and the raised `StagingRefused` names them."""
-    staging = mod("learning.branch.staging")
-    ep = bare_episode(tmp_path)
-    _staged_episode(ep)
-    review = ep / LAYOUT.review
-    if kind == "plain":
-        review.write_text(yaml.safe_dump({"worlds": {"b": {"decision": "accepted"}}}),
-                          encoding="utf-8")
-    else:
-        plant_record(review, kind, host=host)
-        reason = view_reason(ep, LAYOUT.review)
-    before = S.census(tmp_path)
-    door = StuckDoor()
-
-    with S.open_episode(ep) as episode:
-        raised = S.raised_by(lambda: staging.teardown(episode, door=door))
-
-    assert door.deleted == [STAGED_NAME], door.deleted
-    assert isinstance(raised, staging.StagingRefused), f"teardown over a {kind} review: {raised!r}"
-    assert STAGED_NAME in str(raised), f"the teardown failure lost its names: {raised}"
-    if kind == "plain":
-        doc = yaml.safe_load(review.read_text(encoding="utf-8"))
-        assert doc["worlds"] == {"b": {"decision": "accepted"}}
-        assert doc["teardown"]["names"] == [STAGED_NAME], doc
-        return
-    assert reason in str(raised), (
-        f"the teardown failure does not carry the review record's refusal ({reason!r}): {raised}")
-    assert S.census(tmp_path) == before, f"teardown wrote over a {kind} review record"
-
-
-@pytest.mark.parametrize("kind", ["plain", "undecodable"])
-def test_r1_an_aborting_teardown_over_a_refused_review_does_not_say_the_names_are_in_it(
-        tmp_path, caplog, kind):
-    """While an abort is in flight the launcher logs a teardown failure instead of raising it,
-    and says where the unverified names are. With the review record REFUSED they are not in it:
-    the line carries the names and does not claim they are "in the review record". Control on
-    the same address (`plain`): the names were merged, and the line says so."""
-    cli = mod("learning.branch.cli")
-    ep = bare_episode(tmp_path)
-    _staged_episode(ep)
-    review = ep / LAYOUT.review
-    if kind == "plain":
-        review.write_text("worlds: {}\n", encoding="utf-8")
-    else:
-        review.write_bytes(UNDECODABLE)
-    caplog.set_level(logging.ERROR)
-
-    with S.open_episode(ep) as episode:
-        cli._teardown_without_masking(episode, StuckDoor(), aborting=True)
-
-    lines = [r.getMessage() for r in caplog.records
-             if r.levelno >= logging.ERROR and "teardown" in r.getMessage()]
-    assert len(lines) == 1, f"the aborting teardown's failure was not logged once: {lines}"
-    [line] = lines
-    assert STAGED_NAME in line, f"the logged failure does not carry the names: {line}"
-    if kind == "plain":
-        assert "review record" in line, line
-        assert yaml.safe_load(review.read_text(encoding="utf-8"))["teardown"]["names"] == [
-            STAGED_NAME]
-    else:
-        assert "are in the review record" not in line, (
-            f"the line claims the names are in a review record that was refused: {line}")
-        assert review.read_bytes() == UNDECODABLE
-
-
-def _siblings(ep: Path) -> list[Path]:
-    return [T.sibling_run_dir(ep / "runs", w) for w in T.WORLDS]
-
-
-@pytest.mark.parametrize("kind", ["symlink", "undecodable"])
-def test_r1_an_archive_refusal_stays_the_raised_one_with_a_refused_merge_attached_as_a_note(
-        tmp_path, host, kind):
-    """`verify_family` records `incomplete` before re-raising an archive refusal. With the
-    review record REFUSED, that merge is refused too: the ARCHIVE's exception stays the one
-    raised (the same type and message as with a plain record), the merge's refusal is attached
-    to it as a note, and the record is left as it was (declared: readers then find no recorded
-    outcome).
-
-    Control on the same address, the same archive refusal: with a plain record the same
-    exception is raised and the record carries `incomplete`."""
-    cli = mod("learning.branch.cli")
-    staging = mod("learning.branch.staging")
-    ep = T.episode(tmp_path)
-    dirs = _siblings(ep)
-    (ep / "worlds").mkdir()
-    link_folder(ep / "worlds" / "a", reach="inside", ep=ep, host=host, keep={"keep": b"kept\n"})
-    review = ep / LAYOUT.review
-    plant_record(review, kind, host=host)
-    reason = view_reason(ep, LAYOUT.review)
-    before = S.census(review.parent / "elsewhere-a"), (
-        os.readlink(review) if review.is_symlink() else review.read_bytes())
-
-    with S.open_episode(ep) as episode:
-        raised = S.raised_by(lambda: cli.verify_family(episode, dirs,
-                                                       source=T.provenance_record()))
-    assert raised is not None, "verify_family did not raise over a refused archive"
-    assert not isinstance(raised, staging.StagingRefused), (
-        f"the merge's refusal displaced the archive's: {raised!r}")
-    S.assert_refusal(S.refusal_in(raised), "folder_link_inside",
-                     where="the archive under a refused review record")
-    notes = getattr(raised, "__notes__", [])
-    assert any(reason in note for note in notes), (
-        f"the refused merge ({reason!r}) is not attached to the archive's exception: {notes}")
-    assert (S.census(review.parent / "elsewhere-a"),
-            os.readlink(review) if review.is_symlink() else review.read_bytes()) == before
-
-    if review.is_symlink() or review.is_file():
-        review.unlink()
-    review.write_text("worlds: {}\n", encoding="utf-8")
-    with S.open_episode(ep) as episode:
-        control = S.raised_by(lambda: cli.verify_family(episode, dirs,
-                                                        source=T.provenance_record()))
-    assert type(control) is type(raised), f"the archive raised {control!r}, not {raised!r}"
-    assert str(control) == str(raised), f"the archive raised {control!r}, not {raised!r}"
-    assert yaml.safe_load(review.read_text(encoding="utf-8"))["episode"]["outcome"] == (
-        "incomplete")
-
-
-@pytest.mark.parametrize("kind", ["plain", "symlink", "undecodable"])
-def test_r1_a_completed_familys_outcome_over_a_refused_review_ends_as_a_refusal(
-        tmp_path, host, kind):
-    """Elsewhere (`_record_episode_outcome` after a completed family) a refused merge raises:
-    `verify_family` over clean siblings, with the review record refused, is `StagingRefused`
-    naming the reason, and the record is left as it was (today undecodable bytes are replaced
-    and the family reads as accepted). Control on the same address (`plain`): the outcome
-    `accepted` is merged into the record."""
-    cli = mod("learning.branch.cli")
-    staging = mod("learning.branch.staging")
-    ep = T.episode(tmp_path)
-    dirs = _siblings(ep)
-    review = ep / LAYOUT.review
-    if kind == "plain":
-        review.write_text("worlds: {}\n", encoding="utf-8")
-    else:
-        plant_record(review, kind, host=host)
-        reason = view_reason(ep, LAYOUT.review)
-    before = os.readlink(review) if review.is_symlink() else review.read_bytes()
-
-    with S.open_episode(ep) as episode:
-        raised = S.raised_by(lambda: cli.verify_family(episode, dirs,
-                                                       source=T.provenance_record()))
-    if kind == "plain":
-        assert raised is None, raised
-        assert yaml.safe_load(review.read_text(encoding="utf-8"))["episode"]["outcome"] == (
-            "accepted")
-        return
-    assert isinstance(raised, staging.StagingRefused), (
-        f"a completed family's outcome over a {kind} review record: {raised!r}")
-    assert reason in str(raised), raised
-    assert (os.readlink(review) if review.is_symlink() else review.read_bytes()) == before
-
-
 # ---- delta_o: one bind for the pass ------------------------------------------------------
 
 def _delta_episode(tmp_path: Path) -> Path:
-    """An accepted episode with a base world `a` and a world `b`, both archived; the base
-    captures k1 and k2, and `b` served k1 the same and k2 differently."""
+    """An accepted episode (pre-flight's `outcome.yaml`) with a base world `a` and a world `b`,
+    both archived; the base captures k1 and k2, and `b` served k1 the same and k2 differently."""
     doc = T.family_doc(worlds=[T.base_world(), T.world_doc("b")])
     ep = T.episode(tmp_path, doc=doc)
+    J.outcome_record(ep)
     for label in ("a", "b"):
         T.archived_world(ep, label)
     T.base_capture(ep, [T.captured_row(key="k1"), T.captured_row(key="k2")])
@@ -647,6 +404,7 @@ def test_r1_delta_o_with_no_archived_worlds_is_empty_before_the_base_is_read(tmp
     worlds, an absent or refused base — which is "no primed base" once there are worlds —
     changes nothing. Pinned to keep holding."""
     ep = T.episode(tmp_path)
+    J.outcome_record(ep)
     at = ep / LAYOUT.served_base
     at.unlink()
     fifo = None
@@ -723,26 +481,28 @@ def test_r1_delta_o_reads_an_absent_world_file_as_serving_nothing(tmp_path, stat
 
 
 @pytest.mark.parametrize("kind", ["symlink", "hardlink", "fifo", "undecodable"])
-def test_r1_delta_os_incomplete_gate_refuses_a_refused_review_record(tmp_path, host, kind):
-    """The incomplete-outcome gate (`_recorded_outcome`, shared with `verdicts`) treats a
-    REFUSED `review.yaml` — a link, a hard link, a FIFO, undecodable bytes — as `EpisodeError`,
-    not as "no outcome recorded" (declared: today a link there skips the gate). Controls on the
-    same address: an absent record and an unparseable one gate nothing; a recorded `incomplete`
-    refuses."""
+def test_r1_delta_os_outcome_gate_refuses_a_refused_outcome_record(tmp_path, host, kind):
+    """The outcome gate (`_recorded_outcome`, shared with `verdicts`) treats a REFUSED
+    `outcome.yaml` — a link, a hard link, a FIFO, undecodable bytes — as `EpisodeError`, never
+    as the record it may be hiding. Controls on the same address: a plain `accepted` record
+    classifies; an unparseable one and a recorded `unusable` refuse."""
     ep = _delta_episode(tmp_path)
-    review = ep / LAYOUT.review
-    planted = plant_record(review, kind, host=host)
+    record = ep / LAYOUT.outcome
+    good = record.read_bytes()
+    record.unlink()
+    planted = plant_record(record, kind, host=host)
 
     raised = S.raised_by(lambda: episode_mod().delta_o(ep), fifo=planted.fifo)
     assert isinstance(raised, episode_mod().EpisodeError), (
-        f"delta_o past a {kind} review record: {raised!r}")
+        f"delta_o past a {kind} outcome record: {raised!r}")
 
     planted.remove()
+    record.write_bytes(good)
     assert episode_mod().delta_o(ep)["b"]["k1"] == "same"
-    review.write_text("episode: [unclosed\n", encoding="utf-8")
-    assert episode_mod().delta_o(ep)["b"]["k1"] == "same"
-    review.write_text(yaml.safe_dump({"episode": {"outcome": "incomplete", "reason": "r"}}),
-                      encoding="utf-8")
+    record.write_text("outcome: [unclosed\n", encoding="utf-8")
+    with pytest.raises(episode_mod().EpisodeError):
+        episode_mod().delta_o(ep)
+    J.outcome_record(ep, "unusable", reason="r")
     with pytest.raises(episode_mod().EpisodeError):
         episode_mod().delta_o(ep)
 
@@ -859,9 +619,17 @@ def test_r2_a_linked_or_non_directory_folder_on_the_way_is_not_the_leaf_class(tm
 
 # ---- R2 at the judge's stale-draw removal (S1) -------------------------------------------
 
+def _draw0_asks() -> list[str]:
+    """Every ask of world `b`'s draw 0: the first and its re-asks after a refused reply (N22,
+    `judge._REPLY_ATTEMPTS` asks per draw)."""
+    attempts = J.mod("learning.judge")._REPLY_ATTEMPTS
+    return ["judge:b:0", *(f"judge:b:0:{a}" for a in range(1, attempts))]
+
+
 class SwappingJudge:
-    """The judge seam: a malformed reply for `judge:b:0` (after `act()` runs once, a plant made
-    mid-pass), a good reply for every other call; each agent id recorded."""
+    """The judge seam: a malformed reply for every ask of world `b`'s draw 0 (after `act()`
+    runs once, on the first, a plant made mid-pass), a good reply for every other call; each
+    agent id recorded."""
 
     def __init__(self, act: Any = None) -> None:
         self.good = J.as_reply_text(J.reply_doc())
@@ -872,7 +640,7 @@ class SwappingJudge:
     def __call__(self, prompt: str, *, role: Any = None, agent_id: str = "judge",
                  **kw: Any) -> str:
         self.agent_ids.append(agent_id)
-        if agent_id == "judge:b:0":
+        if agent_id in _draw0_asks():
             if self.act is not None:
                 act, self.act = self.act, None
                 act()
@@ -896,7 +664,8 @@ def _grade(tmp_path: Path, ep: Path, judge: Any) -> Any:
 def test_r2_a_judge_folder_linked_after_its_ensure_stops_the_pass_at_the_stale_draw_removal(
         tmp_path, roots, host, reach):
     """At the judge (S1), a `judge/` folder linked AFTER `draws.ensure()` — swapped in by the
-    judge seam's first call for world `b`, whose reply is malformed — makes the stale-draw
+    judge seam's first call for world `b`, every ask of whose draw 0 is malformed — makes the
+    stale-draw
     removal (`world.draw(0).delete()`) raise the walk's FOLDER refusal, a plain `OSError(ELOOP)`
     that is not `NotPlainEntry`, which stops the pass: `JudgeRefused`, draw 1 never paid for,
     the stale draw the link reaches not removed, the link left. Today the errno classifier
@@ -905,7 +674,7 @@ def test_r2_a_judge_folder_linked_after_its_ensure_stops_the_pass_at_the_stale_d
     Control on the same address: the link removed, a regrade pays for both draws and writes
     them into a real `judge/`. (A `judge/` linked BEFORE the pass is that world's setup fault at
     `draws.ensure()`: `test_1133_entry_points`.)"""
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     judge_dir = ep / "worlds" / "b" / "judge"
     stale = b"findings: [{bucket: stale}]\n"
     reached: dict[str, Path] = {}
@@ -922,7 +691,7 @@ def test_r2_a_judge_folder_linked_after_its_ensure_stops_the_pass_at_the_stale_d
         f"a judge/ folder linked mid-pass did not stop the pass: {got!r}")
     S.assert_refusal(S.refusal_in(got), f"folder_link_{reach}",
                      where="the stale-draw removal through a linked judge/")
-    assert judge.called_for("b") == ["judge:b:0"], (
+    assert judge.called_for("b") == _draw0_asks(), (
         f"the pass went on past a linked judge/ folder: {judge.called_for('b')}")
     assert (reached["dir"] / "0.yaml").read_bytes() == stale, "a draw was removed through the link"
     assert judge_dir.is_symlink(), "the link at judge/ was removed"
@@ -932,7 +701,7 @@ def test_r2_a_judge_folder_linked_after_its_ensure_stops_the_pass_at_the_stale_d
     judge = SwappingJudge()
     got = _grade(tmp_path, ep, judge)
     assert not isinstance(got, BaseException), f"the control pass was refused: {got!r}"
-    assert judge.called_for("b") == ["judge:b:0", "judge:b:1"]
+    assert judge.called_for("b") == [*_draw0_asks(), "judge:b:1"]
     assert sorted(p.name for p in judge_dir.iterdir()) == ["1.yaml"]
 
 
@@ -1188,67 +957,6 @@ def _launcher(tmp_path: Path) -> tuple[Any, Path, Any, Path]:
     return cli, src, tenant, cli.episode_dir_for(T.EPISODE_ID, tenant=tenant)
 
 
-@pytest.mark.parametrize("capture", ["no-rows", "one-call"])
-@pytest.mark.parametrize("kind", ["plain", "empty", "symlink", "fifo", "directory"])
-def test_r3_a_retry_through_prepare_episode_over_an_existing_base_is_already_primed(
-        tmp_path, roots, host, kind, capture):
-    """A retry through the launcher's door (`prepare_episode`, its default primer: `prime_base`
-    with `allow_empty=True`) over an episode that already holds a base — any kind of entry — is
-    the one "already holds a primed base" `LedgerError`: never a raw `FileExistsError` or core
-    refusal from a second create (today's zero-row downgrade creates the base itself), and never
-    after reading the capture. The base is left as it was, the claim released, the episode
-    closed.
-
-    Control on the same address: with no base, a zero-row source primes an empty base (with a
-    warning) and a one-call source primes its row."""
-    cli, src, tenant, ep = _launcher(tmp_path)
-    ledger = mod("learning.branch.ledger")
-    sidecar = None
-    if capture == "no-rows":
-        (src / "executed_queries.jsonl").write_text("", encoding="utf-8")
-    else:
-        sidecar, payload = fifo_sidecar(src)
-
-    def watching() -> Any:
-        return _Nothing() if sidecar is None else CaptureRead(sidecar, payload)
-
-    ep.mkdir(parents=True)
-    planted = _plant_base(ep, kind, host)
-    before = S.census(ep)
-
-    with watching() as watch:
-        raised = S.raised_by(lambda: cli.prepare_episode(T.EPISODE_ID, src, tenant=tenant),
-                             fifo=planted.fifo)
-    assert isinstance(raised, ledger.LedgerError), (
-        f"a retry over a {kind} base ({capture}): {raised!r}")
-    assert "already holds a primed base" in str(raised), raised
-    assert not watch.read.is_set(), "the capture was read before the already-primed check"
-    assert S.census(ep) == before, f"the retry changed the episode over a {kind} base"
-    assert S.open_fds_on(ep) == [], "prepare_episode left the episode open on its refusal"
-
-    planted.remove()
-    with watching() as watch:
-        episode = S.in_time(lambda: cli.prepare_episode(T.EPISODE_ID, src, tenant=tenant),
-                            fifo=sidecar)
-    with episode:
-        assert Path(episode.dir) == ep
-    assert watch.read.is_set() is (sidecar is not None), "control: the capture read not observed"
-    base = (ep / LAYOUT.served_base).read_bytes()
-    assert (base == b"") is (capture == "no-rows"), base
-
-
-class _Nothing:
-    """A `CaptureRead` stand-in for a source with no sidecar: nothing is ever read."""
-
-    read = threading.Event()
-
-    def __enter__(self) -> _Nothing:
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        return None
-
-
 def test_r3_the_launchers_default_primer_primes_an_empty_capture_once_and_warns(
         tmp_path, roots, caplog):
     """The launcher's default primer is `prime_base(..., allow_empty=True)`: a source whose
@@ -1364,23 +1072,6 @@ def test_patch_the_minting_check_judges_the_whole_token(token, minted):
     else:
         with pytest.raises(ValueError, match="not case-stable"):
             check_minted_token(token)
-
-
-def test_patch_scratch_ledger_refuses_a_dotless_label_that_is_not_case_stable(tmp_path):
-    """`scratch_ledger(scratch, world_label=)` builds its ledger through `for_world`, whose
-    minting check now judges the whole token: `Control` is `LedgerError` and no world file is
-    made. Control on the same scratch: `control` builds and records."""
-    ledger = mod("learning.branch.ledger")
-    review = mod("learning.branch.review")
-    with S.create_episode(tmp_path / "review-scratch" / "scratch") as scratch:
-        with pytest.raises(ledger.LedgerError):
-            review.scratch_ledger(scratch, world_label="Control")
-        served = scratch.dir / "served"
-        assert sorted(p.name for p in served.iterdir()) == ["base.jsonl"], (
-            sorted(p.name for p in served.iterdir()))
-        book = review.scratch_ledger(scratch, world_label="control")
-        book.declare()
-    assert (served / "control.jsonl").read_bytes() == b""
 
 
 def test_patch_resume_with_no_held_episode_is_refused_never_an_ordinary_run(tmp_path):

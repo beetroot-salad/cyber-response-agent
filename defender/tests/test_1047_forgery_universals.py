@@ -48,11 +48,11 @@ from defender.tests import _spec1047 as S
 
 
 def _rows_and_word(episode_dir):
-    """One pass over one episode: every row, plus the family's word. The pair, because a
-    forgery that moved only the word (or only one row) must not slip through an assertion that
+    """One pass over one episode: every row, plus what the family-scope call (which gives the
+    family's word since #1224) was shown of each world. The pair, because a forgery that moved
+    only the word's input (or only one row) must not slip through an assertion that
     looked at the other."""
-    grade = S.mod("learning.judge.family").grade_family(episode_dir)
-    return S.rows(grade), S.word_of(grade)
+    return S.graded_with_view(episode_dir)
 
 
 # ---------------------------------------------------------------------------------------
@@ -187,7 +187,7 @@ def test_a_forged_run_end_record_in_the_run_dir_does_not_reach_the_grade(tmp_pat
     assert word == control_word
 
     honest = S.cut_short_episode(tmp_path / "honest", cut={"b": "request-limit"})
-    assert S.rows(S.mod("learning.judge.family").grade_family(honest))["b"].get(
+    assert S.graded(honest)["b"].get(
         "cut_short") == "request-limit", (
         "the control failed: a HOST-written record no longer moves the grade either, so the "
         "assertion above is not about the forgery")
@@ -334,7 +334,7 @@ def test_grading_given_a_planted_truncated_by_frontmatter_line_with_a_garbage_va
 
 def test_grading_given_planted_row_shaped_keys_in_frontmatter(tmp_path):
     """Row-shaped keys planted in frontmatter are never merged into the row: the row is built by
-    `_grade_world` from `read_world_facts`, not from report.md.
+    `read_world` from `read_world_facts`, not from report.md.
 
     The planted keys are the row's own discriminators — `ungradable`, `cut_short`, `malformed`,
     `ungradable_reason` — which is the merge an implementation that folded frontmatter into the

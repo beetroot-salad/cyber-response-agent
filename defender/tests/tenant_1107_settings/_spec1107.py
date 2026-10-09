@@ -20,10 +20,7 @@ receipt shape and the lint's `main(argv) -> int`. It does NOT name:
   * the keyword the ticket writer's two steps take the record, the defender dir and the run env
     under (`tenant=`, `defender_dir=`, `env=` here — `record_step` / `open_step`);
   * the keyword the `case_ticket` mapping consumers take the mapping under (`mapping=` here —
-    `with_mapping`), nor `release_predicate`'s (positional here — `released_status`), nor
-    `applier.unservable`'s (positional second argument, where the settings folder went);
-  * how `review.verb_context` is handed the episode tenant's record (positionally, where the
-    settings folder went — `review_verb_context`);
+    `with_mapping`), nor `release_predicate`'s (positional here — `released_status`);
   * the keyword a transport call names the secrets its one child needs under (`secrets=`, a tuple
     of declared names, here — `SECRETS_KW`);
   * how the run page learns `--update-ticket` (PG-2a: run.py passes it as an ARGUMENT; the
@@ -33,9 +30,6 @@ receipt shape and the lint's `main(argv) -> int`. It does NOT name:
     lints' `# lint-monkeypatch: ok`, asserted ABSENT from every swept file);
   * the keyword the replay helper chain stops taking (`grants=` — `GRANTS_KW`) and the retired
     field / parameter the record replaces (`settings_dir` — `RETIRED_FIELD`).
-  * how `review.review` is handed the episode tenant's record (`tenant=` — `review_run`), and the
-    keyword the branch launcher takes its write door's transport under (`door_transport=` —
-    `DOOR_TRANSPORT_KW`, the door lane's injection seam).
 
 If write-code-from-spec spells any of these differently, it renames it HERE, never through a
 `conceptAliases` entry (which would silently disable `check_binds`' prose scan for the concept).
@@ -116,11 +110,6 @@ ELASTIC_ATTRS: tuple[str, ...] = (
 #: spell theirs `# lint-monkeypatch: ok — <reason>`). o7_lint_clean_empty_allowlist asserts no
 #: swept file carries it.
 ENV_LINT_SUPPRESSION = re.compile(r"lint[-_]tenant[-_]env[-_]reads\s*:", re.I)
-#: The keyword the branch launcher (`learning.branch.cli.main`) takes a transport for the write
-#: door it builds under (coined, Phase F re-open, O4 lanes): the launcher still builds the REAL
-#: door from the episode tenant's record, and only the door's transport is the caller's — the
-#: door lane's one injection seam (d_launcher_door_transport_seam). Omitted, the real transport.
-DOOR_TRANSPORT_KW = "door_transport"
 #: The config-shaped variables a developer's shell might carry, cleared before a branch launch so
 #: a value either side of an assertion is the one the test put there.
 BRANCH_CONFIG_VARS: tuple[str, ...] = (
@@ -364,24 +353,6 @@ def record_on(ctx: Any) -> Any:
     return getattr(ctx, RECORD_FIELD)
 
 
-def review_verb_context(episode_dir: Path, record: Any, *, runs_base: Path) -> Any:
-    """`review.verb_context` handed the episode tenant's record POSITIONALLY, where the settings
-    folder went (coined: the design says the review's replay contexts carry the record, F0, but
-    not how the record is handed in)."""
-    return mod("learning.branch.review").verb_context(
-        Path(episode_dir), record, runs_base=Path(runs_base))
-
-
-def review_run(family: Any, episode_dir: Path, record: Any, *, adapters: Any, door: Any,
-               invoke: Any, runs_base: Path) -> dict:
-    """`review.review` over one episode, handed the episode tenant's record under the coined
-    `tenant=` keyword (RECORD_FIELD), where the settings folder went (`settings_dir=`)."""
-    with mod("_episode_handle").Episode.open(Path(episode_dir)) as episode:
-        return mod("learning.branch.review").review(
-            family, episode=episode, adapters=adapters, door=door, invoke=invoke,
-            runs_base=Path(runs_base), **{RECORD_FIELD: record})
-
-
 def launch_branch(src: Path, data_root: Path, **seams: Any) -> tuple[Any, BaseException | None]:
     """The REAL branch launcher (`learning.branch.cli.main`) over the source run `src`, whose
     tenant is planted under `data_root` (this test's), every seam faked (`_triplet_947`'s fakes,
@@ -392,8 +363,7 @@ def launch_branch(src: Path, data_root: Path, **seams: Any) -> tuple[Any, BaseEx
     from defender.tests.tenant_1078_pass_a import _spec1078 as h1078
 
     fakes: dict[str, Any] = {
-        "spawn": t947.FakeSpawn(), "door": t947.FakeDoor(), "questioner": t947.FakeAgent(),
-        "adapters": t947.FakeAdapters(), "invoke": t947.FakeAgent(),
+        "spawn": t947.FakeSpawn(), "questioner": t947.FakeAgent(),
         "live_tree": t947.source_capture(), "preflight": t947.no_preflight}
     fakes.update(seams)
     argv = [str(src), str(t947.BRANCH_MESSAGE_ID), "--continuation-prompt",
@@ -633,7 +603,7 @@ class RunRecorder:
         self.lifecycle_calls: list[dict[str, Any]] = []
         self.visualize_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
-    def preflight(self, model: str | None = None) -> int:
+    def preflight(self, model: str | None = None, *, branching: bool = False) -> int:
         self.order.append("preflight")
         return 0
 

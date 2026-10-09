@@ -396,11 +396,12 @@ demands:
   - '#101 test_record_or_context_formatted_whole_into_text'
 - id: c_estate_registry_reads_record
   kind: coherence
-  form: test
+  form: clause
   binds:
   - interacts(WorldRegistry->ticket_mapping)
   - interacts(unservable->ticket_mapping)
-  discharged_by: test_c_estate_registry_reads_record
+  status: retired
+  outcome: {nl: "RETIRED by #1224 — the live oracle replaced the cluster write door, the launcher's elastic refusals, configured-pattern checks, the estate applier and the world-view guard; `test_c_estate_registry_reads_record`, which discharged this demand, was deleted with the behaviour it pinned."}
   seed_docstring: A resumed sibling's WorldRegistry, built in run.py, and the estate applier judge a ticket comment
     patch against the record's ticket_mapping. Editing mapping.yaml's released status after the record is built
     does not change which patch is refused.
@@ -419,11 +420,12 @@ demands:
   source: 20-demands.md (phase B)
 - id: c_foreign_view_review_record
   kind: coherence
-  form: test
+  form: clause
   binds:
   - interacts(_configured_for->elastic)
   - interacts(review.verb_context->RunTenant)
-  discharged_by: test_c_foreign_view_review_record
+  status: retired
+  outcome: {nl: "RETIRED by #1224 — the live oracle replaced the cluster write door, the launcher's elastic refusals, configured-pattern checks, the estate applier and the world-view guard; `test_c_foreign_view_review_record`, which discharged this demand, was deleted with the behaviour it pinned."}
   seed_docstring: For a world with no manifest record, the foreign-view guard's fallback patterns come from the
     serving VerbContext's record.elastic. The review's replay verb contexts carry the episode tenant's record.
   source: 20-demands.md (phase B)
@@ -530,11 +532,12 @@ demands:
   source: 20-demands.md (phase B)
 - id: d_door_child_env_scrubbed
   kind: negative
-  form: test
+  form: clause
   binds:
   - interacts(write_door->child_env)
   - host_context
-  discharged_by: test_d_door_child_env_scrubbed
+  status: retired
+  outcome: {nl: "RETIRED by #1224 — the live oracle replaced the cluster write door, the launcher's elastic refusals, configured-pattern checks, the estate applier and the world-view guard; `test_d_door_child_env_scrubbed`, which discharged this demand, was deleted with the behaviour it pinned."}
   seed_docstring: 'The launcher''s entry point builds the write door''s docker child environment with run_common''s provider-key
     scrub and passes it in. A provider API key variable present in the launching process''s environment is absent
     from the door child''s environment. It carries no DEFENDER_RUN_DIR or DEFENDER_RUNS_BASE naming a run that
@@ -547,7 +550,7 @@ demands:
   - '#107 test_door_child_environment_built_before_any_run_directory_exists'
 - id: d_launcher_door_transport_seam
   kind: seam
-  form: test
+  form: clause
   binds:
   - branch.cli.main
   - write_door
@@ -555,7 +558,8 @@ demands:
   - RunTenant
   - drives(branch.cli.main->write_door_from_env)
   - interacts(write_door->child_env)
-  discharged_by: test_d_launcher_door_transport_seam
+  status: retired
+  outcome: {nl: "RETIRED by #1224 — the live oracle replaced the cluster write door, the launcher's elastic refusals, configured-pattern checks, the estate applier and the world-view guard; `test_d_launcher_door_transport_seam`, which discharged this demand, was deleted with the behaviour it pinned."}
   seed_docstring: 'The branch launcher takes a transport for the write door it builds (the door_transport seam): with the
     door left to the launcher, every door call goes through that transport, handed a context that carries the episode tenant''s
     record, so the door addresses that record''s own elastic docker context and container. It is the door lane''s one injection
@@ -567,11 +571,12 @@ demands:
     (the same door child''s env).'
 - id: d_door_child_env_carries_path
   kind: behavior
-  form: test
+  form: clause
   binds:
   - interacts(write_door->child_env)
   - host_context
-  discharged_by: test_d_door_child_env_carries_path
+  status: retired
+  outcome: {nl: "RETIRED by #1224 — the live oracle replaced the cluster write door, the launcher's elastic refusals, configured-pattern checks, the estate applier and the world-view guard; `test_d_door_child_env_carries_path`, which discharged this demand, was deleted with the behaviour it pinned."}
   seed_docstring: The same door child's environment carries the launching process's PATH, HOME and DOCKER_CONFIG
     (N4, NF-31). The scrub removes provider keys and keeps what docker needs.
   source: 20-demands.md (phase B), amended at D from §7
@@ -841,13 +846,14 @@ demands:
   source: 20-demands.md (phase B)
 - id: o9_no_elastic_refused
   kind: behavior
-  form: test
+  form: clause
   binds:
   - branch.cli.main
   - _episode_tenant
   - elastic.domain.distinguished[None]
   - episode_dir
-  discharged_by: test_o9_no_elastic_refused
+  status: retired
+  outcome: {nl: "RETIRED by #1224 — the live oracle replaced the cluster write door, the launcher's elastic refusals, configured-pattern checks, the estate applier and the world-view guard; `test_o9_no_elastic_refused`, which discharged this demand, was deleted with the behaviour it pinned."}
   seed_docstring: The branch launcher, over a source run whose tenant has no systems/elastic/ folder, refuses with
     LauncherRefused. The message names the tenant and says 'no elastic system configured'. The refusal comes before
     any episode dir exists, and before the questioner or any preflight spend.
@@ -860,13 +866,14 @@ demands:
   note: 'NF-21 (auto): the refusal precedes the write door''s construction, which contacts nothing (G49).'
 - id: o9_bad_elastic_refused
   kind: behavior
-  form: test
+  form: clause
   binds:
   - branch.cli.main
   - _episode_tenant
   - elastic.domain.distinguished[ConfigFault]
   - episode_dir
-  discharged_by: test_o9_bad_elastic_refused
+  status: retired
+  outcome: {nl: "RETIRED by #1224 — the live oracle replaced the cluster write door, the launcher's elastic refusals, configured-pattern checks, the estate applier and the world-view guard; `test_o9_bad_elastic_refused`, which discharged this demand, was deleted with the behaviour it pinned."}
   seed_docstring: 'Over a tenant whose elastic config.env lacks ELASTIC_ES_CONTAINER, the launcher refuses with
     a message that names the tenant and says ''elastic config is bad: <the ConfigFault''s text>''. The refusal comes
     before any episode dir exists.'
@@ -944,22 +951,24 @@ demands:
   source: 20-demands.md (phase B)
 - id: o1_staged_patterns_ignore_env
   kind: coherence
-  form: test
+  form: clause
   binds:
   - interacts(configured_patterns->elastic)
   - interacts(_configured_for->elastic)
   - config_env.access[env]
-  discharged_by: test_o1_staged_patterns_ignore_env
+  status: retired
+  outcome: {nl: "RETIRED by #1224 — the live oracle replaced the cluster write door, the launcher's elastic refusals, configured-pattern checks, the estate applier and the world-view guard; `test_o1_staged_patterns_ignore_env`, which discharged this demand, was deleted with the behaviour it pinned."}
   seed_docstring: With ELASTIC_EVENTS_INDEX and ELASTIC_ALERTS_INDEX exported, the branch launcher's configured
     patterns and a sibling's foreign-view fallback are the tenant file's patterns.
   source: 20-demands.md (phase B)
 - id: o1_write_door_ignores_env
   kind: coherence
-  form: test
+  form: clause
   binds:
   - interacts(write_door_from_env->elastic)
   - config_env.access[env]
-  discharged_by: test_o1_write_door_ignores_env
+  status: retired
+  outcome: {nl: "RETIRED by #1224 — the live oracle replaced the cluster write door, the launcher's elastic refusals, configured-pattern checks, the estate applier and the world-view guard; `test_o1_write_door_ignores_env`, which discharged this demand, was deleted with the behaviour it pinned."}
   seed_docstring: With ELASTICSEARCH_URL, ELASTIC_SSL_VERIFY and SOC_PLAYGROUND_ES_CONTAINER exported, and also
     present in the caller's ctx env, the write door's base URL, TLS posture and container are the tenant file's.
   source: 20-demands.md (phase B)
@@ -1155,14 +1164,15 @@ demands:
   source: '45-dispositions.md settled #63 (O2)'
 - id: s073
   kind: behavior
-  form: test
+  form: clause
   binds:
   - branch.cli.main
   - _episode_tenant
   - elastic.domain.distinguished[ConfigFault]
   - elastic.domain.distinguished[None]
   - episode_dir
-  discharged_by: test_branch_refusal_names_the_elastic_fault
+  status: retired
+  outcome: {nl: "RETIRED by #1224 — the live oracle replaced the cluster write door, the launcher's elastic refusals, configured-pattern checks, the estate applier and the world-view guard; `test_branch_refusal_names_the_elastic_fault`, which discharged this demand, was deleted with the behaviour it pinned."}
   seed_docstring: 'The branch refusal names the tenant and says which: "no elastic system configured", or "elastic
     config is bad: <fault>" carrying the fault''s text; it reaches the operator launching the branch before any
     episode dir exists.'
@@ -1258,7 +1268,7 @@ demands:
   - TRANSPORT.domain.distinguished[absent]
   - episode_dir
   - _resolve_item1
-  discharged_by: test_s7_mf7a_launcher_refuses_elastic_without_docker_exec
+  discharged_by: test_s7_mf7a_elastic_without_docker_exec_is_a_fault
   seed_docstring: 'A tenant whose elastic config.env carries every listed Elastic key but no ELASTIC_TRANSPORT (or
     one other than docker-exec) has record.elastic a ConfigFault: the branch launcher refuses with "elastic config
     is bad: <fault>" naming the tenant before any episode dir exists, and lead-zero''s item 1 reports unavailable.'
@@ -1950,7 +1960,7 @@ demands:
     non-material; accepted at the post-gate §7 pass (resolved_by: auto, non-material; gate-leaf routing)'
 - id: s7pg_bare_star_events_index_refused_at_launch
   kind: behavior
-  form: test
+  form: clause
   binds:
   - ELASTIC_EVENTS_INDEX.domain.distinguished[*]
   - check_configured_patterns
@@ -1958,7 +1968,8 @@ demands:
   - branch.cli.main
   - _episode_tenant
   - episode_dir
-  discharged_by: test_s7pg_bare_star_events_index_refused_at_launch
+  status: retired
+  outcome: {nl: "RETIRED by #1224 — the live oracle replaced the cluster write door, the launcher's elastic refusals, configured-pattern checks, the estate applier and the world-view guard; `test_s7pg_bare_star_events_index_refused_at_launch`, which discharged this demand, was deleted with the behaviour it pinned."}
   seed_docstring: 'A tenant whose elastic config.env sets ELASTIC_EVENTS_INDEX to exactly `*` is refused at branch launch by
     check_configured_patterns, with a reason that names the key and says a bare `*` would widen confinement to
     every index the cluster serves, before any episode dir exists. A trailing wildcard such as acme-* is accepted
@@ -1997,7 +2008,7 @@ demands:
     rw bind.'
 - id: s7pg_bare_star_alerts_index_refused_at_launch
   kind: behavior
-  form: test
+  form: clause
   binds:
   - ELASTIC_EVENTS_INDEX.domain.distinguished[*]
   - check_configured_patterns
@@ -2005,7 +2016,8 @@ demands:
   - branch.cli.main
   - _episode_tenant
   - episode_dir
-  discharged_by: test_s7pg_bare_star_alerts_index_refused_at_launch
+  status: retired
+  outcome: {nl: "RETIRED by #1224 — the live oracle replaced the cluster write door, the launcher's elastic refusals, configured-pattern checks, the estate applier and the world-view guard; `test_s7pg_bare_star_alerts_index_refused_at_launch`, which discharged this demand, was deleted with the behaviour it pinned."}
   seed_docstring: 'A tenant whose elastic config.env sets ELASTIC_ALERTS_INDEX to exactly `*` is refused at branch launch by
     check_configured_patterns under the same rule as ELASTIC_EVENTS_INDEX: a reason that names the key and says a
     bare `*` would widen confinement to every index the cluster serves, before any episode dir exists. A trailing
