@@ -519,16 +519,22 @@ def test_slow_real_system_and_slow_oracle_in_one_call(tmp_path, monkeypatch):
     counts)."""
     monkeypatch.setenv(ENFORCE, "true")
     est = S.estate(tmp_path)
-    _slow_adapter(est, "edr", 1.2)
+    # Margins on both sides of the 4 s limit, whatever the run's own start-up costs (about
+    # 1 s cold, 0.05 s in a warm worker): start-up + one 2.2 s read stays under it, start-up +
+    # two reads crosses it on real latency alone, and start-up + one read + the 2.5 s oracle
+    # turn would cross it too — so a refusal at the third call would be oracle time counted.
+    # (At 1.2 s reads against 2.5 s, two reads were 2.4 s: the positive control leaned on
+    # start-up overhead, and a warm runner counted 2.45 s and refused nothing.)
+    _slow_adapter(est, "edr", 2.2)
     est.answer("edr", "query", None, {"events": [EDR_ROW]})
     ep = _episode(tmp_path, [])
     oracle = S.oracle(then=S.submit({"events": [EDR_ROW]}, S.EMPTY_CLAIM),
-                      fault=S.Fault(delay=1.5))
+                      fault=S.Fault(delay=2.5))
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier(),
                            retry_cap=3)
     first, second, third = (S.query_params(f"host:db-{n}") for n in (1, 2, 3))
     run_dir, router, _ = _drive(
-        tmp_path, verbs=reg, tenant=est.place(), limits=_limits(2.5), system="edr",
+        tmp_path, verbs=reg, tenant=est.place(), limits=_limits(4.0), system="edr",
         leads={"l-001": [_q(first, "edr"), _q(first, "edr"), _q(second, "edr"),
                          _q(third, "edr"), S.done_turn()]})
 
