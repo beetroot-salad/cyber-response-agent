@@ -13,7 +13,6 @@
     "load_config": "distinct-ok: _stub_transport.load_config reads a docker-exec-curl system's three-key template from the record (`ctx.tenant.systems`); elastic_adapter.load_config keeps its own because its keys are the Elastic entry's (URL, indices, containers), not the shared URL_BASE/BASTION_HOST/TIMEOUT_SEC template (#619, #1107)",
     "materialize": "distinct-ok: the two eval harnesses build tmp trees from different fixtures (findings/lessons vs query-catalog/run-dir)",
     "render": "distinct-ok: frontend/build.py's render(view) stamps the standalone lessons.html page from a JSON view dict; selection.render(store, ...) is the store's send-role renderer for the runtime loop — unrelated domains, same generic verb (#705)",
-    "run_batch": "distinct-ok: per-direction public entrypoint — each direction module wraps the one shared drain body with its own config, and the actor/benign modules forward to the observation direction's entrypoint (#719)",
-    "start_box": "distinct-ok: oracle.start_box(*, env) is #1224's coined name for the branching oracle's sandboxed box (a thin wrapper over runtime/box/_oracle.start_oracle_box that converts a refused start to OracleSandboxError); box/_lifecycle.start_box starts the investigator's run box \u2014 different boxes, the spec fixes the name"
+    "run_batch": "distinct-ok: per-direction public entrypoint — each direction module wraps the one shared drain body with its own config, and the actor/benign modules forward to the observation direction's entrypoint (#719)"
   }
 }

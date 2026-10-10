@@ -135,7 +135,7 @@ ORACLE_CHECK_DEF = AgentDefinition(
 # The oracle's box (M18).
 # --------------------------------------------------------------------------------------------
 
-def start_box(*, env: Mapping[str, str]) -> Any:
+def start_box(*, env: Mapping[str, str]) -> Any:  # lint-dup: ok — the spec's coined name for the oracle's sandboxed box; box/_lifecycle.start_box starts the investigator's run box, a different box
     """The production oracle box (`runtime.box.start_oracle_box`): sandboxed or refused with
     `OracleSandboxError`, never an unsandboxed executor (M18)."""
     try:
