@@ -211,12 +211,12 @@ def test_a_missing_root_is_an_error_and_is_never_created(tmp_path: Path, monkeyp
         "the stage's CRITICAL line does not name the root and the env var"
 
     caplog.clear()
-    runs = tmp_path / "runs"
+    runs = S.curation_run_dir("case-r15").parent
     run_dir = make_run_dir(runs, name="case-r15", disposition="benign")
     scrub_mod.scrub(run_dir)
     answered: list[bool] = []
     enqueued = S.caught(lambda: answered.append(
-        run_common.enqueue_curation(run_dir, run_dir / "alert.json")))
+        run_common.enqueue_curation(S.run_of(run_dir), run_dir / "alert.json")))
     assert enqueued is None, f"the run-end enqueue raised {enqueued!r} into the investigation"
     assert answered == [False], f"the run-end enqueue answered {answered!r}"
     assert any(ENV in r.getMessage() for r in caplog.records), "E1 did not log the root error"
@@ -365,7 +365,7 @@ def test_a_linked_write_target_raises_in_either_mode_and_is_never_slot_taken(tmp
     raises StateRefused and never answers False ("slot taken"); the link's target is untouched
     and nothing is written through it."""
     paths = S.built_paths(tmp_path)
-    S.seed_request(paths, "case-x", tmp_path / "runs" / "run-a")
+    S.seed_request(paths, "case-x", S.curation_run_dir("run-a"))
     state = S.LearningState.open(paths)
     claims = _claim_all(state)
     assert len(claims) == 1, f"the plain request was not claimed: {claims!r}"
@@ -400,7 +400,7 @@ def test_a_plain_write_lands_in_either_mode(tmp_path: Path):
     new spec; requeue(claimed) into a free top-level slot creates a complete single-linked
     record and returns True."""
     paths = S.built_paths(tmp_path)
-    S.seed_request(paths, "case-x", tmp_path / "runs" / "run-a")
+    S.seed_request(paths, "case-x", S.curation_run_dir("run-a"))
     state = S.LearningState.open(paths)
     claims = _claim_all(state)
     assert len(claims) == 1, f"the plain request was not claimed: {claims!r}"
@@ -484,7 +484,7 @@ def test_a_linked_inflight_folder_stops_the_claim_before_any_move(tmp_path: Path
     queued request, the claim raises StateRefused: the queued request is still at its top-level
     name, and nothing appears in the link's target folder."""
     paths = S.built_paths(tmp_path)
-    queued = S.seed_request(paths, "case-x", tmp_path / "runs" / "run-a")
+    queued = S.seed_request(paths, "case-x", S.curation_run_dir("run-a"))
     body = queued.read_bytes()
     elsewhere = tmp_path / "outside" / "inflight"
     elsewhere.mkdir(parents=True)
@@ -508,7 +508,7 @@ def test_a_plain_claim_moves_the_request_into_inflight(tmp_path: Path):
     a plain alphabetical order give different answers (R14: today's claim_markers serves
     [*orphans, *queued])."""
     paths = S.built_paths(tmp_path)
-    run_a, run_b = tmp_path / "runs" / "run-a", tmp_path / "runs" / "run-b"
+    run_a, run_b = S.curation_run_dir("run-a"), S.curation_run_dir("run-b")
     S.seed_request(paths, "case-a", run_a)
     S.seed_request(paths, "case-b", run_b, inflight=True)  # an orphan of a dead pass
     queue = paths.state_root / "author-queue"
@@ -684,7 +684,7 @@ def test_a_non_plain_entry_at_a_record_name_halts_when_the_claim_opens_it(tmp_pa
     paths = S.built_paths(tmp_path)
     queue = paths.state_root / "author-queue"
     queue.mkdir()
-    body = (json.dumps(S.request_body("case-x", tmp_path)) + "\n").encode()
+    body = (json.dumps(S.request_body("case-x", S.curation_run_dir("run-x"))) + "\n").encode()
     with contextlib.ExitStack() as stack:
         if shape == "symlink":
             target = tmp_path / "outside" / "case-x.json"
@@ -740,8 +740,8 @@ def test_a_listing_keeps_record_names_and_never_opens_a_foreign_name(tmp_path: P
     assert err is None, f"has_requests() over foreign names raised {err!r}"
     assert only_foreign is False, f"foreign names counted as work: {only_foreign!r}"
 
-    S.seed_request(paths, "case-a", tmp_path / "runs" / "run-a")
-    S.seed_request(paths, "case-b", tmp_path / "runs" / "run-b", inflight=True)
+    S.seed_request(paths, "case-a", S.curation_run_dir("run-a"))
+    S.seed_request(paths, "case-b", S.curation_run_dir("run-b"), inflight=True)
     finished, has_work, err = S.within(10, state.has_requests)
     assert finished, "has_requests() blocked beside foreign names"
     assert err is None, f"has_requests() raised {err!r}"
@@ -797,7 +797,7 @@ def test_every_core_refusal_shape_surfaces_as_state_refused(tmp_path: Path, verb
         folder = paths.state_root / "_pending"
         leaf = folder / "findings.jsonl"
     else:
-        S.seed_request(paths, "case-x", tmp_path / "runs" / "run-a")
+        S.seed_request(paths, "case-x", S.curation_run_dir("run-a"))
         claims = _claim_all(state)
         assert len(claims) == 1, f"the plain request was not claimed: {claims!r}"
         folder = paths.state_root / "author-queue" / "inflight"
@@ -832,11 +832,11 @@ def test_ordinary_io_errors_are_not_converted_to_refusals(tmp_path: Path):
     listing and its move is skipped by the claim, as today's FileNotFoundError arm does; move_at
     on a missing source raises FileNotFoundError."""
     paths = S.built_paths(tmp_path)
-    S.seed_request(paths, "case-x", tmp_path / "runs" / "run-a")
+    S.seed_request(paths, "case-x", S.curation_run_dir("run-a"))
     state = S.LearningState.open(paths)
     claims = _claim_all(state)
     assert len(claims) == 1, f"the plain request was not claimed: {claims!r}"
-    fresher = S.seed_request(paths, "case-x", tmp_path / "runs" / "run-b")  # a re-ask mid-serve
+    fresher = S.seed_request(paths, "case-x", S.curation_run_dir("run-b"))  # a re-ask mid-serve
     body = fresher.read_bytes()
     answer = state.requeue(claims[0])
     assert answer is False, f"a requeue into an occupied slot answered {answer!r}"
@@ -847,8 +847,8 @@ def test_ordinary_io_errors_are_not_converted_to_refusals(tmp_path: Path):
     state.done(claims[0])
     fresher.unlink()
 
-    S.seed_request(paths, "case-p", tmp_path / "runs" / "run-p")
-    S.seed_request(paths, "case-q", tmp_path / "runs" / "run-q")
+    S.seed_request(paths, "case-p", S.curation_run_dir("run-p"))
+    S.seed_request(paths, "case-q", S.curation_run_dir("run-q"))
     served: list = []
     passed = S.caught(lambda: served.extend(_vanishing_pass(state, paths)))
     assert passed is None, f"the pass raised {passed!r}"
@@ -887,14 +887,14 @@ def test_a_request_whose_identity_is_already_claimed_this_pass_waits_a_pass(tmp_
     # rejected: revision 2's newest-wins removal of the orphan (R5, superseded by R14); N2 —
     # request record bodies are unchanged
     paths = S.built_paths(tmp_path)
-    run_a, run_b = tmp_path / "runs" / "run-a", tmp_path / "runs" / "run-b"
+    run_a, run_b = S.curation_run_dir("run-a"), S.curation_run_dir("run-b")
     orphan = S.seed_request(paths, "case-x", run_a, inflight=True)
     fresher = S.seed_request(paths, "case-x", run_b)
     orphan_body, fresher_body = orphan.read_bytes(), fresher.read_bytes()
 
     state = S.LearningState.open(paths)
     first = _claim_all(state)
-    assert [c.spec.get("run_dir") for c in first] == [str(run_a.resolve())], \
+    assert [c.spec.get("run_id") for c in first] == [run_a.name], \
         f"the pass served {[c.spec for c in first]}, not exactly run A's orphan"
     assert S.entry_kind(fresher) == "file", "run B's request left its top-level name"
     assert fresher.read_bytes() == fresher_body, "run B's request changed"
@@ -902,7 +902,7 @@ def test_a_request_whose_identity_is_already_claimed_this_pass_waits_a_pass(tmp_
 
     state.done(first[0])
     second = _claim_all(state)
-    assert [c.spec.get("run_dir") for c in second] == [str(run_b.resolve())], \
+    assert [c.spec.get("run_id") for c in second] == [run_b.name], \
         "the next pass did not claim run B's request"
 
 
@@ -962,9 +962,9 @@ def test_move_at_renames_under_the_held_root(tmp_path: Path):
         "a plain destination was not replaced"
     assert isinstance(missing, FileNotFoundError), f"a missing src answered {missing!r}"
     assert not S.is_refusal(missing), f"a missing src answered a refusal {missing!r}"
-    (root / "runs" / "run-a").mkdir(parents=True)
     (root / "author-queue" / "inflight" / "case-a.json").write_text(
-        json.dumps(S.request_body("case-a", root / "runs" / "run-a")) + "\n", encoding="utf-8")
+        json.dumps(S.request_body("case-a", S.curation_run_dir("run-a"))) + "\n",
+        encoding="utf-8")
     state = S.LearningState.open(paths)
     assert [c.key for c in _claim_all(state)] == ["case-a"], \
         "the handle's claim does not see the record at the inflight/ name move_at moved it to"

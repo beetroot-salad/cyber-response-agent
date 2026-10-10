@@ -662,7 +662,7 @@ def cell(name, root):
         if name == "e1":
             os.environ["DEFENDER_LEARNING_STATE_DIR"] = root
             run_dir = Path(spec["run_dir"])
-            out["answer"] = run_common.enqueue_curation(run_dir, run_dir / "alert.json")
+            out["answer"] = run_common.enqueue_curation(S.run_of(run_dir), run_dir / "alert.json")
             return out
         state = S.LearningState.open(paths)
         if name == "append":
@@ -787,13 +787,18 @@ def test_1135_an_everyday_failure_writing_moving_or_locking_a_state_record(tmp_p
     base = Path(tempfile.mkdtemp(prefix="ls1135-everyday-", dir="/tmp"))
     os.chmod(base, 0o755)
     try:
-        run_dir = base / "run" / "case-a"
+        # A natural run where run setup leaves one (#1105 PR 2: run end is handed the `Run`, and
+        # the row it files is the run's address): `<T>/runs/<id>` under its tenant record.
+        from defender._tenant import ensure_runs_base_record
+
+        run_dir = base / "acme" / "runs" / "case-a"
         run_dir.mkdir(parents=True)
+        ensure_runs_base_record(run_dir.parent, "acme")
         (run_dir / "alert.json").write_text('{"rule": {"name": "everyday"}}\n', encoding="utf-8")
         from defender.runtime import scrub as scrub_mod
 
         scrub_mod.scrub(run_dir)  # a certified tree: the enqueue's refusal gate passes it
-        for p in (base / "run", run_dir):
+        for p in (base / "acme", run_dir.parent, run_dir):
             os.chmod(p, 0o755)
         row = _defender_row("ep-1/b/0/9", "caught")
         names = ("e1", "append", "rotate", "move", "lock", "read", "rotate_unreadable")
