@@ -23,7 +23,10 @@ branch point (M27: told, and the verifier checks — no host rule); usage is pri
 bad argument to an oracle tool fails that call only; a count cell is the answer's own count,
 never a document's field; a pre-flight thread's error stops the other worlds; a capped call
 writes nothing; the family recording is parsed once per pre-flight. Seventh round: a sibling's
-re-ask of a pre-branch call is served unchanged or not at all (M01=A), by pre-flight's own rule.
+re-ask of a pre-branch call is served unchanged or not at all (M01=A), by pre-flight's own rule;
+and (M14 and M12 re-ruled by the implementer, the human having delegated them) a forged row has
+the shape of one real row, never the union of all; an id column is named as one, and a forged
+id collides only with a real identifier.
 """
 from __future__ import annotations
 
@@ -1787,3 +1790,97 @@ def test_the_sibling_s_registry_gets_pre_flight_s_pre_branch_set(tmp_path):
         tenant=est.run_tenant(), world=S.load_world(ep, "b"), episode=Episode.open(ep),
         serving=S.serving(), investigate=lambda **kw: seen.update(kw) or {})
     assert seen["verbs"].prebranch == expected
+
+
+# --- seventh round (re-ruled M14/M12) -------------------------------------------------------
+
+_ES_EVENT = {"@timestamp": "2026-03-01T09:00:00Z", "event": {"kind": "event"},
+             "host": {"name": "web-1"}, "process": {"name": "bash"}}
+_ES_ALERT = {"@timestamp": "2026-03-01T09:01:00Z", "event": {"kind": "alert"},
+             "host": {"name": "web-1"}, "kibana.alert.rule.name": "odd shell",
+             "kibana.alert.severity": "high"}
+
+
+def _hits_check(row: dict) -> list[str]:
+    base = {"hits": [_ES_EVENT, _ES_ALERT]}
+    record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": row}
+    failures = _checks(base, {"hits": [_ES_EVENT, _ES_ALERT, row]},
+                       {"added": [{"forged_id": "fg-1", "fact_id": "F"}]},
+                       staged={"fg-1": record})
+    return [f for f in failures if f.startswith("check 2")]
+
+
+def test_a_forged_row_in_an_answer_mixing_event_and_alert_documents_has_one_real_rows_shape():
+    """Seventh round (re-ruled M14/M12): check 2's reference was the union of every real
+    row's columns at the place, so in an Elastic answer mixing event and alert documents every
+    honest forged row failed — it had to carry the event's `process` AND the alert's
+    `kibana.*` columns. Now a forged row's columns equal those of SOME real row there: an
+    honest event-shaped row passes, the union fails (no real row has it), and a row matching
+    no real row's columns fails naming the closest one's missing column."""
+    event = {"@timestamp": "2026-03-01T09:30:00Z", "event": {"kind": "event"},
+             "host": {"name": "db-1"}, "process": {"name": "kinit"}}
+    assert _hits_check(event) == []
+    union = {**event, "kibana.alert.rule.name": "x", "kibana.alert.severity": "low"}
+    assert _hits_check(union), "a union-shaped row matches no real row and must fail check 2"
+    short = {k: v for k, v in event.items() if k != "process"}
+    failures = _hits_check(short)
+    assert failures, "a row short of the event's `process` must fail check 2"
+    assert "missing ['process']" in failures[0], failures
+    # Types are judged against the real rows sharing the forged row's columns.
+    assert _hits_check({**event, "process": "kinit"}), "a retyped event column must fail"
+
+
+def test_only_columns_named_as_ids_are_id_columns():
+    """Seventh round (re-ruled M14/M12): any column whose name ended in `id` was id-like, so
+    `valid`, `paid` and `android` were ids; `pid`, `userId` and `host_id` are, those are not."""
+    from defender.learning.branch.estate.checks import id_column
+
+    for name in ("id", "pid", "PPID", "userId", "hostID", "host_id", "agent-id", "user.id",
+                 "process.pid", "file_hash", "file.hash", "hash", "session_uuid", "GUID"):
+        assert id_column(name), name
+    for name in ("valid", "paid", "android", "void", "squid", "liquid", "", "hashtag"):
+        assert not id_column(name), name
+
+
+def _ids_check(real_rows: list[dict], forged: dict) -> list[str]:
+    base = {"rows": real_rows}
+    record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": forged}
+    failures = _checks(base, {"rows": [*real_rows, forged]},
+                       {"added": [{"forged_id": "fg-1", "fact_id": "F"}]},
+                       staged={"fg-1": record})
+    return [f for f in failures if f.startswith("check 3")]
+
+
+def test_a_forged_id_collides_only_with_a_real_identifier():
+    """Seventh round (re-ruled M14/M12): a forged id-like value collided with ANY real scalar,
+    so a forged `pid: 1` failed because a real row carried an unrelated `total: 1`. It collides
+    only with a real value that sat in an id-like column (or is UUID / long-hex shaped)."""
+    real = [{"pid": 4242, "total": 1}]
+    assert _ids_check(real, {"pid": 1, "total": 5}) == []
+    reused = _ids_check(real, {"pid": 4242, "total": 5})
+    assert reused, "a forged pid equal to a real pid must fail check 3"
+    assert "'pid'" in reused[0], reused
+    # Across columns: a real `host_id` value reused in a forged `userId` is a real identifier.
+    real = [{"host_id": "h-77", "userId": "u-1"}]
+    assert _ids_check(real, {"host_id": "h-78", "userId": "h-77"})
+    # `valid` is not an id column, so a real `valid` value is not a real identifier.
+    real = [{"valid": "v-500", "id": "r-1"}]
+    assert _ids_check(real, {"valid": "x", "id": "v-500"}) == []
+
+
+def test_a_frozen_row_records_only_collisions_with_real_identifiers():
+    """Seventh round (re-ruled M14/M12): the frozen-row collision record used the same
+    any-scalar rule, recording `pid: 1` against an unrelated `total: 1`; it now records only a
+    real identifier, with the rows holding it as one."""
+    from defender.learning.branch.estate.checks import frozen_id_collisions, run_checks
+
+    row = {"pid": 1, "user_id": "u-9", "total": 2}
+    record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": row}
+    store = CheckStore(frozen={"fg-1": record}, staged={}, facts={}, rerun=lambda *_a: {})
+    real = RealData(answers=[("s", {"rows": [{"pid": 5, "user_id": "u-9", "total": 1}]})])
+    checked = run_checks({"rows": []}, {"rows": [row]},
+                         {"added": [{"forged_id": "fg-1", "fact_id": "F"}]},
+                         world=SimpleNamespace(facts=[SimpleNamespace(fact_id="F")]),
+                         store=store, real_data=real)
+    found = frozen_id_collisions(checked, store=store, real_data=real)
+    assert [(e["column"], e["value"]) for e in found] == [("user_id", "u-9")], found

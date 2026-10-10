@@ -10,15 +10,21 @@ failure texts, each naming the check it failed (`check <n>`); an empty list pass
      aggregate's value, a bucket's count — never an ordinary field of a document; see
      `_counts_change`), one `counts` entry used up by it — and every claim entry is found. Mapping key order is
      not a difference, list order is, duplicates are a multiset (N09).
-  2. Shape: a forged row carries exactly the columns real rows of its system (the call's,
-     stamped by the host at forge) carry at the same place, with their value types (M14=B);
-     with no real example there is nothing to compare (D2).
+  2. Shape: a forged row has the shape of a real row: its columns EQUAL the column set of at
+     least one real row of its system (the call's, stamped by the host at forge) at the same
+     place, and its values carry the types real rows of that column set give them. One answer
+     may mix row shapes (event and alert documents at one path): a forged row matches
+     one of them, never their union. With no real example there is nothing to compare (D2).
+     (Re-ruled 2026-10-10, PR #1232 round 7; M14=B's union is gone.)
   3. Ids: no id-like value of a newly forged row (nested fields included, by their dotted
-     column) equals a value in this world's real data,
-     unless the claim declares it a reference to an entity (M12=A, S21). "Id-like" is judged
-     by column name and value shape only: a column whose name ends in id/hash/uuid/guid, or a
-     value shaped like a UUID or 16+ hex digits; placeholders ("", "none", "n/a", ...) never
-     are. In memory, no lookup.
+     column) equals a real identifier — a real value that itself sat in an id-like column or
+     is UUID / 16+ hex shaped — unless the claim declares it a reference to an entity (S21).
+     "Id-like" is judged by column name and value shape only (`id_column`): a column named
+     exactly `id`, ending in `_id`/`-id`/`.id` or a camelCase `Id`, a short id word (pid, ppid,
+     uid, gid, sid, tid, uuid, guid, hash), or ending in `_hash`/`.hash`/`uuid`/`guid`; or a
+     value shaped like a UUID or 16+ hex digits in any column; placeholders ("", "none", "n/a",
+     ...) never are. Equality is exact whole-value text. In memory, no lookup. (Re-ruled
+     2026-10-10, PR #1232 round 7: M12=A's `*id` suffix and any-real-scalar collision are gone.)
   4. Facts: a recorded fact is contradicted only by a served mapping whose own string values
      include the entity and which itself carries the field with a different value — the same
      mapping, no nesting or cross-row linkage — every frozen row a claim names is served
@@ -35,8 +41,8 @@ are not rows). A row's cells are its top-level columns; its flat view (`flatten`
 nested field as a dotted column (`process.entity_id`). A list inside a row is ONE cell, never
 exploded into columns; a list of mappings inside a row is also a table of its own at the
 deeper path, and check 3 judges each scalar inside a list cell under that cell's column.
-Check 2 compares cells (top-level columns, or ES|QL column names — the granularity M14=B
-ruled on); check 3, the collision record and the real-data index read the flat view.
+Check 2 compares cells (top-level columns, or ES|QL column names); check 3, the collision
+record and the real-data index read the flat view.
 """
 from __future__ import annotations
 
@@ -58,6 +64,12 @@ CLAIM_KEYS = ("added", "removed", "changed", "counts", "entity_refs")
 _PLACEHOLDERS = frozenset({"", "-", "--", "0", "none", "null", "n/a", "na", "unknown", "nil"})
 _UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 _LONG_HEX = re.compile(r"^[0-9a-fA-F]{16,}$")
+#: Column names that are ids by themselves (compared without case; check 3).
+_ID_WORDS = frozenset({"id", "pid", "ppid", "uid", "gid", "sid", "tid", "uuid", "guid", "hash"})
+#: Name endings that make a column an id column (compared without case).
+_ID_SUFFIXES = ("_id", "-id", ".id", "_hash", "-hash", ".hash", "uuid", "guid")
+#: A camelCase id suffix (`userId`, `hostID`): a lower-case letter or digit, then `Id` / `ID`.
+_CAMEL_ID = re.compile(r"[a-z0-9](Id|ID)$")
 
 
 class Refused(Exception):
@@ -104,11 +116,15 @@ class RealData:
         loose, self.loose = list(self.loose), []
         self._held: set[bytes] = set()
         #: Every scalar's text; the flat rows (`flatten`) of every table row and of every
-        #: top-level mapping; the flat rows carrying each value's text; the cells of each
-        #: `(system, table path)` table's rows (answers only, not loose values).
+        #: top-level mapping; the flat rows carrying each value's text; the real identifiers
+        #: (check 3): each text a value had in an id-like position (`_id_like`), with the
+        #: flat rows holding it there (a UUID / long-hex scalar outside any row is an id with
+        #: no row); the cells of each `(system, table path)` table's rows (answers only, not
+        #: loose values).
         self.values: set[str] = set()
         self.maps: list[dict] = []
         self.by_value: dict[str, list[dict]] = {}
+        self.by_id: dict[str, list[dict]] = {}
         self.rows: dict[tuple[str, _Table], list[dict]] = {}
         for system, payload in given:
             self.add(system, payload)
@@ -129,7 +145,11 @@ class RealData:
             self._index(value)
 
     def _index(self, payload: Any) -> list[tuple[_Table, dict]]:
-        self.values.update(_value_text(v) for v in _scalars(payload))
+        for value in _scalars(payload):
+            text = _value_text(value)
+            self.values.add(text)
+            if _id_like("", value):
+                self.by_id.setdefault(text, [])
         found = [(_table(path, names), cells) for path, cells, names in tables(payload)]
         flats = [flatten(cells) for _path, cells in found]
         if isinstance(payload, Mapping):
@@ -140,8 +160,11 @@ class RealData:
                                                               for x in v))})
         for flat in flats:
             self.maps.append(flat)
-            for text in {_value_text(v) for _c, v in _leaves(flat)}:
+            leaves = list(_leaves(flat))
+            for text in {_value_text(v) for _c, v in leaves}:
                 self.by_value.setdefault(text, []).append(flat)
+            for text in {_value_text(v) for c, v in leaves if _id_like(c, v)}:
+                self.by_id.setdefault(text, []).append(flat)
         return found
 
 
@@ -664,7 +687,10 @@ def _fresh(matched: _Matched, store: CheckStore) -> _Matched:
 
 def _check_shape(matched: _Matched, real: RealData) -> list[str]:  # noqa: C901 — check 2's per-row rules
     """Check 2 over a row's cells (its top-level columns; an ES|QL row's column names): the
-    union of the cells real rows of that table carry, with their value types (M14=B)."""
+    forged row's columns equal those of at least one real row of that table, and each value
+    has a type real rows of that column set give the column. Equal, not a subset or superset:
+    a forged row has the shape of a real row. Where none matches, the failure names the
+    closest real column set's missing and extra columns."""
     failures: list[str] = []
     for table, element, record in matched:
         if not isinstance(element, Mapping):
@@ -676,26 +702,46 @@ def _check_shape(matched: _Matched, real: RealData) -> list[str]:  # noqa: C901 
         rows = real.rows.get((str(record.get("system")), table))
         if not rows:
             continue  # D2: no real example, nothing to compare
-        columns = set().union(*(set(r) for r in rows))
-        types: dict[str, set[str]] = {}
+        fid, own = record.get("forged_id"), frozenset(element)
+        shapes: dict[frozenset[str], list[dict]] = {}
         for r in rows:
+            shapes.setdefault(frozenset(r), []).append(r)
+        same = shapes.get(own)
+        if same is None:
+            closest = min(shapes, key=lambda cols: (len(cols ^ own), sorted(cols)))
+            missing, extra = sorted(closest - own), sorted(own - closest)
+            failures.append(
+                f"check 2: forged row {fid!r} does not carry the columns of any real "
+                f"{record.get('system')} row here ({len(shapes)} real column set(s); the "
+                f"closest is missing {missing}, extra {extra}): a forged row's columns equal "
+                "one real row's")
+            continue
+        types: dict[str, set[str]] = {}
+        for r in same:
             for col, value in r.items():
                 kind = _json_type(value)
                 if kind is not None:
                     types.setdefault(col, set()).add(kind)
-        fid = record.get("forged_id")
-        missing, extra = sorted(columns - set(element)), sorted(set(element) - columns)
-        if missing or extra:
-            failures.append(f"check 2: forged row {fid!r} does not carry the columns real "
-                            f"{record.get('system')} rows carry (missing {missing}, extra {extra})")
-            continue
         wrong = sorted(col for col, value in element.items()
                        if _json_type(value) is not None and types.get(col)
                        and _json_type(value) not in types[col])
         if wrong:
             failures.append(f"check 2: forged row {fid!r} gives {wrong} a value type real rows "
-                            "never carry")
+                            "with its columns never carry")
     return failures
+
+
+def id_column(column: str) -> bool:
+    """A column whose name makes its values ids (check 3): exactly `id`; ending in `_id`,
+    `-id`, `.id` or a camelCase `Id` (`userId`); a short id word (pid, ppid, uid, gid, sid,
+    tid, uuid, guid, hash); or ending in `_hash`, `.hash`, `uuid` or `guid`. A nested column
+    is named by its last dotted part too (`process.pid`). `valid`, `paid`, `android` are not."""
+    if not column:
+        return False
+    last = column.rsplit(".", 1)[-1]
+    lowered, last_lowered = column.lower(), last.lower()
+    return (last_lowered in _ID_WORDS or lowered.endswith(_ID_SUFFIXES)
+            or bool(_CAMEL_ID.search(last)))
 
 
 def _id_like(column: str, value: Any) -> bool:
@@ -704,10 +750,7 @@ def _id_like(column: str, value: Any) -> bool:
     text = _value_text(value).strip()
     if text.lower() in _PLACEHOLDERS:
         return False
-    name = column.lower()
-    if name.endswith(("id", "hash", "uuid", "guid")):
-        return True
-    return bool(_UUID.match(text) or _LONG_HEX.match(text))
+    return id_column(column) or bool(_UUID.match(text) or _LONG_HEX.match(text))
 
 
 def _forged_leaves(element: Any) -> Iterator[tuple[str, Any]]:
@@ -721,7 +764,7 @@ def _check_ids(matched: _Matched, claim: _Claim, store: CheckStore, real: RealDa
     for _t, element, record in _fresh(matched, store):
         fid = str(record.get("forged_id"))
         for column, value in _forged_leaves(element):
-            if not _id_like(column, value) or _value_text(value) not in real.values:
+            if not _id_like(column, value) or _value_text(value) not in real.by_id:
                 continue
             if _declared_reference(fid, column, value, claim, real):
                 continue
@@ -743,7 +786,8 @@ class Checked:
 def frozen_id_collisions(checked: Checked, *, store: CheckStore,
                          real_data: RealData) -> list[dict[str, Any]]:
     """Every identifier a FROZEN forged row serves in this answer that this world's real data
-    carries too, with the real rows (flat) carrying it (M12=A): the row stays frozen and is
+    carries as an identifier too (check 3's rule: the real value sat in an id-like column or is
+    UUID / long-hex shaped), with the real rows (flat) carrying it there: the row stays frozen and is
     still served — check 3 only judges fresh rows — and the collision is recorded for the
     judge. Read off a submission's `Checked`, after it passed."""
     found: list[dict[str, Any]] = []
@@ -756,7 +800,7 @@ def frozen_id_collisions(checked: Checked, *, store: CheckStore,
             if not _id_like(column, value):
                 continue
             text = _value_text(value)
-            rows = [dict(m) for m in real_data.by_value.get(text, ())
+            rows = [dict(m) for m in real_data.by_id.get(text, ())
                     if canonical_json(m) != own]
             if rows:
                 found.append({"forged_id": fid, "column": column, "value": text,
