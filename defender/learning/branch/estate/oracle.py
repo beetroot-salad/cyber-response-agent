@@ -209,6 +209,8 @@ class OracleStore:
                     self.base[key] = text
                     self.base_answers.append((row["system"], text))
         self.spent = sum(float(r.get("cost_usd") or 0.0) for r in read_jsonl_rows(self.paths.trace))
+        #: Trace rows charged to `spent` whose append failed; the next charge writes them first.
+        self._unwritten: list[dict] = []
         #: The `(forged_id, column, value)` of every collision already recorded.
         self._collided = {(r.get("forged_id"), r.get("column"), r.get("value"))
                           for r in read_jsonl_rows(self.paths.collisions)}
@@ -239,14 +241,26 @@ class OracleStore:
     def charge(self, actor: str, model_name: str, usage: Mapping[str, Any], *,
                priced_as: str) -> float:
         """Record one response's spend: `model_name` as the provider reported it, its cost at
-        the `priced_as` pricing row."""
+        the `priced_as` pricing row. The cost counts toward `spent` whatever the trace write
+        does: a row whose append fails is kept and written ahead of the next one, and the
+        response it prices is used as it is (a paid answer is not a failed request)."""
         cost = usage_cost(priced_as, dict(usage))
+        row = {"actor": actor, "model": model_name,
+               "input_tokens": usage.get("input_tokens", 0),
+               "output_tokens": usage.get("output_tokens", 0), "cost_usd": cost, "at": time.time()}
         with self._lock:
-            self._append(self.paths.trace, [{"actor": actor, "model": model_name,
-                                  "input_tokens": usage.get("input_tokens", 0),
-                                  "output_tokens": usage.get("output_tokens", 0),
-                                  "cost_usd": cost, "at": time.time()}])
             self.spent += cost
+            self._unwritten.append(row)
+            try:
+                self._append(self.paths.trace, self._unwritten)
+            except OSError as unwritable:
+                # A partial append may have left a torn line: the retry starts on its own.
+                self._torn.add(self.paths.trace)
+                _logger.warning(f"the oracle's spend trace could not record "
+                                f"{len(self._unwritten)} row(s) ({unwritable!r}); they are "
+                                "counted and retried with the next charge")
+            else:
+                self._unwritten = []
         return cost
 
     def record_collisions(self, entries: list[dict]) -> None:
@@ -289,6 +303,39 @@ class OracleStore:
 # --------------------------------------------------------------------------------------------
 
 
+class LimiterWaits:
+    """One attempt's time waiting on the rate limiter, which its deadline excludes (M11=A).
+
+    Each attempt holds its own, and its tools (the verifier's and the host checks' queries
+    included) wait into it: a thread an earlier attempt abandoned still holds that attempt's
+    record, so it can neither end nor add to this one's. Overlapping waits count once."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._done = 0.0
+        self._open = 0
+        self._since = 0.0
+
+    @contextlib.contextmanager
+    def waiting(self) -> Any:
+        with self._lock:
+            if not self._open:
+                self._since = time.monotonic()
+            self._open += 1
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._open -= 1
+                if not self._open:
+                    self._done += time.monotonic() - self._since
+
+    def excluded(self) -> float:
+        """Every second of limiter wait so far, a wait in progress included."""
+        with self._lock:
+            return self._done + (time.monotonic() - self._since if self._open else 0.0)
+
+
 @dataclass
 class QueryDoor:
     """Grant-decided (read verbs only), at the branch-point clock, rate-limited, recorded in
@@ -299,18 +346,11 @@ class QueryDoor:
     limiter: RateLimiter
     store: OracleStore
     context: Callable[[], Any]
-    #: Seconds spent waiting on the limiter; a turn excludes them from its deadline.
-    waited: float = 0.0
-    #: When the wait in progress began (a tool thread is in `acquire`), else `None`.
-    waiting_since: float | None = None
 
-    def excluded(self) -> float:
-        """Every second of limiter wait so far, the one in progress included."""
-        since = self.waiting_since
-        return self.waited + (time.monotonic() - since if since is not None else 0.0)
-
-    def run(self, actor: str, system: Any, verb: Any, params: Any) -> Any:
-        """The real answer, or `Refused` naming why not."""
+    def run(self, actor: str, system: Any, verb: Any, params: Any, *,
+            waits: LimiterWaits) -> Any:
+        """The real answer, or `Refused` naming why not. Time waiting on the limiter goes to
+        `waits`, the asking attempt's own record."""
         if not isinstance(system, str) or not isinstance(verb, str):
             raise Refused(f"run_query needs a system and a verb name; got {system!r}.{verb!r}")
         if params is None:
@@ -329,11 +369,8 @@ class QueryDoor:
         if fn is None or verb_class_of(fn) != "r":
             raise Refused(f"run_query {system}.{verb} was refused: only read verbs are served "
                           "to the oracle")
-        self.waiting_since = time.monotonic()
-        try:
-            self.waited += self.limiter.acquire()
-        finally:
-            self.waiting_since = None
+        with waits.waiting():
+            self.limiter.acquire()
         try:
             answer = fn(self.context(), **dict(params))
         except Exception as exc:  # noqa: BLE001 — a tenant error is the oracle's to see
@@ -532,11 +569,54 @@ class _BudgetSpent(Exception):
     """The world's oracle budget is spent; the call ends unservable (reason `budget`)."""
 
 
+class _AttemptBox:
+    """The python box of one attempt: started on the attempt's first `python` call, stopped
+    (its container and scratch removed) when the attempt ends, whatever the ending. Stopping it
+    also ends a frame the attempt's deadline abandoned. An attempt that runs no python starts
+    no box; a box started after the attempt ended (by its abandoned thread) is stopped at once."""
+
+    def __init__(self, factory: Callable[[], Any]) -> None:
+        self._factory = factory
+        self._lock = threading.Lock()
+        self._box: Any = None
+        self._ended = False
+
+    def get(self) -> Any:
+        with self._lock:
+            if self._ended:
+                raise _AttemptFailed("the attempt has already ended")
+            if self._box is not None:
+                return self._box
+        box = self._factory()  # outside the lock: a slow start never holds up `stop`
+        with self._lock:
+            keep = not self._ended and self._box is None
+            if keep:
+                self._box = box
+        if not keep:
+            _stop_box(box)
+            return self.get()
+        return box
+
+    def lost(self, box: Any) -> None:
+        """`box` died under a frame or cannot serve: the next `python` call starts a fresh one."""
+        with self._lock:
+            if self._box is box:
+                self._box = None
+        _stop_box(box)
+
+    def stop(self) -> None:
+        with self._lock:
+            self._ended = True
+            box, self._box = self._box, None
+        if box is not None:
+            _stop_box(box)
+
+
 @dataclass
 class _Run:
     """One model run's state, which its tools and its request guard read: the run's clock (the
-    turn deadline, rate-limiter waits excluded) and, for an oracle attempt, the call it serves,
-    what the attempt staged, and the verdict a tool ended it with."""
+    turn deadline, its own rate-limiter waits excluded) and, for an oracle attempt, the call it
+    serves, what the attempt staged, its python box, and the verdict a tool ended it with."""
 
     door: QueryDoor
     deadline: float
@@ -546,30 +626,24 @@ class _Run:
     attempt: _Attempt = field(default_factory=_Attempt)
     ended: str | None = None
     reasked: bool = False
-    #: The tool whose thread is running, if any (a deadline that cuts it off abandons it).
-    busy: str | None = None
     #: Side-query answers already read this attempt, so a re-checked draft re-reads nothing.
     reruns: dict[str, Any] = field(default_factory=dict)
     began: float = field(default_factory=time.monotonic)
-    excluded_before: float = 0.0
-
-    def __post_init__(self) -> None:
-        self.excluded_before = self.door.excluded()
+    #: This attempt's limiter waits; the verifier's run shares its attempt's.
+    waits: LimiterWaits = field(default_factory=LimiterWaits)
+    #: The oracle attempt's python box (`None` for the verifier, which runs no python).
+    box: _AttemptBox | None = None
 
     def remaining(self) -> float:
-        return self.deadline - (
-            time.monotonic() - self.began - (self.door.excluded() - self.excluded_before))
+        return self.deadline - (time.monotonic() - self.began - self.waits.excluded())
 
-    async def blocking(self, name: str, work: Callable[[], Any]) -> Any:
+    async def blocking(self, work: Callable[[], Any]) -> Any:
         """`work` (a tenant read, a box run, the host checks) on a worker thread the attempt's
-        deadline can stop waiting on; the abandoned thread finishes on its own."""
+        deadline can stop waiting on; the abandoned thread finishes on its own (a python frame
+        ends sooner: the attempt's box is stopped under it)."""
         import anyio.to_thread
 
-        self.busy = name
-        try:
-            return await anyio.to_thread.run_sync(work, abandon_on_cancel=True)
-        finally:
-            self.busy = None
+        return await anyio.to_thread.run_sync(work, abandon_on_cancel=True)
 
 
 async def _within_deadline(run: _Run, work: Callable[[], Any]) -> tuple[bool, Any]:
@@ -683,10 +757,15 @@ class OraclePricingError(RuntimeError):
     could not bound it, so it is refused before any request goes out."""
 
 
-def _price_row(actor: str, model: Any) -> str:
+def _price_row(actor: str, given: Any) -> str:
+    """`actor`'s pricing row, from the model's name alone: a `Model`, a `BuiltModel` carrying
+    one, or a model built lazily from its knob (whose name needs no provider key)."""
     from defender._pricing import UnknownModel, model_key
 
-    name = str(getattr(model, "model_name", "") or "")
+    name = getattr(given, "model_name", None)
+    if name is None:
+        name = getattr(_model_and_settings(given)[0], "model_name", "")
+    name = str(name or "")
     try:
         return model_key(name)
     except UnknownModel:
@@ -712,7 +791,6 @@ def _guard(oracle: Oracle, actor: str) -> Any:
                 raise _AttemptOver(run.ended, told=True)
             try:
                 response = await handler(request_context)
-                oracle.charge(actor, response)
             except (_BudgetSpent, _AttemptOver):
                 raise
             except Exception as exc:  # noqa: BLE001 — a provider failure ends the attempt
@@ -724,6 +802,8 @@ def _guard(oracle: Oracle, actor: str) -> Any:
                 if actor == "verifier":
                     raise _VerifierGaveUp(f"the verifier's model request failed ({name})") from None
                 raise _AttemptOver(f"the model request failed ({name})") from None
+            # Outside the provider-failure handling: the request succeeded and was paid for.
+            oracle.charge(actor, response)
             return response
 
     return _Guard()
@@ -761,12 +841,15 @@ class Oracle:
         self._pending: list[Any] = []
         self._in_conversation = 0
         self._failures: list[str] = []
-        self._box: Any = None
-        self._boxes: list[Any] = []
+        #: The python box of the attempt running now, if it has one (`close` stops it).
+        self._live_box: _AttemptBox | None = None
         self.explored: list[tuple[str, Any]] = []
         self.unservable: OracleUnservable | None = None
-        #: Each role's pricing row, settled when its agent is built (`_price_row`).
-        self._price_rows: dict[str, str] = {}
+        #: Both roles' pricing rows, settled here, before any request: a role whose model has
+        #: none is refused before the oracle spends anything (`_price_row`).
+        self._price_rows: dict[str, str] = {
+            "oracle": _price_row("oracle", self.oracle_model),
+            "verifier": _price_row("verifier", self.verifier_model)}
 
     # -- the turn -----------------------------------------------------------------------------
 
@@ -812,7 +895,6 @@ class Oracle:
         from pydantic_ai import Agent, TextOutput, Tool, ToolOutput
 
         model, settings = _model_and_settings(self.oracle_model)
-        self._price_rows["oracle"] = _price_row("oracle", model)
         name, description, schema = _SUBMIT
         return Agent(
             model, model_settings=settings, instructions=_ORACLE_INSTRUCTIONS, deps_type=_Run,
@@ -831,12 +913,12 @@ class Oracle:
         from pydantic_ai import Agent, TextOutput, Tool, ToolOutput
 
         model, settings = _model_and_settings(self.verifier_model)
-        self._price_rows["verifier"] = _price_row("verifier", model)
         name, description, schema = _VERDICT
         tool, about, args = _ORACLE_TOOLS[0]
 
         async def run_query(ctx: Any, **query: Any) -> str:
-            return await ctx.deps.blocking("run_query", lambda: self._run_query("verifier", query))
+            run: _Run = ctx.deps
+            return await run.blocking(lambda: self._run_query("verifier", query, run.waits))
 
         return Agent(
             model, model_settings=settings, instructions=_VERIFIER_INSTRUCTIONS, deps_type=_Run,
@@ -849,7 +931,7 @@ class Oracle:
 
     def charge(self, actor: str, response: Any) -> None:
         """Charge one model response's spend to the world (oracle and verifier together), at
-        the price row settled when `actor`'s agent was built — never at whatever spelling the
+        the price row settled when the oracle was configured — never at whatever spelling the
         provider reports, which may name no row."""
         usage = response.usage
         reported = str(getattr(response, "model_name", None) or self._price_rows[actor])
@@ -862,14 +944,13 @@ class Oracle:
 
     def _give_up(self, stop: OracleUnservable) -> None:
         self.unservable = stop
-        self.close()
 
     def close(self) -> None:
-        """Tear down every box this oracle started."""
-        for box in self._boxes:
-            _stop_box(box)
-        self._boxes = []
-        self._box = None
+        """Stop the box of an attempt still running (the sibling is ending under it). Every
+        attempt stops its own box as it ends, so none is left otherwise."""
+        live = self._live_box
+        if live is not None:
+            live.stop()
 
     def _prefix(self) -> list[Any]:
         from pydantic_ai.messages import UserPromptPart
@@ -946,7 +1027,9 @@ class Oracle:
         if first or not self._conversation:
             self._start_call(call, base)
         self._in_conversation += 1
-        run = _Run(door=self.door, deadline=self.turn_deadline, call=call, base=base, real=real)
+        box = _AttemptBox(self.box_factory)
+        run = _Run(door=self.door, deadline=self.turn_deadline, call=call, base=base, real=real,
+                   box=box)
         # A verdict already handed over as a tool's result leaves nothing pending: the
         # conversation then ends on that request, and the run continues from it.
         history = [*self._conversation, *([ModelRequest(parts=self._pending)]
@@ -960,6 +1043,7 @@ class Oracle:
                 return await _within_deadline(run, lambda: self._oracle_agent.run(
                     message_history=history, deps=run))
 
+        self._live_box = box
         try:
             in_time, result = _run_coroutine(attempt)
         except _AttemptOver as over:
@@ -969,9 +1053,11 @@ class Oracle:
             self._conversation = _settled(held[-1])
             return self._fail_text(f"the model's replies could not be used "
                                    f"({type(unusable).__name__})")
+        finally:
+            # The attempt's box ends with it, an abandoned python frame inside it included.
+            self._live_box = None
+            box.stop()
         if not in_time:
-            if run.busy == "python":
-                self._box = None  # its frame may still be running: the next run starts fresh
             self._conversation = _settled(held[-1])
             return self._fail_text("the turn deadline passed before a submission")
         outcome: _Outcome = result.output
@@ -989,7 +1075,7 @@ class Oracle:
             if run.ended is not None:
                 return _NOT_RUN
             try:
-                return await run.blocking(name, lambda: self._tool(name, args, run))
+                return await run.blocking(lambda: self._tool(name, args, run))
             except (_AttemptFailed, StoreFailure) as failed:
                 run.ended = f"Attempt failed: {failed}."
                 return run.ended
@@ -1026,13 +1112,13 @@ class Oracle:
 
     def _tool(self, name: str, args: dict, run: _Run) -> str:
         if name == "run_query":
-            return self._run_query("oracle", args)
+            return self._run_query("oracle", args, run.waits)
         if name == "forge":
             return self._forge(args, run.attempt, names=esql_names(run.base))
         if name == "record_fact":
             return self._record(args, run.attempt)
         if name == "python":
-            return self._python(args)
+            return self._python(args, run)
         if name == "check":
             failures = self._check(run, args.get("served"), args.get("claim")).failures
             if not failures:
@@ -1040,10 +1126,10 @@ class Oracle:
             return "The draft fails:\n" + "\n".join(failures)
         return f"There is no tool named {wrap_fresh(str(name), 'untrusted')}."
 
-    def _run_query(self, actor: str, args: dict) -> str:
+    def _run_query(self, actor: str, args: dict, waits: LimiterWaits) -> str:
         system, verb, params = args.get("system"), args.get("verb"), args.get("params") or {}
         try:
-            answer = self.door.run(actor, system, verb, params)
+            answer = self.door.run(actor, system, verb, params, waits=waits)
         except Refused as refused:
             return wrap_fresh(str(refused), "untrusted")
         self.explored.append((str(system), answer))
@@ -1092,19 +1178,23 @@ class Oracle:
         attempt.facts[key] = value
         return "Fact staged for this attempt."
 
-    def _python(self, args: dict) -> str:
+    def _python(self, args: dict, run: _Run) -> str:
         from defender.runtime.box_codec import BoxFault
 
         code = args.get("code")
         if not isinstance(code, str):
             return "python refused: it needs code."
+        if run.box is None:
+            raise _AttemptFailed("python runs only in an oracle attempt's own box")
         try:
-            box = self._ensure_box()
+            box = run.box.get()
+        except _AttemptFailed:
+            raise
         except Exception as exc:  # noqa: BLE001 — no sandboxed box: the attempt fails (M18=A)
             raise _AttemptFailed("python needs the oracle's sandboxed box, and it could not "
                                  "start") from exc
         if not getattr(box, "sandboxed", False):
-            self._box = None
+            run.box.lost(box)
             raise _AttemptFailed("python needs a sandboxed box; the oracle's box is not "
                                  "sandboxed, and its code never runs on the host")
         cwd = getattr(box, "scratch", None) or _BOX_CWD
@@ -1114,17 +1204,11 @@ class Oracle:
         except subprocess.TimeoutExpired:
             return "python timed out."
         except BoxFault:
-            self._box = None
+            run.box.lost(box)
             return "python failed: the box was lost; a fresh one starts on the next run."
         out = (result.out or b"")[:_PYTHON_OUTPUT].decode("utf-8", "replace")
         err = (result.err or b"")[:_PYTHON_OUTPUT].decode("utf-8", "replace")
         return "\n".join([f"exit {result.rc}", _framed("stdout", out), _framed("stderr", err)])
-
-    def _ensure_box(self) -> Any:
-        if self._box is None:
-            self._box = self.box_factory()
-            self._boxes.append(self._box)
-        return self._box
 
     def _check_store(self, run: _Run) -> CheckStore:
         return CheckStore(frozen=self.store.frozen, staged=run.attempt.forged,
@@ -1154,7 +1238,7 @@ class Oracle:
         """A side query's answer, read once per attempt however often its draft is checked."""
         key = request_key(system, verb, params)
         if key not in run.reruns:
-            run.reruns[key] = self.door.run("host-check", system, verb, params)
+            run.reruns[key] = self.door.run("host-check", system, verb, params, waits=run.waits)
         return run.reruns[key]
 
     # -- submission ---------------------------------------------------------------------------
@@ -1163,7 +1247,7 @@ class Oracle:
         if "served" not in args or "claim" not in args:
             return self._verdict(["check 1: a submission needs both `served` and `claim`"])
         served, claim = _base_handle_resolved(args["served"], run.base), args["claim"]
-        checked = await run.blocking("submit", lambda: self._check(run, served, claim))
+        checked = await run.blocking(lambda: self._check(run, served, claim))
         if checked.failures:
             return self._verdict(checked.failures)
         parsed, _why = parse_claim(claim)
@@ -1172,7 +1256,7 @@ class Oracle:
         if not verdict.get("passed"):
             return self._verdict([f"the verifier failed the answer: "
                                   f"{wrap_fresh(str(verdict.get('reason') or ''), 'untrusted')}"])
-        await run.blocking("submit", lambda: self._note_collisions(run, checked))
+        await run.blocking(lambda: self._note_collisions(run, checked))
         return _Submitted(served=served, claim=structured(parsed), verdict=verdict,
                           attempt=run.attempt)
 
@@ -1205,7 +1289,7 @@ class Oracle:
         ])
         try:
             result = await self._verifier_agent.run(
-                context, deps=_Run(door=self.door, deadline=self.turn_deadline),
+                context, deps=_Run(door=self.door, deadline=self.turn_deadline, waits=run.waits),
                 usage_limits=UsageLimits(request_limit=_VERIFIER_STEPS))
         except _VerifierGaveUp as gave_up:
             return {"passed": False, "reason": str(gave_up)}

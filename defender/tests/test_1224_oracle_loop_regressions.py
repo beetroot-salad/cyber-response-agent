@@ -5,7 +5,9 @@ private import, one host checker), the turn-held context, the box-owned scratch 
 Second round: a forged row is fresh or frozen, never both (a frozen row is not re-judged, and a
 re-forged one is reused); one deadline over the whole attempt, tools included; one framing,
 with its size cap, for every prompt; one recorder for every delivered row; a price settled
-before any request. Each test is red on the code it replaces.
+before any request. Fourth round: the python box and the limiter-wait record belong to one
+attempt, the oracle-open clock mark to the process that wrote it; both price rows and the
+charge settle outside the provider-failure path. Each test is red on the code it replaces.
 """
 from __future__ import annotations
 
@@ -374,18 +376,24 @@ def test_a_slow_tool_is_cut_off_by_the_attempt_deadline(tmp_path):
 
 def test_an_unpriced_model_is_refused_before_any_request(tmp_path):
     """Second-round finding 5: a model with no pricing row was charged $0 per response, so the
-    oracle's budget never bounded it. Its price is settled when its agent is built, and a model
-    with none is refused before any request goes out."""
+    oracle's budget never bounded it. Its price is settled when the oracle is configured, and
+    a model with none is refused before any request goes out."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     model = ProviderLikeModel([("submit", {"served": ALICE_ROWS, "claim": S.EMPTY_CLAIM})],
                               name="no-such-model")
-    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=model,
-                           verifier=S.passing_verifier(), retry_cap=1)
 
     with pytest.raises(oracle_mod.OraclePricingError):
-        S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
+        _configure_and_ask(tmp_path, est, model, S.passing_verifier())
     assert model.requests == 0
+
+
+def _configure_and_ask(tmp_path: Path, est: Any, oracle: Any, verifier: Any) -> Any:
+    """Configure world b's registry over these models, then ask it one call: a refusal at
+    either step is the same refusal before any request."""
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=oracle, verifier=verifier,
+                           retry_cap=1)
+    return S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
 
 
 def test_an_undelivered_control_world_call_leaves_no_row(tmp_path):
@@ -537,3 +545,248 @@ def test_a_frozen_row_s_nested_id_collision_is_recorded():
     assert found[0]["real_rows"] == [{"@timestamp": "2026-03-01T09:00:00Z",
                                       "event.action": "exec", "process.name": "bash",
                                       "process.entity_id": _PROCESS_ID}]
+
+
+# --- fourth round: state belongs to whoever created it; preconditions settle before spending ---
+
+
+class _BoxLog:
+    def __init__(self) -> None:
+        self.names: list[str] = []
+        self.scratch: list[Path] = []
+        self.removed: list[str] = []
+        self.frames = 0
+
+
+def _python_box_factory(tmp_path: Path, *, slow_first: float = 0.0) -> tuple[Any, _BoxLog]:
+    """A sandboxed oracle box factory whose boxes carry a recording docker and a real scratch
+    folder, so a teardown shows as a `docker rm -f <name>` and a removed folder. The first frame
+    any of its boxes runs takes `slow_first` seconds (a python frame outliving the deadline)."""
+    from dataclasses import dataclass
+
+    from defender.runtime import box_codec as codec
+    from defender.runtime.box import _spec
+
+    log = _BoxLog()
+
+    def docker(argv: list[str], **_kw: Any) -> subprocess.CompletedProcess:
+        if argv[:3] == ["docker", "rm", "-f"]:
+            log.removed.append(argv[3])
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    @dataclass(frozen=True)
+    class _Frames(_spec._DockerTransport):
+        def __call__(self, frame: bytes, *, cwd: Path, timeout: float) -> Any:
+            log.frames += 1
+            if log.frames == 1 and slow_first:
+                time.sleep(slow_first)
+            return codec.RawExec(rc=0, stdout=codec.encode_response(
+                codec.BoxResult(rc=0, out=b"ok\n", err=b"")), stderr=b"")
+
+    def factory() -> Any:
+        name = f"oracle-box-r4-{len(log.names) + 1}"
+        scratch = tmp_path / "scratch" / name
+        scratch.mkdir(parents=True)
+        log.names.append(name)
+        log.scratch.append(scratch)
+        return OracleBox(spec=BoxSpec(), transport=_Frames(name=name, spec=BoxSpec()),
+                         name=name, docker=docker, scratch=scratch)
+
+    return factory, log
+
+
+def test_the_python_box_is_stopped_when_the_attempt_that_used_it_ends(tmp_path):
+    """Finding 9: the box outlived its attempt (kept for the sibling), and the reset after a
+    deadline never ran, so the next attempt's python shared the abandoned frame's container and
+    scratch. The box belongs to one attempt: started on its first python call, its container
+    and scratch removed when the attempt ends, whatever the ending."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    box, log = _python_box_factory(tmp_path)
+    o = S.oracle(S.python("print(1)"), S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, box=box,
+                           verifier=S.passing_verifier(), retry_cap=1)
+
+    assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == ALICE_ROWS
+
+    assert log.names == ["oracle-box-r4-1"], log.names
+    assert log.removed == log.names, "the verified attempt's box outlived it"
+    assert not any(p.exists() for p in log.scratch), "the attempt's scratch outlived it"
+
+
+def test_a_deadline_abandoned_python_frame_does_not_share_the_next_attempts_box(tmp_path):
+    """Finding 9: by the time `_attempt` asked whether python was busy, the cancelled tool had
+    cleared the flag, so the abandoned frame's box was kept and the next attempt ran in it. The
+    attempt that the deadline ends stops its box (ending the frame); the next starts its own."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    box, log = _python_box_factory(tmp_path, slow_first=1.5)
+    o = S.oracle(S.python("import time; time.sleep(60)"), S.python("print(2)"),
+                 S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, box=box,
+                           verifier=S.passing_verifier(), retry_cap=2, turn_deadline=0.4)
+
+    assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == ALICE_ROWS
+
+    assert len(log.names) == 2, f"the second attempt reused the abandoned box: {log.names}"
+    assert log.removed == log.names, log.removed
+    assert not any(p.exists() for p in log.scratch)
+
+
+class _GatedLimiter:
+    """A limiter double. The thread that acquired first (attempt 1's host check, abandoned
+    mid-check) blocks on its next `acquire` until another thread's wait (the next attempt's
+    own) releases it 0.2 s in; that wait then goes on for 1 s more."""
+
+    def __init__(self) -> None:
+        self.first: int | None = None
+        self.next_attempt_waited = False
+        self.abandoned_waiting = threading.Event()
+        self.release_abandoned = threading.Event()
+
+    def acquire(self) -> float:
+        me = threading.get_ident()
+        if self.first is None:
+            self.first = me
+            return 0.0
+        if me == self.first:
+            self.abandoned_waiting.set()
+            self.release_abandoned.wait(10)
+            return 0.0
+        began = time.monotonic()
+        self.abandoned_waiting.wait(10)
+        time.sleep(0.2)
+        self.release_abandoned.set()
+        time.sleep(1.0)
+        self.next_attempt_waited = True
+        return time.monotonic() - began
+
+
+def test_an_abandoned_attempts_limiter_wait_does_not_touch_the_next_attempts_clock(tmp_path):
+    """Finding 10: one `waiting_since` slot served every thread on the door, so a thread of an
+    abandoned attempt leaving `acquire` cleared the next attempt's wait in progress, and that
+    attempt was cut off for limiter time the deadline excludes. Each attempt keeps its own
+    wait record; a thread of another attempt cannot touch it."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    est.answer("idp", "query", BOB, BOB_ROWS)
+    est.answer("idp", "lookup", {"entity": "alice"}, LOOKUP_ALICE)
+    side = [S.removed(row, system="idp", verb="query", params=params, count=1)
+            for row, params in ((ALICE_ROWS["rows"][0], ALICE), (BOB_ROWS["rows"][0], BOB))]
+    o = S.oracle(S.check(ALICE_ROWS, S.claim(removed=side)),
+                 S.run_query("idp", "lookup", {"entity": "alice"}),
+                 S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+    limiter = _GatedLimiter()
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, limiter=limiter,
+                           verifier=S.passing_verifier(), retry_cap=2, turn_deadline=0.5)
+    door = reg.oracle.door
+    real_context = door.context
+    slowed: list[bool] = []
+
+    def slow_once() -> Any:
+        # The first side query's counted work outlives attempt 1's deadline; its thread is
+        # abandoned and goes on into the second side query's limiter wait.
+        if not slowed:
+            slowed.append(True)
+            time.sleep(0.9)
+        return real_context()
+
+    door.context = slow_once
+
+    assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == ALICE_ROWS
+    assert limiter.abandoned_waiting.is_set(), "attempt 1's thread never reached the limiter"
+    assert limiter.next_attempt_waited, "the next attempt never waited on the limiter"
+
+
+def test_an_oracle_open_mark_left_by_a_dead_process_does_not_stop_the_clock(tmp_path):
+    """Finding 7: a sibling killed mid-turn left `oracle_open_since` in budget.json, and every
+    later read counted `now - opened` as oracle-held, so a resume's elapsed time stood still and
+    the wall-clock limit never tripped. The mark names the process that wrote it; one whose
+    writer is gone is ignored. A mark this live process wrote still holds the clock (control)."""
+    import os
+    import sys
+
+    from defender.hooks import budget_enforcer as be
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    be.open_budget(run_dir, "r-1")
+    root = Path(be.__file__).resolve().parents[2]
+    subprocess.run(
+        [sys.executable, "-c", "import sys; from pathlib import Path; "
+         "from defender.hooks.budget_enforcer import oracle_turn_opened; "
+         "oracle_turn_opened(Path(sys.argv[1]))", str(run_dir)],
+        check=True, env={**os.environ, "PYTHONPATH": str(root)})
+    assert be.ORACLE_OPEN_KEY in be.read_budget(run_dir)
+
+    first = be._elapsed(be.read_budget(run_dir))
+    time.sleep(0.3)
+    later = be._elapsed(be.read_budget(run_dir))
+    assert first is not None
+    assert later is not None
+    assert later - first >= 0.25, f"a dead writer's mark froze the clock ({first} -> {later})"
+
+    be.oracle_turn_opened(run_dir)
+    held = be._elapsed(be.read_budget(run_dir))
+    time.sleep(0.3)
+    assert be._elapsed(be.read_budget(run_dir)) - held < 0.1, "a live turn no longer holds"
+
+
+def test_a_failure_closing_the_oracle_mark_does_not_replace_the_unservable_abort(tmp_path,
+                                                                               monkeypatch):
+    """Finding 7, second half: `oracle_turn_closed` raising in the turn's `finally` replaced an
+    in-flight `OracleUnservable`, which was then filed as a fault row instead of ending the
+    sibling. The abort leaves the turn as itself."""
+    from defender.learning.branch.estate import registry as registry_mod
+
+    def broken(_run_dir: Path) -> None:
+        raise OSError("budget.json lock timed out")
+
+    monkeypatch.setattr(registry_mod, "oracle_turn_closed", broken)
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=S.oracle(S.text_only("no.")),
+                           verifier=S.passing_verifier(), retry_cap=1)
+
+    with pytest.raises(oracle_mod.OracleUnservable):
+        S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
+
+
+def test_an_unpriced_verifier_is_refused_before_the_oracles_first_request(tmp_path):
+    """Finding 6: the verifier's price row was settled only when its agent was first built,
+    after the oracle's paid attempt, so pre-flight paid and then aborted. Both roles' rows are
+    settled when the oracle is configured, before any request."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    model = ProviderLikeModel([("submit", {"served": ALICE_ROWS, "claim": S.EMPTY_CLAIM})])
+    unpriced = ProviderLikeModel([("verdict", {"passed": True, "reason": "ok"})],
+                                 name="no-such-verifier-model")
+
+    with pytest.raises(oracle_mod.OraclePricingError, match="verifier"):
+        _configure_and_ask(tmp_path, est, model, unpriced)
+    assert model.requests == 0, "the oracle paid for a request before the refusal"
+
+
+def test_a_failing_trace_write_still_charges_and_is_not_a_model_failure(tmp_path, monkeypatch):
+    """Finding 8: the charge ran inside the provider-failure `try`, so a failed `trace.jsonl`
+    append was reported as a failed model request, the paid response's cost never reached
+    `spent`, and the verifier re-asked (paying again). Only the model call is guarded: the
+    spend is counted whatever the trace write does, and the answer is served."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+    v = S.passing_verifier()
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, verifier=v, retry_cap=1)
+    trace = reg.store.paths.trace
+    real_write = oracle_mod.write_guarded
+
+    def refuse_trace(path: Path, *a: Any, **kw: Any) -> Any:
+        if Path(path) == trace:
+            raise OSError(28, "No space left on device")
+        return real_write(path, *a, **kw)
+
+    monkeypatch.setattr(oracle_mod, "write_guarded", refuse_trace)
+
+    assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == ALICE_ROWS
+    assert reg.store.spent > 0, "the paid responses were not charged"
+    assert (o.requests, v.requests) == (1, 1), (o.requests, v.requests)
