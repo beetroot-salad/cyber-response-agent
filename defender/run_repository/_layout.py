@@ -315,7 +315,7 @@ WIRE_LOG_NAMES = WireLogNames()
 class RunPaths:
     """One run's directories and its accessors — every name a run reads or writes.
 
-    19 accessors (a census test checks this count against the set it pins).
+    18 accessors (a census test checks this count against the set it pins).
 
     Accessors resolve relative to ``run_dir``, except the five sidecars, `sessions_dir` and
     `session_db`, which take the runs base explicitly.
