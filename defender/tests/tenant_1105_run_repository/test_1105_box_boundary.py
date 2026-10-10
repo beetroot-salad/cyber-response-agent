@@ -22,7 +22,7 @@ is named `defender-run-<206-byte id>` (219 characters): CI starts that box under
 that refused the name fails the session's `start_box` here.
 The host tree is observed twice after the box stops: entry for entry and byte for byte
 (`H.tree_state`, the run's own folder excluded — the box writes there by design), and through
-the repository's own readers (`list_run_ids`, `sibling_run_ids`, `run_exists`), which must
+the repository's own readers (`runs.list()`, `sibling_run_ids`, `runs.exists`), which must
 answer exactly what the planted tree says: the box neither hid a run nor forged a claim.
 
 WHERE IT RUNS, AND WHY IT CANNOT SKIP IN CI. The file carries the `box` marker, so CI's main
@@ -261,7 +261,7 @@ def test_1105_a_sandboxed_box_cannot_write_the_runs_folder_the_tenant_record_or_
     unchanged, while a control write inside the run folder lands (the shape of GR-A1 and GR-A2).
     The file skips with its reason where no daemon or no registered runtime can start a box. The
     host tree is observed entry for entry and through the repository's own readers."""
-    from defender.run_repository import RunId, list_run_ids, sibling_run_ids
+    from defender.run_repository import RunId, sibling_run_ids
 
     s = box_session
     assert s["sandboxed"] is True, (
@@ -280,9 +280,9 @@ def test_1105_a_sandboxed_box_cannot_write_the_runs_folder_the_tenant_record_or_
     assert s["after"] == s["before"], (
         "the host's runs folder changed outside the run's own folder: "
         f"{sorted(set(s['after'].items()) ^ set(s['before'].items()))[:6]}")
-    listed = list_run_ids(s["tenant"])
+    listed = list(s["tenant"].runs_repository().list())
     assert listed == [RunId.parse(SIBLING_ID), RunId.parse(RUN_ID)], (
-        f"after the box ran, list_run_ids must answer the planted runs, no more no fewer: {listed!r}")
+        f"after the box ran, runs.list() must answer the planted runs, no more no fewer: {listed!r}")
     claimed = sibling_run_ids(s["tenant"])
     assert claimed == {RunId.parse(ARM_ID)}, (
         f"after the box ran, the claims must be the host-written record's alone: {claimed!r}")
@@ -297,7 +297,7 @@ def test_1105_a_sandboxed_box_sees_only_its_own_run_folder_not_the_tenant_record
     the box started sandboxed, the run's own folder is listed and its control write lands. The
     host's own view of the same folder, through the repository, holds each planted run (the
     219-byte sidecar name, beyond RunId's bound, is checked on disk)."""
-    from defender.run_repository import RunId, run_exists
+    from defender.run_repository import RunId
 
     s = box_session
     assert s["sandboxed"] is True, (
@@ -311,7 +311,7 @@ def test_1105_a_sandboxed_box_sees_only_its_own_run_folder_not_the_tenant_record
     assert s["control_on_host"] == CONTROL, "positive control: the control write lands on the host"
     t = s["tenant"]
     for name in (SIBLING_ID, RUN_ID):
-        assert run_exists(t, RunId.parse(name)) is True, (
+        assert t.runs_repository().exists(RunId.parse(name)) is True, (
             f"the host's runs folder holds {name!r}, which the box must not list")
     for name in ("_tenant.json", "_episodes", f"{RUN_ID}{H.SIDECAR_SUFFIXES[0]}"):
         assert (s["runs"] / name).exists(), f"the host's runs folder holds {name}"

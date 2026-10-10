@@ -1,12 +1,13 @@
 """The file-backed `Run` handle: five sub-collections, a `RunRecord` value object, and a
 per-kind `RecordHandle` every record accessor answers.
 
-`Run.for_tenant(tenant_id, run_id, *, runs_base, io=)` is the constructor run setup uses; it
-refuses a runs folder with no tenant record. `Run.at(directory)` is the eval/fixture/tooling
-escape hatch with no runs base. `Run.under` builds the handle with no I/O: `for_tenant` uses it
-after judging the record, and so does the repository's `open_run`, which judged the record
-through its own held runs folder. Outside the package every constructor is gated by
-`scripts/lint/lint_run_layout_imports.py`; application code gets a `Run` from `open_run`.
+`Run.for_tenant(tenant_id, run_id, *, runs_base, io=)` is the constructor the repository's
+creates use; it refuses a runs folder with no tenant record. `Run.at(directory)` is the
+eval/fixture/tooling escape hatch with no runs base. `Run.under` builds the handle with no I/O:
+`for_tenant` uses it after judging the record, and so does the repository's `open`, which
+judged the record through its own held runs folder. Outside the package every constructor is
+gated by `scripts/lint/lint_run_layout_imports.py`; application code gets a `Run` from its
+tenant's repository (`tenant.runs_repository().open(run_id)`, `.create`, or an episode view's).
 
 Every accessor answers a `RecordHandle` (`.path`, `.read`, and the record's own write verb),
 never parsed contents. Asking for `.path` creates nothing; writes create the holding directory
@@ -295,6 +296,25 @@ class Run:
     def subcollections(self) -> tuple[str, ...]:
         return GROUPS
 
+    @property
+    def run_id(self) -> RunId:
+        """The address's run half, as a `RunId` (the run folder's own name, which the
+        constructors admitted)."""
+        return RunId.parse(self.run_dir.name)
+
+    def runs_base_env(self) -> dict[str, str]:
+        """The environment entry naming this run's container (`DEFENDER_RUNS_BASE`), handed out
+        so a caller passes it on without naming the folder (#1105 PR 2)."""
+        return RunPaths(self.run_dir).runs_base_env()
+
+    def make_run_dir(self) -> None:
+        """Make the run folder and its `gather_raw/` (run setup), judged component by component
+        from the container — the trust root this handle holds — so a link at the run id or at
+        `gather_raw` is refused and nothing above the container is judged. The container is
+        never handed out for it (#1105 PR 2, J15)."""
+        self._io.guarded_mkdir(RunPaths(self.run_dir).gather_raw,
+                               base=self._runs_base_for("make_run_dir", "gather_raw"))
+
     def _record_partial_failure(self, note: str) -> None:
         self.partial_failures = (*self.partial_failures, note)
 
@@ -363,7 +383,7 @@ class Run:
         cls, runs_base: Path, run_id: str | RunId, *, io: Any = _real_io,
         tenant_id: str | None = None,
     ) -> Run:
-        """The no-I/O builder `for_tenant` and `open_run` share — not a public front door. The
+        """The no-I/O builder `for_tenant` and the repository's `open` share — not a public front door. The
         id is a `RunId`, or text `RunId.parse` admits (`RunRefused` otherwise): the repository
         has one admission rule, its 206-byte bound included, so no handle is built for a run
         whose sidecar files could not be named."""

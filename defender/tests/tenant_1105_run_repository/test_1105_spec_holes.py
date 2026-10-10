@@ -8,7 +8,7 @@ its neighbours (a plain file, a FIFO, a badly named file) stayed green:
 * B1 — every READER over a linked or file `_episodes` (NM-04, R1, MF-17), and run setup's
        claimed-id check over it;
 * B2 — every lookup and record function over a file or FIFO at `tenant.runs` (H2, P2);
-* B3 — `open_run` over a file or FIFO at the run's name (H6 step 4);
+* B3 — `runs.open` (PR 1's `open_run`) over a file or FIFO at the run's name (H6 step 4);
 * C  — a sidecar-suffixed regular file whose owner `RunId.parse` refuses (rev 4.1, H4);
 * S  — a link or FIFO wearing a sidecar's name (rev 4.1: sidecars are regular files; H4);
 * D1 — a JSON-escaped lone surrogate in a record (NM-04);
@@ -43,31 +43,24 @@ def _good(tmp_path: Path, *run_ids: str, tenant_id: str = H.T_ID):
     return t
 
 
-def _bound_ids(t) -> list[str]:
-    from defender.run_repository import bound_runs
-
-    with bound_runs(t) as runs:
-        return [str(rid) for rid, _row in runs]
-
-
 def _listings(t, run_id: str = "r1"):
-    """The functions that judge the whole runs folder's listing."""
-    from defender.run_repository import RunId, list_run_ids, run_exists
+    """The repository methods that judge the whole runs folder's listing (PR 1's `list_run_ids`
+    and `run_exists`; `bound_runs` is gone, #1105 PR 2)."""
+    from defender.run_repository import RunId
 
     return [
-        ("list_run_ids", lambda: list_run_ids(t)),
-        ("bound_runs", lambda: _bound_ids(t)),
-        ("run_exists", lambda: run_exists(t, RunId.parse(run_id))),
+        ("runs.list", lambda: t.runs_repository().list()),
+        ("runs.exists", lambda: t.runs_repository().exists(RunId.parse(run_id))),
     ]
 
 
 def _every_function(t, *, run_id: str = "r1", episode_id: str = "ep9"):
     from defender.run_repository import (
-        RunId, episode_runs, open_run, record_episode_runs, sibling_run_ids,
+        RunId, episode_runs, record_episode_runs, sibling_run_ids,
     )
 
     return [*_listings(t, run_id),
-            ("open_run", lambda: open_run(t, RunId.parse(run_id))),
+            ("runs.open", lambda: t.runs_repository().open(RunId.parse(run_id))),
             ("record_episode_runs", lambda: record_episode_runs(
                 t, episode_id, RunId.parse(run_id), {"a": RunId.parse(f"{episode_id}-a")})),
             ("episode_runs", lambda: episode_runs(t, "ep")),
@@ -114,11 +107,10 @@ def test_1105_run_setup_refuses_a_non_directory_runs_folder_before_creating_anyt
 @pytest.mark.parametrize("kind", ["link", "file"])
 def test_1105_every_reader_refuses_a_linked_or_file_episodes(tmp_path, data_root, kind):
     """`_episodes` as a link (to a real folder holding a good record) and as a regular file:
-    list_run_ids, bound_runs, sibling_run_ids and the path-only episode_sibling_ids each raise
+    runs.list (PR 1's list_run_ids), sibling_run_ids and the path-only episode_sibling_ids each raise
     RunRefused naming `_episodes` — never "no claims" — and run setup refuses a pinned id with
     one stderr line, creating no run folder."""
-    from defender.run_repository import RunRefused, episode_sibling_ids, list_run_ids, \
-        sibling_run_ids
+    from defender.run_repository import RunRefused, episode_sibling_ids, sibling_run_ids
 
     t = _good(tmp_path, "r0", "ep-a")
     runs = Path(t.runs)
@@ -128,8 +120,7 @@ def test_1105_every_reader_refuses_a_linked_or_file_episodes(tmp_path, data_root
         os.symlink(outside / "_episodes", runs / "_episodes")
     else:
         (runs / "_episodes").write_text("{}\n", encoding="utf-8")
-    readers = [("list_run_ids", lambda: list_run_ids(t)),
-               ("bound_runs", lambda: _bound_ids(t)),
+    readers = [("runs.list", lambda: t.runs_repository().list()),
                ("sibling_run_ids", lambda: sibling_run_ids(t))]
     for name, call in readers:
         err = H.raised(call)
@@ -168,14 +159,15 @@ def test_1105_every_function_refuses_a_non_directory_runs_folder(tmp_path, kind)
             f"a {kind} at tenant.runs: {name} answered or raised {err!r}")
 
 
-# -- B3: open_run over a non-directory at the run's name ---------------------------------------
+# -- B3: runs.open over a non-directory at the run's name --------------------------------------
 
 
 @pytest.mark.parametrize("kind", ["file", "fifo"])
 def test_1105_open_run_refuses_a_non_directory_at_the_runs_name(tmp_path, kind):
-    """A regular file and a FIFO named r2 in the runs folder: open_run raises RunRefused naming
-    the path; no Run is handed out (H6 step 4: a real directory, anything else refuses)."""
-    from defender.run_repository import RunId, RunRefused, open_run
+    """A regular file and a FIFO named r2 in the runs folder: runs.open (PR 1's open_run) raises
+    RunRefused naming the path; no Run is handed out (H6 step 4: a real directory, anything else
+    refuses)."""
+    from defender.run_repository import RunId, RunRefused
 
     t = _good(tmp_path, "r1")
     entry = Path(t.runs) / "r2"
@@ -183,8 +175,8 @@ def test_1105_open_run_refuses_a_non_directory_at_the_runs_name(tmp_path, kind):
         entry.write_text("x\n", encoding="utf-8")
     else:
         H.make_fifo(entry)
-    err = H.raised(open_run, t, RunId.parse("r2"))
-    assert H.is_a(err, RunRefused), f"a {kind} at r2: open_run gave {err!r}"
+    err = H.raised(t.runs_repository().open, RunId.parse("r2"))
+    assert H.is_a(err, RunRefused), f"a {kind} at r2: runs.open gave {err!r}"
     assert str(entry) in H.message(err), f"the refusal does not name {entry}: {err!r}"
 
 
@@ -198,7 +190,7 @@ def test_1105_open_run_refuses_a_non_directory_at_the_runs_name(tmp_path, kind):
 ])
 def test_1105_a_sidecar_file_whose_owner_is_not_a_run_id_refuses_the_listings(tmp_path, name):
     """A regular file with a known sidecar suffix whose `<id>` RunId.parse refuses, beside a
-    good run: both listings and run_exists raise RunRefused naming it (rev 4.1: known sidecar
+    good run: runs.list and runs.exists raise RunRefused naming it (rev 4.1: known sidecar
     files are named `<id><suffix>` with `<id>` a run id; H4: any other entry refuses)."""
     from defender.run_repository import RunRefused
 
@@ -212,7 +204,7 @@ def test_1105_a_sidecar_file_whose_owner_is_not_a_run_id_refuses_the_listings(tm
 
 @pytest.mark.parametrize("kind", ["link", "fifo"])
 def test_1105_a_link_or_fifo_wearing_a_sidecar_name_refuses_the_listings(tmp_path, kind):
-    """A link and a FIFO named `r1.run-end.json` beside run r1: both listings and run_exists
+    """A link and a FIFO named `r1.run-end.json` beside run r1: runs.list and runs.exists
     raise RunRefused naming it. A known sidecar is a REGULAR file (rev 4.1)."""
     from defender.run_repository import RunRefused
 

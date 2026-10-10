@@ -93,7 +93,9 @@ NAMED_GATED = ("RunPaths", "RUN_LAYOUT", "SessionPaths", "WIRE_LOG_NAMES", "GATE
                "RunLayout", "WireLogNames", "resolve_run_bundle")
 #: The door's public names that are not layout names (D1.3).
 NON_LAYOUT = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref", "RunId",
-                        "open_run", "list_run_ids", "bound_runs", "run_exists",
+                        # #1105 PR 2 (declared change 0): the tenant-scoped repository's names
+                        # replace PR 1's four Tenant-taking lookups at the door.
+                        "RunsRepository", "EpisodeRuns", "Listed", "RunAddress", "RunAbsent",
                         "record_episode_runs", "episode_runs", "sibling_run_ids",
                         "episode_sibling_ids", "RunRefused",
                         # Owner rulings (the high and xhigh reviews): the two decisions the

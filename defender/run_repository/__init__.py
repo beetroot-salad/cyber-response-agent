@@ -1,5 +1,6 @@
-"""The runs repository (#1105): the one owner of run-folder layout, the run handle, run lookup
-and the episode -> runs record. This module is its door.
+"""The runs repository (#1105): the one owner of run-folder layout, the run handle, the
+tenant-scoped repository (`Tenant.runs_repository()`, PR 2) and the episode -> runs record.
+This module is its door.
 
 The door serves the public surface lazily (PEP 562 `__getattr__`): reading a name imports the
 one submodule that defines it, and nothing else. That is load-bearing twice over (R4-6):
@@ -42,13 +43,13 @@ if TYPE_CHECKING:
         RunId,
     )
     from defender.run_repository._lookup import (
-        open_run, list_run_ids, bound_runs, run_exists,
+        RunsRepository, EpisodeRuns, Listed, RunAddress,
     )
     from defender.run_repository._record import (
         record_episode_runs, episode_runs, sibling_run_ids, episode_sibling_ids,
     )
     from defender.run_repository._errors import (
-        RunRefused,
+        RunRefused, RunAbsent,
     )
     from defender.run_repository._held import (
         hold_runs_folder, run_name_fault,
@@ -74,9 +75,9 @@ _HOMES: dict[str, str] = {
     ), "_layout"),
     **dict.fromkeys(("Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref",), "_handle"),
     **dict.fromkeys(("RunId",), "_id"),
-    **dict.fromkeys(("open_run", "list_run_ids", "bound_runs", "run_exists",), "_lookup"),
+    **dict.fromkeys(("RunsRepository", "EpisodeRuns", "Listed", "RunAddress",), "_lookup"),
     **dict.fromkeys(("record_episode_runs", "episode_runs", "sibling_run_ids", "episode_sibling_ids",), "_record"),
-    **dict.fromkeys(("RunRefused",), "_errors"),
+    **dict.fromkeys(("RunRefused", "RunAbsent",), "_errors"),
     **dict.fromkeys(("hold_runs_folder", "run_name_fault",), "_held"),
 }
 
@@ -94,9 +95,9 @@ __all__ = [
     "SessionPaths", "LEAD_ID_BODY", "LEAD_ID_RE", "GATHER_RAW_SHAPE", "CASE_ANSWER_KEY_NAMES",
     "is_case_answer_key", "gather_summaries_shape", "artifact_file", "plain_file", "artifact_dir",
     "resolve_run_bundle", "contained_payload", "Run", "RunRecord", "ArchivedWorld",
-    "RecordHandle", "case_ref", "RunId", "open_run", "list_run_ids", "bound_runs", "run_exists",
+    "RecordHandle", "case_ref", "RunId", "RunsRepository", "EpisodeRuns", "Listed", "RunAddress",
     "record_episode_runs", "episode_runs", "sibling_run_ids", "episode_sibling_ids", "RunRefused",
-    "hold_runs_folder", "run_name_fault",
+    "RunAbsent", "hold_runs_folder", "run_name_fault",
 ]
 
 

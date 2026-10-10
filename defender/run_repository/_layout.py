@@ -114,6 +114,9 @@ _STAGED_TAIL = re.compile(r"\.staged-[0-9a-f]+\Z")
 
 #: The sessions directory is a sibling of the runs base, never a child.
 SESSIONS_DIRNAME = "sessions"
+#: The environment variable a host or box child reads its run's container from
+#: (`RunPaths.runs_base_env`, the one producer of its value).
+_RUNS_BASE_ENV = "DEFENDER_RUNS_BASE"
 
 
 # ==========================================================================================
@@ -450,21 +453,40 @@ class RunPaths:
         return self.run_dir / RUN_LAYOUT.provenance
 
     # -- upward: the runs base, and the sessions dir beside it -------------------------------
+    #
+    # A sidecar sits beside the run folder, in its container. Each accessor takes that
+    # container, or — `runs_base` left out — derives it here, from the folder (#1105 PR 2,
+    # J15): a caller holding only its run folder never names the container itself.
 
-    def run_end_sidecar(self, runs_base: Path) -> Path:
-        return Path(runs_base) / f"{self.run_dir.name}{RUN_END_SIDECAR_SUFFIX}"
+    def _container(self, runs_base: Path | None) -> Path:
+        return self.run_dir.parent if runs_base is None else Path(runs_base)
 
-    def scrub_verdict(self, runs_base: Path) -> Path:
-        return Path(runs_base) / f"{self.run_dir.name}{SCRUB_VERDICT_SUFFIX}"
+    def run_end_sidecar(self, runs_base: Path | None = None) -> Path:
+        return self._container(runs_base) / f"{self.run_dir.name}{RUN_END_SIDECAR_SUFFIX}"
 
-    def accounting_failures(self, runs_base: Path) -> Path:
-        return Path(runs_base) / f"{self.run_dir.name}{ACCOUNTING_FAILURES_SUFFIX}"
+    def scrub_verdict(self, runs_base: Path | None = None) -> Path:
+        return self._container(runs_base) / f"{self.run_dir.name}{SCRUB_VERDICT_SUFFIX}"
 
-    def ticket_write(self, runs_base: Path) -> Path:
-        return Path(runs_base) / f"{self.run_dir.name}{TICKET_WRITE_SUFFIX}"
+    def accounting_failures(self, runs_base: Path | None = None) -> Path:
+        return self._container(runs_base) / f"{self.run_dir.name}{ACCOUNTING_FAILURES_SUFFIX}"
 
-    def oracle_held(self, runs_base: Path) -> Path:
-        return Path(runs_base) / f"{self.run_dir.name}{ORACLE_HELD_SUFFIX}"
+    def ticket_write(self, runs_base: Path | None = None) -> Path:
+        return self._container(runs_base) / f"{self.run_dir.name}{TICKET_WRITE_SUFFIX}"
+
+    def oracle_held(self, runs_base: Path | None = None) -> Path:
+        return self._container(runs_base) / f"{self.run_dir.name}{ORACLE_HELD_SUFFIX}"
+
+    def runs_base_env(self) -> dict[str, str]:
+        """The environment entry naming this run's container, for a host or box child
+        (`DEFENDER_RUNS_BASE`, the derived per-run corpus root): handed out here so the caller
+        passes it through without naming the folder (#1105 PR 2, row 26). The value is the run
+        folder's parent, as before."""
+        return {_RUNS_BASE_ENV: str(self.run_dir.parent)}
+
+    def session_paths(self) -> SessionPaths:
+        """The session store's paths for this run's container (`SessionPaths`), derived here
+        from the run folder (#1105 PR 2, fork S): the store's caller hands them on whole."""
+        return SessionPaths(self.run_dir.parent)
 
     def sessions_dir(self, runs_base: Path) -> Path:
         """The sessions directory (a sibling of the runs base), from `SessionPaths`."""
@@ -503,6 +525,12 @@ class SessionPaths:
         case-unstable lineage id."""
         refuse_bad_case_id(lineage_id)
         return self.sessions_dir / f"{lineage_id}{SESSION_DB_SUFFIX}"
+
+    def store(self, lineage_id: str) -> tuple[Path, Path]:
+        """The store for `lineage_id` and the root its directory is made under, as one hand-out
+        (#1105 PR 2, fork S): the session store opens the first and guards its mkdir at the
+        second, and names neither the runs base nor the trust root itself."""
+        return self.session_db(lineage_id), self.trust_root
 
 
 # A run bundle is always `runs_dir / <run_id>`, so a recorded `source_run_dir` contributes

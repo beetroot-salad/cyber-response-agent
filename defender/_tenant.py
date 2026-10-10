@@ -31,7 +31,7 @@ import uuid
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import ValidationError
 from pydantic_core import core_schema
@@ -47,6 +47,9 @@ from defender._tenants import (
     TENANT_ID_FILE,
     TOP_LEVEL_ALLOWED,
 )
+
+if TYPE_CHECKING:
+    from defender.run_repository._lookup import RunsRepository
 
 _R = TypeVar("_R")
 
@@ -415,6 +418,14 @@ class Tenant:
     @property
     def agent(self) -> Path:
         return self._layout.agent
+
+    def runs_repository(self) -> RunsRepository:
+        """This tenant's runs repository (#1105 PR 2, decision C): bound to this tenant, and
+        below it everything is ids. Only an accepted `Tenant` exists, so this is the one way a
+        repository is built. The package is imported here, lazily: it imports this module."""
+        from defender.run_repository._lookup import RunsRepository
+
+        return RunsRepository(self)
 
 
 def requested_tenant_id(raw: object) -> TenantId:

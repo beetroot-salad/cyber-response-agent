@@ -45,7 +45,7 @@ def test_the_repository_reads_and_writes_episode_records_without_the_model_stack
         R.record_episode_runs(t, "ep", R.RunId.parse("r0"), {{"a": R.RunId.parse("ep-a")}})
         assert R.episode_runs(t, "ep") == {{"a": R.RunId.parse("ep-a")}}
         assert R.sibling_run_ids(t) == {{R.RunId.parse("ep-a")}}
-        assert [str(i) for i in R.list_run_ids(t)] == ["r0"]
+        assert [str(i) for i in t.runs_repository().list()] == ["r0"]
         assert "pydantic_ai" not in sys.modules and "defender.runtime.branch" not in sys.modules
         print("ok")
     ''')
@@ -89,21 +89,6 @@ def test_a_run_refused_escapes_its_own_message():
     assert "\n" not in str(err), str(err)
     assert "\x1b" not in str(err), str(err)
     assert str(R.RunRefused(str(err))) == str(err), "escaping an escaped message changes it"
-
-
-def test_a_row_refusal_under_a_folder_with_a_newline_stays_one_line(tmp_path):
-    """The review's site: a `bound_runs` row read that is refused, under a runs folder whose
-    path carries a newline."""
-    t = H.tenant(tmp_path / _FORGED)
-    runs = H.runs_folder(t)
-    run = H.make_run(runs, "r1")
-    (run / "alert.json").unlink()
-    os.symlink(tmp_path / "elsewhere.json", run / "alert.json")
-    with R.bound_runs(t) as rows:
-        (_rid, row), = list(rows)
-        with pytest.raises(R.RunRefused) as refused:
-            row.read("alert.json")
-    assert "\n" not in str(refused.value), str(refused.value)
 
 
 def _lint_run_records():
@@ -163,8 +148,10 @@ def test_another_tenants_record_is_a_record_mismatch_everywhere(tmp_path):
     runs = H.runs_folder(t)
     H.make_run(runs, "r0")
     H.plant_tenant_record(runs, H.U_ID)
-    for call in (lambda: R.open_run(t, R.RunId.parse("r0")), lambda: R.list_run_ids(t),
-                 lambda: R.run_exists(t, R.RunId.parse("r0")), lambda: R.sibling_run_ids(t)):
+    for call in (lambda: t.runs_repository().open(R.RunId.parse("r0")),
+                 lambda: t.runs_repository().list(),
+                 lambda: t.runs_repository().exists(R.RunId.parse("r0")),
+                 lambda: R.sibling_run_ids(t)):
         with pytest.raises(TenantRecordMismatch):
             call()
 
@@ -175,7 +162,7 @@ def test_an_absent_runs_folder_refusal_carries_no_stale_error(tmp_path):
     from defender._tenant import TenantRefused
     t = H.tenant(tmp_path / "data")
     with pytest.raises(TenantRefused) as refused:
-        R.open_run(t, R.RunId.parse("r0"))
+        t.runs_repository().open(R.RunId.parse("r0"))
     assert refused.value.__context__ is None, repr(refused.value.__context__)
 
 
@@ -297,7 +284,7 @@ def test_run_setup_and_the_lookups_refuse_a_linked_runs_folder_in_the_same_words
     with pytest.raises(TenantRefused) as setup:
         run_common.materialize_run(alert, "pinned-1", tenant=t)
     with pytest.raises(TenantRefused) as lookup:
-        R.list_run_ids(t)
+        t.runs_repository().list()
     assert str(setup.value) == str(lookup.value), (str(setup.value), str(lookup.value))
     assert "is a link" in str(setup.value), str(setup.value)
 
@@ -323,13 +310,13 @@ def test_a_sidecar_shaped_label_is_refused_at_the_family_gate():
 
 
 def test_run_exists_and_the_writer_agree_on_a_taken_id(tmp_path):
-    """An id that owns sidecar files but has no run folder is taken for both: `run_exists`
-    answers True and the writer refuses it as an arm."""
+    """An id that owns sidecar files but has no run folder is taken for both: `runs.exists`
+    (PR 1's `run_exists`) answers True and the writer refuses it as an arm."""
     t = H.tenant(tmp_path / "data")
     runs = H.runs_folder(t)
     H.make_run(runs, "r0")
     (runs / "ep-a.run-end.json").write_text("{}", encoding="utf-8")
-    assert R.run_exists(t, R.RunId.parse("ep-a")) is True
+    assert t.runs_repository().exists(R.RunId.parse("ep-a")) is True
     with pytest.raises(R.RunRefused, match="taken"):
         R.record_episode_runs(t, "ep", R.RunId.parse("r0"), {"a": R.RunId.parse("ep-a")})
 

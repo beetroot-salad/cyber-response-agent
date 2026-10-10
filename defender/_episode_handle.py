@@ -15,14 +15,96 @@ the class; a folder answers `.path` and `.ensure()`. Each verb is one call on th
 `view()` is a `Bound` over the same held folder, for a pass that reads the tree it writes (the
 judge). Readers that bind the episode dir on their own keep their `_io.bind`. The archive's
 copy lane (`learning/branch/archive.py`) is the declared exception and does not go through here.
+
+The owner also has the episodes root and the episode id (#1105 PR 2, D-ep): `episodes_root`
+(the one reader of `DEFENDER_EPISODES_BASE`, with its refusals), `refuse_bad_episode_id`, and
+the id-taking doors `Episode.open_in(data_root, episode_id)` / `Episode.create_in(...)`, each
+refusing a bad id or an unusable root (`EpisodeRefused`) before anything is read. The owner
+never reads inside the episode's `runs/`: that container and its arms are the runs repository's
+episode view (`tenant.runs_repository().episode(episode_id)`), built on this handle. The one
+hand-out of the container's path is `box_mounted_container`, for a sibling's acceptance.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from defender import _io as _real_io
 from defender._episode_paths import LAYOUT, _check_label, check_minted_token
+from defender._git import REPO_ROOT
+from defender._run_id import episode_id_fault
+
+#: Where episodes live. No default: deriving it from the runs base would put `episodes/` inside
+#: the tree corpus walkers descend and inside the checkout provenance is stamped from.
+EPISODES_BASE_ENV = "DEFENDER_EPISODES_BASE"
+
+
+class EpisodeRefused(ValueError):
+    """The episode owner refused an episode id or the configured episodes root, before anything
+    under the root was read. The message is operator-ready; each door adds its own prefix."""
+
+
+def episodes_root(data_root: Path) -> Path:
+    """The configured root every episode directory is a child of, resolved.
+
+    Must be outside the data root (every tenant's tree lives there, so walkers indexing a
+    tenant's runs or episodes would count it) and outside the checkout (or an untracked episode
+    dir makes every sibling's provenance stamp dirty, so no family can complete). Being
+    configured also keeps it independent of the data root. `data_root` is the one the request's
+    tenant was (or is about to be) accepted under.
+    """
+    raw = os.environ.get(EPISODES_BASE_ENV)
+    if not raw:
+        raise EpisodeRefused(
+            f"{EPISODES_BASE_ENV} is not set — an episode's directory is a CONFIGURED "
+            "location, and there is deliberately no default: derived from the data root it "
+            "would be walked by every consumer that indexes a tenant's runs, and derived from "
+            "the checkout it would dirty the tree every sibling stamps itself against. Name a "
+            "directory outside both")
+    # Resolved even when it does not exist yet (every first launch): an unresolved relative path
+    # has `.parents == (Path("."),)`, so neither refusal below would fire.
+    root = Path(raw)
+    candidate = root.resolve()
+    data_root = Path(data_root).resolve()
+    for forbidden, why in (
+        (data_root, "the data root — every tenant's tree lives there, so an episode inside it "
+                    "would be indexed as a tenant's own runs or episodes"),
+        (REPO_ROOT, "the checkout — an untracked directory there is what a sibling's own "
+                    "provenance stamp reports as a dirty tree"),
+    ):
+        forbidden = Path(forbidden).resolve()
+        if candidate == forbidden or forbidden in candidate.parents:
+            raise EpisodeRefused(f"{EPISODES_BASE_ENV}={root} resolves inside {why}")
+    # A base containing the data root (its parent, say) is refused too; one containing the
+    # checkout is not.
+    if candidate in data_root.parents:
+        raise EpisodeRefused(
+            f"{EPISODES_BASE_ENV}={root} contains the data root {data_root} — keep "
+            "episodes and tenants' trees apart")
+    # The resolved path the refusals judged: paths built from it reach child processes, which
+    # would re-resolve a relative one against their own cwd.
+    return candidate
+
+
+def refuse_bad_episode_id(episode_id: object) -> str:
+    """`episode_id`, when it can name a directory of its own under the episodes root — a run id
+    with room left for a sibling (`_run_id.episode_id_fault`, the one statement of the rule) —
+    else `EpisodeRefused`, before any path is built from it."""
+    if type(episode_id) is not str:
+        raise EpisodeRefused(f"an episode id must be text, not {type(episode_id).__name__}")
+    if (why := episode_id_fault(episode_id)) is not None:
+        raise EpisodeRefused(f"episode id {episode_id!r} is not usable: {why} — it names a "
+                             "directory and half of every sibling's run id")
+    return episode_id
+
+
+def episode_dir(data_root: Path, episode_id: str) -> Path:
+    """Where episode `episode_id` lives: one path component under the configured episodes root.
+    The id is judged first, since a separator in it would put the episode outside the root or
+    onto another's. Asking for it reads nothing under the root."""
+    episode_id = refuse_bad_episode_id(episode_id)
+    return episodes_root(data_root) / episode_id
 
 #: Every record the handle hands out, keyed by its address (a bare name is an attribute of the
 #: episode, `world.<name>` one of `episode.world(label)`), mapped to the verbs its row grants.
@@ -179,6 +261,22 @@ class Episode:
             held = io.hold_new(episode_dir.parent, episode_dir.name)
         return cls(held, episode_dir, _door=_DOOR)
 
+    @classmethod
+    def open_in(cls, data_root: Path, episode_id: str, *, io: Any = _real_io) -> Episode:
+        """`open`, by id: the episode `episode_id` under the configured episodes root for
+        `data_root`. A bad id or an unusable root is `EpisodeRefused` before anything is read;
+        a missing episode is `FileNotFoundError` and a non-directory at its name
+        `NotADirectoryError`, nothing made (#1133 O4.8.2)."""
+        return cls.open(episode_dir(data_root, episode_id), io=io)
+
+    @classmethod
+    def create_in(cls, data_root: Path, episode_id: str, *, io: Any = _real_io,
+                  exclusive: bool = True) -> Episode:
+        """`create`, by id, under the configured episodes root for `data_root`: the launch's
+        exclusive claim (#1224 N17) unless `exclusive` is False. The id and the root are judged
+        first (`EpisodeRefused`); the root is made when absent."""
+        return cls.create(episode_dir(data_root, episode_id), io=io, exclusive=exclusive)
+
     def close(self) -> None:
         self._held.close()
 
@@ -268,9 +366,16 @@ class Episode:
         return self._folder(LAYOUT.served)
 
     @property
-    def runs(self) -> EpisodeFolder:
-        """`runs/`, the siblings' runs base. The handle never addresses inside a run."""
+    def _runs(self) -> EpisodeFolder:
+        """`runs/`, the siblings' container. Private (#1105 PR 2, F-13): the container and its
+        arms are the runs repository's episode view, which is built on this handle."""
         return self._folder(LAYOUT.runs)
+
+    @property
+    def box_mounted_container(self) -> Path:
+        """The container's path, for a sibling's acceptance only (`box_mounted`): the box mounts
+        it, so the tenant's settings must lie under none of it. Asking reads nothing."""
+        return self._runs.path
 
     @property
     def worlds(self) -> EpisodeFolder:
@@ -283,5 +388,6 @@ class Episode:
 _DOOR = object()
 
 
-__all__ = ["FOLDERS", "RECORD_VERBS", "Episode", "EpisodeFolder", "EpisodeRecord",
-           "EpisodeWorld"]
+__all__ = ["EPISODES_BASE_ENV", "FOLDERS", "RECORD_VERBS", "Episode", "EpisodeFolder",
+           "EpisodeRecord", "EpisodeRefused", "EpisodeWorld", "episode_dir", "episodes_root",
+           "refuse_bad_episode_id"]

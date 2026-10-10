@@ -65,10 +65,11 @@ LAYOUT_IMPORTED = ("ALIAS_READ_REFUSAL", "Path", "PurePosixPath", "annotations",
 #: The private layout helpers `_episode_paths.py` imports from the submodule (R4-27).
 PRIVATE_HELPERS = ("_check_component", "_check_index", "_confine")
 HANDLE_NAMES = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref"})
-#: The door's 15 non-layout public names (D1.3).
+#: The door's 18 non-layout public names (D1.3; #1105 PR 2's declared change 0 swaps PR 1's four
+#: Tenant-taking lookups for the tenant-scoped repository's five names).
 NON_LAYOUT_PUBLIC = HANDLE_NAMES | {
-    "RunId", "open_run", "list_run_ids", "bound_runs", "run_exists", "record_episode_runs",
-    "episode_runs", "sibling_run_ids", "episode_sibling_ids", "RunRefused",
+    "RunId", "RunsRepository", "EpisodeRuns", "Listed", "RunAddress", "RunAbsent",
+    "record_episode_runs", "episode_runs", "sibling_run_ids", "episode_sibling_ids", "RunRefused",
     # Owner rulings (the high and xhigh reviews): the repository answers "may this text name a
     # run?" and holds a runs folder for its outside callers (run setup, the family gate), so
     # neither re-derives the sidecar clause or the hold's refusals.
@@ -371,12 +372,13 @@ def test_1105_the_package_holds_exactly_its_seven_pinned_submodules():  # name k
         f"{sorted(LAYOUT_NAMES - layout_public)}, extra {sorted(layout_public - LAYOUT_NAMES)}")
 
 
-def test_1105_the_door_serves_exactly_its_68_public_names():  # 70 since the owner rulings, 71 with #1224's ORACLE_HELD_SUFFIX; the spec graph cites this name
-    """defender.run_repository.__all__ is exactly the 71 public names: the layout's 54 (the
+def test_1105_the_door_serves_exactly_its_68_public_names():  # 70 since the owner rulings, 71 with #1224's ORACLE_HELD_SUFFIX, 72 with #1105 PR 2's declared change 0; the spec graph cites this name
+    """defender.run_repository.__all__ is exactly the 72 public names: the layout's 54 (the
     door's layout surface equals _layout's public names, NM-06), Run, RunRecord, ArchivedWorld,
-    RecordHandle, case_ref, RunId, open_run, list_run_ids, bound_runs, run_exists,
-    record_episode_runs, episode_runs, sibling_run_ids, episode_sibling_ids, RunRefused,
-    run_name_fault and hold_runs_folder; it
+    RecordHandle, case_ref, RunId, RunsRepository, EpisodeRuns, Listed, RunAddress, RunAbsent
+    (#1105 PR 2's declared change 0: they replace PR 1's open_run, list_run_ids, bound_runs and
+    run_exists), record_episode_runs, episode_runs, sibling_run_ids, episode_sibling_ids,
+    RunRefused, run_name_fault and hold_runs_folder; it
     lists none of the layout's 10 imported names nor _check_component, _check_index, _confine,
     and serves none of them as an attribute but annotations, which the door's own
     `from __future__ import annotations` binds; every name today's code imports from the two
@@ -389,7 +391,7 @@ def test_1105_the_door_serves_exactly_its_68_public_names():  # 70 since the own
         f"__all__ differs from D1.3's 68 plus the two ruled names: missing "
         f"{sorted((LAYOUT_NAMES | NON_LAYOUT_PUBLIC) - served)}, extra "
         f"{sorted(served - LAYOUT_NAMES - NON_LAYOUT_PUBLIC)}")
-    assert len(served) == 71, f"{len(served)} public names, not 71"
+    assert len(served) == 72, f"{len(served)} public names, not 72"
     layout_public = {n for n in _module_defs(ast.parse(Path(_layout.__file__).read_text(
         "utf-8"))) if not n.startswith("_")}
     assert served - NON_LAYOUT_PUBLIC == layout_public, (
@@ -471,7 +473,7 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
                   "missing = [n for n in rr.__all__ if getattr(rr, n, None) is None]\n"
                   "print(len(rr.__all__), missing)\n")
     assert proc.returncode == 0, f"not every public name imports in a fresh interpreter: {_out(proc)}"
-    assert _out(proc).split()[0] == "71", f"not every public name imports in a fresh interpreter: {_out(proc)}"
+    assert _out(proc).split()[0] == "72", f"not every public name imports in a fresh interpreter: {_out(proc)}"
     assert "[]" in _out(proc), f"not every public name imports in a fresh interpreter: {_out(proc)}"
 
 
@@ -1015,7 +1017,7 @@ def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_p
     under a writable bind. Positive control: the run's own run_dir is bound read-write. (A BoxSpec
     with an explicit rootfs keeps _create_argv off the filesystem: resolve_rootfs returns it
     verbatim, _docker.py:65-70; GR-A1, executed, is the design's own discharge.)"""
-    from defender.run_repository import RunId, open_run
+    from defender.run_repository import RunId
     from defender.runtime.box import BoxSpec
     from defender.runtime.box._lifecycle import _create_argv
 
@@ -1023,8 +1025,8 @@ def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_p
     runs = H.runs_folder(t)
     H.make_run(runs, "r1")
     H.plant_record(runs, "r1-n1", t.id, "r1", {"a": "r1-n1-a"})
-    run = open_run(t, RunId.parse("r1"))
-    assert getattr(run, "run_dir", None) == runs / "r1", f"open_run handed out {run!r}"
+    run = t.runs_repository().open(RunId.parse("r1"))
+    assert getattr(run, "run_dir", None) == runs / "r1", f"runs.open handed out {run!r}"
     create = _create_argv("defender-run-r1", run.run_dir, H.DEFENDER,
                           BoxSpec(runtime="runc", rootfs="busybox"), tenant_agent=t.agent)
     argv = create.argv

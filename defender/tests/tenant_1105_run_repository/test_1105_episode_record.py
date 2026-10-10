@@ -66,11 +66,8 @@ def _rid(text: str):
 
 
 def _listed(t) -> list:
-    """`bound_runs(t)`'s row ids, entered and iterated once."""
-    from defender.run_repository import bound_runs
-
-    with bound_runs(t) as rows:
-        return [rid for rid, _w in rows]
+    """`t.runs_repository().list()`'s ids (PR 1's `list_run_ids(t)`), as a list."""
+    return list(t.runs_repository().list())
 
 
 def _record(runs: Path, episode_id: str) -> Path:
@@ -520,8 +517,8 @@ def test_1105_a_record_over_64_kib_is_corrupt_and_read_no_further_than_the_cap_p
 
 def test_1105_overlapping_claims_across_good_records_are_a_union(tmp_path):
     """Two good records claiming the same run id are not an error: sibling_run_ids returns the
-    union, and list_run_ids drops that id once."""
-    from defender.run_repository import list_run_ids, sibling_run_ids
+    union, and runs.list (PR 1's list_run_ids) drops that id once."""
+    from defender.run_repository import sibling_run_ids
 
     t, runs = _setup(tmp_path)
     H.plant_record(runs, "e1", t.id, "keep", {"a": "shared", "b": "x1"})
@@ -530,7 +527,7 @@ def test_1105_overlapping_claims_across_good_records_are_a_union(tmp_path):
         H.make_run(runs, name)
     claimed = sibling_run_ids(t)
     assert claimed == set(_ids("shared", "x1", "y1")), f"the union of both records: {claimed!r}"
-    assert list_run_ids(t) == _ids("keep"), "the shared id is dropped once; the source stays"
+    assert _listed(t) == _ids("keep"), "the shared id is dropped once; the source stays"
 
 
 def test_1105_episode_runs_answers_from_that_episodes_own_record_only(tmp_path):
@@ -576,13 +573,13 @@ def test_1105_sibling_run_ids_is_the_union_of_every_record_and_fails_closed(tmp_
 
 def test_1105_both_listings_drop_exactly_the_ids_sibling_run_ids_claims(tmp_path):
     """With real run folders for a source and two arms and a record written by
-    record_episode_runs, list_run_ids and bound_runs both drop exactly sibling_run_ids(tenant) and
-    keep the source; a record in tenant.runs/_episodes naming another tenant makes both listings
-    raise RunRefused, and episode_runs(tenant, 'foreign') refuses that record as corrupt too."""
+    record_episode_runs, runs.list (PR 1's list_run_ids; bound_runs is gone, #1105 PR 2) drops
+    exactly sibling_run_ids(tenant) and keeps the source; a record in tenant.runs/_episodes naming
+    another tenant makes the listing raise RunRefused, and episode_runs(tenant, 'foreign') refuses
+    that record as corrupt too."""
     from defender.run_repository import (
         RunRefused,
         episode_runs,
-        list_run_ids,
         record_episode_runs,
         sibling_run_ids,
     )
@@ -595,10 +592,9 @@ def test_1105_both_listings_drop_exactly_the_ids_sibling_run_ids_claims(tmp_path
     assert claimed == set(_ids("src-n1-a", "src-n1-b")), f"the record's arms: {claimed!r}"
     every = _ids("src", "src-n1-a", "src-n1-b")
     kept = [rid for rid in every if rid not in claimed]
-    assert list_run_ids(t) == kept == _ids("src"), "list_run_ids drops exactly the claims"
-    assert _listed(t) == kept, "bound_runs drops exactly the claims"
+    assert _listed(t) == kept == _ids("src"), "runs.list drops exactly the claims"
     foreign = H.plant_record(runs, "foreign", H.U_ID, "src", {"z": "foreign-z"})
-    for name, call in (("list_run_ids", lambda: list_run_ids(t)), ("bound_runs", lambda: _listed(t)),
+    for name, call in (("runs.list", lambda: _listed(t)),
                        ("episode_runs", lambda: episode_runs(t, "foreign"))):
         err = H.raised(call)
         assert H.is_a(err, RunRefused), f"{name} over a foreign record gave {err!r}"
@@ -607,8 +603,9 @@ def test_1105_both_listings_drop_exactly_the_ids_sibling_run_ids_claims(tmp_path
 
 def test_1105_the_record_folder_can_never_be_a_run_id(tmp_path):
     """RunId.parse refuses '_episodes' and every name with a leading '_', so no run folder can
-    share the record folder's name, and a populated _episodes/ is never a list_run_ids entry."""
-    from defender.run_repository import RunId, RunRefused, list_run_ids, record_episode_runs
+    share the record folder's name, and a populated _episodes/ is never a runs.list entry (PR 1's
+    list_run_ids)."""
+    from defender.run_repository import RunId, RunRefused, record_episode_runs
 
     for name in ("_episodes", "_x", "_tenant.json", "_1", "__"):
         err = H.raised(RunId.parse, name)
@@ -617,7 +614,7 @@ def test_1105_the_record_folder_can_never_be_a_run_id(tmp_path):
     record_episode_runs(t, "ep", _rid("src"), {"a": _rid("ep-a")})
     H.make_run(runs, "r1")
     assert (runs / "_episodes").is_dir(), "the record folder is populated"
-    assert list_run_ids(t) == _ids("r1"), "_episodes/ is never a list_run_ids entry"
+    assert _listed(t) == _ids("r1"), "_episodes/ is never a runs.list entry"
 
 
 def test_1105_the_episode_record_has_its_own_kinds_registry_row(tmp_path):
@@ -765,9 +762,9 @@ def test_1105_a_records_episode_id_must_equal_its_file_name_minus_the_final_json
     """A record's stem is its file name minus the final '.json': _episodes/ep.json holding
     episode_id 'ep' is good, and so is _episodes/ep.1.json holding 'ep.1' (refuse_bad_episode_id
     admits it); a record whose episode_id differs from its stem in any way (ep-2, EP-1, 'ep-1 '
-    at ep-1.json) makes sibling_run_ids, list_run_ids and episode_runs(tenant, 'ep-1') raise
-    RunRefused naming the file."""
-    from defender.run_repository import RunRefused, episode_runs, list_run_ids, sibling_run_ids
+    at ep-1.json) makes sibling_run_ids, runs.list (PR 1's list_run_ids) and
+    episode_runs(tenant, 'ep-1') raise RunRefused naming the file."""
+    from defender.run_repository import RunRefused, episode_runs, sibling_run_ids
 
     t, runs = _setup(tmp_path)
     H.plant_record(runs, "ep", t.id, "src", {"a": "ep-a"})
@@ -775,7 +772,7 @@ def test_1105_a_records_episode_id_must_equal_its_file_name_minus_the_final_json
     assert sibling_run_ids(t) == set(_ids("ep-a", "ep.1-a")), "both stems are good records"
     for wrong in ("ep-2", "EP-1", "ep-1 "):
         bad = H.plant_record(runs, wrong, t.id, "src", {"z": "z1"}, name="ep-1")
-        for name, call in (("sibling_run_ids", sibling_run_ids), ("list_run_ids", list_run_ids),
+        for name, call in (("sibling_run_ids", sibling_run_ids), ("runs.list", _listed),
                            ("episode_runs", lambda tenant: episode_runs(tenant, "ep-1"))):
             err = H.raised(call, t)
             assert H.is_a(err, RunRefused), f"{name}: episode_id {wrong!r} at ep-1.json gave {err!r}"
@@ -787,9 +784,9 @@ def test_1105_the_reader_applies_only_its_closed_list_so_a_writer_rule_breaker_c
     """The reader's rule is D3.4's closed list: a host-written record that breaks only writer rules
     (two labels on one id, an arm equal to the source, an arm not shaped f'{episode_id}-{label}',
     an arm another record claims) is good on read, so sibling_run_ids claims its ids and
-    list_run_ids hides them; in PR 1 'a record never hides an ordinary run' holds through the
-    writer only (the owner accepts this, O4)."""
-    from defender.run_repository import list_run_ids, sibling_run_ids
+    runs.list (PR 1's list_run_ids) hides them; in PR 1 'a record never hides an ordinary run'
+    holds through the writer only (the owner accepts this, O4)."""
+    from defender.run_repository import sibling_run_ids
 
     t, runs = _setup(tmp_path)
     H.plant_record(runs, "e1", t.id, "s0", {"a": "x", "b": "x"})  # two labels on one id
@@ -800,7 +797,7 @@ def test_1105_the_reader_applies_only_its_closed_list_so_a_writer_rule_breaker_c
         H.make_run(runs, name)
     claimed = sibling_run_ids(t)
     assert claimed == set(_ids("x", "s", "other")), f"each writer-rule breaker claims: {claimed!r}"
-    assert list_run_ids(t) == _ids("plain", "s0"), "their ids are hidden; the rest are listed"
+    assert _listed(t) == _ids("plain", "s0"), "their ids are hidden; the rest are listed"
 
 
 def test_1105_the_reader_refuses_each_content_rule_breaker_naming_the_file(tmp_path):
@@ -863,7 +860,7 @@ def test_1105_the_reader_refuses_each_content_rule_breaker_naming_the_file(tmp_p
 
 def test_1105_a_truncated_episode_record_refuses_naming_the_file(tmp_path):
     """With _episodes/ep-1.json truncated (a good record cut short), sibling_run_ids,
-    list_run_ids, bound_runs, episode_runs(tenant, 'ep-1') and episode_sibling_ids raise
+    runs.list (PR 1's list_run_ids), episode_runs(tenant, 'ep-1') and episode_sibling_ids raise
     RunRefused naming that file, and it fails closed until an operator removes it; episode_runs
     for another episode with a good record still answers. Positive control: the untruncated
     record claims its ids."""
@@ -871,7 +868,6 @@ def test_1105_a_truncated_episode_record_refuses_naming_the_file(tmp_path):
         RunRefused,
         episode_runs,
         episode_sibling_ids,
-        list_run_ids,
         record_episode_runs,
         sibling_run_ids,
     )
@@ -890,8 +886,7 @@ def test_1105_a_truncated_episode_record_refuses_naming_the_file(tmp_path):
             return episode_sibling_ids(held.view())
 
     readers = (("sibling_run_ids", lambda: sibling_run_ids(t)),
-               ("list_run_ids", lambda: list_run_ids(t)),
-               ("bound_runs", lambda: _listed(t)),
+               ("runs.list", lambda: _listed(t)),
                ("episode_runs", lambda: episode_runs(t, "ep-1")))
     for _attempt in range(2):  # fails closed: the same answer every time until removed
         for name, call in readers:
@@ -907,13 +902,13 @@ def test_1105_a_truncated_episode_record_refuses_naming_the_file(tmp_path):
 
 
 def test_1105_a_stray_name_in_episodes_refuses_naming_it(tmp_path):
-    """With a file named 'README' beside a good record in _episodes, sibling_run_ids, list_run_ids,
-    bound_runs and episode_sibling_ids raise RunRefused naming tenant.runs/_episodes/README.
+    """With a file named 'README' beside a good record in _episodes, sibling_run_ids, runs.list
+    (PR 1's list_run_ids) and episode_sibling_ids raise RunRefused naming
+    tenant.runs/_episodes/README.
     Positive control: with it removed the good record's claims stand."""
     from defender.run_repository import (
         RunRefused,
         episode_sibling_ids,
-        list_run_ids,
         record_episode_runs,
         sibling_run_ids,
     )
@@ -929,8 +924,7 @@ def test_1105_a_stray_name_in_episodes_refuses_naming_it(tmp_path):
             return episode_sibling_ids(held.view())
 
     for name, call in (("sibling_run_ids", lambda: sibling_run_ids(t)),
-                       ("list_run_ids", lambda: list_run_ids(t)),
-                       ("bound_runs", lambda: _listed(t))):
+                       ("runs.list", lambda: _listed(t))):
         err = H.raised(call)
         assert H.is_a(err, RunRefused), f"{name} over a stray README gave {err!r}"
         assert str(stray) in H.message(err), f"{name} names {stray}: {H.message(err)!r}"
@@ -950,7 +944,6 @@ def test_1105_an_absent_episodes_claims_nothing_and_the_writer_creates_it(tmp_pa
     from defender.run_repository import (
         episode_runs,
         episode_sibling_ids,
-        list_run_ids,
         record_episode_runs,
         sibling_run_ids,
     )
@@ -959,13 +952,13 @@ def test_1105_an_absent_episodes_claims_nothing_and_the_writer_creates_it(tmp_pa
     H.make_run(runs, "r1")
     assert sibling_run_ids(t) == set(), "no _episodes: nothing is claimed"
     assert episode_runs(t, "ep") == {}, "no _episodes: an episode's record is absent"
-    assert list_run_ids(t) == _ids("r1"), "the listing excludes nothing"
+    assert _listed(t) == _ids("r1"), "the listing excludes nothing"
     with _io.hold(runs) as held:
         assert episode_sibling_ids(held.view()) == set(), "the path-only reader: empty"
     run_common.materialize_run(H.alert_file(tmp_path / "alerts"), "r2", tenant=t)
     assert (runs / "r2").is_dir(), "a first-ever pinned run setup proceeds"
     assert not os.path.lexists(runs / "_episodes"), "run setup creates no _episodes"
-    assert list_run_ids(t) == _ids("r1", "r2"), "the listing still excludes nothing"
+    assert _listed(t) == _ids("r1", "r2"), "the listing still excludes nothing"
     record_episode_runs(t, "ep", _rid("r1"), {"a": _rid("ep-a")})
     assert (runs / "_episodes").is_dir(), "the first record_episode_runs creates _episodes inside tenant.runs"
     assert not (runs / "_episodes").is_symlink(), "the first record_episode_runs creates _episodes inside tenant.runs"
@@ -975,7 +968,8 @@ def test_1105_an_absent_episodes_claims_nothing_and_the_writer_creates_it(tmp_pa
 def test_1105_the_record_key_is_tenant_and_episode_so_no_record_is_read_by_another_episode_or_tenant(
         tmp_path):
     """the same episode_id recorded under tenants T and U (U hand-planted, F36) lands in two files;
-    T's episode_runs, sibling_run_ids and list_run_ids see only T's record and U's only U's; two
+    T's episode_runs, sibling_run_ids and runs.list (PR 1's list_run_ids) see only T's record and
+    U's only U's; two
     episodes of one tenant, and 'ep' beside the dotted 'ep.1', never read each other's record; two
     writers racing one episode id with different content leave exactly one intact record and one
     RunRefused (serial both orders where a genuine interleaving cannot be forced); positive
@@ -983,7 +977,6 @@ def test_1105_the_record_key_is_tenant_and_episode_so_no_record_is_read_by_anoth
     from defender.run_repository import (
         RunRefused,
         episode_runs,
-        list_run_ids,
         record_episode_runs,
         sibling_run_ids,
     )
@@ -1002,8 +995,8 @@ def test_1105_the_record_key_is_tenant_and_episode_so_no_record_is_read_by_anoth
     assert episode_runs(u, "ep") == {"b": _rid("ep-b")}, "U sees only U's record"
     assert sibling_run_ids(t) == set(_ids("ep-a"))
     assert sibling_run_ids(u) == set(_ids("ep-b"))
-    assert list_run_ids(t) == _ids("ep-b"), "each tenant's listing is filtered by its own record only"
-    assert list_run_ids(u) == _ids("ep-a"), "each tenant's listing is filtered by its own record only"
+    assert _listed(t) == _ids("ep-b"), "each tenant's listing is filtered by its own record only"
+    assert _listed(u) == _ids("ep-a"), "each tenant's listing is filtered by its own record only"
 
     record_episode_runs(t, "ep.1", _rid("src"), {"c": _rid("ep.1-c")})
     record_episode_runs(t, "ep2", _rid("src"), {"d": _rid("ep2-d")})
@@ -1047,7 +1040,7 @@ def test_1105_record_labels_are_returned_verbatim_as_untrusted_text_and_a_refusa
         tmp_path):
     """a host-written record whose labels carry a newline, an escaped NUL, a 4,000-character string
     and non-ASCII text is good on read: episode_runs returns each label byte-for-byte as the key
-    and its RunId as the value, sibling_run_ids and list_run_ids are unaffected, and a refusal
+    and its RunId as the value, sibling_run_ids and runs.list are unaffected, and a refusal
     that quotes such a label escapes it (a record at the cap with one such label still reads);
     positive control: the same record with plain labels returns the same ids. Pins that the
     repository does not sanitise labels, so PR 2 re-asks R6 at each renderer instead of assuming
@@ -1061,7 +1054,6 @@ def test_1105_record_labels_are_returned_verbatim_as_untrusted_text_and_a_refusa
     from defender.run_repository import (
         RunRefused,
         episode_runs,
-        list_run_ids,
         record_episode_runs,
         sibling_run_ids,
     )
@@ -1076,7 +1068,7 @@ def test_1105_record_labels_are_returned_verbatim_as_untrusted_text_and_a_refusa
     for name in (*labels.values(), "plain"):
         H.make_run(runs, name)
     assert sibling_run_ids(t) == set(_ids(*labels.values())), "the claims are unaffected"
-    assert list_run_ids(t) == _ids("plain"), "the listing is unaffected"
+    assert _listed(t) == _ids("plain"), "the listing is unaffected"
 
     for odd in ("x\ny", "x\ty", "x\x1b[31m", "x\x7f\x9b\u2028y"):
         err = H.raised(record_episode_runs, t, "w1", _rid("src"), {odd: _rid("w1-x")})
