@@ -318,13 +318,18 @@ def plant_container_record(episode_dir: Path) -> None:
     the launcher leaves when it makes the siblings' container (`EpisodeRuns.create_container`;
     the page's view refuses a container without one, #1105 PR 2 declared change 4) — when
     `runs/` is a real directory holding no record entry. Anything else is left as planted: no
-    `runs/` (an episode stopped before RUNS), a link or a file there, or a record of any kind
-    already present (a scenario's own). The page helpers below call it before each render;
-    `sample_episode` itself leaves the container as the pre-#1078 shape it always was."""
+    `runs/` (an episode stopped before RUNS), a link or a file there, a container the scenario
+    made unlistable or unsearchable (nothing inside it is touched: the page reads such a
+    container as absent, rev 5.1 S1), or a record of any kind already present (a scenario's
+    own). The page helpers below call it before each render; `sample_episode` itself leaves the
+    container as the pre-#1078 shape it always was (`test_dc4_a_container_with_no_record_…`
+    builds on that)."""
     from defender import _tenant
 
     runs = Path(episode_dir) / "runs"
     if runs.is_symlink() or not runs.is_dir():
+        return
+    if not os.access(runs, os.R_OK | os.X_OK):
         return
     record = runs / _tenant.TENANT_RECORD_NAME
     if record.is_symlink() or record.exists():
