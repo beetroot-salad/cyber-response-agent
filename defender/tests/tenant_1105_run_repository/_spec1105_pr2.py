@@ -238,13 +238,21 @@ def drive_launch(est: Any, argv: list[str], *, spawn: Any = None, judge: Any = N
 
 def grade(episode_dir: Path, tenant_id: str) -> Any:
     """Grade `episode_dir` afresh for `tenant_id` through the judge's one entry point
-    (`learning.judge.grade_episode`, via `_judge_921.grade`). TODAY's shape: the tenant's
-    natural runs folder is threaded as `runs_base=`, as the launcher's `_grade` threads it.
-    PR 2 re-points THIS builder (J3 as settled: the judge reads only the episode it is handed,
-    and the world-label collision probe over `<T>/runs` is removed), never the tests that call
-    it. A final `judge.yaml` short-circuits a second pass, so it is removed first."""
+    (`learning.judge.grade_episode`). Re-pointed by PR 2 to the declared shape (J3 as settled:
+    the judge reads only the episode it is handed, and the world-label collision probe over
+    `<T>/runs` is removed): `grade_episode(runs, episode_id)`, `runs` the tenant's repository
+    under the configured data root, the episode opened by id under the configured episodes
+    base. A final `judge.yaml` short-circuits a second pass, so it is removed first."""
+    from defender import _tenant
+    from defender.tests._state1135 import env_state
+    from defender.tests.tenant_1105_run_repository import _spec1105 as H1
+
     (Path(episode_dir) / "judge.yaml").unlink(missing_ok=True)
-    return J.grade(Path(episode_dir), runs_base=data_root() / tenant_id / "runs")
+
+    runs = _tenant.accept_tenant(
+        data_root(), tenant_id, defender_dir=H1.DEFENDER).runs_repository()
+    return T.mod("learning.judge").grade_episode(
+        runs, Path(episode_dir).name, judge=J.scripted_judge(), state=env_state())
 
 
 def sibling_scene(tmp_path: Path, *, container: str | None = None,

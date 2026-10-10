@@ -218,11 +218,9 @@ SECTION_TITLES: dict[str, str] = {
     "answers": "VIEW 2 — THE ANSWERS THOSE CALLS WERE SERVED, by call number",
     "leads": "VIEW 3 — PER-LEAD CHAIN (goal -> params -> payload -> refused -> summary -> "
              "resolutions)",
-    "siblings": "VIEW 4 — SIBLING TRIALS OF THIS SAME ALERT",
     "lessons": "VIEW 5 — LESSONS THAT REACHED THIS WORLD (name, how it reached the model — "
                "read, or pushed as a description only — and the body at its recorded commit "
                "for you to judge against, whether or not the model read it)",
-    "spread": "TRIAL SPREAD (the dispositions those sibling trials reached, tallied)",
     "document": "THE JUDGED WORLD'S OWN investigation.md",  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     "report": "THE JUDGED WORLD'S OWN report.md",  # lint-run-records: ok — a message naming the record for the model or operator, not a path
     "oracle": "THE JUDGED WORLD'S FROZEN TELEMETRY AND IDENTIFIER COLLISIONS (its oracle-side "
@@ -577,9 +575,8 @@ def _build_prompt(judge_input: JudgeInput) -> str:
         "world's investigator ran, every call it made was answered live, and an answer was "
         "changed only where the world's facts touch it. You are shown the judged world's facts "
         "and declared verdict, the systems this tenant serves, every call its investigator made "
-        "and how each was answered, its leads, document and verdict, the sibling trials of this "
-        "same alert with their spread, the lessons it loaded, real example answers per served "
-        "system, and pre-flight's record of the family. Every OTHER world's facts are withheld: "
+        "and how each was answered, its leads, document and verdict, the lessons it loaded, real "
+        "example answers per served system, and pre-flight's record of the family. Every OTHER world's facts are withheld: "
         "never cite another world as a fact about the judged world.\n\n"
         f"{_DECISION_GLOSSARY}"
         # What a `refused:` entry means, in host text. Otherwise a harness refusal reads as
