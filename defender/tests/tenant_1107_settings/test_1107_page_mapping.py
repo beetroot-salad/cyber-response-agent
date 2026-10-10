@@ -630,7 +630,7 @@ def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
                 alert_path=RunPaths(rd).alert, run_dir=rd, run_id=rd.name,
                 defender_dir=kw["defender_dir"], model_name=kw["model"],
                 model_override=kw["model_override"], box=None, tenant=kw["tenant"],
-                world=kw["world"], episode=kw["episode"],
+                world=kw["world"], episode=kw["episode"], serving=kw["serving"],
                 investigate=lambda **ikw: investigated.append(ikw) or {
                     "output": "spec1107", "requests": 0, "truncated_by": None})
 

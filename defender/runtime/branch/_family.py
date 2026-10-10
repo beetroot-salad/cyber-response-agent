@@ -19,7 +19,6 @@ reader, before any other fault is reported.
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
 import re
 from collections.abc import Iterator
 from defender._model import model
@@ -102,11 +101,6 @@ class ManifestPredatesOracle(FamilyError):
 
     Its own class so a reader that shows a refusal (the episode page) can tell an archive of
     the old design from a damaged manifest."""
-
-
-def is_contradiction(_error: BaseException) -> bool:
-    """Is this refusal a corpus contradiction? Never, for a manifest fault."""
-    return False
 
 
 # ---------------------------------------------------------------------------------------
@@ -607,24 +601,6 @@ def write_family(episode: Episode, doc: dict) -> Path:
     return manifest.path
 
 
-def manifest_digest(view: Bound) -> str:
-    """The manifest's content digest, recorded in the review and re-checked on resume.
-
-    Uses the same read as `_read_document`, so a planted link is never certified.
-    """
-    return hashlib.sha256(_read_manifest(view).encode("utf-8")).hexdigest()
-
-
-def check_manifest_digest(view: Bound, recorded: str) -> None:
-    """Refuse a manifest whose bytes changed since the review recorded them."""
-    actual = manifest_digest(view)
-    if actual != recorded:
-        raise FamilyError(
-            f"the manifest ({LAYOUT.family}) has a digest of {actual[:12]} but the review "
-            f"recorded {str(recorded)[:12]} — a manifest edited between review and run is not "
-            "the document the review accepted")
-
-
 # ---------------------------------------------------------------------------------------
 # identity: one gate, before anything is launched
 # ---------------------------------------------------------------------------------------
@@ -769,14 +745,11 @@ __all__ = [
     "ResumeWorld",
     "World",
     "check_identities",
-    "check_manifest_digest",
     "episode_token_for",
-    "is_contradiction",
     "is_reserved_world_label",
     "refuse_reserved_world_label",
     "load_family",
     "load_manifest_document",
-    "manifest_digest",
     "parse_as_of",
     "parse_family",
     "parse_world",

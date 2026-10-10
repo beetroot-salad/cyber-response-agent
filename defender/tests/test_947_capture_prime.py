@@ -248,7 +248,7 @@ def test_a_primed_key_is_served_without_the_estate_being_asked(tmp_path):
     adapter — which would have answered `live-estate` — recorded no call at all. Without it,
     "the base file holds a row" is a claim about a file rather than about what a sibling reads.
     """
-    from defender.learning.branch.estate.registry import WorldRegistry
+    from defender.tests.live_oracle_1224._spec1224 import build_registry
 
     run_dir = source_run(tmp_path)
     append_call(run_dir, call_row("l-001", 0, "cmdb", "get-host", {"host": "canary-1"}),
@@ -261,7 +261,7 @@ def test_a_primed_key_is_served_without_the_estate_being_asked(tmp_path):
         touches = ()
 
     with Episode.open(root) as ep:
-        reg = WorldRegistry(read_roster(fake_estate(tmp_path)), LIVE_GRANT, world=World(),
+        reg = build_registry(read_roster(fake_estate(tmp_path)), LIVE_GRANT, world=World(),
                             ledger=Ledger.for_world(ep, "w1"), as_of=T0)
         ctx = run_ctx(tmp_path)
 

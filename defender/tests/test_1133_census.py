@@ -991,13 +991,12 @@ NB_READERS = frozenset({
     ("scripts.visualize.visualize_episode", "load_episode"),
     ("scripts.visualize.visualize_episode", "_read_grade"),
     ("scripts.visualize.visualize_episode", "_Episode"),
-    # The O5 carve-outs: the stale-`served/*.jsonl` glob (the launcher's door), `base_file`
-    # itself, the path-taking readers and their one caller each, and the containment arithmetic. Rev 3 (R1) removes
+    # The O5 carve-outs: the stale-`served/*.jsonl` glob (the launcher's door), the
+    # path-taking readers and their one caller each, and the containment arithmetic. Rev 3 (R1) removes
     # `episode._answers` and `episode.delta_o`: `delta_o` reads the base and each world's served
     # file through its one `bind` (`read_jsonl(LAYOUT.served_base)`, `read_jsonl(LAYOUT.
     # served_world(token))`), naming no path.
     ("learning.branch.cli", "prepare_episode"),
-    ("learning.branch.ledger", "base_file"),
     ("learning.branch.ledger", "Ledger._absorb"),
     ("learning.judge.family", "leads_by_id"),
     ("scripts.visualize.visualize_episode", "_load_world_leads"),

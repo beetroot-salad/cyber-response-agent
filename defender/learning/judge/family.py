@@ -34,7 +34,7 @@ from pydantic import SkipValidation
 
 from pathlib import Path, PurePath, PurePosixPath
 
-from defender._io import ALIAS_READ_REFUSAL, Bound, bind
+from defender._io import Bound, bind
 from defender._report import ReportRead, parse_report_text
 from defender._run_id import is_valid_run_id
 from defender._vocab import normalized_disposition
@@ -99,32 +99,6 @@ def screened_yaml_mapping(
     return doc
 
 
-def _default_review_reader(bound: Bound, name: str | PurePath) -> dict[str, Any] | None:
-    """`review.yaml` through the screened read: absent is `None` (the page tells "absent" from
-    "present but empty"); an aliased entry is a refusal."""
-    import yaml
-
-    from defender._yaml import safe_load
-
-    rec = bound.read(name)
-    if rec.absent:
-        return None
-    if rec.text is None:
-        raise JudgeRefused(rec.refusal or ALIAS_READ_REFUSAL)
-    try:
-        doc = safe_load(rec.text) or {}
-    except yaml.YAMLError as bad:
-        raise JudgeRefused(f"{name} could not be read: {bad}") from bad
-    return doc if isinstance(doc, dict) else {}
-
-
-def read_review_record(bound: Bound, *, reader: Any = None) -> dict[str, Any] | None:
-    """`review.yaml`, parsed once per caller: the episode dir is box-reachable, so two
-    independent parses need not agree. `None` on absence."""
-    read = reader if reader is not None else _default_review_reader
-    return read(bound, LAYOUT.review)
-
-
 def _default_samples_reader(bound: Bound, name: str | PurePath) -> dict[str, Any]:
     """`samples.yaml`, read permissively: absent, unreadable or unparseable all read as `{}`.
 
@@ -151,17 +125,6 @@ def read_samples_record(bound: Bound, *, reader: Any = None) -> dict[str, Any]:
     run."""
     read = reader if reader is not None else _default_samples_reader
     return read(bound, LAYOUT.samples)
-
-
-def world_review_block(review: dict[str, Any], label: str) -> dict[str, Any] | None:
-    """This world's `reachability` sub-block off the review record, joined by label (never
-    position), or `None` when the review has no entry for it."""
-    worlds = review.get("worlds")
-    entry = worlds.get(label) if isinstance(worlds, dict) else None
-    if not isinstance(entry, dict):
-        return None
-    block = entry.get("reachability")
-    return block if isinstance(block, dict) else None
 
 
 def raw_manifest(episode_dir: Path) -> dict[str, Any]:
@@ -886,11 +849,10 @@ __all__ = [
     "InvestigationFacts", "WorldFacts",
     "discriminator_of", "episode_id_of",
     "is_gradable_row", "json_mapping", "json_mapping_of", "lead_chain", "leads_by_id", "mapping_key",
-    "names_one_file", "non_control_worlds", "raw_manifest", "read_manifest", "read_review_record",
+    "names_one_file", "non_control_worlds", "raw_manifest", "read_manifest",
     "refused_entries", "has_refusals", "render_refused", "is_external_refusal",
     "read_archived_report", "read_investigation_facts", "read_samples_record", "read_world",
     "read_world_facts", "read_world_ledger", "scope_params",
     "summary_lead_ids", "world_ledger_name",
     "screened_yaml_mapping", "world_label_names_directory",
-    "world_review_block",
 ]

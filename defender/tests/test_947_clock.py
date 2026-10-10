@@ -52,7 +52,8 @@ pytest.importorskip("pydantic_ai")
 from defender import _clock  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender._paths import PATHS  # noqa: E402
-from defender.learning.branch.estate.registry import EstateError, WorldRegistry  # noqa: E402
+from defender.learning.branch.estate.registry import EstateError  # noqa: E402
+from defender.tests.live_oracle_1224._spec1224 import build_registry  # noqa: E402
 from defender.runtime.verbs import read_roster  # noqa: E402
 from defender._episode_handle import Episode  # noqa: E402
 from defender._episode_paths import BASE_FILENAME, SERVED_DIRNAME  # noqa: E402
@@ -196,7 +197,7 @@ def _record(ctx: VerbContext, name: str, params: dict) -> None:
     at = getattr(ctx, "as_of", None)
     with log.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({
-            "verb": name, "params": params, "world_id": ctx.world_id,
+            "verb": name, "params": params,
             "as_of": None if at is None else at.isoformat(),
         }) + "\\n")
 
@@ -450,26 +451,17 @@ def tz_east_of_utc(monkeypatch):
 
 # 2. the seam: `VerbContext.as_of`, threaded unconditionally
 
-def test_the_clock_is_appended_after_the_world_id_it_rides_beside():
+def test_the_clock_is_the_last_field_of_the_context_and_defaults_to_none():
     """    `as_of` is the LAST field of `VerbContext`, and defaults to `None`.
 
-    The position is the demand. Twenty-odd sites build a `VerbContext`, several of them
-    positionally, and a field inserted before `world_id` rebinds every one of them silently —
-    a run whose ctx claims a world it is not being served for, which `confine_index` then
-    admits views for. Defaulted, because `None` is the ordinary run and the base world alike:
-    both read the estate as it is now."""
+    The position is the demand. Twenty-odd sites build a `VerbContext`, and a field inserted
+    before the defaulted tail would rebind a positional site silently. Defaulted, because
+    `None` is the ordinary run: it reads the estate as it is now."""
     names = [f.name for f in dataclasses.fields(VerbContext)]
 
-    assert names[-2:] == ["world_id", "as_of"], f"the clock did not land last: {names}"
+    assert names[-1] == "as_of", f"the clock did not land last: {names}"
     assert VerbContext(defender_dir=Path("/d"), run_dir=Path("/r"), env={},
                        tenant=_tenants1106.fixture_run_tenant()).as_of is None
-    # The world and the clock are two fields: a context naming a world names no moment. (#1106
-    # made the tenant a REQUIRED field, so every site now builds by keyword and the old
-    # positional spelling — fifth argument the world — is no longer one any site uses.)
-    ctx = VerbContext(defender_dir=Path("/d"), run_dir=Path("/r"), env={},
-                      tenant=_tenants1106.fixture_run_tenant(), capture=None, world_id="w1")
-    assert ctx.world_id == "w1"
-    assert ctx.as_of is None
 
 
 def test_an_unstaged_host_state_call_reaches_the_adapter_carrying_the_runs_clock(tmp_path):
@@ -488,7 +480,7 @@ def test_an_unstaged_host_state_call_reaches_the_adapter_carrying_the_runs_clock
     the second is what separates "the clock was threaded" from "the adapter stamped something
     that happened to be a timestamp"."""
     ctx = docker_ctx(tmp_path)
-    reg = WorldRegistry(read_roster(REAL_ADAPTERS), _gather_grant(), world=World("w1"),
+    reg = build_registry(read_roster(REAL_ADAPTERS), _gather_grant(), world=World("w1"),
                         ledger=primed_ledger(tmp_path), as_of=T0)
 
     payload = reg.verbs("host-state")["proc-tree"](ctx, host="web-1")
@@ -504,27 +496,25 @@ def test_an_unstaged_host_state_call_reaches_the_adapter_carrying_the_runs_clock
 
 def test_the_clock_rides_every_served_call_on_every_system(tmp_path):
     """    Every served call reaches its adapter body with `ctx.as_of` set, whichever system it
-    addresses — and none of them carries a world-id declaration.
+    addresses.
 
     The clock is unconditional because every payload a sibling records has to be reproducible
     whatever path it took to get there: an implementation that threaded the clock only for the
     systems a world's facts are about would show up here as a `cmdb` call with `as_of: None`.
-    (#1224 retired cluster staging, and with it the one call site that declared a world id to
-    the adapter; the declaration column stays `None` on every call.)
 
     The context arrives NAMING NO MOMENT, as `query_tool.py` builds it — so both `as_of` values
     below are the registry's own work and not the fixture's."""
     ctx = docker_ctx(tmp_path)
-    reg = WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT,
+    reg = build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT,
                         world=World("w1", ("elastic",)), ledger=primed_ledger(tmp_path),
                         as_of=T0)
 
     reg.verbs("elastic")["esql"](ctx, query="FROM logs-nginx.access-*\n| LIMIT 5")
     reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
-    assert [(c["verb"], c["world_id"], c["as_of"]) for c in adapter_calls(ctx)] == [
-        ("esql", None, T0.isoformat()),
-        ("get-host", None, T0.isoformat()),
+    assert [(c["verb"], c["as_of"]) for c in adapter_calls(ctx)] == [
+        ("esql", T0.isoformat()),
+        ("get-host", T0.isoformat()),
     ]
 
 
@@ -536,7 +526,7 @@ def test_the_clock_never_perturbs_the_params_a_call_records(tmp_path):
     request key every stored answer is looked up by and make every row record a call the model
     never made."""
     ctx = docker_ctx(tmp_path)
-    reg = WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("A", ("cmdb",)),
+    reg = build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("A", ("cmdb",)),
                         ledger=primed_ledger(tmp_path), as_of=T0)
 
     reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
@@ -547,8 +537,6 @@ def test_the_clock_never_perturbs_the_params_a_call_records(tmp_path):
         f"an unstaged call recorded a second identity: {own[0]}")
     assert own[0]["params"] == {"host": "canary-1"}
     assert own[0]["source"] == PASSTHROUGH
-    assert [c["world_id"] for c in adapter_calls(ctx)] == [None], (
-        "the ctx declared a world to the adapter")
 
 
 def test_a_context_that_cannot_carry_the_clock_is_served_anyway(tmp_path):
@@ -576,7 +564,7 @@ def test_a_context_that_cannot_carry_the_clock_is_served_anyway(tmp_path):
 
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
-    reg = WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
+    reg = build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
                         ledger=primed_ledger(tmp_path), as_of=T0)
 
     payload = reg.verbs("cmdb")["get-host"](
@@ -610,7 +598,7 @@ def test_a_registry_refuses_a_clock_that_cannot_honestly_spell_z(tmp_path, as_of
     a property of the clock, not of a call, and per-call it reads as a sibling that asked
     nothing."""
     with pytest.raises(EstateError):
-        WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
+        build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
                       ledger=primed_ledger(tmp_path), as_of=as_of)
 
 
@@ -631,7 +619,7 @@ def test_a_zero_offset_zone_that_is_not_utc_itself_is_accepted(tmp_path):
         def tzname(self, moment):
             return "UTC"
 
-    reg = WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
+    reg = build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
                         ledger=primed_ledger(tmp_path),
                         as_of=dt.datetime(2026, 5, 25, 15, 30, 45, tzinfo=ZeroOffset()))
 
@@ -649,7 +637,7 @@ def test_a_registry_will_not_serve_without_being_told_which_moment_it_serves(tmp
     forgot the clock would keep working and keep minting wall-clock stamps, which is precisely
     the state the batch is removing, with nothing red to show for it."""
     with pytest.raises(TypeError):
-        WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
+        build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
                       ledger=primed_ledger(tmp_path))
 
 

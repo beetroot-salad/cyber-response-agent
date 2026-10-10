@@ -140,14 +140,12 @@ def test_947_label_basis_defaults_to_policy_rule():
 
 
 def test_947_a_naive_or_non_utc_as_of_is_refused_as_a_fault():
-    """A naive or non-UTC T0 is refused where the registry reads it, and the refusal is filed as
-    a fault rather than as a corpus contradiction or an unreachable difference."""
+    """A naive or non-UTC T0 is refused where the registry reads it, as a manifest fault."""
     fam = _family()
     for bad_moment in ("2026-07-28T16:18:45", "2026-07-28T16:18:45+02:00"):
         with pytest.raises(_refusal()) as bad:
             fam.parse_family(T.family_doc(as_of=bad_moment))
         assert "as_of" in str(bad.value)
-        assert not fam.is_contradiction(bad.value)
 
 
 def test_947_a_model_authored_free_text_field_stays_one_scalar(tmp_path):
@@ -208,20 +206,6 @@ def test_947_disposition_declared_is_gated_by_the_same_enum_the_report_is():
     ok = _load(T.family_doc(worlds=[T.base_world(), T.world_doc(
         "b", disposition_declared=sorted(vocab.DISPOSITION_ENUM)[0])]))
     assert ok.worlds[1].disposition_declared in vocab.DISPOSITION_ENUM
-
-
-def test_947_a_manifest_edited_after_its_digest_was_taken_is_refused(tmp_path):
-    """A digest taken of the manifest is re-checkable against it: a manifest edited after the
-    digest was taken refuses rather than passing as the document that was digested."""
-    fam = _family()
-    doc = T.family_doc()
-    with Episode.open(T.episode(tmp_path)) as episode:
-        fam.write_family(episode, doc)
-        recorded = fam.manifest_digest(episode.view())
-        fam.write_family(episode, T.family_doc(base_story="edited after the digest"))
-        with pytest.raises(_refusal()) as bad:
-            fam.check_manifest_digest(episode.view(), recorded)
-    assert "digest" in str(bad.value)
 
 
 # ---------------------------------------------------------------------------------------

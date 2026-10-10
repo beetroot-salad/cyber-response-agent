@@ -59,7 +59,7 @@ from defender.learning.branch.estate.registry import (  # noqa: E402
     EstateError,
     WorldRegistry,
 )
-from defender._episode_paths import LAYOUT  # noqa: E402
+from defender._episode_paths import LAYOUT, EpisodePaths  # noqa: E402
 from defender.learning.branch.ledger import (  # noqa: E402
     BASE,
     CAPTURED,
@@ -71,11 +71,9 @@ from defender.learning.branch.ledger import (  # noqa: E402
     REFUSED,
     SOURCES,
     STAGED,
-    PATCHED,
     Ledger,
     LedgerError,
     ServedCall,
-    base_file,
     payload_text,
     request_key,
 )
@@ -97,6 +95,7 @@ from defender.runtime.verbs import (  # noqa: E402
 )
 from defender.tests._engine_helpers import fake_model  # noqa: E402
 from defender.tests import _tenants1106 as T1106  # noqa: E402
+from defender.tests.live_oracle_1224._spec1224 import build_registry  # noqa: E402
 
 #: The estate a real branched run queries: the shipped adapters and the shipped gather grant.
 #: Read through `PATHS`, the same seam `build_agent_core` defaults to, so a tree that moves its
@@ -149,9 +148,7 @@ def _record(ctx: VerbContext, name: str, params: dict) -> int:
     log = Path(ctx.run_dir) / CALLS
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("a", encoding="utf-8") as fh:
-        # `world_id` rides along so a test can see no world was declared to the adapter.
-        fh.write(json.dumps(
-            {"verb": name, "params": params, "world_id": ctx.world_id}) + "\\n")
+        fh.write(json.dumps({"verb": name, "params": params}) + "\\n")
     return len(log.read_text(encoding="utf-8").splitlines())
 
 
@@ -266,7 +263,7 @@ def world_registry(
     world: Any = UNTOUCHED_WORLD,
 ) -> WorldRegistry:
     """A `WorldRegistry` built through its own constructor, over a fresh ledger at `path`."""
-    return WorldRegistry(
+    return build_registry(
         read_roster(adapters), grant, world=world, ledger=fresh_ledger(ledger_path),
         as_of=AS_OF, tenant=T1106.fixture_run_tenant(),
     )
@@ -479,7 +476,7 @@ def test_the_vocabulary_splits_into_the_tier_the_seam_and_the_world():
     assert BASE in FAMILY_SOURCES
     assert CAPTURED in FAMILY_SOURCES
     assert not (world_decisions & FAMILY_SOURCES)
-    assert not ({STAGED, PATCHED} & SOURCES)
+    assert not ({STAGED, "patched"} & SOURCES)
 
 
 def test_the_ledger_refuses_an_invented_decision_at_its_own_door(tmp_path):
@@ -639,7 +636,7 @@ def test_the_reserved_base_world_id_cannot_name_the_family_capture(tmp_path):
     be appended there.
     """
     episode_root = tmp_path / "episode"
-    capture = base_file(episode_root)
+    capture = EpisodePaths(episode_root).served_base
     capture.parent.mkdir(parents=True, exist_ok=True)
     capture.touch()
 
@@ -685,15 +682,15 @@ def test_two_siblings_read_one_base_recording(tmp_path):
     served row, because what was served is per world."""
     ledger_path = tmp_path / SERVED_FILE
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
-    base = base_file(tmp_path / "ep")
+    base = EpisodePaths(tmp_path / "ep").served_base
     base.parent.mkdir(parents=True, exist_ok=True)
     base.write_text(json.dumps({
         "system": "cmdb", "verb": "get-host", "params": {"host": "canary-1"},
         "payload_text": payload_text({"host": "canary-1", "owner": "captured"}),
         "source": CAPTURED, "world_id": None}) + "\n", encoding="utf-8")
     ledger = fresh_ledger(ledger_path)
-    a = WorldRegistry(read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=ledger, as_of=AS_OF)
-    b = WorldRegistry(read_roster(adapters), FAKE_GRANT, world=World("b"), ledger=ledger, as_of=AS_OF)
+    a = build_registry(read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=ledger, as_of=AS_OF)
+    b = build_registry(read_roster(adapters), FAKE_GRANT, world=World("b"), ledger=ledger, as_of=AS_OF)
 
     from_a = a.verbs("cmdb")["get-host"](ctx, host="canary-1")
     from_b = b.verbs("cmdb")["get-host"](ctx, host="canary-1")
@@ -737,17 +734,17 @@ def test_a_world_reopened_from_disk_replays_its_own_kept_base_read(tmp_path):
     different world asking the same uncaptured key reads live for itself."""
     ledger_path = tmp_path / SERVED_FILE
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
-    first = WorldRegistry(read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=fresh_ledger(ledger_path), as_of=AS_OF)
+    first = build_registry(read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=fresh_ledger(ledger_path), as_of=AS_OF)
     from_a = first.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
-    reopened = WorldRegistry(
+    reopened = build_registry(
         read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=fresh_ledger(ledger_path), as_of=AS_OF)
     again = reopened.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
     assert from_a == again
     assert len(adapter_calls(ctx, "get-host")) == 1
 
-    other = WorldRegistry(
+    other = build_registry(
         read_roster(adapters), FAKE_GRANT, world=World("b"), ledger=fresh_ledger(ledger_path), as_of=AS_OF)
     other.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
@@ -843,7 +840,7 @@ def test_a_world_may_not_answer_to_the_family_tiers_key(tmp_path):
                   "entities": ["web-1"]},)
 
     with pytest.raises(EstateError):
-        WorldRegistry(
+        build_registry(
             read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=BaseWorld(),
             ledger=fresh_ledger(ledger_path), as_of=AS_OF)
 
@@ -878,7 +875,7 @@ def test_the_control_worlds_rows_are_its_own_never_the_familys(tmp_path):
     assert [c["params"]["query"] for c in adapter_calls(ctx, "esql")] == [body]
     assert [(r["world_id"], r["source"]) for r in served_rows(ledger_path)] \
         == [("base", PASSTHROUGH)], "the control world's row must not share the family's slot"
-    assert base_file(tmp_path / "ep").read_text(encoding="utf-8") == ""
+    assert EpisodePaths(tmp_path / "ep").served_base.read_text(encoding="utf-8") == ""
 
 
 def test_an_unstaged_call_records_one_identity_not_two(tmp_path):
@@ -890,7 +887,7 @@ def test_an_unstaged_call_records_one_identity_not_two(tmp_path):
     prevent."""
     ledger_path = tmp_path / SERVED_FILE
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
-    reg = WorldRegistry(
+    reg = build_registry(
         read_roster(adapters), FAKE_GRANT, world=World("A"), ledger=fresh_ledger(ledger_path), as_of=AS_OF)
 
     reg.verbs("cmdb")["get-host"](ctx, host="canary-1")

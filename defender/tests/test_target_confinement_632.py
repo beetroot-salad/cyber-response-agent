@@ -37,7 +37,6 @@ from __future__ import annotations
 import inspect
 import re
 from collections.abc import Mapping
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -322,18 +321,14 @@ def test_an_in_bounds_calls_backend_outage_is_recorded_exactly_as_today(tmp_path
 
 
 @pytest.mark.parametrize("outside", [".security-7", "wv-a-logs-", "logsecret-*"])
-def test_a_branched_runs_queries_are_confined_exactly_as_an_ordinary_runs(
+def test_a_former_world_view_name_is_confined_like_any_other_outside_index(
     tmp_path: Path, outside: str,
 ):
-    """A sibling's context — one declaring its world — is confined exactly as an ordinary
-    run's: the declaration admits nothing the base run's reach does not.
-
-    #1224 retired cluster staging and its per-world `wv-` views, and with them the rule that a
-    world's declaration admitted that world's view. What survives is the confinement itself,
-    and the one way it could quietly widen for a branched run: a declaration still read as
-    admitting something. So the refusals run under a declared world — a former view name among
-    them — and the positive control proves the same context still reaches its transport."""
-    ctx = replace(_ctx(tmp_path), world_id="a")
+    """#1224 retired cluster staging and its per-world `wv-` views, and with them the rule that
+    a world's declaration admitted that world's view. A former view name is now just another
+    index outside the configured patterns: refused at the gate and through the real adapter,
+    with the positive control proving the same context still reaches its transport."""
+    ctx = _ctx(tmp_path)
 
     with pytest.raises(ConfinementFault):
         confine_index(outside, CONFIGURED_PATTERNS)

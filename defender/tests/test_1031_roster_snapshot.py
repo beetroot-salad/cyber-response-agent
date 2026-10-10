@@ -38,7 +38,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender import _scaffold_rules  # noqa: E402
-from defender.learning.branch.estate.registry import WorldRegistry  # noqa: E402
+from defender.tests.live_oracle_1224._spec1224 import build_registry  # noqa: E402
 from defender.runtime import query_tool, verbs  # noqa: E402
 from defender.runtime.query_tool import QueryCapture, _registry_declares  # noqa: E402
 from defender.runtime.verb_grant import DENY_ALL, GrantError  # noqa: E402
@@ -376,12 +376,12 @@ def test_the_world_registry_inherits_the_snapshot_and_the_construction_time_chec
     answering `()` after the removal."""
     missing = tmp_path / "nope"
     with pytest.raises(verbs.RegistryError) as exc:
-        WorldRegistry(read_roster(missing), DENY_ALL, world=World("w1"),
+        build_registry(read_roster(missing), DENY_ALL, world=World("w1"),
                       ledger=fresh_ledger(tmp_path / "missing" / SERVED_FILE), as_of=AS_OF)
     assert str(missing) in str(exc.value)
 
     adapters = _adapters(tmp_path, "elastic")
-    world = WorldRegistry(read_roster(adapters), DENY_ALL, world=World("w1"),
+    world = build_registry(read_roster(adapters), DENY_ALL, world=World("w1"),
                           ledger=fresh_ledger(tmp_path / "real" / SERVED_FILE), as_of=AS_OF)
     assert world.systems() == ("elastic",)
     shutil.rmtree(adapters)

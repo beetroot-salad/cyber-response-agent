@@ -35,7 +35,7 @@ from defender._episode_handle import Episode  # noqa: E402
 # `episode` (#1133 rev 2): the sibling's held episode, threaded beside `world` for the world
 # ledger's writes. `oracle` / `verifier` (#1224): a fact world's oracle and verifier models.
 INVESTIGATE_PARAMS = ["self", "alert_path", "run_dir", "run_id", "defender_dir", "model_name",
-                      "model_override", "box", "tenant", "world", "episode", "oracle", "verifier"]
+                      "model_override", "box", "tenant", "world", "episode", "serving"]
 
 
 # ======================================================================================
