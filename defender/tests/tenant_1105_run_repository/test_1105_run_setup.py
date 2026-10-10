@@ -305,8 +305,10 @@ def test_1105_run_setup_refuses_a_linked_runs_folder_before_creating_anything(
     ep = T947.episode(tmp_path / "eps")
     with Episode.open(ep) as episode:
         world = run_py.resume_world(episode, "b", tenant=lambda: None)
-    os.symlink(episode_outside, Path(world.episode_dir) / "runs")
-    err = H.raised(_via_run_py, alert, world.run_id, t, world=world)
+        os.symlink(episode_outside, Path(world.episode_dir) / "runs")
+        # #1105 PR 2: an arm is made through the sibling's episode view (`episode_runs=`).
+        view = t.runs_repository().episode(episode.dir.name, held=episode)
+        err = H.raised(_via_run_py, alert, world.run_id, t, world=world, episode_runs=view)
     assert H.message(err).startswith("[run.py] "), f"a linked episode runs/ gave {err!r}"
     assert H.tree_state(episode_outside) == {}, "a sibling's setup wrote through the link"
 

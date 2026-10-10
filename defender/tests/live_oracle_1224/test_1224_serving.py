@@ -175,8 +175,8 @@ def _parallel_turn(*calls: tuple[str, str, dict]) -> Any:
 def _grade(ep: Path, judge: Any) -> Any:
     """Grade `ep` once, against a learning-state root of its own (so no other grade of the same
     episode id in the environment's state can stand in for this one)."""
-    return S.sym(S.JUDGE, "grade_episode")(ep, judge=judge, runs_base=ep.parent / "runs-base",
-                                           state=state_over(ep.parent.parent / "judge-state"), draws=1)
+    return J.grade_at(ep, judge=judge, state=state_over(ep.parent.parent / "judge-state"),
+                      draws=1)
 
 
 class _CallRouted:

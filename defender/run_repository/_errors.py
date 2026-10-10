@@ -1,10 +1,11 @@
-"""The runs repository's one error type. How its refusals show a name is `defender._shown`'s
+"""The runs repository's error types. How its refusals show a name is `defender._shown`'s
 rule, shared with the tenant owner.
 
 `RunRefused` is every refusal the repository makes that is not the tenant's (#1105 OP-5):
 `RunId`'s, the lookups' and the episode record's. A fault of the tenant's runs folder or its
 `_tenant.json` is `_tenant.TenantRefused` instead (P2). It is a plain `Exception`, not a
-`ValueError`, so neither error's handler ever catches the other.
+`ValueError`, so neither error's handler ever catches the other. `RunAbsent` is the one
+subclass: nothing at a run's name (#1105 PR 2).
 
 Pydantic-free: `RunId` imports it, and in-box code may import `RunId` (NM-05).
 """
@@ -24,3 +25,10 @@ class RunRefused(Exception):  # noqa: N818 — the design's name (#1105 OP-5), a
     def __init__(self, message: object = "") -> None:
         super().__init__(escaped(message))
 
+
+
+class RunAbsent(RunRefused):
+    """The repository refused because nothing is at the run's name: an absent entry, told apart
+    from an entry that is there but is not a run (a file, a link), which stays a plain
+    `RunRefused` (#1105 rev 5.1 S4). A subclass, so every existing `except RunRefused` handler
+    still catches it; a caller that must tell absent from refused catches this first."""

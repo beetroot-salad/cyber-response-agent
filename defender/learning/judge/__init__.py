@@ -28,7 +28,7 @@ import json
 import logging
 from dataclasses import field, fields as dataclass_fields
 from pathlib import Path
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import AfterValidator, TypeAdapter, ValidationError
 
@@ -50,6 +50,9 @@ from defender.learning.judge import render as render_mod  # noqa: E402
 from defender.learning.judge import run as run_mod  # noqa: E402
 from defender.runtime.branch._family import ManifestPredatesOracle, episode_token_for  # noqa: E402
 from defender import _yaml
+
+if TYPE_CHECKING:
+    from defender.run_repository import RunsRepository
 
 _logger = logging.getLogger(__name__)
 
@@ -217,18 +220,16 @@ def _gate(bound: Bound) -> tuple[str, str, dict[str, Any] | None, dict[str, dict
 
 def _prepare_world_prompt(  # noqa: PLR0913 — the render's own inputs, threaded from the pass
     episode: Episode, label: str, *, bound: Bound, payload_cap: int, git_show: Any,
-    facts: family_mod.WorldFacts | None, lessons_commit: str | None,
-    union: tuple[list[dict[str, Any]], dict[str, Any]], manifest: dict[str, Any],
+    facts: family_mod.WorldFacts | None, lessons_commit: str | None, manifest: dict[str, Any],
     samples: dict[str, Any], family_text: str,
 ) -> str:
     """One world's whole framed prompt, with its draw directory made.
 
     Its own frame so the caller can contain a fault here (all of it touches the box-reachable
-    episode tree) to this world. No `runs_base`: the caller always passes the pass's union, so
-    `render` never walks the runs base per world."""
+    episode tree) to this world."""
     judge_input = render_mod.render(
         episode.dir, label, git_show=git_show, payload_cap=payload_cap, facts=facts,
-        lessons_commit=lessons_commit, union=union, manifest=manifest,
+        lessons_commit=lessons_commit, manifest=manifest,
         samples=samples, family_text=family_text, bound=bound)
     episode.world(label).draws.ensure()
     return run_mod._build_prompt(judge_input)
@@ -424,57 +425,62 @@ def _default_judge_seam(episode_dir: Path) -> Any:
 
 
 def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration surface
-    episode_dir: Path, *, runs_base: Path, judge: Any = None,
+    runs: RunsRepository, episode_id: str, *, judge: Any = None,
     state: LearningState, draws: int | None = None, git_show: Any = None,
 ) -> EpisodeGrade:
-    """#1078 D4/J48 (design correction R-A3): `runs_base` is a REQUIRED keyword — no tool
-    falls back to a default base or skips its check when it has none. It threads into both the
-    world-label collision probe (`family._check_world_labels`) and the sibling union
-    (`render.sibling_union`)."""
+    """Grade episode `episode_id` of `runs`'s tenant (#1105 PR 2: the judge takes the
+    repository and an id). Its door is `runs.episode_files(episode_id)`, the episode owner's
+    handle alone, held for the whole pass (one descriptor while the judge is paid, none after):
+    a bad id, an unusable episodes root, a missing episode or a file at its name is
+    `JudgeRefused`, and nothing is created. The judge reads only the episode it is handed — no
+    tenant's runs (J3)."""
     import yaml
 
-    episode_dir = Path(episode_dir)
-    resolved_judge = judge if judge is not None else _default_judge_seam(episode_dir)
     try:
-        return _grade_episode(episode_dir, judge=resolved_judge, runs_base=runs_base,
-                              draws=draws, git_show=git_show, state=state)
+        with _open_episode(runs, episode_id) as episode:
+            resolved_judge = judge if judge is not None else _default_judge_seam(episode.dir)
+            return _grade_episode(episode, judge=resolved_judge, draws=draws,
+                                  git_show=git_show, state=state)
     except JudgeRefused:
         raise
     # Every input-driven failure arrives as `JudgeRefused`, which is what the launcher catches:
     # e.g. a decode error in an archived document, a YAML error in a draw file, a `ValueError`
     # from the guarded mkdir, a timeout on the queue lock.
     except (OSError, ValueError, TimeoutError, yaml.YAMLError) as bad:
-        raise JudgeRefused(f"episode {episode_dir}: {bad!r}") from bad
+        raise JudgeRefused(f"episode {episode_id}: {bad!r}") from bad
 
 
-def _grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration surface
-    episode_dir: Path, *, judge: Any, runs_base: Path | None, draws: int | None,
-    git_show: Any, state: LearningState,
+def _open_episode(runs: RunsRepository, episode_id: str) -> Episode:
+    """The pass's one handle, through the judge's door: every read through its view, every
+    write through it. A missing episode is refused, never recreated by the not-graded stamp;
+    the owner's refusals (a bad id, an unusable root, a file at the name) are `JudgeRefused`."""
+    try:
+        return runs.episode_files(episode_id)
+    except FileNotFoundError as missing:
+        raise JudgeRefused(f"episode {episode_id}: no such episode directory") from missing
+    except (OSError, ValueError) as refused:
+        raise JudgeRefused(f"episode {episode_id}: {refused}") from refused
+
+
+def _grade_episode(
+    episode: Episode, *, judge: Any, draws: int | None, git_show: Any, state: LearningState,
 ) -> EpisodeGrade:
     # An existing grade in which every judgeable world completed a draw is final (N22); one with
     # worlds left ungraded is re-run for those worlds only; a not-graded stamp never
     # short-circuits, so a repaired episode can still be graded.
-    existing = read_grade(episode_dir)
+    existing = read_grade(episode.dir)
     prior: EpisodeGrade | None = None
     if existing is not None and existing.not_graded is None:
         if not _ungraded_labels(existing):
             return existing
         prior = existing
-
-    # One handle for the pass: every read through its view, every write through it. A missing
-    # episode is refused, never recreated by the not-graded stamp.
-    try:
-        episode = Episode.open(episode_dir)
-    except FileNotFoundError as missing:
-        raise JudgeRefused(f"episode {episode_dir}: no such episode directory") from missing
-    with episode:
-        return _grade_bound_episode(
-            episode.view(), episode, judge=judge, runs_base=runs_base, draws=draws,
-            git_show=git_show, state=state, prior=prior)
+    return _grade_bound_episode(
+        episode.view(), episode, judge=judge, draws=draws, git_show=git_show, state=state,
+        prior=prior)
 
 
 def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orchestration, kept whole
-    bound: Bound, episode: Episode, *, judge: Any, runs_base: Path | None, draws: int | None,
+    bound: Bound, episode: Episode, *, judge: Any, draws: int | None,
     git_show: Any, state: LearningState, prior: EpisodeGrade | None,
 ) -> EpisodeGrade:
     episode_dir = episode.dir
@@ -499,7 +505,7 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orche
                                 f"'accepted'",
                       validity=UNUSABLE if word == outcome_mod.UNUSABLE else None)
 
-    worlds = family_mod.non_control_worlds(manifest, runs_base=runs_base)
+    worlds = family_mod.non_control_worlds(manifest)
     unusable = outcome_mod.unusable_reason(failed)
     if unusable is not None:
         # O5 (S9): counted from pre-flight's failed worlds plus every world's own record, with
@@ -546,18 +552,13 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orche
             facts[label] = read
     gradable = list(facts)
 
-    # Per-pass facts, resolved once and threaded into every render: every world shares one
-    # alert, and the record's `lessons_commit` must be the one the worlds rendered against. The
-    # runs-base walk is skipped when no world is gradable, since no render would consume it.
+    # Per-pass facts, resolved once and threaded into every render: the record's
+    # `lessons_commit` must be the one the worlds rendered against.
     lessons_commit = _pass_lessons_commit(bound, gradable)
     if lessons_commit is None and prior is not None:
         lessons_commit = prior.lessons_commit
     # One `git show` per (commit, path) for the pass, memoized around the injected seam.
     git_show = _memoized_show(git_show if git_show is not None else render_mod._git_show_default)
-    union = render_mod.sibling_union(
-        Path(runs_base) if runs_base is not None and gradable else None,
-        alert_id=_pass_alert_id(bound, gradable),
-        source_run_id=manifest.get("source_run_id"))
 
     per_world_draws: dict[str, dict[int, dict[str, Any]]] = {}
     row_of = {row["world"]: row for row in rows}
@@ -568,7 +569,7 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orche
         try:
             prompt = _prepare_world_prompt(
                 episode, label, bound=bound, payload_cap=cap, git_show=git_show,
-                facts=facts[label], lessons_commit=lessons_commit, union=union,
+                facts=facts[label], lessons_commit=lessons_commit,
                 manifest=manifest, samples=samples, family_text=family_text)
         except (JudgeRefused, OSError, ValueError, TimeoutError) as world_failed:
             # Distinguishes "setup failed" from "ungradable" (both have 0 completed draws).
@@ -689,12 +690,6 @@ def _pass_lessons_commit(bound: Bound, labels: list[str]) -> str | None:
         if commit is not None:
             return str(commit)
     return None
-
-
-def _pass_alert_id(bound: Bound, labels: list[str]) -> Any:
-    """The alert this episode's worlds all investigate (they share one source run) — the
-    union's key. Through `render.episode_alert`, the same rule the enqueue uses."""
-    return render_mod.episode_alert(bound, labels).get("alert_id")
 
 
 def read_grade(episode_dir: Path) -> EpisodeGrade | None:

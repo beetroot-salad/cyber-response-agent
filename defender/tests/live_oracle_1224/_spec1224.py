@@ -1477,7 +1477,9 @@ def _dispatch_after_branch_point(base: Path, src: Path, lead: str) -> None:
     from defender.runtime.branch._frontier import session_for_run
     from defender.tests import _session_store_705 as SS
 
-    store = ss.open_store(case_id=T.SOURCE_CASE_ID, runs_base=base)
+    from defender.run_repository import SessionPaths
+
+    store = ss.open_store(case_id=T.SOURCE_CASE_ID, sessions=SessionPaths(base))
     try:
         session_id = session_for_run(store, src)
         call_id = f"gather-{lead}-after-branch"
@@ -1526,8 +1528,10 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
         T.EPISODES_BASE_ENV) else None
     before = {p.name for p in root.iterdir()} if root is not None and root.is_dir() else set()
     try:
-        rc = cli.main([str(src), str(BRANCH_MESSAGE_ID), "--continuation-prompt", "go",
-                       *argv_extra], spawn=spawn, **seams)
+        # #1105 PR 2 (declared change 1): the tenant and the source run by id — the source sits
+        # at `<data root>/<tenant>/runs/<run id>`.
+        rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(BRANCH_MESSAGE_ID),
+                       "--continuation-prompt", "go", *argv_extra], spawn=spawn, **seams)
     except SystemExit as stop:
         if isinstance(stop.code, int):
             rc = stop.code
@@ -1541,7 +1545,9 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
     if len(fresh) == 1:
         ep = fresh[0]
     else:
-        ep = cli.episode_dir_for(EPISODE_ID, tenant=T.current_tenant())
+        from defender._episode_handle import episode_dir
+
+        ep = episode_dir(T.current_tenant().data_root, EPISODE_ID)
     return Launch(rc=rc, message=message, spawn=spawn, ep=ep)
 
 

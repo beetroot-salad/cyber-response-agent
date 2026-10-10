@@ -152,9 +152,9 @@ def test_767_run_under_flag_leaves_an_agent_comment(tmp_path, state, monkeypatch
 def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
     """n7_writes_only_under_the_flag — `--update-ticket` remains the whole switch. It is
     declared `store_true` and default OFF, so a run without it reaches NEITHER post-step; and
-    it is refused OUTRIGHT under `--resume`, before anything is spent (g5/r3: run.py carries
-    THREE `if ns.update_ticket:` sites, and this demand's second observable lives at the first
-    of them).
+    it is refused OUTRIGHT under `--episode` (`--resume` before #1105 PR 2), before anything is
+    spent (g5/r3: run.py carries THREE `if ns.update_ticket:` sites, and this demand's second
+    observable lives at the first of them).
 
     REJECTED, and deliberately not asserted: making the flag the platform default is a later
     change (N7).
@@ -178,9 +178,16 @@ def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
             f"a run without --update-ticket reached the estate anyway (ran {tail.names})"
         )
 
-    monkeypatch.setenv("DEFENDER_RUNS_BASE", str(tmp_path / "resume-runs"))
+    # #1105 PR 2 (declared change 6): a sibling names its episode by id under the configured
+    # episodes base, whose container the launcher made for its tenant before any sibling.
+    from defender import _tenant
+
+    episodes = tmp_path / "episodes-root"
+    (episodes / "ep-767" / "runs").mkdir(parents=True)
+    _tenant.ensure_runs_base_record(episodes / "ep-767" / "runs", "playground")
+    monkeypatch.setenv("DEFENDER_EPISODES_BASE", str(episodes))
     with pytest.raises(SystemExit) as refusal:
-        run_py.main(["--resume", str(tmp_path / "family.yaml"), "--world", "b",
+        run_py.main(["--episode", "ep-767", "--world", "b",
                      "--tenant", "playground", "--update-ticket"])
     assert "--update-ticket" in str(refusal.value), (
         "the resume path accepted the ticket flag: the two ticket calls are ordered around "

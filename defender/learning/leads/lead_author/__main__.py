@@ -1,4 +1,5 @@
-"""`python -m defender.learning.leads.lead_author <run_dir>` — the lead-author's by-hand entry point.
+"""`python -m defender.learning.leads.lead_author --tenant T <run_id>` — the lead-author's
+by-hand entry point.
 
 A package runs as a program only through its `__main__.py`.
 """

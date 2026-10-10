@@ -79,6 +79,7 @@ from pathlib import Path
 from typing import Any
 
 from defender.learning.core.config import LoopPaths
+from defender.tests._state1135 import curation_row, curation_run_dir, run_of  # noqa: F401 — the 1135 suite's doors onto the planted run a row names (#1105 PR 2)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFENDER = REPO_ROOT / "defender"
@@ -333,8 +334,11 @@ def write_jsonl(p: Path, rows: list[dict]) -> None:
 
 
 def request_body(case_id: str, run_dir: Path, **extra: Any) -> dict:
-    """Today's request record body (`markers.enqueue_case_for_curation`, R14: unchanged)."""
-    return {"case_id": case_id, "run_dir": str(run_dir.resolve()), **extra}
+    """The curation request record body: `{case_id, tenant_id, run_id}`, the address of the
+    natural run at `run_dir` (#1105 PR 2 declared change 8; the row named its `run_dir`
+    before), read off where it lives (`_state1135.curation_row`; plant the run with
+    `_state1135.curation_run_dir`)."""
+    return {**curation_row(case_id, run_dir), **extra}
 
 
 def seed_request(paths: LoopPaths, case_id: str, run_dir: Path, *, inflight: bool = False,

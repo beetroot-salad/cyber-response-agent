@@ -171,6 +171,13 @@ RESIDUE = frozenset({
     # Link-following reads of things that are not episode records: a sibling's scrub verdict,
     # the sidecar beside its run dir (screened by `artifact_file` first); the source run's
     # investigation and alert (run records, #1105); the episode page's own stylesheet asset.
+    # #1105 PR 2 (decision C): the tenant-scoped runs repository's and the episode view's
+    # `open(run_id)` — a run opened by id through its owner, not a `Path.open` — which this
+    # census's by-name rule cannot tell apart from one.
+    ("learning.branch.cli", "_finished_arms", ".open"),
+    ("learning.branch.cli", "_open_launch_source", ".open"),
+    ("run", "_open_world_source", ".open"),
+    ("scripts.visualize.visualize_episode", "_load_arm", ".open"),
 })
 
 #: `_io` functions that do no I/O; any OTHER public `_io` function called from the handle is a
@@ -971,8 +978,8 @@ NB_READERS = frozenset({
     # D3' "stay path-typed": pre-door, or the episode dir itself.
     ("learning.branch.cli", "preflight_episode"),
     ("learning.branch.cli", "refuse_claimed_episode"),
-    ("learning.branch.cli", "episode_dir_for"),
-    ("learning.branch.cli", "sibling_runs_base"),
+    # (#1105 PR 2 deleted `episode_dir_for` — the owner's `episode_dir` — and
+    # `sibling_runs_base`, F-13.)
     ("learning.branch.cli", "sibling_argv"),
     ("runtime.branch._family", "resume_world_from"),
     ("run", "main"),
@@ -1027,9 +1034,11 @@ DOORS_TOLERATED = frozenset({
 DOORS_REQUIRED = (
     ("learning.branch.cli", ("prepare_episode",), "create"),
     ("run", ("main",), "open"),
-    ("learning.judge", ("grade_episode", "_grade_episode"), "open"),
-    ("scripts.visualize.visualize_episode", ("render_episode",), "open"),
     ("learning.branch.cli", ("preflight_replay",), "open"),
+    # #1105 PR 2 (decision C, declared changes 3 and 4): the judge's and the page's doors take an
+    # episode id and hold their `Episode` through the tenant's runs repository
+    # (`runs.episode_files(ep)`, `runs.episode(ep)`), which opens it by id — so neither calls
+    # `Episode.open` itself any more.
 )
 
 

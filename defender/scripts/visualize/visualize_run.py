@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
@@ -45,6 +46,8 @@ from defender.scripts.visualize.visualize_primitives import (
     esc,
     fmt_duration,
     parse_report,
+    UsageParser,
+    UsageRefused,
     render_alert_block,
     section,
 )
@@ -462,7 +465,7 @@ def render_ticket_line(run_dir: Path) -> str:
     is shown as text, never as a link: nothing on the page sends the reader to an address a file
     named. The receipt's producer is the ticket writer's `_write_receipt`; this only reads what it
     wrote."""
-    path = RunPaths(run_dir).ticket_write(Path(run_dir).parent)  # = ticket_writer.receipt_path
+    path = RunPaths(run_dir).ticket_write()  # = ticket_writer.receipt_path
     if not path.is_symlink() and not path.exists():
         return ""
     text, _refused = read_guarded(path)
@@ -612,28 +615,66 @@ def render_runtime_page(run_dir: Path, *, update_ticket: bool = False) -> str:
 """
 
 
-def main(argv: list[str]) -> int:
-    """Re-render a finished run: the operator's tooling, so the handle is `Run.at` (#1110 N7),
-    through the same step `run.py` takes, with every line stamped with the run and the tenant
-    its provenance names. Exits 1 when the record was not saved, or when a `dev` copy failed —
-    refreshing that copy is often why an operator re-renders."""
-    from defender import _log
-    from defender.run_repository import Run
+def _parse_run_page_args(argv: list[str]) -> argparse.Namespace:
+    """`--tenant T [--episode ep] <run_id> [--update-ticket]` (#1105 declared change 7, J8):
+    the tenant is required, with no default; the run is named by its id, in the tenant's own
+    runs or, with `--episode`, as an arm of that episode."""
+    p = UsageParser(prog="visualize_run.py", description=__doc__)
+    p.add_argument("--tenant", required=True,
+                   help="the tenant whose run is re-rendered; required, with no default")
+    p.add_argument("--episode", default=None,
+                   help="the episode the run is an arm of (its id); absent for a natural run")
+    p.add_argument("--update-ticket", action="store_true")
+    p.add_argument("run_id", help="the run, by its id")
+    return p.parse_args(argv)
 
-    args = argv[1:]
-    update_ticket = "--update-ticket" in args
-    args = [a for a in args if a != "--update-ticket"]
-    if len(args) != 1:
-        print("usage: visualize_run.py <run_dir> [--update-ticket]", file=sys.stderr)
+
+def _open_run(ns: argparse.Namespace, tenant: Any) -> Run:
+    """The run the request names, opened by id through the request's tenant's repository —
+    `runs.open` for a natural run, the episode view's `open` for an arm. Neither follows a link
+    at the run's name, and an absent run is `RunAbsent`."""
+    from defender.run_repository import RunId
+
+    runs = tenant.runs_repository()
+    run_id = RunId.parse(ns.run_id)
+    if ns.episode is None:
+        return runs.open(run_id)
+    with runs.episode(ns.episode) as view:
+        return view.open(run_id)
+
+
+def main(argv: list[str]) -> int:
+    """Re-render a finished run of the request's tenant (`--tenant`), opened by id through its
+    repository, through the same step `run.py` takes, with every line stamped with the run and
+    the REQUEST's tenant (never the tenant a box-writable stamp names). Exits 1 when the run
+    cannot be opened, when the record was not saved, or when a `dev` copy failed — refreshing
+    that copy is often why an operator re-renders."""
+    from defender import _log, _tenant
+    from defender._episode_handle import EpisodeRefused
+    from defender._paths import process_defender_dir
+    from defender.run_repository import RunRefused
+
+    try:
+        ns = _parse_run_page_args(argv[1:])
+    except UsageRefused as bad:
+        print("usage: visualize_run.py --tenant T [--episode EPISODE_ID] <run_id> "
+              f"[--update-ticket] ({bad})", file=sys.stderr)
         return 64
-    run_dir = Path(args[0]).resolve()
-    if not run_dir.is_dir():
-        print(f"not a directory: {run_dir}", file=sys.stderr)
+    try:
+        tenant = _tenant.accept_tenant(
+            _tenant.resolve_data_root(), _tenant.requested_tenant_id(ns.tenant),
+            defender_dir=process_defender_dir())
+    except _tenant.TenantRefused as refused:
+        print(f"this re-render's tenant cannot be used: {refused}", file=sys.stderr)
         return 1
-    run = Run.at(run_dir)
-    with _log.run_context(run_dir.name, run.record.tenant_id, logger=_logger):
+    with _log.run_context(ns.run_id, str(tenant.id), logger=_logger):
         try:
-            copy = publish_page(run, update_ticket=update_ticket)
+            run = _open_run(ns, tenant)
+        except (RunRefused, _tenant.TenantRefused, EpisodeRefused, OSError) as refused:
+            _logger.error("the run cannot be opened: %s", refused)
+            return 1
+        try:
+            copy = publish_page(run, update_ticket=ns.update_ticket)
         except VisualizeFailed:
             _logger.error("the re-render failed", exc_info=True)
             return 1

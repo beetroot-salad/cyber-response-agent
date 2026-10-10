@@ -21,14 +21,14 @@ lesson's ``created_at`` window do not count. The value is emitted from that clos
 never the row's bytes, so a forged ``kind`` cannot forge a column.
 
 Usage:
-  trace_lesson.py --all                 # <name>\\t<description>\\t<in_context_cases>\\t<main_read_cases>
-  trace_lesson.py <lesson_name>         # per-case: case_id  disposition  loaded_at  evidence
+  trace_lesson.py --tenant T --all             # <name>\\t<description>\\t<in_context_cases>\\t<main_read_cases>
+  trace_lesson.py --tenant T <lesson_name>     # per-case: case_id  disposition  loaded_at  evidence
 
-Runs scanned: the durable learning runs dir (``DEFAULT_PATHS.runs_dir`` —
-``$DEFENDER_LEARNING_STATE_DIR/runs`` or in-repo ``defender/learning/runs/``),
-where the learn worker persists each case's ``report.md`` + ``lessons_loaded.jsonl``.
-Override with ``--runs-dir`` (e.g. a tenant's ephemeral ``<T>/runs`` for
-``--no-learn`` dev runs that are never persisted). Lessons: ``defender/lessons/``,
+Runs scanned: the natural runs of the tenant ``--tenant`` names (required, no default; #1105
+J8), listed and opened through its run repository — every case's ``report.md`` +
+``lessons_loaded.jsonl``. The listing rule applies (rev 4.1 H4): an entry in the runs folder
+that is not a run (a stray file, an off-rule name) fails the trace loudly, naming it, rather
+than being skipped. Lessons: ``defender/lessons/``,
 overridable with ``--lessons-dir``; ``--all`` walks it through the shared ``iter_lessons``
 and so inherits the corpus discovery rules (underscore-skip, warn on a malformed lesson).
 A lesson the walk skips still gets a marker row with an unwindowed count — the audit index
@@ -40,6 +40,7 @@ import argparse
 import functools
 import sys
 from defender._model import model
+from collections.abc import Iterable
 from datetime import date, datetime, UTC
 from pathlib import Path
 
@@ -54,8 +55,7 @@ from defender._frontmatter import parse_frontmatter_or_none
 from defender._report import UNKNOWN_DISPOSITION, read_report
 from defender._knowledge import CHECKOUT_KNOWLEDGE
 from defender._text import one_line
-from defender.run_repository import RunPaths
-from defender.learning.core.config import DEFAULT_PATHS
+from defender.run_repository import Run, RunPaths
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LESSONS_DIR = CHECKOUT_KNOWLEDGE.lessons_dir
@@ -72,10 +72,6 @@ def _unwindowed_reason(raw: object) -> str:
     if raw is None:
         return "no created_at"
     return f"created_at {_echo_value(raw)} is unparseable"
-
-
-def _default_runs_dir() -> Path:
-    return DEFAULT_PATHS.runs_dir
 
 
 def _parse_dt(raw) -> datetime | None:
@@ -97,7 +93,8 @@ class CaseHit:
 
 @functools.cache
 def _report_disposition(run_dir: Path) -> str:
-    """This case's disposition for the trace table, or the unknown placeholder.
+    """This case's disposition for the trace table, or the unknown placeholder — read from the
+    report of the run folder it is handed (an opened run's `run.run_dir`).
 
     Degrades rather than raises, so one bad report costs only its row. Warns when a present
     report has no readable headline; a report never written (an in-progress run) is silent.
@@ -113,21 +110,44 @@ def _report_disposition(run_dir: Path) -> str:
     return read.disposition_or_unknown
 
 
+def tenant_runs(raw_tenant: str) -> list[Run]:
+    """Every natural run of the tenant `raw_tenant` names (accepted under the configured data
+    root), in id order: `runs.list()` — whose listing rule refuses an entry that is not a run
+    (`RunRefused`, naming it) — then `runs.open` for each. An absent runs folder holds none.
+    `TenantRefused` when the tenant cannot be accepted."""
+    from defender import _tenant
+    from defender._paths import process_defender_dir
+
+    tenant = _tenant.accept_tenant(
+        _tenant.resolve_data_root(), _tenant.requested_tenant_id(raw_tenant),
+        defender_dir=process_defender_dir())
+    runs = tenant.runs_repository()
+    return [runs.open(run_id) for run_id in runs.list()]
+
+
 def in_context_cases(
-    lesson_name: str, created_at: datetime | None, runs_dir: Path
+    lesson_name: str, created_at: datetime | None, runs: Iterable[Run]
 ) -> list[CaseHit]:
+    """The cases among `runs` (opened runs, `tenant_runs`) that had `lesson_name` in context
+    since `created_at`, each with its disposition."""
+    return [hit for run in runs for hit in _run_hits(lesson_name, created_at, run)]
+
+
+def _run_hits(lesson_name: str, created_at: datetime | None, run: Run) -> list[CaseHit]:
+    """One run's exposures to `lesson_name` since `created_at`, read through the run's own
+    `lessons_loaded` record, then the report of its folder for the disposition."""
+    loaded = Path(run.observability.lessons_loaded.path)
+    if not loaded.is_file():
+        return []
+    # Filter to this lesson first: `--all` calls this once per lesson per run.
+    mine = (r for r in read_jsonl_rows(loaded) if r.get("lesson_name") == lesson_name)
     hits: list[CaseHit] = []
-    if not runs_dir.is_dir():
-        return hits
-    for run_dir in sorted(p for p in runs_dir.iterdir() if p.is_dir()):
-        loaded = RunPaths(run_dir).lessons_loaded
-        if not loaded.is_file():
-            continue
-        # Filter to this lesson first: `--all` calls this once per lesson per run.
-        mine = (r for r in read_jsonl_rows(loaded) if r.get("lesson_name") == lesson_name)
-        for exposure in exposures(mine, since=created_at).lessons:
-            hits.append(CaseHit(run_dir.name, _report_disposition(run_dir),
-                                str(exposure.evidence_at), exposure.evidence))
+    disposition = None
+    for exposure in exposures(mine, since=created_at).lessons:
+        if disposition is None:
+            disposition = _report_disposition(run.run_dir)
+        hits.append(CaseHit(str(run.id), disposition, str(exposure.evidence_at),
+                            exposure.evidence))
     return hits
 
 
@@ -135,21 +155,35 @@ def _main_read_count(hits: list[CaseHit]) -> int:
     return sum(1 for h in hits if h.evidence == EVIDENCE_READ)
 
 
-def _print_index(lessons_dir: Path, runs_dir: Path) -> None:
+def _print_index(lessons_dir: Path, runs: list[Run]) -> None:
     skipped: list[Path] = []
     for lesson in iter_lessons(lessons_dir, on_skip=skipped.append):
         name = lesson.path.stem
         raw_created = lesson.fm.get("created_at")  # lint-lesson-text: ok — parsed as a date; a bad value prints through one_line
         created_at = _parse_dt(raw_created)
-        cases = in_context_cases(name, created_at, runs_dir)
+        cases = in_context_cases(name, created_at, runs)
         desc = lesson.line("description")
         if created_at is None:
             desc = f"{desc} ({_unwindowed_reason(raw_created)} — unwindowed count)"
         print(f"{one_line(name)}\t{desc}\t{len(cases)}\t{_main_read_count(cases)}")
     for path in skipped:
-        cases = in_context_cases(path.stem, None, runs_dir)
+        cases = in_context_cases(path.stem, None, runs)
         print(f"{one_line(path.stem)}\t(malformed lesson — unwindowed count)\t{len(cases)}"
               f"\t{_main_read_count(cases)}")
+
+
+def _scanned_runs(raw_tenant: str) -> list[Run] | None:
+    """`tenant_runs`, or `None` with the refusal on stderr (one line, naming a stray entry
+    or the refused tenant)."""
+    from defender import _tenant
+    from defender.run_repository import RunRefused
+
+    try:
+        return tenant_runs(raw_tenant)
+    except (_tenant.TenantRefused, RunRefused) as refused:
+        print(f"error: the runs of tenant {one_line(raw_tenant)} cannot be scanned: "
+              f"{one_line(str(refused))}", file=sys.stderr)
+        return None
 
 
 def main(argv: list[str]) -> int:
@@ -157,14 +191,14 @@ def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
+    p.add_argument("--tenant", required=True,
+                   help="the tenant whose runs are scanned; required, with no default")
     p.add_argument("lesson_name", nargs="?", help="lesson slug to trace")
     p.add_argument("--all", action="store_true",
                    help="list every lesson with its in-context case count (cheap scan)")
-    p.add_argument("--runs-dir", type=Path, default=None)
     p.add_argument("--lessons-dir", type=Path, default=LESSONS_DIR,
                    help="Corpus directory (default: defender/lessons)")
     ns = p.parse_args(argv)
-    runs_dir = ns.runs_dir or _default_runs_dir()
     lessons_dir = ns.lessons_dir
 
     if ns.all and ns.lesson_name:
@@ -175,14 +209,23 @@ def main(argv: list[str]) -> int:
         print(f"no lessons dir: {lessons_dir}", file=sys.stderr)
         return 1
 
+    runs = _scanned_runs(ns.tenant)
+    if runs is None:
+        return 1
+
     if ns.all:
-        _print_index(lessons_dir, runs_dir)
+        _print_index(lessons_dir, runs)
         return 0
 
     if not ns.lesson_name:
         print("give a <lesson_name> or --all", file=sys.stderr)
         return 1
-    path = lessons_dir / f"{ns.lesson_name}.md"
+    return _trace_one(lessons_dir, ns.lesson_name, runs)
+
+
+def _trace_one(lessons_dir: Path, lesson_name: str, runs: list[Run]) -> int:
+    """`<lesson_name>`'s per-case table over `runs`."""
+    path = lessons_dir / f"{lesson_name}.md"
     if not path.is_file():
         print(f"no such lesson: {path}", file=sys.stderr)
         return 1
@@ -200,7 +243,7 @@ def main(argv: list[str]) -> int:
     elif created_at is None:
         print(f"warn: {path.name}: {_unwindowed_reason(raw_created)} — trace is unwindowed",
               file=sys.stderr)
-    hits = in_context_cases(path.stem, created_at, runs_dir)
+    hits = in_context_cases(path.stem, created_at, runs)
     since = str(created_at) if created_at is not None else f"? ({_unwindowed_reason(raw_created)})"
     print(f"# {one_line(path.stem)} — {len(hits)} case(s) in context since {since}")
     for h in hits:

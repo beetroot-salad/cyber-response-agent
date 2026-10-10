@@ -8,9 +8,9 @@ label bound in, closed when it returns or raises; A4: readers take a `Bound`, wr
 and the owner decisions of 2026-09-29 (the label is required; functions that took
 `catalog_dir` / `skills_dir` take the handle only, no `Path` form, no default). The shape it pins:
 
-- `drains._invoke_lead_author(paths, run_dir, *, label, box, on_done)` and
+- `drains._invoke_lead_author(paths, run, *, label, box, on_done)` and
   `drains._invoke_pitfalls(paths, *, label, box, on_curated, lock_wait_seconds)` require the label
-  and open `open_drain_trees(paths, label)` AROUND the curator call. `lead_author.run(run_dir, *,
+  and open `open_drain_trees(paths, label)` AROUND the curator call. `lead_author.run(run, *,
   label, ...)` requires it too. Below the open, the open `DrainTrees` flows:
   `run_under_held_queue_lock(..., trees)`, `run_pitfalls(*, paths, trees, ...)` and
   `build_lead_author_deps(paths, *, trees)` require it (`TypeError` without). The deps carry
@@ -121,7 +121,7 @@ from defender.tests._lead_author_1134 import (
     write,
 )
 from defender.tests._repo import query_template, seed_skills_repo
-from defender.tests._state1135 import state_for_paths
+from defender.tests._state1135 import curation_row, curation_run_dir, run_of, state_for_paths
 from defender.tests._shared_readers_1134 import RefusesFolder, kernel_watch
 from defender.tests._spec791 import (
     SpecBranch,
@@ -904,10 +904,13 @@ def _worktree(tmp_path: Path, name: str = "repo") -> Path:
                      skills=("elastic",), catalog=("elastic", "wazuh"), name=name)
 
 
-def _run_dir(tmp_path: Path, *rows: tuple[str, str, str]) -> Path:
+def _run_dir(*rows: tuple[str, str, str], run_id: str = "run-1") -> Path:
     """A run dir whose queries table holds `rows` (`(query_id, system, verb)`), in order,
-    written through the production writer, one lead each."""
-    run_dir = tmp_path / "runs" / "run-1"
+    written through the production writer, one lead each. A natural run where run setup leaves
+    one (`_state1135.curation_run_dir`: `<data root>/<T>/runs/<run_id>`, #1105 PR 2), so the
+    lane's entry points take it as the `Run` the drain opens (`run_of`) and a row naming it
+    rehydrates; `run_id` tells apart the runs of one test."""
+    run_dir = curation_run_dir(run_id)
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
     for i, (qid, system, verb) in enumerate(rows):
         seed_executed_query(run_dir, query_id=qid, lead_id=f"l-00{i + 1}", system=system,
@@ -942,7 +945,7 @@ def test_a_kind_fault_does_not_unwind_the_claim_through_run_under_held_queue_loc
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    run_dir = _run_dir(tmp_path, ("wazuh.hunt-creds", "wazuh", "esql"),
+    run_dir = _run_dir(("wazuh.hunt-creds", "wazuh", "esql"),
                        ("elastic.hunt-creds", "elastic", "esql"))
     site = paths.skills_dir / "gather/queries/wazuh/_draft"
     site.mkdir(parents=True, exist_ok=True)
@@ -951,7 +954,7 @@ def test_a_kind_fault_does_not_unwind_the_claim_through_run_under_held_queue_loc
 
     with DrainTrees.open((paths.skills_dir,), **({"os_": refuser} if refuser else {})) as trees, \
             pytest.raises(FatalConfigError, match=NO_MODEL):
-        lead_author.run_under_held_queue_lock(run_dir, paths=paths, state=state_for_paths(paths), trees=trees,
+        lead_author.run_under_held_queue_lock(run_of(run_dir), paths=paths, state=state_for_paths(paths), trees=trees,
                                               on_done=done.append)
 
     w_draft = paths.skills_dir / f"gather/queries/wazuh/_draft/{_draft_basename('wazuh.hunt-creds')}.md"
@@ -975,7 +978,7 @@ def test_a_kind_fault_does_not_unwind_the_claim_through_run(tmp_path: Path, capl
     rc 2)."""
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    run_dir = _run_dir(tmp_path)
+    run_dir = _run_dir()
     site = paths.skills_dir / "gather/queries/wazuh/_draft"
     site.mkdir(parents=True, exist_ok=True)
     refuser = RefusesFolder(site, "step", errno.EACCES)
@@ -983,7 +986,7 @@ def test_a_kind_fault_does_not_unwind_the_claim_through_run(tmp_path: Path, capl
 
     with DrainTrees.open((paths.skills_dir,), os_=refuser) as trees:
         deps = _deps(paths, trees, spawn, [WAZUH_LEAD, ELASTIC_LEAD])
-        rc = lead_author.run(run_dir, label=LEAD, paths=paths, deps=deps)
+        rc = lead_author.run(run_of(run_dir), label=LEAD, paths=paths, deps=deps)
 
     assert rc == 2, "the run did not reach the (failing) agent"
     assert refuser.refused > 0
@@ -1016,7 +1019,7 @@ def test_run_writes_no_draft_outside_skills_through_a_linked_catalog(
     writer-level row above watches it with no git in the call."""
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    run_dir = _run_dir(tmp_path)
+    run_dir = _run_dir()
     spawn = LeadAuthorSpawn()
     names = {lead.query_id: draft_of(lead) for lead in (WAZUH_LEAD, ELASTIC_LEAD)}
     with scene_over(tmp_path, repo) as s:
@@ -1025,7 +1028,7 @@ def test_run_writes_no_draft_outside_skills_through_a_linked_catalog(
         planted = plant_state(s.at(site)) if site is not None else None
         before = census(s.outside)
         deps = _deps(paths, s.trees, spawn, [WAZUH_LEAD, ELASTIC_LEAD])
-        rc = lead_author.run(run_dir, label=LEAD, paths=paths, deps=deps)
+        rc = lead_author.run(run_of(run_dir), label=LEAD, paths=paths, deps=deps)
 
     assert rc == 0
     if site is None:
@@ -1055,7 +1058,7 @@ def test_run_goes_on_past_a_refused_draft_folder(tmp_path: Path, kind: str, capl
     The agent fake fails (rc 1), so the run stops at the spawn (rc 2)."""
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    run_dir = _run_dir(tmp_path)
+    run_dir = _run_dir()
     outside = tmp_path / "outside"
     outside.mkdir()
     spawn = LeadAuthorSpawn(rc=1)
@@ -1069,7 +1072,7 @@ def test_run_goes_on_past_a_refused_draft_folder(tmp_path: Path, kind: str, capl
     before = census(outside)
 
     with lead_trees(paths) as trees:
-        rc = lead_author.run(run_dir, label=LEAD, paths=paths,
+        rc = lead_author.run(run_of(run_dir), label=LEAD, paths=paths,
                              deps=_deps(paths, trees, spawn, [WAZUH_LEAD, ELASTIC_LEAD]))
 
     assert rc == 2, "the run did not reach the (failing) agent"
@@ -1094,21 +1097,21 @@ def test_run_under_held_queue_lock_writes_nothing_outside_skills_through_a_linke
     the unroutable model)."""
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
     repo = _worktree(tmp_path)
-    run_dir = _run_dir(tmp_path, ("elastic.newthing", "elastic", "esql"))
+    run_dir = _run_dir(("elastic.newthing", "elastic", "esql"))
     hexname = _draft_basename("elastic.newthing")
     done: list[str | None] = []
     with scene_over(tmp_path, repo) as s:
         draft = s.at(f"gather/queries/elastic/_draft/{hexname}.md")
         if site is None:
             with pytest.raises(FatalConfigError, match=NO_MODEL):
-                lead_author.run_under_held_queue_lock(run_dir, paths=s.paths, state=state_for_paths(s.paths), trees=s.trees,
+                lead_author.run_under_held_queue_lock(run_of(run_dir), paths=s.paths, state=state_for_paths(s.paths), trees=s.trees,
                                                       on_done=done.append)
             assert f"id: elastic.{hexname}" in draft.read_text(encoding="utf-8")
             assert done == []
             return
         plant_folder(s, site, "link")
         before = census(s.outside)
-        rc = lead_author.run_under_held_queue_lock(run_dir, paths=s.paths, state=state_for_paths(s.paths), trees=s.trees,
+        rc = lead_author.run_under_held_queue_lock(run_of(run_dir), paths=s.paths, state=state_for_paths(s.paths), trees=s.trees,
                                                    on_done=done.append)
 
     assert rc == 0
@@ -1176,10 +1179,9 @@ def test_the_drain_default_seams_carry_the_label_and_write_nothing_outside_skill
         planted.append(census(outside))
 
     branch = PlantingBranch(tmp_path / "worktrees", plant)
-    run_dir = tmp_path / "runs" / "run-1"
+    run_dir = curation_run_dir("run-1")
     seed_executed_query(run_dir, query_id="elastic.newthing", system="elastic", verb="esql")
-    state_for_paths(paths).enqueue_curation(
-        "case-1", {"case_id": "case-1", "run_dir": str(run_dir.resolve())})
+    state_for_paths(paths).enqueue_curation("case-1", curation_row("case-1", run_dir))
 
     rc = drains.lead_author_drain(
         paths, branch=branch, start_box=noop_start_box, stop_box=noop_stop_box, scrub=noop_scrub,
@@ -1212,10 +1214,9 @@ def test_a_seam_that_cannot_hold_skills_dead_letters_the_claim(tmp_path: Path, c
             shutil.rmtree(wt / "defender" / "skills")
 
     branch = PlantingBranch(tmp_path / "worktrees", plant)
-    run_dir = tmp_path / "runs" / "run-1"
+    run_dir = curation_run_dir("run-1")
     seed_executed_query(run_dir, query_id="elastic.newthing", system="elastic", verb="esql")
-    state_for_paths(paths).enqueue_curation(
-        "case-1", {"case_id": "case-1", "run_dir": str(run_dir.resolve())})
+    state_for_paths(paths).enqueue_curation("case-1", curation_row("case-1", run_dir))
 
     drains.lead_author_drain(
         paths, branch=branch, start_box=noop_start_box, stop_box=noop_stop_box, scrub=noop_scrub,
@@ -1240,11 +1241,11 @@ def _lifetime_paths(tmp_path: Path) -> tuple[LoopPaths, Path]:
     return LoopPaths(repo_root=repo, state_dir=tmp_path / "state"), repo
 
 
-def _unresolved_run(tmp_path: Path) -> Path:
+def _unresolved_run() -> Path:
     """A run whose one executed row resolves to no catalog template and is no draft candidate
     (`wazuh.search`: its suffix is its verb), so the run reaches `on_done(None)` (nothing to
     hand the agent) through every reader of the claim, and never the agent."""
-    return _run_dir(tmp_path, ("wazuh.search", "wazuh", "search"))
+    return _run_dir(("wazuh.search", "wazuh", "search"))
 
 
 def test_the_lead_author_seam_holds_skills_only_while_its_call_runs(tmp_path: Path, caplog):
@@ -1255,12 +1256,12 @@ def test_the_lead_author_seam_holds_skills_only_while_its_call_runs(tmp_path: Pa
     log of a normal claim, which reads the catalog, the drafts and the handoff through it)."""
     caplog.set_level(logging.DEBUG)
     paths, repo = _lifetime_paths(tmp_path)
-    run_dir = _unresolved_run(tmp_path)
+    run_dir = _unresolved_run()
     during: list[tuple[str | None, list[str]]] = []
     assert descriptors_under(repo) == []
 
     drains._invoke_lead_author(
-        paths, state_for_paths(paths), run_dir, label=LEAD,
+        paths, state_for_paths(paths), run_of(run_dir), label=LEAD,
         on_done=lambda sha: during.append((sha, sorted(descriptors_under(repo)))))
 
     assert during == [(None, [os.path.realpath(paths.skills_dir)])], during
@@ -1276,7 +1277,7 @@ def test_the_lead_author_seam_releases_skills_when_its_call_raises(tmp_path: Pat
     out of the seam as itself, an `OSError` is the seam's swallowed transient
     (`_LeadAuthorRetry`). Either way the trees were held while it ran and are closed after."""
     paths, repo = _lifetime_paths(tmp_path)
-    run_dir = _unresolved_run(tmp_path)
+    run_dir = _unresolved_run()
     during: list[list[str]] = []
 
     def on_done(_sha: str | None) -> None:
@@ -1287,7 +1288,7 @@ def test_the_lead_author_seam_releases_skills_when_its_call_raises(tmp_path: Pat
     expected = RuntimeError if fault == "RuntimeError" else drains._LeadAuthorRetry
     with pytest.raises(expected):
         drains._invoke_lead_author(
-            paths, state_for_paths(paths), run_dir, label=LEAD, on_done=on_done)
+            paths, state_for_paths(paths), run_of(run_dir), label=LEAD, on_done=on_done)
 
     assert during == [[os.path.realpath(paths.skills_dir)]], during
     assert descriptors_under(repo) == [], "a handle on the leaf outlived the raising seam"
@@ -1349,10 +1350,10 @@ def test_a_hold_fault_at_the_open_propagates_out_of_the_seam(tmp_path: Path, sea
 
     paths, repo = _lifetime_paths(tmp_path)
     shutil.rmtree(paths.skills_dir)
-    run_dir = _unresolved_run(tmp_path)
+    run_dir = _unresolved_run()
 
     if seam == "lead_author":
-        call = functools.partial(drains._invoke_lead_author, paths, state_for_paths(paths), run_dir,
+        call = functools.partial(drains._invoke_lead_author, paths, state_for_paths(paths), run_of(run_dir),
                                  label=LEAD,
                                  on_done=lambda _s: None)
     else:
@@ -1384,11 +1385,11 @@ def test_the_seams_and_entry_points_refuse_a_call_without_their_label_or_trees(t
     is then driven with it, as the positive control: the empty run is served, the empty queue
     returns 0."""
     paths, _repo = _lifetime_paths(tmp_path)
-    run_dir = _run_dir(tmp_path)
+    run_dir = _run_dir()
     state = state_for_paths(paths)
 
     with pytest.raises(TypeError):
-        drains._invoke_lead_author(paths, state, run_dir, on_done=lambda _s: None)
+        drains._invoke_lead_author(paths, state, run_of(run_dir), on_done=lambda _s: None)
     with pytest.raises(TypeError):
         drains._invoke_pitfalls(paths, state, on_curated=lambda _d: None, lock_wait_seconds=0)
     with pytest.raises(TypeError):
@@ -1398,18 +1399,18 @@ def test_the_seams_and_entry_points_refuse_a_call_without_their_label_or_trees(t
     with opened(paths) as trees:
         deps = _deps(paths, trees, LeadAuthorSpawn(), [])
         with pytest.raises(TypeError):
-            lead_author.run(run_dir, paths=paths, deps=deps)
+            lead_author.run(run_of(run_dir), paths=paths, deps=deps)
         with pytest.raises(TypeError):
             lead_author.run_under_held_queue_lock(
-                run_dir, paths=paths, state=state, on_done=lambda _s: None)
+                run_of(run_dir), paths=paths, state=state, on_done=lambda _s: None)
         with pytest.raises(TypeError):
             pitfalls_curator.run_pitfalls(paths=paths)
 
-        assert lead_author.run(run_dir, label=LEAD, paths=paths, deps=deps) == 0
+        assert lead_author.run(run_of(run_dir), label=LEAD, paths=paths, deps=deps) == 0
         assert lead_author.run_under_held_queue_lock(
-            run_dir, paths=paths, state=state, trees=trees, on_done=lambda _s: None) == 0
+            run_of(run_dir), paths=paths, state=state, trees=trees, on_done=lambda _s: None) == 0
         assert pitfalls_curator.run_pitfalls(paths=paths, trees=trees) == 0
-    drains._invoke_lead_author(paths, state, run_dir, label=LEAD, on_done=lambda _s: None)
+    drains._invoke_lead_author(paths, state, run_of(run_dir), label=LEAD, on_done=lambda _s: None)
     assert (run_dir / "lead_author" / "pitfalls_collected").is_file()
     assert drains._invoke_pitfalls(paths, state, label=LEAD, on_curated=lambda _d: None,
                                    lock_wait_seconds=0) == 0
@@ -1525,19 +1526,19 @@ def test_run_consults_the_label_it_is_given(tmp_path: Path, label: object):
     is served. The control is the lead member, on the same deps."""
     paths, _repo = _lifetime_paths(tmp_path)
     _lessons(paths)
-    run_dir = _run_dir(tmp_path)
+    run_dir = _run_dir()
     spawn = LeadAuthorSpawn()
     refusal = _refusal_for(label)
     with opened(paths) as trees:
         deps = _deps(paths, trees, spawn, [ELASTIC_LEAD])
         with pytest.raises(refusal):
-            lead_author.run(run_dir, label=label, paths=paths, deps=deps)  # type: ignore[arg-type]
+            lead_author.run(run_of(run_dir), label=label, paths=paths, deps=deps)  # type: ignore[arg-type]
         assert not (run_dir / "lead_author").exists()
         with pytest.raises(refusal):
-            lead_author.run(run_dir, label=label, paths=paths)  # type: ignore[arg-type]
+            lead_author.run(run_of(run_dir), label=label, paths=paths)  # type: ignore[arg-type]
         assert not (run_dir / "lead_author").exists()
         assert spawn.calls == []
-        assert lead_author.run(run_dir, label=LEAD, paths=paths, deps=deps) == 0
+        assert lead_author.run(run_of(run_dir), label=LEAD, paths=paths, deps=deps) == 0
     assert spawn.calls, "the control never reached the agent"
 
 
@@ -1550,11 +1551,11 @@ def test_the_drain_seams_consult_the_label(tmp_path: Path, label: object):
     `test_the_seams_and_entry_points_refuse_...`."""
     paths, repo = _lifetime_paths(tmp_path)
     _lessons(paths)
-    run_dir = _run_dir(tmp_path)
+    run_dir = _run_dir()
     refusal = _refusal_for(label)
 
     with pytest.raises(refusal):
-        drains._invoke_lead_author(paths, state_for_paths(paths), run_dir,
+        drains._invoke_lead_author(paths, state_for_paths(paths), run_of(run_dir),
                                    label=label,  # type: ignore[arg-type]
                                    on_done=lambda _s: None)
     assert not (run_dir / "lead_author").exists()

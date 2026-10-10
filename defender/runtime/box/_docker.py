@@ -122,11 +122,14 @@ def container_name(run_id: str) -> str:
 
 def infra_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
     """The infra env every box needs: the shims and package location. `DEFENDER_RUNS_BASE` is
-    derived from the run dir, never read from the environment."""
+    the run folder's own hand-out from the layout owner (`RunPaths.runs_base_export`), never read
+    from the environment and never composed here (#1105 PR 2, #1210)."""
+    from defender.run_repository import RunPaths
+
     env: dict[str, str] = {}
     env["DEFENDER_DIR"] = str(defender_dir)
     env["DEFENDER_RUN_DIR"] = str(run_dir)
-    env["DEFENDER_RUNS_BASE"] = str(run_dir.parent)
+    env["DEFENDER_RUNS_BASE"] = RunPaths(run_dir).runs_base_export()
     env["PATH"] = f"{defender_dir / 'bin'}:{_BOX_PATH}"
     env["PYTHONPATH"] = str(defender_dir.parent)
     return env

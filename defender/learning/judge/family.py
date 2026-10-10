@@ -380,9 +380,7 @@ def world_label_names_directory(episode_id: str, label: str) -> bool:
     return is_valid_run_id(label) and is_valid_run_id(f"{episode_id}-{label}")
 
 
-def _check_world_labels(
-    episode_id: str, worlds: list[dict[str, Any]], *, runs_base: Path | None,
-) -> None:
+def _check_world_labels(episode_id: str, worlds: list[dict[str, Any]]) -> None:
     """Refuse a world label that cannot be used as a name, before any path is built from it.
 
     - Reserved labels (`base`, `family`, `family_<n>`): re-checked here because `grade_episode`
@@ -390,8 +388,9 @@ def _check_world_labels(
       would collide with the family-level call's finding ids and archive path.
     - The label must name a directory (`world_label_names_directory`): it is model-authored and
       joined straight into every per-world path.
-    - It must not collide with a real run under the runs base, which the last-segment resolver
-      for `source_run_dir` would otherwise resolve to wrong-but-real content."""
+
+    The judge reads only the episode it is handed (#1105 J3), so a label is never probed
+    against the tenant's runs: the collision probe guarded a resolver nothing called."""
     for world in worlds:
         label = world.get("world_id")
         if isinstance(label, str) and is_reserved_world_label(label):
@@ -406,20 +405,6 @@ def _check_world_labels(
                 f"sibling run ({episode_id}-{label}) — the label is joined straight into every "
                 "per-world path this pass reads and writes, so a label off that grammar reads "
                 "and writes outside the world it names")
-    if runs_base is None:
-        return
-    base = Path(runs_base)
-    for world in worlds:
-        label = world.get("world_id")
-        # Wider than `is_dir()`: anything at the name (a file, a link, a broken link) is
-        # reachable by the resolver, and `is_dir()` would follow a planted link.
-        if isinstance(label, str) and (
-                (base / label).exists() or (base / label).is_symlink()):
-            raise JudgeRefused(
-                f"world label {label!r} collides with a real run under the operator's runs "
-                f"base ({base / label}) — a family row's source_run_dir naming this label "
-                "would resolve to that run's content rather than this world's own archive; "
-                "rename one of the two")
 
 
 def mapping_key(mapping: dict[str, Any]) -> str:
@@ -818,11 +803,11 @@ def read_world(  # noqa: PLR0911 — one tier rule, one return per way a world i
     return row, facts
 
 
-def non_control_worlds(doc: dict[str, Any], *, runs_base: Path | None) -> list[dict[str, Any]]:
+def non_control_worlds(doc: dict[str, Any]) -> list[dict[str, Any]]:
     """The manifest's non-control world entries, each label checked usable as a name
     (`_check_world_labels`) before any path is built from it."""
     worlds = _non_control_worlds(doc)
-    _check_world_labels(episode_id_of(doc), worlds, runs_base=runs_base)
+    _check_world_labels(episode_id_of(doc), worlds)
     return worlds
 
 

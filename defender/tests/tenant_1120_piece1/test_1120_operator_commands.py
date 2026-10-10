@@ -315,12 +315,14 @@ def _launcher_source(root: Path) -> Path:
 
 def _launch(source: Path) -> BaseException | int:
     """The REAL branch launcher over `source`, with no `--tenants-root` (piece 1 removes it),
-    the role preflight neutralised and the spawn recorded."""
+    the role preflight neutralised and the spawn recorded. #1105 PR 2 (declared change 1): the
+    tenant and the source run by id (`<root>/<T>/runs/<run id>`)."""
     spawn = _SpawnRecorder()
     try:
         return branch_cli.main(
-            [str(source), str(T947.BRANCH_MESSAGE_ID), "--continuation-prompt",
-             "Continue from here."], spawn=spawn, preflight=T947.no_preflight)
+            ["--tenant", source.parent.parent.name, source.name,
+             str(T947.BRANCH_MESSAGE_ID), "--continuation-prompt", "Continue from here."],
+            spawn=spawn, preflight=T947.no_preflight)
     except SystemExit as refused:
         return refused
     finally:

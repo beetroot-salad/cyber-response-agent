@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run-records name gate: no code outside the name-owner modules (every file of the runs
 repository package `defender/run_repository/`, `defender/_episode_paths.py`,
-`defender/_tenant.py`) may spell or hold a run or episode record's name, whole or as a
+`defender/_episode_handle.py`, `defender/_tenant.py`) may spell or hold a run or episode record's name, whole or as a
 composed part, or join a name onto a run or episode root.
 
 Three checks:
@@ -60,8 +60,10 @@ END_MARK = "<!-- end generated -->"
 #: (#1105 D1.5, which absorbed the layout and the handle), read off disk, so a module the
 #: package gains is an owner the day it lands rather than when a list is edited.
 OWNER_PACKAGE = "run_repository"
-#: The two owners outside the package.
-_OWNER_FLAT_MODULES = ("_episode_paths.py", "_tenant.py")
+#: The owners outside the package. `_episode_handle.py` owns the episode folder with
+#: `_episode_paths.py` (#1105 rev 5.1's data model): its private `runs/` container, on which the
+#: runs repository's episode view is built, is an owner read.
+_OWNER_FLAT_MODULES = ("_episode_paths.py", "_episode_handle.py", "_tenant.py")
 
 #: The owner modules by their path under `defender/`, the exempt set everything below is
 #: defined relative to. Matched by path, never by basename — a package submodule's basename
@@ -536,7 +538,8 @@ def main(argv: list[str] | None = None) -> int:
         for f in found:
             print(f"  {f.display}")
         print(
-            "\nNo code outside defender/run_repository/, _episode_paths.py and _tenant.py "
+            "\nNo code outside defender/run_repository/, _episode_paths.py, _episode_handle.py "
+            "and _tenant.py "
             "may spell a run or episode record's name — reach it through the "
             "owner, or mark a deliberate diagnostic with "
             "`# lint-run-records: ok — <reason>`."

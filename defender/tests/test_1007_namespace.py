@@ -38,6 +38,7 @@ from pathlib import Path
 
 import pytest
 
+from defender import _episode_handle as EH
 from defender.tests import _triplet_947 as T
 from defender.tests import _world_1007 as W
 from defender.tests.live_oracle_1224 import _spec1224 as S
@@ -102,7 +103,6 @@ def test_the_launcher_answers_to_no_operator_named_episode_token(tmp_path):
     What failure looks like: the flag stays, and one hand-typed token puts an episode's world
     ledgers in a namespace no reader will ever re-derive.
     """
-    cli = W.mod("learning.branch.cli")
     fam = W.mod("runtime.branch._family")
 
     refused_rc, refused_spawn, _ep = launch(
@@ -112,7 +112,7 @@ def test_the_launcher_answers_to_no_operator_named_episode_token(tmp_path):
         f"the launcher accepted --episode-token {OPERATOR_NAMED!r} and exited "
         f"{refused_rc!r} — the operator door onto the episode's namespace is still open")
     assert refused_spawn.launches == [], "the refused launch started a sibling anyway"
-    root = Path(cli.episodes_root(tenant=W.current_tenant()))
+    root = Path(EH.episodes_root(W.current_tenant().data_root))
     if root.is_dir():
         assert OPERATOR_NAMED not in written_bytes(root), (
             "the operator's token was written under the episodes root")

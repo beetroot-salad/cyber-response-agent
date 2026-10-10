@@ -4,8 +4,9 @@ The change (`spec-flow/specs/spec_graph_1078-pass-a.yaml`, `.spec-flow/frontiers
 every request names its tenant, the tenant must exist (its ROW, `<data root>/<T>/tenant.json`,
 written only by `create_tenant`), and the runs base follows from it
 (`runs_base_for(T) == TenantPaths(resolve_data_root(), T).runs == <root>/<T>/runs`). A fork
-learns its tenant from its source's HOST-ONLY runs-base record (`tenant_of_run_dir`), never
-from the stamp a box can write.
+takes its tenant from the request (#1105 PR 2: `branch --tenant T <source_run_id>`; the
+`tenant_of_run_dir` derivation is gone, F-13) and holds it to the host-only runs-base record,
+never to the stamp a box can write.
 
 NONE of the new names exists at base ed5386bc. Every import goes through `mod()` PER CALL (the
 `_triplet_947` / `_spec1077` idiom) so a missing name is ONE failure per test rather than a
@@ -13,7 +14,7 @@ collection error that hides every other assertion in the file.
 
 COINED NAMES LIVE HERE AND NOWHERE ELSE. The design names every new owner function
 (`is_valid_tenant_id`, `TenantId`, `TenantPaths`, `create_tenant`, `require_tenant`,
-`tenant_of_run_dir`, `ensure_runs_base_record`, `resolve_data_root`, `runs_base_for`), and §7
+`ensure_runs_base_record`, `resolve_data_root`, `runs_base_for`), and §7
 J06 places them all in `defender/_tenant.py`. What it does NOT name is the setup command's
 Python entry; the tests therefore drive it as the operator does, as a PROCESS
 (`python3 defender/scripts/tenant.py setup <id>`), and read its exit status and output. If
@@ -126,13 +127,6 @@ def create_tenant(root: Path, tenant_id: str) -> Any:
 
 def require_tenant(root: Path, tenant_id: str) -> Any:
     return tenant().require_tenant(root, tenant_id)
-
-
-def tenant_of_run_dir(run_dir: Path, data_root: Path | None = None) -> str:
-    """#1120 D1: the owner takes the data root, resolved once at the entry; a pass-A test that
-    names none means the one its process is pointed at."""
-    root = data_root if data_root is not None else resolve_data_root()
-    return tenant().tenant_of_run_dir(root, run_dir)
 
 
 def ensure_runs_base_record(runs_base: Path, tenant_id: str) -> Any:
@@ -455,15 +449,43 @@ def drive_main(argv: list[str], rec: Recorder) -> tuple[int | None, BaseExceptio
         return None, refused
 
 
-def resume_argv(manifest: Path, world: str = "b", *extra: str) -> list[str]:
-    return ["--resume", str(manifest), "--world", world, *extra]
+def sibling_argv(manifest: Path, world: str = "b", *extra: str) -> list[str]:
+    """A sibling's command line for the episode whose manifest is `manifest` (#1105 PR 2,
+    declared change 6: `run.py --episode <episode_id> --world L`, the tenant among `extra`).
+    The episode is opened by id under `DEFENDER_EPISODES_BASE`, which the scene points at the
+    manifest's episodes root (`family_for(..., monkeypatch=)`)."""
+    return ["--episode", Path(manifest).parent.name, "--world", world, *extra]
 
 
-def family_for(source: Path, episode_dir: Path) -> Path:
-    """An episode dir holding a family manifest whose source is `source` — what the launcher
-    leaves before it spawns a sibling. Returns the manifest path."""
-    ep = T.episode(episode_dir.parent, doc=T.family_doc(source_run_dir=str(source)),
+#: `family_for`'s default container: the tenant whose location `<root>/<T>/runs/<run>` the
+#: source sits at.
+SOURCE_TENANT_CONTAINER = object()
+
+
+def family_for(source: Path, episode_dir: Path, *, monkeypatch: Any = None,
+               container: Any = SOURCE_TENANT_CONTAINER) -> Path:
+    """An episode dir holding a family manifest whose source is `source` (by its run id) — what
+    the launcher leaves before it spawns a sibling. Returns the manifest path.
+
+    #1105 PR 2: the launcher makes the siblings' container `<episode>/runs` with its tenant's
+    record before the first sibling starts (`EpisodeRuns.create_container`), and a sibling over
+    an absent one refuses; it is planted here through the real writer, naming `container` (the
+    source location's tenant by default; `None` leaves it absent). With `monkeypatch`, the
+    episodes base a sibling opens its episode under (`DEFENDER_EPISODES_BASE`) is pointed at
+    the episode's parent."""
+    from defender import _tenant
+
+    source = Path(source)
+    ep = T.episode(episode_dir.parent, doc=T.family_doc(source_run_dir=str(source),
+                                                        source_run_id=source.name),
                    episode_id=episode_dir.name, root=episode_dir.parent)
+    if container is SOURCE_TENANT_CONTAINER:
+        container = source.parent.parent.name
+    if container is not None:
+        (ep / "runs").mkdir(exist_ok=True)
+        _tenant.ensure_runs_base_record(ep / "runs", container)
+    if monkeypatch is not None:
+        monkeypatch.setenv(T.EPISODES_BASE_ENV, str(ep.parent))
     return ep / "family.yaml"
 
 
@@ -474,9 +496,16 @@ def family_for(source: Path, episode_dir: Path) -> Path:
 CONTINUATION = "Continue from here."
 
 
-def launch_argv(source: Path, message_id: int = T.BRANCH_MESSAGE_ID) -> list[str]:
+def launch_argv(source: Path, message_id: int = T.BRANCH_MESSAGE_ID, *,
+                tenant_id: str | None = None) -> list[str]:
+    """The launcher's command line for the source run at `source` (#1105 PR 2, declared
+    change 1: `--tenant T <source_run_id> <message>`): the tenant is `tenant_id`, or the one
+    whose tenant location `<root>/<T>/runs/<run id>` the source sits at; the run by its id."""
     place_knowledge_for_rows()
-    return [str(source), str(message_id), "--continuation-prompt", CONTINUATION]
+    source = Path(source)
+    requested = source.parent.parent.name if tenant_id is None else tenant_id
+    return ["--tenant", requested, source.name, str(message_id),
+            "--continuation-prompt", CONTINUATION]
 
 
 def no_preflight(_model: str | None = None, *, branching: bool = False) -> int:
@@ -499,12 +528,13 @@ def serving_oracle() -> dict[str, Any]:
             "verifier": S.passing_verifier().model}
 
 
-def drive_launch(source: Path, *, spawn: Any = None, **seams: Any) -> BaseException | int:
-    """Drive the REAL `learning/branch/cli.main` over one source, the role preflight
-    neutralised (`no_preflight`) so a refusal is never the host's credentials.
+def drive_launch(source: Path, *, spawn: Any = None, tenant_id: str | None = None,
+                 **seams: Any) -> BaseException | int:
+    """Drive the REAL `learning/branch/cli.main` over one source (`launch_argv`), the role
+    preflight neutralised (`no_preflight`) so a refusal is never the host's credentials.
     Returns the exit status, or the refusal it raised."""
     seams.setdefault("preflight", no_preflight)
     try:
-        return branch_cli().main(launch_argv(source), spawn=spawn, **seams)
+        return branch_cli().main(launch_argv(source, tenant_id=tenant_id), spawn=spawn, **seams)
     except SystemExit as refused:
         return refused

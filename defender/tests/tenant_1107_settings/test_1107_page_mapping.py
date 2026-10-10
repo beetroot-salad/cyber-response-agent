@@ -606,6 +606,13 @@ def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
         T.world_doc("b", facts=note("SOC-1", "closed")),
         T.world_doc("c", facts=note("SOC-2", "done-edited-1107")),
     ]))
+    # #1105 PR 2: the sibling opens its episode by id under the configured episodes base, over
+    # the container the launcher made for its tenant before the first sibling.
+    from defender import _tenant
+
+    (ep / "runs").mkdir(exist_ok=True)
+    _tenant.ensure_runs_base_record(ep / "runs", S.PLAYGROUND_ID)
+    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(ep.parent))
     shim = S.DockerShim(tmp_path / "docker")
     monkeypatch.setenv("PATH", shim.path_value())
     run = S.run_py()
@@ -631,14 +638,15 @@ def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
                 defender_dir=kw["defender_dir"], model_name=kw["model"],
                 model_override=kw["model_override"], box=None, tenant=kw["tenant"],
                 world=kw["world"], episode=kw["episode"], serving=kw["serving"],
+                source=kw["source"],
                 investigate=lambda **ikw: investigated.append(ikw) or {
                     "output": "spec1107", "requests": 0, "truncated_by": None})
 
         rec = S.RunRecorder(tmp_path / "siblings" / world)
         try:
             outcome: Any = S.drive_run(
-                H.resume_argv(ep / "family.yaml", world, "--tenant", S.PLAYGROUND_ID,
-                              "--no-learn"),
+                H.sibling_argv(ep / "family.yaml", world, "--tenant", S.PLAYGROUND_ID,
+                               "--no-learn"),
                 rec, preflight=edit_after_record, lifecycle=lifecycle)
         except EstateError as refused:
             outcome = refused

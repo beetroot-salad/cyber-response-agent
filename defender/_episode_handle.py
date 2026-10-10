@@ -15,6 +15,15 @@ the class; a folder answers `.path` and `.ensure()`. Each verb is one call on th
 `view()` is a `Bound` over the same held folder, for a pass that reads the tree it writes (the
 judge). Readers that bind the episode dir on their own keep their `_io.bind`. The archive's
 copy lane (`learning/branch/archive.py`) is the declared exception and does not go through here.
+
+An episode is opened by id as `Episode.open(episode_dir(data_root, episode_id))` (#1105 PR 2,
+D-ep): `episode_dir` — with `episodes_root` (the one reader of `DEFENDER_EPISODES_BASE`, with
+its refusals) and `refuse_bad_episode_id`, kept in `_episodes_root` and re-exported here —
+refuses a bad id or an unusable root (`EpisodeRefused`) before anything is read, and the door
+holds what it names. The owner never reads inside the episode's `runs/`: that container and its
+arms are the runs repository's episode view (`tenant.runs_repository().episode(episode_id)`),
+built on this handle. The one hand-out of the container's path is `box_mounted_container`, for a
+sibling's acceptance.
 """
 from __future__ import annotations
 
@@ -23,6 +32,12 @@ from typing import Any
 
 from defender import _io as _real_io
 from defender._episode_paths import LAYOUT, _check_label, check_minted_token
+# The episodes root and the episode id (#1105 PR 2, D-ep) live in `_episodes_root`, so this
+# handle stays a pure holder (#1133 D6': its only I/O is `hold`/`hold_new` and their `Held`);
+# re-exported here, where the doors' callers look for them.
+from defender._episodes_root import (  # noqa: F401
+    EPISODES_BASE_ENV, EpisodeRefused, episode_dir, episodes_root, refuse_bad_episode_id,
+)
 
 #: Every record the handle hands out, keyed by its address (a bare name is an attribute of the
 #: episode, `world.<name>` one of `episode.world(label)`), mapped to the verbs its row grants.
@@ -268,9 +283,16 @@ class Episode:
         return self._folder(LAYOUT.served)
 
     @property
-    def runs(self) -> EpisodeFolder:
-        """`runs/`, the siblings' runs base. The handle never addresses inside a run."""
+    def _runs(self) -> EpisodeFolder:
+        """`runs/`, the siblings' container. Private (#1105 PR 2, F-13): the container and its
+        arms are the runs repository's episode view, which is built on this handle."""
         return self._folder(LAYOUT.runs)
+
+    @property
+    def box_mounted_container(self) -> Path:
+        """The container's path, for a sibling's acceptance only (`box_mounted`): the box mounts
+        it, so the tenant's settings must lie under none of it. Asking reads nothing."""
+        return self._runs.path
 
     @property
     def worlds(self) -> EpisodeFolder:
@@ -283,5 +305,6 @@ class Episode:
 _DOOR = object()
 
 
-__all__ = ["FOLDERS", "RECORD_VERBS", "Episode", "EpisodeFolder", "EpisodeRecord",
-           "EpisodeWorld"]
+__all__ = ["EPISODES_BASE_ENV", "FOLDERS", "RECORD_VERBS", "Episode", "EpisodeFolder",
+           "EpisodeRecord", "EpisodeRefused", "EpisodeWorld", "episode_dir", "episodes_root",
+           "refuse_bad_episode_id"]

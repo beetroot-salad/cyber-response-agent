@@ -670,7 +670,7 @@ def test_the_handle_surface_takes_and_returns_no_tree_path(tmp_path: Path) -> No
         held = _path_valued(value)
         assert not held, f"{channel_name} carries a Path: {held}"
 
-    S.seed_request(paths, "case-0000000000000001", tmp_path / "runs" / "r1")
+    S.seed_request(paths, "case-0000000000000001", S.curation_run_dir("r1"))
     claims = list(state.claim("case_id"))
     assert len(claims) == 1, f"one queued request must claim once: {claims!r}"
     assert isinstance(claims[0], S.Claimed), f"a claim must be a Claimed: {claims[0]!r}"

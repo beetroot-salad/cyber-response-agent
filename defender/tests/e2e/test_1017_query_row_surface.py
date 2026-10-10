@@ -299,7 +299,7 @@ def _judge_world(tmp_path: Path, rows: list[dict], *, goal: str = "GOAL_MARKER")
 def _leads_view(ep: Path, base: Path):
     """The per-lead chain and the rendered leads section — the address every O3 claim is
     made at, off the REAL `render` with the runs base seam pointed at this test's own."""
-    judge_input = J.mod("learning.judge.render").render(ep, "b", runs_base=base)
+    judge_input = J.mod("learning.judge.render").render(ep, "b")
     return judge_input.leads, judge_input.as_prompt_sections()["leads"]
 
 

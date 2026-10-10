@@ -303,8 +303,9 @@ demands:
              "DEFENDER_EPISODES_BASE.domain.distinguished[inside-checkout]",
              "DEFENDER_EPISODES_BASE.domain.distinguished[containing-data-root]"],
      discharged_by: test_1120_the_launcher_still_refuses_an_episodes_base_inside_the_data_root}
-  - {id: d1_tenant_of_run_dir_takes_root, kind: survival, form: test, binds: [tenant_of_run_dir, data_root],
-     discharged_by: test_1120_tenant_of_run_dir_takes_the_data_root_and_still_refuses_a_run_outside_its_tenant}
+  - {id: d1_tenant_of_run_dir_takes_root, kind: survival, form: clause, status: retired,
+     binds: [tenant_of_run_dir, data_root],
+     outcome: {nl: 'RETIRED by #1105 PR 2 — F-13: `tenant_of_run_dir` lost its last production caller when the launcher took a tenant and a source run id (declared change 1) and was deleted; `test_1120_tenant_of_run_dir_takes_the_data_root_and_still_refuses_a_run_outside_its_tenant`, which discharged this demand, was deleted with it.'}}
   # ---- D2 / O1 (settings half)
   - {id: o1_run_reads_data_root_settings, kind: behavior, form: test,
      binds: [run.main, "interacts(run.main->settings_half)", data_root],

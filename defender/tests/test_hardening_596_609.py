@@ -27,6 +27,9 @@ import json
 from pathlib import Path
 
 from defender.tests._by_path import load_trace_lesson
+from defender.tests.tenant_1105_run_repository import _spec1105 as H1105
+import itertools
+import os
 from types import SimpleNamespace
 from typing import cast
 
@@ -46,6 +49,39 @@ from defender.learning.core.validate import normalize_disposition
 
 def _load_tl():
     return load_trace_lesson("trace_lesson_hardening")
+
+
+@pytest.fixture(autouse=True)
+def _data_root(tmp_path, monkeypatch):
+    """The tracer walks a tenant's natural runs (#1105 PR 2, J8: `--tenant` is required and
+    `--runs-dir` is gone), so every scenario's runs live under a data root."""
+    root = tmp_path / "data"
+    root.mkdir()
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
+    return root
+
+
+_TENANTS = itertools.count(1)
+
+
+def _tenant_runs(_scenario: Path) -> Path:
+    """A fresh tenant's natural runs folder (with its tenant record), one per scenario, so a
+    test driving several scenarios keeps them apart as it kept their runs dirs apart. The
+    tenant id is the folder's parent's name (`<data root>/<T>/runs`)."""
+    from defender import _tenant
+
+    root = Path(os.environ["DEFENDER_DATA_ROOT"])
+    tid = f"t{next(_TENANTS)}"
+    H1105.tenant(root, tid)
+    runs = root / tid / "runs"
+    runs.mkdir()
+    _tenant.ensure_runs_base_record(runs, tid)
+    return runs
+
+
+def _opened(tl, runs: Path) -> list:
+    """`runs`' tenant's runs as the tracer opens them (the listing rule, then `runs.open`)."""
+    return tl.tenant_runs(runs.parent.name)
 
 
 def _flow_flood(depth: int = 3000) -> str:
@@ -84,11 +120,10 @@ def _mk_run(runs: Path, name: str, *, disposition: str, loads: list[dict]) -> Pa
 def _std_runs(tmp_path: Path, stem: str = "L") -> Path:
     """Two loads of ``stem``: one before any plausible created_at, one after — so a
     windowed count is 1 (vs created_at 2026-06-04) and an unwindowed count is 2."""
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    _mk_run(runs, "caseA", disposition="benign",
+    runs = _tenant_runs(tmp_path)
+    _mk_run(runs, "case-a", disposition="benign",
             loads=[{"lesson_name": stem, "ts": "2026-01-01T00:00:00+00:00"}])
-    _mk_run(runs, "caseB", disposition="malicious",
+    _mk_run(runs, "case-b", disposition="malicious",
             loads=[{"lesson_name": stem, "ts": "2026-06-05T00:00:00+00:00"}])
     return runs
 
@@ -103,7 +138,7 @@ def _all_row(tmp_path: Path, body_frontmatter: str, capsys, stem: str = "L"):
     lessons = base / "lessons"
     _mk_lesson(lessons, stem, body_frontmatter=body_frontmatter)
     runs = _std_runs(base, stem)
-    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
+    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
     cap = capsys.readouterr()
     assert rc == 0
     [row] = [ln for ln in cap.out.splitlines() if ln.split("\t")[0] == stem]
@@ -178,15 +213,14 @@ def test_d_b7_flood_report_costs_one_disposition_not_the_walk(tmp_path):
     """d: b7 — one flooded report.md degrades that case's disposition to "?" and the
     walk completes with the healthy sibling intact (the #595 class, one exception over)."""
     tl = _load_tl()
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    bad = _mk_run(runs, "caseA", disposition="benign",
+    runs = _tenant_runs(tmp_path)
+    bad = _mk_run(runs, "case-a", disposition="benign",
                   loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
     (bad / "report.md").write_text(_flood_doc(_flow_flood()), encoding="utf-8")
-    _mk_run(runs, "caseB", disposition="malicious",
+    _mk_run(runs, "case-b", disposition="malicious",
             loads=[{"lesson_name": "L", "ts": "2026-06-06T00:00:00+00:00"}])
-    hits = tl.in_context_cases("L", None, runs)
-    assert [(h.case_id, h.disposition) for h in hits] == [("caseA", "?"), ("caseB", "malicious")]
+    hits = tl.in_context_cases("L", None, _opened(tl, runs))
+    assert [(h.case_id, h.disposition) for h in hits] == [("case-a", "?"), ("case-b", "malicious")]
 
 
 def test_d_b8_all_survives_flood_lesson_with_marker_row(tmp_path, capsys):
@@ -196,12 +230,11 @@ def test_d_b8_all_survives_flood_lesson_with_marker_row(tmp_path, capsys):
     lessons = tmp_path / "lessons"
     _mk_lesson(lessons, "ok", body_frontmatter="name: ok\ndescription: fine\ncreated_at: 2026-06-04")
     (lessons / "flood.md").write_text(_flood_doc(_flow_flood()), encoding="utf-8")
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    _mk_run(runs, "caseA", disposition="benign",
+    runs = _tenant_runs(tmp_path)
+    _mk_run(runs, "case-a", disposition="benign",
             loads=[{"lesson_name": "ok", "ts": "2026-06-05T00:00:00+00:00"},
                    {"lesson_name": "flood", "ts": "2026-06-05T00:00:00+00:00"}])
-    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
+    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
     cap = capsys.readouterr()
     assert rc == 0
     lines = cap.out.splitlines()
@@ -218,14 +251,13 @@ def test_d_b9_named_flood_lesson_still_traces(tmp_path, capsys):
     lessons = tmp_path / "lessons"
     lessons.mkdir()
     (lessons / "flood.md").write_text(_flood_doc(_flow_flood()), encoding="utf-8")
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    _mk_run(runs, "caseA", disposition="benign",
+    runs = _tenant_runs(tmp_path)
+    _mk_run(runs, "case-a", disposition="benign",
             loads=[{"lesson_name": "flood", "ts": "2026-06-05T00:00:00+00:00"}])
-    rc = tl.main(["flood", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
+    rc = tl.main(["flood", "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
     cap = capsys.readouterr()
     assert rc == 0
-    assert _case_ids(cap.out) == ["caseA"]
+    assert _case_ids(cap.out) == ["case-a"]
     assert "malformed or missing frontmatter" in cap.err
 
 
@@ -356,7 +388,7 @@ def _named(tmp_path, body_frontmatter: str, capsys, stem: str = "L"):
     lessons = base / "lessons"
     _mk_lesson(lessons, stem, body_frontmatter=body_frontmatter)
     runs = _std_runs(base, stem)
-    rc = tl.main([stem, "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
+    rc = tl.main([stem, "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
     cap = capsys.readouterr()
     assert rc == 0
     return cap
@@ -392,7 +424,7 @@ def test_d_a8_header_never_prints_since_none(tmp_path, capsys):
     assert "since None" not in cap.out
     assert '"not-a-date"' in header
     assert sum(ln.startswith("#") for ln in lines) == 1
-    assert _case_ids(cap.out) == ["caseA", "caseB"]
+    assert _case_ids(cap.out) == ["case-a", "case-b"]
 
 
 def test_d_a8b_header_honest_when_absent(tmp_path, capsys):
@@ -454,7 +486,7 @@ def test_d_a11_windowed_lesson_is_unmarked_everywhere(tmp_path, capsys):
     named = _named(tmp_path, "name: M\ndescription: d\ncreated_at: 2026-06-04", capsys, stem="M")
     assert named.err == ""
     assert "since 2026-06-04" in named.out.splitlines()[0]
-    assert _case_ids(named.out) == ["caseB"]
+    assert _case_ids(named.out) == ["case-b"]
 
 
 def test_d_a12_every_discovered_lesson_appears_exactly_once(tmp_path, capsys):
@@ -467,12 +499,11 @@ def test_d_a12_every_discovered_lesson_appears_exactly_once(tmp_path, capsys):
     _mk_lesson(lessons, "badts", body_frontmatter="name: badts\ndescription: bd\ncreated_at: not-a-date")
     _mk_lesson(lessons, "good", body_frontmatter="name: good\ndescription: g\ncreated_at: 2026-06-04")
     (lessons / "flood.md").write_text(_flood_doc(_flow_flood()), encoding="utf-8")
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    _mk_run(runs, "caseA", disposition="benign",
+    runs = _tenant_runs(tmp_path)
+    _mk_run(runs, "case-a", disposition="benign",
             loads=[{"lesson_name": s, "ts": "2026-06-05T00:00:00+00:00"}
                    for s in ("badts", "good", "flood")])
-    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
+    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
     cap = capsys.readouterr()
     assert rc == 0
     lines = cap.out.splitlines()
@@ -498,24 +529,23 @@ def test_d_a13_named_rows_flatten_disposition_and_ts(tmp_path, capsys):
     tl = _load_tl()
     lessons = tmp_path / "lessons"
     _mk_lesson(lessons, "L", body_frontmatter="name: L\ndescription: d")
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    _mk_run(runs, "caseA", disposition='"ben\\tign\\nX"',
+    runs = _tenant_runs(tmp_path)
+    _mk_run(runs, "case-a", disposition='"ben\\tign\\nX"',
             loads=[{"lesson_name": "L", "ts": "2026-06-05\t00:00:00+00:00"}])
-    rc = tl.main(["L", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
+    rc = tl.main(["L", "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
     cap = capsys.readouterr()
     assert rc == 0
     lines = cap.out.splitlines()
     assert len(lines) == 2
     row = lines[1]
     assert row.count("\t") == 3
-    assert row.split("\t") == ["caseA", "?", "2026-06-05 00:00:00+00:00", "unknown"]
+    assert row.split("\t") == ["case-a", "?", "2026-06-05 00:00:00+00:00", "unknown"]
     # Positive control on the SAME column: a well-formed disposition still renders, so the
     # `?` above is the hostile value being refused, not the column having gone dead.
-    _mk_run(runs, "caseB", disposition="benign",
+    _mk_run(runs, "case-b", disposition="benign",
             loads=[{"lesson_name": "L", "ts": "2026-06-06T00:00:00+00:00"}])
-    assert tl.main(["L", "--lessons-dir", str(lessons), "--runs-dir", str(runs)]) == 0
-    assert "caseB\tbenign\t" in capsys.readouterr().out
+    assert tl.main(["L", "--lessons-dir", str(lessons), "--tenant", runs.parent.name]) == 0
+    assert "case-b\tbenign\t" in capsys.readouterr().out
 
 
 def test_d_a14_all_description_survives_every_line_breaker(tmp_path, capsys):
@@ -533,16 +563,20 @@ def test_d_a14_all_description_survives_every_line_breaker(tmp_path, capsys):
 def test_d_a14b_filename_id_columns_survive_breakers(tmp_path, capsys):
     """d: a14 — the id columns are filenames (lesson stem, run-dir case_id), and Unix
     filenames legally carry tab/newline: neither forges a row or a column, on either
-    path, and the named header stays one ``#`` line."""
+    path, and the named header stays one ``#`` line.
+
+    #1105 PR 2 (declared change 10, J3): the tracer walks the tenant's runs through the
+    repository's listing rule, so a run folder whose name is not a run id (`case\nA`) is no
+    longer read into a row at all — it refuses the trace, naming it on one stderr line, with
+    nothing on stdout. The lesson-stem half is unchanged, over a run with a real id."""
     tl = _load_tl()
     lessons = tmp_path / "lessons"
     _mk_lesson(lessons, "st\tem", body_frontmatter="name: L\ndescription: d\ncreated_at: 2026-06-04")
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    _mk_run(runs, "case\nA", disposition="benign",
+    runs = _tenant_runs(tmp_path)
+    _mk_run(runs, "case-a", disposition="benign",
             loads=[{"lesson_name": "st\tem", "ts": "2026-06-05T00:00:00+00:00"}])
 
-    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
+    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
     cap = capsys.readouterr()
     assert rc == 0
     [row] = cap.out.splitlines()
@@ -550,10 +584,20 @@ def test_d_a14b_filename_id_columns_survive_breakers(tmp_path, capsys):
     # still counts its loads, on the malformed-lesson row, its name one line.
     assert row.split("\t") == ["st em", "(malformed lesson — unwindowed count)", "1", "0"]
 
-    rc = tl.main(["st\tem", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
+    rc = tl.main(["st\tem", "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
     cap = capsys.readouterr()
     assert rc == 0
     lines = cap.out.splitlines()
     assert len(lines) == 2
     assert lines[0].startswith("# st em — ")
-    assert lines[1].split("\t") == ["case A", "benign", "2026-06-05T00:00:00+00:00", "unknown"]
+    assert lines[1].split("\t") == ["case-a", "benign", "2026-06-05T00:00:00+00:00", "unknown"]
+
+    _mk_run(runs, "case\nA", disposition="benign",
+            loads=[{"lesson_name": "st\tem", "ts": "2026-06-05T00:00:00+00:00"}])
+    for argv in (["--all"], ["st\tem"]):
+        rc = tl.main([*argv, "--lessons-dir", str(lessons), "--tenant", runs.parent.name])
+        cap = capsys.readouterr()
+        assert rc == 1, f"a run folder named off the run-id rule was read: {cap.out!r}"
+        assert cap.out == "", f"a refused trace printed rows: {cap.out!r}"
+        assert len(cap.err.splitlines()) == 1, cap.err
+        assert "case" in cap.err, cap.err

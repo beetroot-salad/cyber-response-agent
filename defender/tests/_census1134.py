@@ -399,8 +399,8 @@ def io_private_names(io_source: ast.Module) -> frozenset[str]:
 #: Every other public top-level function there is in the vocabulary (`artifact_file`,
 #: `artifact_dir`, `plain_file` lstat the entry; `contained_payload` resolves it);
 #: `test_1134_census` checks the split against each body. Its classes (`RunPaths`, ...) only
-#: compose names and are not vocabulary.
-RUN_PATHS_PURE = frozenset({"is_case_answer_key", "gather_summaries_shape", "resolve_run_bundle"})
+#: compose names and are not vocabulary. (`resolve_run_bundle` left with #1105 PR 2, F-13.)
+RUN_PATHS_PURE = frozenset({"is_case_answer_key", "gather_summaries_shape"})
 
 
 #: The run layout's file under `defender/`, and the module names its functions are reached by:

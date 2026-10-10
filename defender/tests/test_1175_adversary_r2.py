@@ -16,6 +16,7 @@ import pytest
 from defender.learning.core import drains
 from defender.tests._declared869 import git
 from defender.tests._spec791 import author_markers, marker_body
+from defender.tests._state1135 import curation_row
 from defender.tests.test_1134_curator_git_bounds import _Shim
 from defender.tests.test_1175_claim_session import (
     _assert_leftover,
@@ -217,8 +218,8 @@ def test_r2c_unstartable_git_after_a_requeued_claim_ends_the_tick(tmp_path, monk
         transient = _leaving(LIFT, EDITED_LIFT, patch, path_dir, retry)
         plain = _serving(served)
 
-        def step(paths: Any, state: Any, run_dir: Path, **kw: Any) -> None:
-            (transient if run_dir == run_a else plain)(paths, state, run_dir, **kw)
+        def step(paths: Any, state: Any, run: Any, **kw: Any) -> None:
+            (transient if run.run_dir == run_a else plain)(paths, state, run, **kw)
 
         got = _tick(sc, run_lead_author=step, run_pitfalls=_no_curation, git_timeout=BOUND)
 
@@ -232,8 +233,8 @@ def test_r2c_unstartable_git_after_a_requeued_claim_ends_the_tick(tmp_path, monk
     assert _oserror_in(exc), repr(exc)
     assert served == [], "the next claim was served over the re-queued claim's leftovers"
     assert "case-b.json" in author_markers(sc.paths)
-    assert marker_body(sc.paths.state_root / "author-queue" / "case-b.json") == {
-        "case_id": "case-b", "run_dir": str(run_b.resolve())}
+    assert marker_body(sc.paths.state_root / "author-queue" / "case-b.json") == \
+        curation_row("case-b", run_b)
     assert _failed(sc.paths) == []
     assert "finish" not in sc.branch.events
     _assert_leftover(sc.wt, LIFT, EDITED_LIFT, cleaned=False, committed=LIFT_TEXT)

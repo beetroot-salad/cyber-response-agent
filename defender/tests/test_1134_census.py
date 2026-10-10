@@ -392,9 +392,15 @@ ALLOW: tuple[Allowed, ...] = (
             "the run dir's lead_author/ state"),
     Allowed(LEAD_AUTHOR, "_write_state", "attr", "path.write_text(content, encoding='utf-8')", N_E,
             "the run dir's lead_author/ state"),
-    Allowed(LEAD_AUTHOR, "run", "attr", "run_dir.is_dir()", N_E, "the run dir"),
     Allowed(LEAD_AUTHOR, "run", "construct", "open_drain_trees(paths, label)", D3, _OPENER),
-    Allowed(LEAD_AUTHOR, "run_under_held_queue_lock", "attr", "run_dir.is_dir()", N_E, "the run dir"),
+    # #1105 PR 2 (decision C, J8): the CLI's `--tenant T <run_id>` opens its run by id through
+    # the tenant's repository — the run's existence is the open's answer (`RunAbsent`), so
+    # `run` / `run_under_held_queue_lock` no longer probe `run_dir.is_dir()` themselves.
+    Allowed(LEAD_AUTHOR, "_open_requested_run", "call", "process_defender_dir()", N_E,
+            "the CLI's tenant acceptance: the checkout's defender dir, host state"),
+    Allowed(LEAD_AUTHOR, "_open_requested_run", "attr",
+            "tenant.runs_repository().open(RunId.parse(raw_run_id))", N_E,
+            "the run dir, opened by id through the request's tenant's repository"),
     Allowed(LEAD_AUTHOR, "_run_locked", "attr", "_done_sentinel(run_dir).is_file()", N_E,
             "the run dir's done sentinel"),
     Allowed(LEAD_AUTHOR, "_run_locked", "attr", "collected_marker.is_file()", N_E,
@@ -990,8 +996,9 @@ def test_the_run_paths_vocabulary_is_its_disk_touching_functions():
         "vocabulary, or a pure one is in it: fix `RUN_PATHS_PURE`")
     for module in ("defender.run_repository", "defender.run_repository._layout"):
         assert TREE.in_vocabulary(f"{module}.artifact_file"), f"{module}.artifact_file"
-        assert not TREE.in_vocabulary(f"{module}.resolve_run_bundle"), (
-            f"{module}.resolve_run_bundle")
+        # A pure one is not (`resolve_run_bundle`, the earlier example, left with #1105 PR 2).
+        assert not TREE.in_vocabulary(f"{module}.is_case_answer_key"), (
+            f"{module}.is_case_answer_key")
 
 
 def test_the_private_vocabulary_is_each_handle_class_own_state():

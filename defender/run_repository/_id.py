@@ -11,8 +11,8 @@ Unforgeable: a direct `RunId(...)`, `RunId.__new__(RunId)` and a subclass each r
 `RunId.parse`. A strict value: not a `str`, not path-like, not JSON-serialisable, never equal
 to a `str` and unordered against one; `str(run_id)` is its text, an exact `str`.
 
-The sidecar clause is not part of `RunId`: `run_exists` takes a `RunId` and answers for a
-sidecar file at such a name (D2.1). Pydantic-free (NM-05).
+The sidecar clause is not part of `RunId`: the repository's `exists` takes a `RunId` and
+answers for a sidecar file at such a name (D2.1). Pydantic-free (NM-05).
 """
 from __future__ import annotations
 

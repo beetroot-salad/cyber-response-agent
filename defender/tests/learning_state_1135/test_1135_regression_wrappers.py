@@ -17,7 +17,6 @@ from pathlib import Path
 
 import pytest
 
-from defender.learning import judge as judge_mod
 from defender.learning.core.state import FINDINGS
 from defender.tests import _drain719 as D
 from defender.tests import _judge_921 as J
@@ -49,11 +48,10 @@ def test_1135_the_e2e_spine_replay_reaches_the_corpus_unchanged(tmp_path: Path, 
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     state = S.LearningState.open(paths)
-    graded = S.caught(lambda: judge_mod.grade_episode(
+    graded = S.caught(lambda: J.grade_at(
         ep, judge=J.FakeJudge(  # the family's word is the family-scope call's (#1224)
             default=J.as_reply_text(J.reply_doc()),
             family_default=J.as_reply_text(J.family_reply(verdict_word="survived"))),
-        runs_base=runs_base,
         draws=1, state=state))
     assert graded is None, f"grade_episode did not grade on the handle it was handed (RF5): {graded!r}"
     record = J.judge_record(ep)

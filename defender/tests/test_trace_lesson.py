@@ -8,10 +8,40 @@ from pathlib import Path
 import pytest
 
 from defender.tests._by_path import load_trace_lesson
+from defender.tests.tenant_1105_run_repository import _spec1105 as H1105
+
+#: The tenant whose natural runs the tracer walks (#1105 PR 2, J8: `--tenant` is required and
+#: `--runs-dir` is gone; the runs are `<data root>/<T>/runs`, opened through the repository).
+TID = H1105.T_ID
+
+
+@pytest.fixture(autouse=True)
+def _data_root(tmp_path, monkeypatch):
+    root = tmp_path / "data"
+    root.mkdir()
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
+    H1105.tenant(root, TID)
+    return root
 
 
 def _load():
     return load_trace_lesson("trace_lesson")
+
+
+def _tenant_runs_dir(tmp_path: Path) -> Path:
+    """The tenant's natural runs folder, made with its tenant record (what run setup makes)."""
+    from defender import _tenant
+
+    runs = tmp_path / "data" / TID / "runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    _tenant.ensure_runs_base_record(runs, TID)
+    return runs
+
+
+def _opened(tl) -> list:
+    """The tenant's runs as the tracer opens them (`tenant_runs`: the listing rule, then
+    `runs.open` for each id)."""
+    return tl.tenant_runs(TID)
 
 
 def _mk_run(runs: Path, name: str, *, disposition: str, loads: list[dict]):
@@ -26,28 +56,26 @@ def _mk_run(runs: Path, name: str, *, disposition: str, loads: list[dict]):
 
 def test_in_context_cases_windows_on_created_at(tmp_path):
     tl = _load()
-    runs = tmp_path / "runs"
-    runs.mkdir()
+    runs = _tenant_runs_dir(tmp_path)
     created = datetime(2026, 6, 4, tzinfo=UTC)
-    _mk_run(runs, "caseA", disposition="benign",
+    _mk_run(runs, "case-a", disposition="benign",
             loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
-    _mk_run(runs, "caseB", disposition="malicious",
+    _mk_run(runs, "case-b", disposition="malicious",
             loads=[{"lesson_name": "L", "ts": "2026-06-01T00:00:00+00:00"}])
-    _mk_run(runs, "caseC", disposition="benign",
+    _mk_run(runs, "case-c", disposition="benign",
             loads=[{"lesson_name": "OTHER", "ts": "2026-06-06T00:00:00+00:00"}])
-    hits = tl.in_context_cases("L", created, runs)
-    assert [(h.case_id, h.disposition) for h in hits] == [("caseA", "benign")]
+    hits = tl.in_context_cases("L", created, _opened(tl))
+    assert [(h.case_id, h.disposition) for h in hits] == [("case-a", "benign")]
 
 
 def test_in_context_cases_dedups_per_case_keeps_earliest(tmp_path):
     tl = _load()
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    _mk_run(runs, "caseA", disposition="benign", loads=[
+    runs = _tenant_runs_dir(tmp_path)
+    _mk_run(runs, "case-a", disposition="benign", loads=[
         {"lesson_name": "L", "ts": "2026-06-05T01:00:00+00:00"},
         {"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"},
     ])
-    hits = tl.in_context_cases("L", None, runs)
+    hits = tl.in_context_cases("L", None, _opened(tl))
     assert len(hits) == 1
     assert hits[0].loaded_at == "2026-06-05T00:00:00+00:00"
 
@@ -58,13 +86,12 @@ def test_earliest_load_is_chronological_not_lexicographic(tmp_path):
     ``+00:00`` row that is chronologically later. Latent while both production writers go
     through ``now_iso()``'s canonical UTC; wrong the day a migration or hand-edit doesn't."""
     tl = _load()
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    _mk_run(runs, "caseA", disposition="benign", loads=[
+    runs = _tenant_runs_dir(tmp_path)
+    _mk_run(runs, "case-a", disposition="benign", loads=[
         {"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"},
         {"lesson_name": "L", "ts": "2026-06-05T08:00:00+09:00"},
     ])
-    hits = tl.in_context_cases("L", None, runs)
+    hits = tl.in_context_cases("L", None, _opened(tl))
     assert [h.loaded_at for h in hits] == ["2026-06-05T08:00:00+09:00"]
 
 
@@ -74,10 +101,9 @@ def test_all_flattens_tab_and_newline_in_description(tmp_path, capsys):
     tl = _load()
     _mk_lesson(tmp_path / "lessons", "L",
                body_frontmatter='name: L\ndescription: "a\\tb\\nc"\ncreated_at: 2026-06-04')
-    runs = tmp_path / "runs"
-    runs.mkdir()
+    _tenant_runs_dir(tmp_path)
 
-    rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
+    rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
     assert rc == 0
     lines = capsys.readouterr().out.splitlines()
     assert lines == ["L\ta b c\t0\t0"]
@@ -90,17 +116,17 @@ def test_all_drops_terminal_controls_from_the_description(tmp_path, capsys):
     tl = _load()
     _mk_lesson(tmp_path / "lessons", "L",
                body_frontmatter='name: L\ndescription: "a\\e[2Kb\\x1fc"\ncreated_at: 2026-06-04')
-    runs = tmp_path / "runs"
-    runs.mkdir()
+    _tenant_runs_dir(tmp_path)
 
-    rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
+    rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
     assert rc == 0
     assert capsys.readouterr().out.splitlines() == ["L\ta[2Kbc\t0\t0"]
 
 
 def test_in_context_cases_missing_runs_dir_is_empty(tmp_path):
     tl = _load()
-    assert tl.in_context_cases("L", None, tmp_path / "nope") == []
+    assert not (tmp_path / "data" / TID / "runs").exists()
+    assert tl.in_context_cases("L", None, _opened(tl)) == []
 
 
 def _mk_lesson(lessons: Path, stem: str, *, body_frontmatter: str) -> Path:
@@ -136,8 +162,8 @@ def _case_ids(out: str) -> list[str]:
         # TypeError against the always-aware hook timestamps.
         ("naive-created-at-does-not-crash",
          "L", "name: L\ndescription: d\ncreated_at: 2026-06-04T00:00:00",
-         [("caseA", "benign", "2026-06-05T00:00:00+00:00")],
-         ["caseA"], (None, "caseA\tbenign")),
+         [("case-a", "benign", "2026-06-05T00:00:00+00:00")],
+         ["case-a"], (None, "case-a\tbenign")),
 
         # `created_at: 2026-06-04` (PyYAML → date) is promoted to UTC midnight, not silently
         # dropped — so a load BEFORE it stays excluded and one after it is kept.
@@ -156,8 +182,8 @@ def _case_ids(out: str) -> list[str]:
         # ``test_corpus_fold_584.py::test_d23``.
         ("identity-is-the-stem-not-the-frontmatter-name",
          "foo-bar", "name: foo_bar\ndescription: d",
-         [("caseA", "malicious", "2026-06-05T00:00:00+00:00")],
-         ["caseA"], ("# foo-bar", None)),
+         [("case-a", "malicious", "2026-06-05T00:00:00+00:00")],
+         ["case-a"], ("# foo-bar", None)),
     ], ids=lambda v: v if isinstance(v, str) and len(v) < 60 and "\n" not in v else "")
 def test_trace_reports_the_cases_a_lesson_was_loaded_into(
     tmp_path, capsys, case, stem, frontmatter, runs, expected, expect
@@ -167,14 +193,13 @@ def test_trace_reports_the_cases_a_lesson_was_loaded_into(
     resolution or the windowing could silently report nothing."""
     tl = _load()
     _mk_lesson(tmp_path / "lessons", stem, body_frontmatter=frontmatter)
-    runs_dir = tmp_path / "runs"
-    runs_dir.mkdir()
+    runs_dir = _tenant_runs_dir(tmp_path)
     for name, disposition, ts in runs:
         _mk_run(runs_dir, name, disposition=disposition,
                 loads=[{"lesson_name": stem, "ts": ts}])
 
     rc = tl.main([stem, "--lessons-dir", str(tmp_path / "lessons"),
-                  "--runs-dir", str(runs_dir)])
+                  "--tenant", TID])
     out = capsys.readouterr().out
     assert rc == 0
     assert _case_ids(out) == expected
@@ -193,18 +218,17 @@ def test_undecodable_report_degrades_to_unknown_disposition(tmp_path, capsys):
     warning, not kill the walk with a UnicodeDecodeError traceback (#595 — the walk's last
     unguarded read; UnicodeDecodeError is a ValueError, not an OSError)."""
     tl = _load()
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    broken = _mk_run(runs, "caseA", disposition="benign",
+    runs = _tenant_runs_dir(tmp_path)
+    broken = _mk_run(runs, "case-a", disposition="benign",
                      loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
     (broken / "report.md").write_bytes(b"---\ndisposition: benign\n---\n\xff")
-    _mk_run(runs, "caseB", disposition="malicious",
+    _mk_run(runs, "case-b", disposition="malicious",
             loads=[{"lesson_name": "L", "ts": "2026-06-06T00:00:00+00:00"}])
 
-    hits = tl.in_context_cases("L", None, runs)
+    hits = tl.in_context_cases("L", None, _opened(tl))
     err = capsys.readouterr().err
-    assert [(h.case_id, h.disposition) for h in hits] == [("caseA", "?"), ("caseB", "malicious")]
-    assert "caseA/report.md" in err
+    assert [(h.case_id, h.disposition) for h in hits] == [("case-a", "?"), ("case-b", "malicious")]
+    assert "case-a/report.md" in err
 
 
 def test_all_survives_undecodable_report(tmp_path, capsys):
@@ -213,13 +237,12 @@ def test_all_survives_undecodable_report(tmp_path, capsys):
     tl = _load()
     _mk_lesson(tmp_path / "lessons", "L",
                body_frontmatter="name: L\ndescription: d\ncreated_at: 2026-06-04")
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    rd = _mk_run(runs, "caseA", disposition="benign",
+    runs = _tenant_runs_dir(tmp_path)
+    rd = _mk_run(runs, "case-a", disposition="benign",
                  loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
     (rd / "report.md").write_bytes(b"---\ndisposition: benign\n---\n\xff")
 
-    rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
+    rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
     assert rc == 0
     assert "L\td\t1\t0" in capsys.readouterr().out.splitlines()
 
@@ -235,14 +258,13 @@ def test_all_marks_malformed_lesson_instead_of_dropping_it(tmp_path, capsys):
     lessons = tmp_path / "lessons"
     _mk_lesson(lessons, "ok", body_frontmatter="name: ok\ndescription: fine\ncreated_at: 2026-06-04")
     (lessons / "broken.md").write_text("---\ndescription: [unclosed\n---\nbody\n")
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    _mk_run(runs, "caseA", disposition="malicious",
+    runs = _tenant_runs_dir(tmp_path)
+    _mk_run(runs, "case-a", disposition="malicious",
             loads=[{"lesson_name": "broken", "ts": "2026-06-05T00:00:00+00:00"}])
-    _mk_run(runs, "caseB", disposition="benign",
+    _mk_run(runs, "case-b", disposition="benign",
             loads=[{"lesson_name": "ok", "ts": "2026-06-05T00:00:00+00:00"}])
 
-    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
+    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--tenant", TID])
     cap = capsys.readouterr()
     assert rc == 0
     lines = cap.out.splitlines()
@@ -258,10 +280,9 @@ def test_all_marker_pass_inherits_the_discovery_rule(tmp_path, capsys):
     lessons = tmp_path / "lessons"
     _mk_lesson(lessons, "ok", body_frontmatter="name: ok\ndescription: fine\ncreated_at: 2026-06-04")
     (lessons / "_draft.md").write_text("not a lesson\n")
-    runs = tmp_path / "runs"
-    runs.mkdir()
+    _tenant_runs_dir(tmp_path)
 
-    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
+    rc = tl.main(["--all", "--lessons-dir", str(lessons), "--tenant", TID])
     assert rc == 0
     assert capsys.readouterr().out.splitlines() == ["ok\tfine\t0\t0"]
 
@@ -274,15 +295,14 @@ def test_named_path_traces_malformed_lesson_and_warns_unwindowed(tmp_path, capsy
     lessons = tmp_path / "lessons"
     lessons.mkdir()
     (lessons / "broken.md").write_text("---\ndescription: [unclosed\n---\nbody\n")
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    _mk_run(runs, "caseA", disposition="malicious",
+    runs = _tenant_runs_dir(tmp_path)
+    _mk_run(runs, "case-a", disposition="malicious",
             loads=[{"lesson_name": "broken", "ts": "2026-06-05T00:00:00+00:00"}])
 
-    rc = tl.main(["broken", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
+    rc = tl.main(["broken", "--lessons-dir", str(lessons), "--tenant", TID])
     cap = capsys.readouterr()
     assert rc == 0
-    assert _case_ids(cap.out) == ["caseA"]
+    assert _case_ids(cap.out) == ["case-a"]
     assert "trace is unwindowed" in cap.err
 
 
@@ -294,15 +314,14 @@ def test_named_path_warns_unwindowed_on_unparseable_created_at(tmp_path, capsys)
     tl = _load()
     _mk_lesson(tmp_path / "lessons", "L",
                body_frontmatter="name: L\ndescription: d\ncreated_at: not-a-date")
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    _mk_run(runs, "caseA", disposition="benign",
+    runs = _tenant_runs_dir(tmp_path)
+    _mk_run(runs, "case-a", disposition="benign",
             loads=[{"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}])
 
-    rc = tl.main(["L", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
+    rc = tl.main(["L", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
     cap = capsys.readouterr()
     assert rc == 0
-    assert _case_ids(cap.out) == ["caseA"]
+    assert _case_ids(cap.out) == ["case-a"]
     assert "trace is unwindowed" in cap.err
 
 
@@ -312,11 +331,10 @@ def test_all_with_lesson_name_is_a_usage_error(tmp_path, capsys):
     report under a stray extra argument. Both together is a usage error."""
     tl = _load()
     _mk_lesson(tmp_path / "lessons", "L", body_frontmatter="name: L\ndescription: d")
-    runs = tmp_path / "runs"
-    runs.mkdir()
+    _tenant_runs_dir(tmp_path)
 
     rc = tl.main(["L", "--all",
-                  "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
+                  "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])
     cap = capsys.readouterr()
     assert rc == 1
     assert cap.out == ""
@@ -331,10 +349,9 @@ def test_named_path_unreadable_lesson_is_still_an_error(tmp_path, capsys):
     lessons = tmp_path / "lessons"
     lessons.mkdir()
     (lessons / "undecodable.md").write_bytes(b"---\nname: u\n---\n\xff")
-    runs = tmp_path / "runs"
-    runs.mkdir()
+    _tenant_runs_dir(tmp_path)
 
-    rc = tl.main(["undecodable", "--lessons-dir", str(lessons), "--runs-dir", str(runs)])
+    rc = tl.main(["undecodable", "--lessons-dir", str(lessons), "--tenant", TID])
     cap = capsys.readouterr()
     assert rc == 1
     assert "cannot read undecodable.md" in cap.err

@@ -78,9 +78,9 @@ def _graded(tmp_path, **kw):
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"},
                             **kw)
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-    J.mod("learning.judge").grade_episode(
+    J.grade_at(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        runs_base=tmp_path / "defender-runs", draws=1, state=env_state())
+        draws=1, state=env_state())
     return ep, J.judge_record(ep)
 
 
@@ -238,9 +238,8 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
     own_root = tmp_path / "two" / "queue"
     own_root.mkdir(parents=True)
     own = LearningState.open(LoopPaths(repo_root=tmp_path / "two", state_dir=own_root))
-    J.mod("learning.judge").grade_episode(
-        ep2, judge=J.scripted_judge(default=two), runs_base=tmp_path / "two" / "defender-runs",
-        draws=2, state=own)
+    J.grade_at(
+        ep2, judge=J.scripted_judge(default=two), draws=2, state=own)
     fresh = [row["finding_id"] for row in J.enqueued_rows(J.judge_record(ep2))]
     assert len(fresh) == len(set(fresh)) == 8, (
         f"two worlds x two draws x two findings did not mint eight distinct ids: {fresh}")
@@ -263,9 +262,9 @@ def test_921_enqueue_refuses_discard_and_corpus_contradiction(tmp_path):
         # `staged_row` on H) buckets `None` on agreement — write the mismatch this assertion
         # needs explicitly, the standard idiom other bucket tests already use.
         (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-        J.mod("learning.judge").grade_episode(
+        J.grade_at(
             ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc(episode_outcome=word))),
-            runs_base=tmp_path / word / "defender-runs", draws=1, state=env_state())
+            draws=1, state=env_state())
         record = J.judge_record(ep)
         assert record["episode_outcome"] == word
         assert record["enqueued_rows"] == 0
@@ -287,9 +286,8 @@ def test_921_gradable_episode_appends_one_row_per_finding(tmp_path):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-    J.mod("learning.judge").grade_episode(
-        ep, judge=J.FakeJudge(default=two_findings), runs_base=tmp_path / "defender-runs",
-        draws=2, state=env_state())
+    J.grade_at(
+        ep, judge=J.FakeJudge(default=two_findings), draws=2, state=env_state())
 
     record = J.judge_record(ep)
     rows = J.enqueued_rows(record)
@@ -531,9 +529,9 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-    J.mod("learning.judge").grade_episode(
+    J.grade_at(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        runs_base=tmp_path / "defender-runs", draws=1, state=LearningState.open(paths))
+        draws=1, state=LearningState.open(paths))
 
     record = J.judge_record(ep)
     assert Path(record["enqueued_to"]) == queue, (
@@ -601,8 +599,8 @@ def test_921_self_contradicting_episode_is_discard_and_the_record_is_the_artifac
     judge = J.scripted_judge(
         family_default=J.as_reply_text(J.family_reply(verdict_word="discard",
                                                       episode_outcome="discard")))
-    J.mod("learning.judge").grade_episode(
-        ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=1, state=env_state())
+    J.grade_at(
+        ep, judge=judge, draws=1, state=env_state())
 
     assert any("DRIFT-MARKER-921" in p for p in judge.prompts), (
         "pre-flight's recorded drift never reached the judge, so its `discard` is a guess")
@@ -626,9 +624,8 @@ def test_921_world_contradicted_by_the_corpus_is_corpus_contradiction(tmp_path):
         episode_outcome="corpus-contradiction",
         findings=[J.finding_doc(evidence=["report.md", "investigation.md#l-001"])]))
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
-    J.mod("learning.judge").grade_episode(
-        ep, judge=J.FakeJudge(default=contradiction), runs_base=tmp_path / "defender-runs",
-        draws=2, state=env_state())
+    J.grade_at(
+        ep, judge=J.FakeJudge(default=contradiction), draws=2, state=env_state())
 
     record = J.judge_record(ep)
     assert record["episode_outcome"] == "corpus-contradiction"
@@ -640,9 +637,9 @@ def test_921_world_contradicted_by_the_corpus_is_corpus_contradiction(tmp_path):
     ok = J.accepted_episode(tmp_path / "ok", ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
     (ok / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-    J.mod("learning.judge").grade_episode(
+    J.grade_at(
         ok, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        runs_base=tmp_path / "ok" / "defender-runs", draws=2, state=env_state())
+        draws=2, state=env_state())
     assert J.enqueued_rows(J.judge_record(ok)), "the positive control enqueued nothing"
 
 
@@ -663,8 +660,8 @@ def test_921_discard_needs_a_majority_of_draws(tmp_path):
                  J.as_reply_text(J.reply_doc()), J.as_reply_text(J.reply_doc())],
         default=J.as_reply_text(J.reply_doc()),
         family_default=J.as_reply_text(J.family_reply()))
-    J.mod("learning.judge").grade_episode(
-        ep, judge=minority, runs_base=tmp_path / "defender-runs", draws=3, state=env_state())
+    J.grade_at(
+        ep, judge=minority, draws=3, state=env_state())
 
     record = J.judge_record(ep)
     assert record["episode_outcome"] == "gradable", (
@@ -674,11 +671,11 @@ def test_921_discard_needs_a_majority_of_draws(tmp_path):
     majority = J.accepted_episode(tmp_path / "majority",
                                   ledgers={"b": [J.staged_row("b")], "c": []})
     discard = J.as_reply_text(J.reply_doc(episode_outcome="discard"))
-    J.mod("learning.judge").grade_episode(
+    J.grade_at(
         majority, judge=J.FakeJudge(replies=[discard, discard, J.as_reply_text(J.reply_doc())],
                                     default=J.as_reply_text(J.reply_doc()),
                                     family_default=J.as_reply_text(J.family_reply())),
-        runs_base=tmp_path / "majority" / "defender-runs", draws=3, state=env_state())
+        draws=3, state=env_state())
     assert J.judge_record(majority)["episode_outcome"] == "discard", (
         "positive control: two draws of three answering `discard` did not spoil the episode")
 

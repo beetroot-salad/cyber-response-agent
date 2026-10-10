@@ -4,8 +4,8 @@
 O3: a tenant is accepted by ONE function returning a `Tenant`, so no entry point accepts a
 tenant another refuses. Two censuses observe it (doc O3, "Observed by"): `Tenant(` is
 constructed only inside `accept_tenant`, and `resolve_data_root` is called only from the entry
-points (once per entry module), never from `runs_base_for`, `tenant_of_run_dir` or
-`materialize_run`, which take a `Tenant` or the data root instead (C8). N10 (auto) sets their
+points (once per entry module), never from `runs_base_for` or `materialize_run`, which take a
+`Tenant` or the data root instead (C8; `tenant_of_run_dir` left with #1105 PR 2, F-13). N10 (auto) sets their
 strength: the construction census also reports `dataclasses.replace(t, …)` and `type(t)(…)`,
 and `Tenant` itself refuses a construction outside `accept_tenant` at run time (a
 module-private sentinel checked in `__post_init__`) while a copy or pickle of an accepted one
@@ -224,10 +224,20 @@ _ENTRY_MODULES = {
     "defender/scripts/tenant.py": 2,
     "defender/scripts/policy_cli.py": 1,
     "defender/skills/connect/validate_scaffold.py": 1,
+    # #1105 PR 2 (part 2 item 12, N3): the lead-author drain resolves the root once per tick
+    # before it claims (declared change 8), and each edge J8 makes require `--tenant` resolves
+    # the root it accepts that tenant under: the lead author, the tracer, the run page, the
+    # episode page and workspace_map.
+    "defender/learning/core/drains.py": 1,
+    "defender/learning/leads/lead_author/__init__.py": 1,
+    "defender/learning/ops/trace_lesson.py": 1,
+    "defender/scripts/visualize/visualize_run.py": 1,
+    "defender/scripts/visualize/visualize_episode.py": 1,
+    "defender/scripts/workspace_map.py": 1,
 }
 
 #: Functions that take a Tenant or the data root after piece 1 and must resolve nothing (C8).
-_NEVER_RESOLVE = ("runs_base_for", "tenant_of_run_dir", "materialize_run")
+_NEVER_RESOLVE = ("runs_base_for", "materialize_run")  # tenant_of_run_dir: deleted, #1105 F-13
 
 _RESOLVER = "defender._tenant.resolve_data_root"
 
@@ -269,9 +279,10 @@ def test_1120_resolve_data_root_is_called_once_and_only_from_entry_points(
         tmp_path: Path) -> None:
     """A resolved-reference census of defender/ (excluding tests/) and scripts/ finds calls to
     resolve_data_root in the entry points that take a tenant (O3's list as correction 3 scopes
-    it: run.py, the branch launcher, tenant.py's setup and check, policy_cli, validate_scaffold —
-    not held_out, which takes no tenant, nor generate_case, removed: human on PR #1157, nor
-    ticket_adapter, whose command line #1107 removed) and nowhere else: not in defender/_tenant.py beyond the definition itself, and not inside runs_base_for, tenant_of_run_dir or
+    it: run.py, the branch launcher, tenant.py's setup and check, policy_cli, validate_scaffold;
+    since #1105 PR 2 also the lead-author drain and the J8 edges — the lead author, the tracer,
+    the run and episode pages and workspace_map — not held_out, which takes no tenant, nor generate_case, removed: human on PR #1157, nor
+    ticket_adapter, whose command line #1107 removed) and nowhere else: not in defender/_tenant.py beyond the definition itself, and not inside runs_base_for or
     materialize_run, which take a Tenant or the data root instead (C8). Each calling entry
     module holds exactly one call site (tenant.py at most one per subcommand that resolves the
     root). The census finding run.py's call is its positive control, and a call planted in a

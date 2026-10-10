@@ -26,6 +26,7 @@ from defender.tests._repo import query_template, seed_skills_repo
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.learning.core.state import LEAD_QUEUE_LOCK, PITFALLS, TRY_ONCE
 from defender.tests._lead_author_1134 import lane_tree_for, lead_deps, repo_skills, skills_view
+from defender.tests._state1135 import curation_run_dir, run_of
 
 
 def _ensure_declarable(repo_root: Path) -> None:
@@ -125,9 +126,10 @@ def _write_query(  # noqa: PLR0913 — a queries-row builder mirrors the table's
 
 
 @pytest.fixture
-def run_dir(tmp_path: Path) -> Path:
-    rd = tmp_path / "test-run-001"
-    rd.mkdir()
+def run_dir() -> Path:
+    # A natural run where run setup leaves one (`<data root>/<T>/runs/<id>`): the lane takes it
+    # as the `Run` its open hands it (`run_of`, #1105 PR 2).
+    rd = curation_run_dir("test-run-001")
     (rd / "gather_raw").mkdir()
     return rd
 
@@ -329,36 +331,38 @@ def _claude_should_not_be_called(*args, **kwargs):
     raise AssertionError("claude was spawned despite gating check")
 
 
-def test_run_missing_run_dir(tmp_path: Path):
-    assert lead_author.run(
-        tmp_path / "nope", label=LEAD_AUTHOR_DRAIN_LABEL, paths=LoopPaths(repo_root=tmp_path),
-    ) == 2
+def test_run_missing_run_dir():
+    # `run` takes the opened run (#1105 PR 2); a run that is not there is refused by the open,
+    # which the by-hand entry (`--tenant T <run_id>`, J8) makes before any of the run. The
+    # tenant is real, its runs folder made: only the run is missing.
+    tenant_id = curation_run_dir("present").parent.parent.name
+    assert lead_author.main(["--tenant", tenant_id, "nope"]) == 2
 
 
-def test_run_held_queue_lock_reports_a_skip_not_a_serve(run_dir: Path):
+def test_run_held_queue_lock_reports_a_skip_not_a_serve(run_dir: Path, tmp_path: Path):
     """A held queue lock spawns nothing AND says so distinguishably (#852 F-03).
 
     It used to return 0 — the value a completed curation returns — and the lead-author drain
     reads that rc as "served, unlink the marker". The whole claimed batch was deleted with no
     work done and no dead letter. The agent still must not be spawned; what changed is that
     the caller can now tell the two apart."""
-    deps = _deps(run_dir.parent, invoke_agent=_claude_should_not_be_called)
+    deps = _deps(tmp_path, invoke_agent=_claude_should_not_be_called)
     with deps.state.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as held:
         assert held, "the test could not take the queue lock it means to hold"
-        rc = lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
+        rc = lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
     assert rc == lead_author.QUEUE_LOCK_SKIP_RC
     assert rc != 0
 
 
-def test_run_done_sentinel_short_circuits(run_dir: Path):
+def test_run_done_sentinel_short_circuits(run_dir: Path, tmp_path: Path):
     state = run_dir / "lead_author"
     state.mkdir()
     (state / "done").write_text("ok")
     deps = _deps(
-        run_dir.parent,
+        tmp_path,
         invoke_agent=_claude_should_not_be_called,
     )
-    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
+    assert lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
 
 
 
@@ -1016,8 +1020,7 @@ def test_run_loop_commits_agent_edits(tmp_git_repo: Path, tmp_path: Path):
     """End-to-end: the agent (faked) edits the worktree and runs no git; the loop
     verifies + commits exactly the skills delta with a generated message + writes done."""
     repo = tmp_git_repo
-    run_dir = tmp_path / "lead-run"
-    run_dir.mkdir()
+    run_dir = curation_run_dir("lead-run")
 
     def fake_agent(rd, handoffs, pending, *, box=None):
         (repo / _CATALOG / "wazuh" / "newthing.md").write_text(
@@ -1034,7 +1037,7 @@ def test_run_loop_commits_agent_edits(tmp_git_repo: Path, tmp_path: Path):
         discover_system_drafts=lambda: [],
     )
     head_before = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
-    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
+    assert lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
     head_after = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
     assert head_after != head_before, "the loop should have committed"
     changed = _run_git(repo, "diff", "--name-only", "HEAD~1", "HEAD").stdout.split()
@@ -1051,8 +1054,7 @@ def test_run_raises_and_skips_commit_on_scope_violation(tmp_git_repo: Path, tmp_
     """A stray edit makes the gate raise LeadAuthorError (the drain quarantines the
     marker); the loop commits nothing and writes no done sentinel."""
     repo = tmp_git_repo
-    run_dir = tmp_path / "lead-run"
-    run_dir.mkdir()
+    run_dir = curation_run_dir("lead-run")
 
     stray = _commit_outside(repo)
 
@@ -1069,7 +1071,7 @@ def test_run_raises_and_skips_commit_on_scope_violation(tmp_git_repo: Path, tmp_
     )
     head_before = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
     with pytest.raises(lead_author.LeadAuthorError):
-        lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
+        lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
     assert _run_git(repo, "rev-parse", "HEAD").stdout.strip() == head_before
     assert not (run_dir / "lead_author" / "done").is_file()
 
@@ -1079,8 +1081,7 @@ def test_run_returns_rc2_on_nonzero_agent_exit(tmp_git_repo: Path, tmp_path: Pat
     quarantines the marker. The loop commits nothing, writes no done sentinel, and
     (post-#426) writes no ``failure.txt`` brake (quarantine is the sole surfacing)."""
     repo = tmp_git_repo
-    run_dir = tmp_path / "lead-run"
-    run_dir.mkdir()
+    run_dir = curation_run_dir("lead-run")
     deps = _deps(
         repo,
         **_bypass_tables(),
@@ -1089,7 +1090,7 @@ def test_run_returns_rc2_on_nonzero_agent_exit(tmp_git_repo: Path, tmp_path: Pat
         discover_system_drafts=lambda: [],
     )
     head_before = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
-    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 2
+    assert lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 2
     assert _run_git(repo, "rev-parse", "HEAD").stdout.strip() == head_before
     assert not (run_dir / "lead_author" / "done").is_file()
     assert not (run_dir / "lead_author" / "failure.txt").exists()
@@ -1109,8 +1110,7 @@ def test_run_loop_clears_drafts_on_discard_and_promote(tmp_git_repo: Path, tmp_p
     )
     _run_git(repo, "add", "-A")
     _run_git(repo, "commit", "-q", "-m", "seed second draft")
-    run_dir = tmp_path / "lead-run"
-    run_dir.mkdir()
+    run_dir = curation_run_dir("lead-run")
 
     promoted_est = repo / _CATALOG / "wazuh" / "newthing.md"
     promoted_draft = repo / _CATALOG / "wazuh" / "_draft" / "newthing.md"
@@ -1129,7 +1129,7 @@ def test_run_loop_clears_drafts_on_discard_and_promote(tmp_git_repo: Path, tmp_p
         build_handoff=lambda rd, ex, jl=None, **_: [{"query_id": "wazuh.newthing"}],
         discover_system_drafts=lambda: [],
     )
-    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
+    assert lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
     assert not promoted_draft.exists()
     assert not discarded_draft.exists()
     assert promoted_est.is_file()
@@ -1146,8 +1146,7 @@ def test_run_quarantines_half_promote(tmp_git_repo: Path, tmp_path: Path):
     loop's half-promote gate raises through ``run`` → no commit, no ``done`` → the drain
     quarantines the marker instead of committing established + draft together."""
     repo = tmp_git_repo
-    run_dir = tmp_path / "lead-run"
-    run_dir.mkdir()
+    run_dir = curation_run_dir("lead-run")
 
     def fake_agent(rd, handoffs, pending, *, box=None):
         (repo / _CATALOG / "wazuh" / "newthing.md").write_text(
@@ -1164,7 +1163,7 @@ def test_run_quarantines_half_promote(tmp_git_repo: Path, tmp_path: Path):
     )
     head_before = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
     with pytest.raises(lead_author.LeadAuthorError, match="half-promote"):
-        lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
+        lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
     assert _run_git(repo, "rev-parse", "HEAD").stdout.strip() == head_before
     assert not (run_dir / "lead_author" / "done").is_file()
 
@@ -1184,7 +1183,7 @@ def test_run_refuses_a_bare_discard_of_a_draft_it_minted_this_tick(
     one (`synthesize_drafts` off a real queries row), the discard is the agent's, and the only
     thing under test is that the two are connected."""
     repo = tmp_git_repo
-    run_dir = tmp_path / "lead-run"
+    run_dir = curation_run_dir("lead-run")
     (run_dir / "gather_raw").mkdir(parents=True)
     _write_lead_meta(run_dir, "l-001", "probe a brand-new measurement")
     _write_query(run_dir, "l-001", 0, "wazuh.hunt-failed-logins", verb="search",
@@ -1205,13 +1204,13 @@ def test_run_refuses_a_bare_discard_of_a_draft_it_minted_this_tick(
     )
     head_before = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
     with pytest.raises(lead_author.LeadAuthorError, match="wazuh.hunt-failed-logins"):
-        lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
+        lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
     assert _run_git(repo, "rev-parse", "HEAD").stdout.strip() == head_before
     assert not (run_dir / "lead_author" / "done").is_file()
 
 
 def test_prepare_handoffs_below_lift_threshold_returns_empty_drafts(
-    run_dir: Path, monkeypatch
+    run_dir: Path, monkeypatch, tmp_path: Path
 ):
     """Pending drafts below threshold are silenced; executed handoffs unaffected.
 
@@ -1226,7 +1225,7 @@ def test_prepare_handoffs_below_lift_threshold_returns_empty_drafts(
     }]
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5")
     deps = _deps(
-        run_dir.parent,
+        tmp_path,
         extract=lambda rd: ([], fake_executed),
         build_handoff=lambda rd, ex, jl=None, **_: fake_handoff,
         discover_system_drafts=lambda: [Path("/fake/a.md"), Path("/fake/b.md")],
@@ -1288,9 +1287,9 @@ def test_prepare_handoffs_drafts_only_no_executed_proceeds(
     assert len(pending) == 2
 
 
-def test_prepare_handoffs_both_empty_exits_zero(run_dir: Path):
+def test_prepare_handoffs_both_empty_exits_zero(run_dir: Path, tmp_path: Path):
     """No executed leads AND no pending drafts → early exit 0, no work."""
-    deps = _deps(run_dir.parent, discover_system_drafts=lambda: [])
+    deps = _deps(tmp_path, discover_system_drafts=lambda: [])
     handoffs, pending, rc = lead_author._prepare_handoffs(run_dir, deps)
     assert rc == 0
     assert handoffs == []
@@ -1414,12 +1413,12 @@ def test_run_collects_general_failure_before_early_return(tmp_git_repo: Path, tm
         lead_deps(paths),
         invoke_agent=lambda *a, **k: 0,
     )
-    run_dir = tmp_path / "run-xyz"
+    run_dir = curation_run_dir("run-xyz")
     (run_dir / "gather_raw").mkdir(parents=True)
     _write_lead_meta(run_dir, "l-001", "probe")
     _write_query(run_dir, "l-001", 0, "elastic.esql", payload_status="error")
 
-    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
+    assert lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
     queue = deps.paths.state_root / PITFALLS.queue
     rows = [json.loads(ln) for ln in queue.read_text().splitlines()]
     assert [r["query_id"] for r in rows] == ["elastic.esql"]
@@ -1427,7 +1426,7 @@ def test_run_collects_general_failure_before_early_return(tmp_git_repo: Path, tm
     assert (run_dir / "lead_author" / "pitfalls_collected").is_file()
 
     (run_dir / "lead_author" / "done").unlink()
-    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
+    assert lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
     rows2 = [json.loads(ln) for ln in queue.read_text().splitlines()]
     assert len(rows2) == 1
 
@@ -1448,12 +1447,12 @@ def test_run_reloads_catalog_after_mint_so_minted_draft_resolves(
         lead_deps(paths),
         invoke_agent=lambda rd, handoffs, pending, **_kw: seen.update(handoffs=handoffs) or 0,
     )
-    run_dir = tmp_path / "run-mint"
+    run_dir = curation_run_dir("run-mint")
     (run_dir / "gather_raw").mkdir(parents=True)
     _write_lead_meta(run_dir, "l-001", "probe a brand-new verb")
     _write_query(run_dir, "l-001", 0, "wazuh.brandnew", verb="lookup", payload_status="ok")
 
-    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
+    assert lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
     minted = lead_author._draft_basename("wazuh.brandnew")
     assert (tmp_git_repo / _CATALOG / "wazuh" / "_draft" / f"{minted}.md").is_file()
     # The row still resolves, through `covers:` rather than through a matching `id:`. The

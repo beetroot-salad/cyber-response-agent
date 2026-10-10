@@ -44,7 +44,7 @@ from defender.tests.tenant_1105_run_repository import _spec1105 as H
 PACKAGE_FILES = ("__init__.py", "_layout.py", "_handle.py", "_lookup.py", "_record.py",
                  "_held.py", "_id.py", "_errors.py")
 #: The 53 public names `defender/_run_paths.py` defines at module level at 80888efb (R4-42),
-#: plus #1224's ORACLE_HELD_SUFFIX.
+#: plus #1224's ORACLE_HELD_SUFFIX, minus `resolve_run_bundle` (deleted by #1105 PR 2, F-13).
 LAYOUT_NAMES = frozenset({
     "WIRE_LOG_DIR", "WIRE_LOG", "PROVENANCE", "GATE_METADATA_KEY", "ALERT", "REPORT",
     "INVESTIGATION", "EXECUTED_QUERIES", "SOURCE_REFS", "RAW_MARKER", "GATHER_SUMMARIES_DIRNAME",
@@ -57,7 +57,7 @@ LAYOUT_NAMES = frozenset({
     "ORACLE_HELD_SUFFIX", "SESSIONS_DIRNAME", "RunLayout", "RUN_LAYOUT", "WireLogNames", "WIRE_LOG_NAMES", "RunPaths",
     "SessionPaths", "LEAD_ID_BODY", "LEAD_ID_RE", "GATHER_RAW_SHAPE", "CASE_ANSWER_KEY_NAMES",
     "is_case_answer_key", "gather_summaries_shape", "artifact_file", "plain_file", "artifact_dir",
-    "resolve_run_bundle", "contained_payload",
+    "contained_payload",
 })
 #: The layout's 10 public IMPORTED names, which the door does not serve (D1.3, R4-42).
 LAYOUT_IMPORTED = ("ALIAS_READ_REFUSAL", "Path", "PurePosixPath", "annotations", "dataclasses",
@@ -65,22 +65,23 @@ LAYOUT_IMPORTED = ("ALIAS_READ_REFUSAL", "Path", "PurePosixPath", "annotations",
 #: The private layout helpers `_episode_paths.py` imports from the submodule (R4-27).
 PRIVATE_HELPERS = ("_check_component", "_check_index", "_confine")
 HANDLE_NAMES = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref"})
-#: The door's 15 non-layout public names (D1.3).
+#: The door's 18 non-layout public names (D1.3; #1105 PR 2's declared change 0 swaps PR 1's four
+#: Tenant-taking lookups for the tenant-scoped repository's five names).
 NON_LAYOUT_PUBLIC = HANDLE_NAMES | {
-    "RunId", "open_run", "list_run_ids", "bound_runs", "run_exists", "record_episode_runs",
-    "episode_runs", "sibling_run_ids", "episode_sibling_ids", "RunRefused",
+    "RunId", "RunsRepository", "EpisodeRuns", "Listed", "RunAddress", "RunAbsent",
+    "record_episode_runs", "episode_runs", "sibling_run_ids", "episode_sibling_ids", "RunRefused",
     # Owner rulings (the high and xhigh reviews): the repository answers "may this text name a
     # run?" and holds a runs folder for its outside callers (run setup, the family gate), so
     # neither re-derives the sidecar clause or the hold's refusals.
     "run_name_fault", "hold_runs_folder"}
-#: Every public name today's code from-imports from the two moved modules (R4-26).
+#: Every public name today's code from-imports from the two moved modules (R4-26), but
+#: `resolve_run_bundle` (deleted by #1105 PR 2, F-13).
 TODAYS_IMPORTED = frozenset({
     "Run", "case_ref", "ALERT", "CASE_ANSWER_KEY_NAMES", "GATE_METADATA_KEY", "GATHER_RAW_SHAPE",
     "GATHER_SUMMARIES_DIRNAME", "INVESTIGATION", "LEAD_ID_RE", "LESSONS_LOADED", "PROVENANCE",
     "REPORT", "RUN_LAYOUT", "RunPaths", "SERVED_PREFIX", "SessionPaths", "TRACE_SUFFIX",
     "WIRE_LOG", "WIRE_LOG_DIR", "WIRE_LOG_NAMES", "artifact_dir", "artifact_file",
     "contained_payload", "gather_summaries_shape", "is_case_answer_key", "plain_file",
-    "resolve_run_bundle",
 })
 #: The owner modules the O2 scan exempts, by their path under `defender/` (OP-3).
 O2_OWNERS = ("_episode_paths.py", "_episode_handle.py", "_tenant.py")
@@ -371,12 +372,13 @@ def test_1105_the_package_holds_exactly_its_seven_pinned_submodules():  # name k
         f"{sorted(LAYOUT_NAMES - layout_public)}, extra {sorted(layout_public - LAYOUT_NAMES)}")
 
 
-def test_1105_the_door_serves_exactly_its_68_public_names():  # 70 since the owner rulings, 71 with #1224's ORACLE_HELD_SUFFIX; the spec graph cites this name
-    """defender.run_repository.__all__ is exactly the 71 public names: the layout's 54 (the
+def test_1105_the_door_serves_exactly_its_68_public_names():  # 70 since the owner rulings, 71 with #1224's ORACLE_HELD_SUFFIX, 72 with #1105 PR 2's declared change 0, 71 once F-13 deleted resolve_run_bundle; the spec graph cites this name
+    """defender.run_repository.__all__ is exactly the 71 public names: the layout's 53 (the
     door's layout surface equals _layout's public names, NM-06), Run, RunRecord, ArchivedWorld,
-    RecordHandle, case_ref, RunId, open_run, list_run_ids, bound_runs, run_exists,
-    record_episode_runs, episode_runs, sibling_run_ids, episode_sibling_ids, RunRefused,
-    run_name_fault and hold_runs_folder; it
+    RecordHandle, case_ref, RunId, RunsRepository, EpisodeRuns, Listed, RunAddress, RunAbsent
+    (#1105 PR 2's declared change 0: they replace PR 1's open_run, list_run_ids, bound_runs and
+    run_exists), record_episode_runs, episode_runs, sibling_run_ids, episode_sibling_ids,
+    RunRefused, run_name_fault and hold_runs_folder; it
     lists none of the layout's 10 imported names nor _check_component, _check_index, _confine,
     and serves none of them as an attribute but annotations, which the door's own
     `from __future__ import annotations` binds; every name today's code imports from the two
@@ -1015,7 +1017,7 @@ def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_p
     under a writable bind. Positive control: the run's own run_dir is bound read-write. (A BoxSpec
     with an explicit rootfs keeps _create_argv off the filesystem: resolve_rootfs returns it
     verbatim, _docker.py:65-70; GR-A1, executed, is the design's own discharge.)"""
-    from defender.run_repository import RunId, open_run
+    from defender.run_repository import RunId
     from defender.runtime.box import BoxSpec
     from defender.runtime.box._lifecycle import _create_argv
 
@@ -1023,8 +1025,8 @@ def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_p
     runs = H.runs_folder(t)
     H.make_run(runs, "r1")
     H.plant_record(runs, "r1-n1", t.id, "r1", {"a": "r1-n1-a"})
-    run = open_run(t, RunId.parse("r1"))
-    assert getattr(run, "run_dir", None) == runs / "r1", f"open_run handed out {run!r}"
+    run = t.runs_repository().open(RunId.parse("r1"))
+    assert getattr(run, "run_dir", None) == runs / "r1", f"runs.open handed out {run!r}"
     create = _create_argv("defender-run-r1", run.run_dir, H.DEFENDER,
                           BoxSpec(runtime="runc", rootfs="busybox"), tenant_agent=t.agent)
     argv = create.argv

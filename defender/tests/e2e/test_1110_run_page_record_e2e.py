@@ -26,7 +26,9 @@ through the handle's own `io=` seam and the assertion is on the CALL it captured
   resolver's reason. A copy that lands warns nothing.
 - O6: an unrecognised deployment renders the record, makes no copy, and logs an error.
 - O7: `run.py main` exits 0 over a run whose renderer genuinely crashes, or cannot be imported.
-- O8: `python visualize_run.py <run_dir>` re-renders a finished run into its `runtime_html`
+- O8: `python visualize_run.py --tenant T <run_id>` (#1105 PR 2, declared change 7: it took the
+  run folder's path; the run is now opened by id through T's repository, so these tests drive
+  it at `<data root>/T/runs/<run_id>`) re-renders a finished run into its `runtime_html`
   record, and under `production` copies nothing; like the post-run step it writes through the
   handle, so a link planted at the record's name is refused, not followed (S2).
 - The #1110 review's boundaries: the step's two jobs fail DIFFERENTLY — a render failure's
@@ -42,8 +44,9 @@ through the handle's own `io=` seam and the assertion is on the CALL it captured
   renderer that cannot be imported is a `VisualizeFailed` saying it could not be LOADED (a
   render failure says RENDERED and never "load…"; a record failure says SAVED). The standalone
   re-render runs its OWN `publish_page` — importing neither `run_common` nor a second copy of
-  the renderer — inside the run's context under the tenant the run's stamp names (`tenant_id`
-  on every line; `null` when the stamp names none or cannot be read), and exits 1 when the
+  the renderer — inside the run's context under the REQUEST's tenant, `--tenant` (`tenant_id`
+  on every line, whatever the run's box-writable stamp names or whether it can be read at all;
+  #1105 PR 2, declared change 7 — it was the tenant the stamp names), and exits 1 when the
   record was saved but the dev copy failed. The failure type itself is
   `test_1110_run_page_record.py`'s.
 
@@ -70,7 +73,7 @@ from typing import Any
 
 import pytest
 
-from defender import _env, _io, _provenance, _tenant, run_common
+from defender import _env, _io, _provenance, run_common
 from defender.run_repository import Run
 from defender.run_repository import RunPaths
 from defender.tests._spec1077 import bound_arguments
@@ -83,6 +86,8 @@ from defender.tests.e2e.test_1084_mirror_e2e import (
     _defender_snapshot,
     _infos_naming,
     _main_checkout_by_git,
+    _repository_run,
+    _run_page_argv,
     _stray_state,
     _warnings,
 )
@@ -843,10 +848,12 @@ def test_1110_o7_run_main_exits_0_when_the_renderer_cannot_be_imported(
 # ---------------------------------------------------------------------------------------
 
 
-def _standalone(run_dir: Path, **env: str) -> subprocess.CompletedProcess:
+def _standalone(tenant: str, run_dir: Path, **env: str) -> subprocess.CompletedProcess:
+    """`python visualize_run.py --tenant T <run_id>` over a `_repository_run` (#1105 PR 2,
+    declared change 7: it was `python visualize_run.py <run_dir>`)."""
     script = run_common.DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
-    return subprocess.run(  # noqa: S603 — this interpreter, the renderer script, the run dir
-        [sys.executable, str(script), str(run_dir)],
+    return subprocess.run(  # noqa: S603 — this interpreter, the renderer script, tenant, run id
+        [sys.executable, str(script), *_run_page_argv(tenant, run_dir)[1:]],
         capture_output=True, text=True, encoding="utf-8", check=False,
         env={**os.environ, **env})
 
@@ -862,14 +869,17 @@ def test_1110_o8_s2_the_standalone_re_render_refuses_a_link_planted_at_the_recor
     link and overwrites the outside file.
 
     Positive control on the same run: the link removed, the same command exits 0 and writes the
-    record (as the unplanted O8 case above does)."""
-    run_dir = driven_run(tmp_path)
+    record (as the unplanted O8 case above does).
+
+    #1105 PR 2 (declared change 7): the run is driven where the re-render's repository opens it
+    (`_repository_run`), and the re-render is `--tenant T <run_id>`."""
+    tenant, run_dir = _repository_run()
     record = RunPaths(run_dir).runtime_html
     outside = tmp_path / "outside.html"
     outside.write_bytes(b"OUTSIDE\n")
     os.symlink(outside, record)
 
-    child = _standalone(run_dir, DEFENDER_LOG_FORMAT="json")
+    child = _standalone(tenant, run_dir, DEFENDER_LOG_FORMAT="json")
 
     assert child.returncode == 1, (
         f"the re-render did not answer a refused record with exit 1 (got {child.returncode}): "
@@ -886,7 +896,7 @@ def test_1110_o8_s2_the_standalone_re_render_refuses_a_link_planted_at_the_recor
     assert os.readlink(record) == str(outside), "the planted link was re-aimed"
 
     record.unlink()
-    child = _standalone(run_dir)
+    child = _standalone(tenant, run_dir)
     assert child.returncode == 0, f"the re-render failed: {child.stderr}"
     assert MARKER in record.read_text(encoding="utf-8")
 
@@ -901,8 +911,9 @@ def _fresh_dirs(tmp_path: Path) -> tuple[Path, Path]:
 def test_1110_o2_s1_a_production_re_render_writes_nothing_to_the_temp_dir_or_home(
         tmp_path, run_visualizations_dir):
     """O2/S1 beyond the snapshot's universe: the system temp dir and the home directory, read
-    off ONE real production child (`python visualize_run.py <run_dir>` as `__main__`, JSON log)
-    that also carries the standalone re-render's other production-side obligations:
+    off ONE real production child (`python visualize_run.py --tenant T <run_id>` as `__main__`,
+    JSON log; #1105 PR 2, declared change 7: it took `<run_dir>`, and the run is driven where
+    the re-render's repository opens it, `_repository_run`) that also carries the standalone re-render's other production-side obligations:
 
     - O2/S1: a child whose `TMPDIR` and `HOME` are fresh, empty folders leaves both empty — no
       page staged in `/tmp` "for later", nothing cached under `~` — and the copy override stays
@@ -913,16 +924,16 @@ def test_1110_o2_s1_a_production_re_render_writes_nothing_to_the_temp_dir_or_hom
     - the standalone re-render imports neither `run_common` nor a second copy of the renderer
       (`visualize_run.main` calls the `publish_page` of the module it is running in), read off
       the child's `sys.modules` after the script ran to its exit.
-    - the #1110 review: every log line the child writes carries `run_id` — and `tenant_id`
-      `null`, the replay harness's stamp naming none — including ONE INFO line saying the page
-      was "not copied" (naming `DEFENDER_DEPLOYMENT`, never claiming a value) and the saved
+    - the #1110 review: every log line the child writes carries `run_id` — and `tenant_id` the
+      REQUEST's tenant (#1105 PR 2, declared change 7; before, `null`: the replay harness's
+      stamp names none) — including ONE INFO line saying the page was "not copied" (naming `DEFENDER_DEPLOYMENT`, never claiming a value) and the saved
       record's INFO line.
 
     Positive controls: the child's interpreter really resolves the system temp dir and home to
     those folders (so a write there would be seen), the record exists (so two empty folders are
     not a child that did nothing), the module list holds what the script itself imports
     (`defender._env`, so an absent name is absent, not unrecorded)."""
-    run_dir = driven_run(tmp_path / "runs-base")
+    tenant, run_dir = _repository_run()  # #1105 PR 2 (declared change 7)
     record = RunPaths(run_dir).runtime_html
     assert not record.exists(), "precondition: no page before the re-render"
     assert Run.at(run_dir).record.tenant_id is None, "precondition: the stamp names no tenant"
@@ -937,7 +948,8 @@ def test_1110_o2_s1_a_production_re_render_writes_nothing_to_the_temp_dir_or_hom
     script = run_common.DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
 
     child = subprocess.run(  # noqa: S603 — this interpreter, a fixed probe, the script, the run
-        [sys.executable, "-c", _REPORTING_RE_RENDER, str(script), str(run_dir)],
+        [sys.executable, "-c", _REPORTING_RE_RENDER, str(script),
+         *_run_page_argv(tenant, run_dir)[1:]],  # #1105 PR 2 (declared change 7)
         capture_output=True, text=True, encoding="utf-8", check=False,
         env={**os.environ, **env, "DEFENDER_LOG_FORMAT": "json"})
 
@@ -960,10 +972,11 @@ def test_1110_o2_s1_a_production_re_render_writes_nothing_to_the_temp_dir_or_hom
         "it ran another module's publish step, not its own")
     lines = _json_lines(child.stderr)
     unbound = [line for line in lines
-               if (line.get("run_id"), line.get("tenant_id")) != (run_dir.name, None)]
+               if (line.get("run_id"), line.get("tenant_id")) != (run_dir.name, tenant)]
     assert len(lines) >= 2, f"too few log lines: {lines!r}"
     assert unbound == [], (
-        f"lines not filed under run {run_dir.name!r} and no tenant: {unbound!r} of {child.stderr!r}")
+        f"lines not filed under run {run_dir.name!r} and the request's tenant {tenant!r}: "
+        f"{unbound!r} of {child.stderr!r}")
     skipped = [line for line in lines if _env.DEPLOYMENT_ENV in str(line.get("message", ""))
                and line.get("severity") == "INFO"
                and "not copied" in str(line.get("message", "")).lower()]
@@ -1054,11 +1067,15 @@ def test_1110_the_standalone_re_render_logs_inside_the_runs_context(
     the ERROR about the unrecognised value is on a line whose `run_id` is this run's. Exits 0
     with the record written (the positive control that the child ran the step). The unset side
     (the skipped copy's INFO line and the saved record's, both bound to the run) is read off the
-    production child of the O2/S1 temp-dir test."""
-    run_dir = driven_run(tmp_path / "runs-base")
+    production child of the O2/S1 temp-dir test.
+
+    #1105 PR 2 (declared change 7): the run is driven where the re-render's repository opens it
+    (`_repository_run`), and the re-render is `--tenant T <run_id>`."""
+    tenant, run_dir = _repository_run()
     record = RunPaths(run_dir).runtime_html
 
-    child = _standalone(run_dir, DEFENDER_LOG_FORMAT="json", **{_env.DEPLOYMENT_ENV: "staging"})
+    child = _standalone(tenant, run_dir, DEFENDER_LOG_FORMAT="json",
+                        **{_env.DEPLOYMENT_ENV: "staging"})
 
     assert child.returncode == 0, f"the re-render failed: {child.stderr}"
     assert MARKER in record.read_text(encoding="utf-8")
@@ -1169,13 +1186,15 @@ def test_1110_publish_page_raises_the_failure_type_run_common_names(tmp_path, fa
         assert os.readlink(record) == str(outside), "the planted link was re-aimed"
 
 
-#: A child that runs the standalone re-render exactly as `python visualize_run.py <run_dir>`
-#: does (`runpy` as `__main__`), then reports its exit code and every `defender` module the
-#: process imported doing it — on one tagged stdout line, apart from the log on stderr.
+#: A child that runs the standalone re-render exactly as `python visualize_run.py --tenant T
+#: <run_id>` does (`runpy` as `__main__`; #1105 PR 2, declared change 7: the script's arguments
+#: are handed through whole, where it was the one `<run_dir>`), then reports its exit code and
+#: every `defender` module the process imported doing it — on one tagged stdout line, apart from
+#: the log on stderr.
 _REPORTING_RE_RENDER = textwrap.dedent("""
     import json, runpy, sys
-    script, run_dir = sys.argv[1], sys.argv[2]
-    sys.argv = [script, run_dir]
+    script, args = sys.argv[1], sys.argv[2:]
+    sys.argv = [script, *args]
     try:
         runpy.run_path(script, run_name="__main__")
         code = "returned without exiting"
@@ -1186,19 +1205,25 @@ _REPORTING_RE_RENDER = textwrap.dedent("""
 """)
 
 
+#: A tenant OTHER than the request's, written into a run's box-writable stamp (#1105 PR 2,
+#: declared change 7): the re-render must never file its lines under it.
+STAMPED_ELSEWHERE = "beta"
+
+
 def _stamp_tenant(run_dir: Path, stamp: str) -> str | None:
     """Give the run's provenance stamp the shape `stamp` names, and answer the tenant it now
-    names: `tenant` — production's shape, the runs base's own tenant record's id written into
-    the stamp (as `run_common._stamp` does); `no-tenant` — the replay harness's stamp as it is
-    (no `tenant_id`); `unreadable` — not JSON at all."""
+    names: `tenant` — a stamp naming ANOTHER tenant than the request's (`STAMPED_ELSEWHERE`,
+    production's shape with a forged id; #1105 PR 2, declared change 7: it was the runs base's
+    own record's id, which is the request's tenant, so it could not tell the request's tenant
+    from the stamp's); `no-tenant` — the replay harness's stamp as it is (no `tenant_id`);
+    `unreadable` — not JSON at all."""
     path = RunPaths(run_dir).provenance
     if stamp == "tenant":
-        tenant = _tenant.ensure_runs_base_record(
-            run_dir.parent, _tenant.TenantId("playground")).tenant_id
         prov = _provenance.read(path)
         assert prov is not None, "precondition: the harness stamped the run"
-        path.write_text(dataclasses.replace(prov, tenant_id=tenant).as_json(), encoding="utf-8")
-        return tenant
+        path.write_text(dataclasses.replace(prov, tenant_id=STAMPED_ELSEWHERE).as_json(),
+                        encoding="utf-8")
+        return STAMPED_ELSEWHERE
     if stamp == "unreadable":
         path.write_text("{ this is not a stamp\n", encoding="utf-8")
     return None
@@ -1206,30 +1231,37 @@ def _stamp_tenant(run_dir: Path, stamp: str) -> str | None:
 
 @pytest.mark.parametrize("stamp", ["tenant", "unreadable"])
 def test_1110_the_standalone_re_render_logs_under_the_tenant_the_runs_stamp_names(
-        tmp_path, stamp):
-    """The standalone re-render binds the run's log context with the tenant the run's own
-    stamp names (`Run.at(run_dir).record.tenant_id`): every JSON line it writes carries
-    `run_id` = the run's and `tenant_id` = the stamped tenant — so a re-render's lines file
-    under the same tenant as the run's own. A stamp that names no tenant, or cannot be read at
-    all, binds `null` and still re-renders: reading the tenant never fails the re-render.
+        stamp):
+    """FLIPPED by #1105 PR 2, declared change 7 (J8): the standalone re-render binds the run's
+    log context with the REQUEST's tenant — the `--tenant` value it was run with — never the
+    tenant the run's box-writable provenance stamp names. Every JSON line it writes carries
+    `run_id` = the run's and `tenant_id` = the `--tenant` value, whatever the stamp says: a
+    stamp naming ANOTHER tenant (`tenant`: `STAMPED_ELSEWHERE`), or a stamp that cannot be read
+    at all (`unreadable`) — reading the stamp never fails the re-render, and never chooses the
+    tenant its lines file under. (It was: the stamped tenant, `null` for an unreadable stamp.)
 
     Positive controls: the stamp reads back as intended through the run handle before the
-    child starts, and each child exits 0 with this run's record written and at least the two
-    lines a production re-render always writes (the saved record, the skipped copy)."""
-    run_dir = driven_run(tmp_path / "runs-base")
-    tenant = _stamp_tenant(run_dir, stamp)
-    assert Run.at(run_dir).record.tenant_id == tenant, "precondition: the stamp names the tenant"
+    child starts, and names something other than the request's tenant (so a re-render that
+    still took the stamp's would fail here); each child exits 0 with this run's record written
+    and at least the two lines a production re-render always writes (the saved record, the
+    skipped copy)."""
+    requested, run_dir = _repository_run()
+    stamped = _stamp_tenant(run_dir, stamp)
+    assert Run.at(run_dir).record.tenant_id == stamped, (
+        "precondition: the stamp reads back as planted")
+    assert stamped != requested, "precondition: the stamp does not name the request's tenant"
 
-    child = _standalone(run_dir, DEFENDER_LOG_FORMAT="json")
+    child = _standalone(requested, run_dir, DEFENDER_LOG_FORMAT="json")
 
     assert child.returncode == 0, f"the re-render failed: {child.stderr[-800:]!r}"
     assert MARKER in RunPaths(run_dir).runtime_html.read_text(encoding="utf-8")
     lines = _json_lines(child.stderr)
     assert len(lines) >= 2, f"the re-render logged less than it always does: {child.stderr!r}"
     unbound = [line for line in lines
-               if (line.get("run_id"), line.get("tenant_id")) != (run_dir.name, tenant)]
+               if (line.get("run_id"), line.get("tenant_id")) != (run_dir.name, requested)]
     assert unbound == [], (
-        f"lines not filed under run {run_dir.name!r} and tenant {tenant!r}: {unbound!r}")
+        f"lines not filed under run {run_dir.name!r} and the request's tenant {requested!r} "
+        f"(the stamp names {stamped!r}): {unbound!r}")
 
 
 def test_1110_a_dev_re_render_whose_copy_failed_exits_1_with_the_record_written(
@@ -1242,15 +1274,19 @@ def test_1110_a_dev_re_render_whose_copy_failed_exits_1_with_the_record_written(
 
     Positive control on the same run: the same command with the override on a writable folder
     exits 0 and lands the copy. (A saved record with the copy skipped off `dev` is exit 0: the
-    O8 and log-context tests above; a record that could not be saved is exit 1: O8/S2.)"""
-    run_dir = driven_run(tmp_path / "runs-base")
+    O8 and log-context tests above; a record that could not be saved is exit 1: O8/S2.)
+
+    #1105 PR 2 (declared change 7): the run is driven where the re-render's repository opens it
+    (`_repository_run`), and the re-render is `--tenant T <run_id>`."""
+    tenant, run_dir = _repository_run()
     record = RunPaths(run_dir).runtime_html
     blocker = tmp_path / "blocker"
     blocker.write_bytes(b"a file, not a folder\n")
     dest = blocker / "run-visualizations" / run_dir.name / PAGE
 
-    child = _standalone(run_dir, **{_env.DEPLOYMENT_ENV: "dev", "DEFENDER_LOG_FORMAT": "json",
-                                    MIRROR_ENV: str(blocker / "run-visualizations")})
+    child = _standalone(tenant, run_dir,
+                        **{_env.DEPLOYMENT_ENV: "dev", "DEFENDER_LOG_FORMAT": "json",
+                           MIRROR_ENV: str(blocker / "run-visualizations")})
 
     assert child.returncode == 1, (
         f"a dev re-render whose copy failed exited {child.returncode}: {child.stderr[-800:]!r}")
@@ -1262,6 +1298,6 @@ def test_1110_a_dev_re_render_whose_copy_failed_exits_1_with_the_record_written(
     assert warning.get("run_id") == run_dir.name, f"the warning is not bound to the run: {warning!r}"
     assert blocker.read_bytes() == b"a file, not a folder\n"
 
-    child = _standalone(run_dir, **{_env.DEPLOYMENT_ENV: "dev"})
+    child = _standalone(tenant, run_dir, **{_env.DEPLOYMENT_ENV: "dev"})
     assert child.returncode == 0, f"the dev re-render failed: {child.stderr[-800:]!r}"
     assert (run_visualizations_dir / run_dir.name / PAGE).read_bytes() == record.read_bytes()

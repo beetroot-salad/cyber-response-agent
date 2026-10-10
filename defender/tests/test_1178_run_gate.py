@@ -281,7 +281,7 @@ def _lead_scene(tmp_path: Path, committed: dict[str, str] | None = None) -> Lead
         commit_all(repo, "seed the names the agent rewrites")
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     paths.state_root.mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
-    return LeadScene(tmp=tmp_path, repo=repo, paths=paths, run_dir=_run_dir(tmp_path),
+    return LeadScene(tmp=tmp_path, repo=repo, paths=paths, run_dir=_run_dir(),
                      head=_git.git_head_sha(repo))
 
 
@@ -346,7 +346,7 @@ def _drive_lead(  # noqa: PLR0913 — one drive, every seam a row varies
     with lead_trees(s.paths) as trees:
         deps = _journaled_deps(_deps(s.paths, trees, spawn, [ELASTIC_LEAD]), log)
         got = _outcome(lambda: lead_author.run(
-            s.run_dir, label=LEAD, paths=s.paths, deps=deps, box=box))
+            _state1135.run_of(s.run_dir), label=LEAD, paths=s.paths, deps=deps, box=box))
     return got, spawn
 
 
@@ -1047,7 +1047,7 @@ def _queue_claims(s: LeadScene, *run_names: str) -> list[Path]:
     own), keyed `case-<name>`; returns the run dirs."""
     run_dirs = []
     for name in run_names:
-        run_dir = s.tmp / "runs" / name
+        run_dir = _state1135.curation_run_dir(name)
         (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
         _state1135.enqueue_case(_state1135.state_for_paths(s.paths), f"case-{name}", run_dir)
         run_dirs.append(run_dir)
@@ -1072,7 +1072,7 @@ class Lanes:
         self.handed: list[Any] = []
         self.swallowed: list[BoxFault] = []
 
-    def run_lead(self, paths: LoopPaths, state: Any, run_dir: Path, *, box: Any = None,
+    def run_lead(self, paths: LoopPaths, state: Any, run: Any, *, box: Any = None,
                  on_done: Any, **_kw: Any) -> int:
         self.handed.append(box)
         with lead_trees(paths) as trees:
@@ -1083,7 +1083,7 @@ class Lanes:
                 # The drain holds the queue lock for the whole tick, so the lane runs under it,
                 # as the drain's own default seam does (`run(deps=)` would take it again and
                 # skip).
-                return lead_author._run_locked(run_dir, deps, box=box, on_done=on_done)
+                return lead_author._run_locked(run.run_dir, deps, box=box, on_done=on_done)
             except BoxFault as e:
                 if not self.swallow:
                     raise
@@ -1487,7 +1487,7 @@ def test_a_run_start_fault_through_the_default_claim_step_halts_the_lane(
     for name, lead in leads.items():
         rows = [(lead.query_id, lead.system, lead.verb)] if lead is not None else []
         _state1135.enqueue_case(_state1135.state_for_paths(s.paths), f"case-{name}",
-                                _run_dir(tmp_path / name, *rows))
+                                _run_dir(*rows, run_id=name))
 
     got, calls, events, watch = _held_lead_drain(s, monkeypatch)
 

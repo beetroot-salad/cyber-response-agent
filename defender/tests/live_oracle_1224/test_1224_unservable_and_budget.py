@@ -14,7 +14,7 @@ feedback, not attempts), N06 (N counts failures per call), M04=A, N12, N13, N19,
 
 Every scenario drives the REAL serving seam (`S.world_registry` + `S.call`), the REAL
 investigation (`_drive`, the replay harness with the registry injected as its verb seam), or the
-REAL sibling entry point (`_resume`: `run.main --resume`, whose lifecycle seam drives the real
+REAL sibling entry point (`_resume`: `run.main --episode`, whose lifecycle seam drives the real
 investigation over the world registry). Faults are real inputs (the fixture estate's real
 `AdapterFault` subclasses, GA-40; a removed adapter file; a directory where a store file must be
 written) or scripted model content the design names (O3). A model-provider outage is the
@@ -237,7 +237,7 @@ def _drive(root: Path, est: S.Estate, verbs: Any, turns: list[Any], *,
 
 
 # --------------------------------------------------------------------------------------
-# The sibling process (`run.py --resume`), its lifecycle seam driving the real investigation.
+# The sibling process (`run.py --episode`), its lifecycle seam driving the real investigation.
 # --------------------------------------------------------------------------------------
 
 
@@ -259,16 +259,26 @@ class _Sibling:
 def _sibling_episode(tmp_path: Path, monkeypatch: Any, est: S.Estate) -> Path:
     """A v2 episode whose source is a finished run on the fixture tenant (a sibling resumes
     from it). Called BEFORE a scenario scripts its own answers: the source run answers the
-    default captured calls."""
+    default captured calls.
+
+    #1105 PR 2: the sibling opens its episode by id under the configured episodes base, so the
+    episode lives there, and its container `runs/` is present with the tenant's record — what
+    the launcher makes before the first sibling (an absent container refuses the sibling)."""
+    from defender import _tenant
+
+    episodes = tmp_path / "episodes-root"
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(episodes))
     _base, src = S.source_run(tmp_path, est)
-    return S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)))
+    ep = S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)), root=episodes)
+    (ep / "runs").mkdir(exist_ok=True)
+    _tenant.ensure_runs_base_record(ep / "runs", S.FIXTURE_TENANT)
+    return ep
 
 
 def _resume(ep: Path, est: S.Estate, *, oracle: S.ScriptedModel, verifier: S.ScriptedModel,
             turns: list[Any], label: str = "b", **knobs: Any) -> _Sibling:
-    """World `label`'s sibling: the REAL `run.main --resume`, handed the oracle and verifier
+    """World `label`'s sibling: the REAL `run.main --episode`, handed the oracle and verifier
     through its coined seams; its lifecycle seam drives the real investigation (replay
     harness) over the world registry, so whatever escapes the investigation reaches the
     sibling's own abort path as it would in production."""
@@ -283,8 +293,8 @@ def _resume(ep: Path, est: S.Estate, *, oracle: S.ScriptedModel, verifier: S.Scr
         return H.drive(run_dir, run_id=run_dir.name, main=sib.run.main,
                        gather=sib.run.gather, verbs=reg, tenant=est.place())
 
-    argv = ["--resume", str(ep / "family.yaml"), "--world", label, "--tenant",
-            S.FIXTURE_TENANT]
+    # #1105 PR 2 (declared change 6): `--tenant T --episode <episode id> --world L`.
+    argv = ["--tenant", S.FIXTURE_TENANT, "--episode", ep.name, "--world", label]
     try:
         sib.rc = S.mod(S.RUN).main(argv, lifecycle=lifecycle, visualize=_no_visualize,
                                    preflight=_no_preflight, oracle=oracle.model,

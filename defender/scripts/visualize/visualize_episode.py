@@ -1,7 +1,13 @@
-"""The episode page: `render_episode(episode_dir) -> Path` renders `learning.html` beside
-`judge.yaml` from an episode directory alone; `main(argv)` is the standalone CLI. The launcher
-(`branch/cli.py::_render_page`) calls `render_episode` after the judge frame closes, under its
-own non-fatal boundary.
+"""The episode page: `render_episode(runs, episode_id) -> Path` renders `learning.html` beside
+`judge.yaml`, the episode opened by id through the request's tenant's repository
+(`runs.episode(episode_id)`, #1105 PR 2); `main(argv)` is the standalone CLI
+(`--tenant T <episode_id>`). The launcher (`branch/cli.py::_render_page`) calls `render_episode`
+after the judge frame closes, under its own non-fatal boundary.
+
+The episode view judges the siblings' container record before anything else is read (G20): a
+record naming another tenant, or none, refuses the page. The arm roster is the manifest's (and
+the grade record's) labels, each arm opened by id through the view; an entry in `runs/` that is
+no roster label is never shown. An unreadable container reads as absent.
 
 Two phases. `load_episode` reads every record the page shows exactly once, through the package
 readers, into a typed model (`_Episode`), and runs the findings walk once over it. Section
@@ -16,22 +22,27 @@ edges the page exists to explain. If a decision is not recorded, fix the writer.
 """
 from __future__ import annotations
 
+import argparse
 import math
 import re
 import sys
-from pathlib import Path, PurePosixPath
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 if __name__ == "__main__" and (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._tenant import (
+    TenantRefused, accept_tenant, requested_tenant_id, resolve_data_root,
+)
 from defender._clock import parse_iso_utc
-from defender._episode_handle import Episode
-from defender._io import Bound, bind, read_text_utf8
+from defender._episode_handle import Episode, EpisodeRefused
+from defender._paths import process_defender_dir
+from defender._io import Bound, read_text_utf8
 from defender._report import ReportRead
 from defender._run_id import is_valid_run_id
 from defender._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
-from defender.run_repository import RUN_LAYOUT, WIRE_LOG_NAMES
+from defender.run_repository import RUN_LAYOUT, WIRE_LOG_NAMES, RunRefused
 from defender._vocab import normalized_disposition, normalized_judge_outcome
 from defender.learning.branch import archive
 from defender.learning.branch import outcome as outcome_mod
@@ -57,9 +68,14 @@ from defender.scripts.visualize.visualize_primitives import (
     ASSETS,
     CSS,
     EVENT_HANDLER_RE,
+    UsageParser,
+    UsageRefused,
     esc,
     fmt_duration,
 )
+
+if TYPE_CHECKING:
+    from defender.run_repository import EpisodeRuns, Run, RunsRepository
 
 #: The page's own stylesheet, inlined after the shared run-page `CSS`, which knows nothing of
 #: this page's classes. `test_1025_every_class_the_page_emits_has_a_rule` keeps them in step.
@@ -354,9 +370,6 @@ class _WorldLeads:
 #: The three shapes a roster item takes, decided once at load (`_build_roster`) so the worlds
 #: and leads sections and their headings all count the same list.
 ROSTER_WORLD = "world"
-#: A `runs/` dir whose name does not decompose into `<episode_id>-<label>`: sectioned under its
-#: full name, with a leads block reading "not archived".
-ROSTER_STRAY_RUN_DIR = "stray_run_dir"
 #: A label (or directory name) that cannot become an html id (`_safe_id`): rendered as one
 #: "unnameable entry" line in the worlds section, and given NO section, NO leads block and
 #: NO nav entry — so it is counted in neither heading.
@@ -364,8 +377,7 @@ ROSTER_UNNAMEABLE = "unnameable"
 
 
 class RosterItem:
-    """One line of the roster: its label (a world label, or a stray run dir's full name) and
-    which of the three shapes above it takes."""
+    """One line of the roster: its world label and which of the two shapes above it takes."""
 
     __slots__ = ("label", "kind")
 
@@ -389,7 +401,9 @@ class WorldEntry:
         #: a label with `..` or a separator names a directory outside the episode, so nothing
         #: is read for it and it renders as unnameable.
         self.nameable = False
-        self.run_dir_name: str | None = None  # the runs/ dir that decomposed to this label
+        self.run_dir_name: str | None = None  # the arm's run folder, opened by id through the view
+        #: The arm's run page, relative to the episode page (`runs/<arm>/runtime.html`).
+        self.run_page: str | None = None
         self.result: _ResultEvent | None = None  # `None` when there is no run dir at all
         self.archive: _WorldArchive | None = None  # `None` when nothing is at worlds/<label>
 
@@ -592,13 +606,10 @@ class _Episode:
         #: render, and what their headings count.
         self.roster: list[RosterItem] = []
         self.off_roster = 0
-        #: `runs/` directories whose full name is already a roster label — not sectioned a
-        #: second time under the same ids; named on the off-roster line.
-        self.shadowed_run_dirs: list[str] = []
         self.archived_world_dirs: list[str] = []
         self.alert: Any = None
         self.draws: dict[str, tuple[dict[int, dict[str, Any]], DrawsSkipReport]] = {}
-        #: One leads block per roster label, stray `runs/` dirs included (keyed by full name).
+        #: One leads block per roster label.
         self.leads: dict[str, _WorldLeads] = {}
         self.wire = _WireLogs()
         self.findings = _Findings()
@@ -645,15 +656,15 @@ class _Episode:
 # =========================================================================================
 
 
-def load_episode(episode_dir: Path) -> _Episode:
-    """Every record the page shows, read once. Raises `JudgeRefused` for the manifest alone;
-    every other refusal is a slot on the model."""
-    episode_dir = Path(episode_dir)
-    with bind(episode_dir) as bound:
-        return _load_episode(episode_dir, bound)
+def load_episode(view: EpisodeRuns) -> _Episode:
+    """Every record the page shows, read once, through `view` — the episode's view in its
+    tenant's repository, whose container record was judged when it opened. Raises
+    `JudgeRefused` for the manifest alone; every other refusal is a slot on the model."""
+    episode = view.episode
+    return _load_episode(Path(episode.dir), episode.view(), view)
 
 
-def _load_episode(episode_dir: Path, bound: Bound) -> _Episode:
+def _load_episode(episode_dir: Path, bound: Bound, view: EpisodeRuns) -> _Episode:
     ep = _Episode(episode_dir, family.read_manifest(bound))
 
     ep.grade_rec = _read_grade(episode_dir)
@@ -670,7 +681,8 @@ def _load_episode(episode_dir: Path, bound: Bound) -> _Episode:
         name for name in bound.under(LAYOUT.worlds).entries().dirs()
         if name != _FAMILY_LABEL]
     ep.entries, ep.roster, ep.off_roster = _build_roster(
-        ep, bound, [r["world"] for r in grade_rows], grade_present=ep.grade_rec.present)
+        ep, [r["world"] for r in grade_rows], grade_present=ep.grade_rec.present,
+        reached_container=view.present)
     for row in grade_rows:
         w = ep.entries.get(row["world"])
         if w is not None:
@@ -691,8 +703,8 @@ def _load_episode(episode_dir: Path, bound: Bound) -> _Episode:
     for w in ep.entries.values():
         if not w.nameable:
             continue
-        if w.run_dir_name is not None:
-            w.result = _result_event(bound, LAYOUT.run(w.run_dir_name))
+        if view.present:
+            _load_arm(w, view, episode_dir, ep.episode_id)
         w.archive = _load_world_archive(bound, w.label)
     for item in ep.sectioned:
         entry = ep.entries.get(item.label)
@@ -703,6 +715,31 @@ def _load_episode(episode_dir: Path, bound: Bound) -> _Episode:
     ep.findings = _walk_findings(ep)
     ep.total_cost, ep.runs_costed, ep.costed, ep.worlds_wall, ep.lower_bound = _cost_totals(ep)
     return ep
+
+
+def _load_arm(w: WorldEntry, view: EpisodeRuns, episode_dir: Path, episode_id: str) -> None:
+    """World `w`'s arm, opened by id through the episode view (`view.open(view.arm_id(label))`,
+    whose entry rule takes only a real directory): its run folder's name, its run page's link
+    relative to the episode page, and its result event, read through the arm's own no-follow
+    reader. Anything the open refuses — nothing at the id, a link or a file there, a label no
+    run id can carry, a container gone since the view opened — leaves the arm absent.
+
+    The arm id is composed from `episode_id`, the manifest's own (`<episode_id>-<label>`, as
+    before): a page requested through a link name (`episodes/latest`, J4) names the same arms."""
+    try:
+        run = view.open(view.arm_id(w.label, episode_id=episode_id))
+        with run.reader() as reader:
+            w.result = _result_event(reader)
+    except (RunRefused, TenantRefused, OSError):
+        return
+    w.run_dir_name = run.run_dir.name
+    w.run_page = _run_page_link(run, episode_dir)
+
+
+def _run_page_link(run: Run, episode_dir: Path) -> str:
+    """The arm's run page (`run.observability.runtime_html`), as a link relative to the
+    episode page beside `judge.yaml`."""
+    return Path(run.observability.runtime_html.path).relative_to(episode_dir).as_posix()
 
 
 def _load_draws(bound: Bound, label: str) -> tuple[dict[int, dict[str, Any]], DrawsSkipReport]:
@@ -729,25 +766,17 @@ def _finite(value: Any) -> float | None:
     return as_float if math.isfinite(as_float) else None
 
 
-def _decompose_run_dir(name: str, *, episode_id: str) -> str | None:
-    prefix = f"{episode_id}-"
-    if name.startswith(prefix) and len(name) > len(prefix):
-        return name[len(prefix):]
-    return None
+def _build_roster(ep: _Episode, grade_row_labels: list[str], *, grade_present: bool,
+                  reached_container: bool) -> tuple[dict[str, WorldEntry], list[RosterItem], int]:
+    """Every world label that gets a section: manifest worlds ∪ `judge.yaml` rows. Each one's
+    arm is opened by id later (`_load_arm`); an entry in `runs/` that is neither is never shown
+    (#1105 J3: the roster is the manifest's, not a listing of the container).
 
-
-def _build_roster(ep: _Episode, bound: Bound, grade_row_labels: list[str],  # noqa: C901 — one union-membership decision the roster keys on
-                  *, grade_present: bool) -> tuple[dict[str, WorldEntry], list[RosterItem], int]:
-    """Every world label that gets a section: manifest worlds ∪ `judge.yaml` rows ∪ `runs/`
-    directories that decompose to `<episode_id>-<label>`.
-
-    Returns the entries by label (manifest order first), the classified roster (labels, then
-    undecomposable `runs/` dirs by full name), and the count of `worlds/` dirs on neither the
-    manifest nor the record (reported on one line, never rendered)."""
+    Returns the entries by label (manifest order first), the classified roster, and the count
+    of `worlds/` dirs on neither the manifest nor the record (reported on one line, never
+    rendered)."""
     entries: dict[str, WorldEntry] = {}
     order: list[str] = []
-    runs = bound.under(LAYOUT.runs).entries()
-    run_dirs = runs.dirs()
 
     def entry(label: str) -> WorldEntry:
         if label not in entries:
@@ -757,9 +786,9 @@ def _build_roster(ep: _Episode, bound: Bound, grade_row_labels: list[str],  # no
         return entries[label]
 
     # A manifest world with no grade row gets a section only once the episode reached RUNS:
-    # `runs/` exists, a grade record landed, or a world was archived. An episode rejected or
-    # aborted before then has no world to show.
-    reached_runs = runs.entries is not None or grade_present or bool(ep.archived_world_dirs)
+    # its container is there, a grade record landed, or a world was archived. An episode
+    # rejected or aborted before then has no world to show.
+    reached_runs = reached_container or grade_present or bool(ep.archived_world_dirs)
     # `family` is not a world: it is the reserved label for the family-level draws. The judge
     # refuses such a manifest, but the page reads whatever tree it is given, and treating it as
     # a world would walk its draws twice under duplicate ids.
@@ -779,34 +808,17 @@ def _build_roster(ep: _Episode, bound: Bound, grade_row_labels: list[str],  # no
         if label != _FAMILY_LABEL:
             entry(label)
 
-    stray_run_dirs: list[str] = []
-    for child in run_dirs:
-        label = _decompose_run_dir(child, episode_id=ep.episode_id)
-        if label is None or label == _FAMILY_LABEL:
-            stray_run_dirs.append(child)
-            continue
-        entry(label).run_dir_name = child
-
-    # One item per label: a stray dir named like an existing label would duplicate its ids and
-    # overwrite that world's leads block, so it goes on the off-roster line instead.
-    shadowed = [name for name in stray_run_dirs if name in entries]
-    stray_run_dirs = [name for name in stray_run_dirs if name not in entries]
-
     off_roster = sum(1 for name in ep.archived_world_dirs if name not in entries)
-    ep.shadowed_run_dirs = shadowed
 
-    def classify(label: str, kind: str) -> RosterItem:
-        return RosterItem(label, kind if _safe_id(label) is not None else ROSTER_UNNAMEABLE)
-
-    roster = [*(classify(label, ROSTER_WORLD) for label in order),
-              *(classify(name, ROSTER_STRAY_RUN_DIR) for name in stray_run_dirs)]
+    roster = [RosterItem(label, ROSTER_WORLD if _safe_id(label) is not None else ROSTER_UNNAMEABLE)
+              for label in order]
     return entries, roster, off_roster
 
 
-def _result_event(bound: Bound, run_rel: PurePosixPath) -> _ResultEvent:
-    # Through the bind's JSONL reader: absent/refused are its own states, and a link or FIFO is
-    # refused at the open rather than raising `PermissionError`.
-    rows, _bad, rec = bound.read_jsonl(run_rel / RUN_LAYOUT.tool_trace)
+def _result_event(run: Bound) -> _ResultEvent:
+    # Through the arm reader's JSONL reader: absent/refused are its own states, and a link or
+    # FIFO is refused at the open rather than raising `PermissionError`.
+    rows, _bad, rec = run.read_jsonl(RUN_LAYOUT.tool_trace)
     if rec.absent:
         return _ResultEvent(None, None, "absent")
     if rec.refusal is not None:
@@ -1191,26 +1203,38 @@ def _write_page(episode: Episode, html_text: str) -> Path:
     return page.path
 
 
-def render_episode(episode_dir: Path) -> Path:
-    """Render `episode_dir`'s page into it. A missing episode is `JudgeRefused`, never made."""
-    try:
-        episode = Episode.open(Path(episode_dir))
-    except FileNotFoundError as missing:
-        raise JudgeRefused(f"episode {episode_dir}: no such episode directory") from missing
-    with episode:
+def render_episode(runs: RunsRepository, episode_id: str) -> Path:
+    """Render episode `episode_id` of `runs`'s tenant into its own folder. The door is the
+    episode view (`open_episode_view`): a missing episode, a bad id, an unusable episodes root
+    or a file at the name is `JudgeRefused`, never made, and a container record naming another
+    tenant, or none, refuses before anything else is read."""
+    with open_episode_view(runs, episode_id) as view:
         try:
-            html_text = build_page(episode_dir)
+            html_text = build_page(view)
         except JudgeRefused as bad:
             # An archive of the pre-oracle design gets a page saying so; any other manifest
             # refusal stays a refusal.
             if not isinstance(bad.__cause__, ManifestPredatesOracle):
                 raise
-            html_text = _render_refusal(episode_dir, bad)
-        return _write_page(episode, html_text)
+            html_text = _render_refusal(view.episode_id, bad)
+        return _write_page(view.episode, html_text)
 
 
-def build_page(episode_dir: Path) -> str:
-    return _render_document(load_episode(Path(episode_dir)))
+def open_episode_view(runs: RunsRepository, episode_id: str) -> EpisodeRuns:
+    """`runs.episode(episode_id)`, every refusal of its door as the page's `JudgeRefused`:
+    the episode owner's (a bad id, an unusable root, a missing episode, a file at the name;
+    nothing is created) and the container record's (another tenant's, or none — an episode
+    launched before #1078 is not supported). The caller closes the view."""
+    try:
+        return runs.episode(episode_id)
+    except FileNotFoundError as missing:
+        raise JudgeRefused(f"episode {episode_id}: no such episode directory") from missing
+    except (EpisodeRefused, TenantRefused, OSError) as refused:
+        raise JudgeRefused(f"episode {episode_id}: {refused}") from refused
+
+
+def build_page(view: EpisodeRuns) -> str:
+    return _render_document(load_episode(view))
 
 
 def _render_document(ep: _Episode) -> str:
@@ -1240,10 +1264,10 @@ def _render_document(ep: _Episode) -> str:
 """
 
 
-def _render_refusal(episode_dir: Path, refusal: JudgeRefused) -> str:
+def _render_refusal(episode_id: str, refusal: JudgeRefused) -> str:
     """The whole page for an episode the manifest reader refused: the reason, as text, and
     nothing read from the archive."""
-    title = f"episode — {esc(Path(episode_dir).name)}"
+    title = f"episode — {esc(episode_id)}"
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>{title}</title>
 <style>{CSS}
@@ -1532,13 +1556,6 @@ def _render_roster_item(ep: _Episode, item: RosterItem) -> str:
     """One roster line, by the shape the loader gave it."""
     if item.kind == ROSTER_UNNAMEABLE:
         return _unnameable(item.label, what="world directory")
-    if item.kind == ROSTER_STRAY_RUN_DIR:
-        # Not a world: a minimal section keyed on the directory's full name.
-        link = f"{LAYOUT.run_page(item.label)}"
-        return (f'<div id="world-{esc(item.label)}" class="w-section">'
-               f'<span class="w-name">{_uv(item.label)}</span>'
-               f'<div class="w-state">not declared in the manifest</div>'
-               f'<a href="{esc(link)}">runtime</a></div>')
     return _render_one_world(ep, item.label)
 
 
@@ -1587,11 +1604,9 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
         bits.append(_calls_html(leads.calls))
 
     result = entry.result
-    # Both checked: `result` is only set alongside `run_dir_name`, but nothing enforces that,
-    # and `run_page` refuses `None`.
-    if result is not None and entry.run_dir_name is not None:
-        link = f"{LAYOUT.run_page(entry.run_dir_name)}"
-        bits.append(f'<a href="{esc(link)}">runtime</a>')
+    # Both checked: `result` is only set alongside `run_page`, but nothing enforces that.
+    if result is not None and entry.run_page is not None:
+        bits.append(f'<a href="{esc(entry.run_page)}">runtime</a>')
         if result.cost is not None and result.costed:
             bits.append(f'<span class="w-cost">{_money(result.cost)}</span>')
             if result.wall_ms:
@@ -1752,10 +1767,6 @@ def _render_findings_section(ep: _Episode) -> str:
     if ep.off_roster:
         body += (f'<div class="fr-off-roster">{ep.off_roster} entries under worlds/ are not on '
                 f'the record</div>')
-    if ep.shadowed_run_dirs:
-        body += (f'<div class="fr-shadowed-runs">{len(ep.shadowed_run_dirs)} entries under '
-                f'{esc(str(LAYOUT.runs))}/ wear a world\'s own label and are not sectioned twice: '
-                f'{", ".join(_uv(n) for n in ep.shadowed_run_dirs)}</div>')
     n = len(ep.findings.rows)
     return _page_section("sec-findings", f"Findings ({n})", body)
 
@@ -2216,28 +2227,42 @@ def _diagnostics(ep: _Episode) -> list[str]:
     return lines
 
 
+def _parse_page_args(argv: list[str]) -> argparse.Namespace:
+    """`--tenant T <episode_id>` (#1105 declared change 4, J8): the tenant is required, with
+    no default, and the episode is named by its id under the configured episodes root."""
+    p = UsageParser(prog="visualize_episode.py", description=__doc__)
+    p.add_argument("--tenant", required=True,
+                   help="the tenant whose episode is rendered; required, with no default")
+    p.add_argument("episode_id", help="the episode, by its id")
+    return p.parse_args(argv)
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) != 1:
-        print("usage: visualize_episode.py <episode_dir>", file=sys.stderr)
-        return 1
-    episode_dir = Path(argv[0])
-    # Plain `is_dir()`: this is the operator's own argument, and a symlinked episode dir is
-    # accepted.
-    if not episode_dir.is_dir():  # lint-tree-read-follows-link: ok — the operator's own CLI argument, not an episode-tree entry; a symlinked episode dir is accepted
-        print(f"not a directory: {episode_dir}", file=sys.stderr)
+    try:
+        ns = _parse_page_args(argv)
+    except UsageRefused as bad:
+        print(f"usage: visualize_episode.py --tenant T <episode_id> ({bad})", file=sys.stderr)
         return 1
     try:
-        ep = load_episode(episode_dir)
-    except JudgeRefused as bad:
+        tenant = accept_tenant(
+            resolve_data_root(), requested_tenant_id(ns.tenant),
+            defender_dir=process_defender_dir())
+        view = open_episode_view(tenant.runs_repository(), ns.episode_id)
+    except (TenantRefused, JudgeRefused) as bad:
         # One line: the refusal may wrap a multi-line YAML parser error.
         print(" ".join(str(bad).split()), file=sys.stderr)
         return 1
-    try:
-        with Episode.open(episode_dir) as episode:
-            page_path = _write_page(episode, _render_document(ep))
-    except OSError as bad:
-        print(str(bad), file=sys.stderr)
-        return 1
+    with view:
+        try:
+            ep = load_episode(view)
+        except JudgeRefused as bad:
+            print(" ".join(str(bad).split()), file=sys.stderr)
+            return 1
+        try:
+            page_path = _write_page(view.episode, _render_document(ep))
+        except OSError as bad:
+            print(str(bad), file=sys.stderr)
+            return 1
     print(page_path)
     for line in _diagnostics(ep):
         print(line, file=sys.stderr)

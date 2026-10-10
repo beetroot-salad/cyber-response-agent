@@ -157,11 +157,19 @@ class _Branch(SpecBranch):
         return f"PR/{batch_id}" if self._deliver_result is not None else None
 
 
-def _queued_run(tmp_path: Path, case_id: str, name: str, paths: LoopPaths) -> Path:
-    run_dir = tmp_path / "runs" / name
-    run_dir.mkdir(parents=True, exist_ok=True)
+def _queued_run(case_id: str, name: str, paths: LoopPaths) -> Path:
+    """A natural run `name` planted where the drain rehydrates a row (`curation_run_dir`, under
+    the test's data root, #1105 PR 2), with the curation request for `case_id` naming it."""
+    run_dir = _state1135.curation_run_dir(name)
     _state1135.enqueue_case(_state1135.state_for_paths(paths), case_id, run_dir)
     return run_dir
+
+
+def _address(run_dir: Path) -> tuple[str, str]:
+    """The `(tenant_id, run_id)` a curation row names for the run at `run_dir` (#1105 PR 2
+    declared change 8: the row is the run's address, where it named its folder)."""
+    row = _state1135.curation_row("", run_dir)
+    return row["tenant_id"], row["run_id"]
 
 
 def _seed_pitfalls(paths: LoopPaths) -> bytes:
@@ -188,8 +196,8 @@ def _serving(served: list[Path], *, done: bool = True, before=None):
     seam. `on_done` is keyword-REQUIRED so a drain that stopped passing it fails here, at the
     seam, rather than silently serving without one."""
 
-    def serve(_paths, _state, run_dir, *, box=None, on_done):
-        served.append(run_dir)
+    def serve(_paths, _state, run, *, box=None, on_done):
+        served.append(run.run_dir)
         if before is not None:
             before()
         if done:
@@ -317,8 +325,8 @@ def _assert_nothing_consumed(
     the consumed ledger, no `done` sentinel exists for the run, and the wake gate still sees
     the work."""
     assert _inflight(paths) == [f"{case}.json"], "the served marker left inflight/"
-    assert Path(marker_body(paths.state_root / "author-queue" / "inflight" / f"{case}.json")["run_dir"]) \
-        == run_dir.resolve()
+    claimed = marker_body(paths.state_root / "author-queue" / "inflight" / f"{case}.json")
+    assert (claimed["tenant_id"], claimed["run_id"]) == _address(run_dir)
     assert author_markers(paths) == [], "the claim was handed back to the top level"
     assert not (paths.state_root / "author-queue" / "failed").exists(), "the served run was dead-lettered"
     assert (paths.state_root / PITFALLS.queue).read_bytes() == queue_before, (
@@ -375,7 +383,7 @@ def test_952_o1_a_batch_whose_tree_never_passes_the_scrub_consumes_nothing(
     work, not one that skipped it. The green tick beside this test is the positive control on
     every address."""
     paths = loop_paths(tmp_path)
-    run_dir = _queued_run(tmp_path, "case-1", "run-1", paths)
+    run_dir = _queued_run("case-1", "run-1", paths)
     queue_before = _seed_pitfalls(paths)
     served: list[Path] = []
     curated: list[PitfallsDisposition] = []
@@ -435,7 +443,7 @@ def test_952_o3_a_batch_that_passes_the_scrub_consumes_what_it_served(
     about the consumption: it happened before the push was attempted, and the sentinel
     records the run as done."""
     paths = loop_paths(tmp_path)
-    run_dir = _queued_run(tmp_path, "case-1", "run-1", paths)
+    run_dir = _queued_run("case-1", "run-1", paths)
     _seed_pitfalls(paths)
     served: list[Path] = []
     curated: list[PitfallsDisposition] = []
@@ -464,7 +472,7 @@ def test_952_o1_consumption_happens_before_the_push_and_is_not_undone_by_its_fai
     delivery — recorded for the next tick, and logged as exactly that. No `inflight/` claim,
     no re-serve, none of the old "work stays queued" wording."""
     paths = loop_paths(tmp_path)
-    run_dir = _queued_run(tmp_path, "case-1", "run-1", paths)
+    run_dir = _queued_run("case-1", "run-1", paths)
     _seed_pitfalls(paths)
     served: list[Path] = []
     curated: list[PitfallsDisposition] = []
@@ -510,7 +518,7 @@ def test_952_o1_a_git_fault_from_finish_batch_propagates_after_the_consumption(
     but the consumption it interrupts has already happened, because the tree had passed the
     scrub. Nothing is logged as retained, because nothing is."""
     paths = loop_paths(tmp_path)
-    run_dir = _queued_run(tmp_path, "case-1", "run-1", paths)
+    run_dir = _queued_run("case-1", "run-1", paths)
     _seed_pitfalls(paths)
     branch = _Branch(tmp_path / "worktrees", fail=GitError(["push"], 128, "the remote hung up"))
 
@@ -542,7 +550,7 @@ def test_952_m1_the_disposition_applies_sentinels_and_unlinks_before_the_pitfall
     control: the same disposition rotates and bumps."""
     monkeypatch.setenv("LEARNING_REPO_LOCK_WAIT_SECONDS", "0")
     paths = loop_paths(tmp_path)
-    run_dir = _queued_run(tmp_path, "case-1", "run-1", paths)
+    run_dir = _queued_run("case-1", "run-1", paths)
     queue_before = _seed_pitfalls(paths)
     served: list[Path] = []
     curated: list[PitfallsDisposition] = []
@@ -581,7 +589,7 @@ def test_952_m1_a_malformed_lock_wait_refuses_the_tick_before_any_work(
 
     monkeypatch.setenv("LEARNING_REPO_LOCK_WAIT_SECONDS", "soon")
     paths = loop_paths(tmp_path)
-    _queued_run(tmp_path, "case-1", "run-1", paths)
+    _queued_run("case-1", "run-1", paths)
     served: list[Path] = []
     branch = _Branch(tmp_path / "worktrees")
 
@@ -603,7 +611,7 @@ def test_952_o7_the_next_tick_delivers_the_retained_branch_before_serving(
     from the branch alone, no agent — then goes on to serve whatever is queued. The record
     is removed once delivered, and the log names the PR."""
     paths = loop_paths(tmp_path)
-    _queued_run(tmp_path, "case-1", "run-1", paths)
+    _queued_run("case-1", "run-1", paths)
     served: list[Path] = []
     failing = _Branch(tmp_path / "worktrees", fail=BranchError("push rejected"))
     assert _tick(
@@ -613,7 +621,7 @@ def test_952_o7_the_next_tick_delivers_the_retained_branch_before_serving(
     retained = failing.batch_id
     capsys.readouterr()
 
-    second = _queued_run(tmp_path, "case-2", "run-2", paths)
+    second = _queued_run("case-2", "run-2", paths)
     landing = _Branch(tmp_path / "worktrees")
     assert _tick(
         paths, branch=landing, run_lead_author=_serving(served), run_pitfalls=_no_curation,
@@ -638,14 +646,14 @@ def test_952_o7_a_delivery_that_keeps_failing_holds_the_writer_lease(tmp_path: P
     open PR parks it. The record stays. Released (the delivery succeeds), the same tick
     serves. Nothing here re-runs an agent for the retained batch, however many ticks pass."""
     paths = loop_paths(tmp_path)
-    _queued_run(tmp_path, "case-1", "run-1", paths)
+    _queued_run("case-1", "run-1", paths)
     served: list[Path] = []
     failing = _Branch(tmp_path / "worktrees", fail=BranchError("push rejected"))
     assert _tick(
         paths, branch=failing, run_lead_author=_serving(served), run_pitfalls=_no_curation,
     ) == 0
     retained = failing.batch_id
-    _queued_run(tmp_path, "case-2", "run-2", paths)
+    _queued_run("case-2", "run-2", paths)
     capsys.readouterr()
 
     for _ in range(3):
@@ -677,7 +685,7 @@ def test_952_o7_a_retained_branch_with_nothing_to_deliver_is_forgotten(tmp_path:
     """`deliver` answering `None` — the branch is gone, or has nothing ahead of `origin/main`
     any more — is not a failure: the record is dropped, the log says so, and the tick goes on."""
     paths = loop_paths(tmp_path)
-    _queued_run(tmp_path, "case-1", "run-1", paths)
+    _queued_run("case-1", "run-1", paths)
     failing = _Branch(tmp_path / "worktrees", fail=BranchError("push rejected"))
     assert _tick(paths, branch=failing, run_lead_author=_serving([]), run_pitfalls=_no_curation) == 0
     retained = failing.batch_id
@@ -699,7 +707,7 @@ def test_952_o7_each_lane_delivers_only_its_own_records(tmp_path: Path):
     its own drain lock — so the lessons lane must neither deliver nor be parked by a
     `lead-author/` record, and vice versa."""
     paths = loop_paths(tmp_path)
-    _queued_run(tmp_path, "case-1", "run-1", paths)
+    _queued_run("case-1", "run-1", paths)
     failing = _Branch(tmp_path / "worktrees", fail=BranchError("push rejected"))
     assert _tick(paths, branch=failing, run_lead_author=_serving([]), run_pitfalls=_no_curation) == 0
     assert len(_pending_deliveries(paths)) == 1
@@ -728,7 +736,7 @@ def test_952_o8_a_batch_that_never_passes_the_scrub_is_quarantined_at_the_ceilin
     dead letter names what happened; the agent never runs for it again."""
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "3")
     paths = loop_paths(tmp_path)
-    run_dir = _queued_run(tmp_path, "case-1", "run-1", paths)
+    run_dir = _queued_run("case-1", "run-1", paths)
     served: list[Path] = []
 
     for expected in (1, 2, 3):
@@ -752,7 +760,7 @@ def test_952_o8_a_batch_that_never_passes_the_scrub_is_quarantined_at_the_ceilin
     assert not _done(run_dir).exists()
     failed = marker_body(paths.state_root / "author-queue" / "failed" / "case-1.json")
     assert failed["failed"] == "served 3 time(s) without being recorded done"
-    assert Path(failed["run_dir"]) == run_dir.resolve()
+    assert (failed["tenant_id"], failed["run_id"]) == _address(run_dir)
     assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is False
 
 
@@ -768,9 +776,8 @@ def test_952_o6_a_failed_push_neither_destroys_nor_supersedes_a_fresher_request(
     `attempts`. The second tick delivers the retained branch, then serves the fresher request
     alone: the stale run is never served twice."""
     paths = loop_paths(tmp_path)
-    first = _queued_run(tmp_path, "case-A", "run-1", paths)
-    second = tmp_path / "runs" / "run-2"
-    second.mkdir(parents=True)
+    first = _queued_run("case-A", "run-1", paths)
+    second = _state1135.curation_run_dir("run-2")
     served: list[Path] = []
 
     def re_ask() -> None:
@@ -786,7 +793,7 @@ def test_952_o6_a_failed_push_neither_destroys_nor_supersedes_a_fresher_request(
 
     assert author_markers(paths) == ["case-A.json"]
     fresher = marker_body(paths.state_root / "author-queue" / "case-A.json")
-    assert Path(fresher["run_dir"]) == second.resolve(), (
+    assert (fresher["tenant_id"], fresher["run_id"]) == _address(second), (
         "the failed push replaced the fresher curation request with the stale run dir"
     )
     assert "attempts" not in fresher
@@ -908,8 +915,7 @@ def test_952_m4_the_post_commit_sentinel_is_written_or_handed_over(
     `on_done`, the commit that WOULD have been recorded is handed to it instead and NOTHING
     lands under the run dir; the commit itself is not deferred (HEAD moves in both modes)."""
     repo = seed_skills_repo(tmp_path / "repo")
-    run_dir = tmp_path / "lead-run"
-    run_dir.mkdir()
+    run_dir = _state1135.curation_run_dir("lead-run")
     deps = _curator_deps(
         repo, tmp_path / "state",
         invoke_agent=_promoting_agent(repo),
@@ -918,9 +924,10 @@ def test_952_m4_the_post_commit_sentinel_is_written_or_handed_over(
     head_before = _git.git_head_sha(repo)
     captured: list[str | None] = []
 
-    rc = lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps,
+    run = _state1135.run_of(run_dir)
+    rc = lead_author.run(run, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps,
                          on_done=captured.append) if deferred \
-        else lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
+        else lead_author.run(run, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
 
     assert rc == 0
     sha = _git.git_head_sha(repo)
@@ -944,8 +951,7 @@ def test_952_m4_the_none_resolved_sentinel_is_written_or_handed_over(
     template, and no pending drafts — the agent is never spawned and the run is recorded done
     with `commit: none`. Both modes, same record; only where it goes differs."""
     repo = seed_skills_repo(tmp_path / "repo")
-    run_dir = tmp_path / "lead-run"
-    run_dir.mkdir()
+    run_dir = _state1135.curation_run_dir("lead-run")
     deps = _curator_deps(
         repo, tmp_path / "state",
         invoke_agent=_agent_must_not_run,
@@ -954,9 +960,10 @@ def test_952_m4_the_none_resolved_sentinel_is_written_or_handed_over(
     head_before = _git.git_head_sha(repo)
     captured: list[str | None] = []
 
-    rc = lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps,
+    run = _state1135.run_of(run_dir)
+    rc = lead_author.run(run, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps,
                          on_done=captured.append) if deferred \
-        else lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
+        else lead_author.run(run, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
 
     assert rc == 0
     assert _git.git_head_sha(repo) == head_before, "a none-resolved run made a commit"
@@ -975,8 +982,7 @@ def test_952_m4_the_clean_path_writes_nothing_and_calls_nothing(tmp_path: Path, 
     and hands over none under `on_done` either: `rc == 0`, no `done`, `on_done` never called.
     The `pitfalls_collected` marker is still written in both modes (O4)."""
     repo = seed_skills_repo(tmp_path / "repo")
-    run_dir = tmp_path / "lead-run"
-    run_dir.mkdir()
+    run_dir = _state1135.curation_run_dir("lead-run")
     deps = _curator_deps(
         repo, tmp_path / "state",
         extract=lambda _rd: ([], []),
@@ -984,9 +990,10 @@ def test_952_m4_the_clean_path_writes_nothing_and_calls_nothing(tmp_path: Path, 
     )
     captured: list[str | None] = []
 
-    rc = lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps,
+    run = _state1135.run_of(run_dir)
+    rc = lead_author.run(run, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps,
                          on_done=captured.append) if deferred \
-        else lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
+        else lead_author.run(run, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
 
     assert rc == 0
     assert captured == []
@@ -1012,8 +1019,7 @@ def test_952_m4_done_sentinel_text_is_the_one_producer_and_write_done_sentinel_t
     assert none.startswith("commit: none\n")
     assert none.endswith("commit_made: False\n")
 
-    run_dir = tmp_path / "lead-run"
-    run_dir.mkdir()
+    run_dir = _state1135.curation_run_dir("lead-run")
     lead_author.write_done_sentinel(run_dir, "abc123")
     written = _done(run_dir).read_text(encoding="utf-8")
     assert _without_at(written) == _without_at(made)
@@ -1021,7 +1027,8 @@ def test_952_m4_done_sentinel_text_is_the_one_producer_and_write_done_sentinel_t
 
     repo = seed_skills_repo(tmp_path / "repo")
     deps = _curator_deps(repo, tmp_path / "state", invoke_agent=_agent_must_not_run)
-    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
+    assert lead_author.run(_state1135.run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL,
+                           deps=deps) == 0
     assert _done(run_dir).read_text(encoding="utf-8") == written, "the short-circuit rewrote it"
 
 
@@ -1239,14 +1246,14 @@ def test_952_m5_the_drain_holds_the_queue_lock_across_the_serve(tmp_path: Path):
     repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",),
                      skills=("elastic",), catalog=("elastic",))
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    run_dir = _queued_run(tmp_path, "case-1", "run-1", paths)
-    by_hand = tmp_path / "runs" / "by-hand"
-    (by_hand / "gather_raw").mkdir(parents=True)
+    run_dir = _queued_run("case-1", "run-1", paths)
+    by_hand = _state1135.curation_run_dir("by-hand")
+    (by_hand / "gather_raw").mkdir()
     served: list[Path] = []
     mid_serve: list[int] = []
 
     def probe() -> None:
-        mid_serve.append(lead_author.run(by_hand, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths))
+        mid_serve.append(lead_author.run(_state1135.run_of(by_hand), label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths))
 
     assert _tick(
         paths, branch=_Branch(tmp_path / "worktrees"), run_pitfalls=_no_curation,
@@ -1261,10 +1268,10 @@ def test_952_m5_the_drain_holds_the_queue_lock_across_the_serve(tmp_path: Path):
     # Positive control: the lock the tick held IS the file a by-hand run locks. Held here the
     # way a second process would hold it, the same call skips; released, it does not.
     with _held((paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"):
-        assert lead_author.run(by_hand, label=LEAD_AUTHOR_DRAIN_LABEL,
+        assert lead_author.run(_state1135.run_of(by_hand), label=LEAD_AUTHOR_DRAIN_LABEL,
                                paths=paths) == lead_author.QUEUE_LOCK_SKIP_RC
         assert not (by_hand / "lead_author").exists(), "a skipped by-hand run wrote state"
-    assert lead_author.run(by_hand, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths) == 0
+    assert lead_author.run(_state1135.run_of(by_hand), label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths) == 0
     assert (by_hand / "lead_author" / "pitfalls_collected").is_file(), \
         "outside a tick the by-hand run must serve, not skip"
 
@@ -1275,8 +1282,8 @@ def test_952_m5_a_tick_started_under_a_held_queue_lock_claims_nothing(tmp_path: 
     (nothing in `inflight/`, no `attempts` spent), the serve seam is never reached, and the
     tick returns 0."""
     paths = loop_paths(tmp_path)
-    _queued_run(tmp_path, "case-1", "run-1", paths)
-    _queued_run(tmp_path, "case-2", "run-2", paths)
+    _queued_run("case-1", "run-1", paths)
+    _queued_run("case-2", "run-2", paths)
     served: list[Path] = []
     branch = _Branch(tmp_path / "worktrees")
 
@@ -1320,21 +1327,22 @@ def test_952_m5_the_drain_enters_the_curator_past_its_own_lock(tmp_path: Path):
     repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",),
                      skills=("elastic",), catalog=("elastic",))
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    drained = tmp_path / "runs" / "drained"
-    by_hand = tmp_path / "runs" / "by-hand"
+    drained = _state1135.curation_run_dir("drained")
+    by_hand = _state1135.curation_run_dir("by-hand")
     for d in (drained, by_hand):
-        (d / "gather_raw").mkdir(parents=True)
+        (d / "gather_raw").mkdir()
     captured: list[str | None] = []
 
     with _held((paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"):
-        drains._invoke_lead_author(paths, _state1135.state_for_paths(paths), drained, on_done=captured.append,
+        drains._invoke_lead_author(paths, _state1135.state_for_paths(paths),
+                                   _state1135.run_of(drained), on_done=captured.append,
                                    label=LEAD_AUTHOR_DRAIN_LABEL)
         assert (drained / "lead_author" / "pitfalls_collected").is_file(), \
             "the curator never ran past the lock the drain is supposed to have exempted it from"
         assert captured == [], "an empty run dir is the clean path: no sentinel to hand over"
         assert not _done(drained).exists()
 
-        assert lead_author.run(by_hand, label=LEAD_AUTHOR_DRAIN_LABEL,
+        assert lead_author.run(_state1135.run_of(by_hand), label=LEAD_AUTHOR_DRAIN_LABEL,
                                paths=paths) == lead_author.QUEUE_LOCK_SKIP_RC
         assert not (by_hand / "lead_author").exists(), "a skipped by-hand run wrote state"
 
@@ -1356,11 +1364,12 @@ def test_952_a_the_production_adapter_forwards_on_done_to_the_curator(tmp_path: 
     repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",),
                      skills=("elastic",), catalog=("elastic",))
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    run_dir = tmp_path / "runs" / "run-1"
+    run_dir = _state1135.curation_run_dir("run-1")
     seed_executed_query(run_dir, query_id="nosuch.verb", system="nosuch", verb="verb")
     captured: list[str | None] = []
 
-    drains._invoke_lead_author(paths, _state1135.state_for_paths(paths), run_dir, on_done=captured.append,
+    drains._invoke_lead_author(paths, _state1135.state_for_paths(paths),
+                               _state1135.run_of(run_dir), on_done=captured.append,
                                label=LEAD_AUTHOR_DRAIN_LABEL)
 
     assert captured == [None], "the production adapter did not hand the record to on_done"
@@ -1368,7 +1377,8 @@ def test_952_a_the_production_adapter_forwards_on_done_to_the_curator(tmp_path: 
         "the production adapter let the curator write the sentinel inside do_work"
     assert (run_dir / "lead_author" / "pitfalls_collected").is_file()
 
-    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths) == 0
+    assert lead_author.run(_state1135.run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL,
+                           paths=paths) == 0
     assert _done_sha(run_dir) == "none"
 
 
@@ -1395,14 +1405,14 @@ def test_952_c_the_queue_lock_is_held_through_curation_and_finish_batch(tmp_path
     repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",),
                      skills=("elastic",), catalog=("elastic",))
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    run_dir = _queued_run(tmp_path, "case-1", "run-1", paths)
-    by_hand = tmp_path / "runs" / "by-hand"
-    (by_hand / "gather_raw").mkdir(parents=True)
+    run_dir = _queued_run("case-1", "run-1", paths)
+    by_hand = _state1135.curation_run_dir("by-hand")
+    (by_hand / "gather_raw").mkdir()
     served: list[Path] = []
     in_curation: list[int] = []
 
     def probe() -> int:
-        return lead_author.run(by_hand, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths)
+        return lead_author.run(_state1135.run_of(by_hand), label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths)
 
     def curate(_paths, _state, *, box=None, on_curated):
         in_curation.append(probe())
@@ -1421,7 +1431,7 @@ def test_952_c_the_queue_lock_is_held_through_curation_and_finish_batch(tmp_path
     assert _inflight(paths) == []
     assert _done_sha(run_dir) == SHA
 
-    assert lead_author.run(by_hand, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths) == 0
+    assert lead_author.run(_state1135.run_of(by_hand), label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths) == 0
     assert (by_hand / "lead_author" / "pitfalls_collected").is_file()
 
 
@@ -1434,7 +1444,7 @@ def test_952_d_a_failed_sentinel_write_leaves_the_claim_in_inflight(tmp_path: Pa
     a no-op re-serve, never a run consumed without its sentinel. Nothing behind the sentinel
     step ran either. The green tick is the positive control on every address."""
     paths = loop_paths(tmp_path)
-    run_dir = _queued_run(tmp_path, "case-1", "run-1", paths)
+    run_dir = _queued_run("case-1", "run-1", paths)
     queue_before = _seed_pitfalls(paths)
     (run_dir / "lead_author").write_text("not a directory\n", encoding="utf-8")
     served: list[Path] = []
@@ -1508,8 +1518,8 @@ def test_952_f_the_retained_summary_counts_each_kind_at_asymmetric_counts(
     which one hands over no record, three committed ids, one held id — each count is its own
     number, and the state assertions are honest against a queue seeded to match."""
     paths = loop_paths(tmp_path)
-    run_1 = _queued_run(tmp_path, "case-1", "run-1", paths)
-    run_2 = _queued_run(tmp_path, "case-2", "run-2", paths)
+    run_1 = _queued_run("case-1", "run-1", paths)
+    run_2 = _queued_run("case-2", "run-2", paths)
     committed = ("p:committed:0", "p:committed:1", "p:committed:2")
     persist.append_pitfalls(
         [*(pitfall_row(pid, "elastic") for pid in committed),
@@ -1519,9 +1529,9 @@ def test_952_f_the_retained_summary_counts_each_kind_at_asymmetric_counts(
     queue_before = (paths.state_root / PITFALLS.queue).read_bytes()
     served: list[Path] = []
 
-    def serve(_paths, _state, run_dir, *, box=None, on_done):
-        served.append(run_dir)
-        if run_dir.name == "run-1":
+    def serve(_paths, _state, run, *, box=None, on_done):
+        served.append(run.run_dir)
+        if run.run_dir.name == "run-1":
             on_done(SHA)  # run-2 is the clean path that hands over no record
 
     disposition = PitfallsDisposition(committed_ids=committed, sha=SHA, held_ids=(HELD_ID,))

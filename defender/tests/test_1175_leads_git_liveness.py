@@ -106,7 +106,7 @@ from defender.learning.leads.lead_extraction import ExecutedLead, LeadAuthorErro
 from defender.learning.leads.pitfalls_curator import PitfallsDisposition
 from defender.runtime import box as box_mod
 from defender.tests._curator1134 import plant_fifo
-from defender.tests._state1135 import enqueue_case, state_for_paths
+from defender.tests._state1135 import curation_row, curation_run_dir, enqueue_case, state_for_paths
 from defender.tests._declared869 import (
     Spawn,
     commit_all,
@@ -239,9 +239,10 @@ class _LeadLane:
         self.replaced = replaced
         self.reached: list[dict] = []
 
-    def __call__(self, paths: LoopPaths, state: Any, run_dir: Path, *, box: Any = None,
+    def __call__(self, paths: LoopPaths, state: Any, run: Any, *, box: Any = None,
                  on_done: Callable[[str | None], None]) -> None:
         worktree = paths.repo_root
+        run_dir = run.run_dir  # the drain hands the run it opened from the claim (#1105 PR 2)
 
         def agent(_run_dir, handoffs, pending_drafts=None, *, box=None, **_kw) -> int:
             self.reached.append({"handoffs": list(handoffs or []),
@@ -352,7 +353,8 @@ def _lead_scene(tmp: Path, monkeypatch: pytest.MonkeyPatch, *, cases: Iterable[s
     wt = _worktree(tmp / "worktrees", committed=committed)
     run_dirs = []
     for case in cases:
-        run_dir = tmp / "runs" / case
+        # Where a natural run lives, so the drain can open the row's address (#1105 PR 2).
+        run_dir = curation_run_dir(case)
         (run_dir / "gather_raw").mkdir(parents=True)
         enqueue_case(state, case, run_dir)
         run_dirs.append(run_dir)
@@ -492,12 +494,12 @@ def _is_systemic_git_fault(e: BaseException) -> bool:
 def _assert_lead_claim_held(sc: _Scene, case: str = "case-1") -> None:
     """The claim was served once and not consumed, dead-lettered or re-queued: it waits in
     `inflight/` with its one attempt for the next tick's reclaim, its run not recorded done."""
+    [run_dir] = [d for d in sc.run_dirs if d.name == case]
     assert _inflight(sc.paths) == {f"{case}.json": {
-        "case_id": case, "run_dir": str((sc.tmp / "runs" / case).resolve()), "attempts": 1}}, \
-        _inflight(sc.paths)
+        **curation_row(case, run_dir), "attempts": 1}}, _inflight(sc.paths)
     assert _failed(sc.paths) == [], "the claim was dead-lettered"
     assert author_markers(sc.paths) == [], "the claim was re-queued"
-    assert _done_sha(sc.tmp / "runs" / case) is None
+    assert _done_sha(run_dir) is None
 
 
 def _assert_lead_served(sc: _Scene, changes: set[str]) -> None:
@@ -1029,8 +1031,8 @@ def _serving(served: list[Path]) -> Callable[..., None]:
     """A `run_lead_author` that serves a claim cleanly with no git of its own: recorded done,
     no commit."""
 
-    def serve(_paths, _state, run_dir, *, box=None, on_done):
-        served.append(run_dir)
+    def serve(_paths, _state, run, *, box=None, on_done):
+        served.append(run.run_dir)
         on_done(None)
 
     return serve
@@ -1097,10 +1099,10 @@ def test_t5b_a_cleanup_overrun_after_a_clean_claim_ends_the_tick(tmp_path, monke
     assert _stalled(shim) == [stall], _stalled(shim)
     assert served == [run_a], "the next claim was served over the first one's leftovers"
     assert _inflight(sc.paths) == {"case-a.json": {
-        "case_id": "case-a", "run_dir": str(run_a.resolve()), "attempts": 1}}, _inflight(sc.paths)
+        **curation_row("case-a", run_a), "attempts": 1}}, _inflight(sc.paths)
     assert author_markers(sc.paths) == ["case-b.json"]
-    assert marker_body(sc.paths.state_root / "author-queue" / "case-b.json") == {
-        "case_id": "case-b", "run_dir": str(run_b.resolve())}
+    assert marker_body(sc.paths.state_root / "author-queue" / "case-b.json") == \
+        curation_row("case-b", run_b)
     assert _failed(sc.paths) == []
     assert _done_sha(run_a) is None
     assert "finish" not in sc.branch.events

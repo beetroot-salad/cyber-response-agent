@@ -44,6 +44,7 @@ import pytest
 
 from defender import _yaml
 from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
+from defender.tests import _episode_1025 as E
 from defender.tests import _judge_921 as J
 from defender.tests import _state1135
 from defender.tests._state1135 import env_state
@@ -147,12 +148,13 @@ def _judge(worlds: dict[str, Any] | None = None, *, verdict: Any = "survived",
 
 def _grade(tmp_path: Path, ep: Path, judge: Any, **kw: Any) -> Any:
     """`grade_episode` through its own seams: one draw, a recording `git show`, this test's
-    state handle."""
+    state handle — by id (#1105 PR 2, `_judge_921.grade_at`): the judge reads only the episode
+    it is handed (J3), so `tmp_path` threads nothing in."""
+    del tmp_path
     kw.setdefault("draws", 1)
     kw.setdefault("git_show", J.FakeGitShow())
     kw.setdefault("state", env_state())
-    return S.sym(S.JUDGE, "grade_episode")(
-        ep, judge=judge, runs_base=tmp_path / "defender-runs", **kw)
+    return J.grade_at(ep, judge=judge, **kw)
 
 
 def _record(ep: Path) -> dict:
@@ -264,11 +266,11 @@ def _oracle_row(q: str, *, label: str = "b", claim: dict | None = None,
 
 def _page(ep: Path) -> tuple[str | None, str | None]:
     """The episode page: `(html, None)` when it renders, `(None, refusal text)` when it refuses
-    by name (`JudgeRefused`). Any other exception propagates — that is a crash."""
-    render = S.sym(S.VISUALIZE, "render_episode")
+    by name (`JudgeRefused`). Any other exception propagates — that is a crash. (#1105 PR 2,
+    declared change 4: rendered by id, `_episode_1025.render_episode`.)"""
     refused = S.judge_refused_cls()
     try:
-        path = render(ep)
+        path = E.render_episode(Path(ep), module=S.mod(S.VISUALIZE))
     except refused as refusal:
         return None, str(refusal)
     return Path(path).read_text(encoding="utf-8"), None

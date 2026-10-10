@@ -1518,14 +1518,16 @@ demands:
       raises RunRefused for any id (was: open_run serves)'
 - id: d2_bound_runs_contract
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1105 PR 2 — F-13: `bound_runs` (and `runs.bound()`) lost its last production caller with J3''s removal of the judge''s same-alert union and was deleted; `test_1105_bound_runs_yields_run_id_and_wrapper_rows_in_list_run_ids_order_over_one_descriptor`, which discharged this demand, was deleted with it.'
   binds:
   - bound_runs
   - Bound
   - interacts(bound_runs->episode_runs_record)
   - interacts(caller->bound_runs).response
   - interacts(bound_runs->run_dir)
-  discharged_by: test_1105_bound_runs_yields_run_id_and_wrapper_rows_in_list_run_ids_order_over_one_descriptor
   home: defender/tests/tenant_1105_run_repository/test_1105_run_lookup.py
   seed_docstring: Inside `with bound_runs(tenant) as runs:`, runs.absent is False over a good folder and the listing carries no reason; iterating
     runs yields one (RunId, w) row per id list_run_ids returns, in that order, where w is the repository's wrapper over the held view's under(run_id),
@@ -1569,12 +1571,14 @@ demands:
       alone skips them)'
 - id: d2_bound_runs_single_use
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1105 PR 2 — F-13: `bound_runs` (and `runs.bound()`) lost its last production caller with J3''s removal of the judge''s same-alert union and was deleted; `test_1105_bound_runs_is_single_use_and_refuses_every_read_after_the_block`, which discharged this demand, was deleted with it.'
   binds:
   - bound_runs
   - Bound
   - RunRefused
-  discharged_by: test_1105_bound_runs_is_single_use_and_refuses_every_read_after_the_block
   home: defender/tests/tenant_1105_run_repository/test_1105_run_lookup.py
   seed_docstring: bound_runs lists once, on entry (a run folder created inside the block is not a row); after the with block exits, iterating
     the listing, reading a row's wrapper, or listing it raises RunRefused, where a bare Bound would answer reason='Bad file descriptor' without
@@ -1650,13 +1654,15 @@ demands:
   - D016
 - id: s1_bound_runs_never_yields_another_tenants_row
   kind: negative
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1105 PR 2 — F-13: `bound_runs` (and `runs.bound()`) lost its last production caller with J3''s removal of the judge''s same-alert union and was deleted; `test_1105_bound_runs_never_yields_a_row_under_another_tenants_folder`, which discharged this demand, was deleted with it.'
   binds:
   - bound_runs
   - interacts(bound_runs->runs_base)
   - interacts(bound_runs->run_dir)
   - Tenant.runs
-  discharged_by: test_1105_bound_runs_never_yields_a_row_under_another_tenants_folder
   home: defender/tests/tenant_1105_run_repository/test_1105_run_lookup.py
   seed_docstring: 'A link at A.runs/x into B''s runs folder makes bound_runs(A) raise RunRefused naming it on entry, before any row is yielded,
     and no read reaches a file under B.runs. Positive control: without the link, A''s real run is a row and its alert.json reads.'

@@ -151,11 +151,11 @@ def graded_episode(tmp_path: Path, paths, *, reply=None):
     from defender.learning.core.state import LearningState
 
     with LearningState.open(paths) as state:
-        J.mod("learning.judge").grade_episode(
+        J.grade_at(
             ep, judge=J.FakeJudge(
                 default=reply or J.as_reply_text(J.reply_doc()),
                 family_default=J.as_reply_text(J.family_reply(verdict_word="survived"))),
-            runs_base=tmp_path / "defender-runs", draws=1, state=state)
+            draws=1, state=state)
     return ep, J.judge_record(ep)
 
 

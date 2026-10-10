@@ -107,9 +107,13 @@ def _write_grade_over(copy: E.Episode) -> None:
         manifest = family.read_manifest(bound)
         rows = [family.read_world(bound, world, episode_dir=copy.dir,
                                   episode_token=E.EPISODE_TOKEN)[0]
-                for world in family.non_control_worlds(manifest, runs_base=None)]
+                for world in family.non_control_worlds(manifest)]
     doc = E.sample_grade()
     doc["worlds"] = rows
+    # #1105 PR 2 (declared change 4/J3): the page's roster is the manifest's and the record's
+    # labels, no longer a listing of `runs/`, so the two spare worlds (no manifest entry) are
+    # named by rows of their own to keep their sections.
+    doc["worlds"] += [E.ungradable_row(label) for label in (LINKED_WORLD, DANGLING_WORLD)]
     E.write_judge(copy.dir, doc)
 
 

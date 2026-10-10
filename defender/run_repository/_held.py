@@ -1,8 +1,9 @@
 """The held runs folder (#1105 H1–H4): the one object every lookup and tenant-keyed record
 function works through, and the argument checks they share.
 
-`hold_runs(tenant, io)` opens `tenant.runs` ONCE, no-follow, and yields a `HeldRuns` for the
-block, closing the handle when it ends. The object is the call's whole view of the folder:
+`hold_runs(tenant, io)` opens `tenant.runs` — or the folder the repository's episode view
+names, an episode's container — ONCE, no-follow, and yields a `HeldRuns` for the block,
+closing the handle when it ends. The object is the call's whole view of the folder:
 
 * `absent` — the folder's one expected state other than present (empty answers);
 * `view` — the held folder, handed out only after `_tenant.json` has been judged through it
@@ -28,7 +29,8 @@ from defender import _io
 from defender._run_id import run_id_fault
 from defender._shown import quoted, shown
 from defender._tenant import (
-    TENANT_RECORD_NAME, Tenant, TenantRecordMismatch, TenantRefused, read_tenant, record_path,
+    TENANT_RECORD_NAME, Tenant, TenantRecord, TenantRecordMismatch, TenantRefused, read_tenant,
+    record_path,
 )
 from defender.run_repository._errors import RunRefused
 from defender.run_repository._id import RunId
@@ -197,16 +199,19 @@ class _HeldRecordIO:
 
 
 class HeldRuns:
-    """One call's hold of `tenant.runs` (see the module docstring). Built only by
+    """One call's hold of a runs folder of the tenant's — `tenant.runs`, or an episode's
+    container through the repository's episode view (see the module docstring). Built only by
     `hold_runs`; valid for its block."""
 
-    def __init__(self, tenant: Tenant, held: _io.Held | None, io: Any) -> None:
+    def __init__(self, tenant: Tenant, held: _io.Held | None, io: Any, *,
+                 folder: Path) -> None:
         self.tenant = tenant
-        self.folder = Path(tenant.runs)
+        self.folder = Path(folder)
         self.absent = held is None
         self._held = held
         self.io = io
         self._checked: _io.Bound | None = None
+        self._record: TenantRecord | None = None
         self._listing: Listing | None = None
 
     def require_present(self) -> HeldRuns:
@@ -240,8 +245,15 @@ class HeldRuns:
             if record.tenant_id != self.tenant.id:
                 raise TenantRecordMismatch(f"{path} names the tenant {quoted(record.tenant_id)}, "
                                            f"not {quoted(self.tenant.id)}")
-            self._checked = view
+            self._checked, self._record = view, record
         return self._checked
+
+    def record(self) -> TenantRecord:
+        """The folder's tenant record, as `judged()` read and judged it through the held
+        handle (the episode view's `base_world_id` reads it here, never by path)."""
+        self.judged()
+        assert self._record is not None
+        return self._record
 
     def listing(self) -> Listing:
         """Every entry of the folder, judged once per hold (after the tenant record)."""
@@ -280,18 +292,20 @@ def hold_runs_folder(folder: Path, *, create: bool = False, io: Any = _io) -> _i
 
 
 @contextmanager
-def hold_runs(tenant: Tenant, io: Any) -> Iterator[HeldRuns]:
-    """`tenant.runs`, held open no-follow for the block (`absent` when it does not exist, the
-    one expected state of the folder itself) by `hold_runs_folder`; the handle is closed when
-    the block ends, however it ends."""
+def hold_runs(tenant: Tenant, io: Any, *, folder: Path | None = None) -> Iterator[HeldRuns]:
+    """`folder` — `tenant.runs` when not given; an episode's container when the repository's
+    episode view hands its own — held open no-follow for the block (`absent` when it does not
+    exist, the one expected state of the folder itself) by `hold_runs_folder`; the handle is
+    closed when the block ends, however it ends."""
+    folder = Path(tenant.runs) if folder is None else Path(folder)
     try:
-        held = hold_runs_folder(Path(tenant.runs), io=io)
+        held = hold_runs_folder(folder, io=io)
     except FileNotFoundError:
         held = None
     if held is None:
-        yield HeldRuns(tenant, None, io)
+        yield HeldRuns(tenant, None, io, folder=folder)
         return
     try:
-        yield HeldRuns(tenant, held, io)
+        yield HeldRuns(tenant, held, io, folder=folder)
     finally:
         held.close()

@@ -51,7 +51,6 @@ from defender.run_repository import Run  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender import _tenant  # noqa: E402
 from defender._episode_handle import Episode  # noqa: E402
-from defender._episode_paths import LAYOUT  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime import providers  # noqa: E402
@@ -74,17 +73,20 @@ _logger = logging.getLogger(__name__)
 def parse_args(argv: list[str]) -> argparse.Namespace:
     """The entry point's arguments, for an ordinary run and for a sibling world.
 
-    A sibling is `--resume <family manifest> --world <label>`; everything else it needs is
-    derived from the manifest. The positional alert is refused with `--resume`, since the
-    manifest already names the source run and there would be two case inputs.
+    A sibling is `--tenant T --episode <episode_id> --world <label>` (#1105 PR 2): its
+    request's tenant, the episode it is an arm of, and which arm — ids, never a path;
+    everything else it needs is derived from the episode's manifest. The positional alert is
+    refused with `--episode`, since the manifest already names the source run and there would
+    be two case inputs.
     """
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("alert", type=Path, nargs="?", default=None,
-                   help="Path to alert.json fixture (illegal with --resume)")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-    p.add_argument("--resume", type=Path, default=None,
-                   help="a family manifest (episodes/<id>/family.yaml) to resume a world of")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+                   help="Path to alert.json fixture (illegal with --episode)")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+    p.add_argument("--episode", default=None,
+                   help="the episode this process is a sibling arm of, by id (under the "
+                        "configured DEFENDER_EPISODES_BASE)")
     p.add_argument("--world", default=None,
-                   help="which world of --resume's manifest this process is")
+                   help="which world of --episode's manifest this process is")
     p.add_argument("--run-id", default=None,
                    help="Pin the run id for a named A/B or live run (learning-loop "
                         "commits reference it) instead of the auto timestamp id. Lower case "
@@ -100,19 +102,20 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                    help="model id (overrides $DEFENDER_MODEL); e.g. a claude-* id, "
                         "or 'glm-5.3' / 'fireworks:<id>' for the Fireworks-served GLM")
     p.add_argument("--tenant", default=None,
-                   help="the tenant this run belongs to; required on every run, --resume "
-                        "included (there is no default). On --resume it must be the source "
-                        "run's tenant, as its runs-base record names it")
+                   help="the tenant this run belongs to; required on every run, --episode "
+                        "included (there is no default). On --episode the episode's container "
+                        "record must name it")
     ns = p.parse_args(argv)
-    if ns.resume is not None and ns.alert is not None:
+    if ns.episode is not None and ns.alert is not None:
         p.error(
-            "the positional alert is illegal with --resume: the manifest already names the "
+            "the positional alert is illegal with --episode: the manifest already names the "
             "source run the alert would come from, and a command line carrying both names two "
             "case inputs with no rule for which wins")
-    if ns.resume is None and ns.alert is None:
-        p.error("an alert path is required unless --resume names a family manifest")
-    if ns.resume is not None and not ns.world:
-        p.error("--resume needs --world: a manifest declares a family, and a process is one arm")
+    if ns.episode is None and ns.alert is None:
+        p.error("an alert path is required unless --episode names the episode of a sibling")
+    if ns.episode is not None and not ns.world:
+        p.error("--episode needs --world: a manifest declares a family, and a process is one "
+                "arm")
     return ns
 
 
@@ -240,6 +243,7 @@ class _Investigate(Protocol):
         self, *, alert_path: Path, run_dir: Path, run_id: str, defender_dir: Path,
         model_name: str, model_override: str | None, box: Any, tenant: RunTenant,
         world: Any = None, episode: Episode | None = None, serving: Any = None,
+        source: Run | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -261,13 +265,16 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     box: Any,
     #: The run's tenant (folder, grants, lead-zero dispatch), resolved by `main` before the box.
     tenant: RunTenant,
-    #: The world this process is, on the `--resume` path; `None` on an ordinary run.
+    #: The world this process is, on the `--episode` path; `None` on an ordinary run.
     world: Any = None,
     #: The sibling's episode, held by `main`: the world ledger is written through it.
     episode: Episode | None = None,
     #: The world's settled oracle side (#1224, `registry.oracle_serving`), resolved by `main`;
     #: `None` exactly when `world` is.
     serving: Any = None,
+    #: The source run the world forks, opened by `main` in the tenant's repository from the
+    #: manifest's `source_run_id` (#1105 PR 2); `None` exactly when `world` is.
+    source: Run | None = None,
     registry_cls: Any = ModuleVerbRegistry,
     investigate: Callable[..., dict[str, Any]] = _run_the_driver,
 ) -> dict[str, Any]:
@@ -291,6 +298,10 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
             raise TypeError("_drive_investigation(world=…) needs the sibling's held `episode=`")
         if serving is None:
             raise TypeError("_drive_investigation(world=…) needs the world's settled `serving=`")
+        if source is None:
+            # The fork's source is the opened `Run`, never the manifest's recorded path.
+            raise TypeError("_drive_investigation(world=…) needs the opened source run "
+                            "`source=`")
         from defender.learning.branch.estate.limiter import RateLimiter
         from defender.learning.branch.estate.registry import (
             WorldRegistry,
@@ -311,10 +322,11 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
             tenant=tenant, grant_home=tenant.table_pointer,
             # The source run's pre-branch calls, by pre-flight's own rule (M01=A): a re-ask
             # still takes its oracle turn (S1), and is served unchanged or not at all.
-            prebranch=prebranch_calls(Path(family.source_run_dir), family.branch_message_id),
+            prebranch=prebranch_calls(source.run_dir, family.branch_message_id),
+            source_run_dir=source.run_dir,
         )
         resume = branch_mod.BranchSpec(
-            source_run_dir=Path(family.source_run_dir),
+            source_run_dir=source.run_dir,
             branch_message_id=family.branch_message_id,
             continuation_prompt=family.continuation_prompt,
             as_of=family.as_of,
@@ -353,6 +365,8 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     episode: Episode | None = None,
     #: The world's settled oracle side (#1224), threaded to the world registry.
     serving: Any = None,
+    #: The opened source run a world forks, threaded beside `world`.
+    source: Run | None = None,
     investigate: _Investigate = _drive_investigation,
     start_box: Callable[..., Any] = box_mod.start_box,
     stop_box: Callable[..., None] = box_mod.stop_box,
@@ -376,6 +390,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             world=world,
             episode=episode,
             serving=serving,
+            source=source,
         )
         investigation_ok = True
     finally:
@@ -393,7 +408,7 @@ def _resolve_run_tenant(
     readiness function — or the refusal, before the run dir, the box and any model call, so
     tenant misconfiguration fails early. Refusals name the file to edit.
 
-    `dispatches_lead_zero` is False for a `--resume` sibling, which dispatches no turn-0
+    `dispatches_lead_zero` is False for an `--episode` sibling, which dispatches no turn-0
     lead."""
     from defender.runtime import run_tenant as run_tenant_mod
 
@@ -402,23 +417,6 @@ def _resolve_run_tenant(
             tenant, defender_dir=defender_dir, dispatches_lead_zero=dispatches_lead_zero)
     except run_tenant_mod.TenantRefused as refusal:
         sys.exit(f"[run.py] this run's tenant {tenant.id!r} cannot be used: {refusal}")
-
-
-def _sibling_tenant_agrees(world: Any, tenant: _tenant.Tenant) -> None:
-    """Refuse a sibling whose request names a tenant other than the episode's — the source
-    run's, read from its runs-base record, never its box-writable stamp. The launcher names
-    the episode's tenant on each sibling's command line, so a disagreement is a sibling resumed
-    by hand for another tenant, which would query the staged corpus with that tenant's grants."""
-    if world is None:
-        return
-    try:
-        source_tenant = _tenant.tenant_of_run_dir(
-            tenant.data_root, Path(world.family.source_run_dir))
-    except _tenant.TenantRefused as refused:
-        sys.exit(f"[run.py] {refused}")
-    if source_tenant != tenant.id:
-        sys.exit(f"[run.py] the requested tenant {tenant.id!r} disagrees with the source run's "
-                 f"tenant {source_tenant!r}")
 
 
 def _announce_provenance(run_dir: Path) -> None:
@@ -457,7 +455,7 @@ def resume_world(episode: Episode, world_label: str, *, tenant: Callable[[], Any
         _family.load_family(episode.view()), world_label, episode.dir)
 
 
-def _screened_source_alert(source_run_dir: Path) -> Path:
+def _screened_source_alert(source: Run) -> Path:
     """The source run's alert, or the refusal that says it is not a plain file.
 
     The source run dir was a box's writable bind, so `alert.json` may be a planted link, and
@@ -466,13 +464,26 @@ def _screened_source_alert(source_run_dir: Path) -> Path:
     """
     from defender.run_repository import artifact_file
 
-    alert = RunPaths(Path(source_run_dir)).alert
+    alert = source.facts.alert.path
     if not artifact_file(alert):
         sys.exit(
             f"source alert {alert} is not a plain file — the alert is the case input this "
             "sibling investigates, and a link wearing its name would copy bytes from outside "
             "the source run into this run dir")
     return alert
+
+
+def _open_world_source(runs: Any, world: Any) -> Run:
+    """The source run a world forks: the manifest's `source_run_id`, opened in the request's
+    tenant's natural container (#1105 PR 2, decision A — an old manifest's `source_run_dir` is
+    never read). An id the repository refuses, or a run that is not there, is the sibling's
+    refusal, before anything is spent."""
+    from defender.run_repository import RunId, RunRefused
+
+    try:
+        return runs.open(RunId.parse(world.family.source_run_id))
+    except (RunRefused, _tenant.TenantRefused) as refused:
+        sys.exit(f"[run.py] the episode's source run cannot be opened: {refused}")
 
 
 def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
@@ -483,17 +494,17 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
     `--update-ticket` is refused outright rather than ignored: the two ticket calls are paired
     around the curation marker. An undeclared world label is refused before a run dir exists.
     """
-    if ns.resume is None:
+    if ns.episode is None:
         return None
     if episode is None:
         # A sibling is only ever resumed through its held episode; without one it must not
         # run on as an ordinary investigation.
-        sys.exit(f"[run.py] --resume {ns.resume}: no episode is held for it")
+        sys.exit(f"[run.py] --episode {ns.episode}: no episode is held for it")
     from defender.runtime.branch._family import FamilyError
 
     if ns.update_ticket:
         sys.exit(
-            "--update-ticket is not available with --resume: a sibling world is a synthetic "
+            "--update-ticket is not available with --episode: a sibling world is a synthetic "
             "continuation of someone else's case, and a ticket row for it would enter the "
             "case history as a real investigation of a real alert")
     try:
@@ -504,76 +515,105 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
 
 def _materialize_run(
     alert: Path, run_id: str | None, *, tenant: _tenant.Tenant, model: str | None,
-    world: Any = None,
+    world: Any = None, episode_runs: Any = None,
 ) -> Run:
     """Build this run's directory via `run_common.materialize_run` and return its tenant-bound
     handle, stamped with code, model, the request's tenant and (for a sibling) the manifest's
-    world and lineage.
+    world and lineage. A sibling's arm is made in its episode's container, through the view
+    `main` opened (`episode_runs`).
 
     The single call site of the builder and the seam `main` injects; turns a tenant refusal
     (a runs-base record naming another tenant, say) into a named `[run.py]` exit.
     """
     try:
-        run = _run.materialize_run(alert, run_id, tenant=tenant, model=model, world=world)
+        run = _run.materialize_run(alert, run_id, tenant=tenant, model=model, world=world,
+                                   episode_runs=episode_runs)
     except _tenant.TenantRefused as refusal:
         sys.exit(f"[run.py] {refusal}")
     return run
 
 
-def _accept_request_tenant(
-    ns: argparse.Namespace, *, box_mounted: tuple[Path, ...],
-) -> _tenant.Tenant:
-    """The request's tenant, accepted, or a `[run.py]` refusal before the preflight. Every run
-    names it with `--tenant`, a sibling included: it comes from the request (for a platform,
-    the acting user's authentication context), never from a record or a stamp, and there is no
-    default. The data root is resolved here, once, and accepted under through
-    `_tenant.accept_tenant` — the one acceptance every entry point shares; a sibling's
-    tenant is also checked against its source's record once the manifest is resolved
-    (`_sibling_tenant_agrees`). `box_mounted` is what the run's box mounts besides the
-    checkout — a sibling's runs base, inside its held episode — and the tenant's settings must
-    sit under none of it."""
+def _request_data_root(ns: argparse.Namespace) -> Path:
+    """The request's tenant id checked (`--tenant` is required, there is no default), then the
+    data root resolved — once, here — or a `[run.py]` refusal before the preflight."""
     try:
-        tenant_id = _tenant.requested_tenant_id(ns.tenant)
-        return _tenant.accept_tenant(
-            _tenant.resolve_data_root(), tenant_id, defender_dir=DEFENDER_DIR,
-            box_mounted=box_mounted)
+        _tenant.requested_tenant_id(ns.tenant)
+        return _tenant.resolve_data_root()
     except _tenant.TenantRefused as refused:
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
 
 
-def _resume_episode_dir(ns: argparse.Namespace) -> Path | None:
-    """The episode dir a `--resume` sibling resumes, or `None` for an ordinary run: the
-    manifest's parent, RESOLVED AT ENTRY (§7 J42) so no path built from it is relative or
-    symlinked. A manifest not named `LAYOUT.family` is refused before anything is opened."""
-    if ns.resume is None:
+def _accept_request_tenant(
+    ns: argparse.Namespace, *, data_root: Path, box_mounted: tuple[Path, ...],
+) -> _tenant.Tenant:
+    """The request's tenant, accepted, or a `[run.py]` refusal before the preflight. Every run
+    names it with `--tenant`, a sibling included: it comes from the request (for a platform,
+    the acting user's authentication context), never from a record or a stamp, and there is no
+    default. It is accepted under `data_root` (`_request_data_root`) through
+    `_tenant.accept_tenant` — the one acceptance every entry point shares; a sibling's
+    tenant is then held to its episode's container record (`_open_episode_runs`).
+    `box_mounted` is what the run's box mounts besides the checkout — a sibling's container,
+    inside its held episode — and the tenant's settings must sit under none of it."""
+    try:
+        tenant_id = _tenant.requested_tenant_id(ns.tenant)
+        return _tenant.accept_tenant(
+            data_root, tenant_id, defender_dir=DEFENDER_DIR, box_mounted=box_mounted)
+    except _tenant.TenantRefused as refused:
+        sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
+
+
+def _sibling_episode_dir(ns: argparse.Namespace, data_root: Path) -> Path | None:
+    """Where the episode `--episode` names lives, as the episode owner composes it under the
+    configured episodes root (`DEFENDER_EPISODES_BASE`) for `data_root` — `None` for an
+    ordinary run. A bad id or an unusable root is refused here, before anything is opened."""
+    if ns.episode is None:
         return None
-    manifest = ns.resume.resolve()
-    if manifest.name != LAYOUT.family.name:
-        sys.exit(f"[run.py] --resume {ns.resume} is not an episode manifest — a sibling resumes "
-                 f"from its episode dir's {LAYOUT.family}")
-    return manifest.parent
+    from defender._episode_handle import EpisodeRefused, episode_dir
+
+    try:
+        return episode_dir(data_root, ns.episode)
+    except EpisodeRefused as refused:
+        sys.exit(f"[run.py] --episode {ns.episode}: {refused}")
 
 
-def _case_input(ns: argparse.Namespace, world: Any) -> tuple[Path, str | None]:
+def _open_episode_runs(ns: argparse.Namespace, accepted: _tenant.Tenant,
+                       episode: Episode | None) -> Any:
+    """The sibling's episode view, adopting the episode `main` already holds, with the
+    container REQUIRED: one that is absent, unreadable, recordless or whose `_tenant.json`
+    names another tenant is refused here — right after acceptance, before the manifest is
+    read (G19) — so an arm is never made in a container its tenant's launcher did not bind
+    (G5). `None` for an ordinary run."""
+    if episode is None:
+        return None
+    try:
+        return accepted.runs_repository().episode(
+            ns.episode, held=episode, container_required=True)
+    except _tenant.TenantRefused as refused:
+        sys.exit(f"[run.py] --episode {ns.episode} for tenant {accepted.id!r}: {refused}")
+
+
+def _case_input(ns: argparse.Namespace, world: Any, source: Run | None) -> tuple[Path, str | None]:
     """The alert this run investigates and its run id: a sibling's from its world (the source
     run's alert, screened before the preflight like other argument errors), else the
     operator's."""
     if world is not None:
-        return _screened_source_alert(Path(world.family.source_run_dir)), world.run_id
+        assert source is not None
+        return _screened_source_alert(source), world.run_id
     return ns.alert.resolve(), ns.run_id
 
 
-def _world_seams(world: Any, *, oracle: Any, verifier: Any) -> dict[str, Any]:
+def _world_seams(world: Any, *, oracle: Any, verifier: Any, source: Run | None) -> dict[str, Any]:
     """The lifecycle's world-only keywords: none for an ordinary run; for a sibling its oracle
     side, settled once here from its knobs (the launcher hands it its rate slice through the
-    environment) and threaded inward whole."""
+    environment) and threaded inward whole, and the opened source run it forks."""
     if world is None:
         return {}
     from defender.learning.branch.estate.registry import oracle_serving
     from defender.learning.core.config import process_oracle_settings
 
     return {"serving": oracle_serving(process_oracle_settings(), oracle=oracle,
-                                      verifier=verifier)}
+                                      verifier=verifier),
+            "source": source}
 
 
 def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injection seams; the unservable exit is one more arm
@@ -599,28 +639,37 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
     # Bound under its production name so the curation lane is visibly reached from here.
     enqueue_curation = enqueue
 
-    # A sibling's door: the episode it resumes, held for the whole run. The handle serves the
-    # manifest read and the world ledger's writes; nothing below reopens the episode by name.
-    episode_dir = _resume_episode_dir(ns)
+    # The request's tenant id, then the data root, resolved once; nothing below resolves either
+    # again.
+    data_root = _request_data_root(ns)
+    # A sibling's door: the episode it is an arm of, opened by the episode owner before
+    # acceptance and held for the whole run. The handle serves the manifest read and the world
+    # ledger's writes; nothing below reopens the episode by name.
+    episode_dir = _sibling_episode_dir(ns, data_root)
     try:
         door: contextlib.AbstractContextManager[Episode | None] = (
             contextlib.nullcontext() if episode_dir is None else Episode.open(episode_dir))
     except OSError as missing:
-        sys.exit(f"[run.py] --resume {ns.resume}: its episode dir cannot be held ({missing})")
+        sys.exit(f"[run.py] --episode {ns.episode}: its episode dir cannot be held ({missing})")
     with door as episode:
-        # The tenant, from the request, accepted under the data root before anything is spent;
-        # nothing below resolves the root or a tenant path again. A sibling's runs base is its
-        # episode's, which the box mounts and the tenant's settings must not sit under.
+        # The tenant, from the request, accepted under the data root before anything is spent.
+        # A sibling's container is its episode's, which the box mounts and the tenant's
+        # settings must not sit under.
         accepted = _accept_request_tenant(
-            ns, box_mounted=() if episode is None else (episode.runs.path,))
+            ns, data_root=data_root,
+            box_mounted=() if episode is None else (episode.box_mounted_container,))
+        # The sibling's view judges its container's record before anything else of the episode
+        # is read: another tenant's episode is refused here, the manifest unread.
+        episode_runs = _open_episode_runs(ns, accepted, episode)
         # One readiness check, shared by the old-manifest judge (only for a manifest recording
         # no corpus patterns) and the run.
         tenant_of = functools.cache(lambda: _resolve_run_tenant(
-            accepted, defender_dir=DEFENDER_DIR, dispatches_lead_zero=ns.resume is None))
+            accepted, defender_dir=DEFENDER_DIR, dispatches_lead_zero=ns.episode is None))
         world = _resume_target(ns, episode=episode, tenant=tenant_of)
-        _sibling_tenant_agrees(world, accepted)
+        source = (None if world is None
+                  else _open_world_source(accepted.runs_repository(), world))
 
-        alert, run_id = _case_input(ns, world)
+        alert, run_id = _case_input(ns, world, source)
 
         # The tenant's settings, resolved before anything is spent; nothing below reads them again.
         tenant = tenant_of()
@@ -631,10 +680,12 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
         rc = preflight(ns.model, branching=True) if world is not None else preflight(ns.model)
         if rc:
             return rc
-        seams = _world_seams(world, oracle=oracle, verifier=verifier)
+        seams = _world_seams(world, oracle=oracle, verifier=verifier, source=source)
 
         # The handle, not just its directory: the post-run step saves the run page through it.
-        run = materialize(alert, run_id, tenant=accepted, model=model, world=world)
+        run = (materialize(alert, run_id, tenant=accepted, model=model) if world is None
+               else materialize(alert, run_id, tenant=accepted, model=model, world=world,
+                                episode_runs=episode_runs))
         run_dir = run.run_dir
 
         # Every log line from here on, the crash included, names this run and the tenant this
@@ -664,7 +715,7 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
                 if abort is None or world is None or episode is None:
                     raise
                 _record_unservable_world(episode, world, abort)
-                _logger.error(f"--resume: world {world.label} is unservable; the sibling ends "
+                _logger.error(f"--episode: world {world.label} is unservable; the sibling ends "
                               f"({getattr(abort, 'reason', '')})")
                 return UNSERVABLE_EXIT
 
@@ -699,10 +750,10 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
 
             # A sibling's evidence was staged on purpose, so it must never feed the catalog.
             if world is not None:
-                _logger.info("--resume: a sibling world is not enqueued for curation")
+                _logger.info("--episode: a sibling world is not enqueued for curation")
             elif ns.no_learn:
                 _logger.info("--no-learn set; not enqueuing for curation")
-            elif enqueue_curation(run_dir, alert, truncated_by=summary.get("truncated_by")):
+            elif enqueue_curation(run, alert, truncated_by=summary.get("truncated_by")):
                 _logger.info("enqueued for catalog curation")
 
             try:
@@ -742,7 +793,7 @@ def _record_unservable_world(episode: Episode, world: Any, abort: ServingAbort) 
         call={"system": system, "verb": verb, "params": dict(params)},
         detail=str(getattr(abort, "detail", "") or reason))
     if not written:
-        _logger.info(f"--resume: world {world.label} already has its record; left as it is")
+        _logger.info(f"--episode: world {world.label} already has its record; left as it is")
 
 
 if __name__ == "__main__":

@@ -56,8 +56,8 @@ def visualize_episode():
 
 
 def render(ep) -> E.Page:
-    """`visualize_episode().render_episode(<dir>)` — the real entry point — then the page it
-    wrote, parsed."""
+    """`visualize_episode().render_episode(runs, <episode id>)` — the real entry point — then
+    the page it wrote, parsed."""
     return E.render(ep, module=visualize_episode())
 
 

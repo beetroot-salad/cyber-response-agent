@@ -306,6 +306,85 @@ def write_tool_trace(run_dir: Path, rows: list[dict[str, Any]]) -> Path:
     return path
 
 
+def page_tenant() -> Any:
+    """The tenant a page is rendered for (#1105 PR 2, declared change 4: `render_episode(runs,
+    episode_id)` renders an episode of `runs`' tenant): this test data root's one tenant
+    (`_triplet_947.current_tenant`), set up from the committed fixture when absent."""
+    return T.current_tenant()
+
+
+def plant_container_record(episode_dir: Path) -> None:
+    """`<episode>/runs/_tenant.json` naming the page's tenant, through the real writer — what
+    the launcher leaves when it makes the siblings' container (`EpisodeRuns.create_container`;
+    the page's view refuses a container without one, #1105 PR 2 declared change 4) — when
+    `runs/` is a real directory holding no record entry. Anything else is left as planted: no
+    `runs/` (an episode stopped before RUNS), a link or a file there, a container the scenario
+    made unlistable or unsearchable (nothing inside it is touched: the page reads such a
+    container as absent, rev 5.1 S1), or a record of any kind already present (a scenario's
+    own). The page helpers below call it before each render; `sample_episode` itself leaves the
+    container as the pre-#1078 shape it always was (`test_dc4_a_container_with_no_record_…`
+    builds on that)."""
+    from defender import _tenant
+
+    runs = Path(episode_dir) / "runs"
+    if runs.is_symlink() or not runs.is_dir():
+        return
+    if not os.access(runs, os.R_OK | os.X_OK):
+        return
+    record = runs / _tenant.TENANT_RECORD_NAME
+    if record.is_symlink() or record.exists():
+        return
+    _tenant.ensure_runs_base_record(runs, page_tenant().id)
+
+
+def render_episode(episode_dir: Path, *, module: Any = None) -> Path:
+    """The page's in-process door, by id (#1105 PR 2): `render_episode(runs, episode_id)` for
+    the episode at `episode_dir`, with `runs` the page tenant's repository and the configured
+    episodes base pointed at `episode_dir.parent` for the call (the container's record ensured
+    first, `plant_container_record`). Returns what it returns."""
+    d = Path(episode_dir).absolute()
+    target = module if module is not None else page_module()
+    plant_container_record(d)
+    with J.episodes_base(d.parent):
+        return target.render_episode(page_tenant().runs_repository(), d.name)
+
+
+def load_episode(episode_dir: Path, *, module: Any = None) -> Any:
+    """The page's typed model of the episode at `episode_dir` (`load_episode(view)`), the view
+    opened by id the way `render_episode` opens it (#1105 PR 2)."""
+    d = Path(episode_dir).absolute()
+    target = module if module is not None else page_module()
+    plant_container_record(d)
+    with J.episodes_base(d.parent), \
+            target.open_episode_view(page_tenant().runs_repository(), d.name) as view:
+        return target.load_episode(view)
+
+
+def build_page(episode_dir: Path, *, module: Any = None) -> str:
+    """The page's HTML for the episode at `episode_dir` (`build_page(view)`), the view opened by
+    id the way `render_episode` opens it (#1105 PR 2); nothing is written."""
+    d = Path(episode_dir).absolute()
+    target = module if module is not None else page_module()
+    plant_container_record(d)
+    with J.episodes_base(d.parent), \
+            target.open_episode_view(page_tenant().runs_repository(), d.name) as view:
+        return target.build_page(view)
+
+
+def cli_on(episode_dir: Path, capsys, *, module: Any = None) -> tuple[int, str, str]:
+    """`cli` for the episode at `episode_dir`, by id: `--tenant T <episode_id>` under the
+    episodes base that holds it (#1105 PR 2, declared change 4)."""
+    d = Path(episode_dir)
+    plant_container_record(d)
+    return cli(cli_argv(d), capsys, module=module, episodes_base=d.parent)
+
+
+def cli_argv(episode_dir: Path) -> list[str]:
+    """The page CLI's arguments for the episode at `episode_dir` (#1105 PR 2, declared change 4
+    and J8): `--tenant T <episode_id>`; the caller points the episodes base at its parent."""
+    return ["--tenant", str(page_tenant().id), Path(episode_dir).name]
+
+
 def run_dir(episode_dir: Path, label: str, *, cost: float | Any = 0.25,
             duration_ms: int | Any = 180_000, result: bool = True, runtime_html: bool = True,
             events: list[dict[str, Any]] | None = None) -> Path:
@@ -758,13 +837,15 @@ def page_module():
 
 
 def render(ep: Episode | Path, *, module: Any = None) -> Page:
-    """`render_episode(episode_dir)` — the real entry point — then the page it wrote, parsed.
-    `module` is the page module a test file resolved through its own `visualize_episode()`
-    helper (so the static reach check sees the target from the test); default: imported here."""
+    """`render_episode(runs, episode_id)` — the real entry point, by id (`render_episode` here)
+    — then the page it wrote, parsed. `module` is the page module a test file resolved through
+    its own `visualize_episode()` helper (so the static reach check sees the target from the
+    test); default: imported here."""
     d = ep.dir if isinstance(ep, Episode) else Path(ep)
-    target = module if module is not None else page_module()
-    out = target.render_episode(d)
-    assert Path(out) == d / PAGE_NAME, f"render_episode returned {out!r}"
+    out = render_episode(d, module=module)
+    # The id door resolves the episode under the configured (absolute) episodes base, so a
+    # cwd-relative `ep` is compared by its absolute spelling.
+    assert Path(out) == d.absolute() / PAGE_NAME, f"render_episode returned {out!r}"
     return read_page(d)
 
 
@@ -775,10 +856,14 @@ def read_page(ep: Episode | Path) -> Page:
     return Page.parse(page.read_text(encoding="utf-8"))
 
 
-def cli(argv: list[str], capsys, *, module: Any = None) -> tuple[int, str, str]:
-    """`visualize_episode.main(argv)` with its stdout / stderr captured."""
+def cli(argv: list[str], capsys, *, module: Any = None,
+        episodes_base: Path | None = None) -> tuple[int, str, str]:
+    """`visualize_episode.main(argv)` with its stdout / stderr captured — under the episodes
+    base `episodes_base` when given (an id-taking argv names an episode under it)."""
     target = module if module is not None else page_module()
-    rc = target.main(argv)
+    with (J.episodes_base(episodes_base) if episodes_base is not None
+          else contextlib.nullcontext()):
+        rc = target.main(argv)
     out = capsys.readouterr()
     return rc, out.out, out.err
 

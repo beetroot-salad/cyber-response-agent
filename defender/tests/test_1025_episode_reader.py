@@ -99,8 +99,7 @@ def _refused():
 def _grade(ep: Path, tmp_path: Path):
     """The real grading pass over `ep`, through its own seams — never a live provider."""
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    return _judge().grade_episode(ep, judge=judge, runs_base=tmp_path / "defender-runs",
-                                   state=_state1135.env_state())
+    return J.grade_at(ep, judge=judge, state=_state1135.env_state())
 
 
 def _write_issued(world_dir: Path, rows: list[dict]) -> Path:
@@ -405,7 +404,7 @@ def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_pat
         json.dumps({"lead_id": "l-001", "goal": "find the pivot"}), encoding="utf-8")
     base, _src = J.runs_base(tmp_path)
 
-    shown = _render().render(ep, "b", runs_base=base).leads
+    shown = _render().render(ep, "b").leads
     facts = family.read_world_facts(J.mod("_io").bind(ep), "b", episode_token=J.EPISODE_TOKEN)
     expected = family.lead_chain(_world(ep, "b"), "l-001", facts.resolutions_by_lead,
                                  leads=family.leads_by_id(world_dir))

@@ -5,7 +5,7 @@ does **not** run in-process after an investigation: a finished run is a
 starting point an operator picks up later, deliberately, by naming it.
 
 ```
-python3 defender/learning/branch/cli.py <run_dir> <branch_message_id>
+python3 defender/learning/branch/cli.py --tenant <T> <run_id> <branch_message_id>
 ```
 
 For the *why* — the RL / ablation-study framing — read
@@ -50,7 +50,7 @@ What runs now branches a **real** investigation instead of inventing one.
    host checks and a separate verifier. Two or more worlds that cannot be
    served make the family unusable, recorded in `outcome.yaml`, and no sibling
    starts.
-4. **Run the family** — each world runs as its own `run.py --resume` process,
+4. **Run the family** — each world runs as its own `run.py --tenant <T> --episode <id> --world <label>` process,
    started together, under the episode, each served by its own world's oracle.
 5. **Judge** (`learning/judge/`) — grades the archived episode, one model call
    per world per draw. The episode comes out `gradable`, `discard` (the

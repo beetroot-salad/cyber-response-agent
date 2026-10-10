@@ -34,6 +34,7 @@ from typing import Any
 
 import pytest
 
+from defender import _episode_handle as EH
 from defender._episode_handle import Episode
 from defender._episode_paths import LAYOUT, EpisodePaths
 
@@ -177,7 +178,7 @@ def _launch(tmp_path, *, judge=None, spawn=None, calls=None, oracle=None, verifi
     """
     est = S.estate(tmp_path)
     _base, src = S.source_run(tmp_path, est, calls=_calls() if calls is None else calls)
-    episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
+    episode_dir = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
     if spawn is None:
         spawn = J.FakeSibling(episode_dir)
     if judge is None:
@@ -192,7 +193,9 @@ def _launch(tmp_path, *, judge=None, spawn=None, calls=None, oracle=None, verifi
     seams.setdefault("live_tree", T.source_capture())
     seams.setdefault("roster", est.roster())
     before = now_iso()
-    rc = _cli().main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
+    # #1105 PR 2 (declared change 1): the tenant and the source run by id.
+    rc = _cli().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
+                      "--continuation-prompt", "go"],
                      spawn=spawn, judge=judge, oracle=oracle.model, verifier=verifier.model,
                      **seams)
     return Launch(rc, spawn, judge, episode_dir, before, now_iso())
@@ -204,7 +207,7 @@ def _abort(tmp_path, raises: type[BaseException], **seams) -> tuple[Path, str, s
     before = now_iso()
     with pytest.raises(raises):
         _launch(tmp_path, **seams)
-    return _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()), before, now_iso()
+    return EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID), before, now_iso()
 
 
 def _outcome(episode_dir: Path) -> dict:
@@ -611,7 +614,7 @@ def test_1025_an_accepted_episode_leaves_every_step_in_launch_order(tmp_path):
     is not one `parse_iso_utc` accepts or lies outside the launch, when two steps' intervals
     overlap, or when the rows are not on disk until the launcher exits.
     """
-    episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
+    episode_dir = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
     sibling = _WatchingSibling(episode_dir)
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
     seen_by_judge: list[list[str]] = []
@@ -650,7 +653,7 @@ def test_1025_the_runs_row_spans_the_time_the_siblings_were_actually_running(tmp
     The one scenario in this file that spends real wall time (about a second), because it is
     the only way a whole-second clock can tell the two apart.
     """
-    episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
+    episode_dir = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
     sibling = _WatchingSibling(episode_dir, hold=1.1)
     launch = _launch(tmp_path, spawn=sibling)
     assert launch.rc == 0, "the control failed: the accepted episode did not launch cleanly"
@@ -718,14 +721,14 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
     cli = _cli()
 
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-questioner"))
-    questioner = _Interrupting(cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()))
+    questioner = _Interrupting(EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID))
     ep, _before, _after = _abort(tmp_path, cli.LauncherRefused, questioner=questioner)
     assert questioner.calls > 0, "the control failed: the questioner seam was never reached"
     assert questioner.seen == [[]], f"the questioner saw {questioner.seen} before it ran"
     assert _raw_rows(ep) == [], "a step that raised was recorded"
 
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-preflight"))
-    oracle_seam = _Interrupting(cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()))
+    oracle_seam = _Interrupting(EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID))
     ep, before, after = _abort(tmp_path, cli.LauncherRefused,
                                oracle=S.oracle(then=S.Move(None, raises=oracle_seam)))
     assert oracle_seam.calls > 0, "the control failed: pre-flight's oracle was never reached"
@@ -735,7 +738,7 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
     _clocked(_raw_rows(ep), before=before, after=after)
 
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-runs"))
-    family = _Interrupting(cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()))
+    family = _Interrupting(EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID))
     ep, before, after = _abort(tmp_path, KeyboardInterrupt, spawn=family)
     assert family.calls > 0, "the control failed: the process seam was never reached"
     assert all(seen == ["questioner", "preflight"] for seen in family.seen), (
@@ -747,7 +750,7 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-verify"))
     outside = tmp_path / "outside-verify"
     outside.mkdir()
-    planting = _PlantingSibling(cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()), outside=outside)
+    planting = _PlantingSibling(EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID), outside=outside)
     ep, before, after = _abort(tmp_path, OSError, spawn=planting)
     assert planting.launches, "the control failed: no sibling was spawned"
     assert list(outside.iterdir()) == [], (
@@ -757,7 +760,7 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
     _clocked(_raw_rows(ep), before=before, after=after)
 
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-judge"))
-    judge = _Interrupting(cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()))
+    judge = _Interrupting(EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID))
     ep, before, after = _abort(tmp_path, KeyboardInterrupt, judge=judge)
     assert judge.calls > 0, "the control failed: the judge seam was never reached"
     assert judge.seen == [["questioner", "preflight", "runs", "verify"]], (
@@ -826,7 +829,7 @@ def test_1025_a_record_that_cannot_be_written_does_not_end_the_episode(tmp_path,
 
     def squatting_author(prompt, **kw):
         if not squatted:
-            episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
+            episode_dir = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
             EpisodePaths(episode_dir).timing.mkdir()
             squatted.append(episode_dir)
         return author(prompt, **kw)

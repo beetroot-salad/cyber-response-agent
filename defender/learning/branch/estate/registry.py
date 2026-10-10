@@ -264,14 +264,18 @@ class WorldRegistry(ModuleVerbRegistry):
                  serving: OracleServing, oracle_dir: Path, limiter: RateLimiter,
                  tenant: Any = None, grant_home: str = TABLE_POINTER,
                  family_answers: Sequence[FamilyAnswer] | None = None,
-                 prebranch: Collection[str] = frozenset()):
+                 prebranch: Collection[str] = frozenset(),
+                 source_run_dir: Path | None = None):
         """`serving` is the world's settled oracle side (`oracle_serving`), `oracle_dir` its
         oracle-side state (`default_oracle_dir`), `limiter` the process's one rate limiter
         (S16: pre-flight hands every world the launcher's, held at the episode rate; a
         sibling builds its slice's). `family_answers` is the family's base recording as
         `read_family_answers` parses it — pre-flight parses it once for every world; `None`
         parses `ledger.base_path` here. `prebranch` is the request keys of the source run's
-        pre-branch calls (`prebranch_calls`), whose answers a sibling serves unchanged."""
+        pre-branch calls (`prebranch_calls`), whose answers a sibling serves unchanged.
+        `source_run_dir` is the source run's folder, as the opened source `Run` hands it out
+        (#1105 PR 2: never the manifest's recorded path); its alert is the oracle's view of the
+        case, and `None` serves none."""
         super().__init__(roster, grant, grant_home=grant_home)
         # Validate the clock here, once: every query this world issues, the oracle's own
         # included, carries it, so no oracle-side context is ever built without it (O-31).
@@ -300,6 +304,7 @@ class WorldRegistry(ModuleVerbRegistry):
         self.tenant = tenant
         self.world_facts = tuple(getattr(world, "facts", ()) or ())
         self.prebranch = frozenset(prebranch)
+        self._source_run_dir = None if source_run_dir is None else Path(source_run_dir)
         self.store = OracleStore(Path(oracle_dir))
         self._turn_lock = threading.Lock()
         #: The context of the call whose turn holds the lock: every oracle-side query of that
@@ -515,11 +520,9 @@ class WorldRegistry(ModuleVerbRegistry):
         return out
 
     def _alert(self) -> list[Any]:
-        family = getattr(self.world, "family", None)
-        source = getattr(family, "source_run_dir", None)
-        if not source:
+        if self._source_run_dir is None:
             return []
-        alert = source_alert(Path(source))
+        alert = source_alert(self._source_run_dir)
         return [alert] if alert is not None else []
 
     def close(self) -> None:

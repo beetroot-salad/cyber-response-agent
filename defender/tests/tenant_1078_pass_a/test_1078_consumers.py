@@ -7,7 +7,8 @@ The consumers, each driven through its REAL entry point:
 * the judge (`learning/judge`): `grade_episode(runs_base=...)` — REQUIRED keyword (§7 J48,
   human, design correction R-A3) — threads the base into BOTH readers, the world-label
   collision probe (`family._check_world_labels`, whose `except Exception: return` fallback goes,
-  C26) and the sibling union (`render.sibling_union`);
+  C26) and the sibling union (`render.sibling_union`). #1105 PR 2 (J3): the judge now takes
+  `(runs, episode_id)` and reads only the episode; the union and its two tests are gone;
 * the pre-flight replay (`learning/branch/cli._preflight_context`): the replay env's
   `DEFENDER_RUNS_BASE` is the run tenant's runs base (F3; the review replay's successor, #1224);
 * `evals/held_out.py`: the positional runs dir, required, and never resolving the data root
@@ -25,6 +26,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import ast
+import inspect
 import json
 import subprocess
 import sys
@@ -127,115 +129,56 @@ SCORED = "# Held-out eval"
 # ======================================================================================
 
 def test_d4_judge_probe_threaded(tmp_path, monkeypatch):
-    """_check_world_labels takes the runs base as a parameter threaded from
-    grade_episode (its runs_base keyword given runs_base_for(T)) via the launcher's _grade, and a colliding world
-    label is refused (JudgeRefused) in the configuration where today's probe returns silently;
-    the except-Exception fallback is gone. grade_episode's runs_base is a required keyword:
-    calling it without one is a TypeError, never a skipped probe.
-
-    The configuration: the retired `DEFENDER_RUNS_BASE` unset, so today's probe resolves some
-    OTHER base (or none) and finds nothing to collide with; the base that holds the colliding
-    finished run `b` is the one handed in. The launcher's `_grade` handing it
-    `runs_base_for(T)` is the clause `d4_launcher_derives_once`; this test pins the grade's own
-    half, which is the only half with a return channel."""
+    """#1105 PR 2, declared change 3 / J3: the judge reads only the episode it is handed, so the
+    world-label collision probe (G17) — which `grade_episode` once threaded a `runs_base` to —
+    is gone with its keyword. A finished run in T's runs folder whose name is a graded world's
+    label no longer refuses the grade (it grades), and `grade_episode` takes no `runs_base`
+    (the episode is named by id, through the tenant's repository)."""
     root = _judge_roots(tmp_path, monkeypatch)
     base = H.runs_base_for(TENANT)
     assert base == root.resolve() / TENANT / "runs"
     _trial(base, "b")  # a finished run whose name is graded world b's label
 
     ep = _episode(tmp_path, "collide")
-    judge_refused = H.mod("learning.judge.family").JudgeRefused
-    with pytest.raises(judge_refused) as refused:
-        _grade_episode()(ep, judge=_judge(), runs_base=base, draws=1, state=env_state())
-    assert "'b'" in str(refused.value), f"the refusal is not the probe's: {refused.value}"
-    assert str(base / "b") in str(refused.value), (
-        f"the refusal is not the label-collision probe's: {refused.value}")
+    J.grade_at(ep, judge=_judge(), draws=1, state=env_state())
+    graded = J.world_rows(J.judge_record(ep))
+    assert {"b", "c"} <= set(graded), f"the episode's worlds were not graded: {sorted(graded)}"
 
-    # the positive control: the same episode shape with no collision under the threaded base
-    # grades — so the refusal above is the probe firing, not the episode being ungradable
-    clean_base = tmp_path / "clean-base"
-    clean_base.mkdir()
-    _grade_episode()(_episode(tmp_path, "clean"), judge=_judge(), runs_base=clean_base,
-                     draws=1, state=env_state())
-
-    unthreaded = _episode(tmp_path, "unthreaded")
-    with pytest.raises(TypeError):
-        _grade_episode()(unthreaded, judge=_judge(), draws=1, state=env_state())
+    assert "runs_base" not in inspect.signature(_grade_episode()).parameters, (
+        "grade_episode still takes a runs_base (the judge reads only its episode)")
 
 
 def test_collision_probe_over_a_tenant_runs_base_holding_a_label_named_run(tmp_path,
                                                                            monkeypatch):
-    """The judge's collision probe runs against the threaded runs_base_for(T): a finished
-    <T>/runs/a collides with world label a and grading refuses (JudgeRefused), as C26's control
-    shows; the probe's comparison logic is unchanged. P6 (is that the right base to probe?)
-    stays carried.
-
-    World `b` stands in for "world label a" here: in the #947 layout `a` is the family's
-    control (role A), which the label probe does not grade. The comparison logic being
-    unchanged is pinned by its own spelling of the collision: anything standing at the label's
-    name — here a dangling link, which `is_dir()` would miss — collides."""
+    """#1105 PR 2, declared change 3 / J3: with the probe gone, anything standing at a world
+    label's name in T's runs folder — here a dangling link, which the probe once refused as a
+    collision — is not read by the judge, and the episode grades."""
     _judge_roots(tmp_path, monkeypatch)
     base = H.runs_base_for(TENANT)
     base.mkdir(parents=True, exist_ok=True)
     (base / "b").symlink_to(tmp_path / "nowhere")
-    judge_refused = H.mod("learning.judge.family").JudgeRefused
-    with pytest.raises(judge_refused) as refused:
-        _grade_episode()(_episode(tmp_path, "ep"), judge=_judge(), runs_base=base, draws=1, state=env_state())
-    assert "collides" in str(refused.value), refused.value
-    assert "'b'" in str(refused.value), refused.value
-
-
-def test_d4_render_union_threaded(tmp_path, monkeypatch):
-    """The judge render's sibling_union reads the same threaded runs_base_for(T).
-    grade_episode's runs_base is a required keyword: calling it without one is a TypeError,
-    never a skipped probe.
-
-    Observed on what the model seam is SHOWN: a finished trial of the same alert under the
-    threaded base is in the prompt, and one under a stale retired knob is not."""
-    stale = tmp_path / "old-runs"
-    _trial(stale, "trial-under-the-stale-knob")
-    _judge_roots(tmp_path, monkeypatch, stale_base=stale)
-    base = H.runs_base_for(TENANT)
-    _trial(base, "trial-under-the-tenant")
-
-    judge = _judge()
-    _grade_episode()(_episode(tmp_path, "ep"), judge=judge, runs_base=base, draws=1, state=env_state())
-    world_prompts = [p for p in judge.prompts if "trial-under-the-tenant" in p]
-    assert world_prompts, "the sibling union did not read the threaded runs base"
-    assert not any("trial-under-the-stale-knob" in p for p in judge.prompts), (
-        "the sibling union read the retired DEFENDER_RUNS_BASE rather than the threaded base")
-
-    with pytest.raises(TypeError):
-        _grade_episode()(_episode(tmp_path, "unthreaded"), judge=_judge(), draws=1, state=env_state())
-
-
-def test_judge_sibling_union_after_the_switch(tmp_path, monkeypatch):
-    """The judge's sibling union reads the threaded runs_base_for(T) only, so trials in the old
-    runs base are absent from it (N4: old bases are not read for T).
-
-    The old base is the one an operator's shell still names (the retired knob); the union is
-    read off the graded world's own prompt."""
-    old = tmp_path / "defender-runs"
-    _trial(old, "old-layout-trial")
-    _judge_roots(tmp_path, monkeypatch, stale_base=old)
-    base = H.runs_base_for(TENANT)
-    _trial(base, "tenant-trial")
-
-    judge = _judge()
-    _grade_episode()(_episode(tmp_path, "ep"), judge=judge, runs_base=H.runs_base_for(TENANT),
-                     draws=1, state=env_state())
-    shown = "\n".join(judge.prompts)
-    assert "tenant-trial" in shown, "the union did not read runs_base_for(T)"
-    assert "old-layout-trial" not in shown, "a trial in the old runs base entered the union"
+    ep = _episode(tmp_path, "ep")
+    J.grade_at(ep, judge=_judge(), draws=1, state=env_state())
+    graded = J.world_rows(J.judge_record(ep))
+    assert {"b", "c"} <= set(graded), f"the episode's worlds were not graded: {sorted(graded)}"
+    assert (base / "b").is_symlink(), "the link at the label's name was touched"
 
 
 # ======================================================================================
 # The pre-flight replay (D4 row 5; the review replay's successor, #1224)
 # ======================================================================================
 
-def _preflight_context(ep: Path, tenant: Any) -> Any:
-    """The context pre-flight's host-side reads run in (`cli._preflight_context`)."""
-    return H.branch_cli()._preflight_context(ep, tenant, _AS_OF)
+def _preflight_context(ep: Path, source: Any, tenant: Any) -> Any:
+    """The context pre-flight's host-side reads run in (`cli._preflight_context`), for the
+    opened source `Run` (#1105 PR 2: the env's runs base is the source's own hand-out)."""
+    return H.branch_cli()._preflight_context(ep, source, tenant, _AS_OF)
+
+
+def _tenant_source(root: Path) -> Any:
+    """T's finished source run at `<root>/T/runs/<id>`, opened by id through T's repository —
+    what the launcher hands pre-flight (#1105 PR 2)."""
+    _base, src = H.tenant_source(root, TENANT, row=False)
+    return T.open_source(src)
 
 
 def test_d4_preflight_env_threaded(tmp_path, monkeypatch):
@@ -251,7 +194,7 @@ def test_d4_preflight_env_threaded(tmp_path, monkeypatch):
     ep.mkdir(parents=True)
     base = root.resolve() / TENANT / "runs"
 
-    ctx = _preflight_context(ep, H.T1106.run_tenant(H.accept(root, TENANT)))
+    ctx = _preflight_context(ep, _tenant_source(root), H.T1106.run_tenant(H.accept(root, TENANT)))
     assert ctx.env["DEFENDER_RUNS_BASE"] == str(base)
     assert ctx.env["DEFENDER_RUNS_BASE"] != str(ep.parent)
     assert ctx.run_dir == ep, "the replay context stopped being the episode dir"
@@ -274,7 +217,7 @@ def test_preflight_replay_runs_base_for_an_old_base_episode(tmp_path, monkeypatc
     ep = tmp_path / "old-episodes-base" / "src-run-n5"
     ep.mkdir(parents=True)
 
-    ctx = _preflight_context(ep, H.T1106.run_tenant(H.accept(root, TENANT)))
+    ctx = _preflight_context(ep, _tenant_source(root), H.T1106.run_tenant(H.accept(root, TENANT)))
     child = subprocess.run(  # noqa: S603 — fixed argv, the test's own interpreter
         [sys.executable, "-c", "import os; print(os.environ['DEFENDER_RUNS_BASE'])"],
         env=ctx.env, capture_output=True, text=True, check=True, timeout=60)

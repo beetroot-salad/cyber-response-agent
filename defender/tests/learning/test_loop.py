@@ -14,7 +14,7 @@ LoopPaths = loop.LoopPaths
 
 from defender.learning.core import drains as drains  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning.core.state import AUTHOR_DRAIN_LOCK, FINDINGS  # noqa: E402
-from defender.tests._state1135 import enqueue_run, state_for_paths  # noqa: E402
+from defender.tests._state1135 import curation_run_dir, enqueue_run, state_for_paths  # noqa: E402
 from defender.learning.core import persist as persist  # type: ignore[import-not-found]  # noqa: E402
 from defender import _io as _io  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning import lead_repository as lr  # type: ignore[import-not-found]  # noqa: E402
@@ -311,11 +311,12 @@ def test_rotate_preserves_concurrent_appends(tmp_path: Path):
 
 def test_enqueue_for_authoring_writes_marker(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-a"
-    run_dir.mkdir(parents=True)
+    run_dir = curation_run_dir("case-a")
     enqueue_run(state_for_paths(paths), run_dir)
     spec = json.loads((paths.state_root / "author-queue" / "case-a.json").read_text())
-    assert spec == {"case_id": "case-a", "run_dir": str(run_dir.resolve())}
+    # The row is the run's address (#1105 PR 2 declared change 8), where it named its folder.
+    assert spec == {"case_id": "case-a", "tenant_id": run_dir.parent.parent.name,
+                    "run_id": "case-a"}
 
 
 class _FakeBranch:
@@ -461,14 +462,14 @@ def test_author_drain_singleton_lock_exits_without_work(tmp_path: Path):
 
 def test_lead_author_drain_runs_lead_author_then_clears_marker(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-b"
-    run_dir.mkdir(parents=True)
+    run_dir = curation_run_dir("case-b")
     enqueue_run(state_for_paths(paths), run_dir)
     seen: list[tuple[Path, Path]] = []
     branch = _FakeBranch(prefix="lead-author/")
     drains.lead_author_drain(
         paths,
-        run_lead_author=lambda wt_paths, state, rd, **_kw: seen.append((wt_paths.repo_root, rd)),
+        run_lead_author=lambda wt_paths, state, run, **_kw: seen.append(
+            (wt_paths.repo_root, run.run_dir)),
         branch=branch,
         start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
     )
@@ -480,8 +481,7 @@ def test_lead_author_drain_runs_lead_author_then_clears_marker(tmp_path: Path):
 
 def test_lead_author_drain_runs_pitfalls_after_markers(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-p"
-    run_dir.mkdir(parents=True)
+    run_dir = curation_run_dir("case-p")
     enqueue_run(state_for_paths(paths), run_dir)
     order: list[str] = []
     drains.lead_author_drain(
@@ -509,15 +509,16 @@ def test_has_lead_author_work_fires_on_pitfalls_threshold(tmp_path: Path, monkey
 
 def test_lead_author_drain_marks_artifact_missing(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-real"
-    run_dir.mkdir(parents=True)
+    run_dir = curation_run_dir("case-real")
     enqueue_run(state_for_paths(paths), run_dir)
-    gone = tmp_path / "tmprun" / "case-gone"
+    # A row naming a run its tenant's repository cannot open (#1105 PR 2): the address is
+    # well-formed, the run folder was never made.
+    gone = run_dir.parent / "case-gone"
     enqueue_run(state_for_paths(paths), gone)
     seen: list[Path] = []
     drains.lead_author_drain(
         paths,
-        run_lead_author=lambda wt_paths, state, rd, **_kw: seen.append(rd),
+        run_lead_author=lambda wt_paths, state, run, **_kw: seen.append(run.run_dir),
         branch=_FakeBranch(prefix="lead-author/"),
         start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
     )
@@ -554,10 +555,13 @@ def test_lead_author_drain_dead_letters_an_unservable_marker(tmp_path: Path, bod
     Either way, leaving the marker where it was means the reclaim hands it straight back next
     tick, it fails again, and `_has_lead_author_work` stays true on its presence forever, so
     the drain wakes every tick to re-fail on the same file. The healthy sibling in the same
-    pass must still be served."""
+    pass must still be served.
+
+    Since #1105 PR 2 a servable row is its run's address, `{case_id, tenant_id, run_id}`
+    (declared change 8): none of these bodies carries one, so the claim quarantines each as
+    `unreadable: …` on its shape alone — the `run_dir`-keyed ones included."""
     paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-real"
-    run_dir.mkdir(parents=True)
+    run_dir = curation_run_dir("case-real")
     enqueue_run(state_for_paths(paths), run_dir)
     (paths.state_root / "author-queue").mkdir(parents=True, exist_ok=True)
     (paths.state_root / "author-queue" / "case-broken.json").write_text(body, encoding="utf-8")
@@ -565,7 +569,7 @@ def test_lead_author_drain_dead_letters_an_unservable_marker(tmp_path: Path, bod
     seen: list[Path] = []
     drains.lead_author_drain(
         paths,
-        run_lead_author=lambda wt_paths, state, rd, **_kw: seen.append(rd),
+        run_lead_author=lambda wt_paths, state, run, **_kw: seen.append(run.run_dir),
         branch=_FakeBranch(prefix="lead-author/"),
         start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
     )
@@ -582,13 +586,12 @@ def test_lead_author_drain_dead_letters_an_unservable_marker(tmp_path: Path, bod
 
 def test_lead_author_drain_skips_when_lease_held(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-lease"
-    run_dir.mkdir(parents=True)
+    run_dir = curation_run_dir("case-lease")
     enqueue_run(state_for_paths(paths), run_dir)
     seen: list = []
     branch = _FakeBranch(prefix="lead-author/", pr_exists=True)
     rc = drains.lead_author_drain(
-        paths, run_lead_author=lambda wt_paths, state, rd, **_kw: seen.append(rd),
+        paths, run_lead_author=lambda wt_paths, state, run, **_kw: seen.append(run.run_dir),
         branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
     )
     assert rc == 0
@@ -601,8 +604,7 @@ def test_lead_author_drain_singleton_lock_distinct_from_lessons(tmp_path: Path):
     import fcntl
 
     paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-d"
-    run_dir.mkdir(parents=True)
+    run_dir = curation_run_dir("case-d")
     enqueue_run(state_for_paths(paths), run_dir)
     (paths.state_root / AUTHOR_DRAIN_LOCK.file).parent.mkdir(parents=True, exist_ok=True)
     holder = (paths.state_root / AUTHOR_DRAIN_LOCK.file).open("a+")
@@ -611,7 +613,7 @@ def test_lead_author_drain_singleton_lock_distinct_from_lessons(tmp_path: Path):
         seen: list = []
         rc = drains.lead_author_drain(
             paths,
-            run_lead_author=lambda wt_paths, state, rd, **_kw: seen.append(rd),
+            run_lead_author=lambda wt_paths, state, run, **_kw: seen.append(run.run_dir),
             branch=_FakeBranch(prefix="lead-author/"),
             start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
         )
@@ -624,18 +626,16 @@ def test_lead_author_drain_singleton_lock_distinct_from_lessons(tmp_path: Path):
 
 def test_lead_author_drain_quarantines_poison_run_dir(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
-    poison = tmp_path / "tmprun" / "case-poison"
-    poison.mkdir(parents=True)
-    good = tmp_path / "tmprun" / "case-good"
-    good.mkdir(parents=True)
+    poison = curation_run_dir("case-poison")
+    good = curation_run_dir("case-good")
     enqueue_run(state_for_paths(paths), poison)
     enqueue_run(state_for_paths(paths), good)
     seen: list[Path] = []
 
-    def maybe_boom(wt_paths, state, rd: Path, *, box=None, **_kw) -> None:
-        if rd.name == "case-poison":
+    def maybe_boom(wt_paths, state, run, *, box=None, **_kw) -> None:
+        if run.run_dir.name == "case-poison":
             raise RuntimeError("lead-author blew up")
-        seen.append(rd)
+        seen.append(run.run_dir)
 
     drains.lead_author_drain(
         paths, run_lead_author=maybe_boom, branch=_FakeBranch(prefix="lead-author/"),
@@ -651,8 +651,7 @@ def test_lead_author_drain_quarantines_on_nonzero_rc(tmp_path: Path, monkeypatch
     import defender.learning.leads.lead_author as la
 
     paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-rc"
-    run_dir.mkdir(parents=True)
+    run_dir = curation_run_dir("case-rc")
     enqueue_run(state_for_paths(paths), run_dir)
     # lint-monkeypatch: ok — drives the real _invoke_lead_author; _run_curator_module
     monkeypatch.setattr(la, "run_under_held_queue_lock", lambda rd, paths=None, box=None, **_kw: 2)  # lint-monkeypatch: ok
@@ -667,8 +666,7 @@ def test_lead_author_drain_bounded_retry_then_quarantine(tmp_path: Path, monkeyp
     import defender.learning.leads.lead_author as la
 
     paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-transient"
-    run_dir.mkdir(parents=True)
+    run_dir = curation_run_dir("case-transient")
     enqueue_run(state_for_paths(paths), run_dir)
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "3")
 
@@ -694,8 +692,7 @@ def test_lead_author_drain_bounded_retry_then_quarantine(tmp_path: Path, monkeyp
 
 def test_lead_author_drain_opens_distinct_lead_author_pr(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-pr"
-    run_dir.mkdir(parents=True)
+    run_dir = curation_run_dir("case-pr")
     enqueue_run(state_for_paths(paths), run_dir)
     _, work = _origin_work(tmp_path)
     forge = _FakeForge(create_ref="https://github.com/o/r/pull/77")
@@ -705,7 +702,7 @@ def test_lead_author_drain_opens_distinct_lead_author_pr(tmp_path: Path):
         worktree_base=tmp_path / "wt",
     )
 
-    def _author(wt_paths, state, rd, *, box=None, **_kw):
+    def _author(wt_paths, state, run, *, box=None, **_kw):
         f = wt_paths.repo_root / "defender" / "skills" / "note.md"
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text("edit\n")
@@ -726,8 +723,7 @@ def test_lead_author_drain_delivers_a_retained_branch_on_the_next_tick(tmp_path:
     sees ONE `open_pr` for that head, and the record is gone. No second batch is minted for
     it and the lead-author agent is not run again."""
     paths, _ = _isolate(tmp_path)
-    run_dir = tmp_path / "tmprun" / "case-pr"
-    run_dir.mkdir(parents=True)
+    run_dir = curation_run_dir("case-pr")
     enqueue_run(state_for_paths(paths), run_dir)
     origin, work = _origin_work(tmp_path)
     forge = _FakeForge(create_ref="https://github.com/o/r/pull/78", raises=True)
@@ -738,8 +734,8 @@ def test_lead_author_drain_delivers_a_retained_branch_on_the_next_tick(tmp_path:
     )
     served: list[Path] = []
 
-    def _author(wt_paths, state, rd, *, box=None, **_kw):
-        served.append(rd)
+    def _author(wt_paths, state, run, *, box=None, **_kw):
+        served.append(run.run_dir)
         f = wt_paths.repo_root / "defender" / "skills" / "note.md"
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text("edit\n")
@@ -786,22 +782,20 @@ def test_lead_author_drain_resets_worktree_between_markers(tmp_path: Path):
     _real(wt, "commit", "-q", "-m", "seed")
 
     paths = LoopPaths(repo_root=wt, state_dir=tmp_path / "state")
-    poison = tmp_path / "runs" / "case-a-poison"
-    good = tmp_path / "runs" / "case-b-good"
-    poison.mkdir(parents=True)
-    good.mkdir(parents=True)
+    poison = curation_run_dir("case-a-poison")
+    good = curation_run_dir("case-b-good")
     enqueue_run(state_for_paths(paths), poison)
     enqueue_run(state_for_paths(paths), good)
 
     clean_at_entry: dict[str, bool] = {}
 
-    def run_lead_author(p, state, rd: Path, *, box=None, **_kw) -> None:
+    def run_lead_author(p, state, run, *, box=None, **_kw) -> None:
         st = _subprocess.run(
             ["git", "-C", str(p.repo_root), "status", "--porcelain"],
             capture_output=True, text=True,
         )
-        clean_at_entry[rd.name] = st.stdout.strip() == ""
-        if rd.name == "case-a-poison":
+        clean_at_entry[run.run_dir.name] = st.stdout.strip() == ""
+        if run.run_dir.name == "case-a-poison":
             (p.repo_root / "defender" / "skills" / "gather" / "queries"
              / "wazuh" / "auth-events.md").unlink()
             raise RuntimeError("scope-gate boom")

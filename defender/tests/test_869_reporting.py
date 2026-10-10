@@ -34,6 +34,7 @@ from defender.tests._declared869 import (
 )
 from defender.tests._curator1134 import open_state
 from defender.tests._lead_author_1134 import lane_tree_for, lead_trees
+from defender.tests._state1135 import curation_row, curation_run_dir
 from defender.learning.core.state import PITFALLS
 
 DECLARED = frozenset({"elastic"})
@@ -281,15 +282,16 @@ def test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record(tmp_pa
                      catalog=())
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     state = open_state(paths)
-    run_dir = tmp_path / "run-x"
-    (run_dir / "gather_raw").mkdir(parents=True)
+    # A natural run where the drain rehydrates the row (#1105 PR 2): the row is its address.
+    run_dir = curation_run_dir("run-x")
+    (run_dir / "gather_raw").mkdir()
     write(paths.state_root / "author-queue" / "case-1.json",
-          json.dumps({"case_id": "case-1", "run_dir": str(run_dir)}) + "\n")
+          json.dumps(curation_row("case-1", run_dir)) + "\n")
 
     calls: list[Path] = []
 
-    def refusing_lane(_paths, _state, rd, *, box=None, **_kw):
-        calls.append(rd)
+    def refusing_lane(_paths, _state, run, *, box=None, **_kw):
+        calls.append(run.run_dir)
         raise LeadAuthorError(
             "lead author refused: mcpsys is not a declared system in this tree")
 
@@ -305,7 +307,7 @@ def test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record(tmp_pa
     assert failed.is_file()
     record = json.loads(failed.read_text())
     assert "mcpsys" in record["failed"]
-    assert record["run_dir"] == str(run_dir)
+    assert (record["tenant_id"], record["run_id"]) == (run_dir.parent.parent.name, run_dir.name)
     assert record["case_id"] == "case-1"
     assert "attempts" not in record, (
         "an attempts counter means the retriable class was taken, which §7 declined"
