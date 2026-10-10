@@ -400,11 +400,13 @@ answer this world's facts imply.
 Leave the base answer exactly as it is wherever the world's facts do not reach. Where a fact \
 implies telemetry the base answer lacks, forge rows for it (`forge`), with the columns and \
 value types real rows of that system carry and fresh identifiers, and add them (an ES|QL \
-row is forged as its value array in column order). Where a fact \
+row is forged as its value array, one value per column in column order). A forged row \
+belongs to the system of the call you are serving. Where a fact \
 fixes a field of an entity, `record_fact` it and serve it consistently. Claim every \
 difference you make: `added` (forged rows), `removed` (with a side query that selects the \
 removed rows and its count), `changed` (entity, field, old, new), `counts` (base + added - \
-removed = served) and `entity_refs` (a forged column that names a real entity).
+removed = served; one entry for each count cell that moves — a total, an aggregate's \
+value, a bucket's count) and `entity_refs` (a forged column that names a real entity).
 
 Tools: `run_query` reads a real system (read verbs only); `forge`, `record_fact` stage rows \
 and facts for this attempt; `python` runs code in a sandboxed scratch box; `check` runs the \
@@ -434,11 +436,10 @@ _SERVED_SCHEMA = _schema({"served": _ANY, "claim": {"type": "object"}}, ["served
 _ORACLE_TOOLS: tuple[tuple[str, str, dict], ...] = (
     ("run_query", "Read a real system through the gather grant (read verbs only).",
      _QUERY_SCHEMA),
-    ("forge", "Stage a forged row for one of this world's facts.",
+    ("forge", "Stage a forged row of the call's system for one of this world's facts.",
      _schema({"forged_id": {"type": "string"}, "fact_id": {"type": "string"},
-              "system": {"type": "string"},
               "row": {"type": ["object", "array"]}},
-             ["forged_id", "fact_id", "system", "row"])),
+             ["forged_id", "fact_id", "row"])),
     ("record_fact", "Record the value a fact fixes for an entity's field.",
      _schema({"entity": {"type": "string"}, "field": {"type": "string"}, "value": _ANY},
              ["entity", "field", "value"])),
@@ -1114,7 +1115,7 @@ class Oracle:
         if name == "run_query":
             return self._run_query("oracle", args, run.waits)
         if name == "forge":
-            return self._forge(args, run.attempt, names=esql_names(run.base))
+            return self._forge(args, run.attempt, system=run.call[0], names=esql_names(run.base))
         if name == "record_fact":
             return self._record(args, run.attempt)
         if name == "python":
@@ -1135,19 +1136,24 @@ class Oracle:
         self.explored.append((str(system), answer))
         return _framed(f"{system}.{verb} answered", answer)
 
-    def _forge(self, args: dict, attempt: _Attempt, *, names: list[str] | None = None) -> str:
-        """Stage a forged row. A value array forged against an ES|QL base is staged as the
-        mapping of that answer's columns (the row model's cells), so the frozen row keeps its
-        column names whatever a later query projects."""
-        fid, fact_id, system, row = (args.get("forged_id"), args.get("fact_id"),
-                                     args.get("system"), args.get("row"))
+    def _forge(self, args: dict, attempt: _Attempt, *, system: str,
+               names: list[str] | None = None) -> str:
+        """Stage a forged row of `system`, the call's own (stamped by the host: an oracle-typed
+        system is ignored). A value array forged against an ES|QL base is staged as the mapping
+        of that answer's columns (the row model's cells), so the frozen row keeps its column
+        names whatever a later query projects; one whose length is not the column count is
+        refused, so no unzipped value array is ever staged."""
+        fid, fact_id, row = args.get("forged_id"), args.get("fact_id"), args.get("row")
         if not (isinstance(fid, str) and fid and isinstance(fact_id, str)
-                and isinstance(system, str) and isinstance(row, (Mapping, list))):
-            return ("forge refused: it needs a forged_id, a fact_id, a system and a row (a "
-                    "mapping of columns, or an ES|QL value array in column order).")
+                and isinstance(row, (Mapping, list))):
+            return ("forge refused: it needs a forged_id, a fact_id and a row (a mapping of "
+                    "columns, or an ES|QL value array in column order).")
         facts = {str(getattr(f, "fact_id", "")) for f in getattr(self.world, "facts", ()) or ()}
         if fact_id not in facts:
             return f"forge refused: {wrap_fresh(fact_id, 'untrusted')} is not one of this world's facts."
+        if names is not None and isinstance(row, list) and len(row) != len(names):
+            return (f"forge refused: this ES|QL answer has {len(names)} columns {names}; the "
+                    f"value array carries {len(row)} values (one per column, in column order).")
         cells = as_row(row, names)
         record = {"forged_id": fid, "fact_id": fact_id, "system": system,
                   "row": cells if cells is not None else list(row)}

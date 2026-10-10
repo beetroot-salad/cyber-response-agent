@@ -7,7 +7,10 @@ re-forged one is reused); one deadline over the whole attempt, tools included; o
 with its size cap, for every prompt; one recorder for every delivered row; a price settled
 before any request. Fourth round: the python box and the limiter-wait record belong to one
 attempt, the oracle-open clock mark to the process that wrote it; both price rows and the
-charge settle outside the provider-failure path. Each test is red on the code it replaces.
+charge settle outside the provider-failure path. Fifth round: the host stamps a forged row's
+system and refuses a value array that is not one value per column; a claimed row backs the
+fact it was forged for; a count entry accounts for one count cell; an entity reference is
+found by value. Each test is red on the code it replaces.
 """
 from __future__ import annotations
 
@@ -326,7 +329,7 @@ def test_re_forging_a_frozen_row_reuses_it_instead_of_staging_a_copy(tmp_path):
     reg.store.commit(forged=[frozen], facts=[], answer=None)
     attempt = oracle_mod._Attempt()
 
-    told = reg.oracle._forge(dict(frozen), attempt)
+    told = reg.oracle._forge(dict(frozen), attempt, system="idp")
 
     assert attempt.forged == {}, "the frozen row was staged as a fresh copy"
     assert "already frozen" in told, told
@@ -784,3 +787,162 @@ def test_a_failing_trace_write_still_charges_and_is_not_a_model_failure(tmp_path
     assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == ALICE_ROWS
     assert reg.store.spent > 0, "the paid responses were not charged"
     assert (o.requests, v.requests) == (1, 1), (o.requests, v.requests)
+
+
+# --- fifth round: the host fills in what it knows, and refuses malformed input at entry ------
+
+_ALICE_ROW = ALICE_ROWS["rows"][0]
+_HONEST = {"user": "alice", "event_id": "e-9f01", "action": "tgt", "host": "db-1",
+           "ts": "2026-07-28T15:20:00Z"}
+
+
+def _forge_and_serve(tmp_path: Path, row: Any, *, system: str = "Elastic") -> tuple[Any, Any]:
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    served = {"rows": [_ALICE_ROW, row]}
+    o = S.oracle(S.Move("forge", {"forged_id": "fg-1", "fact_id": "f1", "system": system,
+                                  "row": row}),
+                 S.submit(served, S.claim(added=[S.added("fg-1", "f1")])))
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o,
+                           verifier=S.passing_verifier(), retry_cap=1)
+    return reg, S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
+
+
+def test_a_forged_row_belongs_to_the_calls_system_not_the_one_the_oracle_typed(tmp_path):
+    """Fifth-round finding 3: check 2 found its real rows under the `system` the oracle typed
+    into `forge`, so a misspelt system ("Elastic" for idp) found none and passed a row of any
+    shape (D2). The host stamps the call's system: the misshapen row fails check 2, and an
+    honest row is frozen under the call's system (control)."""
+    with pytest.raises(oracle_mod.OracleUnservable) as refused:
+        _forge_and_serve(tmp_path / "a", {"ts": "2026-07-28T15:20:00Z", "totally": "different"})
+    assert "check 2" in refused.value.detail, refused.value.detail
+
+    reg, served = _forge_and_serve(tmp_path / "b", _HONEST)
+    assert served == {"rows": [_ALICE_ROW, _HONEST]}
+    assert reg.store.frozen["fg-1"]["system"] == "idp"
+
+
+def test_an_esql_value_array_of_the_wrong_length_is_refused_at_forge(tmp_path):
+    """Fifth-round finding 4: a value array whose length is not the ES|QL answer's column count
+    was staged as a raw list; the diff left it unzipped and check 2 skipped it, so a 3-value
+    row in a 4-column answer was served. `forge` refuses it with a legible reason, nothing is
+    staged, and the submission naming it fails."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, _esql(_ESQL_ROWS))
+    short = ["2026-03-01T11:00:00Z", "alice", "e-9f01"]
+    o = S.oracle(S.Move("forge", {"forged_id": "fg-1", "fact_id": "f1", "system": "idp",
+                                  "row": short}),
+                 S.submit(_esql([*_ESQL_ROWS, short]), S.claim(
+                     added=[S.added("fg-1", "f1")],
+                     counts=[S.counted("*", base=2, added_=1, served=3)])))
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o,
+                           verifier=S.passing_verifier(), retry_cap=1)
+
+    with pytest.raises(oracle_mod.OracleUnservable) as refused:
+        S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
+    assert "fg-1" in refused.value.detail, refused.value.detail
+    assert "check 1" in refused.value.detail, refused.value.detail
+    assert "fg-1" not in reg.store.frozen
+
+    told = reg.oracle._forge({"forged_id": "fg-2", "fact_id": "f1", "row": short},
+                             oracle_mod._Attempt(), system="idp",
+                             names=[c["name"] for c in _ESQL_COLUMNS])
+    assert told.startswith("forge refused"), told
+    assert "4 columns" in told, told
+
+
+def test_a_nested_esql_value_array_that_does_not_zip_fails_check_2():
+    """Fifth-round finding 4, the checks' side: an ES|QL answer nested below the top level
+    gives `forge` no column names, so a short value array reached the checks raw and check 2
+    skipped every non-mapping row. A forged row in an ES|QL table that is not one value per
+    column fails check 2; a full row passes (control)."""
+    base = {"result": _esql(_ESQL_ROWS)}
+
+    def forged(row: list[Any]) -> list[str]:
+        record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": row}
+        served = {"result": {**_esql([*_ESQL_ROWS, row]), "row_count": 2}}
+        return _checks(base, served, {"added": [{"forged_id": "fg-1", "fact_id": "F"}]},
+                       staged={"fg-1": record})
+
+    short = forged(["2026-03-01T11:00:00Z", "alice", "e-9f01"])
+    assert [f for f in short if f.startswith("check 2")], short
+    assert forged(["2026-03-01T11:00:00Z", "alice", "e-9f01", "db-1"]) == []
+
+
+def _two_fact_checks(claimed_fact: str, *, frozen: bool) -> list[str]:
+    row = {"user": "alice", "event_id": "e-9f01", "action": "tgt"}
+    record = {"x1": {"forged_id": "x1", "fact_id": "f1", "system": "s", "row": row}}
+    store = CheckStore(frozen=record if frozen else {}, staged={} if frozen else record,
+                       facts={}, rerun=lambda *_a: {})
+    base = {"rows": [_REAL_ROW]}
+    return check_submission(
+        base, {"rows": [_REAL_ROW, row]}, {"added": [{"forged_id": "x1", "fact_id": claimed_fact}]},
+        world=SimpleNamespace(facts=[SimpleNamespace(fact_id="f1"), SimpleNamespace(fact_id="f2")]),
+        store=store, real_data=RealData(answers=[("s", base)]))
+
+
+@pytest.mark.parametrize("frozen", [False, True], ids=["fresh", "frozen"])
+def test_a_forged_row_is_claimed_under_the_fact_it_was_forged_for(frozen):
+    """Fifth-round finding 7: a claim's `added[].fact_id` was compared with the forge record's
+    only for frozen rows, so a row forged this attempt for f1 could be claimed — and shown to
+    the verifier — as backing f2, then frozen under f1. Fresh or frozen, the claimed fact must
+    be the record's; the right fact passes (control)."""
+    wrong = _two_fact_checks("f2", frozen=frozen)
+    assert any(f.startswith("check 4") and "'f1', not 'f2'" in f for f in wrong), wrong
+    assert _two_fact_checks("f1", frozen=frozen) == []
+
+
+def test_a_star_count_does_not_cover_an_edit_to_a_real_rows_field():
+    """Fifth-round finding 2: a `counts` entry whose base/served matched a changed value
+    claimed it whatever the cell, and was never used up — one "*" entry (1 -> 2) covered the
+    answer's total AND edits of a real row's severity and risk from 1 to 2. Each count entry
+    accounts for one count cell, and a real row's ordinary field is none: the edits fail
+    check 1; the total alone, counted, passes (control)."""
+    base = {"total": 1, "hits": [{"user": "alice", "severity": 1, "risk": 1}]}
+    forged_row = {"user": "bob", "severity": 1, "risk": 1}
+    record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": forged_row}
+    claim = {"added": [{"forged_id": "fg-1", "fact_id": "F"}],
+             "counts": [{"group": "*", "base": 1, "added": 1, "removed": 0, "served": 2}]}
+
+    edited = _checks(base, {"total": 2, "hits": [{"user": "alice", "severity": 2, "risk": 2},
+                                                 forged_row]}, claim, staged={"fg-1": record})
+    unclaimed = sorted(f.split("'")[1] for f in edited if "without a claimed change" in f)
+    assert unclaimed == ["risk", "severity"], edited
+    assert _checks(base, {"total": 2, "hits": [base["hits"][0], forged_row]}, claim,
+                   staged={"fg-1": record}) == []
+
+
+def test_one_count_entry_accounts_for_one_count_cell():
+    """Fifth-round finding 2, consumption: one count entry covered every changed count cell
+    with its base and served. Two totals moving 1 -> 2 need two entries; with two, the answer
+    passes (control)."""
+    base = {"hits": {"total": 1}, "aggregations": {"all": {"value": 1}}}
+    served = {"hits": {"total": 2}, "aggregations": {"all": {"value": 2}}}
+    star = {"group": "*", "base": 1, "added": 1, "removed": 0, "served": 2}
+
+    one = _checks(base, served, {"counts": [star]})
+    assert sum("without a claimed change" in f for f in one) == 1, one
+    assert _checks(base, served, {"counts": [star, dict(star)]}) == []
+
+
+class _NoScan(list):
+    def __iter__(self):
+        raise AssertionError("check 3 scanned every real row instead of the value index")
+
+
+def test_a_declared_reference_is_found_by_value_not_by_scanning_every_real_row():
+    """Fifth-round finding 15: an entity reference was confirmed by scanning every flat real
+    row, though `RealData.by_value` indexes rows by value. It is looked up by value; the
+    reference still exempts the reused id."""
+    real_row = {"user": "alice", "user_id": "u-4410", "event_id": "e-100"}
+    real = RealData(answers=[("s", {"rows": [real_row]})])
+    real.maps = _NoScan(real.maps)
+    row = {"user": "alice", "user_id": "u-4410", "event_id": "e-9f01"}
+    record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": row}
+    claim = {"added": [{"forged_id": "fg-1", "fact_id": "F"}],
+             "entity_refs": [{"forged_id": "fg-1", "column": "user_id", "entity": "alice"}]}
+    store = CheckStore(frozen={}, staged={"fg-1": record}, facts={}, rerun=lambda *_a: {})
+
+    assert check_submission({"rows": []}, {"rows": [row]}, claim,
+                            world=SimpleNamespace(facts=[SimpleNamespace(fact_id="F")]),
+                            store=store, real_data=real) == []
