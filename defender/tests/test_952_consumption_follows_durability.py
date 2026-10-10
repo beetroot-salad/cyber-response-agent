@@ -1020,7 +1020,7 @@ def test_952_m4_done_sentinel_text_is_the_one_producer_and_write_done_sentinel_t
     assert none.endswith("commit_made: False\n")
 
     run_dir = _state1135.curation_run_dir("lead-run")
-    lead_author.write_done_sentinel(_state1135.run_of(run_dir), "abc123")
+    lead_author.write_done_sentinel(run_dir, "abc123")
     written = _done(run_dir).read_text(encoding="utf-8")
     assert _without_at(written) == _without_at(made)
     assert _SENTINEL_RE.match(written)

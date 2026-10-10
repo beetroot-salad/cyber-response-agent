@@ -367,7 +367,7 @@ class BatchDisposition:
 
         for marker in self.served:
             if marker.done:
-                write_done_sentinel(marker.run, marker.sha)
+                write_done_sentinel(marker.run.run_dir, marker.sha)
         for marker in self.served:
             state.done(marker.claim)
         if self.pitfalls is not None:

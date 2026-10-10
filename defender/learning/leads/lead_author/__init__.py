@@ -143,15 +143,11 @@ def done_sentinel_text(sha: str | None) -> str:
     )
 
 
-def write_done_sentinel(run: Run, sha: str | None) -> None:
-    """The one writer of the run's `lead_author/done`, which `_run_locked` short-circuits on.
+def write_done_sentinel(run_dir: Path, sha: str | None) -> None:
+    """The one writer of `<run_dir>/lead_author/done`, which `_run_locked` short-circuits on.
     Under `on_done` the drain writes it only after the scrub, so a tainted batch's run is
-    served again rather than recorded done. Takes the opened `Run` (#1105 PR 2); the state
-    goes through its `run_dir`."""
-    _write_done(run.run_dir, sha)
-
-
-def _write_done(run_dir: Path, sha: str | None) -> None:
+    served again rather than recorded done. `run_dir` is the folder of the run the lead author
+    was handed (an opened run's `run.run_dir`, #1105 PR 2)."""
     _write_state(_done_sentinel(run_dir), done_sentinel_text(sha))
 
 
@@ -248,7 +244,7 @@ def run(
         raise TypeError("run takes paths= (or deps=)")
     writable = label.writable_trees(deps.paths if deps is not None else paths)  # type: ignore[arg-type]
     run_dir = Path(run.run_dir)
-    sink = on_done if on_done is not None else functools.partial(_write_done, run_dir)
+    sink = on_done if on_done is not None else functools.partial(write_done_sentinel, run_dir)
 
     # Take the lock before building `deps`: resolving membership is subprocess work, and a
     # tick about to skip on a contended lock should neither pay for it nor fail on a tree the
@@ -380,7 +376,7 @@ def _prepare_handoffs(
     *, catalog: list | None = None, on_done: DoneSink | None = None,
 ) -> tuple[list, list, int | None]:
     # Optional only for tests that drive this frame directly; `_run_locked` always passes it.
-    record_done = on_done if on_done is not None else functools.partial(_write_done, run_dir)
+    record_done = on_done if on_done is not None else functools.partial(write_done_sentinel, run_dir)
     pending_drafts_raw = deps.discover_system_drafts()
     threshold = _lift_threshold()
     contradicting = [
