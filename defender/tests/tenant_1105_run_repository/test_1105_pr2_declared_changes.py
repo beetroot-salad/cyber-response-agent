@@ -49,13 +49,21 @@ is no longer shown (the `ROSTER_STRAY_RUN_DIR` rows go). Pinned by `test_dc3_…
 `test_dc4_the_page_roster_…`.
 
 NOT PINNED (ambiguous or no observable): `Run.reader()` (it survives only if the page's per-world
-reads still need it); the lead author's `--tenant T <run_id>` positive path (its CLI has no seam
-short of a real curation run; its J8 refusal is pinned); docs/profile (13); fork S (no
-observable change; G16 is the guard).
+reads still need it); the profile half of declared change 13 (`run_page_mirror`, the
+`tenant_runs_record` reader list); fork S (no observable change; G16 is the guard). The lead
+author's `--tenant T <run_id>` path and change 13's usage prose are pinned by
+`test_1105_pr2_tighten.py` (F9, F10), with the red-team pass's other closures.
 
 EXISTING TESTS A DECLARED CHANGE WILL EDIT (behavioural assertions, not just call sites; this
 commit edits none of them). Declared change 12's signature families adapt on top of these.
 
+  F1  the fence's end state (`test_1105_pr2_tighten::test_f1_…`): tenant_1105_run_repository/
+      test_1105_layout_lint.py::test_1105_layout_lint_is_clean_on_the_tree_and_every_allow_list_entry_is_load_bearing
+      (pins PR 1's 18 entries; D7″ empties them) and
+      ::test_1105_layout_lint_table_equals_the_importer_population_and_an_unlisted_module_gets_no_exemption
+      (pins `NON_LAYOUT`, which lacks `RunAbsent` / `RunAddress`); test_1120_owner_lint_reaches_runs_base.py
+      (pins the literal `runs_base = tenant.runs` / `runs_base = tenant.tenant.runs` lines and
+      `_episode_tenant` as the launcher's tenant factory, which D-create (a) and row 16 remove).
   0   tenant_1105_run_repository/test_1105_run_repository_package.py (the door's `__all__` pin)
       and PR 1's lookup tests (test_1105_run_lookup.py, test_1105_spec_holes.py,
       test_1105_review_followups.py, test_1105_claims_followups.py): move onto the methods.
@@ -88,7 +96,8 @@ commit edits none of them). Declared change 12's signature families adapt on top
       (a `runs/`-only world's section).
   4   test_1133_entry_points.py::test_*doors_keep_their_path_signatures (:16);
       test_1133_o4.py::test_o4_8_2_render_episode_refuses_a_missing_episode_dir_and_does_not_recreate_it
-      (moves to `runs.episode`); test_1025_page_contract.py::test_1025_cli_argument_names_an_existing_regular_file_not_a_directory;
+      (moves to `runs.episode`); test_1025_page_contract.py::test_1025_cli_argument_names_an_existing_regular_file_not_a_directory
+      and ::test_1025_the_standalone_script_runs_with_no_pythonpath_from_any_cwd (passes `<dir>`);
       the `_episode_1025.run_dir` fixture (14 importers) gains `runs/_tenant.json`.
   6   tenant_1078_pass_a/test_1078_run_main.py::test_o5_sibling_tenant_from_record,
       ::test_d3_materialize_seam_tenant (sibling half), ::test_o5_forged_stamp_ignored,
@@ -102,12 +111,15 @@ commit edits none of them). Declared change 12's signature families adapt on top
       container created); test_1133_o4.py::test_the_sibling_door_refuses_a_resume_manifest_not_named_family_yaml
       (G18, moot); the other `"--resume"` files (11).
   7   e2e/test_1110_run_page_record_e2e.py::test_1110_the_standalone_re_render_logs_under_the_tenant_the_runs_stamp_names
-      (the log names the request's tenant); the `visualize_run.main` files (3).
+      (the log names the request's tenant) and every other test there that runs the standalone
+      re-render with a folder path (the red-team pass saw six red; the O4 store-precondition
+      pin stays green); the other `visualize_run.main` files (3).
   8   learning/test_loop.py::test_lead_author_drain_marks_artifact_missing,
       ::test_lead_author_drain_dead_letters_an_unservable_marker; test_869_reporting.py (its
       dead letter carries `run_dir`); the `enqueue_curation(` (11) and `.claim("case_id"` (5)
       files.
-  J8  test_trace_lesson.py (every `--runs-dir` call); test_n9 (`--tenant` required);
+  J8  test_trace_lesson.py, test_corpus_hardening_586.py and test_corpus_fold_584.py (every
+      `--runs-dir` call); test_n9 (`--tenant` required);
       test_1120's `resolve_data_root` census (gains the drain and each J8 edge).
 """
 from __future__ import annotations
@@ -660,7 +672,15 @@ def test_dc7_the_run_page_takes_a_tenant_and_a_run_id(tmp_path):
     assert set(named) == {P.SIBLING_TENANT}, (
         f"the log does not file the re-render under the request's tenant: {named!r}")
 
+    # The arm as a real sibling leaves it: its case pointer names the source's store (a sibling
+    # forks into the source's database), so the page's store precondition (M1, pinned by
+    # e2e/test_1110::…o4…store_cannot_be_resolved…) holds for it as for any run — `--episode`
+    # gets no pass on it.
+    from defender.runtime import session_store
+
     arm = P.T.sibling_run_dir(ep / "runs", "b")
+    session_store.write_case_pointer(arm, case_id=P.T.SOURCE_CASE_ID,
+                                     store_path=session_store.resolve_store_path(src))
     got = P.drive_cli(P.run_page_main(), P.new_run_page_argv(
         P.SIBLING_TENANT, arm.name, episode_id=ep.name))
     assert got.rc == 0, f"--episode ep <arm id> did not render: {got.said}"

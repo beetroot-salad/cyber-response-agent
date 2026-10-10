@@ -360,6 +360,25 @@ def test_a_run_address_checks_its_fields_at_construction_and_is_frozen():
     assert str(good.tenant_id) == H.T_ID
 
 
+@pytest.mark.parametrize("episode_id", [
+    "..", ".", "a/b", "Upper-Case", "", "x" * 300, "-leading", "a\x00b", b"ep", 7,
+], ids=["dotdot", "dot", "slash", "upper", "empty", "over-long", "dash-first", "nul", "bytes",
+        "int"])
+def test_a_run_address_holds_its_episode_id_to_the_owners_episode_grammar(episode_id):
+    """F6(b) / D-repo: `RunAddress` checks `episode_id` at construction against the owner's
+    episode-id grammar — exactly a `str`, a valid run id (`..`, `.`, a separator, a leading
+    `-`, NUL and the empty string are not), case-stable (`Upper-Case` is not), and short enough
+    to name its record (300 bytes is not) — and refuses every member of that domain, not only
+    `/`. POSITIVE CONTROL: the same fields with the episode id `EP` build an address. RED at
+    base: the door has no `RunAddress` (ImportError)."""
+    from defender.run_repository import RunAddress, RunId
+
+    fields = {"tenant_id": _tenant.TenantId(H.T_ID), "run_id": RunId.parse(f"{EP}-a")}
+    assert RunAddress(**fields, episode_id=EP).episode_id == EP
+    assert H.raised(RunAddress, **fields, episode_id=episode_id) is not None, (
+        f"RunAddress accepted the episode id {episode_id!r}")
+
+
 # ==========================================================================================
 # The episode view.
 # ==========================================================================================
