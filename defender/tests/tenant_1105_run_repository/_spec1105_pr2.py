@@ -75,8 +75,7 @@ def launch_argv(tenant_id: str, source_run_dir: Path,
     """The launcher's command line for `source_run_dir` of `tenant_id`. TODAY: the source as
     a positional path (`cli.py:1428`), the tenant derived from its runs folder. PR 2 (declared
     change 1): `new_launch_argv(tenant_id, source_run_dir.name, ...)`."""
-    del tenant_id  # today's edge derives it
-    return [str(source_run_dir), str(branch_message_id), "--continuation-prompt", "go", *extra]
+    return new_launch_argv(tenant_id, Path(source_run_dir).name, branch_message_id, *extra)
 
 
 def new_launch_argv(tenant_id: str, source_run_id: str,
@@ -89,8 +88,7 @@ def new_launch_argv(tenant_id: str, source_run_id: str,
 def sibling_argv(tenant_id: str, episode_dir: Path, label: str, *extra: str) -> list[str]:
     """A sibling's `run.py` command line. TODAY: `--resume <episode>/family.yaml --world L
     --tenant T`. PR 2 (declared change 6): `new_sibling_argv(tenant_id, episode_dir.name, L)`."""
-    return ["--resume", str(Path(episode_dir) / "family.yaml"), "--world", label,
-            "--tenant", tenant_id, *extra]
+    return new_sibling_argv(tenant_id, Path(episode_dir).name, label, *extra)
 
 
 def new_sibling_argv(tenant_id: str, episode_id: str, label: str, *extra: str) -> list[str]:
