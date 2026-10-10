@@ -24,6 +24,7 @@ from defender._io import read_jsonl_rows
 from defender.run_repository import RunPaths
 from defender.scripts.visualize import visualize_data as d
 from defender.scripts.visualize.visualize_run import render_runtime_page
+from defender.run_repository import SessionPaths
 
 _USAGE = {"input_tokens": 100, "output_tokens": 800, "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 200}
 
@@ -70,7 +71,7 @@ def _seed_session_store(run: Path, messages: list[dict]) -> None:
     # silently picking one, which is what surfaces this fixture's own pre-existing
     # cross-test collision.
     store = ss.open_store(
-        case_id=f"visualize-runtime-fixture-{run.parent.name}", runs_base=run.parent)
+        case_id=f"visualize-runtime-fixture-{run.parent.name}", sessions=SessionPaths(run.parent))
     ss.write_case_pointer(run, case_id=store.case_id, store_path=store.path)
     sessions: dict[str, str] = {}
     for rec in messages:

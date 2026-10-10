@@ -660,8 +660,10 @@ def open_store(*, case_id: str, sessions: SessionPaths) -> StoreHandle:
     """The store for `case_id`, created if missing. The layout owner (`sessions`, a run's
     `RunPaths.session_paths()`) hands over both the store's path and the root its directory
     is made under (#1105 fork S(b)): this module reads neither a runs base nor a trust root."""
-    path, root = sessions.store(case_id)
-    # Guarded under the root the owner handed out, not one composed here.
+    # One composer for the store's path in this module (`store_path_for`, which the resume
+    # door also asks); the mkdir root comes from the same hand-out, not composed here.
+    path = store_path_for(case_id, sessions=sessions)
+    _, root = sessions.store(case_id)
     guarded_mkdir(path.parent, base=root)
     fresh = not path.exists()
     conn = _bare_connect(path)

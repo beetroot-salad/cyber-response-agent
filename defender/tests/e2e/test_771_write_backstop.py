@@ -83,6 +83,7 @@ from defender.tests.e2e._spec771 import (  # noqa: E402
     worktree_tree,
     write_guarded,
 )
+from defender.run_repository import SessionPaths  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -394,7 +395,7 @@ def test_a_symlinked_ancestor_above_the_tree_does_not_refuse(tmp_path):
     )
 
     # The consequence that is not recoverable by any caller: a run cannot start at all.
-    handle = session_store.open_store(case_id="c-771-anchor", runs_base=linked / "runs")
+    handle = session_store.open_store(case_id="c-771-anchor", sessions=SessionPaths(linked / "runs"))
     try:
         assert handle.path.is_file(), "the session store did not land under a symlinked base"
     finally:

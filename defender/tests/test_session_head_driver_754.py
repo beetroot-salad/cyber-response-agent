@@ -49,6 +49,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     drive,
     materialize,
 )
+from defender.run_repository import SessionPaths  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -131,7 +132,7 @@ def test_a_store_error_during_setup_ends_the_run_through_the_handled_exit(tmp_pa
     # the store.
     ss = store_mod()
     run_dir = materialize(tmp_path, GOLDEN)
-    legacy_v1_store_file(ss.store_path_for("stale-case", runs_base=runs_base(tmp_path)))
+    legacy_v1_store_file(ss.store_path_for("stale-case", sessions=SessionPaths(runs_base(tmp_path))))
     replay = ReplayFn([Turn(text="never reached")])
 
     result = drive(run_dir, run_id="stale-setup", main=replay,

@@ -49,6 +49,7 @@ from defender.tests._session_store_705 import (  # noqa: E402
     tool_call_response,
     user_request,
 )
+from defender.run_repository import SessionPaths  # noqa: E402
 
 
 # the two tables' declared shape
@@ -260,7 +261,7 @@ def test_the_log_reads_back_identically_from_a_second_process(tmp_path):
     base = runs_base(tmp_path)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    store = ss.open_store(case_id="case-alpha", runs_base=base)
+    store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
     ss.write_case_pointer(run_dir, case_id="case-alpha", store_path=store.path)
 
     live_session = store.new_session(agent_id="main")
@@ -448,7 +449,7 @@ def test_a_fresh_store_stamps_schema_version_2(tmp_path):
     base = runs_base(tmp_path)
 
     assert ss.SCHEMA_VERSION == 2, "the bump this change ships"
-    store = ss.open_store(case_id="case-fresh", runs_base=base)
+    store = ss.open_store(case_id="case-fresh", sessions=SessionPaths(base))
     session_id = store.new_session(agent_id="main")
     linear_turns(store, session_id, 1)
     assert store.connection.execute("PRAGMA user_version").fetchone()[0] == 2
@@ -460,7 +461,7 @@ def test_a_fresh_store_stamps_schema_version_2(tmp_path):
     assert "session_head_log" in shape["objects"], shape["objects"]
     assert "head_message_id" in shape["session_columns"], shape["session_columns"]
 
-    again = ss.open_store(case_id="case-fresh", runs_base=base)
+    again = ss.open_store(case_id="case-fresh", sessions=SessionPaths(base))
     assert ss.path_row_ids(again, session_id) == message_ids(again, session_id), (
         "a non-fresh file at the current version reopens and reads")
 
@@ -478,16 +479,16 @@ def test_open_store_refuses_a_user_version_1_file(tmp_path):
     # provenance: issue obligation 9, as narrowed by correction C2.
     ss = store_mod()
     base = runs_base(tmp_path)
-    stale = legacy_v1_store_file(ss.store_path_for("case-stale", runs_base=base))
+    stale = legacy_v1_store_file(ss.store_path_for("case-stale", sessions=SessionPaths(base)))
     assert file_shape(stale)["user_version"] == 1
 
-    refusal = raised_by(ss.open_store, case_id="case-stale", runs_base=base)
+    refusal = raised_by(ss.open_store, case_id="case-stale", sessions=SessionPaths(base))
 
     assert isinstance(refusal, ss.UnknownSchemaVersion), (
         f"a version-1 file must be refused at open; got {refusal!r}")
     assert "1" in str(refusal), f"the refusal names the version it found: {refusal}"
 
-    fresh = ss.open_store(case_id="case-fresh", runs_base=base)
+    fresh = ss.open_store(case_id="case-fresh", sessions=SessionPaths(base))
     assert fresh.path != stale, "control: a file at the current version opens"
     assert fresh.new_session(agent_id="main")
 
@@ -508,13 +509,13 @@ def test_open_store_refuses_before_any_ddl_or_wal_pragma(tmp_path):
     # until process exit.
     ss = store_mod()
     base = runs_base(tmp_path)
-    stale = legacy_v1_store_file(ss.store_path_for("case-stale", runs_base=base))
+    stale = legacy_v1_store_file(ss.store_path_for("case-stale", sessions=SessionPaths(base)))
     before_bytes = stale.read_bytes()
     before = file_shape(stale)
     assert before["journal_mode"] == "delete", before
     assert "session_head_log" not in before["objects"], before
 
-    refusal = raised_by(ss.open_store, case_id="case-stale", runs_base=base)
+    refusal = raised_by(ss.open_store, case_id="case-stale", sessions=SessionPaths(base))
 
     assert isinstance(refusal, ss.StoreError), refusal
     assert stale.read_bytes() == before_bytes, (
@@ -543,20 +544,20 @@ def test_open_store_for_read_refuses_a_stale_version_too(tmp_path):
     # wired exclusively to hydrate. C11 for the asymmetry, OC-2 for the writer's fresh file.
     ss = store_mod()
     base = runs_base(tmp_path)
-    stale = legacy_v1_store_file(ss.store_path_for("case-stale", runs_base=base))
+    stale = legacy_v1_store_file(ss.store_path_for("case-stale", sessions=SessionPaths(base)))
 
     reader_refusal = raised_by(ss.open_store_for_read, stale)
-    writer_refusal = raised_by(ss.open_store, case_id="case-stale", runs_base=base)
+    writer_refusal = raised_by(ss.open_store, case_id="case-stale", sessions=SessionPaths(base))
     assert isinstance(reader_refusal, ss.UnknownSchemaVersion), (
         f"the reader is the opener that MEETS a stale file; got {reader_refusal!r}")
     assert isinstance(writer_refusal, ss.UnknownSchemaVersion), writer_refusal
     assert sidecars(stale) == [], "neither refusal leaks its connection"
 
-    current = ss.open_store(case_id="case-current", runs_base=base)
+    current = ss.open_store(case_id="case-current", sessions=SessionPaths(base))
     session_id = current.new_session(agent_id="main")
     linear_turns(current, session_id, 1)
     current.close()
-    reader = ss.open_store_for_read(ss.store_path_for("case-current", runs_base=base))
+    reader = ss.open_store_for_read(ss.store_path_for("case-current", sessions=SessionPaths(base)))
     assert ss.path_row_ids(reader, session_id), (
         "control: the same reader opens and serves a file at the current version")
 
@@ -573,7 +574,7 @@ def test_an_unknown_user_version_is_still_refused_at_the_new_raise_point(tmp_pat
     # refused.
     ss = store_mod()
     base = runs_base(tmp_path)
-    store = ss.open_store(case_id="case-alpha", runs_base=base)
+    store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
     session_id = store.new_session(agent_id="main")
     linear_turns(store, session_id, 1)
     path = store.path
@@ -586,7 +587,7 @@ def test_an_unknown_user_version_is_still_refused_at_the_new_raise_point(tmp_pat
         raw.commit()
         raw.close()
         with pytest.raises(ss.UnknownSchemaVersion):
-            ss.open_store(case_id="case-alpha", runs_base=base)
+            ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
         with pytest.raises(ss.UnknownSchemaVersion):
             ss.open_store_for_read(path)
 
@@ -594,7 +595,7 @@ def test_an_unknown_user_version_is_still_refused_at_the_new_raise_point(tmp_pat
     raw.execute(f"PRAGMA user_version = {ss.SCHEMA_VERSION}")
     raw.commit()
     raw.close()
-    reopened = ss.open_store(case_id="case-alpha", runs_base=base)
+    reopened = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
     assert ss.hydrate(reopened, session_id, role="analysis"), (
         "control: restored to the known version, the same file opens and reads again")
 
@@ -612,13 +613,13 @@ def test_no_alter_shim_reshapes_an_existing_store(tmp_path):
     # re-shaped' is literal. P84.
     ss = store_mod()
     base = runs_base(tmp_path)
-    legacy = legacy_v1_store_file(ss.store_path_for("case-legacy", runs_base=base),
+    legacy = legacy_v1_store_file(ss.store_path_for("case-legacy", sessions=SessionPaths(base)),
                                   migrated=False)
     before = file_shape(legacy)
     assert before["session_columns"] == ["session_id", "case_id", "parent_session_id",
                                          "truncated_by", "last_render_len"], before
 
-    refusal = raised_by(ss.open_store, case_id="case-legacy", runs_base=base)
+    refusal = raised_by(ss.open_store, case_id="case-legacy", sessions=SessionPaths(base))
 
     assert isinstance(refusal, ss.UnknownSchemaVersion), refusal
     after = file_shape(legacy)
@@ -628,7 +629,7 @@ def test_no_alter_shim_reshapes_an_existing_store(tmp_path):
     assert "head_message_id" not in after["session_columns"]
     assert after["user_version"] == 1, "and its version was not re-stamped either"
 
-    fresh = ss.open_store(case_id="case-fresh", runs_base=base)
+    fresh = ss.open_store(case_id="case-fresh", sessions=SessionPaths(base))
     assert "head_message_id" in file_shape(fresh.path)["session_columns"], (
         "control: the fresh path still builds the current shape")
 
@@ -641,7 +642,7 @@ def _rendered_run(tmp_path, *, case_id: str = "case-alpha"):
     base = runs_base(tmp_path)
     run_dir = tmp_path / f"run-{case_id}"
     run_dir.mkdir()
-    store = ss.open_store(case_id=case_id, runs_base=base)
+    store = ss.open_store(case_id=case_id, sessions=SessionPaths(base))
     ss.write_case_pointer(run_dir, case_id=case_id, store_path=store.path)
     return run_dir, store
 

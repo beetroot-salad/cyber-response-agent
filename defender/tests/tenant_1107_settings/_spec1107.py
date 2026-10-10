@@ -64,6 +64,7 @@ from typing import Any
 
 from defender.tests import _tenants1106 as T1106
 from defender.tests._by_path import LINT_DIR, load_module
+from defender.run_repository import SessionPaths
 
 REPO_ROOT = T1106.REPO_ROOT
 DEFENDER = T1106.DEFENDER
@@ -645,7 +646,7 @@ def seed_session_store(run_dir: Path) -> None:
     """A real, empty session store behind the run dir's pointer — `render_and_mirror`'s
     precondition (the page is refused for a run whose record cannot be found)."""
     ss = mod("runtime.session_store")
-    store = ss.open_store(case_id=f"c1107-{uuid.uuid4().hex[:12]}", runs_base=Path(run_dir).parent)
+    store = ss.open_store(case_id=f"c1107-{uuid.uuid4().hex[:12]}", sessions=SessionPaths(Path(run_dir).parent))
     try:
         ss.write_case_pointer(Path(run_dir), case_id=store.case_id, store_path=store.path)
     finally:

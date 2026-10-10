@@ -62,6 +62,7 @@ from defender.tests.e2e._replay_harness import (
     drive,
     materialize,
 )
+from defender.run_repository import SessionPaths
 
 pytestmark = pytest.mark.e2e
 
@@ -279,7 +280,7 @@ def test_the_pre_change_construction_assertions_are_overturned(tmp_path, monkeyp
     3/3 phase-C consensus: both pre-change assertions must be REWRITTEN (O20, R2/M8).
     Leaving them green would pin the branch-on-the-flag reading R10 rejected."""
     ss = store_mod()
-    store = ss.open_store(case_id="case-assembly", runs_base=runs_base(tmp_path))
+    store = ss.open_store(case_id="case-assembly", sessions=SessionPaths(runs_base(tmp_path)))
     session_id = store.new_session(agent_id="main")
 
     monkeypatch.delenv("DEFENDER_COMPACTION", raising=False)

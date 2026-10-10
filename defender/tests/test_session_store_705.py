@@ -54,6 +54,7 @@ from defender.tests._session_store_705 import (
     tool_return_request,
     user_request,
 )
+from defender.run_repository import SessionPaths
 
 
 # the handle, the connection, the schema version
@@ -65,16 +66,16 @@ def test_open_store_returns_a_per_case_handle(tmp_path):
     ss = store_mod()
     base = runs_base(tmp_path)
 
-    first = ss.open_store(case_id="case-alpha", runs_base=base)
+    first = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
     s1 = first.new_session(agent_id="main")
     first.append(s1, [user_request("execution one")], agent_id="main")
     first.close()
 
-    second = ss.open_store(case_id="case-alpha", runs_base=base)
+    second = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
     s2 = second.new_session(agent_id="main")
     second.append(s2, [user_request("execution two")], agent_id="main")
 
-    other = ss.open_store(case_id="case-beta", runs_base=base)
+    other = ss.open_store(case_id="case-beta", sessions=SessionPaths(base))
 
     assert second.path == first.path, "two executions of one case must share one file"
     assert other.path != first.path, "a different case must not share the file"
@@ -174,7 +175,7 @@ def test_reader_refuses_an_unknown_user_version(tmp_path):
         raw.commit()
         raw.close()
         with pytest.raises(ss.UnknownSchemaVersion):
-            ss.open_store(case_id="case-alpha", runs_base=runs_base(tmp_path))
+            ss.open_store(case_id="case-alpha", sessions=SessionPaths(runs_base(tmp_path)))
 
 
 def test_every_store_connection_sets_the_foreign_keys_pragma_itself(tmp_path):
@@ -188,10 +189,10 @@ def test_every_store_connection_sets_the_foreign_keys_pragma_itself(tmp_path):
     FK-violating INSERT SUCCEEDED."""
     ss = store_mod()
     base = runs_base(tmp_path)
-    writer = ss.open_store(case_id="case-alpha", runs_base=base)
+    writer = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
     writer.new_session(agent_id="main")
 
-    second = ss.open_store(case_id="case-alpha", runs_base=base)
+    second = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
     assert second.connection is not writer.connection, (
         "this demand is about a SECOND connection; sharing one hides the defect")
     assert second.connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
@@ -600,7 +601,7 @@ def test_case_id_is_inherited_by_a_fork_and_the_eval_join_key_is_not(tmp_path):
     assert fork != main, "session_id is minted, not derived"
 
     from defender.tests._session_store_705 import runs_base as _rb
-    other = store_mod().open_store(case_id="case-beta", runs_base=_rb(tmp_path))
+    other = store_mod().open_store(case_id="case-beta", sessions=SessionPaths(_rb(tmp_path)))
     assert other.path != store.path, "case_id is what selects the file"
 
 
@@ -795,7 +796,7 @@ def test_the_last_render_length_is_persisted_on_the_session_row(tmp_path):
         f"the session row must carry the render cursor; columns are {cols}")
 
     store.close()
-    reopened = ss.open_store(case_id="case-alpha", runs_base=runs_base(tmp_path))
+    reopened = ss.open_store(case_id="case-alpha", sessions=SessionPaths(runs_base(tmp_path)))
     assert reopened.last_render_len(session_id) == 3, (
         "a fresh process must recover the cursor from the store")
 
@@ -809,9 +810,9 @@ def test_an_append_is_one_commit_per_render_boundary(tmp_path):
     NEVER visible), so a torn (row, payload) pair is observable if it exists."""
     ss = store_mod()
     base = runs_base(tmp_path)
-    store = ss.open_store(case_id="case-alpha", runs_base=base)
+    store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
     session_id = store.new_session(agent_id="main")
-    observer = ss.open_store(case_id="case-alpha", runs_base=base)
+    observer = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
 
     samples: list[tuple[int, int]] = []
 
@@ -843,7 +844,7 @@ def test_message_writes_from_concurrent_gather_legs_do_not_collide_or_lose_rows(
     cross-visibility) that this demand pins as a test rather than as a probe."""
     ss = store_mod()
     base = runs_base(tmp_path)
-    owner = ss.open_store(case_id="case-alpha", runs_base=base)
+    owner = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
     session_id = owner.new_session(agent_id="main")
 
     counts = {"gather-a": 20, "gather-b": 10}
@@ -852,7 +853,7 @@ def test_message_writes_from_concurrent_gather_legs_do_not_collide_or_lose_rows(
 
     def leg(agent_id: str, n: int) -> None:
         try:
-            handle = ss.open_store(case_id="case-alpha", runs_base=base)
+            handle = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
             barrier.wait(timeout=10)
             for i in range(n):
                 handle.append(session_id, [text_response(f"{agent_id}-{i}")],
@@ -893,7 +894,7 @@ def test_one_writer_racing_itself_under_one_agent_id_allocates_distinct_seqs(tmp
     satisfied by an empty table."""
     ss = store_mod()
     base = runs_base(tmp_path)
-    owner = ss.open_store(case_id="case-alpha", runs_base=base)
+    owner = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
     session_id = owner.new_session(agent_id="main")
 
     per_leg = 15
@@ -903,7 +904,7 @@ def test_one_writer_racing_itself_under_one_agent_id_allocates_distinct_seqs(tmp
 
     def leg(tag: str) -> None:
         try:
-            handle = ss.open_store(case_id="case-alpha", runs_base=base)
+            handle = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
             barrier.wait(timeout=10)
             for i in range(per_leg):
                 handle.append(session_id, [text_response(f"{tag}-{i}")], agent_id=agent_id)

@@ -99,6 +99,7 @@ from defender.tests.test_987_query_door import (  # noqa: E402
     frame_body,
     split,
 )
+from defender.run_repository import SessionPaths  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -690,7 +691,7 @@ def test_the_stopped_leads_session_is_recorded_like_a_finished_ones(tmp_path):
     request, recorded under the lead's own session — and ends on that request, the trailing
     parity every finished gather session has (there is no gather-side run-end flush)."""
     base = runs_base(tmp_path / "db")
-    store = session_store.open_store(case_id="case-987", runs_base=base)
+    store = session_store.open_store(case_id="case-987", sessions=SessionPaths(base))
     session_id = store.new_session(agent_id=f"gather:{LEAD}")
     caps = driver._gather_extra_capabilities(store, session_id, f"gather:{LEAD}", request_limit=6)
 
@@ -718,7 +719,7 @@ def test_the_marked_final_request_is_recorded_as_it_was_sent(tmp_path):
     ceiling hook sits ahead of every extra capability on a gather agent — so the session
     holds the request the model actually read, sentence included, and not a shorter one."""
     base = runs_base(tmp_path / "db")
-    store = session_store.open_store(case_id="case-987c", runs_base=base)
+    store = session_store.open_store(case_id="case-987c", sessions=SessionPaths(base))
     session_id = store.new_session(agent_id=f"gather:{LEAD}")
     caps = driver._gather_extra_capabilities(store, session_id, f"gather:{LEAD}", request_limit=3)
 
