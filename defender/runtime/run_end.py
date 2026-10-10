@@ -78,7 +78,7 @@ def sidecar_path(run_dir: Path) -> Path:
     no box-writable content influences it.
     """
     run_dir = Path(run_dir)
-    return RunPaths(run_dir).run_end_sidecar(run_dir.parent)
+    return RunPaths(run_dir).run_end_sidecar()
 
 
 def write_sidecar(run_dir: Path, record: RunEnd) -> None:

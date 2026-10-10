@@ -153,7 +153,7 @@ StoreFactory = Callable[[str, Path], Any]
 
 
 def _default_store_factory(case_id: str, run_dir: Path) -> Any:
-    return session_store.open_store(case_id=case_id, runs_base=run_dir.parent)
+    return session_store.open_store(case_id=case_id, sessions=RunPaths(run_dir).session_paths())
 
 
 def _resolve_store_factory(resume: Any, store_factory: StoreFactory | None) -> StoreFactory:

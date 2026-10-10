@@ -639,10 +639,12 @@ def _find_nonrepresentable(obj: Any) -> Any:
 
 # open / resolve
 
-def store_path_for(case_id: str, *, runs_base: Path) -> Path:
-    """The store for `case_id` beside `runs_base`. Raises `InvalidCaseId` for a malformed or
-    non-case-stable id."""
-    return SessionPaths(runs_base).session_db(case_id)
+def store_path_for(case_id: str, *, sessions: SessionPaths) -> Path:
+    """The store for `case_id`, as the layout owner's `sessions` (a run's
+    `RunPaths.session_paths()`) names it (#1105 fork S(b)). Raises `InvalidCaseId` for a
+    malformed or non-case-stable id."""
+    store, _root = sessions.store(case_id)
+    return store
 
 
 def _refuse_stale_version(conn: sqlite3.Connection) -> None:
@@ -654,10 +656,13 @@ def _refuse_stale_version(conn: sqlite3.Connection) -> None:
         raise UnknownSchemaVersion(f"store reports schema version {version}")
 
 
-def open_store(*, case_id: str, runs_base: Path) -> StoreHandle:
-    path = store_path_for(case_id, runs_base=runs_base)
-    # Guarded under the trust root `SessionPaths` names, not one composed here.
-    guarded_mkdir(path.parent, base=SessionPaths(runs_base).trust_root)
+def open_store(*, case_id: str, sessions: SessionPaths) -> StoreHandle:
+    """The store for `case_id`, created if missing. The layout owner (`sessions`, a run's
+    `RunPaths.session_paths()`) hands over both the store's path and the root its directory
+    is made under (#1105 fork S(b)): this module reads neither a runs base nor a trust root."""
+    path, root = sessions.store(case_id)
+    # Guarded under the root the owner handed out, not one composed here.
+    guarded_mkdir(path.parent, base=root)
     fresh = not path.exists()
     conn = _bare_connect(path)
     try:

@@ -207,7 +207,8 @@ class RecordHandle:
     def _do_open(self):
         # Resolve first so the owner's refusals apply to `.open()` as to `.path`.
         _ = self.path
-        return self.open_store(case_id=self._lineage_id, runs_base=self._sessions_runs_base)
+        return self.open_store(case_id=self._lineage_id,
+                               sessions=SessionPaths(self._sessions_runs_base))
 
 
 class _RecordHandleGroup:
