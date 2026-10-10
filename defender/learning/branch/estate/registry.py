@@ -354,12 +354,23 @@ class WorldRegistry(ModuleVerbRegistry):
             self._turn_ctx = ctx
             if run_dir is not None:
                 oracle_turn_opened(Path(run_dir))
+            ended = False
             try:
                 yield
+                ended = True
             finally:
                 self._turn_ctx = None
                 if run_dir is not None:
-                    oracle_turn_closed(Path(run_dir))
+                    try:
+                        oracle_turn_closed(Path(run_dir))
+                    except Exception as unclosed:
+                        if ended:
+                            raise
+                        # The turn's own abort (an unservable world, which ends the sibling)
+                        # is what leaves; the mark it could not close names this process, and
+                        # is ignored once the process is gone (`budget_enforcer._oracle_held`).
+                        _logger.warning(f"the oracle turn's clock mark could not be closed "
+                                        f"({unclosed!r}) while the turn was aborting")
 
     def _oracle_context(self) -> Any:
         """The context an oracle-side query runs in: that of the call whose turn is held,
@@ -418,6 +429,11 @@ class _LazyModel:
     def __init__(self, name: str, effort: str) -> None:
         self.name, self.effort = name, effort
         self._built: Any = None
+
+    @property
+    def model_name(self) -> str:
+        """The knob's model name, which prices the role without building it (`_price_row`)."""
+        return self.name
 
     @property
     def model(self) -> Any:

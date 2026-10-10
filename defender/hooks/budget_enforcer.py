@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from datetime import UTC, datetime
@@ -206,7 +207,8 @@ def _wall_origin(state: dict) -> datetime | None:
 
 
 #: S15 (#1224): the seconds a branched world's oracle held the turn, which every investigator
-#: time limit excludes, and the wall-clock moment the turn now open began (absent when none is).
+#: time limit excludes, and the mark of the turn now open (absent when none is):
+#: `{"at": <wall-clock start>, "pid": <writer>, "started": <writer's start time or null>}`.
 ORACLE_HELD_KEY = "oracle_held_seconds"
 ORACLE_OPEN_KEY = "oracle_open_since"
 
@@ -217,15 +219,65 @@ def _number(value: object) -> float | None:
     return None
 
 
+def _process_stat(pid: int) -> tuple[str, str] | None:
+    """`pid`'s `(state, start time in clock ticks since boot)` from Linux `/proc`, or None where
+    it cannot be read. The start time tells a reused pid from the process that held it."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    fields = stat.rpartition(")")[2].split()
+    return (fields[0], fields[19]) if len(fields) > 19 else None
+
+
+def _this_process() -> dict:
+    pid = os.getpid()
+    stat = _process_stat(pid)
+    return {"pid": pid, "started": stat[1] if stat else None}
+
+
+def _writer_alive(mark: dict) -> bool:
+    """Whether the process that wrote `mark` still runs: same pid, same start time where the
+    platform tells it, and not a zombie. A mark naming no writer is never trusted."""
+    pid = mark.get("pid")
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return False
+    if pid != os.getpid():
+        try:
+            os.kill(pid, 0)
+        except PermissionError:
+            pass  # it exists, owned by someone else
+        except OSError:
+            return False
+    started = mark.get("started")
+    stat = _process_stat(pid)
+    if stat is None:
+        return started is None
+    state, now_started = stat
+    return state not in ("Z", "X") and (started is None or started == now_started)
+
+
+def _open_mark(state: dict) -> float | None:
+    """The start of the oracle turn open now, if a live process holds it. A turn whose process
+    died mid-turn (a killed sibling) left its mark behind; it holds nothing, so a resume into
+    the same run dir finds its clock running."""
+    mark = state.get(ORACLE_OPEN_KEY)
+    if not isinstance(mark, dict) or not _writer_alive(mark):
+        return None
+    return _number(mark.get("at"))
+
+
 def oracle_turn_opened(run_dir: Path) -> None:
-    """Pause the investigator's clock: an oracle turn holds the world from now. A run with no
-    budget record (no enforcer) has no clock to pause."""
+    """Pause the investigator's clock: an oracle turn holds the world from now, for as long as
+    this process lives to close it. A run with no budget record (no enforcer) has no clock to
+    pause."""
     path = RunPaths(run_dir).budget
     if not path.is_file():
         return
+    writer = _this_process()
 
     def _mutate(state: dict) -> None:
-        state[ORACLE_OPEN_KEY] = time.time()
+        state[ORACLE_OPEN_KEY] = {"at": time.time(), **writer}
 
     update_json_locked(path, _mutate, default=dict)
 
@@ -240,7 +292,8 @@ def oracle_turn_closed(run_dir: Path) -> None:
         return
 
     def _mutate(state: dict) -> None:
-        opened = _number(state.pop(ORACLE_OPEN_KEY, None))
+        opened = _open_mark(state)
+        state.pop(ORACLE_OPEN_KEY, None)
         held = _number(state.get(ORACLE_HELD_KEY)) or 0.0
         if opened is not None:
             held += max(0.0, time.time() - opened)
@@ -250,9 +303,10 @@ def oracle_turn_closed(run_dir: Path) -> None:
 
 
 def _oracle_held(state: dict) -> float:
-    """The excluded oracle time: the credited total plus the turn open now, if any."""
+    """The excluded oracle time: the credited total plus the turn a live process holds open
+    now, if any."""
     held = _number(state.get(ORACLE_HELD_KEY)) or 0.0
-    opened = _number(state.get(ORACLE_OPEN_KEY))
+    opened = _open_mark(state)
     if opened is not None:
         held += max(0.0, time.time() - opened)
     return held
