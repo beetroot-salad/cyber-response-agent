@@ -507,11 +507,20 @@ def test_the_enforcing_read_of_budget_json_is_never_torn(tmp_path):
 
 
 def _seal(run_dir: Path) -> None:
+    """Make the accounting write fail: the run dir and its `budget.json` read-only. The file
+    too, because the accounting write is a locked in-place rewrite of `budget.json` (the one
+    writer every budget update shares), which a read-only directory alone does not stop."""
+    budget = run_dir / "budget.json"
+    if budget.exists():
+        budget.chmod(stat.S_IRUSR)
     run_dir.chmod(stat.S_IRUSR | stat.S_IXUSR)
 
 
 def _unseal(run_dir: Path) -> None:
     run_dir.chmod(stat.S_IRWXU)
+    budget = run_dir / "budget.json"
+    if budget.exists():
+        budget.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
 
 def test_one_failed_accounting_write_costs_one_call_of_overshoot(tmp_path):

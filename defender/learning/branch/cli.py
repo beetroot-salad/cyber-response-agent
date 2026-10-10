@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import contextvars
 import functools
 import json
 import logging
@@ -275,6 +276,7 @@ def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a mode
     preflight: Callable[..., int], model: str | None,
     continuation_prompt: str, allow_dirty: bool,
     live_tree: Callable[[], _provenance.RunProvenance],
+    oracle: Any = None, verifier: Any = None,
 ) -> dict:
     """Everything that can refuse before the questioner is paid for, in one block, so an
     operator with several problems hears about them all before spending anything.
@@ -291,7 +293,13 @@ def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a mode
     The role preflight is asked with `branching=True` (M25=A): a branch launch whose oracle or
     oracle-check model cannot be used refuses here, as an operator's configuration error, before
     pre-flight spends anything or charges any world.
+
+    The oracle's own configuration is judged here too, by the rules pre-flight applies when it
+    configures each world: its knobs (`config.oracle_settings` — rate, budget, retry cap, turn
+    deadline) and both roles' pricing rows (`oracle._price_row`), for `oracle` / `verifier` as
+    `main` was handed them (`None`: the knobs' models).
     """
+    _check_oracle_side(oracle=oracle, verifier=verifier)
     _check_branch_point(source_run_dir, branch_message_id,
                         continuation_prompt=continuation_prompt)
     # The live tree is judged as a one-member family by `verify_family`'s own rules, before the
@@ -323,6 +331,26 @@ def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a mode
             "the oracle and its verifier included, is checked at launch so a missing key or an "
             "unroutable model surfaces before anything is spent, never as a world's failure")
     return source_stamp
+
+
+def _check_oracle_side(*, oracle: Any, verifier: Any) -> None:
+    """Refuse a launch whose oracle `preflight_replay` could not configure: a bad oracle knob
+    (`FatalConfigError`) or a role with no pricing row (`OraclePricingError`). The same
+    functions pre-flight's `oracle_settings_with` and each world's `Oracle` call, so the rule
+    lives once; asked here only to refuse before the questioner is paid for."""
+    from defender._env import FatalConfigError
+    from defender.learning.branch.estate.oracle import OraclePricingError, _price_row
+    from defender.learning.branch.estate.registry import oracle_serving
+    from defender.learning.core.config import oracle_settings_with
+
+    try:
+        serving = oracle_serving(oracle_settings_with(), oracle=oracle, verifier=verifier)
+        _price_row("oracle", serving.oracle)
+        _price_row("verifier", serving.verifier)
+    except (FatalConfigError, OraclePricingError) as bad:
+        raise LauncherRefused(
+            f"[branch] the oracle cannot be configured: {bad} — pre-flight would refuse it "
+            "after the question-writer was paid for") from bad
 
 
 def served_systems(grant: Any) -> list[str]:
@@ -649,13 +677,12 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
                                "replayed: the live gather grant admits none of them (see "
                                "not_replayable)")
 
-    # The oracle side, settled once for every world of the pass: `knobs` over the process's
-    # knobs, and the seams' production defaults (`oracle_serving`).
+    # The oracle's knobs, settled once for every world of the pass: `knobs` over the process's
+    # knobs. Each world's serving is built from them in its own thread (`calibrate`).
     box = knobs.pop("box", None)
     restart_after = knobs.pop("restart_after", DEFAULT_RESTART_AFTER)
-    serving = oracle_serving(oracle_settings_with(**knobs), oracle=oracle, verifier=verifier,
-                             box=box, restart_after=restart_after)
-    limiter = RateLimiter(serving.settings.rate)
+    settings = oracle_settings_with(**knobs)
+    limiter = RateLimiter(settings.rate)
     ctx = _preflight_context(episode.dir, tenant, family.as_of)
     resumed = {w.world_id: _family.resume_world_from(family, w.world_id, episode.dir)
                for w in fact_worlds}
@@ -700,6 +727,12 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     def calibrate(label: str) -> None:
         world = resumed[label]
         ledger = Ledger.for_world(episode, world.world_id)
+        # The world's own oracle side (`oracle_serving`), as a sibling builds its own in its own
+        # process: every world calibrates on its own thread, each attempt on that thread's own
+        # event loop, so the production models — each with its provider and HTTP client — are
+        # never shared across loops. Only the limiter is the pass's one (S18).
+        serving = oracle_serving(settings, oracle=oracle, verifier=verifier, box=box,
+                                 restart_after=restart_after)
         registry = WorldRegistry(
             roster, tenant.grants.gather, world=world, ledger=ledger, as_of=family.as_of,
             serving=serving, oracle_dir=default_oracle_dir(world, ledger), limiter=limiter,
@@ -721,9 +754,11 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
             registry.close()
 
     # One thread per world: worlds calibrate side by side and finish in any order; the outcome
-    # is written once, from every world's result.
+    # is written once, from every world's result. Each runs in a copy of this context, so its
+    # log lines keep the run and tenant.
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(fact_worlds)) as pool:
-        futures = [pool.submit(calibrate, w.world_id) for w in fact_worlds]
+        futures = [pool.submit(contextvars.copy_context().run, calibrate, w.world_id)
+                   for w in fact_worlds]
     for future in futures:
         # Anything but a world's own failure is the launch's, and leaves no outcome record.
         future.result()
@@ -1472,7 +1507,7 @@ def _launch(  # noqa: PLR0913 — see `main`
         source_run_dir=source, branch_message_id=ns.branch_message_id,
         preflight=role_preflight, model=ns.model,
         continuation_prompt=ns.continuation_prompt, allow_dirty=ns.allow_dirty,
-        live_tree=live_capture)
+        live_tree=live_capture, oracle=oracle, verifier=verifier)
     if roster is None:
         from defender._paths import adapters_under
         from defender.runtime.verbs import read_roster

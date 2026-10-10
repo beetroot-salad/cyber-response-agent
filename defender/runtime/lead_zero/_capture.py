@@ -42,23 +42,6 @@ class LeadZeroResult:
     status: str
 
 
-def _run_sync(coro: Any) -> Any:
-    """Run a coroutine from a synchronous caller, whether or not a loop is already running
-    on this thread (if one is, it runs on a fresh thread with its own loop).
-
-    The thread runs in a copy of the caller's context so log lines keep the run id and
-    tenant."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coro)
-    import concurrent.futures
-    import contextvars
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-        return ex.submit(contextvars.copy_context().run, asyncio.run, coro).result()
-
-
 def _sanitize(text: Any) -> str:
     """Defang `<run-…-…>`-shaped delimiters and markdown fence runs in external content
     before it is interpolated into text that crosses an agent boundary.

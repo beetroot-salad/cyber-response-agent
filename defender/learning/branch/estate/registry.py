@@ -160,9 +160,10 @@ def calibrate_one(registry: WorldRegistry, ctx: Any, system: str, verb: str,
 @dataclasses.dataclass(frozen=True)
 class OracleServing:
     """A world's oracle-side inputs, settled: the oracle and verifier models, the oracle's box
-    factory and its knobs. Built once by `oracle_serving` at the boundary that starts serving
-    (the sibling's `run.main`, the launcher's `cli.preflight_replay`) and handed inward whole,
-    so no registry re-applies a default."""
+    factory and its knobs. Built once per world by `oracle_serving` at the boundary that starts
+    serving it (the sibling's `run.main`, one world per process; the launcher's
+    `cli.preflight_replay`, in each world's own thread) and handed inward whole, so no registry
+    re-applies a default and no two worlds' event loops share a production model."""
 
     oracle: Any
     verifier: Any

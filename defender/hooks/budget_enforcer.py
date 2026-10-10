@@ -99,37 +99,48 @@ def update_budget_locked(
     )
 
 
+#: Serializes this process's threads over the failure path's sidecar writes
+#: (`_record_accounting_failure`, `_record_alias_refusal`), as before.
+#: `budget.json` itself needs no process lock: every write to it is one `update_json_locked`
+#: under its file lock, which also orders this process's threads (each opens its own fd).
 _ACCOUNT_LOCK = threading.Lock()
-
-
-def _write_budget_atomic(run_dir: Path, state: dict) -> None:
-    write_atomic(RunPaths(run_dir).budget, json.dumps(state, indent=2))  # lint-unguarded-tree-write: ok — delegates to write_guarded
 
 
 def account_call(
     run_dir: Path, run_id: str, tool_name: str, *,
     limits: dict, tier: str, exit_code: int = 0,
 ) -> dict:
+    """Count one executed call against the pool, re-checking the cap at commit time.
+
+    The read, the cap check and the increment are one locked read-modify-write of
+    `budget.json` (`update_json_locked`), the same lock the oracle-turn marks are written
+    under, so no interleaving with another writer can lose an increment or resurrect a mark
+    that writer removed."""
     limit = limits["max_tool_calls"] + (TAIL_ALLOWANCE if tier == "tail" else 0)
-    with _ACCOUNT_LOCK:
-        state = read_budget(run_dir) or make_budget_state(run_id)
+    built: dict = {}
+
+    def _mutate(state: dict) -> None:
+        if not state:
+            state.update(make_budget_state(run_id))
         current = _valid_count(state.get("tool_calls")) or 0
-        if current >= limit:
-            _reset_accounting_failure(run_dir)
-            return state
-        state["tool_calls"] = current + 1
-        if tool_name == "gather":
-            state["subagent_spawns"] = (_valid_count(state.get("subagent_spawns")) or 0) + 1
+        if current < limit:
+            state["tool_calls"] = current + 1
+            if tool_name == "gather":
+                state["subagent_spawns"] = (_valid_count(state.get("subagent_spawns")) or 0) + 1
+        built.update(state)
+
+    with _ACCOUNT_LOCK:
         try:
-            _write_budget_atomic(run_dir, state)
+            state = update_json_locked(
+                RunPaths(run_dir).budget, _mutate, default=lambda: make_budget_state(run_id))
         except OSError as e:
             # An alias refusal never counts toward the kill circuit, or the box would hold a
             # DoS lever. Ordinary write failures (squatted directory, full disk) still escalate.
             if getattr(e, "write_guarded_alias", False):
                 _record_alias_refusal(run_dir, RunPaths(run_dir).budget)
-                return read_budget(run_dir) or state
+                return read_budget(run_dir) or built or make_budget_state(run_id)
             _record_accounting_failure(run_dir, limits)
-            return read_budget(run_dir) or state
+            return read_budget(run_dir) or built or make_budget_state(run_id)
     _reset_accounting_failure(run_dir)
     return state
 
