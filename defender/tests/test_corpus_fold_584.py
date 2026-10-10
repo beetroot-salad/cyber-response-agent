@@ -57,9 +57,29 @@ from defender.hooks import record_lesson_load  # noqa: E402
 from defender.tests._locale import C_LOCALE_ENV  # noqa: E402
 from defender.tests.test_curator_manifest import _findings_lesson, _headers  # noqa: E402
 from defender.tests.test_trace_lesson import _mk_run  # noqa: E402
+from defender.tests.tenant_1105_run_repository import _spec1105 as H1105  # #1105 PR 2 (J8, declared change 10)
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 DEFENDER = WORKSPACE_ROOT / "defender"
+
+#: The tenant whose runs the tracer walks — #1105 PR 2 (J8, declared change 10).
+TID = H1105.T_ID
+
+
+def _tenant_runs() -> Path:
+    """The tenant's natural runs folder `<data root>/<T>/runs`, with its tenant record — #1105
+    PR 2 (J8, declared change 10): the tracer takes a required `--tenant` and walks that
+    tenant's runs (`--runs-dir` is gone). The data root is conftest's autouse per-test one; the
+    tenant is set up here, on request, so tests that never trace keep a tenant-free root."""
+    from defender import _tenant
+    from defender.tests._data_root_1078 import current_data_root
+
+    root = current_data_root()
+    H1105.tenant(root, TID)
+    runs = root / TID / "runs"
+    runs.mkdir(exist_ok=True)
+    _tenant.ensure_runs_base_record(runs, TID)
+    return runs
 
 
 def _corpus_of(tmp_path: Path, *stems: str, name: str = "lessons") -> Path:
@@ -624,14 +644,13 @@ def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
     discovered-but-skipped lesson (it may still have in-context cases). The rest of the demand
     (underscore-skip, warn to stderr, rc 0, well-formed siblings untouched) is unchanged."""
     tl = load_trace_lesson("trace_lesson_584")
-    runs = tmp_path / "runs"
-    runs.mkdir()
+    _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
     corpus = _corpus_of(tmp_path, "alpha", "beta")
     (corpus / "_TEMPLATE.md").write_text("---\nname: t\ndescription: template\n---\nbody\n")
     (corpus / "unfenced.md").write_text("no fence at all\n")
     _undecodable(corpus)
 
-    rc = tl.main(["--all", "--lessons-dir", str(corpus), "--runs-dir", str(runs)])
+    rc = tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID])  # #1105 PR 2 (J8, declared change 10)
     captured = capsys.readouterr()
     assert rc == 0
 
@@ -660,7 +679,8 @@ def test_d22_missing_lessons_dir_follows_the_seam(tmp_path, capsys):
     tl = load_trace_lesson("trace_lesson_584")
     missing = tmp_path / "no-such-corpus"
 
-    assert tl.main(["--all", "--lessons-dir", str(missing)]) == 1
+    # #1105 PR 2 (J8, declared change 10): `--tenant` is required
+    assert tl.main(["--all", "--lessons-dir", str(missing), "--tenant", TID]) == 1
     err = capsys.readouterr().err
     assert f"no lessons dir: {missing}" in err
     assert str(tl.LESSONS_DIR) not in err
@@ -682,15 +702,14 @@ def test_d23_lesson_identity_is_the_stem_cross_module(tmp_path, capsys):
     cases forever). The fixture corpus is rooted at ``<tmp>/defender/lessons`` because
     ``lesson_name`` keys on the grandparent dir — the oracle only speaks for a real corpus path."""
     tl = load_trace_lesson("trace_lesson_584")
-    runs = tmp_path / "runs"
-    runs.mkdir()
+    _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
     corpus = _corpus_of(tmp_path / "defender", "foo-bar")
     lesson_path = corpus / "foo-bar.md"
 
     oracle = record_lesson_load.lesson_name(str(lesson_path))
     assert oracle == "foo-bar"
 
-    assert tl.main(["--all", "--lessons-dir", str(corpus), "--runs-dir", str(runs)]) == 0
+    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0  # #1105 PR 2 (J8, declared change 10)
     first_column = capsys.readouterr().out.splitlines()[0].split("\t")[0]
     assert first_column == oracle
 
@@ -714,12 +733,11 @@ def test_d23b_stem_wins_when_the_frontmatter_name_disagrees(tmp_path, capsys):
     (corpus / "foo-bar.md").write_text(
         "---\nname: foo_bar\ndescription: d\ncreated_at: 2026-06-04\n---\nbody\n"
     )
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    _mk_run(runs, "caseA", disposition="malicious",
+    runs = _tenant_runs()  # #1105 PR 2 (J8, declared change 10): run ids, `--tenant`
+    _mk_run(runs, "case-a", disposition="malicious",
             loads=[{"lesson_name": "foo-bar", "ts": "2026-06-05T00:00:00+00:00"}])
 
-    assert tl.main(["--all", "--lessons-dir", str(corpus), "--runs-dir", str(runs)]) == 0
+    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0
     assert capsys.readouterr().out.splitlines() == ["foo-bar\td\t1\t0"]
 
 
@@ -738,11 +756,10 @@ def test_d24_single_lesson_path_keeps_its_own_guarded_read(tmp_path, capsys):
     which turns an O(1) read into a whole-corpus parse and converts "no such lesson" from an explicit
     exit-1 into a ``StopIteration`` traceback."""
     tl = load_trace_lesson("trace_lesson_584")
-    runs = tmp_path / "runs"
-    runs.mkdir()
+    _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
     corpus = _corpus_of(tmp_path, "good")
     _undecodable(corpus, "corrupt.md")
-    base = ["--lessons-dir", str(corpus), "--runs-dir", str(runs)]
+    base = ["--lessons-dir", str(corpus), "--tenant", TID]
 
     assert tl.main(["nope", *base]) == 1
     assert f"no such lesson: {corpus / 'nope.md'}" in capsys.readouterr().err

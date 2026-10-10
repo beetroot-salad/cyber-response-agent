@@ -43,9 +43,29 @@ from defender.learning.core.config import LoopPaths
 from defender.tests._curator1134 import author_trees
 from defender.tests._locale import C_LOCALE_ENV
 from defender.tests.test_trace_lesson import _mk_run  # noqa: E402
+from defender.tests.tenant_1105_run_repository import _spec1105 as H1105  # #1105 PR 2 (J8, declared change 10)
 from defender.tests._curator1134 import open_state
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+
+#: The tenant whose runs the tracer walks — #1105 PR 2 (J8, declared change 10).
+TID = H1105.T_ID
+
+
+def _tenant_runs() -> Path:
+    """The tenant's natural runs folder `<data root>/<T>/runs`, with its tenant record — #1105
+    PR 2 (J8, declared change 10): the tracer takes a required `--tenant` and walks that
+    tenant's runs (`--runs-dir` is gone). The data root is conftest's autouse per-test one; the
+    tenant is set up here, on request, so tests that never trace keep a tenant-free root."""
+    from defender import _tenant
+    from defender.tests._data_root_1078 import current_data_root
+
+    root = current_data_root()
+    H1105.tenant(root, TID)
+    runs = root / TID / "runs"
+    runs.mkdir(exist_ok=True)
+    _tenant.ensure_runs_base_record(runs, TID)
+    return runs
 
 
 def _load_trace_lesson():
@@ -220,13 +240,12 @@ def test_all_windows_each_count_on_the_lessons_created_at(tmp_path, capsys):
     (corpus / "rewritten.md").write_text(
         "---\nname: rewritten\ndescription: d\ncreated_at: 2026-06-04\n---\nbody\n"
     )
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    _mk_run(runs, "caseOld", disposition="benign",
+    runs = _tenant_runs()  # #1105 PR 2 (J8, declared change 10): run ids, `--tenant`
+    _mk_run(runs, "case-old", disposition="benign",
             loads=[{"lesson_name": "rewritten", "ts": "2026-06-01T00:00:00+00:00"}])
-    _mk_run(runs, "caseNew", disposition="malicious",
+    _mk_run(runs, "case-new", disposition="malicious",
             loads=[{"lesson_name": "rewritten", "ts": "2026-06-05T00:00:00+00:00"}])
 
-    assert tl.main(["--all", "--lessons-dir", str(corpus), "--runs-dir", str(runs)]) == 0
+    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0
 
     assert capsys.readouterr().out.splitlines() == ["rewritten\td\t1\t0"]
