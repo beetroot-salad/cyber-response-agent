@@ -406,3 +406,134 @@ def test_an_undelivered_control_world_call_leaves_no_row(tmp_path):
 
     assert served == ALICE_ROWS
     assert S.ledger_rows(ep, "a") == []
+
+
+# --- fourth round: one row model ------------------------------------------------------------
+
+_ESQL_COLUMNS = [{"name": "@timestamp", "type": "date"}, {"name": "user.name", "type": "keyword"},
+                 {"name": "event_id", "type": "keyword"}, {"name": "host", "type": "keyword"}]
+_ESQL_ROWS = [["2026-03-01T09:00:00Z", "alice", "e-100", "web-1"],
+              ["2026-03-01T10:00:00Z", "alice", "e-101", "web-1"]]
+
+
+def _esql(rows: list[list[Any]]) -> dict:
+    """An ES|QL answer as the elastic adapter shapes it."""
+    return {"query": "FROM logs-* | WHERE user.name == \"alice\"", "columns": _ESQL_COLUMNS,
+            "row_count": len(rows), "values": rows}
+
+
+def test_a_forged_row_can_be_added_to_an_esql_answer(tmp_path):
+    """Fourth-round finding 2: an ES|QL answer (`columns` + `values`) could never be changed:
+    `forge` refused a value-array row and check 1 recognised only mapping rows, so every added
+    row was unclaimed. A value array zips with the column names into one row model; a forged
+    ES|QL row is staged, matched, shape-checked and served."""
+    est = S.estate(tmp_path)
+    base = est.answer("idp", "query", ALICE, _esql(_ESQL_ROWS))
+    row = ["2026-03-01T11:00:00Z", "alice", "e-9f01", "db-1"]
+    served = _esql([*_ESQL_ROWS, row])
+    o = S.oracle(S.Move("forge", {"forged_id": "fg-1", "fact_id": "f1", "system": "idp",
+                                  "row": row}),
+                 S.submit(served, S.claim(added=[S.added("fg-1", "f1")],
+                                          counts=[S.counted("*", base=2, added_=1, served=3)])))
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o,
+                           verifier=S.passing_verifier(), retry_cap=1)
+
+    assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == served
+    assert base["values"] == _ESQL_ROWS
+    # Frozen as named cells, so a later query projecting other columns cannot misread it.
+    assert reg.store.frozen["fg-1"]["row"] == dict(zip(
+        [c["name"] for c in _ESQL_COLUMNS], row, strict=True))
+
+
+def _checks(base: Any, served: Any, claim: dict, *, staged: dict | None = None,
+            frozen: dict | None = None, rerun: Any = None, real: list | None = None) -> list[str]:
+    store = CheckStore(frozen=frozen or {}, staged=staged or {}, facts={},
+                       rerun=rerun or (lambda *_a: {}))
+    return check_submission(base, served, claim,
+                            world=SimpleNamespace(facts=[SimpleNamespace(fact_id="F")]),
+                            store=store, real_data=RealData(answers=real or [("s", base)]))
+
+
+def test_an_esql_side_query_selects_its_rows_not_its_columns():
+    """Fourth-round finding 3: check 5 counted the first list in a side query's answer, which
+    for ES|QL is `columns`: a removal selecting 2 rows over 4 columns read as 4. It counts the
+    answer's rows, and finds the removed row among them."""
+    base = _esql(_ESQL_ROWS)
+    served = _esql(_ESQL_ROWS[:1])
+    side = {"system": "s", "verb": "esql", "params": {"query": "FROM logs-* | WHERE host == 1"}}
+    claim = {"removed": [{"row": _ESQL_ROWS[1], "side_query": side, "count": 2}],
+             "counts": [{"group": "*", "base": 2, "added": 0, "removed": 1, "served": 1}]}
+
+    failures = _checks(base, served, claim, rerun=lambda *_a: _esql(_ESQL_ROWS))
+
+    assert failures == [], failures
+
+
+def test_esql_answers_projecting_other_columns_are_separate_tables_for_check_2():
+    """Fourth-round finding 2, check 2: every ES|QL answer of a system sat at one place
+    (`values`), so the union of all projections ever seen was required of each forged row. An
+    ES|QL table is its column set: an honest row of this projection passes, and a mistyped
+    one still fails (control)."""
+    other = {"columns": [{"name": "host", "type": "keyword"}, {"name": "risk", "type": "long"}],
+             "values": [["web-1", 3]]}
+    base = _esql(_ESQL_ROWS)
+
+    def forged(row: list[Any]) -> list[str]:
+        record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": row}
+        claim = {"added": [{"forged_id": "fg-1", "fact_id": "F"}],
+                 "counts": [{"group": "*", "base": 2, "added": 1, "removed": 0, "served": 3}]}
+        return _checks(base, _esql([*_ESQL_ROWS, row]), claim, staged={"fg-1": record},
+                       real=[("s", base), ("s", other)])
+
+    assert forged(["2026-03-01T11:00:00Z", "alice", "e-9f01", "db-1"]) == []
+    mistyped = forged(["2026-03-01T11:00:00Z", "alice", "e-9f01", 7])
+    assert [f for f in mistyped if f.startswith("check 2")], mistyped
+
+
+_PROCESS_ID = "c2f1a7e0-55d1-4b7e-9f0a-8d3e6b2a9c41"
+_REAL_EVENT = {"@timestamp": "2026-03-01T09:00:00Z", "event": {"action": "exec"},
+               "process": {"name": "bash", "entity_id": _PROCESS_ID}}
+
+
+def test_a_nested_real_identifier_reused_by_a_forged_row_fails_check_3():
+    """Fourth-round finding 4: check 3 judged only a forged row's top-level scalars, so a
+    nested id (`process.entity_id`) copied from a real event passed. Rows are judged by their
+    flat columns; the same row with a fresh id passes (control)."""
+    base = {"hits": [_REAL_EVENT]}
+
+    def forged(entity_id: str) -> list[str]:
+        row = {"@timestamp": "2026-03-01T09:30:00Z", "event": {"action": "exec"},
+               "process": {"name": "curl", "entity_id": entity_id}}
+        record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": row}
+        return _checks(base, {"hits": [_REAL_EVENT, row]},
+                       {"added": [{"forged_id": "fg-1", "fact_id": "F"}]},
+                       staged={"fg-1": record})
+
+    reused = forged(_PROCESS_ID)
+    assert any(f.startswith("check 3") and "process.entity_id" in f for f in reused), reused
+    assert forged("0b9e4d2a-7c13-4f6e-a1d8-5e2f9b3c7a60") == []
+
+
+def test_a_frozen_row_s_nested_id_collision_is_recorded():
+    """Fourth-round finding 4, the collision record: a frozen row serving a nested id that
+    real data carries was never recorded for the judge. It is, with the column spelled flat,
+    off the submission's own structural diff."""
+    from defender.learning.branch.estate.checks import frozen_id_collisions, run_checks
+
+    row = {"@timestamp": "2026-03-01T09:30:00Z", "event": {"action": "exec"},
+           "process": {"name": "curl", "entity_id": _PROCESS_ID}}
+    record = {"forged_id": "fg-1", "fact_id": "F", "system": "s", "row": row}
+    store = CheckStore(frozen={"fg-1": record}, staged={}, facts={}, rerun=lambda *_a: {})
+    real = RealData(answers=[("s", {"hits": [_REAL_EVENT]})])
+    checked = run_checks({"hits": []}, {"hits": [row]},
+                         {"added": [{"forged_id": "fg-1", "fact_id": "F"}]},
+                         world=SimpleNamespace(facts=[SimpleNamespace(fact_id="F")]),
+                         store=store, real_data=real)
+
+    assert checked.failures == []
+    found = frozen_id_collisions(checked, store=store, real_data=real)
+    assert [(e["column"], e["value"]) for e in found] == [("process.entity_id", _PROCESS_ID)]
+    # The real row carrying it, not the whole answer it came in.
+    assert found[0]["real_rows"] == [{"@timestamp": "2026-03-01T09:00:00Z",
+                                      "event.action": "exec", "process.name": "bash",
+                                      "process.entity_id": _PROCESS_ID}]

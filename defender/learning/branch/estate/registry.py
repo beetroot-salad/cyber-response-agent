@@ -213,6 +213,8 @@ class WorldRegistry(ModuleVerbRegistry):
             answers=[(s, answer) for s, _verb, answer in self._family_answers])
         self._kept_seen = 0
         self._explored_seen = 0
+        #: The last base answer added to `_real_data` (held, so identity is a safe test).
+        self._real_base: Any = None
         #: A host check abandoned by a passed deadline may still be reading on its own thread
         #: while the next attempt checks: the index grows under one lock.
         self._real_lock = threading.Lock()
@@ -380,7 +382,11 @@ class WorldRegistry(ModuleVerbRegistry):
                 data.add(kept_system, _parsed(text))
             for explored_system, answer in explored:
                 data.add(explored_system, answer)
-            data.add(system, base)
+            if base is not self._real_base:
+                # This call's base, once: a check or submit re-reading the index does not
+                # re-serialise the same answer.
+                data.add(system, base)
+                self._real_base = base
             if not data.loose:
                 data.add_loose(self.oracle.real_extra)
         return data

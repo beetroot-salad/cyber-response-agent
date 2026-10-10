@@ -51,13 +51,17 @@ from defender.runtime.box._oracle import (
 from defender.runtime.verbs import ServingAbort
 
 from .checks import (
+    Checked,
     CheckStore,
     RealData,
     Refused,
+    esql_names,
+    as_row,
     canonical_json,
     check_submission,
     frozen_id_collisions,
     parse_claim,
+    run_checks,
     structured,
 )
 from .limiter import RateLimiter
@@ -358,7 +362,8 @@ answer this world's facts imply.
 
 Leave the base answer exactly as it is wherever the world's facts do not reach. Where a fact \
 implies telemetry the base answer lacks, forge rows for it (`forge`), with the columns and \
-value types real rows of that system carry and fresh identifiers, and add them. Where a fact \
+value types real rows of that system carry and fresh identifiers, and add them (an ES|QL \
+row is forged as its value array in column order). Where a fact \
 fixes a field of an entity, `record_fact` it and serve it consistently. Claim every \
 difference you make: `added` (forged rows), `removed` (with a side query that selects the \
 removed rows and its count), `changed` (entity, field, old, new), `counts` (base + added - \
@@ -394,7 +399,8 @@ _ORACLE_TOOLS: tuple[tuple[str, str, dict], ...] = (
      _QUERY_SCHEMA),
     ("forge", "Stage a forged row for one of this world's facts.",
      _schema({"forged_id": {"type": "string"}, "fact_id": {"type": "string"},
-              "system": {"type": "string"}, "row": {"type": "object"}},
+              "system": {"type": "string"},
+              "row": {"type": ["object", "array"]}},
              ["forged_id", "fact_id", "system", "row"])),
     ("record_fact", "Record the value a fact fixes for an entity's field.",
      _schema({"entity": {"type": "string"}, "field": {"type": "string"}, "value": _ANY},
@@ -1022,13 +1028,13 @@ class Oracle:
         if name == "run_query":
             return self._run_query("oracle", args)
         if name == "forge":
-            return self._forge(args, run.attempt)
+            return self._forge(args, run.attempt, names=esql_names(run.base))
         if name == "record_fact":
             return self._record(args, run.attempt)
         if name == "python":
             return self._python(args)
         if name == "check":
-            failures = self._check(run, args.get("served"), args.get("claim"))
+            failures = self._check(run, args.get("served"), args.get("claim")).failures
             if not failures:
                 return "The draft passes the host checks."
             return "The draft fails:\n" + "\n".join(failures)
@@ -1043,16 +1049,22 @@ class Oracle:
         self.explored.append((str(system), answer))
         return _framed(f"{system}.{verb} answered", answer)
 
-    def _forge(self, args: dict, attempt: _Attempt) -> str:
+    def _forge(self, args: dict, attempt: _Attempt, *, names: list[str] | None = None) -> str:
+        """Stage a forged row. A value array forged against an ES|QL base is staged as the
+        mapping of that answer's columns (the row model's cells), so the frozen row keeps its
+        column names whatever a later query projects."""
         fid, fact_id, system, row = (args.get("forged_id"), args.get("fact_id"),
                                      args.get("system"), args.get("row"))
         if not (isinstance(fid, str) and fid and isinstance(fact_id, str)
-                and isinstance(system, str) and isinstance(row, Mapping)):
-            return "forge refused: it needs a forged_id, a fact_id, a system and a row mapping."
+                and isinstance(system, str) and isinstance(row, (Mapping, list))):
+            return ("forge refused: it needs a forged_id, a fact_id, a system and a row (a "
+                    "mapping of columns, or an ES|QL value array in column order).")
         facts = {str(getattr(f, "fact_id", "")) for f in getattr(self.world, "facts", ()) or ()}
         if fact_id not in facts:
             return f"forge refused: {wrap_fresh(fact_id, 'untrusted')} is not one of this world's facts."
-        record = {"forged_id": fid, "fact_id": fact_id, "system": system, "row": dict(row)}
+        cells = as_row(row, names)
+        record = {"forged_id": fid, "fact_id": fact_id, "system": system,
+                  "row": cells if cells is not None else list(row)}
         frozen = self.store.frozen.get(fid)
         if frozen is not None and canonical_json(frozen) != canonical_json(record):
             return (f"forge refused: {wrap_fresh(fid, 'untrusted')} is frozen with other "
@@ -1119,17 +1131,17 @@ class Oracle:
                           facts={**self.store.facts, **run.attempt.facts},
                           rerun=lambda system, verb, params: self._rerun(run, system, verb, params))
 
-    def _check(self, run: _Run, served: Any, claim: Any) -> list[str]:
+    def _check(self, run: _Run, served: Any, claim: Any) -> Checked:
         """The one host checker, behind both the advisory `check` and `submit`."""
-        return check_submission(run.base, _base_handle_resolved(served, run.base), claim,
-                                world=self.world, store=self._check_store(run),
-                                real_data=run.real())
+        return run_checks(run.base, _base_handle_resolved(served, run.base), claim,
+                          world=self.world, store=self._check_store(run), real_data=run.real())
 
-    def _note_collisions(self, run: _Run, served: Any, claim: Any) -> None:
+    def _note_collisions(self, run: _Run, checked: Checked) -> None:
         """Record, for the judge, every identifier a frozen row serves that this world's real
-        data now carries too (M12=A). Best-effort: the answer is served either way."""
-        entries = frozen_id_collisions(run.base, served, claim, world=self.world,
-                                       store=self._check_store(run), real_data=run.real())
+        data now carries too (M12=A), off the submission's own structural diff. Best-effort:
+        the answer is served either way."""
+        entries = frozen_id_collisions(checked, store=self._check_store(run),
+                                       real_data=run.real())
         if not entries:
             return
         try:
@@ -1151,16 +1163,16 @@ class Oracle:
         if "served" not in args or "claim" not in args:
             return self._verdict(["check 1: a submission needs both `served` and `claim`"])
         served, claim = _base_handle_resolved(args["served"], run.base), args["claim"]
-        failures = await run.blocking("submit", lambda: self._check(run, served, claim))
-        if failures:
-            return self._verdict(failures)
+        checked = await run.blocking("submit", lambda: self._check(run, served, claim))
+        if checked.failures:
+            return self._verdict(checked.failures)
         parsed, _why = parse_claim(claim)
         assert parsed is not None
         verdict = await self._verify(run, served, structured(parsed))
         if not verdict.get("passed"):
             return self._verdict([f"the verifier failed the answer: "
                                   f"{wrap_fresh(str(verdict.get('reason') or ''), 'untrusted')}"])
-        await run.blocking("submit", lambda: self._note_collisions(run, served, claim))
+        await run.blocking("submit", lambda: self._note_collisions(run, checked))
         return _Submitted(served=served, claim=structured(parsed), verdict=verdict,
                           attempt=run.attempt)
 
