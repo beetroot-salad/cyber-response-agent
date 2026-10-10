@@ -1188,6 +1188,9 @@ demands:
   - F-06
   - M02
   source: 20-demands
+  amendment_note: 're-ruled 2026-10-10: the human delegated finding 5 to the implementer ("Do what you find right"); a sibling''s re-ask
+    of a pre-branch call still takes its oracle turn (S1), and a verified answer that changes it fails the attempt, as M01 refuses it at
+    pre-flight; PR #1232 round 7'
   renamed_from: test_1224_sibling_repeat_of_an_original_call_is_served_preflights_answer
   provisional_lifted: §7 (70-resolutions.md)
   inverted: S1, S3 (Amendment 2 change 1)
@@ -6693,6 +6696,9 @@ demands:
   - P021
   - P080
   - P227
+  amendment_note: 're-ruled 2026-10-10: the human delegated finding 5 to the implementer ("Do what you find right"); a sibling''s re-ask
+    of a pre-branch call still takes its oracle turn (S1), and a verified answer that changes it fails the attempt, as M01 refuses it at
+    pre-flight; PR #1232 round 7'
   source: 45-dispositions cluster M01
   resolved_by: human
   fork_status: resolved

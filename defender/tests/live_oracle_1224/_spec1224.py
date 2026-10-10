@@ -1245,8 +1245,11 @@ def build_registry(roster: Any, grant: Any, *, world: Any, ledger: Any, as_of: A
                    tenant: Any = None, grant_home: str | None = None, **knobs: Any) -> Any:
     """`WorldRegistry(roster, grant, ...)` with its settled oracle side from
     `registry_seams(world, ledger, **knobs)` — the constructor as a test that does not care
-    about the oracle side spells it."""
+    about the oracle side spells it. `prebranch=` (the source run's pre-branch request keys)
+    goes to the registry itself, not its oracle side."""
     extra = {} if grant_home is None else {"grant_home": grant_home}
+    if "prebranch" in knobs:
+        extra["prebranch"] = knobs.pop("prebranch")
     return sym(REGISTRY, "WorldRegistry")(
         roster, grant, world=world, ledger=ledger, as_of=as_of, tenant=tenant,
         **registry_seams(world, ledger, **knobs), **extra)

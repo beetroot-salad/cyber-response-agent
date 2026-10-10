@@ -22,7 +22,8 @@ detail never reaches another world's judge prompt; the oracle and the verifier a
 branch point (M27: told, and the verifier checks — no host rule); usage is priced by one rule (cached tokens once); a
 bad argument to an oracle tool fails that call only; a count cell is the answer's own count,
 never a document's field; a pre-flight thread's error stops the other worlds; a capped call
-writes nothing; the family recording is parsed once per pre-flight.
+writes nothing; the family recording is parsed once per pre-flight. Seventh round: a sibling's
+re-ask of a pre-branch call is served unchanged or not at all (M01=A), by pre-flight's own rule.
 """
 from __future__ import annotations
 
@@ -1670,3 +1671,119 @@ def test_preflight_parses_the_family_recording_once_for_every_world(tmp_path, mo
     assert answers[0] == answers[1]
     assert all(a is b for a, b in zip(answers[0], answers[1], strict=True)), (
         "each world parsed the family recording itself")
+
+
+# --------------------------------------------------------------------------------------
+# Seventh round (finding 5): a sibling's re-ask of a pre-branch call is held to M01=A.
+# --------------------------------------------------------------------------------------
+
+#: A base answer whose columns a forged row can share (check 2), and that row (check 3: an id no
+#: real answer holds) — the shape the serving suite forges onto.
+_PB_BASE = {"rows": [{"action": "logon", "event_id": "e-100", "user": "alice"}]}
+_PB_FORGED = {"action": "tgt-issued", "event_id": "e-9001", "user": "alice"}
+_PB_CHANGED = {"rows": [*_PB_BASE["rows"], _PB_FORGED]}
+_PB_CLAIM = S.claim(added=[S.added("fg-1", "f1")])
+_PB_REFUSAL = "made before the branch point; serve its base answer unchanged"
+
+
+def _pb_change() -> list:
+    """One attempt that forges fact f1's row onto the alice answer and submits the change."""
+    return [S.forge("fg-1", "f1", "idp", _PB_FORGED), S.submit(_PB_CHANGED, _PB_CLAIM)]
+
+
+def _pb_registry(tmp_path: Path, o: Any, v: Any, *, prebranch: bool, retry_cap: int = 3) -> Any:
+    """World b's registry over a tenant answering the alice call `_PB_BASE`; `prebranch` puts
+    that call in the source run's pre-branch set, as `prebranch_calls` derives it."""
+    from defender.learning.branch.ledger import request_key
+
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, _PB_BASE)
+    keys = {request_key("idp", "query", ALICE)} if prebranch else set()
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, verifier=v,
+                           retry_cap=retry_cap, prebranch=keys)
+    return reg, est.ctx(tmp_path / "inv")
+
+
+def test_a_sibling_s_changed_answer_to_a_pre_branch_call_is_refused_and_retried(tmp_path):
+    """Seventh-round finding 5: pre-flight fails a world whose verified answer changes a call
+    the source run made before the branch point (M01=A), but a sibling re-asking that call got
+    a fresh oracle turn (S1) whose verified change was served — contradicting the answer in the
+    transcript it inherited. The turn still runs; a changed submission is refused as a failed
+    attempt before the host checks and the verifier, the oracle is told why, and the retry
+    serves the base unchanged."""
+    o = S.oracle(*_pb_change(), S.submit(_PB_BASE, S.EMPTY_CLAIM))
+    v = S.passing_verifier()
+    reg, ctx = _pb_registry(tmp_path, o, v, prebranch=True)
+
+    assert S.call(reg, "idp", "query", ctx, **ALICE) == _PB_BASE
+    assert o.submissions() == 2, "the changed answer was not refused and retried"
+    assert v.requests == 1, "the verifier was paid for the refused change"
+    assert _PB_REFUSAL in o.seen[-1], "the oracle was not told why its change was refused"
+    rows = list(reg.store.answers.values())
+    assert len(rows) == 1, rows
+    assert rows[0]["decision"] == "passthrough", rows
+    assert not reg.store.frozen, "the refused attempt's forged row was frozen"
+
+
+def test_an_oracle_that_only_changes_a_pre_branch_call_makes_it_unservable(tmp_path):
+    """Seventh-round finding 5, the other end: an oracle that changes the pre-branch call on
+    every attempt spends `retry_cap` and the call is unservable — as the world would have
+    failed pre-flight — with no verifier pass paid and no answer served."""
+    o = S.oracle(*_pb_change(), then=S.submit(_PB_CHANGED, _PB_CLAIM))
+    v = S.passing_verifier()
+    reg, ctx = _pb_registry(tmp_path, o, v, prebranch=True, retry_cap=2)
+
+    with pytest.raises(S.unservable_cls()) as raised:
+        S.call(reg, "idp", "query", ctx, **ALICE)
+    assert raised.value.reason == "retries", raised.value.reason
+    assert _PB_REFUSAL in raised.value.detail, raised.value.detail
+    assert v.requests == 0
+    assert not reg.store.answers
+
+
+def test_a_post_branch_call_can_still_be_changed(tmp_path):
+    """Seventh-round finding 5, the control: a call outside the pre-branch set is served the
+    world's verified change, and its framing does not call it pre-branch."""
+    o = S.oracle(*_pb_change())
+    v = S.passing_verifier()
+    reg, ctx = _pb_registry(tmp_path, o, v, prebranch=False)
+
+    assert S.call(reg, "idp", "query", ctx, **ALICE) == _PB_CHANGED
+    assert "BEFORE the branch point" not in o.seen[0]
+
+
+def test_the_oracle_is_told_a_call_is_pre_branch(tmp_path):
+    """Seventh-round finding 5, the framing: the oracle was not told which calls the source run
+    made before the branch point, so it could spend attempts changing one. The call's turn says
+    so."""
+    o = S.oracle(S.submit(_PB_BASE, S.EMPTY_CLAIM))
+    reg, ctx = _pb_registry(tmp_path, o, S.passing_verifier(), prebranch=True)
+
+    assert S.call(reg, "idp", "query", ctx, **ALICE) == _PB_BASE
+    assert "BEFORE the branch point" in o.seen[0], o.seen[0]
+    assert "serve its base answer unchanged" in o.seen[0]
+
+
+def test_the_sibling_s_registry_gets_pre_flight_s_pre_branch_set(tmp_path):
+    """Seventh-round finding 5, one rule for two callers: the sibling's `WorldRegistry` is
+    handed the source run's pre-branch calls by the same derivation pre-flight's `fixed` reads
+    (`prebranch_calls`): the inherited lead's calls, not the post-branch lead's."""
+    from defender import run
+    from defender.learning.branch.estate.registry import prebranch_calls
+    from defender.learning.branch.ledger import request_key
+
+    est = S.estate(tmp_path)
+    post = S.post_branch_call()
+    _base, src = S.source_run(tmp_path, est, calls=[*S.default_calls(), post])
+    expected = {request_key(c.system, c.verb, c.params) for c in S.default_calls()}
+    assert prebranch_calls(src, S.BRANCH_MESSAGE_ID) == expected
+
+    ep = S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)))
+    seen: dict = {}
+    from defender._episode_handle import Episode
+    run._drive_investigation(
+        alert_path=src / "alert.json", run_dir=tmp_path / "sib", run_id="sib",
+        defender_dir=est.defender_dir, model_name="m", model_override=None, box=None,
+        tenant=est.run_tenant(), world=S.load_world(ep, "b"), episode=Episode.open(ep),
+        serving=S.serving(), investigate=lambda **kw: seen.update(kw) or {})
+    assert seen["verbs"].prebranch == expected
