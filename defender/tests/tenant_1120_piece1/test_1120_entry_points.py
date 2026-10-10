@@ -144,10 +144,10 @@ def _launch(source: Path, spawn: Any, *, tenant_id: str | None = None,
     (declared change 1): `--tenant T <source_run_id>` — `tenant_id`, or the tenant whose
     location `<root>/<T>/runs/<id>` the source sits at."""
     seams.setdefault("preflight", T.no_preflight)
-    tenant_id = source.parent.parent.name if tenant_id is None else tenant_id
+    requested = source.parent.parent.name if tenant_id is None else tenant_id
     try:
         return branch_cli.main(
-            ["--tenant", tenant_id, source.name, str(T.BRANCH_MESSAGE_ID),
+            ["--tenant", requested, source.name, str(T.BRANCH_MESSAGE_ID),
              "--continuation-prompt", P.CONTINUATION],
             spawn=spawn, **seams)
     except SystemExit as refused:

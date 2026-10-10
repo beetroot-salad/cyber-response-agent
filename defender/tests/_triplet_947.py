@@ -949,11 +949,11 @@ def episode_view(episode: Any, *, tenant: Any = None) -> Any:
     `verify_family` callers open their arms through it (`family_arms`)."""
     from defender import _tenant
 
-    tenant = current_tenant() if tenant is None else tenant
+    owner = current_tenant() if tenant is None else tenant
     runs = Path(episode.dir) / "runs"
     if runs.is_dir() and not runs.is_symlink() and not os.path.lexists(runs / "_tenant.json"):
-        _tenant.ensure_runs_base_record(runs, tenant.id)
-    view = tenant.runs_repository().episode(episode.dir.name, held=episode)
+        _tenant.ensure_runs_base_record(runs, owner.id)
+    view = owner.runs_repository().episode(episode.dir.name, held=episode)
     if view.state == "absent":
         view.create_container()
     return view

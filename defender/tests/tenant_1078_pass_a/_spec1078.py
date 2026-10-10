@@ -503,8 +503,8 @@ def launch_argv(source: Path, message_id: int = T.BRANCH_MESSAGE_ID, *,
     whose tenant location `<root>/<T>/runs/<run id>` the source sits at; the run by its id."""
     place_knowledge_for_rows()
     source = Path(source)
-    tenant_id = source.parent.parent.name if tenant_id is None else tenant_id
-    return ["--tenant", tenant_id, source.name, str(message_id),
+    requested = source.parent.parent.name if tenant_id is None else tenant_id
+    return ["--tenant", requested, source.name, str(message_id),
             "--continuation-prompt", CONTINUATION]
 
 

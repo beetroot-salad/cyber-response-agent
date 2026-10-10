@@ -6,6 +6,7 @@ import json
 import math
 import re
 from pathlib import Path
+from typing import NoReturn
 
 from defender._io import read_text_utf8
 
@@ -36,7 +37,7 @@ class UsageParser(argparse.ArgumentParser):
     raises `UsageRefused` rather than printing argparse's usage block and exiting 2, so each
     CLI keeps its own usage refusal — one stderr line and its own exit status."""
 
-    def error(self, message: str):  # type: ignore[override]
+    def error(self, message: str) -> NoReturn:
         raise UsageRefused(message)
 
 

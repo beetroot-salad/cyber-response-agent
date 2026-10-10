@@ -445,7 +445,8 @@ def test_1025_world_or_lead_directory_name_carries_attribute_or_tag_breaking_cha
     page = render(ep)
     assert page.text.count("unnameable entry") == 1, page.text_of("sec-worlds")
     assert 'w"x<i>' in page.text_of("sec-worlds"), page.text_of("sec-worlds")
-    assert 'r"un' not in page.text and "r&quot;un" not in page.raw, "a stray runs/ entry was shown"
+    assert 'r"un' not in page.text, "a stray runs/ entry was shown"
+    assert "r&quot;un" not in page.raw, "a stray runs/ entry was shown"
     assert not [v for v in _attribute_values(page) if '"x<i>' in v or 'un<i>' in v]
     assert "<i>" not in page.raw.replace("&lt;i&gt;", ""), "a raw <i> reached the bytes"
     assert {f"world-{w}" for w in E.WORLDS} <= set(page.ids)

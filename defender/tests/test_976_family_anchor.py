@@ -66,11 +66,10 @@ def _tenant_paths():
     return T.current_tenant()
 
 
-def _verify(ep: Path, plant: Any = None, **kw: Any) -> dict:
+def _verify(ep: Path, plant: Any = T.arm_run_dir, **kw: Any) -> dict:
     """`cli.verify_family` over episode `ep`'s arms (#1105 PR 2): `plant(ep, world)` makes each
     world's finished arm in `ep`'s own container (default `T.arm_run_dir(ep, world)`), and each
     is opened by id through the episode's view (`T.family_arms`)."""
-    plant = T.arm_run_dir if plant is None else plant
     for world in T.WORLDS:
         plant(ep, world)
     with Episode.open(ep) as episode:

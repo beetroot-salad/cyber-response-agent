@@ -8,8 +8,8 @@ suffix plus the staged tail, R4-35..R4-37). Every refusal is `RunRefused`. It is
 (every copy route re-parses; `__new__` and subclassing are refused) and a strict value: not a
 `str`, not path-like, not JSON-serialisable, unordered against a `str`, never equal to one.
 
-The sidecar clause is NOT part of `RunId` (`run_exists` takes a `RunId` and answers for a known
-sidecar file at such a name), and the handle's constructors keep taking `str` in PR 1 (D12.4).
+The sidecar clause is NOT part of `RunId` (the repository's `exists` — PR 1's lookup, a method
+since #1105 PR 2 — takes a `RunId` and answers for a known sidecar file at such a name), and the handle's constructors keep taking `str` in PR 1 (D12.4).
 
 Red at base 80888efb: `defender.run_repository` does not exist, so every test here fails at
 its own import of the door (`ModuleNotFoundError`); the handle-constructor test, which pins
@@ -183,8 +183,8 @@ def test_1105_run_id_parse_admits_a_sidecar_suffixed_id():
     """RunId.parse admits 'r1.run-end.json', 'r1.scrub-verdict.json',
     'r1.accounting_failures.json', 'r1.ticket-write.json' and the staged shape
     'r1.run-end.json.staged-0123456789abcdef': the sidecar clause, staged shape included, belongs
-    to open_run and run setup, not to RunId, because run_exists takes a RunId and answers for a
-    known sidecar file at such a name."""
+    to the repository's open and run setup, not to RunId, because its `exists` takes a RunId and
+    answers for a known sidecar file at such a name."""
     from defender.run_repository import RunId
 
     names = [f"r1{s}" for s in H.SIDECAR_SUFFIXES] + [f"r1.run-end.json{H.STAGED_TAIL}"]
@@ -220,8 +220,8 @@ def test_1105_the_handle_constructors_keep_taking_str_and_todays_run_id_check(tm
 def test_1105_run_id_is_unforgeable_every_copy_route_reparses_and_new_and_subclassing_are_refused():
     """Unpickling, copy.copy, copy.deepcopy and dataclasses.replace (and copy.replace where it
     exists) rebuild a RunId through RunId.parse, so a pickled payload carrying '../x', a
-    300-character text or '_episodes' raises RunRefused at unpickling and open_run and run_exists
-    are never reached with it; RunId.__new__(RunId) and defining a subclass of RunId each raise
+    300-character text or '_episodes' raises RunRefused at unpickling and the repository's open
+    and exists are never reached with it; RunId.__new__(RunId) and defining a subclass of RunId each raise
     RunRefused. Positive control: a valid RunId round-trips by each route equal to the original.
     The forged payloads cover every pickle protocol (0 to pickle.HIGHEST_PROTOCOL), each RunId's
     own stream with its text overwritten in place; every replace route is driven, and one that

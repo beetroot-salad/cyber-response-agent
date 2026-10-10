@@ -465,9 +465,9 @@ def grade_at(episode_dir: Path, *, runs: Any = None, **kw: Any) -> Any:
     under the episodes base `episode_dir.parent` (pointed at for the call). Every keyword passes
     through unchanged; nothing is defaulted."""
     episode_dir = Path(episode_dir)
-    runs = judge_runs() if runs is None else runs
+    repository = judge_runs() if runs is None else runs
     with episodes_base(episode_dir.parent):
-        return mod("learning.judge").grade_episode(runs, episode_dir.name, **kw)
+        return mod("learning.judge").grade_episode(repository, episode_dir.name, **kw)
 
 
 def grade(episode_dir: Path, *, judge: Any = None, state: Any = None, **kw: Any) -> Any:

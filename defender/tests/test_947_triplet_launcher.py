@@ -54,13 +54,12 @@ def _cli():
     return T.mod("learning.branch.cli")
 
 
-def _verify_family(ep_dir, plant=None, **kw):
+def _verify_family(ep_dir, plant=T.arm_run_dir, **kw):
     """`cli.verify_family` over an `Episode` opened on `ep_dir`: it takes the handle, not the
     episode dir (#1133 rev 2), and the finished arms by label (#1105 PR 2): `plant(ep_dir,
     world)` makes each world's arm in the episode's own container (default
     `T.arm_run_dir(ep_dir, world)`), and each is opened by id through the episode's view
     (`T.family_arms`)."""
-    plant = T.arm_run_dir if plant is None else plant
     for world in T.WORLDS:
         plant(ep_dir, world)
     with Episode.open(ep_dir) as episode:
