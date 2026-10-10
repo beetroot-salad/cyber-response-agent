@@ -1,8 +1,8 @@
 """#947 — the family launcher's refusals that nothing later could recover from.
 
 `learning/branch/cli.py` is what actually runs an episode: it derives the episode id, primes the
-capture, has the questioner author the triplet, stages it, reviews it and drives each sibling as
-its own process. Almost everything it can get wrong fails loudly on the spot. The ones here do
+capture, has the questioner author the triplet, has pre-flight calibrate each world's oracle
+(#1224) and drives each sibling as its own process. Almost everything it can get wrong fails loudly on the spot. The ones here do
 not, or fail somewhere that names the wrong cause.
 
 RECONCILED AT #947. This file predates the §7 seam and pinned the pre-#947 launcher: an episode
@@ -124,30 +124,36 @@ def test_an_existing_episode_is_refused_even_if_only_stale_world_rows_remain(
 
     Checking only ``served/base.jsonl`` misses a partly removed or partly failed episode. Its
     world ledger still participates in ``Ledger._absorb`` and can override live reads for keys
-    the new source never captured, so a directory holding per-world rows is not adoptable.
+    the new source never captured, so a directory holding per-world rows is never adopted.
 
-    #947 (FORK-2) narrows what "already exists" means without weakening this: an episode
-    directory that got no further than being MADE is adopted, because a mid-prime death would
-    otherwise leave that source and branch point permanently unbranchable. A directory holding
-    rows is a different state, and it is still refused.
+    #1224 (N17) made the rule total: a launch never reuses an episode directory at all — the
+    taken id moves on to ``<id>-r2`` — so the stale directory is left exactly as it was, and
+    the episode that IS primed is a fresh one holding no row the old one left.
 
     Handed in through ``prepare_episode``'s own injection seam rather than patched onto the
     module, so the arm drives the production call path instead of a rebound global.
     """
+    from defender.learning.branch.capture import PrimeReport
+
     cli = cli_mod()
     episode = episodes_root / "episode-001"
     stale = episode / "served" / "w1.jsonl"
     stale.parent.mkdir(parents=True, exist_ok=True)
     stale.write_text('{"source":"base","world_id":null}\n', encoding="utf-8")
+    primed: list[Path] = []
 
-    def primed_too_early(*_args, **_kwargs):
-        pytest.fail("prime_base ran for an episode id that already holds rows")
+    def prime(_source, claimed):
+        primed.append(claimed.dir)
+        return PrimeReport()
 
-    with pytest.raises(cli.LedgerError, match="per-world rows"):
-        cli.prepare_episode("episode-001", tmp_path / "source", tenant=tenant_paths,
-                            prime=primed_too_early)
+    with cli.prepare_episode("episode-001", tmp_path / "source", tenant=tenant_paths,
+                             prime=prime) as fresh:
+        assert fresh.dir == episodes_root / "episode-001-r2"
+        assert list((fresh.dir / "served").glob("*.jsonl")) == []
 
-    assert stale.is_file(), "the refusal should not mutate or sanitize the stale episode"
+    assert primed == [episodes_root / "episode-001-r2"], "the stale episode was primed"
+    assert stale.read_text(encoding="utf-8") == '{"source":"base","world_id":null}\n', (
+        "the relaunch should not mutate or sanitize the stale episode")
 
 
 def test_the_launcher_bootstraps_the_package_when_invoked_by_path(tmp_path):
@@ -176,9 +182,8 @@ def test_the_launcher_bootstraps_the_package_when_invoked_by_path(tmp_path):
 # It drove `--episode-id ... --world w:elastc`, and #947 deletes both arguments: the episode id
 # is derived from (source run, branch point), and the worlds are authored by the questioner
 # rather than declared on the command line, with `World.touches` retired as an authored field
-# (D2). Its INTENT — a misspelt system cannot become a successful all-passthrough sibling — is
-# carried by two #947 demands against the mechanism that replaced it:
-#   * `test_947_triplet_manifest.py::test_947_a_patch_naming_a_system_outside_the_six_is_refused_by_field`
-#     — the loader refuses the overlay key by name, before any world is staged;
-#   * `test_947_triplet_manifest.py::test_947_validate_world_touches_takes_the_derived_set`
-#     — the estate's own validator still refuses an unknown name, now over the derived set.
+# (D2). Its INTENT — a misspelt system cannot become a successful all-passthrough sibling — was
+# carried by #947's overlay-key refusals, which #1224 retired with the overlay itself: a world is
+# now natural-language `facts` that name no system, and the manifest's `served_systems` is the
+# launcher's own derivation from the tenant's gather grant (`cli.served_systems`), overwriting
+# whatever the questioner returned — so no authored system name reaches a sibling at all.

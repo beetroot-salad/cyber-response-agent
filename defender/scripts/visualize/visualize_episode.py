@@ -33,24 +33,25 @@ from defender._run_id import is_valid_run_id
 from defender._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
 from defender.run_repository import RUN_LAYOUT, WIRE_LOG_NAMES
 from defender._vocab import normalized_disposition, normalized_judge_outcome
-from defender.learning.branch import archive, staging
+from defender.learning.branch import archive
+from defender.learning.branch import outcome as outcome_mod
 from defender.learning.branch import timing as timing_mod
 from defender.learning.branch.steps import STEPS, Step
 from defender.learning.judge import JudgeRefused, read_grade
 from defender.learning.judge import family
 from defender.learning.judge.enqueue import (
-    KIND_MECHANICAL,
     LANE_DEFENDER,
     LANE_NEVER_ELIGIBLE,
     LANE_UNQUEUEABLE,
-    LANE_WITHHELD,
     LANE_WORLD,
     DrawsSkipReport,
     draws_on_disk_report,
 )
 from defender.learning.judge.render import episode_alert
 from defender.learning.judge.run import SUBJECT_DEFENDER, SUBJECT_WORLD
-from defender.runtime.branch._family import BASE_ROLE, episode_token_for
+from defender.runtime.branch._family import (
+    BASE_ROLE, ManifestPredatesOracle, episode_token_for,
+)
 from defender._pricing import UnknownModel, model_key, usage_cost
 from defender.scripts.visualize.visualize_primitives import (
     ASSETS,
@@ -67,29 +68,15 @@ EPISODE_CSS = read_text_utf8(ASSETS / "episode.css")
 #: The family's own draw documents live under this pseudo-label beside the worlds.
 _FAMILY_LABEL = "family"
 
+#: The judge model's world buckets (O11, M19=A), each with its own colour; any other word (a
+#: world-subject finding's free-text bucket) is `bucket-other`.
 _BUCKET_CLASS = {
     "lead-set": "bucket-lead-set",
     "observability": "bucket-observability",
     "decision-discipline": "bucket-decision-discipline",
     "analyze-discipline": "bucket-analyze-discipline",
-    "unreachable-difference": "bucket-mechanical",
-    "story-overlay-gap": "bucket-story-overlay-gap",
     "lead-quality": "bucket-lead-quality",
 }
-
-_CHIP_FIELDS = ("holding_queried", "doctored_answer_served", "difference_shown",
-                "injected_present", "capture_reasks_faulted", "envelope_ran")
-
-#: Chips that exist only on a `judge.yaml` row. A world with no row (the control, any
-#: never-graded world) omits them rather than showing "unrecorded".
-_ROW_ONLY_CHIP_FIELDS = frozenset({"holding_queried", "doctored_answer_served",
-                                   "difference_shown"})
-
-#: Never a row field: always read from the review's reachability block when present.
-_REACH_ONLY_CHIP_FIELDS = frozenset({"envelope_ran"})
-
-_LADDER_FIELDS = ("holding_queried", "doctored_answer_served", "difference_shown",
-                  "verdict", "resolution_moved")
 
 
 # =========================================================================================
@@ -177,12 +164,17 @@ class _Record:
         return self.error is None
 
 
-def _read_review(bound: Bound) -> _Record:
+def _read_outcome(bound: Bound) -> _Record:
+    """Pre-flight's outcome record with the worlds O5 counts as failed, as
+    `{"record": <record or None>, "failed": {label: entry}}`. An absent or torn record is the
+    "no record" state: `error` names it, and the failed worlds' own records still show."""
     try:
-        doc = family.read_review_record(bound)
-    except JudgeRefused as bad:
-        return _Record(present=True, error=f"review record unreadable: {bad}")
-    return _Record(doc, present=doc is not None)
+        record = outcome_mod.read_outcome(bound)
+    except outcome_mod.OutcomeUnreadable as missing:
+        return _Record({"record": None, "failed": outcome_mod.failed_worlds(bound, {})},
+                       present=True, error=f"{outcome_mod.NO_RECORD} — {missing}")
+    return _Record({"record": record, "failed": outcome_mod.failed_worlds(bound, record)},
+                   present=True)
 
 
 def _strict_samples_reader(bound: Bound, name: str) -> dict[str, Any] | None:
@@ -200,14 +192,6 @@ def _read_samples(bound: Bound) -> _Record:
     except JudgeRefused as bad:
         return _Record(present=True, error=f"samples record unreadable: {bad}")
     return _Record(doc or {}, present=doc is not None)
-
-
-def _read_staged(bound: Bound) -> _Record:
-    try:
-        rows = staging.read_staged(bound)
-    except staging.StagingRefused as bad:
-        return _Record(present=True, error=f"staging record unreadable: {bad}")
-    return _Record(rows or [], present=rows is not None)
 
 
 def _read_timing(bound: Bound) -> _Record:
@@ -350,10 +334,14 @@ class _WorldLeads:
     The ledger and `investigation.md` are read and refused independently: a missing ledger costs
     only the malformed-row count."""
 
-    __slots__ = ("ledger_note", "archived", "dir_error", "facts_error", "moved", "chains")
+    __slots__ = ("ledger_note", "calls", "archived", "dir_error", "facts_error", "moved",
+                 "chains")
 
     def __init__(self) -> None:
         self.ledger_note: str | None = None
+        #: The world's own served-ledger rows (never an oracle-side store's), as the judge reads
+        #: them: each call with the decision word that answered it.
+        self.calls: list[dict[str, Any]] = []
         self.archived = False
         #: `worlds/<label>` exists but is not a listable real directory: the bind's refusal,
         #: said once for the block.
@@ -563,7 +551,7 @@ class _Findings:
 
     def __init__(self) -> None:
         self.rows: list[_Finding] = []
-        self.counts = {"defender": 0, "world_author": 0, "withheld": 0, "unqueueable": 0,
+        self.counts = {"defender": 0, "world_author": 0, "unqueueable": 0,
                        "dropped": 0, "never_eligible": 0}
         self.world_reports: dict[str, DrawsSkipReport] = {}
         self.draw_failures: list[tuple[str, int, str]] = []
@@ -595,9 +583,8 @@ class _Episode:
             (w["world_id"] for w in self.manifest_worlds
              if w.get("role") == BASE_ROLE and isinstance(w.get("world_id"), str)), None)
         self.grade_rec = _Record()
-        self.review_rec = _Record()
+        self.outcome_rec = _Record()
         self.samples_rec = _Record()
-        self.staged_rec = _Record()
         self.stamp_rec = _Record()
         self.timing_rec = _Record()
         self.entries: dict[str, WorldEntry] = {}
@@ -647,10 +634,10 @@ class _Episode:
         """The first manifest entry naming `label`; the guide still renders every entry."""
         return next((w for w in self.manifest_worlds if w.get("world_id") == label), None)
 
-    def review_block(self, label: str) -> dict[str, Any] | None:
-        if not (self.review_rec.ok and isinstance(self.review_rec.value, dict)):
-            return None
-        return family.world_review_block(self.review_rec.value, label)
+    @property
+    def failed_worlds(self) -> dict[str, dict[str, Any]]:
+        """Every world O5 counts as failed, by label (`outcome.failed_worlds`)."""
+        return _mapping(_mapping(self.outcome_rec.value).get("failed"))
 
 
 # =========================================================================================
@@ -670,9 +657,8 @@ def _load_episode(episode_dir: Path, bound: Bound) -> _Episode:
     ep = _Episode(episode_dir, family.read_manifest(bound))
 
     ep.grade_rec = _read_grade(episode_dir)
-    ep.review_rec = _read_review(bound)
+    ep.outcome_rec = _read_outcome(bound)
     ep.samples_rec = _read_samples(bound)
-    ep.staged_rec = _read_staged(bound)
     ep.stamp_rec = _read_family_stamp(bound)
     ep.timing_rec = _read_timing(bound)
     ep.timing = _Timing(ep.timing_rec)
@@ -859,11 +845,12 @@ def _load_world_leads(ep: _Episode, bound: Bound, label: str) -> _WorldLeads:  #
         leads.ledger_note = "served ledger: not readable — the episode id names no token"
     else:
         try:
-            _rows, malformed, ledger_read = family.read_world_ledger(
+            rows, malformed, ledger_read = family.read_world_ledger(
                 bound, label, episode_token=ep.episode_token)
         except JudgeRefused as bad:
             leads.ledger_note = f"served ledger unreadable: {bad}"
         else:
+            leads.calls = rows
             if ledger_read.absent:
                 leads.ledger_note = "served ledger: absent"
             elif malformed:
@@ -1017,18 +1004,6 @@ def _world_findings_lookup(grade: Any) -> dict[str, dict[str, Any]]:
     return out
 
 
-def _withheld_lookup(grade: Any) -> dict[str, dict[str, Any]]:
-    """The pass's `withheld_findings` by coordinate — the stub text for a withheld entry whose
-    draw document is gone."""
-    out: dict[str, dict[str, Any]] = {}
-    for item in _items(grade.withheld_findings):
-        if isinstance(item, dict) and isinstance(item.get("finding"), dict):
-            coord = _coordinate_of(item.get("finding_id"))
-            if coord is not None:
-                out.setdefault(coord, item)
-    return out
-
-
 def _bump(counts: dict[str, int], disposition: str) -> None:
     if disposition in counts:
         counts[disposition] += 1
@@ -1045,7 +1020,7 @@ def _finding_fields(finding: Any) -> dict[str, Any]:
 
 
 #: The ledger's lane → the page's disposition word (`_disposition_heading_raw`).
-_LANE_WORD = {LANE_DEFENDER: "defender", LANE_WORLD: "world_author", LANE_WITHHELD: "withheld",
+_LANE_WORD = {LANE_DEFENDER: "defender", LANE_WORLD: "world_author",
               LANE_UNQUEUEABLE: "unqueueable", LANE_NEVER_ELIGIBLE: "never_eligible"}
 
 
@@ -1120,7 +1095,6 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
         return _LANE_WORD[entry["lane"]], entry.get("reason"), entry["finding_id"]
 
     for label in walked_labels:
-        entry = entries.get(label)
         docs, _report = ep.draws[label]
         for draw, doc in docs.items():
             for index, finding in enumerate(_items(doc.get("findings"))):
@@ -1136,27 +1110,14 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
                     recorded_id=recorded_id, outcome=doc.get("episode_outcome"),
                     **_finding_fields(finding)))
 
-        for mech_index, finding in enumerate(
-                _items(entry.row.get("mechanical_world_findings")) if entry and entry.row
-                else []):
-            coord = f"{label}/{KIND_MECHANICAL}/{mech_index}"
-            disposition, reason, recorded_id = _dispose(label, coord)
-            _bump(counts, disposition)
-            rows.append(_Finding(
-                row_id=f"f-{label}-{KIND_MECHANICAL}-{mech_index}", label=label,
-                draw=KIND_MECHANICAL, index=mech_index, subject=SUBJECT_WORLD,
-                disposition=disposition, reason=reason, stub=False, recorded_id=recorded_id,
-                **_finding_fields(finding)))
 
     # Record-only stubs: a ledger entry whose draw document is absent but whose text the
-    # record still carries (`world_findings` for a world-lane entry, `withheld_findings` for a
-    # withheld one). Defender or dropped entries have no text on the record, so they only
-    # appear in the queue accounting. The grain is the document: a present document with fewer
+    # record still carries (`world_findings` for a world-lane entry). Defender or dropped
+    # entries have no text on the record, so they only appear in the queue accounting. The grain is the document: a present document with fewer
     # findings than the ledger knew renders nothing extra.
     if ledger:
         present_docs = {label: set(ep.draws[label][0]) for label in roster_labels}
         world_rows_by_coord = _world_findings_lookup(grade)
-        withheld_by_coord = _withheld_lookup(grade)
         for coord, filed in ledger.items():
             label, draw_s, index_s = coord.rsplit("/", 2)
             try:
@@ -1165,16 +1126,10 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
                 draw_i = None
             if draw_i is not None and draw_i in present_docs.get(label, set()):
                 continue
-            if draw_s == KIND_MECHANICAL and label in entries and entries[label].row:
-                continue  # its row is on the record; the walk above rendered it
             world_row = world_rows_by_coord.get(coord)
-            withheld = withheld_by_coord.get(coord)
             if filed["lane"] == LANE_WORLD and world_row is not None:
                 fields: dict[str, Any] = {"claim": world_row.get("finding")}
                 subject = SUBJECT_WORLD
-            elif filed["lane"] == LANE_WITHHELD and withheld is not None:
-                fields = _finding_fields(withheld["finding"])
-                subject = SUBJECT_DEFENDER
             else:
                 continue
             disposition = _LANE_WORD[filed["lane"]]
@@ -1203,8 +1158,6 @@ def _disposition_heading_raw(f: _Finding) -> str:
         return "defender: enqueued"
     if f.disposition == "world_author":
         return "world author: enqueued"
-    if f.disposition == "withheld":
-        return f"defender: withheld — {_raw(f.reason)}"
     if f.disposition == "unqueueable":
         addressee = "defender" if f.subject == SUBJECT_DEFENDER else "world author"
         return f"{addressee}: unqueueable — {_raw(f.reason)}"
@@ -1245,7 +1198,15 @@ def render_episode(episode_dir: Path) -> Path:
     except FileNotFoundError as missing:
         raise JudgeRefused(f"episode {episode_dir}: no such episode directory") from missing
     with episode:
-        return _write_page(episode, build_page(episode_dir))
+        try:
+            html_text = build_page(episode_dir)
+        except JudgeRefused as bad:
+            # An archive of the pre-oracle design gets a page saying so; any other manifest
+            # refusal stays a refusal.
+            if not isinstance(bad.__cause__, ManifestPredatesOracle):
+                raise
+            html_text = _render_refusal(episode_dir, bad)
+        return _write_page(episode, html_text)
 
 
 def build_page(episode_dir: Path) -> str:
@@ -1273,6 +1234,24 @@ def _render_document(ep: _Episode) -> str:
 {nav}
 <article class="content episode">
 {body}
+</article>
+</div>
+</body></html>
+"""
+
+
+def _render_refusal(episode_dir: Path, refusal: JudgeRefused) -> str:
+    """The whole page for an episode the manifest reader refused: the reason, as text, and
+    nothing read from the archive."""
+    title = f"episode — {esc(Path(episode_dir).name)}"
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>{title}</title>
+<style>{CSS}
+{EPISODE_CSS}</style></head><body id="top">
+<div class="layout">
+<article class="content episode">
+<h1>{title}</h1>
+<div class="refusal">{_uv(str(refusal))}</div>
 </article>
 </div>
 </body></html>
@@ -1346,7 +1325,7 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
     grade = ep.grade
     if ep.not_graded:
         stamp = grade.not_graded
-        band = (f'<div class="vd-band">not graded: '
+        band = (f'<div class="vd-band">not graded: {_uv(stamp.outcome)} — '
                f'<span class="vd-reason">{_uv(stamp.reason)}</span></div>')
         return _page_section("sec-verdict", "Verdict", band)
 
@@ -1367,7 +1346,7 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
         if f.label == _FAMILY_LABEL and f.disposition != "never_on_record":
             family_groups.setdefault(f.draw, []).append(f)
     family_docs = ep.draws[_FAMILY_LABEL][0]
-    # Draw keys may be `int` (document), `str` (stub) or `None` (withheld entry); the sort key
+    # Draw keys may be `int` (document), `str` (stub) or `None`; the sort key
     # compares across them so a mixed set cannot raise `TypeError` out of the page.
     for draw in sorted(family_groups, key=_draw_sort_key):
         doc = family_docs.get(draw) if isinstance(draw, int) else None
@@ -1385,62 +1364,42 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
     family_outcome = getattr(grade, "family_outcome", None)
     badge_word = family_outcome if family_outcome is not None else grade.verdict_word
     queued = grade.enqueued_rows + grade.world_enqueued_rows
-    lede_line = (f"{_uv(grade.verdict_word)} · {queued} "
-                f"findings queued · {counts['withheld']} withheld")
-    if counts["withheld"]:
-        first_reason = _first_withheld_reason(rows)
-        if first_reason:
-            lede_line += f" ({_uv(first_reason)})"
+    lede_line = f"{_uv(grade.verdict_word)} · {queued} findings queued"
     lede_parts.append(f'<div class="vd-lede">{lede_line}</div>')
 
     badge = f'<span class="vd-badge">{_uv(badge_word)}</span>'
-    meta = f'<span class="vd-meta">{_uv(grade.episode_outcome)} · {_uv(grade.verdict_word)}</span>'
+    meta = (f'<span class="vd-meta">{_uv(grade.episode_outcome)} · {_uv(grade.verdict_word)}'
+            f' · validity {_uv(grade.validity)}</span>')
 
     # The record's own partition, never re-derived here.
-    measuring = grade.measuring_worlds
     graded = grade.graded_worlds
-    control_world = ep.manifest_world(ep.control_label) if ep.control_label else None
-    control_declared = _normalized_disposition(
-        control_world.get("disposition_declared") if control_world else None)
-    contrasting = 0
     agree = 0
-    for label in sorted(measuring):
+    for label in sorted(graded):
         entry = entries.get(label)
         row = entry.row if entry is not None else None
-        if row is None:
-            continue
-        declared = _normalized_disposition(row.get("declared"))
-        if declared != control_declared:
-            contrasting += 1
-        # Same normalizer as the contrast count, so case/whitespace variants agree on both.
-        if _normalized_disposition(row.get("verdict")) == declared:
+        if row is not None and _normalized_disposition(row.get("verdict")) == \
+                _normalized_disposition(row.get("declared")):
             agree += 1
     # Asked of the vocabulary's own normalizer (case-insensitive, trimmed) rather than a local
     # copy of the enum.
     verdict_note = ("" if normalized_judge_outcome(grade.verdict_word) is not None
-                    else ' <span class="vd-nonladder">(family outcome, not the ladder)</span>')
+                    else ' <span class="vd-nonladder">(not a family word)</span>')
     tile1 = (
-        f'<div class="vd-tile" id="vd-tile-1">{len(measuring)} of {len(graded)} graded '
-        f'measuring · {contrasting} of {len(measuring)} contrast the control · verdict = '
-        f'declared on {agree} of {len(measuring)} '
+        f'<div class="vd-tile" id="vd-tile-1">{len(graded)} worlds judged · verdict = '
+        f'declared on {agree} of {len(graded)} '
         f'<span class="vd-word">{_uv(grade.verdict_word)}</span>{verdict_note}</div>')
 
-    withheld_captions = []
-    for w in entries.values():
-        if w.row is None:
-            continue
-        if w.row.get("ungradable"):
-            withheld_captions.append(f"{_uv(w.label)} — ungradable")
-        elif w.row.get("withheld_reason") is not None:
-            withheld_captions.append(f"{_uv(w.label)} — {_uv(w.row['withheld_reason'])}")
+    unjudged_captions = [f"{_uv(w.label)} — {_uv(w.row.get('ungradable_reason'))}"
+                         for w in entries.values()
+                         if w.row is not None and w.row.get("ungradable")]
     tile2 = (
-        f'<div class="vd-tile" id="vd-tile-2">{len(measuring)} of {len(graded)}'
-        f'<div class="vd-caption">{"; ".join(withheld_captions)}</div></div>')
+        f'<div class="vd-tile" id="vd-tile-2">{len(graded)} of '
+        f'{sum(1 for w in entries.values() if w.row is not None)}'
+        f'<div class="vd-caption">{"; ".join(unjudged_captions)}</div></div>')
 
     findings_total = len(rows)
     split_parts = [f"{counts['defender']} defender", f"{counts['world_author']} world author",
-                  f"{counts['withheld']} withheld", f"{counts['unqueueable']} unqueueable",
-                  f"{counts['dropped']} dropped"]
+                  f"{counts['unqueueable']} unqueueable", f"{counts['dropped']} dropped"]
     if counts["never_eligible"]:
         split_parts.append(f"{counts['never_eligible']} never eligible")
     # The walk's own count, not `grade.enqueued_rows` (the record's figure, shown separately in
@@ -1464,22 +1423,12 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
             continue
         row = w.row
         header = f"{_uv(row.get('declared'))} → {_uv(row.get('verdict'))}"
-        heading = (_uv(row.get("withheld_reason")) if row.get("withheld_reason") is not None
-                  else _uv(row.get("bucket")))
-        chip_bits = "".join(f'<span class="vd-chip">{_uv(k)}={_uv(row.get(k))}</span>'
-                           for k in _CHIP_FIELDS if k in row)
-        reach = ep.review_block(w.label)
-        envelope_note = ""
-        if isinstance(reach, dict) and reach.get("envelope_failed"):
-            first_line = str(reach["envelope_failed"]).splitlines()[0]
-            envelope_note = f'<div class="vd-envelope">{_uv(first_line)}</div>'
+        heading = _bucket_html(row)
         # The footer counts this world's defender rows and links the group of the first one, so
         # the count and the anchor refer to the same rows.
         world_group = [f for f in rows if f.label == w.label and f.subject == SUBJECT_DEFENDER]
         n_findings = len(world_group)
-        if row.get("withheld_reason") is not None:
-            footer_word = "withheld"
-        elif world_group and all(f.disposition == "never_eligible" for f in world_group):
+        if world_group and all(f.disposition == "never_eligible" for f in world_group):
             footer_word = "never eligible"
         else:
             footer_word = "enqueued"
@@ -1489,21 +1438,13 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
                           else '<div class="vd-off-roster">not in the manifest</div>')
         cards.append(
             f'<div class="vd-cause">{_uv(w.label)} {header} {heading}{off_roster_note}'
-            f'{chip_bits}{envelope_note}'
             f'<a href="#fg-{group_n}">{n_findings} findings · {footer_word}</a>'
             f'</div>')
 
-    discard = getattr(grade, "discard_evidence", None)
-    discard_html = ""
-    if discard:
-        pointer = discard.get("review_pointer") if isinstance(discard, dict) else None
-        if pointer:
-            discard_html = f'<div class="vd-discard">{_uv(pointer)}</div>'
-
     body = (f'<div class="vd-band">{badge}{meta}</div>'
            f'{"".join(lede_parts)}{tile1}{tile2}{tile3}{tile4}'
-           f'<div class="vd-cards">{"".join(cards)}</div>{discard_html}'
-           f'{_render_queue_accounting(grade, counts, rows)}')
+           f'<div class="vd-cards">{"".join(cards)}</div>'
+           f'{_render_queue_accounting(grade, counts)}')
     return _page_section("sec-verdict", "Verdict", body)
 
 
@@ -1522,45 +1463,26 @@ def _normalized_disposition(value: Any) -> Any:
     return normalized_disposition(value) or value
 
 
-def _render_queue_accounting(grade: Any, counts: dict[str, int], rows: list[_Finding]) -> str:
+def _render_queue_accounting(grade: Any, counts: dict[str, int]) -> str:
     lines = [
         f'defender: {grade.enqueued_rows} enqueued to {_uv(grade.enqueued_to)}',
         f'questioner: {grade.world_enqueued_rows} enqueued to {_uv(grade.world_enqueued_to)}',
-        f'withheld {counts["withheld"]} ({_uv(_first_withheld_reason(rows))})',
         f'unqueueable {counts["unqueueable"]}',
         f'malformed {grade.queue_malformed_rows} / {grade.world_queue_malformed_rows}',
         f'dropped {counts["dropped"]}',
         f'family malformed replies {grade.family_malformed_replies}',
     ]
-    discard = getattr(grade, "discard_evidence", None)
-    if discard and isinstance(discard, dict) and discard.get("review_pointer"):
-        lines.append(_uv(discard["review_pointer"]))
     record_vs_page = f'record: {grade.enqueued_rows} enqueued · page found: {counts["defender"]}'
     if grade.enqueued_rows != counts["defender"]:
         record_vs_page += (f' <span class="vd-disagree">record and page disagree by '
                           f'{abs(grade.enqueued_rows - counts["defender"])}</span>')
     lines.append(record_vs_page)
 
-    recorded_withheld = len(_items(getattr(grade, "withheld_findings", None)))
-    matched = min(recorded_withheld, counts["withheld"])
-    withheld_line = f'withheld list: {recorded_withheld} entries · {matched} matched'
-    if recorded_withheld != counts["withheld"]:
-        withheld_line += (f' <span class="vd-disagree">record and page disagree by '
-                         f'{abs(recorded_withheld - counts["withheld"])}</span>')
-    lines.append(withheld_line)
-
     for line in _items(getattr(grade, "unqueueable_findings", None)):
         lines.append(_uv(str(line)))
 
     return f'<details class="vd-acct"><summary>Queue accounting</summary>' \
           f'{"".join(f"<div>{line_}</div>" for line_ in lines)}</details>'
-
-
-def _first_withheld_reason(rows: list[_Finding]) -> str | None:
-    for f in rows:
-        if f.disposition == "withheld":
-            return f.reason
-    return None
 
 
 # =========================================================================================
@@ -1620,10 +1542,10 @@ def _render_roster_item(ep: _Episode, item: RosterItem) -> str:
     return _render_one_world(ep, item.label)
 
 
-def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, PLR0915 — one world's whole section (state, ladder, chips, archive, review)
+def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, PLR0915 — one world's whole section (state, bucket, facts, calls, archive)
     entry = ep.entries[label]
     # A `not_graded` stamp voids the family's word: every record-derived part (ladder,
-    # bucket, withheld reason) renders as "not graded" even though the row exists. Run-dir and
+    # bucket, systems) renders as "not graded" even though the row exists. Run-dir and
     # archive parts are unaffected.
     row = None if ep.not_graded else entry.row
     bits = []
@@ -1644,20 +1566,25 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
     elif row.get("ungradable"):
         bits.append('<div class="w-state">ungradable</div>')
         bits.append(f'<div class="w-reason">{_uv(row.get("ungradable_reason"))}</div>')
-    elif row.get("withheld_reason") is not None:
-        bits.append('<div class="w-state">withheld</div>')
-        bits.append(f'<div class="w-reason">{_uv(row["withheld_reason"])}</div>')
-        bits.append(_ladder_html(row))
     else:
         bits.append(f'<div class="w-verdict">{_uv(row.get("verdict"))}</div>')
-        bits.append(_ladder_html(row))
-
-    bits.append(_chip_html(row, ep.review_block(label)))
+        bits.append(f'<span class="w-ladder">verdict = declared: {_uv(row.get("verdict"))} == '
+                    f'{_uv(row.get("declared"))}</span>')
+        bits.append(_bucket_html(row))
+    failed = ep.failed_worlds.get(label)
+    if isinstance(failed, dict) and row is None:
+        bits.append(f'<div class="w-reason">{_uv(failed.get("reason"))} — '
+                    f'{_uv(failed.get("detail"))}</div>')
 
     if manifest_world is not None:
         axis = manifest_world.get("axis")
         if isinstance(axis, str):
             bits.append(f'<div class="w-axis"><q class="verbatim">{_uv(axis)}</q></div>')
+        bits.append(_facts_html(manifest_world))
+
+    leads = ep.leads.get(label)
+    if leads is not None and leads.calls:
+        bits.append(_calls_html(leads.calls))
 
     result = entry.result
     # Both checked: `result` is only set alongside `run_dir_name`, but nothing enforces that,
@@ -1701,66 +1628,49 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
         else:
             bits.append(f'<div class="w-scrub">{_uv(archived.scrub)}</div>')
 
-    review_rec = ep.review_rec
-    review_worlds = review_rec.value.get("worlds") if review_rec.ok and isinstance(
-        review_rec.value, dict) else None
-    review_entry = review_worlds.get(label) if isinstance(review_worlds, dict) else None
-    if not review_rec.ok:
-        bits.append('<div class="w-review">review block unreadable</div>')
-    elif review_entry is None:
-        bits.append('<div class="w-review">no review record for this world</div>')
-
     return f'<div id="world-{esc(label)}" class="w-section">{"".join(bits)}</div>'
 
 
-def _ladder_html(row: dict[str, Any]) -> str:
+def _bucket_html(row: dict[str, Any]) -> str:
+    """The judge model's own answer for a world: its bucket and the systems its facts touch,
+    or every draw's answer where the draws disagree (never reduced to one here)."""
     bits = []
-    for field in _LADDER_FIELDS:
-        if field == "verdict":
-            bits.append(f'<span class="w-ladder">verdict = declared: '
-                       f'{_uv(row.get("verdict"))} == {_uv(row.get("declared"))}</span>')
-            continue
-        if field not in row:
-            continue
-        val = row.get(field)
-        bits.append(f'<span class="w-ladder">{esc(field)} = {_uv(val)}</span>')
-        if field == "doctored_answer_served" and row.get("holding_queried"):
-            # `has_refused` applies only where the world got a holding answer. "unrecorded"
-            # is for a not-doctored row missing the flag; on the doctored branch it is not
-            # applicable.
-            if "has_refused" in row:
-                bits.append(f'<span class="w-ladder">has_refused = {_uv(row["has_refused"])}</span>')
-            elif val is False:
-                bits.append('<span class="w-ladder">has_refused unrecorded</span>')
-            else:
-                bits.append('<span class="w-ladder">has_refused not applicable (doctored)</span>')
     bucket = row.get("bucket")
     if bucket:
         cls = _BUCKET_CLASS.get(bucket, "bucket-other")
         bits.append(f'<span class="w-bucket {cls}">{_uv(bucket)}</span>')
-    return "".join(bits)
+    else:
+        bits.append('<span class="w-bucket bucket-other">no bucket</span>')
+    systems = row.get("systems")
+    if isinstance(systems, list):
+        bits.append(f'<span class="w-chip">systems: {_uv(", ".join(map(str, systems)))}</span>')
+    if row.get("draws_disagree"):
+        for draw in _items(row.get("draws")):
+            draw = _mapping(draw)
+            bits.append(f'<span class="w-chip">draw {_uv(draw.get("draw"))}: '
+                        f'{_uv(draw.get("bucket"))} {_uv(draw.get("systems"))}</span>')
+    return " ".join(bits)
 
 
-def _chip_html(row: dict[str, Any] | None, reach: dict[str, Any] | None) -> str:
-    bits = []
-    for field in _CHIP_FIELDS:
-        if row is not None and field in row:
-            bits.append(f'<span class="w-chip">{esc(field)}: {_uv(row[field])}</span>')
-        elif (field in _REACH_ONLY_CHIP_FIELDS or row is None) \
-                and isinstance(reach, dict) and field in reach:
-            # `envelope_ran` always comes from reach. The other fields fall back to reach only
-            # when there is no row (the control, an ungraded world); a row that omits one reads
-            # "unrecorded" rather than borrowing another record's value.
-            bits.append(f'<span class="w-chip">{esc(field)}: {_uv(reach[field])}</span>')
-        elif row is None and field in _ROW_ONLY_CHIP_FIELDS:
-            # No row and never on a reachability block: omit the chip.
-            continue
-        else:
-            bits.append(f'<span class="w-chip">{esc(field)}: unrecorded</span>')
-    if isinstance(reach, dict) and reach.get("envelope_ran") is False and reach.get("envelope_failed"):
-        first_line = str(reach["envelope_failed"]).splitlines()[0]
-        bits.append(f'<div class="w-envelope">{_uv(first_line)}</div>')
-    return "".join(bits)
+def _facts_html(manifest_world: dict[str, Any]) -> str:
+    """A world's natural-language facts, each statement and its entities as text."""
+    facts = [f for f in _items(manifest_world.get("facts")) if isinstance(f, dict)]
+    if not facts:
+        return '<div class="w-facts">no facts (the capture\'s own answers)</div>'
+    items = "".join(
+        f'<div class="w-fact">{_uv(f.get("fact_id"))}: {_uv(f.get("statement"))} '
+        f'<span class="w-entities">{_uv(", ".join(map(str, _items(f.get("entities")))))}'
+        f'</span></div>' for f in facts)
+    return f'<div class="w-facts">{items}</div>'
+
+
+def _calls_html(calls: list[dict[str, Any]]) -> str:
+    """The world's own served-ledger rows: each call with the decision word that answered it
+    (`passthrough`, `oracle`, `real-error`, `refused`, `fault`)."""
+    items = "".join(
+        f'<div class="w-call">[{_uv(c.get("source"))}] {_uv(c.get("system"))} '
+        f'{_uv(c.get("verb"))} {_uv(c.get("params"))}</div>' for c in calls)
+    return f'<div class="w-calls">{items}</div>'
 
 
 # =========================================================================================
@@ -1875,8 +1785,6 @@ def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the
             wall_text = "not on the record"
         if str(step) in ep.role_costs:
             cost_text = _role_cost_text(ep.role_costs[str(step)])
-        elif str(step) == "review":
-            cost_text = f"{_money(review_total)}" if review_calls else "no model calls"
         elif str(step) == "runs":
             # The runs step row carries only its wall; its cost is on the per-run sub-rows.
             cost_text = ""
@@ -1898,8 +1806,7 @@ def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the
     # No total line when nothing priced; `ep.costed` rather than truthiness, since an
     # all-$0.0000 episode is still priced.
     if ep.costed or review_calls:
-        table += (f'<div class="st-total">{_money(grand_total)} — excludes gather subagents and '
-                f'the review gate</div>')
+        table += (f'<div class="st-total">{_money(grand_total)} — excludes gather subagents</div>')
 
     runs_rows = []
     runs_total = 0.0
@@ -1920,9 +1827,9 @@ def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the
     if ep.runs_costed:
         runs_rows.append(f'<div class="rn-total">{_money(runs_total)}</div>')
 
-    # Only these steps get an id; `staging`/`verify` render inline.
+    # Only these steps get an id; the rest render inline.
     stages_id_map = {"questioner": "stage-questioner", "runs": "stage-runs",
-                     Step.JUDGE: "stage-judge", "review": "stage-review"}
+                     Step.JUDGE: "stage-judge"}
     stage_blocks = []
     for step in STEPS:
         content = table_rows[list(STEPS).index(step)]
@@ -2200,67 +2107,27 @@ def _render_world_leads(label: str, leads: _WorldLeads) -> str:
 
 
 def _render_records(ep: _Episode) -> str:  # noqa: C901, PLR0912 — every episode-level record's own slot in one section
-    samples_rec, staged_rec, review_rec, stamp_rec = (
-        ep.samples_rec, ep.staged_rec, ep.review_rec, ep.stamp_rec)
+    samples_rec, stamp_rec = ep.samples_rec, ep.stamp_rec
     bits = [f'<div class="rc-story">{_uv(ep.manifest.get("base_story"))}</div>']
     discriminator = ep.manifest.get("discriminator")
     if isinstance(discriminator, dict):
-        predicate = discriminator.get("predicate")
-        bits.append(f'<div class="rc-predicate">{_uv(predicate)}</div>')
-        params = _mapping(_mapping(discriminator.get("envelope")).get("params"))
-        if "query" in params:
-            bits.append(f'<div class="rc-envelope">{_uv(params["query"])}</div>')
+        bits.append(f'<div class="rc-predicate">{_uv(discriminator.get("predicate"))}</div>')
+    served = _items(ep.manifest.get("served_systems"))
+    bits.append(f'<div class="rc-served">served systems: {_uv(", ".join(map(str, served)))}'
+                '</div>')
 
     for w in ep.manifest_worlds:
         if isinstance(w.get("world_id"), str):
             bits.append(f'<div class="rc-world">{_uv(w["world_id"])}</div>')
+
+    bits.append(_outcome_html(ep))
 
     if samples_rec.error:
         bits.append(f'<div class="rc-samples">{_uv(samples_rec.error)}</div>')
     elif not samples_rec.present:
         bits.append('<div class="rc-samples">absent</div>')
     else:
-        for pattern in _mapping(samples_rec.value):
-            bits.append(f'<div class="rc-pattern">{_uv(pattern)}</div>')
-
-    if staged_rec.error:
-        bits.append(f'<div class="rc-staged">{_uv(staged_rec.error)}</div>')
-    elif not staged_rec.present:
-        bits.append('<div class="rc-staged">absent</div>')
-    else:
-        for row in _items(staged_rec.value):
-            bits.append(f'<div class="rc-staged-row">{_uv(_mapping(row).get("name"))}</div>')
-
-    if review_rec.error:
-        bits.append(f'<div class="rc-review">{_uv(review_rec.error)}</div>')
-    elif not review_rec.present:
-        bits.append('<div class="rc-review">absent</div>')
-    else:
-        review_doc = _mapping(review_rec.value)
-        episode_block = review_doc.get("episode")
-        if isinstance(episode_block, dict):
-            bits.append(f'<div class="rc-review-episode">{_uv(episode_block.get("decision"))}'
-                       f' {_uv(episode_block.get("outcome"))}</div>')
-        else:
-            bits.append('<div class="rc-review-episode">absent</div>')
-        review_worlds = review_doc.get("worlds")
-        if not isinstance(review_worlds, dict):
-            bits.append('<div class="rc-review-worlds">absent</div>')
-        teardown = review_doc.get("teardown")
-        if isinstance(teardown, dict):
-            bits.append(f'<div class="rc-teardown-at">{_uv(teardown.get("at"))}</div>')
-            for failure in _items(teardown.get("failures")):
-                if isinstance(failure, dict):
-                    bits.append(f'<div class="rc-teardown-fail">{_uv(failure.get("name"))} '
-                               f'{_uv(failure.get("detail"))}</div>')
-        for block in _mapping(review_worlds).values():
-            if isinstance(block, dict):
-                for inv in _items(block.get("inventions")):
-                    bits.append(f'<div class="rc-invention">{_uv(inv)}</div>')
-                consistency = block.get("consistency")
-                if isinstance(consistency, dict):
-                    for key in _items(consistency.get("control_mismatch_keys")):
-                        bits.append(f'<div class="rc-mismatch-key">{_uv(key)}</div>')
+        bits.append(_samples_html(_mapping(samples_rec.value)))
 
     if stamp_rec.error:
         bits.append(f'<div class="rc-provenance">{_uv(stamp_rec.error)}</div>')
@@ -2280,6 +2147,56 @@ def _render_records(ep: _Episode) -> str:  # noqa: C901, PLR0912 — every episo
     return _page_section("sec-records", "Records", "".join(bits))
 
 
+def _record_call_text(call: Any) -> str:
+    call = _mapping(call)
+    return f'{_uv(call.get("system"))} {_uv(call.get("verb"))} {_uv(call.get("params"))}'
+
+
+def _outcome_html(ep: _Episode) -> str:
+    """Pre-flight's outcome record — its word and reason, the worlds it found unservable, the
+    calls it could not replay and the calls that drifted — and every world's own record."""
+    rec = ep.outcome_rec
+    record = _mapping(_mapping(rec.value).get("record"))
+    bits = []
+    if rec.error:
+        bits.append(f'<div class="rc-outcome">{_uv(rec.error)}</div>')
+    else:
+        bits.append(f'<div class="rc-outcome">outcome: {_uv(record.get("outcome"))} — '
+                    f'{_uv(record.get("reason"))}</div>')
+    for key, what in (("unservable_worlds", "unservable in pre-flight"),
+                      ("not_replayable", "not replayable"), ("drift", "drift")):
+        for entry in _items(record.get(key)):
+            entry = _mapping(entry)
+            extra = entry.get("world") if key == "unservable_worlds" else None
+            note = entry.get("status") or entry.get("reason")
+            bits.append(f'<div class="rc-outcome-call">{esc(what)}: '
+                        f'{_uv(extra) + " " if extra is not None else ""}{_record_call_text(entry.get("call") if key == "unservable_worlds" else entry)}'
+                        f' ({_uv(note)})</div>')
+    for label, entry in sorted(ep.failed_worlds.items()):
+        entry = _mapping(entry)
+        bits.append(f'<div class="rc-world-record">world {_uv(label)}: {_uv(entry.get("reason"))}'
+                    f' — {_record_call_text(entry.get("call"))} — {_uv(entry.get("detail"))}</div>')
+    return "".join(bits)
+
+
+def _samples_html(samples: dict[str, Any]) -> str:
+    """The samples record, one section per system: its verbs' real example answers, or the
+    reason the system has none."""
+    bits = []
+    for system, section in samples.items():
+        section = _mapping(section)
+        if "unavailable" in section:
+            bits.append(f'<div class="rc-sample-system">{_uv(system)}: unavailable — '
+                        f'{_uv(section.get("unavailable"))}</div>')
+            continue
+        answers = "".join(
+            f'<div class="rc-sample">{_uv(verb)}: {_uv(answer)}</div>'
+            for verb, listed in _mapping(section.get("verbs")).items()
+            for answer in _items(listed))
+        bits.append(f'<div class="rc-sample-system">{_uv(system)}{answers}</div>')
+    return "".join(bits)
+
+
 # =========================================================================================
 # CLI
 # =========================================================================================
@@ -2290,8 +2207,8 @@ def _diagnostics(ep: _Episode) -> list[str]:
     never a scan of the rendered bytes, which include model-authored text."""
     lines = []
     for name, rec in (("grade", ep.grade_rec), ("timing", ep.timing_rec),
-                      ("review", ep.review_rec), ("samples", ep.samples_rec),
-                      ("staging", ep.staged_rec), ("provenance", ep.stamp_rec)):
+                      ("outcome", ep.outcome_rec), ("samples", ep.samples_rec),
+                      ("provenance", ep.stamp_rec)):
         if rec.error:
             lines.append(f"{name} record unreadable")
     if ep.grade_rec.ok and ep.grade is None:

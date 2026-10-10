@@ -34,13 +34,13 @@ from defender._io import append_jsonl, read_jsonl_rows
 from defender._episode_handle import Episode
 from defender._episode_paths import BASE_FILENAME, SERVED_DIRNAME
 from defender.learning.branch.ledger import (
-    APPLIER_DECISIONS,
     BASE,
     CAPTURED,
     FAMILY_SOURCES,
     FAULT,
+    ORACLE,
     PASSTHROUGH,
-    PATCHED,
+    REAL_ERROR,
     REFUSED,
     SOURCES,
     STAGED,
@@ -87,20 +87,24 @@ def base_file(root: Path) -> Path:
 
 # 1. the vocabulary
 
-def test_the_family_tier_is_two_labels_and_the_applier_owns_neither():
-    """    `SOURCES` partitions into the FAMILY tier, the seam's own two, and the applier's three.
+def test_the_family_tier_is_two_labels_and_no_world_decision_is_one():
+    """    `SOURCES` partitions into the FAMILY tier, the seam's own two, and a world's three
+    serving decisions (#1224: `passthrough`, `oracle`, `real-error`).
 
     `captured` joining `base` in the family tier is the whole of Part B at the vocabulary level:
-    both are `world_id=None` rows every sibling replays, and neither is a decision an applier may
-    name. Without the partition spelled out, "the vocabulary is closed" reads as "any applier may
-    claim any member of it" — which now includes the label that means "this is what the estate
-    said during the real run"."""
+    both are `world_id=None` rows every sibling replays, and neither is a decision a world's
+    serving may name. Without the partition spelled out, "the vocabulary is closed" reads as
+    "any world may claim any member of it" — which now includes the label that means "this is
+    what the estate said during the real run". The retired staging decisions are names for
+    readers of archived ledgers only, never a new row's source."""
+    world_decisions = {PASSTHROUGH, ORACLE, REAL_ERROR}
     assert CAPTURED in SOURCES
     assert {BASE, CAPTURED} == FAMILY_SOURCES
-    assert APPLIER_DECISIONS | FAMILY_SOURCES | {REFUSED, FAULT} == SOURCES
-    assert not (APPLIER_DECISIONS & FAMILY_SOURCES), (
-        "an applier can name a family-tier label — one world's answer offered as the shared "
+    assert world_decisions | FAMILY_SOURCES | {REFUSED, FAULT} == SOURCES
+    assert not (world_decisions & FAMILY_SOURCES), (
+        "a world decision is a family-tier label — one world's answer offered as the shared "
         "recording, with its own row still reading honestly")
+    assert not ({STAGED, "patched"} & SOURCES), "a retired staging decision is still writable"
 
 
 @pytest.mark.parametrize("world_id", [None, "w1"])
@@ -128,7 +132,7 @@ def test_the_ledger_refuses_a_captured_row_at_its_own_door(tmp_path, world_id):
 
 
 @pytest.mark.parametrize(("source", "world_id"), [
-    (BASE, "w1"), (PASSTHROUGH, None), (STAGED, None), (PATCHED, None),
+    (BASE, "w1"), (PASSTHROUGH, None), (ORACLE, None), (REAL_ERROR, None),
 ])
 def test_the_two_tiers_still_have_to_agree_after_the_split(tmp_path, source, world_id):
     """    The widened invariant is still an invariant: a family label owned by a world, or a
@@ -431,7 +435,7 @@ def test_a_world_owned_row_never_answers_for_the_family_even_when_it_is_first(tm
     path = root / SERVED_DIRNAME / "w1.jsonl"
     call = dict(system="cmdb", verb="get-host", params={"host": "canary-1"})
     append_jsonl(path, [
-        ServedCall(payload_text='{"owner": "world a made this"}', source=PATCHED,
+        ServedCall(payload_text='{"owner": "world a made this"}', source="patched",
                    world_id="w1", **call).row(),
         ServedCall(payload_text='{"owner": "estate"}', source=BASE, world_id=None, **call).row(),
     ])

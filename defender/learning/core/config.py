@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import dataclasses
 import enum
 import logging
+import math
 import os
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any
 
 from defender._clock import now_iso  # noqa: F401 — re-export: core.config stays the loop's import surface
@@ -160,6 +163,116 @@ def judge_model() -> str:
 
 def judge_effort() -> str:
     return env_str("JUDGE_EFFORT", "medium")
+
+
+
+#: The oracle roles' defaults (#1224, M11): each routes on its own, so a launch with no knob set
+#: still preflights clean. Read through the accessors below, at call time.
+ORACLE_MODEL_DEFAULT = "kimi-k3"
+ORACLE_CHECK_MODEL_DEFAULT = "glm-5.3"
+ORACLE_EFFORT_DEFAULT = "medium"
+ORACLE_CHECK_EFFORT_DEFAULT = "medium"
+
+
+def oracle_model() -> str:
+    return env_str("ORACLE_MODEL", ORACLE_MODEL_DEFAULT)
+
+
+def oracle_check_model() -> str:
+    return env_str("ORACLE_CHECK_MODEL", ORACLE_CHECK_MODEL_DEFAULT)
+
+
+def oracle_effort() -> str:
+    return env_str("ORACLE_EFFORT", ORACLE_EFFORT_DEFAULT)
+
+
+def oracle_check_effort() -> str:
+    return env_str("ORACLE_CHECK_EFFORT", ORACLE_CHECK_EFFORT_DEFAULT)
+
+
+#: The oracle's knobs (#1224): platform settings, read from the process environment at the
+#: process boundary, never tenant settings.
+KNOB_MODEL = "ORACLE_MODEL"
+KNOB_CHECK_MODEL = "ORACLE_CHECK_MODEL"
+KNOB_EFFORT = "ORACLE_EFFORT"
+KNOB_CHECK_EFFORT = "ORACLE_CHECK_EFFORT"
+KNOB_RETRY_CAP = "ORACLE_RETRY_CAP"
+KNOB_RATE = "ORACLE_RATE"
+KNOB_BUDGET = "ORACLE_BUDGET"
+KNOB_TURN_DEADLINE = "ORACLE_TURN_DEADLINE"
+
+DEFAULT_RETRY_CAP = 3
+#: Oracle-side queries per second, per episode (a sibling gets its slice R/k from the launcher).
+DEFAULT_RATE = 5.0
+#: The oracle's own spend bound per world, in USD (`defender._pricing` on each response's
+#: usage, oracle and verifier together). Not the investigator's budget.
+DEFAULT_BUDGET = 20.0
+#: Seconds one attempt may take, rate-limiter waits excluded (M03=A, M11=A).
+DEFAULT_TURN_DEADLINE = 300.0
+
+
+@dataclasses.dataclass(frozen=True)
+class OracleSettings:
+    retry_cap: int
+    rate: float
+    budget: float
+    turn_deadline: float
+    model: str
+    check_model: str
+    effort: str
+    check_effort: str
+
+
+def _positive_float(knobs: Mapping[str, str], name: str, default: float, *,
+                    allow_zero: bool = False) -> float:
+    raw = knobs.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        raise FatalConfigError(f"{name} must be a number; got {raw!r}") from None
+    if not math.isfinite(value) or value < 0 or (value == 0 and not allow_zero):
+        bound = "zero or more" if allow_zero else "greater than zero"
+        raise FatalConfigError(f"{name} must be a finite number {bound}; got {raw!r}")
+    return value
+
+
+def oracle_settings(env: Mapping[str, str]) -> OracleSettings:
+    """The oracle's knobs read from `env`. A bad knob raises `FatalConfigError` naming it."""
+    raw_cap = env.get(KNOB_RETRY_CAP)
+    retry_cap = DEFAULT_RETRY_CAP
+    if raw_cap is not None and raw_cap != "":
+        try:
+            retry_cap = int(raw_cap)
+        except ValueError:
+            raise FatalConfigError(
+                f"{KNOB_RETRY_CAP} must be a whole number of at least 1; got {raw_cap!r}") from None
+        if retry_cap < 1:
+            raise FatalConfigError(
+                f"{KNOB_RETRY_CAP} must be a whole number of at least 1; got {raw_cap!r}")
+    return OracleSettings(
+        retry_cap=retry_cap,
+        rate=_positive_float(env, KNOB_RATE, DEFAULT_RATE),
+        budget=_positive_float(env, KNOB_BUDGET, DEFAULT_BUDGET, allow_zero=True),
+        turn_deadline=_positive_float(env, KNOB_TURN_DEADLINE, DEFAULT_TURN_DEADLINE),
+        model=env.get(KNOB_MODEL, ORACLE_MODEL_DEFAULT),
+        check_model=env.get(KNOB_CHECK_MODEL, ORACLE_CHECK_MODEL_DEFAULT),
+        effort=env.get(KNOB_EFFORT, ORACLE_EFFORT_DEFAULT),
+        check_effort=env.get(KNOB_CHECK_EFFORT, ORACLE_CHECK_EFFORT_DEFAULT),
+    )
+
+
+def process_oracle_settings() -> OracleSettings:
+    """`oracle_settings` over this process's environment."""
+    return oracle_settings(os.environ)
+
+
+def oracle_settings_with(**given: Any) -> OracleSettings:
+    """This process's oracle knobs with each `given` value that is not `None` in its place: the
+    one place a caller's explicit knob and the environment's default are reconciled."""
+    return dataclasses.replace(process_oracle_settings(),
+                               **{name: value for name, value in given.items() if value is not None})
 
 
 

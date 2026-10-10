@@ -481,7 +481,7 @@ def test_m6_the_chain_and_each_refused_entry_carry_exactly_their_named_keys(
     assert leads["l-001"]["refused"] == [], "a lead with no refusal carries a refused entry"
 
     # The unknown-id arm: referenced by the document, unknown to the surface.
-    ep2 = J.accepted_episode(tmp_path / "unknown", ledgers={"b": [J.staged_row("b")], "c": []})
+    ep2 = J.accepted_episode(tmp_path / "unknown", ledgers={"b": [J.oracle_row("b")], "c": []})
     base2, _src = J.runs_base(tmp_path / "unknown")
     world2 = ep2 / "worlds" / "b"
     assert not (world2 / "gather_raw" / "l-001.lead.json").exists()
@@ -746,8 +746,8 @@ def test_m5_the_prompt_states_the_refused_rule_in_host_text(tmp_path, judge_root
     """O2/M5 — the judge's prompt, in its HOST text (outside every untrusted frame), states
     the rule for `refused:`: an entry with `external=true` on the family's holding system is
     an `observability` finding, never `lead-set`; `external=false` is the defender's own
-    conduct; `evidence` cites `executed_queries.jsonl`; and VIEW 2's `source: refused` (a call
-    that reached the system) is named as a different thing. Pinned by its load-bearing tokens
+    conduct; `evidence` cites `executed_queries.jsonl`; and the ledger's own `refused` decision
+    word is defined in VIEW 1's host glossary (#1224). Pinned by its load-bearing tokens
     in ONE host paragraph rather than verbatim, so wording may move and a prompt without the
     rule still fails. The rule is host text and not a frame title: a heading inside a frame is
     data by the reader contract. The flag is spelled `external=true`, the form
@@ -756,7 +756,7 @@ def test_m5_the_prompt_states_the_refused_rule_in_host_text(tmp_path, judge_root
 
     Observed failing by: a prompt whose host text names neither `refused` nor `external`, or
     spells the flag in a form the section never prints."""
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     base, _src = J.runs_base(tmp_path)
     prompt = _prompt_for_world_b(ep, base)
     host = J.outside_untrusted_frames(prompt)
@@ -790,34 +790,40 @@ def test_m5_the_prompt_states_the_refused_rule_in_host_text(tmp_path, judge_root
     assert not re.search(r"\b(never|not|must not)\b[^.]*\bcite\b", before_files), \
         "the rule forbids citing the table rather than naming it as the pointer"
     assert re.search(r"\bevidence\b", files), "the files paragraph does not mention `evidence`"
-    assert "VIEW 2" in rule, "the rule does not name VIEW 2 to tell its `refused` apart"
-    assert "source: refused" in rule, \
-        "the rule does not tell VIEW 2's estate-seam `refused` apart from the lead line's"
+    # #1224: the ledger's own `refused` is now one of VIEW 1's decision words, defined in its
+    # own host glossary paragraph (a call turned away before it reached any system) — the same
+    # kind of attempt the lead line's entries are, so the rule no longer sets it apart.
+    glossary = [p for p in host.split("\n\n") if "VIEW 1" in p and "decision word" in p]
+    assert len(glossary) == 1, "no single host paragraph glosses VIEW 1's decision words"
+    assert "- `refused`:" in glossary[0], \
+        "the decision glossary does not define VIEW 1's `refused` word"
 
 
 def test_m5_every_description_of_the_per_lead_chain_names_its_refused_link(tmp_path, judge_roots):
     """M5, and the attack deck's 2026-07-23 shape (PR #700): prose that DESCRIBES a section's
     content stays green while the content moves. The chain now carries `refused`, so every
     trusted sentence that enumerates the chain's links — the task's "per-lead chain (goal,
-    params, payload, summary, resolutions)" in the host text, and VIEW 1's own title line
-    inside its frame (`## VIEW 1 — PER-LEAD CHAIN (goal -> params -> ...)`) — names `refused`
+    params, payload, summary, resolutions)" in the host text, and the chain's own title line
+    inside its frame (`## VIEW 3 — PER-LEAD CHAIN (goal -> params -> ...)` since #1224) — names `refused`
     too; a description that lists the links and omits the new one tells the judge the line is
     not part of the view it was told to compare against.
 
-    Observed failing by: a host paragraph or a VIEW 1 title line that enumerates the links
+    Observed failing by: a host paragraph or the chain's title line that enumerates the links
     (mentions `goal`, `params` and `payload`) without `refused`."""
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     base, _src = J.runs_base(tmp_path)
     prompt = _prompt_for_world_b(ep, base)
     host = J.outside_untrusted_frames(prompt)
 
+    # #1224 dropped the task sentence's enumeration (the per-lead chain became VIEW 3), so the
+    # host side may enumerate nothing — but whatever does enumerate the links names `refused`.
     enumerations = [p for p in host.split("\n\n") if "goal" in p and "params" in p and "payload" in p]
-    assert enumerations, "no host paragraph enumerates the chain's links — the fixture moved"
     for paragraph in enumerations:
         assert "refused" in paragraph, \
             f"a host description of the per-lead chain omits its refused link:\n{paragraph}"
-    titles = [line for line in prompt.splitlines() if line.startswith("## ") and "VIEW 1" in line]
-    assert len(titles) == 1, f"VIEW 1's title line is not where the port put it: {titles}"
+    titles = [line for line in prompt.splitlines()
+              if line.startswith("## ") and "PER-LEAD CHAIN" in line]
+    assert len(titles) == 1, f"the per-lead chain's title line is not where the port put it: {titles}"
     assert "goal" in titles[0], f"VIEW 1's title no longer enumerates the chain: {titles[0]}"
     assert "refused" in titles[0], \
         f"VIEW 1's title enumerates the chain without its refused link: {titles[0]}"
@@ -860,7 +866,7 @@ def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, jud
         == [ABOVE_GUARD_QUERY_ID, DENIED_QUERY_ID, "elastic.query"]
     assert len(rec.calls) == 1, "the granted call did not run"
 
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     base, _src = J.runs_base(tmp_path)
     world = ep / "worlds" / "b"
     # The replay closes no investigation, so the run dir has no report.md of its own; the
@@ -894,28 +900,19 @@ def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, jud
 
 
 # ---------------------------------------------------------------------------------------
-# The mechanical record agrees with the prompt — through the ledger, not a second surface
+# A denial reaches the judge through the world's own ledger, not a second surface
 # ---------------------------------------------------------------------------------------
 
 
-def _grade(ep: Path, base: Path):
-    """The real grading pass over `ep`, through its own seams."""
-    judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    return J.mod("learning.judge").grade_episode(
-        ep, judge=judge, runs_base=base, state=_state1135.env_state())
-
-
 def test_a_real_denial_in_a_sibling_world_is_that_worlds_refused_ledger_row(tmp_path):
-    """The rule the prompt states (`external=true` on the holding system -> not `lead-set`)
-    is the RECORD's too, and by one mechanism: the mechanical pass decides `lead-set` from the
-    world's served ledger, and a call the grant withholds used to be absent from that ledger
-    by construction. Now the sibling's own registry files it there (`WorldRegistry.
+    """A call the grant withholds is on the world's served ledger, which is what the judge's
+    VIEW 1 renders with its decision word (#1224 retired the mechanical pass that once read it
+    for `lead-set`); a withheld call used to be absent from that ledger by construction. Now the sibling's own registry files it there (`WorldRegistry.
     decide_call`, `source: refused`, the params as asked, the world's id) at the grant
     decision — the same row the seam's isolation refusal leaves, one frame earlier — so the
-    ledger's F-1 rule covers it and the pass reads no second surface and stores no second
-    flag. A REAL gather run, a REAL `WorldRegistry` over a fake estate, the REAL query tool
-    between them: the denied call also leaves its `∅.denied` row on the queries table (VIEW
-    1's per-lead line, which the ledger cannot carry), and the adapter body never runs.
+    judge reads no second surface and no second flag is stored. A REAL gather run, a REAL `WorldRegistry` over a fake estate, the REAL query tool
+    between them: the denied call also leaves its `∅.denied` row on the queries table (the per-lead
+    chain's line, which the ledger cannot carry), and the adapter body never runs.
 
     Observed failing by: no `refused` row in the sibling's ledger, or one with the wrong
     params/world, or the queries-table row gone."""
@@ -939,59 +936,6 @@ def test_a_real_denial_in_a_sibling_world_is_that_worlds_refused_ledger_row(tmp_
     assert r.own_evidence == [], "a denied call wrote an evidence row"
     (own,) = r.own_denied_rows
     assert (own["lead_id"], own["system"], own["verb"]) == (LEAD, "elastic", "get-host")
-
-
-def test_the_mechanical_bucket_reads_the_ledgers_refused_row_and_not_the_queries_table(
-    tmp_path, judge_roots,
-):
-    """What the pass reads a refusal FROM. The ledger's `refused` row on H — the row the
-    sibling's registry writes for a denial — is F-1: the world asked and was turned away, so
-    it is excluded from the failure buckets (`bucket: None`, `has_refused: True`). The
-    queries table's `∅.` rows are NOT a grading surface: a world whose only trace of H is a
-    `∅.denied` row there and an EMPTY ledger buckets `lead-set`, because that table is
-    inherited from the source run (a pre-branch denial reaches every sibling, `test_m2_*`),
-    carries the harness's own reserved leads, and holds every kind of "did not happen" —
-    and a pass reading it would excuse every sibling of a family for one lead's wander. No
-    world row carries a `refused_before_dispatch` key: there is no second flag.
-
-    Four non-control worlds:
-    * `b` — ledger `refused` on H, no table row     -> `None`, has_refused True;
-    * `c` — empty ledger, `∅.denied` on H in the table -> `lead-set`, has_refused False;
-    * `d` — empty ledger, an `infra` above-guard row on H -> `lead-set`, has_refused False;
-    * `e` — ledger `refused` on ANOTHER system      -> `lead-set`, has_refused False.
-
-    Observed failing by: `c`/`d` excused, `b` bucketed, or the retired flag on a row."""
-    labels = ("a", "b", "c", "d", "e")
-    refused = J.ledger_row(source="refused", world_label="b", params={"host": "web-01"})
-    elsewhere = J.ledger_row(source="refused", world_label="e", system="ticket",
-                             verb="get-ticket", params={"id": "T-1"})
-    ep = J.accepted_episode(
-        tmp_path, labels=labels,
-        dispositions={label: "malicious" for label in labels} | {"a": "benign"},
-        ledgers={"b": [refused], "c": [], "d": [], "e": [elsewhere]},
-    )
-    base, _src = J.runs_base(tmp_path)
-    worlds = ep / "worlds"
-    _table(worlds / "c", [_denied(0, system=J.HOLDING_SYSTEM, verb="esql")])
-    _table(worlds / "d", [_sentinel(0, ABOVE_GUARD_QUERY_ID, system=J.HOLDING_SYSTEM,
-                                    error_class=INFRA_ERROR_CLASS)])
-    for label in ("c", "d"):
-        _lead_file(worlds / label, "REFUSED_GOAL", lead_id=DENIED_LEAD)
-
-    rows = J.rows(_grade(ep, base))
-
-    for label in labels[1:]:
-        assert rows[label].get("ungradable") is not True, rows[label]
-        assert "refused_before_dispatch" not in rows[label], \
-            f"{label}: the retired second flag is on the row"
-    assert (rows["b"]["has_refused"], rows["b"]["holding_queried"], rows["b"]["bucket"]) \
-        == (True, True, None), f"the ledger's refusal on H: {rows['b']}"
-    assert (rows["c"]["has_refused"], rows["c"]["bucket"]) == (False, "lead-set"), \
-        f"a `∅.denied` table row is not the pass's surface: {rows['c']}"
-    assert (rows["d"]["has_refused"], rows["d"]["bucket"]) == (False, "lead-set"), \
-        f"an above-guard table row is not the pass's surface: {rows['d']}"
-    assert (rows["e"]["has_refused"], rows["e"]["bucket"]) == (False, "lead-set"), \
-        f"a refusal elsewhere is not H's: {rows['e']}"
 
 
 # ---------------------------------------------------------------------------------------

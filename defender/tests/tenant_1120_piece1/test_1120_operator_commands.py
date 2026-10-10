@@ -30,8 +30,6 @@ import pytest
 from defender import _tenant
 from defender import run as run_py
 from defender.learning.branch import cli as branch_cli
-from defender.learning.branch import staging
-from defender.learning.branch.estate.stagers import elastic as elastic_stager
 from defender.runtime import box as box_mod
 from defender.runtime import box_codec, lead_zero_config, verb_dispositions
 from defender.runtime import case_ticket
@@ -519,10 +517,8 @@ def test_1120_every_settings_loader_reads_the_accepted_tenants_settings(
     marker key). The system configs are read once, into the run's tenant record (#1107), from
     that same folder: elastic_adapter.load_config (the data-root cluster marker) and
     _stub_transport.load_config (the data-root ticket marker) for a VerbContext carrying the
-    record; the elastic stager's configured_patterns over the record's Elastic view (the
-    data-root index markers); staging.write_door_from_env over staging.host_context (the
-    data-root cluster marker as the door's base URL). A loader that resolves anywhere else is
-    the R7 escape this pins."""
+    record; and the record's Elastic view carries the data-root index markers. A loader that
+    resolves anywhere else is the R7 escape this pins."""
     for key in ("ELASTICSEARCH_URL", "ELASTIC_SSL_VERIFY", "ELASTIC_EVENTS_INDEX",
                 "ELASTIC_ALERTS_INDEX", "TICKET_URL_BASE", "TICKET_BASTION_HOST",
                 "TICKET_TIMEOUT_SEC", "TICKET_KEY_PATTERN"):
@@ -569,10 +565,10 @@ def test_1120_every_settings_loader_reads_the_accepted_tenants_settings(
     loaded = _stub_transport.load_config(ctx, "ticket", "TICKET")
     assert loaded["URL_BASE"] == "http://spec1120-acme-ticket:8080", loaded
 
-    assert elastic_stager.configured_patterns(record.elastic) == (
-        "spec1120-acme-events-*", "spec1120-acme-alerts-*")
-    door = staging.write_door_from_env(staging.host_context(record, {}))
-    assert door.base_url == "https://spec1120-acme-cluster:9200", door
+    # #1224 retired the elastic stager and the write door that read this view; the view itself
+    # is what survives, built from the data-root copy.
+    assert (record.elastic.events_index, record.elastic.alerts_index) == (
+        "spec1120-acme-events-*", "spec1120-acme-alerts-*"), record.elastic
 
     report = validate_scaffold.Report()
     validate_scaffold.check_config(report, Path(settings), "ticket")

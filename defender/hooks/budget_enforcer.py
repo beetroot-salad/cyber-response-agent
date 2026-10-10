@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import json
+import logging
+import math
+import os
 import threading
 import time
 from datetime import UTC, datetime
@@ -12,6 +15,8 @@ from defender._io import write_atomic
 from defender.run_repository import RunPaths
 from defender.hooks._run_dir import read_json_locked, update_json_locked
 from defender.runtime.agent_role import AgentRole
+
+_logger = logging.getLogger(__name__)
 
 DEFAULT_LIMITS = {
     "max_tool_calls": 200,
@@ -66,6 +71,7 @@ def open_budget(run_dir: Path, run_id: str) -> dict:
         state.setdefault("created_at", now)
         state.setdefault("started_at", now)
 
+    forget_open_turn(run_dir)
     return update_json_locked(RunPaths(run_dir).budget, _mutate, default=dict)
 
 
@@ -98,37 +104,56 @@ def update_budget_locked(
     )
 
 
+#: Serializes this process's threads over the failure path's sidecar writes
+#: (`_record_accounting_failure`, `_record_alias_refusal`), as before.
+#: `budget.json` itself needs no process lock: every write to it is one `update_json_locked`
+#: under its file lock, which also orders this process's threads (each opens its own fd).
 _ACCOUNT_LOCK = threading.Lock()
-
-
-def _write_budget_atomic(run_dir: Path, state: dict) -> None:
-    write_atomic(RunPaths(run_dir).budget, json.dumps(state, indent=2))  # lint-unguarded-tree-write: ok — delegates to write_guarded
 
 
 def account_call(
     run_dir: Path, run_id: str, tool_name: str, *,
     limits: dict, tier: str, exit_code: int = 0,
 ) -> dict:
+    """Count one executed call against the pool, re-checking the cap at commit time.
+
+    A call at the cap writes nothing. Below it, the read, the cap check and the increment are
+    one locked read-modify-write of `budget.json` (`update_json_locked`), so no interleaving
+    with another writer can lose an increment. (Oracle-held time is not in this file: it is
+    host state, in the run's `oracle-held` sidecar and this process's memory.)"""
     limit = limits["max_tool_calls"] + (TAIL_ALLOWANCE if tier == "tail" else 0)
-    with _ACCOUNT_LOCK:
-        state = read_budget(run_dir) or make_budget_state(run_id)
-        current = _valid_count(state.get("tool_calls")) or 0
-        if current >= limit:
+    # At the cap nothing changes, so nothing is written: a capped call cannot fail an
+    # accounting write (and climb the kill circuit) over a count it never makes. The count only
+    # grows, so a read showing the cap stays true; below it the locked write re-checks.
+    seen = read_budget(run_dir)
+    if (_valid_count(seen.get("tool_calls")) or 0) >= limit:
+        with _ACCOUNT_LOCK:
             _reset_accounting_failure(run_dir)
-            return state
-        state["tool_calls"] = current + 1
-        if tool_name == "gather":
-            state["subagent_spawns"] = (_valid_count(state.get("subagent_spawns")) or 0) + 1
+        return seen or make_budget_state(run_id)
+    built: dict = {}
+
+    def _mutate(state: dict) -> None:
+        if not state:
+            state.update(make_budget_state(run_id))
+        current = _valid_count(state.get("tool_calls")) or 0
+        if current < limit:
+            state["tool_calls"] = current + 1
+            if tool_name == "gather":
+                state["subagent_spawns"] = (_valid_count(state.get("subagent_spawns")) or 0) + 1
+        built.update(state)
+
+    with _ACCOUNT_LOCK:
         try:
-            _write_budget_atomic(run_dir, state)
+            state = update_json_locked(
+                RunPaths(run_dir).budget, _mutate, default=lambda: make_budget_state(run_id))
         except OSError as e:
             # An alias refusal never counts toward the kill circuit, or the box would hold a
             # DoS lever. Ordinary write failures (squatted directory, full disk) still escalate.
             if getattr(e, "write_guarded_alias", False):
                 _record_alias_refusal(run_dir, RunPaths(run_dir).budget)
-                return read_budget(run_dir) or state
+                return read_budget(run_dir) or built or make_budget_state(run_id)
             _record_accounting_failure(run_dir, limits)
-            return read_budget(run_dir) or state
+            return read_budget(run_dir) or built or make_budget_state(run_id)
     _reset_accounting_failure(run_dir)
     return state
 
@@ -205,6 +230,116 @@ def _wall_origin(state: dict) -> datetime | None:
     return None
 
 
+#: S15 (#1224): the seconds a branched world's oracle held the turn, which every investigator
+#: time limit excludes. HOST state, never in `budget.json`: the box can write the run dir, so a
+#: total or an open-turn mark read from there would let it stop the investigator's clock, and a
+#: link it planted there would fault every oracle turn. The credited total lives in the run's
+#: host-only sidecar beside the run dir (`RunPaths.oracle_held`), where it survives a resume;
+#: the turn open now lives in this process's memory — the registry holding it and the
+#: enforcer reading it are one process, and a process that dies holds no turn.
+ORACLE_HELD_KEY = "oracle_held_seconds"
+
+#: The key `_budget_state_for_enforcement` sets on the in-memory enforcement state to hand
+#: `_elapsed` the host's oracle-held seconds. It is never read from a state that names no host
+#: value: `_elapsed` honours only a `_HostHeld`, which no JSON document can produce.
+ENFORCEMENT_HELD_KEY = "_host_oracle_held"
+
+
+class _HostHeld(float):
+    """Oracle-held seconds the host measured (`oracle_held`). A distinct type so a same-named
+    key in `budget.json`, which decodes to a plain number, subtracts nothing."""
+
+
+#: The oracle turn open now per run dir: its `time.monotonic()` start. One turn at a time per
+#: world (`WorldRegistry._turn`), and one world per run dir.
+_OPEN_TURNS: dict[str, float] = {}
+_OPEN_LOCK = threading.Lock()
+
+
+def _turn_key(run_dir: Path) -> str:
+    return os.path.abspath(run_dir)
+
+
+def _oracle_held_path(run_dir: Path) -> Path:
+    run_dir = Path(run_dir)
+    return RunPaths(run_dir).oracle_held(run_dir.parent)
+
+
+def _seconds(value: object) -> float:
+    """A credited total as a usable number of seconds: anything else reads as none credited."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        number = float(value)
+        if math.isfinite(number) and number >= 0:
+            return number
+    return 0.0
+
+
+def _credited(run_dir: Path) -> float:
+    """The oracle-held seconds credited so far, from the host-only sidecar. Absent, linked,
+    unreadable or garbage reads as none: the clock then runs, it never pauses."""
+    try:
+        return _seconds(read_json_locked(_oracle_held_path(run_dir)).get(ORACLE_HELD_KEY))
+    except (OSError, ValueError):
+        return 0.0
+
+
+def _has_clock(run_dir: Path) -> bool:
+    """Whether the run has a budget record (an enforcer whose clock an oracle turn pauses).
+    `lexists`, so a link the box planted at `budget.json` still counts as a run with a clock."""
+    return os.path.lexists(RunPaths(Path(run_dir)).budget)
+
+
+def oracle_turn_opened(run_dir: Path) -> None:
+    """Pause the investigator's clock: an oracle turn holds the world from now until
+    `oracle_turn_closed`. A run with no budget record (no enforcer) has no clock to pause.
+    Writes nothing: the open turn is this process's memory, so nothing the box writes can
+    fault it."""
+    if not _has_clock(run_dir):
+        return
+    with _OPEN_LOCK:
+        _OPEN_TURNS[_turn_key(run_dir)] = time.monotonic()
+
+
+def oracle_turn_closed(run_dir: Path) -> None:
+    """Resume the investigator's clock, crediting the closed turn's interval to the run's
+    host-only total, once. Never raises for the record: a turn whose credit cannot be written
+    still closes, and its time then counts toward the investigator's clock.
+
+    @owns oracle_held_seconds"""
+    with _OPEN_LOCK:
+        opened = _OPEN_TURNS.pop(_turn_key(run_dir), None)
+    if opened is None:
+        return
+    interval = max(0.0, time.monotonic() - opened)
+
+    def _mutate(state: dict) -> None:
+        state[ORACLE_HELD_KEY] = _seconds(state.get(ORACLE_HELD_KEY)) + interval
+
+    try:
+        update_json_locked(_oracle_held_path(run_dir), _mutate, default=dict)
+    except OSError as e:
+        _logger.warning(f"the oracle turn's {interval:.1f}s could not be credited to the "
+                        f"investigator's clock ({e!r}); it counts as investigator time")
+
+
+def forget_open_turn(run_dir: Path) -> None:
+    """Drop a turn left open in this process for `run_dir` (a run that ended mid-turn): a run
+    that starts again in this process starts with its clock running."""
+    with _OPEN_LOCK:
+        _OPEN_TURNS.pop(_turn_key(run_dir), None)
+
+
+def oracle_held(run_dir: Path) -> float:
+    """The oracle time the investigator's clock excludes for `run_dir`: the host-only credited
+    total plus the turn this process holds open now, if any. Zero for a run no oracle served."""
+    held = _credited(run_dir)
+    with _OPEN_LOCK:
+        opened = _OPEN_TURNS.get(_turn_key(run_dir))
+    if opened is not None:
+        held += max(0.0, time.monotonic() - opened)
+    return _HostHeld(held)
+
+
 def _elapsed(state: dict) -> float | None:
     deltas: list[float] = []
     origin = _wall_origin(state)
@@ -213,7 +348,10 @@ def _elapsed(state: dict) -> float | None:
     mono = state.get("started_monotonic")
     if isinstance(mono, (int, float)) and not isinstance(mono, bool):
         deltas.append(time.monotonic() - mono)
-    return max(deltas) if deltas else None
+    if not deltas:
+        return None
+    held = state.get(ENFORCEMENT_HELD_KEY)
+    return max(deltas) - (float(held) if isinstance(held, _HostHeld) else 0.0)
 
 
 def tail_exhausted(state: dict, limits: dict) -> bool:

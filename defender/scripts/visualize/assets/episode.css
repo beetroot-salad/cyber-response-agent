@@ -141,6 +141,7 @@
 .episode .st-total, .episode .rn-total { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; font-weight: 600; color: var(--text-bright); padding: 4px 0; }
 .episode .st-caption { font-size: 11px; color: var(--text-dim); font-style: italic; padding: 2px 0; }
 .episode .st-error, .episode .st-unattributed { font-size: 12px; color: var(--warn); padding: 4px 0; overflow-wrap: anywhere; }
+.episode .refusal { color: var(--warn); padding: 8px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .episode .stage-block { margin-bottom: 12px; padding: 8px 12px; border-radius: 6px; background: var(--bg-2); border: 1px solid var(--border-2); }
 .episode .rn-row { padding-left: 16px; color: var(--text-dim); }
 .episode .rn-launcher { font-size: 10.5px; color: var(--accent-raw); margin-left: 6px; }
@@ -188,3 +189,14 @@
   font-size: 12px; color: var(--text-dim); padding: 2px 0; overflow-wrap: anywhere;
 }
 .episode .rc-teardown-fail { font-size: 12px; color: var(--bad); padding: 2px 0 2px 12px; overflow-wrap: anywhere; }
+
+/* #1224: a world's facts and its served calls; pre-flight's outcome record, world records and
+   the per-system samples record. */
+.episode .w-facts, .episode .w-calls { margin: 4px 0; }
+.episode .w-fact, .episode .w-call { font-size: 0.9em; }
+.episode .w-entities { color: var(--text-dim); }
+.episode .rc-served, .episode .rc-outcome, .episode .rc-outcome-call, .episode .rc-world-record,
+.episode .rc-sample-system, .episode .rc-sample {
+  font-size: 0.9em;
+}
+.episode .rc-sample { margin-left: 1em; }

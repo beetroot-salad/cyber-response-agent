@@ -495,7 +495,7 @@ class RunRecorder:
         self.materialize_calls: list[dict[str, Any]] = []
         self.lifecycle_calls: list[dict[str, Any]] = []
 
-    def preflight(self, _model: str | None = None) -> int:
+    def preflight(self, _model: str | None = None, *, branching: bool = False) -> int:
         self.order.append("preflight")
         return 0
 

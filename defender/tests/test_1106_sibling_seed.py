@@ -30,6 +30,7 @@ from defender._episode_handle import Episode
 from defender.tests import _tenants1106 as T
 from defender.tests import _triplet_947 as P
 from defender.tests._data_root_1078 import DATA_ROOT_ENV, current_data_root
+from defender.tests.live_oracle_1224 import _spec1224 as O
 from defender.tests.tenant_1107_settings import _spec1107 as S
 
 
@@ -118,35 +119,59 @@ def test_start_family_refuses_an_episode_with_no_tenant_and_starts_nothing(tmp_p
 _AS_STAMPED = object()
 
 
-def _launch(tmp_path: Path, *, stamp_tenant: str | None,
-            door: Any = None, record_tenant: Any = _AS_STAMPED,
-            source: Path | None = None) -> tuple[Any, SpawnRecorder]:
-    """One episode through the real launcher (`cli.main`), as `test_947_triplet_launcher` drives
-    it, with the SOURCE run's stamp naming `stamp_tenant` and its runs base's record naming
-    `record_tenant` (the same tenant unless a scenario says otherwise; `None` leaves the
-    fixture's own record). The launcher finds tenants under this test's data root (#1120).
-    `source` is a source run dir the scenario already built (its tenant shaped by hand)."""
-    record = stamp_tenant if record_tenant is _AS_STAMPED else record_tenant
-    # The source sits at its record's tenant location (#1078 O5); `None` keeps the fixture's.
-    src = source if source is not None else P.runs_base(tmp_path, tenant_id=record)[1]
-    P.source_stamp(src, tenant_id=stamp_tenant)
+def _main(src: Path, *, stamp_tenant: str | None, roster: Any = None) -> tuple[Any, SpawnRecorder]:
+    """One episode from `src` through the real launcher (`cli.main`), every seam injected: the
+    question-writer, the role preflight, the live tree, and pre-flight's roster and oracle and
+    verifier doubles (#1224 — an oracle serving every call unchanged and a verifier passing it).
+    A refusal is returned as the outcome rather than raised."""
     spawn = SpawnRecorder()
     outcome: Any
     try:
         outcome = T.mod("learning.branch.cli").main(
             [str(src), str(P.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
-            spawn=spawn, door=door if door is not None else P.FakeDoor(),
-            questioner=P.FakeAgent(P.family_doc(), P.world_doc("b"), P.world_doc("c")),
-            adapters=P.FakeAdapters(), invoke=P.FakeAgent(*["same"] * 24),
-            preflight=P.no_preflight, live_tree=P.source_capture(tenant_id=stamp_tenant))
+            spawn=spawn, questioner=O.questioner_for(), preflight=O.no_preflight,
+            live_tree=P.source_capture(tenant_id=stamp_tenant), roster=roster,
+            oracle=O.oracle(then=O.submit(_BASE, O.EMPTY_CLAIM)).model,
+            verifier=O.passing_verifier().model)
     except (Exception, SystemExit) as refused:  # noqa: BLE001 — a refusal is an outcome here
         outcome = refused
     return outcome, spawn
 
 
+def _launch(tmp_path: Path, *, stamp_tenant: str | None, record_tenant: Any = _AS_STAMPED,
+            source: Path | None = None) -> tuple[Any, SpawnRecorder]:
+    """One episode through the real launcher, as `test_947_triplet_launcher` drives it, with
+    the SOURCE run's stamp naming `stamp_tenant` and its runs base's record naming
+    `record_tenant` (the same tenant unless a scenario says otherwise; `None` leaves the
+    fixture's own record). The launcher finds tenants under this test's data root (#1120).
+    `source` is a source run dir the scenario already built (its tenant shaped by hand). Every
+    scenario driving this one is refused before pre-flight reads anything."""
+    record = stamp_tenant if record_tenant is _AS_STAMPED else record_tenant
+    # The source sits at its record's tenant location (#1078 O5); `None` keeps the fixture's.
+    src = source if source is not None else P.runs_base(tmp_path, tenant_id=record)[1]
+    P.source_stamp(src, tenant_id=stamp_tenant)
+    return _main(src, stamp_tenant=stamp_tenant)
+
+
+#: The one answer every captured call of the estate source carries, so one scripted oracle
+#: submission serves every call unchanged and the family is accepted.
+_BASE = {"rows": [{"user": "alice", "event_id": "e-100", "host": "web-1"}]}
+
+
+def _estate_launch(tmp_path: Path) -> tuple[Any, SpawnRecorder, Any]:
+    """One ACCEPTED episode over `_spec1224`'s estate tenant (`acme`, systems the checkout's
+    playground does not have), stamped `acme`. Returns `(outcome, spawn, estate)`."""
+    est = O.estate(tmp_path)
+    _base, src = O.source_run(tmp_path, est, calls=[
+        O.Call("idp", "query", O.query_params("user:alice"), _BASE),
+        O.Call("edr", "query", O.query_params("host:web-1"), _BASE)])
+    outcome, spawn = _main(src, stamp_tenant="acme", roster=est.roster())
+    return outcome, spawn, est
+
+
 def _episode_tenant(root: Path) -> Path:
-    """A complete tenant whose elastic patterns are the fixture's configured pair, so the
-    stager's namespace checks accept the family's overlays."""
+    """A complete tenant `acme` (its elastic patterns the fixture's configured pair) — the
+    episode tenant a refused launch is refused beside."""
     return T.place_tenant(root, "acme", configs=S.config_texts(
         "acme", events_index=P.EVENTS_PATTERN, alerts_index=P.ALERTS_PATTERN))
 
@@ -166,8 +191,7 @@ def _knowledgeless_source(tmp_path: Path, tenant_id: str) -> Path:
 
 def test_a_launched_episodes_siblings_run_on_the_source_stamps_tenant(tmp_path):
     root = current_data_root()
-    _episode_tenant(root)
-    outcome, spawn = _launch(tmp_path, stamp_tenant="acme")
+    outcome, spawn, _est = _estate_launch(tmp_path)
     assert spawn.launches, f"no sibling was started: {outcome!r}"
     for launch in spawn.launches:
         assert launch["tenant_at_spawn"] == "acme", launch
@@ -194,35 +218,24 @@ def test_a_source_stamp_with_no_usable_tenant_refuses_the_episode_before_any_sib
 
 # ---- O2/O6 on the branching lane: the launcher reads the INJECTED episode tenant ------------------
 
-#: Corpus patterns no committed tenant configures — the checkout's playground names `logs-*`
-#: and the security alerts index, so a launcher that read the checkout would record those. The
-#: events pattern is WIDER than `logs-*` (it still reaches the fixture world's `logs-*` overlay,
-#: so the episode can stage it); the alerts pattern is one no tenant in the checkout has.
-TENANT_PATTERNS = ("log*", "tenant-alerts-*")
-
-
-def test_the_launcher_judges_and_records_the_episode_tenants_own_corpus_patterns(tmp_path):
-    """The episode tenant, under an injected root, configures corpus patterns the checkout's
-    playground does not. The launcher's preflight probes the cluster through the FIRST of THEM
-    (the write door's `count` is the inbound payload), and the manifest it writes records THEM
-    as `configured_patterns` — the set every sibling, the registry's own-view test and the
-    judge re-read. The episode still runs (the positive control: siblings start)."""
-    stager = T.mod("learning.branch.estate.stagers.elastic")
-    assert tuple(stager.configured_patterns(T.fixture_run_tenant().elastic)) != TENANT_PATTERNS, \
-        "the fixture no longer discriminates from the checkout's copy"
-    T.place_tenant(current_data_root(), "acme", configs=S.config_texts(
-        "acme", events_index=TENANT_PATTERNS[0], alerts_index=TENANT_PATTERNS[1]))
-    door = P.FakeDoor()
-    outcome, spawn = _launch(tmp_path, stamp_tenant="acme", door=door)
+def test_the_launcher_judges_and_records_the_episode_tenants_own_served_systems(tmp_path):
+    """The episode tenant, under an injected root, grants gather systems the checkout's
+    playground does not have (`_spec1224`'s estate: `edr`, `idp`, `siem-x`). The manifest the
+    launcher writes records THEM as `served_systems` — the set every sibling, the judge and the
+    question-writer re-read (#1224 M20/M21, which replaced the corpus patterns this file once
+    pinned) — and pre-flight's reads reach the episode tenant's estate. The episode still runs
+    (the positive control: siblings start)."""
+    checkout = T.fixture_run_tenant().grants.gather
+    outcome, spawn, est = _estate_launch(tmp_path)
     assert spawn.launches, f"no sibling was started: {outcome!r}"
-    probed = [name for op, name in door.ops if op == "count"]
-    assert probed, door.ops
-    assert probed[0] == TENANT_PATTERNS[0], probed
-    assert not {"logs-*", P.ALERTS_PATTERN} & set(probed), probed
+    served = sorted(est.served_systems())
+    assert not set(served) & {s for s, _v, _c in checkout.entries}, (
+        "the fixture no longer discriminates from the checkout's copy")
     manifest = T.mod("learning.branch.cli").episode_dir_for(
         P.EPISODE_ID, tenant=P.current_tenant()) / "family.yaml"
     doc = T.mod("_yaml").safe_load(manifest.read_text(encoding="utf-8"))
-    assert tuple(doc["configured_patterns"]) == TENANT_PATTERNS, doc["configured_patterns"]
+    assert doc["served_systems"] == served, doc["served_systems"]
+    assert {c["system"] for c in est.calls()} == {"idp", "edr"}, est.calls()
 
 
 def test_a_source_stamp_disagreeing_with_its_runs_base_record_refuses_before_any_sibling(
@@ -247,7 +260,7 @@ def test_an_episode_tenant_gather_can_query_nothing_under_refuses_before_the_que
         tmp_path, capsys):
     """The launcher applies the run start's content rules to the episode's tenant: a table
     that loads but grants gather only `health-check` is refused before the questioner is paid,
-    the review replays or any sibling starts — not by every sibling afterwards. The control is
+    pre-flight replays or any sibling starts — not by every sibling afterwards. The control is
     `test_a_launched_episodes_siblings_run_on_the_source_stamps_tenant`."""
     T.place_tenant(current_data_root(), "acme", table=(
         "dispositions:\n"
@@ -256,16 +269,15 @@ def test_an_episode_tenant_gather_can_query_nothing_under_refuses_before_the_que
         "    health-check: {roles: [gather]}\n"),
         configs=S.config_texts("acme", events_index=P.EVENTS_PATTERN,
                                alerts_index=P.ALERTS_PATTERN))
-    questioner = P.FakeAgent(P.family_doc(), P.world_doc("b"), P.world_doc("c"))
+    questioner = O.questioner_for()
     base, src = P.runs_base(tmp_path, tenant_id="acme")
     P.source_stamp(src, tenant_id="acme")
     spawn = SpawnRecorder()
     with pytest.raises((Exception, SystemExit)) as refused:  # noqa: PT011 — the launcher's refusal type is not what is pinned; its text and timing are
         T.mod("learning.branch.cli").main(
             [str(src), str(P.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
-            spawn=spawn, door=P.FakeDoor(), questioner=questioner,
-            adapters=P.FakeAdapters(), invoke=P.FakeAgent(*["same"] * 24),
-            preflight=P.no_preflight, live_tree=P.source_capture(tenant_id="acme"))
+            spawn=spawn, questioner=questioner,
+            preflight=O.no_preflight, live_tree=P.source_capture(tenant_id="acme"))
     text = f"{refused.value} {capsys.readouterr().err}"
     assert "query" in text, text
     assert "verb-grants.yaml" in text, text
@@ -292,34 +304,6 @@ def test_a_source_stamp_naming_a_tenant_absent_from_the_injected_root_refuses_be
     assert minted == [], minted
 
 
-def test_the_reviews_production_read_side_is_built_on_the_episode_tenant(tmp_path):
-    """The review replays through `seams.adapter_seam(episode, tenant)` when no adapters are
-    injected: its registry must hold the EPISODE tenant's gather grant (a pair the family's
-    siblings cannot reach must not be reachable by the review either), point its refusals at
-    that tenant's table (by name, not host path), and carry that tenant's record on its verb context. Tenant B's
-    table differs from the checkout playground's, pair by pair."""
-    seams = T.mod("learning.branch.seams")
-    b = T.place_tenant(current_data_root(), "bravo", table=T.TABLE_B, marker="bravo",
-                       configs=S.config_texts("bravo"))
-    tenant = T.accept(current_data_root(), "bravo")
-    ep = P.episode(tmp_path)
-    side = seams.adapter_seam(ep, T.run_tenant(tenant), runs_base=tmp_path / "runs")
-    assert {(s, v) for s, v, _ in side.registry.grant.entries} == set(T.GATHER_PAIRS_B)
-    assert side.registry.decide("identity", "get-user").outcome == "GRANTED"
-    denied = side.registry.decide("identity", "can-access")
-    assert denied.outcome == "DENIED", denied
-    # The refusal is MODEL-facing: it names the episode tenant's table, never its host path.
-    from defender.runtime.run_tenant import table_pointer
-
-    assert table_pointer("bravo") in (denied.refusal or ""), denied.refusal
-    assert str(b) not in (denied.refusal or ""), denied.refusal
-    assert str(tenant.settings) not in (denied.refusal or ""), denied.refusal
-    assert Path(side.ctx.tenant.settings) == tenant.settings
-    transport = T.mod("scripts.adapters._stub_transport")
-    assert transport.load_config(side.ctx, "identity", "IDENTITY")["URL_BASE"] == \
-        "http://identity-bravo:8080"
-
-
 # ---- O3 on the resume path: a sibling serves through its OWN run's grant ------------------------
 
 _ELASTIC_FOR_GATHER = """\
@@ -339,8 +323,8 @@ def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path)
     base, src = P.runs_base(tmp_path)
     ep = P.episode(tmp_path, doc=P.family_doc(source_run_dir=str(src)))
     root = current_data_root()
-    # The fixture world touches elastic, and a world may only touch a system its grant serves,
-    # so both tables reach elastic; they still differ on cmdb and identity.
+    # Both tables reach elastic, the system the fixture source's one captured call read; they
+    # still differ on cmdb and identity.
     T.place_tenant(root, "acme", table=T.TABLE_A, configs=S.config_texts("acme"))
     T.place_tenant(root, "bravo", table=T.TABLE_B + _ELASTIC_FOR_GATHER,
                    configs=S.config_texts("bravo"))
@@ -358,7 +342,7 @@ def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path)
             defender_dir=P.DEFENDER, model_name="m", model_override=None, box=None,
             tenant=record,
             world=run.resume_world(Episode.open(ep), "b", tenant=lambda r=record: r),
-            episode=Episode.open(ep),
+            episode=Episode.open(ep), serving=O.serving(),
             investigate=lambda seen=seen, **kw: seen.update(kw) or {})
         registry = seen["verbs"]
         assert type(registry).__name__ == "WorldRegistry", type(registry)

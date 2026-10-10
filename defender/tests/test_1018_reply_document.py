@@ -677,6 +677,12 @@ def _fence_then_prose(body: str) -> str:
     return fenced(body.rstrip("\n")) + PROSE_AFTER
 
 
+#: How many times one draw asks the model before it gives the draw up (#1224 N22: a refused
+#: reply is asked again, and every refused ask is counted). A scenario about a draw that
+#: produced nothing scripts the same refused shape this many times.
+ASKS_PER_DRAW = 3
+
+
 def test_1018_judge_fence_then_prose_reply_costs_one_draw_and_the_reply_is_on_disk(tmp_path):
     """M2 at the judge, shape 4: a fence-then-prose reply carrying an otherwise VALID verdict is
     one malformed draw — `completed_draws` 0, `malformed_replies` 1, no `worlds/b/judge/0.yaml`
@@ -686,15 +692,16 @@ def test_1018_judge_fence_then_prose_reply_costs_one_draw_and_the_reply_is_on_di
     VERBATIM, so the refusal is diagnosable from disk.
 
     Failing: the draw completes (the block was recovered), a class escapes `grade_episode`, or
-    the reply text is nowhere on disk."""
+    the reply text is nowhere on disk. #1224 (N22): a refused reply is asked again, so the
+    draw is lost only when every ask came back in this shape — each one counted."""
     ep = _episode(tmp_path)
     shape_4 = _fence_then_prose(_bare_verdict())
-    judge = J.FakeJudge(replies=[shape_4], default=_bare_verdict())
+    judge = J.scripted_judge(replies=[shape_4] * ASKS_PER_DRAW, default=_bare_verdict())
     grade = _grade(tmp_path, ep, judge, draws=1)
 
     rows = J.world_rows(J.judge_record(ep))
     assert rows["b"]["completed_draws"] == 0, "a fence-then-prose reply completed a draw"
-    assert rows["b"]["malformed_replies"] == 1
+    assert rows["b"]["malformed_replies"] == ASKS_PER_DRAW
     assert not (ep / "worlds" / "b" / "judge" / "0.yaml").exists(), (
         "a draw file was written off a reply that was not one bare document")
     assert grade.episode_dir == ep, "the pass did not return normally"
@@ -710,13 +717,14 @@ def test_1018_judge_a_bare_second_draw_completes_beside_a_malformed_first(tmp_pa
     the same verdict bare. `completed_draws` is 1, `1.yaml` exists and `0.yaml` does not.
     Failing: the malformed draw poisons the world (0 completed) or is silently completed (2)."""
     ep = _episode(tmp_path)
-    judge = J.FakeJudge(replies=[_fence_then_prose(_bare_verdict()), _bare_verdict()],
-                        default=_bare_verdict())
+    judge = J.scripted_judge(
+        replies=[_fence_then_prose(_bare_verdict())] * ASKS_PER_DRAW + [_bare_verdict()],
+        default=_bare_verdict())
     _grade(tmp_path, ep, judge, draws=2)
 
     rows = J.world_rows(J.judge_record(ep))
     assert rows["b"]["completed_draws"] == 1
-    assert rows["b"]["malformed_replies"] == 1
+    assert rows["b"]["malformed_replies"] == ASKS_PER_DRAW
     assert not (ep / "worlds" / "b" / "judge" / "0.yaml").exists()
     assert J.draw_doc(ep, "b", 1)["episode_outcome"] == "gradable"
 
@@ -734,14 +742,14 @@ def test_1018_judge_draft_then_corrected_verdict_records_neither(tmp_path):
     final = _bare_verdict()
     shape_6 = (fenced(draft.rstrip("\n")) + "\n\nOn reflection that is wrong. Final answer:\n\n"
                + fenced(final.rstrip("\n")) + "\n")
-    judge = J.FakeJudge(replies=[shape_6], default=final)
+    judge = J.scripted_judge(replies=[shape_6] * ASKS_PER_DRAW, default=final)
     _grade(tmp_path, ep, judge, draws=1)
 
     record = J.judge_record(ep)
     rows = J.world_rows(record)
     assert not J.draw_files(ep, "b"), "a verdict was recorded off a two-document reply"
     assert rows["b"]["completed_draws"] == 0
-    assert rows["b"]["malformed_replies"] == 1
+    assert rows["b"]["malformed_replies"] == ASKS_PER_DRAW
     assert _wire_row(ep, "b", 0)["reply"] == shape_6
     # World c (bare) is the control that the enqueue path was live for this pass.
     assert rows["c"]["completed_draws"] == 1
@@ -753,12 +761,12 @@ def test_1018_judge_prose_then_fence_reply_is_no_longer_recovered(tmp_path):
     is 1."""
     ep = _episode(tmp_path)
     shape_3 = PROSE_BEFORE + fenced(_bare_verdict().rstrip("\n")) + "\n"
-    judge = J.FakeJudge(replies=[shape_3], default=_bare_verdict())
+    judge = J.scripted_judge(replies=[shape_3] * ASKS_PER_DRAW, default=_bare_verdict())
     _grade(tmp_path, ep, judge, draws=1)
 
     rows = J.world_rows(J.judge_record(ep))
     assert rows["b"]["completed_draws"] == 0, "prose-then-fence was recovered leniently"
-    assert rows["b"]["malformed_replies"] == 1
+    assert rows["b"]["malformed_replies"] == ASKS_PER_DRAW
     assert _wire_row(ep, "b", 0)["reply"] == shape_3
 
 
@@ -783,15 +791,17 @@ def test_1018_validate_reply_wraps_the_parser_refusal_in_judge_refused(tmp_path)
 
 
 def _family_verdict() -> str:
-    """A verdict valid at FAMILY scope: no findings, so nothing names a world or the defender."""
-    return J.as_reply_text(J.reply_doc(findings=[]))
+    """A verdict valid at FAMILY scope: the family's `verdict_word` (#1224) and no findings, so
+    nothing names a world or the defender."""
+    return J.as_reply_text(J.family_reply())
 
 
 def test_1018_judge_family_scope_fence_then_prose_costs_one_family_draw_not_the_family_call(
         tmp_path):
     """O2 at the family lane: a fence-then-prose reply on `judge:family:0` (draws=2) is ONE
-    malformed family draw — `family_malformed_replies` 1, `family_failed_reason` None — and the
-    second family draw is still made and completes, so `family_outcome` resolves. A refusal
+    malformed family ASK — `family_malformed_replies` 1, `family_failed_reason` None — the
+    draw asks again (#1224 N22) and completes, and the second family draw is still made and
+    completes, so `family_outcome` resolves. A refusal
     that escapes `validate_reply` at this scope is caught by the family arm's `except
     Exception` as a FAILED CALL: draw 1 never made, `family_malformed_replies` 0, and the
     family outcome lost to one bad reply. Failing: `family_failed_reason` names
@@ -805,8 +815,11 @@ def test_1018_judge_family_scope_fence_then_prose_costs_one_family_draw_not_the_
     record = J.judge_record(ep)
     assert record["family_failed_reason"] is None, record["family_failed_reason"]
     assert record["family_malformed_replies"] == 1
-    assert judge.agent_ids[-2:] == ["judge:family:0", "judge:family:1"], judge.agent_ids
-    assert record["family_outcome"] == "gradable", "the bare second family draw did not count"
+    family_calls = [a for a in judge.agent_ids if a.startswith(J.FAMILY_AGENT_PREFIX)]
+    assert family_calls == ["judge:family:0", "judge:family:0:1", "judge:family:1"], (
+        judge.agent_ids)
+    assert record["family_completed_draws"] == 2
+    assert record["family_outcome"] == "survived", "the bare family draws did not count"
     assert _wire_row(ep, "family", 0)["reply"] == _fence_then_prose(_family_verdict())
 
 
@@ -921,7 +934,7 @@ def test_1018_every_shape_telling_prompt_site_says_the_document_is_bare(tmp_path
     the assertion is that the set of sites missing the phrase is empty, named.
     Failing: any site still permits a shape the parser refuses."""
     ep = _episode(tmp_path)
-    judge = J.FakeJudge(default=_bare_verdict())
+    judge = J.scripted_judge(default=_bare_verdict())
     _grade(tmp_path, ep, judge, draws=1)
     assert judge.calls == 3, "the census did not see all three judge prompts"
     by_call = dict(zip(judge.agent_ids, judge.prompts, strict=True))

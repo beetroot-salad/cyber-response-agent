@@ -10,11 +10,6 @@ carrying the whole 10-32K-token prompt verbatim, so the undeclared sink holds th
 artifact in the tree. J14, settled: declare it in the census and note in the same sentence that
 it is already denied to the model, so the fix is a census correction rather than a mechanism.
 
-M8's FIXTURE IS THE DEMAND THAT MAKES THE MECHANICAL HALF FALSIFIABLE, and the amendment revised
-it: it must carry a world that lands a `staged`-served row on H and STILL gets the verdict wrong,
-or it cannot tell a correct implementation from a degenerate one — which is exactly why the
-original fixture could not catch the refuted table.
-
 RED against `d1b8b06a`: `_vocab.py` has no `JUDGE_OUTCOME_ENUM` and no normalizer for one.
 """
 from __future__ import annotations
@@ -113,7 +108,7 @@ def test_921_every_surface_tests_membership_through_the_shipped_normalizer(tmp_p
     assert reply.episode_outcome == "gradable"
 
     # 2. the appender's refusal
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
         runs_base=tmp_path / "defender-runs", draws=1,
@@ -153,75 +148,6 @@ def test_921_a_garbage_outcome_value_fails_the_normalizer(tmp_path):
 
 
 # ---------------------------------------------------------------------------------------
-# M8 — the fixture that makes the mechanical half falsifiable
-# ---------------------------------------------------------------------------------------
-
-
-def test_921_hand_built_episode_yields_lead_set_and_survived(tmp_path):
-    """A hand-built ACCEPTED episode in the #947 layout — two non-control worlds with
-    contrasting declared dispositions, NO row on H, both verdicts equal to the control's —
-    yields `lead-set` for both and `verdict_word: survived`.
-
-    No real archived episode exists (#947's "one real branched run" was never reported done), so
-    "reproduce the 08-16 finding mechanically" means exactly this fixture, and the limit is
-    declared rather than hidden: the suite tests the readers against a tree the suite wrote.
-
-    Every non-control world carries a NON-NULL role. A world declared `role: null` is the
-    REPLICATE arm — `runnable_worlds` drops it, so it is never staged, never reviewed and never
-    run, and the review record then reads "1 worlds reviewed" for a three-world manifest and
-    looks green. A fixture holding one pins a family the launcher would never have produced.
-    """
-    ep = J.accepted_episode(
-        tmp_path,
-        dispositions={"a": "benign", "b": "malicious", "c": "benign"},
-        ledgers={"b": [], "c": []})
-    for label in ("a", "b", "c"):
-        (ep / "worlds" / label / "report.md").write_text(
-            J.report_text("benign"), encoding="utf-8")
-
-    import yaml
-    doc = yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
-    assert all(world["role"] for world in doc["worlds"]), (
-        "a non-control world carries `role: null`; the launcher would have dropped it")
-
-    grade = J.mod("learning.judge.family").grade_family(ep)
-    rows = J.rows(grade)
-    assert rows["b"]["bucket"] == rows["c"]["bucket"] == "lead-set"
-    assert J.word_of(grade) == "survived", (
-        "world b's verdict (benign) differs from its declared disposition (malicious) and the "
-        "family did not survive")
-
-
-def test_921_fixture_carries_a_staged_row_world_with_a_wrong_verdict(tmp_path):
-    """The fixture MUST carry a world that lands a `staged`-served row on H and STILL gets the
-    verdict wrong, or it cannot tell a correct implementation from a degenerate one — the reason
-    the original fixture could not catch the refuted table.
-
-    `staged` is reachable only for `elastic`, the sole stager, so the fixture's H is `elastic` or
-    another stager-backed system; a state-system H can carry the difference only as `patched`.
-
-    The DISCRIMINATION is the assertion, not the fixture's contents: a degenerate implementation
-    that answers `lead-set` for every world passes the 08-16 fixture above and fails here,
-    because here the world demonstrably WAS shown the doctored evidence.
-    """
-    ep = J.accepted_episode(
-        tmp_path, holding_system="elastic",
-        dispositions={"a": "benign", "b": "malicious", "c": "malicious"},
-        ledgers={"b": [J.staged_row("b")], "c": []})
-    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-
-    rows = J.rows(J.mod("learning.judge.family").grade_family(ep))
-    assert rows["b"]["doctored_answer_served"] is True
-    assert rows["b"]["verdict"] != rows["b"]["declared"]
-    assert rows["b"]["bucket"] == "decision-discipline", (
-        "the world that was shown the doctored evidence and still got the verdict wrong was "
-        "bucketed as if nothing had reached it; that is the degenerate implementation this "
-        "fixture exists to fail")
-    assert rows["c"]["bucket"] == "lead-set", (
-        "the fixture no longer contrasts a served world with an unserved one")
-
-
-# ---------------------------------------------------------------------------------------
 # the corrected security write census
 # ---------------------------------------------------------------------------------------
 
@@ -236,15 +162,14 @@ def test_921_the_three_judge_write_sinks_are_the_only_ones_and_land_on_distinct_
     not driven is a sentence: the episode tree is enumerated before and after a real grading
     pass, and the difference is the census.
     """
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     before = {p.relative_to(ep) for p in ep.rglob("*") if p.is_file()}
-    # `findings=[]` SO THE FAMILY CALL'S DRAWS ALSO LAND. This suite's default finding carries
-    # `subject: defender`, which the family scope refuses — so both family draws came back
-    # malformed, wrote nothing, and the family sink was invisible to the census that exists to
-    # catch exactly a new sink. A findings-free reply validates in both scopes, so all three
-    # callers write and the count below is over the whole write surface.
+    # The family call answers a family-scope reply SO ITS DRAWS ALSO LAND: a refused family
+    # reply writes nothing, and the family sink would be invisible to the census that exists to
+    # catch exactly a new sink. All three callers write and the count below is over the whole
+    # write surface.
     J.mod("learning.judge").grade_episode(
-        ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc(findings=[]))),
+        ep, judge=J.scripted_judge(),
         runs_base=tmp_path / "defender-runs", draws=2,
         state=_state1135.env_state())
     after = {p.relative_to(ep) for p in ep.rglob("*") if p.is_file()}
@@ -291,7 +216,7 @@ def test_921_the_wire_log_holding_the_framed_prompt_is_not_reachable_from_a_box(
     from defender.runtime import permission
     from defender.runtime.agent_definition import compile_policy_for
 
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     J.mod("learning.judge").grade_episode(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
         runs_base=tmp_path / "defender-runs", draws=1,

@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import urllib.parse
 
@@ -236,10 +237,26 @@ def _search_body(  # noqa: PLR0913 — one search body's parameters, threaded wh
     """The search body, with the window's open end closed at the run's clock.
 
     The clock is consulted here, where every search body is built, rather than at call sites.
-    `_bounded_end` decides what the bound is.
+    `_bounded_end` decides what the bound is. A branched read also carries the clock as a
+    `post_filter` (`_before_clock`): the caller's own window stays in `query` exactly as spelled
+    (R-10=A), and the cluster drops the later hits before it sorts, pages and counts — so a
+    page is never emptied, nor its total inflated, by rows past the branch point.
     """
-    return OutboundBody(_build_search_body(
-        query_string, time_start, _bounded_end(ctx, time_end), time_field, limit, sort))
+    body = _build_search_body(
+        query_string, time_start, _bounded_end(ctx, time_end), time_field, limit, sort)
+    at = getattr(ctx, "as_of", None)
+    if at is not None:
+        body["post_filter"] = _before_clock(time_field, at)
+    return OutboundBody(body)
+
+
+def _before_clock(time_field: str, at: _dt.datetime) -> dict:
+    """Hits dated at or before `at`, and undated ones (as `_after_clock` keeps them). Spelled as
+    `_bounded_end` and `bounded_esql` spell the clock, so every path cuts at the same moment."""
+    return {"bool": {"minimum_should_match": 1, "should": [
+        {"range": {time_field: {"lte": _clock.z_seconds(at)}}},
+        {"bool": {"must_not": {"exists": {"field": time_field}}}},
+    ]}}
 
 
 def _search(
@@ -268,12 +285,8 @@ def _search_verb(  # noqa: PLR0913 — the two search verbs' shared body, one pa
 ) -> dict:
     config = load_config(ctx)
     resolved = index or config[index_key]
-    # `world_id` lets a branched run's staged world view (named outside every configured
-    # pattern) be confined rather than refused. `None` on ordinary runs.
     resolved = confine_index(
-        resolved, (config["ELASTIC_EVENTS_INDEX"], config["ELASTIC_ALERTS_INDEX"]),
-        world_id=getattr(ctx, "world_id", None),
-    )
+        resolved, (config["ELASTIC_EVENTS_INDEX"], config["ELASTIC_ALERTS_INDEX"]))
     docs, total, truncated = _search(
         ctx, config, resolved,
         _search_body(
@@ -281,7 +294,28 @@ def _search_verb(  # noqa: PLR0913 — the two search verbs' shared body, one pa
             time_field="@timestamp", limit=limit, sort=sort,
         ),
     )
-    return search_envelope(resolved, docs, total, truncated, sort)
+    # The cluster already dropped later hits (`post_filter`); this is the backstop for one that
+    # did not, and finds nothing to drop against Elasticsearch itself.
+    kept = [d for d in docs if not _after_clock(ctx, d.get("@timestamp"))]
+    return search_envelope(resolved, kept, total - (len(docs) - len(kept)), truncated, sort)
+
+
+def _after_clock(ctx: VerbContext, stamp: object) -> bool:
+    """Is `stamp` dated after the run's clock? A branched read keeps the caller's own window end
+    on the wire, however it is spelled (#1224, R-10=A); the cluster drops later hits by
+    `post_filter`, and any that still arrive are dropped here. Unbranched runs (no clock) and
+    undated rows keep every row."""
+    at = getattr(ctx, "as_of", None)
+    if at is None:
+        return False
+    if isinstance(stamp, (int, float)) and not isinstance(stamp, bool):
+        moment = _dt.datetime.fromtimestamp(stamp / 1000, _dt.UTC)
+    else:
+        parsed = _clock.parse_iso_utc(stamp)
+        if parsed is None:
+            return False
+        moment = parsed
+    return moment > _clock.as_utc(at)
 
 
 def _bounded_end(ctx: VerbContext, end: str | None) -> str | None:
@@ -295,9 +329,7 @@ def _bounded_end(ctx: VerbContext, end: str | None) -> str | None:
     clock, and the caller has already bounded the query. The start stays open because the past
     does not change.
 
-    Returns a new value rather than editing `params`: the estate seam compares
-    `prepared != params` to detect staging, and a filled window would make an unstaged call
-    look staged.
+    Returns a new value rather than editing `params`, so the caller's params stay as asked.
     """
     at = getattr(ctx, "as_of", None)
     return end if _bound_set(end) or at is None else _clock.z_seconds(at)
@@ -444,7 +476,21 @@ def esql(ctx: VerbContext, *, query: str) -> dict:  # noqa: A002 — shadows the
     # capture (`stagers/elastic.restore` only repairs the corpus identity in the echo).
     status, resp = _http_json(ctx, "POST", url, config, body=_esql_body(ctx, query))
     _raise_on_es_error(status, resp, "ES|QL query")
-    return esql_payload(query, resp)
+    return esql_payload(query, _esql_within_clock(ctx, resp))
+
+
+def _esql_within_clock(ctx: VerbContext, resp: dict) -> dict:
+    """`resp` with every row whose `@timestamp` column is dated after the run's clock dropped
+    (R-10=A): the spliced bound covers only a query opening with `FROM`, this covers any
+    source command."""
+    columns = resp.get("columns") or []
+    names = [c.get("name") if isinstance(c, dict) else None for c in columns]
+    if getattr(ctx, "as_of", None) is None or "@timestamp" not in names:
+        return resp
+    at = names.index("@timestamp")
+    values = [row for row in resp.get("values", [])
+              if not (isinstance(row, list) and len(row) > at and _after_clock(ctx, row[at]))]
+    return {**resp, "values": values}
 
 
 VERBS = {

@@ -35,7 +35,6 @@ from defender import _tenant, _tenants
 from defender._episode_handle import Episode
 from defender import run as run_py
 from defender.learning.branch import cli as branch_cli
-from defender.learning.branch import seams as branch_seams
 from defender.runtime import lead_zero
 from defender.runtime import run_tenant as run_tenant_mod
 from defender.runtime import session_store
@@ -44,12 +43,12 @@ from defender.scripts import policy_cli
 from defender.scripts import tenant as tenant_py
 from defender.skills.connect import validate_scaffold
 from defender.tests import _dispositions995 as D995
-from defender.tests import _judge_921 as J
 from defender.tests import _spec1077 as S1077
 from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as P
 from defender.tests.tenant_1120_piece1 import _spec1120 as H
 from defender.tests import _state1135
+from defender.tests.live_oracle_1224 import _spec1224 as S1224
 
 #: The launcher's episodes knob (J44; the refusal stays until D12).
 EPISODES_BASE_ENV = "DEFENDER_EPISODES_BASE"
@@ -122,6 +121,12 @@ def _source_under(root: Path, record_tenant: str, *, runs_tenant: str = H.TID) -
     base.mkdir(parents=True, exist_ok=True)
     S1077.plant_tenant_record(base, tenant_id=record_tenant)
     return P.source_run(base)
+
+
+#: The one answer every captured call of the branch launch's source carries, so one scripted
+#: oracle submission serves every call unchanged and every fact world calibrates (#1224).
+_BASE = {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon", "host": "web-1",
+                   "ts": "2026-07-28T15:00:00Z"}]}
 
 
 class _UntouchedVerbs:
@@ -662,15 +667,14 @@ def test_1120_tenant_sessions_is_the_session_stores_folder_for_a_fresh_run(
 
 def test_1120_every_run_tenant_reader_takes_the_accepted_tenant(
         data_root: Path, tmp_path: Path, monkeypatch) -> None:
-    """The readers of RunTenant that piece 1 does not move — the branch launcher, the review's
-    adapter seam (branch.seams), the driver (run_investigation) and its opening prompt
-    (driver._prompts) — read what they need through RunTenant, whose tenant member is now the
-    accepted Tenant (M5's owner table): its settings is the Tenant's settings under the data
-    root, its tenant_id the Tenant's id, its table pointer names that id. Each is handed the
-    RunTenant run.py itself resolved and must agree with the Tenant: the launcher, over a source
-    run under the accepted tenant, runs a whole episode and starts every sibling with that
-    Tenant's id and the parent's data root; the adapter seam's
-    verb context reads the Tenant's settings; the opening prompt resolves lead zero from the
+    """The readers of RunTenant that piece 1 does not move — the branch launcher, the driver
+    (run_investigation) and its opening prompt (driver._prompts) — read what they need through
+    RunTenant, whose tenant member is now the accepted Tenant (M5's owner table): its settings
+    is the Tenant's settings under the data root, its tenant_id the Tenant's id, its table
+    pointer names that id. Each is handed the RunTenant run.py itself resolved and must agree
+    with the Tenant: the launcher, over a source run under the accepted tenant, runs a whole
+    episode and starts every sibling with that Tenant's id and the parent's data root; the
+    opening prompt resolves lead zero from the
     Tenant's settings — over the fixture's alert it resolves to an empty lead zero, issuing
     no fetch, where a settings folder it could not read fails — and its table pointer names
     the tenant's id; run_investigation's reads are the same RunTenant members (driven end to
@@ -683,12 +687,6 @@ def test_1120_every_run_tenant_reader_takes_the_accepted_tenant(
     assert rc == 0
     run_tenant = rec.lifecycle_calls[0]["tenant"]
     assert run_tenant.tenant == tenant
-
-    # branch.seams — the review's read side reads the Tenant's settings through RunTenant.
-    episode = tmp_path / "episode"
-    episode.mkdir()
-    adapters = branch_seams.adapter_seam(episode, run_tenant, runs_base=tenant.runs)
-    assert Path(adapters.ctx.tenant.settings) == H.settings_dir(data_root) == tenant.settings
 
     # driver._prompts — lead zero resolves from the Tenant's settings; no fault degrades it.
     run_dir = tmp_path / "prompt-run"
@@ -705,24 +703,26 @@ def test_1120_every_run_tenant_reader_takes_the_accepted_tenant(
 
     # branch.cli.main — one whole episode through the real launcher (every seam it is not
     # about faked): it resolves the source run's tenant once and reads it through RunTenant for
-    # its door, read side and siblings, each of which is started with the accepted id.
+    # pre-flight's reader and its siblings, each of which is started with the accepted id. The
+    # episode runs over `_spec1224`'s estate tenant (its gather grant admits the source's
+    # calls, so pre-flight accepts the family), placed under a data root of its own.
+    branch_root = tmp_path / "branch-data-root"
+    branch_root.mkdir()
+    monkeypatch.setenv(H.DATA_ROOT_ENV, str(branch_root))
     monkeypatch.delenv(T.RUNS_BASE_ENV, raising=False)
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
     monkeypatch.setenv(EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    src = _source_under(data_root, H.TID)
-    episode_dir = (tmp_path / "episodes-root").resolve() / T.EPISODE_ID
-    spawn = J.FakeSibling(episode_dir)
-    result = _launch(
-        src, spawn, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        door=T.FakeDoor(), questioner=T.FakeAgent(T.family_doc(), T.world_doc("b"),
-                                                  T.world_doc("c")),
-        adapters=T.FakeAdapters(), invoke=T.FakeAgent(*["same"] * 24),
-        live_tree=T.source_capture())
-    assert not isinstance(result, BaseException), (
-        f"the launcher refused a source whose tenant accept_tenant accepts: "
-        f"{H.exit_text(result)}")
-    assert spawn.launches, "the launcher started no sibling"
-    for launch in spawn.launches:
+    est = S1224.estate(tmp_path)
+    branch_tenant = est.place()
+    calls = [S1224.Call("idp", "query", S1224.query_params("user:alice"), _BASE),
+             S1224.Call("edr", "query", S1224.query_params("host:db-1"), _BASE)]
+    run = S1224.launch(tmp_path, est, calls=calls,
+                       oracle=S1224.oracle(then=S1224.submit(_BASE, S1224.EMPTY_CLAIM)),
+                       verifier=S1224.passing_verifier())
+    assert run.message == "", f"the launcher refused a source whose tenant accept_tenant " \
+                              f"accepts: {run.message}"
+    assert run.spawn.launches, "the launcher started no sibling"
+    for launch in run.spawn.launches:
         argv = launch["argv"]
-        assert argv[argv.index("--tenant") + 1] == tenant.id, argv
-        assert launch["env"].get(H.DATA_ROOT_ENV) == str(data_root), launch["env"]
+        assert argv[argv.index("--tenant") + 1] == branch_tenant.id, argv
+        assert launch["env"].get(H.DATA_ROOT_ENV) == str(branch_root), launch["env"]

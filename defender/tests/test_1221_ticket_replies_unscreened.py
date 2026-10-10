@@ -173,11 +173,13 @@ def test_1221_the_family_prompt_no_longer_demands_a_released_status_on_a_comment
     served no comments and the family was refused when parsed. #1221 removed both the screen
     and the refusal (`test_a_ticket_patch_writing_comments_on_an_unreleased_case_is_accepted`),
     so a prompt still teaching it would have the questioner close every case it annotates — a
-    difference of its own in every sibling. The prompt still teaches `patches` itself."""
+    difference of its own in every sibling. The control: the prompt still teaches a world's
+    `facts` (#1224 replaced the `patches` table this control once named with facts a live oracle
+    serves)."""
     prompt = (Path(T1106.DEFENDER) / "learning" / "branch" / "questioner" / "family.md").read_text(
         encoding="utf-8")
     flat = " ".join(prompt.split())
-    assert "patches" in flat, "the control failed: the family prompt no longer teaches patches"
+    assert "`facts`" in flat, "the control failed: the family prompt no longer teaches facts"
     for stale in ("must also set that case's `status`", "serves NO comments"):
         assert stale not in flat, (
             f"the family prompt still teaches the removed release rule ({stale!r})"

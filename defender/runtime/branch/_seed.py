@@ -13,7 +13,8 @@ from typing import Any
 
 
 from defender._io import (
-    guarded_mkdir, read_guarded, read_jsonl_rows, read_plain_bytes, write_guarded,
+    guarded_mkdir, load_json_artifact, read_guarded, read_jsonl_rows, read_plain_bytes,
+    write_guarded,
 )
 from defender.run_repository import RUN_LAYOUT, RunPaths, artifact_dir, artifact_file
 
@@ -118,6 +119,21 @@ def seed_investigation(store: Any, spec: BranchSpec | None, run_dir: Path) -> in
         leads_at(store, source_session(store, spec), spec.branch_message_id,
                  Path(spec.source_run_dir)))
     return fences
+
+
+def source_alert(source_run_dir: Path) -> dict[str, Any] | None:
+    """The source run's alert (the case input) as a JSON object, or `None` when it is absent,
+    not a plain file, or not a JSON object `load_json_artifact` accepts (nested too deep
+    included). The one reader of it for the question-writer and the branching oracle's real
+    data (#1224): never raises."""
+    alert = RunPaths(source_run_dir).alert
+    try:
+        if not artifact_file(alert):
+            return None
+        doc, unreadable = load_json_artifact(_plain_bytes(alert).decode("utf-8"))
+    except (OSError, ValueError, BranchError):
+        return None
+    return doc if unreadable is None and isinstance(doc, dict) else None
 
 
 def _inherit_evidence(source_run_dir: Path, run_dir: Path, leads: set[str]) -> None:

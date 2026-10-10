@@ -63,8 +63,11 @@ from defender._query_rules import (
 
 from . import circuit_breaker
 from .verbs import (
+    CALL_DELIVERY,
     DENIED,
     GRANTED,
+    CallDelivery,
+    ServingAbort,
     VerbContext,
     _ann_name,
     _resolved_hints,
@@ -85,6 +88,8 @@ CONTROL_FLOW_EXCEPTIONS: tuple[type[BaseException], ...] = (
     CallDeferred,
     ApprovalRequired,
     ToolRetryError,
+    # A served verb that gave up on its world (#1224): the sibling ends, nothing is filed.
+    ServingAbort,
 )
 
 DEFAULT_FAULT_EXIT = 2
@@ -922,7 +927,16 @@ def register_query_tool(agent, registry) -> None:
             defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=_bash_env(deps),
             tenant=deps.tenant,
         )
-        return await asyncio.to_thread(fn, vctx, **params)
+        delivery = CallDelivery()
+        token = CALL_DELIVERY.set(delivery)
+        try:
+            return await asyncio.to_thread(fn, vctx, **params)
+        except asyncio.CancelledError:
+            # The worker runs on; whatever it would record as delivered, it was not.
+            delivery.abandoned = True
+            raise
+        finally:
+            CALL_DELIVERY.reset(token)
 
 
 

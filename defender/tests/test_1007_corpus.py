@@ -113,9 +113,9 @@ class TwoLaneRecorder:
 
 def world_queue_row(fid: str = "ep-1/b/0/0", **extra) -> dict:
     row = dict(D.finding_row(fid, run_id="ep-1", direction=W.SUBJECT_WORLD),
-               subject=W.SUBJECT_WORLD, type="story-overlay-gap", world="b",
-               pattern=W.EVENTS_PATTERN, holding_system="elastic", provenance="model",
-               subject_anchor="overlay", subject_topic="corpus shape",
+               subject=W.SUBJECT_WORLD, type="fact-story-gap", world="b",
+               systems=[W.SYSTEM], provenance="model",
+               subject_anchor="facts", subject_topic="answer shape",
                judge_outcome="gradable", source_run_dir="episodes/ep-1")
     row.update(extra)
     return row
@@ -682,8 +682,9 @@ def test_the_new_corpus_root_is_admitted_by_no_runtime_read_or_write_scope(tmp_p
 def test_nothing_lands_outside_the_declared_write_set(tmp_path, monkeypatch):
     """M1 to M5 write EXACTLY the five artifacts this change declares, and nothing else.
 
-    Observably true: driving a whole episode — review, serve, grade, enqueue — over a tree
-    snapshotted before and after leaves changes only at `review.yaml`, `samples.yaml`, the
+    Observably true: driving a whole episode — pre-flight's outcome, serve, grade, enqueue —
+    over a tree snapshotted before and after leaves changes only at `outcome.yaml`,
+    `samples.yaml`, the
     served ledgers, `judge.yaml` and the two queue files. Every new artifact of this change is
     accounted for by a demand; a sixth would be an unbudgeted sink in a tree nothing prunes.
 
@@ -694,12 +695,11 @@ def test_nothing_lands_outside_the_declared_write_set(tmp_path, monkeypatch):
     judge_mod = W.mod("learning.judge")
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
     _base, _src, root = W.configured_layout(tmp_path, monkeypatch)
-    doc = W.family_doc(worlds=[W.base_world(), W.world_doc(
-        "b", ov=W.overlay(elastic=W.elastic_overlay(inject=[{"_id": "i1"}])))])
+    doc = W.family_doc(worlds=[W.base_world(), W.world_doc("b", facts=[W.fact()])])
     ep = W.episode(tmp_path, doc=doc, root=root)
     W.archived_world(ep, "b")
     W.write_served(ep, "b", [W.served_row(world="b")])
-    W.write_review(ep, worlds={"b": W.reviewed_world(label="b")})
+    W.write_outcome(ep)
     W.write_samples(ep)
     before = {p.relative_to(ep) for p in ep.rglob("*") if p.is_file()}
 
@@ -707,7 +707,7 @@ def test_nothing_lands_outside_the_declared_write_set(tmp_path, monkeypatch):
                             state=W.learning_state(paths), runs_base=ep.parent / "runs-base")
 
     after = {p.relative_to(ep) for p in ep.rglob("*") if p.is_file()}
-    allowed = {Path(W.JUDGE_NAME), Path(W.REVIEW_NAME), Path(W.SAMPLES_NAME)}
+    allowed = {Path(W.JUDGE_NAME), Path(W.OUTCOME_NAME), Path(W.SAMPLES_NAME)}
     new = {p for p in after - before
            if p not in allowed and p.parts[0] not in ("served", "worlds", "draws", "wire_logs")}
     assert new == set(), (

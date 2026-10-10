@@ -703,7 +703,7 @@ def test_archive_episode_still_copies_report_md_verbatim_regardless_of_the_world
     unaffected by this change — it copies the same bytes whether the world's run was cut short
     or not, on both a cut-short and a control world in one episode.
 
-    R7: `archive_episode` is an unmoved READER of `report_md` while `_grade_world` and
+    R7: `archive_episode` is an unmoved READER of `report_md` while `read_world` and
     `record_case_ticket` both moved (claims h4, h8). If the new write had been folded into the
     copy list, or the exit class had been allowed to gate the copy, a cut-short world would
     archive with no report at all and the judge's tier-1 reason would change meaning."""

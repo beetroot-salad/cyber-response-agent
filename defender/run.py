@@ -55,8 +55,9 @@ from defender._episode_paths import LAYOUT  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime import providers  # noqa: E402
+from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.run_tenant import RunTenant  # noqa: E402
-from defender.runtime.verbs import ModuleVerbRegistry, read_roster  # noqa: E402
+from defender.runtime.verbs import ModuleVerbRegistry, ServingAbort, read_roster  # noqa: E402
 from defender.scripts.case_history import ticket_writer as _default_ticket_writer  # noqa: E402
 
 DEFENDER_DIR = _DEFENDER_DIR
@@ -173,16 +174,38 @@ def _role_model_name(defn: Any, model_override: str | None) -> str:
     return str(defn.model())
 
 
-def preflight_role_models(model_override: str | None = None) -> int:
+#: The roles only a branching process uses (#1224, M25=A): preflighted where `branching=True`
+#: (the launcher and its siblings), never on a plain alert run. Each role's effort knob is read
+#: at call time and checked against the provider its model routes to.
+def _branching_roles() -> dict[AgentRole, Callable[[], str]]:
+    from defender.learning.core import config
+
+    return {AgentRole.ORACLE: config.oracle_effort,
+            AgentRole.ORACLE_CHECK: config.oracle_check_effort}
+
+
+def preflight_role_models(  # noqa: C901 — one fail-fast check per role, plus the branching roles' efforts
+        model_override: str | None = None, *, branching: bool = False) -> int:
     """Check every registered role's model config at startup and fail fast if a provider key
     is unusable. Some providers only fail on first live call, and review agents are built per
-    call, so a broken review role would otherwise silently downgrade runs to unresolved."""
+    call, so a broken review role would otherwise silently downgrade runs to unresolved.
+
+    The oracle roles are checked only when `branching` (M25=A): a plain alert run never
+    depends on them. A branching role with no definition fails loudly, naming it."""
     from defender.agents import AGENTS
 
+    efforts = _branching_roles()
+    if branching:
+        missing = [role.name for role in efforts if role not in AGENTS]
+        if missing:
+            _logger.error(f"preflight: branching role(s) {missing} have no agent definition")
+            return 2
     seen_provider_ids: set[str] = set()
     for defn in AGENTS.values():
+        if defn.role in efforts and not branching:
+            continue
         try:
-            name = _role_model_name(defn, model_override)
+            name = _role_model_name(defn, model_override if defn.role not in efforts else None)
         except Exception as e:  # noqa: BLE001 — a broken model accessor is a preflight failure
             _logger.error(f"preflight: {defn.role.name} model config raised: {e!r}")
             return 2
@@ -191,6 +214,13 @@ def preflight_role_models(model_override: str | None = None) -> int:
         except ValueError as e:
             _logger.error(f"preflight: {defn.role.name}: {e}")
             return 2
+        if defn.role in efforts:
+            effort = efforts[defn.role]()
+            try:
+                prov.settings_for_effort(effort)
+            except ValueError as e:
+                _logger.error(f"preflight: {defn.role.name} ({name}) effort {effort!r}: {e}")
+                return 2
         if prov.id in seen_provider_ids:
             continue
         seen_provider_ids.add(prov.id)
@@ -209,7 +239,7 @@ class _Investigate(Protocol):
     def __call__(  # noqa: PLR0913 — the investigation's whole identity, one keyword each
         self, *, alert_path: Path, run_dir: Path, run_id: str, defender_dir: Path,
         model_name: str, model_override: str | None, box: Any, tenant: RunTenant,
-        world: Any = None, episode: Episode | None = None,
+        world: Any = None, episode: Episode | None = None, serving: Any = None,
     ) -> dict[str, Any]: ...
 
 
@@ -235,6 +265,9 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     world: Any = None,
     #: The sibling's episode, held by `main`: the world ledger is written through it.
     episode: Episode | None = None,
+    #: The world's settled oracle side (#1224, `registry.oracle_serving`), resolved by `main`;
+    #: `None` exactly when `world` is.
+    serving: Any = None,
     registry_cls: Any = ModuleVerbRegistry,
     investigate: Callable[..., dict[str, Any]] = _run_the_driver,
 ) -> dict[str, Any]:
@@ -256,18 +289,29 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
             # The world's ledger is written through the episode `main` holds; there is no path
             # to fall back to.
             raise TypeError("_drive_investigation(world=…) needs the sibling's held `episode=`")
-        from defender.learning.branch.estate.applier import WorldApplier
-        from defender.learning.branch.estate.registry import WorldRegistry
+        if serving is None:
+            raise TypeError("_drive_investigation(world=…) needs the world's settled `serving=`")
+        from defender.learning.branch.estate.limiter import RateLimiter
+        from defender.learning.branch.estate.registry import (
+            WorldRegistry,
+            default_oracle_dir,
+            prebranch_calls,
+        )
         from defender.learning.branch.ledger import Ledger
         from defender.runtime import branch as branch_mod
 
         family = world.family
+        # Declared up front: a world that serves nothing must still leave a ledger.
+        ledger = Ledger.for_world(episode, world.world_id).declare()
         verbs: Any = WorldRegistry(
-            roster, tenant.grants.gather,
-            # Declared up front: a world that serves nothing must still leave a ledger.
-            world=world, ledger=Ledger.for_world(episode, world.world_id).declare(),
-            as_of=world.as_of, applier=WorldApplier(),
-            grant_home=tenant.table_pointer,
+            roster, tenant.grants.gather, world=world, ledger=ledger, as_of=world.as_of,
+            serving=serving, oracle_dir=default_oracle_dir(world, ledger),
+            # This sibling's one limiter, at its slice of the episode rate (S16).
+            limiter=RateLimiter(serving.settings.rate),
+            tenant=tenant, grant_home=tenant.table_pointer,
+            # The source run's pre-branch calls, by pre-flight's own rule (M01=A): a re-ask
+            # still takes its oracle turn (S1), and is served unchanged or not at all.
+            prebranch=prebranch_calls(Path(family.source_run_dir), family.branch_message_id),
         )
         resume = branch_mod.BranchSpec(
             source_run_dir=Path(family.source_run_dir),
@@ -275,12 +319,15 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
             continuation_prompt=family.continuation_prompt,
             as_of=family.as_of,
         )
-        return investigate(
-            alert_path=alert_path, run_dir=run_dir, run_id=run_id,
-            defender_dir=defender_dir, model_name=model_name,
-            model_override=model_override, box=box, verbs=verbs, roster=roster, resume=resume,
-            tenant=tenant,
-        )
+        try:
+            return investigate(
+                alert_path=alert_path, run_dir=run_dir, run_id=run_id,
+                defender_dir=defender_dir, model_name=model_name,
+                model_override=model_override, box=box, verbs=verbs, roster=roster,
+                resume=resume, tenant=tenant,
+            )
+        finally:
+            verbs.close()
     verbs = registry_cls(roster, tenant.grants.gather, grant_home=tenant.table_pointer)
     return investigate(
         alert_path=alert_path, run_dir=run_dir, run_id=run_id, defender_dir=defender_dir,
@@ -304,6 +351,8 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     world: Any = None,
     #: The sibling's held episode, threaded beside `world` for the world ledger's writes.
     episode: Episode | None = None,
+    #: The world's settled oracle side (#1224), threaded to the world registry.
+    serving: Any = None,
     investigate: _Investigate = _drive_investigation,
     start_box: Callable[..., Any] = box_mod.start_box,
     stop_box: Callable[..., None] = box_mod.stop_box,
@@ -326,6 +375,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             tenant=tenant,
             world=world,
             episode=episode,
+            serving=serving,
         )
         investigation_ok = True
     finally:
@@ -394,26 +444,17 @@ def _announce_provenance(run_dir: Path) -> None:
 
 
 def resume_world(episode: Episode, world_label: str, *, tenant: Callable[[], Any]) -> Any:
-    """The world this process is, from `episode`'s manifest — judged against the episode
-    tenant's configured corpus patterns only where the manifest does not record them.
+    """The world this process is, from `episode`'s manifest alone.
 
     The episode dir is the manifest's own, so the world ledger sits beside the family's
-    primed recording and depends on nothing the manifest does not say.
-
-    A manifest that records no `configured_patterns` was judged against the checkout's corpus
-    config when it was authored. That config now lives in the tenant's record (#1107), so for
-    such a manifest — and only for one — the loader asks `tenant` for the sibling's own
-    `RunTenant` (resolved from the record the launcher seeded its runs base with, naming the
-    source's tenant) and takes its corpus patterns from the record's corpus-engine view. A
-    manifest that records its set is judged by the manifest, and no tenant is looked up.
+    primed recording and depends on nothing the manifest does not say. The manifest records
+    its served systems, so no tenant is resolved to read it: `tenant` is never called here.
     """
-    from defender.learning.branch.estate.stagers.elastic import configured_patterns  # lint-shippable: ok — the tenant's configured corpus patterns an older manifest's overlays were judged against
     from defender.runtime.branch import _family
 
+    del tenant  # the manifest is the whole record; see the docstring
     return _family.resume_world_from(
-        _family.load_family(
-            episode.view(), configured_patterns=lambda: configured_patterns(tenant().elastic)),  # lint-shippable: ok — the record's field name (#1107)
-        world_label, episode.dir)
+        _family.load_family(episode.view()), world_label, episode.dir)
 
 
 def _screened_source_alert(source_run_dir: Path) -> Path:
@@ -522,16 +563,36 @@ def _case_input(ns: argparse.Namespace, world: Any) -> tuple[Path, str | None]:
     return ns.alert.resolve(), ns.run_id
 
 
-def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection seams
+def _world_seams(world: Any, *, oracle: Any, verifier: Any) -> dict[str, Any]:
+    """The lifecycle's world-only keywords: none for an ordinary run; for a sibling its oracle
+    side, settled once here from its knobs (the launcher hands it its rate slice through the
+    environment) and threaded inward whole."""
+    if world is None:
+        return {}
+    from defender.learning.branch.estate.registry import oracle_serving
+    from defender.learning.core.config import process_oracle_settings
+
+    return {"serving": oracle_serving(process_oracle_settings(), oracle=oracle,
+                                      verifier=verifier)}
+
+
+def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injection seams; the unservable exit is one more arm
     argv: list[str],
     *,
     lifecycle: Callable[..., dict[str, Any]] = _run_investigation_lifecycle,
     visualize: Callable[..., None] = _run.visualize,
     ticket_writer: Any = _default_ticket_writer,
     enqueue: Callable[..., bool] = _run.enqueue_curation,
-    preflight: Callable[[str | None], int] = preflight_role_models,
+    preflight: Callable[..., int] = preflight_role_models,
     materialize: Callable[..., Run] = _materialize_run,
+    oracle: Any = None,
+    verifier: Any = None,
+    roster: Any = None,
 ) -> int:
+    """`oracle` / `verifier` are a sibling's oracle and verifier models (#1224; `None` builds
+    them from their knobs); `roster` is accepted for the launcher's seam parity and unused
+    here (the sibling reads its roster where the investigation starts)."""
+    del roster
     # Undrivable dependencies (credentialed lifecycle, HTML render, ticket endpoint) are
     # injection seams defaulting to production.
     ns = parse_args(argv)
@@ -566,10 +627,11 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
 
         model = driver.resolve_main_model(ns.model)
         # Runs in siblings too: models are resolved per process, so each sibling must check (and
-        # record) its own.
-        rc = preflight(ns.model)
+        # record) its own; a sibling also checks the oracle roles it serves through (M25=A).
+        rc = preflight(ns.model, branching=True) if world is not None else preflight(ns.model)
         if rc:
             return rc
+        seams = _world_seams(world, oracle=oracle, verifier=verifier)
 
         # The handle, not just its directory: the post-run step saves the run page through it.
         run = materialize(alert, run_id, tenant=accepted, model=model, world=world)
@@ -586,15 +648,25 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
             _logger.info(f"run_dir={run_dir} model={model}")
             _announce_provenance(run_dir)
 
-            summary = lifecycle(
-                run_dir=run_dir,
-                model=model,
-                model_override=ns.model,
-                defender_dir=DEFENDER_DIR,
-                tenant=tenant,
-                world=world,
-                episode=episode,
-            )
+            try:
+                summary = lifecycle(
+                    run_dir=run_dir,
+                    model=model,
+                    model_override=ns.model,
+                    defender_dir=DEFENDER_DIR,
+                    tenant=tenant,
+                    world=world,
+                    episode=episode,
+                    **seams,
+                )
+            except (ServingAbort, BaseExceptionGroup) as escaped:
+                abort = _serving_abort(escaped)
+                if abort is None or world is None or episode is None:
+                    raise
+                _record_unservable_world(episode, world, abort)
+                _logger.error(f"--resume: world {world.label} is unservable; the sibling ends "
+                              f"({getattr(abort, 'reason', '')})")
+                return UNSERVABLE_EXIT
 
             # Everything below reads the scrubbed tree; a lifecycle failure propagates uncaught.
             out = str(summary.get("output") or "")
@@ -638,6 +710,39 @@ def main(  # noqa: PLR0913 — the entry point's inputs plus its six injection s
             except _run.VisualizeFailed:
                 _logger.warning("the run page was not saved", exc_info=True)
             return 0
+
+
+#: A sibling whose world went unservable exits with this (its world record says why).
+UNSERVABLE_EXIT = 3
+
+
+def _serving_abort(exc: BaseException) -> ServingAbort | None:
+    """The `ServingAbort` an escaping exception carries (an exception group may wrap it)."""
+    if isinstance(exc, ServingAbort):
+        return exc
+    if isinstance(exc, BaseExceptionGroup):
+        for inner in exc.exceptions:
+            found = _serving_abort(inner)
+            if found is not None:
+                return found
+    return None
+
+
+def _record_unservable_world(episode: Episode, world: Any, abort: ServingAbort) -> None:
+    """Write the world's own record, once: a resumed sibling never rewrites it (N13). The
+    record's shape is `outcome.write_world_record`'s."""
+    from defender.learning.branch import outcome as outcome_mod
+
+    call = getattr(abort, "call", None)
+    system, verb, params = call if isinstance(call, tuple) and len(call) == 3 else ("", "", {})
+    reason = getattr(abort, "reason", "")
+    written = outcome_mod.write_world_record(
+        episode, world.label,
+        outcome_mod.BUDGET if reason == "budget" else outcome_mod.ORACLE_UNSERVABLE,
+        call={"system": system, "verb": verb, "params": dict(params)},
+        detail=str(getattr(abort, "detail", "") or reason))
+    if not written:
+        _logger.info(f"--resume: world {world.label} already has its record; left as it is")
 
 
 if __name__ == "__main__":

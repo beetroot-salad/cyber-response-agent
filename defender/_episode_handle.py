@@ -26,8 +26,8 @@ from defender._episode_paths import LAYOUT, _check_label, check_minted_token
 
 #: Every record the handle hands out, keyed by its address (a bare name is an attribute of the
 #: episode, `world.<name>` one of `episode.world(label)`), mapped to the verbs its row grants.
-#: `write` replaces (stage + rename), `create` is exclusive, `append` / `append_durable` append
-#: (the latter synced, with its folder, before it returns), `delete` removes a plain file.
+#: `write` replaces (stage + rename), `create` is exclusive, `append` appends, `delete` removes a
+#: plain file.
 #: No record reads: reading is the view's (`episode.view().read(LAYOUT.<record>)`).
 RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "family": ("write",),
@@ -36,7 +36,6 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "samples": ("write",),
     "judge": ("write",),
     "timing": ("write",),
-    "staged": ("create", "append_durable"),
     "learning_html": ("write",),
     "served_base": ("create",),
     "served_world": ("append",),
@@ -44,6 +43,9 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "wire_log": ("write",),
     "world.draw": ("write", "delete"),
     "world.run_dir_pointer": ("write",),
+    "world_record": ("create",),
+    "outcome": ("create",),
+    "not_comparable": ("write",),
 }
 
 #: Every folder the handle hands out, keyed the same way.
@@ -80,11 +82,6 @@ class _Append(EpisodeRecord):
         self._held.write(self._rel, text, mode="append")
 
 
-class _AppendDurable(EpisodeRecord):
-    def append_durable(self, text: str | bytes) -> None:
-        self._held.write(self._rel, text, mode="append", durable=True)
-
-
 class _Delete(EpisodeRecord):
     def delete(self) -> bool:
         return self._held.unlink(self._rel)
@@ -104,10 +101,6 @@ class CreateRecord(_Create):
 
 
 class CreateDeleteRecord(_Create, _Delete):
-    pass
-
-
-class StagedRecord(_Create, _AppendDurable):
     pass
 
 
@@ -174,11 +167,17 @@ class Episode:
         return cls(io.hold(episode_dir), episode_dir, _door=_DOOR)
 
     @classmethod
-    def create(cls, episode_dir: Path, *, io: Any = _real_io) -> Episode:
+    def create(cls, episode_dir: Path, *, io: Any = _real_io, exclusive: bool = False) -> Episode:
         """Make (or adopt) the episode dir, judged from its parent — a link, file or FIFO at
-        its name is refused — and hold it. The episodes root's entry for it is synced."""
+        its name is refused — and hold it. The episodes root's entry for it is synced.
+        `exclusive` adopts nothing: an entry already at the name is `FileExistsError` (#1224
+        N17, a launch's claim)."""
         episode_dir = Path(episode_dir)
-        return cls(io.hold_new(episode_dir.parent, episode_dir.name), episode_dir, _door=_DOOR)
+        if exclusive:
+            held = io.hold_new(episode_dir.parent, episode_dir.name, exclusive=True)
+        else:
+            held = io.hold_new(episode_dir.parent, episode_dir.name)
+        return cls(held, episode_dir, _door=_DOOR)
 
     def close(self) -> None:
         self._held.close()
@@ -227,8 +226,14 @@ class Episode:
         return WriteRecord(*self._at(LAYOUT.timing))
 
     @property
-    def staged(self) -> StagedRecord:
-        return StagedRecord(*self._at(LAYOUT.staged))
+    def outcome(self) -> CreateRecord:
+        """`outcome.yaml`, pre-flight's episode outcome (#1224): created once, never rewritten."""
+        return CreateRecord(*self._at(LAYOUT.outcome))
+
+    @property
+    def not_comparable(self) -> WriteRecord:
+        """`not_comparable.yaml`: why `verify_family` withheld the family stamp."""
+        return WriteRecord(*self._at(LAYOUT.not_comparable))
 
     @property
     def learning_html(self) -> WriteRecord:
@@ -246,6 +251,11 @@ class Episode:
         """`served/<token>.jsonl`, a world's replay ledger; the token's label must be
         case-stable (the minting check)."""
         return AppendRecord(*self._at(LAYOUT.served_world(check_minted_token(token))))
+
+    def world_record(self, label: str) -> CreateRecord:
+        """`world_records/<label>.yaml`, written once (#1224): a second write is refused, so a
+        resumed sibling never rewrites its world's record."""
+        return CreateRecord(*self._at(LAYOUT.world_record(label)))
 
     def wire_log(self, name: str) -> WriteRecord:
         """`wire_logs/<name>`, by the full file name `WIRE_LOG_NAMES` gives."""

@@ -10,11 +10,12 @@ the archive step, so no container is live either side of the slot. Demand #0 was
 that fork and is settled by it: every drive point in this suite hangs off this answer.
 
 RED against `d1b8b06a`: `cli.main` has no `judge=` seam, `learning/judge/` does not exist, and
-nothing at base reads `review.yaml`'s outcome to decide what to do next.
+nothing at base reads the episode's outcome to decide what to do next (since #1224 that is
+pre-flight's `outcome.yaml`).
 """
 from __future__ import annotations
 
-import json
+from pathlib import Path
 
 import pytest
 
@@ -52,32 +53,51 @@ def _tenant_paths():
     return T.current_tenant()
 
 
-def _launch(tmp_path, *, judge=None, spawn=None, argv_extra=(), **seams):
+#: The one captured call every launch here replays, and the empty answer it was recorded with:
+#: pre-flight's oracle serves it unchanged, so every world calibrates and the episode is
+#: `accepted` (#1224).
+_EMPTY: dict = {"rows": []}
+
+
+class _LazySibling(J.FakeSibling):
+    """`J.FakeSibling`, its episode directory resolved when the launcher first starts a child
+    (the launcher names the directory; the test does not)."""
+
+    def __init__(self) -> None:
+        super().__init__(Path("/nonexistent-until-launch"))
+
+    def __call__(self, argv, *, env=None, **kw):
+        self.episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
+        return super().__call__(argv, env=env, **kw)
+
+
+def _launch_judge() -> J.FakeJudge:
+    """A judge double answering in the launched family's own served systems (#1224's fixture
+    tenant serves `idp`, not the archived fixtures' `elastic`)."""
+    return J.scripted_judge(default=J.as_reply_text(J.reply_doc(systems=["idp"])))
+
+
+def _launch(tmp_path, *, judge=None, spawn=None, **seams):
     """Drive ONE whole episode through the real launcher, judge included.
 
     The judge is reached through `cli.main`'s injected `judge=` seam and never by patching a
     module attribute: the design named no seam for the judge's model call, so the seam is part
     of the contract and driving every launcher scenario through it is what discharges it.
+    #1224: the launch runs over the live-oracle suite's fixture tenant, with a pre-flight
+    oracle that serves the one captured call unchanged.
     """
-    base, src = T.runs_base(tmp_path)
-    episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
+    from defender.tests.live_oracle_1224 import _spec1224 as S
+
+    est = S.estate(tmp_path)
     if spawn is None:
-        spawn = J.FakeSibling(episode_dir)
+        spawn = _LazySibling()
     if judge is None:
-        judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    seams.setdefault("door", T.FakeDoor())
-    seams.setdefault("questioner",
-                     T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c")))
-    seams.setdefault("adapters", T.FakeAdapters())
-    seams.setdefault("invoke", T.FakeAgent(*["same"] * 24))
-    seams.setdefault("preflight", T.no_preflight)
-    # #976 M2: the live-tree capture is injected to match the fixture source's stamp, or the
-    # preflight compares the suite's own HEAD against `deadbee` and refuses every launch.
-    seams.setdefault("live_tree", T.source_capture())
-    rc = _cli().main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go",
-                      *argv_extra],
-                     spawn=spawn, judge=judge, **seams)
-    return rc, judge, episode_dir
+        judge = _launch_judge()
+    launched = S.launch(tmp_path, est,
+                        calls=[S.Call("idp", "query", S.query_params("user:alice"), _EMPTY)],
+                        oracle=S.oracle(then=S.submit(_EMPTY, S.EMPTY_CLAIM)),
+                        verifier=S.passing_verifier(), spawn=spawn, judge=judge, **seams)
+    return launched.rc, judge, launched.ep
 
 
 # ---------------------------------------------------------------------------------------
@@ -99,8 +119,7 @@ def test_921_episode_grade_is_the_artifacts_the_launcher_leaves(tmp_path):
     pass returns the `FamilyGrade` it writes, and the enqueue returns the appended-row count,
     the shape `_io.append_jsonl(path, rows) -> int` already has.
     """
-    judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    rc, judge, ep = _launch(tmp_path, judge=judge)
+    rc, judge, ep = _launch(tmp_path)
 
     assert rc in (0, 1), "the launcher's status is still about the LAUNCH, not about the grade"
     assert (ep / "judge.yaml").is_file(), "the family record was never written"
@@ -123,60 +142,56 @@ def test_921_episode_grade_is_the_artifacts_the_launcher_leaves(tmp_path):
 # ---------------------------------------------------------------------------------------
 
 
-def test_921_rejected_and_incomplete_episodes_are_not_graded(tmp_path):
-    """Only an `accepted` episode is graded; `rejected` and `incomplete` are recorded as "not
+def test_921_unaccepted_episodes_are_not_graded(tmp_path):
+    """Only an `accepted` episode is graded; `unusable` and `refused` are recorded as "not
     graded, reason" rather than passing silently.
 
-    Base's own reader gates on `incomplete` ALONE and admits `rejected` (G14), so the
-    grade-only-on-accepted rule is #921's and not the base's — and an `incomplete` episode can
-    still hold cleanly archived worlds, which is exactly why the refusal has to be RECORDED
-    rather than expressed as an absent file. Positive control in the same drive: the accepted
-    episode does get graded, so the negative cannot pass on a judge that never runs.
+    #1224: the gate reads pre-flight's `outcome.yaml`, whose words are `accepted` / `unusable`
+    / `refused`. A word outside them (the retired `incomplete`) is no outcome at all: it reads
+    as the distinct "no record" state, never as `accepted` (M05=A). The refusal has to be
+    RECORDED rather than expressed as an absent file. Positive control in the same drive: the
+    accepted episode does get graded, so the negative cannot pass on a judge that never runs.
     """
     judge_mod = J.mod("learning.judge")
+    no_record = J.sym("learning.branch.outcome", "NO_RECORD")
     seen = {}
-    for outcome in ("accepted", "rejected", "incomplete"):
+    for outcome in ("accepted", "unusable", "refused", "incomplete"):
         ep = J.accepted_episode(tmp_path / outcome, outcome=outcome)
-        judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
+        judge = J.scripted_judge()
         judge_mod.grade_episode(ep, judge=judge, runs_base=tmp_path / outcome / "defender-runs", state=env_state())
         seen[outcome] = (judge.calls, (ep / "judge.yaml").is_file())
         if outcome != "accepted":
             record = J.judge_record(ep)
             assert record["not_graded"]["reason"], (
                 f"an episode recorded {outcome!r} was skipped with no reason on the record")
-            assert outcome in json.dumps(record["not_graded"]), (
-                "the recorded reason does not name the outcome that caused it")
+            word = no_record if outcome == "incomplete" else outcome
+            assert record["not_graded"]["outcome"] == word, (
+                f"the record does not name the outcome that caused it: {record['not_graded']}")
 
     assert seen["accepted"][0] > 0, "the accepted episode was not graded — the control failed"
-    assert seen["rejected"][0] == 0, "a rejected episode reached the model"
-    assert seen["incomplete"][0] == 0, "an incomplete episode reached the model"
+    assert seen["unusable"][0] == 0, "an unusable episode reached the model"
+    assert seen["refused"][0] == 0, "a refused episode reached the model"
+    assert seen["incomplete"][0] == 0, "an episode with no outcome word reached the model"
 
 
-def test_921_the_trigger_reads_the_single_episode_outcome_key_step_six_wrote(tmp_path):
-    """`review.yaml` carries ONE `episode.outcome` key, not two.
-
-    `Step.REVIEW` writes a human sentence into it and `Step.VERIFY`'s `merge_review` OVERWRITES
-    that with its enum value on every episode that reaches `Step.VERIFY` (P8, executed end to
-    end: the review step's sentence is then absent from the file entirely), so by the time the
-    judge runs the key always holds `Step.VERIFY`'s word; `decision` beside it is
-    `Step.REVIEW`'s and is not the trigger. Drive a full episode and read the key back off disk.
+def test_921_the_trigger_reads_the_outcome_record_preflight_wrote(tmp_path):
+    """The trigger is pre-flight's `outcome.yaml` (#1224), which carries ONE `outcome` word —
+    the retired `review.yaml` and its two-writer `episode.outcome` key are gone. Drive a full
+    episode and read the record back off disk: the word is one of the three, no `review.yaml`
+    was left, and the grade follows that word.
     """
     import yaml
 
     rc, judge, ep = _launch(tmp_path)
-    record = yaml.safe_load((ep / "review.yaml").read_text(encoding="utf-8"))
+    record = yaml.safe_load((ep / "outcome.yaml").read_text(encoding="utf-8"))
 
-    assert isinstance(record["episode"]["outcome"], str)
-    assert "worlds reviewed" not in record["episode"]["outcome"], (
-        "`Step.REVIEW`'s descriptive sentence survived into the archived record; P8 says "
-        "`Step.VERIFY` overwrites it, and a judge reading a sentence where an enum is expected "
-        "reads the wrong half")
-    assert record["episode"]["outcome"] in ("accepted", "rejected", "incomplete")
-    # `decision` is `Step.REVIEW`'s, sits beside it, and is NOT what the trigger reads.
-    assert "decision" in record["episode"]
+    assert record["outcome"] in ("accepted", "unusable", "refused")
+    assert not (ep / "review.yaml").exists(), "a launch still wrote the retired review record"
     graded = J.judge_record(ep) if (ep / "judge.yaml").exists() else {}
-    assert bool(graded) is (record["episode"]["outcome"] == "accepted"), (
-        "the grade did not follow the one key the trigger is specified to read")
+    assert bool(graded) is (record["outcome"] == "accepted"), (
+        "the grade did not follow the one record the trigger is specified to read")
+    assert record["outcome"] == "accepted", (
+        "positive control: the launch's one served call calibrated, so the episode is accepted")
 
 
 def test_921_existing_judge_yaml_stops_a_second_grade(tmp_path):
@@ -351,7 +366,9 @@ def test_921_the_three_knobs_are_resolved_once_and_an_oversized_lead_is_truncate
 
     # And the bound is over the SET. Eight sections each allowed to reach the cap is eight
     # times the number the operator set, which is the same defect one bounded file was.
+    # #1224 (N22): the call list is the one view the cap never cuts — under any cap the judge
+    # still gets each call with its decision word — so the bound is over every OTHER view.
     sections = J.mod("learning.judge.render").render(
         ep, "b", tmp_path / "defender-runs", payload_cap=3000).as_prompt_sections()
-    assert sum(len(body) for body in sections.values()) <= 3000, (
+    assert sum(len(body) for name, body in sections.items() if name != "calls") <= 3000, (
         "the rendered views together exceed the operator's payload cap")

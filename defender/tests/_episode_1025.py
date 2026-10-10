@@ -3,30 +3,30 @@
 The change: a page rendered from an episode directory alone —
 `scripts/visualize/visualize_episode.py::render_episode(episode_dir) -> Path`, written beside
 `judge.yaml` through `_io.write_guarded`'s replace lane, called by the launcher after the JUDGE
-clock frame closes (inside `_cluster_released`'s body, under its own non-fatal boundary) and by
+clock frame closes (`cli._render_page`, under its own non-fatal boundary) and by
 the standalone CLI `main([episode_dir])`. NONE of it exists at base `e8d22ac0`; every import goes
 through `mod()` PER TEST (the `_triplet_947` / `_judge_921` idiom) so the missing target is one
 failure per test, never a collection error hiding the other assertions.
 
 THE ARCHIVES ARE NOT VISIBLE TO CI (F27: `/workspace/.defender-episodes/` is gitignored and
-outside the checkout), so every "sample" number the design doc quotes off
-`fresh-authkeys-20260909-n124` (13 findings, 4 withheld, 5 world-author rows, $1.6386) is
-carried here by a SUITE-BUILT episode that reproduces the archive's SHAPE with its own numbers:
-`sample_episode()` — three worlds (the control `a`, `no_remote_session` withheld, `prior_fake_key_precedent` graded), one draw each plus a family draw, three questioner traces, three
-judge traces with their framed twins, three sibling run dirs each ending in a result event, the
-review / samples / staged / provenance records — and no `timing.json`, because both archives
-predate prep 1 (c25). Every fixture number is a module constant (`SAMPLE`), so a test asserts
-against the fixture's declared figure, never against a value its own body computed from the
-records.
+outside the checkout), so the "sample" the design doc quotes off `fresh-authkeys-20260909-n124`
+is carried here by a SUITE-BUILT episode that reproduces an oracle-era archive's SHAPE with its
+own numbers: `sample_episode()` — three worlds (the control `a`, `no_remote_session` whose fact
+touched no served call, `prior_fake_key_precedent` whose oracle answered one), one draw each plus
+a family draw, three questioner traces, three judge traces with their framed twins, three
+sibling run dirs each ending in a result event, pre-flight's `outcome.yaml`, the samples and
+provenance records — and no `timing.json`, because both archives predate prep 1 (c25). Every
+fixture number is a module constant (`SAMPLE`), so a test asserts against the fixture's
+declared figure, never against a value its own body computed from the records.
 
 EVERY RECORD IS WRITTEN IN THE SHAPE ITS PRODUCTION WRITER LEAVES AND READ BACK THROUGH ITS
 PRODUCTION READER before a test sees it — `write_judge` round-trips through `judge.read_grade`,
-`draw_document` through `enqueue.draws_on_disk`, `staged.yaml` is written by
-`staging.record_staged` itself, the manifest by `_triplet_947.write_family`, the served
-ledgers by `_judge_921.write_ledger`, the run dirs by `_triplet_947.sibling_run_dir`. A fixture
-the real reader refuses is a fixture bug, and it fails HERE, loudly, rather than turning up as a
-page that rendered "unreadable" for a record the test believed intact. Where a scenario WANTS an
-unreadable record it writes raw bytes (`plant_raw`) and says so.
+`draw_document` through `enqueue.draws_on_disk`, `outcome.yaml` and `world_records/` are
+written by `learning/branch/outcome.py` itself, the manifest by `_triplet_947.write_family`, the
+served ledgers by `_judge_921.write_ledger`, the run dirs by `_triplet_947.sibling_run_dir`. A
+fixture the real reader refuses is a fixture bug, and it fails HERE, loudly, rather than
+turning up as a page that rendered "unreadable" for a record the test believed intact. Where a
+scenario WANTS an unreadable record it writes raw bytes (`plant_raw`) and says so.
 
 Fault content cites the ledger claim that observed it on the real dependency
 (`spec-flow/specs/spec_graph_1025.yaml`, `claims:`): the trace row shape is c2, the result event
@@ -78,13 +78,18 @@ EPISODE_TOKEN = T.EPISODE_TOKEN
 #: trace stem `judge_no_remote_session_0_trace` is ambiguous to a filename parser, which is what
 #: `s_judge_trace_stems_with_underscored_labels_and_two_digit_draws` is about.
 CONTROL = "a"
-WITHHELD_WORLD = "no_remote_session"
+#: A sibling whose fact touched no call the investigator made: its served ledger is all
+#: `passthrough`.
+PASSTHROUGH_WORLD = "no_remote_session"
+#: A sibling whose live oracle answered one of the investigator's calls (an `oracle` row).
 GRADED_WORLD = "prior_fake_key_precedent"
 FAMILY = "family"
-WORLDS = (CONTROL, WITHHELD_WORLD, GRADED_WORLD)
+WORLDS = (CONTROL, PASSTHROUGH_WORLD, GRADED_WORLD)
 
-AXIS_WITHHELD = "There is no accepted SSH login from the external address around the write."
+AXIS_PASSTHROUGH = "There is no accepted SSH login from the external address around the write."
 AXIS_GRADED = "Falco history holds two earlier fake-key writes shaped like this one."
+FACT_PASSTHROUGH = "No SSH session from 203.0.113.7 was accepted on soc-playground that hour."
+FACT_GRADED = "Falco logged two earlier fake-key writes to root's authorized_keys on soc-playground."
 BASE_STORY = "Host soc-playground fired the authorized_keys rule after a root one-liner."
 ALERT_RULE = "v2 Falco: authorized_keys modification"
 ALERT_ID = "99c120d90c1b134ffa0368cdb9f29e766aa0a275e8cd9471ff63ff98fd99a250"
@@ -93,21 +98,20 @@ MODEL = "accounts/fireworks/models/kimi-k3"   # prices through the table (c3): $
 ENQUEUED_TO = "/workspace/.claude/worktrees/episode-authkeys/defender/learning/_pending/findings.jsonl"
 WORLD_ENQUEUED_TO = ("/workspace/.claude/worktrees/episode-authkeys/defender/learning/_pending/"
                      "questioner_findings.jsonl")
-ENVELOPE_FAILED = "ES|QL query failed (HTTP 400): Found 3 problems\nline 2:9: Unknown column"
+#: Pre-flight's reason on the sample's `outcome.yaml` (`accepted`).
+OUTCOME_REASON = "pre-flight calibrated every world against the live estate"
+#: The system every sibling's served call and judge answer names — one of `T.SERVED_SYSTEMS`.
+SYSTEM = "elastic"
 
 
 @dataclass(frozen=True)
 class _Sample:
     """The fixture's declared figures — the expected side of every count assertion."""
     findings: int = 13            # 5 + 5 + 3
-    defender_enqueued: int = 4    # prior_fake_key_precedent's four subject: defender rows
-    defender_withheld: int = 4    # no_remote_session's four, withheld reachability_unmeasured
+    defender_enqueued: int = 8    # each sibling's four subject: defender rows
     world_author: int = 5         # one per world draw + the family draw's three
-    queued: int = 9               # 4 + 5
-    withheld_reason: str = "reachability_unmeasured"
+    queued: int = 13              # 8 + 5
     graded: int = 2
-    measuring: int = 1
-    contrasting: int = 0
     # trace usage → cost through the pricing table (kimi-k3: $3/M in, $15/M out — exact sums)
     questioner_usage: tuple[tuple[int, int], ...] = ((100_000, 10_000), (50_000, 10_000),
                                                      (50_000, 10_000))
@@ -120,9 +124,9 @@ class _Sample:
     judge_ms: tuple[int, ...] = (120_000, 60_000, 60_000)
     judge_wall: str = "4m00s"
     run_cost: dict[str, float] = field(default_factory=lambda: {
-        CONTROL: 0.40, WITHHELD_WORLD: 0.25, GRADED_WORLD: 0.35})
+        CONTROL: 0.40, PASSTHROUGH_WORLD: 0.25, GRADED_WORLD: 0.35})
     run_ms: dict[str, int] = field(default_factory=lambda: {
-        CONTROL: 600_000, WITHHELD_WORLD: 180_000, GRADED_WORLD: 300_000})
+        CONTROL: 600_000, PASSTHROUGH_WORLD: 180_000, GRADED_WORLD: 300_000})
     worlds_cost: str = "$1.0000"
     total_cost: str = "$3.5500"             # 1.05 + 1.50 + 1.00
     longest_world: str = "10m00s"
@@ -339,8 +343,9 @@ def write_timing(episode_dir: Path, steps: list[tuple[str, str, str]] | None = N
     return path
 
 
-def six_steps(*, minute: int = 0) -> list[tuple[str, str, str]]:
-    """A complete six-step record, one minute per step from `10:0<minute>`."""
+def every_step(*, minute: int = 0) -> list[tuple[str, str, str]]:
+    """A complete record, one row per `STEPS` member in launch order, one minute per step from
+    `10:0<minute>`."""
     out = []
     for i, step in enumerate(J.mod("learning.branch.steps").STEPS):
         m = minute + i * 2
@@ -364,58 +369,66 @@ def write_stamp(episode_dir: Path, *, commit: str = LESSONS_COMMIT, dirty: bool 
 
 
 def write_samples(episode_dir: Path, doc: dict[str, Any] | None = None) -> Path:
-    """`samples.yaml` — the questioner's reference document per staged pattern."""
+    """`samples.yaml` — the questioner's real example answers per served system (O16):
+    `{<system>: {verbs: {<verb>: [<answer>, ...]}}}` or `{<system>: {unavailable: <reason>}}`,
+    read back through `family.read_samples_record`."""
     doc = doc if doc is not None else {
-        "logs-system.auth-*": {"user.name": "root", "event.outcome": "success"},
-        "logs-falco.alerts-*": {"falco.rule": "Adding ssh keys to authorized_keys"},
+        SYSTEM: {"verbs": {"esql": ['{"user.name": "root", "event.outcome": "success"}']}},
+        "identity": {"unavailable": "the adapter answered no example"},
     }
     path = Path(episode_dir) / "samples.yaml"
     path.write_text(_yaml.safe_dump(doc, sort_keys=True), encoding="utf-8")
+    with bind(Path(episode_dir)) as bound:
+        assert J.sym("learning.judge.family", "read_samples_record")(bound) == doc, (
+            "fixture bug: samples.yaml did not read back")
     return path
 
 
-def stage_names(episode_dir: Path, labels: tuple[str, ...] = (WITHHELD_WORLD, GRADED_WORLD)) -> list[dict]:
-    """`staged.yaml` through the PRODUCTION writer `staging.record_staged`: one index row and one
-    alias row per world, in the shape the launcher appends."""
-    staging = J.mod("learning.branch.staging")
-    rows = []
-    # `record_staged` now takes the `Episode` handle (#1133 rev 2), not the episode dir path.
+def write_outcome(episode_dir: Path, outcome: str = "accepted", *,
+                  reason: str = OUTCOME_REASON, family_stamp: bool = True,
+                  **lists: Any) -> Path:
+    """Pre-flight's `outcome.yaml` through the production writer (`outcome.write_outcome`),
+    replacing any record already there (a fixture restating the outcome is not a second
+    pre-flight), read back through `outcome.read_outcome`. `lists` are the writer's
+    `unservable_worlds` / `not_replayable` / `drift`. An `accepted` record also gets the family
+    stamp (`J.comparable_family_stamp`) unless one is there or `family_stamp=False`."""
+    outcome_mod = J.mod("learning.branch.outcome")
+    path = Path(episode_dir) / "outcome.yaml"
+    path.unlink(missing_ok=True)
     with _EpisodeHandle.open(Path(episode_dir)) as episode:
-        for label in labels:
-            token = T.world_token(label)
-            for kind, name in (("index", f"wv-{token}-logs-system.auth-.inject"),
-                               ("alias", f"wv-{token}-logs-system.auth-")):
-                rows.append(staging.record_staged(
-                    episode, {"world": token, "name": name, "kind": kind,
-                              "derived_from": "logs-system.auth-*"}))
-    return rows
+        outcome_mod.write_outcome(episode, outcome, reason=reason, **lists)
+    with bind(Path(episode_dir)) as bound:
+        assert outcome_mod.read_outcome(bound)["outcome"] == outcome
+    if family_stamp and outcome == "accepted":
+        # PR #1232 round 7: only a stamped family is graded or compared.
+        J.comparable_family_stamp(Path(episode_dir), commit=LESSONS_COMMIT)
+    return path
 
 
-def reachability(*, envelope_ran: bool = True, envelope_failed: str | None = None,
-                 injected_present: int = 0, injected_retrieved: int = 0,
-                 capture_reasks_faulted: int = 0, capture_addressed: bool = True,
-                 reachable_by_capture: bool | None = True) -> dict[str, Any]:
-    return {"envelope_ran": envelope_ran, "envelope_failed": envelope_failed,
-            "injected_retrieved": injected_retrieved, "injected_present": injected_present,
-            "patched_visible": False, "exclusion_matches": None,
-            "exclusion_count_failed": False, "base_documents": None, "capture_replays": [],
-            "capture_addressed": capture_addressed, "capture_reasks_faulted": capture_reasks_faulted,
-            "reachable_by_capture": reachable_by_capture}
+def write_world_record(episode_dir: Path, label: str, reason: str = "oracle unservable", *,
+                       call: dict[str, Any] | None = None, detail: str = "") -> Path:
+    """World `label`'s own record (`world_records/<label>.yaml`) through the production writer
+    (`outcome.write_world_record`)."""
+    with _EpisodeHandle.open(Path(episode_dir)) as episode:
+        assert J.mod("learning.branch.outcome").write_world_record(
+            episode, label, reason, call=call, detail=detail), "fixture bug: record exists"
+    return Path(episode_dir) / "world_records" / f"{label}.yaml"
 
 
-def review_world(role: str, label: str, *, reach: dict[str, Any] | None = None,
-                 inventions: list | None = None, decision: str = "accepted") -> dict[str, Any]:
-    """One `review.yaml` `worlds.<label>` block: role, world_token, consistency, reachability,
-    inventions, decision — the shape the archived record carries."""
-    block: dict[str, Any] = {
-        "role": role, "world_token": T.world_token(label),
-        "consistency": {"replayed": [], "mismatches": [], "control_mismatch_keys": [],
-                        "faults": []},
-        "inventions": inventions or [], "decision": decision,
+def served_row(label: str | None, source: str, *, system: str = SYSTEM, verb: str = "esql",
+               params: dict[str, Any] | None = None,
+               payload: str = '{"hits": []}', **extra: Any) -> dict[str, Any]:
+    """One served-ledger row in `ServedCall.row()`'s shape, its `source` one of the decision
+    words (`passthrough`, `oracle`, `real-error`, `refused`, `fault`). `extra` carries an
+    `oracle` row's own fields (`claim`, `verifier_verdict`, `attempts`)."""
+    row: dict[str, Any] = {
+        "system": system, "verb": verb,
+        "params": params if params is not None else {"query": "FROM logs-system.auth-* | LIMIT 5"},
+        "payload_text": payload, "source": source,
+        "world_id": None if label is None else T.world_token(label),
     }
-    if reach is not None:
-        block["reachability"] = reach
-    return block
+    row.update(extra)
+    return row
 
 
 # --------------------------------------------------------------------------------------
@@ -423,7 +436,7 @@ def review_world(role: str, label: str, *, reach: dict[str, Any] | None = None,
 # --------------------------------------------------------------------------------------
 
 
-def _world_findings_rows(withheld: bool) -> list[dict[str, Any]]:
+def _world_findings_rows() -> list[dict[str, Any]]:
     """Five per-draw findings for a sibling: four addressed to the defender, one to the world
     author (the sample's split)."""
     rows = [finding(subject="defender", bucket=b, claim=f"defender claim {i}",
@@ -431,66 +444,56 @@ def _world_findings_rows(withheld: bool) -> list[dict[str, Any]]:
                     anchor=f"l-00{i + 1}")
             for i, b in enumerate(("lead-set", "observability", "decision-discipline",
                                    "analyze-discipline"))]
-    rows.append(finding(subject="world", bucket="story-overlay-gap",
-                        claim="the overlay never reached the defender as a readable document",
-                        root_cause="injected rows were present but retrieval faulted",
-                        topic="injected precedent never retrieved", anchor="l-002"))
+    rows.append(finding(subject="world", bucket="fact-story-gap",
+                        claim="the fact never reached the defender as a readable answer",
+                        root_cause="the oracle served the fact on a call the lead never made",
+                        topic="served fact never retrieved", anchor="l-002"))
     return rows
 
 
 def family_findings() -> list[dict[str, Any]]:
-    return [finding(subject="world", bucket="unreachable-difference",
+    return [finding(subject="world", bucket="undiscriminating-family",
                     claim=f"family claim {i}", root_cause=f"family root cause {i}",
                     topic=f"family topic {i}",
-                    anchor=f"worlds.{WITHHELD_WORLD}.reachability.envelope_failed")
+                    anchor=f"worlds.{PASSTHROUGH_WORLD}.facts")
             for i in range(3)]
 
 
-def world_row(label: str, *, declared: str, withheld_reason: str | None = None,  # noqa: PLR0913 — one keyword per row field the ladder and chips read; a scenario names only the field it is about
-              bucket: str | None = "decision-discipline", verdict: str = "inconclusive",
-              holding_queried: bool = True, doctored: bool = True, difference_shown: bool = True,
-              has_refused: bool | None = False, resolution_moved: bool = True,
-              world_findings: list[dict[str, Any]] | None = None, **over: Any) -> dict[str, Any]:
-    """One `judge.yaml` world row in the post-#1007 shape (every flag the chips and ladder
-    name), with `has_refused` STORED (prep 2b) unless `has_refused=None` drops it."""
+def world_row(label: str, *, declared: str, bucket: str | None = "decision-discipline",
+              systems: list[str] | None = None, verdict: str = "inconclusive",
+              resolution_moved: bool = True, findings: list[dict[str, Any]] | None = None,
+              **over: Any) -> dict[str, Any]:
+    """One `judge.yaml` world row in the shape `family.read_world` and the pass's answer step
+    leave: the archive's verdict facts, the judge model's own `bucket` and `systems`, the
+    draws' findings (each stamped with its `draw`) and the draw counts."""
     row: dict[str, Any] = {
-        "world": label, "declared": declared, "holding_system": "elastic",
-        "holding_queried": holding_queried, "scope_discriminated": False,
-        "doctored_answer_served": doctored, "resolution_moved": resolution_moved,
-        "verdict": verdict, "malformed_rows": 0, "served_nothing": not holding_queried,
-        "difference_shown": difference_shown, "reachable_by_capture": difference_shown or None,
-        "capture_addressed": True, "capture_reasks_faulted": 0 if difference_shown else 5,
-        "injected_retrieved": 0, "injected_present": 2 if difference_shown else 0,
-        "withheld_reason": withheld_reason,
-        "world_findings": world_findings if world_findings is not None else [],
-        "mechanical_world_findings": [], "sample_unavailable": False,
-        "sample_unavailable_patterns": [], "pattern": "logs-system.auth-*", "bucket": bucket,
-        "agreed_without_difference": False, "completed_draws": 1,
-        "spread": {bucket: 1} if bucket else {}, "malformed_replies": 0,
+        "world": label, "declared": declared, "verdict": verdict,
+        "resolution_moved": resolution_moved, "malformed_rows": 0, "served_nothing": False,
+        "completed_draws": 1, "malformed_replies": 0, "bucket": bucket,
+        "systems": systems if systems is not None else [SYSTEM],
+        "findings": [{**f, "draw": 0} for f in findings] if findings is not None else [],
     }
-    if has_refused is not None:
-        row["has_refused"] = has_refused
     row.update(over)
     return row
 
 
 def ungradable_row(label: str, *, declared: str = "malicious",
-                   reason: str = "a call on 'elastic' faulted — the defender is not graded on "
-                                 "a call the estate could not answer") -> dict[str, Any]:
-    """The THIRD world state (c13 refuted): `ungradable: True`, its reason, no ladder flags,
-    `bucket: None` — live-996's `sshpass_confirmed` row."""
+                   reason: str = "oracle unservable — the oracle could not serve 'elastic' "
+                                 "esql for this world") -> dict[str, Any]:
+    """The world the judge never judged: `ungradable: True`, its reason, no bucket, no
+    findings — the row `family.read_world` or the pass's failed-world arm leaves."""
     return {"world": label, "declared": declared, "ungradable": True,
-            "ungradable_reason": reason, "bucket": None, "completed_draws": 0,
-            "world_findings": [], "mechanical_world_findings": []}
+            "ungradable_reason": reason}
 
 
 def world_finding_queue_row(finding_id: str, text: str, *, anchor: str = "l-002",
-                            topic: str = "injected precedent never retrieved") -> dict[str, Any]:
+                            topic: str = "served fact never retrieved",
+                            type_: str = "fact-story-gap") -> dict[str, Any]:
     """One episode-level `world_findings` row — the questioner-queue `FindingRow` shape (g28),
     joined to the draw by `finding_id` ONLY."""
     return {"schema_version": 1, "finding_id": finding_id, "run_id": EPISODE_ID,
             "alert_rule_key": "rule-v2-falco-authorized-keys-modification",
-            "direction": "world", "subject": "world", "type": "unreachable-difference",
+            "direction": "world", "subject": "world", "type": type_,
             "subject_anchor": anchor, "subject_topic": topic, "finding": text,
             "judge_outcome": "discard", "citations": ["investigation.md"],
             "source_run_dir": f"/runs/{EPISODE_ID}"}
@@ -504,8 +507,8 @@ def family_queue_row(draw: int, index: int, *, topic: str | None = None,
     claim = claim if claim is not None else f"family claim {index}"
     return world_finding_queue_row(f"{EPISODE_ID}/{FAMILY}/{draw}/{index}",
                                    f"{claim} — family root cause {index}",
-                                   anchor=f"worlds.{WITHHELD_WORLD}.reachability.envelope_failed",
-                                   topic=topic)
+                                   anchor=f"worlds.{PASSTHROUGH_WORLD}.facts",
+                                   topic=topic, type_="undiscriminating-family")
 
 
 def finding_id(label: str, draw: int | str, index: int) -> str:
@@ -521,16 +524,14 @@ def disposition(label: str, draw: int | str, index: int, lane: str,
 
 def sample_dispositions(*, family: bool = True) -> list[dict[str, Any]]:
     """The ledger the real pass writes for the sample, IN ITS WALK ORDER: the family draw's
-    three world rows first, then each graded row's draw in row order — the withheld world's
-    four defender findings withheld and its fifth a world row, the graded world's four
-    enqueued and its fifth a world row. `test_1025_the_fixture_ledger_is_the_passes_own`
-    holds this list to the real `enqueue_report`'s output."""
+    three world rows first, then each graded row's draw in row order — four defender findings
+    enqueued and the fifth a world row, per sibling.
+    `test_1025_the_fixture_ledger_is_the_passes_own` holds this list to the real
+    `enqueue_report`'s output."""
     ledger = [disposition(FAMILY, 0, i, "world") for i in range(3)] if family else []
-    ledger += [disposition(WITHHELD_WORLD, 0, i, "withheld", SAMPLE.withheld_reason)
-               for i in range(4)]
-    ledger.append(disposition(WITHHELD_WORLD, 0, 4, "world"))
-    ledger += [disposition(GRADED_WORLD, 0, i, "defender") for i in range(4)]
-    ledger.append(disposition(GRADED_WORLD, 0, 4, "world"))
+    for label in (PASSTHROUGH_WORLD, GRADED_WORLD):
+        ledger += [disposition(label, 0, i, "defender") for i in range(4)]
+        ledger.append(disposition(label, 0, 4, "world"))
     return ledger
 
 
@@ -567,8 +568,7 @@ def drop_lanes(doc: dict[str, Any], label: str) -> dict[str, Any]:
 def block_defender_lane(doc: dict[str, Any], verdict_word: str) -> dict[str, Any]:
     """The record as the enqueue writes it on a discard / corpus-contradiction episode (O7):
     the word on `verdict_word`, `enqueued_rows` 0, every defender entry on the ledger
-    re-filed never eligible with that word — and the withheld ones untouched (withheld before
-    blocked, 92-reconciliation F-2)."""
+    re-filed never eligible with that word."""
     doc["verdict_word"] = verdict_word
     doc["enqueued_rows"] = 0
     doc["dispositions"] = [
@@ -582,56 +582,49 @@ def _coordinate(finding_id: str) -> tuple[str, str, str]:
     return label, draw, index
 
 
-def sample_grade(*, withheld_findings: list[dict[str, Any]] | None = None,
-                 family: bool = True) -> dict[str, Any]:
-    """The sample-shaped `judge.yaml` document: two graded rows (one withheld), the control
-    absent (no row), `verdict_word: undecidable`, `family_outcome: discard`, four defender rows
-    enqueued, five world-author rows (two without the family's three when `family=False` —
-    the record of an episode whose family call never ran), four withheld — and the ledger
-    (`dispositions`) that says so per finding."""
-    withheld_docs = _world_findings_rows(withheld=True)
-    graded_docs = _world_findings_rows(withheld=False)
+def sample_grade(*, family: bool = True) -> dict[str, Any]:
+    """The sample-shaped `judge.yaml` document: two graded rows, the control absent (no row),
+    `verdict_word: undecidable`, `family_outcome: discard`, `validity: usable`, eight defender
+    rows enqueued, five world-author rows (two without the family's three when `family=False` —
+    the record of an episode whose family call never ran) — and the ledger (`dispositions`)
+    that says so per finding."""
+    passthrough_docs = _world_findings_rows()
+    graded_docs = _world_findings_rows()
     prefix = f"{EPISODE_ID}"
     world_rows = ([family_queue_row(0, i) for i in range(3)] if family else []) + [
-        world_finding_queue_row(f"{prefix}/{WITHHELD_WORLD}/0/4",
-                                withheld_docs[4]["claim"] + " — " + withheld_docs[4]["root_cause"]),
-        world_finding_queue_row(f"{prefix}/{GRADED_WORLD}/0/4",
-                                graded_docs[4]["claim"] + " — " + graded_docs[4]["root_cause"]),
+        world_finding_queue_row(f"{prefix}/{label}/0/4",
+                                docs[4]["claim"] + " — " + docs[4]["root_cause"])
+        for label, docs in ((PASSTHROUGH_WORLD, passthrough_docs), (GRADED_WORLD, graded_docs))
     ]
     return {
         "worlds": [
-            world_row(WITHHELD_WORLD, declared="benign",
-                      withheld_reason=SAMPLE.withheld_reason, bucket="lead-set",
-                      holding_queried=False, doctored=False, difference_shown=False,
-                      has_refused=None, world_findings=[withheld_docs[4]]),
+            world_row(PASSTHROUGH_WORLD, declared="benign", bucket="lead-set",
+                      resolution_moved=False, findings=passthrough_docs),
             world_row(GRADED_WORLD, declared="malicious", bucket="decision-discipline",
-                      has_refused=None, world_findings=[graded_docs[4]]),
+                      findings=graded_docs),
         ],
-        "verdict_word": "undecidable", "episode_outcome": "gradable",
+        "verdict_word": "undecidable", "episode_outcome": "gradable", "validity": "usable",
         "enqueued_rows": SAMPLE.defender_enqueued, "enqueued_to": ENQUEUED_TO,
         "draws": {"configured": 1, "completed": 1},
         "knobs": {"draws": 1, "model": "kimi-k3", "effort": "medium", "payload_cap": 20000},
         "lessons_commit": LESSONS_COMMIT,
-        "discard_evidence": {"review_pointer": f"{EPISODE_ID}/review.yaml#worlds.*.consistency.control_mismatch_keys"},
         "queue_malformed_rows": 0, "world_queue_malformed_rows": 0,
         "unqueueable_findings": [], "family_outcome": "discard", "family_failed_reason": None,
-        "family_malformed_replies": 0, "world_enqueued_rows": len(world_rows),
+        "family_malformed_replies": 0, "family_completed_draws": 1 if family else 0,
+        "world_enqueued_rows": len(world_rows),
         "world_enqueued_to": WORLD_ENQUEUED_TO, "world_findings": world_rows,
-        "withheld_findings": withheld_findings if withheld_findings is not None else [
-            {"finding": row, "world": WITHHELD_WORLD, "reason": SAMPLE.withheld_reason,
-             "finding_id": finding_id(WITHHELD_WORLD, 0, i)}
-            for i, row in enumerate(withheld_docs[:4])],
         "dispositions": sample_dispositions(family=family),
     }
 
 
 def sample_manifest_worlds() -> list[dict[str, Any]]:
     return [
-        T.world_doc(CONTROL, role="A", axis=None, disposition_declared="malicious", ov={}),
-        T.world_doc(WITHHELD_WORLD, role="B", axis=AXIS_WITHHELD, disposition_declared="benign",
-                    ov=T.overlay(elastic=T.elastic_overlay(inject=[{"_id": "i-b"}]))),
+        T.world_doc(CONTROL, role="A", axis=None, disposition_declared="malicious", facts=[]),
+        T.world_doc(PASSTHROUGH_WORLD, role="B", axis=AXIS_PASSTHROUGH,
+                    disposition_declared="benign",
+                    facts=[T.fact("f-quiet", FACT_PASSTHROUGH, ("soc-playground", "203.0.113.7"))]),
         T.world_doc(GRADED_WORLD, role="C", axis=AXIS_GRADED, disposition_declared="malicious",
-                    ov=T.overlay(elastic=T.elastic_overlay(inject=[{"_id": "i-c"}]))),
+                    facts=[T.fact("f-precedent", FACT_GRADED, ("soc-playground",))]),
     ]
 
 
@@ -663,42 +656,39 @@ class Episode:
 
 def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = True,  # noqa: PLR0913, C901 — one switch per record so a scenario about a record's absence names exactly that record
                    family_draw: bool = True, traces: bool = True, runs: bool = True,
-                   timing: bool = False, stamp: bool = True, samples: bool = True,
-                   staged: bool = True) -> Episode:
+                   timing: bool = False, stamp: bool = True, samples: bool = True) -> Episode:
     """The fresh-authkeys-SHAPED episode, suite-built (F27), every record through its writer.
 
     Switches turn a record off for the scenarios about its absence; `timing=True` adds the
-    six-step `timing.json` a post-prep launch leaves (the archives predate it, c25)."""
+    every-step `timing.json` a post-prep launch leaves (the archives predate it, c25)."""
     manifest = sample_manifest()
     ep = J.accepted_episode(
-        tmp_path, root=root, worlds=manifest["worlds"], labels=WORLDS,
-        dispositions={CONTROL: "malicious", WITHHELD_WORLD: "benign", GRADED_WORLD: "malicious"},
-        ledgers={CONTROL: [J.ledger_row(source="passthrough", world_label=CONTROL)],
-                 WITHHELD_WORLD: [J.staged_row(WITHHELD_WORLD)],
-                 GRADED_WORLD: [J.staged_row(GRADED_WORLD)]})
+        tmp_path, root=root, worlds=manifest["worlds"], labels=WORLDS, family_stamp=False,
+        dispositions={CONTROL: "malicious", PASSTHROUGH_WORLD: "benign", GRADED_WORLD: "malicious"},
+        ledgers={CONTROL: [served_row(CONTROL, "passthrough")],
+                 PASSTHROUGH_WORLD: [served_row(PASSTHROUGH_WORLD, "passthrough")],
+                 GRADED_WORLD: [served_row(GRADED_WORLD, "oracle",
+                                           claim={"added": [{"forged_id": "fg-1",
+                                                             "fact_id": "f-precedent"}]},
+                                           verifier_verdict={"passed": True,
+                                                             "reason": "present"},
+                                           attempts=1)]})
     # the manifest the sample carries: base story, a real axis per sibling, the control's null
     T.write_family(ep, manifest)
+    # The family stamp is `stamp`'s alone (`write_stamp` below), so `stamp=False` means absent.
+    write_outcome(ep, family_stamp=False)
     # world alerts name the rule the header shows
     for label in WORLDS:
         (ep / "worlds" / label / "alert.json").write_text(json.dumps(
             {"alert_id": ALERT_ID, "rule": {"id": "v2-falco-authorized-keys-modification",
                                             "name": ALERT_RULE}}), encoding="utf-8")
         _leads(ep / "worlds" / label, label)
-    withheld_docs = _world_findings_rows(withheld=True)
-    graded_docs = _world_findings_rows(withheld=False)
-    draw_document(ep, WITHHELD_WORLD, 0, draw_doc(findings=withheld_docs))
-    draw_document(ep, GRADED_WORLD, 0, draw_doc(findings=graded_docs))
+    for label, bucket in ((PASSTHROUGH_WORLD, "lead-set"), (GRADED_WORLD, "decision-discipline")):
+        draw_document(ep, label, 0, draw_doc(findings=_world_findings_rows(), bucket=bucket,
+                                             systems=[SYSTEM]))
     if family_draw:
         draw_document(ep, FAMILY, 0, draw_doc(findings=family_findings(),
-                                              episode_outcome="discard"))
-    J.review_record(ep, worlds={
-        CONTROL: review_world("A", CONTROL),
-        WITHHELD_WORLD: review_world("B", WITHHELD_WORLD, reach=reachability(
-            envelope_ran=False, envelope_failed=ENVELOPE_FAILED, capture_reasks_faulted=5,
-            reachable_by_capture=None)),
-        GRADED_WORLD: review_world("C", GRADED_WORLD, reach=reachability(
-            injected_present=2, capture_reasks_faulted=2)),
-    })
+                                              episode_outcome="discard", verdict_word="discard"))
     if judge:
         write_judge(ep, sample_grade(family=family_draw))
     if traces:
@@ -706,7 +696,7 @@ def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = Tr
                                        SAMPLE.questioner_usage, SAMPLE.questioner_ms, strict=True):
             write_trace(ep, agent_id, usage=usage, duration_ms=float(ms),
                         prompt=f"questioner prompt for {agent_id}", reply=f"reply of {agent_id}")
-        labels = ((FAMILY, 0), (WITHHELD_WORLD, 0), (GRADED_WORLD, 0))
+        labels = ((FAMILY, 0), (PASSTHROUGH_WORLD, 0), (GRADED_WORLD, 0))
         for (label, n), usage, ms in zip(labels, SAMPLE.judge_usage, SAMPLE.judge_ms, strict=True):
             agent_id = f"judge:{label}:{n}"
             write_trace(ep, agent_id, usage=usage, duration_ms=float(ms),
@@ -717,13 +707,11 @@ def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = Tr
         for label in WORLDS:
             run_dir(ep, label, cost=SAMPLE.run_cost[label], duration_ms=SAMPLE.run_ms[label])
     if timing:
-        write_timing(ep, six_steps())
+        write_timing(ep, every_step())
     if stamp:
         write_stamp(ep)
     if samples:
         write_samples(ep)
-    if staged:
-        stage_names(ep)
     return Episode(ep, tmp_path)
 
 
@@ -1069,16 +1057,16 @@ def escaped(s: str) -> str:
 
 
 __all__ = [
-    "AXIS_GRADED", "AXIS_WITHHELD", "ALERT_ID", "ALERT_RULE", "BASE_STORY", "CONTROL",
-    "ENQUEUED_TO", "ENVELOPE_FAILED", "EPISODE_ID", "EPISODE_TOKEN", "FAMILY", "GRADED_WORLD",
-    "LESSONS_COMMIT", "MODEL", "PAGE_MODULE", "PAGE_NAME", "SAMPLE", "WITHHELD_WORLD",
-    "WORLD_ENQUEUED_TO", "WORLDS",
+    "AXIS_GRADED", "AXIS_PASSTHROUGH", "ALERT_ID", "ALERT_RULE", "BASE_STORY", "CONTROL",
+    "ENQUEUED_TO", "EPISODE_ID", "EPISODE_TOKEN", "FACT_GRADED", "FACT_PASSTHROUGH", "FAMILY",
+    "GRADED_WORLD", "LESSONS_COMMIT", "MODEL", "OUTCOME_REASON", "PAGE_MODULE", "PAGE_NAME",
+    "PASSTHROUGH_WORLD", "SAMPLE", "SYSTEM", "WORLD_ENQUEUED_TO", "WORLDS",
     "Episode", "Node", "Page", "Rescue", "PAGE_FILE", "raise_now", "when_inside",
-    "cli", "copy_episode", "draw_doc", "draw_document", "escaped", "family_findings",
-    "finding", "mod", "page_module", "plant_fifo", "plant_link", "plant_raw", "reachability",
-    "read_page", "render", "result_event", "review_world", "run_dir", "sample_episode",
-    "family_queue_row", "sample_grade", "sample_manifest", "sample_manifest_worlds", "six_steps", "snapshot",
-    "stage_names", "sym", "trace_rows", "trace_stem", "ungradable_row", "world_finding_queue_row",
-    "world_row", "write_framed", "write_judge", "write_samples", "write_stamp", "write_timing",
-    "write_tool_trace", "write_trace",
+    "cli", "copy_episode", "draw_doc", "draw_document", "escaped", "every_step",
+    "family_findings", "family_queue_row", "finding", "mod", "page_module", "plant_fifo",
+    "plant_link", "plant_raw", "read_page", "render", "result_event", "run_dir",
+    "sample_episode", "sample_grade", "sample_manifest", "sample_manifest_worlds", "served_row",
+    "snapshot", "sym", "trace_rows", "trace_stem", "ungradable_row", "world_finding_queue_row",
+    "world_row", "write_framed", "write_judge", "write_outcome", "write_samples", "write_stamp",
+    "write_timing", "write_tool_trace", "write_trace", "write_world_record",
 ]

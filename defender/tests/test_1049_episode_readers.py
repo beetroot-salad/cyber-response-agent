@@ -1,19 +1,18 @@
 """#1049 — the episode-tree readers rewritten over the bound primitive.
 
 Every reader in the design's census (`learning/judge/family.py`, `judge/__init__.py`,
-`branch/staging.py`, `branch/timing.py`, `branch/archive.py`, `branch/episode.py`) takes the
-BOUND reader `_io.bind(episode_dir)` answers, never a root it could format (D-V2); every
-sentence it formats names the record's RELATIVE name — `review.yaml`, `staged.yaml`,
-`worlds/<w>/report.md`, `served/<token>.<label>.jsonl`, `gather_summaries/<lead>.md` — and never
+`branch/timing.py`, `branch/archive.py`, `branch/episode.py`) takes the BOUND reader
+`_io.bind(episode_dir)` answers, never a root it could format (D-V2); every sentence it formats
+names the record's RELATIVE name — `samples.yaml`, `judge.yaml`, `worlds/<w>/report.md`, `served/<token>.<label>.jsonl`, `gather_summaries/<lead>.md` — and never
 the directory the operator keeps episodes in; the three world-level readers answer the
 primitive's absent STATE as a value (never `None`, never a sentence — F-I as a type), and the
 parsing readers keep `value | None` with `None` their typed absent answer (RF-R1), coalesced
 `or {}` at every read site. The `reader=` seam is `reader(bound, name)`.
 
 Every fault is a real entry planted on the filesystem through the real readers; the grading
-pass is driven through `grade_family` / `render.render` / `grade_episode`, the page through
-`render_episode`. The one fake is `_world_1007.RecordingReader`, a counting pass-through
-injected at the `reader=` / `review_reader=` seams.
+pass is driven through `render.render` / `grade_episode` (its model seam a `FakeJudge`), the
+page through `render_episode`. The one other fake is `_world_1007.RecordingReader`, a counting
+pass-through injected at the `reader=` seam.
 
 RED AGAINST BASE by construction: `_io.bind` does not exist and the readers take a path today;
 every import goes through `mod()` per test.
@@ -60,6 +59,20 @@ def _episode(tmp_path: Path, *, labels: tuple[str, ...] = ("b", "c"), **kw) -> P
         root, root=root, labels=("a", *labels),
         dispositions={"a": "benign", **{label: "malicious" for label in labels}},
         ledgers={label: [J.staged_row(label)] for label in labels}, **kw)
+
+
+#: The judge double's reply for every draw: a valid world answer that grades nothing.
+_REPLY = J.as_reply_text(J.reply_doc(bucket="none", systems=[]))
+
+
+def _grade(ep: Path, tmp_path: Path):
+    """The real grading pass over `ep` (`grade_episode`), its model seam a `FakeJudge`. A
+    record already on disk is removed first, so a scenario that re-plants a fault and grades
+    again sees a fresh pass rather than the idempotent re-read of the earlier one."""
+    (ep / "judge.yaml").unlink(missing_ok=True)
+    return R.judge().grade_episode(ep, judge=J.FakeJudge(default=_REPLY),
+                                   runs_base=tmp_path / "defender-runs",
+                                   git_show=J.FakeGitShow(), state=_state1135.env_state())
 
 
 def _ledger_name(label: str) -> str:
@@ -120,42 +133,6 @@ def test_1049_screened_yaml_mapping_says_the_name_on_all_three_arms_and_none_on_
 
 
 # ---------------------------------------------------------------------------------------
-# d-09 — the review reader
-# ---------------------------------------------------------------------------------------
-
-
-def test_1049_the_review_reader_says_review_yaml_and_answers_none_when_absent(tmp_path):
-    """read_review_record's default reader, called (bound, name), refuses the read and parse
-    arms with a sentence naming review.yaml and no root, answers None (not {}) when review.yaml
-    is absent — branched off the primitive's absent state (RF-R1) — and D-J7's shape arms
-    otherwise (a present mapping is the mapping).
-    """
-    ep = _episode(tmp_path)
-    family = R.family()
-    bound = R.bind(ep)
-    refused = R.refused_class()
-
-    present = family.read_review_record(bound)
-    assert isinstance(present, dict)
-    assert present['episode']['outcome'] == 'accepted'
-    assert family._default_review_reader(bound, "review.yaml") == present
-
-    (ep / "review.yaml").unlink()
-    assert family.read_review_record(bound) is None, "absent must be None, not {}"
-    assert family._default_review_reader(bound, "review.yaml") is None
-
-    for arm, plant in (("read", lambda: R.plant_link(ep / "review.yaml", ep / "family.yaml")),
-                       ("parse", lambda: R.write_bytes(ep / "review.yaml", "{\n  ["))):
-        plant()
-        with pytest.raises(refused) as caught:
-            family.read_review_record(bound)
-        sentence = str(caught.value)
-        assert "review.yaml" in sentence, (arm, sentence)
-        _root_free(sentence, ep)
-        (ep / "review.yaml").unlink()
-
-
-# ---------------------------------------------------------------------------------------
 # d-10 — the permissive samples reader survives
 # ---------------------------------------------------------------------------------------
 
@@ -168,8 +145,8 @@ def test_1049_the_permissive_samples_reader_still_answers_empty_for_absent_unrea
     ep = _episode(tmp_path)
     family = R.family()
     bound = R.bind(ep)
-    R.write_bytes(ep / "samples.yaml", "logs-*:\n  '@timestamp': '2026-07-28T16:00:00Z'\n")
-    assert family.read_samples_record(bound) == {"logs-*": {"@timestamp": "2026-07-28T16:00:00Z"}}
+    R.write_bytes(ep / "samples.yaml", "elastic:\n  verbs:\n    esql: ['{}']\n")
+    assert family.read_samples_record(bound) == {"elastic": {"verbs": {"esql": ["{}"]}}}
     assert family._default_samples_reader(bound, "samples.yaml") == family.read_samples_record(bound)
     (ep / "samples.yaml").unlink()
     assert family.read_samples_record(bound) == {}
@@ -303,30 +280,28 @@ def test_1049_the_world_ledger_refusal_names_served_token_label_jsonl(tmp_path):
 # ---------------------------------------------------------------------------------------
 
 
-def test_1049_a_missing_served_ledger_is_recorded_as_served_token_jsonl(tmp_path):
-    """_missing_required_input answers 'served ledger (served/<token>.<label>.jsonl)' for an
-    absent ledger — and for a link at its name, which its kept lstat pre-filter refuses first
-    (RF-R10) — so the judge.yaml row _grade_world writes reads 'world <w> is missing its
-    served ledger (served/<token>.<label>.jsonl)' with no root — the ordinary ungradable path,
-    the sibling graded in the same pass. The grading lane's two pre-filters
-    (_missing_required_input, _check_gather_summaries) stay.
+def test_1049_a_linked_served_ledger_is_recorded_as_served_token_jsonl(tmp_path):
+    """An ABSENT served ledger is no longer a missing input (#1224 S8: no call reached it, and
+    whether a world ran is its own record's to say) — the world is graded with
+    `served_nothing: True`. A LINK at the ledger's name is refused by the read: the judge.yaml
+    row the pass writes is ungradable and malformed, its reason naming
+    `served/<token>.<label>.jsonl` exactly once and no root — the ordinary ungradable path, the
+    sibling graded in the same pass.
     """
     ep = _episode(tmp_path, labels=("b", "c", "d"))
-    family = R.family()
     (ep / _ledger_name("b")).unlink()
     R.plant_link(ep / _ledger_name("c"), ep / "family.yaml")
 
-    rows = _rows(family.grade_family(ep))
-    for label in ("b", "c"):
-        row = rows[label]
-        assert row.get('ungradable') is True, row
-        assert not row.get('malformed'), row
-        reason = row["ungradable_reason"]
-        assert reason == f"world {label!r} is missing its served ledger ({_ledger_name(label)})", reason
-        _root_free(reason, ep)
+    rows = _rows(_grade(ep, tmp_path))
+    assert not rows["b"].get("ungradable"), rows["b"]
+    assert rows["b"]["served_nothing"] is True, rows["b"]
+    c = rows["c"]
+    assert c.get("ungradable") is True, c
+    assert c.get("malformed") is True, c
+    assert c["ungradable_reason"].count(_ledger_name("c")) == 1, c
+    assert R.ALIAS in c["ungradable_reason"], c
+    _root_free(c["ungradable_reason"], ep)
     assert not rows["d"].get("ungradable"), rows["d"]
-
-
 # ---------------------------------------------------------------------------------------
 # d-14 — lead_chain
 # ---------------------------------------------------------------------------------------
@@ -506,37 +481,6 @@ def test_1049_read_family_stamp_says_provenance_json_on_all_three_arms(tmp_path)
     assert archive.read_family_stamp(bound)["agreed"]["commit"] == "deadbee"
 
 
-def test_1049_read_staged_says_staged_yaml_and_answers_none_when_absent(tmp_path):
-    """read_staged(bound) raises StagingRefused naming staged.yaml and no root on the read,
-    parse and shape arms; answers None when staged.yaml is absent and [] when it is an empty
-    document (a comment-only header is present-and-empty, #70); the rows otherwise.
-    """
-    ep = _episode(tmp_path)
-    staging = R.mod("learning.branch.staging")
-    bound = R.bind(ep)
-    record = staging.staged_path(ep)
-    assert staging.read_staged(bound) is None, "absent must be None, not []"
-    R.write_bytes(record, "")
-    assert staging.read_staged(bound) == []
-    R.write_bytes(record, "# staged names — appended by the staging door\n")
-    assert staging.read_staged(bound) == []
-    for arm, plant in (("read", lambda: R.plant_link(record, ep / "family.yaml")),
-                       ("parse", lambda: R.write_bytes(record, "- world: {torn\n")),
-                       ("shape", lambda: R.write_bytes(record, "name: not-a-list\n"))):
-        record.unlink()
-        plant()
-        with pytest.raises(staging.StagingRefused) as caught:
-            staging.read_staged(bound)
-        sentence = str(caught.value)
-        assert "staged.yaml" in sentence, (arm, sentence)
-        _root_free(sentence, ep)
-    record.unlink()
-    # `record_staged` now takes the `Episode` handle, not the episode dir path (#1133 rev 2).
-    with Episode.open(ep) as episode:
-        staging.record_staged(episode, {"name": "wv-one", "kind": "index"})
-    assert [r["name"] for r in staging.read_staged(bound)] == ["wv-one"]
-
-
 def test_1049_read_stage_timings_is_root_free_on_the_alias_arm_and_none_when_absent(tmp_path):
     """read_stage_timings(bound) over a link at timing.json raises ValueError naming
     timing.json and no root (today it quotes the absolute path, c-12); answers None when
@@ -602,15 +546,12 @@ def test_1049_branch_episode_verdicts_decides_absent_vs_refused_by_the_open(tmp_
 
 
 def test_1049_the_reader_seam_takes_the_bound_reader_and_a_name_and_may_answer_none(tmp_path):
-    """read_review_record(bound, reader=…) and read_samples_record(bound, reader=…) call
-    reader(bound, name) -> mapping | None and pass its None through; grade_family(episode_dir,
-    …, review_reader=…) binds once at entry and hands the bound reader down, calling the
-    injected reader exactly once; the page's _strict_samples_reader(bound, name) delegates to
+    """read_samples_record(bound, reader=…) calls reader(bound, name) -> mapping | None and
+    passes its None through; the page's _strict_samples_reader(bound, name) delegates to
     screened_yaml_mapping (None when absent, the mapping when present, JudgeRefused for a
-    non-mapping). Every injector — the default readers, the page's strict reader,
+    non-mapping). Every injector — the default reader, the page's strict reader,
     test_1007_ladder's RecordingReader over _world_1007.read_yaml_record — is called (bound,
-    name), so no injected reader holds a root it could format; a reader that answers None for
-    a PRESENT record is coalesced exactly as absent is — nothing tells them apart.
+    name), so no injected reader holds a root it could format.
     """
     ep = _episode(tmp_path)
     family = R.family()
@@ -620,102 +561,68 @@ def test_1049_the_reader_seam_takes_the_bound_reader_and_a_name_and_may_answer_n
         assert not isinstance(arg, (str, bytes, os.PathLike)), f"the seam received a root: {arg!r}"
         assert callable(getattr(arg, "read", None)), f"the seam's first argument is not a bound reader: {arg!r}"
 
-    recording = W.RecordingReader(W.read_yaml_record)
-    assert family.read_review_record(bound, reader=recording)["episode"]["outcome"] == "accepted"
-    (args, kwargs) = recording.calls[0]
-    assert len(args) == 2, recording.calls
-    assert kwargs == {}, recording.calls
+    samples = W.RecordingReader(W.read_yaml_record)
+    R.write_bytes(ep / "samples.yaml", "elastic: {}\n")
+    assert family.read_samples_record(bound, reader=samples) == {"elastic": {}}
+    (args, kwargs) = samples.calls[0]
+    assert len(args) == 2, samples.calls
+    assert kwargs == {}, samples.calls
     not_a_root(args[0])
     # THE NAME, not its spelling. The seam is handed the owner's own relative path object
     # (#1077 D7) rather than a string a caller composed; `_io.Bound` takes `str | PurePath`
     # and renders either through the same grammar, so what this pins is the record it names.
-    assert str(args[1]) == "review.yaml"
-
-    samples = W.RecordingReader(W.read_yaml_record)
-    R.write_bytes(ep / "samples.yaml", "logs-*: {}\n")
-    assert family.read_samples_record(bound, reader=samples) == {"logs-*": {}}
-    not_a_root(samples.calls[0][0][0])
-    assert str(samples.calls[0][0][1]) == "samples.yaml"
+    assert str(args[1]) == "samples.yaml"
 
     nothing = W.RecordingReader(lambda _bound, _name: None)
-    assert family.read_review_record(bound, reader=nothing) is None, "None must pass through"
-
-    counted = W.RecordingReader(W.read_yaml_record)
-    family.grade_family(ep, review_reader=counted)
-    assert counted.count == 1, counted.calls
-    not_a_root(counted.calls[0][0][0])
-    assert str(counted.calls[0][0][1]) == "review.yaml"
+    assert family.read_samples_record(bound, reader=nothing) is None, "None must pass through"
+    assert nothing.count == 1
 
     page = E.page_module()
     (ep / "samples.yaml").unlink()
     assert page._strict_samples_reader(bound, "samples.yaml") is None
-    R.write_bytes(ep / "samples.yaml", "logs-*: {}\n")
-    assert page._strict_samples_reader(bound, "samples.yaml") == {"logs-*": {}}
+    R.write_bytes(ep / "samples.yaml", "elastic: {}\n")
+    assert page._strict_samples_reader(bound, "samples.yaml") == {"elastic": {}}
     R.write_bytes(ep / "samples.yaml", "- a list\n")
     with pytest.raises(R.refused_class()):
         page._strict_samples_reader(bound, "samples.yaml")
-
-
 # ---------------------------------------------------------------------------------------
 # d-22 — every caller coalesces at the read site
 # ---------------------------------------------------------------------------------------
 
 
 def test_1049_every_caller_coalesces_none_at_the_read_site(tmp_path):
-    """With review.yaml, samples.yaml and staged.yaml absent, staging.teardown / sweep,
-    judge._grade_episode (through grade_episode), family.grade_family and render.render each
-    proceed over {} / [] — world_review_block never receives None (r7) — because the coalesce
-    is `reader(...) or {}` at the read site, not an `is not None` hand-over (RF-R1: the eight
-    sites are unchanged; the parsing readers' None is their typed absent answer). teardown
-    and sweep coalesce `or []` and proceed identically (#70); review=None handed to
-    grade_family means 'not supplied' and triggers its own coalesced read, a supplied {}
-    passes through (F-L); the two reads of one review record across a pass are independent.
+    """With samples.yaml absent, judge._grade_episode (through grade_episode) and
+    render.render each proceed over {} — the coalesce is `reader(...) or {}` at the read
+    site, not an `is not None` hand-over (RF-R1: the parsing reader's None is its typed absent
+    answer). With outcome.yaml absent the pass does not grade: the "no record" state (M05=A),
+    its reason naming outcome.yaml — never `accepted`.
     """
     ep = _episode(tmp_path)
-    family = R.family()
-    staging = R.mod("learning.branch.staging")
-    judge = R.judge()
-    for name in ("review.yaml", "samples.yaml", "staged.yaml"):
-        (ep / name).unlink(missing_ok=True)
+    (ep / "samples.yaml").unlink(missing_ok=True)
 
-    grade = family.grade_family(ep)
+    grade = _grade(ep, tmp_path)
+    assert grade.not_graded is None, grade.not_graded
     assert set(_rows(grade)) == {'b', 'c'}
     assert not any(r.get('ungradable') for r in grade.worlds)
-    assert family.grade_family(ep, review={}).verdict_word == grade.verdict_word
-    assert family.grade_family(ep, review=None).verdict_word == grade.verdict_word
-    # the read-site coalesce, observed: a reader injected at the seam that answers None for
-    # the (present) review record is coalesced to {} — world_review_block never sees None
-    (ep / "review.yaml").write_text("episode:\n  outcome: accepted\nworlds: {}\n", encoding="utf-8")
-    none_reader = W.RecordingReader(lambda _bound, _name: None)
-    assert family.grade_family(ep, review_reader=none_reader).verdict_word == grade.verdict_word
-    assert none_reader.count == 1
-    (ep / "review.yaml").unlink()
 
     base, _src = J.runs_base(tmp_path)
     shown = R.mod("learning.judge.render").render(ep, "b", runs_base=base)
     assert shown.world_label == 'b'
     assert 'l-001' in shown.leads
 
-    door = T.FakeDoor()
-    # `teardown` now takes the `Episode` handle and drops `review_path=` (#1133 rev 2).
-    with Episode.open(ep) as episode:
-        assert staging.teardown(episode, door=door) == []
-    assert staging.sweep(ep, episode_token=TOKEN, door=door) == []
-
-    record = judge.grade_episode(ep, judge=J.FakeJudge(), runs_base=base, git_show=J.FakeGitShow(),
-                                 state=_state1135.env_state())
+    (ep / "outcome.yaml").unlink()
+    record = _grade(ep, tmp_path)
     assert record.not_graded is not None, record
-    assert record.not_graded.reason == 'no review.yaml on disk', record
-
-
+    assert record.not_graded.outcome == "no record", record.not_graded
+    assert "outcome.yaml" in record.not_graded.reason, record.not_graded
 # ---------------------------------------------------------------------------------------
 # d-28 — judge.yaml rows say relative names
 # ---------------------------------------------------------------------------------------
 
 
 def test_1049_grade_world_records_relative_names_in_ungradable_reason(tmp_path):
-    """_grade_world, driven by grade_family over three worlds — a HARD LINK (not a symlink;
-    C-03) at one world's worlds/<w>/investigation.md, an absent served ledger at the second,
+    """read_world, driven by grade_episode over three worlds — a HARD LINK (not a symlink;
+    C-03) at one world's worlds/<w>/investigation.md, a link at the second's served ledger,
     a SYMLINKED worlds/<w''> at the third (#27: the pre-filter's lstat follows the
     intermediate link and passes the regular leaf, so the reader IS reached and the walk
     refuses at the worlds/<w''> component) — writes rows whose ungradable_reason names
@@ -726,14 +633,13 @@ def test_1049_grade_world_records_relative_names_in_ungradable_reason(tmp_path):
     RF-R10).
     """
     ep = _episode(tmp_path, labels=("b", "c", "d", "e"))
-    family = R.family()
     R.plant_hard_link(ep / "worlds" / "b" / "investigation.md", tmp_path / "scratch" / "inv-target.md")
-    (ep / _ledger_name("c")).unlink()
+    R.plant_link(ep / _ledger_name("c"), ep / "family.yaml")
     real_d = ep / "worlds" / "d"
     real_d.rename(ep / "worlds" / "d-real")
     R.plant_link(real_d, ep / "worlds" / "d-real")
 
-    rows = _rows(family.grade_family(ep))
+    rows = _rows(_grade(ep, tmp_path))
     assert set(rows) == {"b", "c", "d", "e"}, "a refusal took a sibling's row with it"
     assert not rows["e"].get("ungradable"), rows["e"]
     b, c, d = rows["b"], rows["c"], rows["d"]
@@ -742,9 +648,9 @@ def test_1049_grade_world_records_relative_names_in_ungradable_reason(tmp_path):
     assert b['ungradable_reason'].count('worlds/b/investigation.md') == 1, b
     assert R.ALIAS in b['ungradable_reason'], b
     assert c.get('ungradable'), c
-    assert not c.get('malformed'), c
-    assert _ledger_name('c') in c['ungradable_reason'], c
-    assert 'missing its served ledger' in c['ungradable_reason'], c
+    assert c.get('malformed') is True, c
+    assert c['ungradable_reason'].count(_ledger_name('c')) == 1, c
+    assert R.ALIAS in c['ungradable_reason'], c
     assert d.get('ungradable'), d
     assert d.get('malformed') is True, d
     assert ("worlds/d/investigation.md" in d["ungradable_reason"]
@@ -754,7 +660,7 @@ def test_1049_grade_world_records_relative_names_in_ungradable_reason(tmp_path):
         _root_free(row["ungradable_reason"], ep)
 
     R.plant_link(ep / "worlds" / "e" / "investigation.md", ep / "family.yaml")
-    e = _rows(family.grade_family(ep))["e"]
+    e = _rows(_grade(ep, tmp_path))["e"]
     assert e["ungradable_reason"] == "world 'e' is missing its investigation.md", e
 
 
@@ -765,8 +671,8 @@ def test_1049_grade_world_records_relative_names_in_ungradable_reason(tmp_path):
 
 def test_1049_a_label_or_lead_id_that_names_no_path_inside_the_world_is_never_echoed_from_a_read(tmp_path):
     """A world label or lead id carrying a separator or `..` is refused by the grammar before
-    any name is constructed — on the grading lane (_check_world_labels via grade_family,
-    names_one_file via lead_chain) and on the page lane (names_one_file) alike — so the name
+    any name is constructed — on the grading lane (the manifest loader's world-token rule via
+    raw_manifest / grade_episode, names_one_file via lead_chain) and on the page lane (names_one_file) alike — so the name
     a refusal echoes is never a model-authored path that left the world; under the component
     grammar (D-V1) this is the positive control, not the only defence (a traversing lead id
     cannot reach a sibling's summary either way). names_one_file now ALSO bars a NUL byte
@@ -779,8 +685,9 @@ def test_1049_a_label_or_lead_id_that_names_no_path_inside_the_world_is_never_ec
     manifest = family.raw_manifest(ep)
     manifest["worlds"].append({**manifest["worlds"][1], "world_id": "../../elsewhere"})
     T.write_family(ep, manifest)
-    with pytest.raises(refused, match="cannot name a directory"):
-        family.grade_family(ep)
+    for read in (lambda: family.raw_manifest(ep), lambda: _grade(ep, tmp_path)):
+        with pytest.raises(refused, match="outside the world-token alphabet"):
+            read()
     assert not family.world_label_names_directory(T.EPISODE_ID, "../../elsewhere")
     assert family.world_label_names_directory(T.EPISODE_ID, "b")
 
@@ -815,9 +722,7 @@ def test_1049_the_three_world_level_readers_answer_the_absent_state_and_the_page
     test_1025_read_world_facts_refuses_an_absent_ledger_on_every_path stays green: the
     ledger's sentence still says 'ledger'); the page renders 'served ledger: absent',
     'report.md: not archived' and 'investigation.md: not archived' with no facts_error, each
-    off its read's state; _episode_has_any_served_row counts absent as no rows, so a
-    two-world episode whose only sibling ledger is absent grades as episode-incomplete
-    rather than refusing.
+    off its read's state.
     """
     ep = _episode(tmp_path)
     family = R.family()
@@ -914,17 +819,17 @@ def test_1049_a_symlinked_gather_summary_or_directory_is_the_chains_sentence_and
     sample = E.sample_episode(tmp_path / "page")
     graded = sample.world(E.GRADED_WORLD)
     R.plant_link(graded / "gather_summaries" / "l-001.md", sample.dir / "family.yaml")
-    withheld = sample.world(E.WITHHELD_WORLD)
-    (withheld / "gather_summaries").rename(withheld / "summaries-real")
-    R.plant_link(withheld / "gather_summaries", withheld / "summaries-real")
+    quiet = sample.world(E.PASSTHROUGH_WORLD)
+    (quiet / "gather_summaries").rename(quiet / "summaries-real")
+    R.plant_link(quiet / "gather_summaries", quiet / "summaries-real")
     page = E.render(sample)
     graded_block = page.text_of(f"leads-{E.GRADED_WORLD}")
     assert 'gather_summaries/l-001.md' in graded_block, graded_block
     assert R.ALIAS in graded_block, graded_block
     assert f"summary of l-002 for {E.GRADED_WORLD}" in graded_block, "the sibling summaries still read"
-    withheld_block = page.text_of(f"leads-{E.WITHHELD_WORLD}")
-    assert 'gather_summaries/l-001.md' in withheld_block, withheld_block
-    assert R.ALIAS in withheld_block, withheld_block
+    quiet_block = page.text_of(f"leads-{E.PASSTHROUGH_WORLD}")
+    assert 'gather_summaries/l-001.md' in quiet_block, quiet_block
+    assert R.ALIAS in quiet_block, quiet_block
     assert str(sample.dir) not in page.raw
     assert str(tmp_path) not in page.raw
 
@@ -934,29 +839,18 @@ def test_1049_a_symlinked_gather_summary_or_directory_is_the_chains_sentence_and
 # ---------------------------------------------------------------------------------------
 
 
-def test_1049_review_and_samples_shape_arms_absent_none_empty_mapping_non_mapping_per_reader(tmp_path):
-    """_default_review_reader: absent → None, empty/null document → {}, list/scalar → {}
-    (permissive, unchanged — _episode_outcome_from_review's 'no review.yaml on disk' is
-    therefore still said of an empty file, FU-6); the page's strict samples reader
-    (_strict_samples_reader over screened_yaml_mapping): absent → None → page 'absent',
-    empty/null → {} → page 'present, empty' (no pattern, not 'absent', not 'unreadable'),
-    non-mapping → JudgeRefused 'samples.yaml is not a mapping' → 'unreadable'; the pass's
-    samples reader (_default_samples_reader via read_samples_record) stays permissive over
-    the same shapes. The manifest's own empty-document refusal (test_1025_family_yaml_is_zero_
-    bytes) is untouched: the present-empty tolerance is the strict samples reader's.
+def test_1049_samples_shape_arms_absent_none_empty_mapping_non_mapping_per_reader(tmp_path):
+    """The page's strict samples reader (_strict_samples_reader over screened_yaml_mapping):
+    absent → None → page 'absent', empty/null → {} → page 'present, empty' (no section, not
+    'absent', not 'unreadable'), non-mapping → JudgeRefused 'samples.yaml is not a mapping' →
+    'unreadable'; the pass's samples reader (_default_samples_reader via read_samples_record)
+    stays permissive over the same shapes. The manifest's own empty-document refusal
+    (test_1025_family_yaml_is_zero_bytes) is untouched: the present-empty tolerance is the
+    strict samples reader's.
     """
     ep = _episode(tmp_path)
     family = R.family()
     bound = R.bind(ep)
-    review = ep / "review.yaml"
-    review.unlink()
-    assert family._default_review_reader(bound, "review.yaml") is None
-    for text in ("", "null\n", "- a list\n", "42\n"):
-        R.write_bytes(review, text)
-        assert family._default_review_reader(bound, "review.yaml") == {}, text
-    R.write_bytes(review, "")
-    assert R.judge()._episode_outcome_from_review(family.read_review_record(bound) or {}) == (
-        "incomplete", "no review.yaml on disk")
 
     page = E.page_module()
     samples = ep / "samples.yaml"
@@ -978,18 +872,18 @@ def test_1049_review_and_samples_shape_arms_absent_none_empty_mapping_non_mappin
     R.write_bytes(empty.dir / "samples.yaml", "")
     broken = E.copy_episode(sample, tmp_path / "broken")
     R.write_bytes(broken.dir / "samples.yaml", "- a list\n")
+    present_text = E.render(sample).text_of("sec-records")
     absent_text = E.render(absent).text_of("sec-records")
     empty_text = E.render(empty).text_of("sec-records")
     broken_text = E.render(broken).text_of("sec-records")
+    assert '"event.outcome"' in present_text, "positive control: the sample's answer is shown"
     assert 'absent' in absent_text
     assert 'samples record unreadable' not in absent_text
     assert 'absent' not in empty_text, empty_text
     assert 'samples record unreadable' not in empty_text, empty_text
-    assert "logs-falco.alerts-*" not in empty_text
+    assert '"event.outcome"' not in empty_text
     assert 'samples record unreadable' in broken_text, broken_text
     assert 'not a mapping' in broken_text, broken_text
-
-
 # ---------------------------------------------------------------------------------------
 # D-V2 — the bind is the only root holder
 # ---------------------------------------------------------------------------------------
@@ -1000,10 +894,9 @@ def test_1049_review_and_samples_shape_arms_absent_none_empty_mapping_non_mappin
 ROOTLESS_READERS = {
     "learning.judge.family": ("lead_chain", "read_archived_report", "_read_archived_text",
                               "read_investigation_facts", "_read_world_ledger", "read_world_ledger",
-                              "read_world_facts", "screened_yaml_mapping", "_default_review_reader",
+                              "read_world_facts", "screened_yaml_mapping",
                               "_default_samples_reader"),
     "learning.branch.archive": ("read_family_stamp",),
-    "learning.branch.staging": ("read_staged",),
     "learning.branch.timing": ("read_stage_timings",),
     "scripts.visualize.visualize_episode": ("_result_event",),
 }
@@ -1122,7 +1015,7 @@ def test_1049_a_lead_id_that_is_not_a_plain_component_never_reaches_name_constru
     facts = family.read_investigation_facts(bound, world="b")
     assert nul in facts.resolutions_by_lead, "the fixture's NUL id did not parse (rg12)"
 
-    grade = family.grade_family(ep)
+    grade = _grade(ep, tmp_path)
     row = _rows(grade)["b"]
     assert not row.get("ungradable"), row
     base, _src = J.runs_base(tmp_path)
@@ -1147,15 +1040,14 @@ def test_1049_a_lead_id_that_is_not_a_plain_component_never_reaches_name_constru
 
 def test_every_refusal_shape_still_arrives_at_the_served_row_swallow_site_as_the_same_exception_type(tmp_path):
     """An alias, a directory, a symlinked served/ and (under NOT_ROOT) a mode-000 file at
-    served/<token>.<label>.jsonl each arrive at _episode_has_any_served_row as JudgeRefused
-    and are caught there (d-34: no new refusal type; rg1: every OSError is caught by type),
-    so grade_family completes and the sibling whose ledger holds a served row is graded with
-    the episode counted complete; absent arrives as the primitive's absent state and is
-    counted as no rows — with every sibling ledger absent or refused the episode counts as
-    incomplete, and the pass still completes. Undecodable bytes are NOT a refusal on this
-    reader — the twin decodes with errors='replace' and counts malformed rows (d-07).
+    served/<token>.<label>.jsonl each arrive at read_world's read as JudgeRefused and are
+    caught there as that world's ungradable row (d-34: no new refusal type; rg1: every OSError
+    is caught by type), so grade_episode completes and the sibling whose ledger holds a served
+    row is graded; absent arrives as the primitive's absent state and is counted as no rows —
+    with every sibling ledger absent each world is graded as having been served nothing, and
+    the pass still completes. Undecodable bytes are NOT a refusal on this reader — the twin
+    decodes with errors='replace' and counts malformed rows (d-07).
     """
-    family = R.family()
     shapes = {
         "alias": lambda p, ep: R.plant_link(p, ep / "family.yaml"),
         "directory": lambda p, ep: p.mkdir(),
@@ -1170,21 +1062,23 @@ def test_every_refusal_shape_still_arrives_at_the_served_row_swallow_site_as_the
         ledger.unlink()
         plant(ledger, ep)
         with R.restoring_modes(ledger):
-            grade = family.grade_family(ep)
+            grade = _grade(ep, tmp_path / shape)
         rows = _rows(grade)
         assert set(rows) == {"b", "c"}, shape
         assert not rows['c'].get('ungradable'), (shape, rows['c'])
-        assert rows['c'].get('withheld_reason') != 'episode_incomplete', (shape, rows['c'])
+        assert bool(rows['b'].get('ungradable')) is (shape in ("alias", "directory", "mode_000")), (
+            shape, rows['b'])
 
     ep = _episode(tmp_path / "served-link", labels=("b", "c"))
     (ep / "served").rename(ep / "served-real")
     R.plant_link(ep / "served", ep / "served-real")
-    grade = family.grade_family(ep)
+    grade = _grade(ep, tmp_path / "served-link")
     assert {r["world"] for r in grade.worlds} == {"b", "c"}
     assert all(r.get("ungradable") for r in grade.worlds), "a symlinked served/ reached no reader"
 
     ep = _episode(tmp_path / "all-absent", labels=("b", "c"))
     for label in ("b", "c"):
         (ep / _ledger_name(label)).unlink()
-    grade = family.grade_family(ep)
-    assert all(r.get("ungradable") for r in grade.worlds)
+    grade = _grade(ep, tmp_path / "all-absent")
+    assert not any(r.get("ungradable") for r in grade.worlds), grade.worlds
+    assert all(r["served_nothing"] is True for r in grade.worlds), grade.worlds

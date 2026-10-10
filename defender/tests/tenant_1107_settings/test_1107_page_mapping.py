@@ -12,9 +12,10 @@ The mapping half drives the `case_ticket` consumers with the record's `ticket_ma
 keyword `mapping=` — `S.with_mapping`; `release_predicate`, once positional here, was removed by
 #1221's amendment), the query tool's
 ticket screen through the replay harness (`verbs=` / `tenant=`; the served payload is what the
-gather model was shown), the estate applier, and a resumed sibling's `WorldRegistry` through
-`run.main --resume`, whose `lifecycle` seam hands the REAL `_drive_investigation` a recording
-`investigate`. "After the record is built" is the `preflight` seam, which `run.main` calls after
+gather model was shown), and a resumed sibling's `WorldRegistry` through `run.main --resume`,
+whose `lifecycle` seam hands the REAL `_drive_investigation` a recording `investigate`. (#1224
+retired the estate applier and the world patches it once judged against the mapping; a world
+now carries facts its live oracle serves.) "After the record is built" is the `preflight` seam, which `run.main` calls after
 `tenant = tenant_of()`.
 
 Nothing here reaches the real docker: the only transport that forks (the record step in
@@ -583,11 +584,11 @@ def test_o2_ticket_replies_ignore_the_mapping(tmp_path):
 
 
 def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
-    """A resumed sibling's WorldRegistry, built in run.py, accepts a ticket comment patch whatever
-    status it moves the case to — the status the record was built with, or one only a mid-run
-    edit of mapping.yaml names: no ticket reply is screened any more, so no patch can author a
-    difference the sibling could not see, and the registry consults no mapping. (#1221 removed
-    the estate applier's refusal, which judged the patch against the record's ticket_mapping.)"""
+    """A resumed sibling's WorldRegistry, built in run.py, builds a world whose facts put a note
+    on a case whatever status the case is in — the status the record was built with, or one only
+    a mid-run edit of mapping.yaml names: no ticket reply is screened any more, so the registry
+    consults no mapping. (#1221 removed the estate applier's refusal, which judged a comment
+    patch against the record's ticket_mapping; #1224 replaced the patches with world facts.)"""
     # #1120: the resumed sibling reads its tenant from `DEFENDER_DATA_ROOT` alone.
     root = current_data_root()
     folder = S.plant(root, marker="est", table=TICKET_TABLE)
@@ -595,16 +596,15 @@ def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
                                       dispatches_lead_zero=False)
     assert S.open_reporter(probe.ticket_mapping) == "defender"
 
-    def patch(entity: str, status: str) -> dict[str, Any]:
-        return {"ticket": {entity: {"status": status, "comments": [
-            {"author": "defender", "body": f"a world's note on {entity}"}]}}}
+    def note(entity: str, status: str) -> list[dict[str, Any]]:
+        return [T.fact("f1", f"case {entity} is in status {status} and carries a defender note "
+                             "that the same binary was benign last quarter", (entity,))]
 
-    as_built, as_edited = patch("SOC-1", "closed"), patch("SOC-2", "done-edited-1107")
     _base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src), worlds=[
         T.base_world(),
-        T.world_doc("b", ov=T.overlay(patches=as_built)),
-        T.world_doc("c", ov=T.overlay(patches=as_edited)),
+        T.world_doc("b", facts=note("SOC-1", "closed")),
+        T.world_doc("c", facts=note("SOC-2", "done-edited-1107")),
     ]))
     shim = S.DockerShim(tmp_path / "docker")
     monkeypatch.setenv("PATH", shim.path_value())
@@ -618,7 +618,7 @@ def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
         investigated: list[dict[str, Any]] = []
         handed: dict[str, Any] = {}
 
-        def edit_after_record(_model: str | None = None) -> int:
+        def edit_after_record(_model: str | None = None, *, branching: bool = False) -> int:
             S.mapping_path(folder).write_text(
                 T1106.mapping_text(reporter="done-edited-1107"), encoding="utf-8")
             return 0
@@ -630,7 +630,7 @@ def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
                 alert_path=RunPaths(rd).alert, run_dir=rd, run_id=rd.name,
                 defender_dir=kw["defender_dir"], model_name=kw["model"],
                 model_override=kw["model_override"], box=None, tenant=kw["tenant"],
-                world=kw["world"], episode=kw["episode"],
+                world=kw["world"], episode=kw["episode"], serving=kw["serving"],
                 investigate=lambda **ikw: investigated.append(ikw) or {
                     "output": "spec1107", "requests": 0, "truncated_by": None})
 

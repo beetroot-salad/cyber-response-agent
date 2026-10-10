@@ -40,10 +40,8 @@ pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
 S = E.SAMPLE
 CONTROL_GUIDE = "the branch point untouched, not graded"
-LADDER = ("holding_queried", "doctored_answer_served", "difference_shown", "verdict",
-          "resolution_moved")
-CHIPS = ("holding_queried", "doctored_answer_served", "difference_shown", "injected_present",
-         "capture_reasks_faulted", "envelope_ran")
+#: The world block's one verdict line: the row's verdict against its declared disposition.
+VERDICT_LINE = "verdict = declared"
 
 
 @pytest.fixture(autouse=True)
@@ -89,7 +87,7 @@ def _world(page: E.Page, label: str) -> str:
 def _ordered(text: str, *needles: str) -> bool:
     """Whether `needles` occur in `text` in this order — each found AFTER the previous one, so
     an earlier, unrelated mention of a later word (a heading naming the verdict before the
-    ladder) does not defeat a correctly ordered sequence."""
+    verdict line) does not defeat a correctly ordered sequence."""
     position = 0
     for needle in needles:
         position = text.find(needle, position)
@@ -108,23 +106,23 @@ def _nav(page: E.Page) -> E.Node:
 def _ungradable_episode(tmp_path: Path) -> E.Episode:
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
-    doc["worlds"][0] = E.ungradable_row(E.WITHHELD_WORLD, declared="benign",
+    doc["worlds"][0] = E.ungradable_row(E.PASSTHROUGH_WORLD, declared="benign",
                                         reason="a call on 'elastic' faulted <b>x</b>")
-    doc["withheld_findings"] = []
-    E.drop_lanes(doc, E.WITHHELD_WORLD)  # the pass never walks an ungradable row's draws
+    doc["enqueued_rows"] = S.defender_enqueued - 4  # the ungradable world's four never queue
+    E.drop_lanes(doc, E.PASSTHROUGH_WORLD)  # the pass never walks an ungradable row's draws
     E.write_judge(ep.dir, doc)
     return ep
 
 
 # ---------------------------------------------------------------------------------------
-# d06 / d07 / d08 / d09 / d10 / d11 — sections, states, ladder, chips, links
+# d06 / d07 / d08 / d09 / d10 / d11 — sections, states, verdict line, bucket, chips, links
 # ---------------------------------------------------------------------------------------
 
 
 def test_1025_every_step_in_steps_order_and_every_directory_under_runs_has_its_section_the_control_included(
         tmp_path):
-    """On the sample the page has `stage-timing` rows for `questioner, staging, review, runs,
-    verify, judge` in `STEPS` order, a `world-<id>` section and a `leads-<id>` block for each of
+    """On the sample the page has `stage-timing` rows for `questioner, preflight, runs, verify,
+    judge` in `STEPS` order, a `world-<id>` section and a `leads-<id>` block for each of
     `a`, `no_remote_session`, `prior_fake_key_precedent` (the ungraded control included) and no
     section for the `.scrub-verdict.json` sidecar files beside the run dirs, plus
     `sec-verdict … sec-records`; with a synthetic 3-step `timing.json` the missing steps' rows
@@ -141,130 +139,98 @@ def test_1025_every_step_in_steps_order_and_every_directory_under_runs_has_its_s
         assert anchor in page.by_id, anchor
     assert "scrub-verdict" not in " ".join(page.ids)
 
-    E.write_timing(ep.dir, E.six_steps()[:3])
+    E.write_timing(ep.dir, E.every_step()[:3])
     timing = render(ep).text_of("stage-timing")
     assert _ordered(timing, *ST.EXPECTED_STEPS), timing
-    assert timing.count("not on the record") == 3, timing
+    assert timing.count("not on the record") == len(ST.EXPECTED_STEPS) - 3, timing
 
 
 def test_1025_a_world_section_is_not_graded_ungradable_with_its_reason_or_graded_and_never_confuses_the_three(
         tmp_path):
-    """`a` (no row) renders "not graded" with no bucket and no ladder; an `ungradable: True` row
-    renders its `ungradable_reason` escaped, its stored flags, no ladder and no bucket line;
-    `prior_fake_key_precedent` renders verdict, bucket and ladder; `no_remote_session` renders
-    as withheld with its reason.
+    """`a` (no row) renders "not graded" with no bucket and no verdict line; an `ungradable:
+    True` row renders its `ungradable_reason` escaped, no verdict line and no bucket;
+    `prior_fake_key_precedent` and `no_remote_session` render their verdict, the verdict line
+    and the judge model's bucket.
     """
     page = render(E.sample_episode(tmp_path))
     control = _world(page, E.CONTROL)
     assert "not graded" in control, control
-    assert "holding_queried" not in control, control
+    assert VERDICT_LINE not in control, control
     assert "lead-set" not in control
     assert "decision-discipline" not in control
     graded = _world(page, E.GRADED_WORLD)
     assert "inconclusive" in graded
     assert "decision-discipline" in graded
-    assert _ordered(graded, *LADDER)
-    withheld = _world(page, E.WITHHELD_WORLD)
-    assert "withheld" in withheld, withheld
-    assert S.withheld_reason in withheld, withheld
+    assert f"{VERDICT_LINE}: inconclusive == malicious" in graded, graded
+    passthrough = _world(page, E.PASSTHROUGH_WORLD)
+    assert f"{VERDICT_LINE}: inconclusive == benign" in passthrough, passthrough
+    assert "lead-set" in passthrough, passthrough
+    assert "not graded" not in passthrough, passthrough
+    assert "ungradable" not in passthrough, passthrough
 
     page = render(_ungradable_episode(tmp_path / "u"))
-    ungradable = _world(page, E.WITHHELD_WORLD)
+    ungradable = _world(page, E.PASSTHROUGH_WORLD)
     assert "ungradable" in ungradable
     assert "a call on 'elastic' faulted <b>x</b>" in ungradable
     assert "&lt;b&gt;x&lt;/b&gt;" in page.raw
-    assert not _ordered(ungradable, *LADDER), ungradable
-    assert "resolution_moved" not in ungradable, ungradable
-    assert "bucket" not in ungradable.lower(), ungradable
+    assert VERDICT_LINE not in ungradable, ungradable
+    assert not page.section(f"world-{E.PASSTHROUGH_WORLD}").find_all(cls="w-bucket"), ungradable
+    assert "lead-set" not in ungradable, ungradable
 
 
-def test_1025_the_ladder_block_walks_the_stored_flags_in_ladder_order_and_shows_the_stored_bucket_even_when_the_flags_would_not_derive_it(
+def test_1025_the_world_block_shows_the_verdict_line_and_the_stored_bucket_never_a_recomputed_one(
         tmp_path):
-    """For `prior_fake_key_precedent` the ladder lists `holding_queried →
-    doctored_answer_served (+has_refused) → difference_shown → verdict == declared →
-    resolution_moved` in that order and ends in `decision-discipline`; a synthetic row whose
-    flags imply `analyze-discipline` but stores `bucket: lead-set` renders `lead-set` (bucket
-    read, never recomputed).
+    """For `prior_fake_key_precedent` the world block shows the verdict line (`verdict =
+    declared: inconclusive == malicious`) and then the judge model's own bucket,
+    `decision-discipline`, and its systems; a synthetic row whose facts imply
+    `analyze-discipline` (resolutions did not move) but stores `bucket: lead-set` renders
+    `lead-set` (bucket read, never recomputed).
     """
     ep = E.sample_episode(tmp_path)
     graded = _world(render(ep), E.GRADED_WORLD)
-    assert _ordered(graded, "holding_queried", "doctored_answer_served", "has_refused",
-                    "difference_shown", "verdict", "declared", "resolution_moved",
-                    "decision-discipline"), graded
+    assert _ordered(graded, VERDICT_LINE, "inconclusive", "malicious", "decision-discipline",
+                    f"systems: {E.SYSTEM}"), graded
 
     doc = E.sample_grade()
     doc["worlds"][1] = E.world_row(E.GRADED_WORLD, declared="malicious", bucket="lead-set",
-                                   resolution_moved=False, has_refused=False)
+                                   resolution_moved=False)
     E.write_judge(ep.dir, doc)
     graded = _world(render(ep), E.GRADED_WORLD)
     assert "lead-set" in graded, graded
     assert "analyze-discipline" not in graded, graded
 
 
-def test_1025_a_row_without_has_refused_gets_the_caveat_only_on_the_not_doctored_branch_and_never_an_invented_value(
+def test_1025_world_chips_carry_the_judge_models_systems_and_every_draws_answer_and_never_a_default(
         tmp_path):
-    """A row `{holding_queried: True, doctored_answer_served: False}` with no `has_refused`
-    renders the caveat (`has_refused` named as unrecorded) and no `has_refused = …` value; the
-    same row with `has_refused: False` renders the `lead-quality` branch and no caveat;
-    `no_remote_session` (`holding_queried: False`, no `has_refused`) renders no caveat.
+    """Each graded world's chip names the systems the judge model's answer touched; a row whose
+    draws disagree (`bucket: None`, `systems: None`, `draws_disagree: True`) shows "no bucket"
+    and one chip per draw with that draw's own bucket and systems — never reduced to one, never
+    a default; a row with no `systems` field shows no systems chip rather than an invented
+    value; the verdict line is present as well.
     """
     ep = E.sample_episode(tmp_path)
-    doc = E.sample_grade()
-    doc["worlds"][1] = E.world_row(E.GRADED_WORLD, declared="malicious", bucket=None,
-                                   doctored=False, difference_shown=False, has_refused=None)
-    E.write_judge(ep.dir, doc)
-    graded = _world(render(ep), E.GRADED_WORLD)
-    assert "has_refused" in graded, graded
-    assert "unrecorded" in graded, graded
-    assert "has_refused = " not in graded, graded
-    assert "has_refused: " not in graded, graded
+    page = render(ep)
+    for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD):
+        assert f"systems: {E.SYSTEM}" in _world(page, label), _world(page, label)
 
-    doc["worlds"][1]["has_refused"] = False
-    doc["worlds"][1]["bucket"] = "lead-quality"
+    doc = E.sample_grade()
+    doc["worlds"][1] = E.world_row(
+        E.GRADED_WORLD, declared="malicious", bucket=None, systems=None, draws_disagree=True,
+        draws=[{"draw": 0, "bucket": "lead-quality", "systems": ["identity"]},
+               {"draw": 1, "bucket": "observability", "systems": [E.SYSTEM]}])
+    doc["worlds"][1]["systems"] = None
+    del doc["worlds"][0]["systems"]
     E.write_judge(ep.dir, doc)
     page = render(ep)
     graded = _world(page, E.GRADED_WORLD)
-    assert "lead-quality" in graded, graded
-    assert "unrecorded" not in graded, graded
-    assert "has_refused" not in _world(page, E.WITHHELD_WORLD), _world(page, E.WITHHELD_WORLD)
-
-
-def test_1025_world_chips_are_the_named_fields_say_unrecorded_when_absent_and_sit_beside_the_ladder_not_instead_of_it(
-        tmp_path):
-    """Each graded world renders chips for exactly `holding_queried, doctored_answer_served,
-    difference_shown, injected_present / injected_retrieved, capture_reasks_faulted, envelope_ran`
-    (with the first line of `envelope_failed` when false); on rows and review blocks in the
-    pre-#1007 shape — lacking `difference_shown`, `injected_present`, `capture_reasks_faulted`,
-    `reachable_by_capture` — the chip reads "unrecorded" rather than a default; the ladder block
-    is present as well.
-    """
-    ep = E.sample_episode(tmp_path)
-    page = render(ep)
-    withheld = _world(page, E.WITHHELD_WORLD)
-    for chip in CHIPS:
-        assert chip in withheld, chip
-    assert E.ENVELOPE_FAILED.splitlines()[0] in withheld
-    assert E.ENVELOPE_FAILED.splitlines()[1] not in withheld
-    assert "unrecorded" not in withheld, withheld
-
-    doc = E.sample_grade()
-    for row in doc["worlds"]:
-        for key in ("difference_shown", "injected_present", "injected_retrieved",
-                    "capture_reasks_faulted", "reachable_by_capture", "has_refused"):
-            row.pop(key, None)
-    E.write_judge(ep.dir, doc)
-    review = J.review_record(ep.dir, worlds={
-        E.CONTROL: E.review_world("A", E.CONTROL),
-        E.WITHHELD_WORLD: E.review_world("B", E.WITHHELD_WORLD, reach={"envelope_ran": False,
-                                                                        "envelope_failed": "boom"}),
-        E.GRADED_WORLD: E.review_world("C", E.GRADED_WORLD, reach={"envelope_ran": True}),
-    })
-    assert review.is_file()
-    graded = _world(render(ep), E.GRADED_WORLD)
-    assert graded.count("unrecorded") >= 3, graded
-    assert _ordered(graded, "holding_queried", "doctored_answer_served", "verdict", "resolution_moved")
-    assert "True" not in graded.split("difference_shown", 1)[1][:40], graded
-    assert "False" not in graded.split("difference_shown", 1)[1][:40], graded
+    assert "no bucket" in graded, graded
+    assert _ordered(graded, "draw 0", "lead-quality", "identity", "draw 1", "observability",
+                    E.SYSTEM), graded
+    assert "systems:" not in graded, graded
+    assert VERDICT_LINE in graded, graded
+    passthrough = _world(page, E.PASSTHROUGH_WORLD)
+    assert "systems:" not in passthrough, passthrough
+    assert "lead-set" in passthrough, passthrough
 
 
 def test_1025_each_world_links_to_runs_episode_world_runtime_html_relatively_and_the_run_dir_pointer_is_never_the_source(
@@ -295,7 +261,7 @@ def test_1025_each_world_links_to_runs_episode_world_runtime_html_relatively_and
 
 def test_1025_headings_carry_substituted_counts_the_worlds_guide_uses_each_axis_verbatim_and_the_nav_iterates_the_same_sets_as_the_sections(
         tmp_path):
-    """Section headings carry the sample's counts (3 worlds, 13 findings, 6 stages); the worlds
+    """Section headings carry the sample's counts (3 worlds, 13 findings, 5 stages); the worlds
     guide names the control as "the branch point untouched, not graded" and each sibling by
     role letter, declared disposition and its `axis` text escaped; the nav's per-world and
     per-group entries equal the sets of `world-<id>` and `fg-<n>` ids on the page.
@@ -310,9 +276,9 @@ def test_1025_headings_carry_substituted_counts_the_worlds_guide_uses_each_axis_
 
     assert "3" in h2("sec-worlds") or "three" in h2("sec-worlds"), h2("sec-worlds")
     assert str(S.findings) in h2("sec-findings"), h2("sec-findings")
-    assert "6" in h2("sec-stages") or "six" in h2("sec-stages"), h2("sec-stages")
+    assert str(len(ST.EXPECTED_STEPS)) in h2("sec-stages"), h2("sec-stages")
     assert CONTROL_GUIDE in worlds
-    for role, label, declared, axis in (("B", E.WITHHELD_WORLD, "benign", E.AXIS_WITHHELD),
+    for role, label, declared, axis in (("B", E.PASSTHROUGH_WORLD, "benign", E.AXIS_PASSTHROUGH),
                                         ("C", E.GRADED_WORLD, "malicious", E.AXIS_GRADED)):
         entry = worlds[worlds.index(label):worlds.index(axis) + len(axis)]
         assert re.search(rf"\b{role}\b", entry), (label, entry)
@@ -349,7 +315,7 @@ def test_1025_per_world_leads_are_referenced_leads_union_gather_summary_stems_wi
     refused = page.text_of(f"leads-{E.GRADED_WORLD}")
     assert "investigation record unavailable" in refused, refused
     assert "absent" not in refused, refused
-    assert f"summary of l-001 for {E.WITHHELD_WORLD}" in page.text_of(f"leads-{E.WITHHELD_WORLD}")
+    assert f"summary of l-001 for {E.PASSTHROUGH_WORLD}" in page.text_of(f"leads-{E.PASSTHROUGH_WORLD}")
 
 
 def test_1025_a_lead_id_that_names_no_single_file_reads_nothing_and_renders_the_guards_sentence(tmp_path):
@@ -387,7 +353,7 @@ def test_1025_the_artifacts_anchor_ids_exist_and_every_nav_href_resolves_to_an_i
     assert page.ids_with("fg-")
     assert len([i for i in page.ids if i.startswith("f-")]) == S.findings
     stems = {"questioner_trace", "questioner_b_trace", "questioner_c_trace",
-             f"judge_{E.FAMILY}_0_trace", f"judge_{E.WITHHELD_WORLD}_0_trace",
+             f"judge_{E.FAMILY}_0_trace", f"judge_{E.PASSTHROUGH_WORLD}_0_trace",
              f"judge_{E.GRADED_WORLD}_0_trace"}
     assert {f"tx-{s}" for s in stems} <= set(page.ids), page.ids_with("tx-")
     for stale in ("sec-disposition", "sec-questioner", "stage-staging"):
@@ -420,7 +386,7 @@ def test_1025_the_header_names_the_episode_alert_rule_source_run_and_branch_poin
 
     live = E.sample_episode(tmp_path / "live", family_draw=False, samples=False, judge=False)
     doc = E.sample_grade()
-    for key in ("world_findings", "family_outcome", "withheld_findings"):
+    for key in ("world_findings", "family_outcome"):
         del doc[key]
     E.write_judge(live.dir, doc)
     assert E.ALERT_RULE in render(live).one("header").text()
@@ -435,25 +401,26 @@ def _attribute_values(page: E.Page) -> list[str]:
     return [v for n in page.root.descendants() for v in n.attrs.values()]
 
 
-def test_1025_manifest_labels_as_frame_slots_on_an_ungated_manifest(tmp_path):
-    """`raw_manifest` validates no label, so a planted manifest label carrying markup and a
-    space reaches the page: it is grammar-gated on `is_valid_run_id`'s alphabet — rendered as an
-    "unnameable entry" line with the label escaped as text, no `world-<label>` section, no id
-    or href built from it — and the raw label appears in no attribute value (J5).
+def test_1025_a_manifest_label_off_the_token_alphabet_never_reaches_a_frame_slot(tmp_path):
+    """A planted manifest label carrying markup and a space is refused by the manifest reader
+    the page shares with the judge (`family.read_manifest`, the runtime loader's world-token
+    gate): `render_episode` raises `JudgeRefused` naming the alphabet, and no page carrying the
+    label is written — the label never becomes an id, an href or a heading (J5). Positive
+    control: the same episode with its own manifest renders.
     """
     ep = E.sample_episode(tmp_path)
+    render(ep)
+    before = ep.page.read_bytes()
     hostile = 'evil<b onmouseover="x">label one'
     manifest = E.sample_manifest()
     manifest["worlds"].append(T.world_doc(hostile, role="D", axis="hostile axis",
                                           disposition_declared="benign"))
     T.write_family(ep.dir, manifest)
-    page = render(ep)
-    assert "unnameable entry" in page.text_of("sec-worlds"), page.text_of("sec-worlds")
-    assert hostile in page.text
-    assert "onmouseover=" not in page.raw.replace("on​mouseover", "")
-    assert not [v for v in _attribute_values(page) if "evil<b" in v or "label one" in v]
-    assert not [i for i in page.all_ids if "evil" in i]
-    assert sorted(page.ids_with("world-")) == sorted(f"world-{w}" for w in E.WORLDS)
+    with pytest.raises(J.sym("learning.judge", "JudgeRefused"), match="world-token alphabet"):
+        visualize_episode().render_episode(ep.dir)
+    assert ep.page.read_bytes() == before, "a refused manifest still rewrote the page"
+    assert b"evil<b" not in before
+    assert b"onmouseover" not in before
 
 
 def test_1025_world_or_lead_directory_name_carries_attribute_or_tag_breaking_characters(tmp_path):
@@ -500,18 +467,16 @@ def test_1025_a_gather_summary_stem_that_is_hostile(tmp_path):
 
 
 def test_1025_a_bucket_or_reason_word_used_as_an_attribute_value(tmp_path):
-    """A bucket word and a withheld reason built to break out of an attribute never become
-    structure: the class comes from the closed map's neutral fallback, the raw word appears in
-    no attribute value, and the word renders escaped as text (J5).
+    """A finding's bucket word and a world row's bucket built to break out of an attribute never
+    become structure: the class comes from the closed map's neutral fallback, the raw word
+    appears in no attribute value, and the word renders escaped as text (J5).
     """
     ep = E.sample_episode(tmp_path)
     word = 'x" onmouseover="alert(1)'
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=[
         E.finding(subject="defender", bucket=word, claim="attribute-breaking bucket")]))
     doc = E.sample_grade()
-    doc["worlds"][0]["withheld_reason"] = word
-    for entry in doc["withheld_findings"]:
-        entry["reason"] = word
+    doc["worlds"][0]["bucket"] = word
     E.write_judge(ep.dir, doc)
     page = render(ep)
     assert 'onmouseover="alert' not in page.raw, "the word broke out of its attribute"
@@ -519,6 +484,10 @@ def test_1025_a_bucket_or_reason_word_used_as_an_attribute_value(tmp_path):
     assert word in page.text
     row = page.section(f"f-{E.GRADED_WORLD}-0-0")
     assert "bucket-other" in row.classes or any("bucket-other" in n.classes for n in row.descendants())
+    world = page.section(f"world-{E.PASSTHROUGH_WORLD}")
+    assert [n for n in world.find_all(cls="w-bucket") if "bucket-other" in n.classes], (
+        "the row's bucket did not take the neutral fallback class")
+    assert word in world.text()
 
 
 def test_1025_axis_text_engineered_to_read_as_more_of_the_templated_sentence(tmp_path):
@@ -542,27 +511,9 @@ def test_1025_axis_text_engineered_to_read_as_more_of_the_templated_sentence(tmp
 # ---------------------------------------------------------------------------------------
 
 
-def test_1025_family_yaml_declares_two_worlds_under_the_same_label(tmp_path):
-    """A manifest declaring two worlds under one label (unreachable through the launcher — p9:
-    `check_identities` refuses it — but readable through `raw_manifest`) renders: the guide
-    lists BOTH entries verbatim (both axes), and the sections key on the directory — one
-    `world-<label>` section.
-    """
-    ep = E.sample_episode(tmp_path)
-    manifest = E.sample_manifest()
-    manifest["worlds"].append(T.world_doc(E.GRADED_WORLD, role="D", axis="SECOND AXIS SAME LABEL",
-                                          disposition_declared="benign"))
-    T.write_family(ep.dir, manifest)
-    page = render(ep)
-    worlds = page.text_of("sec-worlds")
-    assert E.AXIS_GRADED in worlds, worlds
-    assert "SECOND AXIS SAME LABEL" in worlds, worlds
-    assert page.all_ids.count(f"world-{E.GRADED_WORLD}") == 1
-
-
 def test_1025_judge_yaml_worlds_row_names_a_label_absent_from_family_yaml_and_runs(tmp_path):
     """A `judge.yaml` row for a label in neither the manifest nor `runs/` renders on the
-    row-driven surfaces — its card, its findings group, tile 2's caption when withheld — marked
+    row-driven surfaces — its card and its findings group — marked
     "not in the manifest", and gets a section through the union rule with its run-dir parts
     absent; nothing is silently dropped (J7 v / J8).
     """
@@ -581,37 +532,37 @@ def test_1025_judge_yaml_worlds_row_names_a_label_absent_from_family_yaml_and_ru
 def test_1025_ungradable_world_carries_a_populated_judge_directory(tmp_path):
     """Draw documents under a world the record marks ungradable were never enqueued (g13): they
     render in the findings section under the distinct group "not enqueued — world ungradable:
-    <reason>", never merged with enqueued or withheld rows, and the world's section still
+    <reason>", never merged with enqueued rows, and the world's section still
     shows the row's reason (J7).
     """
     ep = _ungradable_episode(tmp_path)
     page = render(ep)
-    row = f"f-{E.WITHHELD_WORLD}-0-0"
+    row = f"f-{E.PASSTHROUGH_WORLD}-0-0"
     assert row in page.ids
     heading = page.group_of(row).text()
     assert "not enqueued — world ungradable:" in heading, heading
     assert "a call on 'elastic' faulted" in heading, heading
-    assert "withheld" not in heading
     assert "enqueued —" not in heading.replace("not enqueued —", "")
 
 
 def test_1025_leftover_draw_documents_under_a_world_the_record_excludes(tmp_path):
     """Draw documents under a manifest world with no `judge.yaml` row render under the distinct
-    group "not enqueued — no grade row" — never as enqueued, withheld or unqueueable (J7).
+    group "not enqueued — no grade row" — never as enqueued or unqueueable (J7).
     """
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     doc["worlds"] = doc["worlds"][:1]
     doc["world_findings"] = [r for r in doc["world_findings"]
                              if not r["finding_id"].endswith(f"/{E.GRADED_WORLD}/0/4")]
-    doc["enqueued_rows"], doc["world_enqueued_rows"] = 0, 4
+    # what the pass enqueues without the graded world: the other sibling's four defender rows,
+    # the family's three world rows and the other sibling's one
+    doc["enqueued_rows"], doc["world_enqueued_rows"] = 4, 4
     E.drop_lanes(doc, E.GRADED_WORLD)  # no row, so the pass never walked it
     E.write_judge(ep.dir, doc)
     page = render(ep)
     row = f"f-{E.GRADED_WORLD}-0-0"
     heading = page.group_of(row).text()
     assert "not enqueued — no grade row" in heading, heading
-    assert "withheld" not in heading
     assert "unqueueable" not in heading
 
 
@@ -721,7 +672,7 @@ def test_1025_a_declared_world_with_no_run_directory(tmp_path):
 
 def test_1025_render_when_a_graded_world_has_no_matching_runs_dir(tmp_path):
     """A graded world whose run dir is gone keeps its section: the record-derived parts
-    (verdict, bucket, ladder, card, findings group) render and the run-dir-derived parts read
+    (verdict, bucket, verdict line, card, findings group) render and the run-dir-derived parts read
     "run directory absent" — no link, no cost row, no result-event wall (J8).
     """
     ep = E.sample_episode(tmp_path)
@@ -768,18 +719,17 @@ def test_1025_runs_pruned_after_the_grade(tmp_path):
 
 
 def test_1025_ungradable_rows_from_the_early_tiers_carry_no_flags(tmp_path):
-    """An ungradable row from an early tier carries no flag fields: it renders the same chip set
-    as a graded row, each chip "unrecorded" for an absent field, the `ungradable_reason`
-    verbatim, no ladder, no bucket, no card — one code path for every tier (J16 d).
+    """An ungradable row from an early tier carries no verdict fields: it renders the
+    `ungradable_reason` verbatim, no verdict line, no bucket, no systems chip, no card — one
+    code path for every tier (J16 d).
     """
     page = render(_ungradable_episode(tmp_path))
-    world = _world(page, E.WITHHELD_WORLD)
-    for chip in CHIPS:
-        assert chip in world, (chip, world)
-    assert world.count("unrecorded") >= 4, world
+    world = _world(page, E.PASSTHROUGH_WORLD)
     assert "a call on 'elastic' faulted" in world
-    assert "resolution_moved" not in world
-    assert not [c for c in page.elements(cls="vd-cause") if E.WITHHELD_WORLD in c.text()]
+    assert VERDICT_LINE not in world, world
+    assert "systems:" not in world, world
+    assert not page.section(f"world-{E.PASSTHROUGH_WORLD}").find_all(cls="w-bucket"), world
+    assert not [c for c in page.elements(cls="vd-cause") if E.PASSTHROUGH_WORLD in c.text()]
 
 
 def test_1025_record_declared_and_manifest_declared_disagree(tmp_path):
@@ -806,16 +756,18 @@ def test_1025_record_declared_and_manifest_declared_disagree(tmp_path):
     assert "malicious" in _world(page, E.CONTROL)
 
 
-def test_1025_the_control_worlds_chips_and_review_block(tmp_path):
-    """The control has no row: its section renders no row-derived chips (`holding_queried`,
-    `doctored_answer_served`, `difference_shown`), its review-derived chips with "unrecorded"
-    for the capture fields its review block lacks, and its leads block renders (J16 c).
+def test_1025_the_control_world_renders_no_row_derived_parts(tmp_path):
+    """The control has no row: its section renders no row-derived part (no verdict line, no
+    bucket, no systems chip), says it carries no facts (the capture's own answers), lists its
+    own served calls with their decision word, and its leads block renders (J16 c).
     """
     page = render(E.sample_episode(tmp_path))
     control = _world(page, E.CONTROL)
-    for row_chip in ("holding_queried", "doctored_answer_served", "difference_shown"):
-        assert row_chip not in control, (row_chip, control)
-    assert "unrecorded" in control, control
+    assert VERDICT_LINE not in control, control
+    assert "systems:" not in control, control
+    assert not page.section(f"world-{E.CONTROL}").find_all(cls="w-bucket"), control
+    assert "no facts" in control, control
+    assert f"[passthrough] {E.SYSTEM}" in control, control
     assert f"goal of l-001 in {E.CONTROL}" in page.text_of(f"leads-{E.CONTROL}")
 
 
@@ -830,22 +782,7 @@ def test_1025_render_before_a_worlds_scrub_verdict_sidecar_is_written(tmp_path):
     (ep.world(E.GRADED_WORLD) / "scrub_verdict.json").unlink()
     page = render(ep)
     assert "not recorded" in _world(page, E.GRADED_WORLD)
-    assert "not recorded" not in _world(page, E.WITHHELD_WORLD)
-
-
-def test_1025_two_world_labels_differ_only_by_case_or_a_lookalike_character(tmp_path):
-    """Two labels distinct as bytes but case-fold identical are two worlds with two distinct
-    sections and ids (labels are gated ASCII identifiers; J16 e).
-    """
-    ep = E.sample_episode(tmp_path)
-    manifest = E.sample_manifest()
-    manifest["worlds"].append(T.world_doc("Prior_Fake_Key_Precedent", role="D",
-                                          axis="case twin", disposition_declared="benign"))
-    T.write_family(ep.dir, manifest)
-    page = render(ep)
-    assert "world-Prior_Fake_Key_Precedent" in page.by_id
-    assert f"world-{E.GRADED_WORLD}" in page.by_id
-    assert "case twin" in _world(page, "Prior_Fake_Key_Precedent")
+    assert "not recorded" not in _world(page, E.PASSTHROUGH_WORLD)
 
 
 # ---------------------------------------------------------------------------------------
@@ -855,9 +792,9 @@ def test_1025_two_world_labels_differ_only_by_case_or_a_lookalike_character(tmp_
 
 def test_1025_the_control_is_identified_how(tmp_path):
     """The control is the manifest world with role `A` (equivalently the one whose `axis` is
-    present-and-null, x07) — never the label string `a`: the worlds guide, tile 1's "contrast
-    the control" and the leads section all use that world, and its declared disposition comes
-    from `family.yaml`. Positive control: a manifest whose control is labelled `zeta` still
+    present-and-null, x07) — never the label string `a`: the worlds guide, the world section's
+    "not graded" state and the leads section all use that world, and its declared disposition
+    comes from `family.yaml`. Positive control: a manifest whose control is labelled `zeta` still
     renders it as the control.
     """
     ep = E.sample_episode(tmp_path)
@@ -873,27 +810,25 @@ def test_1025_the_control_is_identified_how(tmp_path):
     assert "world-zeta" in page.by_id
     assert "not graded" in _world(page, "zeta")
     assert "leads-zeta" in page.by_id
-    tiles = page.elements(cls="vd-tile")
-    assert len(tiles) == 4, [t.text() for t in tiles]
-    assert "0 of 1 contrast the control" in tiles[0].text(), [t.text() for t in tiles]
+    assert "malicious" in _world(page, "zeta"), _world(page, "zeta")
 
 
 def test_1025_a_world_that_ran_but_was_never_archived(tmp_path):
     """The run dir gives it a section (O5) with its `runtime.html` link and its result-event
-    cost and wall; every archive-derived block (leads, report, review block, scrub verdict)
+    cost and wall; every archive-derived block (leads, report, scrub verdict)
     reads "not archived" / the reader's refusal; the judge part follows the record — here an
     ungradable row's reason.
     """
     ep = _ungradable_episode(tmp_path)
-    shutil.rmtree(ep.world(E.WITHHELD_WORLD))
+    shutil.rmtree(ep.world(E.PASSTHROUGH_WORLD))
     page = render(ep)
-    world = _world(page, E.WITHHELD_WORLD)
-    assert f"runs/{E.EPISODE_ID}-{E.WITHHELD_WORLD}/runtime.html" in page.anchors_in(f"world-{E.WITHHELD_WORLD}")
+    world = _world(page, E.PASSTHROUGH_WORLD)
+    assert f"runs/{E.EPISODE_ID}-{E.PASSTHROUGH_WORLD}/runtime.html" in page.anchors_in(f"world-{E.PASSTHROUGH_WORLD}")
     assert "$0.2500" in world, world
     assert "3m00s" in world, world
     assert "not archived" in world, world
     assert "a call on 'elastic' faulted" in world, world
-    assert "not archived" in page.text_of(f"leads-{E.WITHHELD_WORLD}")
+    assert "not archived" in page.text_of(f"leads-{E.PASSTHROUGH_WORLD}")
 
 
 def test_1025_render_against_a_world_archive_mid_copy(tmp_path):
@@ -914,35 +849,6 @@ def test_1025_render_against_a_world_archive_mid_copy(tmp_path):
     leads = page.text_of(f"leads-{E.GRADED_WORLD}")
     assert f"summary of l-001 for {E.GRADED_WORLD}" in leads
     assert "l-002" in leads
-
-
-def test_1025_review_record_lacks_a_worlds_block_for_a_world(tmp_path):
-    """`world_review_block` → `None` (x08) for a world the review carries no entry for: its
-    review block reads "no review record for this world", its review-derived chips read
-    "unrecorded", its card and ladder render from the row; distinct from a present block with
-    missing fields, whose chips read "unrecorded" individually.
-    """
-    ep = E.sample_episode(tmp_path)
-    J.review_record(ep.dir, worlds={E.CONTROL: E.review_world("A", E.CONTROL),
-                                    E.WITHHELD_WORLD: E.review_world("B", E.WITHHELD_WORLD,
-                                                                     reach={"envelope_ran": True})})
-    page = render(ep)
-    graded = _world(page, E.GRADED_WORLD)
-    assert "no review record for this world" in graded, graded
-    assert "unrecorded" in graded, graded
-    assert "decision-discipline" in graded
-    assert _ordered(graded, *LADDER)
-    assert any(E.GRADED_WORLD in c.text() for c in page.elements(cls="vd-cause"))
-    withheld = _world(page, E.WITHHELD_WORLD)
-    assert "no review record for this world" not in withheld
-    # NOT "unrecorded": this world's `judge.yaml` row is the sample's own, full modern shape —
-    # every chip field the row itself carries renders that row's real value regardless of how
-    # narrow the review override above leaves `reach` (row wins over reach whenever the row HAS
-    # the field, established by the sibling chip test in this file, which manufactures
-    # "unrecorded" only by popping the fields off the ROW too, not by narrowing reach alone).
-    # A present-but-narrower review block is exactly the case that should NOT read "unrecorded"
-    # for a field the row itself already answers.
-    assert "unrecorded" not in withheld, withheld
 
 
 def test_1025_a_run_directory_symlink_or_dir_pointer_naming_a_symlinked_final_component(tmp_path):
@@ -987,9 +893,9 @@ def test_1025_investigation_md_is_present_but_unreadable(tmp_path):
     unavailable", never "absent" — and the other worlds render (d30's seed).
     """
     ep = E.sample_episode(tmp_path)
-    E.plant_raw(ep.world(E.WITHHELD_WORLD) / "investigation.md", b"\xff\xfe\x00\x01 not utf-8")
+    E.plant_raw(ep.world(E.PASSTHROUGH_WORLD) / "investigation.md", b"\xff\xfe\x00\x01 not utf-8")
     page = render(ep)
-    block = page.text_of(f"leads-{E.WITHHELD_WORLD}")
+    block = page.text_of(f"leads-{E.PASSTHROUGH_WORLD}")
     assert "investigation record unavailable" in block, block
     assert "absent" not in block, block
     assert f"summary of l-001 for {E.GRADED_WORLD}" in page.text_of(f"leads-{E.GRADED_WORLD}")
@@ -1107,19 +1013,24 @@ def test_1025_markup_in_lead_params_raw_command_and_resolutions(tmp_path):
 
 
 def test_1025_a_sibling_process_exited_non_zero(tmp_path):
-    """A world whose sibling process exited non-zero renders from what is on disk and never
-    states an exit status or a failure the record does not carry: the launcher harness's run
-    dir has no result event, so its cost row reads "no result event" / "no cost recorded", its
-    archive-derived blocks render from the archive, and no "exit" status is stated for the
-    world. Positive control: the section, its link and its rows exist.
+    """A world whose sibling process exited non-zero renders from what is on disk and states no
+    failure the record does not carry: the launcher harness's run dir has no result event, so
+    its cost row reads "no result event" / "no cost recorded"; its archive-derived blocks render
+    from the archive; and the failure it does state is the world's own record
+    (`world_records/b.yaml`, the launcher's `did not finish`) — its reason and detail verbatim.
+    Positive control: the section, its link and its rows exist.
     """
     launch = ST._launch(tmp_path, spawn=J.FakeSibling(
         ST._cli().episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths()), exits={"b": 1}))
     assert launch.rc == 1, "the control failed: no sibling exited non-zero"
+    record = T.mod("_yaml").safe_load(
+        (launch.episode_dir / "world_records" / "b.yaml").read_text(encoding="utf-8"))
+    assert record["reason"] == "did not finish", record
     page = hook_page(launch.episode_dir)
     world = _world(page, "b")
     assert "no result event" in world or "no cost recorded" in world, world
-    assert "exit" not in world.lower(), world
+    assert f"{record['reason']} — {record['detail']}" in world, world
+    assert world.lower().count("exit") == record["detail"].lower().count("exit"), world
     assert f"runs/{E.EPISODE_ID}-b/runtime.html" in page.anchors_in("world-b")
 
 
@@ -1128,10 +1039,10 @@ def test_1025_partial_copy_missing_served_or_worlds_or_wire_logs(tmp_path):
     `read_world_facts`' refusal (the ledger is absent) and its other blocks render; `wire_logs/`
     absent: no transcript block, every stage cost "no cost recorded"; `worlds/` absent: every
     archive-derived block reads "not archived", no row comes from a draw document, and every
-    row the record still carries follows J9b — the 5 `world_findings` rows and the 4
-    `withheld_findings` entries each render as a stub carrying "draw document absent", nine
-    `f-` rows in all, and tile 3 counts exactly those nine (92-reconciliation F-1(b)) — the
-    page is written in every case.
+    row the record still carries follows J9b — the 5 `world_findings` rows each render as a
+    stub carrying "draw document absent", five `f-` rows in all (a defender entry has no text
+    on the record, so no stub), and tile 3 counts exactly those five (92-reconciliation
+    F-1(b)) — the page is written in every case.
     """
     base = E.sample_episode(tmp_path)
     no_served = E.copy_episode(base, tmp_path / "no-served")
@@ -1156,15 +1067,15 @@ def test_1025_partial_copy_missing_served_or_worlds_or_wire_logs(tmp_path):
     for label in E.WORLDS:
         assert "not archived" in _world(page, label), _world(page, label)
     stubs = [i for i in page.ids if i.startswith("f-")]
-    assert len(stubs) == S.world_author + S.defender_withheld, stubs
+    assert len(stubs) == S.world_author, stubs
     for row_id in stubs:
         assert "draw document absent" in page.text_of(row_id), page.text_of(row_id)
-    assert "defender claim 0" in page.text_of("sec-findings"), "no withheld stub"
+    assert "defender claim 0" not in page.text_of("sec-findings"), "a defender stub"
     assert f"f-{E.FAMILY}-0-0" in stubs, stubs
     assert f"f-{E.GRADED_WORLD}-0-4" in stubs, stubs
     tiles = page.elements(cls="vd-tile")
     assert len(tiles) == 4, [t.text() for t in tiles]
-    assert f"of {S.world_author + S.defender_withheld}" in tiles[2].text(), tiles[2].text()
+    assert f"of {S.world_author}" in tiles[2].text(), tiles[2].text()
     assert page.by_id, "no page"
 
 
@@ -1220,11 +1131,11 @@ def test_1025_a_missing_or_unreadable_served_ledger_costs_the_leads_block_only_t
     ep = E.sample_episode(tmp_path)
     ledger = ep.dir / "served" / f"{T.world_token(E.GRADED_WORLD)}.jsonl"
     ledger.unlink()
-    E.plant_link(ep.dir / "served" / f"{T.world_token(E.WITHHELD_WORLD)}.jsonl",
+    E.plant_link(ep.dir / "served" / f"{T.world_token(E.PASSTHROUGH_WORLD)}.jsonl",
                  ep.dir / "family.yaml")
     page = render(ep)
     for label, note in ((E.GRADED_WORLD, "served ledger: absent"),
-                        (E.WITHHELD_WORLD, "served ledger unreadable")):
+                        (E.PASSTHROUGH_WORLD, "served ledger unreadable")):
         block = page.text_of(f"leads-{label}")
         assert note in block, block
         assert "investigation record unavailable" not in block, block

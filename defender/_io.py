@@ -1910,12 +1910,16 @@ def hold(root: Path, *, os_: Any = os, follow: bool = True,
 
 
 def hold_new(parent: Path, name: str, *, os_: Any = os,
-             open_unnamed: Callable[[int], int] = open_unnamed_at) -> Held:
+             open_unnamed: Callable[[int], int] = open_unnamed_at,
+             exclusive: bool = False) -> Held:
     """Make (or adopt) the folder `name` in `parent` and hold it. `parent` is made if missing,
     following its spelling; `name` is judged off `parent`'s handle and never followed (a link,
     file or FIFO there is the core's folder refusal). The held descriptor is the one that
     judged it. `parent` is then fsynced, so the new folder's entry is durable. `open_unnamed`
-    is the unnamed-open seam, as :func:`hold`'s."""
+    is the unnamed-open seam, as :func:`hold`'s.
+
+    `exclusive` adopts nothing: any entry already at `name` (a folder, a link, anything) is
+    `FileExistsError`, so of two callers racing for one name exactly one wins it."""
     if _O_PATH is None:  # pragma: no cover — no CI box lacks it
         raise OSError(errno.ENOTSUP, _PLATFORM_FAULT)
     if not isinstance(name, str) or len(_parse_name(name)[1]) != 1:
@@ -1927,6 +1931,8 @@ def hold_new(parent: Path, name: str, *, os_: Any = os,
         os_.makedirs(parent, exist_ok=True)
         parent_fd = os_.open(parent, _ROOT_FLAGS)
     try:
+        if exclusive:
+            os_.mkdir(name, dir_fd=parent_fd)  # lint-unguarded-tree-write: ok — the rooted mkdir, relative to a no-follow handle; EEXIST is the caller's answer
         fd = _step(os_, parent_fd, name, parent / name, create=True)
         try:
             _fsync_folder(os_, parent_fd)

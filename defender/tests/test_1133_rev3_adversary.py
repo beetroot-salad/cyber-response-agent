@@ -7,52 +7,19 @@ from __future__ import annotations
 
 import errno
 import json
-import logging
 import os
 import shutil
 import types
 
 import pytest
-import yaml
 
 from defender import _io
 from defender._episode_paths import LAYOUT
+from defender.tests import _judge_921 as J
 from defender.tests import _spec1133 as S
 from defender.tests import _triplet_947 as T
 from defender.tests import test_1133_rev3 as R
 from defender.tests.test_947_capture_prime import append_call, call_row, source_run
-
-
-# ---------------------------------------------------------------------------------------
-# E1 (R1): with the review record refused, the aborting launcher's line does not make the claim it makes when the names were merged.
-# ---------------------------------------------------------------------------------------
-
-
-def _line(tmp_path, caplog, kind):
-    cli = R.mod("learning.branch.cli")
-    ep = tmp_path / kind / "episodes" / R.EPISODE_ID
-    ep.mkdir(parents=True)
-    R._staged_episode(ep)
-    review = ep / LAYOUT.review
-    if kind == "plain":
-        review.write_text("worlds: {}\n", encoding="utf-8")
-    else:
-        review.write_bytes(R.UNDECODABLE)
-    caplog.clear()
-    with S.open_episode(ep) as episode:
-        cli._teardown_without_masking(episode, R.StuckDoor(), aborting=True)
-    [line] = [r.getMessage() for r in caplog.records
-              if r.levelno >= logging.ERROR and "teardown" in r.getMessage()]
-    return line
-
-
-def test_the_refused_line_drops_the_merged_lines_location_claim(tmp_path, caplog):
-    caplog.set_level(logging.ERROR)
-    plain = _line(tmp_path, caplog, "plain")
-    refused = _line(tmp_path, caplog, "undecodable")
-    claim = plain[plain.rindex(")") + 1:]  # the text after the exception's repr
-    assert claim not in refused, (
-        f"the refused-record line repeats the merged line's claim {claim!r}: {refused}")
 
 
 # ---------------------------------------------------------------------------------------
@@ -102,25 +69,28 @@ def test_the_already_primed_check_follows_the_held_root_not_the_path(tmp_path):
 
 
 # ---------------------------------------------------------------------------------------
-# E3 (R1): the incomplete gate refuses a refused review record for both readers that share it.
+# E3 (R1): the outcome gate refuses a refused outcome record for both readers that share it
+# (#1224 moved the gate from `review.yaml` to pre-flight's `outcome.yaml`).
 # ---------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("reader", ["verdicts", "delta_o"])
-def test_a_linked_review_record_holding_incomplete_is_refused_by_both_readers(tmp_path, reader):
+def test_a_linked_outcome_record_holding_accepted_is_refused_by_both_readers(tmp_path, reader):
     episode = T.mod("learning.branch.episode")
     doc = T.family_doc(worlds=[T.base_world(), T.world_doc("b")])
     ep = T.episode(tmp_path, doc=doc)
     for label in ("a", "b"):
         T.archived_world(ep, label)
     T.base_capture(ep, [T.captured_row(key="k1")])
+    J.outcome_record(ep)
     host = tmp_path / "host"
     host.mkdir()
-    (host / "review.yaml").write_text(
-        yaml.safe_dump({"episode": {"outcome": "incomplete", "reason": "r"}}), encoding="utf-8")
-    review = ep / LAYOUT.review
-    review.unlink(missing_ok=True)
-    review.symlink_to(host / "review.yaml")
+    record = ep / LAYOUT.outcome
+    # Control: the plain accepted record passes the gate.
+    getattr(episode, reader)(ep)
+    record.rename(host / "outcome.yaml")
+    record.symlink_to(host / "outcome.yaml")
+    # A followed link would read `accepted` and pass; the gate refuses it instead.
     with pytest.raises(episode.EpisodeError):
         getattr(episode, reader)(ep)
 
@@ -138,6 +108,7 @@ def test_a_linked_served_folder_is_no_primed_base_never_followed(tmp_path):
     for label in ("a", "b"):
         T.archived_world(ep, label)
     T.base_capture(ep, [T.captured_row(key="k1")])
+    J.outcome_record(ep)
     (ep / LAYOUT.served_world(T.world_token("b"))).write_text(
         json.dumps(T.captured_row(key="k1")) + "\n", encoding="utf-8")
     outside = tmp_path / "host" / "served-elsewhere"

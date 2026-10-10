@@ -11,7 +11,7 @@ admits unknown keys (claim h3) and the judge reads a copy of a file the box had 
 world from grading. Everything in this module exists to keep the value off that path.
 
 **None of the mechanism exists at base `59bdea44`.** `session_store.normalized_truncated_by`,
-`runtime/run_end.py`, `archive.RUN_END_NAME`, `_grade_world`'s cut-short early return and
+`runtime/run_end.py`, `archive.RUN_END_NAME`, `read_world`'s cut-short early return and
 the ticket lane's exit-class parameter are all absent. That is the expected state of a
 spec — RED against HEAD. Every import goes through `mod()`/`sym()` PER TEST (the
 `_triplet_947` / `_judge_921` idiom) so a missing target is one failure per test rather than
@@ -81,6 +81,7 @@ Underscore-prefixed so pytest does not collect it; it defines no tests.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -90,6 +91,7 @@ from defender.tests._judge_921 import (  # noqa: F401 — re-exported vocabulary
     EPISODE_ID,
     EPISODE_TOKEN,
     EPISODES_BASE_ENV,
+    FAMILY_AGENT_PREFIX,
     RUNS_BASE_ENV,
     STATE_DIR_ENV,
     accepted_episode,
@@ -98,12 +100,14 @@ from defender.tests._judge_921 import (  # noqa: F401 — re-exported vocabulary
     base_capture,
     captured_row,
     episode,
+    grade,
     ledger_row,
     mod,
     provenance_record,
     report_text,
     rows,
     runs_base,
+    scripted_judge,
     sibling_run_dir,
     staged_row,
     sym,
@@ -111,6 +115,7 @@ from defender.tests._judge_921 import (  # noqa: F401 — re-exported vocabulary
     world_doc,
     write_ledger,
 )
+from defender.tests._state1135 import state_over
 from defender.tests._triplet_947 import (  # noqa: F401 — re-exported vocabulary
     DEFENDER,
     WORLDS,
@@ -225,22 +230,64 @@ def cut_short_episode(tmp_path: Path, *, cut: dict[str, str] | None = None,
     return ep
 
 
-def graded(episode_dir: Path) -> dict[str, dict]:
-    """`grade_family`'s per-world rows, keyed by label — the real mechanical pass over a real
-    episode dir, which is the entry point every O1 demand is stated at."""
-    return rows(mod("learning.judge.family").grade_family(Path(episode_dir)))
+def graded(episode_dir: Path, *, judge: Any = None) -> dict[str, dict]:
+    """`graded_record`'s per-world rows, keyed by label."""
+    return rows(graded_record(episode_dir, judge=judge))
 
 
-def family_word(episode_dir: Path) -> str:
-    """The family-level `verdict_word` the same pass computes."""
-    return word_of(mod("learning.judge.family").grade_family(Path(episode_dir)))
+def graded_record(episode_dir: Path, *, judge: Any = None) -> Any:
+    """The family record (`EpisodeGrade`) — the real judge pass
+    (`learning.judge.grade_episode`, which reads each world through `family.read_world`) over
+    a real episode dir, which is the entry point every O1 demand is stated at.
+
+    #1224 retired the offline mechanical pass; the pass is now the judge itself, driven through
+    its model seam (`judge=`, default `scripted_judge()`). Each call grades afresh: an earlier
+    pass's `judge.yaml` would otherwise be returned as final, and every scenario here compares
+    passes over an episode it changed in between. The queue and runs base are the episode's
+    own, beside it, so a pass never appends into another scenario's queue."""
+    ep = Path(episode_dir)
+    (ep / "judge.yaml").unlink(missing_ok=True)
+    side = ep.parent / f".{ep.name}-judge"
+    return grade(ep, runs_base=side / "defender-runs", judge=judge,
+                 state=state_over(side / "learning-state"))
+
+
+def graded_with_view(episode_dir: Path) -> tuple[dict[str, dict], dict[str, str]]:
+    """One pass: the per-world rows, and what the family-scope call was shown of each world —
+    its row line in the family prompt (`run._render_family_rows`), keyed by label.
+
+    #1224: the family's `verdict_word` is the family MODEL call's majority, decided from these
+    lines; no code path computes it. "Does X move the family's word" is therefore asked of what
+    X puts in front of that call: a world's line names its reached `verdict`, or says it was NOT
+    JUDGED (the why is the row's `ungradable_reason`, compared on the rows)."""
+    judge = scripted_judge()
+    record = graded_record(episode_dir, judge=judge)
+    family = [p for p, a in zip(judge.prompts, judge.agent_ids, strict=True)
+              if str(a).startswith(FAMILY_AGENT_PREFIX)]
+    assert family, "the pass never made its family-scope call"
+    view = {label: ("NOT JUDGED" if line.startswith("NOT JUDGED") else line)
+            for label, line in re.findall(r"(?m)^world (\S+): (.*)$", family[-1])}
+    return rows(record), view
+
+
+def family_view(episode_dir: Path) -> dict[str, str]:
+    """`graded_with_view`'s family view alone."""
+    return graded_with_view(episode_dir)[1]
+
+
+def judge_calls_for(judge: Any, label: str) -> list[str]:
+    """The agent ids of every judge call made for world `label` (`judge:<label>:<n>[:k]`)."""
+    return [a for a in judge.agent_ids if str(a).startswith(f"judge:{label}:")]
 
 
 def world_facts(episode_dir: Path, label: str) -> Any:
     """`read_world_facts` over one archived world — the judge's own reader, driven directly for
     the premises that are about what a record READS AS rather than about the row it produces."""
-    return mod("learning.judge.family").read_world_facts(
-        Path(episode_dir), label, episode_token=EPISODE_TOKEN)
+    from defender._io import bind
+
+    with bind(Path(episode_dir)) as bound:
+        return mod("learning.judge.family").read_world_facts(
+            bound, label, episode_token=EPISODE_TOKEN, absent_ledger_ok=True)
 
 
 # --------------------------------------------------------------------------------------

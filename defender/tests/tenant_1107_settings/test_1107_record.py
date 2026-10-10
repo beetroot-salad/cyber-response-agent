@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+from datetime import UTC, datetime
 import inspect
 import json
 import logging
@@ -864,9 +865,10 @@ def test_s7_mf11_record_parts_read_only(tmp_path):
     rec = _resolve(root)
     registry = S.mod("learning.branch.estate.registry")
     ctx = _ctx(rec, tmp_path)
-    carried = registry._carrying(ctx, world_id="w-mf11")  # the estate applier's VerbContext copy
+    moment = datetime(2026, 7, 28, 16, 18, 45, tzinfo=UTC)
+    carried = registry._carrying(ctx, as_of=moment)  # the world registry's VerbContext copy
     assert carried is not ctx
-    assert carried.world_id == "w-mf11"
+    assert carried.as_of == moment
 
     # One consumer edits each part in place; the edit raises or lands on its own copy.
     for attempt in (

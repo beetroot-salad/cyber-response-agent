@@ -2,11 +2,12 @@
 
 This is the spec suite for the design in `.spec-flow/design-doc.md`: an operator names
 (source run, N); a deny-all QUESTIONER role authors a triplet of worlds into
-`episodes/<id>/family.yaml`; staging writes a per-world Elasticsearch corpus under the `wv-`
-namespace, write-ahead-recorded in `staged.yaml`; a replay review rejects any world that
-contradicts the capture or whose declared difference is unreachable; each accepted world then
-runs as its own `run.py --resume` PROCESS; the launcher verifies every scrub and stamp,
-archives each world under `worlds/<X>/`, and two derived readers compute from the episode dir.
+`episodes/<id>/family.yaml`; each world then runs as its own `run.py --resume` PROCESS; the
+launcher verifies every scrub and stamp, archives each world under `worlds/<X>/`, and two
+derived readers compute from the episode dir. (#1224 replaced #947's cluster staging, its write
+door and the replay review with each world's live oracle: a world is now the natural-language
+`facts` it asserts, and the family records its `served_systems`. The builders below write that
+v2 manifest; the write-door fake and the staging/review readers went with the design.)
 
 **Eight of the modules these tests drive do not exist at the base commit** (X16:
 `learning/branch/{staging,review,comparator,archive,episode}.py`, `learning/branch/questioner/`,
@@ -28,14 +29,11 @@ Four things live here and nothing else.
 
    Every fault SHAPE here cites the ledger claim that observed it on the real dependency
    (`spec-flow/specs/spec_graph_947.yaml`, `claims:`). No fault in this suite is imagined:
-   * `malformed="no-status-line"` — PO-C3, executed and refuted: `split_status` over stdout
-     with no parseable trailing status line yields `("", <whole body>)`, and a failed create
-     then reads as SUCCESS against a write-ahead-recorded name. That is the behaviour of the
-     one write door that ships today.
+   * `malformed="no-status-line"` — PO-C3: `split_status` over stdout with no parseable
+     trailing status line yields `("", <whole body>)`.
    * `raise_after=n` with `TransportFault` — the real class at `scripts/adapters/faults.py`,
      exit_code 2, which `docker_exec_curl` raises when the docker exec itself fails (X9).
-   * `fail_on=(<name>,)` — a per-name cluster-side refusal, S30/S34's "the guard is a pre-flight
-     check on the target NAME, not a promise the cluster accepts the call".
+   * `fail_on=(<name>,)` — a per-name refusal from the far side.
    Anything else a test wants induced is a PROBE REQUEST, not a fake: see 80-author-digest.md.
 
 3. **The builders** — an episode on disk, a runs base with a source run, an archived world.
@@ -60,7 +58,7 @@ import os
 import re
 import threading
 import time
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -104,6 +102,8 @@ GOLDEN_INVESTIGATION = DEFENDER / "fixtures-e2e" / "golden-v2sshd" / "investigat
 EVENTS_PATTERN = "logs-*"
 ALERTS_PATTERN = ".internal.alerts-security.alerts-default-*"
 CONFIGURED = (EVENTS_PATTERN, ALERTS_PATTERN)
+#: The systems a v2 manifest records as served (`served_systems`).
+SERVED_SYSTEMS = ("elastic", "identity")
 
 
 def mod(dotted: str):
@@ -116,7 +116,7 @@ def sym(dotted: str, name: str):
     return getattr(mod(dotted), name)
 
 
-def no_preflight(_model: str | None = None) -> int:
+def no_preflight(_model: str | None = None, *, branching: bool = False) -> int:
     """The role-model preflight, neutralised — for every scenario that is not about it.
 
     `preflight_role_models` sources a BILLABLE provider key and exits 2 when there is none, so a
@@ -235,107 +235,14 @@ class Fault:
 CLEAN = Fault()
 
 
-# --------------------------------------------------------------------------------------
-# The cluster's write door (M3's host-side seam) and the transport under it.
-# --------------------------------------------------------------------------------------
+def _transport_fault(detail: str) -> Exception:
+    """The real `TransportFault` — what the transport raises when the docker exec itself fails."""
+    return sym("scripts.adapters.faults", "TransportFault")(detail)
 
 
-@dataclass(frozen=True)
-class DoorCall:
-    """One thing the staging write door was ASKED to do."""
-    op: str                       # create_index | create_alias | delete | exists | count | resolve
-    name: str
-    payload: dict[str, Any] = field(default_factory=dict)
-
-
-class FakeDoor:
-    """The host-side Elasticsearch write door as a recording, fault-injecting fake.
-
-    It is the injection seam M3's staging, teardown and sweep take (`door=`), and it stands in
-    for the ONE production door that reaches `transport.docker_exec_curl` with PUT/DELETE.
-    It holds a set of names that "exist on the cluster" so teardown's delete-then-verify and
-    the sweep's list-then-remove have something real to be right or wrong about.
-
-    It classifies nothing. `fail_on` raises for a name; `malformed` hands back a body shape the
-    ledger observed; neither decides whether the caller should treat that as a failure — which
-    is exactly the reading PO-C3 says the staging door must get right.
-    """
-
-    def __init__(self, *, fault: Fault = CLEAN, existing: tuple[str, ...] = (),
-                 counts: dict[str, int] | None = None,
-                 resolves: dict[str, tuple[str, ...]] | None = None) -> None:
-        self.fault = fault
-        self.names: set[str] = set(existing)
-        self.calls: list[DoorCall] = []
-        self.connections = 0
-        self._counts = dict(counts or {})
-        self._resolves = dict(resolves or {})
-
-    # -- the observation channel ---------------------------------------------------------
-    @property
-    def ops(self) -> list[tuple[str, str]]:
-        return [(c.op, c.name) for c in self.calls]
-
-    def created(self) -> list[str]:
-        return [c.name for c in self.calls if c.op in {"create_index", "create_alias"}]
-
-    def deleted(self) -> list[str]:
-        return [c.name for c in self.calls if c.op == "delete"]
-
-    def only(self, op: str) -> DoorCall:
-        hits = [c for c in self.calls if c.op == op]
-        assert len(hits) == 1, f"expected exactly one {op}, got {self.ops}"
-        return hits[0]
-
-    # -- the fault gate ------------------------------------------------------------------
-    def _gate(self, op: str, name: str, payload: dict[str, Any]) -> None:
-        self.calls.append(DoorCall(op=op, name=name, payload=dict(payload)))
-        if op in {"create_index", "create_alias", "delete", "count"}:
-            self.connections += 1
-        if self.fault.raise_after is not None and self.connections > self.fault.raise_after:
-            raise self._transport_fault(f"docker exec failed reaching {name}")
-        if self.fault.hits(name):
-            raise self._upstream_fault(f"cluster refused {name}")
-
-    @staticmethod
-    def _transport_fault(detail: str) -> Exception:
-        return sym("scripts.adapters.faults", "TransportFault")(detail)
-
-    @staticmethod
-    def _upstream_fault(detail: str) -> Exception:
-        return sym("scripts.adapters.faults", "UpstreamFault")(detail)
-
-    # -- the door's surface --------------------------------------------------------------
-    def create_index(self, name: str, *, docs: list[dict]) -> None:
-        self._gate("create_index", name, {"docs": docs})
-        self.names.add(name)
-
-    def create_alias(self, name: str, *, over: list[str], filter: dict | None,
-                     unfiltered: Any = ()) -> None:
-        self._gate("create_alias", name,
-                   {"over": list(over), "filter": filter, "unfiltered": list(unfiltered)})
-        self.names.add(name)
-
-    def delete(self, name: str) -> None:
-        self._gate("delete", name, {})
-        self.names.discard(name)
-
-    def exists(self, name: str) -> bool:
-        self._gate("exists", name, {})
-        return name in self.names
-
-    def list_names(self, glob: str) -> list[str]:
-        self._gate("list_names", glob, {})
-        head = glob.rstrip("*")
-        return sorted(n for n in self.names if n.startswith(head))
-
-    def count(self, index: str, *, query: dict | None = None) -> int:
-        self._gate("count", index, {"query": query})
-        return self._counts.get(index, 0)
-
-    def resolve(self, pattern: str) -> list[str]:
-        self._gate("resolve", pattern, {})
-        return list(self._resolves.get(pattern, (f"{pattern.rstrip('*')}000001",)))
+def _upstream_fault(detail: str) -> Exception:
+    """The real `UpstreamFault` — what an adapter raises when the far side refuses."""
+    return sym("scripts.adapters.faults", "UpstreamFault")(detail)
 
 
 class FakeTransport:
@@ -346,7 +253,7 @@ class FakeTransport:
     line — PO-C3's executed fault: `split_status` then returns `("", <whole body>)` and the
     caller that compares the second element to "200" reads a FAILED create as a success.
 
-    Records `argv`-shaped call state so a test can assert a derived staging name reached the
+    Records `argv`-shaped call state so a test can assert a derived name reached the
     transport as a DISCRETE argument rather than concatenated into a shell string (S39).
     """
 
@@ -369,7 +276,7 @@ class FakeTransport:
             "insecure": insecure, "auth": auth, "system": system, "secrets": secrets,
         })
         if self.fault.raise_after is not None and len(self.calls) > self.fault.raise_after:
-            raise FakeDoor._transport_fault(f"docker exec failed: {url}")
+            raise _transport_fault(f"docker exec failed: {url}")
         payload = json.dumps(self.body)
         if self.fault.malformed == "no-status-line":
             return 0, payload, ""
@@ -487,41 +394,32 @@ def _world_of(argv: list[str]) -> str | None:
 # --------------------------------------------------------------------------------------
 
 
-def overlay(*, patches: dict | None = None, elastic: dict | None = None) -> dict:
-    """An `Overlay` document. Empty halves are omitted, so the base world is `{}`."""
-    doc: dict[str, Any] = {}
-    if patches:
-        doc["patches"] = patches
-    if elastic:
-        doc["elastic"] = elastic
-    return doc
-
-
-def elastic_overlay(pattern: str = EVENTS_PATTERN, *, inject: list[dict] | None = None,
-                    exclude: dict | None = None) -> dict:
-    """The elastic half, keyed by the base pattern it stages."""
-    return {pattern: {"inject": inject or [], "exclude": exclude}}
+def fact(fact_id: str = "f1", statement: str = "web-1's owner is the platform team",
+         entities: tuple[str, ...] = ("web-1",)) -> dict:
+    """One fact a world asserts: an id, its natural-language statement, the entities it names."""
+    return {"fact_id": fact_id, "statement": statement, "entities": list(entities)}
 
 
 def world_doc(world_id: str, *, role: str = "B", story: str = "a story",
               axis: str | None = "an axis", disposition_declared: str = "malicious",
-              label_basis: str = "policy-rule", ov: dict | None = None) -> dict:
+              label_basis: str = "policy-rule", facts: list[dict] | None = None) -> dict:
+    """One v2 world. `facts=None` gives one default fact; pass `[]` for the control world."""
     return {
         "world_id": world_id, "role": role, "story": story, "axis": axis,
         "disposition_declared": disposition_declared, "label_basis": label_basis,
-        "overlay": ov if ov is not None else {},
+        "facts": [fact()] if facts is None else facts,
     }
 
 
 def base_world() -> dict:
-    """World A: the base — empty overlay, `axis: null`, role A."""
-    return world_doc("a", role="A", axis=None, ov={})
+    """World A: the control — explicit `facts: []`, `axis: null`, role A."""
+    return world_doc("a", role="A", axis=None, facts=[])
 
 
 def family_doc(*, worlds: list[dict] | None = None, source_run_dir: str = "/runs/source",
                as_of: str = AS_OF, continuation_prompt: str = "Continue from here.",
                **over: Any) -> dict:
-    """A `Family` document: the launcher's derived half, the operator's instrument field and
+    """A v2 `Family` document: the launcher's derived half, the operator's instrument field and
     the questioner's authored half, one document."""
     doc: dict[str, Any] = {
         "episode_id": EPISODE_ID,
@@ -532,16 +430,15 @@ def family_doc(*, worlds: list[dict] | None = None, source_run_dir: str = "/runs
         "as_of": as_of,
         "continuation_prompt": continuation_prompt,
         "base_story": "the captured story",
-        # #1106: the launcher records the tenant's configured corpus patterns in the manifest
-        # (the loader reads no settings), so the authored document carries them.
-        "configured_patterns": [EVENTS_PATTERN, ALERTS_PATTERN],
-        "discriminator": {"predicate": "p", "holding_system": "elastic",
-                          "envelope": {"system": "elastic", "verb": "esql",
-                                       "params": {"query": f"FROM {EVENTS_PATTERN} | LIMIT 5"}}},
+        # #1224: the launcher records the systems the tenant's gather grant served (the loader
+        # reads no settings), so the authored document carries them.
+        "served_systems": list(SERVED_SYSTEMS),
+        "discriminator": {"predicate": "p"},
         "worlds": worlds if worlds is not None else [
             base_world(),
-            world_doc("b", ov=overlay(elastic=elastic_overlay(inject=[{"_id": "i1"}]))),
-            world_doc("c", ov=overlay(patches={"identity": {"web-1": {"owner": "platform"}}})),
+            world_doc("b", facts=[fact("f1", "a second login to web-1 came from 10.0.0.9",
+                                       ("web-1", "10.0.0.9"))]),
+            world_doc("c", facts=[fact("f2")]),
         ],
     }
     doc.update(over)
@@ -1026,17 +923,6 @@ def configured_layout(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
     return base, src, root
 
 
-def staged_rows(episode_dir: Path) -> list[dict]:
-    """`staged.yaml`'s rows, in written order."""
-    text = (episode_dir / "staged.yaml").read_text(encoding="utf-8")
-    return list(_yaml.safe_load(text) or [])
-
-
-def review_doc(episode_dir: Path) -> dict:
-
-    return _yaml.safe_load((episode_dir / "review.yaml").read_text(encoding="utf-8"))
-
-
 def lesson_row(run_dir: Path, name: str = "L1",
                loaded_at: str = "2026-07-28T17:00:00Z") -> None:
     """One `lessons_loaded.jsonl` row — what `trace_lesson.in_context_cases` selects on."""
@@ -1047,10 +933,9 @@ def lesson_row(run_dir: Path, name: str = "L1",
 class FakeAdapters:
     """The real adapter bodies' stand-in behind the serving registry (`adapters=`).
 
-    The review replays the captured set through a `WorldRegistry`, and the serving path answers
-    from the primed capture BEFORE calling any adapter (C15) — so "no post-branch query reaches
-    a real adapter unasked" is only observable if something records what the adapter layer was
-    asked for. That is this fake's whole job: it records `(system, verb, params)` per call and
+    The serving path answers from the primed capture BEFORE calling any adapter (C15) — so "no
+    post-branch query reaches a real adapter unasked" is only observable if something records
+    what the adapter layer was asked for. That is this fake's whole job: it records `(system, verb, params)` per call and
     answers from a scripted table, so an unrecorded call is a demand failing rather than a
     silence nobody can see.
     """
@@ -1058,9 +943,8 @@ class FakeAdapters:
     def __init__(self, answers: dict[tuple[str, str], Any] | None = None, *,
                  by_target: dict[str, Any] | None = None, fault: Fault = CLEAN) -> None:
         self.answers = dict(answers or {})
-        #: Keyed by a SUBSTRING of the bound params — a staged world's params carry its own
-        #: world token, so this is how one fake answers a control and a staged sibling
-        #: differently without ever being told which world is asking.
+        #: Keyed by a SUBSTRING of the bound params, so one fake answers two calls differently
+        #: without ever being told which world is asking.
         self.by_target = dict(by_target or {})
         self.fault = fault
         self.calls: list[tuple[str, str, dict]] = []
@@ -1087,9 +971,9 @@ class FakeAdapters:
             if needle in rendered:
                 return answer
         if self.fault.raise_after is not None and len(self.calls) > self.fault.raise_after:
-            raise FakeDoor._upstream_fault("Elasticsearch query failed (HTTP 503)")
+            raise _upstream_fault("Elasticsearch query failed (HTTP 503)")
         if self.fault.hits(rendered) or self.fault.hits(f"{system}.{verb}"):
-            raise FakeDoor._upstream_fault(f"{system}.{verb} is unavailable")
+            raise _upstream_fault(f"{system}.{verb} is unavailable")
         if self.fault.malformed == "truncated-json":
             raise ValueError("Expecting value: line 1 column 1 (char 0)")
         return self.answers.get((system, verb), {"hits": []})
@@ -1132,15 +1016,13 @@ def refusals() -> tuple[type[BaseException], ...]:
     from defender.learning.branch.estate.registry import EstateError
     from defender.learning.branch.ledger import LedgerError
     from defender.runtime.branch import BranchError
-    from defender.scripts.adapters.confinement import ConfinementFault, ViewNameError
+    from defender.scripts.adapters.confinement import ConfinementFault
     from defender.scripts.adapters.faults import AdapterFault
     out: list[type[BaseException]] = [
-        SystemExit, EstateError, LedgerError, BranchError, ConfinementFault, ViewNameError,
+        SystemExit, EstateError, LedgerError, BranchError, ConfinementFault,
         AdapterFault, ValueError,
     ]
-    for dotted, name in (("learning.branch.staging", "StagingRefused"),
-                         ("runtime.branch._family", "FamilyError"),
-                         ("learning.branch.review", "ReviewError"),
+    for dotted, name in (("runtime.branch._family", "FamilyError"),
                          ("learning.judge", "JudgeRefused")):
         out.append(sym(dotted, name))
     return tuple(out)
@@ -1153,41 +1035,15 @@ __all__ = [
     "KNOWLEDGE_SHA", "NO_KNOWLEDGE_KEY", "OTHER_KNOWLEDGE_SHA",
     "branchable_investigation",
     "SOURCE_RUN_ID", "WORLDS",
-    "DoorCall", "FakeAdapters", "FakeAgent", "FakeDoor", "FakeSpawn", "FakeTransport",
+    "FakeAdapters", "FakeAgent", "FakeSpawn", "FakeTransport", "SERVED_SYSTEMS",
     "UNTRUSTED_FRAME", "assert_wrapped_untrusted", "outside_untrusted_frames", "untrusted_frames",
     "Fault", "base_capture", "captured_row",
     "archived_world", "base_world", "capture_call", "configured_layout",
     "report_text",
     "corpus_document",
-    "elastic_overlay", "episode", "family_doc", "provenance_record",
+    "episode", "fact", "family_doc", "provenance_record",
     "FakeCapture", "source_capture", "source_stamp", "isolate_learning_state", "LEARNING_STATE_ENV",
-    "lesson_row", "mod", "overlay", "refusals", "replace", "review_doc", "runs_base",
+    "lesson_row", "mod", "refusals", "replace", "runs_base",
     "sibling_run_dir",
-    "staged_rows", "sym", "world_doc", "world_token", "write_family",
+    "sym", "world_doc", "world_token", "write_family",
 ]
-
-
-def sampled_run(tmp_path: Path, *, rows: list) -> Path:
-    """A run dir whose two tables hold `rows` — `(base_pattern, payload)` pairs, in order.
-
-    The sampler's own inputs and nothing else: one lead, one query row per pair, and the
-    payload by-ref at the path `payload_path` names. Hand-built rather than driven through
-    `capture_call` because what is under test is the WALK — which payload a pattern ends up
-    with when several are eligible — so the order and the shapes have to be the scenario's.
-    """
-    run = tmp_path / "sampled-run"
-    (run / "gather_raw" / "l-001").mkdir(parents=True, exist_ok=True)
-    (run / "gather_raw" / "l-001.lead.json").write_text(
-        json.dumps({"goal": "g", "what_to_summarize": []}), encoding="utf-8")
-    lines = []
-    for seq, (pattern, payload) in enumerate(rows):
-        ref = f"gather_raw/l-001/{seq}.json"
-        (run / ref).write_text(json.dumps(payload), encoding="utf-8")
-        lines.append(json.dumps({
-            "lead_id": "l-001", "seq": seq, "system": "elastic", "verb": "query",
-            "query_id": "elastic.ad-hoc", "params": {"index": pattern},
-            "raw_command": "", "exit_code": 0, "payload_status": "ok",
-            "payload_digest": "n bytes", "payload_path": ref,
-        }))
-    (run / "executed_queries.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return run

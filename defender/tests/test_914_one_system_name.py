@@ -126,14 +126,20 @@ def test_no_module_restates_the_shape_or_the_bound():
     # the system alphabet spelled INSIDE a larger pattern, after `query\(`. A restatement is a
     # restatement wherever it sits.
     shape = re.compile(re.escape("[a-z0-9][a-z0-9-]*"))
-    bound = re.compile(r"^\s*_?[A-Z][A-Z0-9_]*MAX_LEN[A-Z0-9_]*\s*=\s*64\b", re.M)
+    bound = re.compile(r"^\s*(_?[A-Z][A-Z0-9_]*MAX_LEN[A-Z0-9_]*)\s*=\s*64\b", re.M)
     # Exempted by PATH, not by basename: `p.name != "verbs.py"` would silently pardon any
     # future module that happened to be called that.
     home = (root / "runtime" / "verbs.py").resolve()
+    # A 64 that bounds something other than a system name, by (path, constant) — one pair, not
+    # a pattern: #1224's fact-id bound is checked by `_printable_fault`, not the system shape.
+    other_sixty_fours = {((root / "runtime" / "branch" / "_family.py").resolve(),
+                          "FACT_ID_MAX_LEN")}
 
     def restates(path: Path) -> bool:
         text = path.read_text(encoding="utf-8", errors="replace")
-        return bool(shape.search(text) or bound.search(text))
+        bounds = [m.group(1) for m in bound.finditer(text)
+                  if (path.resolve(), m.group(1)) not in other_sixty_fours]
+        return bool(shape.search(text) or bounds)
 
     offenders = [
         str(p.relative_to(root)) for p in root.rglob("*.py")

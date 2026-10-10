@@ -4,8 +4,8 @@
 
 **Implementation cache; code wins on conflict.** The loop exists under
 `defender/learning/` as branched episode (`branch/cli.py`) → questioner
-(`branch/questioner/`) → staged estate (`branch/estate/`) → review by replay
-(`branch/review.py`) → the family as `run.py --resume` processes → judge
+(`branch/questioner/`) → pre-flight calibration through each world's live oracle
+(`branch/cli.py`, `branch/estate/`) → the family as `run.py --resume` processes → judge
 (`judge/`) → findings queue → lessons curator (`author/lessons/`) with a
 per-lesson forward-check (`author/verify_forward/`) → `defender/lessons/*.md`.
 
@@ -130,13 +130,13 @@ Completed run dir (alert.json + investigation.md + report.md
         │
         ▼
 defender/learning/branch/cli.py <run_dir> <branch_message_id>
-        ├── 1. preflight        — everything that can refuse before anything is spent
-        ├── 2. questioner       — family.yaml: a control world + one-axis counterfactuals
-        ├── 3. staging          — each world's corpus into its own namespace
-        ├── 4. review by replay — any rejection ends the EPISODE; no sibling starts
-        ├── 5. the family       — each accepted world as its own `run.py --resume`
-        ├── 6. archive          — episodes/<id>/worlds/<label>/, self-contained
-        └── 7. judge            — judge.yaml + findings → learning/_pending/findings.jsonl
+        ├── 0. refusals         — everything that can refuse before anything is spent
+        ├── 1. questioner       — family.yaml: a control world + one-axis counterfactuals
+        ├── 2. pre-flight       — replay the original calls through each world's oracle;
+        │                         outcome.yaml; two or more failed worlds → no sibling starts
+        ├── 3. the family       — each world as its own `run.py --resume`, served by its oracle
+        ├── 4. archive          — episodes/<id>/worlds/<label>/, self-contained
+        └── 5. judge            — judge.yaml + findings → learning/_pending/findings.jsonl
         │
         ▼
 defender/learning/loop.py --author-drain   (at LEARNING_AUTHOR_THRESHOLD)
@@ -157,14 +157,14 @@ in — the part no seam can enforce about itself. The sequence itself is
 `branch/steps.py::Step`'s — that module owns the episode lifecycle (one
 declaration, launch order), the launcher runs it, the timing record
 (`branch/timing.py`, one row per completed step at the episode root) refuses
-any other spelling, and the numbers below are this doc's own. Preflight is not
-a `Step`: it refuses before anything is spent or recorded.
+any other spelling, and the numbers below are this doc's own. The refusal block
+is not a `Step`: it refuses before anything is spent or recorded.
 
-**1. Preflight.** Everything that can refuse before anything is spent, in one
+**0. Refusals.** Everything that can refuse before anything is spent, in one
 place: branch point in range, the source's provenance stamp usable as the
 family's anchor and the launcher's own checkout matching it, source alert a
-plain file, corpus patterns able to carry a view name, write door reaching the
-cluster, namespace sweep complete, every role holding a usable model. The
+plain file, every role holding a usable model (the oracle and its verifier
+included). The
 anchor check is the verify tier's own judgement run early over a one-member
 family (the live tree): the commit must equal the source's, and so must the
 scope unless the source stamped before the field existed; neither is ever
@@ -172,60 +172,78 @@ waived. A tree git did not certify clean — the source's or the live one — is
 refused unless `--allow-dirty`, which waives dirt and only dirt. A source that
 names no commit refuses on its own, before the live tree is asked.
 
-**2. `Step.QUESTIONER`** (`branch/questioner/`) is a **deny-all** role — no tools,
-its whole input inlined by the host, its whole output one YAML manifest. It
-authors the **discriminator** (the fact the verdict turns on, the system holding
-it, the query that would establish it — a discriminator no single query could
-settle makes the episode unreadable however good the worlds are) and the
-**family** (world A, the capture unchanged, plus one-axis counterfactuals).
+**1. `Step.QUESTIONER`** (`branch/questioner/`) is a **deny-all** role — no tools,
+its whole input inlined by the host, its whole output one YAML manifest. It is
+told which systems the tenant serves (`served_systems`, recorded on the manifest
+at launch) and shown real example answers per system from the capture
+(`samples.yaml`). It authors the **discriminator** (the fact the verdict turns
+on — a discriminator no single query could settle makes the episode unreadable
+however good the worlds are) and the **family**: world A, the control, with no
+facts, plus one-axis counterfactuals, each a short list of **world facts** in
+natural language ("alice obtained a TGT and logged on to db-1 at 15:22Z"). The
+questioner writes facts, never telemetry.
 
-**3. `Step.STAGING`** (`branch/staging.py`, `estate/`) writes each world's corpus into
-its own namespace, every name write-ahead-recorded in `staged.yaml` *before* it
-is created, so teardown finds what a crashed run left behind. `branch/ledger.py`
-records every response the estate served with the decision behind it — what
-makes the difference between worlds checkable rather than asserted.
+**2. `Step.PREFLIGHT`** calibrates. The original run's calls are replayed through
+each world's oracle and verifier before any sibling starts. A world that cannot
+serve one of them within the retry cap is unservable. The result is
+`outcome.yaml`, written once and never rewritten: `accepted`, `unusable` (two or
+more worlds failed — no sibling starts) or `refused` (nothing to calibrate, for a
+reason that belongs to no world), with the unservable worlds, the calls that
+could not be replayed and the calls whose live answer drifted from the
+recording. Every replayed call goes through the tenant's gather grant decision,
+so pre-flight cannot reach a verb or system a sibling could not. The forged rows
+and recorded facts pre-flight produced stay as that world's frozen store; it
+seeds no answer cache.
 
-> **The namespace prefix is deliberately not spelled in this tree, and must not
-> be added.** A sibling is a real investigation whose model can read
-> `defender/docs/`; the isolation guarantee is that the fault channel is the
-> *only* way that scheme could be learned, because a world that knows it is
-> staged is not answering the question the family was built to ask.
-> `tests/test_947_triplet_isolation.py` sweeps `defender/{docs,skills,knowledge}`
-> for the prefix, the label template and world labels on every run.
-
-**4. `Step.REVIEW`**, by replay, asks two questions per world before any sibling runs.
-*Does this world contradict the capture?* World A — the control — replays
-**first**, and the keys it mismatches on are the estate's own drift since the
-source run; those are subtracted from every other world's result, so what is
-left is a difference the *world* made. Without that subtraction, ordinary drift
-reads as contradiction and rejects healthy episodes. *Is the declared difference
-observable at all?* An injection nothing retrieves, a patch applying to nothing,
-an exclusion removing no document — each is a world that is not the world it
-claims. Either failure **rejects the whole episode**.
+**How a world is served** (`branch/estate/`). A sibling queries the tenant's real
+systems through `estate/registry.py`'s `serve_one`. Nothing is written to a
+tenant system: there is no staging, no per-world copy of a corpus and no patch
+table. Per call, in order: the world's own stored answer (a repeated call is
+served byte for byte); else the call's base answer — the family's recording, or
+one live read bounded at the branch point; a real error passes through as itself
+(`real-error`). A world with no facts is served its base (`passthrough`).
+Otherwise the world's **oracle** (`estate/oracle.py`, `AgentRole.ORACLE`) takes
+one turn: it sees the call, a handle to the base answer and the world's facts,
+may explore real examples through the same grant decision (rate-limited,
+recorded only on the oracle side), forges telemetry for facts the call covers,
+and submits a served answer plus a claim of every difference. Host checks
+(`estate/checks.py`) hold the claim to the answer, the forged rows to the real
+columns, ids and recorded facts, and the counting arithmetic; then a verifier
+(`AgentRole.ORACLE_CHECK`), in its own context and never shown the oracle's
+reasoning, asks whether each covered fact's telemetry is present and plausible.
+A failure goes back to the oracle and the turn retries; past the cap the world is
+unservable and the sibling aborts with that reason. Each world owns its oracle
+state with one writer; one oracle turn runs at a time per sibling, and the
+investigator's clock pauses while it does. `branch/ledger.py` records every
+response the estate served with the decision behind it (`oracle`, `passthrough`,
+`real-error`, `refused`, `fault`) — what makes the difference between worlds
+checkable rather than asserted.
 
 The comparison is **blind by signature** (`branch/comparator.py`): two payloads
 and an axis, nothing else. It cannot see which side is the base or what a world
 declared — a comparator that could would have a verdict predictable from the
-label, and the label is what the measurement must be independent of. The same
-function serves the review and `delta_o` on the read side.
+label, and the label is what the measurement must be independent of.
 
-**5. `Step.RUNS`, the family as processes.** Each accepted world runs as its own `run.py
+**3. `Step.RUNS`, the family as processes.** Each world runs as its own `run.py
 --resume` **child process**, started together under `{episode_dir}/runs/`. The
 launcher drives no investigation in its own process and has no path to one:
 being a process is what gets a sibling the box lifecycle, the reap scan, its own
 role preflight and its own provenance stamp.
 
-**6. `Step.VERIFY`** (`branch/archive.py`) copies each world into
+**4. `Step.VERIFY`** (`branch/archive.py`) copies each world into
 `episodes/<id>/worlds/<label>/` so later readers answer from the episode
 directory alone — sibling run dirs are disposable. Every sibling's scrub verdict
 and provenance stamp is checked against each other AND against the source run's
 stamp (the anchor the preflight read, threaded here and never re-read): stamps
 that agree at the source's commit write the family stamp, which carries the
 agreed record, the source's whole record and whether `--allow-dirty` was given;
-anything else marks the episode `incomplete` — a modelled outcome with a reason,
-not a missing file. The derived readers (`branch/episode.py`) refuse an
-`incomplete` episode, so "no differences" and "no comparison was possible" stay
-different answers. `Step.JUDGE` follows, once the cluster is handed back.
+any fault withholds the family stamp and is logged as the reason. Verify never
+rewrites `outcome.yaml`. The derived readers (`branch/episode.py`) refuse an
+episode whose outcome is not exactly `accepted`, so "no differences" and "no
+comparison was possible" stay different answers. Anything learned about a world after launch — it went
+unservable, ran out of budget, did not finish, or could not be archived — is
+that world's own record (`world_records/<label>.yaml`, one writer each).
+`Step.JUDGE` follows.
 
 ## The Judge
 
@@ -233,33 +251,24 @@ different answers. `Step.JUDGE` follows, once the cluster is handed back.
 definition (#1008), with an `agent_id` prefix of `judge:`. It borrowed the
 questioner's definition until then, which is why some older prose pairs the two.
 
-1. **Mechanical pass** (`judge/family.py`) — five facts per non-control world,
-   read off *that world's own* archived record: its own ledger, report and
-   investigation document, plus the manifest. Never a sibling's, never a
-   comparator call. A manifest fault refuses the whole pass; a fault in one
-   world's archive marks that world `ungradable` and its siblings still grade.
+1. **Gate** — a manifest predating the oracle is stamped not-graded with that
+   reason; then `outcome.yaml` must say exactly `accepted` (an absent or torn
+   record is its own "no record" state, never `accepted`); then two or more failed
+   worlds — pre-flight's plus every world's own record — make the family
+   `unusable`, recorded with no model call. No code path computes a bucket.
 
-   The bucket, per non-control world, where H is the validated holding system:
-
-   | condition | bucket |
-   |---|---|
-   | no row on H at all | `lead-set` |
-   | rows on H, none `staged`/`patched`, no `refused` row on H | `lead-quality` |
-   | a `refused`/`fault`-adjacent H interaction, nothing doctored served | no bucket |
-   | doctored answer served, verdict == declared | no bucket |
-   | doctored answer served, no resolution moved, verdict != declared | `analyze-discipline` |
-   | doctored answer served, a resolution moved, verdict != declared | `decision-discipline` |
-
-   These are the four places a verdict can lose the deciding fact.
-
-2. **Model pass** — one call per graded world per draw (`JUDGE_DRAWS`, default
-   **1**) into `worlds/<X>/judge/<n>.yaml`. A failed draw does not unwind the
+2. **Model pass** — the judge model decides each world's bucket (`lead-set`,
+   `lead-quality`, `analyze-discipline`, `decision-discipline`, `observability`,
+   or none), the `systems` the world's facts touched, and its findings. It reads
+   the world's facts and declared verdict, the sibling's calls with the verified
+   claims, the sibling's verdict and `served_systems`. One call per graded world
+   per draw (`JUDGE_DRAWS`, default **1**) into `worlds/<X>/judge/<n>.yaml`. A failed draw does not unwind the
    pass.
 
 3. **Episode outcome** — `gradable`, `discard` (measurement spoilt) or
-   `corpus-contradiction` (archive disagrees with itself). `discard` is decided
-   mechanical-first and before any world's contradiction, so the answer does not
-   depend on manifest order.
+   `corpus-contradiction` (archive disagrees with itself). A world the model
+   calls spoilt spoils the family; `discard` wins over `corpus-contradiction`, so
+   the answer does not depend on manifest order.
 
 4. **Enqueue** (`judge/enqueue.py`) — for `gradable` only, one row per surviving
    finding. `discard`/`corpus-contradiction` enqueue nothing: the family record
@@ -330,11 +339,13 @@ findings whose source case has a ground truth.
 ```text
 $DEFENDER_EPISODES_BASE/<episode_id>/
   family.yaml                 # the questioner's manifest — every sibling re-parses it
-  staged.yaml                 # write-ahead record of every staged name, for teardown
-  review.yaml                 # per-world accept/reject + the episode's recorded outcome
+  samples.yaml                # real example answers per served system, for the questioner and judge
+  outcome.yaml                # pre-flight's write-once outcome: accepted | unusable | refused
+  world_records/<label>.yaml  # a world's own post-launch record (unservable, budget, did not finish, not archived)
+  oracle/<label>/             # that world's oracle-side store: forged rows, recorded facts, oracle ledger
   provenance.json             # the family stamp, only when every sibling's agrees with the source's
   timing.json                 # the launcher's own StageClock record, one row per step
-  served/base.jsonl           # the capture, primed before staging
+  served/base.jsonl           # the capture, primed before pre-flight
   served/<world_token>.jsonl  # every response served that world, with its decision
   worlds/<label>/
     report.md  investigation.md  alert.json  provenance.json
@@ -358,9 +369,9 @@ pre-cutover cases and silently stops growing. Re-pointing the tracer at
 ## Evaluation
 
 - **Queue yield** per episode, by bucket.
-- **Episode disposition** and the rejection rate at review-by-replay — a family
-  that rarely survives its own replay means the questioner is authoring
-  unreachable differences.
+- **Episode disposition** and the unusable rate at pre-flight — a family whose
+  worlds rarely calibrate means the questioner is authoring facts the oracle
+  cannot serve consistently.
 - **Draw agreement** across `JUDGE_DRAWS`. At the default of one draw this is not
   measured; raising it is how you learn whether a grade was stable.
 - **Forward-check pass rate**, with manual review of BAD holds.
@@ -380,8 +391,8 @@ determines what an episode can measure. A cheap heuristic — the turn at which 
 open set last narrowed, say — would make the loop schedulable without giving up
 forking a real run.
 
-**Co-evolution.** If an adversary returns it should author *worlds* (staged
-corpora the defender must still read correctly), not stories, so its output stays
+**Co-evolution.** If an adversary returns it should author *worlds* (fact sets
+the oracle serves and the defender must still read correctly), not stories, so its output stays
 executable. Co-evolution is prone to cycling, arms-race drift, and Red Queen
 dynamics where both sides improve on synthetic cases and neither on real ones —
 so hold a fixed set of historical families as a regression suite, periodically
@@ -395,7 +406,7 @@ the one-sided loop demonstrably moving the needle first.
 - Should the curator see prior accepted lesson commits as exemplars, and how to
   avoid drift toward one editing style?
 - How many worlds is a family worth? Three ships. More arms buy more axes but
-  multiply run cost and the chance one arm rejects and voids the episode.
+  multiply run cost and the chance two arms fail calibration and void the episode.
 - `JUDGE_MODEL` / `JUDGE_EFFORT` are read by two unrelated judges — this one and
   the golden-case eval judge (`evals/oracle_golden/judge.py`) — so setting either
   retargets both. Inherited, not designed; separating them means a knob name of

@@ -195,25 +195,25 @@ demands:
      binds: ["interacts(_gate_findings->findings_channel)"]}
 
   # ---- O2/M1: the review's three executed reachability facts --------------------------------
-  - {id: reachability_block_carries_the_three_facts, kind: shape, form: test,
-     discharged_by: test_reachability_block_carries_the_three_executed_facts,
+  - {id: reachability_block_carries_the_three_facts, kind: shape, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_reachability_block_carries_the_three_executed_facts`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: [reachability, "interacts(_reachability->reachability)", "interacts(_reachability->review_record)"]}
-  - {id: reachable_true_on_a_differing_reask, kind: domain-outcome, form: test,
-     discharged_by: test_reachable_by_capture_true_on_a_differing_reask,
+  - {id: reachable_true_on_a_differing_reask, kind: domain-outcome, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_reachable_by_capture_true_on_a_differing_reask`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["reachable_by_capture.domain.distinguished[true]"]}
-  - {id: reachable_false_needs_a_completed_reask, kind: domain-outcome, form: test,
-     discharged_by: test_reachable_by_capture_false_only_when_one_completed_and_none_differ,
+  - {id: reachable_false_needs_a_completed_reask, kind: domain-outcome, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_reachable_by_capture_false_only_when_one_completed_and_none_differ`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["reachable_by_capture.domain.distinguished[false]"]}
-  - {id: reachable_null_when_none_completed, kind: domain-outcome, form: test,
-     discharged_by: test_reachable_by_capture_null_when_no_reask_completed,
+  - {id: reachable_null_when_none_completed, kind: domain-outcome, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_reachable_by_capture_null_when_no_reask_completed`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["reachable_by_capture.domain.distinguished[null]"]}
-  - {id: reachability_not_derived_from_injection_size, kind: negative, form: test,
-     discharged_by: test_reachability_is_never_derived_from_the_injection_size,
+  - {id: reachability_not_derived_from_injection_size, kind: negative, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_reachability_is_never_derived_from_the_injection_size`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: [reachability, "interacts(_reachability->world_view)"]}
-  - {id: capture_addressed_false_when_nothing_names_a_staged_pattern, kind: domain-outcome, form: test,
-     discharged_by: test_capture_addressed_false_when_no_captured_query_names_a_staged_pattern,
+  - {id: capture_addressed_false_when_nothing_names_a_staged_pattern, kind: domain-outcome, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_capture_addressed_false_when_no_captured_query_names_a_staged_pattern`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["capture_addressed.domain.distinguished[false]"]}
-  - {id: capture_addressed_true_on_the_patched_system_arm, kind: domain-outcome, form: test,
+  - {id: capture_addressed_true_on_the_patched_system_arm, kind: domain-outcome, form: clause,
      minted_from: "PHASE F, F-R1. Ledger fork F4 was resolved at §7 (`resolved_by: auto`, taken as
        recommended) as `capture_addressed` being true when a captured query names a staged pattern
        OR THE PATCHED SYSTEM, and was marked MATERIAL on its own reason — `it decides which worlds
@@ -226,32 +226,32 @@ demands:
        it from the `verdict_word` vote — a family of patch-only worlds grading `undecidable` under
        a recorded reason that is false. `capture_addressed.domain.distinguished` gains `true` in the
        same repair so R4 fires on the arm and the omission cannot recur.",
-     discharged_by: test_capture_addressed_true_when_a_captured_query_names_the_patched_system,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_capture_addressed_true_when_a_captured_query_names_the_patched_system`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["capture_addressed.domain.distinguished[true]", "interacts(_reachability->capture_addressed)"]}
-  - {id: staging_error_is_a_faulted_reask, kind: behavior, form: test,
-     discharged_by: test_a_staging_error_counts_as_a_faulted_reask_not_a_quiet_one,
+  - {id: staging_error_is_a_faulted_reask, kind: behavior, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_staging_error_counts_as_a_faulted_reask_not_a_quiet_one`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_reachability->world_view)"]}
-  - {id: base_arm_read_once_per_key_per_episode, kind: behavior, form: test,
-     discharged_by: test_the_base_arm_is_read_once_per_key_across_all_worlds,
+  - {id: base_arm_read_once_per_key_per_episode, kind: behavior, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_the_base_arm_is_read_once_per_key_across_all_worlds`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_reachability->base_pattern)", "drives(review->_reachability)", "base_arm_memo.identity"]}
-  - {id: base_arm_carries_the_captures_own_params, kind: negative, form: test,
-     discharged_by: test_the_base_arm_never_carries_an_overlay_supplied_param,
+  - {id: base_arm_carries_the_captures_own_params, kind: negative, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_the_base_arm_never_carries_an_overlay_supplied_param`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_reachability->base_pattern)", "base_pattern.access[base-arm]"]}
-  - {id: m1_world_arm_refuses_a_foreign_view, kind: negative, form: test,
-     discharged_by: test_the_world_arm_refuses_a_foreign_world_view,
+  - {id: m1_world_arm_refuses_a_foreign_view, kind: negative, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_the_world_arm_refuses_a_foreign_world_view`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["world_view.access[world-arm]", "interacts(_reachability->world_view)"]}
-  - {id: m1_world_arm_admits_its_own_view, kind: behavior, form: test,
-     discharged_by: test_the_world_arm_admits_this_worlds_own_view,
+  - {id: m1_world_arm_admits_its_own_view, kind: behavior, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_the_world_arm_admits_this_worlds_own_view`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["world_view.access[world-arm]"]}
 
   # ---- O3/M2: the base witness on the staged row --------------------------------------------
-  - {id: staged_row_carries_differs_from_base, kind: shape, form: test,
-     discharged_by: test_a_staged_row_carries_differs_from_base_and_a_digest,
+  - {id: staged_row_carries_differs_from_base, kind: shape, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_staged_row_carries_differs_from_base_and_a_digest`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["served_ledger.payload", "interacts(_served->served_ledger)"]}
-  - {id: equal_payload_is_not_a_difference_shown, kind: domain-outcome, form: test,
-     discharged_by: test_a_staged_row_equal_to_the_base_answer_is_not_a_difference_shown,
+  - {id: equal_payload_is_not_a_difference_shown, kind: domain-outcome, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_staged_row_equal_to_the_base_answer_is_not_a_difference_shown`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["served_ledger.payload", "judge_record.identity"]}
-  - {id: patched_row_shown_by_construction, kind: domain-outcome, form: test,
+  - {id: patched_row_shown_by_construction, kind: domain-outcome, form: clause,
      restated_at_seam: "RS-2 (§7, from H1). The BY-CONSTRUCTION exemption is STRUCK. C4 is refuted
        by execution (c4-noop-patch-reports-patched): an entity present in the payload with an
        empty-dict overlay reports `PATCHED` with the served content byte-identical to unpatched, so
@@ -260,68 +260,68 @@ demands:
        BECAUSE the merged content differs, which is the same standard a staged row's witness meets.
        The test name changes with the ground; no test exists yet, so the pointer is re-sited, not
        renamed around an existing assertion.",
-     discharged_by: test_a_patched_row_counts_as_shown_because_its_merged_content_differs,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_patched_row_counts_as_shown_because_its_merged_content_differs`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["judge_record.identity",
              "applied_counter.domain.alternatives[name-match-with-identical-content]",
              "interacts(_served->applied_counter)"]}
-  - {id: witness_writes_no_second_ledger_row, kind: negative, form: test,
-     discharged_by: test_the_base_witness_appends_no_second_ledger_row,
+  - {id: witness_writes_no_second_ledger_row, kind: negative, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_the_base_witness_appends_no_second_ledger_row`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_served->served_ledger)", "served_ledger.identity"]}
-  - {id: delta_o_still_classifies_the_staged_key, kind: coherence, form: test,
-     discharged_by: test_delta_o_still_classifies_a_staged_key_after_the_witness,
+  - {id: delta_o_still_classifies_the_staged_key, kind: coherence, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_delta_o_still_classifies_a_staged_key_after_the_witness`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(delta_o->served_ledger)", "interacts(_answers->served_ledger)"]}
-  - {id: witness_uses_the_plain_ctx, kind: negative, form: test,
-     discharged_by: test_the_witness_read_carries_no_world_id,
+  - {id: witness_uses_the_plain_ctx, kind: negative, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_the_witness_read_carries_no_world_id`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_served->base_pattern)", "world_view.access[witness]", "base_pattern.access[witness]"]}
-  - {id: witness_fault_records_null, kind: domain-outcome, form: test,
-     discharged_by: test_a_faulted_witness_records_null_not_false,
+  - {id: witness_fault_records_null, kind: domain-outcome, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_faulted_witness_records_null_not_false`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["differs_from_base.domain.distinguished[null]"]}
-  - {id: differs_is_live_reads_beyond_formatting, kind: behavior, form: test,
-     discharged_by: test_differs_is_two_live_reads_compared_beyond_formatting,
+  - {id: differs_is_live_reads_beyond_formatting, kind: behavior, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_differs_is_two_live_reads_compared_beyond_formatting`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_served->base_pattern)", "interacts(_reachability->base_pattern)", mechanical]}
-  - {id: control_world_takes_no_witness, kind: negative, form: test,
-     discharged_by: test_the_control_world_takes_no_base_witness,
+  - {id: control_world_takes_no_witness, kind: negative, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_the_control_world_takes_no_base_witness`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_served->base_pattern)"]}
 
   # ---- O4/M3: the ladder, the withholding, and the mechanical world finding ------------------
-  - {id: hydra_shape_world_still_enqueues_lead_set, kind: domain-outcome, form: test,
-     discharged_by: test_a_reachable_world_that_showed_nothing_still_enqueues_lead_set,
+  - {id: hydra_shape_world_still_enqueues_lead_set, kind: domain-outcome, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_reachable_world_that_showed_nothing_still_enqueues_lead_set`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["drives(_grade_world->append_rows)", "interacts(append_rows->findings_channel)", "judge_record.identity"]}
-  - {id: measured_nothing_withholds_defender_findings, kind: domain-outcome, form: test,
-     discharged_by: test_a_measured_nothing_world_withholds_its_defender_findings,
+  - {id: measured_nothing_withholds_defender_findings, kind: domain-outcome, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_measured_nothing_world_withholds_its_defender_findings`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["judge_record.identity", "drives(_grade_world->append_rows)",
              "withheld_reason.domain.distinguished[measured_nothing]"]}
-  - {id: withheld_reason_capture_unaddressed, kind: domain-outcome, form: test,
-     discharged_by: test_withheld_reason_is_capture_unaddressed_when_nothing_names_the_corpus,
+  - {id: withheld_reason_capture_unaddressed, kind: domain-outcome, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_withheld_reason_is_capture_unaddressed_when_nothing_names_the_corpus`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["judge_record.identity", "withheld_reason.domain.distinguished[capture_unaddressed]"]}
-  - {id: withheld_reason_reachability_unmeasured, kind: domain-outcome, form: test,
-     discharged_by: test_withheld_reason_is_reachability_unmeasured_when_every_reask_faulted,
+  - {id: withheld_reason_reachability_unmeasured, kind: domain-outcome, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_withheld_reason_is_reachability_unmeasured_when_every_reask_faulted`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["judge_record.identity", "withheld_reason.domain.distinguished[reachability_unmeasured]"]}
-  - {id: withheld_world_excluded_from_verdict_word, kind: behavior, form: test,
-     discharged_by: test_a_withheld_world_does_not_vote_in_verdict_word,
+  - {id: withheld_world_excluded_from_verdict_word, kind: behavior, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_withheld_world_does_not_vote_in_verdict_word`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["judge_record.identity", verdict_word]}
-  - {id: no_measuring_world_is_undecidable, kind: domain-outcome, form: test,
-     discharged_by: test_verdict_word_is_undecidable_when_no_world_measured,
+  - {id: no_measuring_world_is_undecidable, kind: domain-outcome, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_verdict_word_is_undecidable_when_no_world_measured`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["judge_record.identity", "verdict_word.domain.distinguished[undecidable]"]}
-  - {id: unreachable_difference_fires_on_any_declared_difference, kind: domain-outcome, form: test,
-     discharged_by: test_unreachable_difference_fires_for_inject_exclude_and_patch_alike,
+  - {id: unreachable_difference_fires_on_any_declared_difference, kind: domain-outcome, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_unreachable_difference_fires_for_inject_exclude_and_patch_alike`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["world_finding_bucket.domain.distinguished[unreachable-difference]"]}
-  - {id: unreachable_difference_fires_on_ladder_row_1, kind: domain-outcome, form: test,
-     discharged_by: test_unreachable_difference_fires_even_with_no_row_on_the_holding_system,
+  - {id: unreachable_difference_fires_on_ladder_row_1, kind: domain-outcome, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_unreachable_difference_fires_even_with_no_row_on_the_holding_system`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["world_finding_bucket.domain.distinguished[unreachable-difference]"]}
-  - {id: agreed_without_difference_is_a_trial_outcome, kind: negative, form: test,
-     discharged_by: test_agreed_without_difference_is_a_trial_outcome_not_a_world_finding,
+  - {id: agreed_without_difference_is_a_trial_outcome, kind: negative, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_agreed_without_difference_is_a_trial_outcome_not_a_world_finding`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["judge_record.identity", world_finding_bucket]}
   - {id: agreed_without_evidence_removal_settles_the_921_graph, kind: coherence, form: test,
      discharged_by: test_removing_the_flag_leaves_no_orphan_in_the_committed_spec_corpus,
      binds: ["family_bucket.domain.distinguished[agreed-without-evidence]",
              "interacts(spec_corpus->family_bucket)", "interacts(test_921_family_buckets->family_bucket)",
              "interacts(_grade_world->family_bucket)"]}
-  - {id: reachable_by_sibling_only_runs_the_ladder_unchanged, kind: domain-outcome, form: test,
-     discharged_by: test_reachable_by_sibling_only_leaves_the_defender_ladder_unchanged,
+  - {id: reachable_by_sibling_only_runs_the_ladder_unchanged, kind: domain-outcome, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_reachable_by_sibling_only_leaves_the_defender_ladder_unchanged`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["judge_record.identity"]}
-  - {id: grade_family_reads_the_review_record_once, kind: behavior, form: test,
-     discharged_by: test_grade_family_reads_the_review_record_once_through_the_guarded_reader,
+  - {id: grade_family_reads_the_review_record_once, kind: behavior, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_grade_family_reads_the_review_record_once_through_the_guarded_reader`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_grade_world->review_record)", "interacts(_grade_world->reachability)"]}
 
   # ---- O5/M4: the sample, the per-world prompt, and the open world vocabulary ----------------
@@ -350,11 +350,11 @@ demands:
   - {id: present_sample_admits_shape_invention, kind: behavior, form: test,
      discharged_by: test_a_present_sample_admits_a_shape_invention_finding,
      binds: ["judge_reply.access[world-subject]", "samples_yaml.payload"]}
-  - {id: review_section_rendered_per_graded_world, kind: shape, form: test,
-     discharged_by: test_the_per_world_prompt_carries_that_worlds_reachability_block,
+  - {id: review_section_rendered_per_graded_world, kind: shape, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_the_per_world_prompt_carries_that_worlds_reachability_block`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(render->judge_prompt).payload", "interacts(render->reachability)"]}
   - {id: per_world_prompt_holds_no_sibling_overlay, kind: negative, form: test,
-     discharged_by: test_the_per_world_prompt_holds_no_siblings_overlay,
+     discharged_by: test_the_per_world_prompt_holds_no_siblings_facts,
      binds: ["interacts(render->judge_prompt).payload", "interacts(_run_world_draws->wire_log)"]}
   - {id: world_bucket_names_reach_the_prompt_as_examples, kind: shape, form: test,
      discharged_by: test_the_world_buckets_reach_the_prompt_as_examples_not_as_an_enum,
@@ -395,7 +395,7 @@ demands:
      discharged_by: test_a_lesson_matching_neither_pattern_nor_system_is_absent,
      binds: ["interacts(questioner->questioner_call1_prompt).payload"]}
   - {id: world_md_names_exclude, kind: shape, form: test,
-     discharged_by: test_world_md_names_exclude_as_the_way_to_express_an_absence,
+     discharged_by: test_world_md_names_how_to_express_an_absence,
      binds: ["interacts(questioner->questioner_call1_prompt).payload"]}
 
   # ---- D3/M7 + R1's four literals: the corpus, its curator, and the drain ----------------------
@@ -468,20 +468,20 @@ demands:
      binds: ["questioner_findings_channel.identity"]}
 
   # ---- N4/M9: honest counts, and what the review still rejects --------------------------------
-  - {id: injected_retrieved_is_envelope_hits_only, kind: behavior, form: test,
-     discharged_by: test_injected_retrieved_is_the_envelopes_own_hits_and_present_is_the_door_count,
+  - {id: injected_retrieved_is_envelope_hits_only, kind: behavior, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_injected_retrieved_is_the_envelopes_own_hits_and_present_is_the_door_count`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: [reachability]}
-  - {id: injection_rejection_branch_retired, kind: survival, form: test,
-     discharged_by: test_a_world_whose_envelope_retrieves_no_injection_is_no_longer_rejected,
+  - {id: injection_rejection_branch_retired, kind: survival, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_world_whose_envelope_retrieves_no_injection_is_no_longer_rejected`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_rejection->review_record)"]}
-  - {id: patch_rejection_branch_survives, kind: survival, form: test,
-     discharged_by: test_the_patch_rejection_branch_still_rejects,
+  - {id: patch_rejection_branch_survives, kind: survival, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_the_patch_rejection_branch_still_rejects`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_rejection->review_record)"]}
-  - {id: contradiction_and_zero_exclusion_rejections_survive, kind: survival, form: test,
-     discharged_by: test_contradiction_and_zero_exclusion_rejections_survive,
+  - {id: contradiction_and_zero_exclusion_rejections_survive, kind: survival, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_contradiction_and_zero_exclusion_rejections_survive`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_rejection->review_record)"]}
-  - {id: review_admits_an_unreachable_world, kind: negative, form: test,
-     discharged_by: test_the_review_admits_a_world_that_is_unreachable_by_capture,
+  - {id: review_admits_an_unreachable_world, kind: negative, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_the_review_admits_a_world_that_is_unreachable_by_capture`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_rejection->review_record)"]}
 
   # ---- S7: the evidence resolver, widened for one subject only ---------------------------------
@@ -511,9 +511,9 @@ demands:
   # demands -> tests edge; a consensus answer that never became a demand is the canonical
   # silent hole (rules.md, "Premise-disposition conservation").
   # ===========================================================================================
-  - {id: d_any_reask_fault_is_faulted_and_the_loop_continues, kind: behavior, form: test,
+  - {id: d_any_reask_fault_is_faulted_and_the_loop_continues, kind: behavior, form: clause,
      minted_from: "consensus test_m1_partial_fault_mid_pattern_list + auto test_m1_reask_hits_a_non_staging_adapter_fault",
-     discharged_by: test_any_reask_fault_records_faulted_and_the_pattern_loop_continues,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_any_reask_fault_records_faulted_and_the_pattern_loop_continues`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_reachability->world_view)", reachability]}
   - {id: d_world_bucket_must_be_a_string, kind: shape, form: test,
      minted_from: "consensus test_world_bucket_is_non_string",
@@ -532,9 +532,9 @@ demands:
      discharged_by: test_a_near_miss_subject_is_refused_with_no_case_fold_and_no_trim,
      binds: [subject, "interacts(validate_reply->judge_reply).payload",
              "interacts(append_rows->questioner_findings_channel)"]}
-  - {id: d_a_staged_row_without_the_witness_field_reads_unmeasured, kind: survival, form: test,
+  - {id: d_a_staged_row_without_the_witness_field_reads_unmeasured, kind: survival, form: clause,
      minted_from: "consensus test_served_ledger_row_missing_differs_from_base_key",
-     discharged_by: test_a_pre_change_staged_row_is_not_read_as_a_measured_absence,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_pre_change_staged_row_is_not_read_as_a_measured_absence`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["served_ledger.payload", differs_from_base]}
   - {id: d_defender_queue_row_carries_its_subject_key, kind: shape, form: test,
      minted_from: "consensus test_defender_row_carries_a_subject_key",
@@ -545,17 +545,17 @@ demands:
      discharged_by: test_a_defender_subject_row_cannot_reach_the_questioner_curator,
      binds: ["interacts(append_rows->questioner_findings_channel)",
              "interacts(questioner_curator->questioner_findings_channel)"]}
-  - {id: d_reachability_facts_survive_a_later_rejection, kind: behavior, form: test,
+  - {id: d_reachability_facts_survive_a_later_rejection, kind: behavior, form: clause,
      minted_from: "consensus test_1007_m1_reachability_facts_recorded_for_a_world_review_then_rejects_on_another_ground",
-     discharged_by: test_the_reachability_facts_stay_on_the_record_when_the_world_is_later_rejected,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_the_reachability_facts_stay_on_the_record_when_the_world_is_later_rejected`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_reachability->review_record)", "interacts(_rejection->review_record)"]}
   - {id: d_evidence_pointer_traversal_is_refused_through_the_widened_set, kind: negative, form: test,
      minted_from: "consensus test_evidence_pointer_walks_traversal_syntax_through_the_widened_three_file_set",
      discharged_by: test_traversal_syntax_is_refused_on_every_widened_episode_level_pointer,
      binds: ["judge_reply.access[world-subject]"]}
-  - {id: d_a_withheld_world_is_still_drawn, kind: negative, form: test,
+  - {id: d_a_withheld_world_is_still_drawn, kind: negative, form: clause,
      minted_from: "consensus test_a_withheld_world_is_still_drawn_and_still_says_something_about_the_world",
-     discharged_by: test_a_withheld_world_is_still_drawn_and_still_yields_world_findings,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_withheld_world_is_still_drawn_and_still_yields_world_findings`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["judge_record.identity", "interacts(render->judge_prompt).payload"]}
   - {id: d_the_untrusted_frame_closes_on_a_body_carrying_its_own_delimiter, kind: parity, form: test,
      minted_from: "consensus test_a_lesson_body_carries_the_delimiter_of_the_frame_it_will_arrive_in",
@@ -563,13 +563,13 @@ demands:
      binds: ["questioner_call1_prompt.access[lessons-section]",
              "questioner_call1_prompt.access[capture-section]",
              "interacts(questioner->questioner_call1_prompt).payload"]}
-  - {id: d_a_captured_row_with_no_derivable_pattern_is_not_selected, kind: domain-outcome, form: test,
+  - {id: d_a_captured_row_with_no_derivable_pattern_is_not_selected, kind: domain-outcome, form: clause,
      minted_from: "consensus test_a_captured_row_whose_pattern_cannot_be_derived (P-C.2: source_pattern hands back None)",
-     discharged_by: test_a_captured_row_whose_pattern_cannot_be_derived_is_never_re_asked,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_captured_row_whose_pattern_cannot_be_derived_is_never_re_asked`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_reachability->world_view)", "interacts(_reachability->base_pattern)"]}
-  - {id: d_the_witness_and_base_arm_reads_are_recorded_at_the_read_door, kind: parity, form: test,
+  - {id: d_the_witness_and_base_arm_reads_are_recorded_at_the_read_door, kind: parity, form: clause,
      minted_from: "consensus test_the_witness_read_is_recorded_wherever_reads_are_recorded (brief F3)",
-     discharged_by: test_both_new_reads_go_through_the_recording_read_door_with_the_plain_ctx,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_both_new_reads_go_through_the_recording_read_door_with_the_plain_ctx`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["base_pattern.access[base-arm]", "base_pattern.access[witness]"]}
   - {id: d_family_draws_disagree_take_the_majority, kind: domain-outcome, form: test,
      minted_from: "consensus test_the_family_draws_do_not_agree",
@@ -583,14 +583,14 @@ demands:
      minted_from: "consensus test_two_episodes_grade_into_one_questioner_channel_at_once",
      discharged_by: test_two_episodes_appending_at_once_lose_no_questioner_row,
      binds: ["questioner_findings_channel.identity", "interacts(append_rows->questioner_findings_channel)"]}
-  - {id: d_a_missing_side_faults_before_the_comparator_is_called, kind: negative, form: test,
+  - {id: d_a_missing_side_faults_before_the_comparator_is_called, kind: negative, form: clause,
      minted_from: "auto F-A test_one_arm_faults_and_the_other_answers (P-D: mechanical(None, text) is an uncaught TypeError, not a verdict)",
      restated_at_seam: "H4 (§7, resolved_by: human) BINDS this and WIDENS it: `mechanical(None,
        <text>)` raises an uncaught TypeError out of `_folded`'s re.sub, so BOTH M1 arms AND M2's
        witness must guard a `None` side rather than call through it. The witness edge and both
        comparator invocations are added to `binds` for that reason; F-A(f) — either arm failing
        records `faulted: true` once — is taken as recommended in the same decision.",
-     discharged_by: test_a_missing_arm_records_faulted_once_and_never_reaches_the_comparator,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_missing_arm_records_faulted_once_and_never_reaches_the_comparator`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["mechanical.domain.distinguished[none-argument]", "interacts(_reachability->base_pattern)",
              "interacts(_reachability->mechanical)", "interacts(_served->mechanical)",
              "interacts(_served->base_pattern)", reachability]}
@@ -604,40 +604,40 @@ demands:
      binds: ["samples_yaml.identity", "interacts(launcher->samples_yaml)"]}
   - {id: d_an_overlay_pattern_matches_a_samples_key_exactly, kind: domain-outcome, form: test,
      minted_from: "auto test_overlay_pattern_string_differs_by_case_from_samples_yaml_key",
-     discharged_by: test_a_case_differing_overlay_pattern_misses_the_sample_and_refuses_the_finding,
+     discharged_by: test_a_case_differing_system_misses_the_sample_and_refuses_the_finding,
      binds: ["samples_yaml.identity"]}
-  - {id: d_an_incomplete_capture_replay_entry_is_unmeasured, kind: domain-outcome, form: test,
+  - {id: d_an_incomplete_capture_replay_entry_is_unmeasured, kind: domain-outcome, form: clause,
      minted_from: "auto test_capture_replay_entry_missing_a_key",
-     discharged_by: test_an_incomplete_capture_replay_entry_is_never_a_completed_non_differing_reask,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_an_incomplete_capture_replay_entry_is_never_a_completed_non_differing_reask`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: [reachability, "reachable_by_capture.domain.distinguished[null]"]}
-  - {id: d_a_non_boolean_reachable_by_capture_reads_unmeasured, kind: domain-outcome, form: test,
+  - {id: d_a_non_boolean_reachable_by_capture_reads_unmeasured, kind: domain-outcome, form: clause,
      minted_from: "auto test_reachable_by_capture_stored_as_a_string_not_a_boolean",
-     discharged_by: test_a_non_boolean_reachable_by_capture_reads_as_unmeasured,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_non_boolean_reachable_by_capture_reads_as_unmeasured`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: [reachable_by_capture, "interacts(_grade_world->reachability)"]}
   - {id: d_a_malformed_queue_or_ledger_line_is_skipped_and_counted, kind: parity, form: test,
      minted_from: "auto test_served_ledger_line_is_malformed_json + test_questioner_queue_line_is_malformed_json",
      discharged_by: test_a_malformed_line_on_either_channel_is_skipped_and_counted_never_silently_absent,
      binds: ["questioner_findings_channel.payload", "served_ledger.payload"]}
-  - {id: d_an_absent_reachability_block_withholds_and_never_reads_false, kind: negative, form: test,
+  - {id: d_an_absent_reachability_block_withholds_and_never_reads_false, kind: negative, form: clause,
      minted_from: "auto test_the_review_record_holds_no_block_for_the_world_being_graded",
-     discharged_by: test_an_absent_reachability_block_withholds_and_never_mints_unreachable_difference,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_an_absent_reachability_block_withholds_and_never_mints_unreachable_difference`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_grade_world->reachability)",
              "withheld_reason.domain.distinguished[reachability_unmeasured]"]}
-  - {id: d_a_world_label_in_only_one_artifact_reads_as_an_absent_block, kind: coherence, form: test,
+  - {id: d_a_world_label_in_only_one_artifact_reads_as_an_absent_block, kind: coherence, form: clause,
      minted_from: "auto test_the_review_record_and_the_manifest_disagree_about_the_world_set",
-     discharged_by: test_a_label_present_in_only_one_artifact_reads_as_an_absent_block,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_label_present_in_only_one_artifact_reads_as_an_absent_block`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_grade_world->reachability)", "interacts(_grade_world->review_record)"]}
-  - {id: d_the_base_arm_memo_caches_successes_only, kind: negative, form: test,
+  - {id: d_the_base_arm_memo_caches_successes_only, kind: negative, form: clause,
      minted_from: "auto test_m1_base_arm_fault_is_memoized_across_worlds",
-     discharged_by: test_a_faulted_base_arm_is_not_memoised_across_worlds,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_faulted_base_arm_is_not_memoised_across_worlds`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["base_arm_memo.identity", "interacts(_reachability->base_pattern)"]}
   - {id: d_a_faulted_family_draw_leaves_the_per_world_rows_intact, kind: survival, form: test,
      minted_from: "auto test_the_family_draw_faults_while_the_per_world_draws_completed",
-     discharged_by: test_a_faulted_family_draw_isolates_and_leaves_verdict_word_intact,
+     discharged_by: test_a_faulted_family_draw_isolates_and_leaves_the_per_world_rows_intact,
      binds: ["judge_record.identity", "drives(grade_episode->_run_family_draw)"]}
-  - {id: d_the_reachability_block_rides_the_one_whole_record_review_write, kind: shape, form: test,
+  - {id: d_the_reachability_block_rides_the_one_whole_record_review_write, kind: shape, form: clause,
      minted_from: "P-C.3 (executed): review() writes review.yaml exactly once per episode pass — F-D(a)'s incumbent cadence, now bindable",
-     discharged_by: test_the_reachability_block_is_written_in_the_one_guarded_whole_record_write,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_the_reachability_block_is_written_in_the_one_guarded_whole_record_write`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(review->review_record)", "interacts(_reachability->review_record)"]}
   - {id: d_the_family_trace_name_survives_the_colon_fold, kind: uniqueness, form: test,
      minted_from: "consensus test_the_family_calls_identity_becomes_a_filename (P-C.1: the colon fold is the CALLER's, and it is not injective)",
@@ -679,48 +679,48 @@ demands:
   # ran the 13 files that reference the three consumers: 316 passed before, 316 passed after, 0
   # flipped. No existing test exercises an empty or content-identical patch, so each consumer owes
   # its own NEW test — none of these three restates coverage the suite already has.
-  - {id: d_the_served_row_reads_passthrough_when_the_patch_changes_no_content, kind: domain-outcome, form: test,
+  - {id: d_the_served_row_reads_passthrough_when_the_patch_changes_no_content, kind: domain-outcome, form: clause,
      minted_from: "H1 consumer (i): the serve path's PATCHED/PASSTHROUGH ledger `source`, applier.py:245-246 (pac-1, pac-2)",
-     discharged_by: test_a_name_matching_patch_that_changes_no_content_serves_as_passthrough,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_name_matching_patch_that_changes_no_content_serves_as_passthrough`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["applied_counter.domain.distinguished[0]",
              "applied_counter.domain.alternatives[name-match-with-identical-content]",
              "interacts(_served->applied_counter)", "interacts(_served->served_ledger)"]}
-  - {id: d_the_world_rejection_gate_reads_the_content_diff_counter, kind: domain-outcome, form: test,
+  - {id: d_the_world_rejection_gate_reads_the_content_diff_counter, kind: domain-outcome, form: clause,
      minted_from: "H1 consumer (ii): `_patched_visible` (review.py:731,743) feeding `_rejection` (review.py:876), which rejects a whole world and ends the episode before siblings run (pac-3)",
-     discharged_by: test_a_patch_that_changes_no_content_rejects_the_world_and_a_content_changing_one_does_not,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_patch_that_changes_no_content_rejects_the_world_and_a_content_changing_one_does_not`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["patched_visible.domain.distinguished[false]",
              "interacts(_patched_visible->applied_counter)", "interacts(_rejection->patched_visible)",
              "interacts(_rejection->review_record)"]}
-  - {id: d_doctored_answer_served_follows_the_content_diff_counter, kind: coherence, form: test,
+  - {id: d_doctored_answer_served_follows_the_content_diff_counter, kind: coherence, form: clause,
      minted_from: "H1 consumer (iii): `judge/family.py`'s `doctored_answer_served` (:663-667) selecting the grading bucket table (:34-39) and gating the agreed-without-evidence flag (:724) (pac-4)",
-     discharged_by: test_a_content_identical_patch_grades_in_the_undoctored_bucket_family,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_content_identical_patch_grades_in_the_undoctored_bucket_family`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_doctored_answer_served->served_ledger)",
              "interacts(_doctored_answer_served->bucket_table)",
              "bucket_table.domain.distinguished[lead-quality]"]}
 
   # ---- H4 (human): confirm a difference before recording it, and name what makes it safe ------
-  - {id: d_a_difference_is_confirmed_by_one_back_to_back_re_read, kind: behavior, form: test,
+  - {id: d_a_difference_is_confirmed_by_one_back_to_back_re_read, kind: behavior, form: clause,
      minted_from: "H4 cells (a)+(c): read-to-read instability and base/world time skew. One back-to-back re-read is taken and the difference is recorded only if it survives",
-     discharged_by: test_a_difference_is_recorded_only_after_one_confirming_re_read,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_difference_is_recorded_only_after_one_confirming_re_read`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_reachability->base_pattern)", "interacts(_reachability->world_view)",
              "mechanical.domain.distinguished[none-unsettled]", reachability]}
-  - {id: d_the_confirming_re_read_is_taken_only_on_the_differing_path, kind: negative, form: test,
+  - {id: d_the_confirming_re_read_is_taken_only_on_the_differing_path, kind: negative, form: clause,
      minted_from: "H4: the extra read happens ONLY on the differing path — a SAME or FORMATTING comparison takes no second read (the positive control is the differing path above)",
-     discharged_by: test_a_non_differing_comparison_takes_no_second_read,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_non_differing_comparison_takes_no_second_read`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_reachability->base_pattern)", "interacts(_reachability->world_view)",
              "drives(review->_reachability)"]}
-  - {id: d_the_adapter_normalization_the_ladder_rests_on_is_load_bearing, kind: shape, form: test,
+  - {id: d_the_adapter_normalization_the_ladder_rests_on_is_load_bearing, kind: shape, form: clause,
      minted_from: "H4, explicitly: pd-8 shows the incidental-field protection (took/_shards/_id) lives in `elastic_adapter._search`'s normalization, NOT in `mechanical` — the ladder's safety is one layer from the code that depends on it and is named by no obligation today",
-     discharged_by: test_the_search_envelope_the_ledger_sees_carries_no_took_shards_or_document_id,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_the_search_envelope_the_ledger_sees_carries_no_took_shards_or_document_id`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(elastic_adapter_search->search_envelope).payload", "search_envelope.payload",
              "interacts(_reachability->search_envelope)", "interacts(_served->search_envelope)"]}
-  - {id: d_the_base_arm_memo_is_keyed_on_the_full_pattern_and_params_tuple, kind: uniqueness, form: test,
+  - {id: d_the_base_arm_memo_is_keyed_on_the_full_pattern_and_params_tuple, kind: uniqueness, form: clause,
      minted_from: "H4's guard clause for F-A(d), taken as recommended: the memo key is the full (source_pattern, params) tuple, not the source pattern alone",
-     discharged_by: test_two_captured_rows_sharing_a_pattern_and_differing_in_params_get_their_own_base_answers,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_two_captured_rows_sharing_a_pattern_and_differing_in_params_get_their_own_base_answers`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["base_arm_memo.identity", "interacts(_reachability->base_arm_memo)"]}
-  - {id: d_two_empty_results_read_as_the_same_answer, kind: domain-outcome, form: test,
+  - {id: d_two_empty_results_read_as_the_same_answer, kind: domain-outcome, form: clause,
      minted_from: "H4's guard clause for F-A(e), taken as recommended and grounded on pd-6: both arms empty is SAME, not a difference",
-     discharged_by: test_two_empty_results_are_the_same_answer_and_not_a_difference,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_two_empty_results_are_the_same_answer_and_not_a_difference`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: [mechanical, "reachable_by_capture.domain.distinguished[false]"]}
 
   # ---- H2 (human) + G-1: wrapper yes, filter no ----------------------------------------------
@@ -744,7 +744,7 @@ demands:
      discharged_by: test_a_second_attempts_step_2_overwrites_the_first_attempts_samples,
      binds: ["samples_yaml.domain.alternatives[re-entered-step-2]", "interacts(launcher->samples_yaml)",
              "samples_yaml.identity"]}
-  - {id: d_a_re_entered_episode_is_adopted_with_its_artifacts_intact, kind: behavior, form: test,
+  - {id: d_a_re_entered_episode_is_adopted_with_its_artifacts_intact, kind: behavior, form: clause,
      minted_from: "PHASE F, F-R3. H3 has TWO halves and only the writer's was pinned. The second is
        equally explicit and was decided against a named, costed alternative: `the adopt path KEEPS
        its current admission predicate (refuse_claimed_episode + no served/*.jsonl besides
@@ -758,14 +758,14 @@ demands:
        writer's truncate semantics: a gap covered one layer away from where it lives is uncovered.
        Driven through the `prime=` injection seam `prepare_episode` already exposes for exactly
        this caller; e68-4 executed the scenario, so the fixture is a transcription.",
-     discharged_by: test_a_re_entered_episode_is_adopted_and_the_second_attempts_samples_win,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_re_entered_episode_is_adopted_and_the_second_attempts_samples_win`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["episode_dir.domain.alternatives[adopted-partial-episode]",
              "interacts(prepare_episode->episode_dir)", prepare_episode,
              "interacts(launcher->samples_yaml)"],
      cites: [e68-4, e68-5]}
-  - {id: d_a_re_entered_review_re_derives_the_reachability_block, kind: behavior, form: test,
+  - {id: d_a_re_entered_review_re_derives_the_reachability_block, kind: behavior, form: clause,
      minted_from: "H3: a re-entered review RE-DERIVES the reachability block rather than trusting the adopted episode's; the adopt path keeps its current admission predicate (refuse_claimed_episode plus no served/*.jsonl besides base.jsonl) and keeps resuming killed episodes (e68-4, e68-5)",
-     discharged_by: test_a_re_entered_review_re_derives_every_worlds_reachability_block,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_re_entered_review_re_derives_every_worlds_reachability_block`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(review->review_record)", "interacts(_reachability->review_record)",
              "interacts(prepare_episode->episode_dir)",
              "episode_dir.domain.alternatives[adopted-partial-episode]"]}
@@ -782,9 +782,9 @@ demands:
      discharged_by: test_a_finding_citing_an_unavailable_sample_is_refused_whatever_its_bucket,
      binds: ["judge_reply.access[world-subject]", "samples_yaml.payload", "judge_record.identity",
              "world_finding_bucket.domain.alternatives[any-unlisted-string]"]}
-  - {id: d_a_mechanical_world_finding_carries_its_provenance, kind: shape, form: test,
+  - {id: d_a_mechanical_world_finding_carries_its_provenance, kind: shape, form: clause,
      minted_from: "A1(c): mechanical findings carry a provenance field and readers key on PROVENANCE, never on bucket uniqueness — the mechanical pass and a model draw can both mint `unreachable-difference` on one world",
-     discharged_by: test_a_mechanical_world_finding_is_told_from_a_model_drawn_one_by_provenance,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_mechanical_world_finding_is_told_from_a_model_drawn_one_by_provenance`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["questioner_findings_channel.payload", world_finding_bucket,
              "world_finding_bucket.domain.alternatives[story-overlay-gap]",
              "interacts(_grade_world->world_finding_bucket)"]}
@@ -875,12 +875,12 @@ demands:
              "interacts(_gate_findings->findings_channel)"]}
   - {id: d_the_appender_is_the_last_screen_for_the_required_world_fields, kind: shape, form: test,
      minted_from: "A3(b): `pattern`, `holding_system` and `subject` are REQUIRED at the appender — the questioner channel's own gate is idempotency-only (M7), so the appender is the last screen",
-     discharged_by: test_a_world_row_missing_pattern_holding_system_or_subject_is_refused_at_the_appender,
+     discharged_by: test_a_world_row_missing_systems_or_subject_is_refused_at_the_appender,
      binds: ["interacts(append_rows->questioner_findings_channel)", "questioner_findings_channel.payload",
              "interacts(questioner_curator->questioner_findings_channel)"]}
-  - {id: d_a_re_grade_is_absorbed_by_the_mechanical_findings_fixed_draw_and_index, kind: uniqueness, form: test,
+  - {id: d_a_re_grade_is_absorbed_by_the_mechanical_findings_fixed_draw_and_index, kind: uniqueness, form: clause,
      minted_from: "A3(e): the mechanical finding takes a fixed synthetic `draw`/`index`, so a re-grade of the same episode is absorbed by idempotency rather than appending a second row",
-     discharged_by: test_a_re_grade_appends_no_second_mechanical_world_finding,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_a_re_grade_appends_no_second_mechanical_world_finding`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["questioner_findings_channel.identity", "drives(_grade_world->append_rows)"]}
   - {id: d_the_world_lane_does_not_share_the_defender_lanes_unqueueable_early_return, kind: parity, form: test,
      minted_from: "A3(g): the world lane does NOT share the defender lane's unqueueable early return — a defender finding that cannot be queued must not silently take the world findings with it",
@@ -897,9 +897,9 @@ demands:
      discharged_by: test_a_questioner_queue_row_carries_no_defender_verdict_word,
      binds: ["questioner_findings_channel.payload", verdict_word,
              "interacts(append_rows->questioner_findings_channel)"]}
-  - {id: d_an_episode_that_died_before_the_defender_ran_is_withheld_as_episode_incomplete, kind: domain-outcome, form: test,
+  - {id: d_an_episode_that_died_before_the_defender_ran_is_withheld_as_episode_incomplete, kind: domain-outcome, form: clause,
      minted_from: "A3, cell (h): ladder row 1 requires at least one SERVED row somewhere in the episode before any defender finding is authored; otherwise the world is withheld with reason `episode_incomplete`. Without it an episode killed before step 5 is indistinguishable from a defender that queried nothing, and the defender is falsely accused at O4's own falsifier",
-     discharged_by: test_an_episode_killed_before_the_sibling_ran_withholds_with_episode_incomplete,
+     status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_an_episode_killed_before_the_sibling_ran_withholds_with_episode_incomplete`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["withheld_reason.domain.alternatives[episode_incomplete]", "judge_record.identity",
              "drives(_grade_world->append_rows)", "interacts(_grade_world->review_record)"]}
   - {id: d_a_finding_id_consumed_on_one_channel_does_not_suppress_the_other, kind: uniqueness, form: test,
@@ -930,7 +930,7 @@ demands:
              "interacts(launcher->episode_token)", "episode_dir", world_view]}
   - {id: d_an_episode_stages_and_is_read_under_one_namespace, kind: coherence, form: test,
      minted_from: "F-R5 (human, PHASE F), the correctness half: an episode must not stage under one namespace and be read back under another. Today the token is threaded to staging and to nothing else — review.py:298, _family.py:702 and _family.py:859 all re-derive from the episode id and the manifest records no token (f5-override-is-not-threaded-to-any-reader) — so the flag makes staging and every reader disagree. Bound at each unmoved reader's OWN edge, never at the boundary, and asserted by construction as well: the derivation takes the episode id and nothing else, so no caller can hand staging a namespace a reader will not re-derive",
-     discharged_by: test_an_episode_stages_and_is_read_under_one_namespace,
+     discharged_by: test_an_episode_is_read_under_one_namespace,
      binds: ["interacts(review->episode_token)", "interacts(grade_episode->episode_token)",
              "interacts(resume_world_from->episode_token)"]}
   - {id: d_an_unrenderable_source_run_id_is_refused_by_the_gate_that_runs_first, kind: survival, form: test,

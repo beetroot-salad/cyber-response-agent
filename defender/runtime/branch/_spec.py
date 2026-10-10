@@ -16,7 +16,7 @@ from pydantic import model_validator
 
 
 
-from defender.run_repository import RUN_LAYOUT, RunPaths
+from defender.run_repository import RUN_LAYOUT, RunPaths, artifact_file
 
 from .. import session_store
 from defender._io import read_text_utf8
@@ -126,6 +126,20 @@ def open_source_store(run_dir: Path) -> Any:
             f"runs_base {run_dir.parent} resolves to {derived} — opening the derived path "
             "would create an empty database and lose the branch point")
     return session_store.open_store(case_id=case_id, runs_base=run_dir.parent)
+
+
+def source_store_if_any(run_dir: Path) -> Any:
+    """The finished run's own store (`open_source_store`), or `None` when it carries no
+    session pointer.
+
+    Only an absent pointer means "no session". `open_source_store` raises one class for both a
+    missing pointer and one that does not reconcile, so the presence check is made here and a
+    mismatch still propagates as a refusal rather than silently taking a storeless fallback
+    (wrong T0, the finished document's frontier, no fixed prefix).
+    """
+    if not artifact_file(RunPaths(Path(run_dir)).session_pointer):
+        return None
+    return open_source_store(run_dir)
 
 
 def store_factory_for(spec: BranchSpec):

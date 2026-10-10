@@ -751,7 +751,7 @@ def test_the_family_record_carries_the_familys_base_world(tmp_path):
 
     with Episode.open(ep) as episode:
         report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
-    assert report["outcome"] == "accepted", report["reason"]
+    assert report["comparable"] is True, report["reason"]
     family = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
     assert family["base_world_id"] == tenant_record.base_world_id, (
         "dispositions red flag 5: under D3 as written no member of a family ever stamps the "
@@ -769,7 +769,7 @@ def test_the_family_stamp_agrees_on_the_tenant_and_not_on_the_world(tmp_path):
 
     with Episode.open(ep) as episode:
         report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
-    assert report["outcome"] == "accepted", report["reason"]
+    assert report["comparable"] is True, report["reason"]
     agreed = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))["agreed"]
     assert agreed["tenant_id"] == FAMILY_TENANT, (
         "the tenant is constant across a family and stays in `agreed`")
@@ -790,7 +790,7 @@ def test_family_stamps_agreed_dict_is_all_slots_bound_minus_world_id(tmp_path):
 
     with Episode.open(ep) as episode:
         report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
-    assert report["outcome"] == "accepted", report["reason"]
+    assert report["comparable"] is True, report["reason"]
     stamp = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
     agreed = stamp["agreed"]
     assert agreed["tenant_id"] == FAMILY_TENANT, "the slot is bound on every write"
@@ -809,7 +809,7 @@ def test_a_family_spanning_two_tenants_is_a_member_fault(tmp_path):
 
     with Episode.open(ep) as episode:
         report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
-    assert report["outcome"] == "incomplete", report["reason"]
+    assert report["comparable"] is False, report["reason"]
     assert "tenant" in report["reason"], (
         f"a family spanning tenants is a fault, added to `_member_faults`: {report['reason']}")
     assert not (ep / "provenance.json").exists(), "a cross-tenant family was stamped as agreed"
@@ -827,7 +827,7 @@ def test_a_sibling_stamp_with_no_tenant_field_is_its_own_named_fault(tmp_path):
 
     with Episode.open(ep) as episode:
         report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
-    assert report["outcome"] == "incomplete", report["reason"]
+    assert report["comparable"] is False, report["reason"]
     reason = report["reason"]
     named_fault = (
         f"treating 'absent' as 'compatible' is exactly how a real cross-tenant family slips "
@@ -886,6 +886,6 @@ def test_verify_family_still_compares_only_commit_scope_and_model(tmp_path):
                       world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
     with Episode.open(ep) as episode:
         report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
-    assert report["outcome"] == "accepted", (
+    assert report["comparable"] is True, (
         f"siblings differ on world_id BY DESIGN; if it reached the comparison every family "
-        f"would be incomplete: {report['reason']}")
+        f"would be withheld its stamp: {report['reason']}")

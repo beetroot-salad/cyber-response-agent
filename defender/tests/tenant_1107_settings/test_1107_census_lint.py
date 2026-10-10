@@ -201,8 +201,8 @@ def test_d_settings_dir_census_detects_planted(tmp_path):
 # ======================================================================================
 
 def test_n3_helper_lookups_removed():
-    """In the four swept trees (scripts/adapters, learning/branch/estate with
-    learning/branch/staging.py, scripts/case_history, runtime/lead_zero*), no function other than
+    """In the four swept trees (scripts/adapters, learning/branch/estate,
+    scripts/case_history, runtime/lead_zero*), no function other than
     one named main calls process_defender_dir() or run_common.run_env(), or looks up DEFENDER_DIR or
     DEFENDER_RUN_DIR. The location and the env come from the caller (F6 resolved: run.py passes its
     run env)."""
@@ -306,7 +306,6 @@ def test_o7_lint_flags_each_form(tmp_path):
     planted = [
         "defender/scripts/adapters/planted_1107.py",
         "defender/learning/branch/estate/planted_1107.py",
-        "defender/learning/branch/staging.py",
         "defender/scripts/case_history/planted_1107.py",
         "defender/runtime/lead_zero/planted_1107.py",
         "defender/runtime/lead_zero_config.py",

@@ -43,7 +43,8 @@ from defender.tests.tenant_1105_run_repository import _spec1105 as H
 #: ruling, #1105 PR 1 review: it replaced their import cycle).
 PACKAGE_FILES = ("__init__.py", "_layout.py", "_handle.py", "_lookup.py", "_record.py",
                  "_held.py", "_id.py", "_errors.py")
-#: The 53 public names `defender/_run_paths.py` defines at module level at 80888efb (R4-42).
+#: The 53 public names `defender/_run_paths.py` defines at module level at 80888efb (R4-42),
+#: plus #1224's ORACLE_HELD_SUFFIX.
 LAYOUT_NAMES = frozenset({
     "WIRE_LOG_DIR", "WIRE_LOG", "PROVENANCE", "GATE_METADATA_KEY", "ALERT", "REPORT",
     "INVESTIGATION", "EXECUTED_QUERIES", "SOURCE_REFS", "RAW_MARKER", "GATHER_SUMMARIES_DIRNAME",
@@ -53,7 +54,7 @@ LAYOUT_NAMES = frozenset({
     "TOOL_TRACE", "POLICY_DENIALS", "BUDGET", "CIRCUIT_BREAKER", "LESSONS_LOADED",
     "SESSION_POINTER", "RUNTIME_HTML", "BOX_SENTINEL", "RUN_END_SIDECAR_SUFFIX",
     "SCRUB_VERDICT_SUFFIX", "ACCOUNTING_FAILURES_SUFFIX", "TICKET_WRITE_SUFFIX",
-    "SESSIONS_DIRNAME", "RunLayout", "RUN_LAYOUT", "WireLogNames", "WIRE_LOG_NAMES", "RunPaths",
+    "ORACLE_HELD_SUFFIX", "SESSIONS_DIRNAME", "RunLayout", "RUN_LAYOUT", "WireLogNames", "WIRE_LOG_NAMES", "RunPaths",
     "SessionPaths", "LEAD_ID_BODY", "LEAD_ID_RE", "GATHER_RAW_SHAPE", "CASE_ANSWER_KEY_NAMES",
     "is_case_answer_key", "gather_summaries_shape", "artifact_file", "plain_file", "artifact_dir",
     "resolve_run_bundle", "contained_payload",
@@ -370,8 +371,8 @@ def test_1105_the_package_holds_exactly_its_seven_pinned_submodules():  # name k
         f"{sorted(LAYOUT_NAMES - layout_public)}, extra {sorted(layout_public - LAYOUT_NAMES)}")
 
 
-def test_1105_the_door_serves_exactly_its_68_public_names():  # 70 since the owner rulings; the spec graph cites this name
-    """defender.run_repository.__all__ is exactly the 70 public names: the layout's 53 (the
+def test_1105_the_door_serves_exactly_its_68_public_names():  # 70 since the owner rulings, 71 with #1224's ORACLE_HELD_SUFFIX; the spec graph cites this name
+    """defender.run_repository.__all__ is exactly the 71 public names: the layout's 54 (the
     door's layout surface equals _layout's public names, NM-06), Run, RunRecord, ArchivedWorld,
     RecordHandle, case_ref, RunId, open_run, list_run_ids, bound_runs, run_exists,
     record_episode_runs, episode_runs, sibling_run_ids, episode_sibling_ids, RunRefused,
@@ -388,7 +389,7 @@ def test_1105_the_door_serves_exactly_its_68_public_names():  # 70 since the own
         f"__all__ differs from D1.3's 68 plus the two ruled names: missing "
         f"{sorted((LAYOUT_NAMES | NON_LAYOUT_PUBLIC) - served)}, extra "
         f"{sorted(served - LAYOUT_NAMES - NON_LAYOUT_PUBLIC)}")
-    assert len(served) == 70, f"{len(served)} public names, not 70"
+    assert len(served) == 71, f"{len(served)} public names, not 71"
     layout_public = {n for n in _module_defs(ast.parse(Path(_layout.__file__).read_text(
         "utf-8"))) if not n.startswith("_")}
     assert served - NON_LAYOUT_PUBLIC == layout_public, (
@@ -470,7 +471,7 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
                   "missing = [n for n in rr.__all__ if getattr(rr, n, None) is None]\n"
                   "print(len(rr.__all__), missing)\n")
     assert proc.returncode == 0, f"not every public name imports in a fresh interpreter: {_out(proc)}"
-    assert _out(proc).split()[0] == "70", f"not every public name imports in a fresh interpreter: {_out(proc)}"
+    assert _out(proc).split()[0] == "71", f"not every public name imports in a fresh interpreter: {_out(proc)}"
     assert "[]" in _out(proc), f"not every public name imports in a fresh interpreter: {_out(proc)}"
 
 
@@ -788,9 +789,9 @@ def test_1105_tree_read_lint_lists_the_new_submodules_and_not_the_moved_ones(tmp
 
 
 def test_1105_lint_baselines_name_no_deleted_path_and_unused_public_names_cite_pr_2():
-    """No lint list or baseline names defender/_run_paths.py or defender/_run_handle.py; the five
-    vulture entries keyed on them are keyed on run_repository/_layout.py and _handle.py with their
-    reasons, a sixth entry covers the door's own __getattr__ (RG-05-c), and every vulture entry
+    """No lint list or baseline names defender/_run_paths.py or defender/_run_handle.py; the
+    vulture entries keyed on them that vulture still reports are keyed on run_repository/_handle.py
+    with their reasons, a sixth entry covers the door's own __getattr__ (RG-05-c), and every vulture entry
     for a public repository name with no PR 1 caller gives a reason naming PR 2."""
     lint_dir = H.WORKTREE / "scripts" / "lint"
     baseline = json.loads((lint_dir / "lint_vulture_baseline.json").read_text("utf-8"))["entries"]
@@ -799,11 +800,11 @@ def test_1105_lint_baselines_name_no_deleted_path_and_unused_public_names_cite_p
         "defender/run_repository/_handle.py: unused property 'subcollections' (60% confidence)",
         "defender/run_repository/_handle.py: unused variable 'alert_ref' (60% confidence)",
         "defender/run_repository/_handle.py: unused variable 'tables' (60% confidence)",
-        "defender/run_repository/_layout.py: unused function 'resolve_run_bundle' "
-        "(60% confidence)",
     }
+    # #1224: the fifth, `_layout.py`'s `resolve_run_bundle`, left the baseline — vulture no
+    # longer reports it.
     assert moved <= set(baseline), (
-        f"the five moved vulture entries are not re-keyed: {sorted(moved - set(baseline))}")
+        f"the moved vulture entries are not re-keyed: {sorted(moved - set(baseline))}")
     assert all(str(baseline[k]).strip() for k in moved), "a re-keyed entry lost its reason"
     door = [k for k in baseline
             if k.startswith("defender/run_repository/__init__.py:") and "'__getattr__'" in k]

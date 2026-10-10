@@ -18,7 +18,6 @@ if (_root := str(_Path(__file__).resolve().parents[3])) not in _sys.path:
     _sys.path.insert(0, _root)
 
 from defender._model import model
-from defender._world_label import view_name_fault, world_view_fault
 from defender.scripts.adapters.faults import AdapterFault
 
 
@@ -183,16 +182,13 @@ def _reach_ok(index: str, pattern: str) -> bool:
     return index.startswith(prefix)
 
 
-def confine_index(
-    index: str, configured_patterns: Iterable[str], *, world_id: str | None = None,
-) -> str:
+def confine_index(index: str, configured_patterns: Iterable[str]) -> str:
     """Refuse an index expression whose reach (not literal string) falls outside every
     configured pattern. Evaluates Elasticsearch's grammar (comma lists, `*`, leading `-`
     exclusion) and refuses the whole call rather than narrowing to the in-bounds part.
 
-    `world_id` admits that world's views (`is_world_view`), which are named outside the
-    configured patterns on purpose. Views are per world, and only of configured corpora: the
-    world changes which name is admissible, never which corpus.
+    A branched run is confined exactly as an ordinary one: its world is served by the oracle
+    over the same corpus, never by a renamed copy of it.
     """
     patterns = tuple(configured_patterns)
     if not isinstance(index, str) or not index:
@@ -207,116 +203,7 @@ def confine_index(
         raise ConfinementFault("index '*' reaches the whole cluster — refused")
     if any(_reach_ok(index, p) for p in patterns):
         return index
-    if world_id is not None and is_world_view(index, patterns, world_id):
-        return index
-    raise ConfinementFault(
-        f"index {index!r} falls outside the configured patterns {patterns}"
-        + (f" and is not a world view of {world_id!r}" if world_id is not None else "")
-    )
-
-
-# the world-view namespace
-
-#: The namespace every world view lives in, as a prefix. A suffixed view (`logs-*` ->
-#: `logs-w-a`) would still match `logs-*`, so the base run and unstaged siblings would read the
-#: world's staged documents. `world_view` checks the disjointness per name.
-VIEW_NAMESPACE = "wv"
-
-
-class ViewNameError(ValueError):
-    """A corpus pattern that cannot carry a world view.
-
-    A plain `ValueError`, not a `ConfinementFault`: the branch stager wraps it in its own
-    usage-class fault so the refusal lands in the ledger as evidence.
-    """
-
-
-def world_view(base_pattern: str, world_id: str) -> str:
-    """The alias `world_id`'s queries read in place of `base_pattern`.
-
-    Per world (siblings sharing a view would see each other's documents) and outside the
-    pattern it derives from (see `VIEW_NAMESPACE`).
-
-    Refuses stems an alias cannot carry: `*` alone (nothing left to name the corpus by), a
-    non-trailing wildcard (`logs-*-2026`), and characters a quoted source needed (space, `|`),
-    since the view is written back unquoted and would break the query. The world id gets the
-    same rule, since it reaches every view the run stages. A view nobody can read would let a
-    sibling run green against the base corpus while reporting a world that was never applied.
-
-    Disjointness is checked against `base_pattern`, not assumed: a pattern like `wv-*` reaches
-    into the namespace itself.
-    """
-    world = _nameable_world(world_id)
-    stem = _nameable(_view_stem(base_pattern), f"corpus pattern {base_pattern!r}")
-    view = f"{VIEW_NAMESPACE}-{world}-{stem}"
-    if _reach_ok(view, base_pattern):
-        raise ViewNameError(
-            f"corpus pattern {base_pattern!r} still reaches {view!r}, the view built from it — "
-            "a world view has to fall outside the pattern it stages, or the base run and every "
-            "sibling that does not stage this system read this world's documents through it")
-    return view
-
-
-def _view_stem(pattern: str) -> str:
-    """The corpus half of a view name: `pattern` without its trailing wildcard.
-
-    Shared by `world_view` (build) and `is_world_view` (read back) so they cannot drift. Only
-    the wildcard is trimmed: trimming the separator too would collapse `logs-*`, `logs.*` and
-    `logs*` onto one alias. A trailing `-` or `.` is legal in an alias name (only a leading one
-    is not, and the namespace prefix rules that out). Anything still unnameable, like
-    `logs-**`, is refused by `_nameable`.
-    """
-    return pattern.removesuffix("*")
-
-
-def _nameable(part: str, origin: str) -> str:
-    """`part`, or a refusal naming what an index or alias cannot hold
-    (`_world_label.view_name_fault`)."""
-    if (why := view_name_fault(part, origin)) is not None:
-        raise ViewNameError(why)
-    return part
-
-
-def refuse_unnameable_world(world_id: str) -> str:
-    """`world_id`, or the `ViewNameError` every view built from it would raise — for callers
-    holding a world but no corpus pattern yet, so a bad id fails once rather than per call.
-    """
-    return _nameable_world(world_id)
-
-
-def _nameable_world(world_id: str) -> str:
-    """`world_id`, held to the alias name rule plus one more: no `-`
-    (`_world_label.world_view_fault`)."""
-    if (why := world_view_fault(world_id)) is not None:
-        raise ViewNameError(why)
-    return world_id
-
-
-def is_world_view(index: str, configured_patterns: Iterable[str], world_id: str) -> bool:
-    """Is `index` a name `world_id` may read in place of a corpus it configures?
-
-    Two conditions: the name carries this world's prefix (`wv-b-…` is out of bounds in A), and
-    its stem is a corpus the base run could itself reach, so `wv-a-other` is refused.
-
-    Not an enumeration of `world_view(p, world_id)` over configured patterns: the stager derives
-    views from the index the call named, which may be narrower (`logs-system.auth-*` under
-    `logs-*`), and those must be admitted too. The stem is held to `_reach_ok`, the rule every
-    unstaged name gets, rather than a bare prefix test (which would admit `wv-a-logsecret`).
-    The `==` arm admits the view of the configured pattern itself (`wv-a-logs-`), which
-    `_reach_ok` alone does not.
-
-    The world id is matched as a whole segment; `_nameable_world` bars `-` inside one so this
-    parse is unambiguous.
-    """
-    namespace, _, rest = index.partition("-")
-    head, _, stem = rest.partition("-")
-    # The namespace must be checked, or `evil-a-logs-nginx` would parse as world `a`'s view.
-    if namespace != VIEW_NAMESPACE or head != world_id or not stem:
-        return False
-    return any(
-        _view_stem(p) and (stem == _view_stem(p) or _reach_ok(stem, p))
-        for p in configured_patterns
-    )
+    raise ConfinementFault(f"index {index!r} falls outside the configured patterns {patterns}")
 
 
 __all__ = [
@@ -324,15 +211,10 @@ __all__ = [
     "AllowlistError",
     "CapturedRequest",
     "ConfinementFault",
-    "VIEW_NAMESPACE",
     "ReadEndpointAllowlist",
     "TransportCapture",
-    "ViewNameError",
     "confine_index",
     "confine_read_endpoint",
     "guard_outbound",
-    "is_world_view",
-    "refuse_unnameable_world",
     "normalize_endpoint",
-    "world_view",
 ]

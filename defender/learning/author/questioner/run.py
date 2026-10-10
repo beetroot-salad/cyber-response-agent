@@ -4,8 +4,9 @@
 Drained in the same tick as the defender lessons curator (one worktree, box, branch and PR
 lease) but with its own corpus and queue channel.
 
-Its pre-author gate is idempotency only: a world finding has no defender ground truth to
-gate on. Its config sets no drain-run check, since there is no defender behaviour a world
+Its pre-author gate is idempotency plus a `systems` shape check: a world finding has no
+defender ground truth to gate on, and a row naming no systems could only author a lesson no
+tenant selects. Its config sets no drain-run check, since there is no defender behaviour a world
 lesson could regress, so the verdict step and repair pass are skipped; the file-vs-batch
 attribution check still runs.
 """
@@ -39,7 +40,7 @@ from defender.learning.core.config import (
     author_timeout as _author_timeout,
 )
 from defender.learning.core.lane_trees import DrainTrees, open_drain_trees
-from defender.learning.core.state import QUESTIONER_FINDINGS, LearningState
+from defender.learning.core.state import QUESTIONER_FINDINGS, LearningState, names_systems
 
 
 AuthorError = _shared.AuthorError
@@ -103,21 +104,37 @@ def questioner_existing_finding_ids(cfg: QuestionerAuthorConfig) -> set[str]:
 def _gate_questioner(
     batch: list[dict], cfg: QuestionerAuthorConfig,
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    """Idempotency only: a world finding carries no defender disposition to gate on, so every
-    row not already attributed to a lesson in this corpus is authored. Returns
+    """Idempotency, plus the one shape rule a lesson's selection key needs: a world finding
+    carries no defender disposition to gate on, so every row not already attributed to a lesson
+    in this corpus is authored — unless it names no systems.
+
+    A row queued before #1224 carries the old selection keys (a pattern and a holding system)
+    and no `systems`. A lesson authored from it could select a tenant only by guess, so it is
+    drained without authoring (consumed, never held: the row will never change) and named in a
+    warning (N23). Returns
     `(held, consumed_pre, to_author)`."""
     existing_ids = questioner_existing_finding_ids(cfg)
-    consumed_idempotent: list[dict] = []
+    consumed: list[dict] = []
     to_author: list[dict] = []
     for entry in batch:
         fid = entry["finding_id"]
         if fid in existing_ids:
             rec = dict(entry)
             rec["consumed_category"] = "consumed_idempotent"
-            consumed_idempotent.append(rec)
+            consumed.append(rec)
+            continue
+        if not names_systems(entry.get("systems")):
+            _logger.warning(
+                f"{_LOG_PREFIX}: world finding {fid} names no systems (systems="
+                f"{entry.get('systems')!r}) — a row queued before lessons were keyed by "
+                "system; drained without authoring, since no tenant could select its lesson "
+                "except by guess")
+            rec = dict(entry)
+            rec["consumed_category"] = "consumed_no_systems"
+            consumed.append(rec)
             continue
         to_author.append(entry)
-    return [], consumed_idempotent, to_author
+    return [], consumed, to_author
 
 
 def build_questioner_user_prompt(

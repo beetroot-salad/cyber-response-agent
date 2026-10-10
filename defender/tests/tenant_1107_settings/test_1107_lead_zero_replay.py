@@ -17,6 +17,7 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import inspect
+import json
 import re
 import shutil
 from pathlib import Path
@@ -29,7 +30,6 @@ pytest.importorskip("pydantic_ai")
 from defender.runtime import driver, run_tenant  # noqa: E402
 from defender.scripts.adapters import (  # noqa: E402
     _stub_transport,
-    confinement,
     elastic_adapter,
     host_state_adapter,
 )
@@ -85,12 +85,11 @@ def _linked_root(tmp_path: Path, marker: str) -> tuple[Path, Path, Path]:
 
 
 def _identity_worlds() -> list[dict]:
-    """A family whose siblings overlay identity only — so an old manifest recording no corpus
-    patterns is not refused for an Elastic overlay key (probed at base: a `logs-*` overlay with
-    no recorded patterns and no elastic folder is refused before anything runs)."""
+    """A family whose siblings assert facts about an identity record only — nothing in it
+    names an Elastic corpus (#1224: a world is the facts it asserts)."""
     return [T.base_world(),
-            T.world_doc("b", ov=T.overlay(patches={"identity": {"web-1": {"owner": "x"}}})),
-            T.world_doc("c", ov=T.overlay(patches={"identity": {"web-1": {"owner": "y"}}}))]
+            T.world_doc("b", facts=[T.fact("f1", "web-1's owner is x", ("web-1",))]),
+            T.world_doc("c", facts=[T.fact("f2", "web-1's owner is y", ("web-1",))])]
 
 
 def _resume_argv(manifest: Path) -> list[str]:
@@ -366,13 +365,14 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root):
 
 
 def test_s7_mf7e_old_manifest_resume_runs_elastic_down(tmp_path, data_root):
-    """Resuming a sibling whose manifest predates #1106 (no recorded configured_patterns) over a
-    tenant with no elastic folder, or a bad one, proceeds: record.elastic is None or a
-    ConfigFault, the resume recovers no patterns, the resumed sibling runs with its Elastic
-    reads failing (the foreign-view guard refuses every view), and nothing refuses the
-    investigation (O5)."""
+    """Resuming a sibling whose manifest records no corpus patterns over a tenant with no elastic
+    folder, or a bad one, proceeds: record.elastic is None or a ConfigFault, the resumed
+    sibling runs with its Elastic reads failing, and nothing refuses the investigation (O5).
+
+    #1224: no manifest records patterns any more (`configured_patterns` is refused as
+    pre-oracle), so the v2 manifest is this case's input, and the world-view guard the pre-#1224
+    arm also drove went with cluster staging."""
     _base, source = H.tenant_source(data_root, S.PLAYGROUND_ID)
-    registry = importlib.import_module("defender.learning.branch.estate.registry")
     shim = S.DockerShim(tmp_path / "docker")
 
     for arm in ("none", "bad"):
@@ -382,7 +382,7 @@ def test_s7_mf7e_old_manifest_resume_runs_elastic_down(tmp_path, data_root):
         else:
             S.drop_key(folder, "elastic", "ELASTIC_ES_CONTAINER")
         doc = T.family_doc(source_run_dir=str(source), worlds=_identity_worlds())
-        doc.pop("configured_patterns")
+        assert "configured_patterns" not in doc, sorted(doc)
         episode = T.episode(tmp_path, doc=doc, episode_id=T.EPISODE_ID,
                             root=tmp_path / f"episodes-{arm}")
         sibling = S.RunRecorder(tmp_path / f"sibling-{arm}")
@@ -393,22 +393,14 @@ def test_s7_mf7e_old_manifest_resume_runs_elastic_down(tmp_path, data_root):
         assert rc == 0, (arm, rc, sibling.order)
         assert "lifecycle" in sibling.order, (arm, rc, sibling.order)
         record = sibling.lifecycle_calls[0]["tenant"]
-        world = sibling.lifecycle_calls[0]["world"]
         if arm == "none":
             assert record.elastic is None, (arm, record.elastic)
         else:
             assert isinstance(record.elastic, S.config_fault()), (arm, record.elastic)
-        assert tuple(world.family.configured_patterns) == (), (
-            f"[{arm}] the resume recovered patterns from a tenant with no good Elastic part: "
-            f"{world.family.configured_patterns}")
 
         ctx = S.verb_context(record, sibling.run_dir_at, shim.env())
         with pytest.raises(S.config_fault()):
             elastic_adapter.query(ctx, native_query="event.action:ssh_login")
-        view = confinement.world_view(f"mf7e{arm}-events-*", world.world_id)
-        with pytest.raises(confinement.ConfinementFault):
-            registry.refuse_a_foreign_world_view(
-                world, "elastic", "query", {"native_query": "*", "index": view}, ctx)
         assert shim.calls() == [], f"[{arm}] an Elastic read reached docker: {shim.calls()}"
 
 
@@ -526,11 +518,11 @@ def test_s60_soc_playground_tests_migrated(tmp_path):
     enc589 = importlib.import_module("defender.tests.test_encoding_contract_589")
     clock947 = importlib.import_module("defender.tests.test_947_clock")
     world1007 = importlib.import_module("defender.tests._world_1007")
-    reach1007 = importlib.import_module("defender.tests.test_1007_reachability")
     enc589.test_a_vendor_byte_from_a_transport_is_replaced_not_raised(_fresh(tmp_path, "t589"))
     clock947.test_the_health_check_stamps_nothing_and_stays_that_way(_fresh(tmp_path, "t947"))
-    reach1007.test_the_search_envelope_the_ledger_sees_carries_no_took_shards_or_document_id(
-        _fresh(tmp_path, "t1007"))
+    # The 1007 test that drove this fixture (`test_1007_reachability`) went with the replay
+    # review (#1224); its body is run here so the migrated fixture still completes a real read.
+    _elastic_envelope_carries_no_incidental_fields(world1007, _fresh(tmp_path, "t1007"))
 
     # test_947_clock's fixture: its own docker shim logs every argv, so the context a call
     # names is observable — and it is the one the fixture tenant's config.env declares.
@@ -548,6 +540,20 @@ def test_s60_soc_playground_tests_migrated(tmp_path):
     assert SOC_PLAYGROUND_CONTEXT_KEY not in ctx.env, sorted(ctx.env)
     assert S.record_on(ctx).systems["elastic"]["ELASTIC_DOCKER_CONTEXT"], (
         "the 1007 fixture tenant declares no elastic docker context")
+
+
+def _elastic_envelope_carries_no_incidental_fields(world1007: Any, where: Path) -> None:
+    """A REAL raw Elasticsearch response reaches the real `query` verb through `_world_1007`'s
+    fixture tenant and docker shim, and the envelope carries only the documents' `_source`."""
+    raw = world1007.RAW_ES_RESPONSE
+    envelope = elastic_adapter.query(world1007.elastic_ctx(where, response=raw),
+                                     native_query="event.action:ssh_login")
+    assert set(envelope) == {"index", "total", "returned", "sort", "truncated", "hits"}, (
+        sorted(envelope))
+    rendered = json.dumps(envelope, sort_keys=True)
+    for incidental in ("took", "_shards", "_id", "_score", "max_score"):
+        assert incidental not in rendered, incidental
+    assert envelope["hits"] == [h["_source"] for h in raw["hits"]["hits"]]
 
 
 # ---- the settings-path redaction keys on the record ----------------------------------------------

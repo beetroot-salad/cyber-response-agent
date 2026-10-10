@@ -69,10 +69,6 @@ EXCLUDED_PREFIXES = (
     # other platform module interprets them (the census test `d4_elastic_keys_one_place` holds
     # that). A file, not a directory: the carve-out is this module and nothing beside it.
     "defender/runtime/tenant_settings.py",
-    # Per-vendor corpus stagers, the read-side twin of scripts/adapters/: how an index is
-    # addressed is irreducibly per-vendor. One directory deep so `estate/registry.py` beside
-    # it stays inside the gate.
-    "defender/learning/branch/estate/stagers/",
 )
 
 EXCLUDED_FILES = {

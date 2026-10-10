@@ -9,9 +9,8 @@ the process happens to have exported, which differs between the shell that launc
 box and the CI job, and which a model-writable tree can influence. This lint is the net under
 that rule: in the four swept trees an environment LOOKUP is a finding.
 
-THE FOUR TREES (repo-relative): `defender/scripts/adapters/`, `defender/learning/branch/estate/`
-with `defender/learning/branch/staging.py`, `defender/scripts/case_history/` with
-`defender/runtime/case_ticket.py`, and
+THE FOUR TREES (repo-relative): `defender/scripts/adapters/`, `defender/learning/branch/estate/`,
+`defender/scripts/case_history/` with `defender/runtime/case_ticket.py`, and
 `defender/runtime/lead_zero/` with `defender/runtime/lead_zero_config.py`. The allow-list is EMPTY
 — there is no baseline file and no suppression comment; a read that is genuinely not a setting
 moves out of the tree or is handed in by the caller.
@@ -70,7 +69,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SWEPT: tuple[str, ...] = (
     "defender/scripts/adapters/",
     "defender/learning/branch/estate/",
-    "defender/learning/branch/staging.py",
     "defender/scripts/case_history/",
     "defender/runtime/case_ticket.py",
     "defender/runtime/lead_zero/",

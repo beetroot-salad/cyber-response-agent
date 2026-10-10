@@ -37,6 +37,11 @@ RETIRED_ROLES = ("challenger", "coherence_checker", "projection")
 #: no review role carries it.
 RETIRED_OFFLINE_STAGE = "oracle"
 
+#: The one role value besides `oracle` itself that may carry the stage's name: #1224's live
+#: oracle's verifier (`AgentRole.ORACLE_CHECK`, waiver GD-05/RF-8). Exactly this value — not a
+#: prefix or pattern — so a third `oracle`-named role still fails the fence below.
+ORACLE_VERIFIER_ROLE = "oracle_check"
+
 #: The vocabulary the counter-story machinery was built out of. Every one of these was a
 #: symbol, a JSON key or a record field in `challenge_gate` / `review_roles` / `close_tool`.
 COUNTER_STORY_VOCABULARY = (
@@ -121,7 +126,7 @@ def test_797_no_review_role_survives_the_retirement():
         # The offline learning oracle keeps its own role; a REVIEW role must not be named for
         # it. Nothing in the registry is a review role after #797, which is what makes this
         # arm a guard on #796's roster rather than an assertion about today.
-        if role.value == RETIRED_OFFLINE_STAGE:
+        if role.value in (RETIRED_OFFLINE_STAGE, ORACLE_VERIFIER_ROLE):
             continue
         assert RETIRED_OFFLINE_STAGE not in role.value, (
             f"role {role.value!r} joins by name to the retired offline stage"

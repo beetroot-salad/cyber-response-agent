@@ -1,17 +1,11 @@
-"""#921 — the bucket each world falls into, the family's verdict word, and what may move them.
+"""#921 — what may move a world's row, and who owns its bucket.
 
-The bucket falls out of the five facts rather than out of an empty set. The REFUTED table's
-central case (`ΔO_X != empty` on H's keys) was unreachable by construction — offline every
-difference classifies as `undeclared` — which is why `decision-discipline` had no member and why
-the amendment rewrote the table against the ledger's `source` column instead.
-
-WHAT IS STRUCK AND APPEARS IN NO ASSERTION HERE: the original bucket table, N8, `delta_o`, the
-mutation/undeclared membership test, the offline comparator lane, and every "post-branch key"
-predicate. `delta_o` survives in the tree as a manipulation check on the EPISODE; #921 does not
-consume it, and `test_921_family_pass_never_reads_served_base_and_never_calls_the_comparator`
-is what keeps it out.
-
-RED against `d1b8b06a`: `learning/judge/family.py` does not exist.
+#1224 retired the mechanical bucket table and the computed family word: the judge MODEL decides
+each world's bucket (O11, `run._draw_document` owns it) and the family-scope call gives the
+family's `verdict_word`. What stays is what the record may and may not be moved by: no world's
+row reads another world's archive, nothing reads `served/base.jsonl` or calls the comparator,
+the control gets no row, the bucket is the draws' own (never the findings', never a code
+path's), and the majority is counted over completed draws.
 """
 from __future__ import annotations
 
@@ -34,229 +28,50 @@ def _tmp_roots(tmp_path, monkeypatch):
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
-def _family():
-    return J.mod("learning.judge.family")
-
-
-def _graded(tmp_path, **kw):
-    """One accepted episode graded by the mechanical half, as `(grade, rows)`."""
-    ep = J.accepted_episode(tmp_path, **kw)
-    grade = _family().grade_family(ep)
-    return ep, grade, J.rows(grade)
+def _grade(ep, **kw):
+    """Grade `ep` afresh (a final `judge.yaml` short-circuits a second pass)."""
+    (ep / "judge.yaml").unlink(missing_ok=True)
+    return J.grade(ep, runs_base=ep.parent / "defender-runs", **kw)
 
 
 # ---------------------------------------------------------------------------------------
-# the five buckets
+# what the row may not be moved by
 # ---------------------------------------------------------------------------------------
-
-
-def test_921_never_queried_H_is_lead_set(tmp_path):
-    """No row on H at all: the world never queried the holding system. Bucket `lead-set`.
-
-    Exercised against a world whose ledger carries a row on a DIFFERENT system, so the bucket
-    turns on `system == H` rather than on the file being empty — the two are separate reasons to
-    answer `lead-set` and only one of them is this bucket's.
-    """
-    _ep, _grade, rows = _graded(tmp_path, ledgers={
-        "b": [J.ledger_row(source="patched", world_label="b", system="cmdb", verb="get-host")],
-        "c": [],
-    })
-    assert rows["b"]["bucket"] == "lead-set"
-    assert rows["b"]["holding_queried"] is False
-
-
-def test_921_queried_H_at_a_non_discriminating_scope_is_lead_quality(tmp_path):
-    """Rows on H exist but at a scope that could not tell the worlds apart. Bucket
-    `lead-quality`.
-
-    J1's second half lands here too and is exercised as its own row: when `H` names a served
-    system this world never touches, the applier's `not _touches -> PASSTHROUGH` rule (G7) makes
-    every row on H a `passthrough`, so the world DID query H and the difference never reached
-    it — `lead-quality`'s successor, not `lead-set`. Spelling it as its own condition is what
-    keeps "never queried" and "queried and shown nothing" from collapsing into one bucket.
-    """
-    _ep, _grade, rows = _graded(tmp_path, ledgers={
-        # queried H, but the form carries no window and no scope key.
-        "b": [J.ledger_row(source="passthrough", world_label="b",
-                           params={"index": J.EVENTS_PATTERN})],
-        # queried H at a discriminating scope, but the world touches nothing there.
-        "c": [J.ledger_row(source="passthrough", world_label="c",
-                           params={"index": J.EVENTS_PATTERN, "window": "24h",
-                                   "scope_key": "host.name"})],
-    })
-    assert rows["b"]["holding_queried"] is True
-    assert rows["b"]["scope_discriminated"] is False
-    assert rows["b"]["bucket"] == "lead-quality"
-    assert rows["c"]["bucket"] == "lead-quality", (
-        "a world whose every H row is `passthrough` was bucketed as if it never queried H")
-
-
-def test_921_doctored_answer_served_and_conclusion_unmoved_is_analyze_discipline(tmp_path):
-    """The doctored evidence was served (`staged`/`patched` on H) and the conclusion still did
-    not move. Bucket `analyze-discipline`."""
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
-                            dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "investigation.md").write_text(
-        J.investigation_document("b", moved=False), encoding="utf-8")
-    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-    row = J.rows(_family().grade_family(ep))["b"]
-
-    assert (row["doctored_answer_served"], row["resolution_moved"]) == (True, False)
-    assert row["verdict"] != row["declared"]
-    assert row["bucket"] == "analyze-discipline"
-
-
-def test_921_conclusion_moved_and_verdict_still_wrong_is_decision_discipline(tmp_path):
-    """The doctored evidence was served, a resolution moved past `fences_at`, and the verdict
-    still disagreed with the declared disposition. Bucket `decision-discipline`.
-
-    Reachable ONLY under the amendment: the refuted table routed this case through `ΔO_X`, whose
-    central set is empty by construction offline, so the member had no reachable instance at
-    all. This is the bucket the fixture exists to discriminate.
-    """
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
-                            dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-    row = J.rows(_family().grade_family(ep))["b"]
-
-    assert (row["doctored_answer_served"], row["resolution_moved"]) == (True, True)
-    assert row["verdict"] != row["declared"]
-    assert row["bucket"] == "decision-discipline"
-
-
-def test_921_verdict_matching_declared_gets_no_bucket(tmp_path):
-    """A world whose verdict equals its declared disposition gets no bucket.
-
-    Driven with the difference demonstrably served, so "no bucket" is the grade of a world that
-    got it right rather than of a world nothing reached.
-    """
-    _ep, _grade, rows = _graded(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
-                               dispositions={"a": "benign", "b": "malicious",
-                                             "c": "malicious"})
-    assert rows["b"]["verdict"] == rows["b"]["declared"] == "malicious"
-    assert rows["b"]["doctored_answer_served"] is True
-    assert rows["b"]["bucket"] is None
-
-
-def test_921_verdict_matched_while_every_H_row_is_passthrough_still_buckets_lead_quality(
-        tmp_path):
-    """The verdict matched while EVERY row on H says `passthrough`: the world agreed without
-    having been shown anything. `lead-quality`, not a retired special-case flag.
-
-    #1007/N8 removed that flag: whether an agreeing-but-unshown world's finding is a genuine
-    defect to author a lesson from is now O4's withholding ladder's question
-    (`withheld_reason`, keyed on the review record's reachability facts), not a bucket-level
-    special case. This episode's `review.yaml` (written by `accepted_episode`, this suite
-    predates #1007) carries no per-world reachability data at all — a review that never went
-    through #1007's review step, which O4's ladder has nothing to withhold on — so the row is
-    not withheld here; a `test_1007_ladder.py` scenario pins the withheld case on a review
-    record that DOES carry the data.
-    """
-    _ep, _grade, rows = _graded(tmp_path, ledgers={
-        "b": [J.ledger_row(source="passthrough", world_label="b"),
-              J.ledger_row(source="passthrough", world_label="b", verb="query")],
-        "c": [],
-    }, dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-
-    assert rows["b"]["verdict"] == rows["b"]["declared"]
-    assert rows["b"]["doctored_answer_served"] is False
-    assert rows["b"]["bucket"] == "lead-quality"
-    assert "flag" not in rows["b"]
-    assert rows["b"]["withheld_reason"] is None
-
-
-# ---------------------------------------------------------------------------------------
-# the family's verdict word
-# ---------------------------------------------------------------------------------------
-
-
-def test_921_every_graded_verdict_equal_to_declared_is_caught(tmp_path):
-    """Every graded world's verdict equals its declared disposition: family `verdict_word` is
-    `caught`."""
-    _ep, grade, rows = _graded(tmp_path, ledgers={"b": [J.staged_row("b")],
-                                                  "c": [J.staged_row("c")]},
-                               dispositions={"a": "benign", "b": "malicious",
-                                             "c": "malicious"})
-    assert all(row["verdict"] == row["declared"] for row in rows.values())
-    assert J.word_of(grade) == "caught"
-
-
-def test_921_any_graded_world_missing_its_declared_disposition_is_survived(tmp_path):
-    """One graded world whose verdict differs from its declared disposition makes the family
-    `survived` — the word `_gate_family` routes to AUTHOR a lesson.
-
-    Everything upstream that can silently exclude a world moves this word, which is why J1's
-    validation and J5's named-and-recorded exclusion are material rather than hygiene: a world
-    quietly dropped here flips `survived` to `caught` and suppresses the lesson, or the reverse
-    and authors one nobody's evidence supports.
-    """
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
-                            dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-    grade = _family().grade_family(ep)
-
-    assert J.rows(grade)["c"]["verdict"] == J.rows(grade)["c"]["declared"]
-    assert J.word_of(grade) == "survived", (
-        "one disagreeing graded world did not carry the family to `survived`")
-
-
-def test_921_no_contrasting_archived_world_is_undecidable(tmp_path):
-    """No archived non-control world declares a disposition different from the control's, or
-    none is archived at all: there is no contrast to grade and the family is `undecidable`.
-
-    Both shapes are driven, because they are two different absences: a family whose every world
-    declares what the control declares, and a family whose non-control worlds were never
-    archived.
-    """
-    _ep, grade, _rows = _graded(tmp_path, dispositions={"a": "benign", "b": "benign",
-                                                        "c": "benign"},
-                                ledgers={"b": [J.staged_row("b")], "c": []})
-    assert J.word_of(grade) == "undecidable", (
-        "a family with no declared contrast produced a verdict about the defender")
-
-    control_only = J.accepted_episode(tmp_path / "alone", labels=("a",),
-                                      worlds=[J.world_doc("a", role="A", axis=None,
-                                                          disposition_declared="benign", ov={})],
-                                      dispositions={"a": "benign"})
-    assert J.word_of(_family().grade_family(control_only)) == "undecidable"
 
 
 def test_921_control_world_is_graded_per_world_only_and_gets_no_bucket(tmp_path):
-    """The control world is graded by the per-world judge pass only and carries no bucket row in
-    the family record.
+    """The control world carries no row in the family record.
 
-    Positive control: a non-control world in the same family DOES carry one, so the negative
-    cannot pass on a record with no rows at all.
+    Positive control: a non-control world in the same family DOES carry one, with a bucket, so
+    the negative cannot pass on a record with no rows at all.
     """
-    _ep, _grade, rows = _graded(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
-    assert "a" not in rows, "the control world was given a mechanical bucket row"
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
+    rows = J.rows(_grade(ep))
+    assert "a" not in rows, "the control world was given a bucket row"
     assert "b" in rows, "the positive control failed: no non-control world is graded at all"
     assert "bucket" in rows["b"], (
         "the positive control failed: no non-control world carries a bucket either")
 
 
 def test_921_world_processing_order_does_not_change_any_per_world_fact(tmp_path):
-    """All five per-world facts read X's own record plus the manifest, so grading the worlds in
+    """Every per-world fact reads X's own record plus the manifest, so grading the worlds in
     any order — including a non-control world before the control's own archive write lands —
-    yields the same family record.
+    yields the same rows.
 
-    Deleting ΔO removed the only cross-world input; this is the demand that keeps it removed.
     Driven by grading with the control's archived directory absent and then present: if any fact
-    reached across worlds, the two records would differ on the worlds that were graded both
-    times.
+    reached across worlds, the two records would differ on the worlds graded both times.
     """
     import shutil
 
-    family_mod = _family()
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")],
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")],
                                                "c": [J.ledger_row(source="passthrough",
                                                                   world_label="c")]})
     control = ep / "worlds" / "a"
     stash = tmp_path / "control-stash"
     shutil.move(str(control), str(stash))
-    early = J.rows(family_mod.grade_family(ep))
+    early = J.rows(_grade(ep))
     shutil.move(str(stash), str(control))
-    late = J.rows(family_mod.grade_family(ep))
+    late = J.rows(_grade(ep))
 
     assert set(early) == {"b", "c"}
     for label in ("b", "c"):
@@ -268,101 +83,100 @@ def test_921_world_processing_order_does_not_change_any_per_world_fact(tmp_path)
 
 
 def test_921_family_pass_never_reads_served_base_and_never_calls_the_comparator(tmp_path):
-    """The family pass reads no `served/base.jsonl`, makes no base comparison and issues no
-    comparator call: no archived classification, no offline comparator lane, no
-    `mutation`/`undeclared` membership test.
+    """The pass reads no `served/base.jsonl`, makes no base comparison and issues no comparator
+    call.
 
     Driven as real input rather than as an inspection: the family capture is first DELETED and
     then written as bytes no reader can parse. Every base-comparing path in the tree goes
     through `Ledger`, which refuses a missing base outright, so a pass that touched it would
     fail on the first arm and raise on the second.
 
-    Positive control: with the base gone the pass still produces a COMPLETE `FamilyGrade` from
-    X's own record — five facts, a bucket and a verdict word — so the negative cannot pass on a
-    pass that does nothing.
+    Positive control: with the base gone the pass still produces a COMPLETE grade from X's own
+    record — every per-world fact, the model's bucket and a family word — so the negative
+    cannot pass on a pass that does nothing.
     """
-    family_mod = _family()
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    # `decision-discipline` needs `verdict != declared` (J4's own compare); `accepted_episode`
-    # drives both `report.md`'s disposition and the manifest's `disposition_declared` off the
-    # same value, so the mismatch this test's own bucket needs is written explicitly here, the
-    # same one-line idiom `test_921_conclusion_moved_and_verdict_still_wrong_is_decision_discipline`
-    # already uses.
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     base = ep / "served" / "base.jsonl"
 
     base.unlink()
-    without = family_mod.grade_family(ep)
+    without = _grade(ep)
     base.write_text('{"system": "elastic", "verb": "esq\n\x00 torn', encoding="utf-8")
-    with_torn = family_mod.grade_family(ep)
+    with_torn = _grade(ep)
 
     for grade in (without, with_torn):
         rows = J.rows(grade)
         assert set(rows) == {"b", "c"}
         assert all(fact in rows["b"] for fact in J.PER_WORLD_FACTS)
-        assert rows["b"]["bucket"] == "decision-discipline"
+        assert rows["b"]["verdict"] == "benign"
+        assert rows["b"]["bucket"] == J.reply_doc()["bucket"]
         assert J.word_of(grade) in ("caught", "survived", "undecidable")
     assert J.rows(without)["b"] == J.rows(with_torn)["b"], (
         "the family capture's bytes moved a per-world fact; nothing here may read them")
 
 
 def test_921_model_findings_explain_a_bucket_and_never_assign_it(tmp_path):
-    """A world's bucket is computed from the archive. A reply whose findings all claim a
-    DIFFERENT bucket does not change it; the findings EXPLAIN the bucket, and each finding row
-    carries its OWN bucket as `type` because that is what the lesson author acts on.
+    """A world's bucket is the judge model's own answer for the world — the reply's top-level
+    `bucket` (`run._draw_document` @owns it) — never one its findings claim. Each finding row
+    carries its OWN bucket as `type`, because that is what the lesson author acts on.
 
-    O3's sentence is "graded by the archive, not by prose", and J13(b) settled where the archive
-    stops being host-attested: the ledger is written by `registry.served` and is a per-call fact
-    about what the defender saw, while `investigation.md` and `report.md` are model-authored
-    bytes. A predicate reading a self-reported document yields evidence the judge EXPLAINS, not
-    ground truth it is graded against — which is why a reply cannot move the bucket in either
-    direction.
+    #1224 inverted the owner (O11): no code path computes a bucket, so where the draws DISAGREE
+    the row carries none (`draws_disagree`, every draw's answer on `draws`) rather than a bucket
+    of the pass's own choosing.
     """
-    judge_mod = J.mod("learning.judge")
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
 
-    loud = J.as_reply_text(J.reply_doc(findings=[
+    loud = J.as_reply_text(J.reply_doc(bucket="decision-discipline", findings=[
         J.finding_doc(bucket="observability",
                       claim="this world is plainly lead-set and nothing else"),
         J.finding_doc(bucket="lead-quality", anchor="l-002", topic="scope"),
     ]))
-    judge_mod.grade_episode(ep, judge=J.FakeJudge(default=loud),
-                            runs_base=tmp_path / "defender-runs", state=env_state())
+    _grade(ep, judge=J.scripted_judge(default=loud))
 
     record = J.judge_record(ep)
     assert J.world_rows(record)["b"]["bucket"] == "decision-discipline", (
-        "the model's findings moved the archive-computed bucket")
+        "the findings' buckets moved the world's bucket the reply gave")
     types = {row["type"] for row in J.enqueued_rows(record)}
     assert types == {"observability", "lead-quality"}, (
         "a finding row did not carry its OWN bucket as `type`")
 
+    # Two draws that disagree: the row names no bucket either draw gave, and keeps both.
+    split = J.accepted_episode(tmp_path / "split", ledgers={"b": [J.oracle_row("b")], "c": []})
+    one = J.as_reply_text(J.reply_doc(bucket="analyze-discipline"))
+    other = J.as_reply_text(J.reply_doc(bucket="decision-discipline"))
+    _grade(split, judge=J.scripted_judge(replies=[one, other], default=one), draws=2)
+    row = J.world_rows(J.judge_record(split))["b"]
+    assert row["bucket"] is None, (
+        f"disagreeing draws were reduced to {row['bucket']!r}; no code path picks a bucket")
+    assert row.get("draws_disagree") is True
+    assert sorted(d["bucket"] for d in row["draws"]) == [
+        "analyze-discipline", "decision-discipline"]
+
 
 def test_921_the_majority_denominator_is_completed_draws(tmp_path):
     """J6, settled with the human: the majority is over COMPLETED draws, both the completed and
-    the configured counts are recorded on the family record, a draw that fails at any stage
-    writes a DRAW RECORD carrying its failure reason, and a world with zero completed draws
-    still gets its mechanical bucket.
+    the configured counts are recorded on the family record, and a draw that fails at any stage
+    writes a DRAW RECORD carrying its failure reason.
 
     The denominator is not a detail: with `draws=4`, two failures and two completed draws that
     both answer `discard`, the completed denominator suppresses the whole episode's findings and
-    the configured denominator does not. Two defensible implementations disagree on the word
-    that decides whether an episode's findings exist at all.
+    the configured denominator does not.
 
-    A silent absence is indistinguishable from a draw never requested, which is why a failed
-    draw writes a record rather than nothing — and P9 (executed) is why the record cannot branch
-    on exception type: a wall-clock timeout and a raw transport failure arrive as the same
-    `RunUnprocessable`, separable only by message text and `__cause__`.
+    P9 (executed) is why the record cannot branch on exception type: a wall-clock timeout and a
+    raw transport failure arrive as the same `RunUnprocessable`. And a world with ZERO completed
+    draws carries no bucket at all (#1224, O11): nothing but a draw supplies one.
     """
     judge_mod = J.mod("learning.judge")
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     discard = J.as_reply_text(J.reply_doc(episode_outcome="discard"))
     # Two answers, then the seam degrades: `raise_after=2` is P9's one class, both ways.
     judge = J.FakeJudge(replies=[discard, discard], default=discard,
                         fault=J.Fault(raise_after=2))
-    judge_mod.grade_episode(ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=4, state=env_state())
+    judge_mod.grade_episode(ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=4,
+                            state=env_state())
 
     record = J.judge_record(ep)
     assert record["draws"] == {"configured": 4, "completed": 2}, (
@@ -378,18 +192,14 @@ def test_921_the_majority_denominator_is_completed_draws(tmp_path):
     assert all("RunUnprocessable" in str(r) or "did not complete" in str(r) or "failed" in str(r)
                for r in reasons)
 
-    # A world with ZERO completed draws still gets its mechanical bucket. A doctored world
-    # (the `staged_row` on H) with `verdict == declared` buckets `None` by design (agreement is
-    # the non-failure case) — the mismatch this assertion needs is written explicitly, same as
-    # `test_921_conclusion_moved_and_verdict_still_wrong_is_decision_discipline`.
-    dead = J.accepted_episode(tmp_path / "dead", ledgers={"b": [J.staged_row("b")], "c": []})
-    (dead / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    dead = J.accepted_episode(tmp_path / "dead", ledgers={"b": [J.oracle_row("b")], "c": []})
     judge_mod.grade_episode(dead, judge=J.FakeJudge(fault=J.Fault(raise_after=0)),
-                            runs_base=tmp_path / "dead" / "defender-runs", draws=2, state=env_state())
+                            runs_base=tmp_path / "dead" / "defender-runs", draws=2,
+                            state=env_state())
     dead_rows = J.world_rows(J.judge_record(dead))
     assert dead_rows["b"]["completed_draws"] == 0
-    assert dead_rows["b"]["bucket"], (
-        "a world whose every draw failed lost the bucket its own archive still supports")
+    assert dead_rows["b"]["bucket"] is None, (
+        "a world whose every draw failed carries a bucket no draw gave")
 
 
 # ---------------------------------------------------------------------------------------
@@ -402,16 +212,15 @@ def test_921_a_running_world_leaves_a_ledger_even_when_it_serves_nothing(tmp_pat
 
     The rows are written by `record`, which creates the file on its first append — so a sibling
     that answered every question from the replayed capture, and made no live call at all, left
-    no ledger. One missing file then stood for two facts: J5's tier rule reads an absent ledger
-    as an incomplete archive and refuses to grade the world (right, and unchanged), while the
-    sibling above produced that state by running perfectly.
+    no ledger. One missing file then stood for two facts: a world that never ran and one that
+    ran perfectly and served nothing.
 
     Observed live: of two siblings, one issued the same 76 queries as the control, served
     nothing, closed `benign`, and was filed unjudgeable — when "closed without ever consulting
     the world it was given" is the strongest finding this design can make.
 
-    Declared up front, that sibling leaves an EMPTY ledger, which the grader already buckets
-    `lead-set`.
+    Declared up front, that sibling leaves an EMPTY ledger, which the row reports as
+    `served_nothing`.
     """
     ledger_mod = J.mod("learning.branch.ledger")
     ep_dir = J.accepted_episode(tmp_path)
@@ -438,31 +247,25 @@ def test_921_declaring_a_ledger_twice_keeps_the_rows_already_written(tmp_path):
     ep_dir = J.accepted_episode(tmp_path)
     with Episode.open(ep_dir) as episode:
         led = ledger_mod.Ledger.for_world(episode, "already_writing").declare()
-        led.path.write_text('{"source": "staged"}\n', encoding="utf-8")
+        led.path.write_text('{"source": "oracle"}\n', encoding="utf-8")
 
         led.declare()
-        assert led.path.read_text(encoding="utf-8") == '{"source": "staged"}\n', (
+        assert led.path.read_text(encoding="utf-8") == '{"source": "oracle"}\n', (
             "a second declare truncated rows a concurrent writer had already appended")
 
 
 def test_921_an_empty_ledger_reports_served_nothing_on_the_record(tmp_path):
-    """The row says it served nothing, separately from `holding_queried`.
+    """The row says whether the world served anything at all, from its own rows.
 
-    A world with no rows on the holding system may have queried elsewhere; a world that served
-    NOTHING never made a live call at all, so its staged difference was never consulted and its
-    verdict is not a measurement. The two deserve different lessons, so they are two fields.
+    A world that served NOTHING never made a call that reached its oracle, so its facts were
+    never consulted and its verdict is not a measurement. World `c` serves one row on a system
+    other than the fixture's usual one, so a `served_nothing` keyed on a particular system
+    instead of on the rows fails it.
     """
-    # World `c` serves a row on a system that is NOT the family's holding system. That is the
-    # case where the two fields part company — `holding_queried` is false for it while
-    # `served_nothing` is false too — so a `served_nothing` derived from `holding_queried`
-    # instead of from the rows passes every fixture where the two happen to coincide.
     elsewhere = J.ledger_row(source="passthrough", system="cmdb", verb="lookup",
                              world_label="c")
     ep = J.accepted_episode(tmp_path, ledgers={"b": [], "c": [elsewhere]})
-    rows = J.rows(_family().grade_family(ep))
+    rows = J.rows(_grade(ep))
     assert rows["b"]["served_nothing"] is True, "an empty ledger did not report serving nothing"
-    assert rows["b"]["bucket"] == "lead-set"
     assert rows["c"]["served_nothing"] is False, (
-        "a world that served rows off the holding system was reported as having served nothing")
-    assert rows["c"]["holding_queried"] is False, (
-        "the fixture no longer separates the two facts: c queried the holding system after all")
+        "a world that served rows off the usual system was reported as having served nothing")

@@ -193,8 +193,9 @@ demands:
     # on RecordRead.absent, never on a sentence (RF-R1 / RF-V4)."
   - id: d-09-review-reader
     kind: behavior
-    form: test
-    discharged_by: test_1049_the_review_reader_says_review_yaml_and_answers_none_when_absent
+    form: clause
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the review.yaml and staged.yaml records and their readers; `test_1049_the_review_reader_says_review_yaml_and_answers_none_when_absent`, which discharged this demand, was deleted with the behaviour it pinned."}
     binds: ["_default_review_reader", "read_review_record", "interacts(_default_review_reader->review_yaml)"]
     # docstring seed: "read_review_record's default reader, called (bound, name), refuses the read and
     # parse arms with a sentence naming review.yaml and no root, answers None (not {}) when review.yaml is
@@ -236,7 +237,7 @@ demands:
   - id: d-13-missing-input-ledger-name
     kind: behavior
     form: test
-    discharged_by: test_1049_a_missing_served_ledger_is_recorded_as_served_token_jsonl
+    discharged_by: test_1049_a_linked_served_ledger_is_recorded_as_served_token_jsonl
     binds: ["_missing_required_input", "_grade_world", "interacts(_grade_world->judge_yaml)", "interacts(_missing_required_input->served_ledger)"]
     premises: ["#39", "#41 (F-H: a vanished worlds/<w> is a 'missing its …' row on the pass — rg7)"]
     # docstring seed: "_missing_required_input answers 'served ledger (served/<token>.<label>.jsonl)' for an
@@ -290,8 +291,9 @@ demands:
     # parsing reader's typed absent answer, branched off RecordRead.absent)."
   - id: d-18-read-staged
     kind: behavior
-    form: test
-    discharged_by: test_1049_read_staged_says_staged_yaml_and_answers_none_when_absent
+    form: clause
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the review.yaml and staged.yaml records and their readers; `test_1049_read_staged_says_staged_yaml_and_answers_none_when_absent`, which discharged this demand, was deleted with the behaviour it pinned."}
     binds: ["read_staged", "interacts(read_staged->staged_yaml)", "StagingRefused"]
     premises: ["#70"]
     # docstring seed: "read_staged raises StagingRefused naming staged.yaml and no root on the read,
@@ -638,7 +640,7 @@ demands:
     kind: domain-outcome
     form: test
     status: auto
-    discharged_by: test_1049_review_and_samples_shape_arms_absent_none_empty_mapping_non_mapping_per_reader
+    discharged_by: test_1049_samples_shape_arms_absent_none_empty_mapping_non_mapping_per_reader
     binds: ["_default_review_reader", "read_review_record", "_strict_samples_reader", "screened_yaml_mapping", "_default_samples_reader",
             "interacts(_strict_samples_reader->samples_yaml)", "_Record.domain.distinguished[present_empty]"]
     premises: ["#63", "#64", "#65"]

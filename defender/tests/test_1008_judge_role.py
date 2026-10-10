@@ -441,7 +441,7 @@ def test_1008_every_judge_draw_is_declared_under_the_judges_role(tmp_path):
     """
     AgentRole = _role()
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
-    judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
+    judge = J.scripted_judge()
 
     J.mod("learning.judge").grade_episode(
         ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=2,
@@ -711,20 +711,20 @@ def test_1008_the_default_seam_hands_run_stage_the_judges_deps_and_widens_nothin
 # ---------------------------------------------------------------------------------------
 
 
-def test_1008_the_registry_holds_one_definition_per_role_and_nine_of_them():
-    """Ten roles, ten definitions, one per key.
+def test_1008_the_registry_holds_one_definition_per_role_and_twelve_of_them():
+    """Twelve roles, twelve definitions, one per key.
 
     `set(AGENTS.keys()) == set(AgentRole)` is the invariant the whole roster rests on: an enum
     key with no definition behind it is a compiled grant nothing claims, and a definition with
     no key cannot be reached. The COUNT is stated too, because the four hand-kept censuses
     (`test_947_triplet_questioner.py`, `test_grant_gate_575.py`, `test_bind_sole_seam_551.py`)
     move together — the ninth member was `judge`, #1008's own; #773 adds a tenth,
-    `CORPUS_REPAIR`.
+    `CORPUS_REPAIR`; #1224 adds the live oracle's two, `ORACLE` and `ORACLE_CHECK`.
     """
     AgentRole = _role()
     AGENTS = _agents()
-    assert len(AgentRole) == 10
-    assert len(AGENTS) == 10
+    assert len(AgentRole) == 12
+    assert len(AGENTS) == 12
     assert set(AGENTS.keys()) == set(AgentRole)
     assert sorted(defn.role.value for defn in AGENTS.values()) == sorted(
         r.value for r in AgentRole)

@@ -7,13 +7,14 @@ moved the family from `verdict_word=caught` to `verdict_word=survived`, and file
 own "the model never got to decide" close is read by the learning loop as the model's verdict
 about the case, and it flips the family's word.
 
-THE FIX, in this lane: `_grade_world` learns a THIRD ROW SHAPE. Tier 1 stays "an input is
+THE FIX, in this lane: the world reader (`family.read_world` since #1224) learns a THIRD ROW SHAPE. Tier 1 stays "an input is
 absent" (`ungradable`, no `malformed`); tier 2 stays "an input is there and wrong"
 (`ungradable` + `malformed`); the new shape is "the run did not finish" — `ungradable: True`,
 `cut_short: <normalized exit class>`, an `ungradable_reason` naming the exit, and NO `malformed`
 key, so `test_921_family_facts.py:631`'s absent-vs-malformed split reads the same after the
 change as before it. `is_gradable_row` is truthiness on `ungradable` and already excludes it
-(claim h7), so `verdict_word` is computed over what is left measuring with no change of its own.
+(claim h7). Since #1224 the family's `verdict_word` is the family-scope MODEL call's, so what
+this lane pins is what that call is shown: a cut-short world is NOT JUDGED, never a verdict.
 
 THREE §7 RESOLUTIONS ARE APPLIED HERE AS SETTLED, not as readings this file picked:
 
@@ -39,6 +40,8 @@ episode owner's, reached as `WORLD_LEAVES.run_end` — #1077 D7).
 from __future__ import annotations
 
 import json
+
+import pytest
 
 from defender._episode_handle import Episode
 from defender.tests import _spec1047 as S
@@ -85,7 +88,7 @@ def test_a_cut_short_world_files_the_third_row_shape(tmp_path):
 
 
 def test_a_request_limit_world_is_ungradable_not_a_verdict(tmp_path):
-    """`grade_family` over an episode whose world b ended `request-limit` files row b ungradable
+    """The judge pass over an episode whose world b ended `request-limit` files row b ungradable
     with a reason naming the exit, instead of grading the host's forced `unresolved` report as
     b's verdict about the case.
 
@@ -103,31 +106,39 @@ def test_a_request_limit_world_is_ungradable_not_a_verdict(tmp_path):
         "world b's exclusion cost its sibling its grade")
 
 
-def test_a_cut_short_world_does_not_move_the_family_verdict_word(tmp_path):
-    """verdict_word is computed over the remaining measuring worlds: the control episode's word
-    is unchanged by world b's run being cut short, where today a host-forced unresolved report
-    on b flips caught to survived (claim h2, executed).
+def test_a_cut_short_world_does_not_reach_the_family_call_as_a_verdict(tmp_path):
+    """A cut-short world's host-forced `unresolved` report never reaches the family-scope call
+    as that world's verdict: where today a host-forced unresolved report on b flips caught to
+    survived (claim h2, executed), the family's word — decided by that call since #1224 — is
+    decided from a line saying b was NOT JUDGED, and b's own world call is never made.
 
-    Three episodes, one assertion each: the control; the control with b's report replaced by
-    the host's forced close and NO run-end record, which is the bug; and the same with the
-    record, which is the fix. The middle one is the positive control for the observation
-    channel — without it, "the word did not move" is also green for a pass that cannot move the
-    word at all."""
-    control = S.cut_short_episode(tmp_path / "control")
-    word = S.family_word(control)
+    Three episodes: the control; the control with b's report replaced by the host's forced
+    close and NO run-end record, which is the bug; and the same with the record, which is the
+    fix. The middle one is the positive control for the observation channel — without it, "the
+    forced verdict is not shown" is also green for a pass that never shows any verdict."""
+    control = S.family_view(S.cut_short_episode(tmp_path / "control"))
+    assert "verdict='malicious'" in control["b"], control
 
-    bug = S.cut_short_episode(tmp_path / "bug")
-    _forced_close(bug)
-    assert S.family_word(bug) != word, (
+    bug_ep = S.cut_short_episode(tmp_path / "bug")
+    _forced_close(bug_ep)
+    bug = S.family_view(bug_ep)
+    assert "verdict='unresolved'" in bug["b"], (
         "the observation channel cannot see the difference: a host-forced `unresolved` report "
-        "on world b did not move the family's verdict word, so the assertion below proves "
-        "nothing (claim h2 observed caught -> survived on exactly this configuration)")
+        "on world b did not reach the family call as b's verdict, so the assertion below proves "
+        f"nothing (claim h2 observed caught -> survived on exactly this configuration): {bug}")
 
-    fixed = S.cut_short_episode(tmp_path / "fixed", cut={"b": "request-limit"})
-    _forced_close(fixed)
-    assert S.family_word(fixed) == word, (
-        "world b's run being cut short moved the family's verdict word; a run that was stopped "
-        "before the model could decide is not a measurement of the case")
+    fixed_ep = S.cut_short_episode(tmp_path / "fixed", cut={"b": "request-limit"})
+    _forced_close(fixed_ep)
+    judge = S.scripted_judge()
+    assert S.graded(fixed_ep, judge=judge)["b"].get("verdict") is None
+    assert S.judge_calls_for(judge, "b") == [], (
+        "world b's run was cut short and still bought a world call")
+    fixed = S.family_view(fixed_ep)
+    assert fixed["b"] == "NOT JUDGED", (
+        "world b's run being cut short still put the host's forced close in front of the family "
+        f"call as a verdict; a run stopped before the model could decide is not a measurement: "
+        f"{fixed['b']!r}")
+    assert fixed["c"] == control["c"], "world b's cut moved what the family is shown of world c"
 
 
 def test_the_third_row_shape_keeps_the_two_tiers_separable(tmp_path):
@@ -157,7 +168,7 @@ def test_a_pre_existing_ungradable_reason_does_not_acquire_a_cut_short_key(tmp_p
     direction; this pins the other.
 
     Three pre-existing reasons, each with no run-end record at all: an absent report (tier 1),
-    a manifest disposition outside the vocabulary (tier 1), and a report whose headline is
+    a manifest disposition outside the vocabulary (refused at manifest load since #1224), and a report whose headline is
     outside the vocabulary (tier 2). None of them is about how the run ended, so none of their
     rows may say anything about how the run ended."""
     ep = S.cut_short_episode(tmp_path / "absent")
@@ -171,10 +182,16 @@ def test_a_pre_existing_ungradable_reason_does_not_acquire_a_cut_short_key(tmp_p
     assert row.get("ungradable") is True, "the control failed: the malformed world still graded"
     assert row.get("cut_short") is None, "a malformed world acquired cut_short"
 
+    # #1224: a manifest disposition outside the vocabulary is refused at manifest load by the
+    # runtime loader's own gate, so it is a refusal of the pass naming the disposition — never a
+    # row, and never one that says anything about how a run ended.
     bad_declared = S.cut_short_episode(
         tmp_path / "declared", dispositions={"a": "benign", "b": "nonsense", "c": "malicious"})
-    assert S.graded(bad_declared)["b"].get("cut_short") is None, (
-        "a world with no ground truth to grade against acquired a cut_short key")
+    with pytest.raises(S.sym("learning.judge", "JudgeRefused"), match="nonsense") as refused:
+        S.graded(bad_declared)
+    assert "truncated" not in str(refused.value), (
+        f"a world with no ground truth was refused for how its run ended: {refused.value}")
+    assert "cut short" not in str(refused.value), refused.value
 
 
 def test_an_aborted_budget_or_store_world_names_its_exit_not_a_missing_report(tmp_path):
@@ -237,7 +254,7 @@ def test_a_world_whose_model_closed_and_was_then_cut_short(tmp_path):
         "shape, so the assertion above is not about `closed_before_cut`")
 
     control = S.cut_short_episode(tmp_path / "control")
-    assert S.family_word(decided) == S.family_word(control), (
+    assert S.family_view(decided) == S.family_view(control), (
         "a world that decided before it was cut short stopped counting as a measuring world")
 
 
@@ -542,8 +559,8 @@ def test_world_cut_short_before_any_of_its_required_inputs_exist(tmp_path):
 
 def test_two_worlds_end_in_different_exit_classes_in_one_episode(tmp_path):
     """Each world grades independently per its own class — b a request-limit row, c an aborted
-    row via F5's reordering, d a normal graded row — and verdict_word is computed over what is
-    left measuring.
+    row via F5's reordering, d a normal graded row — and the family call (which gives the word)
+    is shown only d as judged.
 
     Three non-control worlds so "the rest still grades" is observable: with only two, an
     episode where both are excluded and one where both are graded are indistinguishable from
@@ -559,7 +576,11 @@ def test_two_worlds_end_in_different_exit_classes_in_one_episode(tmp_path):
     assert graded["c"].get("cut_short") == "aborted"
     assert graded["d"].get("ungradable") is not True, (
         "the world that finished was excluded along with its cut-short siblings")
-    assert S.family_word(ep), "the family computed no verdict word at all"
+    view = S.family_view(ep)
+    assert view["b"] == "NOT JUDGED", view
+    assert view["c"] == "NOT JUDGED", view
+    assert "verdict='malicious'" in view["d"], (
+        f"the family call was not shown the world that finished as a judged world: {view}")
 
 
 def test_a_cut_short_world_and_a_malformed_world_in_the_same_episode(tmp_path):

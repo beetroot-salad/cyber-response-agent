@@ -533,7 +533,6 @@ def _names_taken_from(importer_rel: str, home_rel: str, root: Path = S.REPO_ROOT
 _IMPORTERS: dict[str, tuple[str, ...]] = {
     "defender/learning/branch/ledger.py": (_JSP, _RK),
     "defender/learning/branch/estate/registry.py": (_JSP,),
-    "defender/runtime/branch/_family.py": (_JSP,),
     "defender/learning/judge/family.py": _RESERVED_IDS,
     "defender/learning/core/persist.py": ("BASH_SHIM_QUERY_ID",),
     "defender/learning/leads/lead_extraction.py": ("BASH_SHIM_QUERY_ID",),
@@ -596,14 +595,14 @@ def test_1080_query_id_and_request_key_rules_live_in_the_flat_tier_with_todays_v
 def test_query_rules_are_imported_by_learning_and_runtime_under_the_private_names():
     """The request-key and params-normalising rules are defined once, under their base names
     (`_json_safe_params`, `_request_key`), in the flat tier; the repeat guard, the ledger, the
-    estate registry and the branch family all import that one definition, and no local copy
-    exists — none is left in `record_query`. (10-03 flat-tier placement; F30. dF11's public
-    rename is parked with #1165 by the 2026-10-04 scope cut.)
+    estate registry all import that one definition, and no local copy exists — none is left in
+    `record_query`. (10-03 flat-tier placement; F30. dF11's public rename is parked with #1165
+    by the 2026-10-04 scope cut. The branch family's envelope normaliser went with the
+    envelope, #1224.)
 
     Structural: each rule, spelled as `S.QUERY_RULE_PUBLIC` gives it (the identity map), has
     exactly one definition in the whole tree (`defender/scripts/` included), and it is in the
-    flat tier; the ledger, the estate registry, the branch family and the module holding the
-    repeat guard — `record_query`, which stays, reached at its staying path (E5) — take the
+    flat tier; the ledger, the estate registry and the module holding the repeat guard — `record_query`, which stays, reached at its staying path (E5) — take the
     rule from that home."""
     guard = "defender/scripts/gather_tools/record_query.py"
     S.module_at(guard)
@@ -619,7 +618,6 @@ def test_query_rules_are_imported_by_learning_and_runtime_under_the_private_name
     importers = {
         "defender/learning/branch/ledger.py": (_JSP, _RK),
         "defender/learning/branch/estate/registry.py": (_JSP,),
-        "defender/runtime/branch/_family.py": (_JSP,),
         guard: (_RK,),
     }
     misses = _census_misses(importers)

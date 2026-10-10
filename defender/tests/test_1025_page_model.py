@@ -4,8 +4,7 @@ What the split buys, pinned behavior by behavior: a stray scalar where a record'
 a list or a mapping degrades THAT slot and never the render (d01: only `family.yaml` refuses the
 whole page); the findings walk runs once, so the tiles, the cards' footers and the findings
 section cannot disagree about a count or a group number; the page's disposition rule reads an
-absent `subject` exactly as `enqueue_report` does; the record-only withheld stubs are joined
-per finding, not per world; the stage clock's whole-second stamps make a zero-length step a
+absent `subject` exactly as `enqueue_report` does; the stage clock's whole-second stamps make a zero-length step a
 real step; and the CLI's diagnostics come off the model's refusal slots, never a scan of the
 rendered bytes. Each of these was a finding of the PR #1042 review, verified by probe against
 the section-reads-its-own-records shape this model replaced.
@@ -80,21 +79,18 @@ def _card_link(card: E.Node) -> tuple[str, str]:
 # ---------------------------------------------------------------------------------------
 
 
-def test_1025_a_scalar_worlds_field_in_the_manifest_renders_a_page_with_no_world_sections(tmp_path):
-    """`family.yaml` with `worlds: 5` is a manifest the page can read (d01 refuses only an
-    unreadable one): the page renders, the guide has no rows, the world sections are the
-    record's and the run dirs' own (no manifest world contributes one), and the records section
-    still lists the base story — the roster builder and every section that walks the manifest's
-    worlds read the same typed list."""
+def test_1025_a_scalar_worlds_field_in_the_manifest_is_refused_by_the_loader_gate(tmp_path):
+    """`family.yaml` with `worlds: 5` is a manifest the runtime loader refuses (the page reads
+    the manifest through the loader's own gate, `family.read_manifest`), so it is the one record
+    that refuses the whole page (d01): `render_episode` raises the reader's `JudgeRefused`
+    naming the field, and no page is written."""
     ep = E.sample_episode(tmp_path)
     manifest = E.sample_manifest()
     manifest["worlds"] = 5
     T.write_family(ep.dir, manifest)
-    page = render(ep)
-    assert page.elements(cls="vd-guide-row") == []
-    assert sorted(page.ids_with("world-")) == sorted(f"world-{w}" for w in E.WORLDS)
-    assert "not graded" in page.text_of(f"world-{E.CONTROL}")
-    assert E.BASE_STORY in page.text_of("sec-records")
+    with pytest.raises(E.sym("learning.judge", "JudgeRefused"), match="worlds"):
+        visualize_episode().render_episode(ep.dir)
+    assert not ep.page.exists(), "a page was written for a manifest the loader refused"
 
 
 def test_1025_a_scalar_findings_field_in_a_draw_document_is_that_draws_own_absence(tmp_path):
@@ -129,26 +125,27 @@ def test_1025_non_numeric_usage_and_odd_message_shapes_in_a_wire_log_leave_that_
     assert "partial" in judge, judge
 
 
-def test_1025_a_scalar_list_field_in_the_review_or_the_provenance_record_degrades_its_own_slot(tmp_path):
-    """`review.yaml` with `worlds.<label>.inventions: 5` and `provenance.json` with
-    `agreed.dirty_paths: 5` render the records section with those two lists empty and every
-    other record intact."""
+def test_1025_a_scalar_list_field_in_the_outcome_or_the_provenance_record_degrades_its_own_slot(tmp_path):
+    """`outcome.yaml` with `unservable_worlds: 5`, `not_replayable: 5` and `drift: 5`, and
+    `provenance.json` with `agreed.dirty_paths: 5`, render the records section with those lists
+    empty and every other record intact — the outcome's word and reason still show."""
     ep = E.sample_episode(tmp_path)
-    review_path = ep.dir / "review.yaml"
-    review = yaml.safe_load(review_path.read_text(encoding="utf-8"))
-    review["worlds"][E.GRADED_WORLD]["inventions"] = 5
-    review["teardown"] = {"at": "2026-09-09T10:00:00Z", "failures": 7}
-    review_path.write_text(yaml.safe_dump(review, sort_keys=False), encoding="utf-8")
+    outcome_path = ep.dir / "outcome.yaml"
+    outcome = yaml.safe_load(outcome_path.read_text(encoding="utf-8"))
+    outcome.update(unservable_worlds=5, not_replayable=5, drift=5)
+    outcome_path.write_text(yaml.safe_dump(outcome, sort_keys=False), encoding="utf-8")
     stamp_path = ep.dir / "provenance.json"
     stamp = json.loads(stamp_path.read_text(encoding="utf-8"))
     stamp["agreed"]["dirty_paths"] = 5
     stamp_path.write_text(json.dumps(stamp), encoding="utf-8")
     page = render(ep)
     records = page.text_of("sec-records")
-    assert "review record unreadable" not in records, records
+    assert "no record" not in records, records
+    assert f"outcome: accepted — {E.OUTCOME_REASON}" in records, records
     assert "provenance record unreadable" not in records, records
     assert E.LESSONS_COMMIT[:8] in records or "allow_dirty" in records, records
-    assert not page.elements(cls="rc-invention")
+    assert not page.elements(cls="rc-outcome-call")
+    assert not page.elements(cls="rc-world-record")
     assert not page.elements(cls="rc-dirty")
 
 
@@ -164,7 +161,7 @@ def test_1025_a_finding_with_no_subject_key_is_the_defenders_as_the_enqueue_read
     disposition mirrors the enqueue's reading rather than calling the absence a subject that
     names neither channel."""
     ep = E.sample_episode(tmp_path)
-    findings = E._world_findings_rows(withheld=False)
+    findings = E._world_findings_rows()
     findings[0].pop("subject")
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=findings))
     page = render(ep)
@@ -179,7 +176,7 @@ def test_1025_the_card_footer_counts_and_links_the_same_defender_rows(tmp_path):
     card footer "4 findings · enqueued" link the group its defender rows sit in — the count
     and the anchor are one list of rows, never the first row of any subject."""
     ep = E.sample_episode(tmp_path)
-    findings = E._world_findings_rows(withheld=False)
+    findings = E._world_findings_rows()
     findings.insert(0, findings.pop())  # the world-author finding now comes first
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=findings))
     doc = E.sample_grade()
@@ -216,49 +213,12 @@ def test_1025_the_dropped_count_on_the_tile_and_in_the_accounting_is_the_draw_do
     and in the queue accounting ("dropped 2"), the same figure the findings section shows per
     draw — never a literal zero."""
     ep = E.sample_episode(tmp_path)
-    graded = E._world_findings_rows(withheld=False)
+    graded = E._world_findings_rows()
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=graded, dropped=2))
     page = render(ep)
     assert "2 dropped" in _tile(page, 2), _tile(page, 2)
     assert "dropped 2" in page.one(cls="vd-acct").text()
     assert "2 dropped" in page.text_of("sec-findings")
-
-
-def test_1025_a_recorded_withheld_finding_whose_document_is_gone_is_a_stub_beside_the_survivors(tmp_path):
-    """The record lists four withheld findings for the withheld world, on the ledger and on
-    `withheld_findings` (each carrying its `finding_id`, so the join is by coordinate — never
-    by matching the finding's body against what is on disk). THE GRAIN IS THE DOCUMENT (F-5),
-    for the withheld lane exactly as for the world lane: with the world's draw document GONE
-    all four render as "draw document absent" stubs carrying the record's own claim under the
-    withheld group, tile 3 counts four withheld and the accounting reads "4 entries · 4
-    matched"; with the document PRESENT but rewritten to carry two of the four, the page
-    shows the two on disk and no stub, and the accounting says the withheld list and the
-    ledger's rows disagree by two rather than inventing rows the document does not hold."""
-    ep = E.sample_episode(tmp_path)
-    withheld = E._world_findings_rows(withheld=True)
-    (ep.world(E.WITHHELD_WORLD) / "judge" / "0.yaml").unlink()
-    page = render(ep)
-    stubs = {i for i in page.ids if i.startswith(f"f-{E.WITHHELD_WORLD}-")}
-    assert stubs == {f"f-{E.WITHHELD_WORLD}-0-{i}" for i in range(5)}, stubs
-    for i in range(4):
-        text = page.text_of(f"f-{E.WITHHELD_WORLD}-0-{i}")
-        assert "draw document absent" in text, text
-        assert withheld[i]["claim"] in text, text
-        assert "withheld" in _heading_of(page, f"f-{E.WITHHELD_WORLD}-0-{i}")
-    acct = page.one(cls="vd-acct").text()
-    assert "withheld list: 4 entries · 4 matched" in acct, acct
-    assert "record and page disagree" not in acct, acct
-    assert f"{S.defender_withheld} withheld" in _tile(page, 2), _tile(page, 2)
-
-    E.draw_document(ep.dir, E.WITHHELD_WORLD, 0, E.draw_doc(findings=withheld[:2]))
-    page = render(ep)
-    rows = [i for i in page.ids if i.startswith(f"f-{E.WITHHELD_WORLD}-")]
-    assert rows == [f"f-{E.WITHHELD_WORLD}-0-0", f"f-{E.WITHHELD_WORLD}-0-1"], rows
-    assert "draw document absent" not in page.text_of("sec-findings")
-    acct = page.one(cls="vd-acct").text()
-    assert "withheld list: 4 entries · 2 matched" in acct, acct
-    assert "record and page disagree by 2" in acct, acct
-    assert "2 withheld" in _tile(page, 2), _tile(page, 2)
 
 
 # ---------------------------------------------------------------------------------------
@@ -272,7 +232,7 @@ def test_1025_a_step_that_starts_and_ends_within_one_second_still_bounds_the_hea
     `verify` as the LAST step and its stamp at 10:11:00, the header reads the full 11m00s from
     the questioner's start, not the 9m00s that dropping it would leave."""
     ep = E.sample_episode(tmp_path)
-    steps = E.six_steps()
+    steps = E.every_step()
     names = [s for s, _a, _b in steps]
     verify = names.index("verify")
     steps[verify] = ("verify", "2026-09-09T10:11:00Z", "2026-09-09T10:11:00Z")
@@ -302,7 +262,7 @@ def test_1025_the_cli_diagnostic_is_the_records_refusal_not_a_phrase_on_the_page
     grade record" exits 0 with nothing on stderr: the diagnostics come off the record slots
     the page was built from, never a substring scan of the rendered bytes."""
     ep = E.sample_episode(tmp_path)
-    graded = E._world_findings_rows(withheld=False)
+    graded = E._world_findings_rows()
     graded[0]["claim"] = "the run left no grade record behind"
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=graded))
     rc, out, err = cli([str(ep.dir)], capsys)
@@ -339,20 +299,20 @@ def _outside_world(tmp_path, ep) -> tuple[Path, str]:
 
 def test_1025_a_manifest_label_off_the_directory_grammar_reads_nothing_from_disk(tmp_path):
     """A manifest world whose label carries `..` names a directory OUTSIDE the episode; the
-    page renders it as an unnameable entry and joins it into no path — the planted draw
-    finding and the planted alert never appear, and the roster's three real worlds do. The
-    gate is the judge's own (`family.world_label_names_directory`), not a second grammar."""
+    manifest reader (the runtime loader's own gate, `family.read_manifest`) refuses the label
+    before anything is joined into a path, so the page refuses as a whole (d01) — the refusal
+    names the world-token alphabet, and neither the planted draw finding nor the planted alert
+    reaches it or any page."""
     ep = E.sample_episode(tmp_path)
     _outside, label = _outside_world(tmp_path, ep)
     manifest = E.sample_manifest()
     manifest["worlds"].append(T.world_doc(label, role="B", axis="planted"))
     T.write_family(ep.dir, manifest)
-    page = render(ep)
-    assert "PLANTED-OUTSIDE-CLAIM" not in page.text
-    assert "PLANTED-OUTSIDE-RULE" not in page.text
-    assert E.ALERT_RULE in page.text_of("sec-case")
-    assert sorted(page.ids_with("world-")) == sorted(f"world-{w}" for w in E.WORLDS)
-    assert "unnameable" in page.text_of("sec-worlds"), page.text_of("sec-worlds")
+    with pytest.raises(E.sym("learning.judge", "JudgeRefused"),
+                       match="world-token alphabet") as refused:
+        visualize_episode().render_episode(ep.dir)
+    assert "PLANTED-OUTSIDE" not in str(refused.value)
+    assert not ep.page.exists(), "a page was written for a manifest the loader refused"
 
 
 def test_1025_a_grade_row_label_off_the_directory_grammar_reads_nothing_from_disk(tmp_path):
@@ -401,18 +361,18 @@ def test_1025_runs_pruned_and_the_grade_unreadable_keeps_every_archived_world(tm
     assert "grade record unreadable" in page.text
 
 
-def test_1025_the_ladder_note_asks_the_outcome_normalizer_not_a_local_list(tmp_path):
-    """`verdict_word: " Survived"` is the ladder word `survived` as `normalized_judge_outcome`
-    reads it (case-insensitive, trimmed), so tile 1 carries no "not the ladder" note; a word
+def test_1025_the_verdict_word_note_asks_the_outcome_normalizer_not_a_local_list(tmp_path):
+    """`verdict_word: " Survived"` is the family word `survived` as `normalized_judge_outcome`
+    reads it (case-insensitive, trimmed), so tile 1 carries no "not a family word" note; a word
     the normalizer refuses carries it."""
     ep = E.sample_episode(tmp_path)
     grade = E.sample_grade()
     grade["verdict_word"] = " Survived"
     E.write_judge(ep.dir, grade, check=False)
-    assert "not the ladder" not in _tile(render(ep), 0)
+    assert "not a family word" not in _tile(render(ep), 0)
     grade["verdict_word"] = "survived-ish"
     E.write_judge(ep.dir, grade, check=False)
-    assert "not the ladder" in _tile(render(ep), 0)
+    assert "not a family word" in _tile(render(ep), 0)
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permission bits")

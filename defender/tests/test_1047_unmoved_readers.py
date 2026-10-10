@@ -107,7 +107,7 @@ def test_route_finding_still_carries_the_cut_short_reason_onto_the_ledger_entry_
 
     lane, carried = enqueue.route_finding(
         label="b", finding={"subject": "defender"}, kind="draw", world_row=row,
-        withheld_reasons={}, defender_blocked=False)
+        defender_blocked=False)
     assert lane == enqueue.ROUTE_UNGRADABLE, (
         f"a cut-short row took lane {lane!r}; `is_gradable_row` is truthiness on `ungradable` "
         "and the third row shape sets it")

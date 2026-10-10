@@ -177,30 +177,3 @@ def test_the_table_is_read_from_the_injected_tenant(injected):
     grants = T.run_grants(injected)
     assert {(s, v) for s, v, _ in grants.gather.entries} == set(T.GATHER_PAIRS_B)
     assert {(s, v) for s, v, _ in T.fixture_grants().gather.entries} != set(T.GATHER_PAIRS_B)
-
-
-# ---- branching: the stager's patterns and the write door ----------------------------------------------
-
-def test_the_configured_patterns_are_the_injected_tenants(injected):
-    stager = T.mod("learning.branch.estate.stagers.elastic")
-    patterns = stager.configured_patterns(_record(injected).elastic)
-    assert tuple(patterns) == (f"{MARK}-events-*", f"{MARK}-alerts-*")
-    assert tuple(stager.configured_patterns(T.fixture_run_tenant().elastic)) != tuple(patterns)
-
-
-def test_the_staging_write_door_addresses_the_injected_tenants_cluster(injected, tmp_path):
-    """The door is driven for real over a recording transport; the URL the transport is HANDED
-    is the injected tenant's `ELASTICSEARCH_URL`, and TLS verification follows its
-    `ELASTIC_SSL_VERIFY` (true here, false in the checkout's playground)."""
-    staging = T.mod("learning.branch.staging")
-    calls: list[dict] = []
-
-    def transport(ctx, container, url, **kw):
-        calls.append({"url": url, **kw})
-        return 0, '{"count": 3}\n200', ""
-
-    door = staging.write_door_from_env(_ctx(injected, tmp_path), transport=transport)
-    assert door.count("logs-x") == 3
-    assert calls, calls
-    assert calls[0]["url"].startswith(f"https://es-{MARK}:9200/"), calls
-    assert calls[0]["insecure"] is False, calls

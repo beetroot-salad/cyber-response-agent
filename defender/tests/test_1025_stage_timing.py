@@ -1,8 +1,8 @@
 """#1025 O7 — the episode's stage timing record, written at the source.
 
 One record at the episode root, `episodes/<id>/timing.json` — `{"steps": [...]}`, one entry
-`{step, started_at, ended_at}` per completed step, in launch order — `questioner`, `staging`,
-`review`, `runs`, `verify`, `judge`. The launcher (`cli._run_episode`) is the only frame that
+`{step, started_at, ended_at}` per completed step, in launch order — `questioner`,
+`preflight`, `runs`, `verify`, `judge`. The launcher (`cli._run_episode`) is the only frame that
 sees every step boundary, so it holds the one `StageClock` and rewrites the WHOLE document
 after each step, never before: an aborted episode leaves exactly the steps that ran, a reader
 sees the previous whole document or the new one and never a torn part, and an entry the record
@@ -41,9 +41,10 @@ from defender._clock import now_iso, parse_iso_utc
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests import _state1135
+from defender.tests.live_oracle_1224 import _spec1224 as S
 
-#: The six steps, in the order the launcher runs them — the names a reader of the record keys on.
-EXPECTED_STEPS = ["questioner", "staging", "review", "runs", "verify", "judge"]
+#: The five steps, in the order the launcher runs them — the names a reader of the record keys on.
+EXPECTED_STEPS = ["questioner", "preflight", "runs", "verify", "judge"]
 
 
 @pytest.fixture(autouse=True)
@@ -151,31 +152,49 @@ class Launch:
     after: str
 
 
-def _launch(tmp_path, *, judge=None, spawn=None, rows=(), **seams) -> Launch:
-    """Drive ONE whole episode through the real launcher, every fake entering by its seam.
+#: The one answer every captured call recorded and the live estate gives, so an oracle serving
+#: it unchanged calibrates every world (no drift, no change to a pre-branch call).
+_BASE = {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon", "host": "web-1",
+                   "ts": "2026-07-28T15:00:00Z"}]}
 
-    `rows` lands rows in the SOURCE run's queries table before the launch — the only way to
-    give the review something to replay, since the launcher primes the episode from the source.
-    `live_tree` (defaulted below) is #976's live-tree seam, injected to match the fixture source.
+
+def _calls() -> list:
+    """The source run's three captured calls, one per fixture system, all answered `_BASE`."""
+    return [S.Call("idp", "query", S.query_params("user:alice"), _BASE),
+            S.Call("edr", "query", S.query_params("host:db-1"), _BASE),
+            S.Call("siem-x", "lookup", {"entity": "svc-1225"}, _BASE)]
+
+
+def _launch(tmp_path, *, judge=None, spawn=None, calls=None, oracle=None, verifier=None,
+            **seams) -> Launch:
+    """Drive ONE whole episode through the real launcher over `_spec1224`'s fixture tenant,
+    every fake entering by its seam.
+
+    `calls` are the SOURCE run's captured calls (`_calls()` by default) — what pre-flight
+    replays through each world's oracle; `oracle` / `verifier` are pre-flight's model doubles
+    (`S.ScriptedModel`; default: an oracle serving every call unchanged and a verifier passing
+    it).
     """
-    base, src = T.runs_base(tmp_path)
-    for row in rows:
-        T.capture_call(src, **row)
+    est = S.estate(tmp_path)
+    _base, src = S.source_run(tmp_path, est, calls=_calls() if calls is None else calls)
     episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
     if spawn is None:
         spawn = J.FakeSibling(episode_dir)
     if judge is None:
-        judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    seams.setdefault("door", T.FakeDoor())
-    seams.setdefault("questioner",
-                     T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c")))
-    seams.setdefault("adapters", T.FakeAdapters())
-    seams.setdefault("invoke", T.FakeAgent(*["same"] * 24))
-    seams.setdefault("preflight", T.no_preflight)
+        # One reply valid in both scopes: a world draw reads `bucket`/`systems`, the family
+        # draw `verdict_word`, so no draw is refused and asked again.
+        judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc(
+            findings=[], bucket="none", systems=[], verdict_word="survived")))
+    oracle = oracle if oracle is not None else S.oracle(then=S.submit(_BASE, S.EMPTY_CLAIM))  # lint-default: ok — a test builder's fresh per-call double, never a shared instance
+    verifier = verifier if verifier is not None else S.passing_verifier()  # lint-default: ok — a test builder's fresh per-call double, never a shared instance
+    seams.setdefault("questioner", S.questioner_for())
+    seams.setdefault("preflight", S.no_preflight)
     seams.setdefault("live_tree", T.source_capture())
+    seams.setdefault("roster", est.roster())
     before = now_iso()
     rc = _cli().main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
-                     spawn=spawn, judge=judge, **seams)
+                     spawn=spawn, judge=judge, oracle=oracle.model, verifier=verifier.model,
+                     **seams)
     return Launch(rc, spawn, judge, episode_dir, before, now_iso())
 
 
@@ -188,21 +207,18 @@ def _abort(tmp_path, raises: type[BaseException], **seams) -> tuple[Path, str, s
     return _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()), before, now_iso()
 
 
-def _rejecting_seams() -> dict:
-    """The seams under which the review REJECTS the family before any sibling starts.
+def _outcome(episode_dir: Path) -> dict:
+    """Pre-flight's outcome record, through its production reader."""
+    with T.mod("_io").bind(episode_dir) as bound:
+        return T.mod("learning.branch.outcome").read_outcome(bound)
 
-    The recipe `test_947_contradicting_world_is_rejected_before_any_sibling_starts` executes:
-    the source captured one identity answer naming `web-1`, world B patches that entity, and
-    the blind comparator answers `contradiction` — one contradicting world ends the episode.
-    """
-    patched = T.world_doc("b", ov=T.overlay(
-        patches={"identity": {"web-1": {"owner": "platform"}}}))
-    return {
-        "rows": [{"system": "identity", "verb": "get-user",
-                  "payload": {"hits": [{"host": "web-1", "owner": "soc"}]}}],
-        "questioner": T.FakeAgent(T.family_doc(worlds=[T.base_world(), patched]), patched),
-        "invoke": T.FakeAgent(*["contradiction"] * 24),
-    }
+
+def _refusing_seams() -> dict:
+    """The seams under which pre-flight REFUSES the family before any sibling starts: no world
+    carries a fact, so there is nothing to calibrate (M05=A `refused`)."""
+    bare = S.family_v2(worlds=[S.control_world("a"), S.world_v2("b", facts=[]),
+                               S.world_v2("c", role="C", facts=[])])
+    return {"questioner": S.questioner_for(bare)}
 
 
 class _Interrupting:
@@ -214,9 +230,9 @@ class _Interrupting:
 
     `KeyboardInterrupt` and not an `Exception`, because every boundary holds the latter:
     `start_family` files one arm's `Exception` as a non-zero exit and the family goes on to be
-    archived, the `JUDGE` frame's body holds whatever the judge raises, and the review's fault arms
-    record a failed replay rather than aborting. An interrupt is the one thing that really ends
-    a step mid-way at all six boundaries.
+    archived, the `JUDGE` frame's body holds whatever the judge raises, and pre-flight files an
+    oracle's failure as a world that failed calibration rather than aborting. An interrupt is
+    the one thing that really ends a step mid-way at all five boundaries.
     """
 
     def __init__(self, episode_dir: Path) -> None:
@@ -251,8 +267,9 @@ class _WatchingSibling(J.FakeSibling):
 
 
 class _PlantingSibling(J.FakeSibling):
-    """`FakeSibling` that leaves a symlink where the archive will copy world B's report — the
-    real fault the archive's own screen refuses, so `verify_family` raises mid-step."""
+    """`FakeSibling` that leaves a symlink to an outside directory where the episode's
+    `worlds/` belongs — a real fault the episode handle's own screen refuses before the
+    archive writes anything, so `verify_family` raises mid-step."""
 
     def __init__(self, episode_dir: Path, *, outside: Path) -> None:
         super().__init__(episode_dir)
@@ -261,13 +278,11 @@ class _PlantingSibling(J.FakeSibling):
     def __call__(self, argv: list[str], *, env: dict[str, str] | None = None,
                  **kw: Any) -> int:
         rc = super().__call__(argv, env=env, **kw)
-        world = self.episode_dir / "worlds" / "b"
-        world.mkdir(parents=True, exist_ok=True)
         # N arms, released from one barrier, race to plant ONE link; the loser's
         # `FileExistsError` would otherwise leave `start_family` as a second, unintended fault
         # ("world b was never started") in a scenario whose only fault is the planted alias.
         with contextlib.suppress(FileExistsError):
-            (world / "report.md").symlink_to(self.outside)
+            (self.episode_dir / "worlds").symlink_to(self.outside, target_is_directory=True)
         return rc
 
 
@@ -303,12 +318,12 @@ def test_1025_a_step_row_round_trips_through_the_record(tmp_path):
     clock = timing.StageClock(_open(episode_dir))
     first = clock.record("questioner", started_at="2026-01-01T00:00:00+00:00",
                          ended_at="2026-01-01T00:00:05+00:00")
-    second = clock.record("staging", started_at="2026-01-01T00:00:07+00:00",
+    second = clock.record("preflight", started_at="2026-01-01T00:00:07+00:00",
                           ended_at="2026-01-01T00:01:30+00:00")
 
     assert first == {"step": "questioner", "started_at": "2026-01-01T00:00:00+00:00",
                      "ended_at": "2026-01-01T00:00:05+00:00"}
-    assert second == {"step": "staging", "started_at": "2026-01-01T00:00:07+00:00",
+    assert second == {"step": "preflight", "started_at": "2026-01-01T00:00:07+00:00",
                       "ended_at": "2026-01-01T00:01:30+00:00"}
     record = EpisodePaths(episode_dir).timing
     assert record.is_file(), "the record is not at the episode root under the owner's name"
@@ -327,14 +342,14 @@ def test_1025_the_reader_returns_record_order_not_step_order(tmp_path):
 
     A reader that sorts by step would make a launcher that writes `verify` before `runs`
     indistinguishable from one that writes at each boundary, which is the one property the
-    record exists to show. Recorded `staging` then `questioner`, the reader answers
-    `[staging, questioner]`.
+    record exists to show. Recorded `preflight` then `questioner`, the reader answers
+    `[preflight, questioner]`.
     """
     timing = _timing()
     episode_dir = tmp_path / "episode"
     episode_dir.mkdir()
     clock = timing.StageClock(_open(episode_dir))
-    later = clock.record("staging", started_at="2026-01-01T00:00:07+00:00",
+    later = clock.record("preflight", started_at="2026-01-01T00:00:07+00:00",
                          ended_at="2026-01-01T00:01:30+00:00")
     earlier = clock.record("questioner", started_at="2026-01-01T00:00:00+00:00",
                            ended_at="2026-01-01T00:00:05+00:00")
@@ -382,7 +397,7 @@ def test_1025_every_write_replaces_the_whole_document_and_never_the_open_file(tm
     before_inode = os.stat(record).st_ino
 
     with record.open("r", encoding="utf-8") as held_open:
-        second = clock.record("staging", started_at=now_iso(), ended_at=now_iso())
+        second = clock.record("preflight", started_at=now_iso(), ended_at=now_iso())
         assert held_open.read() == before_text, (
             "a handle opened before the write saw the new bytes — the existing file was written "
             "in place rather than replaced")
@@ -553,9 +568,9 @@ def test_1025_the_reader_refuses_what_it_cannot_read_and_only_absence_is_empty(t
 def test_1025_a_step_the_disk_refused_once_is_still_on_the_next_document(tmp_path):
     """A step the clock saw finish stays on the clock even when the disk refused THAT write:
     the next boundary's rewrite carries it. Here the record's name is squatted by a directory
-    for the `review` write alone and freed before `runs` — the document after `runs` holds
-    `[questioner, staging, review, runs]`, not a record with a hole in it that no launch can
-    produce and that the record's rule reads as a review that never finished.
+    for the `preflight` write alone and freed before `runs` — the document after `runs` holds
+    `[questioner, preflight, runs]`, not a record with a hole in it that no launch can
+    produce and that the record's rule reads as a pre-flight that never finished.
 
     Fails on a clock that keeps a step only once its write succeeded.
     """
@@ -565,18 +580,17 @@ def test_1025_a_step_the_disk_refused_once_is_still_on_the_next_document(tmp_pat
     record = EpisodePaths(episode_dir).timing
     clock = timing.StageClock(_open(episode_dir))
     clock.record("questioner", started_at=now_iso(), ended_at=now_iso())
-    clock.record("staging", started_at=now_iso(), ended_at=now_iso())
 
     good = record.read_bytes()
     record.unlink()
     record.mkdir()
     with pytest.raises(OSError, match="aliased"):
-        clock.record("review", started_at=now_iso(), ended_at=now_iso())
+        clock.record("preflight", started_at=now_iso(), ended_at=now_iso())
     record.rmdir()
     record.write_bytes(good)
 
     clock.record("runs", started_at=now_iso(), ended_at=now_iso())
-    assert _steps(episode_dir) == ["questioner", "staging", "review", "runs"], (
+    assert _steps(episode_dir) == ["questioner", "preflight", "runs"], (
         "the step whose own write was refused is missing from the document written after it")
 
 
@@ -585,13 +599,13 @@ def test_1025_a_step_the_disk_refused_once_is_still_on_the_next_document(tmp_pat
 # ---------------------------------------------------------------------------------------
 
 
-def test_1025_an_accepted_episode_leaves_all_six_steps_in_launch_order(tmp_path):
-    """A clean accepted episode leaves six rows in `STEPS` order — in the FILE, not merely as
+def test_1025_an_accepted_episode_leaves_every_step_in_launch_order(tmp_path):
+    """A clean accepted episode leaves five rows in `STEPS` order — in the FILE, not merely as
     the reader returns them — each row's moments inside the real clock's bracket around the
     launch, `started_at <= ended_at`, and each step starting no earlier than the previous one
     ended. The rows are on disk from inside a LATER step: the sibling spawned during `runs`
-    already sees `questioner`, `staging`, `review`, and the judge called during `judge` sees
-    the five before it — a record buffered and flushed on the way out shows them nothing.
+    already sees `questioner`, `preflight`, and the judge called during `judge` sees the four
+    before it — a record buffered and flushed on the way out shows them nothing.
 
     Fails when a step is not recorded, when the file's rows are out of order, when a timestamp
     is not one `parse_iso_utc` accepts or lies outside the launch, when two steps' intervals
@@ -608,8 +622,7 @@ def test_1025_an_accepted_episode_leaves_all_six_steps_in_launch_order(tmp_path)
 
     launch = _launch(tmp_path, spawn=sibling, judge=watching_judge)
     assert launch.rc == 0, "the control failed: the accepted episode did not launch cleanly"
-    assert T.review_doc(launch.episode_dir)["episode"]["outcome"] == "accepted", (
-        "the control failed")
+    assert _outcome(launch.episode_dir)["outcome"] == "accepted", "the control failed"
 
     rows = _raw_rows(launch.episode_dir)
     assert [row["step"] for row in rows] == EXPECTED_STEPS
@@ -619,11 +632,11 @@ def test_1025_an_accepted_episode_leaves_all_six_steps_in_launch_order(tmp_path)
     _clocked(rows, before=launch.before, after=launch.after)
 
     assert sibling.seen, "the control failed: no sibling was spawned"
-    assert all(seen == ["questioner", "staging", "review"] for seen in sibling.seen), (
+    assert all(seen == ["questioner", "preflight"] for seen in sibling.seen), (
         f"a sibling spawned during `runs` saw {sibling.seen} on the record — the rows are "
         "not on disk at the boundary")
     assert seen_by_judge, "the control failed: the judge was never called"
-    assert seen_by_judge[0] == ["questioner", "staging", "review", "runs", "verify"], (
+    assert seen_by_judge[0] == ["questioner", "preflight", "runs", "verify"], (
         f"the judge saw {seen_by_judge[0]} on the record — the rows are not on disk at the "
         "boundary")
 
@@ -660,10 +673,10 @@ def test_1025_the_runs_row_spans_the_time_the_siblings_were_actually_running(tmp
         "`verify` started before `runs` ended — a `started_at` that is not the step's own")
 
 
-def test_1025_a_rejected_episode_stops_the_record_at_the_review(tmp_path, monkeypatch):
-    """An episode the review REJECTS leaves exactly `questioner`, `staging`, `review` — the
-    launcher returns 1 before any sibling starts, so no `runs`, `verify` or `judge` row exists
-    — and those three rows lie inside the launch's own clock bracket.
+def test_1025_a_refused_episode_stops_the_record_at_preflight(tmp_path, monkeypatch):
+    """An episode pre-flight REFUSES leaves exactly `questioner`, `preflight` — the launcher
+    returns 1 before any sibling starts, so no `runs`, `verify` or `judge` row exists — and
+    those two rows lie inside the launch's own clock bracket.
 
     Positive control under its own episodes root: the accepted episode does carry those three
     later rows, so the negative cannot pass on a launcher that never records them.
@@ -672,37 +685,35 @@ def test_1025_a_rejected_episode_stops_the_record_at_the_review(tmp_path, monkey
     accepted = _launch(tmp_path)
     assert accepted.rc == 0, "the control failed: the accepted episode did not launch cleanly"
 
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-rejected"))
-    rejected = _launch(tmp_path, **_rejecting_seams())
-    assert rejected.rc == 1, "the rejecting drive did not reach the rejected exit"
-    assert T.review_doc(rejected.episode_dir)["episode"]["decision"] == "rejected", (
-        "the rejecting drive did not reject")
-    assert rejected.spawn.launches == [], "a sibling started for a rejected episode"
+    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-refused"))
+    refused = _launch(tmp_path, **_refusing_seams())
+    assert refused.rc == 1, "the refusing drive did not reach the refused exit"
+    assert _outcome(refused.episode_dir)["outcome"] == "refused", (
+        "the refusing drive did not refuse")
+    assert refused.spawn.launches == [], "a sibling started for a refused episode"
 
-    rows = _raw_rows(rejected.episode_dir)
-    assert [row["step"] for row in rows] == ["questioner", "staging", "review"]
-    _clocked(rows, before=rejected.before, after=rejected.after)
-    assert _steps(accepted.episode_dir)[3:] == ["runs", "verify", "judge"], "the control failed"
+    rows = _raw_rows(refused.episode_dir)
+    assert [row["step"] for row in rows] == ["questioner", "preflight"]
+    _clocked(rows, before=refused.before, after=refused.after)
+    assert _steps(accepted.episode_dir)[2:] == ["runs", "verify", "judge"], "the control failed"
 
 
 def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_raised(
         tmp_path, monkeypatch):
     """An episode that aborts MID-STEP leaves the rows for the steps that completed and no row
-    for the step that raised — at EVERY one of the six boundaries, the record is written after
+    for the step that raised — at EVERY one of the five boundaries, the record is written after
     the step, never before. Each arm runs under its own episodes root, and each interrupting
     seam reports what the record held when it was called, so a row written before its step, or
     a record flushed only on the way out, is caught from inside the step as well as after it.
 
     The seam that ends each step, and the rows it must leave:
     `questioner` interrupted → `[]` (and the seam itself saw an empty record);
-    the comparator (`invoke`) interrupted mid-review → `[questioner, staging]`;
-    the process seam interrupted during `runs` → `[questioner, staging, review]`;
-    the archive refusing a planted alias during `verify` → the four before it;
-    the judge seam interrupted → the five before it, no `judge`.
-    Plus one `Exception`-class real fault: the staging door dying on its first staging write
-    (`raise_after=2`: the preflight probe and the sweep take the first two connections) →
-    `[questioner]`. Every arm but the judge's leaves through `LauncherRefused`; the judge's
-    interrupt lands after the cluster is handed back, which `_launch` re-raises unchanged.
+    pre-flight's oracle interrupted mid-replay → `[questioner]`;
+    the process seam interrupted during `runs` → `[questioner, preflight]`;
+    the archive refusing a planted alias during `verify` → the three before it;
+    the judge seam interrupted → the four before it, no `judge`.
+    Every arm but the judge's leaves through `LauncherRefused`; the judge's interrupt lands
+    after the siblings ran, which `_launch` re-raises unchanged.
     """
     cli = _cli()
 
@@ -713,36 +724,35 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
     assert questioner.seen == [[]], f"the questioner saw {questioner.seen} before it ran"
     assert _raw_rows(ep) == [], "a step that raised was recorded"
 
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-review"))
-    comparator = _Interrupting(cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()))
-    seams = _rejecting_seams()
-    seams["invoke"] = comparator
-    ep, before, after = _abort(tmp_path, cli.LauncherRefused, **seams)
-    assert comparator.calls > 0, "the control failed: the comparator seam was never reached"
-    assert comparator.seen == [["questioner", "staging"]], (
-        f"the comparator saw {comparator.seen} mid-review")
-    assert [row["step"] for row in _raw_rows(ep)] == ["questioner", "staging"]
+    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-preflight"))
+    oracle_seam = _Interrupting(cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()))
+    ep, before, after = _abort(tmp_path, cli.LauncherRefused,
+                               oracle=S.oracle(then=S.Move(None, raises=oracle_seam)))
+    assert oracle_seam.calls > 0, "the control failed: pre-flight's oracle was never reached"
+    assert all(seen == ["questioner"] for seen in oracle_seam.seen), (
+        f"the oracle saw {oracle_seam.seen} mid-pre-flight")
+    assert [row["step"] for row in _raw_rows(ep)] == ["questioner"]
     _clocked(_raw_rows(ep), before=before, after=after)
 
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-runs"))
     family = _Interrupting(cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()))
-    ep, before, after = _abort(tmp_path, cli.LauncherRefused, spawn=family)
+    ep, before, after = _abort(tmp_path, KeyboardInterrupt, spawn=family)
     assert family.calls > 0, "the control failed: the process seam was never reached"
-    assert all(seen == ["questioner", "staging", "review"] for seen in family.seen), (
+    assert all(seen == ["questioner", "preflight"] for seen in family.seen), (
         f"a sibling saw {family.seen} on the record when spawned")
-    assert [row["step"] for row in _raw_rows(ep)] == ["questioner", "staging", "review"], (
+    assert [row["step"] for row in _raw_rows(ep)] == ["questioner", "preflight"], (
         "the record does not stop at the last step that completed")
     _clocked(_raw_rows(ep), before=before, after=after)
 
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-verify"))
-    outside = tmp_path / "outside-verify.md"
-    outside.write_text("untouched\n", encoding="utf-8")
+    outside = tmp_path / "outside-verify"
+    outside.mkdir()
     planting = _PlantingSibling(cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()), outside=outside)
-    ep, before, after = _abort(tmp_path, cli.LauncherRefused, spawn=planting)
+    ep, before, after = _abort(tmp_path, OSError, spawn=planting)
     assert planting.launches, "the control failed: no sibling was spawned"
-    assert outside.read_text(encoding="utf-8") == "untouched\n", (
+    assert list(outside.iterdir()) == [], (
         "the control failed: the archive wrote through the planted alias")
-    assert [row["step"] for row in _raw_rows(ep)] == ["questioner", "staging", "review", "runs"], (
+    assert [row["step"] for row in _raw_rows(ep)] == ["questioner", "preflight", "runs"], (
         "a `verify` that raised was recorded, or a step before it was not")
     _clocked(_raw_rows(ep), before=before, after=after)
 
@@ -750,28 +760,17 @@ def test_1025_an_aborted_episode_keeps_the_completed_steps_and_not_the_one_that_
     judge = _Interrupting(cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths()))
     ep, before, after = _abort(tmp_path, KeyboardInterrupt, judge=judge)
     assert judge.calls > 0, "the control failed: the judge seam was never reached"
-    assert judge.seen == [["questioner", "staging", "review", "runs", "verify"]], (
+    assert judge.seen == [["questioner", "preflight", "runs", "verify"]], (
         f"the judge saw {judge.seen} when called")
-    assert [row["step"] for row in _raw_rows(ep)] == EXPECTED_STEPS[:5], (
+    assert [row["step"] for row in _raw_rows(ep)] == EXPECTED_STEPS[:4], (
         "a `judge` that raised was recorded")
-    _clocked(_raw_rows(ep), before=before, after=after)
-
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-staging"))
-    dying_door = T.FakeDoor(fault=T.Fault(raise_after=2))
-    author = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
-    ep, before, after = _abort(tmp_path, cli.LauncherRefused, door=dying_door, questioner=author)
-    assert author.calls > 0, "the control failed: the questioner step never ran"
-    assert any(call.op == "create_index" for call in dying_door.calls), (
-        "the control failed: the door died before staging began")
-    assert [row["step"] for row in _raw_rows(ep)] == ["questioner"], (
-        "a step that raised was recorded, or the one before it was not")
     _clocked(_raw_rows(ep), before=before, after=after)
 
 
 def test_1025_a_failed_judge_still_leaves_the_judge_row(tmp_path, monkeypatch, capsys):
     """A judge failure is non-fatal to the episode — the `JUDGE` frame's body holds it and the
     launcher returns — so the boundary is crossed and the `judge` entry is on the record with
-    the five before it, inside the launch's clock bracket.
+    the four before it, inside the launch's clock bracket.
 
     Two failures, each under its own episodes root. The grade itself fails: the learning state
     root's pending folder, which the enqueue appends into, is a regular FILE, so the family grade cannot land and
@@ -808,61 +807,38 @@ def test_1025_a_failed_judge_still_leaves_the_judge_row(tmp_path, monkeypatch, c
     _clocked(rows, before=launch.before, after=launch.after)
 
 
-class _StickyDoor(T.FakeDoor):
-    """`FakeDoor` whose deletes are accepted and do nothing — every staged name is "still
-    present after delete", so teardown reports a failure for each and raises."""
-
-    def delete(self, name: str) -> None:
-        self._gate("delete", name, {})
-
-
-def test_1025_a_held_teardown_failure_still_leaves_the_judge_row(tmp_path):
-    """A teardown that cannot verify a staged name gone is HELD by the launcher's hand-back
-    frame (`_cluster_released`), the grade runs to completion, and only then is the failure
-    raised. The judge step therefore completed — `judge.yaml` certifies it — and its entry is
-    on the record with the five before it, even though the launch itself leaves through the
-    held refusal.
-
-    The hand-back frame closes AROUND the `JUDGE` frame: drawn the other way — the clock around
-    the hand-back and the grade together — the clock saw that deferred re-raise as the judge
-    step raising and wrote nothing: a graded episode whose record said the judge never
-    finished.
-
-    Controls: the judge seam was reached, `judge.yaml` exists, and the launch leaves through
-    `LauncherRefused` naming the teardown.
-    """
-    judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    with pytest.raises(_cli().LauncherRefused, match="teardown did not verify"):
-        _launch(tmp_path, door=_StickyDoor(), judge=judge)
-    episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
-    assert judge.calls > 0, "the control failed: the judge seam was never reached"
-    assert (episode_dir / "judge.yaml").exists(), "the control failed: the grade did not land"
-    rows = _raw_rows(episode_dir)
-    assert [row["step"] for row in rows] == EXPECTED_STEPS, (
-        "a judge step that ran to completion has no row because the held teardown failure "
-        "was raised through its clock")
-
-
 def test_1025_a_record_that_cannot_be_written_does_not_end_the_episode(tmp_path, capsys):
-    """A timing entry the record cannot take — here a DIRECTORY squatting `timing.json` before
-    the launch, so every write is refused by the guarded seam — is printed and absent, and
-    the episode is otherwise untouched: it runs to completion, every world is archived, the
-    judge is called and grades, and the launch returns 0. The record is observability; a
-    write that could refuse used to end the episode from inside whichever step had just
-    finished — after `runs`, as "no sibling started" with the family never archived; after
-    the judge, as a bare `OSError` out of `main` for a fully graded episode.
+    """A timing entry the record cannot take — here a DIRECTORY squatting `timing.json`,
+    planted by the question-writer's first call (a launch never reuses an episode directory, so
+    the squat lands inside the step that runs first), so every write is refused by the guarded
+    seam — is printed and absent, and the episode is otherwise untouched: it runs to
+    completion, every world is archived, the judge is called and grades, and the launch returns
+    0. The record is observability; a write that could refuse used to end the episode from
+    inside whichever step had just finished — after `runs`, as "no sibling started" with the
+    family never archived; after the judge, as a bare `OSError` out of `main` for a fully
+    graded episode.
 
-    Six refusals, one per step, each named on stderr; the reader refuses the squatted name
+    Five refusals, one per step, each named on stderr; the reader refuses the squatted name
     rather than answering no entries for an episode that ran every step.
     """
-    episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
-    episode_dir.mkdir(parents=True)
-    EpisodePaths(episode_dir).timing.mkdir()
+    author = S.questioner_for()
+    squatted: list[Path] = []
 
-    launch = _launch(tmp_path)
+    def squatting_author(prompt, **kw):
+        if not squatted:
+            episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
+            EpisodePaths(episode_dir).timing.mkdir()
+            squatted.append(episode_dir)
+        return author(prompt, **kw)
+
+    launch = _launch(tmp_path, questioner=squatting_author)
+    assert squatted == [launch.episode_dir], "the control failed: the squat was not planted"
     assert launch.rc == 0, "a refused timing write ended the episode"
-    assert T.review_doc(launch.episode_dir)["episode"]["outcome"] == "accepted", (
-        "the family was not archived after the refused write")
+    assert _outcome(launch.episode_dir)["outcome"] == "accepted", (
+        "the family was not calibrated after the refused write")
+    for label in ("a", "b", "c"):
+        assert (launch.episode_dir / "worlds" / label / "report.md").is_file(), (
+            f"world {label} was not archived after the refused write")
     assert launch.judge.calls > 0, "the judge was never reached after the refused write"
     assert (launch.episode_dir / "judge.yaml").exists(), "the grade did not land"
     err = capsys.readouterr().err

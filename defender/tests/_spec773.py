@@ -362,13 +362,16 @@ def world_row(fid: str, **extra: Any) -> dict:
     """One QUESTIONER-channel row: a finding about the WORLD, not about the defender.
 
     That channel carries no `run_id` and no defender disposition, so its gate is
-    idempotency-only (#1007 N1) and O7 obliges this delta to leave its behaviour alone."""
+    idempotency-only (#1007 N1) and O7 obliges this delta to leave its behaviour alone. It names
+    the systems its lesson is selected by (#1224 O12): the questioner curator drains a world row
+    naming none without authoring (`consumed_no_systems`)."""
     return {
         "schema_version": 1,
         "finding_id": fid,
         "subject": "world",
         "type": "lead-set",
-        "finding": "the overlay never backed this field",
+        "finding": "the world's facts never backed this field",
+        "systems": ["elastic"],
         **extra,
     }
 

@@ -11,7 +11,7 @@ Claims adversary (reads only the code, falsifies its docstrings):
 
 1. `read_world_facts` used to carry a `cut_short` field nothing in production read, and a
    `run_end=` parameter whose only purpose was to spare the one caller that did not need the
-   field a second parse. Both are gone: the judge reads the record once, in `_grade_world`.
+   field a second parse. Both are gone: the judge reads the record once, in `read_world`.
 2. `_archive_run_end` used to be a bespoke lane for one file, with its own reader and its own
    "skipped and reported" arm. Gone too: the record is the seventh single file, copied through
    the same screened lane as the scrub verdict (the other host-side sidecar), and the judge
@@ -21,7 +21,7 @@ Claims adversary (reads only the code, falsifies its docstrings):
 
 Spec adversary (never sees the code, greens the committed suite with corner-cuts): its own
 from-scratch build satisfied all 106 committed tests while leaving `run.py`'s ticket-lane call
-site unwired (F1) and hardcoding the graded row's world label in `_grade_world`'s cut-short
+site unwired (F1) and hardcoding the graded row's world label in `read_world`'s cut-short
 reason string (F8) — the suite as committed cannot tell either apart from the honest answer.
 Both were independently verified ALREADY CORRECT by reading in this implementation, but the
 suite's own blind spot at those two sites is real, so both get a first-party regression test
@@ -216,7 +216,7 @@ def test_run_py_tail_threads_the_exit_class_into_record_case_ticket(tmp_path, mo
 
 
 def test_cut_short_reason_names_the_actual_world_not_a_hardcoded_label(tmp_path):
-    """The spec adversary's F8: `_grade_world`'s cut-short reason string is only ever asserted
+    """The spec adversary's F8: `read_world`'s cut-short reason string is only ever asserted
     for a world literally named `b` anywhere in the committed suite, so an implementation that
     hardcodes `"world 'b': ..."` instead of interpolating the real label satisfies every one of
     them. Driven on world `c` specifically to catch that substitution."""

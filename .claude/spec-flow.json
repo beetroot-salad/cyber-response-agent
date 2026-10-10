@@ -318,16 +318,12 @@
           "defender/learning/branch/capture.py::prime_base",
           "defender/learning/branch/ledger.py::Ledger.record",
           "defender/runtime/branch/_family.py::write_family",
-          "defender/learning/branch/staging.py::record_staged",
-          "defender/learning/branch/staging.py::_record_teardown_failure",
-          "defender/learning/branch/review.py::review",
           "defender/learning/branch/archive.py::archive_episode",
           "defender/learning/branch/cli.py::_record_episode_outcome",
           "defender/learning/branch/cli.py::_write_family_stamp",
           "defender/runtime/observe.py::RequestLogger",
           "defender/learning/judge/__init__.py::_write_judge_yaml",
-          "defender/learning/judge/__init__.py::_write_wire_log",
-          "defender/learning/branch/staging.py::merge_review"
+          "defender/learning/judge/__init__.py::_write_wire_log"
         ],
         "readers": [
           "defender/learning/branch/ledger.py::base_file",
@@ -336,7 +332,6 @@
           "defender/learning/branch/cli.py::prepare_episode",
           "defender/learning/branch/episode.py::verdicts",
           "defender/learning/branch/episode.py::delta_o",
-          "defender/learning/branch/staging.py::read_staged",
           "defender/runtime/branch/_family.py::load_family",
           "defender/learning/branch/episode.py::_archived_labels",
           "defender/learning/judge/family.py::screened_yaml_mapping",
@@ -372,24 +367,13 @@
         "note": "Declared by #947's grounding. AT b8a63e66 `capture.py:130-136` composes it as `resolve_runs_base()/'episodes'/<id>/` — a sibling of the run dirs, inside the runs base. #947 MOVES BOTH ENDS OF THAT, and this note is written against the design, not the base: (1) the episodes root becomes a CONFIGURED location (`DEFENDER_EPISODES_BASE`), outside both the runs base and the checkout, with NO default derivation — a reader that re-derives it from the runs base silently restores the containment hole the relocation closed (#947 §7 round 2, F5-EPISODE-ROOT); and (2) the three sibling run dirs move UNDER it, at `{episode_dir}/runs/`, so the episode dir is a PARENT of run dirs rather than their sibling. `cli.py::episode_dir_for` is the symbol whose semantics change: it is the production resolver every reader of an episode must go through once the root is configured, and the one to follow instead of re-composing a path. The old safety clause here read 'a SIBLING of the run dirs, never inside one, so it is not bound into any box' — that is verbatim the reason `capture.py:134`'s waiver states, and #947 REFUTES it on that reason (claim C26): the episode dir now contains three rw box binds. The conclusion survives on a different ground, recorded as an examined no: the bind is the run dir alone, `served/` and `worlds/` stay unreachable from inside a box, and every archive read goes through the `_layout.artifact_file` / `stage_tables` screens. Rewrite `capture.py:134`'s waiver text in the same commit that moves the root. Today it holds only `served/`: `prime_base` writes `served/base.jsonl` once and `Ledger.record` appends `served/<world_id>.jsonl`, one writer per file — which is the whole of the launcher's parallel-safety premise. The directory is created as a side effect of `_io.append_jsonl`'s parent mkdir, NOT through `guarded_mkdir`, and NOTHING anywhere removes an episode dir: both `prepare_episode` and `prime_base` treat an existing one as a permanent refusal. #947 adds family.yaml, staged.yaml, review.yaml, provenance.json, worlds/<X>/ AND runs/<sibling>/ here — add those writers (staging.py, review.py, archive.py, _family.py) IN THE COMMIT THAT CREATES THEM, not before: a row naming a symbol that resolves to nothing is indistinguishable to a resolver from a row nobody wrote. ADDED IN THE COMMIT THAT CREATED THEM, as the sentence above requires: `write_family` (family.yaml), `record_staged` and `_record_teardown_failure` (staged.yaml and the teardown block of review.yaml), `review` (review.yaml), `archive_episode` (worlds/<X>/), and `cli._record_episode_outcome` / `_write_family_stamp` (the episode's own outcome and its provenance.json). The readers gain the two derived readers, the staging record's own reader and the manifest loader. ADDED BY #921's GROUNDING (re-verified at base 9f4e8247, where #947's relocation HAS landed: `episodes_root()` is $DEFENDER_EPISODES_BASE with no default derivation, refused inside the runs base and inside REPO_ROOT, and the sibling run dirs live at {episode_dir}/runs/ via the episode layout's own runs segment — `_episode_paths.RUNS_DIRNAME`, reached as `EpisodePaths(...).runs`; at that base it was a constant on cli.py, then on archive.py, and #1077 D7 moved it to the owner). The writer this list was missing is `observe.RequestLogger`: `learning/branch/seams.py::model_seam` builds StageContext(learning_run_dir=episode_dir), and `_pydantic_stage.run_stage` writes every questioner and comparator call's FULL wire stream to `<episode_dir>/wire_logs/<agent_id>_trace.jsonl` through `observe.stage_trace_path` (guarded_mkdir) + `open_guarded` — the seam's own docstring says 'THE TRACE LANDS IN THE EPISODE'. #921's per-world judge calls multiply that stream by worlds x draws and each one carries the whole 10-32K-token prompt verbatim, so a census that lists only judge.yaml and worlds/<X>/judge/ under-counts the writers by the largest artifact in the tree. `_archived_labels` is added beside `verdicts`/`delta_o` because it is the reader that turns `worlds/` into the label set both of them iterate. STILL TRUE and worth keeping: NOTHING removes an episode dir, and `capture.py:134`'s lint-unguarded-tree-write waiver STILL reads 'the episode archive is `runs_base/episodes/<id>/`, a sibling of the run dirs' — refuted text that the commit moving the root was supposed to rewrite and did not. ADDED BY #1049's GROUNDING (base 085b76e0): the RECORD readers this census never listed — every sentence-formatting reader of the episode tree that #1049 rewrites onto the root-bound primitive (`_io.bind(root)` → `.read(name)` / `.read_jsonl(name)` / `.under(name)`, the shape resolved at #1049's §7) (family's YAML screen and its review/samples/manifest/report/ledger/archived-text readers, `_missing_required_input`'s lstat gate, `lead_chain`'s gather-summary read, the grade record's two readers, the stamp/staged/timing readers, `branch/episode.py`'s eval-lane outcome read, and the page's `load_episode`) — plus three writers of records INTO the episode dir that were missing: `_write_judge_yaml` (judge.yaml, the record `ungradable_reason` and `not_graded.reason` land in), `_write_wire_log` (the judge's framed prompt copies), and `staging.merge_review` (the ONE merger of review.yaml, which `cli._record_episode_outcome` and `_record_teardown_failure` both go through — `cli.py:1055` records an `ArchiveRefused` sentence naming `<episode_dir>/runs/...` or `<episode_dir>/worlds/...` into `episode.reason` there). `read_record` itself is deliberately NOT listed: it does not exist until write-code-from-spec builds it — add `_io.py::bind` (and the bound reader's `read` / `read_jsonl` / `under`) here in the commit that creates them."
       },
       "elastic_corpus": {
-        "writers": [
-          "defender/learning/branch/staging.py::stage_world",
-          "defender/learning/branch/staging.py::teardown",
-          "defender/learning/branch/staging.py::sweep",
-          "defender/learning/branch/staging.py::_Door.create_index",
-          "defender/learning/branch/staging.py::_Door.create_alias",
-          "defender/learning/branch/staging.py::_Door.delete"
-        ],
+        "writers": [],
         "readers": [
           "defender/scripts/adapters/elastic_adapter.py::query",
           "defender/scripts/adapters/elastic_adapter.py::alerts",
           "defender/scripts/adapters/elastic_adapter.py::esql",
           "defender/scripts/adapters/confinement.py::confine_index",
           "defender/scripts/adapters/confinement.py::is_world_view",
-          "defender/learning/branch/estate/stagers/elastic.py::redirect",
-          "defender/learning/branch/staging.py::_Door.resolve",
-          "defender/learning/branch/staging.py::_Door.count",
-          "defender/learning/branch/staging.py::_Door.list_names",
           "defender/learning/branch/estate/registry.py::refuse_a_foreign_world_view"
         ],
         "grep": [
@@ -452,8 +436,6 @@
           "defender/_tenant.py::check_knowledge_folder",
           "defender/_tenant.py::read_tenant_id_file",
           "defender/_tenant_census.py::table_findings",
-          "defender/learning/branch/estate/stagers/elastic.py::configured_patterns",
-          "defender/learning/branch/staging.py::write_door_from_env",
           "defender/runtime/lead_zero_config.py::lead_zero_config_path",
           "defender/runtime/verb_dispositions.py::dispositions_path",
           "defender/runtime/verb_dispositions.py::run_grants",
@@ -490,8 +472,6 @@
           "defender/scripts/adapters/elastic_adapter.py::config_from",
           "defender/scripts/adapters/elastic_adapter.py::config_path",
           "defender/scripts/adapters/elastic_adapter.py::load_config",
-          "defender/learning/branch/estate/stagers/elastic.py::configured_patterns",
-          "defender/learning/branch/staging.py::write_door_from_env",
           "defender/runtime/case_ticket.py::load_case_mapping",
           "defender/scripts/case_history/ticket_writer.py::_load_config",
           "defender/skills/connect/validate_scaffold.py::check_config",
@@ -603,6 +583,20 @@
           "_MIRROR_WRITER"
         ],
         "note": "DECLARED BY #1080's GROUNDING (base 80888efb). The dev-only run-page mirror: `<main checkout>/run-visualizations/<run_id>/runtime.html` (`visualize_run.mirror_page` composes `RunPaths(mirror_root() / run_id).runtime_html`). The root resolves, in order: the `DEFENDER_RUN_VISUALIZATIONS_DIR` override; else the main checkout reached from `_DEFENDER_DIR.parent`, where `_DEFENDER_DIR = Path(__file__).resolve().parents[2]` (visualize_run.py:62) — a FILE-DEPTH anchor, so a move of visualize_run.py to another depth silently re-roots the default; else `start` itself. Under pytest the default is refused (`MirrorRootRefused`) and the conftest sets the override for every test, so no test exercises the default anchor. Writer paths: in-process `_mirror_write.write_page` when no privilege drop is needed, else a child `[sys.executable, '-I', <_mirror_write.py path>, <dest>]` run as the mirror folder's owner (visualize_run.py:141-144); the child path comes from `_mirror_write.__file__` (visualize_run.py:68) and the module must stay stdlib-only. No code reads it back: the operator opens the pages. Caller chain: `run_common.py:252` (lazy import inside try → `VisualizeFailed`, never the run's exit code) → `visualize_run.publish_page` → `mirror_page`. Under #1080's 2026-10-04 scope cut visualize/* stays in scripts/: its move into the reports module is parked with #1105 (after #1105's rev 4); update these addresses in the commit that moves them."
+      },
+      "questioner_lessons": {
+        "writers": [],
+        "readers": [
+          "defender/learning/branch/cli.py::_author",
+          "defender/learning/branch/questioner/__init__.py::_questioner_lessons_section"
+        ],
+        "grep": [
+          "lessons-questioner",
+          "lessons_questioner_dir",
+          "_questioner_lessons_section",
+          "stageable_patterns"
+        ],
+        "note": "DECLARED BY #1224's GROUNDING (base 96e4cdb0). The questioner-lesson corpus `defender/lessons-questioner/` (`_paths.PATHS.lessons_questioner_dir`, rel `defender/lessons-questioner/`), which no resource named before: `drain_worktree` covers the curator's writes only through its `corpus_dir` grep token and scopes itself to defender/skills, and nothing covered the launcher's read. EMPTY WRITER LIST ON PURPOSE: the only writer is the questioner curator MODEL, through the drain worktree's file tools (`learning/author/questioner/run.py::build_questioner_config` sets `corpus_dir=paths.lessons_questioner_dir`; `learning/author/shared.py::commit_corpus` commits it — both already rows of `drain_worktree`), so no symbol writes a lesson file; the curator prompt `learning/author/questioner/prompt.md:14-22,30` dictates the frontmatter (`name, description, pattern, holding_system, bucket, source_finding_ids, created_at`) and NO code validates `pattern`/`holding_system`/`bucket` on write. Readers: the launcher's `_author` (cli.py:1507; `iter_lesson_paths(lessons_dir)` at :1537, default dir chosen at :1230) feeding `branch/questioner._questioner_lessons_section` (:182-215), which selects a lesson by `pattern in stageable_patterns` and ignores `holding_system`; also the learning page (`learning/frontend/serialize.py:131-149`, a display table naming `pattern`/`holding_system`/`bucket`), `hooks/record_lesson_load.py:14` (`LESSON_CORPORA`), `learning/core/config.py:65` (drain label) and `evals/harness.py:42` (creates the dir in a temp tree). Today the corpus holds one file, `example-seed-lesson.md`, with `pattern: __none__` so it is never selected. #1224 (O12/M10) replaces the `pattern`/`holding_system` keys with `systems: [str]` and selects by served-system overlap — rewrite the reader rows, the page table and the curator prompt in the commit that does it."
       }
     }
   },

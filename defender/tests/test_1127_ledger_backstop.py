@@ -3,9 +3,9 @@
 A ledger row puts `params` (and `asked_params`) directly under the row object, exactly as the
 queries table does, and both columns go through the one params cleaner
 (`_query_rules._json_safe_params`). Before #1127 the ledger wrote a params map nested past the
-reader's bound anyway, and the served-call path wrote TWO such lines per call (the family `base`
-row inside `_base_payload`, then the world's own row), neither of which any reader — `_absorb`,
-the episode's comparisons, the judge — would ever see.
+reader's bound anyway, and the served-call path wrote TWO such lines per call (then the family
+`base` row and the world's own row; since #1224 the kept base read and the world's own row),
+neither of which any reader — `_absorb`, the episode's comparisons, the judge — would ever see.
 
 The design (issue #1127, as amended after the two reviews of PR #1139):
 
@@ -35,8 +35,8 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender._io import parse_jsonl_row, read_jsonl_rows  # noqa: E402
+from defender._episode_paths import LAYOUT, OracleStorePaths  # noqa: E402
 from defender.learning.branch.ledger import (  # noqa: E402
-    BASE,
     PASSTHROUGH,
     LedgerError,
     ServedCall,
@@ -134,8 +134,8 @@ def test_a_served_call_past_the_limit_is_never_built(depth):
 
 @pytest.mark.parametrize("depth", [LIMIT + 1, FAR])
 def test_a_deep_asked_form_is_refused_naming_the_asked_form(depth):
-    """`asked_params` goes through the same cleaner, so a staged call whose ASKED form is too
-    deep is refused the same way, the ran form shallow — and the refusal names `asked_params`,
+    """`asked_params` goes through the same cleaner, so a staging-era call whose ASKED form
+    is too deep is refused the same way, the ran form shallow — and the refusal names `asked_params`,
     not `params` (#1127 review: the old message blamed the wrong field)."""
     call = raised(lambda: served({"host": "canary-1"}, asked_params=params_of_depth(depth)))
 
@@ -196,10 +196,11 @@ def test_a_deep_served_call_is_refused_before_the_estate_and_files_nothing(
         "the registry tried to file a second (FAULT) row for the ledger's own refusal"
 
 
-def test_a_served_call_at_the_limit_records_both_of_its_rows(tmp_path):
+def test_a_served_call_at_the_limit_records_its_row_and_keeps_its_base_read(tmp_path):
     """The positive control on the same address: at the limit the same call reaches the estate
-    adapter once, is served, and leaves its two readable rows — the family's `base` recording
-    and the world's own `passthrough` row — each carrying the params whole."""
+    adapter once, is served, and leaves its readable record — the world's own `passthrough`
+    row, and its live base read kept in the world's oracle store (#1224: never a ledger row,
+    M16) — each carrying the params whole."""
     ledger_path = tmp_path / "ep" / "served" / "w1.jsonl"
     reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"))
     ctx = run_ctx(tmp_path)
@@ -211,11 +212,15 @@ def test_a_served_call_at_the_limit_records_both_of_its_rows(tmp_path):
     assert [c["params"] for c in adapter_calls(ctx, "get-host")] == [{"host": host}], \
         "the estate adapter was not entered exactly once for a call at the limit"
     lines = raw_lines(ledger_path)
-    assert len(lines) == 2
+    assert len(lines) == 1
     rows = [parse_jsonl_row(line) for line in lines]
     assert all(row is not None for row in rows), "a row at the limit is unreadable"
-    assert [(row["source"], row["world_id"]) for row in rows] == [(BASE, None), (PASSTHROUGH, "w1")]
-    assert all(row["params"] == {"host": host} for row in rows)
+    assert [(row["source"], row["world_id"]) for row in rows] == [(PASSTHROUGH, "w1")]
+    kept = [parse_jsonl_row(line) for line in raw_lines(OracleStorePaths(
+        ledger_path.parent / LAYOUT.oracle_dir("w1")).base)]
+    assert len(kept) == 1
+    assert kept[0] is not None, "the kept base read at the limit is unreadable"
+    assert all(row["params"] == {"host": host} for row in rows + kept)
 
 
 # ── the other door: WorldRegistry.decide_call ──────────────────────────────────────────────

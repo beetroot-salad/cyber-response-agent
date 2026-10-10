@@ -31,6 +31,10 @@ class AgentRole(Enum):
     # even though its policy is as empty as the questioner's. Otherwise a grant added to the
     # questioner would silently reach the judge; `agent_id` separates traces, never policies.
     JUDGE = "judge"
+    # A branched world's live oracle and its verifier (#1224, M11): deny-all, their own models
+    # and budget, apart from the runtime's `VERIFIER`. Preflighted only where branching runs.
+    ORACLE = "oracle"
+    ORACLE_CHECK = "oracle_check"
 
 
 #: The turn-zero correlation lead's name in the verb-disposition table. Not an enum member:

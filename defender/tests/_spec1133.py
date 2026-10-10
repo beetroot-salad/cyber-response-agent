@@ -52,8 +52,7 @@ Handle, ``defender._episode_handle`` (D2'):
 * records answer ``.path`` plus exactly the verbs their row grants, as CLASS attributes (one
   class per verb set); folders answer ``.path`` and ``.ensure()``. Each record verb is ONE call
   on the held root: ``write`` -> ``Held.write(rel, text, mode="replace")``; ``create`` ->
-  ``mode="create"``; ``append`` -> ``mode="append"``; ``append_durable`` -> ``mode="append",
-  durable=True``; ``delete`` -> ``Held.unlink(rel)``; ``ensure`` -> ``Held.mkdir(rel)``.
+  ``mode="create"``; ``append`` -> ``mode="append"``; ``delete`` -> ``Held.unlink(rel)``; ``ensure`` -> ``Held.mkdir(rel)``.
   Reading a record is ``episode.view().read(LAYOUT.<record>)``: present, absent or refused.
 
 Address grammar: an address is an attribute path on an ``Episode``. A bare name (``family``,
@@ -64,29 +63,25 @@ Address grammar: an address is an attribute path on an ``Episode``. A bare name 
 Entry points, with the signatures the suite calls (D3', rev 3):
 
 * ``cli.prepare_episode(episode_id, source_run_dir, *, tenant, prime=)`` -> the ``Episode``
-  (closed by ``prepare_episode`` itself on its own exception); ``prime(source_run_dir, episode)``;
-  its default primer is ``prime_base`` with ``allow_empty=True`` (R3);
-  ``cli._prime_once(episode, episode_id, source_run_dir, prime)`` (the claim, driven directly
-  for R2's folder row: ``prepare_episode`` has no ``io=`` seam);
-  ``cli._teardown_without_masking(episode, door, *, aborting)``;
+  (closed by ``prepare_episode`` itself on its own exception; since #1224 it always creates a
+  fresh directory); ``prime(source_run_dir, episode)``; its default primer is ``prime_base``
+  with ``allow_empty=True`` (R3); ``cli._prime_once(episode, episode_id, source_run_dir,
+  prime)`` (the claim, driven directly for R2's folder row and for an occupied claim:
+  ``prepare_episode`` has no ``io=`` seam and never adopts a taken directory);
 * ``cli.start_family(episode, labels, *, spawn=, tenant_id=)``;
   ``cli.verify_family(episode, run_dirs, *, source=)``;
   ``archive.archive_episode(episode, run_dirs)``;
-* ``staging.record_staged(episode, row)``; ``staging.merge_review(episode, key, block)`` (a
-  refused review record is ``StagingRefused``, nothing written); ``staging.teardown(episode, *,
-  door=)``;
 * ``capture.prime_base(source_run_dir, episode, *, allow_empty=False)``;
 * ``ledger.Ledger.for_world(episode, world_id)`` (``LedgerError`` at construction for a bad or
-  non-case-stable id, the WHOLE token judged); ``review.scratch_ledger(scratch_episode, *,
-  world_label=)``; ``_episode_paths.check_minted_token(token)``;
-* ``_family.load_family(view, ...)``, ``manifest_digest(view)``,
-  ``check_manifest_digest(view, recorded)`` -- ``view`` a ``Bound`` (``episode.view()`` or a
+  non-case-stable id, the WHOLE token judged); ``_episode_paths.check_minted_token(token)``;
+* ``_family.load_family(view, ...)`` -- ``view`` a ``Bound`` (``episode.view()`` or a
   reader's own ``bind``);
 * ``episode.delta_o(episode_dir, *, invoke=)``;
 * ``run._resume_target(ns, *, episode, settings)`` (``--resume`` with no held episode is
   ``SystemExit``);
 * ``enqueue.draws_on_disk(view, label)`` / ``draws_on_disk_report(view, label)``;
-* ``judge._run_world_draws(episode, label, *, judge, draws, model, effort, prompt)`` (S1);
+* ``judge._run_world_draws(episode, label, *, judge, draws, model, effort, prompt)`` (S1) ->
+  ``(completed, documents, malformed)``;
 * the path doors ``judge.grade_episode(episode_dir, ...)``, ``visualize_episode.render_episode(
   episode_dir)``, ``run.main([... "--resume", <manifest>, ...], ...)`` and ``cli.main`` keep
   their signatures.
@@ -140,7 +135,6 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "samples": ("write",),
     "judge": ("write",),
     "timing": ("write",),
-    "staged": ("create", "append_durable"),
     "learning_html": ("write",),
     "served_base": ("create",),
     "served_world": ("append",),
@@ -148,6 +142,11 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "wire_log": ("write",),
     "world.draw": ("write", "delete"),
     "world.run_dir_pointer": ("write",),
+    # #1224: the episode outcome and each world's own record, both created once.
+    "world_record": ("create",),
+    "outcome": ("create",),
+    # PR #1232 round 7: why `verify_family` withheld the family stamp, replaced like the stamp.
+    "not_comparable": ("write",),
 }
 
 #: D1's folders (kept by D2'): `served`, `runs`, `worlds`, `world(label).dir`,
@@ -155,18 +154,19 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
 FOLDERS: tuple[str, ...] = ("served", "runs", "worlds", "world.dir", "world.draws")
 
 #: Every verb name a record could answer. `read` stays listed although rev 3 grants it to no
-#: record, so the class and surface pins check its ABSENCE on every record.
-ALL_VERBS = ("read", "write", "create", "append", "append_durable", "delete")
+#: record, so the class and surface pins check its ABSENCE on every record. (#1224 removed the
+#: last record granting `append_durable`, the staging record, and the verb with it.)
+ALL_VERBS = ("read", "write", "create", "append", "delete")
 
 #: The write verbs, and the `Held.write` mode each is (D2': one `held.write` per write verb).
-WRITE_MODE = {"write": "replace", "create": "create", "append": "append",
-              "append_durable": "append"}
+WRITE_MODE = {"write": "replace", "create": "create", "append": "append"}
 
 #: The components each composing record is addressed with.
 RECORD_ARGS: dict[str, tuple[Any, ...]] = {
     "served_world": (TOKEN,),
     "wire_log": (WIRE_NAME,),
     "world.draw": (DRAW_N,),
+    "world_record": (LABEL,),
 }
 
 
@@ -222,7 +222,6 @@ def expected_record_rel(key: str) -> PurePosixPath:
         "samples": lambda: LAYOUT.samples,
         "judge": lambda: LAYOUT.judge,
         "timing": lambda: LAYOUT.timing,
-        "staged": lambda: LAYOUT.staged,
         "learning_html": lambda: LAYOUT.learning_html,
         "served_base": lambda: LAYOUT.served_base,
         "served_world": lambda: LAYOUT.served_world(TOKEN),
@@ -230,6 +229,9 @@ def expected_record_rel(key: str) -> PurePosixPath:
         "wire_log": lambda: LAYOUT.wire_log(WIRE_NAME),
         "world.draw": lambda: world.draw(DRAW_N),
         "world.run_dir_pointer": lambda: world.run_dir_pointer,
+        "world_record": lambda: LAYOUT.world_record(LABEL),
+        "outcome": lambda: LAYOUT.outcome,
+        "not_comparable": lambda: LAYOUT.not_comparable,
     }[key]()
 
 
@@ -687,9 +689,9 @@ def run_in_thread(fn: Callable[[], Any], *, timeout: float = DEADLINE) -> bool:
 
 def held_verb(held: Any, verb: str, name: Any, payload: str | bytes = "held row\n") -> Any:
     """One `Held` verb by the name the suite parametrizes over: the write modes (`create`,
-    `replace`, `append`, `append_durable`), `mkdir`, `unlink`. (Rev 3 has no `Held.read`; a
+    `replace`, `append`, `durable_append`), `mkdir`, `unlink`. (Rev 3 has no `Held.read`; a
     read is the view's.)"""
-    if verb == "append_durable":
+    if verb == "durable_append":
         return held.write(name, payload, mode="append", durable=True)
     if verb in ("create", "replace", "append"):
         return held.write(name, payload, mode=verb)

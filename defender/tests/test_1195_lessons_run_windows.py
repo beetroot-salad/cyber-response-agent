@@ -214,6 +214,7 @@ def _after_each_spawn(log: list) -> list[list[tuple]]:
 # ---------------------------------------------------------------------------------------
 
 
+
 def _rows(channel: str, *ids: str) -> list[dict]:
     if channel == "lessons":
         return [S.finding_row(i, run_id=i) for i in ids]

@@ -45,12 +45,15 @@ def test_1135_the_e2e_spine_replay_reaches_the_corpus_unchanged(tmp_path: Path, 
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     channel = FINDINGS
 
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
+    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     state = S.LearningState.open(paths)
     graded = S.caught(lambda: judge_mod.grade_episode(
-        ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), runs_base=runs_base,
+        ep, judge=J.FakeJudge(  # the family's word is the family-scope call's (#1224)
+            default=J.as_reply_text(J.reply_doc()),
+            family_default=J.as_reply_text(J.family_reply(verdict_word="survived"))),
+        runs_base=runs_base,
         draws=1, state=state))
     assert graded is None, f"grade_episode did not grade on the handle it was handed (RF5): {graded!r}"
     record = J.judge_record(ep)

@@ -1,10 +1,11 @@
 """Shared machinery for #921's family-judge spec — NO test scripts.
 
 The change: a judge that grades an archived episode. One model call per archived world per
-draw over four joined views (`learning/judge/render.py`), an OFFLINE mechanical pass that
-grades each world from its OWN archived record (`learning/judge/family.py`), an appender into
-the existing findings queue (`learning/judge/enqueue.py`), and a partition inside the findings
-channel's one gate (`author/lessons/run.py::_gate_family`).
+draw over four joined views (`learning/judge/render.py`), each world's row read off its OWN
+archived record (`learning/judge/family.py`; since #1224 the MODEL decides the bucket, and a
+family-scope call gives the family's word), an appender into the existing findings queue
+(`learning/judge/enqueue.py`), and a partition inside the findings channel's one gate
+(`author/lessons/run.py::_gate_family`).
 
 **None of `learning/judge/` exists at base `d1b8b06a`**, and neither does `cli.main`'s `judge=`
 seam. That is the expected state of a spec — RED against HEAD. Every import goes through
@@ -22,8 +23,8 @@ FOUR THINGS LIVE HERE AND NOTHING ELSE.
 
 1. **`mod()` / `sym()`** — re-exported from `_triplet_947`, the per-test import.
 
-2. **The builders.** An accepted episode in the #947 layout: manifest, review record, primed
-   base, per-world ledger files, archived world dirs carrying D7's three new inputs, and a
+2. **The builders.** An accepted episode in the #947 layout: manifest, pre-flight's outcome
+   record (`outcome.yaml`, #1224), primed base, per-world ledger files, archived world dirs carrying D7's three new inputs, and a
    runs base holding sibling trials. A new scenario is a few lines of data against these, not
    fresh plumbing.
 
@@ -98,12 +99,11 @@ from defender.tests._triplet_947 import (  # noqa: F401 — re-exported vocabula
     base_capture,
     capture_call,
     captured_row,
-    elastic_overlay,
     episode,
+    fact,
     family_doc,
     mod,
     outside_untrusted_frames,
-    overlay,
     provenance_record,
     report_text,
     runs_base,
@@ -122,9 +122,8 @@ from defender.tests._triplet_947 import (  # noqa: F401 — re-exported vocabula
 from defender.learning.branch.ledger import request_key  # noqa: E402
 from defender import _yaml
 
-#: The family's holding system. `elastic` and not a state system, because the amended M8
-#: fixture must carry a `staged`-served row on H and `staged` is reachable only for the sole
-#: stager (G7) — a state-system H can carry the difference only as `patched`.
+#: The system the fixtures' worlds query and the default reply blames. One of
+#: `_triplet_947.SERVED_SYSTEMS`, so the host's `lead-set` rule (M20) admits a reply naming it.
 HOLDING_SYSTEM = "elastic"
 
 #: The alert every trial of this family investigates. The sibling union is keyed on it, and it
@@ -146,12 +145,11 @@ MODEL_KNOB = "JUDGE_MODEL"
 EFFORT_KNOB = "JUDGE_EFFORT"
 CAP_KNOB = "JUDGE_PAYLOAD_CAP"
 
-#: The five per-world facts the amendment's mechanical half computes, all from X's own archived
-#: record plus the manifest. Spelled once so a scenario naming one of them cannot drift.
-PER_WORLD_FACTS = (
-    "holding_queried", "scope_discriminated", "doctored_answer_served",
-    "resolution_moved", "verdict",
-)
+#: The facts a world's row carries off its own archived record (`family.read_world`), all
+#: from X's own ledger, investigation and report. Spelled once so a scenario naming one cannot
+#: drift. (#1224 retired the mechanical pass's `holding_queried` / `scope_discriminated` /
+#: `doctored_answer_served`: the judge MODEL now decides each world's bucket.)
+PER_WORLD_FACTS = ("verdict", "resolution_moved", "malformed_rows", "served_nothing")
 
 #: The twelve keys `persist.py:315-330` writes and the queue's validator reads (C7).
 #: The DEFENDER-lane row's own thirteen keys — twelve at #921, plus `subject` (#1007 O1/M6).
@@ -191,18 +189,20 @@ def ledger_row(*, source: str, system: str = HOLDING_SYSTEM, verb: str = "esql",
     return row
 
 
-def staged_row(world_label: str = "b", *, scope_ok: bool = True) -> dict:
-    """A `staged` row: the world's difference was applied to this call.
+def oracle_row(world_label: str = "b", *, scope_ok: bool = True) -> dict:
+    """An `oracle` row: world `world_label`'s live oracle answered this call (#1224).
 
-    `params` is the PREPARED form, whose index is the world's retargeted view name
-    (`wv-<episode_token>.<label>-…`), and `asked_params` carries the form the model actually
-    asked (G6, A4 executed). A checker reading `params` naively on this row scores it as a
-    scope failure — which is the one row the amended M8 fixture exists to carry.
+    `scope_ok=False` drops the window and scope key from the asked params, the shape of a query
+    that did not discriminate.
     """
-    view = f"wv-{world_token(world_label)}-logs-"
     asked = {"index": EVENTS_PATTERN, "window": "24h", "scope_key": "host.name"}
-    ran = dict(asked, index=view) if scope_ok else {"index": view}
-    return ledger_row(source="staged", world_label=world_label, params=ran, asked_params=asked)
+    params = asked if scope_ok else {"index": EVENTS_PATTERN}
+    return ledger_row(source="oracle", world_label=world_label, params=params)
+
+
+#: The pre-#1224 name, kept for its importers: the `staged` decision it spelled is retired with
+#: cluster staging, and a world's own answer is now the oracle's.
+staged_row = oracle_row
 
 
 def write_ledger(episode_dir: Path, world_label: str, rows: list[dict], *,
@@ -229,15 +229,12 @@ def write_ledger(episode_dir: Path, world_label: str, rows: list[dict], *,
 def review_record(episode_dir: Path, *, outcome: str = "accepted",
                   decision: str = "accepted", reason: str | None = None,
                   worlds: dict | None = None) -> Path:
-    """`review.yaml` as the launcher leaves it — ONE `episode.outcome` key, holding
-    `Step.VERIFY`'s word.
+    """A PRE-ORACLE `review.yaml` — the record the retired replay review left (one
+    `episode.outcome` key holding `Step.VERIFY`'s word, `decision` beside it).
 
-    P8, EXECUTED: `Step.REVIEW` (`review._record`) writes a human sentence into `episode.outcome`
-    ("N worlds reviewed, none rejected") and `Step.VERIFY` (`cli._record_episode_outcome` ->
-    `staging.merge_review`) does `held.update(block)` on the SAME key with an enum value, so by
-    the time the judge runs the key always holds `Step.VERIFY`'s word and `Step.REVIEW`'s
-    sentence is absent from the file entirely. `decision` beside it is `Step.REVIEW`'s and
-    survives untouched.
+    No reader grades off it any more (#1224 moved the episode outcome to pre-flight's
+    `outcome.yaml`, `outcome_record`); it is planted to pin that an old archive's review
+    record is NOT read as an outcome.
     """
 
     ep = Path(episode_dir)
@@ -253,6 +250,63 @@ def review_record(episode_dir: Path, *, outcome: str = "accepted",
     }
     path = ep / "review.yaml"
     path.write_text(_yaml.safe_dump(doc, sort_keys=True), encoding="utf-8")
+    return path
+
+
+def comparable_family_stamp(episode_dir: Path, *, commit: str = "deadbee") -> Path | None:
+    """The episode-root family stamp (`provenance.json`) `verify_family` writes when every
+    sibling agreed — the shape `cli._write_family_stamp` leaves, read back through
+    `archive.read_family_stamp`. A stamp already present is kept (a scenario that wrote its
+    own stamp means that one). PR #1232 round 7: the judge grades, and the episode readers
+    compare, only a family carrying this stamp, so every builder of a COMPARABLE accepted
+    family plants it; a scenario modelling a non-comparable family passes `family_stamp=False`.
+    """
+    from defender._episode_handle import Episode
+    from defender._episode_paths import LAYOUT
+    from defender._io import bind
+    from defender.learning.branch.archive import read_family_stamp
+
+    ep = Path(episode_dir)
+    if (ep / LAYOUT.family_stamp).exists():
+        return None
+    doc = {"agreed": {"commit": commit, "dirty": False, "dirty_path_count": 0,
+                      "dirty_paths": [], "unavailable": None},
+           "allow_dirty": False, "source": {"commit": commit, "dirty": False}, "waived": []}
+    with Episode.open(ep) as handle:
+        handle.family_stamp.write(json.dumps(doc, indent=2, sort_keys=True) + "\n")
+    with bind(ep) as bound:
+        assert read_family_stamp(bound) == doc, "fixture bug: the family stamp did not read back"
+    return ep / LAYOUT.family_stamp
+
+
+def outcome_record(episode_dir: Path, outcome: str = "accepted", *, reason: str = "",
+                   unservable: list[dict] | None = None, family_stamp: bool = True) -> Path:
+    """Pre-flight's `outcome.yaml` (#1224) — the record the judge's gate reads — written
+    through the production writer (`learning/branch/outcome.py::write_outcome`).
+
+    A word that writer refuses (a retired one such as `incomplete`, or a misspelling) is
+    written raw, because the gate's own handling of it is what such a scenario is about. A
+    record already present is replaced: the exclusive create belongs to pre-flight, and a
+    fixture restating the outcome is not a second pre-flight.
+
+    An `accepted` record also gets `verify_family`'s family stamp (`comparable_family_stamp`)
+    unless `family_stamp=False`: an accepted, comparable family is what this builder means.
+    """
+    from defender._episode_handle import Episode
+    from defender.learning.branch.outcome import OUTCOMES, write_outcome
+
+    ep = Path(episode_dir)
+    path = ep / "outcome.yaml"
+    path.unlink(missing_ok=True)
+    if outcome in OUTCOMES:
+        with Episode.open(ep) as handle:
+            write_outcome(handle, outcome, reason=reason, unservable_worlds=unservable or ())
+    else:
+        path.write_text(_yaml.safe_dump({
+            "outcome": outcome, "reason": reason, "unservable_worlds": list(unservable or ()),
+            "not_replayable": [], "drift": []}, sort_keys=False), encoding="utf-8")
+    if family_stamp and outcome == "accepted":
+        comparable_family_stamp(ep)
     return path
 
 
@@ -322,13 +376,13 @@ def investigation_document(world_id: str, *, moved: bool = True, fences_at: int 
     return f"# investigation {world_id}\n\n{fenced}"
 
 
-def accepted_episode(tmp_path: Path, *, root: Path | None = None,
+def accepted_episode(tmp_path: Path, *, root: Path | None = None,  # noqa: PLR0913 — one switch per scenario input
                      holding_system: str = HOLDING_SYSTEM,
                      worlds: list[dict] | None = None,
                      labels: tuple[str, ...] = ("a", "b", "c"),
                      dispositions: dict[str, str] | None = None,
                      ledgers: dict[str, list[dict]] | None = None,
-                     outcome: str = "accepted",
+                     outcome: str = "accepted", family_stamp: bool = True,
                      **world_kw: Any) -> Path:
     """A fully archived, ACCEPTED episode in the #947 layout — the judge's whole input.
 
@@ -337,24 +391,20 @@ def accepted_episode(tmp_path: Path, *, root: Path | None = None,
     tests the readers against a tree the suite itself wrote.
 
     Every non-control world carries a NON-NULL role. A world declared `role: null` is the
-    REPLICATE arm — `runnable_worlds` drops it, so it is never staged, never reviewed and never
-    run, and a fixture holding one pins a family the launcher would never have produced (the
+    REPLICATE arm — `runnable_worlds` drops it, so it is never run, and a fixture holding one pins a family the launcher would never have produced (the
     trap `47-runtime-probes.md` red flag 5 records this probe's own first draft hitting).
     """
     declared = dispositions or {"a": "benign", "b": "malicious", "c": "malicious"}
     if worlds is None:
         worlds = [
-            world_doc("a", role="A", axis=None, disposition_declared=declared["a"], ov={}),
+            world_doc("a", role="A", axis=None, disposition_declared=declared["a"], facts=[]),
             *[world_doc(label, role="B", disposition_declared=declared[label],
-                        ov=overlay(elastic=elastic_overlay(inject=[{"_id": f"i-{label}"}])))
+                        facts=[fact(f"f-{label}")])
               for label in labels if label != "a"],
         ]
     doc = family_doc(worlds=worlds)
     doc["discriminator"] = {
         "predicate": "did the analyst re-query the holding system after the branch",
-        "holding_system": holding_system,
-        "envelope": {"system": holding_system, "verb": "esql",
-                     "params": {"query": f"FROM {EVENTS_PATTERN} | LIMIT 5"}},
     }
     ep = episode(tmp_path, doc=doc, root=root)
     base_capture(ep, [captured_row(system=holding_system, verb="esql")])
@@ -365,8 +415,31 @@ def accepted_episode(tmp_path: Path, *, root: Path | None = None,
             write_ledger(ep, label, rows)
         elif label != "a":
             write_ledger(ep, label, [])
-    review_record(ep, outcome=outcome)
+    outcome_record(ep, outcome, family_stamp=family_stamp)
     return ep
+
+
+def scripted_judge(**kw: Any) -> FakeJudge:
+    """A `FakeJudge` answering every world call with the default world reply and the family
+    call with `family_reply()` — for scenarios whose subject is not the reply. `kw` overrides
+    either (`default=`, `family_default=`) or adds a `fault=`."""
+    kw.setdefault("default", as_reply_text(reply_doc()))
+    kw.setdefault("family_default", as_reply_text(family_reply()))
+    return FakeJudge(**kw)
+
+
+def grade(episode_dir: Path, *, runs_base: Path, judge: Any = None, state: Any = None,
+          **kw: Any) -> Any:
+    """`learning.judge.grade_episode` over `episode_dir` — the one grading entry point since
+    #1224 retired the offline `grade_family`. `judge=None` is `scripted_judge()`; `state=None`
+    is the env-configured learning state (each suite points it inside `tmp_path`)."""
+    if state is None:
+        from defender.tests._state1135 import env_state
+
+        state = env_state()
+    return mod("learning.judge").grade_episode(
+        Path(episode_dir), runs_base=Path(runs_base),
+        judge=judge if judge is not None else scripted_judge(), state=state, **kw)
 
 
 def judge_record(episode_dir: Path) -> dict:
@@ -465,19 +538,42 @@ def finding_doc(*, bucket: str = "lead-set", subject: str = "defender",
 
 def reply_doc(*, episode_outcome: str = "gradable", findings: list[dict] | None = None,
               passes: bool = True, noise_floor_note: str = "one trial, no replicate",
+              bucket: str | None = "lead-set", systems: list[str] | None = None,
               **over: Any) -> dict:
-    """One `JudgeReply`. `passes=False` drops the three pass tables the prompt demands."""
+    """One world-scope `JudgeReply`. `passes=False` drops the three pass tables the prompt
+    demands.
+
+    #1224: a world reply carries the model's own `bucket` for the world and the `systems` it
+    blames (`run._world_verdict`); `bucket=None` omits both. The default `systems` is the
+    family's `HOLDING_SYSTEM`, which `_triplet_947.SERVED_SYSTEMS` serves, so the host's one
+    `lead-set` rule (M20) admits the default reply. A family-scope reply is `family_reply`."""
     doc: dict[str, Any] = {
         "episode_outcome": episode_outcome,
         "noise_floor_note": noise_floor_note,
         "findings": findings if findings is not None else [finding_doc()],
     }
+    if bucket is not None:
+        doc["bucket"] = bucket
+        doc["systems"] = list(systems) if systems is not None else [HOLDING_SYSTEM]
     if passes:
         doc["correlations"] = [{"from": "l-001", "to": "l-002", "fact": "web-1"}]
         doc["scope_checks"] = [{"lead": "l-001", "index": EVENTS_PATTERN, "window": "24h"}]
         doc["derivations"] = [{"row": "h1", "from": "payload", "held": True}]
     doc.update(over)
     return doc
+
+
+def family_reply(*, verdict_word: str = "survived", findings: list[dict] | None = None,
+                 **over: Any) -> dict:
+    """One family-scope `JudgeReply` (#1224): the family's `verdict_word`, and only
+    `subject: world` findings (none by default)."""
+    doc = reply_doc(findings=findings if findings is not None else [], bucket=None, **over)
+    doc["verdict_word"] = verdict_word
+    return doc
+
+
+#: The family-scope call's agent id prefix (`judge:family:<n>`).
+FAMILY_AGENT_PREFIX = "judge:family:"
 
 
 def as_reply_text(doc: dict, *, malformed: str | None = None) -> str:
@@ -522,6 +618,10 @@ class FakeJudge:
     fault: Fault = CLEAN
     #: A default reply for scenarios whose subject is not the reply's content.
     default: str | None = None
+    #: #1224: the reply to the FAMILY-scope call (`judge:family:<n>`), which then never draws
+    #: on `replies`/`default`. `None` keeps the old routing: the family call takes the next
+    #: scripted reply like any other. Recorded in `prompts` like every call.
+    family_default: str | None = None
     prompts: list[str] = field(default_factory=list)
     agent_ids: list[str] = field(default_factory=list)
     kwargs: list[dict] = field(default_factory=list)
@@ -535,6 +635,8 @@ class FakeJudge:
             raise self._unprocessable(f"judge ({agent_id}) failed", "TransportFault")
         if self.fault.raise_after is not None and len(self.prompts) > self.fault.raise_after:
             raise self._unprocessable(f"judge ({agent_id}) did not complete", "TimeoutError")
+        if self.family_default is not None and str(agent_id).startswith(FAMILY_AGENT_PREFIX):
+            return self.family_default
         if self.replies:
             return self.replies.pop(0)
         if self.default is not None:
@@ -687,18 +789,19 @@ def refusals() -> tuple[type[BaseException], ...]:
 
 __all__ = [
     "ALERT_ID", "AS_OF", "BRANCH_MESSAGE_ID", "CAP_KNOB", "CLEAN", "DRAWS_KNOB",
-    "EFFORT_KNOB", "EPISODES_BASE_ENV", "EPISODE_ID", "EPISODE_TOKEN", "EVENTS_PATTERN",
+    "EFFORT_KNOB", "EPISODES_BASE_ENV", "FAMILY_AGENT_PREFIX", "EPISODE_ID", "EPISODE_TOKEN", "EVENTS_PATTERN",
     "STATE_DIR_ENV",
     "HOLDING_SYSTEM", "MODEL_KNOB", "PER_WORLD_FACTS", "ROW_KEYS", "RUNS_BASE_ENV",
     "SOURCE_RUN_ID",
     "FakeGitShow", "FakeJudge", "FakeSibling", "Fault",
-    "accepted_episode", "archived_judge_world", "archived_world", "as_reply_text",
+    "accepted_episode", "archived_judge_world", "grade", "scripted_judge", "archived_world", "as_reply_text",
     "assert_wrapped_untrusted", "base_capture", "capture_call", "captured_row", "draw_doc",
-    "draw_files", "elastic_overlay", "enqueued_rows", "episode", "family_doc", "finding_doc",
-    "investigation_document", "judge_record", "ledger_row", "mod", "outside_untrusted_frames",
-    "overlay", "provenance_record", "refusals", "reply_doc", "report_text",
+    "draw_files", "enqueued_rows", "episode", "family_doc", "family_reply", "finding_doc",
+    "investigation_document", "judge_record", "ledger_row", "mod", "outcome_record",
+    "outside_untrusted_frames",
+    "fact", "provenance_record", "refusals", "reply_doc", "report_text",
     "request_key", "review_record",
     "runs_base",
-    "sibling_run_dir", "staged_row", "sym", "untrusted_frames", "wire_logs", "world_doc",
+    "oracle_row", "sibling_run_dir", "staged_row", "sym", "untrusted_frames", "wire_logs", "world_doc",
     "rows", "word_of", "world_rows", "world_token", "write_family", "write_ledger",
 ]

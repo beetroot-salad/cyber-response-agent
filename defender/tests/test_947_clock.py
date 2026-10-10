@@ -17,9 +17,8 @@ WHAT THIS FILE OWNS
 1. **The format** (`_clock.z_seconds`) — the trailing-`Z`, whole-second spelling, and the two
    ways of getting a naive input wrong.
 2. **The seam** — `VerbContext.as_of`, and that the estate registry threads it onto EVERY
-   served call, staged or not. That is the arm the batch turns on: the world-id declaration
-   fires only when staging moved the call, and a clock copied from it would reach the elastic
-   verbs and no others, leaving the six host-state stamps live.
+   served call, on every system. That is the arm the batch turns on: a clock threaded only
+   where a world's facts reach would leave the six host-state stamps live.
 3. **The stamps** — the six `host-state` verbs that carry `captured_at`, the one that does not,
    and the elastic window whose ABSENT end is what an unbounded query resolves against.
 4. **T0 itself** — `branch_point_time` over the prefix, and `validate`'s refusal of a spec that
@@ -40,6 +39,7 @@ import contextlib
 import dataclasses
 import datetime as dt
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -52,13 +52,13 @@ pytest.importorskip("pydantic_ai")
 from defender import _clock  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender._paths import PATHS  # noqa: E402
-from defender.learning.branch.estate.registry import EstateError, WorldRegistry  # noqa: E402
+from defender.learning.branch.estate.registry import EstateError  # noqa: E402
+from defender.tests.live_oracle_1224._spec1224 import build_registry  # noqa: E402
 from defender.runtime.verbs import read_roster  # noqa: E402
 from defender._episode_handle import Episode  # noqa: E402
 from defender._episode_paths import BASE_FILENAME, SERVED_DIRNAME  # noqa: E402
 from defender.learning.branch.ledger import (  # noqa: E402
     PASSTHROUGH,
-    STAGED,
     Ledger,
 )
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
@@ -72,16 +72,52 @@ from defender.tests._branch_947 import (  # noqa: E402
     legal_source,
     spec_at,
 )
-from defender.tests.test_920_elastic_staging import (  # noqa: E402
-    COMMITTED,
-    ESQL_TEMPLATES,
-    leading_source,
-)
 from defender.tests._session_store_705 import (  # noqa: E402
     make_store,
     runs_base,
     store_mod,
 )
+
+#: The committed elastic catalog's ES|QL bodies: 12 of them. The count is asserted below rather
+#: than merely derived, because a corpus that shrank to one template would make every
+#: parametrized case over it pass over less and stay green. Off `PATHS.catalog_dir`, not a
+#: hand-spelling of the segments it already owns: a catalog relocation would otherwise leave the
+#: glob empty and every parametrized case silently collecting zero. (These lived in
+#: `test_920_elastic_staging.py` until #1224 retired cluster staging with that file; this file
+#: is now their only reader.)
+CATALOG = PATHS.catalog_dir / "elastic"
+ESQL_TEMPLATES = 12
+
+#: The fenced ES|QL body of a committed template. Deliberately naive — an ```esql fence is the
+#: catalog's own marker for "this is the query that runs", and a reader that had to understand
+#: the surrounding prose would be a second parser to keep true.
+_FENCE = re.compile(r"^```esql\n(.*?)^```", re.MULTILINE | re.DOTALL)
+
+
+def committed_esql() -> list[tuple[str, str]]:
+    """Every `(template stem, ES|QL body)` the shipped catalog carries."""
+    return [
+        (path.stem, body)
+        for path in sorted(CATALOG.glob("*.md"))
+        for body in _FENCE.findall(path.read_text(encoding="utf-8"))
+    ]
+
+
+COMMITTED = committed_esql()
+
+
+def leading_source(body: str) -> str:
+    """The corpus a committed template addresses, read off its first line.
+
+    The test's OWN oracle, deliberately not the adapter's: every committed template opens with a
+    bare `FROM <pattern>` on its own line, so a split is the whole of what the answer requires
+    here. Computing the expected value with the implementation's own helper would mean the
+    assertion and the implementation could only ever agree.
+    """
+    first = body.splitlines()[0]
+    assert first.startswith("FROM "), f"committed template does not open with FROM: {first!r}"
+    return first[len("FROM "):].strip()
+
 
 #: The branch point's own moment. Far enough from `now` that a stamp taken from the wall clock
 #: cannot coincidentally equal it — which is what makes "the payload carries T0" an assertion
@@ -161,7 +197,7 @@ def _record(ctx: VerbContext, name: str, params: dict) -> None:
     at = getattr(ctx, "as_of", None)
     with log.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({
-            "verb": name, "params": params, "world_id": ctx.world_id,
+            "verb": name, "params": params,
             "as_of": None if at is None else at.isoformat(),
         }) + "\\n")
 
@@ -187,8 +223,7 @@ def health_check(ctx: VerbContext) -> dict:
 VERBS = {"esql": esql, "get-host": get_host, "health-check": health_check}
 '''
 
-#: The fake estate's grant: `elastic` is the one system with a stager, `cmdb` one of the six
-#: without — the pair the staged/unstaged arm needs.
+#: The fake estate's grant: two systems, so the every-system arm has a pair to compare.
 FAKE_GRANT = VerbGrant(role="gather", entries=(
     ("elastic", "esql", "r"), ("elastic", "health-check", "r"),
     ("cmdb", "get-host", "r"), ("cmdb", "health-check", "r"),
@@ -416,37 +451,25 @@ def tz_east_of_utc(monkeypatch):
 
 # 2. the seam: `VerbContext.as_of`, threaded unconditionally
 
-def test_the_clock_is_appended_after_the_world_id_it_rides_beside():
+def test_the_clock_is_the_last_field_of_the_context_and_defaults_to_none():
     """    `as_of` is the LAST field of `VerbContext`, and defaults to `None`.
 
-    The position is the demand. Twenty-odd sites build a `VerbContext`, several of them
-    positionally, and a field inserted before `world_id` rebinds every one of them silently —
-    a run whose ctx claims a world it is not being served for, which `confine_index` then
-    admits views for. Defaulted, because `None` is the ordinary run and the base world alike:
-    both read the estate as it is now."""
+    The position is the demand. Twenty-odd sites build a `VerbContext`, and a field inserted
+    before the defaulted tail would rebind a positional site silently. Defaulted, because
+    `None` is the ordinary run: it reads the estate as it is now."""
     names = [f.name for f in dataclasses.fields(VerbContext)]
 
-    assert names[-2:] == ["world_id", "as_of"], f"the clock did not land last: {names}"
+    assert names[-1] == "as_of", f"the clock did not land last: {names}"
     assert VerbContext(defender_dir=Path("/d"), run_dir=Path("/r"), env={},
                        tenant=_tenants1106.fixture_run_tenant()).as_of is None
-    # The world and the clock are two fields: a context naming a world names no moment. (#1106
-    # made the tenant a REQUIRED field, so every site now builds by keyword and the old
-    # positional spelling — fifth argument the world — is no longer one any site uses.)
-    ctx = VerbContext(defender_dir=Path("/d"), run_dir=Path("/r"), env={},
-                      tenant=_tenants1106.fixture_run_tenant(), capture=None, world_id="w1")
-    assert ctx.world_id == "w1"
-    assert ctx.as_of is None
 
 
 def test_an_unstaged_host_state_call_reaches_the_adapter_carrying_the_runs_clock(tmp_path):
-    """    THE arm of this batch: a `host-state` read — a system NO world stages — comes back
-    stamped with T0, through the real registry, the real grant and the real adapter body.
+    """    THE arm of this batch: a `host-state` read comes back stamped with T0, through the
+    real registry, the real grant and the real adapter body.
 
-    The world-id declaration one column over fires only when staging MOVED the call (the second
-    `registry._carrying` call site, and `test_920_estate_seam` pins that it stays scoped). A clock
-    copied from that shape would reach the three elastic verbs and nothing else — leaving all
-    six host-state stamps on the wall clock, which is where they are today and which is exactly
-    what makes two siblings' `captured_at` differ for no world's reason.
+    A clock threaded only onto the elastic verbs would leave all six host-state stamps on the
+    wall clock — exactly what makes two siblings' `captured_at` differ for no world's reason.
 
     THE CONTEXT NAMES NO MOMENT. `docker_ctx` builds the production shape — `query_tool.py`
     hands the seam a `VerbContext` with no `as_of` — so the T0 in the payload can only have come
@@ -457,7 +480,7 @@ def test_an_unstaged_host_state_call_reaches_the_adapter_carrying_the_runs_clock
     the second is what separates "the clock was threaded" from "the adapter stamped something
     that happened to be a timestamp"."""
     ctx = docker_ctx(tmp_path)
-    reg = WorldRegistry(read_roster(REAL_ADAPTERS), _gather_grant(), world=World("w1"),
+    reg = build_registry(read_roster(REAL_ADAPTERS), _gather_grant(), world=World("w1"),
                         ledger=primed_ledger(tmp_path), as_of=T0)
 
     payload = reg.verbs("host-state")["proc-tree"](ctx, host="web-1")
@@ -471,48 +494,39 @@ def test_an_unstaged_host_state_call_reaches_the_adapter_carrying_the_runs_clock
         "the ledger recorded a different moment from the one the caller was served")
 
 
-def test_the_clock_rides_every_served_call_staged_or_not(tmp_path):
-    """    Both a staged call and an unstaged one reach their adapter body with `ctx.as_of` set —
-    while only the staged one carries the world-id declaration.
+def test_the_clock_rides_every_served_call_on_every_system(tmp_path):
+    """    Every served call reaches its adapter body with `ctx.as_of` set, whichever system it
+    addresses.
 
-    Two facts in one table because they are the pair that is easy to confuse: the DECLARATION
-    is conditional by design (an untouched call addresses the corpus itself and has nothing to
-    declare), and the CLOCK is not, because every payload a sibling records has to be
-    reproducible whatever path it took to get there. An implementation that threaded the clock
-    where the world is threaded would show up here as an unstaged call with `as_of: None`.
+    The clock is unconditional because every payload a sibling records has to be reproducible
+    whatever path it took to get there: an implementation that threaded the clock only for the
+    systems a world's facts are about would show up here as a `cmdb` call with `as_of: None`.
 
     The context arrives NAMING NO MOMENT, as `query_tool.py` builds it — so both `as_of` values
     below are the registry's own work and not the fixture's."""
     ctx = docker_ctx(tmp_path)
-    reg = WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT,
+    reg = build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT,
                         world=World("w1", ("elastic",)), ledger=primed_ledger(tmp_path),
                         as_of=T0)
 
     reg.verbs("elastic")["esql"](ctx, query="FROM logs-nginx.access-*\n| LIMIT 5")
     reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
-    # The retargeted call, plus #1007's M2 witness right behind it (plain ctx — no world
-    # declared — and the SAME clock, since every read of the pass is still `as_of`-stamped);
-    # `cmdb` has no stager, so `get-host` is passthrough and takes no witness.
-    assert [(c["verb"], c["world_id"], c["as_of"]) for c in adapter_calls(ctx)] == [
-        ("esql", "w1", T0.isoformat()),
-        ("esql", None, T0.isoformat()),
-        ("get-host", None, T0.isoformat()),
+    assert [(c["verb"], c["as_of"]) for c in adapter_calls(ctx)] == [
+        ("esql", T0.isoformat()),
+        ("get-host", T0.isoformat()),
     ]
 
 
 def test_the_clock_never_perturbs_the_params_a_call_records(tmp_path):
-    """    Threading the clock does not make an unstaged call look staged: no `asked_params`
-    column, and the row's `params` are the ones the model asked with.
+    """    Threading the clock does not perturb the call: no `asked_params` column, and the
+    row's `params` are the ones the model asked with.
 
-    `registry.py` computes `asked = dict(params) if prepared != params else None`, and
-    `asked is not None` is what fires the world-id declaration, the applier's `restore` and the
-    `asked_params` column. A clock delivered through `params` — or a `prepare` that copied the
-    dict on the way past — would make every call on every system report as rewritten: every row
-    carrying a second identity identical to its first, the pairing column that exists to survive
-    staging reduced to noise, and `restore` running over payloads nothing staged."""
+    The clock rides `ctx`, never `params`. A clock delivered through `params` would change the
+    request key every stored answer is looked up by and make every row record a call the model
+    never made."""
     ctx = docker_ctx(tmp_path)
-    reg = WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("A", ("cmdb",)),
+    reg = build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("A", ("cmdb",)),
                         ledger=primed_ledger(tmp_path), as_of=T0)
 
     reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
@@ -523,27 +537,6 @@ def test_the_clock_never_perturbs_the_params_a_call_records(tmp_path):
         f"an unstaged call recorded a second identity: {own[0]}")
     assert own[0]["params"] == {"host": "canary-1"}
     assert own[0]["source"] == PASSTHROUGH
-    assert [c["world_id"] for c in adapter_calls(ctx)] == [None], (
-        "the ctx declared a world for a call staging never moved")
-
-
-def test_a_staged_call_still_records_the_two_identities_it_always_did(tmp_path):
-    """    The positive control for the arm above: when staging DOES move a call, the row still
-    carries both identities and reports `staged`.
-
-    Without it, an implementation that simply stopped computing `asked` at all would satisfy
-    "an unstaged call records one identity" and lose the cross-world pairing entirely."""
-    ctx = docker_ctx(tmp_path)
-    body = "FROM logs-system.auth-*\n| LIMIT 5"
-    reg = WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("a", ("elastic",)),
-                        ledger=primed_ledger(tmp_path), as_of=T0)
-
-    reg.verbs("elastic")["esql"](ctx, query=body)
-
-    own = [r for r in served_rows(reg.ledger) if r["world_id"] == "a"]
-    assert [r["source"] for r in own] == [STAGED]
-    assert own[0]["asked_params"]["query"] == body
-    assert own[0]["params"]["query"] != body
 
 
 def test_a_context_that_cannot_carry_the_clock_is_served_anyway(tmp_path):
@@ -559,8 +552,6 @@ def test_a_context_that_cannot_carry_the_clock_is_served_anyway(tmp_path):
     So the guard errs toward serving: a ctx that cannot carry the declaration keeps whatever it
     already had. Every real seam builds a `VerbContext`, which does carry it — the arm above is
     the live case."""
-    from defender.learning.branch.ledger import BASE
-
     @dataclasses.dataclass(frozen=True)
     class ClocklessContext:
         """A ctx from before the clock existed: no `as_of` to replace."""
@@ -573,14 +564,16 @@ def test_a_context_that_cannot_carry_the_clock_is_served_anyway(tmp_path):
 
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
-    reg = WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
+    reg = build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
                         ledger=primed_ledger(tmp_path), as_of=T0)
 
     payload = reg.verbs("cmdb")["get-host"](
         ClocklessContext(defender_dir=tmp_path, run_dir=run_dir, env={}), host="canary-1")
 
     assert payload["host"] == "canary-1"
-    assert [r["source"] for r in served_rows(reg.ledger)] == [BASE, PASSTHROUGH]
+    # #1224: the live base read is kept in the world's oracle store, never as a ledger row (M16),
+    # so the one row is the call served to the investigator.
+    assert [r["source"] for r in served_rows(reg.ledger)] == [PASSTHROUGH]
 
 
 @pytest.mark.parametrize("as_of", [
@@ -605,7 +598,7 @@ def test_a_registry_refuses_a_clock_that_cannot_honestly_spell_z(tmp_path, as_of
     a property of the clock, not of a call, and per-call it reads as a sibling that asked
     nothing."""
     with pytest.raises(EstateError):
-        WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
+        build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
                       ledger=primed_ledger(tmp_path), as_of=as_of)
 
 
@@ -626,7 +619,7 @@ def test_a_zero_offset_zone_that_is_not_utc_itself_is_accepted(tmp_path):
         def tzname(self, moment):
             return "UTC"
 
-    reg = WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
+    reg = build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
                         ledger=primed_ledger(tmp_path),
                         as_of=dt.datetime(2026, 5, 25, 15, 30, 45, tzinfo=ZeroOffset()))
 
@@ -644,7 +637,7 @@ def test_a_registry_will_not_serve_without_being_told_which_moment_it_serves(tmp
     forgot the clock would keep working and keep minting wall-clock stamps, which is precisely
     the state the batch is removing, with nothing red to show for it."""
     with pytest.raises(TypeError):
-        WorldRegistry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
+        build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("w1"),
                       ledger=primed_ledger(tmp_path))
 
 
@@ -776,6 +769,33 @@ def test_a_search_that_names_its_own_end_is_never_rewritten(tmp_path, start, end
     assert range_filter(search_body(tmp_path)) == expected
 
 
+@pytest.mark.parametrize("verb", ["query", "alerts"])
+def test_a_branched_search_bounds_its_hits_at_the_cluster_and_keeps_its_window(tmp_path, verb):
+    """    A branched search carries the clock as a `post_filter`, beside a `query` window left as
+    the caller spelled it (R-10=A) — so the cluster drops later hits before it sorts, pages and
+    counts. Dropped only after the reply instead, a window past T0 fills the page (and the
+    total) with later rows and the read comes back emptied of the rows it could have had."""
+    ctx = elastic_ctx(tmp_path, as_of=T0)
+
+    getattr(elastic_adapter, verb)(ctx, native_query="event.action:ssh_login",
+                                   start="2026-05-01T00:00:00Z", end="2026-06-01T00:00:00Z")
+
+    body = search_body(tmp_path)
+    assert range_filter(body) == {"gte": "2026-05-01T00:00:00Z", "lte": "2026-06-01T00:00:00Z"}
+    bounds = [c["range"]["@timestamp"] for c in body["post_filter"]["bool"]["should"]
+              if "range" in c]
+    assert bounds == [{"lte": T0_Z}]
+
+
+def test_an_ordinary_search_carries_no_clock_filter(tmp_path):
+    """    No clock, no `post_filter`: an unbranched run reads what the cluster holds now."""
+    ctx = elastic_ctx(tmp_path, as_of=None)
+
+    elastic_adapter.query(ctx, native_query="event.action:ssh_login")
+
+    assert "post_filter" not in search_body(tmp_path)
+
+
 def test_filling_the_window_does_not_edit_the_callers_own_arguments(tmp_path):
     """    Two searches in a row through one context give the same window, so the fill went into a
     FRESH local rather than into anything the caller (or the next call) can see.
@@ -894,9 +914,7 @@ def test_the_bound_reaches_the_wire_and_stays_out_of_the_evidence(tmp_path):
     window is not closed at all — the episode is unreplayable and nothing says so. Record the
     bounded form and a clause the model never wrote enters the run's own account of what it
     asked: the payload is the lead's evidence, `executed_queries.jsonl` keys off it, a later
-    lead re-binds the template it was just served, and the ledger's `restore` cannot help —
-    it repairs a staged CORPUS identity in that echo, which is a substitution in the `FROM`, and
-    knows nothing about an inserted stage.
+    lead re-binds the template it was just served.
 
     Both sides are read for real: what the transport was handed comes off the fake `docker`'s
     own argv, and the payload comes back from the real verb."""
@@ -955,7 +973,7 @@ def test_every_committed_template_takes_the_bound_with_its_pipes_intact(tmp_path
 def test_the_swept_catalog_is_the_corpus_this_half_claims():
     """    12 committed ES|QL templates, which is what the sweep above is sized against.
 
-    Asserted rather than derived, for `test_920_elastic_staging`'s reason: a catalog that
+    Asserted rather than derived, for `CATALOG`'s reason above: a catalog that
     shrank — or a fence reader that stopped matching — would make the parametrization collect
     fewer cases, or none, and stay green while covering nothing."""
     assert len(COMMITTED) == ESQL_TEMPLATES

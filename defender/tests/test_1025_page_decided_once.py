@@ -38,8 +38,13 @@ def render(ep) -> E.Page:
     return E.render(ep, module=E.page_module())
 
 
-def _inverted_six_steps() -> list[tuple[str, str, str]]:
-    return [(step, ended, started) for step, started, ended in E.six_steps()]
+def _inverted_steps() -> list[tuple[str, str, str]]:
+    return [(step, ended, started) for step, started, ended in E.every_step()]
+
+
+def _every_step_wall() -> str:
+    """The wall `E.every_step()` spans: one minute per step, two minutes apart, from 10:00."""
+    return f"{2 * (len(E.every_step()) - 1) + 1}m00s"
 
 
 # ---------------------------------------------------------------------------------------
@@ -53,7 +58,7 @@ def test_1025_an_all_inverted_timing_record_is_unmeasured_on_every_surface(tmp_p
     keyed on the record merely being readable and non-empty), and the table's caption says
     what is true — the record is there and has no usable span — never "no timing record"."""
     ep = E.sample_episode(tmp_path)
-    E.write_timing(ep.dir, _inverted_six_steps())
+    E.write_timing(ep.dir, _inverted_steps())
     page = render(ep)
     stages = page.text_of("sec-stages")
     assert "no timing record" not in stages, stages
@@ -68,7 +73,7 @@ def test_1025_a_measured_record_repeats_no_fallback_on_the_tile(tmp_path):
     tile carries no fallback beside it."""
     page = render(E.sample_episode(tmp_path, timing=True))
     assert LOWER_BOUND not in page.text_of("vd-tile-4"), page.text_of("vd-tile-4")
-    assert "11m00s" in page.text_of("sec-stages")
+    assert _every_step_wall() in page.text_of("sec-stages")
     assert "no usable span" not in page.text_of("stage-timing")
 
 
@@ -161,9 +166,10 @@ def test_1025_a_manifest_id_that_names_no_token_reads_no_ledger_outside_the_epis
     """`episode_id: ../../x` is an id the token builder refuses. Before, the model fell back
     to the raw id AS the token and joined it into `served/<token>.<label>.jsonl` — for a stray
     `runs/stray/` directory, `<episode>/served/../../x.stray.jsonl`, a file OUTSIDE the
-    episode dir, whose malformed-row count the leads block then rendered. Now a refused id
-    is no token: the leads block says the ledger cannot be named, and the outside file's
-    contents never reach the page."""
+    episode dir, whose malformed-row count the leads block then rendered. Now the manifest
+    reader itself refuses the id (its world labels cannot name a sibling run under it), so the
+    render refuses before any ledger is named: no page is written, and the outside file's
+    contents reach nothing."""
     ep = E.sample_episode(tmp_path)
     manifest = E.sample_manifest()
     manifest["episode_id"] = "../../x"
@@ -172,11 +178,11 @@ def test_1025_a_manifest_id_that_names_no_token_reads_no_ledger_outside_the_epis
     outside = (ep.dir / "served" / ".." / ".." / "x.stray.jsonl").resolve()
     assert ep.dir.resolve() not in outside.parents or outside.parent == ep.dir.parent.resolve()
     outside.write_text("{torn\n{torn\n", encoding="utf-8")
-    page = render(ep)
-    leads = page.text_of("leads-stray")
-    assert "malformed" not in leads, leads
-    assert "names no token" in leads, leads
-    assert "x.stray" not in page.raw
+    refused = E.sym("learning.judge", "JudgeRefused")
+    with pytest.raises(refused, match=r"\.\./\.\./x") as caught:
+        E.page_module().render_episode(ep.dir)
+    assert "x.stray" not in str(caught.value), caught.value
+    assert not ep.page.exists(), "a page was written for a manifest the reader refused"
 
 
 def test_1025_a_runs_directory_wearing_a_worlds_label_is_sectioned_once(tmp_path):

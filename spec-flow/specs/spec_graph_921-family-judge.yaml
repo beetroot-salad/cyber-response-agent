@@ -392,7 +392,7 @@ demands:
     form: test
     source: "amended table row 1"
     binds: ['interacts(judge_family->served_ledger)', 'served_ledger.identity']
-    discharged_by: test_921_holding_queried_reads_x_own_rows_on_H
+    discharged_by: test_921_served_nothing_reads_x_own_rows_off_the_composed_token
     seed_docstring: >-
       `holding_queried` is computed from rows in X's OWN ledger file — `episodes/<id>/served/
       <world_token>.jsonl`, joined to `worlds/<label>/` through
@@ -414,7 +414,7 @@ demands:
     form: test
     source: "45-dispositions §1 (consensus): served_ledger_file_is_empty_for_a_graded_world"
     binds: ['served_ledger.domain.distinguished[empty]', 'family_bucket.domain.distinguished[lead-set]']
-    discharged_by: test_921_an_empty_ledger_file_is_lead_set_like_a_world_that_never_queried_H
+    discharged_by: test_921_an_empty_or_absent_ledger_is_a_world_that_served_nothing
     seed_docstring: >-
       An EMPTY ledger file has zero rows on H, so `holding_queried` is false and the bucket is
       `lead-set` — the same observable as "never queried H". The empty case is DECIDED; the
@@ -422,10 +422,11 @@ demands:
 
   - id: a_row_with_no_system_matches_no_h
     kind: behavior
-    form: test
+    form: clause
     source: "45-dispositions §1 (consensus): ledger_row_system_field_is_empty_or_absent"
     binds: ['served_ledger.payload', 'interacts(judge_family->served_ledger)']
-    discharged_by: test_921_a_row_whose_system_is_empty_or_absent_is_inert_to_every_per_world_fact
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the judge's mechanical pass (holding-system facts, the computed bucket table and the computed family word); `test_921_a_row_whose_system_is_empty_or_absent_is_inert_to_every_per_world_fact`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       A ledger row whose `system` is empty or absent satisfies `system == H` under no reading
       of J2 and contributes to none of the five facts. It is inert, not a match and not an error.
@@ -443,10 +444,11 @@ demands:
 
   - id: scope_discriminated_from_row_params
     kind: behavior
-    form: test
+    form: clause
     source: "amended table row 2"
     binds: ['interacts(judge_family->served_ledger)', 'ledger_source.domain']
-    discharged_by: test_921_scope_discriminated_reads_index_window_and_scope_key_off_the_right_form
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the judge's mechanical pass (holding-system facts, the computed bucket table and the computed family word); `test_921_scope_discriminated_reads_index_window_and_scope_key_off_the_right_form`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       `scope_discriminated` reads index, window and scope key off the row's params — and
       `params` MEANS THREE DIFFERENT THINGS across the source classes (G6): on a `staged` row
@@ -468,13 +470,14 @@ demands:
 
   - id: doctored_answer_served_from_source_column
     kind: domain-outcome
-    form: test
+    form: clause
     source: "amended table row 3"
     binds:
       - 'ledger_source.domain.distinguished[staged]'
       - 'ledger_source.domain.distinguished[patched]'
       - 'ledger_source.domain.distinguished[passthrough]'
-    discharged_by: test_921_staged_and_patched_rows_say_the_difference_reached_the_defender
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the judge's mechanical pass (holding-system facts, the computed bucket table and the computed family word); `test_921_staged_and_patched_rows_say_the_difference_reached_the_defender`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       "A doctored answer was served on H" is `source in {staged, patched}`; `passthrough` is
       the world changing nothing on that call, and it is its own class precisely so that
@@ -484,12 +487,13 @@ demands:
 
   - id: refused_and_fault_are_not_defender_failures
     kind: domain-outcome
-    form: test
+    form: clause
     source: "amendment ('refused and fault were invisible to the old table and are real outcomes'), CORRECTED by A5's refutation and settled by the human's J5 tier rule"
     binds:
       - 'ledger_source.domain.distinguished[refused]'
       - 'ledger_source.domain.distinguished[fault]'
-    discharged_by: test_921_world_whose_H_call_was_refused_is_not_graded_a_defender_failure
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the judge's mechanical pass (holding-system facts, the computed bucket table and the computed family word); `test_921_world_whose_H_call_was_refused_is_not_graded_a_defender_failure`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       REWRITTEN TO THE CORRECTED MECHANISM. The sentence this demand was seeded on — that
       `refused` and `fault` blur into one another, so both mean "never given the chance to
@@ -567,18 +571,20 @@ demands:
 
   - id: bucket_lead_set
     kind: domain-outcome
-    form: test
+    form: clause
     source: "amended bucket fall-out"
     binds: ['family_bucket.domain.distinguished[lead-set]']
-    discharged_by: test_921_never_queried_H_is_lead_set
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the judge's mechanical pass (holding-system facts, the computed bucket table and the computed family word); `test_921_never_queried_H_is_lead_set`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: "No row on H at all: the world never queried the holding system. Bucket `lead-set`."
 
   - id: bucket_lead_quality
     kind: domain-outcome
-    form: test
+    form: clause
     source: "amended bucket fall-out"
     binds: ['family_bucket.domain.distinguished[lead-quality]']
-    discharged_by: test_921_queried_H_at_a_non_discriminating_scope_is_lead_quality
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the judge's mechanical pass (holding-system facts, the computed bucket table and the computed family word); `test_921_queried_H_at_a_non_discriminating_scope_is_lead_quality`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       Rows on H exist but at a scope that could not tell the worlds apart. Bucket
       `lead-quality`. Copy 1's mechanically correct reading of "H names a system this world
@@ -587,20 +593,22 @@ demands:
 
   - id: bucket_analyze_discipline
     kind: domain-outcome
-    form: test
+    form: clause
     source: "amended bucket fall-out"
     binds: ['family_bucket.domain.distinguished[analyze-discipline]']
-    discharged_by: test_921_doctored_answer_served_and_conclusion_unmoved_is_analyze_discipline
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the judge's mechanical pass (holding-system facts, the computed bucket table and the computed family word); `test_921_doctored_answer_served_and_conclusion_unmoved_is_analyze_discipline`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       The doctored evidence was served (`staged`/`patched` on H) and the conclusion still did
       not move. Bucket `analyze-discipline`.
 
   - id: bucket_decision_discipline
     kind: domain-outcome
-    form: test
+    form: clause
     source: "amended bucket fall-out; the member the old table could not reach"
     binds: ['family_bucket.domain.distinguished[decision-discipline]']
-    discharged_by: test_921_conclusion_moved_and_verdict_still_wrong_is_decision_discipline
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the judge's mechanical pass (holding-system facts, the computed bucket table and the computed family word); `test_921_conclusion_moved_and_verdict_still_wrong_is_decision_discipline`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       The doctored evidence was served, a resolution moved past `fences_at`, and the verdict
       still disagreed with the declared disposition. Bucket `decision-discipline` — reachable
@@ -608,18 +616,20 @@ demands:
 
   - id: bucket_none_when_verdict_matches
     kind: domain-outcome
-    form: test
+    form: clause
     source: "amended bucket fall-out"
     binds: ['family_bucket.domain.distinguished[none]']
-    discharged_by: test_921_verdict_matching_declared_gets_no_bucket
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the judge's mechanical pass (holding-system facts, the computed bucket table and the computed family word); `test_921_verdict_matching_declared_gets_no_bucket`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: "A world whose verdict equals its declared disposition gets no bucket."
 
   - id: agreed_without_evidence_flag
     kind: domain-outcome
-    form: test
+    form: clause
     source: "amendment ('the honest reading of agreeing without having seen anything'), superseded by #1007/N8"
     binds: ['family_bucket.domain.distinguished[lead-quality]']
-    discharged_by: test_921_verdict_matched_while_every_H_row_is_passthrough_still_buckets_lead_quality
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the judge's mechanical pass (holding-system facts, the computed bucket table and the computed family word); `test_921_verdict_matched_while_every_H_row_is_passthrough_still_buckets_lead_quality`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       The verdict matched while EVERY row on H says `passthrough`: the world agreed without
       having been shown anything. #1007/N8 retired the flag this demand originally bound the
@@ -629,18 +639,20 @@ demands:
 
   - id: verdict_word_caught
     kind: domain-outcome
-    form: test
+    form: clause
     source: "amendment; FamilyGrade"
     binds: ['JUDGE_OUTCOME_ENUM.domain.distinguished[caught]']
-    discharged_by: test_921_every_graded_verdict_equal_to_declared_is_caught
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the judge's mechanical pass (holding-system facts, the computed bucket table and the computed family word); `test_921_every_graded_verdict_equal_to_declared_is_caught`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: "Every graded world's verdict equals its declared disposition: family `verdict_word` is `caught`."
 
   - id: verdict_word_survived
     kind: domain-outcome
-    form: test
+    form: clause
     source: "amendment; FamilyGrade"
     binds: ['JUDGE_OUTCOME_ENUM.domain.distinguished[survived]']
-    discharged_by: test_921_any_graded_world_missing_its_declared_disposition_is_survived
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the judge's mechanical pass (holding-system facts, the computed bucket table and the computed family word); `test_921_any_graded_world_missing_its_declared_disposition_is_survived`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       One graded world whose verdict differs from its declared disposition makes the family
       `survived` — the word `_gate_family` routes to AUTHOR a lesson. Everything upstream that
@@ -648,10 +660,11 @@ demands:
 
   - id: verdict_word_undecidable
     kind: domain-outcome
-    form: test
+    form: clause
     source: "amendment; FamilyGrade"
     binds: ['JUDGE_OUTCOME_ENUM.domain.distinguished[undecidable]']
-    discharged_by: test_921_no_contrasting_archived_world_is_undecidable
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the judge's mechanical pass (holding-system facts, the computed bucket table and the computed family word); `test_921_no_contrasting_archived_world_is_undecidable`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       No archived non-control world declares a disposition different from the control's, or
       none is archived at all: there is no contrast to grade and the family is `undecidable`.
@@ -729,7 +742,7 @@ demands:
     form: test
     source: "M1 ('coverage rows gain window and scope key')"
     binds: ['judge_prompt.payload']
-    discharged_by: test_921_coverage_rows_carry_window_and_scope_key_against_the_discriminator
+    discharged_by: test_921_call_rows_carry_window_and_scope_key_against_the_discriminator
     seed_docstring: "Every coverage row names its window and its scope key, against the family's discriminator."
 
   - id: sibling_union_by_alert_id
@@ -783,7 +796,7 @@ demands:
     form: test
     source: "O5"
     binds: ['interacts(judge_render->family_manifest)', 'judge_prompt.access[overlay]']
-    discharged_by: test_921_no_sibling_overlay_reaches_the_prompt
+    discharged_by: test_921_no_sibling_facts_reach_the_prompt
     seed_docstring: >-
       Every world but the graded one is marked `counterfactual: true` in the RENDERED manifest
       and its overlay is withheld: no sibling's injected facts reach the prompt. `counterfactual`
@@ -805,7 +818,7 @@ demands:
     form: test
     source: "O5; positive control"
     binds: ['judge_prompt.access[overlay]']
-    discharged_by: test_921_graded_world_keeps_its_own_overlay_and_is_not_marked_counterfactual
+    discharged_by: test_921_graded_world_keeps_its_own_facts_and_is_not_withheld
     seed_docstring: >-
       The paired positive control: the graded world keeps its own overlay and is not marked
       counterfactual, so the withholding demand cannot pass on a render that withholds
@@ -951,7 +964,7 @@ demands:
     form: test
     source: "flow 2"
     binds: ['interacts(judge_episode->review_yaml)', 'judge_reply.domain']
-    discharged_by: test_921_discard_needs_the_control_drift_key_or_a_majority_of_draws
+    discharged_by: test_921_discard_needs_a_majority_of_draws
     seed_docstring: >-
       `discard` is mechanical-first: the discriminator envelope's key among the review's
       control-drift keys, OR a majority of a world's draws answering `discard` citing the same
@@ -1294,7 +1307,7 @@ demands:
       - 'review_yaml.domain.distinguished[rejected]'
       - 'review_yaml.domain.distinguished[incomplete]'
       - 'drives(judge_episode->judge_family)'
-    discharged_by: test_921_rejected_and_incomplete_episodes_are_not_graded
+    discharged_by: test_921_unaccepted_episodes_are_not_graded
     seed_docstring: >-
       Only an `accepted` episode is graded; `rejected` and `incomplete` are recorded as "not
       graded, reason" rather than passing silently. Base's own reader gates on `incomplete`
@@ -1311,7 +1324,7 @@ demands:
     form: test
     source: "45-dispositions §1 (consensus, P8)"
     binds: ['interacts(judge_episode->review_yaml)', 'review_yaml.payload']
-    discharged_by: test_921_the_trigger_reads_the_single_episode_outcome_key_step_six_wrote
+    discharged_by: test_921_the_trigger_reads_the_outcome_record_preflight_wrote
     seed_docstring: >-
       `review.yaml` carries ONE `episode.outcome` key, not two. Step 4 writes a human sentence
       into it and step 6's `merge_review` OVERWRITES that with its enum value on every episode
@@ -1377,13 +1390,14 @@ demands:
 
   - id: fixture_reproduces_the_08_16_finding
     kind: behavior
-    form: test
+    form: clause
     source: "M8, N7, O3"
     binds:
       - 'fixture_corpus'
       - 'family_bucket.domain.distinguished[lead-set]'
       - 'JUDGE_OUTCOME_ENUM.domain.distinguished[survived]'
-    discharged_by: test_921_hand_built_episode_yields_lead_set_and_survived
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the judge's mechanical pass (holding-system facts, the computed bucket table and the computed family word); `test_921_hand_built_episode_yields_lead_set_and_survived`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       A hand-built accepted episode in the #947 layout — two non-control worlds with contrasting
       declared dispositions, no row on H, both verdicts equal to the control's — yields
@@ -1392,10 +1406,11 @@ demands:
 
   - id: fixture_discriminates_a_degenerate_implementation
     kind: behavior
-    form: test
+    form: clause
     source: "M8, AMENDED by the amendment"
     binds: ['fixture_corpus', 'ledger_source.domain.distinguished[staged]']
-    discharged_by: test_921_fixture_carries_a_staged_row_world_with_a_wrong_verdict
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the judge's mechanical pass (holding-system facts, the computed bucket table and the computed family word); `test_921_fixture_carries_a_staged_row_world_with_a_wrong_verdict`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       The fixture MUST carry a world that lands a `staged`-served row on H and still gets the
       verdict wrong, or it cannot tell a correct implementation from a degenerate one — the
@@ -1486,12 +1501,13 @@ demands:
 
   - id: holding_system_is_validated_at_manifest_load
     kind: behavior
-    form: test
+    form: clause
     source: "45-dispositions J1, HUMAN-RESOLVED at §7 (validate at load, refuse)"
     binds:
       - 'family_manifest.access[questioner_authored]'
       - 'interacts(judge_family->family_manifest)'
-    discharged_by: test_921_the_holding_system_is_validated_against_the_served_roster_at_manifest_load
+    status: retired
+    outcome: {nl: "RETIRED by #1224 — the live oracle replaced the judge's mechanical pass (holding-system facts, the computed bucket table and the computed family word); `test_921_the_holding_system_is_validated_against_the_served_roster_at_manifest_load`, which discharged this demand, was deleted with the behaviour it pinned."}
     seed_docstring: >-
       `H` — `discriminator["holding_system"]` — is validated at manifest load: present,
       non-empty, and a member of the seven served-system names (`STAGERS | PATCHABLE_SYSTEMS`)

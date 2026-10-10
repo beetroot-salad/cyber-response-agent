@@ -25,11 +25,11 @@ from defender.tests._curator1134 import author_trees
 
 
 #: A pointer the FAMILY-level call is actually shown. Its default evidence is
-#: `samples.yaml#<pattern>`, and `_build_family_prompt` renders no sample section at
+#: `samples.yaml#<system>`, and `_build_family_prompt` renders no sample section at
 #: all — so a family finding citing one is grounded in a document that call never saw,
 #: which `_resolves` now refuses for `scope="family"`. These cells are about `world`,
 #: `source_run_dir` and who mints the id; the pointer is incidental to every one of them.
-FAMILY_EVIDENCE = ["review.yaml#worlds"]
+FAMILY_EVIDENCE = ["outcome.yaml#outcome"]
 
 
 def episode_with_worlds(tmp_path: Path, monkeypatch, *, labels=("b",)) -> Path:
@@ -39,8 +39,7 @@ def episode_with_worlds(tmp_path: Path, monkeypatch, *, labels=("b",)) -> Path:
     for label in labels:
         W.archived_world(ep, label)
         W.write_served(ep, label, [W.served_row(world=label)])
-    W.write_review(ep, worlds={
-        label: W.reviewed_world(label=label) for label in labels})
+    W.write_outcome(ep)
     W.write_samples(ep)
     return ep
 
@@ -69,10 +68,9 @@ def queue_row(**over) -> dict:
 def world_row(**over) -> dict:
     """One questioner-channel row: a full `FindingRow` plus the four world-lane fields."""
     row = queue_row(
-        subject=W.SUBJECT_WORLD, direction=W.SUBJECT_WORLD, type="story-overlay-gap",
+        subject=W.SUBJECT_WORLD, direction=W.SUBJECT_WORLD, type="fact-story-gap",
         finding_id=f"{W.EPISODE_ID}/b/0/0",
-        world="b", pattern=W.EVENTS_PATTERN, holding_system="elastic",
-        provenance="model")
+        world="b", systems=[W.SYSTEM], provenance="model")
     row.update(over)
     return row
 
@@ -353,8 +351,9 @@ def test_the_questioner_channel_declares_its_own_append_lock_and_shares_the_drai
 
 
 def test_a_world_queue_row_is_a_full_finding_row_plus_four_fields(tmp_path):
-    """A questioner-channel row is a full `FindingRow` plus `world`, `pattern`,
-    `holding_system` and `subject` — not a reduced shape of its own.
+    """A questioner-channel row is a full `FindingRow` plus `world`, `systems`, `provenance`
+    and `subject` — not a reduced shape of its own (#1224: `systems` replaced `pattern` and
+    `holding_system`).
 
     Observably true: the row that lands carries every key the defender row carries (so any
     reader of a finding row can read it) with `run_id` the episode id, `finding_id` the
@@ -374,7 +373,7 @@ def test_a_world_queue_row_is_a_full_finding_row_plus_four_fields(tmp_path):
         assert key in landed, f"the world row is missing the finding-row key {key!r}"
     assert landed["direction"] == W.SUBJECT_WORLD
     assert landed["run_id"] == W.EPISODE_ID
-    for key in ("world", "pattern", "holding_system", "subject"):
+    for key in ("world", "systems", "provenance", "subject"):
         assert key in landed, f"the world row is missing {key!r}"
 
 
@@ -417,7 +416,7 @@ def test_a_non_string_world_bucket_is_refused(tmp_path):
     """
     run = W.mod("learning.judge.run")
 
-    for bad in ([W.MECHANICAL_WORLD_BUCKET], 7, {"a": 1}, None):
+    for bad in (["fact-story-gap"], 7, {"a": 1}, None):
         with pytest.raises(W.refusals()):
             run.validate_reply(W.reply_text(findings=[W.world_finding(bucket=bad)]))
 
@@ -676,22 +675,22 @@ def test_direction_is_derived_from_subject_so_disagreement_is_unrepresentable(tm
         "two fields disagree")
 
 
-def test_a_world_row_missing_pattern_holding_system_or_subject_is_refused_at_the_appender(
-        tmp_path):
-    """`pattern`, `holding_system` and `subject` are REQUIRED at the questioner appender.
+def test_a_world_row_missing_systems_or_subject_is_refused_at_the_appender(tmp_path):
+    """`systems` and `subject` are REQUIRED at the questioner appender (#1224: `systems`
+    replaced `pattern` and `holding_system`).
 
-    Observably true: a world row missing any one of the three is refused and nothing lands; a
+    Observably true: a world row missing either is refused and nothing lands; a
     complete row lands. The appender is the LAST screen — M7's curator gate is idempotency-only
     — so a row that gets past here reaches the corpus unchecked.
 
     What failure looks like: the appender trusts the builder, a hand-built or replayed row
-    arrives without `pattern`, and the questioner's own selector at call 1 can never match it
+    arrives without `systems`, and the questioner's own selector at call 1 can never match it
     to an episode.
     """
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
 
-    for missing in ("pattern", "holding_system", "subject"):
+    for missing in ("systems", "subject"):
         row = world_row()
         row.pop(missing)
         with pytest.raises(W.refusals()):
@@ -701,40 +700,19 @@ def test_a_world_row_missing_pattern_holding_system_or_subject_is_refused_at_the
     assert len(W.queue_rows(paths, QUESTIONER_FINDINGS)) == 1
 
 
-def test_a_re_grade_appends_no_second_mechanical_world_finding(tmp_path, monkeypatch):
-    """The mechanical world finding takes a FIXED synthetic draw and index, so a re-grade is
-    absorbed by idempotency.
+def test_a_world_row_naming_no_system_is_refused_at_the_queue(tmp_path):
+    """A world row whose `systems` names nothing is refused on the way in, with that reason.
 
-    Observably true: grading an episode twice leaves exactly one mechanical row on the
-    questioner channel. The mechanical pass is arithmetic over the episode dir — it has no draw
-    of its own — so a coordinate derived from a counter would mint a new id per re-grade.
-
-    What failure looks like: an operator re-grades a repaired episode and the corpus gains a
-    duplicate lesson for every mechanical finding of every world.
-    """
+    A lesson is selected for a tenant by system, so such a row can never yield one. Queued
+    anyway, the questioner's drain later sets it aside as a row from before #1224 — a reason
+    that is false, and found far from the judge pass that could have said why."""
+    enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
-    judge_mod = W.mod("learning.judge")
-    _base, _src, root = W.configured_layout(tmp_path, monkeypatch)
-    doc = W.family_doc(worlds=[W.base_world(), W.world_doc(
-        "b", ov=W.overlay(elastic=W.elastic_overlay(inject=[{"_id": "i1"}])))])
-    ep = W.episode(tmp_path, doc=doc, root=root)
-    W.archived_world(ep, "b")
-    W.write_served(ep, "b", [W.served_row(world="b")])
-    W.write_samples(ep)
-    W.write_review(ep, worlds={"b": W.reviewed_world(
-        label="b", reachability=W.reachability_block(
-            reachable_by_capture=False,
-            capture_replays=[W.replay_entry("k1", differs=False)]))})
 
-    judge_mod.grade_episode(ep, judge=W.FakeJudge(W.reply_document()),
-                            state=W.learning_state(paths), runs_base=ep.parent / "runs-base")
-    (ep / W.JUDGE_NAME).unlink()        # force a genuine re-grade, not the existing-record path
-    judge_mod.grade_episode(ep, judge=W.FakeJudge(W.reply_document()),
-                            state=W.learning_state(paths), runs_base=ep.parent / "runs-base")
-
-    mech = [r for r in W.queue_rows(paths, QUESTIONER_FINDINGS)
-            if r.get("provenance") == "mechanical"]
-    assert len(mech) == 1, f"a re-grade minted a second mechanical row: {mech}"
+    with pytest.raises(W.refusals(), match="names no system"):
+        enqueue.append_world_rows(tmp_path, [world_row(systems=[])],
+                                  state=W.learning_state(paths))
+    assert W.queue_rows(paths, QUESTIONER_FINDINGS) == []
 
 
 def test_an_unqueueable_defender_finding_does_not_suppress_the_world_findings(

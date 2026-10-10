@@ -10,8 +10,8 @@ six listing/roster sites are the closed allow-list (D-V5).
 
 Every arm is a real entry planted on the filesystem (`_record_1049`, `_episode_1025`); the page
 is driven through `render_episode` (the real entry point); `judge.yaml` is written from the
-rows `grade_family` computed over the same planted tree, so both `ungradable_reason` shapes
-reach the page. Hard-link / fifo / mode-000 / symlinked-parent / dangling-parent arms are
+rows `family.read_world` computes over the same planted tree, so both `ungradable_reason`
+shapes reach the page. Hard-link / fifo / mode-000 / symlinked-parent / dangling-parent arms are
 planted PER COPY after `copy_episode` (copytree flattens a hard link and carries a symlink's
 absolute target, g18); a hard link targets a scratch file, never a live record (RF-J5).
 
@@ -71,17 +71,16 @@ def _plant_shared_arms(built: E.Episode) -> None:
     """The arms planted in the BUILT tree, before copying: one instance of every arm that
     survives `copytree(symlinks=True)` — a symlink keeps its absolute target (into `built`,
     which is why `str(built)` is asserted absent), plain bytes copy as bytes."""
-    E.plant_raw(built.dir / "review.yaml", R.UNDECODABLE)                 # read arm
-    E.plant_raw(built.dir / "staged.yaml", "{\n  [")                     # parse arm
+    E.plant_raw(built.dir / "outcome.yaml", R.UNDECODABLE)                # read arm
+    E.plant_raw(built.dir / "samples.yaml", "{\n  [")                    # parse arm
     E.plant_raw(built.dir / "provenance.json", '{"a": 1}')               # shape arm
-    (built.dir / "samples.yaml").unlink()                                 # absent arm
     E.plant_link(built.dir / "timing.json", built.dir / "family.yaml")    # OSError-shaped, C-02
-    E.plant_link(built.world(E.WITHHELD_WORLD) / "report.md", built.dir / "family.yaml")
-    (built.dir / _ledger_name(E.WITHHELD_WORLD)).unlink()                 # absent ledger
+    E.plant_link(built.world(E.PASSTHROUGH_WORLD) / "report.md", built.dir / "family.yaml")
+    (built.dir / _ledger_name(E.PASSTHROUGH_WORLD)).unlink()                 # absent ledger
     E.plant_link(built.dir / _ledger_name(E.CONTROL), built.dir / "family.yaml")  # aliased ledger
-    withheld_summaries = built.world(E.WITHHELD_WORLD) / "gather_summaries"
-    withheld_summaries.rename(built.world(E.WITHHELD_WORLD) / "summaries-real")
-    E.plant_link(withheld_summaries, built.world(E.WITHHELD_WORLD) / "summaries-real")
+    passthrough_summaries = built.world(E.PASSTHROUGH_WORLD) / "gather_summaries"
+    passthrough_summaries.rename(built.world(E.PASSTHROUGH_WORLD) / "summaries-real")
+    E.plant_link(passthrough_summaries, built.world(E.PASSTHROUGH_WORLD) / "summaries-real")
     E.plant_link(built.world(E.CONTROL) / "gather_summaries" / "l-001.md", built.dir / "family.yaml")
     for label in (LINKED_WORLD, DANGLING_WORLD):
         E.run_dir(built.dir, label)
@@ -98,14 +97,19 @@ def _plant_per_copy_arms(copy: E.Episode) -> None:
 
 
 def _write_grade_over(copy: E.Episode) -> None:
-    """`judge.yaml` written from the rows `grade_family` computes over the planted tree, so the
-    record carries both `ungradable_reason` shapes: the reader's sentence (the hard-linked
-    investigation) and `_missing_required_input`'s (the absent ledger). The review and samples
-    records are handed over parsed, as the orchestration hands them (the planted review.yaml
-    would otherwise refuse the whole pass, which is its contract)."""
-    grade = R.family().grade_family(copy.dir, review={}, samples={})
+    """`judge.yaml` written from the rows `family.read_world` — the sole producer of a row's
+    `ungradable_reason` from the archive — computes over the planted tree, so the record
+    carries both `ungradable_reason` shapes: the reader's sentence (the hard-linked
+    investigation) and `_missing_required_input`'s (the link at the other world's report — the
+    pass no longer requires a served ledger, so the absent one is the leads block's note)."""
+    family = R.family()
+    with R.bind(copy.dir) as bound:
+        manifest = family.read_manifest(bound)
+        rows = [family.read_world(bound, world, episode_dir=copy.dir,
+                                  episode_token=E.EPISODE_TOKEN)[0]
+                for world in family.non_control_worlds(manifest, runs_base=None)]
     doc = E.sample_grade()
-    doc["worlds"] = grade.worlds
+    doc["worlds"] = rows
     E.write_judge(copy.dir, doc)
 
 
@@ -125,14 +129,14 @@ def _every_arm(tmp_path: Path) -> tuple[E.Episode, E.Episode, E.Episode]:
 # ---------------------------------------------------------------------------------------
 
 
-READER_SHAPED = ("_read_review", "_read_samples", "_read_staged", "_read_timing",
+READER_SHAPED = ("_read_outcome", "_read_samples", "_read_timing",
                  "_read_family_stamp", "_read_grade", "_strict_samples_reader",
                  "_load_world_archive", "_result_event")
 
 
 def test_1049_the_page_module_has_no_stat_ahead_of_a_reader_and_no_scrub_symbol():
     """visualize_episode's AST has ZERO entry_present, artifact_dir or artifact_file calls
-    ahead of a package or _io reader — none in the six _read_* record readers,
+    ahead of a package or _io reader — none in the five _read_* record readers,
     _strict_samples_reader, _load_world_archive or _result_event, and none at all of
     entry_present anywhere (D-V5 is the closed allow-list of the six listing sites that
     remain) — no _sentence, _root_pattern or dataclasses.replace(report, reason=…), and family
@@ -161,14 +165,14 @@ def test_1049_the_page_module_has_no_stat_ahead_of_a_reader_and_no_scrub_symbol(
 
 
 def test_1049_an_episode_with_every_arm_planted_renders_no_root_and_byte_identically_from_two_roots(tmp_path):
-    """The fixture plants, per copy after copy_episode: read/parse/shape/absent per
-    episode-root reader (review.yaml undecodable, staged.yaml torn, provenance.json the wrong
-    shape, samples.yaml absent); an absent ledger and an aliased ledger; a SYMLINKED
+    """The fixture plants, per copy after copy_episode: read/parse/shape per episode-root
+    reader (outcome.yaml undecodable, samples.yaml torn, provenance.json the wrong shape); an
+    absent ledger and an aliased ledger; a SYMLINKED
     worlds/<w> and a DANGLING worlds/<w'> (two spare worlds rostered by their run dirs); an
     OSError-shaped arm (a link) at timing.json and a hard link at the graded world's
     investigation (C-02, C-03: scratch target, RF-J5); a link at another world's report; a
     symlinked gather_summaries/ in one world and a symlinked summary in another; judge.yaml
-    written from grade_family's rows over that tree (both ungradable_reason shapes). Asserts
+    written from read_world's rows over that tree (both ungradable_reason shapes). Asserts
     str(episode_dir), os.path.realpath(episode_dir), the EPISODES-BASE spelling
     str(episode_dir.parent) (the basename IS the episode id, which the title legitimately
     prints) and str(built) (a copied link keeps its absolute target) absent from learning.html
@@ -190,7 +194,7 @@ def test_1049_an_episode_with_every_arm_planted_renders_no_root_and_byte_identic
     # the record the page rendered reasons from does carry both shapes (the control is real)
     rows = {r["world"]: r for r in J.judge_record(one.dir)["worlds"]}
     assert rows[E.GRADED_WORLD].get("malformed") is True, rows[E.GRADED_WORLD]
-    assert "missing its served ledger" in rows[E.WITHHELD_WORLD]["ungradable_reason"], rows[E.WITHHELD_WORLD]
+    assert "missing its report.md" in rows[E.PASSTHROUGH_WORLD]["ungradable_reason"], rows[E.PASSTHROUGH_WORLD]
 
 
 # ---------------------------------------------------------------------------------------
@@ -199,8 +203,9 @@ def test_1049_an_episode_with_every_arm_planted_renders_no_root_and_byte_identic
 
 
 def test_1049_every_planted_refusal_is_said_in_its_own_slot(tmp_path):
-    """For the tree d-25 plants, each slot says its refusal with the relative name: the four
-    records (review.yaml / staged.yaml / provenance.json 'unreadable', samples.yaml 'absent'),
+    """For the tree d-25 plants, each slot says its refusal with the relative name: the three
+    records (outcome.yaml the "no record" state naming its refusal, samples.yaml /
+    provenance.json 'unreadable'),
     the timing stage (timing.json), the world report (worlds/<w>/report.md), the investigation
     (worlds/<w>/investigation.md), the ledger note ('absent' for the absent one, 'unreadable …
     served/<token>.<label>.jsonl …' for the aliased one — and for a symlinked served/, rendered
@@ -219,40 +224,39 @@ def test_1049_every_planted_refusal_is_said_in_its_own_slot(tmp_path):
     _built, one, _two = _every_arm(tmp_path)
     page = E.render(one)
     records = page.text_of("sec-records")
-    for slot, name in (("review record unreadable", "review.yaml"),
-                       ("staging record unreadable", "staged.yaml"),
+    for slot, name in (("no record", "outcome.yaml is refused"),
+                       ("samples record unreadable", "samples.yaml"),
                        ("provenance record unreadable", "provenance.json")):
         assert slot in records, (slot, records)
         assert name in records, (slot, records)
-    assert "absent" in records, records
     stages = page.text_of("sec-stages")
     assert 'timing record unreadable' in stages, stages
     assert 'timing.json' in stages, stages
     assert R.ALIAS in stages, stages
 
-    withheld_report = page.section(f"world-{E.WITHHELD_WORLD}").find_all(cls="w-report")[0].text()
-    assert f'worlds/{E.WITHHELD_WORLD}/report.md' in withheld_report, withheld_report
-    assert R.ALIAS in withheld_report, withheld_report
+    passthrough_report = page.section(f"world-{E.PASSTHROUGH_WORLD}").find_all(cls="w-report")[0].text()
+    assert f'worlds/{E.PASSTHROUGH_WORLD}/report.md' in passthrough_report, passthrough_report
+    assert R.ALIAS in passthrough_report, passthrough_report
     graded_leads = _leads(page, E.GRADED_WORLD)
     assert "investigation record unavailable" in graded_leads, graded_leads
     assert f'worlds/{E.GRADED_WORLD}/investigation.md' in graded_leads, graded_leads
     assert R.ALIAS in graded_leads, graded_leads
-    assert "served ledger: absent" in _leads(page, E.WITHHELD_WORLD)
+    assert "served ledger: absent" in _leads(page, E.PASSTHROUGH_WORLD)
     control_leads = _leads(page, E.CONTROL)
     assert 'served ledger unreadable' in control_leads, control_leads
     assert _ledger_name(E.CONTROL) in control_leads, control_leads
     assert 'gather_summaries/l-001.md' in control_leads, control_leads
     assert R.ALIAS in control_leads, control_leads
-    withheld_leads = _leads(page, E.WITHHELD_WORLD)
-    assert 'gather_summaries/l-001.md' in withheld_leads, withheld_leads
-    assert R.ALIAS in withheld_leads, withheld_leads
+    passthrough_leads = _leads(page, E.PASSTHROUGH_WORLD)
+    assert 'gather_summaries/l-001.md' in passthrough_leads, passthrough_leads
+    assert R.ALIAS in passthrough_leads, passthrough_leads
 
     graded_world = _world(page, E.GRADED_WORLD)
     assert 'ungradable' in graded_world, graded_world
     assert f'worlds/{E.GRADED_WORLD}/investigation.md' in graded_world, graded_world
-    withheld_world = _world(page, E.WITHHELD_WORLD)
-    assert 'missing its served ledger' in withheld_world, withheld_world
-    assert _ledger_name(E.WITHHELD_WORLD) in withheld_world, withheld_world
+    passthrough_world = _world(page, E.PASSTHROUGH_WORLD)
+    assert 'ungradable' in passthrough_world, passthrough_world
+    assert 'missing its report.md' in passthrough_world, passthrough_world
 
     for label in (LINKED_WORLD, DANGLING_WORLD):
         world = _world(page, label)
@@ -372,7 +376,7 @@ def test_1049_investigation_present_and_archived_are_read_off_the_readers_states
     """
     ep = E.sample_episode(tmp_path)
     (ep.world(E.GRADED_WORLD) / "investigation.md").unlink()
-    shutil.rmtree(ep.world(E.WITHHELD_WORLD))
+    shutil.rmtree(ep.world(E.PASSTHROUGH_WORLD))
     control = ep.world(E.CONTROL)
     control.rename(ep.dir / "worlds" / "control-real")
     E.plant_link(control, ep.dir / "worlds" / "control-real")
@@ -385,10 +389,10 @@ def test_1049_investigation_present_and_archived_are_read_off_the_readers_states
     assert "investigation record unavailable" not in graded_leads, graded_leads
     assert f"summary of l-001 for {E.GRADED_WORLD}" in graded_leads, graded_leads
 
-    withheld = _world(page, E.WITHHELD_WORLD)
-    assert 'report.md: not archived' in withheld, withheld
-    assert 'investigation.md: not archived' in withheld, withheld
-    assert "not archived" in _leads(page, E.WITHHELD_WORLD)
+    passthrough = _world(page, E.PASSTHROUGH_WORLD)
+    assert 'report.md: not archived' in passthrough, passthrough
+    assert 'investigation.md: not archived' in passthrough, passthrough
+    assert "not archived" in _leads(page, E.PASSTHROUGH_WORLD)
 
     linked = _world(page, E.CONTROL)
     assert f'worlds/{E.CONTROL}/report.md' in linked, linked

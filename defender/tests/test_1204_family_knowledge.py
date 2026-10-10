@@ -27,6 +27,10 @@ replaces the hardcoded `("commit", "scope", "model")` loop. The wire value of kn
 `{"commit": "<sha>"}` | `"unversioned"` | `{"unavailable": "<reason>"}` | `null`
 (`test_1204_knowledge_revision.py` pins it).
 
+#1224: verify no longer writes the episode outcome (pre-flight's, written once before any
+sibling starts); a family called `incomplete` here is a verify report with `comparable: False`
+and no family stamp.
+
 Fixtures: every fake stamp is `T.provenance_record(...)`, which by default carries
 `{"commit": T.KNOWLEDGE_SHA}` — the source `T.runs_base` writes, every `T.sibling_run_dir` /
 `J.FakeSibling` sibling and the `T.source_capture()` live capture all agree on it, as a real
@@ -101,11 +105,15 @@ UNPROVABLE_SAYS: dict[str, str | None] = {
 
 def _verify(tmp_path: Path, name: str, *, source: dict,
             siblings: dict[str, dict] | None = None,
-            allow_dirty: bool = False, reverse: bool = False) -> tuple[dict, dict, dict | None]:
+            allow_dirty: bool = False, reverse: bool = False) -> tuple[dict, dict | None]:
     """`verify_family` over three REAL sibling stamp files (`T.sibling_run_dir`, each with the
-    overrides `siblings[label]` names) against `source`. Returns the report, the RECORDED
-    episode outcome (`review.yaml`), and the family stamp (`None` when none was written).
-    The run dirs are handed over in `T.WORLDS` order (a, b, c), or reversed with `reverse`."""
+    overrides `siblings[label]` names) against `source`. Returns the report and the family
+    stamp (`None` when none was written). The run dirs are handed over in `T.WORLDS` order
+    (a, b, c), or reversed with `reverse`.
+
+    #1224: the family's verdict is the report's `comparable` and its `reason` — the outcome
+    record is pre-flight's, written once before any sibling starts, and verify never writes it
+    (so none exists here)."""
     base, _src = T.runs_base(tmp_path)
     dirs = [T.sibling_run_dir(base / name, w, **(siblings or {}).get(w, {})) for w in T.WORLDS]
     if reverse:
@@ -113,12 +121,11 @@ def _verify(tmp_path: Path, name: str, *, source: dict,
     ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{name}")
     with Episode.open(ep) as episode:
         report = _cli().verify_family(episode, dirs, source=source, allow_dirty=allow_dirty)
-    recorded = T.review_doc(ep)["episode"]
-    assert recorded["outcome"] == report["outcome"], (recorded, report)
+    assert not (ep / "outcome.yaml").exists(), "verify wrote the outcome record pre-flight owns"
     stamp_path = ep / "provenance.json"
     stamp = json.loads(stamp_path.read_text(encoding="utf-8")) if stamp_path.exists() else None
-    assert (stamp is not None) is (report["outcome"] == "accepted"), report
-    return report, recorded, stamp
+    assert (stamp is not None) is report["comparable"], report
+    return report, stamp
 
 
 def _never_called_dirt(text: str) -> None:
@@ -129,14 +136,13 @@ def _never_called_dirt(text: str) -> None:
     assert "dirt" not in text.replace("allow-dirty", ""), text
 
 
-def _incomplete(report: dict, recorded: dict, *phrases: str, waivable: bool) -> str:
-    """The family was refused for its knowledge: `incomplete`, with the recorded reason naming
+def _incomplete(report: dict, *phrases: str, waivable: bool) -> str:
+    """The family was refused for its knowledge: not comparable, with the reason naming
     knowledge and each phrase, and offering `--allow-dirty` exactly when passing it would let
     the family through (the message rule `_family_refusal` holds every fault to) — never
     calling a knowledge fault dirt."""
-    assert report["outcome"] == "incomplete", report
-    reason = recorded["reason"]
-    assert reason == report["reason"]
+    assert report["comparable"] is False, report
+    reason = report["reason"]
     assert "knowledge" in reason, reason
     for phrase in phrases:
         assert phrase in reason, (phrase, reason)
@@ -156,8 +162,8 @@ def test_1204_a_family_on_the_sources_knowledge_commit_is_accepted_and_stamped_w
     commit is `accepted`, and the family stamp says which — `source.knowledge` is the source's
     and `agreed.knowledge` the siblings', both `{"commit": K}`. Every refusal below is only
     meaningful beside this."""
-    report, recorded, stamp = _verify(tmp_path, "same", source=T.provenance_record())
-    assert recorded["outcome"] == "accepted", report["reason"]
+    report, stamp = _verify(tmp_path, "same", source=T.provenance_record())
+    assert report["comparable"] is True, report["reason"]
     assert stamp is not None
     assert stamp["source"]["knowledge"] == {"commit": K}
     assert stamp["agreed"]["knowledge"] == {"commit": K}
@@ -173,15 +179,15 @@ def test_1204_siblings_on_another_knowledge_commit_are_incomplete_even_with_the_
     knowledge commits — different settings, different lessons — archive as one family."""
     on_k2 = {w: {"knowledge": {"commit": K2}} for w in T.WORLDS}
     for allow_dirty in (False, True):
-        report, recorded, _ = _verify(tmp_path, f"moved-{allow_dirty}".lower(),
+        report, _ = _verify(tmp_path, f"moved-{allow_dirty}".lower(),
                                       source=T.provenance_record(), siblings=on_k2,
                                       allow_dirty=allow_dirty)
-        _incomplete(report, recorded, K, K2, waivable=False)
+        _incomplete(report, K, K2, waivable=False)
 
-    report, recorded, stamp = _verify(
+    report, stamp = _verify(
         tmp_path, "anchored-k2", source=T.provenance_record(knowledge={"commit": K2}),
         siblings=on_k2)
-    assert recorded["outcome"] == "accepted", report["reason"]
+    assert report["comparable"] is True, report["reason"]
     assert stamp is not None
     assert stamp["source"]["knowledge"] == {"commit": K2}
 
@@ -191,10 +197,10 @@ def test_1204_siblings_off_the_sources_knowledge_are_each_named_against_the_sour
     other knowledge commits are each named against the source — and not ALSO as a sibling
     disagreement, which the anchor faults already said (#976's one-fact-once rule). The third
     sibling, on the source's commit, is not named."""
-    report, recorded, _ = _verify(
+    report, _ = _verify(
         tmp_path, "two-off", source=T.provenance_record(),
         siblings={"b": {"knowledge": {"commit": K2}}, "c": {"knowledge": {"commit": K3}}})
-    reason = _incomplete(report, recorded, K2, K3, waivable=False)
+    reason = _incomplete(report, K2, K3, waivable=False)
     assert "siblings disagree on knowledge" not in reason, reason
 
 
@@ -209,14 +215,14 @@ def test_1204_siblings_disagreeing_on_knowledge_are_incomplete_even_with_the_ove
     knowledge commits freely."""
     source = T.provenance_record(knowledge=UNPROVABLE[shape])
     for allow_dirty in (True, False):
-        report, recorded, _ = _verify(
+        report, _ = _verify(
             tmp_path, f"split-{shape}-{allow_dirty}".lower(), source=source,
             siblings={"b": {"knowledge": {"commit": K2}}}, allow_dirty=allow_dirty)
-        _incomplete(report, recorded, K, K2, waivable=False)
+        _incomplete(report, K, K2, waivable=False)
 
-    report, recorded, stamp = _verify(tmp_path, f"agree-{shape}", source=source,
+    report, stamp = _verify(tmp_path, f"agree-{shape}", source=source,
                                       allow_dirty=True)
-    assert recorded["outcome"] == "accepted", report["reason"]
+    assert report["comparable"] is True, report["reason"]
     assert stamp is not None
     assert stamp["agreed"]["knowledge"] == {"commit": K}
     assert stamp["allow_dirty"] is True
@@ -231,12 +237,12 @@ def test_1204_a_source_whose_knowledge_is_unprovable_is_waivable(tmp_path, shape
     or every pre-#1204 run becomes permanently unforkable."""
     source = T.provenance_record(knowledge=UNPROVABLE[shape])
     says = UNPROVABLE_SAYS[shape]
-    report, recorded, _ = _verify(tmp_path, f"src-{shape}", source=source)
-    _incomplete(report, recorded, "source", *([says] if says else []), waivable=True)
+    report, _ = _verify(tmp_path, f"src-{shape}", source=source)
+    _incomplete(report, "source", *([says] if says else []), waivable=True)
 
-    report, recorded, stamp = _verify(tmp_path, f"src-{shape}-waived", source=source,
+    report, stamp = _verify(tmp_path, f"src-{shape}-waived", source=source,
                                       allow_dirty=True)
-    assert recorded["outcome"] == "accepted", report["reason"]
+    assert report["comparable"] is True, report["reason"]
     assert stamp is not None
     assert stamp["allow_dirty"] is True
 
@@ -250,15 +256,15 @@ def test_1204_a_sibling_whose_knowledge_is_unprovable_is_waivable(tmp_path, shap
     tenant blocks its family for good, or one is silently accepted."""
     siblings = {"b": {"knowledge": UNPROVABLE[shape]}}
     says = UNPROVABLE_SAYS[shape]
-    report, recorded, _ = _verify(tmp_path, f"sib-{shape}", source=T.provenance_record(),
+    report, _ = _verify(tmp_path, f"sib-{shape}", source=T.provenance_record(),
                                   siblings=siblings)
-    reason = _incomplete(report, recorded, "'b'", *([says] if says else []), waivable=True)
+    reason = _incomplete(report, "'b'", *([says] if says else []), waivable=True)
     assert "disagree" not in reason, reason
 
-    report, recorded, stamp = _verify(tmp_path, f"sib-{shape}-waived",
+    report, stamp = _verify(tmp_path, f"sib-{shape}-waived",
                                       source=T.provenance_record(), siblings=siblings,
                                       allow_dirty=True)
-    assert recorded["outcome"] == "accepted", report["reason"]
+    assert report["comparable"] is True, report["reason"]
     assert stamp is not None
     assert stamp["source"]["knowledge"] == {"commit": K}
 
@@ -280,14 +286,14 @@ def test_1204_two_unavailable_reasons_are_not_a_knowledge_disagreement(tmp_path)
             ("on-k", T.provenance_record(), no_commit),
             ("unavailable", T.provenance_record(knowledge=UNAVAILABLE_UNBORN), no_commit),
             ("absent", T.provenance_record(knowledge=T.NO_KNOWLEDGE_KEY), beside_k)):
-        report, recorded, _ = _verify(tmp_path, f"reasons-{name}", source=source,
+        report, _ = _verify(tmp_path, f"reasons-{name}", source=source,
                                       siblings=mixed)
-        reason = _incomplete(report, recorded, waivable=True)
+        reason = _incomplete(report, waivable=True)
         assert "disagree" not in reason, reason
 
-        report, recorded, stamp = _verify(tmp_path, f"reasons-{name}-waived", source=source,
+        report, stamp = _verify(tmp_path, f"reasons-{name}-waived", source=source,
                                           siblings=mixed, allow_dirty=True)
-        assert recorded["outcome"] == "accepted", report["reason"]
+        assert report["comparable"] is True, report["reason"]
         assert stamp is not None
 
 
@@ -346,23 +352,25 @@ def test_1204_a_source_whose_knowledge_is_unprovable_is_refused_at_preflight_unl
     and knowledge, offering the flag), and with it the launch completes and the family is
     accepted — so every run stamped before #1204 stays forkable."""
     launch = A._prepare(tmp_path)
-    T.source_stamp(launch.src, knowledge=UNPROVABLE[shape])
+    A._restamp(launch.src, knowledge=UNPROVABLE[shape])
     message = A._refused_before_spending(launch)
     A._waivable(message, "source", "knowledge")
     _never_called_dirt(message)
 
     waived = A._prepare(tmp_path)
-    T.source_stamp(waived.src, knowledge=UNPROVABLE[shape])
+    A._restamp(waived.src, knowledge=UNPROVABLE[shape])
     stamp = A._accepted(waived, "--allow-dirty")
     assert stamp["allow_dirty"] is True
 
 
 @pytest.mark.parametrize("argv", [(), ("--allow-dirty",)], ids=["plain", "allow-dirty"])
 def test_1204_a_launch_whose_siblings_read_another_knowledge_commit_ends_incomplete(
-        tmp_path, argv):
+        tmp_path, argv, caplog):
     """O2 end to end, the authority tier: the live clone matches the source (K), so preflight
     passes and the family runs — but every sibling's own stamp says K2, so `verify_family`
-    ends the family `incomplete` with no family stamp, with and without `--allow-dirty`. This is
+    withholds the family stamp, with and without `--allow-dirty`, and the reason it logs names
+    knowledge and K2 without offering the flag (#1224: verify's verdict is no longer written into
+    the outcome record, which is pre-flight's). This is
     the pin that the knowledge comparison runs on the siblings' per-process stamps, not only on
     the launcher's capture."""
     T.runs_base(tmp_path)
@@ -371,11 +379,11 @@ def test_1204_a_launch_whose_siblings_read_another_knowledge_commit_ends_incompl
     assert launch.run(*argv) == 0, "the exit is about the launch; the outcome is the family's"
     assert launch.questioner.calls > 0, "the launch was refused at preflight instead"
     assert sorted(launch.spawn.worlds) == list(T.WORLDS)
-    record = T.review_doc(launch.episode_dir)["episode"]
-    assert record["outcome"] == "incomplete", record
-    assert "knowledge" in record["reason"], record["reason"]
-    assert K2 in record["reason"], record["reason"]
-    assert "allow-dirty" not in record["reason"], record["reason"]
+    assert A._outcome(launch.episode_dir)["outcome"] == "accepted"
+    reason = A._withheld_reason(caplog)
+    assert "knowledge" in reason, reason
+    assert K2 in reason, reason
+    assert "allow-dirty" not in reason, reason
     assert not (launch.episode_dir / "provenance.json").exists()
 
 
@@ -431,9 +439,9 @@ def test_1204_the_family_stamp_records_which_fault_kinds_the_override_waived(tmp
     actually waived. A clean family is `[]` with the flag or without it; a pre-#1204 source on
     clean code is `["knowledge"]` and never `"dirt"`. `allow_dirty` keeps recording the flag."""
     source, siblings, flag, waived = WAIVED[case]
-    report, recorded, stamp = _verify(tmp_path, f"waived-{case}", source=source,
+    report, stamp = _verify(tmp_path, f"waived-{case}", source=source,
                                       siblings=siblings, allow_dirty=flag)
-    assert recorded["outcome"] == "accepted", report["reason"]
+    assert report["comparable"] is True, report["reason"]
     assert stamp is not None
     assert stamp["waived"] == waived, stamp.get("waived")
     assert stamp["allow_dirty"] is flag
@@ -448,7 +456,7 @@ def test_1204_a_launch_that_waives_a_pre_1204_sources_knowledge_records_it_as_kn
     a dirty family — and `["dirt", "knowledge"]` when the code was dirty too. The siblings
     agreed on K, so `agreed.knowledge` is K."""
     launch = A._prepare(tmp_path)
-    T.source_stamp(launch.src, knowledge=T.NO_KNOWLEDGE_KEY, dirty=dirty_source)
+    A._restamp(launch.src, knowledge=T.NO_KNOWLEDGE_KEY, dirty=dirty_source)
     stamp = A._accepted(launch, "--allow-dirty")
     assert stamp["waived"] == (["dirt", "knowledge"] if dirty_source else ["knowledge"])
     assert stamp["source"]["dirty"] is dirty_source
@@ -474,10 +482,10 @@ def test_1204_agreed_knowledge_is_the_commit_the_check_held_not_the_first_siblin
     either order — never the first sibling's `"unversioned"` or unavailable reason, which would
     say the family agreed on no commit. The other agreed fields are the siblings' shared
     values, as before."""
-    report, recorded, stamp = _verify(
+    report, stamp = _verify(
         tmp_path, f"agreed-{shape}-{reverse}".lower(), source=T.provenance_record(),
         siblings=NO_COMMIT_FIRST[shape], allow_dirty=True, reverse=reverse)
-    assert recorded["outcome"] == "accepted", report["reason"]
+    assert report["comparable"] is True, report["reason"]
     assert stamp is not None
     assert stamp["agreed"]["knowledge"] == {"commit": K}, stamp["agreed"]
     assert stamp["waived"] == ["knowledge"]
@@ -496,9 +504,9 @@ def test_1204_agreed_knowledge_is_null_when_no_sibling_names_a_commit(tmp_path, 
               else T.provenance_record(knowledge=T.NO_KNOWLEDGE_KEY))
     siblings = {"a": {"knowledge": "unversioned"}, "b": {"knowledge": UNAVAILABLE_REFTABLE},
                 "c": {"knowledge": T.NO_KNOWLEDGE_KEY}}
-    report, recorded, stamp = _verify(tmp_path, f"no-agreed-{source_shape}", source=source,
+    report, stamp = _verify(tmp_path, f"no-agreed-{source_shape}", source=source,
                                       siblings=siblings, allow_dirty=True)
-    assert recorded["outcome"] == "accepted", report["reason"]
+    assert report["comparable"] is True, report["reason"]
     assert stamp is not None
     assert "knowledge" in stamp["agreed"], stamp["agreed"]
     assert stamp["agreed"]["knowledge"] is None, stamp["agreed"]
@@ -512,11 +520,13 @@ def test_1204_agreed_knowledge_is_null_when_no_sibling_names_a_commit(tmp_path, 
 
 def _versioned_tenant_knowledge() -> str:
     """Place the episode tenant's knowledge folder as a real git repo (the committed fixture,
-    committed) BEFORE `T.runs_base` sets the tenant up — `set_up_tenant` then keeps it and
-    the real `accept_tenant` admits it (C10). Returns its HEAD."""
-    knowledge = Path(os.environ["DEFENDER_DATA_ROOT"]) / T.SOURCE_TENANT / "knowledge"
+    committed) BEFORE `A._prepare` sets the tenant up — the tenant set-up then keeps it and
+    the real `accept_tenant` admits it (C10). Returns its HEAD. The episode tenant is the
+    fixture tenant `A._prepare`'s source run belongs to (#1224's live-oracle estate)."""
+    tenant_id = A.S.FIXTURE_TENANT
+    knowledge = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant_id / "knowledge"
     shutil.copytree(FIXTURE, knowledge, symlinks=True)
-    (knowledge / "agent" / ".tenant-id").write_text(f"{T.SOURCE_TENANT}\n", encoding="utf-8")
+    (knowledge / "agent" / ".tenant-id").write_text(f"{tenant_id}\n", encoding="utf-8")
     R._repo(knowledge)
     return R._head(knowledge)
 
@@ -542,7 +552,7 @@ def test_1204_the_default_live_capture_reads_the_episode_tenants_knowledge_clone
 
     mismatched = A._prepare(tmp_path)
     mismatched.live_tree = None
-    T.source_stamp(mismatched.src, knowledge={"commit": K2})
+    A._restamp(mismatched.src, knowledge={"commit": K2})
     message = A._refused_before_spending(mismatched)
     assert "live tree is at commit" in message, message
     for phrase in ("knowledge", live, K2):
@@ -550,7 +560,7 @@ def test_1204_the_default_live_capture_reads_the_episode_tenants_knowledge_clone
 
     matched = A._prepare(tmp_path)
     matched.live_tree = None
-    T.source_stamp(matched.src, knowledge={"commit": live})
+    A._restamp(matched.src, knowledge={"commit": live})
     message = A._refused_before_spending(matched)
     assert "live tree is at commit" in message, message
     assert "knowledge" not in message, message
@@ -608,16 +618,16 @@ def test_1204_each_anchored_and_constant_field_is_compared_through_verify_family
         f"a compared field has no differing value to test it with: {set(compared) ^ set(DIFFERENT)}")
     for field in compared:
         for allow_dirty in (False, True):
-            report, recorded, stamp = _verify(
+            report, stamp = _verify(
                 tmp_path, f"{field}-{allow_dirty}".lower(), source=T.provenance_record(),
                 siblings={"b": {field: DIFFERENT[field]}}, allow_dirty=allow_dirty)
-            assert report["outcome"] == "incomplete", (field, allow_dirty, report["reason"])
-            assert field in recorded["reason"], (field, recorded["reason"])
-            assert "allow-dirty" not in recorded["reason"], (field, recorded["reason"])
+            assert report["comparable"] is False, (field, allow_dirty, report["reason"])
+            assert field in report["reason"], (field, report["reason"])
+            assert "allow-dirty" not in report["reason"], (field, report["reason"])
             assert stamp is None
 
-    report, recorded, stamp = _verify(tmp_path, "none-differs", source=T.provenance_record())
-    assert recorded["outcome"] == "accepted", report["reason"]
+    report, stamp = _verify(tmp_path, "none-differs", source=T.provenance_record())
+    assert report["comparable"] is True, report["reason"]
 
 
 def _cli_with_table(reclassified: dict[str, str], monkeypatch) -> Any:
@@ -681,16 +691,16 @@ def test_1204_the_field_table_drives_the_comparison(tmp_path, monkeypatch):
         "scope": {w: {**clean, "scope": "defender" if w == "b" else "repo"} for w in T.WORLDS},
         "world_id": {w: {**clean, "world_id": f"{T.EPISODE_ID}.{w}"} for w in T.WORLDS},
     }
-    real_says = {"model": "incomplete", "scope": "incomplete", "world_id": "accepted"}
+    real_says = {"model": False, "scope": False, "world_id": True}
     rebuilt = _cli_with_table(
         {"model": "informational", "scope": "informational", "world_id": "constant"},
         monkeypatch)
     for field, docs in families.items():
         report = _verify_with(_cli(), tmp_path, f"real-{field}".replace("_", "-"), docs)
-        assert report["outcome"] == real_says[field], (field, report["reason"])
+        assert report["comparable"] is real_says[field], (field, report["reason"])
         flipped = _verify_with(rebuilt, tmp_path, f"table-{field}".replace("_", "-"), docs)
-        assert flipped["outcome"] != real_says[field], (field, flipped["reason"])
-        if flipped["outcome"] == "incomplete":
+        assert flipped["comparable"] is not real_says[field], (field, flipped["reason"])
+        if not flipped["comparable"]:
             assert field in flipped["reason"], (field, flipped["reason"])
 
 
@@ -709,10 +719,10 @@ def test_1204_fields_expected_to_differ_or_informational_are_not_compared(tmp_pa
     ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-lineage")
     with Episode.open(ep) as episode:
         report = _cli().verify_family(episode, dirs, source=T.provenance_record())
-    assert report["outcome"] == "accepted", report["reason"]
+    assert report["comparable"] is True, report["reason"]
 
-    report, recorded, _ = _verify(
+    report, _ = _verify(
         tmp_path, "dirt-differs", source=T.provenance_record(), allow_dirty=True,
         siblings={"b": {"dirty": True},
                   "c": {"dirty": None, "unavailable": T.GIT_STATUS_FAILED}})
-    assert recorded["outcome"] == "accepted", report["reason"]
+    assert report["comparable"] is True, report["reason"]

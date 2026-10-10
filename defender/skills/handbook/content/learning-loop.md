@@ -40,38 +40,37 @@ What runs now branches a **real** investigation instead of inventing one.
    it had *observed* up to it is kept.
 2. **Question** (`learning/branch/questioner/`) — a deny-all role reads the
    captured past and authors a **family** of sibling worlds that differ from
-   the base by one deliberate fact. Its whole input is inlined in its prompt
-   by the host and its whole output is one YAML manifest; it runs no tools.
-3. **Stage** (`learning/branch/staging.py`, `estate/`) — each world's corpus
-   is written into its own namespace, every name recorded before it is
-   created. This is what a sibling's queries are answered from: the estate
-   answers for the world the run is in, not for the real environment.
-4. **Review by replay** — the captured query set is replayed through each
-   world. A world that contradicts the capture, or whose declared difference
-   no query could reach, is rejected — and a rejected world ends the whole
-   episode, so no sibling starts.
-5. **Run the family** — each accepted world runs as its own
-   `run.py --resume` process, started together, under the episode.
-6. **Judge** (`learning/judge/`) — grades the archived episode: a mechanical
-   pass per world, then one model call per world per draw. The episode comes
-   out `gradable`, `discard` (the measurement was spoilt) or
-   `corpus-contradiction` (the archive disagrees with itself).
+   the base by one deliberate fact. A world is a short list of facts in plain
+   language, never telemetry. Its whole input is inlined in its prompt by the
+   host and its whole output is one YAML manifest; it runs no tools.
+3. **Pre-flight** (`learning/branch/cli.py`, `estate/`) — the original run's
+   calls are replayed through each world's oracle and verifier. Nothing is
+   written to a tenant system: a world's answers are served, call by call, by
+   a model turn that forges telemetry for the facts the call covers, held to
+   host checks and a separate verifier. Two or more worlds that cannot be
+   served make the family unusable, recorded in `outcome.yaml`, and no sibling
+   starts.
+4. **Run the family** — each world runs as its own `run.py --resume` process,
+   started together, under the episode, each served by its own world's oracle.
+5. **Judge** (`learning/judge/`) — grades the archived episode, one model call
+   per world per draw. The episode comes out `gradable`, `discard` (the
+   measurement was spoilt) or `corpus-contradiction` (the archive disagrees
+   with itself).
 
-   The mechanical pass reads each world's *own* record and assigns at most one
-   bucket — the four places a verdict can lose the fact the family varied: never
-   queried the system holding it (`lead-set`), queried at the wrong scope
-   (`lead-quality`), got the changed answer and concluded the same anyway
-   (`analyze-discipline`), or moved a resolution on it and still concluded the
-   same (`decision-discipline`).
-7. **Enqueue** — a gradable episode's surviving findings are appended to one
+   The model assigns each world at most one bucket — the places a verdict can
+   lose the fact the family varied: never queried a system where it shows
+   (`lead-set`), queried at the wrong scope (`lead-quality`), got the changed
+   answer and concluded the same anyway (`analyze-discipline`), or moved a
+   resolution on it and still concluded the same (`decision-discipline`).
+6. **Enqueue** — a gradable episode's surviving findings are appended to one
    of two queues, partitioned by what a finding is *about* (#1007): a finding
    about the defender's conduct to `_pending/findings.jsonl`, a finding about
-   the world — an invented field shape, a story the overlay never backed, a
+   the world — an invented field shape, a story the world's facts never backed, a
    family that failed to discriminate — to `_pending/questioner_findings.jsonl`.
 
 The episode's own record artifacts — `judge.yaml` (written last, certifying
 the pass) and `timing.json` (the launcher's per-step clock) — sit at the
-episode dir's root beside `family.yaml` and `review.yaml`. `learning.html` is
+episode dir's root beside `family.yaml` and `outcome.yaml`. `learning.html` is
 the episode's one page (#1025): rendered right after `judge.yaml`, from the
 episode dir alone, it lays out the verdict, every world's card, the findings
 table, the stage timings and each world's leads in one static document — the

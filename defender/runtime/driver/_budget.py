@@ -13,6 +13,7 @@ from pydantic_ai.capabilities.hooks import Hooks
 
 
 from .. import observe
+from ..verbs import ServingAbort
 from ..tools import (
     AgentDeps,
 )
@@ -20,9 +21,11 @@ from ..tools import (
 from defender.hooks.budget_enforcer import (
     BUDGET_EXEMPT_TOOLS,
     DEFAULT_LIMITS,
+    ENFORCEMENT_HELD_KEY,
     BudgetKill,
     account_call,
     check_budgets,
+    oracle_held,
     read_budget,
     refusal_message,
     should_refuse,
@@ -35,7 +38,11 @@ _logger = logging.getLogger(__name__)
 
 
 def _budget_state_for_enforcement(state: dict, deps: AgentDeps) -> dict:
-    return {**state, "started_monotonic": deps.budget_started_monotonic}
+    """`budget.json`'s state with the host's own clock facts laid over it: the in-memory
+    monotonic origin, and the oracle-held seconds from host state (#1224 S15) — neither read
+    from the box-writable file."""
+    return {**state, "started_monotonic": deps.budget_started_monotonic,
+            ENFORCEMENT_HELD_KEY: oracle_held(deps.run_dir)}
 
 
 def _budget_short_circuit(
@@ -97,7 +104,13 @@ def _make_hooks(  # noqa: PLR0913 — the hook set's full wiring: logging, budge
             refusal = _budget_short_circuit(deps, tool_name, limits, logger, agent_id)
             if refusal is not None:
                 return refusal
-        result = await handler(args)
+        try:
+            result = await handler(args)
+        except ServingAbort:
+            # The call was made, and its world gave up under it (#1224): it still counts as
+            # the one investigator call it was, as on a run whose world served it.
+            _account_executed_call(deps, tool_name, active=enforce, limits=limits)
+            raise
         _account_executed_call(deps, tool_name, active=enforce, limits=limits)
         return result
 

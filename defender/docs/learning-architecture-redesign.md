@@ -23,6 +23,22 @@ judge, along with the direction routing and `run_cycle.py` itself. Read the sect
 as the case that was made, not as a description of code that is waiting to be written; the
 shipped shape is `docs/learning-loop.md`, and `git show e9e11a48` is the deletion. Where this doc uses the future tense about the branch, the answer is: it exists.
 
+**Serving is a live oracle, not staging (#1224).** The first shipped serving path staged
+each world's corpus into a private copy on the tenant's cluster and patched lookups from a
+fixed table, then reviewed the result by replay. #1224 deleted that path (the stagers, the
+applier and lookups, the write door and the review). A world is now a short list of facts
+in natural language. Every sibling call reads its real base answer (the family's recording,
+else one live read bounded at the branch point) and, in a world with facts, is served by
+that world's oracle: a model turn that forges telemetry for the facts the call covers and
+submits the answer with a claim of every difference, held to host checks and then to a
+separate verifier before it reaches the defender. Nothing is written to a tenant system.
+Pre-flight replays the original calls through each world's oracle before any sibling
+starts; two or more worlds that cannot be served make the family unusable. The judge model
+buckets each world; no code path computes a bucket. Where the sections below speak of
+applying a mutation to the captured base, a holding system, or an envelope, read them as
+the case that was made — the discriminator now carries only its predicate, and the oracle
+is what serves the difference.
+
 **What this revision changes.** The first draft proposed generating a base world from
 scratch. That design is replaced by the **turn-N branch**: fork a real investigation at
 the moment its evidence is in hand, and propose a pair of worlds consistent with that
@@ -165,7 +181,8 @@ outside what was captured.
 **What the oracle still has to do.** It serves **every** `query()` call after the branch —
 lookups included, not just log queries. Serving means reading the captured base and
 applying the sibling's mutation, and where the base is silent, deciding **once** and
-memoizing. A per-call judgment recomputed each time is the mid-run authoring that made the
+memoizing. (Shipped by #1224 as a model turn per uncached call, its forged rows and
+recorded facts frozen in the world's own store so a later answer cannot contradict them.) A per-call judgment recomputed each time is the mid-run authoring that made the
 old oracle fatal; the write-through ledger is what makes `ΔO` checkable against `ΔW`.
 
 Two seam facts belong here. The verb registry **falls back to the real adapters when no

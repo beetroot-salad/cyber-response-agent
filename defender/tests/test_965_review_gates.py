@@ -186,9 +186,10 @@ def test_a_world_id_carrying_upper_case_is_refused_at_the_mint() -> None:
 
     RE-POINTED AT #947's MINT. `learning/branch/cli.World` was the launcher's own world type,
     and #947's D2 retires it — a world is declared in the family manifest and the systems it
-    touches are DERIVED from its overlay, so the launcher parses no worlds at all. The mint is
-    now the manifest's identity gate, which runs over the whole family BEFORE anything is staged
-    (§7 FORK-4) and is the same one-place-for-every-id-rule this test was written to pin."""
+    a world declares in its manifest entry, so the launcher parses no worlds at all. The mint is
+    now the manifest's identity gate, which runs over the whole family BEFORE anything is
+    launched (§7 FORK-4) and is the same one-place-for-every-id-rule this test was written to
+    pin. (#1224: a world is the `facts` it asserts; the control asserts none.)"""
     from defender.runtime.branch import _family
 
     # NOT `Base`. The gate asks the RESERVED-label rule several lines before the case rule, so a
@@ -198,17 +199,26 @@ def test_a_world_id_carrying_upper_case_is_refused_at_the_mint() -> None:
     # that rule's own words rather than a substring every message happens to carry.
     doc = {
         "world_id": "Alpha", "role": "B", "story": "s", "axis": "an axis",
-        "disposition_declared": "malicious", "label_basis": "policy-rule", "overlay": {},
+        "disposition_declared": "malicious", "label_basis": "policy-rule",
+        "facts": [{"fact_id": "f1", "statement": "web-1's owner is the platform team",
+                   "entities": ["web-1"]}],
     }
-    with pytest.raises(_family.FamilyError) as caught:
-        _family.check_identities(_family.parse_family({
+    def family(world: dict) -> dict:
+        return {
             "episode_id": "ep1", "source_run_dir": "/runs/src", "source_run_id": "src",
             "branch_message_id": 1, "fences_at": 1, "as_of": "2026-07-28T16:18:45Z",
-            "continuation_prompt": "go", "base_story": "b",
+            "continuation_prompt": "go", "base_story": "b", "served_systems": ["elastic"],
             "discriminator": {"predicate": "p"},
-            "worlds": [{**doc, "world_id": "a", "role": "A", "axis": None}, doc],
-        }))
-    assert "upper case" in str(caught.value)
+            "worlds": [{**world, "world_id": "a", "role": "A", "axis": None, "facts": []}, world],
+        }
+
+    with pytest.raises(_family.FamilyError) as caught:
+        _family.check_identities(_family.parse_family(family(doc)))
+    # #1224: the case rule is now the world-token alphabet's own (`world_label_fault`), whose
+    # words name the case it admits — and `Alpha` differs from an admitted label only by case.
+    assert "'Alpha' is outside the world-token alphabet (lower-case" in str(caught.value)
+    # The control: the same label lower-cased passes the same gate.
+    _family.check_identities(_family.parse_family(family({**doc, "world_id": "alpha"})))
 
 
 def test_an_episode_id_carrying_upper_case_is_refused() -> None:

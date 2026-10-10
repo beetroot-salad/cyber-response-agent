@@ -134,17 +134,17 @@ GROUPS: dict[str, GroupSpec] = {
     "questioner": {
         "label": "Questioner lessons",
         "dir": LESSONS_QUESTIONER,
-        "blurb": "Pitfalls about the WORLDS the questioner authors — an invented field shape, "
-                 "an under-scoped story, a family that failed to discriminate — folded from "
-                 "the family judge's own world findings (#1007) and read back at the "
-                 "questioner's call 1.",
+        "blurb": "Pitfalls about the WORLDS the questioner authors — a fact placed where no "
+                 "served system could show it, an under-scoped story, a family that failed to "
+                 "discriminate — folded from the family judge's own world findings (#1007) and "
+                 "read back at the questioner's call 1 for a tenant serving one of the "
+                 "lesson's systems.",
         "retired": False,
         "retired_note": "",
         "title_keys": ["name"],
         "desc_key": "description",
         "fields": [
-            {"label": "Pattern", "key": "pattern", "kind": "text"},
-            {"label": "Holding system", "key": "holding_system", "kind": "text"},
+            {"label": "Systems", "key": "systems", "kind": "chips"},
             {"label": "Bucket", "key": "bucket", "kind": "text"},
             {"label": "Source findings", "key": "source_finding_ids", "kind": "count"},
             {"label": "Created", "key": "created_at", "kind": "date"},

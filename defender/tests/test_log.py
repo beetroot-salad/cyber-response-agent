@@ -121,7 +121,7 @@ def test_a_reused_pool_thread_does_not_carry_the_previous_jobs_run(emit):
 def test_lead_zero_s_thread_hop_keeps_the_run_bound():
     """Lead-0 runs its coroutine on a pool thread when a loop is already running (inside the
     driver); what it logs there must still name the run."""
-    from defender.runtime.lead_zero._capture import _run_sync
+    from defender.runtime.lead_zero import _run_sync
 
     async def inner():
         return dict(_log.current_context())

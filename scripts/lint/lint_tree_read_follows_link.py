@@ -83,8 +83,6 @@ LINT_TREE_READER_MODULES: frozenset[str] = frozenset({
     # copies taken out of them.
     "learning/branch/archive.py",
     "learning/branch/episode.py",
-    "learning/branch/review.py",
-    "learning/branch/staging.py",
     # The stage timing record at the episode root.
     "learning/branch/timing.py",
     "learning/branch/questioner/__init__.py",

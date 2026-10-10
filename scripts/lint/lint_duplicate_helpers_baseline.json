@@ -1,7 +1,6 @@
 {
   "//": "lint_duplicate_helpers baseline — module-level helper names defined in >=2 in-scope defender/ modules. Fingerprint is the bare name. CI fails on a dup name absent here. Regenerate: python scripts/lint/lint_duplicate_helpers.py --update-baseline. Shrink as dups are consolidated; annotate intentional entries, \"\" = un-triaged. Never hand-add to silence a new dup — fix it or use `# lint-dup: ok — <reason>`.",
   "entries": {
-    "_json_safe": "distinct-ok: serialize.py coerces YAML scalars (dates/sets) for JSON; sql.py maps non-finite floats to null for DuckDB — different problems",
     "_next_seq": "distinct-ok: session_store's is the per-(session,agent,synthesized) seq minter for the store's own message table; record_query's is the per-(lead_id) query seq minter for executed_queries.jsonl — different tables, same generic name (#705)",
     "_policy": "distinct-ok: bash_policy._policy loads the read-denylist JSON (no args); policy_cli._policy compiles an AgentPolicy for a given definition+run dir. Unrelated. Newly visible because policy_cli.py ends in _cli.py and was hidden by the retired suffix exclusion — pre-existing, not introduced by #619",
     "_render_section": "distinct-ok: lead_zero._render_section(body, salt) wraps item 1's rendered text in ONE untrusted trust-boundary frame (`wrap(text, \"untrusted\", salt)`) for the pre-ORIENT harness step (#808); invlang/advisory._render_section(section, frontier) renders an AdvisorySection's header+body lines for the advisory document — unrelated domains, same generic \"render a section\" name",
