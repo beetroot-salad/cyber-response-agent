@@ -117,11 +117,20 @@ def account_call(
 ) -> dict:
     """Count one executed call against the pool, re-checking the cap at commit time.
 
-    The read, the cap check and the increment are one locked read-modify-write of
+    A call at the cap writes nothing. Below it, the read, the cap check and the increment are
+    one locked read-modify-write of
     `budget.json` (`update_json_locked`), the same lock the oracle-turn marks are written
     under, so no interleaving with another writer can lose an increment or resurrect a mark
     that writer removed."""
     limit = limits["max_tool_calls"] + (TAIL_ALLOWANCE if tier == "tail" else 0)
+    # At the cap nothing changes, so nothing is written: a capped call cannot fail an
+    # accounting write (and climb the kill circuit) over a count it never makes. The count only
+    # grows, so a read showing the cap stays true; below it the locked write re-checks.
+    seen = read_budget(run_dir)
+    if (_valid_count(seen.get("tool_calls")) or 0) >= limit:
+        with _ACCOUNT_LOCK:
+            _reset_accounting_failure(run_dir)
+        return seen or make_budget_state(run_id)
     built: dict = {}
 
     def _mutate(state: dict) -> None:

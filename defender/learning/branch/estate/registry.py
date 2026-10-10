@@ -20,7 +20,7 @@ import functools
 import json
 import logging
 import threading
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import fields, is_dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -202,11 +202,14 @@ class WorldRegistry(ModuleVerbRegistry):
 
     def __init__(self, roster, grant, *, world: Any, ledger: Ledger, as_of: datetime,  # noqa: PLR0913 — a world's whole serving identity, its tenant and its settled oracle side
                  serving: OracleServing, oracle_dir: Path, limiter: RateLimiter,
-                 tenant: Any = None, grant_home: str = TABLE_POINTER):
+                 tenant: Any = None, grant_home: str = TABLE_POINTER,
+                 family_answers: Sequence[FamilyAnswer] | None = None):
         """`serving` is the world's settled oracle side (`oracle_serving`), `oracle_dir` its
         oracle-side state (`default_oracle_dir`), `limiter` the process's one rate limiter
         (S16: pre-flight hands every world the launcher's, held at the episode rate; a
-        sibling builds its slice's)."""
+        sibling builds its slice's). `family_answers` is the family's base recording as
+        `read_family_answers` parses it — pre-flight parses it once for every world; `None`
+        parses `ledger.base_path` here."""
         super().__init__(roster, grant, grant_home=grant_home)
         # Validate the clock here, once: every query this world issues, the oracle's own
         # included, carries it, so no oracle-side context is ever built without it (O-31).
@@ -241,10 +244,8 @@ class WorldRegistry(ModuleVerbRegistry):
         self._turn_ctx: Any = None
         #: The family's base recording as `(system, verb, answer)`, parsed once: every host
         #: check reads it, and it does not change while the world is served.
-        self._family_answers = [(r["system"], str(r.get("verb")), _parsed(r["payload_text"]))
-                                for r in read_jsonl_rows(ledger.base_path)
-                                if isinstance(r.get("system"), str)
-                                and isinstance(r.get("payload_text"), str)]
+        self._family_answers = list(family_answers if family_answers is not None
+                                    else read_family_answers(ledger.base_path))
         #: This world's real data, indexed once and grown as answers arrive (`_real`).
         self._real_data = RealData(
             answers=[(s, answer) for s, _verb, answer in self._family_answers])
@@ -518,6 +519,19 @@ def _world_record(world: Any) -> OracleUnservable | None:
     return OracleUnservable("budget" if doc["reason"] == BUDGET else "retries",
                             (str(call.get("system", "")), str(call.get("verb", "")),
                              dict(params)), "recorded before this process started")
+
+
+#: One answer of the family's base recording: `(system, verb, answer)`.
+FamilyAnswer = tuple[str, str, Any]
+
+
+def read_family_answers(base_path: Path) -> list[FamilyAnswer]:
+    """The family's base recording at `base_path` as `(system, verb, answer)`, in recorded
+    order — read and parsed once per episode: it does not change while any world is served,
+    and every world's host checks and family block read it."""
+    return [(r["system"], str(r.get("verb")), _parsed(r["payload_text"]))
+            for r in read_jsonl_rows(base_path)
+            if isinstance(r.get("system"), str) and isinstance(r.get("payload_text"), str)]
 
 
 def _parsed(text: str) -> Any:

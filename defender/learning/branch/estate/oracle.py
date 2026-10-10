@@ -34,7 +34,7 @@ from typing import Any, ClassVar
 from defender._async import run_sync
 from defender._episode_paths import OracleStorePaths
 from defender._io import guarded_mkdir, read_bytes_capped, read_jsonl_rows, write_guarded
-from defender._pricing import usage_cost
+from defender._pricing import billed_usage, usage_cost
 from defender._untrusted import wrap, wrap_fresh
 from defender.learning.branch.ledger import request_key
 from defender.learning.core import config
@@ -660,6 +660,14 @@ class _AttemptFailed(Exception):
     """A tool that ends the attempt as failed (no sandboxed box for `python`)."""
 
 
+class _ArgumentRefused(Exception):
+    """A tool argument the oracle supplied cannot be used: that one call answers with this text
+    and the attempt continues. Raised by a tool for its own arguments only, and answered in ONE
+    place, the tool wrapper (`_oracle_tool`), so a bad argument to any tool is the oracle's
+    feedback, never a fault of the world — while any other exception is still not caught there.
+    Its text may reach the oracle, framed as untrusted."""
+
+
 class StoreFailure(Exception):
     """A write to the world's oracle-side store failed; the attempt that needed it fails
     (M03=A). Its text names no path or OS error: it may reach the oracle."""
@@ -1071,14 +1079,9 @@ class Oracle:
         """Charge one model response's spend to the world (oracle and verifier together), at
         the price row settled when the oracle was configured — never at whatever spelling the
         provider reports, which may name no row."""
-        usage = response.usage
         reported = str(getattr(response, "model_name", None) or self._price_rows[actor])
-        self.store.charge(actor, reported, {
-            "input_tokens": getattr(usage, "input_tokens", 0) or 0,
-            "output_tokens": getattr(usage, "output_tokens", 0) or 0,
-            "cache_creation_input_tokens": getattr(usage, "cache_write_tokens", 0) or 0,
-            "cache_read_input_tokens": getattr(usage, "cache_read_tokens", 0) or 0},
-            priced_as=self._price_rows[actor])
+        self.store.charge(actor, reported, billed_usage(getattr(response, "usage", None)),
+                          priced_as=self._price_rows[actor])
 
     def _give_up(self, stop: OracleUnservable) -> None:
         self.unservable = stop
@@ -1259,6 +1262,8 @@ class Oracle:
                 return _NOT_RUN
             try:
                 return await run.blocking(lambda: self._tool(name, args, run))
+            except _ArgumentRefused as refused:
+                return f"{name} refused: {wrap_fresh(str(refused), 'untrusted')}"
             except (_AttemptFailed, StoreFailure) as failed:
                 run.ended = f"Attempt failed: {failed}."
                 return run.ended
@@ -1369,11 +1374,19 @@ class Oracle:
         return "Fact staged for this attempt."
 
     def _python(self, args: dict, run: _Run) -> str:
-        from defender.runtime.box_codec import BoxFault
+        from defender.runtime.box_codec import BoxFault, encode_request
 
         code = args.get("code")
         if not isinstance(code, str):
-            return "python refused: it needs code."
+            raise _ArgumentRefused("it needs code")
+        pipelines = [Pipeline("first", [Stage(["python3", "-c", code])])]
+        try:
+            # The box wire's own rule, applied before any box starts: code it cannot carry (a
+            # NUL, a lone surrogate) is this call's bad argument.
+            encode_request(pipelines)
+        except ValueError:
+            raise _ArgumentRefused("the code holds a NUL or text that is not valid UTF-8 (a "
+                                   "lone surrogate), which cannot reach the box") from None
         if run.box is None:
             raise _AttemptFailed("python runs only in an oracle attempt's own box")
         try:
@@ -1389,8 +1402,8 @@ class Oracle:
                                  "sandboxed, and its code never runs on the host")
         cwd = getattr(box, "scratch", None) or _BOX_CWD
         try:
-            result = box.run_parsed([Pipeline("first", [Stage(["python3", "-c", code])])],
-                                    command="python", cwd=cwd, timeout=_PYTHON_TIMEOUT)
+            result = box.run_parsed(pipelines, command="python", cwd=cwd,
+                                    timeout=_PYTHON_TIMEOUT)
         except subprocess.TimeoutExpired:
             return "python timed out."
         except BoxFault:

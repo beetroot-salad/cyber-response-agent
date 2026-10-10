@@ -19,13 +19,17 @@ before the question-writer. Sixth round: one size budget governs everything the 
 verifier are sent — the family's example answers are capped, and a conversation past the
 budget restarts from its prefix, the store's frozen rows carried in it; a failed world's
 detail never reaches another world's judge prompt; the oracle and the verifier are told the
-branch point (M27: told, and the verifier checks — no host rule).
+branch point (M27: told, and the verifier checks — no host rule); usage is priced by one rule (cached tokens once); a
+bad argument to an oracle tool fails that call only; a count cell is the answer's own count,
+never a document's field; a pre-flight thread's error stops the other worlds; a capped call
+writes nothing; the family recording is parsed once per pre-flight.
 """
 from __future__ import annotations
 
 import ast
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -1154,6 +1158,7 @@ def _calibration_seen(tmp_path: Path, monkeypatch: Any) -> list[dict]:
     def record(registry: Any, *_args: Any, **_kw: Any) -> None:
         with lock:
             seen.append({"world": registry.world.label,
+                         "family_answers": registry._family_answers,
                          "oracle": registry.oracle.oracle_model,
                          "verifier": registry.oracle.verifier_model,
                          "context": dict(_log.current_context())})
@@ -1530,3 +1535,138 @@ def test_the_oracle_and_the_verifier_are_told_the_branch_point(tmp_path):
     for who, seen in (("oracle", o.seen[0]), ("verifier", v.seen[0])):
         assert f"branch point is {point}" in seen, f"the {who} was not told the branch point"
         assert "at or before" in seen, f"the {who} was not told rows lie at or before it"
+
+
+# --- sixth round ---------------------------------------------------------------------------
+
+
+def test_cached_tokens_are_billed_once(tmp_path):
+    """Sixth-round finding 4: `Oracle.charge` passed pydantic-ai's `input_tokens`, which already
+    includes the cache reads and writes, beside the cache counts, so every cached token was
+    billed at the full input rate and again at its cache rate. Usage reaches `usage_cost`
+    through the one rule (`billed_usage`) the wire log's pricing uses."""
+    from defender._pricing import usage_cost
+
+    est = S.estate(tmp_path)
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=S.oracle(),
+                           verifier=S.passing_verifier())
+    usage = SimpleNamespace(input_tokens=1_000_000, output_tokens=0,
+                            cache_read_tokens=900_000, cache_write_tokens=50_000)
+    reg.oracle.charge("oracle", SimpleNamespace(model_name=None, usage=usage))
+
+    row = S.read_jsonl(reg.store.paths.trace)[-1]
+    once = usage_cost(row["model"], {"input_tokens": 50_000, "cache_read_input_tokens": 900_000,
+                                     "cache_creation_input_tokens": 50_000})
+    assert once > 0, "the double's price row bills nothing; the test would prove nothing"
+    assert reg.store.spent == pytest.approx(once), (reg.store.spent, once)
+
+
+def test_python_code_the_box_wire_cannot_carry_fails_that_call_only(tmp_path):
+    """Sixth-round finding 6: code holding a NUL (or a lone surrogate) made the box codec raise
+    `ValueError` outside the python tool's handling; the agent run, the attempt and `serve`
+    took it for a fault and the world went unservable. A bad argument to an oracle tool is
+    that call's feedback, answered in the tool wrapper: the oracle is told, no box starts, and
+    the attempt goes on to serve."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    box, log = _python_box_factory(tmp_path)
+    o = S.oracle(S.python("print('a\x00b')"), S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, box=box,
+                           verifier=S.passing_verifier(), retry_cap=1)
+
+    assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == ALICE_ROWS
+    told = _tool_result(o.messages[1], "python")
+    assert "python refused" in told, told
+    assert "NUL" in told, told
+    assert log.names == [], "a box was started for code that cannot reach it"
+
+
+def test_a_star_count_cannot_claim_an_ordinary_field_of_a_document():
+    """Sixth-round finding 12: a `*` counts entry claimed any whole number outside a table row,
+    so a single-document answer's ordinary field (`failed_logins` 3 -> 10) passed check 1 on a
+    count claim alone, and the verifier saw a count, not a changed field. A count cell is the
+    answer's own count of its rows (a count-named cell, a total, an aggregation's value, a
+    group-to-count map): the edit needs a claimed change (control), and a named group spelled
+    as the field's key claims it no more than "*" does."""
+    base = {"user": {"name": "alice", "failed_logins": 3}}
+    served = {"user": {"name": "alice", "failed_logins": 10}}
+    for group in ("*", "failed_logins"):
+        claim = {"counts": [{"group": group, "base": 3, "added": 7, "removed": 0,
+                             "served": 10}]}
+        failures = _checks(base, served, claim)
+        assert any(f.startswith("check 1") and "failed_logins" in f for f in failures), (
+            group, failures)
+    changed = {"changed": [{"entity": "alice", "field": "failed_logins", "old": 3, "new": 10}]}
+    assert _checks(base, served, changed) == []
+    # Still count cells: a count-named answer, and an ES total that carries its relation.
+    count = {"counts": [{"group": "*", "base": 3, "added": 7, "removed": 0, "served": 10}]}
+    assert _checks({"count": 3}, {"count": 10}, count) == []
+    assert _checks({"hits": {"total": {"value": 3, "relation": "eq"}}},
+                   {"hits": {"total": {"value": 10, "relation": "eq"}}}, count) == []
+
+
+def test_an_unexpected_error_in_one_preflight_world_stops_the_others(tmp_path):
+    """Sixth-round finding 13: an exception other than a world's own failure in one world's
+    calibration thread did not set `stop`, so the other worlds went on paying for every call
+    before the launch aborted with no outcome record. Any error in a world's thread stops the
+    rest before their next paid turn; the launch still raises it and writes no outcome.
+
+    World b's oracle store cannot be created (a file squats `oracle/b`): its first call fails
+    at once, while world c's first oracle answer takes 0.4 s, so c has a second paid turn to
+    skip."""
+    from defender.learning.branch import cli
+
+    est = S.estate(tmp_path)
+    calls = [S.default_calls()[0], S.Call("idp", "query", BOB, BOB_ROWS)]
+    _base, src = S.source_run(tmp_path, est, calls=calls)
+    ep = S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)),
+                      base_rows=[S.captured("idp", "query", ALICE, ALICE_ROWS),
+                                 S.captured("idp", "query", BOB, BOB_ROWS)])
+    (ep / "oracle").mkdir(exist_ok=True)
+    (ep / "oracle" / "b").write_text("not a folder", encoding="utf-8")
+    o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM), S.submit(BOB_ROWS, S.EMPTY_CLAIM),
+                 fault=S.Fault(delay=0.4))
+
+    with pytest.raises(OSError, match=re.escape(str(ep / "oracle" / "b"))):
+        cli.preflight_replay(ep, roster=est.roster(), tenant=est.run_tenant(), oracle=o.model,
+                             verifier=S.passing_verifier().model, rate=1e6)
+
+    # 0 when b failed before c's first turn began, 1 when that turn was already under way.
+    assert o.requests <= 1, f"world c paid {o.requests} oracle turns after b's thread failed"
+    assert not (ep / "outcome.yaml").exists()
+
+
+def test_a_call_at_the_cap_writes_nothing(tmp_path):
+    """Sixth-round finding 14: `account_call` rewrote budget.json on every call, at the cap
+    too, where nothing changes — so a write failure there climbed the accounting-failure kill
+    circuit over a count never made. A capped call reads the state and writes nothing."""
+    import json
+
+    from defender.hooks import budget_enforcer as be
+    from defender.run_repository import RunPaths
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    limits = {**be.DEFAULT_LIMITS, "max_tool_calls": 2}
+    budget = RunPaths(run_dir).budget
+    capped = json.dumps({**be.make_budget_state("r-1"), "tool_calls": 2})
+    budget.write_text(capped, encoding="utf-8")
+
+    state = be.account_call(run_dir, "r-1", "bash", limits=limits, tier="core")
+
+    assert state["tool_calls"] == 2
+    assert budget.read_text(encoding="utf-8") == capped, "a capped call rewrote budget.json"
+
+
+def test_preflight_parses_the_family_recording_once_for_every_world(tmp_path, monkeypatch):
+    """Sixth-round finding 15: every world's registry re-read and re-parsed the whole family
+    recording, so pre-flight parsed it once per world on top of each ledger's own read.
+    Pre-flight parses it once and hands that one parse to every world's registry."""
+    seen = _calibration_seen(tmp_path, monkeypatch)
+
+    answers = [s["family_answers"] for s in seen]
+    assert len(answers) == 2
+    assert answers[0]
+    assert answers[0] == answers[1]
+    assert all(a is b for a, b in zip(answers[0], answers[1], strict=True)), (
+        "each world parsed the family recording itself")

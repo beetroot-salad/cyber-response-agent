@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 PRICING = {
     "claude-sonnet-4-6": {"in": 3.0, "out": 15.0, "cache_w": 3.75, "cache_r": 0.30},
@@ -84,6 +85,24 @@ def model_key(model: str) -> str:
             f"PRICING and a spelling to _ROW_BY_NAME rather than letting it bill as a "
             f"neighbour. Known: {sorted(set(_ROW_BY_NAME.values()))}"
         ) from None
+
+
+def billed_usage(usage: Any) -> dict[str, int]:
+    """A pydantic-ai `Usage` as the four token counts `usage_cost` bills: the one rule from a
+    provider's usage to cost inputs. pydantic-ai's `input_tokens` already includes the cache
+    reads and writes, so they are taken out of it here and billed at their own rates — passing
+    `input_tokens` beside the cache counts would bill every cached token twice."""
+    def count(name: str) -> int:
+        return int(getattr(usage, name, 0) or 0)
+
+    cache_r = count("cache_read_tokens")
+    cache_w = count("cache_write_tokens")
+    return {
+        "input_tokens": max(0, count("input_tokens") - cache_r - cache_w),
+        "output_tokens": count("output_tokens"),
+        "cache_read_input_tokens": cache_r,
+        "cache_creation_input_tokens": cache_w,
+    }
 
 
 def usage_cost(model: str, usage: dict) -> float:
