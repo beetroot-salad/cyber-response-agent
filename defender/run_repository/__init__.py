@@ -34,7 +34,7 @@ if TYPE_CHECKING:
         SESSIONS_DIRNAME, RunLayout, RUN_LAYOUT, WireLogNames, WIRE_LOG_NAMES,
         RunPaths, SessionPaths, LEAD_ID_BODY, LEAD_ID_RE, GATHER_RAW_SHAPE, CASE_ANSWER_KEY_NAMES,
         is_case_answer_key, gather_summaries_shape, artifact_file, plain_file, artifact_dir,
-        resolve_run_bundle, contained_payload,
+        contained_payload,
     )
     from defender.run_repository._handle import (
         Run, RunRecord, ArchivedWorld, RecordHandle, case_ref,
@@ -71,7 +71,7 @@ _HOMES: dict[str, str] = {
         "WIRE_LOG_NAMES", "RunPaths", "SessionPaths", "LEAD_ID_BODY", "LEAD_ID_RE",
         "GATHER_RAW_SHAPE", "CASE_ANSWER_KEY_NAMES", "is_case_answer_key",
         "gather_summaries_shape", "artifact_file", "plain_file", "artifact_dir",
-        "resolve_run_bundle", "contained_payload",
+        "contained_payload",
     ), "_layout"),
     **dict.fromkeys(("Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref",), "_handle"),
     **dict.fromkeys(("RunId",), "_id"),
@@ -94,7 +94,7 @@ __all__ = [
     "SESSIONS_DIRNAME", "RunLayout", "RUN_LAYOUT", "WireLogNames", "WIRE_LOG_NAMES", "RunPaths",
     "SessionPaths", "LEAD_ID_BODY", "LEAD_ID_RE", "GATHER_RAW_SHAPE", "CASE_ANSWER_KEY_NAMES",
     "is_case_answer_key", "gather_summaries_shape", "artifact_file", "plain_file", "artifact_dir",
-    "resolve_run_bundle", "contained_payload", "Run", "RunRecord", "ArchivedWorld",
+    "contained_payload", "Run", "RunRecord", "ArchivedWorld",
     "RecordHandle", "case_ref", "RunId", "RunsRepository", "EpisodeRuns", "Listed", "RunAddress",
     "record_episode_runs", "episode_runs", "sibling_run_ids", "episode_sibling_ids", "RunRefused",
     "RunAbsent", "hold_runs_folder", "run_name_fault",

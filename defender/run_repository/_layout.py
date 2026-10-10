@@ -533,11 +533,6 @@ class SessionPaths:
         return self.session_db(lineage_id), self.trust_root
 
 
-# A run bundle is always `runs_dir / <run_id>`, so a recorded `source_run_dir` contributes
-# only a name. Degenerate names map to a child that cannot exist, reading as a missing bundle.
-_NO_BUNDLE = "_unresolvable_source_run_dir"
-_NAMELESS = {"", ".", ".."}
-
 #: The lead-id alphabet, the body of `l-<body>`. Every lead-id validator and payload path
 #: shape composes off this; if they disagreed, gather's read gate could refuse gather's own
 #: payload. Bounded because ids become filename components (64 is well under 255).
@@ -663,20 +658,6 @@ def artifact_dir(path: Path) -> bool:
     `copytree(symlinks=True)` still follows a symlinked root.
     """
     return _lstat_is(path, stat.S_ISDIR)
-
-
-def resolve_run_bundle(runs_dir: Path, source_run_dir: object) -> Path:
-    """The run bundle a recorded ``source_run_dir`` names, always under ``runs_dir``.
-
-    The recorded string is a label, never an address: only its last segment is honored, so
-    neither a traversal nor an absolute path can move the read off the runs root.
-
-    Typed ``object``: the value comes off a queued JSONL row, and a non-string must read as a
-    missing bundle rather than raise mid-batch."""
-    if not isinstance(source_run_dir, str):
-        return runs_dir / _NO_BUNDLE
-    name = Path(source_run_dir.rstrip("/")).name
-    return runs_dir / (_NO_BUNDLE if name in _NAMELESS else name)
 
 
 def contained_payload(run_dir: Path, payload_path: object) -> Path | None:
