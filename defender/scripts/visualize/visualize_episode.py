@@ -2220,7 +2220,7 @@ def _diagnostics(ep: _Episode) -> list[str]:
     return lines
 
 
-def parse_args(argv: list[str]) -> argparse.Namespace:
+def _parse_page_args(argv: list[str]) -> argparse.Namespace:
     """`--tenant T <episode_id>` (#1105 declared change 4, J8): the tenant is required, with
     no default, and the episode is named by its id under the configured episodes root."""
     p = argparse.ArgumentParser(prog="visualize_episode.py", description=__doc__)
@@ -2231,7 +2231,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str]) -> int:
-    ns = parse_args(argv)
+    ns = _parse_page_args(argv)
     try:
         tenant = _tenant.accept_tenant(
             _tenant.resolve_data_root(), _tenant.requested_tenant_id(ns.tenant),

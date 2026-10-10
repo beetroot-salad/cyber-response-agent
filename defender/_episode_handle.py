@@ -87,7 +87,7 @@ def episodes_root(data_root: Path) -> Path:
     return candidate
 
 
-def refuse_bad_episode_id(episode_id: object) -> str:
+def refuse_bad_episode_id(episode_id: object) -> str:  # lint-dup: ok — one rule, two error classes: `_family` raises `FamilyError` for a manifest; the episode owner raises `EpisodeRefused` before any path is built (both state the rule once, in `_run_id.episode_id_fault`)
     """`episode_id`, when it can name a directory of its own under the episodes root — a run id
     with room left for a sibling (`_run_id.episode_id_fault`, the one statement of the rule) —
     else `EpisodeRefused`, before any path is built from it."""

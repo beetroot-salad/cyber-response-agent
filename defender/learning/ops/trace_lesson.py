@@ -129,19 +129,24 @@ def in_context_cases(
 ) -> list[CaseHit]:
     """The cases among `runs` (opened runs, `tenant_runs`) that had `lesson_name` in context
     since `created_at`, each with its disposition."""
+    return [hit for run in runs for hit in _run_hits(lesson_name, created_at, run)]
+
+
+def _run_hits(lesson_name: str, created_at: datetime | None, run: Run) -> list[CaseHit]:
+    """One run's exposures to `lesson_name` since `created_at`, read through the run's own
+    records (`lessons_loaded`, then `report` for the disposition)."""
+    loaded = Path(run.observability.lessons_loaded.path)
+    if not loaded.is_file():
+        return []
+    # Filter to this lesson first: `--all` calls this once per lesson per run.
+    mine = (r for r in read_jsonl_rows(loaded) if r.get("lesson_name") == lesson_name)
     hits: list[CaseHit] = []
-    for run in runs:
-        loaded = Path(run.observability.lessons_loaded.path)
-        if not loaded.is_file():
-            continue
-        # Filter to this lesson first: `--all` calls this once per lesson per run.
-        mine = (r for r in read_jsonl_rows(loaded) if r.get("lesson_name") == lesson_name)
-        disposition = None
-        for exposure in exposures(mine, since=created_at).lessons:
-            if disposition is None:
-                disposition = _report_disposition(Path(run.documents.report.path))
-            hits.append(CaseHit(str(run.run_id), disposition, str(exposure.evidence_at),
-                                exposure.evidence))
+    disposition = None
+    for exposure in exposures(mine, since=created_at).lessons:
+        if disposition is None:
+            disposition = _report_disposition(Path(run.documents.report.path))
+        hits.append(CaseHit(str(run.run_id), disposition, str(exposure.evidence_at),
+                            exposure.evidence))
     return hits
 
 

@@ -104,7 +104,7 @@ class Listed:
         return len(self.ids)
 
 
-def _list(tenant: Tenant, folder: Path, io: Any, *, record_unreadable: bool) -> Listed:
+def _list_container(tenant: Tenant, folder: Path, io: Any, *, record_unreadable: bool) -> Listed:
     """The container's runs, sorted by text, minus every id a good episode record claims.
     Every entry is judged (rev 4.1 H4): a stray refuses the listing, naming it. An absent
     container is `Listed(absent=True)`; one that cannot be held raises `TenantRefused`, or with
@@ -202,7 +202,7 @@ class RunsRepository:
     def list(self) -> Listed:
         """The tenant's natural runs (PR 1's `list_run_ids` rule), telling an absent container
         from an empty one. A container that cannot be held refuses (`TenantRefused`)."""
-        return _list(self._tenant, Path(self._tenant.runs), self._io, record_unreadable=False)
+        return _list_container(self._tenant, Path(self._tenant.runs), self._io, record_unreadable=False)
 
     def exists(self, run_id: RunId) -> bool:
         """Whether `run_id` is taken in the tenant's natural container (PR 1's `run_exists`)."""
@@ -371,7 +371,7 @@ class EpisodeRuns:
     def list(self) -> Listed:
         """The container's arms (every entry judged, H4); `absent` or `unreadable` (recorded,
         not raised) when the container is either."""
-        return _list(self._tenant, self._folder, self._io, record_unreadable=True)
+        return _list_container(self._tenant, self._folder, self._io, record_unreadable=True)
 
     def create(self, arm_id: RunId) -> Run:
         """The `Run` run setup builds for arm `arm_id` (D-create (a)). The container must

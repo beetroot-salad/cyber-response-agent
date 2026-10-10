@@ -381,7 +381,7 @@ def enqueue_curation(
     from defender.learning.core.config import loop_paths
     from defender.learning.core.state import LearningState, StateRefused
 
-    address = RunAddress(tenant_id=run.tenant_id, run_id=run.run_id)
+    address = RunAddress(tenant_id=_tenant.TenantId(run.tenant_id), run_id=run.run_id)
     # Reading the alert is inside the guard too: a moved alert must not fail the run. So is the
     # state tree: a refused entry or a missing root costs this request, never the investigation.
     try:

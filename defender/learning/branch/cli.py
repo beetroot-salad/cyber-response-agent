@@ -359,7 +359,7 @@ def _episode_tenant(tenant_id: _tenant.TenantId, data_root: Path) -> RunTenant:
         raise LauncherRefused(f"[branch] the episode's tenant: {refusal}") from refusal
 
 
-def _open_source(runs: RunsRepository, source_run_id: str) -> Run:
+def _open_launch_source(runs: RunsRepository, source_run_id: str) -> Run:
     """The source run, by id, in the request's tenant's natural container — or the refusal,
     before anything is spent. `runs.open` holds `<T>/runs` no-follow (a link there is refused),
     judges its `_tenant.json` against the tenant, and takes only a real directory at the id; a
@@ -1470,7 +1470,7 @@ def _launch(  # noqa: PLR0913 — see `main`
         raise LauncherRefused(f"[branch] {refusal}") from refusal
     tenant = _episode_tenant(tenant_id, data_root)
     runs = tenant.tenant.runs_repository()
-    source = _open_source(runs, ns.source_run_id)
+    source = _open_launch_source(runs, ns.source_run_id)
     _source_stamp_agrees(source, tenant.tenant_id)
     # N05 / O-20: a tenant whose gather grant serves no system has nothing a world could
     # change. Refused here, before the question-writer or anything else is spent.

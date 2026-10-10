@@ -473,7 +473,7 @@ def _screened_source_alert(source: Run) -> Path:
     return alert
 
 
-def _open_source(runs: Any, world: Any) -> Run:
+def _open_world_source(runs: Any, world: Any) -> Run:
     """The source run a world forks: the manifest's `source_run_id`, opened in the request's
     tenant's natural container (#1105 PR 2, decision A — an old manifest's `source_run_dir` is
     never read). An id the repository refuses, or a run that is not there, is the sibling's
@@ -667,7 +667,7 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
             accepted, defender_dir=DEFENDER_DIR, dispatches_lead_zero=ns.episode is None))
         world = _resume_target(ns, episode=episode, tenant=tenant_of)
         source = (None if world is None
-                  else _open_source(accepted.runs_repository(), world))
+                  else _open_world_source(accepted.runs_repository(), world))
 
         alert, run_id = _case_input(ns, world, source)
 
