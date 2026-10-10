@@ -6,11 +6,12 @@ failure texts, each naming the check it failed (`check <n>`); an empty list pass
 
   1. Structure: every difference between the base answer and the served one is claimed — an
      added row is a claimed forged row, a removed row a claimed removal, a changed value a
-     claimed change or count — and every claim entry is found. Mapping key order is not a
-     difference, list order is, duplicates are a multiset (N09).
-  2. Shape: a forged row carries exactly the columns real rows of its system carry at the same
-     place, with their value types (M14=B); with no real example there is nothing to compare
-     (D2).
+     claimed change or, for a count cell (a total, an aggregate's value, a bucket's count),
+     one `counts` entry used up by it — and every claim entry is found. Mapping key order is
+     not a difference, list order is, duplicates are a multiset (N09).
+  2. Shape: a forged row carries exactly the columns real rows of its system (the call's,
+     stamped by the host at forge) carry at the same place, with their value types (M14=B);
+     with no real example there is nothing to compare (D2).
   3. Ids: no id-like value of a newly forged row (nested fields included, by their dotted
      column) equals a value in this world's real data,
      unless the claim declares it a reference to an entity (M12=A, S21). "Id-like" is judged
@@ -19,8 +20,9 @@ failure texts, each naming the check it failed (`check <n>`); an empty list pass
      are. In memory, no lookup.
   4. Facts: a recorded fact is contradicted only by a served mapping whose own string values
      include the entity and which itself carries the field with a different value — the same
-     mapping, no nesting or cross-row linkage — and every frozen row a claim names is served
-     exactly as frozen (M13=A, S4).
+     mapping, no nesting or cross-row linkage — every frozen row a claim names is served
+     exactly as frozen (M13=A, S4), and every claimed row is claimed under the fact it was
+     forged for.
   5. Counting: the claim's counts add up, and each removal's side query, re-run through the
      run-query door, selects the claimed count (H-02).
 
@@ -319,8 +321,9 @@ _Found = tuple[_Path, Any, _Names]
 class _Diff:
     added: list[_Found] = field(default_factory=list)
     removed: list[_Found] = field(default_factory=list)
-    #: `(key, old, new, base mapping, served mapping)`; key "" is a bare value, no mapping.
-    changed: list[tuple[str, Any, Any, dict, dict]] = field(default_factory=list)
+    #: `(key, old, new, base mapping, served mapping, table row)`; key "" is a bare value, no
+    #: mapping; the table row is the base row the changed value sits in (None outside rows).
+    changed: list[tuple[str, Any, Any, dict, dict, dict | None]] = field(default_factory=list)
     unclaimed: list[str] = field(default_factory=list)
 
 
@@ -344,7 +347,8 @@ def _zipped(node: Mapping[str, Any], names: list[str]) -> dict:
 
 
 def _diff(base: Any, served: Any, path: tuple[str, ...], out: _Diff,  # noqa: C901 — one arm per JSON shape pair
-          is_addition: Callable[[Any, _Names], bool], names: _Names = None) -> None:
+          is_addition: Callable[[Any, _Names], bool], names: _Names = None,
+          row: dict | None = None) -> None:
     kb, ks = _shape_kind(base), _shape_kind(served)
     if kb != ks:
         out.unclaimed.append(f"the value at {_where(path)} changed shape ({kb} to {ks})")
@@ -363,10 +367,10 @@ def _diff(base: Any, served: Any, path: tuple[str, ...], out: _Diff,  # noqa: C9
             b, s = base[key], served[key]
             if _shape_kind(b) == "scalar" and _shape_kind(s) == "scalar":
                 if canonical_json(b) != canonical_json(s):
-                    out.changed.append((str(key), b, s, dict(base), dict(served)))
+                    out.changed.append((str(key), b, s, dict(base), dict(served), row))
             else:
                 _diff(b, s, (*path, str(key)), out, is_addition,
-                      esql if esql is not None and key == "values" else None)
+                      esql if esql is not None and key == "values" else None, row)
         return
     if kb == "list":
         a = [canonical_json(x) for x in base]
@@ -378,13 +382,14 @@ def _diff(base: Any, served: Any, path: tuple[str, ...], out: _Diff,  # noqa: C9
             olds, news = list(base[i1:i2]), list(served[j1:j2])
             pairs, olds, news = _pair_rows(olds, news, lambda new: is_addition(new, names))
             for o, n in pairs:
-                _diff(o, n, path, out, is_addition)
+                # A paired item is a table row (`_pair_rows` pairs mappings only).
+                _diff(o, n, path, out, is_addition, row=dict(o))
             out.removed.extend((path, x, names) for x in olds)
             out.added.extend((path, x, names) for x in news)
         return
     if canonical_json(base) != canonical_json(served):
         # A bare value (a scalar count): only a `counts` entry of group "*" can claim it.
-        out.changed.append(("", base, served, {}, {}))
+        out.changed.append(("", base, served, {}, {}, row))
 
 
 def _pair_rows(olds: list[Any], news: list[Any], is_addition: Callable[[Any], bool],
@@ -472,7 +477,8 @@ def _check_structure(base: Any, served: Any, claim: _Claim, store: CheckStore,  
         failures.append(f"a row was removed at {_where(path)} without a claimed removal: "
                         f"{wrap_fresh(text, 'untrusted')}")
     changes = list(claim.changed)
-    for key, old, new, base_map, served_map in diff.changed:
+    count_cells = list(counts)  # each count entry accounts for at most one changed count cell
+    for key, old, new, base_map, served_map, row in diff.changed:
         values = set(_scalar_values(base_map)) | set(_scalar_values(served_map))
         hit = next((i for i, c in enumerate(changes)
                     if key and str(c["field"]) == key and canonical_json(c["old"]) == canonical_json(old)
@@ -481,7 +487,10 @@ def _check_structure(base: Any, served: Any, claim: _Claim, store: CheckStore,  
         if hit is not None:
             changes.pop(hit)
             continue
-        if any(_counts_change(c, key, old, new, values) for c in counts):
+        hit = next((i for i, c in enumerate(count_cells)
+                    if _counts_change(c, key, old, new, base_map, served_map, row)), None)
+        if hit is not None:
+            count_cells.pop(hit)
             continue
         failures.append(f"field {key!r} changed from {wrap_fresh(canonical_json(old), 'untrusted')} "
                         f"to {wrap_fresh(canonical_json(new), 'untrusted')} without a claimed change")
@@ -530,13 +539,32 @@ def _uncounted(records: list[Mapping[str, Any]], counts: list[dict]) -> list[Map
     return uncovered
 
 
-def _counts_change(entry: Mapping[str, Any], key: str, old: Any, new: Any,
-                   values: set[str]) -> bool:
+def _counts_change(entry: Mapping[str, Any], key: str, old: Any, new: Any,  # noqa: PLR0913 — one changed value and where it sits
+                   base_map: Mapping[str, Any], served_map: Mapping[str, Any],
+                   row: Mapping[str, Any] | None) -> bool:
+    """A count entry accounts for this changed value: the value is a count cell (a whole
+    number) going from the entry's `base` to its `served`, and it is the entry's group's count.
+    "*" (the whole answer) counts a bare value or a cell outside every table row (a total, an
+    aggregate's value), or a cell of an all-number row (an ES|QL `STATS COUNT(*)` row); a named
+    group counts the cell keyed by the group outside a table row (`{"db-1": 3}`), or a cell
+    beside an unchanged cell holding the group (a bucket row's count). An ordinary field of a
+    real row is no count cell: an edit to it is a claimed change."""
+    if not (_is_int(old) and _is_int(new)):
+        return False
     if canonical_json(entry.get("base")) != canonical_json(old) or canonical_json(
             entry.get("served")) != canonical_json(new):
         return False
     group = entry.get("group")
-    return group == "*" or (bool(key) and (group == key or canonical_json(group) in values))
+    if group == "*":
+        return row is None or all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                                  for _c, v in _leaves(flatten(row)))
+    if not key:
+        return False
+    if row is None and group == key:
+        return True
+    text = canonical_json(group)
+    return any(k != key and k in served_map and canonical_json(v) == text
+               and canonical_json(served_map[k]) == text for k, v in base_map.items())
 
 
 # --------------------------------------------------------------------------------------------
@@ -603,6 +631,10 @@ def _check_shape(matched: _Matched, real: RealData) -> list[str]:  # noqa: C901 
     failures: list[str] = []
     for table, element, record in matched:
         if not isinstance(element, Mapping):
+            if table[1] is not None:
+                # An ES|QL value array that did not zip: not one value per column.
+                failures.append(f"check 2: forged row {record.get('forged_id')!r} is not one "
+                                f"value per column of its ES|QL table {list(table[1])}")
             continue
         rows = real.rows.get((str(record.get("system")), table))
         if not rows:
@@ -654,7 +686,7 @@ def _check_ids(matched: _Matched, claim: _Claim, store: CheckStore, real: RealDa
         for column, value in _forged_leaves(element):
             if not _id_like(column, value) or _value_text(value) not in real.values:
                 continue
-            if _declared_reference(fid, column, value, claim, real.maps):
+            if _declared_reference(fid, column, value, claim, real):
                 continue
             where = f" in column {column!r}" if column else ""
             failures.append(f"check 3: forged row {fid!r} reuses a real identifier{where} "
@@ -696,15 +728,15 @@ def frozen_id_collisions(checked: Checked, *, store: CheckStore,
 
 
 def _declared_reference(fid: str, column: str, value: Any, claim: _Claim,
-                        real_maps: list[dict]) -> bool:
+                        real: RealData) -> bool:
     """The claim names this forged column a reference to an entity, and some real flat row
-    carries that entity beside this very value in that column."""
+    carries that entity beside this very value in that column (looked up by value)."""
     text = canonical_json(value)
     for ref in claim.entity_refs:
         if ref["forged_id"] != fid or ref["column"] != column:
             continue
         entity = ref["entity"]
-        for mapping in real_maps:
+        for mapping in real.by_value.get(_value_text(value), ()):
             if column not in mapping:
                 continue
             cell = mapping[column]
@@ -733,10 +765,13 @@ def _check_facts(served: Any, claim: _Claim, store: CheckStore,
                 failures.append(f"check 4: the claimed change of {field_!r} contradicts the "
                                 "recorded fact")
     for entry in claim.added:
-        frozen = store.frozen.get(entry["forged_id"])
-        if frozen is not None and frozen.get("fact_id") != entry["fact_id"]:
-            failures.append(f"check 4: frozen row {entry['forged_id']!r} was forged for fact "
-                            f"{frozen.get('fact_id')!r}, not {entry['fact_id']!r}")
+        # Fresh or frozen, a row backs the fact it was forged for: the verifier is told the
+        # claim's fact, and the commit keeps the forge record's.
+        record = store.forged(entry["forged_id"])
+        if record is not None and record.get("fact_id") != entry["fact_id"]:
+            kind = "frozen" if entry["forged_id"] in store.frozen else "forged"
+            failures.append(f"check 4: {kind} row {entry['forged_id']!r} was forged for fact "
+                            f"{record.get('fact_id')!r}, not {entry['fact_id']!r}")
     for record in missing:
         fid = str(record.get("forged_id"))
         if fid in store.frozen:
