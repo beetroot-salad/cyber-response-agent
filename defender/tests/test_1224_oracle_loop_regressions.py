@@ -13,7 +13,9 @@ fact it was forged for; a count entry accounts for one count cell; an entity ref
 found by value. A turn's outcome is decided in one place — a returned result wins over a late
 cancel, collisions and the ledger row follow the commit and the turn's close, every other
 error is a failed attempt or an unservable world, and a trace row counts once. Each test is
-red on the code it replaces.
+red on the code it replaces. Each pre-flight world runs on its own role models and in the
+launcher's log context, budget.json has one locked writer, and every oracle setting is refused
+before the question-writer.
 """
 from __future__ import annotations
 
@@ -1122,3 +1124,120 @@ def test_a_trace_append_that_failed_part_way_is_counted_once_on_resume(tmp_path)
 
     assert trace_calls == [1, 2, 3]
     assert oracle_mod.OracleStore(tmp_path / "oracle").spent == pytest.approx(store.spent)
+
+
+def _calibration_seen(tmp_path: Path, monkeypatch: Any) -> list[dict]:
+    """Run pre-flight over the default family (fact worlds b and c) with production's role
+    models (`oracle=None`, `verifier=None`), each world's calibration replaced by a recorder of
+    the registry it was handed and the log context it ran in. No model is ever built."""
+    from defender import _log
+    from defender.learning.branch import cli
+    from defender.learning.branch.estate import registry as registry_mod
+
+    seen: list[dict] = []
+    lock = threading.Lock()
+
+    def record(registry: Any, *_args: Any, **_kw: Any) -> None:
+        with lock:
+            seen.append({"world": registry.world.label,
+                         "oracle": registry.oracle.oracle_model,
+                         "verifier": registry.oracle.verifier_model,
+                         "context": dict(_log.current_context())})
+
+    # The only seam inside a world's thread that runs before any model request.
+    monkeypatch.setattr(registry_mod, "calibrate_one", record)  # lint-monkeypatch: ok — observes each world's registry from inside its pre-flight thread
+    est = S.estate(tmp_path)
+    _base, src = S.source_run(tmp_path, est, calls=[S.default_calls()[0]])
+    ep = S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)),
+                      base_rows=[S.captured("idp", "query", ALICE, ALICE_ROWS)])
+    with _log.log_context(run_id="launch-run", tenant_id=S.FIXTURE_TENANT):
+        record_ = cli.preflight_replay(ep, roster=est.roster(), tenant=est.run_tenant(),
+                                       rate=1e6)
+    assert record_["outcome"] == "accepted", record_
+    return seen
+
+
+def test_each_preflight_world_calibrates_on_its_own_role_models(tmp_path, monkeypatch):
+    """Fifth-round finding 1: pre-flight built one oracle side for the pass, so every world —
+    each on its own thread, each attempt on that thread's own event loop — shared one oracle
+    and one verifier model, and so one provider and HTTP client across loops. Each world's
+    oracle side is now built in its own thread: no two worlds hold the same model object."""
+    seen = _calibration_seen(tmp_path, monkeypatch)
+
+    assert sorted(s["world"] for s in seen) == ["b", "c"]
+    assert len({id(s["oracle"]) for s in seen}) == 2, "two worlds share one oracle model"
+    assert len({id(s["verifier"]) for s in seen}) == 2, "two worlds share one verifier model"
+
+
+def test_a_preflight_world_thread_keeps_the_launch_s_log_context(tmp_path, monkeypatch):
+    """Fifth-round finding 13: the pre-flight pool submitted each world's calibration without
+    the launcher's context, so its log lines lost the run and tenant. Each world runs in a copy
+    of it."""
+    seen = _calibration_seen(tmp_path, monkeypatch)
+
+    assert [s["context"] for s in seen] == [
+        {"run_id": "launch-run", "tenant_id": S.FIXTURE_TENANT}] * 2
+
+
+def test_an_accounted_call_cannot_resurrect_a_closed_oracle_mark(tmp_path, monkeypatch):
+    """Fifth-round finding 5: `account_call` read budget.json, then wrote it back with
+    `write_atomic` under a process-local lock, while the oracle-turn marks are written under the
+    file lock. An `oracle_turn_closed` landing between its read and its write was overwritten:
+    the open mark came back (the investigator's clock paused for good) and the held seconds were
+    lost. Every write is now one locked read-modify-write, so the close waits for the count and
+    then lands on top of it.
+
+    Driven in the problematic order, not raced: the close is started from inside the count, once
+    it has read the state."""
+    from defender.hooks import budget_enforcer as be
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    be.open_budget(run_dir, "r-1")
+    be.oracle_turn_opened(run_dir)
+    closer = threading.Thread(target=be.oracle_turn_closed, args=(run_dir,))
+    real_count = be._valid_count
+
+    def count_then_close(value: object) -> int | None:
+        if not closer.is_alive() and closer.ident is None:
+            closer.start()
+            closer.join(timeout=0.5)  # finishes at once unless the count holds the lock
+        return real_count(value)
+
+    # `_valid_count` is the one step every version of the count runs after reading the state.
+    monkeypatch.setattr(be, "_valid_count", count_then_close)  # lint-monkeypatch: ok — the only point between the count's read and its write
+    be.account_call(run_dir, "r-1", "bash", limits=be.DEFAULT_LIMITS, tier="core")
+    closer.join(timeout=10)
+    assert not closer.is_alive()
+
+    state = be.read_budget(run_dir)
+    assert be.ORACLE_OPEN_KEY not in state, "the closed oracle mark was written back"
+    assert be.ORACLE_HELD_KEY in state, "the closed turn's held seconds were lost"
+    assert state["tool_calls"] == 1, state
+
+
+@pytest.mark.parametrize(("knob", "value", "named"), [
+    (S.KNOB_RATE, "abc", "ORACLE_RATE"),
+    ("ORACLE_RETRY_CAP", "0", "ORACLE_RETRY_CAP"),
+    ("ORACLE_BUDGET", "-1", "ORACLE_BUDGET"),
+    ("ORACLE_TURN_DEADLINE", "nan", "ORACLE_TURN_DEADLINE"),
+    ("ORACLE_MODEL", "no-such-model", "oracle"),
+    ("ORACLE_CHECK_MODEL", "no-such-verifier-model", "verifier"),
+])
+def test_a_bad_oracle_setting_is_refused_before_the_question_writer(tmp_path, monkeypatch, knob,
+                                                                     value, named):
+    """Fifth-round finding 8: the oracle's knobs and both roles' pricing rows were first judged
+    in pre-flight, after the question-writer was paid for, leaving an episode with a family and
+    no outcome. They are judged in `preflight_episode`, the launch's one refusal block, by the
+    rules pre-flight applies: the question-writer is never called."""
+    monkeypatch.setenv(S.T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+    S.T.isolate_learning_state(tmp_path, monkeypatch)
+    monkeypatch.setenv(knob, value)
+    est = S.estate(tmp_path)
+    questioner = S.questioner_for()
+
+    run = S.launch(tmp_path, est, questioner=questioner)
+
+    assert run.rc != 0
+    assert named in run.message, run.message
+    assert questioner.calls == 0, "the question-writer was paid for before the refusal"

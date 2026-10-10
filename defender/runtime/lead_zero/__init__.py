@@ -69,6 +69,8 @@ from ._agreement import (
     CorrelationDispatchError,
     resolve_correlation_dispatch,
 )
+from defender._async import run_sync as _run_sync
+
 from ._capture import (
     LeadZeroResult,
     _CallLedger,
@@ -83,7 +85,6 @@ from ._capture import (
     _last_row_seq,
     _record_manual_row,
     _rows_for,
-    _run_sync,
     _sanitize,
 )
 from ._render import (

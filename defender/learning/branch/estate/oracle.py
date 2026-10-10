@@ -14,8 +14,6 @@ in the world's own oracle-side state directory (`oracle/<label>/`, one writer, S
 """
 from __future__ import annotations
 
-import asyncio
-import concurrent.futures
 import contextlib
 import functools
 import hashlib
@@ -30,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
+from defender._async import run_sync
 from defender._episode_paths import OracleStorePaths
 from defender._io import guarded_mkdir, read_bytes_capped, read_jsonl_rows, write_guarded
 from defender._pricing import usage_cost
@@ -773,13 +772,9 @@ def _answered(messages: list[Any], call_id: str | None, answer: str) -> list[Any
 
 
 def _run_coroutine(factory: Callable[[], Any]) -> Any:
-    """Run a coroutine to completion from sync code, from a thread with or without a loop."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(factory())
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(lambda: asyncio.run(factory())).result()
+    """Run `factory()`'s coroutine to completion from sync code, through the shared helper
+    (`_async.run_sync`: a thread with or without a loop, the caller's context carried)."""
+    return run_sync(factory())
 
 
 def _model_and_settings(given: Any) -> tuple[Any, Any]:
