@@ -681,7 +681,7 @@ def test_947_pins_under_a_clean_environment(tmp_path, monkeypatch, d9_tenant):
 
     runs_base = H.runs_base_for(d9_tenant)
     # #1105 PR 2: the context's runs base is the opened source run's own hand-out
-    # (`Run.runs_base_env`), the source at T's tenant location.
+    # (`Run.runs_base_export`), the source at T's tenant location.
     _base, src = H.tenant_source(current_data_root(), d9_tenant, row=False)
     ctx = H.branch_cli()._preflight_context(
         ep, T.open_source(src), H.T1106.run_tenant(H.accept(current_data_root(), d9_tenant)),

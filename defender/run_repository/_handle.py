@@ -299,15 +299,16 @@ class Run:
         return GROUPS
 
     @property
-    def run_id(self) -> RunId:
+    def id(self) -> RunId:
         """The address's run half, as a `RunId` (the run folder's own name, which the
-        constructors admitted)."""
+        constructors admitted). Not `run_id`: that is one of the twelve descriptive fields,
+        which live on `RunRecord` (fork D-F2) — `run.record.run_id` is what the stamp says."""
         return RunId.parse(self.run_dir.name)
 
-    def runs_base_env(self) -> dict[str, str]:
-        """The environment entry naming this run's container (`DEFENDER_RUNS_BASE`), handed out
-        so a caller passes it on without naming the folder (#1105 PR 2)."""
-        return RunPaths(self.run_dir).runs_base_env()
+    def runs_base_export(self) -> str:
+        """The value `DEFENDER_RUNS_BASE` carries for this run's children (its container), as
+        the layout owner hands it out (`RunPaths.runs_base_export`, #1105 PR 2)."""
+        return RunPaths(self.run_dir).runs_base_export()
 
     def make_run_dir(self) -> None:
         """Make the run folder and its `gather_raw/` (run setup), judged component by component

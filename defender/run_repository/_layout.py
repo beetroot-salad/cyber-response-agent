@@ -114,11 +114,6 @@ _STAGED_TAIL = re.compile(r"\.staged-[0-9a-f]+\Z")
 
 #: The sessions directory is a sibling of the runs base, never a child.
 SESSIONS_DIRNAME = "sessions"
-#: The environment variable a host or box child reads its run's container from
-#: (`RunPaths.runs_base_env`, the one producer of its value).
-_RUNS_BASE_ENV = "DEFENDER_RUNS_BASE"
-
-
 # ==========================================================================================
 # THE LAYOUT — every run record as a path relative to the run dir.
 #
@@ -476,12 +471,14 @@ class RunPaths:
     def oracle_held(self, runs_base: Path | None = None) -> Path:
         return self._container(runs_base) / f"{self.run_dir.name}{ORACLE_HELD_SUFFIX}"
 
-    def runs_base_env(self) -> dict[str, str]:
-        """The environment entry naming this run's container, for a host or box child
-        (`DEFENDER_RUNS_BASE`, the derived per-run corpus root): handed out here so the caller
-        passes it through without naming the folder (#1105 PR 2, row 26). The value is the run
-        folder's parent, as before."""
-        return {_RUNS_BASE_ENV: str(self.run_dir.parent)}
+    def runs_base_export(self) -> str:
+        """The value a host or box child's `DEFENDER_RUNS_BASE` carries for this run (the
+        derived per-run corpus root: the run's container), handed out here so the exporting
+        caller stores it without naming the folder (#1105 PR 2, row 26). The value is the run
+        folder's parent, as before; the exporting functions keep the variable's one spelling.
+
+        @owns DEFENDER_RUNS_BASE — the exported runs base of a run's children."""
+        return str(self.run_dir.parent)
 
     def session_paths(self) -> SessionPaths:
         """The session store's paths for this run's container (`SessionPaths`), derived here

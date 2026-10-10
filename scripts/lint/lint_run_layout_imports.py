@@ -103,7 +103,7 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
         "runtime/branch/_spec.py", "runtime/case_ticket.py",
         "scripts/gather_tools/record_query.py", "skills/invlang/corpus.py",
         # #1105 PR 2 (row 26): `infra_env` takes `DEFENDER_RUNS_BASE` from the run folder's
-        # own hand-out (`RunPaths.runs_base_env`).
+        # own hand-out (`RunPaths.runs_base_export`).
         "runtime/box/_docker.py",
     ),
     # A `/` join onto a layout value here is `lint_run_records` arm (b)'s finding, not this one.

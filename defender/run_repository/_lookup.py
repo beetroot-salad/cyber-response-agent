@@ -275,9 +275,9 @@ class RunsRepository:
         root and reading nothing in `runs/` (C-26): the judge's door. Refusals are the owner's
         (`EpisodeRefused`, `FileNotFoundError`, `NotADirectoryError`); nothing is created. The
         caller closes it."""
-        from defender._episode_handle import Episode
+        from defender._episode_handle import Episode, episode_dir
 
-        return Episode.open_in(self._tenant.data_root, episode_id)
+        return Episode.open(episode_dir(self._tenant.data_root, episode_id))
 
 
 #: An episode container's states, as the view records them when it opens.
@@ -297,14 +297,14 @@ class EpisodeRuns:
 
     def __init__(self, tenant: Tenant, episode_id: str, *, held: Episode | None,
                  container_required: bool, io: Any) -> None:
-        from defender._episode_handle import Episode, refuse_bad_episode_id
+        from defender._episode_handle import Episode, episode_dir, refuse_bad_episode_id
         from defender._episode_paths import LAYOUT
 
         self._tenant = tenant
         self._io = io
         self.episode_id = refuse_bad_episode_id(episode_id)
         if held is None:
-            self.episode = Episode.open_in(tenant.data_root, self.episode_id)
+            self.episode = Episode.open(episode_dir(tenant.data_root, self.episode_id))
             self._owns = True
         else:
             if not isinstance(held, Episode) or held.dir.name != self.episode_id:

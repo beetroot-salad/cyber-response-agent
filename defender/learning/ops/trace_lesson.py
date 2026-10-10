@@ -145,7 +145,7 @@ def _run_hits(lesson_name: str, created_at: datetime | None, run: Run) -> list[C
     for exposure in exposures(mine, since=created_at).lessons:
         if disposition is None:
             disposition = _report_disposition(Path(run.documents.report.path))
-        hits.append(CaseHit(str(run.run_id), disposition, str(exposure.evidence_at),
+        hits.append(CaseHit(str(run.id), disposition, str(exposure.evidence_at),
                             exposure.evidence))
     return hits
 

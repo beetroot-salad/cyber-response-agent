@@ -237,7 +237,7 @@ def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
     env = provider_scrubbed_environ()
     env["DEFENDER_DIR"] = str(defender_dir)
     env["DEFENDER_RUN_DIR"] = str(run_dir)
-    env.update(RunPaths(run_dir).runs_base_env())
+    env["DEFENDER_RUNS_BASE"] = RunPaths(run_dir).runs_base_export()
     env["PATH"] = f"{defender_dir / 'bin'}{os.pathsep}{env.get('PATH', '')}"
     # Prepended: host subprocesses also need the operator's own PYTHONPATH entries.
     env["PYTHONPATH"] = _prepend(str(defender_dir.parent), env.get("PYTHONPATH"))
@@ -381,7 +381,7 @@ def enqueue_curation(
     from defender.learning.core.config import loop_paths
     from defender.learning.core.state import LearningState, StateRefused
 
-    address = RunAddress(tenant_id=_tenant.TenantId(run.tenant_id), run_id=run.run_id)
+    address = RunAddress(tenant_id=_tenant.TenantId(run.tenant_id), run_id=run.id)
     # Reading the alert is inside the guard too: a moved alert must not fail the run. So is the
     # state tree: a refused entry or a missing root costs this request, never the investigation.
     try:

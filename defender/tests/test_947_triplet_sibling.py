@@ -242,7 +242,7 @@ def test_947_an_ordinary_run_still_enqueues_for_curation(tmp_path):
     seen: list[str] = []
     _run().main([str(src / "alert.json"), "--tenant", tenant_id], lifecycle=_Recorder([]),
                 visualize=lambda p, **kw: None, preflight=_no_preflight,
-                enqueue=lambda run_dir, alert, truncated_by=None: seen.append(run_dir.name))
+                enqueue=lambda run, alert, truncated_by=None: seen.append(str(run.id)))
     assert seen, "an ordinary run reached no curation lane"
 
 

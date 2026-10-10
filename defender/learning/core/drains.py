@@ -91,7 +91,7 @@ def _invoke_lead_author(
             ),
         )
     if rc not in (0, None):
-        raise LeadAuthorError(f"lead-author for {run.run_id} returned rc={rc}")
+        raise LeadAuthorError(f"lead-author for {run.id} returned rc={rc}")
     if rc is None:
         raise _LeadAuthorRetry("lead-author hit a swallowed transient (rc=None)")
 

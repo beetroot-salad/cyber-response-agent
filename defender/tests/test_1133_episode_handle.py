@@ -184,8 +184,8 @@ def test_d2_a_folder_exposes_no_public_name_beyond_path_and_ensure(opened, key):
 
 
 def test_d2_the_episode_and_its_worlds_expose_only_the_designs_surface(opened):
-    """D2': an `Episode` answers its two doors (`open`, `create`) and their by-id forms
-    (`open_in`, `create_in`, #1105 PR 2), `.dir`, `.view()`, `.close()`, and the record table's
+    """D2': an `Episode` answers its two doors (`open`, `create`), `.dir`, `.view()`,
+    `.close()`, and the record table's
     records and folders by name — its episode-root ones but `runs`, which is private since
     #1105 PR 2 (its one hand-out is `box_mounted_container`), and `world(label)`, which answers
     the `world.*` ones. Nothing else is public: no accessor for the held root, no other
@@ -194,8 +194,7 @@ def test_d2_the_episode_and_its_worlds_expose_only_the_designs_surface(opened):
            if not k.startswith("world.") and k not in S.PRIVATE_FOLDERS}
     in_world = {k.removeprefix("world.") for k in (*S.RECORD_VERBS, *S.FOLDERS)
                 if k.startswith("world.")}
-    episode_class = {"open", "create", "open_in", "create_in", "close", "view", "world",
-                     "box_mounted_container", *top}
+    episode_class = {"open", "create", "close", "view", "world", "box_mounted_container", *top}
     assert S.public_names(S.Episode()) == episode_class, (
         f"the Episode class exposes {sorted(S.public_names(S.Episode()) - episode_class)} "
         f"beyond the design's surface, and lacks {sorted(episode_class - S.public_names(S.Episode()))}")

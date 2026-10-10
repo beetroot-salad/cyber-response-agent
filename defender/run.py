@@ -562,21 +562,18 @@ def _accept_request_tenant(
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
 
 
-def _open_sibling_episode(ns: argparse.Namespace, data_root: Path) -> Episode | None:
-    """A sibling's door: the episode `--episode` names, opened by the episode owner under the
-    configured episodes root (`DEFENDER_EPISODES_BASE`) for `data_root`, before acceptance —
-    `None` for an ordinary run. A bad id or an unusable root is refused before anything is
-    opened; a missing episode is refused naming it."""
+def _sibling_episode_dir(ns: argparse.Namespace, data_root: Path) -> Path | None:
+    """Where the episode `--episode` names lives, as the episode owner composes it under the
+    configured episodes root (`DEFENDER_EPISODES_BASE`) for `data_root` — `None` for an
+    ordinary run. A bad id or an unusable root is refused here, before anything is opened."""
     if ns.episode is None:
         return None
-    from defender._episode_handle import EpisodeRefused
+    from defender._episode_handle import EpisodeRefused, episode_dir
 
     try:
-        return Episode.open_in(data_root, ns.episode)
+        return episode_dir(data_root, ns.episode)
     except EpisodeRefused as refused:
         sys.exit(f"[run.py] --episode {ns.episode}: {refused}")
-    except OSError as missing:
-        sys.exit(f"[run.py] --episode {ns.episode}: its episode dir cannot be held ({missing})")
 
 
 def _open_episode_runs(ns: argparse.Namespace, accepted: _tenant.Tenant,
@@ -648,9 +645,12 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
     # A sibling's door: the episode it is an arm of, opened by the episode owner before
     # acceptance and held for the whole run. The handle serves the manifest read and the world
     # ledger's writes; nothing below reopens the episode by name.
-    held_episode = _open_sibling_episode(ns, data_root)
-    door: contextlib.AbstractContextManager[Episode | None] = (
-        contextlib.nullcontext() if held_episode is None else held_episode)
+    episode_dir = _sibling_episode_dir(ns, data_root)
+    try:
+        door: contextlib.AbstractContextManager[Episode | None] = (
+            contextlib.nullcontext() if episode_dir is None else Episode.open(episode_dir))
+    except OSError as missing:
+        sys.exit(f"[run.py] --episode {ns.episode}: its episode dir cannot be held ({missing})")
     with door as episode:
         # The tenant, from the request, accepted under the data root before anything is spent.
         # A sibling's container is its episode's, which the box mounts and the tenant's

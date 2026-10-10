@@ -32,7 +32,9 @@ from typing import TYPE_CHECKING, Any
 if __name__ == "__main__" and (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender import _tenant
+from defender._tenant import (
+    TenantRefused, accept_tenant, requested_tenant_id, resolve_data_root,
+)
 from defender._clock import parse_iso_utc
 from defender._episode_handle import Episode, EpisodeRefused
 from defender._paths import process_defender_dir
@@ -723,7 +725,7 @@ def _load_arm(w: WorldEntry, view: EpisodeRuns, episode_dir: Path) -> None:
         run = view.open(view.arm_id(w.label))
         with run.reader() as reader:
             w.result = _result_event(reader)
-    except (RunRefused, _tenant.TenantRefused, OSError):
+    except (RunRefused, TenantRefused, OSError):
         return
     w.run_dir_name = run.run_dir.name
     w.run_page = _run_page_link(run, episode_dir)
@@ -1222,7 +1224,7 @@ def open_episode_view(runs: RunsRepository, episode_id: str) -> EpisodeRuns:
         return runs.episode(episode_id)
     except FileNotFoundError as missing:
         raise JudgeRefused(f"episode {episode_id}: no such episode directory") from missing
-    except (EpisodeRefused, _tenant.TenantRefused, OSError) as refused:
+    except (EpisodeRefused, TenantRefused, OSError) as refused:
         raise JudgeRefused(f"episode {episode_id}: {refused}") from refused
 
 
@@ -2233,11 +2235,11 @@ def _parse_page_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     ns = _parse_page_args(argv)
     try:
-        tenant = _tenant.accept_tenant(
-            _tenant.resolve_data_root(), _tenant.requested_tenant_id(ns.tenant),
+        tenant = accept_tenant(
+            resolve_data_root(), requested_tenant_id(ns.tenant),
             defender_dir=process_defender_dir())
         view = open_episode_view(tenant.runs_repository(), ns.episode_id)
-    except (_tenant.TenantRefused, JudgeRefused) as bad:
+    except (TenantRefused, JudgeRefused) as bad:
         # One line: the refusal may wrap a multi-line YAML parser error.
         print(" ".join(str(bad).split()), file=sys.stderr)
         return 1

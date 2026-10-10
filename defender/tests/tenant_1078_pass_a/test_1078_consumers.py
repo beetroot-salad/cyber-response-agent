@@ -26,6 +26,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import ast
+import inspect
 import json
 import subprocess
 import sys
@@ -128,61 +129,39 @@ SCORED = "# Held-out eval"
 # ======================================================================================
 
 def test_d4_judge_probe_threaded(tmp_path, monkeypatch):
-    """_check_world_labels takes the runs base as a parameter threaded from
-    grade_episode (its runs_base keyword given runs_base_for(T)) via the launcher's _grade, and a colliding world
-    label is refused (JudgeRefused) in the configuration where today's probe returns silently;
-    the except-Exception fallback is gone. grade_episode's runs_base is a required keyword:
-    calling it without one is a TypeError, never a skipped probe.
-
-    The configuration: the retired `DEFENDER_RUNS_BASE` unset, so today's probe resolves some
-    OTHER base (or none) and finds nothing to collide with; the base that holds the colliding
-    finished run `b` is the one handed in. The launcher's `_grade` handing it
-    `runs_base_for(T)` is the clause `d4_launcher_derives_once`; this test pins the grade's own
-    half, which is the only half with a return channel."""
+    """#1105 PR 2, declared change 3 / J3: the judge reads only the episode it is handed, so the
+    world-label collision probe (G17) — which `grade_episode` once threaded a `runs_base` to —
+    is gone with its keyword. A finished run in T's runs folder whose name is a graded world's
+    label no longer refuses the grade (it grades), and `grade_episode` takes no `runs_base`
+    (the episode is named by id, through the tenant's repository)."""
     root = _judge_roots(tmp_path, monkeypatch)
     base = H.runs_base_for(TENANT)
     assert base == root.resolve() / TENANT / "runs"
     _trial(base, "b")  # a finished run whose name is graded world b's label
 
     ep = _episode(tmp_path, "collide")
-    judge_refused = H.mod("learning.judge.family").JudgeRefused
-    with pytest.raises(judge_refused) as refused:
-        J.grade_at(ep, judge=_judge(), draws=1, state=env_state())
-    assert "'b'" in str(refused.value), f"the refusal is not the probe's: {refused.value}"
-    assert str(base / "b") in str(refused.value), (
-        f"the refusal is not the label-collision probe's: {refused.value}")
+    J.grade_at(ep, judge=_judge(), draws=1, state=env_state())
+    graded = J.world_rows(J.judge_record(ep))
+    assert {"b", "c"} <= set(graded), f"the episode's worlds were not graded: {sorted(graded)}"
 
-    # the positive control: the same episode shape with no collision under the threaded base
-    # grades — so the refusal above is the probe firing, not the episode being ungradable
-    clean_base = tmp_path / "clean-base"
-    clean_base.mkdir()
-    J.grade_at(_episode(tmp_path, "clean"), judge=_judge(), draws=1, state=env_state())
-
-    unthreaded = _episode(tmp_path, "unthreaded")
-    with pytest.raises(TypeError):
-        _grade_episode()(unthreaded, judge=_judge(), draws=1, state=env_state())
+    assert "runs_base" not in inspect.signature(_grade_episode()).parameters, (
+        "grade_episode still takes a runs_base (the judge reads only its episode)")
 
 
 def test_collision_probe_over_a_tenant_runs_base_holding_a_label_named_run(tmp_path,
                                                                            monkeypatch):
-    """The judge's collision probe runs against the threaded runs_base_for(T): a finished
-    <T>/runs/a collides with world label a and grading refuses (JudgeRefused), as C26's control
-    shows; the probe's comparison logic is unchanged. P6 (is that the right base to probe?)
-    stays carried.
-
-    World `b` stands in for "world label a" here: in the #947 layout `a` is the family's
-    control (role A), which the label probe does not grade. The comparison logic being
-    unchanged is pinned by its own spelling of the collision: anything standing at the label's
-    name — here a dangling link, which `is_dir()` would miss — collides."""
+    """#1105 PR 2, declared change 3 / J3: with the probe gone, anything standing at a world
+    label's name in T's runs folder — here a dangling link, which the probe once refused as a
+    collision — is not read by the judge, and the episode grades."""
     _judge_roots(tmp_path, monkeypatch)
     base = H.runs_base_for(TENANT)
     base.mkdir(parents=True, exist_ok=True)
     (base / "b").symlink_to(tmp_path / "nowhere")
-    judge_refused = H.mod("learning.judge.family").JudgeRefused
-    with pytest.raises(judge_refused) as refused:
-        J.grade_at(_episode(tmp_path, "ep"), judge=_judge(), draws=1, state=env_state())
-    assert "collides" in str(refused.value), refused.value
-    assert "'b'" in str(refused.value), refused.value
+    ep = _episode(tmp_path, "ep")
+    J.grade_at(ep, judge=_judge(), draws=1, state=env_state())
+    graded = J.world_rows(J.judge_record(ep))
+    assert {"b", "c"} <= set(graded), f"the episode's worlds were not graded: {sorted(graded)}"
+    assert (base / "b").is_symlink(), "the link at the label's name was touched"
 
 
 # ======================================================================================

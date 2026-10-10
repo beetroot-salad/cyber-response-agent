@@ -162,7 +162,7 @@ def prepare_episode(
     N17: a launch never reuses an episode directory. The derived id is tried first; a name
     already taken (a finished episode, a dead launch's debris, a launch still running beside
     this one) moves on to `<id>-r2`, `<id>-r3`, ... — the episode owner's exclusive create
-    (`Episode.create_in`, under the configured root for `data_root`, the one the request's
+    (`Episode.create(episode_dir(...))`, under the configured root for `data_root`, the one the request's
     tenant was accepted under) is the claim, so two launchers racing for one name cannot both
     win it, and nothing a dead launch left is adopted. The minted id is the directory's name;
     every later record derives from it.
@@ -178,7 +178,7 @@ def prepare_episode(
     for n in range(1, MAX_LAUNCHES + 1):
         candidate = episode_id if n == 1 else f"{episode_id}-r{n}"
         try:
-            episode = Episode.create_in(data_root, candidate, exclusive=True)
+            episode = Episode.create(episode_dir(data_root, candidate), exclusive=True)
         except EpisodeRefused as refused:
             raise _owner_refusal(refused) from refused
         except FileExistsError:
@@ -384,8 +384,8 @@ def _source_stamp_agrees(source: Run, tenant_id: _tenant.TenantId) -> None:
         raise LauncherRefused(
             f"[branch] source run {source.run_dir}'s stamp names tenant "
             f"{stamp.get('tenant_id')!r} but the request names {tenant_id!r}, whose runs "
-            "folder's record the source was opened under — the stamp is in the box's writable "
-            "run dir, so a disagreement is refused, not settled")
+            f"folder's record ({_tenant.TENANT_RECORD_NAME}) the source was opened under — the "
+            "stamp is in the box's writable run dir, so a disagreement is refused, not settled")
 
 
 #: A generous ceiling on any session's message id, far beyond `DEFAULT_REQUEST_LIMIT` times the
@@ -530,7 +530,7 @@ def _preflight_context(episode_dir: Path, source: Run, tenant: Any, as_of: Any) 
     from defender.runtime.verbs import VerbContext
 
     env = run_env(DEFENDER_DIR, Path(episode_dir))
-    env.update(source.runs_base_env())
+    env["DEFENDER_RUNS_BASE"] = source.runs_base_export()
     return VerbContext(defender_dir=DEFENDER_DIR, run_dir=Path(episode_dir), env=env,
                        capture=None, tenant=tenant, as_of=as_of)
 
@@ -1490,7 +1490,7 @@ def _launch(  # noqa: PLR0913 — see `main`
     # knowledge half reads the EPISODE tenant's clone, as every sibling's stamp will (#1204 D3).
     live_capture = ((lambda: _provenance.capture_run(REPO_ROOT, tenant.tenant.knowledge))
                     if live_tree is None else live_tree)
-    episode_id = episode_id_for(str(source.run_id), ns.branch_message_id)
+    episode_id = episode_id_for(str(source.id), ns.branch_message_id)
     # Checks the id and the configured root before anything is spent.
     try:
         episode_dir(data_root, episode_id)
@@ -1790,7 +1790,7 @@ def _author(  # noqa: PLR0913 — the step's inputs
     # written into the manifest.
     document.update({
         "episode_id": episode.dir.name,
-        "source_run_id": str(source.run_id),
+        "source_run_id": str(source.id),
         "branch_message_id": ns.branch_message_id,
         "fences_at": fences,
         "as_of": as_of.isoformat().replace("+00:00", "Z"),
