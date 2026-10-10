@@ -1612,8 +1612,8 @@ def test_an_unexpected_error_in_one_preflight_world_stops_the_others(tmp_path):
     rest before their next paid turn; the launch still raises it and writes no outcome.
 
     World b's oracle store cannot be created (a file squats `oracle/b`): its first call fails
-    at once, while world c's first oracle answer takes 0.4 s, so c has a second paid turn to
-    skip."""
+    at once, while world c's first oracle answer takes 1.5 s (margin for a loaded runner to
+    schedule b's thread), so c has a second paid turn to skip."""
     from defender.learning.branch import cli
 
     est = S.estate(tmp_path)
@@ -1625,7 +1625,7 @@ def test_an_unexpected_error_in_one_preflight_world_stops_the_others(tmp_path):
     (ep / "oracle").mkdir(exist_ok=True)
     (ep / "oracle" / "b").write_text("not a folder", encoding="utf-8")
     o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM), S.submit(BOB_ROWS, S.EMPTY_CLAIM),
-                 fault=S.Fault(delay=0.4))
+                 fault=S.Fault(delay=1.5))
 
     with pytest.raises(OSError, match=re.escape(str(ep / "oracle" / "b"))):
         cli.preflight_replay(ep, roster=est.roster(), tenant=est.run_tenant(), oracle=o.model,

@@ -441,7 +441,8 @@ fixes a field of an entity, `record_fact` it and serve it consistently. Claim ev
 difference you make: `added` (forged rows), `removed` (with a side query that selects the \
 removed rows and its count), `changed` (entity, field, old, new), `counts` (base + added - \
 removed = served; one entry for each count cell that moves — a total, an aggregate's \
-value, a bucket's count) and `entity_refs` (a forged column that names a real entity).
+value, a bucket's count; an ordinary field of a document is a `changed`, never a count) and \
+`entity_refs` (a forged column that names a real entity).
 
 Tools: `run_query` reads a real system (read verbs only); `forge`, `record_fact` stage rows \
 and facts for this attempt; `python` runs code in a sandboxed scratch box; `check` runs the \

@@ -118,10 +118,9 @@ def account_call(
     """Count one executed call against the pool, re-checking the cap at commit time.
 
     A call at the cap writes nothing. Below it, the read, the cap check and the increment are
-    one locked read-modify-write of
-    `budget.json` (`update_json_locked`), the same lock the oracle-turn marks are written
-    under, so no interleaving with another writer can lose an increment or resurrect a mark
-    that writer removed."""
+    one locked read-modify-write of `budget.json` (`update_json_locked`), so no interleaving
+    with another writer can lose an increment. (Oracle-held time is not in this file: it is
+    host state, in the run's `oracle-held` sidecar and this process's memory.)"""
     limit = limits["max_tool_calls"] + (TAIL_ALLOWANCE if tier == "tail" else 0)
     # At the cap nothing changes, so nothing is written: a capped call cannot fail an
     # accounting write (and climb the kill circuit) over a count it never makes. The count only
