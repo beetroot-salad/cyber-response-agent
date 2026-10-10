@@ -254,7 +254,7 @@ def test_1025_a_world_spelled_family_never_doubles_the_family_lane(tmp_path):
         disposition_declared="benign"))
     T.write_family(ep.dir, manifest)
     with pytest.raises(J.sym("learning.judge", "JudgeRefused"), match="reserved"):
-        visualize_episode().render_episode(ep.dir)
+        E.render_episode(ep.dir, module=visualize_episode())
 
 
 # ---------------------------------------------------------------------------------------

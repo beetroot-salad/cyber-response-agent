@@ -46,6 +46,8 @@ from defender.scripts.visualize.visualize_primitives import (
     esc,
     fmt_duration,
     parse_report,
+    UsageParser,
+    UsageRefused,
     render_alert_block,
     section,
 )
@@ -617,7 +619,7 @@ def _parse_run_page_args(argv: list[str]) -> argparse.Namespace:
     """`--tenant T [--episode ep] <run_id> [--update-ticket]` (#1105 declared change 7, J8):
     the tenant is required, with no default; the run is named by its id, in the tenant's own
     runs or, with `--episode`, as an arm of that episode."""
-    p = argparse.ArgumentParser(prog="visualize_run.py", description=__doc__)
+    p = UsageParser(prog="visualize_run.py", description=__doc__)
     p.add_argument("--tenant", required=True,
                    help="the tenant whose run is re-rendered; required, with no default")
     p.add_argument("--episode", default=None,
@@ -652,7 +654,12 @@ def main(argv: list[str]) -> int:
     from defender._paths import process_defender_dir
     from defender.run_repository import RunRefused
 
-    ns = _parse_run_page_args(argv[1:])
+    try:
+        ns = _parse_run_page_args(argv[1:])
+    except UsageRefused as bad:
+        print("usage: visualize_run.py --tenant T [--episode EPISODE_ID] <run_id> "
+              f"[--update-ticket] ({bad})", file=sys.stderr)
+        return 64
     try:
         tenant = _tenant.accept_tenant(
             _tenant.resolve_data_root(), _tenant.requested_tenant_id(ns.tenant),

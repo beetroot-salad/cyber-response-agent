@@ -68,6 +68,8 @@ from defender.scripts.visualize.visualize_primitives import (
     ASSETS,
     CSS,
     EVENT_HANDLER_RE,
+    UsageParser,
+    UsageRefused,
     esc,
     fmt_duration,
 )
@@ -702,7 +704,7 @@ def _load_episode(episode_dir: Path, bound: Bound, view: EpisodeRuns) -> _Episod
         if not w.nameable:
             continue
         if view.present:
-            _load_arm(w, view, episode_dir)
+            _load_arm(w, view, episode_dir, ep.episode_id)
         w.archive = _load_world_archive(bound, w.label)
     for item in ep.sectioned:
         entry = ep.entries.get(item.label)
@@ -715,14 +717,17 @@ def _load_episode(episode_dir: Path, bound: Bound, view: EpisodeRuns) -> _Episod
     return ep
 
 
-def _load_arm(w: WorldEntry, view: EpisodeRuns, episode_dir: Path) -> None:
+def _load_arm(w: WorldEntry, view: EpisodeRuns, episode_dir: Path, episode_id: str) -> None:
     """World `w`'s arm, opened by id through the episode view (`view.open(view.arm_id(label))`,
     whose entry rule takes only a real directory): its run folder's name, its run page's link
     relative to the episode page, and its result event, read through the arm's own no-follow
     reader. Anything the open refuses — nothing at the id, a link or a file there, a label no
-    run id can carry, a container gone since the view opened — leaves the arm absent."""
+    run id can carry, a container gone since the view opened — leaves the arm absent.
+
+    The arm id is composed from `episode_id`, the manifest's own (`<episode_id>-<label>`, as
+    before): a page requested through a link name (`episodes/latest`, J4) names the same arms."""
     try:
-        run = view.open(view.arm_id(w.label))
+        run = view.open(view.arm_id(w.label, episode_id=episode_id))
         with run.reader() as reader:
             w.result = _result_event(reader)
     except (RunRefused, TenantRefused, OSError):
@@ -2225,7 +2230,7 @@ def _diagnostics(ep: _Episode) -> list[str]:
 def _parse_page_args(argv: list[str]) -> argparse.Namespace:
     """`--tenant T <episode_id>` (#1105 declared change 4, J8): the tenant is required, with
     no default, and the episode is named by its id under the configured episodes root."""
-    p = argparse.ArgumentParser(prog="visualize_episode.py", description=__doc__)
+    p = UsageParser(prog="visualize_episode.py", description=__doc__)
     p.add_argument("--tenant", required=True,
                    help="the tenant whose episode is rendered; required, with no default")
     p.add_argument("episode_id", help="the episode, by its id")
@@ -2233,7 +2238,11 @@ def _parse_page_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str]) -> int:
-    ns = _parse_page_args(argv)
+    try:
+        ns = _parse_page_args(argv)
+    except UsageRefused as bad:
+        print(f"usage: visualize_episode.py --tenant T <episode_id> ({bad})", file=sys.stderr)
+        return 1
     try:
         tenant = accept_tenant(
             resolve_data_root(), requested_tenant_id(ns.tenant),

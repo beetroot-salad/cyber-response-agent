@@ -128,7 +128,7 @@ def test_1025_the_stage_table_reads_the_role_costs_the_model_decided(tmp_path):
     are the table's)."""
     module = visualize_episode()
     ep = E.sample_episode(tmp_path)
-    loaded = module.load_episode(ep.dir)
+    loaded = E.load_episode(ep.dir, module=module)
     assert set(loaded.role_costs) == {"questioner", "judge"}
     assert f"${loaded.role_costs['questioner'].cost:.4f}" == S.questioner_cost
     assert f"${loaded.role_costs['judge'].cost:.4f}" == S.judge_cost
@@ -153,13 +153,24 @@ def test_1025_a_framed_only_judge_trace_naming_no_roster_label_is_listed_as_unat
 
 
 def test_1025_the_draw_read_totals_count_every_directory_the_world_sections_count(tmp_path):
-    """A world present only as a `runs/` directory (no manifest entry, no grade row) whose
-    draw directory holds one unparsable document: its world section says "1 draw documents
-    unreadable", and the findings section's total says the same — one directory, one count.
-    Before, the totals summed the WALKED labels alone and omitted it (review of PR #1042)."""
+    """A world whose draw directory holds one unparsable document: its world section says "1
+    draw documents unreadable", and the findings section's total says the same — one
+    directory, one count. Before, the totals summed the WALKED labels alone and omitted it
+    (review of PR #1042).
+
+    #1105 PR 2 (declared change 4/J3): a world present only as a `runs/` directory (no
+    manifest entry, no grade row) is no roster line any more — no section, and its draws are
+    counted nowhere, so the two counts still agree (both silent). The counted case is the same
+    world named by a grade-record row."""
     ep = E.sample_episode(tmp_path)
     (ep.dir / "runs" / f"{E.EPISODE_ID}-orphan").mkdir()
     E.plant_raw(ep.dir / "worlds" / "orphan" / "judge" / "0.yaml", b"- not: [a mapping")
+    page = render(ep)
+    assert "world-orphan" not in page.by_id, page.ids
+    assert "1 draw documents unreadable" not in page.text_of("sec-findings")
+    doc = E.sample_grade()
+    doc["worlds"].append(E.world_row("orphan", declared="benign"))
+    E.write_judge(ep.dir, doc)
     page = render(ep)
     assert "1 draw documents unreadable" in _world(page, "orphan"), _world(page, "orphan")
     findings = page.text_of("sec-findings")

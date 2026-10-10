@@ -357,11 +357,13 @@ class EpisodeRuns:
     def __exit__(self, *_exc: object) -> None:
         self.close()
 
-    def arm_id(self, label: str) -> RunId:
+    def arm_id(self, label: str, *, episode_id: str | None = None) -> RunId:
         """The arm `label`'s run id, `<episode_id>-<label>` — the one arm-id composition the
         repository makes, temporary until #1187. A label `RunId.parse` refuses is
-        `RunRefused`."""
-        return RunId.parse(f"{self.episode_id}-{label}")
+        `RunRefused`. `episode_id` is the id the arms were launched under when the caller holds
+        the episode's own record of it and the view was opened by another name for the same
+        folder (the page's `episodes/latest` link, #1025 J4); default: the view's id."""
+        return RunId.parse(f"{self.episode_id if episode_id is None else episode_id}-{label}")
 
     def open(self, arm_id: RunId) -> Run:
         """The arm `arm_id`, as `RunsRepository.open` answers in the natural container. An

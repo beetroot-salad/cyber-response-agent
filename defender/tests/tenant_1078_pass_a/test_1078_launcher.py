@@ -846,7 +846,11 @@ def test_g_r7_episode_dir_reader_coherence(tmp_path, monkeypatch, data_root):
     assert run_dir.parent == H.mod("_episode_paths").EpisodePaths(world.episode_dir).runs
     assert run_dir.parent == ep / "runs"
     assert _episodes_root_for(_accepted(data_root)) / T.EPISODE_ID == ep.resolve()
-    page = H.mod("scripts.visualize.visualize_episode").load_episode(ep)
+    # #1105 PR 2 (declared change 4): the page's loader reads the episode view it is handed,
+    # opened by id under the configured episodes base through the tenant's repository.
+    module = H.mod("scripts.visualize.visualize_episode")
+    with module.open_episode_view(_accepted(data_root).runs_repository(), ep.name) as view:
+        page = module.load_episode(view)
     assert page.entries["b"].run_dir_name == run_dir.name, (
         "the episode page does not see the run dir the sibling's materialize made")
 

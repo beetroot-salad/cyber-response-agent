@@ -80,8 +80,8 @@ def visualize_episode():
 
 
 def render(ep) -> E.Page:
-    """`visualize_episode().render_episode(<dir>)` — the real entry point — then the page it
-    wrote, parsed."""
+    """`visualize_episode().render_episode(runs, <episode id>)` — the real entry point — then
+    the page it wrote, parsed."""
     return E.render(ep, module=visualize_episode())
 
 
@@ -279,7 +279,7 @@ def test_1025_the_page_encodes_with_errors_replace_before_the_guarded_write(tmp_
     doc = E.sample_grade()
     doc["unqueueable_findings"] = [f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/1: x\ud800y and n\x00l"]
     E.write_judge(ep.dir, doc, check=False)
-    visualize_episode().render_episode(ep.dir)
+    E.render_episode(ep.dir, module=visualize_episode())
     raw = ep.page.read_bytes()
     text = raw.decode("utf-8")
     assert b"\x00" not in raw
@@ -411,7 +411,7 @@ def test_1025_an_alias_planted_at_each_record_name(tmp_path):
     assert "absent" not in records, records
     E.plant_link(ep.dir / "family.yaml", outside)
     with pytest.raises(J.sym("learning.judge", "JudgeRefused")):
-        visualize_episode().render_episode(ep.dir)
+        E.render_episode(ep.dir, module=visualize_episode())
 
 
 def test_1025_a_malformed_record_versus_an_absent_one(tmp_path):
@@ -473,7 +473,7 @@ def test_1025_an_unreadable_regular_file_at_a_record_name(tmp_path):
     (ep.dir / "family.yaml").chmod(0)
     try:
         with pytest.raises(J.sym("learning.judge", "JudgeRefused")):
-            visualize_episode().render_episode(ep.dir)
+            E.render_episode(ep.dir, module=visualize_episode())
     finally:
         (ep.dir / "family.yaml").chmod(0o644)
 

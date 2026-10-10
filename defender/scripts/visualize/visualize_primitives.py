@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import html
 import json
 import math
@@ -24,6 +25,19 @@ from defender.run_repository import RunPaths  # noqa: E402
 
 def esc(s) -> str:
     return html.escape(s if isinstance(s, str) else json.dumps(s, indent=2))
+
+
+class UsageRefused(Exception):
+    """An argument list a page CLI's parser refuses, with argparse's reason."""
+
+
+class UsageParser(argparse.ArgumentParser):
+    """The page CLIs' parser (#1105 PR 2, J8: `--tenant` is required): a refused argument list
+    raises `UsageRefused` rather than printing argparse's usage block and exiting 2, so each
+    CLI keeps its own usage refusal — one stderr line and its own exit status."""
+
+    def error(self, message: str):  # type: ignore[override]
+        raise UsageRefused(message)
 
 
 #: An `on<word>=`-shaped event-handler attribute, e.g. `onerror=`. Already inert after `esc()`,

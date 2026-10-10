@@ -59,8 +59,8 @@ def visualize_episode():
 
 
 def render(ep) -> E.Page:
-    """`visualize_episode().render_episode(<dir>)` — the real entry point — then the page it
-    wrote, parsed."""
+    """`visualize_episode().render_episode(runs, <episode id>)` — the real entry point — then
+    the page it wrote, parsed."""
     return E.render(ep, module=visualize_episode())
 
 
@@ -418,17 +418,19 @@ def test_1025_a_manifest_label_off_the_token_alphabet_never_reaches_a_frame_slot
                                           disposition_declared="benign"))
     T.write_family(ep.dir, manifest)
     with pytest.raises(J.sym("learning.judge", "JudgeRefused"), match="world-token alphabet"):
-        visualize_episode().render_episode(ep.dir)
+        E.render_episode(ep.dir, module=visualize_episode())
     assert ep.page.read_bytes() == before, "a refused manifest still rewrote the page"
     assert b"evil<b" not in before
     assert b"onmouseover" not in before
 
 
 def test_1025_world_or_lead_directory_name_carries_attribute_or_tag_breaking_characters(tmp_path):
-    """A `worlds/` directory and a `runs/` directory whose names carry a quote and a tag never
-    become an id, an href or a heading unescaped: each renders as an "unnameable entry" line, the
-    name escaped as text, and no attribute value carries the raw characters (J5). Positive
-    control: the three well-formed worlds keep their sections.
+    """A `worlds/` directory whose name carries a quote and a tag never becomes an id, an href or
+    a heading unescaped: it renders as an "unnameable entry" line, the name escaped as text, and
+    no attribute value carries the raw characters (J5). A `runs/` directory of the same shape is
+    no roster label, so it is not shown at all (#1105 PR 2, declared change 4/J3: the roster is
+    the manifest's; before, it too rendered an "unnameable entry" line). Positive control: the
+    three well-formed worlds keep their sections.
     """
     ep = E.sample_episode(tmp_path)
     bad = 'w"x<i>'
@@ -441,7 +443,9 @@ def test_1025_world_or_lead_directory_name_carries_attribute_or_tag_breaking_cha
     run = ep.dir / "runs" / f'{E.EPISODE_ID}-r"un<i>'
     (run / "gather_raw").mkdir(parents=True)
     page = render(ep)
-    assert page.text.count("unnameable entry") >= 2, page.text_of("sec-worlds")
+    assert page.text.count("unnameable entry") == 1, page.text_of("sec-worlds")
+    assert 'w"x<i>' in page.text_of("sec-worlds"), page.text_of("sec-worlds")
+    assert 'r"un' not in page.text and "r&quot;un" not in page.raw, "a stray runs/ entry was shown"
     assert not [v for v in _attribute_values(page) if '"x<i>' in v or 'un<i>' in v]
     assert "<i>" not in page.raw.replace("&lt;i&gt;", ""), "a raw <i> reached the bytes"
     assert {f"world-{w}" for w in E.WORLDS} <= set(page.ids)
@@ -637,17 +641,18 @@ def test_1025_a_roster_labels_own_draw_past_a_small_fixed_bound(tmp_path):
 
 
 def test_1025_a_run_directory_whose_name_is_not_episode_dash_label(tmp_path):
-    """Every artifact dir under `runs/` gets a section (O5); one whose name does not decompose
-    into `<episode_id>-<label>` is labelled by its full name and marked "not declared in the
-    manifest" (J7 iv).
+    """A dir under `runs/` whose name does not decompose into `<episode_id>-<label>` is no
+    roster label, so it gets no section and is not named anywhere on the page (#1105 PR 2,
+    declared change 4/J3: the arm roster is the manifest's runnable labels, each opened by id;
+    before, every `runs/` dir got a section and this one was marked "not declared in the
+    manifest"). Positive control: the manifest's worlds keep exactly their sections.
     """
     ep = E.sample_episode(tmp_path)
     (ep.dir / "runs" / "stray_run_dir" / "gather_raw").mkdir(parents=True)
     page = render(ep)
-    sections = [page.text_of(i) for i in page.ids_with("world-")]
-    stray = [s for s in sections if "stray_run_dir" in s]
-    assert len(stray) == 1, sections
-    assert "not declared in the manifest" in stray[0], sections
+    assert sorted(page.ids_with("world-")) == sorted(f"world-{w}" for w in E.WORLDS), page.ids
+    assert "stray_run_dir" not in page.raw
+    assert "not declared in the manifest" not in page.text
 
 
 # ---------------------------------------------------------------------------------------
@@ -1092,14 +1097,23 @@ def test_1025_the_worlds_and_leads_headings_count_exactly_the_sections_under_the
     list. Before, the worlds heading counted the entries (omitting the stray `runs/` dirs it
     still rendered sections for) and the leads heading counted every roster label (including
     the unnameable ones it then skipped): "Worlds (3)" over four sections plus one unnameable
-    line, "Leads (5)" over four blocks."""
+    line, "Leads (5)" over four blocks.
+
+    #1105 PR 2 (declared change 4/J3): `runs/` dirs are no longer roster lines — the stray and
+    the `bad name!` dir under `runs/` get no section and are not named; the unnameable roster
+    line now comes from a grade-record row labelled `bad name!` (the record's labels are still
+    on the roster)."""
     ep = E.sample_episode(tmp_path)
     (ep.dir / "runs" / "stray_run_dir" / "gather_raw").mkdir(parents=True)
     (ep.dir / "runs" / "bad name!" / "gather_raw").mkdir(parents=True)
+    doc = E.sample_grade()
+    doc["worlds"].append(E.world_row("bad name!", declared="benign"))
+    E.write_judge(ep.dir, doc)
     page = render(ep)
     world_sections = page.ids_with("world-")
     leads_blocks = page.ids_with("leads-")
-    assert len(world_sections) == len(E.WORLDS) + 1, world_sections
+    assert len(world_sections) == len(E.WORLDS), world_sections
+    assert "stray_run_dir" not in page.raw
     assert len(leads_blocks) == len(world_sections), (leads_blocks, world_sections)
     worlds_heading = page.section("sec-worlds").find_all("h2")[0].text()
     leads_heading = page.section("sec-leads").find_all("h2")[0].text()

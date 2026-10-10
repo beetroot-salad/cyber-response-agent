@@ -729,20 +729,24 @@ def test_o4_8_2_grade_episode_refuses_a_missing_episode_dir_and_does_not_recreat
 @pytest.mark.parametrize("kind", ["missing", "missing-parent"])
 def test_o4_8_2_render_episode_refuses_a_missing_episode_dir_and_does_not_recreate_it(
         tmp_path, kind):
-    """`render_episode(episode_dir)` keeps raising `JudgeRefused` for a missing dir (its door
-    converts the open's `FileNotFoundError`), and creates nothing. Control: an existing
-    episode's page is written inside it."""
+    """`render_episode(runs, episode_id)` keeps raising `JudgeRefused` for a missing episode
+    (its door, `runs.episode`, converts the open's `FileNotFoundError`), and creates nothing —
+    neither the episode nor a missing episodes base. Control: an existing episode's page is
+    written inside it. (#1105 PR 2, declared change 4: the door takes the tenant's repository
+    and an id under the configured episodes base, no longer a folder.)"""
     page = T.mod("scripts.visualize.visualize_episode")
+    runs = T.current_tenant().runs_repository()
     ep = tmp_path / "episodes" / EPISODE_ID
     if kind == "missing":
         ep.parent.mkdir()
     before = S.census(tmp_path)
-    with pytest.raises(page.JudgeRefused):
-        page.render_episode(ep)
+    with J.episodes_base(ep.parent), pytest.raises(page.JudgeRefused):
+        page.render_episode(runs, EPISODE_ID)
     assert S.census(tmp_path) == before
 
     control = T.episode(tmp_path / "control")
-    written = page.render_episode(control)
+    with J.episodes_base(control.parent):
+        written = page.render_episode(runs, control.name)
     assert Path(written) == control / "learning.html"
     assert (control / "learning.html").is_file()
 

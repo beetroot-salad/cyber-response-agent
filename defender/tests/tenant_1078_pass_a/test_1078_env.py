@@ -312,16 +312,18 @@ def test_n9_directory_tools_survive(tmp_path, monkeypatch, capsys):
 
     # visualize_run — the J8 edge: no --tenant is a usage error, and nothing is rendered
     src = H.source_run(runs)
-    with pytest.raises(SystemExit) as no_tenant:
-        H.mod("scripts.visualize.visualize_run").main(["visualize_run.py", str(src)])
-    assert no_tenant.value.code == 2, f"visualize_run without --tenant: {no_tenant.value!r}"
+    capsys.readouterr()
+    rc = H.mod("scripts.visualize.visualize_run").main(["visualize_run.py", str(src)])
+    assert rc == 64, f"visualize_run without --tenant returned {rc}, not its usage status"
+    assert "--tenant" in capsys.readouterr().err
     assert not (src / "runtime.html").exists(), "visualize_run rendered with no --tenant"
 
     # visualize_episode — the J8 edge: no --tenant is a usage error
     ep = T.episode(tmp_path / "episodes-home")
-    with pytest.raises(SystemExit) as no_tenant:
-        H.mod("scripts.visualize.visualize_episode").main([str(ep)])
-    assert no_tenant.value.code == 2, f"visualize_episode without --tenant: {no_tenant.value!r}"
+    rc = H.mod("scripts.visualize.visualize_episode").main([str(ep)])
+    assert rc == 1, f"visualize_episode without --tenant returned {rc}, not its usage status"
+    assert "--tenant" in capsys.readouterr().err
+    assert not (ep / "learning.html").exists(), "visualize_episode rendered with no --tenant"
 
     # held_out's positional runs dir — scores the fixture's run found IN that dir
     fixtures = tmp_path / "held-out"
