@@ -342,6 +342,11 @@ class EpisodeRuns:
                 f"to {quoted(self._tenant.id)} ({why}) — an arm runs only in a container the "
                 "launcher made for its tenant before the first sibling")
 
+    @property
+    def present(self) -> bool:
+        """Was the container there, and judged, when the view opened (or made it)?"""
+        return self.state == PRESENT
+
     def close(self) -> None:
         if self._owns:
             self.episode.close()

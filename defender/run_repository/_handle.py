@@ -22,10 +22,11 @@ db. The session db itself is opened through `session_store.open_store`. The two 
 """
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -314,6 +315,19 @@ class Run:
         never handed out for it (#1105 PR 2, J15)."""
         self._io.guarded_mkdir(RunPaths(self.run_dir).gather_raw,
                                base=self._runs_base_for("make_run_dir", "gather_raw"))
+
+    @contextlib.contextmanager
+    def reader(self) -> Iterator[_real_io.Bound]:
+        """A no-follow reader over this run's folder (#1105 D-read), for a caller that reads the
+        run's records as one bound tree (the episode page's per-arm reads): the container is
+        held no-follow — a link there is refused — and every read walks no-follow below it,
+        so the caller formats no path. Held for the `with` block only. A handle built from a
+        bare directory (`Run.at`) holds no container and refuses (`ValueError`)."""
+        held = self._io.hold(self._runs_base_for("reader", "run folder"), follow=False)
+        try:
+            yield held.view().under(self.run_dir.name)
+        finally:
+            held.close()
 
     def _record_partial_failure(self, note: str) -> None:
         self.partial_failures = (*self.partial_failures, note)

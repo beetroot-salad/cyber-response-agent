@@ -100,8 +100,7 @@ def page_argv(tenant_id: str, episode_dir: Path) -> list[str]:
     """The episode page CLI's argv (`visualize_episode.main` takes no program name). TODAY:
     the episode folder's path. PR 2 (declared change 4): `new_page_argv(tenant_id,
     episode_dir.name)`."""
-    del tenant_id
-    return [str(episode_dir)]
+    return new_page_argv(tenant_id, Path(episode_dir).name)
 
 
 def new_page_argv(tenant_id: str, episode_id: str) -> list[str]:
@@ -113,8 +112,7 @@ def run_page_argv(tenant_id: str, run_dir: Path) -> list[str]:
     """The run page CLI's argv (`visualize_run.main` takes `sys.argv`, program name first).
     TODAY: the run folder's path. PR 2 (declared change 7): `new_run_page_argv(tenant_id,
     run_dir.name)` for a natural run."""
-    del tenant_id
-    return ["visualize_run.py", str(run_dir)]
+    return new_run_page_argv(tenant_id, Path(run_dir).name)
 
 
 def new_run_page_argv(tenant_id: str, run_id: str, *, episode_id: str | None = None) -> list[str]:
