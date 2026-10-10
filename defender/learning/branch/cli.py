@@ -630,6 +630,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
         calibrate_one,
         default_oracle_dir,
         oracle_serving,
+        read_family_answers,
     )
     from defender.learning.branch.estate.checks import canonical_json
     from defender.learning.branch.ledger import payload_text
@@ -687,6 +688,8 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     resumed = {w.world_id: _family.resume_world_from(family, w.world_id, episode.dir)
                for w in fact_worlds}
     recording = Ledger.for_world(episode, resumed[fact_worlds[0].world_id].world_id)
+    # The family's base recording, parsed once for every world's registry.
+    family_answers = read_family_answers(recording.base_path)
     fixed_leads = _inherited_leads(source, family.branch_message_id)
 
     drift: list[dict[str, Any]] = []
@@ -725,6 +728,15 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
                 stop.set()
 
     def calibrate(label: str) -> None:
+        try:
+            calibrate_world(label)
+        except BaseException:
+            # Anything but the world's own failure is the launch's: the other worlds stop
+            # before their next paid turn, and `future.result()` re-raises it below.
+            stop.set()
+            raise
+
+    def calibrate_world(label: str) -> None:
         world = resumed[label]
         ledger = Ledger.for_world(episode, world.world_id)
         # The world's own oracle side (`oracle_serving`), as a sibling builds its own in its own
@@ -736,7 +748,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
         registry = WorldRegistry(
             roster, tenant.grants.gather, world=world, ledger=ledger, as_of=family.as_of,
             serving=serving, oracle_dir=default_oracle_dir(world, ledger), limiter=limiter,
-            tenant=tenant, grant_home=tenant.table_pointer)
+            tenant=tenant, grant_home=tenant.table_pointer, family_answers=family_answers)
         try:
             for call, base, fixed in calibrated:
                 if stop.is_set():
@@ -760,7 +772,9 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
         futures = [pool.submit(contextvars.copy_context().run, calibrate, w.world_id)
                    for w in fact_worlds]
     for future in futures:
-        # Anything but a world's own failure is the launch's, and leaves no outcome record.
+        # Anything but a world's own failure is the launch's (it stopped every other world's
+        # calibration), and leaves no outcome record: the outcome words are the family's
+        # (accepted, unusable, refused), and an episode with none is never graded.
         future.result()
 
     unservable = sorted(failures, key=lambda entry: entry["world"])

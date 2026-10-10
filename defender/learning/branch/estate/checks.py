@@ -6,8 +6,9 @@ failure texts, each naming the check it failed (`check <n>`); an empty list pass
 
   1. Structure: every difference between the base answer and the served one is claimed — an
      added row is a claimed forged row, a removed row a claimed removal, a changed value a
-     claimed change or, for a count cell (a total, an aggregate's value, a bucket's count),
-     one `counts` entry used up by it — and every claim entry is found. Mapping key order is
+     claimed change or, for a count cell (the answer's own count of its rows: a total, an
+     aggregate's value, a bucket's count — never an ordinary field of a document; see
+     `_counts_change`), one `counts` entry used up by it — and every claim entry is found. Mapping key order is
      not a difference, list order is, duplicates are a multiset (N09).
   2. Shape: a forged row carries exactly the columns real rows of its system (the call's,
      stamped by the host at forge) carry at the same place, with their value types (M14=B);
@@ -321,9 +322,11 @@ _Found = tuple[_Path, Any, _Names]
 class _Diff:
     added: list[_Found] = field(default_factory=list)
     removed: list[_Found] = field(default_factory=list)
-    #: `(key, old, new, base mapping, served mapping, table row)`; key "" is a bare value, no
-    #: mapping; the table row is the base row the changed value sits in (None outside rows).
-    changed: list[tuple[str, Any, Any, dict, dict, dict | None]] = field(default_factory=list)
+    #: `(key, old, new, base mapping, served mapping, table row, path)`; key "" is a bare
+    #: value, no mapping; the table row is the base row the changed value sits in (None outside
+    #: rows); the path is the holding mapping's key path.
+    changed: list[tuple[str, Any, Any, dict, dict, dict | None, tuple[str, ...]]] = field(
+        default_factory=list)
     unclaimed: list[str] = field(default_factory=list)
 
 
@@ -367,7 +370,7 @@ def _diff(base: Any, served: Any, path: tuple[str, ...], out: _Diff,  # noqa: C9
             b, s = base[key], served[key]
             if _shape_kind(b) == "scalar" and _shape_kind(s) == "scalar":
                 if canonical_json(b) != canonical_json(s):
-                    out.changed.append((str(key), b, s, dict(base), dict(served), row))
+                    out.changed.append((str(key), b, s, dict(base), dict(served), row, path))
             else:
                 _diff(b, s, (*path, str(key)), out, is_addition,
                       esql if esql is not None and key == "values" else None, row)
@@ -389,7 +392,7 @@ def _diff(base: Any, served: Any, path: tuple[str, ...], out: _Diff,  # noqa: C9
         return
     if canonical_json(base) != canonical_json(served):
         # A bare value (a scalar count): only a `counts` entry of group "*" can claim it.
-        out.changed.append(("", base, served, {}, {}, row))
+        out.changed.append(("", base, served, {}, {}, row, path))
 
 
 def _pair_rows(olds: list[Any], news: list[Any], is_addition: Callable[[Any], bool],
@@ -478,7 +481,7 @@ def _check_structure(base: Any, served: Any, claim: _Claim, store: CheckStore,  
                         f"{wrap_fresh(text, 'untrusted')}")
     changes = list(claim.changed)
     count_cells = list(counts)  # each count entry accounts for at most one changed count cell
-    for key, old, new, base_map, served_map, row in diff.changed:
+    for key, old, new, base_map, served_map, row, where in diff.changed:
         values = set(_scalar_values(base_map)) | set(_scalar_values(served_map))
         hit = next((i for i, c in enumerate(changes)
                     if key and str(c["field"]) == key and canonical_json(c["old"]) == canonical_json(old)
@@ -488,7 +491,8 @@ def _check_structure(base: Any, served: Any, claim: _Claim, store: CheckStore,  
             changes.pop(hit)
             continue
         hit = next((i for i, c in enumerate(count_cells)
-                    if _counts_change(c, key, old, new, base_map, served_map, row)), None)
+                    if _counts_change(c, key, old, new, base_map, served_map, row, where)),
+                   None)
         if hit is not None:
             count_cells.pop(hit)
             continue
@@ -539,16 +543,44 @@ def _uncounted(records: list[Mapping[str, Any]], counts: list[dict]) -> list[Map
     return uncovered
 
 
+#: The keys that name a count outside a table row (compared without case): an answer's
+#: total, a count, an aggregation bucket's or a result's row count. A cell keyed by one, or
+#: held by a mapping keyed by one (ES `hits.total.value`), is a count cell.
+_COUNT_KEYS = frozenset({"count", "total", "doc_count", "row_count", "total_count"})
+#: The keys holding an answer's aggregations: every whole number under one is an aggregate.
+_AGGREGATION_KEYS = frozenset({"aggregations", "aggs"})
+
+
+def _count_named(key: str, path: tuple[str, ...]) -> bool:
+    """A cell outside every table row is a count cell only when the answer names it one: its
+    own key or its holding mapping's key is a count key, or it sits under an aggregation."""
+    held_by = path[-1].casefold() if path else ""
+    return (key.casefold() in _COUNT_KEYS or held_by in _COUNT_KEYS
+            or any(p.casefold() in _AGGREGATION_KEYS for p in path))
+
+
+def _whole_numbers(values: Any) -> bool:
+    return all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values)
+
+
 def _counts_change(entry: Mapping[str, Any], key: str, old: Any, new: Any,  # noqa: PLR0913 — one changed value and where it sits
                    base_map: Mapping[str, Any], served_map: Mapping[str, Any],
-                   row: Mapping[str, Any] | None) -> bool:
+                   row: Mapping[str, Any] | None, path: tuple[str, ...] = ()) -> bool:
     """A count entry accounts for this changed value: the value is a count cell (a whole
     number) going from the entry's `base` to its `served`, and it is the entry's group's count.
-    "*" (the whole answer) counts a bare value or a cell outside every table row (a total, an
-    aggregate's value), or a cell of an all-number row (an ES|QL `STATS COUNT(*)` row); a named
-    group counts the cell keyed by the group outside a table row (`{"db-1": 3}`), or a cell
-    beside an unchanged cell holding the group (a bucket row's count). An ordinary field of a
-    real row is no count cell: an edit to it is a claimed change."""
+
+    A count cell is the answer's own count of its rows, never an ordinary field of a document:
+    - "*" (the whole answer) counts a bare value (the answer is the count), a cell outside
+      every table row that the answer names a count (`_count_named`: `{"count": 3}`,
+      `{"total": 2, "rows": [...]}`, `hits.total.value`, an aggregation's value), or a cell of
+      an all-number row (an ES|QL `STATS COUNT(*)` row);
+    - a named group counts the cell keyed by the group outside a table row when that cell is
+      count-named or its mapping is a group-to-count map (every value a number,
+      `{"db-1": 3, "web-1": 5}`), or a bucket row's count: a count-named cell or a cell of a
+      row whose every other cell beside the unchanged group cell is a number (`STATS n =
+      COUNT(*) BY host`).
+    So `{"user": {"name": "alice", "failed_logins": 3}}` holds no count cell: an edit to it,
+    as to an ordinary field of a real row, is a claimed change."""
     if not (_is_int(old) and _is_int(new)):
         return False
     if canonical_json(entry.get("base")) != canonical_json(old) or canonical_json(
@@ -556,15 +588,20 @@ def _counts_change(entry: Mapping[str, Any], key: str, old: Any, new: Any,  # no
         return False
     group = entry.get("group")
     if group == "*":
-        return row is None or all(isinstance(v, (int, float)) and not isinstance(v, bool)
-                                  for _c, v in _leaves(flatten(row)))
+        if row is not None:
+            return _whole_numbers(v for _c, v in _leaves(flatten(row)))
+        return not key or _count_named(key, path)
     if not key:
         return False
-    if row is None and group == key:
-        return True
+    if row is None:
+        return group == key and (_count_named(key, path) or _whole_numbers(base_map.values()))
     text = canonical_json(group)
-    return any(k != key and k in served_map and canonical_json(v) == text
-               and canonical_json(served_map[k]) == text for k, v in base_map.items())
+    holders = [k for k, v in base_map.items() if k != key and k in served_map
+               and canonical_json(v) == text and canonical_json(served_map[k]) == text]
+    if not holders:
+        return False
+    return key.casefold() in _COUNT_KEYS or _whole_numbers(
+        v for k, v in base_map.items() if k != key and k not in holders)
 
 
 # --------------------------------------------------------------------------------------------

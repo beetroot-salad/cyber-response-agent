@@ -24,7 +24,7 @@ from defender._io import JSON_NESTING_LIMIT, guarded_mkdir, json_safe, open_guar
 from defender.run_repository import RUN_LAYOUT, RunPaths
 from defender.runtime._wire import wire_digest
 
-from defender._pricing import usage_cost
+from defender._pricing import billed_usage as _usage_dict, usage_cost
 
 _logger = logging.getLogger(__name__)
 
@@ -68,18 +68,6 @@ def _trim(obj: Any, cap: int) -> Any:
     if isinstance(obj, dict):
         return {k: _trim(v, cap) for k, v in obj.items()}
     return obj
-
-
-def _usage_dict(usage: Any) -> dict[str, int]:
-    g = lambda n: int(getattr(usage, n, 0) or 0)  # noqa: E731
-    cache_r = g("cache_read_tokens")
-    cache_w = g("cache_write_tokens")
-    return {
-        "input_tokens": max(0, g("input_tokens") - cache_r - cache_w),
-        "output_tokens": g("output_tokens"),
-        "cache_read_input_tokens": cache_r,
-        "cache_creation_input_tokens": cache_w,
-    }
 
 
 def encode_wire_record(record: dict) -> str:
