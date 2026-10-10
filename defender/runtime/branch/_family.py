@@ -358,7 +358,7 @@ def _check_disposition(raw: Any, at: str) -> str:
 def _check_label_basis(raw: Any, at: str) -> str:
     """What the declared disposition rests on; omitted means the weaker `policy-rule` claim."""
     # Type first: the membership test hashes the value, and a model-authored `{...}` or `[...]`
-    # would raise `TypeError` instead of the `FamilyError` `run.py --resume` catches.
+    # would raise `TypeError` instead of the `FamilyError` a sibling's `run.py` catches.
     basis = "policy-rule" if raw is None else raw
     if not isinstance(basis, str) or basis not in LABEL_BASES:
         raise FamilyError(f"{at}.label_basis is {basis!r}, outside {sorted(LABEL_BASES)}")

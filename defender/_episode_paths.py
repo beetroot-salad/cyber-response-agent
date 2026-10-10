@@ -300,6 +300,15 @@ class EpisodeLayout:
         return PurePosixPath(RUNS_DIRNAME)
 
     @property
+    def container(self) -> PurePosixPath:
+        """`runs/` as the episode handle names it (#1105 PR 2): the siblings' container, which
+        the handle keeps private for the runs repository's episode view and hands out once,
+        as its box-mounted path. The same folder as `runs`, under the handle's own name so no
+        module outside the run-records owners reads a `runs` attribute (#1210's list A); the
+        fence lint gates it like `runs`."""
+        return PurePosixPath(RUNS_DIRNAME)
+
+    @property
     def worlds(self) -> PurePosixPath:
         return PurePosixPath(WORLDS_DIRNAME)
 
