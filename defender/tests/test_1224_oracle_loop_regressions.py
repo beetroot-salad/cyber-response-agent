@@ -742,7 +742,9 @@ def test_a_failure_closing_the_oracle_mark_does_not_replace_the_unservable_abort
     def broken(_run_dir: Path) -> None:
         raise OSError("budget.json lock timed out")
 
-    monkeypatch.setattr(registry_mod, "oracle_turn_closed", broken)
+    # The close must fail mid-turn after the open succeeded; no file fault does that (a missing
+    # or odd budget record makes both a no-op, and permissions do not bind root).
+    monkeypatch.setattr(registry_mod, "oracle_turn_closed", broken)  # lint-monkeypatch: ok — only seam for a close that fails after its open
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=S.oracle(S.text_only("no.")),
@@ -767,7 +769,7 @@ def test_an_unpriced_verifier_is_refused_before_the_oracles_first_request(tmp_pa
     assert model.requests == 0, "the oracle paid for a request before the refusal"
 
 
-def test_a_failing_trace_write_still_charges_and_is_not_a_model_failure(tmp_path, monkeypatch):
+def test_a_failing_trace_write_still_charges_and_is_not_a_model_failure(tmp_path):
     """Finding 8: the charge ran inside the provider-failure `try`, so a failed `trace.jsonl`
     append was reported as a failed model request, the paid response's cost never reached
     `spent`, and the verifier re-asked (paying again). Only the model call is guarded: the
@@ -777,15 +779,7 @@ def test_a_failing_trace_write_still_charges_and_is_not_a_model_failure(tmp_path
     o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
     v = S.passing_verifier()
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, verifier=v, retry_cap=1)
-    trace = reg.store.paths.trace
-    real_write = oracle_mod.write_guarded
-
-    def refuse_trace(path: Path, *a: Any, **kw: Any) -> Any:
-        if Path(path) == trace:
-            raise OSError(28, "No space left on device")
-        return real_write(path, *a, **kw)
-
-    monkeypatch.setattr(oracle_mod, "write_guarded", refuse_trace)
+    Path(reg.store.paths.trace).mkdir(parents=True)  # every append to the trace now fails
 
     assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == ALICE_ROWS
     assert reg.store.spent > 0, "the paid responses were not charged"

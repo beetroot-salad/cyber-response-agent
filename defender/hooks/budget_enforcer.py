@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from defender._clock import parse_iso_utc
-from defender._io import write_atomic
+from defender._io import read_text_utf8, write_atomic
 from defender.run_repository import RunPaths
 from defender.hooks._run_dir import read_json_locked, update_json_locked
 from defender.runtime.agent_role import AgentRole
@@ -223,8 +223,8 @@ def _process_stat(pid: int) -> tuple[str, str] | None:
     """`pid`'s `(state, start time in clock ticks since boot)` from Linux `/proc`, or None where
     it cannot be read. The start time tells a reused pid from the process that held it."""
     try:
-        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="replace")
-    except OSError:
+        stat = read_text_utf8(Path(f"/proc/{pid}/stat"), limit=4096)
+    except (OSError, ValueError):  # unreadable, or a process name that is not UTF-8
         return None
     fields = stat.rpartition(")")[2].split()
     return (fields[0], fields[19]) if len(fields) > 19 else None
