@@ -47,6 +47,7 @@ from defender.tests._lead_author_1134 import outcome, place, raised, scene_over,
 from defender.tests._repo import seed_skills_repo
 from defender.tests._shared_readers_1134 import REFUSAL_ROUTES, RefusesFolder
 from defender.tests._tree_listing_1134 import descriptors_under
+from defender.tests._state1135 import run_of
 from defender.tests.test_1134_lead_author_handle import (
     ELASTIC_LEAD,
     MINTED_IDS,
@@ -84,7 +85,7 @@ def _bad_fd(caplog) -> list[str]:
 
 def test_run_without_deps_mints_and_reaches_its_agent_inside_its_own_trees(
         tmp_path: Path, monkeypatch, caplog):
-    """`lead_author.run(run_dir, label=, paths=)` with no deps (what `main()` calls): the run
+    """`lead_author.run(run, label=, paths=)` with no deps (what `main()` calls): the run
     opens its own trees under the queue lock and serves the whole claim inside them. Both coined
     rows' drafts land with their ids, the agent spawn is reached (`FatalConfigError` from the
     unroutable model), nothing is recorded done, no log line says `Bad file descriptor`, and
@@ -98,11 +99,11 @@ def test_run_without_deps_mints_and_reaches_its_agent_inside_its_own_trees(
     repo = _worktree(tmp_path)
     (tmp_path / "state").mkdir()  # the state root is never created lazily (#1135)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    run_dir = _run_dir(tmp_path, ("wazuh.hunt-creds", "wazuh", "esql"),
+    run_dir = _run_dir(("wazuh.hunt-creds", "wazuh", "esql"),
                        ("elastic.hunt-creds", "elastic", "esql"))
 
     with pytest.raises(FatalConfigError, match=NO_MODEL):
-        lead_author.run(run_dir, label=LEAD, paths=paths)
+        lead_author.run(run_of(run_dir), label=LEAD, paths=paths)
 
     for system in ("wazuh", "elastic"):
         qid = f"{system}.hunt-creds"

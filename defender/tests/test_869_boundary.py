@@ -46,6 +46,7 @@ from defender.tests._declared869 import (
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.tests._curator1134 import open_state
 from defender.tests._lead_author_1134 import drafts_under, lane_tree_for, lead_deps, lead_trees
+from defender.tests._state1135 import curation_row, curation_run_dir, run_of
 
 
 def _lead(query_id: str, *, system: str = "elastic", verb: str = "esql") -> ExecutedLead:
@@ -58,9 +59,11 @@ def _lead(query_id: str, *, system: str = "elastic", verb: str = "esql") -> Exec
     )
 
 
-def _run_dir(tmp_path: Path) -> Path:
-    d = tmp_path / "run-x"
-    (d / "gather_raw").mkdir(parents=True)
+def _run_dir() -> Path:
+    """A natural run where the drain rehydrates a row (`curation_run_dir`, #1105 PR 2); hand it
+    to the lane as `run_of(_run_dir())`."""
+    d = curation_run_dir("run-x")
+    (d / "gather_raw").mkdir(exist_ok=True)
     return d
 
 
@@ -190,7 +193,7 @@ def test_lead_author_resolves_systems_before_the_agent_is_spawned(tmp_path, monk
     assert "mcpsys" in resolved, "this lane is handed the UNION, not the adapter half"
     assert "late" not in resolved
 
-    assert lead_author.run(_run_dir(tmp_path), label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths,
+    assert lead_author.run(run_of(_run_dir()), label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths,
                            deps=deps) == 0
     assert spawn.calls, "the agent was never spawned, so the ordering claim is vacuous"
     assert deps.systems == resolved
@@ -352,7 +355,7 @@ def test_a_marker_planted_during_the_tick_does_not_declare_its_system(tmp_path, 
     deps = _lead_author_deps(lane2, LeadAuthorSpawn(plant_adapter))
     assert "mcpsys" not in deps.systems
     with pytest.raises(LeadAuthorError, match="mcpsys"):
-        lead_author.run(_run_dir(tmp_path), label=LEAD_AUTHOR_DRAIN_LABEL, paths=lane2, deps=deps)
+        lead_author.run(run_of(_run_dir()), label=LEAD_AUTHOR_DRAIN_LABEL, paths=lane2, deps=deps)
     assert "mcpsys" in declared_systems(other)
 
 
@@ -383,13 +386,13 @@ def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, capsys)
     )
     # The drain's own input: one queued lead-author request, which lane 1 will refuse.
     write(paths.state_root / "author-queue" / "case-1.json",
-          json.dumps({"case_id": "case-1", "run_dir": str(_run_dir(tmp_path))}) + "\n")
+          json.dumps(curation_row("case-1", _run_dir())) + "\n")
 
     residue = "residue that lane 1 left behind\n"
     lane1_calls: list[Path] = []
 
-    def lane1(_paths, _state, _run_dir, *, box=None, **_kw):
-        lane1_calls.append(_run_dir)
+    def lane1(_paths, _state, run, *, box=None, **_kw):
+        lane1_calls.append(run.run_dir)
         skill_md(repo, "elastic").write_text(residue, encoding="utf-8")
         raise LeadAuthorError("lane 1 refuses this marker")
 

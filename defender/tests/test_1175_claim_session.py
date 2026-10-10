@@ -72,6 +72,7 @@ from defender._git import GitError
 from defender.tests._declared869 import ADAPTERS_REL, GIT_IGNORE, git, write
 from defender.tests._declared870 import consumed_by_id
 from defender.tests._spec791 import author_markers, marker_body
+from defender.tests._state1135 import curation_row
 from defender.tests.test_1134_curator_git_bounds import _Shim
 from defender.tests.test_1175_leads_git_liveness import (
     BOUND,
@@ -563,8 +564,8 @@ def test_o8_control_unstartable_git_after_a_clean_lead_author_claim_ends_the_tic
         tampering = _leaving(LIFT, EDITED_LIFT, patch, path_dir, _serving(served))
         plain = _serving(served)
 
-        def step(paths: Any, state: Any, run_dir: Path, **kw: Any) -> None:
-            (tampering if run_dir == run_a else plain)(paths, state, run_dir, **kw)
+        def step(paths: Any, state: Any, run: Any, **kw: Any) -> None:
+            (tampering if run.run_dir == run_a else plain)(paths, state, run, **kw)
 
         got = _tick(sc, run_lead_author=step, run_pitfalls=_no_curation, git_timeout=BOUND)
 
@@ -580,10 +581,10 @@ def test_o8_control_unstartable_git_after_a_clean_lead_author_claim_ends_the_tic
     assert _oserror_in(exc), repr(exc)
     assert served == [run_a], "the next claim was served over the first one's leftovers"
     assert _inflight(sc.paths) == {"case-a.json": {
-        "case_id": "case-a", "run_dir": str(run_a.resolve()), "attempts": 1}}, _inflight(sc.paths)
+        **curation_row("case-a", run_a), "attempts": 1}}, _inflight(sc.paths)
     assert author_markers(sc.paths) == ["case-b.json"]
-    assert marker_body(sc.paths.state_root / "author-queue" / "case-b.json") == {
-        "case_id": "case-b", "run_dir": str(run_b.resolve())}
+    assert marker_body(sc.paths.state_root / "author-queue" / "case-b.json") == \
+        curation_row("case-b", run_b)
     assert _failed(sc.paths) == []
     assert "finish" not in sc.branch.events
     _assert_leftover(sc.wt, LIFT, EDITED_LIFT, cleaned=False, committed=LIFT_TEXT)

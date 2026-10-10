@@ -61,8 +61,7 @@ def test_has_lead_author_work_raises_on_bad_pitfalls_threshold_with_marker_queue
     (exit 0, not the contracted exit 2). The gate reads the threshold up front (#435)."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "high")
     paths = _paths(tmp_path)
-    run_dir = tmp_path / "run-x"
-    run_dir.mkdir()
+    run_dir = _state1135.curation_run_dir("run-x")
     state = _state1135.state_for_paths(paths)
     _state1135.enqueue_run(state, run_dir)
     with pytest.raises(FatalConfigError, match="LEARNING_PITFALLS_THRESHOLD"):
@@ -76,8 +75,7 @@ def test_lead_author_max_retries_bad_value_raises_fatal_config(tmp_path, monkeyp
     raw ValueError that escapes the catch as an uncontracted exit-1 traceback (#435)."""
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "high")
     paths = _paths(tmp_path)
-    run_dir = tmp_path / "run-x"
-    run_dir.mkdir()
+    run_dir = _state1135.curation_run_dir("run-x")
     state = _state1135.state_for_paths(paths)
     _state1135.enqueue_run(state, run_dir)
     with pytest.raises(FatalConfigError, match="LEAD_AUTHOR_MAX_RETRIES"):
@@ -203,8 +201,7 @@ def test_lead_author_marker_drain_reraises_fatal_lift_threshold(tmp_path, monkey
     quarantine the marker (the broad-guard disposition for per-item failures)."""
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "high")
     paths = _paths(tmp_path)
-    run_dir = tmp_path / "run-x"
-    run_dir.mkdir()
+    run_dir = _state1135.curation_run_dir("run-x")
     state = _state1135.state_for_paths(paths)
     _state1135.enqueue_run(state, run_dir)
 
@@ -242,8 +239,7 @@ def test_lead_author_drain_unlinks_marker_on_success(tmp_path, monkeypatch):
     it is neither left queued (re-authored every tick) nor quarantined."""
     monkeypatch.delenv("LEAD_AUTHOR_MAX_RETRIES", raising=False)
     paths = _paths(tmp_path)
-    run_dir = tmp_path / "run-ok"
-    run_dir.mkdir()
+    run_dir = _state1135.curation_run_dir("run-ok")
     state = _state1135.state_for_paths(paths)
     _state1135.enqueue_run(state, run_dir)
 
@@ -258,8 +254,7 @@ def test_lead_author_drain_quarantines_a_plain_failure(tmp_path, monkeypatch):
     lead-author-error reason and is NOT unlinked as if it had succeeded."""
     monkeypatch.delenv("LEAD_AUTHOR_MAX_RETRIES", raising=False)
     paths = _paths(tmp_path)
-    run_dir = tmp_path / "run-boom"
-    run_dir.mkdir()
+    run_dir = _state1135.curation_run_dir("run-boom")
     state = _state1135.state_for_paths(paths)
     _state1135.enqueue_run(state, run_dir)
 
@@ -281,8 +276,7 @@ def test_lead_author_drain_requeues_a_transient_with_bumped_attempts(tmp_path, m
     the transient is silently quarantined instead of retried."""
     monkeypatch.delenv("LEAD_AUTHOR_MAX_RETRIES", raising=False)
     paths = _paths(tmp_path)
-    run_dir = tmp_path / "run-transient"
-    run_dir.mkdir()
+    run_dir = _state1135.curation_run_dir("run-transient")
     state = _state1135.state_for_paths(paths)
     _state1135.enqueue_run(state, run_dir)
 
@@ -411,8 +405,7 @@ def test_lead_author_drain_bad_lift_threshold_is_fatal_two(tmp_path, monkeypatch
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "5")
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "high")
     paths = _paths(tmp_path)
-    run_dir = tmp_path / "run-x"
-    run_dir.mkdir()
+    run_dir = _state1135.curation_run_dir("run-x")
     state = _state1135.state_for_paths(paths)
     _state1135.enqueue_run(state, run_dir)
 

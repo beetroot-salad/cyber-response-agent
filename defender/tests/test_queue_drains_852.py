@@ -217,16 +217,22 @@ def test_852_f02_a_modified_file_that_claims_a_new_source_still_needs_a_voucher(
 
 def _enqueue(paths, case_id: str, run_dir: Path) -> None:
     """The curation request the investigation's tail files (`run_common.enqueue_curation`'s own
-    body), through the handle."""
+    body: the run's address, #1105 PR 2), through the handle."""
     _state1135.state_for_paths(paths).enqueue_curation(
-        case_id, {"case_id": case_id, "run_dir": str(run_dir.resolve())})
+        case_id, _state1135.curation_row(case_id, run_dir))
 
 
-def _queued_run(tmp_path: Path, case_id: str, name: str, paths) -> Path:
-    run_dir = tmp_path / "runs" / name
-    run_dir.mkdir(parents=True, exist_ok=True)
+def _queued_run(case_id: str, name: str, paths) -> Path:
+    """A natural run `name` planted where the drain rehydrates a row (`curation_run_dir`),
+    with the curation request for `case_id` naming it."""
+    run_dir = _state1135.curation_run_dir(name)
     _enqueue(paths, case_id, run_dir)
     return run_dir
+
+
+def _address(row: dict) -> tuple[str, str]:
+    """The run a curation row names: its `(tenant_id, run_id)` (#1105 PR 2 declared change 8)."""
+    return row["tenant_id"], row["run_id"]
 
 
 def _drain(paths, tmp_path: Path, **overrides):
@@ -260,8 +266,8 @@ def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path)
     ticks under a 30-minute manual hold would otherwise dead-letter healthy requests) and the
     marker that WAS claimed is put straight back in the slot the claim freed."""
     paths = loop_paths(tmp_path)
-    _queued_run(tmp_path, "case-1", "run-1", paths)
-    _queued_run(tmp_path, "case-2", "run-2", paths)
+    _queued_run("case-1", "run-1", paths)
+    _queued_run("case-2", "run-2", paths)
 
     # The lock file is resolved off `paths` (#952 M5: `(paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"`),
     # so the drain and a by-hand `run(run_dir, paths=p)` contend on the SAME file for the
@@ -298,8 +304,7 @@ def test_852_f03_the_skip_rc_is_distinct_from_a_completed_serve(tmp_path: Path):
     Bound here rather than left implicit in the test above because it is the whole
     mechanism: `_invoke_lead_author` cannot tell a skip from a serve by any other means —
     it sees an integer and nothing else."""
-    run_dir = tmp_path / "runs" / "run-1"
-    run_dir.mkdir(parents=True)
+    run_dir = _state1135.curation_run_dir("run-1")
     paths = loop_paths(tmp_path)
 
     # Held at the file `run(run_dir, paths=paths)` locks — `(paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"`
@@ -310,7 +315,8 @@ def test_852_f03_the_skip_rc_is_distinct_from_a_completed_serve(tmp_path: Path):
     holder = queue_lock.open("a+")
     try:
         fcntl.flock(holder.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        rc = lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths)
+        rc = lead_author.run(_state1135.run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL,
+                             paths=paths)
     finally:
         fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
         holder.close()
@@ -338,14 +344,13 @@ def test_852_f04_a_transient_retry_does_not_clobber_a_fresher_request(tmp_path: 
     Create-if-absent instead, and the queue's documented contract decides the collision: the
     later run always wins, so the retry is dropped rather than written over the re-ask."""
     paths = loop_paths(tmp_path)
-    first = _queued_run(tmp_path, "case-A", "run-1", paths)
-    second = tmp_path / "runs" / "run-2"
-    second.mkdir(parents=True)
+    first = _queued_run("case-A", "run-1", paths)
+    second = _state1135.curation_run_dir("run-2")
 
     served: list[Path] = []
 
-    def serve(_paths, _state, run_dir, *, box=None, **_kw):
-        served.append(run_dir)
+    def serve(_paths, _state, run, *, box=None, **_kw):
+        served.append(run.run_dir)
         if len(served) == 1:
             # The operator re-investigates the case while the lane is curating it...
             _enqueue(paths, "case-A", second)
@@ -356,7 +361,7 @@ def test_852_f04_a_transient_retry_does_not_clobber_a_fresher_request(tmp_path: 
 
     assert author_markers(paths) == ["case-A.json"]
     body = marker_body(paths.state_root / "author-queue" / "case-A.json")
-    assert Path(body["run_dir"]).resolve() == second.resolve(), (
+    assert _address(body) == _address(_state1135.curation_row("case-A", second)), (
         "the retry replaced the fresher curation request with the stale run dir — the case "
         "will be re-served off the run the operator already superseded"
     )
@@ -381,9 +386,8 @@ def test_852_f04_requeue_is_create_if_absent_and_leaves_no_staging_file(tmp_path
     #1135: the primitive is the handle's `requeue` verb over a claim (`markers.requeue_marker`
     took a bare path and is gone), so the free slot is the one a claim just freed."""
     state = _state1135.state_over(tmp_path / "state")
-    run_dir = tmp_path / "runs" / "run-1"
-    run_dir.mkdir(parents=True)
-    state.enqueue_curation("case-A", {"case_id": "case-A", "run_dir": str(run_dir)})
+    run_dir = _state1135.curation_run_dir("run-1")
+    state.enqueue_curation("case-A", _state1135.curation_row("case-A", run_dir))
     [claim] = list(state.claim("case_id"))
     queue_dir = tmp_path / "state" / "author-queue"
     slot = queue_dir / "case-A.json"
@@ -391,9 +395,10 @@ def test_852_f04_requeue_is_create_if_absent_and_leaves_no_staging_file(tmp_path
 
     assert state.requeue(claim) is True
     stale = Claimed(key="case-A", name="case-A.json",
-                    spec={"case_id": "case-A", "run_dir": "/runs/stale"})
+                    spec=_state1135.curation_row("case-A", run_dir.parent / "stale"))
     assert state.requeue(stale) is False
-    assert json.loads(slot.read_text())["run_dir"] == str(run_dir), \
+    assert _address(json.loads(slot.read_text())) == \
+        _address(_state1135.curation_row("case-A", run_dir)), \
         "the refused re-queue wrote itself in anyway"
     assert {p.name for p in queue_dir.iterdir()} == {"case-A.json", "inflight"}, \
         "the re-queue left its staging file in the queue directory"

@@ -83,6 +83,7 @@ from defender.tests._repo import query_template, seed_skills_repo
 from defender.tests._shared_readers_1134 import REFUSAL_ROUTES, RefusesFolder, kernel_watch
 from defender.tests.test_1111_rooted_io import census, in_time
 from defender.tests.test_1134_mount_list import CONFIG_MODULE, _foreign_imports, _rebindings
+from defender.tests._state1135 import run_of
 from defender.tests.test_1134_lead_author_handle import (
     CONTENT_CASES,
     DECLARED,
@@ -322,7 +323,7 @@ def test_run_resolves_no_lead_through_a_linked_catalog(tmp_path: Path, site, cap
     Catches: `_run_locked` (or the handoff) loading the catalog as `load_catalog(skills_dir /
     "gather/queries")` or `bind(catalog_dir)`."""
     repo = _worktree(tmp_path)
-    run_dir = _run_dir(tmp_path)
+    run_dir = _run_dir()
     lead = _lead("wazuh.probe", system="wazuh", verb="noverb", params={"index": "idx-7"})
     spawn = LeadAuthorSpawn(rc=1)
     with scene_over(tmp_path, repo) as s:
@@ -334,7 +335,7 @@ def test_run_resolves_no_lead_through_a_linked_catalog(tmp_path: Path, site, cap
             template = _moved(plant_folder(s, site, "link"), TEMPLATE_NAME, site)
         caplog.clear()
         with kernel_watch(opens=[template]) as events:
-            rc = lead_author.run(run_dir, label=LEAD, paths=s.paths,
+            rc = lead_author.run(run_of(run_dir), label=LEAD, paths=s.paths,
                                  deps=_deps(s.paths, s.trees, spawn, [lead]))
             seen = events()
 
