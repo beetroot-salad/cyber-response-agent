@@ -403,14 +403,16 @@ def test_pass_a_marker_consumed_by_the_pre_c_lead_author_drain(tmp_path, monkeyp
     assert run_dir == H.runs_dir(root, TENANT) / "r1"
     S791.populate_run_dir(run_dir, disposition="benign")
     scrub_mod.scrub(run_dir)
-    assert H.run_common().enqueue_curation(run_dir, run_dir / "alert.json") is True
+    # #1105 PR 2 (declared change 8): run end hands the request its `Run`, and the marker is
+    # that run's address; the drain rehydrates it in its own tenant and serves the opened run.
+    assert H.run_common().enqueue_curation(_state1135.run_of(run_dir), run_dir / "alert.json") is True
     body = json.loads(next((state.state_root / "author-queue").glob("*.json")).read_text(encoding="utf-8"))
-    assert Path(body["run_dir"]) == run_dir.resolve()
+    assert (body["tenant_id"], body["run_id"]) == (TENANT, run_dir.name)
 
     served: list[Path] = []
     rc = H.mod("learning.core.drains").lead_author_drain(
         state,
-        run_lead_author=lambda _paths, _state, rd, *, box=None, **_kw: served.append(rd),
+        run_lead_author=lambda _paths, _state, run, *, box=None, **_kw: served.append(run.run_dir),
         run_pitfalls=lambda *_a, **_kw: 0,
         branch=S791.SpecBranch(tmp_path / "worktrees"),
         start_box=S791.noop_start_box, stop_box=S791.noop_stop_box, scrub=S791.noop_scrub,

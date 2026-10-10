@@ -774,8 +774,11 @@ def test_947_concurrent_sibling_forks_into_one_source_store_all_land(tmp_path):
 
     from defender.tests import _session_store_705 as S
 
+    from defender.run_repository import SessionPaths
+
     base, src = T.runs_base(tmp_path)
-    handle = store_mod.open_store(case_id="case-947", runs_base=base)
+    # #1105 fork S(b): the layout owner hands the store its paths.
+    handle = store_mod.open_store(case_id="case-947", sessions=SessionPaths(base))
     sid = handle.new_session(agent_id="main")
     # A REAL BRANCH POINT. `fork` walks the prefix at `at_message_id` and refuses one holding an
     # unresolved call, so a fork needs a session with a complete pair in it and the id of that
@@ -788,7 +791,7 @@ def test_947_concurrent_sibling_forks_into_one_source_store_all_land(tmp_path):
 
     def fork():
         barrier.wait()
-        h = store_mod.open_store(case_id="case-947", runs_base=base)
+        h = store_mod.open_store(case_id="case-947", sessions=SessionPaths(base))
         child = h.fork(sid, at_message_id=at)
         with lock:
             made.append(child)
