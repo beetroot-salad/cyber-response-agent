@@ -431,9 +431,14 @@ systems; for each call you are shown the call and the real base answer, and you 
 answer this world's facts imply.
 
 Leave the base answer exactly as it is wherever the world's facts do not reach. Where a fact \
-implies telemetry the base answer lacks, forge rows for it (`forge`), with the columns and \
-value types real rows of that system carry and fresh identifiers, and add them (an ES|QL \
-row is forged as its value array, one value per column in column order). A forged row \
+implies telemetry the base answer lacks, forge rows for it (`forge`) and add them. A forged \
+row has the shape of one real row of that system at that place: exactly that row's columns \
+(where real rows differ, as event and alert documents do, pick the kind of row you forge and \
+carry its columns, never the union) with the value types real rows of those columns carry \
+(an ES|QL row is forged as its value array, one value per column in column order). Its \
+identifiers are fresh: a value in an id column (named `id`, ending in `_id`/`Id`, or pid, \
+uid, sid, uuid, hash and the like) or shaped like a UUID or long hex string may not equal a \
+real identifier unless `entity_refs` declares it a reference to that entity. A forged row \
 belongs to the system of the call you are serving. The world branches at its branch point \
 (stated with the family's base story): every row you forge carries event times at or \
 before it, never after, since nothing real past it is served. Where a fact \

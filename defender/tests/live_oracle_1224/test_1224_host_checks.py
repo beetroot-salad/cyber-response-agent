@@ -10,15 +10,19 @@ Readings this file pins (`.spec-flow/frontiers/70-resolutions.md`):
   * N09: check 1 is a structural diff of parsed JSON — mapping key order and whitespace are not
     differences, list order is; every difference must be claimed, volatile metadata included;
     duplicates are a multiset.
-  * M14=B + D2: check 2's reference is the union of the columns observed in real rows where
-    examples exist (a null keeps its column); with no example the oracle forges from its own
-    knowledge and the call is served; check 2 applies to row-shaped answers only, check 1 to any
-    shape; the host checks no order, size, truncation or id format.
-  * M12=A + S21: check 3 is narrow and in memory — an id-like value (a column named `*id`,
-    `*_id`, `uuid`, `guid`, `hash`, or a UUID / 16+ hex value) in a forged row may not equal, by
-    exact whole-value text, a value in this world's real data (base recording, its live base
-    answers, its exploration results, verifier run_query results, the source alert); a claimed
-    entity reference is exempt; placeholders are not ids; no tenant lookup.
+  * M14 (re-ruled 2026-10-10, PR #1232 round 7; was M14=B's union) + D2: where examples exist,
+    a forged row's columns equal those of SOME real row of its table (a null keeps its column),
+    its value types judged against the real rows with that column set; with no example the
+    oracle forges from its own knowledge and the call is served; check 2 applies to row-shaped
+    answers only, check 1 to any shape; the host checks no order, size, truncation or id format.
+  * M12 (re-ruled 2026-10-10, PR #1232 round 7; was M12=A's `*id` suffix and any-scalar
+    collision) + S21: check 3 is narrow and in memory — an id-like value (a column named `id`,
+    `*_id`, `*-id`, `*.id`, camelCase `*Id`, pid/ppid/uid/gid/sid/tid/uuid/guid/hash, `*_hash`,
+    `*uuid`, `*guid`, or a UUID / 16+ hex value in any column) in a forged row may not equal, by
+    exact whole-value text, a real identifier — a value that sat in an id-like column, or is
+    UUID / 16+ hex shaped, in this world's real data (base recording, its live base answers, its
+    exploration results, verifier run_query results, the source alert); a claimed entity
+    reference is exempt; placeholders are not ids; no tenant lookup.
   * M13=A: check 4 is host-exact on the (entity string, field) key and the exact JSON value;
     `record_fact` may name any entity; a second record of one key with another value is refused;
     equivalence across spellings or formats is the models' judgement, never host code.
@@ -621,14 +625,16 @@ def test_1224_check_tool_and_host_return_one_verdict(tmp_path):
 
 
 # --------------------------------------------------------------------------------------
-# Check 2 (M14=B, D2) — added rows carry the union of the real columns and their types.
+# Check 2 (M14 re-ruled, D2) — an added row carries one real row's columns and their types.
 # --------------------------------------------------------------------------------------
 
 
 def test_1224_forged_row_with_missing_extra_or_mistyped_column_fails_check_2(tmp_path):
     """d09a_forged_row_has_real_columns_and_types — where real rows exist, a forged row missing a column of their union, carrying one outside it, or retyping one fails check 2; with no example the call is served.
 
-    RE-PINNED (M14=B; D2). A null in a real row keeps its column.
+    RE-PINNED (M14=B; D2). A null in a real row keeps its column. M14 re-ruled 2026-10-10 (PR
+    #1232 round 7): the reference is one real row's column set, not the union; both real rows
+    here share one column set, so the three refused rows fail under either reading.
     """
     with_null = {"user": "alice", "event_id": "e-099", "action": "logoff", "host": None,
                  "ts": "2026-07-28T14:55:00Z"}
@@ -700,7 +706,9 @@ def test_1224_forged_id_occurring_in_any_real_answer_fails_check_3(tmp_path):
     """d09b_forged_id_absent_from_real_data — a forged id-like value equal to a value in this world's real data fails check 3, separately for each real source; a claimed entity reference is exempt.
 
     RE-PINNED (M12=A, S21). Id-like: a column named *id/*_id/uuid/guid/hash, or a UUID or 16+ hex
-    value, matched by exact whole-value text. Real data: the base recording, this world's live base
+    value, matched by exact whole-value text. M12 re-ruled 2026-10-10 (PR #1232 round 7): every
+    colliding value below sits in a real `*_id` column (event_id, record_id, alert_id, user_id),
+    so each stays a real identifier under the narrower rule. Real data: the base recording, this world's live base
     answer, this world's exploration result (and verifier run_query results and the source alert).
     Each colliding value below occurs in exactly one source.
     """
@@ -1178,7 +1186,7 @@ def test_input_two_adjacent_windows_meet_at_the_fact_timestamp(tmp_path):
 
 
 # --------------------------------------------------------------------------------------
-# Premises: forging with and without real examples (check 2, M14=B / D2).
+# Premises: forging with and without real examples (check 2, M14 re-ruled / D2).
 # --------------------------------------------------------------------------------------
 
 
@@ -1284,25 +1292,35 @@ def test_input_base_rows_are_heterogeneous(tmp_path):
 
     M14=B: check 2's reference is the union of observed columns where examples exist, and a null in
     a real row keeps its column; order, size and id format are unchecked by the host.
+
+    RE-PINNED 2026-10-10 (M14 re-ruled by the implementer, the human having delegated it; PR
+    #1232 round 7): the reference is the column set of SOME real row — a forged row has one real
+    row's shape, never the union (with event and alert documents at one path, the union is a row
+    no system writes). Refused: r2's shape short its null-only `parent` (a null keeps its
+    column), the union of r1 and r2, and r2's shape plus an extra column. Served: a row with
+    exactly r2's columns, `parent` null included — which the union reading refuses (no `host`).
     """
     r1 = dict(BASE_ROW)
     r2 = {"user": "alice", "event_id": "e-101", "action": "vpn", "ts": TS_BASE,
           "src_ip": "10.0.0.9", "parent": None}
     base = {"rows": [r1, r2]}
-    union = {**FORGED_ROW, "src_ip": "10.0.0.7", "parent": None}
+    r2_shaped = {"user": "alice", "event_id": "e-9f01", "action": "vpn", "ts": TS_FACT,
+                 "src_ip": "10.0.0.7", "parent": None}
+    union = {**FORGED_ROW, "event_id": "e-9f0b", "src_ip": "10.0.0.7", "parent": None}
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, base)])
-    no_parent = {k: v for k, v in union.items() if k != "parent"}
+    no_parent = {k: v for k, v in r2_shaped.items() if k != "parent"}
     o = S.oracle(*_honest("fg-p", row={**no_parent, "event_id": "e-9f0a"}, base_rows=(r1, r2)),
-                 *_honest("fg-x", row={**union, "event_id": "e-9f0b", "note": "x"},
+                 *_honest("fg-u", row=union, base_rows=(r1, r2)),
+                 *_honest("fg-x", row={**r2_shaped, "event_id": "e-9f0c", "note": "x"},
                           base_rows=(r1, r2)),
-                 *_honest(row=union, base_rows=(r1, r2)))
-    reg = sc.registry(o, retry_cap=4)
+                 *_honest(row=r2_shaped, base_rows=(r1, r2)))
+    reg = sc.registry(o, retry_cap=5)
 
-    assert sc.call(reg, "idp", "query", **ALICE) == {"rows": [r1, r2, union]}
-    _assert_verdict(o, 1, "check 2")
-    _assert_verdict(o, 2, "check 2")
+    assert sc.call(reg, "idp", "query", **ALICE) == {"rows": [r1, r2, r2_shaped]}
+    for k in (1, 2, 3):
+        _assert_verdict(o, k, "check 2")
     _spent(o)
-    _only_oracle_row(sc, attempts=3, served={"rows": [r1, r2, union]})
+    _only_oracle_row(sc, attempts=4, served={"rows": [r1, r2, r2_shaped]})
 
 
 def test_input_system_answers_are_not_row_shaped(tmp_path):
@@ -1459,7 +1477,7 @@ def test_p004_base_answer_text_asks_the_oracle_to_record_a_false_fact(tmp_path):
     failed attempt commits no record. The framing assertions are real. Whether a verifier spots the
     induced record is a model judgement (F-01: non-obligation). Control: the SAME obeying attempt
     under a passing verifier IS served and its record committed. Every forged row carries the base
-    rows' `message` column, so check 2 (M14=B's union) passes it.
+    rows' `message` column, so check 2 (one real row's columns) passes it.
     """
     poisoned = {**BASE_ROW, "message": INJECTION}
     tgt = _forged(message="ticket granted to alice on db-1")

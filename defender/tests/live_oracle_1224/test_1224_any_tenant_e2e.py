@@ -212,8 +212,8 @@ def test_1224_launch_over_a_tenant_with_no_elastic_system(tmp_path, elastic):
 
     doc = _family(S.SYSTEMS, S.fact("f1"), S.fact("f2", "bob reset carol's password from "
                                                         "10.0.0.9", ("bob", "carol", "10.0.0.9")))
-    # Check 2's reference is the union of every real idp answer at this path, so the sibling's
-    # base and the forged row carry the captured answers' columns (SHARED) beside their own.
+    # Check 2's reference is the column set of some real idp row at this path (M14 re-ruled
+    # 2026-10-10), so the forged row carries exactly the sibling base row's columns.
     idp_row = {"action": "logon", "event_id": "e-100", "user": "alice", "entity": "alice",
                "kind": "seen"}
     run = _branch_end_to_end(tmp_path, est, doc=doc, calls=_default_calls(), system="idp",

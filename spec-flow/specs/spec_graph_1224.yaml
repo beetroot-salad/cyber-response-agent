@@ -849,6 +849,10 @@ demands:
   - M14
   source: 20-demands
   provisional_lifted: §7 (70-resolutions.md)
+  amendment_note: 're-ruled 2026-10-10: the human delegated M14/M12 to the implementer after review ("Do what you find right"); check 2''s
+    reference is the column set of some real row in the forged row''s table: the forged row''s cells must EQUAL one real row''s columns
+    (never the union of all real rows''), its value types judged against the real rows sharing that column set, and with no real row nothing
+    is compared (D2 unchanged); PR #1232 round 7'
 - id: d09b_forged_id_absent_from_real_data
   kind: domain-outcome
   form: test
@@ -868,6 +872,11 @@ demands:
   - M12
   source: 20-demands
   provisional_lifted: §7 (70-resolutions.md)
+  amendment_note: 're-ruled 2026-10-10: the human delegated M14/M12 to the implementer after review ("Do what you find right"); an id-like
+    column is one named exactly `id`, ending in `_id`/`-id`/`.id` or a camelCase `Id`, a short id word (pid, ppid, uid, gid, sid, tid, uuid,
+    guid, hash) or ending in `_hash`/`.hash`/`uuid`/`guid` (a UUID / 16+ hex value stays id-like in any column), and a forged id-like value
+    collides, by exact whole-value text, only with a real value that itself sat in an id-like column or is UUID / 16+ hex shaped, never with
+    any real scalar anywhere (frozen-row collisions likewise); PR #1232 round 7'
 - id: d09c_examples_are_a_prompt_instruction
   kind: behavior
   form: clause
@@ -4460,6 +4469,11 @@ demands:
     is a slip) | members: #99, #100, #101, #102, #103, #106, FU05, FU06, FU07; carries H-01 | S21 shown and not objected to.'
   resolved_by: human
   provisional_lifted: §7 (70-resolutions.md)
+  amendment_note: 're-ruled 2026-10-10: the human delegated M14/M12 to the implementer after review ("Do what you find right"); an id-like
+    column is one named exactly `id`, ending in `_id`/`-id`/`.id` or a camelCase `Id`, a short id word (pid, ppid, uid, gid, sid, tid, uuid,
+    guid, hash) or ending in `_hash`/`.hash`/`uuid`/`guid` (a UUID / 16+ hex value stays id-like in any column), and a forged id-like value
+    collides, by exact whole-value text, only with a real value that itself sat in an id-like column or is UUID / 16+ hex shaped, never with
+    any real scalar anywhere (frozen-row collisions likewise); PR #1232 round 7'
 - id: b_p103
   kind: domain-outcome
   form: test
@@ -4488,6 +4502,11 @@ demands:
     #102, #103, #106, FU05, FU06, FU07; carries H-01 | S21 shown and not objected to.'
   resolved_by: human
   provisional_lifted: §7 (70-resolutions.md)
+  amendment_note: 're-ruled 2026-10-10: the human delegated M14/M12 to the implementer after review ("Do what you find right"); an id-like
+    column is one named exactly `id`, ending in `_id`/`-id`/`.id` or a camelCase `Id`, a short id word (pid, ppid, uid, gid, sid, tid, uuid,
+    guid, hash) or ending in `_hash`/`.hash`/`uuid`/`guid` (a UUID / 16+ hex value stays id-like in any column), and a forged id-like value
+    collides, by exact whole-value text, only with a real value that itself sat in an id-like column or is UUID / 16+ hex shaped, never with
+    any real scalar anywhere (frozen-row collisions likewise); PR #1232 round 7'
 - id: b_p104
   kind: behavior
   form: test
@@ -4530,6 +4549,10 @@ demands:
   assembly_note: binds derived at assembly from the clause and the premise's obligation tags (O8); the premise carried no `# binds:` line
   source: '45-dispositions ''Bound now'' (untagged: holds under every reading of the cluster)'
   resolved_by: human (D2)
+  amendment_note: 're-ruled 2026-10-10: the human delegated M14/M12 to the implementer after review ("Do what you find right"); check 2''s
+    reference is the column set of some real row in the forged row''s table: the forged row''s cells must EQUAL one real row''s columns
+    (never the union of all real rows''), its value types judged against the real rows sharing that column set, and with no real row nothing
+    is compared (D2 unchanged); PR #1232 round 7'
 - id: b_p110
   kind: domain-outcome
   form: test
@@ -7004,6 +7027,11 @@ demands:
   source: 45-dispositions cluster M12
   resolved_by: human
   fork_status: resolved
+  amendment_note: 're-ruled 2026-10-10: the human delegated M14/M12 to the implementer after review ("Do what you find right"); an id-like
+    column is one named exactly `id`, ending in `_id`/`-id`/`.id` or a camelCase `Id`, a short id word (pid, ppid, uid, gid, sid, tid, uuid,
+    guid, hash) or ending in `_hash`/`.hash`/`uuid`/`guid` (a UUID / 16+ hex value stays id-like in any column), and a forged id-like value
+    collides, by exact whole-value text, only with a real value that itself sat in an id-like column or is UUID / 16+ hex shaped, never with
+    any real scalar anywhere (frozen-row collisions likewise); PR #1232 round 7'
 - id: f_m13_check4
   kind: behavior
   form: clause
@@ -7061,6 +7089,10 @@ demands:
   source: 45-dispositions cluster M14
   resolved_by: human
   fork_status: resolved
+  amendment_note: 're-ruled 2026-10-10: the human delegated M14/M12 to the implementer after review ("Do what you find right"); check 2''s
+    reference is the column set of some real row in the forged row''s table: the forged row''s cells must EQUAL one real row''s columns
+    (never the union of all real rows''), its value types judged against the real rows sharing that column set, and with no real row nothing
+    is compared (D2 unchanged); PR #1232 round 7'
 - id: f_m15_freeze_timing
   kind: behavior
   form: clause
@@ -8140,6 +8172,10 @@ demands:
   resolved_by: human
   source: '§7 fold (phase E): a premise with no prior demand, minted to its cluster''s reading'
   binds_from: f_m14_forge_shape
+  amendment_note: 're-ruled 2026-10-10: the human delegated M14/M12 to the implementer after review ("Do what you find right"); check 2''s
+    reference is the column set of some real row in the forged row''s table: the forged row''s cells must EQUAL one real row''s columns
+    (never the union of all real rows''), its value types judged against the real rows sharing that column set, and with no real row nothing
+    is compared (D2 unchanged); PR #1232 round 7'
 - id: b_p077
   kind: behavior
   form: test
@@ -8162,6 +8198,10 @@ demands:
   resolved_by: human
   source: '§7 fold (phase E): a premise with no prior demand, minted to its cluster''s reading'
   binds_from: f_m14_forge_shape
+  amendment_note: 're-ruled 2026-10-10: the human delegated M14/M12 to the implementer after review ("Do what you find right"); check 2''s
+    reference is the column set of some real row in the forged row''s table: the forged row''s cells must EQUAL one real row''s columns
+    (never the union of all real rows''), its value types judged against the real rows sharing that column set, and with no real row nothing
+    is compared (D2 unchanged); PR #1232 round 7'
 - id: b_p078
   kind: behavior
   form: test
@@ -8185,6 +8225,10 @@ demands:
   resolved_by: human
   source: '§7 fold (phase E): a premise with no prior demand, minted to its cluster''s reading'
   binds_from: f_m14_forge_shape
+  amendment_note: 're-ruled 2026-10-10: the human delegated M14/M12 to the implementer after review ("Do what you find right"); check 2''s
+    reference is the column set of some real row in the forged row''s table: the forged row''s cells must EQUAL one real row''s columns
+    (never the union of all real rows''), its value types judged against the real rows sharing that column set, and with no real row nothing
+    is compared (D2 unchanged); PR #1232 round 7'
 - id: b_p092
   kind: behavior
   form: test
@@ -8257,6 +8301,11 @@ demands:
   resolved_by: human
   source: '§7 fold (phase E): a premise with no prior demand, minted to its cluster''s reading'
   binds_from: f_m12_check3
+  amendment_note: 're-ruled 2026-10-10: the human delegated M14/M12 to the implementer after review ("Do what you find right"); an id-like
+    column is one named exactly `id`, ending in `_id`/`-id`/`.id` or a camelCase `Id`, a short id word (pid, ppid, uid, gid, sid, tid, uuid,
+    guid, hash) or ending in `_hash`/`.hash`/`uuid`/`guid` (a UUID / 16+ hex value stays id-like in any column), and a forged id-like value
+    collides, by exact whole-value text, only with a real value that itself sat in an id-like column or is UUID / 16+ hex shaped, never with
+    any real scalar anywhere (frozen-row collisions likewise); PR #1232 round 7'
 - id: b_p100
   kind: behavior
   form: test
@@ -8287,6 +8336,11 @@ demands:
   resolved_by: human
   source: '§7 fold (phase E): a premise with no prior demand, minted to its cluster''s reading'
   binds_from: f_m12_check3
+  amendment_note: 're-ruled 2026-10-10: the human delegated M14/M12 to the implementer after review ("Do what you find right"); an id-like
+    column is one named exactly `id`, ending in `_id`/`-id`/`.id` or a camelCase `Id`, a short id word (pid, ppid, uid, gid, sid, tid, uuid,
+    guid, hash) or ending in `_hash`/`.hash`/`uuid`/`guid` (a UUID / 16+ hex value stays id-like in any column), and a forged id-like value
+    collides, by exact whole-value text, only with a real value that itself sat in an id-like column or is UUID / 16+ hex shaped, never with
+    any real scalar anywhere (frozen-row collisions likewise); PR #1232 round 7'
 - id: b_p102
   kind: behavior
   form: test
@@ -8318,6 +8372,11 @@ demands:
   resolved_by: human
   source: '§7 fold (phase E): a premise with no prior demand, minted to its cluster''s reading'
   binds_from: f_m12_check3
+  amendment_note: 're-ruled 2026-10-10: the human delegated M14/M12 to the implementer after review ("Do what you find right"); an id-like
+    column is one named exactly `id`, ending in `_id`/`-id`/`.id` or a camelCase `Id`, a short id word (pid, ppid, uid, gid, sid, tid, uuid,
+    guid, hash) or ending in `_hash`/`.hash`/`uuid`/`guid` (a UUID / 16+ hex value stays id-like in any column), and a forged id-like value
+    collides, by exact whole-value text, only with a real value that itself sat in an id-like column or is UUID / 16+ hex shaped, never with
+    any real scalar anywhere (frozen-row collisions likewise); PR #1232 round 7'
 - id: b_p106
   kind: behavior
   form: test
@@ -8348,6 +8407,11 @@ demands:
   resolved_by: human
   source: '§7 fold (phase E): a premise with no prior demand, minted to its cluster''s reading'
   binds_from: f_m12_check3
+  amendment_note: 're-ruled 2026-10-10: the human delegated M14/M12 to the implementer after review ("Do what you find right"); an id-like
+    column is one named exactly `id`, ending in `_id`/`-id`/`.id` or a camelCase `Id`, a short id word (pid, ppid, uid, gid, sid, tid, uuid,
+    guid, hash) or ending in `_hash`/`.hash`/`uuid`/`guid` (a UUID / 16+ hex value stays id-like in any column), and a forged id-like value
+    collides, by exact whole-value text, only with a real value that itself sat in an id-like column or is UUID / 16+ hex shaped, never with
+    any real scalar anywhere (frozen-row collisions likewise); PR #1232 round 7'
 - id: b_p117
   kind: behavior
   form: test
@@ -8823,6 +8887,11 @@ demands:
   resolved_by: human
   source: '§7 fold (phase E): a premise with no prior demand, minted to its cluster''s reading'
   binds_from: f_m12_check3
+  amendment_note: 're-ruled 2026-10-10: the human delegated M14/M12 to the implementer after review ("Do what you find right"); an id-like
+    column is one named exactly `id`, ending in `_id`/`-id`/`.id` or a camelCase `Id`, a short id word (pid, ppid, uid, gid, sid, tid, uuid,
+    guid, hash) or ending in `_hash`/`.hash`/`uuid`/`guid` (a UUID / 16+ hex value stays id-like in any column), and a forged id-like value
+    collides, by exact whole-value text, only with a real value that itself sat in an id-like column or is UUID / 16+ hex shaped, never with
+    any real scalar anywhere (frozen-row collisions likewise); PR #1232 round 7'
 - id: b_fu06
   kind: behavior
   form: test
@@ -8854,6 +8923,11 @@ demands:
   resolved_by: human
   source: '§7 fold (phase E): a premise with no prior demand, minted to its cluster''s reading'
   binds_from: f_m12_check3
+  amendment_note: 're-ruled 2026-10-10: the human delegated M14/M12 to the implementer after review ("Do what you find right"); an id-like
+    column is one named exactly `id`, ending in `_id`/`-id`/`.id` or a camelCase `Id`, a short id word (pid, ppid, uid, gid, sid, tid, uuid,
+    guid, hash) or ending in `_hash`/`.hash`/`uuid`/`guid` (a UUID / 16+ hex value stays id-like in any column), and a forged id-like value
+    collides, by exact whole-value text, only with a real value that itself sat in an id-like column or is UUID / 16+ hex shaped, never with
+    any real scalar anywhere (frozen-row collisions likewise); PR #1232 round 7'
 - id: b_fu07
   kind: behavior
   form: test
@@ -8884,6 +8958,11 @@ demands:
   resolved_by: human
   source: '§7 fold (phase E): a premise with no prior demand, minted to its cluster''s reading'
   binds_from: f_m12_check3
+  amendment_note: 're-ruled 2026-10-10: the human delegated M14/M12 to the implementer after review ("Do what you find right"); an id-like
+    column is one named exactly `id`, ending in `_id`/`-id`/`.id` or a camelCase `Id`, a short id word (pid, ppid, uid, gid, sid, tid, uuid,
+    guid, hash) or ending in `_hash`/`.hash`/`uuid`/`guid` (a UUID / 16+ hex value stays id-like in any column), and a forged id-like value
+    collides, by exact whole-value text, only with a real value that itself sat in an id-like column or is UUID / 16+ hex shaped, never with
+    any real scalar anywhere (frozen-row collisions likewise); PR #1232 round 7'
 - id: b_fu08
   kind: behavior
   form: test

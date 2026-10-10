@@ -1607,7 +1607,8 @@ def test_exploration_result_cached_by_one_world_is_stale_for_another(tmp_path):
 
     Re-pinned: each world's forged rows learn their shape from that world's own real data (S21)
     [where this world's data holds an example, D2] and carry the source's real columns and value
-    types (O8). Check 2's reference is the union of observed columns (M14=B)."""
+    types (O8). Check 2's reference is a real row's column set (M14, re-ruled 2026-10-10 from
+    M14=B's union; this world's real rows share one column set, so it is the same here)."""
     est = _estate(tmp_path)
     ep = S.episode_v2(tmp_path, base_rows=[])
     stale = {"events": [{"event_id": "x-7", "host": "db-1", "process": "sshd-stale-0c4"}]}
