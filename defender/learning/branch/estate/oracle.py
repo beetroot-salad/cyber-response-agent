@@ -24,6 +24,7 @@ import logging
 import subprocess
 import threading
 import time
+import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,7 +65,7 @@ from .checks import (
     run_checks,
     structured,
 )
-from .limiter import RateLimiter
+from .limiter import LimiterStateError, RateLimiter
 
 _logger = logging.getLogger(__name__)
 
@@ -83,6 +84,9 @@ DEFAULT_RESTART_AFTER = 40
 #: Reasons `OracleUnservable` carries.
 REASON_RETRIES = "retries"
 REASON_BUDGET = "budget"
+#: The oracle's own serving broke (an error no attempt can recover from): the world goes
+#: unservable, the error logged, rather than reaching the investigator as a fault row.
+REASON_FAULT = "fault"
 
 
 class OracleUnservable(ServingAbort):
@@ -174,6 +178,21 @@ def _ends_torn(path: Path) -> bool:
     return bool(data) and not data.endswith(b"\n")
 
 
+def _trace_spent(rows: list[dict]) -> float:
+    """The spend the trace records, each row counted once by its `id` (a charge whose append
+    failed part-way is rewritten whole by the next one). A row without an id counts as it is."""
+    seen: set[str] = set()
+    total = 0.0
+    for row in rows:
+        rid = row.get("id")
+        if isinstance(rid, str):
+            if rid in seen:
+                continue
+            seen.add(rid)
+        total += float(row.get("cost_usd") or 0.0)
+    return total
+
+
 class OracleStore:
     """`oracle/<label>/`: frozen forged rows, recorded facts, the served-answer cache, the
     oracle-side ledger, this world's live base answers and the oracle's spend trace."""
@@ -208,8 +227,10 @@ class OracleStore:
                 if key not in self.base:
                     self.base[key] = text
                     self.base_answers.append((row["system"], text))
-        self.spent = sum(float(r.get("cost_usd") or 0.0) for r in read_jsonl_rows(self.paths.trace))
+        self.spent = _trace_spent(read_jsonl_rows(self.paths.trace))
         #: Trace rows charged to `spent` whose append failed; the next charge writes them first.
+        #: Each row carries its own `id`: a failed append may have landed some of them whole,
+        #: and the rewrite of those is counted once (`_trace_spent`).
         self._unwritten: list[dict] = []
         #: The `(forged_id, column, value)` of every collision already recorded.
         self._collided = {(r.get("forged_id"), r.get("column"), r.get("value"))
@@ -245,7 +266,7 @@ class OracleStore:
         does: a row whose append fails is kept and written ahead of the next one, and the
         response it prices is used as it is (a paid answer is not a failed request)."""
         cost = usage_cost(priced_as, dict(usage))
-        row = {"actor": actor, "model": model_name,
+        row = {"id": uuid.uuid4().hex, "actor": actor, "model": model_name,
                "input_tokens": usage.get("input_tokens", 0),
                "output_tokens": usage.get("output_tokens", 0), "cost_usd": cost, "at": time.time()}
         with self._lock:
@@ -254,7 +275,8 @@ class OracleStore:
             try:
                 self._append(self.paths.trace, self._unwritten)
             except OSError as unwritable:
-                # A partial append may have left a torn line: the retry starts on its own.
+                # A partial append may have left a torn line: the retry starts on its own. Rows
+                # it landed whole are written again, and read once (each by its `id`).
                 self._torn.add(self.paths.trace)
                 _logger.warning(f"the oracle's spend trace could not record "
                                 f"{len(self._unwritten)} row(s) ({unwritable!r}); they are "
@@ -370,7 +392,14 @@ class QueryDoor:
             raise Refused(f"run_query {system}.{verb} was refused: only read verbs are served "
                           "to the oracle")
         with waits.waiting():
-            self.limiter.acquire()
+            try:
+                self.limiter.acquire()
+            except LimiterStateError:
+                # The limiter failed closed: the oracle's own machinery, not the tenant, so
+                # the attempt fails (M03=A) rather than handing the oracle feedback; the
+                # limiter's text (an OS error) is not shown.
+                raise _AttemptFailed("the rate limiter could not admit a query (it failed "
+                                     "closed)") from None
         try:
             answer = fn(self.context(), **dict(params))
         except Exception as exc:  # noqa: BLE001 — a tenant error is the oracle's to see
@@ -540,6 +569,8 @@ class _Submitted:
     claim: dict
     verdict: dict
     attempt: _Attempt
+    #: The frozen-row id collisions this answer serves (M12=A), recorded only once it commits.
+    collisions: list[dict] = field(default_factory=list)
 
 
 class _AttemptOver(Exception):
@@ -650,7 +681,10 @@ class _Run:
 async def _within_deadline(run: _Run, work: Callable[[], Any]) -> tuple[bool, Any]:
     """Await `work()` under one deadline for the whole of it — model requests, tools, host
     checks and the verifier alike: `(True, result)`, or `(False, None)` once `run.remaining()`
-    reaches zero. Limiter waits push the deadline back as they happen."""
+    reaches zero. Limiter waits push the deadline back as they happen.
+
+    A `work()` that returned is reported as completed even when the deadline's cancel landed
+    as it returned: a finished result wins over the cancellation that came too late for it."""
     import anyio
 
     outcome: list[Any] = []
@@ -671,7 +705,9 @@ async def _within_deadline(run: _Run, work: Callable[[], Any]) -> tuple[bool, An
                 group.cancel_scope.cancel()
     if failed:
         raise failed[0]
-    return (not scope.cancelled_caught, outcome[0] if outcome else None)
+    # A cancellation reaching `work()` raises out of it (`CancelledError`), so `outcome` holds a
+    # value only if `work()` returned; `scope.cancelled_caught` alone may say the deadline fired.
+    return (True, outcome[0]) if outcome else (False, None)
 
 
 @dataclass
@@ -857,7 +893,20 @@ class Oracle:
     def serve(self, call: tuple[str, str, dict], base: Any, real: Callable[[], RealData],
               commit: Callable[[Any, dict, dict, int, _Attempt], None]) -> tuple[Any, dict, dict, int]:
         """Turns until a verified submission is committed (`commit(served, claim, verdict,
-        attempts, staged)`); returns `(served, claim, verdict, attempts)`."""
+        attempts, staged)`); returns `(served, claim, verdict, attempts)`.
+
+        The one place a turn's outcome is decided, by one rule:
+        - a verified submission whose `commit` returns is the answer; nothing after it undoes
+          it (its frozen-row collisions are recorded then, best-effort);
+        - an attempt that ends without one — no or a refused submission, a passed deadline, an
+          unusable model, the oracle's own store or rate limiter failing (`StoreFailure`,
+          `_AttemptFailed`), or a `commit` that cannot store the answer (`OSError`) — is a
+          failed attempt, and `retry_cap` of them make the call unservable (`retries`);
+        - the world's budget spent ends the call unservable (`budget`);
+        - any other error escaping an attempt is the serving machinery broken: it is logged
+          with its traceback and the call ends unservable (`fault`), never reaching the
+          investigator as an ordinary exception. A `ServingAbort` passes as itself, and so
+          does what `commit` raises other than `OSError` (pre-flight's `PrebranchChanged`)."""
         if self.unservable is not None:
             # The world's one failure, whichever call asks: concurrent calls abort together and
             # the first abort found writes the world's record, which must name the failing call
@@ -873,6 +922,15 @@ class Oracle:
                 stop = OracleUnservable(REASON_BUDGET, call, str(spent))
                 self._give_up(stop)
                 raise stop from None
+            except ServingAbort:
+                raise
+            except Exception as broken:
+                _logger.exception(f"the oracle's serving of {call[0]}.{call[1]} broke; the "
+                                  "world goes unservable")
+                stop = OracleUnservable(REASON_FAULT, call,
+                                        f"the oracle's serving broke ({type(broken).__name__})")
+                self._give_up(stop)
+                raise stop from broken
             first = False
             if isinstance(result, _Submitted):
                 try:
@@ -881,6 +939,7 @@ class Oracle:
                 except OSError:
                     result = self._fail_text("the verified answer could not be stored")
                 else:
+                    self._record_collisions(result.collisions)
                     return result.served, result.claim, result.verdict, failures + 1
             failures += 1
             self._failures = [*self._failures, result][-5:]
@@ -1050,6 +1109,10 @@ class Oracle:
         except _AttemptOver as over:
             self._conversation = _settled(held[-1])
             return over.text if over.told else self._fail_text(over.text)
+        except (_AttemptFailed, StoreFailure) as failed:
+            # The oracle's own machinery failed under a tool no handler answered for.
+            self._conversation = _settled(held[-1])
+            return self._fail_text(str(failed))
         except (UnexpectedModelBehavior, UsageLimitExceeded) as unusable:
             self._conversation = _settled(held[-1])
             return self._fail_text(f"the model's replies could not be used "
@@ -1092,7 +1155,9 @@ class Oracle:
             return _Outcome(call_id, _NOT_RUN, failure=run.ended, told=True)
         try:
             outcome = await self._submitted(run, dict(args))
-        except StoreFailure as lost:
+        except (_AttemptFailed, StoreFailure) as lost:
+            # A host check's or the verifier's query met the oracle's own store or limiter
+            # failing: the submission could not be judged, so the attempt fails.
             outcome = f"Attempt failed: {lost}."
         # The attempt ends here: a tool the same reply calls after `submit` is answered, not run
         # (no tenant read, no box time for an attempt already decided).
@@ -1226,12 +1291,16 @@ class Oracle:
         return run_checks(run.base, _base_handle_resolved(served, run.base), claim,
                           world=self.world, store=self._check_store(run), real_data=run.real())
 
-    def _note_collisions(self, run: _Run, checked: Checked) -> None:
-        """Record, for the judge, every identifier a frozen row serves that this world's real
-        data now carries too (M12=A), off the submission's own structural diff. Best-effort:
-        the answer is served either way."""
-        entries = frozen_id_collisions(checked, store=self._check_store(run),
-                                       real_data=run.real())
+    def _collisions(self, run: _Run, checked: Checked) -> list[dict]:
+        """Every identifier a frozen row serves that this world's real data now carries too
+        (M12=A), off the submission's own structural diff. Recorded only once the answer
+        commits (`_record_collisions`): an answer never served leaves no collision row."""
+        return frozen_id_collisions(checked, store=self._check_store(run),
+                                    real_data=run.real())
+
+    def _record_collisions(self, entries: list[dict]) -> None:
+        """Record a committed answer's collisions for the judge. Best-effort: the answer is
+        served either way."""
         if not entries:
             return
         try:
@@ -1262,9 +1331,9 @@ class Oracle:
         if not verdict.get("passed"):
             return self._verdict([f"the verifier failed the answer: "
                                   f"{wrap_fresh(str(verdict.get('reason') or ''), 'untrusted')}"])
-        await run.blocking(lambda: self._note_collisions(run, checked))
+        collisions = await run.blocking(lambda: self._collisions(run, checked))
         return _Submitted(served=served, claim=structured(parsed), verdict=verdict,
-                          attempt=run.attempt)
+                          attempt=run.attempt, collisions=collisions)
 
     def _verdict(self, failures: list[str]) -> str:
         return "Submission refused:\n" + "\n".join(failures)
