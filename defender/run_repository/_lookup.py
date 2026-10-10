@@ -322,7 +322,10 @@ class EpisodeRuns:
             raise
 
     def _judge(self, *, container_required: bool) -> None:
-        """Record the container's state, judging a present one's `_tenant.json` (G20)."""
+        """Record the container's state, judging a present one's `_tenant.json` (G20). A
+        container that cannot be held (a link, a non-directory) or, held, cannot be listed (its
+        permissions) is recorded unreadable — read as absent by the page (rev 5.1 S1) — and its
+        record is never read; a listable one with no record, or another tenant's, refuses."""
         try:
             held = hold_runs_folder(self._folder, io=self._io)
         except FileNotFoundError:
@@ -331,7 +334,15 @@ class EpisodeRuns:
             self.state, self.unreadable_reason = UNREADABLE, str(unholdable)
         else:
             try:
-                HeldRuns(self._tenant, held, self._io, folder=self._folder).judged()
+                listed = held.view().entries()
+                if listed.absent:
+                    self.state = ABSENT
+                elif listed.entries is None:
+                    self.state = UNREADABLE
+                    self.unreadable_reason = (f"the container {self._folder} cannot be listed: "
+                                              f"{listed.reason}")
+                else:
+                    HeldRuns(self._tenant, held, self._io, folder=self._folder).judged()
             finally:
                 held.close()
         if container_required and self.state != PRESENT:
