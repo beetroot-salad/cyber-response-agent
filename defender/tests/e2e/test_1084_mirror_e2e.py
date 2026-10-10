@@ -56,7 +56,8 @@ from pathlib import Path
 
 import pytest
 
-from defender import _env, _git, run_common
+from defender import _env, _git, _tenant, run_common
+from defender.tests._data_root_1078 import current_data_root, ensure_d9_tenant
 from defender.tests.e2e.test_922_renderer import MARKER, driven_run, tenant_run
 
 pytestmark = pytest.mark.e2e
@@ -84,6 +85,25 @@ def _renderer():
 
 def _under(path: Path, root: Path) -> bool:
     return path.resolve().is_relative_to(root.resolve())
+
+
+def _repository_run() -> tuple[str, Path]:
+    """`(T, run_dir)`: a driven run (`driven_run`) where the run page's repository opens it —
+    `<data root>/<T>/runs/run`, the runs folder carrying `_tenant.json` naming T through the
+    real writer (#1105 PR 2, declared change 7: `visualize_run.py --tenant T <run_id>` opens
+    the run by id through `T.runs_repository()`, where it took the run folder's path). The
+    tenant is set up FIRST: `create_tenant` refuses a tenant folder that already holds `runs/`."""
+    tenant = ensure_d9_tenant()
+    runs = current_data_root() / tenant / "runs"
+    run_dir = driven_run(runs)
+    _tenant.ensure_runs_base_record(runs, _tenant.TenantId(tenant))
+    return tenant, run_dir
+
+
+def _run_page_argv(tenant: str, run_dir: Path) -> list[str]:
+    """The run page CLI's `sys.argv` for a `_repository_run` (#1105 PR 2, declared change 7):
+    `visualize_run.py --tenant T <run_id>`, where it was `visualize_run.py <run_dir>`."""
+    return ["visualize_run.py", "--tenant", tenant, run_dir.name]
 
 
 def _warnings(caplog) -> list[str]:
@@ -481,9 +501,12 @@ def test_1084_an_override_outside_the_checkout_takes_the_copy_at_its_absolute_pa
     DROPPED BY #1110: this test also pinned that the render PRINTED the mirror's path on
     success (the renderer child's stdout, forwarded). The post-run step is in-process now and
     the design gives a successful copy no output; what the operator is told about the copy is
-    the failure warning (O5)."""
+    the failure warning (O5).
+
+    #1105 PR 2 (declared change 7): the run is driven where the re-render's repository opens it
+    (`_repository_run`), and the re-render is `--tenant T <run_id>`."""
     vr = _renderer()
-    run_dir = driven_run(tmp_path)
+    tenant, run_dir = _repository_run()
     outside = tmp_path / "pages"
     assert not _under(outside, run_common.REPO_ROOT), "precondition: outside the checkout"
     monkeypatch.setenv(ENV, str(outside))
@@ -498,7 +521,7 @@ def test_1084_an_override_outside_the_checkout_takes_the_copy_at_its_absolute_pa
     mirrored.unlink()
     assert vr.mirror_page(vr.render_page(run_dir), run_dir.name) == "copied"
     assert mirrored.read_bytes() == (run_dir / PAGE).read_bytes()
-    assert vr.main(["visualize_run.py", str(run_dir)]) == 0
+    assert vr.main(_run_page_argv(tenant, run_dir)) == 0  # #1105 PR 2 (declared change 7)
 
 
 # ---------------------------------------------------------------------------------------
