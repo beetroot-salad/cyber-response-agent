@@ -292,7 +292,11 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
         if serving is None:
             raise TypeError("_drive_investigation(world=…) needs the world's settled `serving=`")
         from defender.learning.branch.estate.limiter import RateLimiter
-        from defender.learning.branch.estate.registry import WorldRegistry, default_oracle_dir
+        from defender.learning.branch.estate.registry import (
+            WorldRegistry,
+            default_oracle_dir,
+            prebranch_calls,
+        )
         from defender.learning.branch.ledger import Ledger
         from defender.runtime import branch as branch_mod
 
@@ -305,6 +309,9 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
             # This sibling's one limiter, at its slice of the episode rate (S16).
             limiter=RateLimiter(serving.settings.rate),
             tenant=tenant, grant_home=tenant.table_pointer,
+            # The source run's pre-branch calls, by pre-flight's own rule (M01=A): a re-ask
+            # still takes its oracle turn (S1), and is served unchanged or not at all.
+            prebranch=prebranch_calls(Path(family.source_run_dir), family.branch_message_id),
         )
         resume = branch_mod.BranchSpec(
             source_run_dir=Path(family.source_run_dir),

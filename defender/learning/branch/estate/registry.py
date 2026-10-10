@@ -20,7 +20,7 @@ import functools
 import json
 import logging
 import threading
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import fields, is_dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -86,6 +86,11 @@ def serve_one(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any
     answer is looked up again under the turn, then the oracle serves, the host checks and the
     verifier pass it, and its rows, facts and answer are committed before the ledger row.
 
+    A call the source run made before the branch point (`registry.prebranch`, M01=A) still
+    takes its turn (S1), but a submission that changes its base answer is refused as a failed
+    attempt before the host checks and the verifier (`changes_base`): the world serves it
+    unchanged or goes unservable, as pre-flight would have failed it (`calibrate_one`).
+
     The answer is recorded and delivered only once the turn has closed (its clock mark
     included): a failure closing the turn raises before any row is written, so the ledger
     never records a call whose answer the investigator did not get (N12); the committed answer
@@ -103,20 +108,22 @@ def serve_one(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any
     with registry._turn(ctx, pauses_clock=True):
         hit = registry.store.answers.get(key)
         if hit is None:
-            hit = _served_in_turn(registry, system, verb, asked, base_text)
+            hit = _served_in_turn(registry, system, verb, asked, base_text,
+                                  fixed=key in registry.prebranch)
     return registry._record_answer(system, verb, asked, hit)
 
 
 def _served_in_turn(registry: WorldRegistry, system: str, verb: str, asked: dict,
-                    base_text: str) -> dict:
-    """One oracle turn's committed answer for the call (under the turn the caller holds)."""
+                    base_text: str, *, fixed: bool) -> dict:
+    """One oracle turn's committed answer for the call (under the turn the caller holds).
+    `fixed`: a pre-branch call, whose changed submission is refused before it is checked."""
     base = json.loads(base_text)
     digest = base_digest(base_text)
     committed: dict[str, Any] = {}
 
     def commit(served: Any, claim: dict, verdict: dict, attempts: int, staged: Any) -> None:
         served_text = payload_text(served)
-        decision = PASSTHROUGH if canonical_json(served) == canonical_json(base) else ORACLE
+        decision = ORACLE if changes_base(served, base) else PASSTHROUGH
         answer = {"system": system, "verb": verb, "params": asked,
                   "served": json.loads(served_text), "decision": decision,
                   "base_digest": digest, "claim": claim, "verifier_verdict": verdict,
@@ -127,9 +134,60 @@ def _served_in_turn(registry: WorldRegistry, system: str, verb: str, asked: dict
                               answer=answer)
         committed["answer"] = answer
 
+    def unchanged(served: Any) -> str | None:
+        return PREBRANCH_REFUSAL if changes_base(served, base) else None
+
     registry.oracle.serve((system, verb, asked), base,
-                          lambda: registry._real(system, base), commit)
+                          lambda: registry._real(system, base), commit,
+                          fixed=fixed, gate=unchanged if fixed else None)
     return committed["answer"]
+
+
+#: What the oracle is told when it submits a changed answer to a pre-branch call in a sibling.
+PREBRANCH_REFUSAL = ("this call was made before the branch point; serve its base answer "
+                     "unchanged (the investigator's inherited transcript already holds it, "
+                     "M01=A)")
+
+
+def changes_base(served: Any, base: Any) -> bool:
+    """Whether `served` changes the call's base answer (canonical JSON): the one comparison
+    M01=A's fixed prefix is judged by, at pre-flight (`calibrate_one`) and in a sibling
+    (`serve_one`)."""
+    return canonical_json(served) != canonical_json(base)
+
+
+def prebranch_calls(source_run_dir: Path, branch_message_id: int) -> frozenset[str]:
+    """The request keys of the calls the source run made before the branch point — the fixed
+    prefix of M01=A — derived once by each caller from the source run: pre-flight (each
+    replayed call's `fixed`) and the sibling (`WorldRegistry(prebranch=)`). A call is pre-branch
+    when the first capture of its key is under a lead the source run held at the branch point.
+    A source with no session store cannot say which leads those were, so nothing is fixed."""
+    from defender.learning.branch.ledger import request_key as ledger_key
+    from defender.learning.lead_repository import load_queries_report
+    from defender.runtime import branch
+
+    run_dir = Path(source_run_dir)
+    store = branch.source_store_if_any(run_dir)
+    if store is None:
+        return frozenset()
+    try:
+        session = branch.session_for_run(store, run_dir)
+        leads = set(branch.leads_at(store, session, branch_message_id, run_dir))
+    finally:
+        store.close()
+    rows, _unreadable = load_queries_report(run_dir)
+    seen: set[str] = set()
+    fixed: set[str] = set()
+    for row in rows:
+        if row.is_sentinel or not row.system or not row.verb:
+            continue
+        key = ledger_key(row.system, row.verb, row.params)
+        if key in seen:
+            continue
+        seen.add(key)
+        if row.lead_id in leads:
+            fixed.add(key)
+    return frozenset(fixed)
 
 
 class PrebranchChanged(Exception):
@@ -147,14 +205,16 @@ def calibrate_one(registry: WorldRegistry, ctx: Any, system: str, verb: str,
     the world's oracle-side ledger (N14).
 
     `fixed` marks a call the source run made before the branch point: a verified answer that
-    differs from its base raises `PrebranchChanged` before anything is frozen. An unservable
+    differs from its base raises `PrebranchChanged` before anything is frozen (the oracle is
+    told the call is pre-branch; unlike a sibling's turn, pre-flight does not refuse the
+    change and retry — one verified change fails the world, M01=A). An unservable
     call raises `OracleUnservable` as it would in a sibling. `ctx` is pre-flight's own verb
     context; every oracle-side query of the turn runs in it, at the branch-point clock."""
     asked = dict(params)
     registry.store.log_query("preflight", system, verb, asked)
 
     def commit(served: Any, _claim: dict, _verdict: dict, _attempts: int, staged: Any) -> None:
-        if fixed and canonical_json(served) != canonical_json(base):
+        if fixed and changes_base(served, base):
             raise PrebranchChanged(
                 f"the world's verified answer changes {system}.{verb}, a call the source run "
                 "made before the branch point — that prefix is fixed (M01=A)")
@@ -165,7 +225,7 @@ def calibrate_one(registry: WorldRegistry, ctx: Any, system: str, verb: str,
 
     with registry._turn(_carrying(ctx, as_of=registry.as_of), pauses_clock=False):
         registry.oracle.serve((system, verb, asked), base,
-                              lambda: registry._real(system, base), commit)
+                              lambda: registry._real(system, base), commit, fixed=fixed)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -203,13 +263,15 @@ class WorldRegistry(ModuleVerbRegistry):
     def __init__(self, roster, grant, *, world: Any, ledger: Ledger, as_of: datetime,  # noqa: PLR0913 — a world's whole serving identity, its tenant and its settled oracle side
                  serving: OracleServing, oracle_dir: Path, limiter: RateLimiter,
                  tenant: Any = None, grant_home: str = TABLE_POINTER,
-                 family_answers: Sequence[FamilyAnswer] | None = None):
+                 family_answers: Sequence[FamilyAnswer] | None = None,
+                 prebranch: Collection[str] = frozenset()):
         """`serving` is the world's settled oracle side (`oracle_serving`), `oracle_dir` its
         oracle-side state (`default_oracle_dir`), `limiter` the process's one rate limiter
         (S16: pre-flight hands every world the launcher's, held at the episode rate; a
         sibling builds its slice's). `family_answers` is the family's base recording as
         `read_family_answers` parses it — pre-flight parses it once for every world; `None`
-        parses `ledger.base_path` here."""
+        parses `ledger.base_path` here. `prebranch` is the request keys of the source run's
+        pre-branch calls (`prebranch_calls`), whose answers a sibling serves unchanged."""
         super().__init__(roster, grant, grant_home=grant_home)
         # Validate the clock here, once: every query this world issues, the oracle's own
         # included, carries it, so no oracle-side context is ever built without it (O-31).
@@ -237,6 +299,7 @@ class WorldRegistry(ModuleVerbRegistry):
         self.ledger = ledger
         self.tenant = tenant
         self.world_facts = tuple(getattr(world, "facts", ()) or ())
+        self.prebranch = frozenset(prebranch)
         self.store = OracleStore(Path(oracle_dir))
         self._turn_lock = threading.Lock()
         #: The context of the call whose turn holds the lock: every oracle-side query of that

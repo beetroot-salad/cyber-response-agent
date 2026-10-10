@@ -469,17 +469,9 @@ def _check_branch_point(source_run_dir: Path, branch_message_id: int, *,
 
 
 def _source_store(source_run_dir: Path) -> Any:
-    """The source run's own session store, or `None` when it does not carry one.
-
-    Only an absent session pointer means "no session". `open_source_store` raises one class
-    for both a missing pointer and one that does not reconcile, so the presence check is made
-    here and a mismatch still propagates as a refusal rather than silently taking the
-    storeless fallback (wrong T0, the finished document's frontier).
-    """
-    run_dir = Path(source_run_dir)
-    if not artifact_file(RunPaths(run_dir).session_pointer):
-        return None
-    return branch.open_source_store(run_dir)
+    """The source run's own session store, or `None` when it does not carry one
+    (`branch.source_store_if_any`: a pointer that does not reconcile still refuses)."""
+    return branch.source_store_if_any(Path(source_run_dir))
 
 
 def branch_point_clock(source_run_dir: Path, branch_message_id: int) -> Any:
@@ -516,7 +508,6 @@ class _Original:
     system: str
     verb: str
     params: dict
-    lead_id: str
     #: The capture recorded an error for it (no base answer was primed).
     failed: bool
 
@@ -542,7 +533,7 @@ def _originals(source_run_dir: Path) -> list[_Original]:
             continue
         seen.add(key)
         out.append(_Original(system=row.system, verb=row.verb, params=dict(row.params),
-                             lead_id=row.lead_id, failed=row.exit_code != 0))
+                             failed=row.exit_code != 0))
     return out
 
 
@@ -561,19 +552,6 @@ def _not_admitted(reader: Any, call: _Original) -> str | None:
     if fn is None or verb_class_of(fn) != "r":
         return f"{call.system}.{call.verb} is not a read verb, and only reads are replayed"
     return None
-
-
-def _inherited_leads(source_run_dir: Path, branch_message_id: int) -> set[str] | None:
-    """The leads the source run held at the branch point (their calls are the fixed prefix,
-    M01=A), or `None` for a source with no session store, which cannot say."""
-    store = _source_store(Path(source_run_dir))
-    if store is None:
-        return None
-    try:
-        session = branch.session_for_run(store, Path(source_run_dir))
-        return set(branch.leads_at(store, session, branch_message_id, Path(source_run_dir)))
-    finally:
-        store.close()
 
 
 def _preflight_context(episode_dir: Path, tenant: Any, as_of: Any) -> Any:
@@ -630,10 +608,11 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
         calibrate_one,
         default_oracle_dir,
         oracle_serving,
+        prebranch_calls,
         read_family_answers,
     )
     from defender.learning.branch.estate.checks import canonical_json
-    from defender.learning.branch.ledger import payload_text
+    from defender.learning.branch.ledger import payload_text, request_key
     from defender.learning.core.config import oracle_settings_with
     from defender.runtime.verbs import ModuleVerbRegistry
 
@@ -690,7 +669,8 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     recording = Ledger.for_world(episode, resumed[fact_worlds[0].world_id].world_id)
     # The family's base recording, parsed once for every world's registry.
     family_answers = read_family_answers(recording.base_path)
-    fixed_leads = _inherited_leads(source, family.branch_message_id)
+    # M01=A's fixed prefix, by the one rule the sibling's registry is handed too (`run.py`).
+    prebranch = prebranch_calls(source, family.branch_message_id)
 
     drift: list[dict[str, Any]] = []
     calibrated: list[tuple[_Original, Any, bool]] = []
@@ -714,7 +694,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
                 if canonical_json(json.loads(recorded)) != canonical_json(json.loads(live_text)):
                     drift.append({**call.entry, "status": "drifted"})
                 base_text = recorded
-        fixed = fixed_leads is not None and call.lead_id in fixed_leads
+        fixed = request_key(call.system, call.verb, call.params) in prebranch
         calibrated.append((call, json.loads(base_text), fixed))
 
     stop = threading.Event()

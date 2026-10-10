@@ -45,6 +45,7 @@ from ._spec import (
     BranchError,
     BranchSpec,
     open_source_store,
+    source_store_if_any,
     store_factory_for,
 )
 from ._frontier import (
@@ -309,6 +310,7 @@ __all__ = [
     "main_session",
     "open_main_session",
     "open_source_store",
+    "source_store_if_any",
     "read_jsonl_rows",
     "read_text_soft",
     "refuse_seeded_run_dir",
