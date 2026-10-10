@@ -7,7 +7,10 @@ re-forged one is reused); one deadline over the whole attempt, tools included; o
 with its size cap, for every prompt; one recorder for every delivered row; a price settled
 before any request. Fourth round: the python box and the limiter-wait record belong to one
 attempt, the oracle-open clock mark to the process that wrote it; both price rows and the
-charge settle outside the provider-failure path. Each test is red on the code it replaces.
+charge settle outside the provider-failure path. Fifth round: a turn's outcome is decided in
+one place — a returned result wins over a late cancel, collisions and the ledger row follow
+the commit and the turn's close, every other error is a failed attempt or an unservable
+world, and a trace row counts once. Each test is red on the code it replaces.
 """
 from __future__ import annotations
 
@@ -784,3 +787,176 @@ def test_a_failing_trace_write_still_charges_and_is_not_a_model_failure(tmp_path
     assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == ALICE_ROWS
     assert reg.store.spent > 0, "the paid responses were not charged"
     assert (o.requests, v.requests) == (1, 1), (o.requests, v.requests)
+
+
+# --- fifth round: a turn's outcome is decided in one place, by one rule ---------------------
+
+
+def test_a_result_that_returned_as_the_deadline_fired_is_completed():
+    """Fifth-round finding 9: `_within_deadline` reported `(False, result)` whenever its scope
+    caught the deadline's cancel, so a work() that had returned (a verified submission) as the
+    cancel landed was thrown away as 'the turn deadline passed'. A returned result wins."""
+    import anyio
+
+    run = oracle_mod._Run(door=None, deadline=0.0)  # type: ignore[arg-type]
+
+    async def work() -> str:
+        return "submitted"  # returns before the watcher's cancel is delivered
+
+    assert anyio.run(oracle_mod._within_deadline, run, work) == (True, "submitted")
+
+
+_COLLIDING = {"forged_id": "fg-1", "fact_id": "f1", "system": "idp",
+              "row": {"user": "alice", "event_id": "e-100", "action": "exec", "host": "web-1",
+                      "ts": "2026-07-28T16:00:00Z"}}
+
+
+def _serve_colliding(tmp_path: Path, *, answers_unwritable: bool) -> tuple[Any, Any]:
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    served = {"rows": [*ALICE_ROWS["rows"], _COLLIDING["row"]]}
+    o = S.oracle(S.submit(served, S.claim(added=[S.added("fg-1", "f1")])))
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o,
+                           verifier=S.passing_verifier(), retry_cap=1)
+    reg.store.commit(forged=[_COLLIDING], facts=[], answer=None)  # fg-1 frozen, id e-100
+    if answers_unwritable:
+        Path(reg.store.paths.answers).mkdir(parents=True)  # the answer's commit now fails
+    return est, reg
+
+
+def test_an_uncommitted_answer_leaves_no_collision_row(tmp_path):
+    """Fifth-round finding 9, the side effect: a verified submission's frozen-row collisions
+    were written to collisions.jsonl before its commit, so an answer whose commit failed (never
+    served) left collision rows for the judge. They are recorded only once the answer commits
+    (control: a committed one records its collision)."""
+    est, reg = _serve_colliding(tmp_path / "failed", answers_unwritable=True)
+    with pytest.raises(oracle_mod.OracleUnservable):
+        S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
+    assert S.read_jsonl(Path(reg.store.paths.collisions)) == []
+
+    est, reg = _serve_colliding(tmp_path / "served", answers_unwritable=False)
+    S.call(reg, "idp", "query", est.ctx(tmp_path / "inv2"), q="user:alice")
+    rows = S.read_jsonl(Path(reg.store.paths.collisions))
+    assert [(r["forged_id"], r["value"]) for r in rows] == [("fg-1", "e-100")]
+
+
+def test_a_failure_closing_the_clock_mark_leaves_no_row_for_the_answer_it_withheld(
+        tmp_path, monkeypatch):
+    """Fifth-round finding 6: the ledger row was written inside the turn, so a clock-mark close
+    that raised on the turn's normal exit replaced the answer after the row recorded it as
+    delivered (against N12). The row is written after the turn closes: a close failure leaves
+    no row, and the committed answer is served, with its row, on the next ask."""
+    from defender.learning.branch.estate import registry as registry_mod
+
+    real_close = registry_mod.oracle_turn_closed
+    closes: list[Path] = []
+
+    def fails_once(run_dir: Path) -> None:
+        closes.append(run_dir)
+        if len(closes) == 1:
+            raise OSError("budget.json lock timed out")
+        real_close(run_dir)
+
+    # The close must fail after its open succeeded; no file fault does that (see the
+    # round-four close test).
+    monkeypatch.setattr(registry_mod, "oracle_turn_closed", fails_once)  # lint-monkeypatch: ok — only seam for a close that fails after its open
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    ep = S.episode_v2(tmp_path)
+    o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+    reg = S.world_registry(ep, "b", est, oracle=o, verifier=S.passing_verifier(), retry_cap=1)
+    ctx = est.ctx(tmp_path / "inv")
+
+    with pytest.raises(OSError, match="lock timed out"):
+        S.call(reg, "idp", "query", ctx, q="user:alice")
+    assert S.ledger_rows(ep, "b") == [], "a row records an answer the investigator never got"
+
+    assert S.call(reg, "idp", "query", ctx, q="user:alice") == ALICE_ROWS
+    assert len(S.ledger_rows(ep, "b")) == 1
+    assert o.requests == 1, "the committed answer was not reused"
+
+
+class _LimiterFailsOnce:
+    """A rate limiter whose state read fails closed once (`LimiterStateError`), then admits."""
+
+    def __init__(self) -> None:
+        self.failed = False
+
+    def acquire(self) -> float:
+        from defender.learning.branch.estate.limiter import LimiterStateError
+
+        if not self.failed:
+            self.failed = True
+            raise LimiterStateError("the rate limiter could not read its clock: EIO")
+        return 0.0
+
+
+def test_a_limiter_failing_closed_under_an_oracle_query_is_a_failed_attempt(tmp_path):
+    """Fifth-round finding 10: `serve()` mapped only a spent budget; a `LimiterStateError`
+    raised by the oracle's `run_query` escaped `serve_one` as an ordinary exception, filed as
+    a fault row the investigator read. The oracle's own limiter failing is a failed attempt:
+    the next attempt serves the call."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    est.answer("idp", "lookup", {"entity": "alice"}, LOOKUP_ALICE)
+    o = S.oracle(S.run_query("idp", "lookup", {"entity": "alice"}),
+                 S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+    limiter = _LimiterFailsOnce()
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, limiter=limiter,
+                           verifier=S.passing_verifier(), retry_cap=2)
+
+    assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == ALICE_ROWS
+    assert limiter.failed
+
+
+def test_a_broken_serving_machine_makes_the_world_unservable_not_a_fault_row(tmp_path):
+    """Fifth-round finding 10, the other tier: any other error escaping an attempt (here the
+    door's verb lookup breaking) reached the investigator as itself. It is logged and the call
+    ends unservable (`fault`), a `ServingAbort` that never becomes a fault row."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    o = S.oracle(S.run_query("idp", "lookup", {"entity": "alice"}),
+                 S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o,
+                           verifier=S.passing_verifier(), retry_cap=3)
+
+    def broken(_system: str) -> Any:
+        raise TypeError("verbs() got an unexpected keyword")
+
+    reg.oracle.door.real_verbs = broken
+
+    with pytest.raises(oracle_mod.OracleUnservable) as raised:
+        S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
+    assert raised.value.reason == oracle_mod.REASON_FAULT
+    assert isinstance(raised.value.__cause__, TypeError)
+
+
+def test_a_trace_append_that_failed_part_way_is_counted_once_on_resume(tmp_path):
+    """Fifth-round finding 12: after an append that landed its first row whole and tore the
+    second, the next charge rewrote both, and a resumed store counted the first row twice.
+    Each trace row carries an id and is counted once: the resumed `spent` is exact."""
+    from defender._io import write_guarded
+
+    store = oracle_mod.OracleStore(tmp_path / "oracle")
+    real_append = store._append
+    trace_calls: list[int] = []
+
+    def faulty(path: Path, rows: list[dict]) -> None:
+        if path != store.paths.trace:
+            return real_append(path, rows)
+        trace_calls.append(len(rows))
+        if len(trace_calls) == 1:
+            raise OSError("ENOSPC")  # nothing lands
+        if len(trace_calls) == 2:
+            real_append(path, rows[:1])  # row 1 whole, row 2 torn, then the disk fills
+            write_guarded(path, '{"id": "torn', mode="append")
+            raise OSError("ENOSPC")
+        return real_append(path, rows)
+
+    store._append = faulty  # type: ignore[method-assign]
+    usage = {"input_tokens": 1000, "output_tokens": 100}
+    for _ in range(3):
+        store.charge("oracle", "m", usage, priced_as=S.PRICED_MODEL)
+
+    assert trace_calls == [1, 2, 3]
+    assert oracle_mod.OracleStore(tmp_path / "oracle").spent == pytest.approx(store.spent)

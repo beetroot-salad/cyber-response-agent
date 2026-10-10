@@ -84,7 +84,12 @@ def serve_one(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any
     that read passes through as itself (`real-error`, not cached, O4). A world with no facts is
     served its base (`passthrough`). Otherwise one oracle turn at a time (S11): the stored
     answer is looked up again under the turn, then the oracle serves, the host checks and the
-    verifier pass it, and its rows, facts and answer are committed before the ledger row."""
+    verifier pass it, and its rows, facts and answer are committed before the ledger row.
+
+    The answer is recorded and delivered only once the turn has closed (its clock mark
+    included): a failure closing the turn raises before any row is written, so the ledger
+    never records a call whose answer the investigator did not get (N12); the committed answer
+    is the world's, and a repeat of the call is served it from the store."""
     asked = dict(params)
     key = request_key(system, verb, asked)
     hit = registry.store.answers.get(key)
@@ -97,28 +102,34 @@ def serve_one(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any
             world_id=registry.world.world_id))
     with registry._turn(ctx, pauses_clock=True):
         hit = registry.store.answers.get(key)
-        if hit is not None:
-            return registry._from_store(system, verb, asked, hit)
-        base = json.loads(base_text)
-        digest = base_digest(base_text)
-        committed: dict[str, Any] = {}
+        if hit is None:
+            hit = _served_in_turn(registry, system, verb, asked, base_text)
+    return registry._record_answer(system, verb, asked, hit)
 
-        def commit(served: Any, claim: dict, verdict: dict, attempts: int, staged: Any) -> None:
-            served_text = payload_text(served)
-            decision = PASSTHROUGH if canonical_json(served) == canonical_json(base) else ORACLE
-            answer = {"system": system, "verb": verb, "params": asked,
-                      "served": json.loads(served_text), "decision": decision,
-                      "base_digest": digest, "claim": claim, "verifier_verdict": verdict,
-                      "attempts": attempts}
-            registry.store.commit(forged=list(staged.forged.values()),
-                                  facts=[{"entity": e, "field": f, "value": v}
-                                         for (e, f), v in staged.facts.items()],
-                                  answer=answer)
-            committed["answer"] = answer
 
-        registry.oracle.serve((system, verb, asked), base,
-                              lambda: registry._real(system, base), commit)
-        return registry._record_answer(system, verb, asked, committed["answer"])
+def _served_in_turn(registry: WorldRegistry, system: str, verb: str, asked: dict,
+                    base_text: str) -> dict:
+    """One oracle turn's committed answer for the call (under the turn the caller holds)."""
+    base = json.loads(base_text)
+    digest = base_digest(base_text)
+    committed: dict[str, Any] = {}
+
+    def commit(served: Any, claim: dict, verdict: dict, attempts: int, staged: Any) -> None:
+        served_text = payload_text(served)
+        decision = PASSTHROUGH if canonical_json(served) == canonical_json(base) else ORACLE
+        answer = {"system": system, "verb": verb, "params": asked,
+                  "served": json.loads(served_text), "decision": decision,
+                  "base_digest": digest, "claim": claim, "verifier_verdict": verdict,
+                  "attempts": attempts}
+        registry.store.commit(forged=list(staged.forged.values()),
+                              facts=[{"entity": e, "field": f, "value": v}
+                                     for (e, f), v in staged.facts.items()],
+                              answer=answer)
+        committed["answer"] = answer
+
+    registry.oracle.serve((system, verb, asked), base,
+                          lambda: registry._real(system, base), commit)
+    return committed["answer"]
 
 
 class PrebranchChanged(Exception):
@@ -387,6 +398,8 @@ class WorldRegistry(ModuleVerbRegistry):
                         oracle_turn_closed(Path(run_dir))
                     except Exception as unclosed:
                         if ended:
+                            # Nothing is recorded or delivered inside a turn (`serve_one`
+                            # does both after it), so this replaces no answer (N12).
                             raise
                         # The turn's own abort (an unservable world, which ends the sibling)
                         # is what leaves; the mark it could not close names this process, and
