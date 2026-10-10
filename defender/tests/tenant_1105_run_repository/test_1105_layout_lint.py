@@ -14,6 +14,10 @@ imports. The module-level `RunPaths` imports of `learning/author/lessons/run.py`
 `load_run_context` in PR 1 (the owner's Phase F ruling on FR-1: the allow-list stays 18, so
 PR 2's empty allow-list stays reachable); no allow-list entry names either module.
 
+#1105 PR 2 reached that end state (D7″, J15): the allow-list is empty, the `unmigrated` row is
+gone (F-09 moved its modules to the rows their remaining use fits), and F-13 deleted
+`resolve_run_bundle`. The tests below that pinned PR 1's interim list now pin the empty one.
+
 THE LINT'S TEST INTERFACE (coined here; the implementer matches it, or renames it HERE):
 
 * the program `scripts/lint/lint_run_layout_imports.py`, run by CI as
@@ -42,7 +46,7 @@ THE LINT'S TEST INTERFACE (coined here; the implementer matches it, or renames i
   (a sequence, so a duplicate can be written and is a finding; entries are not normalised);
 * `CATEGORIES: Mapping[str, Sequence[str]]` — row name -> module paths under `defender/`, the
   rows `owners`, `running-investigation`, `names-only`, `run-lifecycle`, `path-taking-readers`,
-  `not-a-run`, `deferred_legacy`, `unmigrated`, `helpers-only`;
+  `not-a-run`, `deferred_legacy`, `helpers-only` (PR 1's `unmigrated` row went with #1105 PR 2);
 * `DEFERRED_LEGACY: frozenset[tuple[str, str]]` — the four exempt (module, function) pairs;
 * `HELPERS: frozenset[str]` — the eight ungated layout helpers;
 * the sweep skips `evals/` and `tests/` under the root, every `__pycache__` and hidden directory,
@@ -89,8 +93,9 @@ HELPERS = frozenset({"artifact_file", "artifact_dir", "plain_file", "contained_p
                      "LEAD_ID_RE", "gather_summaries_shape", "is_case_answer_key",
                      "GATHER_RAW_SHAPE"})
 #: Layout names D7 names as gated.
+#: (#1105 PR 2, F-13: `resolve_run_bundle` lost its last caller with J3's union and is deleted.)
 NAMED_GATED = ("RunPaths", "RUN_LAYOUT", "SessionPaths", "WIRE_LOG_NAMES", "GATE_METADATA_KEY",
-               "RunLayout", "WireLogNames", "resolve_run_bundle")
+               "RunLayout", "WireLogNames")
 #: The door's public names that are not layout names (D1.3).
 NON_LAYOUT = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref", "RunId",
                         # #1105 PR 2 (declared change 0): the tenant-scoped repository's names
@@ -106,28 +111,9 @@ _VE = "scripts/visualize/visualize_episode.py"
 _CLI = "learning/branch/cli.py"
 _LESSONS = "learning/author/lessons/run.py"
 _FORWARD = "learning/author/verify_forward/forward.py"
-#: PR 1's allow-list (A4-10; the owner's Phase F ruling on FR-1): 18 (module, function, name,
-#: count). The two deferred_legacy modules' module-level imports move into their exempt readers.
-EXPECTED_ALLOW_LIST = (
-    ("run_common.py", "materialize_run", "EpisodePaths.runs", 1),          # :88
-    ("run_common.py", "materialize_run", "Tenant.runs", 1),                # :90
-    ("run_common.py", "materialize_run", "Run.for_tenant", 1),             # :96
-    (_CLI, "sibling_runs_base", "EpisodePaths.runs", 1),                   # :540
-    (_CLI, "start_family", "Episode.runs", 1),                             # :604
-    (_CLI, "_launch", "Tenant.runs", 1),                                   # :1089
-    ("run.py", "main", "Episode.runs", 1),                                 # :554
-    (_VE, "_load_episode", "EpisodeLayout.run", 1),                        # :709
-    (_VE, "_build_roster", "EpisodeLayout.runs", 1),                       # :763
-    (_VE, "_render_roster_item", "EpisodeLayout.run_page", 1),             # :1615
-    (_VE, "_render_one_world", "EpisodeLayout.run_page", 1),               # :1666
-    (_VE, "_render_findings_section", "EpisodeLayout.runs", 1),            # :1847
-    ("scripts/visualize/visualize_run.py", "main", "Run.at", 1),           # :633
-    ("learning/branch/archive.py", "<module>", "RunPaths", 1),
-    ("learning/branch/questioner/__init__.py", "<module>", "RunPaths", 1),
-    ("learning/leads/lead_author/__init__.py", "<module>", "RunPaths", 1),
-    ("learning/ops/trace_lesson.py", "<module>", "RunPaths", 1),
-    (_CLI, "<module>", "RunPaths", 1),
-)
+#: The allow-list. PR 1 held 18 (module, function, name, count) entries (A4-10); #1105 PR 2
+#: migrated every site and emptied it (D7″'s end state, J15: no allow-list entries).
+EXPECTED_ALLOW_LIST: tuple[tuple[str, str, str, int], ...] = ()
 
 #: The four legacy readers `deferred_legacy` exempts, keyed by (module, function) (N-f; the
 #: After-the-gate AUTO, NF-15).
@@ -138,8 +124,14 @@ EXPECTED_DEFERRED_LEGACY = frozenset({
 _PACKAGE_FILES = ("__init__.py", "_layout.py", "_handle.py", "_lookup.py", "_record.py",
                   "_held.py", "_id.py", "_errors.py")
 #: D7's categories table (design-rev4.md, "Categories, by module"), every module in exactly one
-#: row: the owners plus the 57 non-owner production importers of the layout (57 at 80888efb;
+#: row: the owners plus the 56 non-owner production importers of the layout (57 at 80888efb;
 #: #1135 took `learning/judge/enqueue.py` off it; #1191 added `api/demo.py`, names-only).
+#: #1105 PR 2 (F-09): the `unmigrated` row is gone — archive.py, the questioner and the lead
+#: author read the run folder they were handed (path-taking-readers), the launcher keeps only
+#: the predicates (helpers-only), and the tracer reads its runs through `Run` and leaves the
+#: table; `learning/judge/render.py` lost its last layout name with J3's union and leaves it;
+#: `runtime/box/_docker.py` joins the running investigation (the box env's runs base comes from
+#: the layout owner).
 EXPECTED_CATEGORIES: dict[str, frozenset[str]] = {
     "owners": frozenset({*(f"run_repository/{f}" for f in _PACKAGE_FILES),
                          "_episode_paths.py", "_episode_handle.py", "_tenant.py"}),
@@ -154,9 +146,10 @@ EXPECTED_CATEGORIES: dict[str, frozenset[str]] = {
         "runtime/tools_gather.py", "runtime/toon_gate.py", "runtime/box/_lifecycle.py",
         "runtime/branch/__init__.py", "runtime/branch/_frontier.py", "runtime/branch/_seed.py",
         "runtime/branch/_spec.py", "runtime/case_ticket.py",
-        "scripts/gather_tools/record_query.py", "skills/invlang/corpus.py"}),
+        "scripts/gather_tools/record_query.py", "skills/invlang/corpus.py",
+        "runtime/box/_docker.py"}),
     "names-only": frozenset({
-        "_report.py", "_artifact_schema.py", "runtime/compaction.py", "learning/judge/render.py",
+        "_report.py", "_artifact_schema.py", "runtime/compaction.py",
         "learning/branch/seams.py", "learning/judge/__init__.py",
         "learning/author/verify_forward/checks.py", "learning/core/config.py",
         "scripts/workspace_map.py",
@@ -167,27 +160,25 @@ EXPECTED_CATEGORIES: dict[str, frozenset[str]] = {
     "path-taking-readers": frozenset({
         "learning/lead_repository.py", "scripts/visualize/visualize_run.py",
         "scripts/visualize/visualize_runtime.py", "scripts/visualize/visualize_messages.py",
-        "scripts/visualize/visualize_data.py", "scripts/visualize/visualize_primitives.py"}),
+        "scripts/visualize/visualize_data.py", "scripts/visualize/visualize_primitives.py",
+        "learning/branch/archive.py", "learning/branch/questioner/__init__.py",
+        "learning/leads/lead_author/__init__.py"}),
     "not-a-run": frozenset({_VE}),
     "deferred_legacy": frozenset({_LESSONS, _FORWARD}),
-    "unmigrated": frozenset({
-        "learning/branch/archive.py", "learning/branch/questioner/__init__.py",
-        "learning/leads/lead_author/__init__.py", "learning/ops/trace_lesson.py", _CLI}),
     # `learning/judge/enqueue.py` left the row in the merge of #1135, which removed its last use
     # of the layout (owner ruling: the row is dropped, 57 -> 56).
-    "helpers-only": frozenset({"learning/branch/ledger.py", "learning/judge/run.py"}),
+    "helpers-only": frozenset({"learning/branch/ledger.py", "learning/judge/run.py", _CLI}),
 }
 
 #: One representative module per row, for the planted-tree tests.
 _ROW_SAMPLE = {
     "owners": "_episode_handle.py",
     "running-investigation": "runtime/observe.py",
-    "names-only": "learning/judge/render.py",
+    "names-only": "learning/judge/__init__.py",
     "run-lifecycle": "run_common.py",
     "path-taking-readers": "scripts/visualize/visualize_run.py",
     "not-a-run": _VE,
     "deferred_legacy": _LESSONS,
-    "unmigrated": "learning/branch/archive.py",
     "helpers-only": "learning/judge/run.py",
     "uncategorised": "learning/planted_probe.py",
 }
@@ -298,25 +289,6 @@ def _main(lint_run_layout_imports: Any, root: Path, capsys: Any) -> tuple[Any, s
     return code, capsys.readouterr().out
 
 
-def _drop_import(path: Path, name: str) -> None:
-    """Rewrite `path` without its module-level import of `name` (the rest of the module is
-    kept, unparsed back from its AST)."""
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    body: list[ast.stmt] = []
-    for node in tree.body:
-        if isinstance(node, ast.ImportFrom) and any(a.name == name for a in node.names):
-            node.names = [a for a in node.names if a.name != name]
-            if not node.names:
-                continue
-        body.append(node)
-    tree.body = body
-    path.write_text(ast.unparse(tree) + "\n", encoding="utf-8")
-
-
-# ==========================================================================================
-# CI, the real tree and the allow-list.
-# ==========================================================================================
-
 def test_1105_ci_runs_the_layout_lint_as_its_own_step():
     """.github/workflows/ci.yml has a blocking step whose run line executes
     scripts/lint/lint_run_layout_imports.py (no continue-on-error), so a planted violation fails
@@ -338,35 +310,24 @@ def test_1105_ci_runs_the_layout_lint_as_its_own_step():
 
 @pytest.mark.gate
 def test_1105_layout_lint_is_clean_on_the_tree_and_every_allow_list_entry_is_load_bearing():
-    """lint_run_layout_imports exits 0 on the tree with its PR 1 allow-list of exactly 18
-    entries: ruling 1's nine sites (run_common.py:88, learning/branch/cli.py:540,604, run.py:554,
-    scripts/visualize/visualize_episode.py:709,763,1615,1666,1847), cli.py:1089
-    (tenant.tenant.runs), run_common.py:90 (tenant.runs) and :96 (Run.for_tenant),
-    visualize_run.py:633 (Run.at), and the module-level RunPaths imports of
-    learning/branch/archive.py, learning/branch/questioner/__init__.py,
-    learning/leads/lead_author/__init__.py, learning/ops/trace_lesson.py and
-    learning/branch/cli.py; removing any one entry makes the lint fail."""
+    """lint_run_layout_imports exits 0 on the tree with an empty allow-list (D7″'s end state:
+    #1105 PR 2 migrated PR 1's 18 entries — ruling 1's nine sites, cli.py's tenant.tenant.runs,
+    run_common.py's tenant.runs and Run.for_tenant, visualize_run.py's Run.at and the five
+    unmigrated callers' module-level RunPaths imports), and with no allow-list the tree holds no
+    gated use at all, so there is no entry to be load-bearing."""
     lint_run_layout_imports = _lint()
     assert lint_run_layout_imports.main([]) == 0, "the layout lint is not clean on the tree"
     listed = sorted(tuple(e) for e in lint_run_layout_imports.ALLOW_LIST)
     assert listed == sorted(EXPECTED_ALLOW_LIST), (
-        f"the PR 1 allow-list is not the 18 named entries: {listed}")
+        f"the allow-list is not empty (D7″): {listed}")
     raw = lint_run_layout_imports.scan(lint_run_layout_imports.DEFENDER, allow_list=())
-    uses = _keys(raw)
-    expected = collections.Counter({(m, f, n): c for m, f, n, c in EXPECTED_ALLOW_LIST})
-    assert uses == expected, (
-        "with no allow-list the tree's gated uses are not exactly the listed ones, so some "
-        f"entry is not load-bearing or some use is unlisted: {sorted(uses - expected)} extra, "
-        f"{sorted(expected - uses)} missing")
-    dropped = EXPECTED_ALLOW_LIST[1:]
-    found = lint_run_layout_imports.scan(lint_run_layout_imports.DEFENDER, allow_list=dropped)
-    assert _keys(found) == collections.Counter({EXPECTED_ALLOW_LIST[0][:3]: 1}), (
-        f"dropping one entry did not leave exactly its use flagged: {_displays(found)}")
+    assert not _keys(raw), (
+        f"with no allow-list the tree still holds gated uses: {_displays(raw)}")
 
 
 def test_1105_layout_lint_fails_a_planted_new_gated_use(tmp_path, capsys):
     """A gated use planted in a scratch copy of the sweep (a RunPaths import in a new module, a
-    second RunPaths import in an unmigrated caller's function, a Run.at call in a names-only
+    second RunPaths import in a migrated caller's function, a Run.at call in a former names-only
     user) makes the lint exit nonzero naming the module, function and name. Positive control: a
     planted helper import (artifact_file) passes."""
     lint_run_layout_imports = _lint()
@@ -402,30 +363,30 @@ def test_1105_layout_lint_fails_a_stale_allow_list_entry(tmp_path, capsys):
     lint_run_layout_imports = _lint()
     root = _sweep_copy(tmp_path)
     caller = "learning/ops/trace_lesson.py"
-    _drop_import(root / caller, "RunPaths")
+    # #1105 PR 2 migrated this caller off RunPaths and emptied the allow-list (D7″), so the
+    # entry PR 1 listed for its import is now stale on the tree itself.
+    entry = (caller, "<module>", "RunPaths", 1)
+    found = lint_run_layout_imports.scan(root, allow_list=(entry,))
+    stale = [f for f in found if "stale" in str(getattr(f, "display", ""))
+             and caller in str(getattr(f, "display", ""))
+             and "RunPaths" in str(getattr(f, "display", ""))]
+    assert stale, (f"the trace_lesson.py entry covers no use, and the lint did not name it "
+                   f"stale: {_displays(found)}")
     code, out = _main(lint_run_layout_imports, root, capsys)
-    stale = [ln for ln in out.splitlines() if "stale" in ln and caller in ln and "RunPaths" in ln]
-    assert isinstance(code, int), (f"the trace_lesson.py entry covers no use any more, and the lint did not name it stale "
-        f"(exit {code}):\n{out}")
-    assert code != 0, (f"the trace_lesson.py entry covers no use any more, and the lint did not name it stale "
-        f"(exit {code}):\n{out}")
-    assert stale, (f"the trace_lesson.py entry covers no use any more, and the lint did not name it stale "
-        f"(exit {code}):\n{out}")
-    shutil.copyfile(H.DEFENDER / caller, root / caller)
-    code, out = _main(lint_run_layout_imports, root, capsys)
-    assert code == 0, f"with the use restored the copy is not clean under the 18 entries:\n{out}"
+    assert code == 0, f"without the entry the copy is not clean under the empty list:\n{out}"
+    # A module in no row (archive.py, PR 1's sample, is a path-taking reader since F-09).
     planted = _planted(tmp_path / "count")
-    _plant(planted, "learning/branch/archive.py",
+    _plant(planted, caller,
            "from defender.run_repository import RunPaths  # noqa: F401\n")
-    entry = ("learning/branch/archive.py", "<module>", "RunPaths")
+    entry = (caller, "<module>", "RunPaths")
     assert not lint_run_layout_imports.scan(planted, allow_list=(entry + (1,),)), (
         "one use, one entry of count 1: clean")
     found = lint_run_layout_imports.scan(planted, allow_list=(entry + (2,),))
-    assert any("stale" in str(getattr(f, "display", "")) and "archive.py" in
+    assert any("stale" in str(getattr(f, "display", "")) and caller in
                str(getattr(f, "display", "")) for f in found), (
         f"a count above the uses it covers is not reported stale: {_displays(found)}")
     found = lint_run_layout_imports.scan(
-        planted, allow_list=(entry + (1,), ("learning/branch/archive.py", "gone", "RunPaths", 1)))
+        planted, allow_list=(entry + (1,), (caller, "gone", "RunPaths", 1)))
     assert any("stale" in str(getattr(f, "display", "")) and "gone" in
                str(getattr(f, "display", "")) for f in found), (
         f"an entry with no matching use is not reported stale: {_displays(found)}")
@@ -504,8 +465,8 @@ def test_1105_layout_lint_gates_every_layout_name_but_the_eight_helpers_includin
     """In a module with no layout exemption, importing any of the eight helpers (artifact_file,
     artifact_dir, plain_file, contained_payload, LEAD_ID_RE, gather_summaries_shape,
     is_case_answer_key, GATHER_RAW_SHAPE) passes, importing each other layout name (RunPaths,
-    RUN_LAYOUT, SessionPaths, WIRE_LOG_NAMES, GATE_METADATA_KEY, RunLayout, WireLogNames,
-    resolve_run_bundle) is flagged, and a name newly added to _layout is flagged until it is
+    RUN_LAYOUT, SessionPaths, WIRE_LOG_NAMES, GATE_METADATA_KEY, RunLayout, WireLogNames) is
+    flagged, and a name newly added to _layout is flagged until it is
     listed."""
     lint_run_layout_imports = _lint()
     root = _planted(tmp_path)
@@ -731,9 +692,9 @@ def untyped(ep):
 def test_1105_layout_lint_types_owner_receivers_through_every_binding_form_the_precedent_missed(tmp_path):
     """A gated member read is flagged when its receiver is typed as an owner through a with-as
     target, a for target, a comprehension variable, an Optional[X] or X | None or string
-    annotation, an annotated return, or Episode.open(...); run.py:554 (`with door as episode`)
-    is among the findings the allow-list covers. An untyped receiver is not flagged (the recorded
-    gap)."""
+    annotation, an annotated return, or Episode.open(...). run.py's `with door as episode` read
+    (PR 1's allow-listed F41 witness) is gone: #1105 PR 2 starts siblings by episode id, so the
+    real run.py yields no finding. An untyped receiver is not flagged (the recorded gap)."""
     lint_run_layout_imports = _lint()
     root = _planted(tmp_path)
     mod = "learning/binding_forms.py"
@@ -746,11 +707,8 @@ def test_1105_layout_lint_types_owner_receivers_through_every_binding_form_the_p
     assert functions == typed, (
         f"typed receivers flagged in {sorted(functions)}; missing {sorted(typed - functions)}, "
         f"wrongly flagged {sorted(functions - typed)} (an untyped receiver is the recorded gap)")
-    assert ("run.py", "main", "Episode.runs") in _keys(found), (
-        "run.py:554's `with door as episode` read of episode.runs is not seen (F41)")
-    assert ("run.py", "main", "Episode.runs", 1) in {
-        tuple(e) for e in lint_run_layout_imports.ALLOW_LIST}, (
-        "run.py:554 is not among the allow-list's entries")
+    assert not _in(found, "run.py"), (
+        f"the migrated run.py still holds a gated read: {_in(found, 'run.py')}")
 
 
 def test_1105_layout_lint_flags_a_re_exports_own_import(tmp_path):
@@ -776,9 +734,9 @@ def test_1105_layout_lint_flags_a_re_exports_own_import(tmp_path):
 # ==========================================================================================
 
 def test_1105_layout_lint_puts_every_layout_importer_in_exactly_one_category(tmp_path):
-    """The lint's category table places each of the 57 non-owner production importers of the
-    layout at 80888efb in exactly one row as D7's table lists them, the owners in their own row,
-    and exempts layout names exactly in the running-investigation, names-only, run-lifecycle,
+    """The lint's category table places each of the 56 non-owner production importers of the
+    layout (57 at 80888efb; #1105 PR 2's F-09 moves) in exactly one row as D7's table lists
+    them, the owners in their own row, and exempts layout names exactly in the running-investigation, names-only, run-lifecycle,
     path-taking-reader, not-a-run and deferred_legacy rows; a module in no row gets no
     exemption. (The deferred_legacy row exempts only its four readers, keyed by (module,
     function), per the After-the-gate AUTO.)"""
@@ -789,7 +747,7 @@ def test_1105_layout_lint_puts_every_layout_importer_in_exactly_one_category(tmp
         f"{sorted(r for r in EXPECTED_CATEGORIES if table.get(r) != EXPECTED_CATEGORIES[r])}")
     every = [m for mods in table.values() for m in mods]
     assert len(every) == len(set(every)), "a module sits in more than one row"
-    assert sum(len(v) for r, v in EXPECTED_CATEGORIES.items() if r != "owners") == 57
+    assert sum(len(v) for r, v in EXPECTED_CATEGORIES.items() if r != "owners") == 56
     root = _planted(tmp_path)
     for module in _ROW_SAMPLE.values():
         _add(root, module, "from defender.run_repository import RunPaths  # noqa: F401\n\n\n"
@@ -1121,10 +1079,10 @@ def untyped(x):
 def test_1105_layout_lint_flags_what_typing_reaches_and_tags_the_launchers_carrier_read(tmp_path):
     """The lint flags a typed-receiver constructor reference (`r: Run; r.at(x)`), a call
     ArchivedWorld(...) like Run(...), a class-level Tenant.runs, reads through an annotated return
-    and a dataclass field, and owner receivers bound by async with and the walrus; the extended
-    tracer tags learning/branch/cli.py:1089 (tenant.tenant.runs through _episode_tenant(...) ->
-    RunTenant), which today's owner_derived does not (RG-14-a), so that named allow-list entry is
-    load-bearing. An untyped receiver is not flagged."""
+    and a dataclass field, and owner receivers bound by async with and the walrus. PR 1's real-tree
+    witness, learning/branch/cli.py's tenant.tenant.runs through _episode_tenant(...) ->
+    RunTenant (RG-14-a), is gone: #1105 PR 2's launcher opens runs through the tenant's
+    repository, so the real cli.py yields no finding. An untyped receiver is not flagged."""
     lint_run_layout_imports = _lint()
     root = _planted(tmp_path)
     mod = "learning/receivers.py"
@@ -1140,9 +1098,8 @@ def test_1105_layout_lint_flags_what_typing_reaches_and_tags_the_launchers_carri
     assert got == expected, (
         f"typing-reached receivers: flagged {sorted(got)}; missing {sorted(expected - got)}; "
         f"wrongly flagged {sorted(got - expected)} (an untyped receiver is the recorded gap)")
-    assert (_CLI, "_launch", "Tenant.runs") in _keys(found), (
-        "cli.py:1089's tenant.tenant.runs through _episode_tenant(...) -> RunTenant is not "
-        "tagged, so its allow-list entry would be stale (RG-14-a)")
+    assert not _in(found, _CLI), (
+        f"the migrated launcher still holds a gated read: {_in(found, _CLI)}")
 
 
 def test_1105_layout_lint_table_equals_the_importer_population_and_an_unlisted_module_gets_no_exemption(tmp_path):

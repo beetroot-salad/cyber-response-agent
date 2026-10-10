@@ -5,7 +5,8 @@ constructor, except where a category below exempts it or the allow-list names th
 
 It is an INTERIM fence (#1105 rev 4.1 F): it exists because the repository still hands out
 paths (`run.run_dir`, a member's `.path`), and it goes when #1082 stops handing them out. PR 1's
-allow-list names every unmigrated use; PR 2 empties it.
+allow-list named every unmigrated use; PR 2 migrated each and emptied it (D7″), so a new use
+has no hatch but an owner hand-out.
 
 What is gated:
 
@@ -17,8 +18,10 @@ What is gated:
   `.run` / `.run_page` / `.sibling_run_dir`, `Episode.runs` and `RUNS_DIRNAME`;
 * `Tenant.runs`;
 * the handle constructors: a call `Run(...)` / `ArchivedWorld(...)`, and any reference to
-  `Run.at`, `Run.for_tenant`, `Run.under` or `ArchivedWorld.at`. Importing `Run` for a type is
-  not gated.
+  `Run.at`, `Run.for_tenant`, `Run.under` or `ArchivedWorld.at`; and the repository's own
+  constructors, a call `RunsRepository(...)` / `EpisodeRuns(...)` (#1105 PR 2: the accepted
+  `Tenant` hands the repository out, and the repository the episode view). Importing any of
+  them for a type is not gated.
 
 The last three are gated in every category but the owners.
 
@@ -99,11 +102,15 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
         "runtime/branch/__init__.py", "runtime/branch/_frontier.py", "runtime/branch/_seed.py",
         "runtime/branch/_spec.py", "runtime/case_ticket.py",
         "scripts/gather_tools/record_query.py", "skills/invlang/corpus.py",
+        # #1105 PR 2 (row 26): `infra_env` takes `DEFENDER_RUNS_BASE` from the run folder's
+        # own hand-out (`RunPaths.runs_base_env`).
+        "runtime/box/_docker.py",
     ),
     # A `/` join onto a layout value here is `lint_run_records` arm (b)'s finding, not this one.
     "names-only": (
-        "_report.py", "_artifact_schema.py", "runtime/compaction.py", "learning/judge/render.py",
-        "learning/branch/seams.py", "learning/judge/__init__.py",
+        "_report.py", "_artifact_schema.py", "runtime/compaction.py", "learning/branch/seams.py",
+        # F-09 (#1105 PR 2): learning/judge/render.py left this row (J3 took its last name).
+        "learning/judge/__init__.py",
         "learning/author/verify_forward/checks.py", "learning/core/config.py",
         "scripts/workspace_map.py", "api/demo.py",
     ),
@@ -112,17 +119,18 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
         "learning/lead_repository.py", "scripts/visualize/visualize_run.py",
         "scripts/visualize/visualize_runtime.py", "scripts/visualize/visualize_messages.py",
         "scripts/visualize/visualize_data.py", "scripts/visualize/visualize_primitives.py",
+        # F-09 (#1105 PR 2): D5's callers, migrated onto ids at their edges, keep reading the
+        # run folder they were handed (`run.run_dir`) by its layout names.
+        "learning/branch/archive.py", "learning/branch/questioner/__init__.py",
+        "learning/leads/lead_author/__init__.py",
     ),
     "not-a-run": (_VE,),
     # N-f: exempt only inside the four readers in `DEFERRED_LEGACY`; #1166 deletes them.
     "deferred_legacy": (_LESSONS, _FORWARD),
-    # D5's callers: PR 1 allow-lists their uses, PR 2 migrates them.
-    "unmigrated": (
-        "learning/branch/archive.py", "learning/branch/questioner/__init__.py",
-        "learning/leads/lead_author/__init__.py", "learning/ops/trace_lesson.py", _CLI,
-    ),
     "helpers-only": (
         "learning/branch/ledger.py", "learning/judge/run.py",
+        # F-09 (#1105 PR 2): the launcher opens runs by id; it keeps only the predicates.
+        _CLI,
     ),
 }
 
@@ -137,32 +145,10 @@ DEFERRED_LEGACY: frozenset[tuple[str, str]] = frozenset({
     (_FORWARD, "load_run_context"), (_FORWARD, "expected_disposition"),
 })
 
-#: PR 1's allow-list: every unmigrated lint-visible use, (module, function, name, count).
-#: PR 2 replaces each site and empties it.
-ALLOW_LIST: Sequence[tuple[str, str, str, int]] = (
-    # Run setup's runs folder and handle (PR 2's repository create replaces them).
-    ("run_common.py", "materialize_run", "EpisodePaths.runs", 1),
-    ("run_common.py", "materialize_run", "Tenant.runs", 1),
-    ("run_common.py", "materialize_run", "Run.for_tenant", 1),
-    # Ruling 1's sibling sites (PR 2's sibling move).
-    (_CLI, "sibling_runs_base", "EpisodePaths.runs", 1),
-    (_CLI, "start_family", "Episode.runs", 1),
-    (_CLI, "_launch", "Tenant.runs", 1),
-    ("run.py", "main", "Episode.runs", 1),
-    (_VE, "_load_episode", "EpisodeLayout.run", 1),
-    (_VE, "_build_roster", "EpisodeLayout.runs", 1),
-    (_VE, "_render_roster_item", "EpisodeLayout.run_page", 1),
-    (_VE, "_render_one_world", "EpisodeLayout.run_page", 1),
-    (_VE, "_render_findings_section", "EpisodeLayout.runs", 1),
-    # The run page CLI (PR 2 changes its arguments to --tenant T <run_id>).
-    ("scripts/visualize/visualize_run.py", "main", "Run.at", 1),
-    # The unmigrated callers' layout imports (D5, PR 2).
-    ("learning/branch/archive.py", "<module>", "RunPaths", 1),
-    ("learning/branch/questioner/__init__.py", "<module>", "RunPaths", 1),
-    ("learning/leads/lead_author/__init__.py", "<module>", "RunPaths", 1),
-    ("learning/ops/trace_lesson.py", "<module>", "RunPaths", 1),
-    (_CLI, "<module>", "RunPaths", 1),
-)
+#: The allow-list: (module, function, name, count). PR 1 listed every unmigrated use; PR 2
+#: replaced each site and emptied it (D7″'s end state). An entry is a hatch nobody should need.
+ALLOW_LIST: Sequence[tuple[str, str, str, int]] = ()
+
 
 #: Owner classes and their gated members, by canonical origin.
 _EPISODE = "defender._episode_handle.Episode"
@@ -171,6 +157,8 @@ _EPISODE_LAYOUT = "defender._episode_paths.EpisodeLayout"
 _TENANT = "defender._tenant.Tenant"
 _RUN = f"{_DOOR}.Run"
 _ARCHIVED = f"{_DOOR}.ArchivedWorld"
+_REPOSITORY = f"{_DOOR}.RunsRepository"
+_EPISODE_VIEW = f"{_DOOR}.EpisodeRuns"
 _GATED_MEMBERS: dict[str, frozenset[str]] = {
     _EPISODE: frozenset({"runs"}),
     _EPISODE_PATHS: frozenset({"runs", "sibling_run_dir"}),
@@ -178,8 +166,10 @@ _GATED_MEMBERS: dict[str, frozenset[str]] = {
     _TENANT: frozenset({"runs"}),
     _RUN: frozenset({"at", "for_tenant", "under"}),
     _ARCHIVED: frozenset({"at"}),
+    _REPOSITORY: frozenset(),
+    _EPISODE_VIEW: frozenset(),
 }
-_CONSTRUCTORS = frozenset({_RUN, _ARCHIVED})
+_CONSTRUCTORS = frozenset({_RUN, _ARCHIVED, _REPOSITORY, _EPISODE_VIEW})
 _RUNS_DIRNAME = "RUNS_DIRNAME"
 #: Star imports of these modules bind gated names wholesale.
 _STAR_SOURCES = frozenset({_DOOR, "defender._episode_paths", "defender._episode_handle",
@@ -846,7 +836,7 @@ def scan(root: Path = DEFENDER, *,
         for use in found:
             findings.append(Finding(key, f"{module}:{use.lineno} {function}(): {name} — outside "
                                          "the runs repository, name a run by (tenant, run id) "
-                                         "and take paths from the Run open_run hands out"))
+                                         "and take paths from the Run its repository opens"))
     return findings
 
 
