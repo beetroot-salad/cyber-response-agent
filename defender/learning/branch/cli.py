@@ -1231,8 +1231,8 @@ def _stamp_speaks(stamp: dict | None) -> bool:
 def verify_family(
     episode: Episode, run_dirs: Sequence[Path], *, source: dict, allow_dirty: bool = False,
 ) -> dict:
-    """Check every sibling, archive each verified one, and write the family stamp when every
-    check holds.
+    """Check every sibling, archive each verified one, and write the family stamp unless a
+    comparability fault forbids it.
 
     `source` is the source run's stamp as judged by `preflight_episode`. Required with no
     default, so siblings are always held to the source's commit rather than only to each other.
@@ -1240,9 +1240,20 @@ def verify_family(
     Runs only after an `accepted` pre-flight (no sibling starts otherwise), and never touches
     the outcome record pre-flight wrote (S6). Only scrub-verified worlds are archived, each on
     its own: a world whose tree the archive refuses, or that has no scrub verdict, is one the
-    judge cannot see, and gets its own `not archived` record (S10) while the others are still
-    archived. Any fault withholds
-    the family stamp, and is returned (and logged by the caller) as the reason.
+    judge cannot see, and gets its own `not archived` record (S10, counted by O5) while the
+    others are still archived.
+
+    Two kinds of fault (FORK-1 as amended 2026-10-10, PR #1232 round 7). A PER-WORLD fault (no
+    scrub verdict, an archive refusal) is that world's own record and does not withhold the
+    stamp, which records the agreement among the verified, archived siblings. A COMPARABILITY
+    fault — `_family_refusal`'s (commit/knowledge mismatch, dirt unless waived),
+    `_cross_tenant_fault`'s, or no sibling verified and archived at all — withholds the stamp,
+    and its reason is recorded (`outcome.write_not_comparable`) for the judge, which stamps such
+    a family `not comparable`.
+
+    Returns `comparable` (the stamp was written: no comparability fault), `reason` (every
+    fault of both kinds, `""` when none) and `not_comparable` (the comparability faults alone,
+    the recorded reason; `""` when the stamp was written).
     """
     from defender.learning.branch import archive as archive_mod
 
@@ -1251,22 +1262,25 @@ def verify_family(
     unverified = sorted(set(dirs) - set(scrub_verified))
     stamps = {label: _stamp_of(path) for label, path in dirs.items()}
 
-    reasons: list[str] = []
+    # `blocking`: the comparability faults, which withhold the stamp. `per_world`: faults that
+    # are one world's own record and leave the stamp to the rest.
+    blocking: list[str] = []
+    per_world: list[str] = []
     if not dirs:
-        reasons.append("the family has no sibling — a comparison over no arm is not one, so "
-                       "there is nothing to hold to the source's commit or to archive")
+        blocking.append("the family has no sibling — a comparison over no arm is not one, so "
+                        "there is nothing to hold to the source's commit or to archive")
     if unverified:
-        reasons.append(
+        per_world.append(
             f"sibling(s) {unverified} have no scrub verdict recording a completed walk — an "
             "unwalked tree is one nothing has certified as free of what the box left behind")
     judged = _family_refusal(
         source, {f"sibling {label!r}": stamps[label] for label in scrub_verified},
         source_who="the source run", allow_dirty=allow_dirty)
     if judged.refusal is not None:
-        reasons.append(judged.refusal)
+        blocking.append(judged.refusal)
     cross_tenant = _cross_tenant_fault(stamps, scrub_verified)
     if cross_tenant is not None:
-        reasons.append(cross_tenant)
+        blocking.append(cross_tenant)
 
     # `worlds/` exists whatever happens below; a world's own record says why one is missing.
     # Every finished world ends archived or with its own `not archived` record — never neither,
@@ -1283,19 +1297,29 @@ def verify_family(
         try:
             archive_mod.archive_episode(episode, {label: dirs[label]})
         except Exception as refused:  # noqa: BLE001 — one world's archive, recorded; the rest go on
-            reasons.append(f"world {label}'s tree could not be archived ({refused})")
+            per_world.append(f"world {label}'s tree could not be archived ({refused})")
             outcome_mod.write_world_record(
                 episode, label, outcome_mod.NOT_ARCHIVED,
                 detail=f"the archive refused its finished tree: {refused}")
             continue
         archived.append(label)
 
-    reason = "; ".join(reasons)
-    if not reasons:
+    if dirs and not archived:
+        blocking.append(
+            f"no sibling of {sorted(dirs)} was verified and archived — there is no arm left to "
+            "compare")
+    not_comparable = "; ".join(blocking)
+    if not blocking:
+        # The agreement among the verified, archived siblings: a world with only its own
+        # `not archived` record is not a member of what the stamp certifies.
         _write_family_stamp(
-            episode, stamps, source=source, allow_dirty=allow_dirty, waived=judged.waived,
-            dirs=dirs)
-    return {"comparable": not reasons, "reason": reason, "scrub_verified": scrub_verified,
+            episode, {label: stamps[label] for label in archived}, source=source,
+            allow_dirty=allow_dirty, waived=judged.waived, dirs=dirs)
+    else:
+        # The judge names this reason when it stamps the family `not comparable`.
+        outcome_mod.write_not_comparable(episode, not_comparable)
+    return {"comparable": not blocking, "reason": "; ".join(blocking + per_world),
+            "not_comparable": not_comparable, "scrub_verified": scrub_verified,
             "archived": archived, "worlds": sorted(dirs)}
 
 
@@ -1583,7 +1607,10 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
         _logger.warning(f"world {label} exited {exits[label]}")
     if not report["comparable"]:
         _logger.warning(f"episode {episode_id}: the family stamp is withheld "
-                        f"({report['reason']})")
+                        f"({report['not_comparable']})")
+    elif report["reason"]:
+        _logger.warning(f"episode {episode_id}: per-world faults, each on its own world's "
+                        f"record ({report['reason']})")
     _logger.info(f"episode {episode_id}: {len(report['archived'])}/{len(labels)} worlds "
                  "archived")
     with clock.step(Step.JUDGE):

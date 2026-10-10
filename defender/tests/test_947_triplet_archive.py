@@ -65,11 +65,16 @@ def _episode():
 
 def _accepted(tmp_path, *, outcome="accepted", reason="every fact world calibrated"):
     """An episode pre-flight recorded (`outcome.yaml`, through its production writer): the
-    readers compare only an `accepted` family (#1224 M05=A), so every reader scenario that is
-    not about that gate starts from one."""
+    readers compare only an `accepted` family (#1224 M05=A) carrying the family stamp (PR #1232
+    round 7), so every reader scenario that is not about those gates starts from one."""
     ep = T.episode(tmp_path)
     with Episode.open(ep) as episode:
         T.mod("learning.branch.outcome").write_outcome(episode, outcome, reason=reason)
+    if outcome == "accepted":
+        # PR #1232 round 7: the readers compare only a family `verify_family` stamped.
+        from defender.tests._judge_921 import comparable_family_stamp
+
+        comparable_family_stamp(ep)
     return ep
 
 

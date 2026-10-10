@@ -438,15 +438,20 @@ def test_947_launcher_verifies_each_siblings_scrub_verdict(tmp_path):
 
 def test_947_a_sibling_without_a_ran_true_scrub_marks_the_episode_incomplete(tmp_path):
     """A sibling whose scrub verdict is absent, or present but not recording a completed walk,
-    withholds the family's comparability with the reason — never archived as comparable."""
+    is never archived and the reason names it. FORK-1 as amended (2026-10-10, PR #1232 round
+    7): that is a per-world fault, recorded on the world (#1224 S10, O5), so it no longer
+    withholds the family stamp over the verified siblings."""
     base, src = T.runs_base(tmp_path)
     for scrub_ran, world in ((None, "b"), (False, "c")):
-        ep = T.episode(tmp_path)
+        ep = T.episode(tmp_path / world)
         dirs = [T.sibling_run_dir(base, w, scrub_ran=True if w != world else scrub_ran)
                 for w in T.WORLDS]
         report = _verify_family(ep, dirs, source=T.provenance_record())
-        assert report["comparable"] is False
         assert world in report["reason"]
+        assert world not in report["archived"]
+        assert report["comparable"] is True, report
+        assert report["not_comparable"] == ""
+        assert (ep / "provenance.json").exists()
 
 
 def test_a_finished_sibling_without_a_scrub_verdict_gets_its_own_not_archived_record(tmp_path):
@@ -655,18 +660,35 @@ def test_947_launcher_no_longer_hoists_one_capture_above_the_family(tmp_path):
 
 
 def test_947_an_incomplete_family_archives_per_world_and_withholds_comparability(tmp_path):
-    """A family that fails verification archives each individually clean sibling and withholds
-    only the family stamp and the comparability claim: the clean worlds are on disk, the stamp
-    is not, and the verification report says why. (#1224 retired `incomplete` as an outcome
+    """A family that fails verification archives each individually clean sibling. FORK-1 as
+    amended (2026-10-10, PR #1232 round 7): a per-world fault (sibling c's missing scrub
+    verdict) is c's own record and the stamp still certifies the verified siblings; only a
+    comparability fault (here: sibling b ran another commit) withholds the family stamp and the
+    comparability claim, recording why for the judge. (#1224 retired `incomplete` as an outcome
     word: the outcome record is pre-flight's, and verification never touches it.)"""
     base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path)
+    # A per-world fault: c is not archived and the reason names it; the stamp is written.
+    ep = T.episode(tmp_path / "per-world")
     dirs = [T.sibling_run_dir(base, w, scrub_ran=(w != "c")) for w in T.WORLDS]
     report = _verify_family(ep, dirs, source=T.provenance_record())
     assert sorted(p.name for p in (ep / "worlds").iterdir()) == ["a", "b"]
+    assert (ep / "provenance.json").exists()
+    assert not (ep / "not_comparable.yaml").exists()
+    assert report["comparable"] is True
+    assert "c" in report["reason"]
+    assert not (ep / "outcome.yaml").exists(), "verification wrote pre-flight's outcome record"
+
+    # A comparability fault: the clean worlds are still on disk, the stamp is not, and the
+    # recorded reason names the fault.
+    ep = T.episode(tmp_path / "comparability")
+    dirs = [T.sibling_run_dir(base, w, commit="cafef00" if w == "b" else "deadbee")
+            for w in T.WORLDS]
+    report = _verify_family(ep, dirs, source=T.provenance_record())
+    assert sorted(p.name for p in (ep / "worlds").iterdir()) == sorted(T.WORLDS)
     assert not (ep / "provenance.json").exists()
     assert report["comparable"] is False
-    assert "c" in report["reason"]
+    assert "cafef00" in report["not_comparable"]
+    assert "cafef00" in (ep / "not_comparable.yaml").read_text(encoding="utf-8")
     assert not (ep / "outcome.yaml").exists(), "verification wrote pre-flight's outcome record"
 
 

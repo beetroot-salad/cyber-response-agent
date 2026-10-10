@@ -14,6 +14,12 @@ record has one writer; the exclusive create refuses a second.
 
 Readers treat every word other than exactly `accepted` as not gradable, and an absent or torn
 outcome record as the distinct "no record" state, never as `accepted` (M05=A).
+
+An `accepted` family is comparable only once `verify_family` wrote the family stamp
+(`provenance.json`): every verified, archived sibling ran the source's code and knowledge,
+clean or waived, under one tenant. When it withheld the stamp it records why in `not_comparable.yaml`, and readers
+call a family with no readable stamp `not comparable` (`not_comparable_reason`), naming that
+reason (PR #1232 round 7: retiring `incomplete` had left such a family gradable).
 """
 from __future__ import annotations
 
@@ -46,6 +52,11 @@ UNUSABLE_AT = 2
 #: The word a reader states for an absent, empty or torn outcome record: the distinct "no record"
 #: state (M05=A), never one of `OUTCOMES` and never the retired `incomplete`.
 NO_RECORD = "no record"
+
+
+#: The word a reader states for an `accepted` family with no readable family stamp: its siblings
+#: were never shown to have run the same code, knowledge and tenant, so nothing compares them.
+NOT_COMPARABLE = "not comparable"
 
 
 class OutcomeUnreadable(ValueError):
@@ -147,6 +158,55 @@ def failed_worlds(bound: Bound, record: Mapping[str, Any]) -> dict[str, dict[str
     return failed
 
 
+def write_not_comparable(episode: Episode, reason: str) -> None:
+    """Record why `verify_family` withheld the family stamp.
+
+    @owns not_comparable — the shipped `not_comparable.yaml` (`reason`) is produced here and
+    nowhere else. Written only when the stamp is withheld; its reason is what the judge's
+    `not comparable` stamp names."""
+    episode.not_comparable.write(_yaml.safe_dump({"reason": reason}, sort_keys=False))
+
+
+def _withheld_because(bound: Bound) -> str:
+    """`verify_family`'s recorded reason for withholding the stamp, or what stands in its place.
+    Read through the bound reader's screen like every episode record; a refused or torn record
+    is named, never read as a reason."""
+    name = LAYOUT.not_comparable
+    rec = bound.read(name)
+    if rec.text is None:
+        why = "absent" if rec.absent else f"refused ({rec.reason})"
+        return f"no record says why ({name} is {why})"
+    try:
+        doc = _yaml.safe_load(rec.text)
+    except (yaml.YAMLError, _yaml.AliasRefused) as torn:
+        return f"no record says why ({name} does not parse: {torn})"
+    if not isinstance(doc, dict) or not isinstance(doc.get("reason"), str):
+        return f"no record says why ({name} carries no reason)"
+    return f"verify_family withheld it: {doc['reason']}"
+
+
+def not_comparable_reason(bound: Bound) -> str | None:
+    """Why the family's worlds cannot be compared, or `None` when the family stamp is there.
+
+    A family stamp that cannot be read (refused, torn, not the stamp's shape) counts as absent:
+    an unreadable stamp certifies nothing. The reason names the missing stamp and
+    `verify_family`'s recorded reason (`write_not_comparable`). Shared by the judge's grading
+    gate and the episode readers (`episode.verdicts`, `episode.delta_o`)."""
+    # Lazy: the archive module pulls the run repository in, which this record module must not.
+    from defender.learning.branch.archive import read_family_stamp
+
+    try:
+        stamp = read_family_stamp(bound)
+    except ValueError as torn:
+        missing = f"the family stamp ({LAYOUT.family_stamp}) is unreadable ({torn})"
+    else:
+        if stamp is not None:
+            return None
+        missing = f"the episode has no family stamp ({LAYOUT.family_stamp})"
+    return (f"{missing} — nothing shows its siblings ran the same code, knowledge and tenant; "
+            f"{_withheld_because(bound)}")
+
+
 def unusable_reason(failed: Mapping[str, Mapping[str, Any]]) -> str | None:
     """O5's verdict on `failed_worlds`: the reason the family is unusable, or `None` while
     fewer than `UNUSABLE_AT` worlds failed."""
@@ -158,7 +218,8 @@ def unusable_reason(failed: Mapping[str, Mapping[str, Any]]) -> str | None:
 
 
 __all__ = [
-    "ACCEPTED", "BUDGET", "DID_NOT_FINISH", "NOT_ARCHIVED", "NO_RECORD", "ORACLE_UNSERVABLE",
-    "OUTCOMES", "REFUSED", "UNUSABLE", "UNUSABLE_AT", "WORLD_REASONS", "OutcomeUnreadable",
-    "failed_worlds", "read_outcome", "unusable_reason", "write_outcome", "write_world_record",
+    "ACCEPTED", "BUDGET", "DID_NOT_FINISH", "NOT_ARCHIVED", "NOT_COMPARABLE", "NO_RECORD",
+    "ORACLE_UNSERVABLE", "OUTCOMES", "REFUSED", "UNUSABLE", "UNUSABLE_AT", "WORLD_REASONS",
+    "OutcomeUnreadable", "failed_worlds", "not_comparable_reason", "read_outcome",
+    "unusable_reason", "write_not_comparable", "write_outcome", "write_world_record",
 ]

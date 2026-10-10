@@ -1058,14 +1058,18 @@ def base_recording(ep: Path, rows: list[dict]) -> Path:
 
 def outcome_record(ep: Path, outcome: str = "accepted", *, reason: str = "",
                    unservable: Iterable[Mapping] = (), not_replayable: Iterable[Mapping] = (),
-                   drift: Iterable[Mapping] = ()) -> Path:
-    """Write pre-flight's outcome record by hand (for readers' scenarios)."""
+                   drift: Iterable[Mapping] = (), family_stamp: bool = True) -> Path:
+    """Write pre-flight's outcome record by hand (for readers' scenarios). An `accepted`
+    record also gets `verify_family`'s family stamp (`J.comparable_family_stamp`) unless
+    `family_stamp=False`: PR #1232 round 7 grades and compares only a stamped family."""
     path = Path(ep) / OUTCOME_NAME
     path.write_text(_yaml.safe_dump({
         "outcome": outcome, "reason": reason,
         "unservable_worlds": [dict(u) for u in unservable],
         "not_replayable": [dict(n) for n in not_replayable],
         "drift": [dict(d) for d in drift]}), encoding="utf-8")
+    if family_stamp and outcome == "accepted":
+        J.comparable_family_stamp(Path(ep))
     return path
 
 

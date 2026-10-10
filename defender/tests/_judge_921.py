@@ -253,8 +253,34 @@ def review_record(episode_dir: Path, *, outcome: str = "accepted",
     return path
 
 
+def comparable_family_stamp(episode_dir: Path, *, commit: str = "deadbee") -> Path | None:
+    """The episode-root family stamp (`provenance.json`) `verify_family` writes when every
+    sibling agreed — the shape `cli._write_family_stamp` leaves, read back through
+    `archive.read_family_stamp`. A stamp already present is kept (a scenario that wrote its
+    own stamp means that one). PR #1232 round 7: the judge grades, and the episode readers
+    compare, only a family carrying this stamp, so every builder of a COMPARABLE accepted
+    family plants it; a scenario modelling a non-comparable family passes `family_stamp=False`.
+    """
+    from defender._episode_handle import Episode
+    from defender._episode_paths import LAYOUT
+    from defender._io import bind
+    from defender.learning.branch.archive import read_family_stamp
+
+    ep = Path(episode_dir)
+    if (ep / LAYOUT.family_stamp).exists():
+        return None
+    doc = {"agreed": {"commit": commit, "dirty": False, "dirty_path_count": 0,
+                      "dirty_paths": [], "unavailable": None},
+           "allow_dirty": False, "source": {"commit": commit, "dirty": False}, "waived": []}
+    with Episode.open(ep) as handle:
+        handle.family_stamp.write(json.dumps(doc, indent=2, sort_keys=True) + "\n")
+    with bind(ep) as bound:
+        assert read_family_stamp(bound) == doc, "fixture bug: the family stamp did not read back"
+    return ep / LAYOUT.family_stamp
+
+
 def outcome_record(episode_dir: Path, outcome: str = "accepted", *, reason: str = "",
-                   unservable: list[dict] | None = None) -> Path:
+                   unservable: list[dict] | None = None, family_stamp: bool = True) -> Path:
     """Pre-flight's `outcome.yaml` (#1224) — the record the judge's gate reads — written
     through the production writer (`learning/branch/outcome.py::write_outcome`).
 
@@ -262,6 +288,9 @@ def outcome_record(episode_dir: Path, outcome: str = "accepted", *, reason: str 
     written raw, because the gate's own handling of it is what such a scenario is about. A
     record already present is replaced: the exclusive create belongs to pre-flight, and a
     fixture restating the outcome is not a second pre-flight.
+
+    An `accepted` record also gets `verify_family`'s family stamp (`comparable_family_stamp`)
+    unless `family_stamp=False`: an accepted, comparable family is what this builder means.
     """
     from defender._episode_handle import Episode
     from defender.learning.branch.outcome import OUTCOMES, write_outcome
@@ -276,6 +305,8 @@ def outcome_record(episode_dir: Path, outcome: str = "accepted", *, reason: str 
         path.write_text(_yaml.safe_dump({
             "outcome": outcome, "reason": reason, "unservable_worlds": list(unservable or ()),
             "not_replayable": [], "drift": []}, sort_keys=False), encoding="utf-8")
+    if family_stamp and outcome == "accepted":
+        comparable_family_stamp(ep)
     return path
 
 
@@ -345,13 +376,13 @@ def investigation_document(world_id: str, *, moved: bool = True, fences_at: int 
     return f"# investigation {world_id}\n\n{fenced}"
 
 
-def accepted_episode(tmp_path: Path, *, root: Path | None = None,
+def accepted_episode(tmp_path: Path, *, root: Path | None = None,  # noqa: PLR0913 — one switch per scenario input
                      holding_system: str = HOLDING_SYSTEM,
                      worlds: list[dict] | None = None,
                      labels: tuple[str, ...] = ("a", "b", "c"),
                      dispositions: dict[str, str] | None = None,
                      ledgers: dict[str, list[dict]] | None = None,
-                     outcome: str = "accepted",
+                     outcome: str = "accepted", family_stamp: bool = True,
                      **world_kw: Any) -> Path:
     """A fully archived, ACCEPTED episode in the #947 layout — the judge's whole input.
 
@@ -384,7 +415,7 @@ def accepted_episode(tmp_path: Path, *, root: Path | None = None,
             write_ledger(ep, label, rows)
         elif label != "a":
             write_ledger(ep, label, [])
-    outcome_record(ep, outcome)
+    outcome_record(ep, outcome, family_stamp=family_stamp)
     return ep
 
 

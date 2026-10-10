@@ -1278,6 +1278,8 @@ demands:
     the word and reason, with no model call and no findings.'
   forks:
   - M05
+  amendment_note: '2026-10-10, human decision (PR #1232 round 7, review finding 3): retiring `incomplete` left non-comparable families gradable; the
+    judge now stamps a family with no family stamp `not comparable` (no model call, nothing queued), naming verify_family''s reason'
   source: 20-demands
   provisional_lifted: §7 (70-resolutions.md)
 - id: d14i_episode_reader_reads_the_outcome_record
@@ -1288,7 +1290,9 @@ demands:
   discharged_by: test_1224_episode_reader_reads_the_outcome_record
   seed_docstring: 'learning/branch/episode.py''s outcome reader returns the outcome and reason from pre-flight''s outcome record, refuses an `unusable`
     or `refused` episode and one with no readable outcome record (M05=A: `incomplete` is retired), and reads an `accepted` one.'
-  amendment_note: 'RF-5: episode.py refuses only `incomplete`, so a new unusable/refused passes it today.'
+  amendment_note: 'RF-5: episode.py refuses only `incomplete`, so a new unusable/refused passes it today. | 2026-10-10, human decision (PR #1232
+    round 7, review finding 3): retiring `incomplete` left non-comparable families gradable; the judge now stamps a family with no family stamp `not
+    comparable` (no model call, nothing queued), naming verify_family''s reason'
   source: 20-demands
   repinned: 'R-04 (92-reconciliation.md): re-pinned to M05=A; ''refuses an incomplete episode'' named a retired word.'
 - id: d15a_oracle_cost_on_its_own_budget
@@ -6842,6 +6846,8 @@ demands:
   - P176
   - P177
   - P187
+  amendment_note: '2026-10-10, human decision (PR #1232 round 7, review finding 3): retiring `incomplete` left non-comparable families gradable; the
+    judge now stamps a family with no family stamp `not comparable` (no model call, nothing queued), naming verify_family''s reason'
   source: 45-dispositions cluster M05
   resolved_by: human
   fork_status: resolved
@@ -9651,6 +9657,8 @@ demands:
   seed_docstring: episode.verdicts and episode.delta_o refuse an outcome record saying `unusable` or `refused`, and an absent or torn record (the
     'no record' state), each with a reason naming the word; `accepted` is the control that reads (GR-01; `incomplete` is retired).
   obligation: PCO-01
+  amendment_note: '2026-10-10, human decision (PR #1232 round 7, review finding 3): retiring `incomplete` left non-comparable families gradable; the
+    judge now stamps a family with no family stamp `not comparable` (no model call, nothing queued), naming verify_family''s reason'
   source: 65-regrounds.md section C, minted at the §7 fold (70-resolutions.md)
 - id: pco02_judge_gate_new_words
   kind: coherence
@@ -9661,6 +9669,8 @@ demands:
   seed_docstring: The judge's gate stamps `unusable`, `refused` and an absent or empty outcome record not-graded with the word and the reason
     and makes no model call; the word it writes for an absent record is a member of the new vocabulary, never `incomplete`.
   obligation: PCO-02
+  amendment_note: '2026-10-10, human decision (PR #1232 round 7, review finding 3): retiring `incomplete` left non-comparable families gradable; the
+    judge now stamps a family with no family stamp `not comparable` (no model call, nothing queued), naming verify_family''s reason'
   source: 65-regrounds.md section C, minted at the §7 fold (70-resolutions.md)
 - id: pco03_page_records_block
   kind: coherence

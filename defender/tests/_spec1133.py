@@ -145,6 +145,8 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
     # #1224: the episode outcome and each world's own record, both created once.
     "world_record": ("create",),
     "outcome": ("create",),
+    # PR #1232 round 7: why `verify_family` withheld the family stamp, replaced like the stamp.
+    "not_comparable": ("write",),
 }
 
 #: D1's folders (kept by D2'): `served`, `runs`, `worlds`, `world(label).dir`,
@@ -229,6 +231,7 @@ def expected_record_rel(key: str) -> PurePosixPath:
         "world.run_dir_pointer": lambda: world.run_dir_pointer,
         "world_record": lambda: LAYOUT.world_record(LABEL),
         "outcome": lambda: LAYOUT.outcome,
+        "not_comparable": lambda: LAYOUT.not_comparable,
     }[key]()
 
 
