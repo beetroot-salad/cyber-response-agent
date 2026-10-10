@@ -17,16 +17,16 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from defender import _io, _provenance, _tenant  # noqa: E402
-from defender._io import guarded_mkdir, read_bytes_capped  # noqa: E402
+from defender._io import read_bytes_capped  # noqa: E402
 from defender.run_repository import (  # noqa: E402
-    Run, RunId, RunPaths, RunRefused, artifact_dir, case_ref, episode_sibling_ids,
-    hold_runs_folder, run_name_fault,
+    Run, RunAddress, RunId, RunPaths, RunRefused, artifact_dir, case_ref, run_name_fault,
 )
 from defender.scripts.visualize._page_failed import VisualizeFailed  # noqa: E402
 
 _logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from defender.run_repository import EpisodeRuns
     from defender.runtime.branch._family import ResumeWorld
 
 _GENERIC_ALERT_STEMS = {"alert"}
@@ -64,45 +64,47 @@ def _setup_state(run: Run) -> str:
 
 def materialize_run(
     alert: Path, run_id: str | None, *, tenant: _tenant.Tenant, model: str | None = None,
-    world: ResumeWorld | None = None,
+    world: ResumeWorld | None = None, episode_runs: EpisodeRuns | None = None,
 ) -> Run:
     """Build (or finish building) the run directory for `run_id` and return the tenant-bound
     handle the run's later records are saved through.
 
     `tenant` is the request's tenant, accepted by the entry point (`_tenant.accept_tenant`);
-    nothing here resolves the data root or re-accepts it. The runs-base record is created here
-    when absent; a record naming another tenant is refused rather than stamped.
+    nothing here resolves the data root or re-accepts it. The run's handle comes from the
+    tenant's runs repository (#1105 PR 2, D-create (a)): a natural run's from
+    `tenant.runs_repository().create`, which makes the runs folder when absent with its record
+    (a record naming another tenant is refused rather than stamped); a fork's from
+    `episode_runs.create` — the sibling's episode view, whose container the launcher made for
+    the tenant before any arm and which is never made here.
 
     Every write is a guarded write-once verb (written when absent, kept when equal, refused
     when different), so resuming needs no ordering of checks and follows no planted link.
     `world` is a fork's `ResumeWorld`, handed in by the launcher — never derived from paths.
 
     Order (#1105 D3.7): the run id is admitted (the `_tenant.json` collision guard, then
-    `RunId`, then the sidecar clause); the runs base is the tenant's own (`<data root>/<T>/runs`)
-    or, for a fork, its episode's `runs/`, and a link or non-directory there is refused before
-    anything is created in it; then the runs-base record; then, for a pinned id outside a fork,
-    the claimed-id check against the episode records; then `Run.for_tenant` as the race
-    backstop.
+    `RunId`, then the sidecar clause); then the repository's create: the container held
+    no-follow (a link or non-directory refused before anything is created in it), its tenant
+    record, for a pinned id outside a fork the claimed-id check, and the handle's record
+    compare as the race backstop.
     """
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
     pinned = run_id is not None
     admitted = _admit_run_id(alert, run_id)
-    if world is not None:
-        from defender._episode_paths import EpisodePaths
-
-        runs_base = EpisodePaths(world.episode_dir).runs
-    else:
-        runs_base = tenant.runs
-    # One no-follow hold of the runs base serves its state check and the claimed-id read.
-    with hold_runs_folder(runs_base, create=True) as held:
-        # The tenant record comes before the provenance stamp (which must match it) and before
-        # the box exists. Unlike the stamp, its failures propagate: a forged tenant is worse
-        # than no run.
-        tenant_record = _tenant.ensure_runs_base_record(runs_base, tenant.id)
-        if pinned and world is None:
-            _refuse_claimed_run_id(held, runs_base, admitted)
-    run = Run.for_tenant(tenant_record.tenant_id, admitted, runs_base=runs_base)
+    try:
+        if world is not None:
+            if episode_runs is None:
+                raise TypeError("materialize_run(world=…) needs the sibling's episode view "
+                                "(`episode_runs=`): an arm is made only in its episode's "
+                                "container")
+            run = episode_runs.create(admitted)
+            world_id = world.world_id
+        else:
+            runs = tenant.runs_repository()
+            run = runs.create(admitted, pinned=pinned)
+            world_id = runs.base_world_id()
+    except RunRefused as refused:
+        sys.exit(str(refused))
     run_dir = run.run_dir
     paths = RunPaths(run_dir)
 
@@ -115,7 +117,7 @@ def materialize_run(
     if state == "absent":
         _clear_stale_sidecars(run)
     # Judged component by component: a link at the run id or `gather_raw` is refused.
-    guarded_mkdir(paths.gather_raw, base=runs_base)
+    run.make_run_dir()
     _write_alert_once(run, alert)
     # Every executed run is stamped here, by its own process (branched siblings each reach
     # this, and `verify_family` compares their stamps), before the box exists: the run dir is
@@ -126,8 +128,8 @@ def materialize_run(
         with contextlib.suppress(OSError):
             paths.provenance.unlink()
     _stamp(
-        run, knowledge_dir=tenant.knowledge, model=model, tenant_id=tenant_record.tenant_id,
-        world_id=world.world_id if world is not None else tenant_record.base_world_id,
+        run, knowledge_dir=tenant.knowledge, model=model, tenant_id=run.tenant_id,
+        world_id=world_id,
         parent_run_id=world.family.source_run_id if world is not None else None,
         fork_turn=world.family.branch_message_id if world is not None else None,
     )
@@ -153,21 +155,6 @@ def _admit_run_id(alert: Path, run_id: str | None) -> RunId:
     if (why := run_name_fault(str(admitted))) is not None:
         sys.exit(f"invalid run id: {why}")
     return admitted
-
-
-def _refuse_claimed_run_id(held: _io.Held, runs_base: Path, run_id: RunId) -> None:
-    """Exit when an episode record in the held runs base claims the pinned `run_id`: that id
-    names a sibling, not a run of its own (#1105 D3.7). No tenant compare (the record step has
-    already judged `_tenant.json`), so a record naming another tenant still claims — the
-    fail-safe direction. A corrupt record, or anything else in `_episodes` that is not a record,
-    refuses every pinned id."""
-    try:
-        claimed = episode_sibling_ids(held.view(), where=str(runs_base))
-    except RunRefused as bad:
-        sys.exit(str(bad))
-    if run_id in claimed:
-        sys.exit(f"run id {str(run_id)!r} is claimed by an episode record in {runs_base} — it "
-                 "names an episode's sibling run; pick a fresh id")
 
 
 def _sidecars(run: Run) -> tuple[Path, ...]:
@@ -250,7 +237,7 @@ def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
     env = provider_scrubbed_environ()
     env["DEFENDER_DIR"] = str(defender_dir)
     env["DEFENDER_RUN_DIR"] = str(run_dir)
-    env["DEFENDER_RUNS_BASE"] = str(run_dir.parent)
+    env.update(RunPaths(run_dir).runs_base_env())
     env["PATH"] = f"{defender_dir / 'bin'}{os.pathsep}{env.get('PATH', '')}"
     # Prepended: host subprocesses also need the operator's own PYTHONPATH entries.
     env["PYTHONPATH"] = _prepend(str(defender_dir.parent), env.get("PYTHONPATH"))
@@ -369,14 +356,21 @@ def learning_refusal_gate(
 
 
 def enqueue_curation(
-    run_dir: Path,
+    run: Run,
     alert: Path,
     *,
     truncated_by: str | None = None,
     fixtures_dir: Path = HELD_OUT_FIXTURES,
 ) -> bool:
-    """Enqueue catalog curation for a run, through `learning_refusal_gate` — this hands
-    attacker-influenced content (goal text, bound params, rendered queries) to the curator."""
+    """Enqueue catalog curation for a natural run, through `learning_refusal_gate` — this hands
+    attacker-influenced content (goal text, bound params, rendered queries) to the curator.
+
+    @owns tenant_id — a curation row's `tenant_id`: the run's address's tenant (`run.tenant_id`,
+    the repository's, never a stamp).
+    @owns run_id — a curation row's `run_id`: the run's address's id. The row is `{case_id,
+    tenant_id, run_id}`, a natural run's `RunAddress` (#1105 PR 2, D-stored; only natural runs
+    enqueue); the drain rehydrates it in that tenant's repository."""
+    run_dir = run.run_dir
     reason = learning_refusal_gate(
         run_dir, alert, fixtures_dir=fixtures_dir, truncated_by=truncated_by
     )
@@ -387,13 +381,15 @@ def enqueue_curation(
     from defender.learning.core.config import loop_paths
     from defender.learning.core.state import LearningState, StateRefused
 
+    address = RunAddress(tenant_id=run.tenant_id, run_id=run.run_id)
     # Reading the alert is inside the guard too: a moved alert must not fail the run. So is the
     # state tree: a refused entry or a missing root costs this request, never the investigation.
     try:
         case_id = case_ref(read_bytes_capped(alert))
         with LearningState.open(loop_paths()) as state:
             state.enqueue_curation(
-                case_id, {"case_id": case_id, "run_dir": str(run_dir.resolve())})
+                case_id, {"case_id": case_id, "tenant_id": str(address.tenant_id),
+                          "run_id": str(address.run_id)})
     except OSError as e:
         _logger.error(f"NOT enqueuing for curation: could not write the request: {e!r}")
         return False

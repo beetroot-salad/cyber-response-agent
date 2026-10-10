@@ -2,8 +2,8 @@
 
 `episodes/<id>/family.yaml` carries three authors: the launcher's derived half (episode id,
 source run, branch point, T0, the served systems), the operator's `continuation_prompt`, and the
-questioner's authored half (base story, discriminator, worlds and their facts). `run.py --resume <manifest> --world X`
-derives everything else from it.
+questioner's authored half (base story, discriminator, worlds and their facts).
+`run.py --tenant T --episode <episode_id> --world X` derives everything else from it.
 
 The schema lives in the runtime because a resumed run must not import the learning tree to know
 which world it is. Learning validates the questioner's output through the same loader.
@@ -59,7 +59,9 @@ ENTITY_MAX_LEN = 256
 ENTITIES_MAX = 64
 FACT_ID_MAX_LEN = 64
 
-#: Every top-level field the manifest declares. Unknown ones refuse.
+#: Every top-level field the manifest declares. Unknown ones refuse. `source_run_dir` is no
+#: longer written (#1105 PR 2, decision A): an old manifest carrying it still loads, and its
+#: value is never read — the source is `source_run_id`, opened in the request's tenant's runs.
 _FAMILY_FIELDS = (
     "episode_id", "source_run_dir", "source_run_id", "branch_message_id", "fences_at",
     "as_of", "continuation_prompt", "served_systems", "base_story", "discriminator", "worlds",
@@ -373,7 +375,6 @@ class Family:
     """The whole manifest, loaded."""
 
     episode_id: str
-    source_run_dir: str
     source_run_id: str
     branch_message_id: int
     fences_at: int
@@ -426,8 +427,7 @@ def parse_as_of(raw: Any, *, where: str = "as_of") -> dt.datetime:
 
 def _check_scalars(doc: dict) -> None:
     """Every manifest field whose only rule is its own type."""
-    for scalar in ("episode_id", "source_run_dir", "source_run_id", "continuation_prompt",
-                   "base_story"):
+    for scalar in ("episode_id", "source_run_id", "continuation_prompt", "base_story"):
         if not isinstance(doc.get(scalar), str) or not doc.get(scalar):
             raise FamilyError(f"the manifest's {scalar} must be a non-empty string")
     for number in ("branch_message_id", "fences_at"):
@@ -534,7 +534,7 @@ def parse_family(doc: Any) -> Family:
     as_of = parse_as_of(doc.get("as_of"))
     worlds = _parse_worlds(doc.get("worlds"), doc["episode_id"])
     return Family(
-        episode_id=doc["episode_id"], source_run_dir=doc["source_run_dir"],
+        episode_id=doc["episode_id"],
         source_run_id=doc["source_run_id"], branch_message_id=doc["branch_message_id"],
         fences_at=doc["fences_at"], as_of=as_of,
         continuation_prompt=doc["continuation_prompt"],
