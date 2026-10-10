@@ -15,7 +15,11 @@ cancel, collisions and the ledger row follow the commit and the turn's close, ev
 error is a failed attempt or an unservable world, and a trace row counts once. Each test is
 red on the code it replaces. Each pre-flight world runs on its own role models and in the
 launcher's log context, budget.json has one locked writer, and every oracle setting is refused
-before the question-writer.
+before the question-writer. Sixth round: one size budget governs everything the oracle and the
+verifier are sent — the family's example answers are capped, and a conversation past the
+budget restarts from its prefix, the store's frozen rows carried in it; a failed world's
+detail never reaches another world's judge prompt; the oracle and the verifier are told the
+branch point (M27: told, and the verifier checks — no host rule).
 """
 from __future__ import annotations
 
@@ -1422,3 +1426,107 @@ def test_a_link_or_garbage_at_the_held_record_neither_crashes_nor_pauses(tmp_pat
     be.oracle_turn_closed(run_dir)  # the refused write is logged, not raised
     assert be.oracle_held(run_dir) == 0.0
     assert json.loads(target.read_text(encoding="utf-8")) == {be.ORACLE_HELD_KEY: 1e12}
+
+
+# -- sixth round --------------------------------------------------------------------------------
+
+_SIX_MARK = "EXAMPLE6-HUGE"
+
+
+def _big_rows(user: str, mark: str, n: int = 300) -> dict:
+    return {"rows": [{"user": user, "event_id": f"e-{user}-{k:05d}", "action": "logon",
+                      "note": f"{mark}-{k:05d}-" + "x" * 80} for k in range(n)]}
+
+
+def test_oversized_family_example_answers_are_capped(tmp_path):
+    """Sixth-round finding 9: `_prefix` framed the family's example answers whole, past the cap
+    every other framed value goes through, so one large recorded answer put megabytes into
+    every conversation. The family block now shares one fixed cap, its examples shown as their
+    head, saying so."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o,
+                           verifier=S.passing_verifier(), retry_cap=1)
+    huge = {"hits": [{"_id": f"h-{k}", "msg": _SIX_MARK + "y" * 100} for k in range(6000)]}
+    reg.oracle.family_examples = [("idp", "query", huge), ("edr", "query", huge)]
+
+    assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == ALICE_ROWS
+    first = o.seen[0]
+    assert _SIX_MARK in first, "the examples were dropped rather than capped"
+    assert len(first) < oracle_mod._CONTEXT_CAP, len(first)
+    assert "past what one request carries" in first
+
+
+def test_a_conversation_past_the_size_budget_restarts_and_keeps_the_frozen_rows(tmp_path,
+                                                                               monkeypatch):
+    """Sixth-round finding 5: the conversation was append-only across calls and restarted only
+    after `restart_after` attempts, never by size, so a few large answers carried it past the
+    model's window and every later request failed at the provider. A call that would take it
+    past the budget now starts from the prefix; the rows frozen so far live in the store and
+    are shown in the fresh prefix, so the later call still serves them. The budget is set
+    small (each answer here is ~40k characters) so the test stays fast."""
+    monkeypatch.setattr(
+        # lint-monkeypatch: ok — the size budget is a module constant with no seam; a small one
+        # keeps the scenario fast (the full-size one is ~400k characters a request).
+        oracle_mod, "_PROMPT_BUDGET", 60_000, raising=False)
+    est = S.estate(tmp_path)
+    alice = _big_rows("alice", "CALL1MARK")
+    bob = _big_rows("bob", "CALL2MARK")
+    est.answer("idp", "query", ALICE, alice)
+    est.answer("idp", "query", BOB, bob)
+    row = {"user": "alice", "event_id": "e-9001", "action": "tgt", "note": "FORGED6"}
+    served = {"rows": [*alice["rows"], row]}
+    o = S.oracle(S.forge("fg-1", "f1", "idp", row),
+                 S.submit(served, S.claim(added=[S.added("fg-1", "f1")])),
+                 S.submit(oracle_mod.BASE_HANDLE, S.EMPTY_CLAIM))
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o,
+                           verifier=S.passing_verifier(), retry_cap=1)
+    ctx = est.ctx(tmp_path / "inv")
+
+    assert S.call(reg, "idp", "query", ctx, q="user:alice") == served
+    second = o.requests
+    assert S.call(reg, "idp", "query", ctx, q="user:bob") == bob
+
+    restarted = o.seen[second]
+    assert "CALL1MARK" not in restarted, "call 2 carried call 1's conversation past the budget"
+    assert "Telemetry frozen in this world so far" in restarted
+    assert "FORGED6" in restarted, "the restarted conversation lost the frozen row"
+    assert reg.oracle._in_conversation == 1
+
+
+def test_a_failed_worlds_detail_never_reaches_another_worlds_judge_prompt(tmp_path):
+    """Sixth-round finding 7: the family text put every failed world's `detail` into every
+    judged world's prompt; that detail is the oracle's last refusal, quoting the rows it forged
+    for that world's facts. A failed world now shows its label, reason word and failing call,
+    never its detail."""
+    from defender.learning.judge import render as render_mod
+
+    ep = S.judged_episode(tmp_path / "judged", labels=("a", "c"))
+    S.world_record(ep, "b", call={"system": "idp", "verb": "query",
+                                  "params": S.query_params("user:alice")},
+                   detail='Submission refused: check 1: an unclaimed row was added '
+                          '{"event_id": "e-FORGEDLEAK", "note": "FORGEDLEAK-6"}')
+
+    sections = render_mod.render(ep, "c").as_prompt_sections()
+
+    family = sections["family"]
+    assert "world b" in family, family
+    assert "FORGEDLEAK" not in "\n".join(sections.values()), family
+
+
+def test_the_oracle_and_the_verifier_are_told_the_branch_point(tmp_path):
+    """Sixth-round finding 8 (M27: the oracle is told forged rows lie at or before `as_of`, the
+    verifier checks; no host rule): neither model was told the branch-point time, so nothing
+    kept a forged row from being dated after it. Both prompts now carry it."""
+    est = S.estate(tmp_path)
+    est.answer("idp", "query", ALICE, ALICE_ROWS)
+    o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
+    v = S.passing_verifier()
+    reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, verifier=v, retry_cap=1)
+
+    assert S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice") == ALICE_ROWS
+    point = S.AS_OF_DT.isoformat().replace("+00:00", "Z")
+    for who, seen in (("oracle", o.seen[0]), ("verifier", v.seen[0])):
+        assert f"branch point is {point}" in seen, f"the {who} was not told the branch point"
+        assert "at or before" in seen, f"the {who} was not told rows lie at or before it"
