@@ -20,8 +20,10 @@ and a wall-clock limit of a second or two against several seconds of oracle-held
 refusal is read as `test_budget_e2e_631` reads it — the refusal message's literal stem in what
 the gather lead was shown, plus the wire log's `budget_refusal` row.
 
-COINED HERE (S15): `budget.json` carries the excluded oracle-held total under `ORACLE_HELD_KEY`
-(`oracle_held_seconds`), spelled once in `_spec1224.COINED["budget.oracle_held"]`.
+COINED HERE (S15): the run's host-only oracle-held sidecar (`RunPaths.oracle_held`, beside the
+run dir, where the box cannot write — not `budget.json`) carries the excluded oracle-held total
+under `ORACLE_HELD_KEY` (`oracle_held_seconds`), spelled once in
+`_spec1224.COINED["budget.oracle_held"]`.
 
 RED AGAINST HEAD (96e4cdb0) IS THE EXPECTED STATE: `WorldRegistry` takes no oracle seam, the
 launcher no `roster` / `oracle` / `verifier`.
@@ -45,7 +47,8 @@ from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests.live_oracle_1224 import _spec1224 as S
 
-#: S15's coined `budget.json` key: the oracle-held seconds the investigator's clock excludes.
+#: S15's coined key in the host-only oracle-held sidecar: the seconds the investigator's clock
+#: excludes.
 ORACLE_HELD_KEY = S.ORACLE_HELD_KEY  # coined in _spec1224 (COINED["budget.oracle_held"])
 ENFORCE = "DEFENDER_BUDGET_ENFORCE"
 
@@ -310,6 +313,12 @@ def _budget(run_dir: Path) -> dict:
     return json.loads((run_dir / "budget.json").read_text(encoding="utf-8"))
 
 
+def _held_record(run_dir: Path) -> dict:
+    """The run's host-only oracle-held sidecar beside the run dir (`{}` when absent)."""
+    path = RunPaths(run_dir).oracle_held(run_dir.parent)
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+
 def _slow_adapter(est: S.Estate, system: str, seconds: float) -> None:
     """Make the planted adapter for `system` slow: a REAL adapter module whose answer takes
     `seconds` (real-system latency, the investigator's own on a real run — GD-10)."""
@@ -403,8 +412,8 @@ def test_conc_10_overlapping_oracle_turns_and_the_investigator_clock(tmp_path, m
     for lead in ("l-001", "l-002"):
         assert _refusal_stem() not in router.shown(lead), f"{lead} was refused for oracle time"
     assert _refused_queries(run_dir) == []
-    held = _budget(run_dir).get(ORACLE_HELD_KEY)
-    assert isinstance(held, (int, float)), f"budget.json records no {ORACLE_HELD_KEY}"
+    held = _held_record(run_dir).get(ORACLE_HELD_KEY)
+    assert isinstance(held, (int, float)), f"the oracle-held sidecar records no {ORACLE_HELD_KEY}"
     assert held >= 0.9 * _held(oracle, verifier), "oracle-held time was not given back"
     assert held <= wall, "oracle time was given back twice (more than the run's real elapsed)"
 
@@ -556,7 +565,7 @@ def test_resumed_sibling_investigator_clock_after_oracle_time_was_credited(tmp_p
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=verifier, retry_cap=3)
     run_dir, _router, _ = _drive(tmp_path, verbs=reg, tenant=tenant, limits=_limits(2.5),
                                  leads={"l-001": [_q(ALICE), S.done_turn()]})
-    held = _budget(run_dir).get(ORACLE_HELD_KEY)
+    held = _held_record(run_dir).get(ORACLE_HELD_KEY)
     assert isinstance(held, (int, float)), (
         "the oracle-held total did not reach the persisted budget record")
     assert held >= 0.9 * _held(oracle, verifier), (
@@ -580,7 +589,7 @@ def test_resumed_sibling_investigator_clock_after_oracle_time_was_credited(tmp_p
         "the resumed run counted oracle time spent before the crash")
     assert _refusal_stem() in "\n".join(shown[2:]), (
         "the resumed run enforces no clock at all — the negative above proves nothing")
-    assert _budget(run_dir).get(ORACLE_HELD_KEY, 0) >= held, "the excluded total was reset"
+    assert _held_record(run_dir).get(ORACLE_HELD_KEY, 0) >= held, "the excluded total was reset"
 
 
 # --------------------------------------------------------------------------------------

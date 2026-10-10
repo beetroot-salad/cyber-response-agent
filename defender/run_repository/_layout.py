@@ -96,15 +96,18 @@ RUNTIME_HTML = "runtime.html"
 #: The box startup sentinel.
 BOX_SENTINEL = ".box-sentinel"
 
-#: The four sidecars beside the run dir in the runs base, keyed `<run_id><suffix>`.
+#: The five sidecars beside the run dir in the runs base, keyed `<run_id><suffix>`.
 RUN_END_SIDECAR_SUFFIX = ".run-end.json"
 SCRUB_VERDICT_SUFFIX = ".scrub-verdict.json"
 ACCOUNTING_FAILURES_SUFFIX = ".accounting_failures.json"
 #: The case-ticket write's receipt: a host record the box must neither plant nor block (#1107).
 TICKET_WRITE_SUFFIX = ".ticket-write.json"
-#: The four host-only sidecars, each `<run id><suffix>` beside the run folder in the runs base.
+#: The oracle-held seconds a branched run's investigator clock excludes (#1224 S15): host
+#: state the box must not be able to write, so it lives beside the run dir, not in budget.json.
+ORACLE_HELD_SUFFIX = ".oracle-held.json"
+#: The five host-only sidecars, each `<run id><suffix>` beside the run folder in the runs base.
 _SIDECAR_SUFFIXES = (RUN_END_SIDECAR_SUFFIX, SCRUB_VERDICT_SUFFIX, ACCOUNTING_FAILURES_SUFFIX,
-                     TICKET_WRITE_SUFFIX)
+                     TICKET_WRITE_SUFFIX, ORACLE_HELD_SUFFIX)
 #: The tail a sidecar write's staged file carries before its rename (`_io.staged_leaf`:
 #: `.staged-` and lowercase hex digits; one or more, #1105 DV-5).
 _STAGED_TAIL = re.compile(r"\.staged-[0-9a-f]+\Z")
@@ -312,9 +315,9 @@ WIRE_LOG_NAMES = WireLogNames()
 class RunPaths:
     """One run's directories and its accessors — every name a run reads or writes.
 
-    18 accessors (a census test checks this count against the set it pins).
+    19 accessors (a census test checks this count against the set it pins).
 
-    Accessors resolve relative to ``run_dir``, except the four sidecars, `sessions_dir` and
+    Accessors resolve relative to ``run_dir``, except the five sidecars, `sessions_dir` and
     `session_db`, which take the runs base explicitly.
 
     ``provenance`` may be absent on an arbitrary run dir: read it via ``_provenance.read``
@@ -459,6 +462,9 @@ class RunPaths:
 
     def ticket_write(self, runs_base: Path) -> Path:
         return Path(runs_base) / f"{self.run_dir.name}{TICKET_WRITE_SUFFIX}"
+
+    def oracle_held(self, runs_base: Path) -> Path:
+        return Path(runs_base) / f"{self.run_dir.name}{ORACLE_HELD_SUFFIX}"
 
     def sessions_dir(self, runs_base: Path) -> Path:
         """The sessions directory (a sibling of the runs base), from `SessionPaths`."""

@@ -21,9 +21,11 @@ from ..tools import (
 from defender.hooks.budget_enforcer import (
     BUDGET_EXEMPT_TOOLS,
     DEFAULT_LIMITS,
+    ENFORCEMENT_HELD_KEY,
     BudgetKill,
     account_call,
     check_budgets,
+    oracle_held,
     read_budget,
     refusal_message,
     should_refuse,
@@ -36,7 +38,11 @@ _logger = logging.getLogger(__name__)
 
 
 def _budget_state_for_enforcement(state: dict, deps: AgentDeps) -> dict:
-    return {**state, "started_monotonic": deps.budget_started_monotonic}
+    """`budget.json`'s state with the host's own clock facts laid over it: the in-memory
+    monotonic origin, and the oracle-held seconds from host state (#1224 S15) — neither read
+    from the box-writable file."""
+    return {**state, "started_monotonic": deps.budget_started_monotonic,
+            ENFORCEMENT_HELD_KEY: oracle_held(deps.run_dir)}
 
 
 def _budget_short_circuit(

@@ -403,8 +403,9 @@ class WorldRegistry(ModuleVerbRegistry):
                             # does both after it), so this replaces no answer (N12).
                             raise
                         # The turn's own abort (an unservable world, which ends the sibling)
-                        # is what leaves; the mark it could not close names this process, and
-                        # is ignored once the process is gone (`budget_enforcer._oracle_held`).
+                        # is what leaves; a turn left open lives only in this process's memory
+                        # (`budget_enforcer.oracle_held`), so it holds nothing once the process
+                        # is gone, and a run started again here forgets it (`open_budget`).
                         _logger.warning(f"the oracle turn's clock mark could not be closed "
                                         f"({unclosed!r}) while the turn was aborting")
 

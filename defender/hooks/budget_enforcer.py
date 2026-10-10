@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import math
 import os
 import threading
 import time
@@ -9,10 +11,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from defender._clock import parse_iso_utc
-from defender._io import read_text_utf8, write_atomic
+from defender._io import write_atomic
 from defender.run_repository import RunPaths
 from defender.hooks._run_dir import read_json_locked, update_json_locked
 from defender.runtime.agent_role import AgentRole
+
+_logger = logging.getLogger(__name__)
 
 DEFAULT_LIMITS = {
     "max_tool_calls": 200,
@@ -67,6 +71,7 @@ def open_budget(run_dir: Path, run_id: str) -> dict:
         state.setdefault("created_at", now)
         state.setdefault("started_at", now)
 
+    forget_open_turn(run_dir)
     return update_json_locked(RunPaths(run_dir).budget, _mutate, default=dict)
 
 
@@ -218,109 +223,113 @@ def _wall_origin(state: dict) -> datetime | None:
 
 
 #: S15 (#1224): the seconds a branched world's oracle held the turn, which every investigator
-#: time limit excludes, and the mark of the turn now open (absent when none is):
-#: `{"at": <wall-clock start>, "pid": <writer>, "started": <writer's start time or null>}`.
+#: time limit excludes. HOST state, never in `budget.json`: the box can write the run dir, so a
+#: total or an open-turn mark read from there would let it stop the investigator's clock, and a
+#: link it planted there would fault every oracle turn. The credited total lives in the run's
+#: host-only sidecar beside the run dir (`RunPaths.oracle_held`), where it survives a resume;
+#: the turn open now lives in this process's memory — the registry holding it and the
+#: enforcer reading it are one process, and a process that dies holds no turn.
 ORACLE_HELD_KEY = "oracle_held_seconds"
-ORACLE_OPEN_KEY = "oracle_open_since"
+
+#: The key `_budget_state_for_enforcement` sets on the in-memory enforcement state to hand
+#: `_elapsed` the host's oracle-held seconds. It is never read from a state that names no host
+#: value: `_elapsed` honours only a `_HostHeld`, which no JSON document can produce.
+ENFORCEMENT_HELD_KEY = "_host_oracle_held"
 
 
-def _number(value: object) -> float | None:
+class _HostHeld(float):
+    """Oracle-held seconds the host measured (`oracle_held`). A distinct type so a same-named
+    key in `budget.json`, which decodes to a plain number, subtracts nothing."""
+
+
+#: The oracle turn open now per run dir: its `time.monotonic()` start. One turn at a time per
+#: world (`WorldRegistry._turn`), and one world per run dir.
+_OPEN_TURNS: dict[str, float] = {}
+_OPEN_LOCK = threading.Lock()
+
+
+def _turn_key(run_dir: Path) -> str:
+    return os.path.abspath(run_dir)
+
+
+def _oracle_held_path(run_dir: Path) -> Path:
+    run_dir = Path(run_dir)
+    return RunPaths(run_dir).oracle_held(run_dir.parent)
+
+
+def _seconds(value: object) -> float:
+    """A credited total as a usable number of seconds: anything else reads as none credited."""
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value)
-    return None
+        number = float(value)
+        if math.isfinite(number) and number >= 0:
+            return number
+    return 0.0
 
 
-def _process_stat(pid: int) -> tuple[str, str] | None:
-    """`pid`'s `(state, start time in clock ticks since boot)` from Linux `/proc`, or None where
-    it cannot be read. The start time tells a reused pid from the process that held it."""
+def _credited(run_dir: Path) -> float:
+    """The oracle-held seconds credited so far, from the host-only sidecar. Absent, linked,
+    unreadable or garbage reads as none: the clock then runs, it never pauses."""
     try:
-        stat = read_text_utf8(Path(f"/proc/{pid}/stat"), limit=4096)
-    except (OSError, ValueError):  # unreadable, or a process name that is not UTF-8
-        return None
-    fields = stat.rpartition(")")[2].split()
-    return (fields[0], fields[19]) if len(fields) > 19 else None
+        return _seconds(read_json_locked(_oracle_held_path(run_dir)).get(ORACLE_HELD_KEY))
+    except (OSError, ValueError):
+        return 0.0
 
 
-def _this_process() -> dict:
-    pid = os.getpid()
-    stat = _process_stat(pid)
-    return {"pid": pid, "started": stat[1] if stat else None}
-
-
-def _writer_alive(mark: dict) -> bool:
-    """Whether the process that wrote `mark` still runs: same pid, same start time where the
-    platform tells it, and not a zombie. A mark naming no writer is never trusted."""
-    pid = mark.get("pid")
-    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
-        return False
-    if pid != os.getpid():
-        try:
-            os.kill(pid, 0)
-        except PermissionError:
-            pass  # it exists, owned by someone else
-        except OSError:
-            return False
-    started = mark.get("started")
-    stat = _process_stat(pid)
-    if stat is None:
-        return started is None
-    state, now_started = stat
-    return state not in ("Z", "X") and (started is None or started == now_started)
-
-
-def _open_mark(state: dict) -> float | None:
-    """The start of the oracle turn open now, if a live process holds it. A turn whose process
-    died mid-turn (a killed sibling) left its mark behind; it holds nothing, so a resume into
-    the same run dir finds its clock running."""
-    mark = state.get(ORACLE_OPEN_KEY)
-    if not isinstance(mark, dict) or not _writer_alive(mark):
-        return None
-    return _number(mark.get("at"))
+def _has_clock(run_dir: Path) -> bool:
+    """Whether the run has a budget record (an enforcer whose clock an oracle turn pauses).
+    `lexists`, so a link the box planted at `budget.json` still counts as a run with a clock."""
+    return os.path.lexists(RunPaths(Path(run_dir)).budget)
 
 
 def oracle_turn_opened(run_dir: Path) -> None:
-    """Pause the investigator's clock: an oracle turn holds the world from now, for as long as
-    this process lives to close it. A run with no budget record (no enforcer) has no clock to
-    pause."""
-    path = RunPaths(run_dir).budget
-    if not path.is_file():
+    """Pause the investigator's clock: an oracle turn holds the world from now until
+    `oracle_turn_closed`. A run with no budget record (no enforcer) has no clock to pause.
+    Writes nothing: the open turn is this process's memory, so nothing the box writes can
+    fault it."""
+    if not _has_clock(run_dir):
         return
-    writer = _this_process()
-
-    def _mutate(state: dict) -> None:
-        state[ORACLE_OPEN_KEY] = {"at": time.time(), **writer}
-
-    update_json_locked(path, _mutate, default=dict)
+    with _OPEN_LOCK:
+        _OPEN_TURNS[_turn_key(run_dir)] = time.monotonic()
 
 
 def oracle_turn_closed(run_dir: Path) -> None:
-    """Resume the investigator's clock, crediting the closed turn's interval to the excluded
-    total, once.
+    """Resume the investigator's clock, crediting the closed turn's interval to the run's
+    host-only total, once. Never raises for the record: a turn whose credit cannot be written
+    still closes, and its time then counts toward the investigator's clock.
 
     @owns oracle_held_seconds"""
-    path = RunPaths(run_dir).budget
-    if not path.is_file():
+    with _OPEN_LOCK:
+        opened = _OPEN_TURNS.pop(_turn_key(run_dir), None)
+    if opened is None:
         return
+    interval = max(0.0, time.monotonic() - opened)
 
     def _mutate(state: dict) -> None:
-        opened = _open_mark(state)
-        state.pop(ORACLE_OPEN_KEY, None)
-        held = _number(state.get(ORACLE_HELD_KEY)) or 0.0
-        if opened is not None:
-            held += max(0.0, time.time() - opened)
-        state[ORACLE_HELD_KEY] = held
+        state[ORACLE_HELD_KEY] = _seconds(state.get(ORACLE_HELD_KEY)) + interval
 
-    update_json_locked(path, _mutate, default=dict)
+    try:
+        update_json_locked(_oracle_held_path(run_dir), _mutate, default=dict)
+    except OSError as e:
+        _logger.warning(f"the oracle turn's {interval:.1f}s could not be credited to the "
+                        f"investigator's clock ({e!r}); it counts as investigator time")
 
 
-def _oracle_held(state: dict) -> float:
-    """The excluded oracle time: the credited total plus the turn a live process holds open
-    now, if any."""
-    held = _number(state.get(ORACLE_HELD_KEY)) or 0.0
-    opened = _open_mark(state)
+def forget_open_turn(run_dir: Path) -> None:
+    """Drop a turn left open in this process for `run_dir` (a run that ended mid-turn): a run
+    that starts again in this process starts with its clock running."""
+    with _OPEN_LOCK:
+        _OPEN_TURNS.pop(_turn_key(run_dir), None)
+
+
+def oracle_held(run_dir: Path) -> float:
+    """The oracle time the investigator's clock excludes for `run_dir`: the host-only credited
+    total plus the turn this process holds open now, if any. Zero for a run no oracle served."""
+    held = _credited(run_dir)
+    with _OPEN_LOCK:
+        opened = _OPEN_TURNS.get(_turn_key(run_dir))
     if opened is not None:
-        held += max(0.0, time.time() - opened)
-    return held
+        held += max(0.0, time.monotonic() - opened)
+    return _HostHeld(held)
 
 
 def _elapsed(state: dict) -> float | None:
@@ -331,7 +340,10 @@ def _elapsed(state: dict) -> float | None:
     mono = state.get("started_monotonic")
     if isinstance(mono, (int, float)) and not isinstance(mono, bool):
         deltas.append(time.monotonic() - mono)
-    return max(deltas) - _oracle_held(state) if deltas else None
+    if not deltas:
+        return None
+    held = state.get(ENFORCEMENT_HELD_KEY)
+    return max(deltas) - (float(held) if isinstance(held, _HostHeld) else 0.0)
 
 
 def tail_exhausted(state: dict, limits: dict) -> bool:

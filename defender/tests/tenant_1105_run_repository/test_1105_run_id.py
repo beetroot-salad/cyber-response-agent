@@ -149,7 +149,7 @@ def test_1105_run_id_parse_admits_206_bytes_and_refuses_207():
     from defender import run_repository as rr
 
     suffixes = (rr.RUN_END_SIDECAR_SUFFIX, rr.SCRUB_VERDICT_SUFFIX,
-                rr.ACCOUNTING_FAILURES_SUFFIX, rr.TICKET_WRITE_SUFFIX)
+                rr.ACCOUNTING_FAILURES_SUFFIX, rr.TICKET_WRITE_SUFFIX, rr.ORACLE_HELD_SUFFIX)
     assert sorted(suffixes) == sorted(H.SIDECAR_SUFFIXES)
     staged_tail = len(_io.staged_leaf("x")) - len("x")
     assert staged_tail == len(H.STAGED_TAIL) == 24

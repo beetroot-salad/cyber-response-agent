@@ -112,8 +112,9 @@ write-code-from-spec names anything differently it renames it HERE, never in a t
   Knobs (environment, set with `monkeypatch.setenv`): `ORACLE_MODEL`, `ORACLE_CHECK_MODEL`,
     `ORACLE_EFFORT`, `ORACLE_CHECK_EFFORT`, `ORACLE_RETRY_CAP`, `ORACLE_RATE` (queries/second
     per episode), `ORACLE_BUDGET`, `ORACLE_TURN_DEADLINE` (seconds).
-  `budget.json` carries the investigator clock's excluded oracle-held total under
-    `oracle_held_seconds` (S15).
+  The run's host-only oracle-held sidecar (`RunPaths.oracle_held`, beside the run dir — never
+    the box-writable `budget.json`) carries the investigator clock's excluded oracle-held total
+    under `oracle_held_seconds` (S15).
 
 EVERY FAULT HERE IS A REAL INPUT THROUGH THE REAL PRIMITIVE, OR A FAKE CITING ITS CLAIM:
   * adapter errors are the real `AdapterFault` subclasses (`scripts/adapters/faults.py`), raised
