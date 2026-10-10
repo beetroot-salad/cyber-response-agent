@@ -296,7 +296,7 @@ def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a mode
 
     The oracle's own configuration is judged here too, by the rules pre-flight applies when it
     configures each world: its knobs (`config.oracle_settings` — rate, budget, retry cap, turn
-    deadline) and both roles' pricing rows (`oracle._price_row`), for `oracle` / `verifier` as
+    deadline) and both roles' pricing rows (`oracle.price_row`), for `oracle` / `verifier` as
     `main` was handed them (`None`: the knobs' models).
     """
     _check_oracle_side(oracle=oracle, verifier=verifier)
@@ -339,14 +339,14 @@ def _check_oracle_side(*, oracle: Any, verifier: Any) -> None:
     functions pre-flight's `oracle_settings_with` and each world's `Oracle` call, so the rule
     lives once; asked here only to refuse before the questioner is paid for."""
     from defender._env import FatalConfigError
-    from defender.learning.branch.estate.oracle import OraclePricingError, _price_row
+    from defender.learning.branch.estate.oracle import OraclePricingError, price_row
     from defender.learning.branch.estate.registry import oracle_serving
     from defender.learning.core.config import oracle_settings_with
 
     try:
         serving = oracle_serving(oracle_settings_with(), oracle=oracle, verifier=verifier)
-        _price_row("oracle", serving.oracle)
-        _price_row("verifier", serving.verifier)
+        price_row("oracle", serving.oracle)
+        price_row("verifier", serving.verifier)
     except (FatalConfigError, OraclePricingError) as bad:
         raise LauncherRefused(
             f"[branch] the oracle cannot be configured: {bad} — pre-flight would refuse it "

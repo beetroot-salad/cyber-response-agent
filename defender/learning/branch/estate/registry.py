@@ -472,7 +472,7 @@ class _LazyModel:
 
     @property
     def model_name(self) -> str:
-        """The knob's model name, which prices the role without building it (`_price_row`)."""
+        """The knob's model name, which prices the role without building it (`price_row`)."""
         return self.name
 
     @property

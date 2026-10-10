@@ -70,7 +70,8 @@ _logger = logging.getLogger(__name__)
 
 __all__ = [
     "ORACLE_CHECK_DEF", "ORACLE_DEF", "OracleSandboxError", "OracleSettings", "OracleStore",
-    "OracleUnservable", "check_submission", "oracle_settings", "start_box",
+    "OraclePricingError", "OracleUnservable", "check_submission", "oracle_settings", "price_row",
+    "start_box",
 ]
 
 # --------------------------------------------------------------------------------------------
@@ -789,7 +790,7 @@ class OraclePricingError(RuntimeError):
     could not bound it, so it is refused before any request goes out."""
 
 
-def _price_row(actor: str, given: Any) -> str:
+def price_row(actor: str, given: Any) -> str:
     """`actor`'s pricing row, from the model's name alone: a `Model`, a `BuiltModel` carrying
     one, or a model built lazily from its knob (whose name needs no provider key)."""
     from defender._pricing import UnknownModel, model_key
@@ -878,10 +879,10 @@ class Oracle:
         self.explored: list[tuple[str, Any]] = []
         self.unservable: OracleUnservable | None = None
         #: Both roles' pricing rows, settled here, before any request: a role whose model has
-        #: none is refused before the oracle spends anything (`_price_row`).
+        #: none is refused before the oracle spends anything (`price_row`).
         self._price_rows: dict[str, str] = {
-            "oracle": _price_row("oracle", self.oracle_model),
-            "verifier": _price_row("verifier", self.verifier_model)}
+            "oracle": price_row("oracle", self.oracle_model),
+            "verifier": price_row("verifier", self.verifier_model)}
 
     # -- the turn -----------------------------------------------------------------------------
 

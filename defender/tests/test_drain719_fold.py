@@ -111,8 +111,9 @@ def test_duplicate_helper_baseline_drops_the_five_pair_exclusive_names(tmp_path:
     # with #832's payload_view.py in-memory reducer helper, merged into main concurrently),
     # taking it to 15. #1107 deleted the ticket adapter's CLI and with it `_config_path` (the
     # config-file locator the adapters now take from the run's tenant record), which retired
-    # that entry: 14.
-    assert len(entries) == 14, f"baseline is {len(entries)} entries, expected 14"
+    # that entry: 14. #1224 retired `_json_safe` with the staging review's writer, and its
+    # oracle's coined `start_box` is suppressed on its own line rather than baselined: 13.
+    assert len(entries) == 13, f"baseline is {len(entries)} entries, expected 13"
 
     proc = subprocess.run(
         ["python3", "scripts/lint/lint_duplicate_helpers.py"],
