@@ -30,6 +30,7 @@ from typing import Any
 
 import pytest
 
+from defender.tests import _episode_1025 as E
 from defender.tests import _judge_921 as J
 from defender.tests import _state1135
 from defender.tests.live_oracle_1224 import _spec1224 as S
@@ -1726,7 +1727,7 @@ def test_p014_judge_input_carries_payload_text_from_claims_and_forged_rows(tmp_p
         S.assert_wrapped_untrusted(prompts, token, f"{token} at the judge")
     assert failure is None, f"grading did not complete: {failure!r}"
     assert _bucket(ep, "b") == "lead-quality", "payload text set world b's bucket"
-    page = S.sym(S.VISUALIZE, "build_page")(ep)
+    page = E.build_page(ep, module=S.mod(S.VISUALIZE))  # #1105 PR 2 (declared change 4): by id
     assert "REASONHOSTILE-3312" in page, "the unservable reason is not on the page"
     assert "<b>REASONHOSTILE-3312</b>" not in page, "the reason rendered as live markup"
     for raw in ("<img src=x onerror=alert(1)>", "<script>SERVEDHOSTILE-3311</script>"):

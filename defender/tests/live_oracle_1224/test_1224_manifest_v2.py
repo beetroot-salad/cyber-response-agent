@@ -26,6 +26,7 @@ from typing import Any
 import pytest
 
 from defender import _yaml
+from defender.tests import _episode_1025 as E
 from defender.tests import _judge_921 as J
 from defender.tests.live_oracle_1224 import _spec1224 as S
 
@@ -79,10 +80,12 @@ def _judge_read(ep: Path) -> dict:
 
 
 def _page(ep: Path, capsys: Any) -> tuple[int, str]:
-    """The episode page as the operator runs it: its exit code and what it printed on stderr."""
+    """The episode page as the operator runs it: its exit code and what it printed on stderr
+    (#1105 PR 2, declared change 4: `--tenant T <episode_id>` under the episodes base holding
+    `ep`, `_episode_1025.cli_on`)."""
     capsys.readouterr()
-    rc = S.sym(S.VISUALIZE, "main")([str(ep)])
-    return rc, capsys.readouterr().err
+    rc, _out, err = E.cli_on(Path(ep), capsys, module=S.mod(S.VISUALIZE))
+    return rc, err
 
 
 def _page_file(ep: Path) -> Path:
@@ -750,7 +753,10 @@ def test_1224_forbidden_world_label_is_refused_by_the_launcher_and_the_sibling_l
     `siem_x` is the positive control at every reader.
     """
     FamilyError, JudgeRefused = _family_error(), S.judge_refused_cls()
-    load_page = S.sym(S.VISUALIZE, "load_episode")
+    # #1105 PR 2 (declared change 4): the page's loader reads the episode view, opened by id.
+    def load_page(episode: Path) -> object:
+        return E.load_episode(Path(episode), module=S.mod(S.VISUALIZE))
+
     doc = _doc((label, [_F1]), ("c", [_F2]))
     ep = _episode(tmp_path / "ep", doc)
     if label == "siem_x":

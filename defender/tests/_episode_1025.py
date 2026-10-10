@@ -355,6 +355,17 @@ def load_episode(episode_dir: Path, *, module: Any = None) -> Any:
         return target.load_episode(view)
 
 
+def build_page(episode_dir: Path, *, module: Any = None) -> str:
+    """The page's HTML for the episode at `episode_dir` (`build_page(view)`), the view opened by
+    id the way `render_episode` opens it (#1105 PR 2); nothing is written."""
+    d = Path(episode_dir).absolute()
+    target = module if module is not None else page_module()
+    plant_container_record(d)
+    with J.episodes_base(d.parent), \
+            target.open_episode_view(page_tenant().runs_repository(), d.name) as view:
+        return target.build_page(view)
+
+
 def cli_on(episode_dir: Path, capsys, *, module: Any = None) -> tuple[int, str, str]:
     """`cli` for the episode at `episode_dir`, by id: `--tenant T <episode_id>` under the
     episodes base that holds it (#1105 PR 2, declared change 4)."""

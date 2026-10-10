@@ -41,6 +41,7 @@ import pytest
 
 from defender import _episode_handle as EH
 from defender import _yaml
+from defender.tests import _episode_1025 as E
 from defender.tests import _judge_921 as J
 from defender.tests import _state1135
 from defender.tests.live_oracle_1224 import _spec1224 as S
@@ -1454,7 +1455,7 @@ def test_outcome_record_is_cut_short_by_a_launcher_crash(tmp_path, state):
         pass
     assert judge.prompts == [], "no record is not an accepted record: nothing is graded"
 
-    page = Path(S.sym(S.VISUALIZE, "render_episode")(ep))
+    page = Path(E.render_episode(ep, module=S.mod(S.VISUALIZE)))  # #1105 PR 2 (declared change 4)
     html = page.read_text(encoding="utf-8").lower()
     assert "outcome" in html
     assert any(w in html for w in ("missing", "unreadable", "no record"))
