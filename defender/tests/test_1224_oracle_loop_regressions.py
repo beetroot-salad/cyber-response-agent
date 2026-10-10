@@ -19,8 +19,6 @@ from typing import Any
 
 import pytest
 
-from defender import run as run_mod
-from defender._episode_handle import Episode
 from defender.learning.branch.estate import oracle as oracle_mod
 from defender.learning.branch.estate.checks import CheckStore, RealData, check_submission
 from defender.runtime.verbs import CALL_DELIVERY, CallDelivery
@@ -170,10 +168,10 @@ def test_a_hung_verifier_is_cut_off_by_the_turn_deadline(tmp_path):
 
 
 def test_a_call_after_the_world_went_unservable_reports_the_failing_call(tmp_path):
-    """CI race (test_conc_13): a call queued behind the failing one raises unservable for its
-    own call (s_p158). Both aborts surface together and the first one found writes the world's
-    record, which then named a call the oracle never saw. A later call's abort now carries the
-    world's first failure, and the record is written from it."""
+    """CI race (test_conc_13): a call queued behind the failing one raised unservable for its
+    own call. Both aborts surface together and the first one found writes the world's record,
+    which then named a call the oracle never saw. Every later call raises the world's one
+    failure."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     est.answer("idp", "query", BOB, BOB_ROWS)
@@ -186,11 +184,8 @@ def test_a_call_after_the_world_went_unservable_reports_the_failing_call(tmp_pat
     with pytest.raises(oracle_mod.OracleUnservable) as later:
         S.call(reg, "idp", "query", ctx, q="user:bob")
 
-    assert dict(later.value.call[2])["q"] == "user:bob"
-    assert later.value.world is first.value
-    with Episode.open(S.episode_v2(tmp_path / "rec")) as episode:
-        run_mod._record_unservable_world(episode, SimpleNamespace(label="b"), later.value)
-        assert S.read_world_record(episode.dir, "b")["call"]["params"]["q"] == "user:alice"
+    assert later.value.call == first.value.call
+    assert (later.value.reason, later.value.detail) == (first.value.reason, first.value.detail)
 
 
 def test_the_oracle_imports_nothing_private_from_pydantic_ai():

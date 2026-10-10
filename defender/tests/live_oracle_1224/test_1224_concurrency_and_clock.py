@@ -932,9 +932,9 @@ def test_conc_09_conversation_restart_with_a_turn_in_flight(tmp_path):
 
 
 def test_conc_14_two_leads_both_exhaust_attempts_in_one_world(tmp_path):
-    """s_p158 — two leads exhausting their attempts in one world at the same time each raise
-    `OracleUnservable` for their own call, leave no world-ledger row, take sequential turns, and
-    leave at most one record for that world.
+    """s_p158 — two leads exhausting their attempts in one world at the same time both raise
+    `OracleUnservable` naming the world's one failing call, leave no world-ledger row, take
+    sequential turns, and leave at most one record for that world.
 
     Settled: they count as one unservable world toward the family's validity (O5 counts worlds,
     not calls). This test drives the REGISTRY only (two calls released together), so no sibling
@@ -957,10 +957,11 @@ def test_conc_14_two_leads_both_exhaust_attempts_in_one_world(tmp_path):
     ctx = est.ctx(tmp_path / "run")
     a, b = _together(lambda: S.call(reg, "idp", "query", ctx, **one),
                      lambda: S.call(reg, "idp", "query", ctx, **two))
-    for c, params in ((a, one), (b, two)):
+    for c in (a, b):
         assert isinstance(c.error, unservable), f"got {c.error!r}, not OracleUnservable"
-        assert c.error.call[0] == "idp"
-        assert dict(c.error.call[2]) == params
+    assert a.error.call == b.error.call, "the two aborts name different failures"
+    assert a.error.call[0] == "idp"
+    assert dict(a.error.call[2]) in (one, two)
     _assert_never_overlap(oracle)
     assert S.ledger_rows(ep, "b") == [], "an unservable call left a world-ledger row"
     records = sorted(p.name for p in (ep / S.WORLD_RECORDS).glob("*")) if (

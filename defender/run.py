@@ -712,7 +712,6 @@ def _record_unservable_world(episode: Episode, world: Any, abort: ServingAbort) 
     record's shape is `outcome.write_world_record`'s."""
     from defender.learning.branch import outcome as outcome_mod
 
-    abort = getattr(abort, "world", abort)  # the world's first failure, whichever call surfaced
     call = getattr(abort, "call", None)
     system, verb, params = call if isinstance(call, tuple) and len(call) == 3 else ("", "", {})
     reason = getattr(abort, "reason", "")

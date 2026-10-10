@@ -86,18 +86,14 @@ class OracleUnservable(ServingAbort):
 
     `.reason` is a short word (`retries`, `budget`), `.call` the `(system, verb, params)` it
     failed on. A `ServingAbort`, so the query tool re-raises it rather than filing a fault row
-    or charging the circuit breaker: the sibling aborts and records its world as unservable.
-    `.world` is the world's first failure (itself, unless the world was already unservable):
-    concurrent calls abort together, and the world's record names that one (S8)."""
+    or charging the circuit breaker: the sibling aborts and records its world as unservable."""
 
-    def __init__(self, reason: str, call: tuple[str, str, dict], detail: str = "", *,
-                 world: OracleUnservable | None = None) -> None:
+    def __init__(self, reason: str, call: tuple[str, str, dict], detail: str = "") -> None:
         system, verb, params = call
         super().__init__(f"the oracle could not serve {system}.{verb} ({reason}): {detail}")
         self.reason = reason
         self.call = (system, verb, dict(params))
         self.detail = detail
-        self.world: OracleUnservable = world if world is not None else self
 
 
 class OracleSandboxError(RuntimeError):
@@ -773,8 +769,11 @@ class Oracle:
         """Turns until a verified submission is committed (`commit(served, claim, verdict,
         attempts, staged)`); returns `(served, claim, verdict, attempts)`."""
         if self.unservable is not None:
-            raise OracleUnservable(self.unservable.reason, call, "the world is already unservable",
-                                   world=self.unservable)
+            # The world's one failure, whichever call asks: concurrent calls abort together and
+            # the first abort found writes the world's record, which must name the failing call
+            # (S8), not one the oracle never saw.
+            stop = self.unservable
+            raise OracleUnservable(stop.reason, stop.call, stop.detail)
         failures = 0
         first = True
         while True:
