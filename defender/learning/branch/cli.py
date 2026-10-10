@@ -59,9 +59,9 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _provenance
-from defender._episode_handle import (
+from defender._episode_handle import Episode
+from defender._episodes_root import (
     EPISODES_BASE_ENV,
-    Episode,
     EpisodeRefused,
     episode_dir,
     episodes_root,

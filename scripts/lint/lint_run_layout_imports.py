@@ -15,7 +15,7 @@ What is gated:
   eight `HELPERS`. A new export is gated until it is listed. Exempt in the layout-exempt
   categories below;
 * the episode-runs names: `EpisodePaths.runs` / `.sibling_run_dir`, `EpisodeLayout.runs` /
-  `.container` / `.run` / `.run_page` / `.sibling_run_dir`, `Episode.runs` and `RUNS_DIRNAME`;
+  `.run` / `.run_page` / `.sibling_run_dir`, `Episode.runs` and `RUNS_DIRNAME`;
 * `Tenant.runs`;
 * the handle constructors: a call `Run(...)` / `ArchivedWorld(...)`, and any reference to
   `Run.at`, `Run.for_tenant`, `Run.under` or `ArchivedWorld.at`; and the repository's own
@@ -165,8 +165,7 @@ _EPISODE_VIEW = f"{_DOOR}.EpisodeRuns"
 _GATED_MEMBERS: dict[str, frozenset[str]] = {
     _EPISODE: frozenset({"runs"}),
     _EPISODE_PATHS: frozenset({"runs", "sibling_run_dir"}),
-    # `container` is `runs/` under the episode handle's own name (#1105 PR 2, #1210's list A).
-    _EPISODE_LAYOUT: frozenset({"runs", "container", "run", "run_page", "sibling_run_dir"}),
+    _EPISODE_LAYOUT: frozenset({"runs", "run", "run_page", "sibling_run_dir"}),
     _TENANT: frozenset({"runs"}),
     _RUN: frozenset({"at", "for_tenant", "under"}),
     _ARCHIVED: frozenset({"at"}),

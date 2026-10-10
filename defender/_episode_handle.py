@@ -285,9 +285,8 @@ class Episode:
     @property
     def _runs(self) -> EpisodeFolder:
         """`runs/`, the siblings' container. Private (#1105 PR 2, F-13): the container and its
-        arms are the runs repository's episode view, which is built on this handle. Named by
-        the layout's `container` (#1210: no `runs` read outside the run-records owners)."""
-        return self._folder(LAYOUT.container)
+        arms are the runs repository's episode view, which is built on this handle."""
+        return self._folder(LAYOUT.runs)
 
     @property
     def box_mounted_container(self) -> Path:
