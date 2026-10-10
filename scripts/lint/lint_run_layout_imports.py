@@ -123,6 +123,9 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
         # run folder they were handed (`run.run_dir`) by its layout names.
         "learning/branch/archive.py", "learning/branch/questioner/__init__.py",
         "learning/leads/lead_author/__init__.py",
+        # F-09: the tracer walks the tenant's runs by id (J8), then reads each opened run's
+        # report from the folder it was handed (`_report_disposition(run.run_dir)`).
+        "learning/ops/trace_lesson.py",
     ),
     "not-a-run": (_VE,),
     # N-f: exempt only inside the four readers in `DEFERRED_LEGACY`; #1166 deletes them.

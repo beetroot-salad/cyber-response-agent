@@ -297,7 +297,10 @@ def test_the_sibling_prior_walks_a_runs_base_that_now_holds_run_end_records(tmp_
         encoding="utf-8")
     slugs = [src.name]
     index_before = S.mod("evals.held_out").index_runs(slugs, base)
-    traced_before = trace_lesson.in_context_cases(lesson, None, base)
+    # #1105 PR 2 (declared change 10, J8): the tracer walks the tenant's own runs, by id
+    # (`tenant_runs` lists them under the repository's listing rule).
+    traced_before = trace_lesson.in_context_cases(
+        lesson, None, trace_lesson.tenant_runs(base.parent.name))
     assert traced_before, (
         "the fixture failed: the lesson tracer found no case to count, so its walk answers the "
         "empty list whatever sits beside the run dir")
@@ -306,7 +309,8 @@ def test_the_sibling_prior_walks_a_runs_base_that_now_holds_run_end_records(tmp_
         "the fixture did not put the new leaf under the runs base, so this walks nothing new")
     assert S.mod("evals.held_out").index_runs(slugs, base) == index_before, (
         "the held-out index answered differently once a run-end record sat beside the run dir")
-    assert trace_lesson.in_context_cases(lesson, None, base) == traced_before, (
+    assert trace_lesson.in_context_cases(
+            lesson, None, trace_lesson.tenant_runs(base.parent.name)) == traced_before, (
         "the lesson tracer's walk answered differently once a run-end record sat beside the "
         "run dir — the second of the seven screens the docstring names")
 

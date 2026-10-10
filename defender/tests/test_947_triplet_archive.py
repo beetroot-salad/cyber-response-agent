@@ -457,7 +457,9 @@ def test_947_the_lesson_tracer_counts_no_sibling_as_an_in_context_case(tmp_path,
     T.lesson_row(src)
     for w in T.WORLDS:
         T.lesson_row(ep / "runs" / f"{T.EPISODE_ID}-{w}")
-    assert [hit.case_id for hit in trace.in_context_cases("L1", None, base)] == [T.SOURCE_RUN_ID]
+    # #1105 PR 2 (declared change 10, J8): the tracer walks the tenant's own runs, by id.
+    runs = trace.tenant_runs(base.parent.name)
+    assert [hit.case_id for hit in trace.in_context_cases("L1", None, runs)] == [T.SOURCE_RUN_ID]
 
 
 def test_947_the_invlang_corpus_counts_no_sibling_and_no_archived_world(tmp_path, monkeypatch):

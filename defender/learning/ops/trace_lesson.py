@@ -55,7 +55,7 @@ from defender._frontmatter import parse_frontmatter_or_none
 from defender._report import UNKNOWN_DISPOSITION, read_report
 from defender._knowledge import CHECKOUT_KNOWLEDGE
 from defender._text import one_line
-from defender.run_repository import Run
+from defender.run_repository import Run, RunPaths
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LESSONS_DIR = CHECKOUT_KNOWLEDGE.lessons_dir
@@ -92,20 +92,21 @@ class CaseHit:
 
 
 @functools.cache
-def _report_disposition(report: Path) -> str:
-    """This case's disposition for the trace table (from its report, the opened run's
-    `documents.report` record), or the unknown placeholder.
+def _report_disposition(run_dir: Path) -> str:
+    """This case's disposition for the trace table, or the unknown placeholder — read from the
+    report of the run folder it is handed (an opened run's `run.run_dir`).
 
     Degrades rather than raises, so one bad report costs only its row. Warns when a present
     report has no readable headline; a report never written (an in-progress run) is silent.
     """
+    report = RunPaths(run_dir).report
     if not report.is_file():
         return UNKNOWN_DISPOSITION
     read = read_report(report)
     if read.reason is not None:
         # Flattened: the reason can quote model-authored bytes, which could forge rows.
-        print(f"warn: {one_line(report.parent.name)}/{one_line(read.reason)} — disposition "
-              "unknown", file=sys.stderr)
+        print(f"warn: {one_line(run_dir.name)}/{one_line(read.reason)} — disposition unknown",
+              file=sys.stderr)
     return read.disposition_or_unknown
 
 
@@ -134,7 +135,7 @@ def in_context_cases(
 
 def _run_hits(lesson_name: str, created_at: datetime | None, run: Run) -> list[CaseHit]:
     """One run's exposures to `lesson_name` since `created_at`, read through the run's own
-    records (`lessons_loaded`, then `report` for the disposition)."""
+    `lessons_loaded` record, then the report of its folder for the disposition."""
     loaded = Path(run.observability.lessons_loaded.path)
     if not loaded.is_file():
         return []
@@ -144,7 +145,7 @@ def _run_hits(lesson_name: str, created_at: datetime | None, run: Run) -> list[C
     disposition = None
     for exposure in exposures(mine, since=created_at).lessons:
         if disposition is None:
-            disposition = _report_disposition(Path(run.documents.report.path))
+            disposition = _report_disposition(run.run_dir)
         hits.append(CaseHit(str(run.id), disposition, str(exposure.evidence_at),
                             exposure.evidence))
     return hits
