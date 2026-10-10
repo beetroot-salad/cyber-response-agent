@@ -16,7 +16,7 @@ import string
 import sys
 from collections.abc import Callable, Mapping
 from defender._model import model
-from defender.run_repository import RunPaths
+from defender.run_repository import Run, RunPaths
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -143,10 +143,15 @@ def done_sentinel_text(sha: str | None) -> str:
     )
 
 
-def write_done_sentinel(run_dir: Path, sha: str | None) -> None:
-    """The one writer of `<run_dir>/lead_author/done`, which `_run_locked` short-circuits on.
+def write_done_sentinel(run: Run, sha: str | None) -> None:
+    """The one writer of the run's `lead_author/done`, which `_run_locked` short-circuits on.
     Under `on_done` the drain writes it only after the scrub, so a tainted batch's run is
-    served again rather than recorded done."""
+    served again rather than recorded done. Takes the opened `Run` (#1105 PR 2); the state
+    goes through its `run_dir`."""
+    _write_done(run.run_dir, sha)
+
+
+def _write_done(run_dir: Path, sha: str | None) -> None:
     _write_state(_done_sentinel(run_dir), done_sentinel_text(sha))
 
 
@@ -215,7 +220,7 @@ def build_lead_author_deps(
 
 
 def run(
-    run_dir: Path,
+    run: Run,
     *,
     label: _loop_config.DrainLabel,
     paths: _loop_config.LoopPaths | None = None,
@@ -235,14 +240,15 @@ def run(
     `LEAD_AUTHOR_DRAIN_LABEL`): without `deps`, the held trees are opened for it here, under the
     queue lock, and closed when the run ends; with `deps`, a label that does not mount
     `deps.paths.skills_dir` is refused (#1134). The label is used first, on both paths, so a
-    non-member raises before the queue lock or any of the run (#1179 O1')."""
+    non-member raises before the queue lock or any of the run (#1179 O1').
+
+    `run` is the opened run (#1105 PR 2): the open that made it judged its folder, so there is
+    no existence check here; its `lead_author/` state goes through `run.run_dir`."""
     if deps is None and paths is None:
         raise TypeError("run takes paths= (or deps=)")
     writable = label.writable_trees(deps.paths if deps is not None else paths)  # type: ignore[arg-type]
-    if not run_dir.is_dir():
-        _logger.critical(f"run_dir not found: {run_dir}")
-        return 2
-    sink = on_done if on_done is not None else functools.partial(write_done_sentinel, run_dir)
+    run_dir = Path(run.run_dir)
+    sink = on_done if on_done is not None else functools.partial(_write_done, run_dir)
 
     # Take the lock before building `deps`: resolving membership is subprocess work, and a
     # tick about to skip on a contended lock should neither pay for it nor fail on a tree the
@@ -270,17 +276,15 @@ def run(
 
 
 def run_under_held_queue_lock(
-    run_dir: Path, *, paths: _loop_config.LoopPaths, state: LearningState, trees: DrainTrees,
+    run: Run, *, paths: _loop_config.LoopPaths, state: LearningState, trees: DrainTrees,
     box: Any = None, on_done: DoneSink, git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> int:
     """`run` for a caller that already holds the per-author queue lock (the drain holds it for
     its whole tick, since it defers the done sentinel) and the lane's held mounts, `trees` (the
-    drain's work step opens them for its label). Never skips."""
-    if not run_dir.is_dir():
-        _logger.critical(f"run_dir not found: {run_dir}")
-        return 2
+    drain's work step opens them for its label). Never skips. `run` is the run the drain
+    opened from the claim's address."""
     return _run_locked(
-        run_dir, build_lead_author_deps(paths, state=state, trees=trees, git_timeout=git_timeout),
+        Path(run.run_dir), build_lead_author_deps(paths, state=state, trees=trees, git_timeout=git_timeout),
         box=box,
         on_done=on_done,
     )
@@ -376,7 +380,7 @@ def _prepare_handoffs(
     *, catalog: list | None = None, on_done: DoneSink | None = None,
 ) -> tuple[list, list, int | None]:
     # Optional only for tests that drive this frame directly; `_run_locked` always passes it.
-    record_done = on_done if on_done is not None else functools.partial(write_done_sentinel, run_dir)
+    record_done = on_done if on_done is not None else functools.partial(_write_done, run_dir)
     pending_drafts_raw = deps.discover_system_drafts()
     threshold = _lift_threshold()
     contradicting = [
@@ -504,15 +508,36 @@ def main(argv: list[str]) -> int:
         epilog=_HELP_EPILOG.safe_substitute(names),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("run_dir", type=Path,
-                   help=f"defender run dir containing {names['EXECUTED_QUERIES']} "
-                        f"+ {names['RAW_MARKER']}/")
+    p.add_argument("--tenant", required=True,
+                   help="the tenant whose run is served; required, with no default")
+    p.add_argument("run_id",
+                   help=f"the defender run, by its id — its folder holds "
+                        f"{names['EXECUTED_QUERIES']} + {names['RAW_MARKER']}/")
     args = p.parse_args(argv)
+    run_ = _open_requested_run(args.tenant, args.run_id)
+    if run_ is None:
+        return 2
     # By hand this serves the lead-author lane's own queue under its lock, so it names that lane.
-    return run(
-        args.run_dir, label=_loop_config.LEAD_AUTHOR_DRAIN_LABEL, paths=_loop_config.loop_paths())
+    return run(run_, label=_loop_config.LEAD_AUTHOR_DRAIN_LABEL, paths=_loop_config.loop_paths())
 
 
+def _open_requested_run(raw_tenant: str, raw_run_id: str) -> Run | None:
+    """The run `--tenant T <run_id>` names, opened through T's repository (the request's
+    tenant, accepted under the configured data root); `None`, logged, when the tenant or the
+    run is refused — a link at the run's name is never followed."""
+    from defender import _tenant
+    from defender._paths import process_defender_dir
+    from defender.run_repository import RunId, RunRefused
+
+    try:
+        tenant = _tenant.accept_tenant(
+            _tenant.resolve_data_root(), _tenant.requested_tenant_id(raw_tenant),
+            defender_dir=process_defender_dir())
+        return tenant.runs_repository().open(RunId.parse(raw_run_id))
+    except (_tenant.TenantRefused, RunRefused) as refused:
+        _logger.critical(f"run {raw_run_id!r} of tenant {raw_tenant!r} cannot be opened: "
+                         f"{refused}")
+        return None
 
 
 #: Re-exports: callers import these names from here; their real homes are the source

@@ -62,6 +62,7 @@ from defender._io import (
 from defender.learning.core.config import DrainLabel
 
 if TYPE_CHECKING:
+    from defender.run_repository import RunAddress
     from defender.learning.core.config import LoopPaths
 
 _logger = logging.getLogger(__name__)
@@ -213,6 +214,23 @@ PITFALLS = Channel(
 )
 
 
+def _address_fault(spec: dict) -> str | None:
+    """Why a curation row's `tenant_id` / `run_id` cannot be read as a run address — missing,
+    not a string, or off its grammar — or `None` when they can. The shape alone: no tenant
+    folder is read (#1105 D-stored)."""
+    from defender._tenant import TenantRefused
+    from defender.run_repository import RunAddress, RunRefused
+
+    for key in ("tenant_id", "run_id"):
+        if not isinstance(spec.get(key), str):
+            return f"{key} is missing or not a string"
+    try:
+        RunAddress(spec["tenant_id"], spec["run_id"])
+    except (TenantRefused, RunRefused) as off:
+        return f"the run address is off its grammar ({off})"
+    return None
+
+
 @dataclass(frozen=True)
 class Claimed:
     """One request this pass owns: moved into `inflight/`, read, servable.
@@ -226,9 +244,13 @@ class Claimed:
     spec: dict
 
     @property
-    def run_dir(self) -> Path:
-        """The run the request is about (a run-tree path, not a state-tree one: #1105's)."""
-        return Path(self.spec["run_dir"])
+    def address(self) -> RunAddress:
+        """The run the request is about, as the row stores it (#1105 D-stored): its tenant and
+        run id, checked on their grammars when the claim admitted the row. The drain accepts
+        the tenant and opens the run through its repository."""
+        from defender.run_repository import RunAddress
+
+        return RunAddress(self.spec["tenant_id"], self.spec["run_id"])
 
     @property
     def identity(self) -> str:
@@ -685,11 +707,9 @@ class LearningState:
     # -- requests -------------------------------------------------------------------------------
 
     def enqueue_curation(self, case_id: str, spec: dict) -> None:
-        """@owns run_dir — a curation request's run folder, as the claim hands it back (`Claimed.
-        spec`); the writer is `run_common.enqueue_curation`, which passes it here as the request's
-        one source of truth.
-
-        File the curation request for `case_id`, replacing any earlier one: a repeat
+        """File the curation request `spec` (its fields' one producer is
+        `run_common.enqueue_curation`: `{case_id, tenant_id, run_id}`, the run's address) for
+        `case_id`, replacing any earlier one: a repeat
         investigation of one case coalesces onto one request, and the later run wins. Lock-free
         and atomic (a staged replace), so the end-of-run enqueue never waits on a drain."""
         name = f"{_QUEUE}/{case_id}.json"
@@ -752,15 +772,12 @@ class LearningState:
             if spec is None:
                 self._quarantine_name(name, {identity_key: stem}, reason)
                 continue
-            raw_run_dir = spec.get("run_dir")
-            if not isinstance(raw_run_dir, str) or not Path(raw_run_dir).is_absolute():
-                # A non-string would raise `TypeError` out of this generator and wedge the drain;
-                # a relative path would be served against the CWD, a worktree about to be
-                # `reset --hard`. Both writers store an absolute path.
-                self._quarantine_name(name, spec, "unreadable: run_dir is not an absolute path")
-                continue
-            if not Path(raw_run_dir).is_dir():
-                self._quarantine_name(name, spec, "artifact-missing")
+            unshaped = _address_fault(spec)
+            if unshaped is not None:
+                # The shape only (#1105 D-stored): the claim reads no tenant folder. A field the
+                # address cannot be built from would raise out of this generator and wedge the
+                # drain; an old `{case_id, run_dir}` row is one (nothing serves that shape).
+                self._quarantine_name(name, spec, f"unreadable: {unshaped}")
                 continue
             yield Claimed(key=stem, name=name, spec=spec)
 
