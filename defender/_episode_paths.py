@@ -30,6 +30,9 @@ TIMING_NAME = "timing.json"
 STAGED_NAME = "staged.yaml"
 #: Pre-flight's write-once episode outcome record (#1224): accepted, unusable or refused.
 OUTCOME_NAME = "outcome.yaml"
+#: Why `verify_family` withheld the family stamp: written only when it did, so the judge can
+#: name the reason it stamps a stampless family `not comparable`.
+NOT_COMPARABLE_NAME = "not_comparable.yaml"
 LEARNING_HTML_NAME = "learning.html"
 
 WORLDS_DIRNAME = "worlds"
@@ -271,6 +274,10 @@ class EpisodeLayout:
     @property
     def outcome(self) -> PurePosixPath:
         return PurePosixPath(OUTCOME_NAME)
+
+    @property
+    def not_comparable(self) -> PurePosixPath:
+        return PurePosixPath(NOT_COMPARABLE_NAME)
 
     @property
     def learning_html(self) -> PurePosixPath:

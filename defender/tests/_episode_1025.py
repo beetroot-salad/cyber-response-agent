@@ -385,11 +385,13 @@ def write_samples(episode_dir: Path, doc: dict[str, Any] | None = None) -> Path:
 
 
 def write_outcome(episode_dir: Path, outcome: str = "accepted", *,
-                  reason: str = OUTCOME_REASON, **lists: Any) -> Path:
+                  reason: str = OUTCOME_REASON, family_stamp: bool = True,
+                  **lists: Any) -> Path:
     """Pre-flight's `outcome.yaml` through the production writer (`outcome.write_outcome`),
     replacing any record already there (a fixture restating the outcome is not a second
     pre-flight), read back through `outcome.read_outcome`. `lists` are the writer's
-    `unservable_worlds` / `not_replayable` / `drift`."""
+    `unservable_worlds` / `not_replayable` / `drift`. An `accepted` record also gets the family
+    stamp (`J.comparable_family_stamp`) unless one is there or `family_stamp=False`."""
     outcome_mod = J.mod("learning.branch.outcome")
     path = Path(episode_dir) / "outcome.yaml"
     path.unlink(missing_ok=True)
@@ -397,6 +399,9 @@ def write_outcome(episode_dir: Path, outcome: str = "accepted", *,
         outcome_mod.write_outcome(episode, outcome, reason=reason, **lists)
     with bind(Path(episode_dir)) as bound:
         assert outcome_mod.read_outcome(bound)["outcome"] == outcome
+    if family_stamp and outcome == "accepted":
+        # PR #1232 round 7: only a stamped family is graded or compared.
+        J.comparable_family_stamp(Path(episode_dir), commit=LESSONS_COMMIT)
     return path
 
 
@@ -658,7 +663,7 @@ def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = Tr
     every-step `timing.json` a post-prep launch leaves (the archives predate it, c25)."""
     manifest = sample_manifest()
     ep = J.accepted_episode(
-        tmp_path, root=root, worlds=manifest["worlds"], labels=WORLDS,
+        tmp_path, root=root, worlds=manifest["worlds"], labels=WORLDS, family_stamp=False,
         dispositions={CONTROL: "malicious", PASSTHROUGH_WORLD: "benign", GRADED_WORLD: "malicious"},
         ledgers={CONTROL: [served_row(CONTROL, "passthrough")],
                  PASSTHROUGH_WORLD: [served_row(PASSTHROUGH_WORLD, "passthrough")],
@@ -670,7 +675,8 @@ def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = Tr
                                            attempts=1)]})
     # the manifest the sample carries: base story, a real axis per sibling, the control's null
     T.write_family(ep, manifest)
-    write_outcome(ep)
+    # The family stamp is `stamp`'s alone (`write_stamp` below), so `stamp=False` means absent.
+    write_outcome(ep, family_stamp=False)
     # world alerts name the rule the header shows
     for label in WORLDS:
         (ep / "worlds" / label / "alert.json").write_text(json.dumps(

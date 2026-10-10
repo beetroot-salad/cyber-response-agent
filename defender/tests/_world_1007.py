@@ -202,15 +202,21 @@ def write_samples(episode_dir: Path, samples: dict[str, Any] | None = None) -> P
                       samples if samples is not None else samples_document())
 
 
-def write_outcome(episode_dir: Path, *, outcome: str = "accepted", reason: str = "") -> Path:
+def write_outcome(episode_dir: Path, *, outcome: str = "accepted", reason: str = "",
+                  family_stamp: bool = True) -> Path:
     """Materialise pre-flight's `<episode>/outcome.yaml` — the record the judge's gate reads —
-    through the production writer (`learning/branch/outcome.py::write_outcome`)."""
+    through the production writer (`learning/branch/outcome.py::write_outcome`). An `accepted`
+    family also gets `verify_family`'s family stamp unless `family_stamp=False` (PR #1232
+    round 7: only a stamped family is graded)."""
     from defender._episode_handle import Episode
     from defender.learning.branch.outcome import write_outcome as _write
+    from defender.tests._judge_921 import comparable_family_stamp
 
     ep = Path(episode_dir)
     with Episode.open(ep) as handle:
         _write(handle, outcome, reason=reason)
+    if family_stamp and outcome == "accepted":
+        comparable_family_stamp(ep)
     return ep / OUTCOME_NAME
 
 

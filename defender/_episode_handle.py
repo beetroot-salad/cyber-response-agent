@@ -45,6 +45,7 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "world.run_dir_pointer": ("write",),
     "world_record": ("create",),
     "outcome": ("create",),
+    "not_comparable": ("write",),
 }
 
 #: Every folder the handle hands out, keyed the same way.
@@ -228,6 +229,11 @@ class Episode:
     def outcome(self) -> CreateRecord:
         """`outcome.yaml`, pre-flight's episode outcome (#1224): created once, never rewritten."""
         return CreateRecord(*self._at(LAYOUT.outcome))
+
+    @property
+    def not_comparable(self) -> WriteRecord:
+        """`not_comparable.yaml`: why `verify_family` withheld the family stamp."""
+        return WriteRecord(*self._at(LAYOUT.not_comparable))
 
     @property
     def learning_html(self) -> WriteRecord:

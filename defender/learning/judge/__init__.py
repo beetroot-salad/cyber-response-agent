@@ -67,6 +67,11 @@ NOT_GRADED = "not-graded"
 #: not an outcome word, since the outcome record was never consulted.
 MANIFEST_REFUSED = "manifest refused"
 
+#: The stamp's word for an `accepted` family with no readable family stamp: `verify_family`
+#: withheld it, so its worlds are not comparable and the pass grades none of them (PR #1232
+#: round 7; the retired `incomplete` used to keep such a family away from the judge).
+NOT_COMPARABLE = outcome_mod.NOT_COMPARABLE
+
 #: `judge.yaml`'s `validity` (O5, M19=A): its own field, never a family word.
 USABLE, UNUSABLE = "usable", "unusable"
 
@@ -504,6 +509,12 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orche
             {"world": w["world_id"], "ungradable": True,
              "ungradable_reason": "the family is unusable (O5): not judged"}
             for w in worlds])
+    not_comparable = outcome_mod.not_comparable_reason(bound)
+    if not_comparable is not None:
+        # The family stamp is `verify_family`'s certificate that the siblings ran one commit,
+        # one knowledge revision and one tenant on clean (or waived) trees. Without it the
+        # worlds' differences measure nothing: no model call, nothing queued.
+        return _stamp_not_graded(episode, NOT_COMPARABLE, not_comparable)
 
     configured_draws = draws if draws is not None else _judge_draws()
     model, effort, cap = _judge_model(), _judge_effort(), _judge_cap()

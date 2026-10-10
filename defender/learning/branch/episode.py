@@ -12,7 +12,10 @@ followed.
 Both refuse an episode whose outcome record (`outcome.yaml`, written once by the launcher's
 pre-flight) says anything but exactly `accepted`: an `unusable` or `refused` family measured
 nothing, and an absent or torn record is the distinct "no record" state, never `accepted`
-(M05=A). Refusing keeps "no differences" distinct from "no comparison possible".
+(M05=A). An `accepted` episode with no readable family stamp is refused too: `verify_family`
+withheld it, so nothing shows the worlds ran the same code, knowledge and tenant
+(`outcome.not_comparable_reason`, the judge's own gate). Refusing keeps "no differences"
+distinct from "no comparison possible".
 
 An `accepted` episode with no archived worlds answers empty rather than refusing; that is safe
 only because the recorded outcome distinguishes it from "the worlds ran and agreed".
@@ -56,7 +59,8 @@ Invoke = Callable[..., Any]
 class EpisodeError(ValueError):
     """An episode these readers cannot answer over honestly.
 
-    Raised for an outcome other than `accepted` (or no outcome record), an archived disposition
+    Raised for an outcome other than `accepted` (or no outcome record), an accepted family with
+    no readable family stamp, an archived disposition
     outside the shipped
     vocabulary, or an archived world the manifest does not declare. A `ValueError` so callers
     can catch this design's refusals at one boundary.
@@ -87,13 +91,18 @@ def _recorded_outcome(bound: Bound) -> tuple[str, str]:
 
 def _refuse_incomplete(bound: Bound) -> None:
     """Refuse an episode whose outcome record is not exactly `accepted`, naming the word and
-    its reason, or the missing record."""
+    its reason, or the missing record — and an accepted one with no readable family stamp."""
     word, reason = _recorded_outcome(bound)
     if word != outcome_mod.ACCEPTED:
         raise EpisodeError(
             f"the episode's outcome is {word!r}{f' ({reason})' if reason else ''} — only an "
             "accepted family's worlds are compared; an answer over these would read as a "
             "measurement nobody made")
+    not_comparable = outcome_mod.not_comparable_reason(bound)
+    if not_comparable is not None:
+        raise EpisodeError(
+            f"the episode is {outcome_mod.NOT_COMPARABLE} ({not_comparable}) — an answer over "
+            "its worlds would read as a measurement nobody made")
 
 
 def _archived_labels(bound: Bound) -> list[str]:

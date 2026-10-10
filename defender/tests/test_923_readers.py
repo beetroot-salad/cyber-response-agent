@@ -198,6 +198,10 @@ def _episode_verdicts_reads_the_archived_headline(tmp_path: Path) -> None:
     # #1224: the readers compare only an episode pre-flight recorded `accepted` (`outcome.yaml`).
     with Episode.open(world.parents[1]) as episode:
         write_outcome(episode, ACCEPTED, reason="every world calibrated")
+    # PR #1232 round 7: ... and carried `verify_family`'s family stamp.
+    from defender.tests._judge_921 import comparable_family_stamp
+
+    comparable_family_stamp(world.parents[1])
     assert verdicts(world.parents[1]) == {"b": MEMBER}
 
 
