@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shutil
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
@@ -294,113 +294,6 @@ def _partition(rows: list[QueryRow]) -> tuple[list[QueryRow], list[QueryRow]]:
         [r for r in ordered if not r.is_sentinel],
         [r for r in ordered if r.is_sentinel],
     )
-
-
-
-#: How much of one sampled document reaches a prompt: the reader needs the document's shape,
-#: not all of it. The sample says when it elides, or an author writes against the truncation.
-SAMPLE_MAX_FIELDS = 40
-SAMPLE_MAX_VALUE_CHARS = 200
-#: Containers are capped too, and nesting is bounded: a payload can carry an object deep
-#: enough that a faithful rendering is longer than the prompt it is an aside in.
-SAMPLE_MAX_ITEMS = 5
-SAMPLE_MAX_DEPTH = 6
-
-
-def _one_document(payload: object) -> dict | None:
-    """One document out of a parsed payload: a search hit (`{"hits": [...]}`), or an ES|QL row
-    (`{"columns", "values"}`), which is only a projection and is marked `esql_projection`.
-    """
-    if not isinstance(payload, dict):
-        return None
-    hits = payload.get("hits")
-    if isinstance(hits, list):
-        for hit in hits:
-            if isinstance(hit, dict) and hit:
-                return dict(hit)
-    columns, values = payload.get("columns"), payload.get("values")
-    if isinstance(columns, list) and isinstance(values, list):
-        names = [c.get("name") for c in columns if isinstance(c, dict)]
-        for row in values:
-            if isinstance(row, list) and row and len(row) == len(names):
-                return {"esql_projection": True,
-                        **{n: v for n, v in zip(names, row, strict=True) if isinstance(n, str)}}
-    return None
-
-
-def _capped_document(value: object, depth: int = 0) -> object:
-    """`value` trimmed to what a prompt can carry, saying so wherever it elided.
-
-    Structure survives: only leaf strings are truncated, containers are capped and recursed.
-    Stringifying a nested object would show a Python repr, which an author would copy as a
-    flat quoted blob — an invented shape.
-    """
-    if depth >= SAMPLE_MAX_DEPTH:
-        return "…(nested further)"
-    if isinstance(value, dict):
-        out: dict = {str(k): _capped_document(v, depth + 1)
-                     for k, v in list(value.items())[:SAMPLE_MAX_FIELDS]}
-        if len(value) > SAMPLE_MAX_FIELDS:
-            out["…"] = f"{len(value) - SAMPLE_MAX_FIELDS} further field(s) not shown"
-        return out
-    if isinstance(value, list):
-        out_list: list = [_capped_document(v, depth + 1) for v in value[:SAMPLE_MAX_ITEMS]]
-        if len(value) > SAMPLE_MAX_ITEMS:
-            out_list.append(f"…{len(value) - SAMPLE_MAX_ITEMS} further item(s) not shown")
-        return out_list
-    if isinstance(value, str) and len(value) > SAMPLE_MAX_VALUE_CHARS:
-        return value[:SAMPLE_MAX_VALUE_CHARS] + " …(truncated)"
-    return value
-
-
-def corpus_samples(
-    leads: Sequence[JoinedLead], *, pattern_of: Callable[[QueryRow], str | None]
-) -> dict[str, dict | None]:
-    """One real document per base pattern this run's queries addressed — what the questioner
-    needs to inject documents with real field names, which the investigation's own queries
-    would then retrieve.
-
-    `leads` is `joined(run_dir)`, shared with `questioner_leads`; a `Sequence` because it is
-    walked more than once.
-
-    Every addressed pattern is a key; `None` means "asked and held nothing", distinct from
-    never addressed. The keys are also the capture's FROM sources that
-    `parse_family(captured_patterns=...)` checks overlays against.
-
-    `pattern_of` is injected: which key names a call's corpus is the estate's vendor knowledge.
-
-    Reads use `read_guarded` (not lstat-then-read, a check-then-act window) since payloads are
-    box-writable and bound for a prompt. An unreadable payload skips to the next candidate.
-    """
-    samples: dict[str, dict | None] = {}
-    for lead in leads:
-        for query in lead.queries:
-            try:
-                pattern = pattern_of(query)
-            except Exception:  # noqa: BLE001 — a router that refuses a call names no corpus
-                continue
-            if not isinstance(pattern, str) or not pattern:
-                continue
-            # A real document outranks an ES|QL projection, which names fields but not the
-            # record's shape; keep looking after a projection.
-            held = samples.get(pattern)
-            if held is not None and not held.get("esql_projection"):
-                continue
-            samples.setdefault(pattern, None)
-            if query.raw_ref is None or query.payload_status != "ok":
-                continue
-            text, _refused = read_guarded(query.raw_ref)
-            if text is None:
-                continue
-            payload, unreadable = load_json_artifact(text)
-            if unreadable is not None:
-                continue
-            document = _one_document(payload)
-            if document and (samples.get(pattern) is None
-                             or not document.get("esql_projection")):
-                capped = _capped_document(document)
-                samples[pattern] = capped if isinstance(capped, dict) else None
-    return samples
 
 
 def actor_view(run_dir: Path) -> dict:

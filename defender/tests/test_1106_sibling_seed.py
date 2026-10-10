@@ -342,7 +342,7 @@ def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path)
             defender_dir=P.DEFENDER, model_name="m", model_override=None, box=None,
             tenant=record,
             world=run.resume_world(Episode.open(ep), "b", tenant=lambda r=record: r),
-            episode=Episode.open(ep),
+            episode=Episode.open(ep), serving=O.serving(),
             investigate=lambda seen=seen, **kw: seen.update(kw) or {})
         registry = seen["verbs"]
         assert type(registry).__name__ == "WorldRegistry", type(registry)

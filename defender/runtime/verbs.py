@@ -122,16 +122,11 @@ class VerbContext:
     #: imported here (see the import note above); `_tenant_given` still refuses `None`.
     tenant: Annotated[_RunTenant, SkipValidation]
     capture: Any = None
-    #: The branched world this call is served for; `None` for the ordinary run and the base
-    #: world, which both read the corpus itself. Set by the estate registry, never by a model:
-    #: it marks this world's staged reads (and no sibling's) as in bounds for the adapter.
-    world_id: str | None = None
     #: The moment a branched-world call is served as of; `None` for the ordinary run, which
     #: uses the wall clock. Every world of a family, the base included, carries the branch
     #: point's moment, so no branch arm reads the wall clock (that would make it unreplayable).
     #:
-    #: Set by the estate registry on every call, not only staged ones like `world_id`: a clock
-    #: admits nothing, so it need not be scoped to the call. A `datetime` rather than a string
+    #: Set by the estate registry on every call. A `datetime` rather than a string
     #: because systems format timestamps differently; not a callable because a function as a
     #: dataclass default would bind `ctx` as its first argument when called.
     as_of: datetime | None = None

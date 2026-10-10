@@ -239,8 +239,7 @@ class _Investigate(Protocol):
     def __call__(  # noqa: PLR0913 — the investigation's whole identity, one keyword each
         self, *, alert_path: Path, run_dir: Path, run_id: str, defender_dir: Path,
         model_name: str, model_override: str | None, box: Any, tenant: RunTenant,
-        world: Any = None, episode: Episode | None = None, oracle: Any = None,
-        verifier: Any = None,
+        world: Any = None, episode: Episode | None = None, serving: Any = None,
     ) -> dict[str, Any]: ...
 
 
@@ -266,9 +265,9 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
     world: Any = None,
     #: The sibling's episode, held by `main`: the world ledger is written through it.
     episode: Episode | None = None,
-    #: The world's oracle and verifier models (#1224); `None` builds them from their knobs.
-    oracle: Any = None,
-    verifier: Any = None,
+    #: The world's settled oracle side (#1224, `registry.oracle_serving`), resolved by `main`;
+    #: `None` exactly when `world` is.
+    serving: Any = None,
     registry_cls: Any = ModuleVerbRegistry,
     investigate: Callable[..., dict[str, Any]] = _run_the_driver,
 ) -> dict[str, Any]:
@@ -290,17 +289,22 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
             # The world's ledger is written through the episode `main` holds; there is no path
             # to fall back to.
             raise TypeError("_drive_investigation(world=…) needs the sibling's held `episode=`")
-        from defender.learning.branch.estate.registry import WorldRegistry
+        if serving is None:
+            raise TypeError("_drive_investigation(world=…) needs the world's settled `serving=`")
+        from defender.learning.branch.estate.limiter import RateLimiter
+        from defender.learning.branch.estate.registry import WorldRegistry, default_oracle_dir
         from defender.learning.branch.ledger import Ledger
         from defender.runtime import branch as branch_mod
 
         family = world.family
+        # Declared up front: a world that serves nothing must still leave a ledger.
+        ledger = Ledger.for_world(episode, world.world_id).declare()
         verbs: Any = WorldRegistry(
-            roster, tenant.grants.gather,
-            # Declared up front: a world that serves nothing must still leave a ledger.
-            world=world, ledger=Ledger.for_world(episode, world.world_id).declare(),
-            as_of=world.as_of, tenant=tenant, grant_home=tenant.table_pointer,
-            oracle=oracle, verifier=verifier,
+            roster, tenant.grants.gather, world=world, ledger=ledger, as_of=world.as_of,
+            serving=serving, oracle_dir=default_oracle_dir(world, ledger),
+            # This sibling's one limiter, at its slice of the episode rate (S16).
+            limiter=RateLimiter(serving.settings.rate),
+            tenant=tenant, grant_home=tenant.table_pointer,
         )
         resume = branch_mod.BranchSpec(
             source_run_dir=Path(family.source_run_dir),
@@ -340,9 +344,8 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
     world: Any = None,
     #: The sibling's held episode, threaded beside `world` for the world ledger's writes.
     episode: Episode | None = None,
-    #: The world's oracle and verifier models (#1224), threaded to the world registry.
-    oracle: Any = None,
-    verifier: Any = None,
+    #: The world's settled oracle side (#1224), threaded to the world registry.
+    serving: Any = None,
     investigate: _Investigate = _drive_investigation,
     start_box: Callable[..., Any] = box_mod.start_box,
     stop_box: Callable[..., None] = box_mod.stop_box,
@@ -365,8 +368,7 @@ def _run_investigation_lifecycle(  # noqa: PLR0913 — the lifecycle's inputs pl
             tenant=tenant,
             world=world,
             episode=episode,
-            oracle=oracle,
-            verifier=verifier,
+            serving=serving,
         )
         investigation_ok = True
     finally:
@@ -554,6 +556,19 @@ def _case_input(ns: argparse.Namespace, world: Any) -> tuple[Path, str | None]:
     return ns.alert.resolve(), ns.run_id
 
 
+def _world_seams(world: Any, *, oracle: Any, verifier: Any) -> dict[str, Any]:
+    """The lifecycle's world-only keywords: none for an ordinary run; for a sibling its oracle
+    side, settled once here from its knobs (the launcher hands it its rate slice through the
+    environment) and threaded inward whole."""
+    if world is None:
+        return {}
+    from defender.learning.branch.estate.registry import oracle_serving
+    from defender.learning.core.config import process_oracle_settings
+
+    return {"serving": oracle_serving(process_oracle_settings(), oracle=oracle,
+                                      verifier=verifier)}
+
+
 def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injection seams; the unservable exit is one more arm
     argv: list[str],
     *,
@@ -609,6 +624,7 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
         rc = preflight(ns.model, branching=True) if world is not None else preflight(ns.model)
         if rc:
             return rc
+        seams = _world_seams(world, oracle=oracle, verifier=verifier)
 
         # The handle, not just its directory: the post-run step saves the run page through it.
         run = materialize(alert, run_id, tenant=accepted, model=model, world=world)
@@ -625,8 +641,6 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
             _logger.info(f"run_dir={run_dir} model={model}")
             _announce_provenance(run_dir)
 
-            seams: dict[str, Any] = (
-                {} if world is None else {"oracle": oracle, "verifier": verifier})
             try:
                 summary = lifecycle(
                     run_dir=run_dir,

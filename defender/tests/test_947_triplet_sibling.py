@@ -27,6 +27,7 @@ import pytest
 from defender._episode_handle import Episode
 from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T
+from defender.tests.live_oracle_1224 import _spec1224 as S1224
 from defender.tests._data_root_1078 import current_data_root
 
 TOKEN_B = T.world_token("b")
@@ -252,7 +253,7 @@ def test_947_resume_path_builds_a_world_registry_and_world_ledger(tmp_path):
         tenant=T1106.fixture_run_tenant(),
         world=_run().resume_world(
         Episode.open(ep), "b", tenant=T1106.fixture_run_tenant),
-        episode=Episode.open(ep),
+        episode=Episode.open(ep), serving=S1224.serving(),
         investigate=lambda **kw: seen.update(kw) or {},
     )
     registry = seen["verbs"]
@@ -279,7 +280,7 @@ def test_947_resume_path_never_constructs_the_production_registry(tmp_path):
         tenant=T1106.fixture_run_tenant(),
         world=_run().resume_world(
         Episode.open(ep), "b", tenant=T1106.fixture_run_tenant),
-        episode=Episode.open(ep),
+        episode=Episode.open(ep), serving=S1224.serving(),
         registry_cls=Watching, investigate=lambda **kw: {})
     assert built == []
 

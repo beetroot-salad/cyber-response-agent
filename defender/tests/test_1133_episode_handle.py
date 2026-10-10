@@ -9,7 +9,7 @@ The handle this suite builds against (every name is gathered in `_spec1133`'s do
   `.view()`, `.close()`); `Episode(<path>)` is a `TypeError`.
 * records (`.path` plus exactly the verbs their row grants, as CLASS attributes; rev 3: no
   record answers `read` — a record is read through `episode.view()`): `family`,
-  `family_stamp`, `review`, `samples`, `judge`, `timing`, `staged`, `learning_html`,
+  `family_stamp`, `review`, `samples`, `judge`, `timing`, `learning_html`,
   `served_base`, `priming_lock` (properties); `served_world(token)`, `wire_log(name)`
   (methods); `world(label).draw(n)`, `world(label).run_dir_pointer`;
 * folders (`.path`, `.ensure()`): `served`, `runs`, `worlds`, `world(label).dir`,
@@ -29,7 +29,7 @@ What each section pins:
 - The `io=` seam (a recorder offering ONLY `hold` / `hold_new`): opening is exactly one `hold`
   (creating exactly one `hold_new`), and every verb is exactly ONE call on the held root — the
   record's `LAYOUT` name, the payload, the mode (`write` -> replace, `create` -> create,
-  `append` / `append_durable` -> append, the latter `durable=True`); `delete` ->
+  `append` -> append); `delete` ->
   `Held.unlink`, `ensure` -> `Held.mkdir`. No holding-folder `mkdir` before a write (the
   write's own walk makes it), no second `hold`.
 - D7' matrix 1 (O2), records x granted verbs x plant site, on an OPENED episode: refused in the
@@ -43,9 +43,8 @@ What each section pins:
   never recreates it; one whose dir was renamed writes into the moved folder.
 - O3: `view()` is a `Bound` (readers and `close` only) reading through the same handle.
 - Lifetime: after `close()`, a write raises `EBADF` and lands nowhere.
-- The durable chain: `Episode.create` fsyncs the episodes root (whether it made the episode
-  dir or adopted one), and `staged.append_durable` fsyncs `staged.yaml` then the episode dir
-  (the `os_` seam, reached through the `io=` seam).
+- The durable root: `Episode.create` fsyncs the episodes root (whether it made the episode
+  dir or adopted one) (the `os_` seam, reached through the `io=` seam).
 - No iterable text: a record's write verb refuses anything but `str` / `bytes`.
 - Name checks run before any held call.
 
@@ -324,7 +323,7 @@ def test_d2_each_verb_is_one_call_on_the_held_root_with_its_name_payload_and_mod
             assert call.text == payload(key, "seam"), f"{key}.{verb} changed the payload"
             assert call.kwargs.get("mode") == S.WRITE_MODE[verb], (
                 f"{key}.{verb} wrote in mode {call.kwargs.get('mode')!r}")
-            assert bool(call.kwargs.get("durable", False)) is (verb == "append_durable"), (
+            assert not call.kwargs.get("durable", False), (
                 f"{key}.{verb}: durable={call.kwargs.get('durable')!r}")
         assert rec_io.opened == [("hold", (tree.ep,))], "a verb re-opened the episode"
 
@@ -362,7 +361,7 @@ def _assert_landed(path: Path, key: str, verb: str, tag: str, *, prior: bytes = 
     assert not path.is_symlink(), f"{key}.{verb}: a link stands at {path}"
     assert path.is_file(), f"{key}.{verb}: nothing plain at {path}"
     got = path.read_bytes()
-    if verb in ("append", "append_durable"):
+    if verb == "append":
         assert got == prior + as_bytes(payload(key, tag)), f"{key}.{verb} did not append"
     else:
         assert got == as_bytes(payload(key, tag)), f"{key}.{verb} did not land whole"
@@ -651,12 +650,10 @@ def test_d1_a_write_after_close_raises_ebadf_and_lands_nowhere(tree):
 
 
 @pytest.mark.parametrize("dir_state", ["fresh", "adopted"])
-def test_d1_the_staging_records_durable_chain_is_leaf_then_episode_dir_then_episodes_root(
-        tree, dir_state):
-    """`staged.yaml`'s whole chain is durable when `append_durable` returns: `Episode.create`
-    fsyncs the episodes root (the episode dir's own entry), and the durable append fsyncs the
-    leaf (every byte on it) and then the episode dir holding it, on a directory handle that is
-    not `O_PATH`. Observed through the `os_` seam, reached through the `io=` seam.
+def test_d1_episode_create_fsyncs_the_episodes_root(tree, dir_state):
+    """`Episode.create` fsyncs the episodes root (the episode dir's own entry) on a directory
+    handle that is not `O_PATH`. Observed through the `os_` seam, reached through the `io=`
+    seam.
 
     The episodes root is fsynced whether `create` made the episode dir or adopted one already
     there (`adopted`): an entry an earlier, crashed launcher made may never have been synced, so
@@ -664,25 +661,13 @@ def test_d1_the_staging_records_durable_chain_is_leaf_then_episode_dir_then_epis
     fresh = tree.episodes / "ep-durable"
     if dir_state == "adopted":
         fresh.mkdir()
-    staged = fresh / LAYOUT.staged
-    spy = S.OsSpy(watch=staged)
+    spy = S.OsSpy()
     rec_io = S.RecordingIo(os_=spy)
-    with S.create_episode(fresh, io=rec_io) as episode:
+    with S.create_episode(fresh, io=rec_io):
         at_create = list(spy.fsyncs)
-        assert any(s.ino == S.inode(tree.episodes) and s.is_dir and not s.getfl & S.O_PATH
-                   for s in at_create), (
-            f"Episode.create did not fsync the episodes root on a directory handle: {at_create}")
-        episode.staged.create("# header\n")
-        mark = len(spy.fsyncs)
-        episode.staged.append_durable("- name: wv-x\n")
-        syncs = spy.fsyncs[mark:]
-    leaf = [i for i, s in enumerate(syncs) if s.ino == S.inode(staged)]
-    folder = [i for i, s in enumerate(syncs) if s.ino == S.inode(fresh)]
-    assert leaf, f"staged.yaml was not fsynced: {syncs}"
-    assert syncs[leaf[0]].watched_bytes == b"# header\n- name: wv-x\n"
-    assert folder, "the episode dir holding staged.yaml was not fsynced"
-    assert folder[-1] > leaf[0], "the episode dir was fsynced before the leaf"
-    assert not syncs[folder[-1]].getfl & S.O_PATH
+    assert any(s.ino == S.inode(tree.episodes) and s.is_dir and not s.getfl & S.O_PATH
+               for s in at_create), (
+        f"Episode.create did not fsync the episodes root on a directory handle: {at_create}")
 
 
 @pytest.mark.parametrize(("key", "verb"), list(_write_verbs()))

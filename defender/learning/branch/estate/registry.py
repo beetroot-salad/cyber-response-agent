@@ -15,6 +15,7 @@ structural.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import functools
 import json
 import logging
@@ -30,7 +31,7 @@ from defender._episode_paths import LAYOUT
 from defender.runtime.branch import source_alert
 from defender._io import read_jsonl_rows, read_text_utf8
 from defender._query_rules import ParamsTooDeep, _json_safe_params
-from defender.learning.core.config import oracle_settings_with
+from defender.learning.core.config import OracleSettings
 from defender.hooks.budget_enforcer import oracle_turn_closed, oracle_turn_opened
 from defender.runtime.verbs import (
     CALL_DELIVERY,
@@ -156,16 +157,44 @@ def calibrate_one(registry: WorldRegistry, ctx: Any, system: str, verb: str,
                               lambda: registry._real(system, base), commit)
 
 
+@dataclasses.dataclass(frozen=True)
+class OracleServing:
+    """A world's oracle-side inputs, settled: the oracle and verifier models, the oracle's box
+    factory and its knobs. Built once by `oracle_serving` at the boundary that starts serving
+    (the sibling's `run.main`, the launcher's `cli.preflight_replay`) and handed inward whole,
+    so no registry re-applies a default."""
+
+    oracle: Any
+    verifier: Any
+    box: Callable[[], Any]
+    settings: OracleSettings
+    restart_after: int
+
+
+def oracle_serving(settings: OracleSettings, *, oracle: Any = None, verifier: Any = None,
+                   box: Callable[[], Any] | None = None,
+                   restart_after: int = DEFAULT_RESTART_AFTER) -> OracleServing:
+    """The world's oracle-side inputs with every seam left `None` filled by its production
+    default: the role models built lazily from `settings` (a world that never takes a turn
+    needs no provider key) and the production box. The one place those defaults live."""
+    return OracleServing(
+        oracle=oracle if oracle is not None else _LazyModel(settings.model, settings.effort),
+        verifier=verifier if verifier is not None else _LazyModel(
+            settings.check_model, settings.check_effort),
+        box=box if box is not None else start_process_box,
+        settings=settings, restart_after=restart_after)
+
+
 class WorldRegistry(ModuleVerbRegistry):
     """A `ModuleVerbRegistry` whose verbs answer as the world's live oracle serves them."""
 
-    def __init__(self, roster, grant, *, world: Any, ledger: Ledger, as_of: datetime,  # noqa: PLR0913 — a world's whole serving identity, its tenant and the oracle's coined knobs
-                 tenant: Any = None, grant_home: str = TABLE_POINTER, oracle: Any = None,
-                 verifier: Any = None, oracle_dir: Path | None = None,
-                 retry_cap: int | None = None, turn_deadline: float | None = None,
-                 budget: float | None = None, rate: float | None = None,
-                 box: Callable[[], Any] | None = None, restart_after: int = DEFAULT_RESTART_AFTER,
-                 limiter: RateLimiter | None = None):
+    def __init__(self, roster, grant, *, world: Any, ledger: Ledger, as_of: datetime,  # noqa: PLR0913 — a world's whole serving identity, its tenant and its settled oracle side
+                 serving: OracleServing, oracle_dir: Path, limiter: RateLimiter,
+                 tenant: Any = None, grant_home: str = TABLE_POINTER):
+        """`serving` is the world's settled oracle side (`oracle_serving`), `oracle_dir` its
+        oracle-side state (`default_oracle_dir`), `limiter` the process's one rate limiter
+        (S16: pre-flight hands every world the launcher's, held at the episode rate; a
+        sibling builds its slice's)."""
         super().__init__(roster, grant, grant_home=grant_home)
         # Validate the clock here, once: every query this world issues, the oracle's own
         # included, carries it, so no oracle-side context is ever built without it (O-31).
@@ -193,10 +222,6 @@ class WorldRegistry(ModuleVerbRegistry):
         self.ledger = ledger
         self.tenant = tenant
         self.world_facts = tuple(getattr(world, "facts", ()) or ())
-        settings = oracle_settings_with(retry_cap=retry_cap, turn_deadline=turn_deadline,
-                                        budget=budget, rate=rate)
-        if oracle_dir is None:
-            oracle_dir = _default_oracle_dir(world, ledger)
         self.store = OracleStore(Path(oracle_dir))
         self._turn_lock = threading.Lock()
         #: The context of the call whose turn holds the lock: every oracle-side query of that
@@ -219,19 +244,14 @@ class WorldRegistry(ModuleVerbRegistry):
         door = QueryDoor(
             decide=lambda system, verb: ModuleVerbRegistry.decide(self, system, verb),
             real_verbs=lambda system: ModuleVerbRegistry.verbs(self, system),
-            # One limiter per process (S16): pre-flight hands every world the launcher's own,
-            # held at the episode rate; a sibling builds its slice's here.
-            limiter=limiter if limiter is not None else RateLimiter(settings.rate),
-            store=self.store, context=self._oracle_context)
+            limiter=limiter, store=self.store, context=self._oracle_context)
+        settings = serving.settings
         self.oracle = Oracle(
             world=world, store=self.store, door=door,
-            oracle_model=oracle if oracle is not None else _LazyModel(
-                settings.model, settings.effort),
-            verifier_model=verifier if verifier is not None else _LazyModel(
-                settings.check_model, settings.check_effort),
-            box_factory=box if box is not None else start_process_box,
+            oracle_model=serving.oracle, verifier_model=serving.verifier,
+            box_factory=serving.box,
             retry_cap=settings.retry_cap, turn_deadline=settings.turn_deadline,
-            budget=settings.budget, restart_after=restart_after,
+            budget=settings.budget, restart_after=serving.restart_after,
             family_examples=self._examples(), real_extra=self._alert())
         # A world whose sibling already went unservable stays so on resume: its failing call
         # is never retried (N13). Its record is the sibling's own (`run.py`), read here.
@@ -435,7 +455,7 @@ class _LazyModel:
         return self._built
 
 
-def _default_oracle_dir(world: Any, ledger: Ledger) -> Path:
+def default_oracle_dir(world: Any, ledger: Ledger) -> Path:
     """The world's oracle store: under its episode, by label, when the world names one; else
     beside the world's own ledger rows (a world served outside an episode)."""
     episode_dir, label = getattr(world, "episode_dir", None), getattr(world, "label", None)

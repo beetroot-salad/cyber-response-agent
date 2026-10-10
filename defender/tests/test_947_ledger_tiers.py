@@ -41,7 +41,6 @@ from defender.learning.branch.ledger import (
     ORACLE,
     PASSTHROUGH,
     REAL_ERROR,
-    PATCHED,
     REFUSED,
     SOURCES,
     STAGED,
@@ -105,7 +104,7 @@ def test_the_family_tier_is_two_labels_and_no_world_decision_is_one():
     assert not (world_decisions & FAMILY_SOURCES), (
         "a world decision is a family-tier label — one world's answer offered as the shared "
         "recording, with its own row still reading honestly")
-    assert not ({STAGED, PATCHED} & SOURCES), "a retired staging decision is still writable"
+    assert not ({STAGED, "patched"} & SOURCES), "a retired staging decision is still writable"
 
 
 @pytest.mark.parametrize("world_id", [None, "w1"])
@@ -436,7 +435,7 @@ def test_a_world_owned_row_never_answers_for_the_family_even_when_it_is_first(tm
     path = root / SERVED_DIRNAME / "w1.jsonl"
     call = dict(system="cmdb", verb="get-host", params={"host": "canary-1"})
     append_jsonl(path, [
-        ServedCall(payload_text='{"owner": "world a made this"}', source=PATCHED,
+        ServedCall(payload_text='{"owner": "world a made this"}', source="patched",
                    world_id="w1", **call).row(),
         ServedCall(payload_text='{"owner": "estate"}', source=BASE, world_id=None, **call).row(),
     ])

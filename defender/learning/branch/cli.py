@@ -589,16 +589,19 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     drift (M22=A).
 
     `refused` (no world carries a fact, the source made no call, or none is replayable) spends
-    no oracle turn. `knobs` are `WorldRegistry`'s (`retry_cap=`, `budget=`, `turn_deadline=`,
-    `box=`, `restart_after=`) and `rate=` (the episode rate R; default `ORACLE_RATE`).
+    no oracle turn. `knobs` are the oracle's (`retry_cap=`, `budget=`, `turn_deadline=`,
+    `rate=` — the episode rate R —, each defaulting to its environment knob) and its seams
+    (`box=`, `restart_after=`); this is where they are settled (`registry.oracle_serving`).
     Returns the record as written.
     """
     from defender.learning.branch.estate.limiter import RateLimiter
-    from defender.learning.branch.estate.oracle import OracleUnservable
+    from defender.learning.branch.estate.oracle import DEFAULT_RESTART_AFTER, OracleUnservable
     from defender.learning.branch.estate.registry import (
         PrebranchChanged,
         WorldRegistry,
         calibrate_one,
+        default_oracle_dir,
+        oracle_serving,
     )
     from defender.learning.branch.estate.checks import canonical_json
     from defender.learning.branch.ledger import payload_text
@@ -646,7 +649,13 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
                                "replayed: the live gather grant admits none of them (see "
                                "not_replayable)")
 
-    limiter = RateLimiter(oracle_settings_with(rate=knobs.pop("rate", None)).rate)
+    # The oracle side, settled once for every world of the pass: `knobs` over the process's
+    # knobs, and the seams' production defaults (`oracle_serving`).
+    box = knobs.pop("box", None)
+    restart_after = knobs.pop("restart_after", DEFAULT_RESTART_AFTER)
+    serving = oracle_serving(oracle_settings_with(**knobs), oracle=oracle, verifier=verifier,
+                             box=box, restart_after=restart_after)
+    limiter = RateLimiter(serving.settings.rate)
     ctx = _preflight_context(episode.dir, tenant, family.as_of)
     resumed = {w.world_id: _family.resume_world_from(family, w.world_id, episode.dir)
                for w in fact_worlds}
@@ -690,11 +699,11 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
 
     def calibrate(label: str) -> None:
         world = resumed[label]
+        ledger = Ledger.for_world(episode, world.world_id)
         registry = WorldRegistry(
-            roster, tenant.grants.gather, world=world,
-            ledger=Ledger.for_world(episode, world.world_id), as_of=family.as_of,
-            tenant=tenant, grant_home=tenant.table_pointer, oracle=oracle, verifier=verifier,
-            limiter=limiter, **knobs)
+            roster, tenant.grants.gather, world=world, ledger=ledger, as_of=family.as_of,
+            serving=serving, oracle_dir=default_oracle_dir(world, ledger), limiter=limiter,
+            tenant=tenant, grant_home=tenant.table_pointer)
         try:
             for call, base, fixed in calibrated:
                 if stop.is_set():
@@ -1706,7 +1715,7 @@ def _author(  # noqa: PLR0913 — the step's inputs
         source_run_dir=source, episode_dir=episode.dir,
         invoke=questioner,
         leads=questioner_leads(leads),
-        alert=_alert_document(source),
+        alert=branch.source_alert(source) or {},
         frontier=questioner_mod.read_frontier(source, fences_at=fences),
         served_systems=tuple(served),
         samples=samples,
@@ -1769,17 +1778,6 @@ def _joined_leads(source: Path, joined: Callable[[Path], list[Any]]) -> list[Any
         _logger.warning(f"could not join the source's leads ({unreadable!r}); the questioner is "
                         "shown none")
         return []
-
-
-def _alert_document(source: Path) -> dict:
-    """The source run's alert, already screened by the preflight."""
-    path = RunPaths(source).alert
-    try:
-        text = read_text_utf8(path)
-    except OSError:
-        return {}
-    loaded, unreadable = load_json_artifact(text)
-    return loaded if unreadable is None and isinstance(loaded, dict) else {}
 
 
 __all__ = [

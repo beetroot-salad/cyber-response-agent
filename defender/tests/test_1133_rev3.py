@@ -984,18 +984,18 @@ def test_r3_the_launchers_default_primer_primes_an_empty_capture_once_and_warns(
 # R4 — one leaf writer; a durable write never makes a folder
 # =======================================================================================
 
-@pytest.mark.parametrize("lane", ["held", "rooted_write", "staged.append_durable"])
+@pytest.mark.parametrize("lane", ["held", "rooted_write"])
 def test_r4_a_durable_append_that_cannot_encode_its_text_leaves_no_descriptor_open(
         tmp_path, lane):
     """One writer owns the leaf's descriptor: it is handed to `fdopen` before the text is
     encoded, so a `str` that cannot be encoded (a lone surrogate) fails the durable append with
     a `UnicodeError` and leaves NO descriptor of this process open on the leaf (today the
     encode runs before `fdopen` and the fd leaks), and the leaf keeps its bytes. Through the held
-    root, `rooted_write` (the `Run` lane) and the staging record. Control on the same address: a
+    root and `rooted_write` (the `Run` lane). Control on the same address: a
     plain append of the same text leaks nothing either, and an encodable durable append lands."""
     root = tmp_path / "episodes" / EPISODE_ID
     root.mkdir(parents=True)
-    rel = str(LAYOUT.staged) if lane == "staged.append_durable" else "rec.jsonl"
+    rel = "rec.jsonl"
     leaf = root / rel
     leaf.write_text("prior\n", encoding="utf-8")
 
@@ -1003,24 +1003,17 @@ def test_r4_a_durable_append_that_cannot_encode_its_text_leaves_no_descriptor_op
         if lane == "held":
             with S.hold(root) as held:
                 held.write(rel, text, mode="append", durable=durable)
-        elif lane == "rooted_write":
-            _io.rooted_write(root, rel, text, mode="append", durable=durable)
         else:
-            with S.open_episode(root) as episode:
-                if durable:
-                    episode.staged.append_durable(text)
-                else:
-                    raise AssertionError("the staging record has no plain append")
+            _io.rooted_write(root, rel, text, mode="append", durable=durable)
 
     try:
         raised = S.raised_by(lambda: append(UNENCODABLE))
         assert isinstance(raised, UnicodeError), f"an unencodable durable append: {raised!r}"
         assert S.open_fds_on(leaf) == [], "the durable append left the leaf's descriptor open"
         assert leaf.read_text(encoding="utf-8") == "prior\n"
-        if lane != "staged.append_durable":
-            assert isinstance(S.raised_by(lambda: append(UNENCODABLE, durable=False)),
-                              UnicodeError)
-            assert S.open_fds_on(leaf) == []
+        assert isinstance(S.raised_by(lambda: append(UNENCODABLE, durable=False)),
+                          UnicodeError)
+        assert S.open_fds_on(leaf) == []
         append("landed\n")
         assert leaf.read_text(encoding="utf-8") == "prior\nlanded\n"
     finally:

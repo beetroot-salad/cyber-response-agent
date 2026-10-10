@@ -26,8 +26,8 @@ from defender._episode_paths import LAYOUT, _check_label, check_minted_token
 
 #: Every record the handle hands out, keyed by its address (a bare name is an attribute of the
 #: episode, `world.<name>` one of `episode.world(label)`), mapped to the verbs its row grants.
-#: `write` replaces (stage + rename), `create` is exclusive, `append` / `append_durable` append
-#: (the latter synced, with its folder, before it returns), `delete` removes a plain file.
+#: `write` replaces (stage + rename), `create` is exclusive, `append` appends, `delete` removes a
+#: plain file.
 #: No record reads: reading is the view's (`episode.view().read(LAYOUT.<record>)`).
 RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "family": ("write",),
@@ -36,7 +36,6 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "samples": ("write",),
     "judge": ("write",),
     "timing": ("write",),
-    "staged": ("create", "append_durable"),
     "learning_html": ("write",),
     "served_base": ("create",),
     "served_world": ("append",),
@@ -82,11 +81,6 @@ class _Append(EpisodeRecord):
         self._held.write(self._rel, text, mode="append")
 
 
-class _AppendDurable(EpisodeRecord):
-    def append_durable(self, text: str | bytes) -> None:
-        self._held.write(self._rel, text, mode="append", durable=True)
-
-
 class _Delete(EpisodeRecord):
     def delete(self) -> bool:
         return self._held.unlink(self._rel)
@@ -106,10 +100,6 @@ class CreateRecord(_Create):
 
 
 class CreateDeleteRecord(_Create, _Delete):
-    pass
-
-
-class StagedRecord(_Create, _AppendDurable):
     pass
 
 
@@ -233,10 +223,6 @@ class Episode:
     @property
     def timing(self) -> WriteRecord:
         return WriteRecord(*self._at(LAYOUT.timing))
-
-    @property
-    def staged(self) -> StagedRecord:
-        return StagedRecord(*self._at(LAYOUT.staged))
 
     @property
     def outcome(self) -> CreateRecord:

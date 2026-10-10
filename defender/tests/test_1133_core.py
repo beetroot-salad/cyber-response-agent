@@ -65,7 +65,7 @@ ROW = '{"row": "durable"}\n'
 #: The held-root suite's record: two holding folders below the root.
 REC = "fa/fb/rec.jsonl"
 REC_REL = PurePosixPath(REC)
-WRITE_VERBS = ("create", "replace", "append", "append_durable")
+WRITE_VERBS = ("create", "replace", "append", "durable_append")
 
 
 class FsyncSpy(S.PassThroughOs):
@@ -430,7 +430,7 @@ def _held_control(held: Any, verb: str, path: Path) -> None:
         assert held.unlink(REC) is True
         assert not os.path.lexists(path)
         return
-    if verb == "append_durable":
+    if verb == "durable_append":
         path.parent.mkdir(parents=True, exist_ok=True)
     S.held_verb(held, verb, REC, _payload(verb, "landed"))
     assert path.read_text(encoding="utf-8") == _payload(verb, "landed")
@@ -514,7 +514,7 @@ def test_d1_one_write_is_one_walk_off_the_held_root_that_makes_its_holding_folde
     with S.hold(root, os_=spy) as held:
         opens_at, mkdirs_at = len(spy.opens), len(spy.mkdirs)
         target = "fa/fb" if verb == "mkdir" else REC
-        if verb == "append_durable" and folders == "absent":
+        if verb == "durable_append" and folders == "absent":
             before = S.census(root)
             with pytest.raises(FileNotFoundError):
                 S.held_verb(held, verb, target, _payload(verb, "walk"))
@@ -970,7 +970,7 @@ def test_o6_a_held_root_that_was_removed_refuses_every_write_and_is_never_recrea
         assert isinstance(raised, OSError), f"Held.{verb} on a removed root: {raised!r}"
         assert not os.path.lexists(root), f"Held.{verb} recreated the removed root"
     root.mkdir()
-    if verb == "append_durable":
+    if verb == "durable_append":
         (root / rel).parent.mkdir(parents=True, exist_ok=True)  # R4: it makes no folder
     with S.hold(root) as held:
         S.held_verb(held, verb, rel if verb != "mkdir" else "fa")
@@ -982,7 +982,7 @@ def test_o6_a_held_root_that_was_renamed_is_written_in_its_new_place(tmp_path, v
     moved folder and nothing reappears at the old name."""
     root = tmp_path / "root"
     root.mkdir()
-    if verb == "append_durable":
+    if verb == "durable_append":
         (root / "fa").mkdir()  # R4: a durable append makes no folder
     moved = tmp_path / "moved"
     with S.hold(root) as held:
@@ -1044,7 +1044,7 @@ def test_an_interrupt_mid_walk_never_closes_a_descriptor_twice(scratch, op):
     ops[op](control)
 
 
-@pytest.mark.parametrize("verb", ["replace", "append_durable", "unlink", "mkdir", "view_read"])
+@pytest.mark.parametrize("verb", ["replace", "durable_append", "unlink", "mkdir", "view_read"])
 def test_an_interrupt_mid_walk_of_a_held_verb_never_closes_a_descriptor_twice(scratch, verb):
     """The same on the held root: a verb (or the view's read, rev 3's only read) interrupted
     just after its walk's first close closes no number twice (its dup included), the interrupt

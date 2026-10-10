@@ -40,12 +40,14 @@ write-code-from-spec names anything differently it renames it HERE, never in a t
     `.acquire()` — waits, never refuses (M11=A); a limiter that cannot read its own state
     raises (fails closed, S17).
 
-  `WorldRegistry(roster, grant, *, world, ledger, as_of, tenant, grant_home, oracle, verifier,
-    oracle_dir, retry_cap, turn_deadline, budget, rate, box, restart_after)` — `oracle` /
-    `verifier` are pydantic-ai `Model`s (the doubles below are `FunctionModel`s), `box` is a
-    zero-arg callable returning a `BoxExecutor`, `oracle_dir` is the world's oracle-side state
-    directory. Every keyword after `grant_home` is coined; the ones a scenario does not set take
-    the implementer's defaults.
+  `WorldRegistry(roster, grant, *, world, ledger, as_of, serving, oracle_dir, limiter, tenant,
+    grant_home)` — `serving` is `registry.oracle_serving(settings, *, oracle, verifier, box,
+    restart_after)`: `oracle` / `verifier` are pydantic-ai `Model`s (the doubles below are
+    `FunctionModel`s), `box` is a zero-arg callable returning a `BoxExecutor`, and `settings`
+    the oracle's knobs (`retry_cap`, `turn_deadline`, `budget`, `rate`); `oracle_dir` is the
+    world's oracle-side state directory. They are settled once at the boundary and passed in
+    whole; `registry_seams` below holds the suite's defaults for the ones a scenario does not
+    set.
   `cli.main(argv, *, spawn, questioner, preflight, judge, lessons_dir, live_tree, oracle,
     verifier, roster)` — the launcher; `door=`, `door_transport=`, `adapters=` and `invoke=`
     leave with staging/review. `roster=` is pre-flight's grant-decided reader's roster.
@@ -1208,25 +1210,64 @@ def world_ledger(ep: Path, label: str) -> Any:
     return sym(LEDGER, "Ledger").for_world(episode, world_token(label)).declare()
 
 
+def serving(*, oracle: Any = None, verifier: Any = None, box: Callable[[], Any] | None = None,
+            restart_after: int | None = None, **knobs: Any) -> Any:
+    """A world's settled oracle side (`registry.oracle_serving`), the test defaults in one
+    place: `oracle` / `verifier` are models (production's lazy ones when `None`), the box
+    production's when `None`, and `knobs` the oracle's (`retry_cap=`, `turn_deadline=`,
+    `budget=`, `rate=`) over the process's environment."""
+    reg = importlib.import_module(f"defender.{REGISTRY}")
+    config = importlib.import_module("defender.learning.core.config")
+    extra = {} if restart_after is None else {"restart_after": restart_after}
+    return reg.oracle_serving(config.oracle_settings_with(**knobs), oracle=oracle,
+                              verifier=verifier, box=box, **extra)
+
+
+def registry_seams(world: Any, ledger: Any, *, oracle_dir: Path | None = None,
+                   limiter: Any = None, **knobs: Any) -> dict[str, Any]:
+    """`WorldRegistry`'s settled oracle-side keywords (`serving=`, `oracle_dir=`, `limiter=`)
+    for `world` over `ledger`: `serving(**knobs)`, the world's default `oracle_dir`, and a fresh
+    limiter at the settled rate, unless given."""
+    reg = importlib.import_module(f"defender.{REGISTRY}")
+    limiter_mod = importlib.import_module("defender.learning.branch.estate.limiter")
+    settled = serving(**knobs)
+    return {
+        "serving": settled,
+        "oracle_dir": oracle_dir if oracle_dir is not None else reg.default_oracle_dir(
+            world, ledger),
+        "limiter": limiter if limiter is not None else limiter_mod.RateLimiter(
+            settled.settings.rate),
+    }
+
+
+def build_registry(roster: Any, grant: Any, *, world: Any, ledger: Any, as_of: Any,
+                   tenant: Any = None, grant_home: str | None = None, **knobs: Any) -> Any:
+    """`WorldRegistry(roster, grant, ...)` with its settled oracle side from
+    `registry_seams(world, ledger, **knobs)` — the constructor as a test that does not care
+    about the oracle side spells it."""
+    extra = {} if grant_home is None else {"grant_home": grant_home}
+    return sym(REGISTRY, "WorldRegistry")(
+        roster, grant, world=world, ledger=ledger, as_of=as_of, tenant=tenant,
+        **registry_seams(world, ledger, **knobs), **extra)
+
+
 def world_registry(ep: Path, label: str, est: Estate, *, oracle: ScriptedModel | None = None,
                    verifier: ScriptedModel | None = None, box: Callable[[], Any] | None = None,
                    tenant: Any = None, world: Any = None, **knobs: Any) -> Any:
     """`WorldRegistry` for world `label` of episode `ep`, over the fixture estate's roster and
     gather grant, with the doubles injected through the coined seams. `knobs` are the coined
-    keywords (`retry_cap=`, `turn_deadline=`, `budget=`, `rate=`, `restart_after=`)."""
+    keywords (`retry_cap=`, `turn_deadline=`, `budget=`, `rate=`, `restart_after=`,
+    `limiter=`), settled by `registry_seams`, and `as_of=` (the branch point by default)."""
     rt = tenant if tenant is not None else est.run_tenant()
-    kw: dict[str, Any] = dict(
-        world=world if world is not None else load_world(ep, label),
-        ledger=world_ledger(ep, label), as_of=AS_OF_DT, tenant=rt,
-        grant_home=rt.table_pointer, oracle_dir=oracle_dir(ep, label))
-    if oracle is not None:
-        kw["oracle"] = oracle.model
-    if verifier is not None:
-        kw["verifier"] = verifier.model
-    if box is not None:
-        kw["box"] = box
-    kw.update(knobs)
-    return sym(REGISTRY, "WorldRegistry")(est.roster(), rt.grants.gather, **kw)
+    served = world if world is not None else load_world(ep, label)
+    ledger = world_ledger(ep, label)
+    as_of = knobs.pop("as_of", AS_OF_DT)
+    return build_registry(
+        est.roster(), rt.grants.gather, world=served, ledger=ledger, as_of=as_of,
+        tenant=rt, grant_home=rt.table_pointer,
+        oracle=None if oracle is None else oracle.model,
+        verifier=None if verifier is None else verifier.model, box=box,
+        oracle_dir=oracle_dir(ep, label), **knobs)
 
 
 def sandboxed_registry(ep: Path, label: str, est: Estate, oracle: ScriptedModel | None = None,

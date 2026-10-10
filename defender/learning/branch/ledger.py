@@ -24,7 +24,6 @@ from typing import Any, Self
 
 from defender._io import read_jsonl_rows
 from defender._episode_handle import AppendRecord, Episode
-from defender._episode_paths import EpisodePaths
 from defender.run_repository import artifact_file
 from pydantic import ValidationInfo, field_validator
 
@@ -33,7 +32,6 @@ from defender._query_rules import _json_safe_params, _request_key
 #: What produced a served payload. Any other value is a writer inventing a decision class.
 BASE = "base"
 STAGED = "staged"
-PATCHED = "patched"
 PASSTHROUGH = "passthrough"
 #: The call reached the seam and was refused (e.g. this world's corpus cannot be targeted).
 #: Recorded so a refusal does not read as the sibling never asking.
@@ -53,16 +51,13 @@ CAPTURED = "captured"
 ORACLE = "oracle"
 #: The real system errored on the call's base read; the error passed through untouched (O4).
 REAL_ERROR = "real-error"
-#: `staged` and `patched` are the retired staging decisions (#1224): kept as names for readers
-#: of archived ledgers, refused as a new row's decision.
+#: `staged` (and `patched`, now unnamed) are the retired staging decisions (#1224): an archived
+#: row may carry one, and it is refused as a new row's decision.
 SOURCES = frozenset({BASE, PASSTHROUGH, REFUSED, FAULT, CAPTURED, ORACLE, REAL_ERROR})
 #: The family-tier labels — rows every sibling replays, with `world_id=None`. `base` is a live
 #: read of a key the capture never recorded, so counting `base` rows measures the residual a
 #: primed base cannot make deterministic.
 FAMILY_SOURCES = frozenset({BASE, CAPTURED})
-#: The labels an applier may name. `base` is written only by `_base_payload`; `refused`/`fault`
-#: are the seam's own, written when nothing reached a decision.
-APPLIER_DECISIONS = frozenset({STAGED, PATCHED, PASSTHROUGH})
 
 
 def normalized_source(value: Any) -> str | None:
@@ -76,13 +71,6 @@ def normalized_source(value: Any) -> str | None:
 
 class LedgerError(Exception):
     """A served response that cannot be honestly recorded."""
-
-
-def base_file(episode_dir: Path) -> Path:
-    """The family's capture under `episode_dir`: the one path the primer writes and every
-    `Ledger` reads.
-    """
-    return EpisodePaths(Path(episode_dir)).served_base
 
 
 def payload_text(payload: Any) -> str:
