@@ -483,8 +483,13 @@ def _render_call(call: Any) -> str:
 def render_family_text(record: dict[str, Any] | None,
                        failed: dict[str, dict[str, Any]]) -> str:
     """Pre-flight's record of the family and every failed world as an explicit entry (N22):
-    the worlds that could not be judged with their reason, call and detail; the calls pre-flight
-    could not replay; and the calls whose live answer drifted from the capture."""
+    each world that could not be judged by its label, its reason word and the investigator's
+    call it failed on; the calls pre-flight could not replay; and the calls whose live answer
+    drifted from the capture.
+
+    A failed world's `detail` is never shown: it is the oracle's last refusal, which can quote
+    the rows it forged for that world's facts, or the verifier's reasoning about them, and this
+    text reaches every judged world's prompt, which withholds every other world's facts."""
     if record is None:
         lines = ["No pre-flight outcome record is readable for this episode."]
     else:
@@ -492,8 +497,8 @@ def render_family_text(record: dict[str, Any] | None,
     if failed:
         lines.append("worlds that could not be judged (each contributes no findings):")
         for label, entry in sorted(failed.items()):
-            lines.append(f"- world {label}: {entry.get('reason')}; call: "
-                         f"{_render_call(entry.get('call'))}; detail: {entry.get('detail') or ''}")
+            lines.append(f"- world {label}: {entry.get('reason') or '(no reason recorded)'}; "
+                         f"call: {_render_call(entry.get('call'))}")
     else:
         lines.append("every world could be judged")
     for key, what in (("not_replayable", "calls pre-flight could not replay"),
