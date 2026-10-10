@@ -34,6 +34,7 @@ from pathlib import Path
 
 import pytest
 
+from defender import _episode_handle as EH
 from defender.tests import _episode_1025 as E
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
@@ -238,10 +239,9 @@ def test_1025_a_render_fault_is_printed_and_changes_neither_the_exit_status_nor_
     still returns 0, `judge.yaml` is written, stderr carries a "could not be rendered" line and
     the link's target is untouched; the control launch without the link writes the page.
     """
-    launcher = _cli()
     outside = tmp_path / "outside.html"
     outside.write_text("OUTSIDE", encoding="utf-8")
-    episode_dir = launcher.episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths())
+    episode_dir = EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID)
     judge = _PlantingJudge(episode_dir, outside, default=J.as_reply_text(J.reply_doc()))
     launch = ST._launch(tmp_path, judge=judge)
     err = capsys.readouterr().err
@@ -645,7 +645,7 @@ def test_1025_questioner_or_preflight_abort_leaves_a_partial_directory(tmp_path,
     """
     launcher = _cli()
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-preflight"))
-    oracle_seam = ST._Interrupting(launcher.episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths()))
+    oracle_seam = ST._Interrupting(EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID))
     ep, _b, _a = ST._abort(tmp_path, launcher.LauncherRefused,
                            oracle=ST.S.oracle(then=ST.S.Move(None, raises=oracle_seam)))
     assert oracle_seam.calls > 0, "the control failed: pre-flight's oracle was never reached"
@@ -668,7 +668,7 @@ def test_1025_questioner_or_preflight_abort_leaves_a_partial_directory(tmp_path,
     assert page.elements(cls="rc-sample-system"), records
 
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-questioner"))
-    questioner = ST._Interrupting(launcher.episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths()))
+    questioner = ST._Interrupting(EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID))
     ep2, _b, _a = ST._abort(tmp_path, launcher.LauncherRefused, questioner=questioner)
     assert not (ep2 / "family.yaml").exists(), "the control failed: the manifest was written"
     # The abort above still primes the capture before the interrupt lands (priming precedes the
@@ -705,7 +705,7 @@ def test_1025_an_interrupt_during_the_render(tmp_path):
             E.when_inside(E.raise_now(KeyboardInterrupt("mid-render"))) as seen:
         ST._launch(tmp_path)
     assert seen["hit"], "the interrupt never landed inside the launcher's render"
-    launched = _cli().episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths())
+    launched = EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID)
     assert (launched / "judge.yaml").is_file(), "the grade was not on disk before the render"
     assert not (launched / E.PAGE_NAME).exists(), "a partial page was left by the interrupt"
     assert not [p for p in launched.iterdir() if p.name.startswith(".")], "a staged temp is left"
@@ -804,7 +804,7 @@ def test_1025_a_read_only_episode_directory(tmp_path, capsys):
             self.episode_dir.chmod(0o555)
             return reply
 
-    launched = _cli().episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths())
+    launched = EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID)
     judge = _ReadOnlyJudge(launched, default=J.as_reply_text(J.reply_doc()))
     try:
         launch = ST._launch(tmp_path, judge=judge)

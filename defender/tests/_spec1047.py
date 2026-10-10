@@ -248,7 +248,7 @@ def graded_record(episode_dir: Path, *, judge: Any = None) -> Any:
     ep = Path(episode_dir)
     (ep / "judge.yaml").unlink(missing_ok=True)
     side = ep.parent / f".{ep.name}-judge"
-    return grade(ep, runs_base=side / "defender-runs", judge=judge,
+    return grade(ep, judge=judge,
                  state=state_over(side / "learning-state"))
 
 

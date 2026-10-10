@@ -443,8 +443,8 @@ def test_1008_every_judge_draw_is_declared_under_the_judges_role(tmp_path):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     judge = J.scripted_judge()
 
-    J.mod("learning.judge").grade_episode(
-        ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=2,
+    J.grade_at(
+        ep, judge=judge, draws=2,
         state=_state1135.env_state())
 
     assert judge.calls == 6, (

@@ -130,8 +130,8 @@ def test_922_the_family_judge_frames_the_archived_bodies_it_grades(tmp_path):
         J.report_text("benign", body="MARKER-HOSTILE-REPORT"), encoding="utf-8")
 
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    J.mod("learning.judge").grade_episode(
-        ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=1, state=env_state())
+    J.grade_at(
+        ep, judge=judge, draws=1, state=env_state())
 
     assert "judge:b:0" in judge.agent_ids, (
         f"the judge never called for world b: {judge.agent_ids} — nothing to assert against")

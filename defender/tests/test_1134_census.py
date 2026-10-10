@@ -990,8 +990,9 @@ def test_the_run_paths_vocabulary_is_its_disk_touching_functions():
         "vocabulary, or a pure one is in it: fix `RUN_PATHS_PURE`")
     for module in ("defender.run_repository", "defender.run_repository._layout"):
         assert TREE.in_vocabulary(f"{module}.artifact_file"), f"{module}.artifact_file"
-        assert not TREE.in_vocabulary(f"{module}.resolve_run_bundle"), (
-            f"{module}.resolve_run_bundle")
+        # A pure one is not (`resolve_run_bundle`, the earlier example, left with #1105 PR 2).
+        assert not TREE.in_vocabulary(f"{module}.is_case_answer_key"), (
+            f"{module}.is_case_answer_key")
 
 
 def test_the_private_vocabulary_is_each_handle_class_own_state():

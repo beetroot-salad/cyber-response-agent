@@ -42,16 +42,15 @@ def _family():
     return J.mod("learning.judge.family")
 
 
-def _grade(ep, runs_base=None):
+def _grade(ep):
     """Grade `ep` afresh: a final `judge.yaml` short-circuits a second pass, so a scenario that
     changes the archive and grades again removes it first."""
     (ep / "judge.yaml").unlink(missing_ok=True)
-    return J.grade(ep, runs_base=runs_base if runs_base is not None
-                   else ep.parent / "defender-runs")
+    return J.grade(ep)
 
 
-def _rows(ep, runs_base=None):
-    return J.rows(_grade(ep, runs_base))
+def _rows(ep):
+    return J.rows(_grade(ep))
 
 
 # ---------------------------------------------------------------------------------------
@@ -361,17 +360,16 @@ def test_921_two_world_entries_under_one_label_are_refused_at_manifest_load(tmp_
     assert "b" in str(raised.value)
 
 
-def test_921_a_world_label_colliding_with_a_real_run_id_is_refused_at_manifest_load(tmp_path):
-    """F-3, settled at the phase-F seam: a world label that COLLIDES WITH A REAL RUN ID under
-    the runs base is refused at manifest load, alongside J5 tier 3's duplicate-label refusal.
+def test_921_a_world_label_equal_to_a_real_run_id_grades(tmp_path):
+    """#1105 PR 2 (declared change 3, J3 as settled; was F-3's
+    `..._colliding_with_a_real_run_id_is_refused_at_manifest_load`, G17's pin): a world label
+    spelled like a REAL RUN ID under the tenant's runs base now GRADES. The collision probe over
+    `<T>/runs` guarded `resolve_run_bundle`, which has no production caller left (E-27), and the
+    judge reads only the episode it is handed — so a run of that name changes nothing it reads.
+    The reserved-label and label-grammar refusals stay.
 
-    A family row carries `source_run_dir: episodes/<id>/worlds/<label>`, and its consumer
-    honours ONLY THE LAST PATH SEGMENT under the runs dir (`runs_dir / Path(source_run_dir).name`).
-    A label spelled like a real run id therefore resolves to WRONG BUT REAL content instead of
-    failing loudly. Refusing at LOAD is the same tier J5 gives the duplicate label.
-
-    Positive control FIRST, on the same manifest: with no such run on disk the episode loads and
-    grades, so the refusal below is on the COLLISION and not on how the label is spelled.
+    Control FIRST, on the same manifest: with no such run on disk the episode loads and grades;
+    then the run appears, and the same episode grades to the same rows.
     """
     # #1224: a label is a world token (lower-case), so the collision is with a run of that name.
     colliding = "fresh_case_n59"
@@ -384,15 +382,13 @@ def test_921_a_world_label_colliding_with_a_real_run_id_is_refused_at_manifest_l
         "the control failed: a label spelled like a run id did not load while no such run "
         "existed, so the refusal below would not be about the collision")
 
-    # The real run appears under the operator's runs base — `runs_base` writes an ORDINARY
-    # finished run. #1078: the collision check is keyed on the explicit `runs_base=` the caller
-    # threads in.
-    base, _source_run_dir = J.runs_base(tmp_path, source_run_id=colliding)
-    with pytest.raises(J.refusals()) as raised:
-        _grade(ep, runs_base=base)
-    assert colliding in str(raised.value), (
-        "the manifest was refused without naming the label that collided; the operator has to "
-        "rename one of the two and the message is the only thing that says which")
+    # The real run appears under the tenant's runs base — `runs_base` writes an ORDINARY
+    # finished run there — and the label still grades.
+    _base, source_run_dir = J.runs_base(tmp_path, source_run_id=colliding)
+    assert source_run_dir.name == colliding
+    assert sorted(_rows(ep)) == sorted(["b", colliding]), (
+        "a label spelled like a natural run id of the tenant no longer grades — the judge read "
+        "the tenant's runs, which it no longer does (J3)")
 
 
 def test_921_the_family_pass_reader_takes_the_first_row_and_counts_a_torn_line(tmp_path):

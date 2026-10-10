@@ -147,12 +147,13 @@ def _judge(worlds: dict[str, Any] | None = None, *, verdict: Any = "survived",
 
 def _grade(tmp_path: Path, ep: Path, judge: Any, **kw: Any) -> Any:
     """`grade_episode` through its own seams: one draw, a recording `git show`, this test's
-    state handle."""
+    state handle — by id (#1105 PR 2, `_judge_921.grade_at`): the judge reads only the episode
+    it is handed (J3), so `tmp_path` threads nothing in."""
+    del tmp_path
     kw.setdefault("draws", 1)
     kw.setdefault("git_show", J.FakeGitShow())
     kw.setdefault("state", env_state())
-    return S.sym(S.JUDGE, "grade_episode")(
-        ep, judge=judge, runs_base=tmp_path / "defender-runs", **kw)
+    return J.grade_at(ep, judge=judge, **kw)
 
 
 def _record(ep: Path) -> dict:

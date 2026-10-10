@@ -56,6 +56,7 @@ from typing import Any
 import pytest
 import yaml
 
+from defender import _episode_handle as EH
 from defender import _io
 from defender._episode_paths import LAYOUT
 from defender._io import read_jsonl_rows
@@ -302,7 +303,7 @@ def _prime_setup(tmp_path: Path) -> tuple[Any, Path, Any, Path]:
     cli = T.mod("learning.branch.cli")
     _base, src = T.runs_base(tmp_path)
     tenant = T.current_tenant()
-    return cli, src, tenant, cli.episode_dir_for(T.EPISODE_ID, tenant=tenant)
+    return cli, src, tenant, EH.episode_dir(tenant.data_root, T.EPISODE_ID)
 
 
 def test_o4_5_prepare_episode_returns_the_held_episode_and_the_claim_is_released(
@@ -315,7 +316,7 @@ def test_o4_5_prepare_episode_returns_the_held_episode_and_the_claim_is_released
     cli, src, tenant, ep = _prime_setup(tmp_path)
     prime = Primed()
     with umask(0o022):
-        got = cli.prepare_episode(T.EPISODE_ID, src, tenant=tenant, prime=prime)
+        got = cli.prepare_episode(T.EPISODE_ID, src, data_root=tenant.data_root, prime=prime)
     with got as episode:
         assert isinstance(episode, S.Episode()), f"prepare_episode returned {got!r}"
         assert Path(episode.dir) == ep
@@ -421,7 +422,7 @@ def test_o4_5_a_claim_release_refused_in_finally_never_masks_the_primers_excepti
 
     caplog.set_level(logging.WARNING)
     with pytest.raises(PrimerFailed) as failed:
-        cli.prepare_episode(T.EPISODE_ID, src, tenant=tenant, prime=Primed(swap_then_fail))
+        cli.prepare_episode(T.EPISODE_ID, src, data_root=tenant.data_root, prime=Primed(swap_then_fail))
     assert still_planted["check"](), f"the {kind} plant was changed by the claim's release"
     assert S.warned(caplog, ".priming"), "the refused release was not logged"
     assert failed.value is not None
@@ -442,7 +443,7 @@ def test_o4_5_a_link_planted_at_the_claim_is_left_in_place_by_its_release(
         claim.symlink_to(target)
 
     caplog.set_level(logging.WARNING)
-    with cli.prepare_episode(T.EPISODE_ID, src, tenant=tenant, prime=Primed(swap)) as got:
+    with cli.prepare_episode(T.EPISODE_ID, src, data_root=tenant.data_root, prime=Primed(swap)) as got:
         assert Path(got.dir) == ep
     claim = ep / "served" / ".priming"
     assert claim.is_symlink(), "the link planted at the claim was removed"
@@ -508,8 +509,7 @@ def test_o4_6_a_link_at_a_malformed_draws_name_is_refused_logged_and_left_and_th
 
     caplog.set_level(logging.WARNING)
     judge = _malformed_first()
-    J.mod("learning.judge").grade_episode(ep, judge=judge, runs_base=tmp_path / "defender-runs",
-                                          draws=2, state=env_state())
+    J.grade_at(ep, judge=judge, draws=2, state=env_state())
 
     assert "judge:b:1" in judge.agent_ids, "the draw loop stopped at the refused removal"
     link = draw_dir / "0.yaml"
@@ -534,8 +534,7 @@ def test_o4_6_a_plain_stale_draw_at_a_malformed_index_is_still_removed(tmp_path,
     draw_dir.mkdir(parents=True, exist_ok=True)
     (draw_dir / "0.yaml").write_text("findings: [{bucket: stale}]\n", encoding="utf-8")
 
-    J.mod("learning.judge").grade_episode(ep, judge=_malformed_first(),
-                                          runs_base=tmp_path / "defender-runs", draws=2, state=env_state())
+    J.grade_at(ep, judge=_malformed_first(), draws=2, state=env_state())
 
     assert not os.path.lexists(draw_dir / "0.yaml"), "the stale plain draw survived"
     assert (draw_dir / "1.yaml").is_file()
@@ -703,10 +702,12 @@ def test_d3_a_link_at_worlds_or_the_world_or_its_draws_folder_yields_no_draws(tm
 @pytest.mark.parametrize("kind", ["missing", "missing-parent", "file"])
 def test_o4_8_2_grade_episode_refuses_a_missing_episode_dir_and_does_not_recreate_it(
         tmp_path, roots, kind):
-    """`grade_episode(episode_dir, ...)` opens the episode at its door: a missing dir (or a
-    missing episodes root, or a file at the name) is `JudgeRefused`, and nothing is created —
-    rev 1 wrote a not-graded stamp and so recreated the dir (C14). Control: an existing episode
-    that is not `accepted` is graded not-graded, its stamp written inside it."""
+    """`grade_episode(runs, episode_id, ...)` opens the episode at its door, by id through the
+    tenant's repository (`runs.episode_files`, #1105 PR 2; `J.grade_at` names `ep`'s id under
+    the episodes root `ep.parent`): a missing dir (or a missing episodes root, or a file at the
+    name) is `JudgeRefused`, and nothing is created — rev 1 wrote a not-graded stamp and so
+    recreated the dir (C14). Control: an existing episode that is not `accepted` is graded
+    not-graded, its stamp written inside it."""
     judge_mod = J.mod("learning.judge")
     ep = tmp_path / "episodes" / EPISODE_ID
     if kind != "missing-parent":
@@ -716,13 +717,11 @@ def test_o4_8_2_grade_episode_refuses_a_missing_episode_dir_and_does_not_recreat
     before = S.census(tmp_path)
 
     with pytest.raises(judge_mod.JudgeRefused):
-        judge_mod.grade_episode(ep, runs_base=tmp_path / "defender-runs",
-                                judge=ScriptedJudge({}, default="never called"), state=env_state())
+        J.grade_at(ep, judge=ScriptedJudge({}, default="never called"), state=env_state())
     assert S.census(tmp_path) == before, f"grading a {kind} episode dir created something"
 
     control = T.episode(tmp_path / "control")
-    grade = judge_mod.grade_episode(control, runs_base=tmp_path / "defender-runs",
-                                    judge=ScriptedJudge({}, default="never called"), state=env_state())
+    grade = J.grade_at(control, judge=ScriptedJudge({}, default="never called"), state=env_state())
     assert grade.not_graded is not None
     assert (control / "judge.yaml").is_file()
 
@@ -749,7 +748,7 @@ def test_o4_8_2_render_episode_refuses_a_missing_episode_dir_and_does_not_recrea
 
 
 # =======================================================================================
-# The sibling door — run.py --resume refuses a manifest not named family.yaml
+# The sibling door — run.py --episode refuses an id outside the episode-id grammar
 # =======================================================================================
 
 class Recorder:
@@ -769,54 +768,75 @@ def _no_preflight(*_a: Any, **_kw: Any) -> int:
     return 0
 
 
-def _resume_argv(manifest: Path) -> list[str]:
-    return ["--resume", str(manifest), "--world", "b", "--tenant", T.SOURCE_TENANT]
+def _sibling_argv(episode_id: str) -> list[str]:
+    """The sibling's door (#1105 PR 2, declared change 6): `--tenant T --episode <id> --world
+    b`, the episode opened by id under the configured episodes base."""
+    return ["--tenant", T.SOURCE_TENANT, "--episode", episode_id, "--world", "b"]
 
 
-@pytest.mark.parametrize("name", ["not-the-manifest.yaml", "family.yml", "FAMILY.yaml"])
-def test_the_sibling_door_refuses_a_resume_manifest_not_named_family_yaml(tmp_path, name):
-    """`run.py --resume <manifest>` is the sibling's door: a `<manifest>` whose name is not
-    `LAYOUT.family` is refused — a `SystemExit` that names `family.yaml` — before anything is
-    spent: no run dir is materialized and the lifecycle never runs, even though the file holds
-    a valid manifest's bytes (so the refusal is about the name, not the content).
+def _sibling_episode(tmp_path: Path, monkeypatch: Any, src: Path) -> Path:
+    """The episode a sibling opens by id: under the configured episodes base (pointed here),
+    its manifest naming `src`, its container made for the source's tenant as the launcher's
+    `EpisodeRuns.create_container` leaves it before the first sibling (#1105 PR 2)."""
+    from defender import _tenant
 
-    Control on the same episode: the same bytes at `family.yaml` run to completion."""
+    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)),
+                   root=tmp_path / "episodes-root")
+    (ep / "runs").mkdir(exist_ok=True)
+    _tenant.ensure_runs_base_record(ep / "runs", T.SOURCE_TENANT)
+    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(ep.parent))
+    return ep
+
+
+@pytest.mark.parametrize("spelling", ["path", "case", "separator"])
+def test_the_sibling_door_refuses_an_episode_id_outside_the_id_grammar(
+        tmp_path, monkeypatch, spelling):
+    """`run.py --episode <episode_id>` is the sibling's door (#1105 PR 2: G18's manifest-name
+    rule is moot — the sibling names no manifest, only the episode's id): an `--episode` value
+    outside the episode-id grammar — a manifest's path, a spelling that is not case-stable, an
+    id with a separator — is refused, a `SystemExit` naming the refused value, before anything
+    is spent: no run dir is materialized and the lifecycle never runs, even though the episode
+    the value points at holds a valid manifest (so the refusal is about the id, not the
+    content).
+
+    Control on the same episode: its own id runs to completion."""
     run = T.mod("run")
     _base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
-    other = ep / name
-    other.write_bytes((ep / "family.yaml").read_bytes())
+    ep = _sibling_episode(tmp_path, monkeypatch, src)
+    bad = {"path": str(ep / LAYOUT.family), "case": ep.name.upper(),
+           "separator": f"{ep.name}/{LAYOUT.family}"}[spelling]
     lifecycle = Recorder()
     materialized: list[Any] = []
 
     def materialize(*a: Any, **kw: Any) -> Any:
         materialized.append((a, kw))
-        raise AssertionError("a run dir was materialized for a refused manifest")
+        raise AssertionError("a run dir was materialized for a refused episode id")
 
     with pytest.raises(SystemExit) as refused:
-        run.main(_resume_argv(other), lifecycle=lifecycle, visualize=lambda _run, **kw: None,
+        run.main(_sibling_argv(bad), lifecycle=lifecycle, visualize=lambda _run, **kw: None,
                  preflight=_no_preflight, materialize=materialize)
     assert refused.value.code not in (0, None), refused.value.code
-    assert str(LAYOUT.family) in str(refused.value.code), (
-        f"the refusal does not name the manifest's own name: {refused.value.code!r}")
+    assert bad in str(refused.value.code), (
+        f"the refusal does not name the refused episode id: {refused.value.code!r}")
     assert materialized == [], "a run dir was materialized"
-    assert lifecycle.calls == [], "the lifecycle ran over a refused manifest"
+    assert lifecycle.calls == [], "the lifecycle ran over a refused episode id"
 
     lifecycle = Recorder()
-    rc = run.main(_resume_argv(ep / "family.yaml"), lifecycle=lifecycle,
+    rc = run.main(_sibling_argv(ep.name), lifecycle=lifecycle,
                   visualize=lambda _run, **kw: None, preflight=_no_preflight)
     assert rc == 0
     assert len(lifecycle.calls) == 1
 
 
-def test_the_sibling_door_holds_one_descriptor_on_the_episode_for_the_whole_run(tmp_path):
-    """`run.py --resume`'s door opens the episode once, around materialize -> lifecycle, and
+def test_the_sibling_door_holds_one_descriptor_on_the_episode_for_the_whole_run(tmp_path,
+                                                                              monkeypatch):
+    """`run.py --episode`'s door opens the episode once, around materialize -> lifecycle, and
     that one handle serves the manifest read and the world ledger: while the lifecycle runs,
     exactly one descriptor is open on the episode dir, and it is the `Episode` handed to the
     lifecycle (its `.dir` the manifest's parent) — no second root held beside it by name."""
     run = T.mod("run")
     _base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    ep = _sibling_episode(tmp_path, monkeypatch, src)
     seen: dict[str, Any] = {}
 
     class Holding(Recorder):
@@ -825,7 +845,7 @@ def test_the_sibling_door_holds_one_descriptor_on_the_episode_for_the_whole_run(
             seen["episode"] = kw.get("episode")
             return super().__call__(**kw)
 
-    rc = run.main(_resume_argv(ep / "family.yaml"), lifecycle=Holding(),
+    rc = run.main(_sibling_argv(ep.name), lifecycle=Holding(),
                   visualize=lambda _run, **kw: None, preflight=_no_preflight)
     assert rc == 0
     assert "fds" in seen, "the lifecycle never ran"

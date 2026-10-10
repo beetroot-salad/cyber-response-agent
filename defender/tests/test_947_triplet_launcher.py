@@ -28,6 +28,7 @@ from pathlib import Path
 
 import pytest
 
+from defender import _episode_handle as EH
 from defender._episode_handle import Episode
 from defender._io import bind
 from defender.tests import _triplet_947 as T
@@ -53,11 +54,17 @@ def _cli():
     return T.mod("learning.branch.cli")
 
 
-def _verify_family(ep_dir, run_dirs, **kw):
+def _verify_family(ep_dir, plant=None, **kw):
     """`cli.verify_family` over an `Episode` opened on `ep_dir`: it takes the handle, not the
-    episode dir (#1133 rev 2)."""
+    episode dir (#1133 rev 2), and the finished arms by label (#1105 PR 2): `plant(ep_dir,
+    world)` makes each world's arm in the episode's own container (default
+    `T.arm_run_dir(ep_dir, world)`), and each is opened by id through the episode's view
+    (`T.family_arms`)."""
+    plant = T.arm_run_dir if plant is None else plant
+    for world in T.WORLDS:
+        plant(ep_dir, world)
     with Episode.open(ep_dir) as episode:
-        return _cli().verify_family(episode, run_dirs, **kw)
+        return _cli().verify_family(episode, T.family_arms(episode, T.WORLDS), **kw)
 
 
 def _tenant_paths():
@@ -118,7 +125,8 @@ def test_947_un_nameable_episode_token_is_refused_before_the_questioner_runs(tmp
     base, src = T.runs_base(tmp_path, source_run_id="FRESH CASE")
     agent = T.FakeAgent()
     with pytest.raises(SystemExit):
-        _cli().main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
+        _cli().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
+                     "--continuation-prompt", "go"],
                     spawn=T.FakeSpawn(), questioner=agent,
                     preflight=S.no_preflight, live_tree=T.source_capture())
     assert agent.calls == 0
@@ -155,7 +163,8 @@ def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_pa
             # The role-model preflight is neutralised: each arm has to refuse for the reason it
             # names, and an uncredentialed host would otherwise satisfy every one of them with
             # the preflight's own refusal before the check under test was ever reached.
-            _cli().main([str(src), *argv_extra, "--continuation-prompt", "go"],
+            _cli().main(["--tenant", src.parent.parent.name, src.name, *argv_extra,
+                         "--continuation-prompt", "go"],
                         spawn=T.FakeSpawn(), questioner=agent,
                         preflight=S.no_preflight, live_tree=T.source_capture())
         assert agent.calls == 0, "the questioner was paid for before the preflight refused"
@@ -179,7 +188,8 @@ def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_i
     (src / "alert.json").symlink_to(secret)
     agent = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
     with pytest.raises(T.refusals()) as refusal:
-        _cli().main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
+        _cli().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
+                     "--continuation-prompt", "go"],
                     spawn=T.FakeSpawn(), questioner=agent,
                     preflight=S.no_preflight, live_tree=T.source_capture())
     assert "alert" in str(refusal.value)
@@ -197,7 +207,8 @@ def test_947_the_step_one_command_line_requires_a_continuation_prompt(tmp_path):
     base, src = T.runs_base(tmp_path)
     err = io.StringIO()
     with contextlib.redirect_stderr(err), pytest.raises(SystemExit) as bad:
-        _cli().parse_branch_args([str(src), str(T.BRANCH_MESSAGE_ID)])
+        _cli().parse_branch_args(["--tenant", src.parent.parent.name, src.name,
+                                  str(T.BRANCH_MESSAGE_ID)])
     assert bad.value.code == 2
     assert "--continuation-prompt" in err.getvalue()
     assert "--episode-id" not in err.getvalue(), (
@@ -214,7 +225,8 @@ def test_947_all_siblings_in_one_family_share_one_continuation_prompt(tmp_path):
     manifest = yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
     assert manifest["continuation_prompt"] == "go"
     assert len(spawn.launches) >= 2
-    seen = {la["argv"][la["argv"].index("--resume") + 1] for la in spawn.launches}
+    # #1105 PR 2 (declared change 6): a sibling names its episode by id, `--episode <ep>`.
+    seen = {la["argv"][la["argv"].index("--episode") + 1] for la in spawn.launches}
     assert len(seen) == 1, "the siblings were launched from different manifests"
 
 
@@ -225,7 +237,7 @@ def test_947_all_siblings_in_one_family_share_one_continuation_prompt(tmp_path):
 
 def test_947_accepted_siblings_are_started_together_as_processes(tmp_path):
     """The accepted siblings are started TOGETHER as child processes: each launch is a `run.py
-    --resume` command line naming its own world, the launches overlap in time rather than
+    --episode` command line naming its own world, the launches overlap in time rather than
     running to completion one after another, and each child runs the sibling entry point.
 
     The fake BLOCKS, and it has to: a child that answers in microseconds of pure Python is never
@@ -237,7 +249,8 @@ def test_947_accepted_siblings_are_started_together_as_processes(tmp_path):
     rc, spawn, ep, _message = _launch(tmp_path, spawn=slow)
     assert sorted(spawn.worlds) == ["a", "b", "c"]
     for launch in spawn.launches:
-        assert "--resume" in launch["argv"]
+        # #1105 PR 2 (declared change 6): `run.py --tenant T --episode <ep> --world L`.
+        assert "--episode" in launch["argv"]
         assert any(arg.endswith("run.py") for arg in launch["argv"])
     assert spawn.overlap, "the siblings ran serially; nothing was started together"
 
@@ -427,12 +440,9 @@ def test_947_any_failure_in_steps_two_to_four_aborts_the_episode(tmp_path):
 def test_947_launcher_verifies_each_siblings_scrub_verdict(tmp_path):
     """The launcher verifies each sibling's scrub verdict after the processes exit, reading the
     verdict at its sidecar path beside the run dir rather than inside the tree it judges."""
-    base, src = T.runs_base(tmp_path)
+    T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
-    for world in T.WORLDS:
-        T.sibling_run_dir(base, world)
-    report = _verify_family(ep, [base / f"{T.EPISODE_ID}-{w}" for w in T.WORLDS],
-                            source=T.provenance_record())
+    report = _verify_family(ep, source=T.provenance_record())
     assert report["scrub_verified"] == list(T.WORLDS)
 
 
@@ -441,11 +451,13 @@ def test_947_a_sibling_without_a_ran_true_scrub_marks_the_episode_incomplete(tmp
     is never archived and the reason names it. FORK-1 as amended (2026-10-10, PR #1232 round
     7): that is a per-world fault, recorded on the world (#1224 S10, O5), so it no longer
     withholds the family stamp over the verified siblings."""
-    base, src = T.runs_base(tmp_path)
+    T.runs_base(tmp_path)
     for scrub_ran, world in ((None, "b"), (False, "c")):
         ep = T.episode(tmp_path / world)
-        dirs = [T.sibling_run_dir(base, w, scrub_ran=True if w != world else scrub_ran)
-                for w in T.WORLDS]
+
+        def dirs(ep, w, world=world, scrub_ran=scrub_ran):
+            return T.arm_run_dir(ep, w, scrub_ran=True if w != world else scrub_ran)
+
         report = _verify_family(ep, dirs, source=T.provenance_record())
         assert world in report["reason"]
         assert world not in report["archived"]
@@ -459,10 +471,11 @@ def test_a_finished_sibling_without_a_scrub_verdict_gets_its_own_not_archived_re
     cannot see it — and it carries its own `not archived` record, the only way the judge
     counts a world it cannot see toward O5. A verified sibling beside it gets none."""
     outcome = T.mod("learning.branch.outcome")
-    base, _src = T.runs_base(tmp_path)
+    T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
-    dirs = [T.sibling_run_dir(base, w, scrub_ran=None if w == "b" else True)
-            for w in T.WORLDS]
+
+    def dirs(ep, w):
+        return T.arm_run_dir(ep, w, scrub_ran=None if w == "b" else True)
 
     report = _verify_family(ep, dirs, source=T.provenance_record())
 
@@ -480,10 +493,10 @@ def test_947_agreeing_sibling_stamps_write_the_family_stamp(tmp_path):
     The source is anchored at `cafe1` too (#976 M3): siblings agreeing among themselves at a
     commit the source did not run is exactly the family the anchor refuses, so the positive
     here is agreement with each other AND with the source."""
-    base, src = T.runs_base(tmp_path)
+    T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
-    dirs = [T.sibling_run_dir(base, w, commit="cafe1") for w in T.WORLDS]
-    _verify_family(ep, dirs, source=T.provenance_record(commit="cafe1"))
+    _verify_family(ep, lambda ep, w: T.arm_run_dir(ep, w, commit="cafe1"),
+                   source=T.provenance_record(commit="cafe1"))
     stamp = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
     assert stamp["agreed"]["commit"] == "cafe1"
 
@@ -494,10 +507,10 @@ def test_947_family_stamp_carries_agreed_and_override_as_disjoint_roles(tmp_path
     given — none sourced from another, so an override cannot be read out of the provenance
     half, and the anchor cannot be mistaken for the siblings' agreement or vice versa."""
     ep = T.episode(tmp_path)
-    # The siblings' OWN runs base (`<episode>/runs`, §7 FORK-13), with no tenant record, so
-    # the stamp carries exactly its three roles (a seeded base adds `base_world_id`, #1106).
-    _verify_family(ep, [T.sibling_run_dir(ep / "runs", w) for w in T.WORLDS],
-                   source=T.provenance_record())
+    # The siblings' OWN runs base (`<episode>/runs`, §7 FORK-13), and no container base world
+    # handed to verify (#1105 PR 2: `base_world_id=`), so the stamp carries exactly its three
+    # roles (one handed in adds `base_world_id`, #1106).
+    _verify_family(ep, source=T.provenance_record())
     stamp = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
     # #1204: `waived` names the fault kinds the override waived — none, for a clean family.
     assert set(stamp) == {"agreed", "allow_dirty", "source", "waived"}
@@ -512,10 +525,12 @@ def test_947_disagreeing_sibling_stamps_mark_the_episode_incomplete_with_a_reaso
     """Sibling stamps recording different commits withhold the family's comparability with the
     reason, and no family stamp is written: the tree moved between the first and last sibling, which is
     exactly the catch per-process stamps exist for."""
-    base, src = T.runs_base(tmp_path)
+    T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
-    dirs = [T.sibling_run_dir(base, w, commit=("cafe1" if w == "a" else "cafe2"))
-            for w in T.WORLDS]
+
+    def dirs(ep, w):
+        return T.arm_run_dir(ep, w, commit=("cafe1" if w == "a" else "cafe2"))
+
     report = _verify_family(ep, dirs, source=T.provenance_record(commit="cafe1"))
     assert report["comparable"] is False
     assert "commit" in report["reason"]
@@ -526,12 +541,16 @@ def test_947_an_absent_or_unreadable_sibling_stamp_marks_the_episode_incomplete(
     """A sibling stamp that is absent, or present but unreadable, is not an agreeing stamp: the
     family's comparability is withheld with the reason exactly as for a disagreeing one, and no
     family stamp is written."""
-    base, src = T.runs_base(tmp_path)
+    T.runs_base(tmp_path)
     for mutate in ("absent", "truncated"):
         ep = T.episode(tmp_path)
-        dirs = [T.sibling_run_dir(base, w, stamp=(w != "b")) for w in T.WORLDS]
-        if mutate == "truncated":
-            (dirs[1] / "provenance.json").write_text('{"commit": "cafe', encoding="utf-8")
+
+        def dirs(ep, w, mutate=mutate):
+            arm = T.arm_run_dir(ep, w, stamp=(w != "b"))
+            if mutate == "truncated" and w == "b":
+                (arm / "provenance.json").write_text('{"commit": "cafe', encoding="utf-8")
+            return arm
+
         report = _verify_family(ep, dirs, source=T.provenance_record())
         assert report["comparable"] is False
         assert not (ep / "provenance.json").exists()
@@ -541,9 +560,9 @@ def test_947_the_family_stamp_carries_the_resolved_model_per_sibling(tmp_path):
     """The family stamp compares the resolved MODEL alongside the commit and the scope: each
     sibling's stamp records the model its own process resolved, and the family stamp carries the
     agreed value."""
-    base, src = T.runs_base(tmp_path)
+    T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
-    _verify_family(ep, [T.sibling_run_dir(base, w, model="m-1") for w in T.WORLDS],
+    _verify_family(ep, lambda ep, w: T.arm_run_dir(ep, w, model="m-1"),
                    source=T.provenance_record())
     stamp = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
     assert stamp["agreed"]["model"] == "m-1"
@@ -553,9 +572,12 @@ def test_947_a_cross_model_family_refuses_rather_than_agreeing(tmp_path):
     """A family whose siblings resolved DIFFERENT models refuses rather than passing with an
     otherwise agreeing stamp: the model is held constant the way the commit is, so a comparison
     across two models is never archived as comparable."""
-    base, src = T.runs_base(tmp_path)
+    T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
-    dirs = [T.sibling_run_dir(base, w, model=("m-1" if w == "a" else "m-2")) for w in T.WORLDS]
+
+    def dirs(ep, w):
+        return T.arm_run_dir(ep, w, model=("m-1" if w == "a" else "m-2"))
+
     report = _verify_family(ep, dirs, source=T.provenance_record())
     assert report["comparable"] is False
     assert "model" in report["reason"]
@@ -575,15 +597,17 @@ def test_947_a_dirty_sibling_tree_is_refused_without_the_override(tmp_path):
     #976 the override dropped it from the agreement and `_agreed_record` published another
     arm's commit as the family's (C11). Observed failing by: an accepted episode under the
     override in which sibling `b` carries no commit."""
-    base, src = T.runs_base(tmp_path)
+    T.runs_base(tmp_path)
     waivable = {
         "dirty": {"dirty": True},
         "git-failed": {"dirty": None, "unavailable": T.GIT_STATUS_FAILED},
     }
     for name, stamp in waivable.items():
         ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{name}")
-        dirs = [T.sibling_run_dir(base / name, w, **(stamp if w == "b" else {}))
-                for w in T.WORLDS]
+
+        def dirs(ep, w, stamp=stamp):
+            return T.arm_run_dir(ep, w, **(stamp if w == "b" else {}))
+
         report = _verify_family(ep, dirs, source=T.provenance_record())
         assert report["comparable"] is False, name
         assert "b" in report["reason"], (name, report["reason"])
@@ -593,11 +617,15 @@ def test_947_a_dirty_sibling_tree_is_refused_without_the_override(tmp_path):
         assert waived["comparable"] is True, name
         assert (ok / "provenance.json").is_file(), name
     silent = {"commit": None, "dirty": None, "unavailable": T.GIT_UNAVAILABLE}
-    dirs = [T.sibling_run_dir(base / "silent", w, **(silent if w == "b" else {}))
-            for w in T.WORLDS]
+
+    def silent_dirs(ep, w):
+        return T.arm_run_dir(ep, w, **(silent if w == "b" else {}))
+
     for allow_dirty in (False, True):
-        ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-silent-{allow_dirty}")
-        report = _verify_family(ep, dirs, source=T.provenance_record(),
+        # A case-folded id: an episode id is a run id (`refuse_bad_episode_id`).
+        ep = T.episode(tmp_path,
+                       episode_id=f"{T.EPISODE_ID}-silent-{str(allow_dirty).lower()}")
+        report = _verify_family(ep, silent_dirs, source=T.provenance_record(),
                                 allow_dirty=allow_dirty)
         assert report["comparable"] is False, f"allow_dirty={allow_dirty}"
         assert "b" in report["reason"], (allow_dirty, report["reason"])
@@ -608,10 +636,10 @@ def test_947_a_dirty_sibling_tree_is_refused_without_the_override(tmp_path):
 def test_947_the_dirty_override_is_named_in_the_family_stamp(tmp_path):
     """When the dirty override is given it is NAMED in the family stamp: a reader of the archive
     can tell an agreed clean family from one that was waved through."""
-    base, src = T.runs_base(tmp_path)
+    T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
-    dirs = [T.sibling_run_dir(base, w, dirty=(w == "b")) for w in T.WORLDS]
-    _verify_family(ep, dirs, source=T.provenance_record(), allow_dirty=True)
+    _verify_family(ep, lambda ep, w: T.arm_run_dir(ep, w, dirty=(w == "b")),
+                   source=T.provenance_record(), allow_dirty=True)
     stamp = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
     assert stamp["allow_dirty"] is True
 
@@ -635,7 +663,7 @@ def test_947_launcher_no_longer_hoists_one_capture_above_the_family(tmp_path):
 
     from defender.tests import _judge_921 as J
 
-    ep = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
+    ep = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
     launcher_moment = T.source_capture(dirty=True, model=None)
     # The judge seam is `_launch`'s scripted default: an ACCEPTED family is graded at the tail
     # of the launch, and its production value is a real model call.
@@ -666,11 +694,11 @@ def test_947_an_incomplete_family_archives_per_world_and_withholds_comparability
     comparability fault (here: sibling b ran another commit) withholds the family stamp and the
     comparability claim, recording why for the judge. (#1224 retired `incomplete` as an outcome
     word: the outcome record is pre-flight's, and verification never touches it.)"""
-    base, src = T.runs_base(tmp_path)
+    T.runs_base(tmp_path)
     # A per-world fault: c is not archived and the reason names it; the stamp is written.
     ep = T.episode(tmp_path / "per-world")
-    dirs = [T.sibling_run_dir(base, w, scrub_ran=(w != "c")) for w in T.WORLDS]
-    report = _verify_family(ep, dirs, source=T.provenance_record())
+    report = _verify_family(ep, lambda ep, w: T.arm_run_dir(ep, w, scrub_ran=(w != "c")),
+                            source=T.provenance_record())
     assert sorted(p.name for p in (ep / "worlds").iterdir()) == ["a", "b"]
     assert (ep / "provenance.json").exists()
     assert not (ep / "not_comparable.yaml").exists()
@@ -681,8 +709,10 @@ def test_947_an_incomplete_family_archives_per_world_and_withholds_comparability
     # A comparability fault: the clean worlds are still on disk, the stamp is not, and the
     # recorded reason names the fault.
     ep = T.episode(tmp_path / "comparability")
-    dirs = [T.sibling_run_dir(base, w, commit="cafef00" if w == "b" else "deadbee")
-            for w in T.WORLDS]
+
+    def dirs(ep, w):
+        return T.arm_run_dir(ep, w, commit="cafef00" if w == "b" else "deadbee")
+
     report = _verify_family(ep, dirs, source=T.provenance_record())
     assert sorted(p.name for p in (ep / "worlds").iterdir()) == sorted(T.WORLDS)
     assert not (ep / "provenance.json").exists()
@@ -712,7 +742,7 @@ def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
     def attempt():
         barrier.wait()
         try:
-            with cli.prepare_episode(T.EPISODE_ID, src, tenant=_tenant_paths()) as episode:
+            with cli.prepare_episode(T.EPISODE_ID, src, data_root=_tenant_paths().data_root) as episode:
                 results.append(episode)
         except Exception as e:  # noqa: BLE001 — the refusal is the observation
             results.append(e)
@@ -723,7 +753,7 @@ def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
     for t in threads:
         t.join()
     assert not any(isinstance(r, Exception) for r in results), results
-    first = cli.episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
+    first = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
     assert sorted(r.dir for r in results) == [first, first.parent / f"{T.EPISODE_ID}-r2"]
     for episode in results:
         lines = (episode.dir / "served" / "base.jsonl").read_text(encoding="utf-8").splitlines()

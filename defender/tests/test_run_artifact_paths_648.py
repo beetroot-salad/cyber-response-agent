@@ -8,6 +8,10 @@ resolver TRUSTED paths that were spelled absolute. Neither asked where the value
 Both gates matter and they answer different questions, so the symlink case is the load-bearing
 one here: it is spelled exactly like a real artifact and still escapes, which is precisely what
 a shape-only fix passes.
+
+The bundle resolver (`resolve_run_bundle`) is gone (#1105 PR 2, F-13): a stored run is
+addressed by id (`RunAddress`, which refuses a path where the id belongs) and opened through
+its tenant's repository, so its three tests went with it.
 """
 from __future__ import annotations
 
@@ -15,7 +19,7 @@ import json
 from pathlib import Path
 
 
-from defender.run_repository import contained_payload, resolve_run_bundle
+from defender.run_repository import contained_payload
 from defender.learning.lead_repository import load_queries, stage_tables
 
 LEAD = "l-001"
@@ -122,26 +126,6 @@ def test_a_seq_is_ascii_digits_only(tmp_path: Path) -> None:
     assert contained_payload(run, "ticket_reads/١.json") is None
 
 
-def test_source_run_dir_never_addresses_outside_the_runs_root(tmp_path: Path) -> None:
-    """The bundle is always `runs_dir / <run_id>`, so only the last segment is honored —
-    the absolute branch that used to be taken verbatim is gone."""
-    runs = tmp_path / "state" / "runs"
-    assert resolve_run_bundle(runs, "/etc/shadow") == runs / "shadow"
-    assert resolve_run_bundle(runs, "../../../etc/") == runs / "etc"
-    assert resolve_run_bundle(runs, "defender/learning/runs/case-1/") == runs / "case-1"
-    assert resolve_run_bundle(runs, str(tmp_path / "elsewhere" / "case-1")) == runs / "case-1"
-
-
-def test_degenerate_source_run_dir_is_not_the_runs_root_itself(tmp_path: Path) -> None:
-    """`runs_dir` exists, so mapping a nameless input onto it would pass a caller's
-    `is_dir()` bundle check and author from a bundle that is not one."""
-    runs = tmp_path / "state" / "runs"
-    runs.mkdir(parents=True)
-    for degenerate in ("/", ".", "..", ""):
-        assert resolve_run_bundle(runs, degenerate) != runs
-        assert not resolve_run_bundle(runs, degenerate).is_dir()
-
-
 # Staging — the copy, not the read.
 #
 # The read gate above judges a path the moment a consumer follows it. Staging runs EARLIER and
@@ -213,14 +197,3 @@ def test_a_link_inside_the_gather_tree_is_dropped_and_the_rest_still_stages(
     assert (dst / "executed_queries.jsonl").is_file()
     assert set(refused) == {run / "gather_raw" / "dangling.json",
                             run / "gather_raw" / LEAD / "0.json"}
-
-
-
-
-def test_a_source_run_dir_that_is_not_a_string_is_a_missing_bundle(tmp_path: Path) -> None:
-    """A queued row is data, not a contract: a non-string here must read as a missing bundle —
-    the gate's own posture — rather than raise out of a drain batch mid-flight."""
-    runs = tmp_path / "state" / "runs"
-    runs.mkdir(parents=True)
-    for wrong in (7, None, {"path": "case-1"}, ["case-1"]):
-        assert not resolve_run_bundle(runs, wrong).is_dir()

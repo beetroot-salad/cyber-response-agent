@@ -50,8 +50,8 @@ def _episode(tmp_path, **kw):
 
 
 def _grade(tmp_path, ep, judge, **kw):
-    J.mod("learning.judge").grade_episode(
-        ep, judge=judge, runs_base=tmp_path / "defender-runs", state=env_state(), **kw)
+    J.grade_at(
+        ep, judge=judge, state=env_state(), **kw)
     return judge
 
 
@@ -274,8 +274,8 @@ def test_921_no_model_authored_text_reaches_the_prompt_unframed(tmp_path):
     git_show = J.FakeGitShow(
         bodies={("deadbee", "defender/lessons/L1.md"): "MARKER-LESSON-BODY\n"})
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    J.mod("learning.judge").grade_episode(
-        ep, judge=judge, runs_base=tmp_path / "defender-runs", git_show=git_show, draws=1, state=env_state())
+    J.grade_at(
+        ep, judge=judge, git_show=git_show, draws=1, state=env_state())
     prompt = judge.prompts[judge.agent_ids.index("judge:b:0")]
 
     for what, marker in {**markers, "lesson": "MARKER-LESSON-BODY"}.items():

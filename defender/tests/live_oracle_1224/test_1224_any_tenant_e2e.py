@@ -100,8 +100,7 @@ def _branch_end_to_end(tmp_path: Path, est: S.Estate, *, doc: dict, calls: list,
     judged = S.judged_episode(tmp_path / "judged", doc=doc,
                               ledgers={"b": S.ledger_rows(launch.ep, "b")})
     judge = S.FakeJudge(default=S.judge_reply(systems=(system,), bucket=bucket))
-    S.sym(S.JUDGE, "grade_episode")(judged, judge=judge, runs_base=judged.parent / "runs-base",
-                                    state=state_over(tmp_path / "judge-state"), draws=1)
+    J.grade_at(judged, judge=judge, state=state_over(tmp_path / "judge-state"), draws=1)
     judge_world = _judge_world(J.judge_record(judged), "b")
 
     lesson_marker, foreign_marker = f"LESSON-ON-{system}", "LESSON-ON-elastic"

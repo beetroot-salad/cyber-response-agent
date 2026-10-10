@@ -40,6 +40,7 @@ from typing import Any
 
 import pytest
 
+from defender import _episode_handle as EH
 from defender.hooks.budget_enforcer import BUDGET_REFUSAL_MESSAGE, DEFAULT_LIMITS
 from defender.run_repository import RunPaths
 from defender.runtime.lead_zero import RESERVED_LEAD_IDS
@@ -1251,7 +1252,7 @@ class _SnapshotSpawn(S.FakeSpawn):
     def __call__(self, argv: list[str], *, env: dict[str, str] | None = None, **kw: Any) -> int:
         label = T._world_of(argv)
         if label is not None:
-            ep = S.mod(S.CLI).episode_dir_for(S.EPISODE_ID, tenant=T.current_tenant())
+            ep = EH.episode_dir(T.current_tenant().data_root, S.EPISODE_ID)
             snap = _snapshot(S.oracle_dir(ep, label))
             if snap:
                 self.snapshots[label] = snap
@@ -1347,8 +1348,7 @@ class _LazySibling(J.FakeSibling):
         super().__init__(Path("/nonexistent-until-launch"))
 
     def __call__(self, argv: list[str], *, env: dict[str, str] | None = None, **kw: Any) -> int:
-        self.episode_dir = S.mod(S.CLI).episode_dir_for(S.EPISODE_ID,
-                                                        tenant=T.current_tenant())
+        self.episode_dir = EH.episode_dir(T.current_tenant().data_root, S.EPISODE_ID)
         return super().__call__(argv, env=env, **kw)
 
 

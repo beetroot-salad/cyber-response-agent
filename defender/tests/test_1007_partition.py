@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS, LearningState
+from defender.tests import _judge_921 as J
 from defender.tests import _world_1007 as W
 from defender.tests._curator1134 import author_trees
 
@@ -561,12 +562,10 @@ def test_a_model_supplied_world_is_ignored_and_the_draws_own_directory_wins(
     authored about a world that never had the property described.
     """
     paths = W.loop_paths(tmp_path)
-    judge_mod = W.mod("learning.judge")
     ep = episode_with_worlds(tmp_path, monkeypatch, labels=("b", "c"))
     judge = W.FakeJudge(W.reply_document(findings=[W.world_finding(world="c")]))
 
-    judge_mod.grade_episode(ep, judge=judge, state=W.learning_state(paths),
-                            runs_base=ep.parent / "runs-base")
+    J.grade_at(ep, judge=judge, state=W.learning_state(paths))
 
     rows = [r for r in W.queue_rows(paths, QUESTIONER_FINDINGS) if r["provenance"] == "model"]
     assert {r["world"] for r in rows} == {"b", "c"}, (
@@ -590,14 +589,12 @@ def test_every_family_level_finding_carries_a_null_world(tmp_path, monkeypatch):
     drawn last, and a family-level observation is authored as a lesson about one world.
     """
     paths = W.loop_paths(tmp_path)
-    judge_mod = W.mod("learning.judge")
     ep = episode_with_worlds(tmp_path, monkeypatch, labels=("b", "c"))
     judge = W.FakeJudge(W.reply_document(
         findings=[W.world_finding(bucket="undiscriminating-family",
                                   evidence=FAMILY_EVIDENCE)]))
 
-    judge_mod.grade_episode(ep, judge=judge, state=W.learning_state(paths),
-                            runs_base=ep.parent / "runs-base")
+    J.grade_at(ep, judge=judge, state=W.learning_state(paths))
 
     family_rows = [r for r in W.queue_rows(paths, QUESTIONER_FINDINGS)
                    if "family" in r["finding_id"]]
@@ -622,15 +619,13 @@ def test_a_family_findings_identity_is_minted_by_the_pass_not_by_the_model(
     keys on.
     """
     paths = W.loop_paths(tmp_path)
-    judge_mod = W.mod("learning.judge")
     ep = episode_with_worlds(tmp_path, monkeypatch)
     judge = W.FakeJudge(W.reply_document(findings=[
         W.world_finding(bucket="undiscriminating-family", evidence=FAMILY_EVIDENCE),
         W.world_finding(bucket="a-second-family-reading", evidence=FAMILY_EVIDENCE),
     ]))
 
-    judge_mod.grade_episode(ep, judge=judge, state=W.learning_state(paths),
-                            runs_base=ep.parent / "runs-base")
+    J.grade_at(ep, judge=judge, state=W.learning_state(paths))
 
     ids = [r["finding_id"] for r in W.queue_rows(paths, QUESTIONER_FINDINGS)
            if "/family/" in r["finding_id"]]
@@ -729,14 +724,12 @@ def test_an_unqueueable_defender_finding_does_not_suppress_the_world_findings(
     grade — are exactly the ones silently dropped.
     """
     paths = W.loop_paths(tmp_path)
-    judge_mod = W.mod("learning.judge")
     ep = episode_with_worlds(tmp_path, monkeypatch)
     judge = W.FakeJudge(W.reply_document(
         outcome="discard",
         findings=[W.finding(), W.world_finding(bucket="a-world-reading")]))
 
-    judge_mod.grade_episode(ep, judge=judge, state=W.learning_state(paths),
-                            runs_base=ep.parent / "runs-base")
+    J.grade_at(ep, judge=judge, state=W.learning_state(paths))
 
     assert [r for r in W.queue_rows(paths, FINDINGS)] == [], (
         "a discard episode still enqueued a defender row")
@@ -757,7 +750,6 @@ def test_an_ungradable_world_enqueues_nothing_on_either_channel(tmp_path, monkey
     the questioner corpus learns that a world it cannot read is badly authored.
     """
     paths = W.loop_paths(tmp_path)
-    judge_mod = W.mod("learning.judge")
     ep = episode_with_worlds(tmp_path, monkeypatch, labels=("b", "c"))
     for stray in (ep / "worlds" / "c").glob("*"):
         if stray.is_dir():
@@ -767,8 +759,7 @@ def test_an_ungradable_world_enqueues_nothing_on_either_channel(tmp_path, monkey
     judge = W.FakeJudge(W.reply_document(
         findings=[W.finding(), W.world_finding(bucket="a-world-reading")]))
 
-    judge_mod.grade_episode(ep, judge=judge, state=W.learning_state(paths),
-                            runs_base=ep.parent / "runs-base")
+    J.grade_at(ep, judge=judge, state=W.learning_state(paths))
 
     for channel in (FINDINGS, QUESTIONER_FINDINGS):
         rows = [r for r in W.queue_rows(paths, channel) if r.get("world") == "c" or "/c/" in

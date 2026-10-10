@@ -69,7 +69,7 @@ FOUR THINGS LIVE HERE AND NOTHING ELSE.
    states only the field it is about.
 
 Fakes enter through the entry point's INJECTION SEAMS (a `judge=` keyword on `cli.main`, a
-`git_show=` / `runs_base=` argument on the render), never by `monkeypatch.setattr` — the
+`git_show=` argument on the render), never by `monkeypatch.setattr` — the
 project profile's `tests.idioms`, ratcheted in CI by `scripts/lint/lint_monkeypatch.py`. The
 design named NO seam for the judge's model call; the seam is therefore part of the contract and
 every launcher scenario here drives through it, which is what discharges it by construction.
@@ -79,6 +79,9 @@ Underscore-prefixed so pytest does not collect it; it defines no tests.
 from __future__ import annotations
 
 import json
+import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -99,6 +102,7 @@ from defender.tests._triplet_947 import (  # noqa: F401 — re-exported vocabula
     base_capture,
     capture_call,
     captured_row,
+    current_tenant,
     episode,
     fact,
     family_doc,
@@ -428,18 +432,55 @@ def scripted_judge(**kw: Any) -> FakeJudge:
     return FakeJudge(**kw)
 
 
-def grade(episode_dir: Path, *, runs_base: Path, judge: Any = None, state: Any = None,
-          **kw: Any) -> Any:
-    """`learning.judge.grade_episode` over `episode_dir` — the one grading entry point since
-    #1224 retired the offline `grade_family`. `judge=None` is `scripted_judge()`; `state=None`
-    is the env-configured learning state (each suite points it inside `tmp_path`)."""
+@contextmanager
+def episodes_base(base: Path) -> Iterator[Path]:
+    """`DEFENDER_EPISODES_BASE` pointed at `base` for the block, and restored (or unset) after —
+    the configured root the judge's door (`runs.episode_files`) opens an episode id under."""
+    before = os.environ.get(EPISODES_BASE_ENV)
+    os.environ[EPISODES_BASE_ENV] = str(base)
+    try:
+        yield Path(base)
+    finally:
+        if before is None:
+            os.environ.pop(EPISODES_BASE_ENV, None)
+        else:
+            os.environ[EPISODES_BASE_ENV] = before
+
+
+def judge_runs(tenant_id: str | None = None) -> Any:
+    """The runs repository the judge is handed (#1105 PR 2: `grade_episode(runs, episode_id)`):
+    an accepted tenant under this test's `DEFENDER_DATA_ROOT` — `tenant_id`, or the root's one
+    tenant (`_triplet_947.current_tenant`). The judge reads only the episode, never the
+    tenant's runs (J3), so which tenant it is changes nothing it grades."""
+    if tenant_id is None:
+        return current_tenant().runs_repository()
+    from defender.tests._data_root_1078 import set_up_tenant
+
+    return set_up_tenant(Path(os.environ["DEFENDER_DATA_ROOT"]), tenant_id).runs_repository()
+
+
+def grade_at(episode_dir: Path, *, runs: Any = None, **kw: Any) -> Any:
+    """`learning.judge.grade_episode(runs, episode_dir.name, **kw)` — the judge's one entry
+    point, by id: `runs` (default `judge_runs()`) and the episode `episode_dir` names, opened
+    under the episodes base `episode_dir.parent` (pointed at for the call). Every keyword passes
+    through unchanged; nothing is defaulted."""
+    episode_dir = Path(episode_dir)
+    runs = judge_runs() if runs is None else runs
+    with episodes_base(episode_dir.parent):
+        return mod("learning.judge").grade_episode(runs, episode_dir.name, **kw)
+
+
+def grade(episode_dir: Path, *, judge: Any = None, state: Any = None, **kw: Any) -> Any:
+    """`learning.judge.grade_episode` over the episode at `episode_dir` (`grade_at`) — the one
+    grading entry point since #1224 retired the offline `grade_family`. `judge=None` is
+    `scripted_judge()`; `state=None` is the env-configured learning state (each suite points it
+    inside `tmp_path`)."""
     if state is None:
         from defender.tests._state1135 import env_state
 
         state = env_state()
-    return mod("learning.judge").grade_episode(
-        Path(episode_dir), runs_base=Path(runs_base),
-        judge=judge if judge is not None else scripted_judge(), state=state, **kw)
+    return grade_at(episode_dir, judge=judge if judge is not None else scripted_judge(),
+                    state=state, **kw)
 
 
 def judge_record(episode_dir: Path) -> dict:
@@ -794,7 +835,8 @@ __all__ = [
     "HOLDING_SYSTEM", "MODEL_KNOB", "PER_WORLD_FACTS", "ROW_KEYS", "RUNS_BASE_ENV",
     "SOURCE_RUN_ID",
     "FakeGitShow", "FakeJudge", "FakeSibling", "Fault",
-    "accepted_episode", "archived_judge_world", "grade", "scripted_judge", "archived_world", "as_reply_text",
+    "accepted_episode", "archived_judge_world", "episodes_base", "grade", "grade_at",
+    "judge_runs", "scripted_judge", "archived_world", "as_reply_text",
     "assert_wrapped_untrusted", "base_capture", "capture_call", "captured_row", "draw_doc",
     "draw_files", "enqueued_rows", "episode", "family_doc", "family_reply", "finding_doc",
     "investigation_document", "judge_record", "ledger_row", "mod", "outcome_record",

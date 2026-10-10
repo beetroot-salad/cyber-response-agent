@@ -1174,8 +1174,8 @@ def _calibration_seen(tmp_path: Path, monkeypatch: Any) -> list[dict]:
     ep = S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)),
                       base_rows=[S.captured("idp", "query", ALICE, ALICE_ROWS)])
     with _log.log_context(run_id="launch-run", tenant_id=S.FIXTURE_TENANT):
-        record_ = cli.preflight_replay(ep, roster=est.roster(), tenant=est.run_tenant(),
-                                       rate=1e6)
+        record_ = cli.preflight_replay(ep, source=S.T.open_source(src), roster=est.roster(),
+                                       tenant=est.run_tenant(), rate=1e6)
     assert record_["outcome"] == "accepted", record_
     return seen
 
@@ -1632,7 +1632,8 @@ def test_an_unexpected_error_in_one_preflight_world_stops_the_others(tmp_path):
                  fault=S.Fault(delay=1.5))
 
     with pytest.raises(OSError, match=re.escape(str(ep / "oracle" / "b"))):
-        cli.preflight_replay(ep, roster=est.roster(), tenant=est.run_tenant(), oracle=o.model,
+        cli.preflight_replay(ep, source=S.T.open_source(src), roster=est.roster(),
+                             tenant=est.run_tenant(), oracle=o.model,
                              verifier=S.passing_verifier().model, rate=1e6)
 
     # 0 when b failed before c's first turn began, 1 when that turn was already under way.
@@ -1788,7 +1789,8 @@ def test_the_sibling_s_registry_gets_pre_flight_s_pre_branch_set(tmp_path):
         alert_path=src / "alert.json", run_dir=tmp_path / "sib", run_id="sib",
         defender_dir=est.defender_dir, model_name="m", model_override=None, box=None,
         tenant=est.run_tenant(), world=S.load_world(ep, "b"), episode=Episode.open(ep),
-        serving=S.serving(), investigate=lambda **kw: seen.update(kw) or {})
+        serving=S.serving(), source=S.T.open_source(src),
+        investigate=lambda **kw: seen.update(kw) or {})
     assert seen["verbs"].prebranch == expected
 
 

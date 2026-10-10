@@ -77,7 +77,11 @@ DEFENDER = Path(__file__).resolve().parents[1]
 #: separators normalised.
 EPISODE_ID = "20260728t161845z-fresh-case-n59"
 EPISODE_TOKEN = "20260728t161845z.fresh.case.n59"
-SOURCE_RUN_ID = "20260728T161845Z-fresh-case"
+#: The source run's id, CASE-FOLDED (#1105 PR 2): the launcher and the sibling open the source
+#: by id through the tenant's repository, and `RunId.parse` refuses a spelling that is not
+#: case-stable (a minted run id is folded). The derived episode id is unchanged
+#: (`episode_id_for` folds either way).
+SOURCE_RUN_ID = "20260728t161845z-fresh-case"
 BRANCH_MESSAGE_ID = 59
 AS_OF = "2026-07-28T16:18:45Z"
 WORLDS = ("a", "b", "c")
@@ -463,8 +467,8 @@ def episode(tmp_path: Path, *, doc: dict | None = None,
     not about where an episode lives. Where it lives is a demand of its own — the episodes root
     is a CONFIGURED location outside both the runs base and the checkout (§7 round 2), pinned by
     `test_947_the_episodes_root_is_read_from_configuration_not_the_runs_base` and its neighbours
-    in `test_947_triplet_archive.py`, every one of which resolves the path through
-    `cli.episode_dir_for` rather than composing one here.
+    in `test_947_triplet_archive.py`, every one of which resolves the path through the episode
+    owner's `_episode_handle.episode_dir` rather than composing one here.
 
     `root=` puts the episode under a CONFIGURED episodes root — pass `configured_layout`'s third
     return value where a scenario must be able to tell the episodes root and the runs base apart.
@@ -523,8 +527,8 @@ SOURCE_TENANT = "playground"
 def current_tenant() -> Any:
     """#1078: the ONE tenant O10 permits in this test's `DEFENDER_DATA_ROOT` (whichever
     `runs_base()`, `d9_tenant` or the like already set up there), as an accepted `Tenant`
-    (#1120 D1) — for callers (`episode_dir_for`, `prepare_episode`) that need the tenant rather
-    than its runs base alone. Set up from the committed fixture when the root has none yet."""
+    (#1120 D1) — for callers (`episode_dir`, `prepare_episode`, the runs repository) that need
+    the tenant rather than its runs base alone. Set up from the committed fixture when the root has none yet."""
     from defender.tests._data_root_1078 import set_up_tenant
 
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
@@ -539,8 +543,9 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
 
     #1078: `base` is a real tenant's runs base (`<data root>/<tenant>/runs`) — the data root
     the autouse `data_root` fixture already pointed this test's `DEFENDER_DATA_ROOT` at, with a
-    tenant created (and its runs-base record minted) on first use, so `tenant_of_run_dir` and
-    the launcher's own derivation see an ordinary, well-formed tenant location.
+    tenant created (and its runs-base record minted) on first use, so the tenant's runs
+    repository (which the launcher opens its source through) sees an ordinary, well-formed
+    tenant location.
 
     O10 permits only ONE tenant per data root, so when `tenant_id` is not given this reuses
     whichever tenant already exists there (e.g. one a `d9_tenant` fixture already created)
@@ -613,7 +618,10 @@ def seed_source_session(base: Path, src: Path) -> None:
         return
     from defender.tests import _session_store_705 as S
 
-    store = ss.open_store(case_id=SOURCE_CASE_ID, runs_base=base)
+    from defender.run_repository import SessionPaths
+
+    # #1105 fork S(b): the store takes the layout owner's hand-out for the runs base.
+    store = ss.open_store(case_id=SOURCE_CASE_ID, sessions=SessionPaths(base))
     try:
         ss.write_case_pointer(src, case_id=SOURCE_CASE_ID, store_path=store.path)
         session_id = store.new_session(agent_id="main")
@@ -884,6 +892,24 @@ def sibling_run_dir(base: Path, world_id: str, *, scrub_ran: bool = True,
     return run_dir
 
 
+def arm_run_dir(episode_dir: Path, world_id: str, **kw: Any) -> Path:
+    """A finished arm in the episode's own container, `<episode_dir>/runs/<episode id>-<world>`
+    (#1105 PR 2: an arm is opened by id through the episode's view — `family_arms` — so it lives
+    in that episode's container under that episode's id): `sibling_run_dir`'s run dir and
+    scrub-verdict sidecar, every keyword passed through, renamed to the episode's own arm id
+    when the episode is not `EPISODE_ID`."""
+    episode_dir = Path(episode_dir)
+    runs = episode_dir / "runs"
+    run_dir = sibling_run_dir(runs, world_id, **kw)
+    arm = runs / f"{episode_dir.name}-{world_id}"
+    if arm != run_dir:
+        run_dir.rename(arm)
+        verdict = runs / f"{run_dir.name}.scrub-verdict.json"
+        if verdict.exists():
+            verdict.rename(runs / f"{arm.name}.scrub-verdict.json")
+    return arm
+
+
 def corpus_document(run_dir: Path) -> Path:
     """Give `run_dir` a REAL orientation-corpus document, copied from the committed golden run.
 
@@ -897,6 +923,57 @@ def corpus_document(run_dir: Path) -> Path:
     path = run_dir / "investigation.md"
     path.write_text(GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), encoding="utf-8")
     return path
+
+
+def open_source(src: Path) -> Any:
+    """The source `Run` the launcher opens (#1105 PR 2): the run at `src` —
+    `<data root>/<T>/runs/<run id>` — by its id, through tenant T's runs repository, T accepted
+    under that data root. What `preflight_episode(source=)` / `preflight_replay(source=)` take
+    where a test once handed the folder."""
+    from defender import _tenant
+    from defender.run_repository import RunId
+
+    src = Path(src)
+    tenant = _tenant.accept_tenant(src.parent.parent.parent, src.parent.parent.name,
+                                   defender_dir=DEFENDER)
+    return tenant.runs_repository().open(RunId.parse(src.name))
+
+
+def episode_view(episode: Any, *, tenant: Any = None) -> Any:
+    """The episode's view (`EpisodeRuns`) in `tenant`'s runs repository (default: this data
+    root's one tenant, `current_tenant()`), adopting the held `episode` (#1105 PR 2). Its
+    container is made with the tenant's record when absent — what the launcher does at RUNS
+    before the first sibling (`EpisodeRuns.create_container`) — and a container a fixture
+    planted as a plain folder without a record is given the tenant's, so a scene's hand-planted
+    arms are reachable through the view. `start_family` callers make the container this way;
+    `verify_family` callers open their arms through it (`family_arms`)."""
+    from defender import _tenant
+
+    tenant = current_tenant() if tenant is None else tenant
+    runs = Path(episode.dir) / "runs"
+    if runs.is_dir() and not runs.is_symlink() and not os.path.lexists(runs / "_tenant.json"):
+        _tenant.ensure_runs_base_record(runs, tenant.id)
+    view = tenant.runs_repository().episode(episode.dir.name, held=episode)
+    if view.state == "absent":
+        view.create_container()
+    return view
+
+
+def family_arms(episode: Any, labels: Any, *, tenant: Any = None) -> dict[str, Any]:
+    """`verify_family`'s `arms` (#1105 PR 2): each label's arm `<episode>/runs/<ep>-<label>`
+    opened by id through the episode's view (`episode_view`), as the launcher's
+    `_finished_arms` does — the `RunRefused` an open raises (`RunAbsent` for a missing arm
+    folder) kept as that label's value."""
+    from defender.run_repository import RunRefused
+
+    view = episode_view(episode, tenant=tenant)
+    arms: dict[str, Any] = {}
+    for label in labels:
+        try:
+            arms[label] = view.open(view.arm_id(label))
+        except RunRefused as refused:
+            arms[label] = refused
+    return arms
 
 
 def configured_layout(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
@@ -1041,9 +1118,10 @@ __all__ = [
     "archived_world", "base_world", "capture_call", "configured_layout",
     "report_text",
     "corpus_document",
-    "episode", "fact", "family_doc", "provenance_record",
+    "episode", "episode_view", "fact", "family_arms", "family_doc", "open_source",
+    "provenance_record",
     "FakeCapture", "source_capture", "source_stamp", "isolate_learning_state", "LEARNING_STATE_ENV",
     "lesson_row", "mod", "refusals", "replace", "runs_base",
-    "sibling_run_dir",
+    "arm_run_dir", "sibling_run_dir",
     "sym", "world_doc", "world_token", "write_family",
 ]

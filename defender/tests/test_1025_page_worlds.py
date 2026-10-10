@@ -30,6 +30,7 @@ from pathlib import Path
 
 import pytest
 
+from defender import _episode_handle as EH
 from defender.tests import _episode_1025 as E
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
@@ -1021,7 +1022,7 @@ def test_1025_a_sibling_process_exited_non_zero(tmp_path):
     Positive control: the section, its link and its rows exist.
     """
     launch = ST._launch(tmp_path, spawn=J.FakeSibling(
-        ST._cli().episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths()), exits={"b": 1}))
+        EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID), exits={"b": 1}))
     assert launch.rc == 1, "the control failed: no sibling exited non-zero"
     record = T.mod("_yaml").safe_load(
         (launch.episode_dir / "world_records" / "b.yaml").read_text(encoding="utf-8"))

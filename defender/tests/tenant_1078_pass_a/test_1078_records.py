@@ -212,16 +212,22 @@ def test_o3_record_read_grammar(tmp_path, monkeypatch):
     it reads back unchallenged.
 
     Read through the owner's own reader (`read_tenant`, which `Run.for_tenant` uses), through
-    `ensure_runs_base_record` and through `tenant_of_run_dir`; the control is the same record
+    `ensure_runs_base_record` and through the tenant's runs repository opening a run there
+    (#1105 PR 2: the replacement for `tenant_of_run_dir`, F-13); the control is the same record
     naming a grammar id, which reads back."""
+    from defender.run_repository import RunId
+
+    H.make_tenant(tmp_path / "data", T_ID)
     base = tmp_path / "data" / T_ID / "runs"
     H.plant_record(base, "../../x")
+    (base / "r1").mkdir()
     tenant = H.tenant()
     with pytest.raises(H.tenant().TenantRefused, match=r"\.\./\.\./x|tenant"):
         tenant.read_tenant(base)
     H.owner_refusal(H.ensure_runs_base_record, base, T_ID)
     H.set_data_root(monkeypatch, tmp_path / "data")
-    H.owner_refusal(H.tenant_of_run_dir, base / "r1")
+    runs = H.accept(tmp_path / "data", T_ID).runs_repository()
+    H.owner_refusal(runs.open, RunId.parse("r1"))
     good = tmp_path / "good"
     H.plant_record(good, T_ID)
     assert tenant.read_tenant(good).tenant_id == T_ID
@@ -397,22 +403,28 @@ def test_create_does_not_swallow_an_unrelated_failure(tmp_path):
 
 def test_runs_base_record_torn_read(tmp_path, monkeypatch):
     """Under the complete-or-absent create lane (J16/J63), no reader of a runs-base record — a
-    racing ensure_runs_base_record loser or a bystander such as tenant_of_run_dir — ever
-    observes an empty or partial record: it sees the record absent or complete, so the read is
-    old-or-new-only by construction.
+    racing ensure_runs_base_record loser or a bystander such as the tenant's runs repository
+    opening a run — ever observes an empty or partial record: it sees the record absent or
+    complete, so the read is old-or-new-only by construction.
 
     §7 corrected settled #32 here: the premise's empty-intermediate (C-P1) grounded the OLD
-    lane and does not carry forward. The bystander is `tenant_of_run_dir` itself, at a real
-    tenant location: every answer it gives while the record is being created must be either T
-    or EXACTLY its absent-record refusal (captured before the race) — a corrupt-record refusal
-    is the torn read."""
+    lane and does not carry forward. The bystander is T's runs repository opening a run at a
+    real tenant location (#1105 PR 2: the replacement for `tenant_of_run_dir`, F-13): every
+    answer it gives while the record is being created must be either a run of T or EXACTLY its
+    absent-record refusal (captured before the race) — a corrupt-record refusal is the torn
+    read."""
+    from defender.run_repository import RunId, RunRefused
+
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     H.make_tenant(root, T_ID)
     base = H.runs_dir(root, T_ID)
     base.mkdir()
     run_dir = base / "r1"
-    absent = str(H.owner_refusal(H.tenant_of_run_dir, run_dir))
+    run_dir.mkdir()
+    runs = H.accept(root, T_ID).runs_repository()
+    run_id = RunId.parse(run_dir.name)
+    absent = str(H.owner_refusal(runs.open, run_id))
     for trial in range(40):
         (base / H.RECORD_NAME).unlink(missing_ok=True)
         seen: list[str] = []
@@ -421,8 +433,8 @@ def test_runs_base_record_torn_read(tmp_path, monkeypatch):
         def bystander(stop=stop, seen=seen) -> None:
             while not stop.is_set():
                 try:
-                    seen.append("T" if H.tenant_of_run_dir(run_dir) == T_ID else "other")
-                except ValueError as refused:
+                    seen.append("T" if runs.open(run_id).tenant_id == T_ID else "other")
+                except (H.tenant().TenantRefused, RunRefused) as refused:
                     seen.append("absent" if str(refused) == absent else f"torn: {refused}")
 
         reader = threading.Thread(target=bystander)

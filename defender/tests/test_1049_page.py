@@ -107,7 +107,7 @@ def _write_grade_over(copy: E.Episode) -> None:
         manifest = family.read_manifest(bound)
         rows = [family.read_world(bound, world, episode_dir=copy.dir,
                                   episode_token=E.EPISODE_TOKEN)[0]
-                for world in family.non_control_worlds(manifest, runs_base=None)]
+                for world in family.non_control_worlds(manifest)]
     doc = E.sample_grade()
     doc["worlds"] = rows
     E.write_judge(copy.dir, doc)

@@ -47,16 +47,20 @@ def _fresh_run(root: Path, run_id: str = "r2", tenant_id: str = TENANT) -> Path:
 def _sibling_run(tmp_path: Path, root: Path, episodes_root: Path) -> tuple[Path, Path]:
     """A pass-(A) sibling: its source at a tenant location, its episode under the OLD
     episodes base (outside the data root — O4's gap until (B)), materialised by the real
-    `materialize_run`'s sibling arm. Returns (sibling run dir, episode dir)."""
+    `materialize_run`'s sibling arm — through the sibling's episode view, over the container
+    the launcher made with T's record (#1105 PR 2). Returns (sibling run dir, episode dir)."""
     _base, src = H.tenant_source(root, TENANT, row=not H.row_path(root, TENANT).is_file())
     episode_dir = episodes_root / T.EPISODE_ID
     manifest = H.family_for(src, episode_dir)
-    world = H.run_py().resume_world(
-        Episode.open(manifest.parent), "b",
-        tenant=lambda: H.T1106.run_tenant(H.accept(H.resolve_data_root(), TENANT)))
-    run_dir = H.run_common().materialize_run(
-        src / "alert.json", world.run_id, tenant=H.accept(H.resolve_data_root(), TENANT),
-        world=world).run_dir
+    tenant = H.accept(H.resolve_data_root(), TENANT)
+    with Episode.open(manifest.parent) as episode:
+        world = H.run_py().resume_world(
+            episode, "b", tenant=lambda: H.T1106.run_tenant(tenant))
+        view = tenant.runs_repository().episode(episode.dir.name, held=episode,
+                                                container_required=True)
+        run_dir = H.run_common().materialize_run(
+            src / "alert.json", world.run_id, tenant=tenant, world=world,
+            episode_runs=view).run_dir
     return Path(run_dir), episode_dir
 
 
@@ -294,26 +298,30 @@ def _loaded_run(runs: Path, name: str, lesson: str) -> None:
 
 
 def test_n9_directory_tools_survive(tmp_path, monkeypatch, capsys):
-    """visualize_run, visualize_episode, held_out's positional runs dir, trace_lesson
-    --runs-dir and bin/defender-invlang with DEFENDER_RUNS_BASE set run with no --tenant and
-    read the directory they are given.
+    """held_out's positional runs dir and bin/defender-invlang with DEFENDER_RUNS_BASE set run
+    with no --tenant and read the directory they are given; visualize_run, visualize_episode
+    and trace_lesson (#1105 PR 2, J8: `--tenant` is required, with no default, and they name a
+    run or episode by id) refuse a call with no --tenant as a usage error, reading nothing.
 
     Every tool runs with DEFENDER_DATA_ROOT UNSET (so none of them can be resolving a tenant
-    behind the operator's back) and is pointed at a runs dir under a tenant layout — they read
-    what they are given."""
+    behind the operator's back) and is pointed at a runs dir under a tenant layout."""
     H.set_data_root(monkeypatch, None)
     monkeypatch.delenv("DEFENDER_RUNS_BASE", raising=False)
     runs = tmp_path / "data" / TENANT / "runs"
     runs.mkdir(parents=True)
 
-    # visualize_run — a real, renderable run (it follows the run's session pointer)
+    # visualize_run — the J8 edge: no --tenant is a usage error, and nothing is rendered
     src = H.source_run(runs)
-    assert H.mod("scripts.visualize.visualize_run").main(["visualize_run.py", str(src)]) == 0
-    assert (src / "runtime.html").is_file()
+    with pytest.raises(SystemExit) as no_tenant:
+        H.mod("scripts.visualize.visualize_run").main(["visualize_run.py", str(src)])
+    assert no_tenant.value.code == 2, f"visualize_run without --tenant: {no_tenant.value!r}"
+    assert not (src / "runtime.html").exists(), "visualize_run rendered with no --tenant"
 
-    # visualize_episode — reads only the episode dir
+    # visualize_episode — the J8 edge: no --tenant is a usage error
     ep = T.episode(tmp_path / "episodes-home")
-    assert H.mod("scripts.visualize.visualize_episode").main([str(ep)]) == 0
+    with pytest.raises(SystemExit) as no_tenant:
+        H.mod("scripts.visualize.visualize_episode").main([str(ep)])
+    assert no_tenant.value.code == 2, f"visualize_episode without --tenant: {no_tenant.value!r}"
 
     # held_out's positional runs dir — scores the fixture's run found IN that dir
     fixtures = tmp_path / "held-out"
@@ -330,16 +338,18 @@ def test_n9_directory_tools_survive(tmp_path, monkeypatch, capsys):
         status = refused.code
     assert status == 0, "held_out's positional runs dir did not score the run it was given"
 
-    # trace_lesson --runs-dir
+    # trace_lesson — the J8 edge: `--runs-dir` is gone and no --tenant is a usage error
     lessons = tmp_path / "lessons"
     _lesson(lessons, "L")
     _loaded_run(runs, "case-a", "L")
     from defender.tests._by_path import load_trace_lesson
 
     capsys.readouterr()
-    assert load_trace_lesson("trace_lesson").main(
-        ["L", "--runs-dir", str(runs), "--lessons-dir", str(lessons)]) == 0
-    assert "case-a" in capsys.readouterr().out, "trace_lesson did not read the dir it was given"
+    with pytest.raises(SystemExit) as no_tenant:
+        load_trace_lesson("trace_lesson").main(
+            ["L", "--runs-dir", str(runs), "--lessons-dir", str(lessons)])
+    assert no_tenant.value.code == 2, f"trace_lesson without --tenant: {no_tenant.value!r}"
+    assert "case-a" not in capsys.readouterr().out, "trace_lesson read a dir with no --tenant"
 
     # bin/defender-invlang, host use, with DEFENDER_RUNS_BASE set by the operator
     T.corpus_document(runs / "r-doc")

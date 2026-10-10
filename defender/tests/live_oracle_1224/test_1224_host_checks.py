@@ -110,15 +110,28 @@ class _Scene:
     est: S.Estate
     ep: Path
     ctx: Any
+    #: The source run's folder the sibling hands its registry (`None`: no source alert).
+    source_run_dir: Path | None = None
 
     def registry(self, o: S.ScriptedModel, v: S.ScriptedModel | None = None, *,
                  label: str = "b", **knobs: Any) -> Any:
         """World `label`'s registry with the oracle / verifier doubles and a sandboxed box."""
         box, _log = S.sandboxed_box()
         knobs.setdefault("retry_cap", 3)
-        return S.world_registry(self.ep, label, self.est, oracle=o,
-                                verifier=v if v is not None else S.passing_verifier(),
-                                box=box, **knobs)
+        verifier = v if v is not None else S.passing_verifier()
+        if self.source_run_dir is None:
+            return S.world_registry(self.ep, label, self.est, oracle=o, verifier=verifier,
+                                    box=box, **knobs)
+        # #1105 PR 2 (declared change 9): the registry is handed the source run's folder
+        # (`WorldRegistry(source_run_dir=)`, off the sibling's opened source `Run`); the
+        # manifest's recorded `source_run_dir` is never read. Otherwise `world_registry`'s.
+        rt = self.est.run_tenant()
+        world, ledger = S.load_world(self.ep, label), S.world_ledger(self.ep, label)
+        return S.sym(S.REGISTRY, "WorldRegistry")(
+            self.est.roster(), rt.grants.gather, world=world, ledger=ledger, as_of=S.AS_OF_DT,
+            tenant=rt, grant_home=rt.table_pointer, source_run_dir=self.source_run_dir,
+            **S.registry_seams(world, ledger, oracle=o.model, verifier=verifier.model, box=box,
+                               oracle_dir=S.oracle_dir(self.ep, label), **knobs))
 
     def call(self, reg: Any, system: str, verb: str, **params: Any) -> Any:
         """One investigator call through the registry's wrapped verb (what the query tool
@@ -133,15 +146,16 @@ class _Scene:
 
 
 def _scene(tmp_path: Path, *, live: tuple = (), recorded: tuple = (),
-           doc: dict | None = None) -> _Scene:
+           doc: dict | None = None, source_run_dir: Path | None = None) -> _Scene:
     """`live`: `(system, verb, params, payload)` the real system answers; `recorded`: the same
-    shape, captured in the family's base recording."""
+    shape, captured in the family's base recording; `source_run_dir`: the source run's folder
+    the registry is handed."""
     est = S.estate(tmp_path)
     for system, verb, params, payload in live:
         est.answer(system, verb, params, payload)
     ep = S.episode_v2(tmp_path, doc=doc,
                       base_rows=[S.captured(s, v, p, pl) for s, v, p, pl in recorded])
-    return _Scene(tmp_path, est, ep, est.ctx(tmp_path / "run"))
+    return _Scene(tmp_path, est, ep, est.ctx(tmp_path / "run"), source_run_dir)
 
 
 def _forged(**over: Any) -> dict:
@@ -693,8 +707,9 @@ def _sid_attempt(fid: str, event_id: str, *, base_rows: tuple = (SID_ROW,),
 
 
 def _plant_alert(tmp_path: Path) -> Path:
-    """The source run's alert (`alert.json`), in the source run dir the manifest names and in
-    the sibling's run dir, which resumes from it."""
+    """The source run's alert (`alert.json`), in the source run dir the registry is handed
+    (#1105 PR 2: off the opened source `Run`, never the manifest) and in the sibling's run dir,
+    which resumes from it."""
     src = tmp_path / "source-run"
     for where in (src, tmp_path / "run"):
         where.mkdir(parents=True, exist_ok=True)
@@ -716,7 +731,7 @@ def test_1224_forged_id_occurring_in_any_real_answer_fails_check_3(tmp_path):
     bob = {"user": "bob", "user_id": "S-1-5-21-2002", "event_id": "e-555", "action": "logon",
            "host": "web-2", "ts": TS_BASE}
     siem = {"entity": "alice", "risk": "low", "record_id": "r-0042"}
-    sc = _scene(tmp_path, doc=_doc(source_run_dir=str(src)),
+    sc = _scene(tmp_path, doc=_doc(), source_run_dir=src,
                 recorded=[("edr", "query", DB1, {"events": [
                     {"event_id": "x-rec-7", "host": "db-1", "process": "sshd"}]})],
                 live=[("idp", "query", ALICE, {"rows": [SID_ROW]}),
@@ -1634,9 +1649,8 @@ def _grade(ep: Path, judge: Any, where: Path) -> BaseException | None:
     A failure AFTER the judge was asked is returned (the demand reads the prompts); one before
     it is raised."""
     try:
-        S.sym(S.JUDGE, "grade_episode")(ep, judge=judge, runs_base=where / "runs-base",
-                                        git_show=J.FakeGitShow(),
-                                        state=state_over(where / "judge-state"), draws=1)
+        J.grade_at(ep, judge=judge, git_show=J.FakeGitShow(),
+                   state=state_over(where / "judge-state"), draws=1)
     except Exception as exc:  # noqa: BLE001 — re-raised unless the prompts were captured
         if not judge.prompts:
             raise
@@ -1708,7 +1722,7 @@ def test_1224_id_occurs_only_in_a_verifier_query_result_or_the_source_alert(tmp_
     """
     src = _plant_alert(tmp_path)
     siem = {"entity": "alice", "risk": "low", "record_id": "r-0042"}
-    sc = _scene(tmp_path, doc=_doc(source_run_dir=str(src)),
+    sc = _scene(tmp_path, doc=_doc(), source_run_dir=src,
                 live=[("idp", "query", ALICE, BASE), ("idp", "query", DB1, {"rows": []}),
                       ("siem-x", "lookup", SIEM_ALICE, siem)])
     o = S.oracle(*_honest(),

@@ -971,8 +971,8 @@ NB_READERS = frozenset({
     # D3' "stay path-typed": pre-door, or the episode dir itself.
     ("learning.branch.cli", "preflight_episode"),
     ("learning.branch.cli", "refuse_claimed_episode"),
-    ("learning.branch.cli", "episode_dir_for"),
-    ("learning.branch.cli", "sibling_runs_base"),
+    # (#1105 PR 2 deleted `episode_dir_for` — the owner's `episode_dir` — and
+    # `sibling_runs_base`, F-13.)
     ("learning.branch.cli", "sibling_argv"),
     ("runtime.branch._family", "resume_world_from"),
     ("run", "main"),

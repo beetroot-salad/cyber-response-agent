@@ -1,6 +1,7 @@
 """#1106 M2 — a branched sibling runs on its EPISODE's tenant, handed the data root by env.
 
-A sibling is a child PROCESS: `cli.py` starts `run.py --resume <manifest> --world X` with only
+A sibling is a child PROCESS: `cli.py` starts `run.py --resume <manifest> --world X` (#1105 PR 2:
+`--tenant T --episode <episode_id> --world X`) with only
 `DEFENDER_RUNS_BASE=<episode>/runs` in its env. The child reads its tenant from that runs base's
 `_tenant.json` (D4) — and before #1106 nothing seeded it, so every sibling minted the default
 tenant whatever the episode's own stamp said: the same bug class `cli.py` already records for
@@ -26,6 +27,7 @@ from typing import Any
 
 import pytest
 
+from defender import _episode_handle as EH
 from defender._episode_handle import Episode
 from defender.tests import _tenants1106 as T
 from defender.tests import _triplet_947 as P
@@ -50,8 +52,10 @@ class SpawnRecorder:
 
     def __call__(self, argv: list[str], *, env: dict[str, str] | None = None, **_kw: Any) -> int:
         env = dict(env or {})
-        # The child's runs base is its episode's `runs/` (#1078 D2), the manifest's sibling.
-        runs = Path(argv[argv.index("--resume") + 1]).parent / "runs"
+        # The child's runs base is its episode's `runs/` (#1078 D2); #1105 PR 2: the child
+        # names its episode by id, under the episodes base its environment carries.
+        runs = (Path(env[P.EPISODES_BASE_ENV]).resolve() / argv[argv.index("--episode") + 1]
+                / "runs")
         try:
             record = T.mod("_tenant").read_tenant(runs).tenant_id
         except Exception as e:  # noqa: BLE001 — "no readable record at spawn" is the observation
@@ -78,12 +82,19 @@ def _child_data_root(launch: dict[str, Any]) -> Path:
 # ---- start_family: the seed and the hand-off ----------------------------------------------------
 
 def test_start_family_seeds_the_episodes_tenant_before_any_child_starts(tmp_path):
+    """#1105 PR 2: the episode tenant's record is seeded through the episode's view
+    (`EpisodeRuns.create_container`) — the launcher's step just before `start_family`, which no
+    longer makes the container — and every child is started over it."""
+    from defender.tests.tenant_1105_run_repository import _spec1105 as H1105
+
     cli = T.mod("learning.branch.cli")
-    ep = tmp_path / "episode"
-    ep.mkdir()
+    ep = tmp_path / "episodes-root" / "episode"
+    ep.mkdir(parents=True)
     root = current_data_root()
     spawn = SpawnRecorder()
+    acme = H1105.tenant(root, "acme")
     with Episode.open(ep) as episode:
+        acme.runs_repository().episode(episode.dir.name, held=episode).create_container()
         exits = cli.start_family(episode, ["b", "c"], spawn=spawn, tenant_id="acme")
     assert exits == {"b": 0, "c": 0}
     assert len(spawn.launches) == 2
@@ -127,8 +138,11 @@ def _main(src: Path, *, stamp_tenant: str | None, roster: Any = None) -> tuple[A
     spawn = SpawnRecorder()
     outcome: Any
     try:
+        # #1105 PR 2 (declared change 1): the request names the tenant whose location
+        # `<root>/<T>/runs/<run id>` the source sits at, and the source by its id.
         outcome = T.mod("learning.branch.cli").main(
-            [str(src), str(P.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
+            ["--tenant", src.parent.parent.name, src.name, str(P.BRANCH_MESSAGE_ID),
+             "--continuation-prompt", "go"],
             spawn=spawn, questioner=O.questioner_for(), preflight=O.no_preflight,
             live_tree=P.source_capture(tenant_id=stamp_tenant), roster=roster,
             oracle=O.oracle(then=O.submit(_BASE, O.EMPTY_CLAIM)).model,
@@ -231,8 +245,7 @@ def test_the_launcher_judges_and_records_the_episode_tenants_own_served_systems(
     served = sorted(est.served_systems())
     assert not set(served) & {s for s, _v, _c in checkout.entries}, (
         "the fixture no longer discriminates from the checkout's copy")
-    manifest = T.mod("learning.branch.cli").episode_dir_for(
-        P.EPISODE_ID, tenant=P.current_tenant()) / "family.yaml"
+    manifest = EH.episode_dir(P.current_tenant().data_root, P.EPISODE_ID) / "family.yaml"
     doc = T.mod("_yaml").safe_load(manifest.read_text(encoding="utf-8"))
     assert doc["served_systems"] == served, doc["served_systems"]
     assert {c["system"] for c in est.calls()} == {"idp", "edr"}, est.calls()
@@ -275,7 +288,8 @@ def test_an_episode_tenant_gather_can_query_nothing_under_refuses_before_the_que
     spawn = SpawnRecorder()
     with pytest.raises((Exception, SystemExit)) as refused:  # noqa: PT011 — the launcher's refusal type is not what is pinned; its text and timing are
         T.mod("learning.branch.cli").main(
-            [str(src), str(P.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
+            ["--tenant", "acme", src.name, str(P.BRANCH_MESSAGE_ID),
+             "--continuation-prompt", "go"],
             spawn=spawn, questioner=questioner,
             preflight=O.no_preflight, live_tree=P.source_capture(tenant_id="acme"))
     text = f"{refused.value} {capsys.readouterr().err}"
@@ -314,7 +328,7 @@ _ELASTIC_FOR_GATHER = """\
 
 
 def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path):
-    """`run.py --resume` builds a `WorldRegistry` rather than the production registry, and it
+    """`run.py --episode` builds a `WorldRegistry` rather than the production registry, and it
     must be built over the RUN's `grants.gather` — the parity the ordinary arm already pins
     (`e2e/test_1106_run_start.py`). One process drives the world arm for two tenants whose
     tables differ; each registry holds exactly its own tenant's pairs, grants a pair only its
@@ -342,7 +356,7 @@ def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path)
             defender_dir=P.DEFENDER, model_name="m", model_override=None, box=None,
             tenant=record,
             world=run.resume_world(Episode.open(ep), "b", tenant=lambda r=record: r),
-            episode=Episode.open(ep), serving=O.serving(),
+            episode=Episode.open(ep), serving=O.serving(), source=P.open_source(src),
             investigate=lambda seen=seen, **kw: seen.update(kw) or {})
         registry = seen["verbs"]
         assert type(registry).__name__ == "WorldRegistry", type(registry)

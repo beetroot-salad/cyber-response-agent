@@ -1,10 +1,11 @@
 """#1224 suite fixtures: the configured roots every launcher scenario needs.
 
 The launcher reads its episodes root from configuration (`DEFENDER_EPISODES_BASE`, no default:
-`cli.episodes_root` refuses an unset one), and an accepted launch ends in the judge, which
-appends to the learning-state queues under `DEFENDER_LEARNING_STATE_DIR` — by default inside the
-checkout. Both are pointed under the test's own `tmp_path` for every test in this directory, so
-no scenario passes or fails on the ambient environment, and none writes outside its tmp dir.
+`_episode_handle.episodes_root` refuses an unset one), and an accepted launch ends in the judge,
+which appends to the learning-state queues under `DEFENDER_LEARNING_STATE_DIR` — by default
+inside the checkout. Both are pointed under the test's own `tmp_path` for every test in this
+directory, so no scenario passes or fails on the ambient environment, and none writes outside its
+tmp dir.
 """
 from __future__ import annotations
 

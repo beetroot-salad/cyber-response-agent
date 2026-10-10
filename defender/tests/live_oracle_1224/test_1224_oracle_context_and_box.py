@@ -591,10 +591,9 @@ class _Judge:
 def _grade(ep: Path, judge: _Judge, where: Path) -> BaseException | None:
     """`grade_episode` over the episode; a failure AFTER the judge was asked is returned (the
     payload demands read the prompts), one before it is raised."""
-    base, _src = J.runs_base(Path(where))
-    grade = S.sym(S.JUDGE, "grade_episode")
+    grade = J.grade_at
     try:
-        grade(ep, judge=judge, runs_base=base, git_show=J.FakeGitShow(),
+        grade(ep, judge=judge, git_show=J.FakeGitShow(),
               state=_state1135.state_over(Path(where) / "learning-state"))
     except Exception as exc:  # noqa: BLE001 — re-raised unless the prompts were captured
         if not judge.prompts:

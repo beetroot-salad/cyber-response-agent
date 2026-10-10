@@ -28,14 +28,18 @@ from defender.tests import _spec791
 from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
 from defender._episode_handle import Episode  # noqa: E402
+from defender.run_repository import RunId
 
 #: `_Investigate`'s parameters at base ed5386bc (run.py:230-233), plus the `tenant` #1106 added
 #: (the run's resolved `RunTenant` — its settings and grants, which the query tool needs) — D3:
 #: "The `materialize` seam gains `tenant_id`; `_Investigate` does not." It gains no tenant ID.
 # `episode` (#1133 rev 2): the sibling's held episode, threaded beside `world` for the world
 # ledger's writes. `oracle` / `verifier` (#1224): a fact world's oracle and verifier models.
+# `source` (#1105 PR 2, declared changes 6/9): the world's source run, opened by `main` by the
+# manifest's `source_run_id` through the tenant's repository — no recorded path is read.
 INVESTIGATE_PARAMS = ["self", "alert_path", "run_dir", "run_id", "defender_dir", "model_name",
-                      "model_override", "box", "tenant", "world", "episode", "serving"]
+                      "model_override", "box", "tenant", "world", "episode", "serving",
+                      "source"]
 
 
 # ======================================================================================
@@ -74,12 +78,13 @@ def _accepted(argv: list[str], rec: H.Recorder) -> dict[str, Any]:
     return rec.materialize_calls[0]
 
 
-def _sibling(tmp_path: Path, root: Path, tenant_id: str = H.VALID_ID, *,
+def _sibling(tmp_path: Path, root: Path, tenant_id: str = H.VALID_ID, *, monkeypatch: Any,
              record: str | None = "same", row: bool = True) -> tuple[Path, Path]:
     """A source run at T's tenant location plus an episode manifest naming it (outside the data
-    root). Returns (source run dir, manifest)."""
+    root), its container made with T's record as the launcher leaves it, and the episodes base
+    pointed at it (#1105 PR 2). Returns (source run dir, manifest)."""
     _base, src = H.tenant_source(root, tenant_id, record=record, row=row)
-    manifest = H.family_for(src, tmp_path / "episodes" / T.EPISODE_ID)
+    manifest = H.family_for(src, tmp_path / "episodes" / T.EPISODE_ID, monkeypatch=monkeypatch)
     return src, manifest
 
 
@@ -192,13 +197,13 @@ def test_o2_existing_tenant_runs(tmp_path, data_root):
     assert rec.order.index("preflight") < rec.order.index("materialize")
 
 
-def test_d3_materialize_seam_tenant(tmp_path, data_root):
+def test_d3_materialize_seam_tenant(tmp_path, data_root, monkeypatch):
     """main calls the materialize seam with T as its tenant keyword argument (#1120 D1: the
     accepted `Tenant` whose id is T, where pass A handed the bare id as `tenant_id`);
     _Investigate's parameters are unchanged by #1078.
 
-    For a fresh run AND for a `--resume` sibling (which names T too, checked against its
-    source's record): the seam is handed the tenant by keyword. `_Investigate` gains no tenant
+    For a fresh run AND for an `--episode` sibling (which names T too, checked against its
+    episode container's record, #1105 PR 2): the seam is handed the tenant by keyword. `_Investigate` gains no tenant
     id — everything it drives follows from `run_dir` (C24, C29); the resolved `RunTenant` it
     takes is #1106's, and the `oracle` / `verifier` model seams #1224's."""
     H.make_tenant(data_root, H.VALID_ID)
@@ -211,8 +216,8 @@ def test_d3_materialize_seam_tenant(tmp_path, data_root):
     base = H.runs_dir(data_root, H.VALID_ID)
     H.plant_record(base, H.VALID_ID)
     src = H.source_run(base)
-    manifest = H.family_for(src, tmp_path / "episodes" / T.EPISODE_ID)
-    sibling = _accepted(H.resume_argv(manifest, "b", "--tenant", H.VALID_ID),
+    manifest = H.family_for(src, tmp_path / "episodes" / T.EPISODE_ID, monkeypatch=monkeypatch)
+    sibling = _accepted(H.sibling_argv(manifest, "b", "--tenant", H.VALID_ID),
                         H.Recorder(tmp_path / "sib"))
     assert isinstance(sibling.get("tenant"), H.tenant().Tenant), sibling
     assert sibling["tenant"].id == H.VALID_ID, sibling
@@ -225,116 +230,123 @@ def test_d3_materialize_seam_tenant(tmp_path, data_root):
 # O5 — a fork keeps its tenant, learnt from the host-only record
 # ======================================================================================
 
-def test_o5_sibling_tenant_from_record(tmp_path, data_root):
-    """A sibling requesting T, launched from <root>/T/runs/r1, whose runs-base record and stamp
-    both carry T, runs under T: its materialize receives T as its tenant_id."""
-    src, manifest = _sibling(tmp_path, data_root, "acme")
+def test_o5_sibling_tenant_from_record(tmp_path, data_root, monkeypatch):
+    """A sibling requesting T, launched from <root>/T/runs/r1, whose runs-base record, episode
+    container record and stamp all carry T, runs under T: its materialize receives T as its
+    tenant_id."""
+    src, manifest = _sibling(tmp_path, data_root, "acme", monkeypatch=monkeypatch)
     _stamp_tenant(src, "acme")
-    got = _accepted(H.resume_argv(manifest, "b", "--tenant", "acme"),
+    got = _accepted(H.sibling_argv(manifest, "b", "--tenant", "acme"),
                     H.Recorder(tmp_path / "sib"))
     assert got["tenant"].id == "acme"
 
 
-def test_o5_forged_stamp_ignored(tmp_path, data_root):
+def test_o5_forged_stamp_ignored(tmp_path, data_root, monkeypatch):
     """With the source run's provenance.json rewritten to name tenant U, the sibling still
-    runs under T — the request names T, and the source's RECORD agrees; the stamp is not asked.
+    runs under T — the request names T, and the episode container's RECORD agrees (#1105 PR 2);
+    the stamp is not asked.
 
     U is made a REAL tenant (a hand-made second row, which N13 says nothing refuses), so a
     sibling that checked the request against the box-writable stamp would refuse T — and one
     that took the stamp's word would accept U. The positive control is
     `test_o5_sibling_tenant_from_record`: the same launch with an honest stamp."""
-    src, manifest = _sibling(tmp_path, data_root, "acme")
+    src, manifest = _sibling(tmp_path, data_root, "acme", monkeypatch=monkeypatch)
     H.plant_row(data_root, "victim")
     _stamp_tenant(src, "victim")
-    got = _accepted(H.resume_argv(manifest, "b", "--tenant", "acme"),
+    got = _accepted(H.sibling_argv(manifest, "b", "--tenant", "acme"),
                     H.Recorder(tmp_path / "sib"))
     assert got["tenant"].id == "acme", f"the sibling took its tenant from the stamp: {got}"
-    _refused(H.resume_argv(manifest, "b", "--tenant", "victim"), H.Recorder(tmp_path / "sib2"))
+    _refused(H.sibling_argv(manifest, "b", "--tenant", "victim"), H.Recorder(tmp_path / "sib2"))
 
 
-def test_o5_disagreeing_tenant_refused(tmp_path, data_root):
-    """run.py --resume <manifest> --world L --tenant U, where the source derives T != U, is
-    refused before the preflight and materialize.
+def test_o5_disagreeing_tenant_refused(tmp_path, data_root, monkeypatch):
+    """run.py --tenant U --episode <ep> --world L, where the episode container's record names
+    T != U (#1105 PR 2: the launcher made it for T), is refused before the preflight and
+    materialize.
 
     U exists (a hand-made row), so the refusal is the disagreement, not an unknown tenant; the
     refusal is a '[run.py] ...' exit naming the refused U. The control: `--tenant T` (agreeing)
     is accepted and runs under T."""
-    src, manifest = _sibling(tmp_path, data_root, "acme")
+    src, manifest = _sibling(tmp_path, data_root, "acme", monkeypatch=monkeypatch)
     H.plant_row(data_root, "victim")
-    said = _refused(H.resume_argv(manifest, "b", "--tenant", "victim"),
+    said = _refused(H.sibling_argv(manifest, "b", "--tenant", "victim"),
                     H.Recorder(tmp_path / "sib"))
     assert said.startswith("[run.py] "), f"not a '[run.py] ...' refusal: {said!r}"
     assert "victim" in said, f"the refusal does not name the disagreeing --tenant: {said!r}"
-    got = _accepted(H.resume_argv(manifest, "b", "--tenant", "acme"),
+    got = _accepted(H.sibling_argv(manifest, "b", "--tenant", "acme"),
                     H.Recorder(tmp_path / "sib2"))
     assert got["tenant"].id == "acme"
 
 
-def test_o5_resume_without_tenant_refused(tmp_path, data_root, capsys):
-    """run.py --resume with no --tenant is refused before the preflight and materialize — a
+def test_o5_resume_without_tenant_refused(tmp_path, data_root, monkeypatch, capsys):
+    """run.py --episode with no --tenant is refused before the preflight and materialize — a
     sibling names its tenant like every run (the request is where a tenant comes from, never a
-    record). Naming the T that tenant_of_run_dir(family.source_run_dir) derives is accepted and
-    runs under it (the control)."""
-    src, manifest = _sibling(tmp_path, data_root, "acme-corp")
-    derived = H.tenant_of_run_dir(src)
-    assert derived == "acme-corp"
-    said = _refused(H.resume_argv(manifest), H.Recorder(tmp_path / "sib"), capsys)
+    record). Naming the T the episode container's record names (#1105 PR 2: the launcher made
+    it for T; `tenant_of_run_dir` is gone, F-13) is accepted and runs under it (the control)."""
+    src, manifest = _sibling(tmp_path, data_root, "acme-corp", monkeypatch=monkeypatch)
+    recorded = "acme-corp"
+    said = _refused(H.sibling_argv(manifest), H.Recorder(tmp_path / "sib"), capsys)
     assert "--tenant" in said, f"the refusal does not name the missing --tenant: {said!r}"
-    got = _accepted(H.resume_argv(manifest, "b", "--tenant", derived),
+    got = _accepted(H.sibling_argv(manifest, "b", "--tenant", recorded),
                     H.Recorder(tmp_path / "sib2"))
-    assert got["tenant"].id == derived
+    assert got["tenant"].id == recorded
 
 
-def test_resume_flag_combined_with_run_id_and_tenant(tmp_path, data_root):
-    """`run.py --resume <manifest> --world a --run-id X --tenant T`: the tenant checks are D3's
-    (T derived from the source; --tenant must equal it); --run-id handling is unchanged from
-    today (the resume path takes the sibling's id from the manifest)."""
-    src, manifest = _sibling(tmp_path, data_root, "acme")
+def test_resume_flag_combined_with_run_id_and_tenant(tmp_path, data_root, monkeypatch):
+    """`run.py --episode <ep> --world a --run-id X --tenant T`: the tenant checks are the
+    sibling's (#1105 PR 2: --tenant must equal the episode container's record); --run-id
+    handling is unchanged from today (the sibling takes its id from the manifest)."""
+    src, manifest = _sibling(tmp_path, data_root, "acme", monkeypatch=monkeypatch)
     H.plant_row(data_root, "victim")
     world_run_id = H.run_py().resume_world(
         Episode.open(manifest.parent), "a",
         tenant=lambda: H.T1106.run_tenant(H.accept(data_root, "acme"))).run_id
-    got = _accepted(H.resume_argv(manifest, "a", "--run-id", "case-x", "--tenant", "acme"),
+    got = _accepted(H.sibling_argv(manifest, "a", "--run-id", "case-x", "--tenant", "acme"),
                     H.Recorder(tmp_path / "sib"))
     assert got["tenant"].id == "acme"
     assert got["run_id"] == world_run_id, (
         f"the resume path took --run-id over the manifest's sibling id: {got['run_id']!r}")
-    _refused(H.resume_argv(manifest, "a", "--run-id", "case-x", "--tenant", "victim"),
+    _refused(H.sibling_argv(manifest, "a", "--run-id", "case-x", "--tenant", "victim"),
              H.Recorder(tmp_path / "sib2"))
 
 
-def test_launch_whose_source_row_disappears_before_the_siblings_start(tmp_path, data_root):
-    """A row that becomes unreadable after the launcher's own derivation: every sibling
+def test_launch_whose_source_row_disappears_before_the_siblings_start(tmp_path, data_root,
+                                                                      monkeypatch):
+    """A row that becomes unreadable after the launcher's own acceptance: every sibling
     refuses at its own tenant check (require_tenant) and none materializes; the
     already-prepared episode dir may remain."""
-    src, manifest = _sibling(tmp_path, data_root, "acme")
-    assert H.tenant_of_run_dir(src) == "acme", "the launcher's own derivation must pass first"
+    src, manifest = _sibling(tmp_path, data_root, "acme", monkeypatch=monkeypatch)
+    # #1105 PR 2: the launcher accepts the request's tenant (`tenant_of_run_dir` is gone, F-13).
+    assert H.require_tenant(data_root, "acme").tenant_id == "acme", (
+        "the launcher's own acceptance must pass first")
     H.row_path(data_root, "acme").write_text("{torn", encoding="utf-8")
     owner = H.owner_refusal(H.require_tenant, H.resolve_data_root(), "acme")
     for world in ("a", "b", "c"):
-        said = _refused(H.resume_argv(manifest, world, "--tenant", "acme"),
+        said = _refused(H.sibling_argv(manifest, world, "--tenant", "acme"),
                         H.Recorder(tmp_path / f"sib-{world}"))
         H.assert_verbatim(said, owner, entry=f"sibling {world}")
     assert manifest.is_file(), "the prepared episode dir is not the sibling's to remove"
 
 
 def test_s7_j42_resume_manifest_resolved_at_entry(tmp_path, data_root, monkeypatch):
-    """run.py --resume given a relative or symlinked manifest path resolves it at entry,
-    before deriving episode_dir, so the sibling's runs base is the same absolute
-    EpisodePaths(ep).runs whatever the invoking cwd.
+    """run.py --episode under a relative or symlinked episodes base (#1105 PR 2: the sibling
+    takes the episode's id, and its location is the configured `DEFENDER_EPISODES_BASE`)
+    resolves it at entry, before deriving episode_dir, so the sibling's runs base is the same
+    absolute EpisodePaths(ep).runs whatever the invoking cwd.
 
     Observed on what the materialize seam is handed: the world's `episode_dir`, the root
     `materialize_run`'s sibling arm derives `EpisodePaths(world.episode_dir).runs` from."""
-    _src, manifest = _sibling(tmp_path, data_root, "acme")
+    _src, manifest = _sibling(tmp_path, data_root, "acme", monkeypatch=monkeypatch)
     episode = manifest.parent.resolve()
     expected_runs = H.S.EpisodePaths(episode).runs
     link = tmp_path / "episodes-link"
     link.symlink_to(manifest.parent.parent, target_is_directory=True)
     monkeypatch.chdir(tmp_path)
-    for spelling in (Path("episodes") / T.EPISODE_ID / "family.yaml",
-                     link / T.EPISODE_ID / "family.yaml"):
-        got = _accepted(H.resume_argv(spelling, "b", "--tenant", "acme"),
-                        H.Recorder(tmp_path / "sib" / spelling.name))
+    for n, base in enumerate((Path("episodes"), link)):
+        monkeypatch.setenv(T.EPISODES_BASE_ENV, str(base))
+        spelling = base / T.EPISODE_ID / "family.yaml"
+        got = _accepted(H.sibling_argv(spelling, "b", "--tenant", "acme"),
+                        H.Recorder(tmp_path / "sib" / str(n)))
         world = got["world"]
         assert Path(world.episode_dir).is_absolute(), f"{spelling}: {world.episode_dir}"
         assert Path(world.episode_dir) == episode, (
@@ -410,11 +422,12 @@ def test_data_root_moves_after_runs_exist(tmp_path, monkeypatch):
     """After the data root moves: `--run-id X --tenant T` under the new root is refused by O2
     until setup has run there; setup into the new, empty root creates the row (O10); a fork of
     a run under the old root — requesting that same, now-existing T — is refused by location
-    (O5); the old root's runs are neither read, moved nor cleaned (N13: a second data root is
-    unsupported)."""
+    (O5: #1105 PR 2, its source is opened by id through T's repository under the NEW root,
+    which holds no such run); the old root's runs are neither read, moved nor cleaned (N13: a
+    second data root is unsupported)."""
     old, new = tmp_path / "old-root", tmp_path / "new-root"
     H.set_data_root(monkeypatch, old)
-    src, manifest = _sibling(tmp_path, old, "acme")
+    src, manifest = _sibling(tmp_path, old, "acme", monkeypatch=monkeypatch)
     (H.runs_dir(old, "acme") / "case-x").mkdir()
     old_census = H.census(old)
     H.set_data_root(monkeypatch, new)
@@ -429,10 +442,11 @@ def test_data_root_moves_after_runs_exist(tmp_path, monkeypatch):
     assert proc.returncode == 0, H.setup_output(proc)
     assert H.row_path(new, "acme").is_file()
 
-    location = H.owner_refusal(H.tenant_of_run_dir, src)
-    said = _refused(H.resume_argv(manifest, "b", "--tenant", "acme"),
+    location = H.owner_refusal(
+        lambda: H.accept(new, "acme").runs_repository().open(RunId.parse(src.name)))
+    said = _refused(H.sibling_argv(manifest, "b", "--tenant", "acme"),
                     H.Recorder(tmp_path / "sib"))
-    H.assert_verbatim(said, location, entry="run.py --resume (old root)")
+    H.assert_verbatim(said, location, entry="run.py --episode (old root)")
 
     got = _accepted(argv, H.Recorder(tmp_path / "run2"))
     assert got["tenant"].id == "acme"
@@ -558,7 +572,10 @@ def test_o3_grammar_refusal_parity(tmp_path, data_root, bad):
     H.plant_record(base, bad)
     (base / "r1").mkdir()
     reads = H.census(tmp_path)
-    H.owner_refusal(H.tenant_of_run_dir, base / "r1")
+    # #1105 PR 2: the runs-base record is read through the tenant's repository
+    # (`tenant_of_run_dir` is gone, F-13).
+    H.owner_refusal(lambda: H.accept(data_root, H.VALID_ID).runs_repository().open(
+        RunId.parse("r1")))
     H.owner_refusal(H.ensure_runs_base_record, base, H.VALID_ID)
     assert H.census(tmp_path) == reads, "a refused record read wrote something"
 

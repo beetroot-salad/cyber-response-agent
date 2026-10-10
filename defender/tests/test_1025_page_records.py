@@ -711,8 +711,8 @@ def test_1025_grade_episode_reads_world_archive_through_the_same_screen_as_the_p
     with pytest.raises(_refused()):
         family.read_world_facts(bound, "c", episode_token=T.EPISODE_TOKEN)
 
-    grade = E.mod("learning.judge").grade_episode(
-        ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), runs_base=tmp_path / "defender-runs", state=env_state())
+    grade = J.grade_at(
+        ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), state=env_state())
     rows = J.rows(grade)
     assert rows["b"].get("ungradable"), rows["b"]
     assert "report.md" in rows["b"]["ungradable_reason"], rows["b"]
@@ -736,14 +736,14 @@ def test_1025_judge_render_reads_world_archive_through_the_same_screen_as_the_pa
     fifo = E.plant_fifo(ep / "worlds" / "b" / "investigation.md")
     started = time.monotonic()
     with E.Rescue(fifo, after=2.0) as rescue, pytest.raises(_refused()):
-        render_mod.render(ep, "b", tmp_path / "defender-runs")
+        render_mod.render(ep, "b")
     assert time.monotonic() - started < 2.0, "the input builder blocked on the FIFO"
     assert not rescue.fed, "the input builder blocked on the FIFO"
 
     outside = tmp_path / "outside-report.md"
     outside.write_text(T.report_text("benign", body="OUTSIDE-REPORT-BODY"), encoding="utf-8")
     E.plant_link(ep / "worlds" / "c" / "report.md", outside)
-    rendered = render_mod.render(ep, "c", tmp_path / "defender-runs")
+    rendered = render_mod.render(ep, "c")
     assert "OUTSIDE-REPORT-BODY" not in repr(rendered.__dict__)
 
 
@@ -759,21 +759,20 @@ def test_1025_grade_episode_still_grades_an_episode_whose_samples_yaml_is_malfor
     strictness lives in the reader the page passes through the `reader=` seam, not in the
     default.
     """
-    judge_mod = E.mod("learning.judge")
     render_mod = E.mod("learning.judge.render")
     ep = E.sample_episode(tmp_path, judge=False)
     E.plant_raw(ep.dir / "samples.yaml", "logs-*: [\n  {")
-    grade = judge_mod.grade_episode(
+    grade = J.grade_at(
         ep.dir, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc(
             bucket="none", systems=[E.SYSTEM]))),
-        runs_base=tmp_path / "defender-runs", state=env_state())
+        state=env_state())
     assert (ep.dir / "judge.yaml").is_file(), "the torn samples record took the grading pass down"
     rows = J.rows(grade)
     graded = [label for label, row in rows.items() if not row.get("ungradable")]
     assert sorted(graded) == sorted([E.PASSTHROUGH_WORLD, E.GRADED_WORLD]), rows
     for label in graded:
         assert rows[label]["completed_draws"] == 1, (label, rows[label])
-    assert render_mod.render(ep.dir, graded[0], tmp_path / "defender-runs") is not None
+    assert render_mod.render(ep.dir, graded[0]) is not None
 
     page = render(ep)
     records = _records(page)
