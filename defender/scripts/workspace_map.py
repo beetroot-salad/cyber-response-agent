@@ -125,19 +125,37 @@ def _template_counts(queries_dir: Path) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        sys.stderr.write("usage: workspace_map.py <run_dir>\n")
-        return 2
+    """`workspace_map.py --tenant T <run_id>` (#1105 declared change 10, J8): the map of T's
+    run, opened by id through T's repository (a path where the id belongs is refused). The
+    library call (`workspace_map(run_dir, ...)`, the running investigation's) is unchanged."""
+    import argparse
+
+    p = argparse.ArgumentParser(prog="workspace_map.py")
+    p.add_argument("--tenant", required=True,
+                   help="the tenant whose run is mapped; required, with no default")
+    p.add_argument("run_id", help="the run, by its id")
+    ns = p.parse_args(argv[1:])
     # The CLI reads the checkout's roster itself; an unreadable adapters tree is a one-line
     # refusal and exit 2, not a traceback.
+    from defender import _tenant
+    from defender._paths import process_defender_dir
+    from defender.run_repository import RunId, RunRefused
     from defender.runtime.verbs import RegistryError, read_roster
 
+    try:
+        tenant = _tenant.accept_tenant(
+            _tenant.resolve_data_root(), _tenant.requested_tenant_id(ns.tenant),
+            defender_dir=process_defender_dir())
+        run = tenant.runs_repository().open(RunId.parse(ns.run_id))
+    except (_tenant.TenantRefused, RunRefused) as refused:
+        sys.stderr.write(f"workspace_map: {refused}\n")
+        return 2
     try:
         roster = read_roster(adapters_under(DEFENDER_DIR))
     except RegistryError as e:
         sys.stderr.write(f"workspace_map: {e}\n")
         return 2
-    print(workspace_map(Path(argv[1]), systems=tuple(roster.accepted)), end="")
+    print(workspace_map(Path(run.run_dir), systems=tuple(roster.accepted)), end="")
     return 0
 
 
