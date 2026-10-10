@@ -36,10 +36,13 @@ census) and the page's former per-kind reader/writer tables retired with it.
   (`ResumeWorld.world_id`, `:886-897`, keys `served/<token>.jsonl`). An unforked run stamps the
   tenant's `base_world_id`.
 - **Episode** — a family of runs forked from one source run at one message. It is a grouping,
-  not an ownership level: the fork point is declared once in `family.yaml` (`source_run_dir`,
-  `source_run_id`, `branch_message_id`, `fences_at`; `_family.py:85, 411-415`), and a sibling
+  not an ownership level: the fork point is declared once in `family.yaml` (`source_run_id`,
+  `branch_message_id`, `fences_at`; #1105 PR 2 stopped writing `source_run_dir` and never reads
+  an old manifest's; `_family.py:85, 411-415`), and a sibling
   links to its world only through its run id, `<episode_id>-<label>` (`:920-922`).
-- **Run** — the unit of record, addressed by `(tenant_id, run_id)` through `Run.for_tenant`.
+- **Run** — the unit of record, addressed by `(tenant_id, run_id)` (`RunAddress`) through the
+  tenant's run repository (`Tenant.runs_repository()`; an episode's arms through
+  `runs.episode(episode_id)`).
   Every forked sibling is a run with its own run dir under the episode
   (`<episode>/runs/<run_id>`, `learning/branch/archive.py:74`). The archive's `worlds/<label>/`
   is a screened *projection* of that run dir (`ArchivedWorld`), not a `Run` itself (section 5).
@@ -49,7 +52,7 @@ Locations are relative to one of four roots: `<run>` (the run dir), `<runs_base>
 parent — `<data root>/<T>/runs` for a tenant's own runs, `<episode>/runs` for a family's
 siblings — also where the runs-base record lives), `<sessions>` (`<runs_base>/../sessions`,
 `runtime/session_store.py`), and `<episode>` = `$DEFENDER_EPISODES_BASE/<episode_id>`
-(`learning/branch/cli.py`). The episodes base is a *configured* location with no default: it
+(`_episode_handle.episode_dir`). The episodes base is a *configured* location with no default: it
 must sit outside the runs base, so no runs-base walker counts a sibling as an ordinary run, and
 outside the checkout.
 
@@ -113,7 +116,7 @@ unreachable by root containment rather than by a named deny.
 | archive_proj | 4 | `worlds/<label>` | — | — | episode.archive_proj | the archive copy itself (section 5) |
 | tool_seam |  | `(the role's declared read/write targets)` | — | — | — | the model's generic read/write/edit file tools; the kind is decided by the gate at the call |
 | tenant | 2 | `_tenant.json` | — | — | tenant | D2: created once when absent |
-| episode_runs_record | 2 | `_episodes/<episode_id>.json` | — | — | — | #1105 D3: the episode -> runs record, host-only beside _tenant.json; written once by run_repository.record_episode_runs (no production writer in PR 1), read by the repository's listings and run setup's claimed-id check |
+| episode_runs_record | 2 | `_episodes/<episode_id>.json` | — | — | — | #1105 D3: the episode -> runs record, host-only beside _tenant.json; written once by run_repository.record_episode_runs (no production writer; its deletion is deferred to #1187), read by the repository's listings and RunsRepository.create's claimed-id check |
 | tenant_row | 5 | `<tenant>/tenant.json` | — | — | tenant.row | #1078 D1: the tenant's own row, created once per data root by the tenant setup command |
 
 <!-- end generated -->
