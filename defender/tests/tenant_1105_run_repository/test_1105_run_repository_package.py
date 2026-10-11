@@ -65,7 +65,7 @@ LAYOUT_IMPORTED = ("ALIAS_READ_REFUSAL", "Path", "PurePosixPath", "annotations",
 #: The private layout helpers `_episode_paths.py` imports from the submodule (R4-27).
 PRIVATE_HELPERS = ("_check_component", "_check_index", "_confine")
 HANDLE_NAMES = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref"})
-#: The door's 18 non-layout public names (D1.3; #1105 PR 2's declared change 0 swaps PR 1's four
+#: The door's 20 non-layout public names (D1.3; #1105 PR 2's declared change 0 swaps PR 1's four
 #: Tenant-taking lookups for the tenant-scoped repository's five names).
 NON_LAYOUT_PUBLIC = HANDLE_NAMES | {
     "RunId", "RunsRepository", "EpisodeRuns", "Listed", "RunAddress", "RunAbsent",
@@ -73,7 +73,10 @@ NON_LAYOUT_PUBLIC = HANDLE_NAMES | {
     # Owner rulings (the high and xhigh reviews): the repository answers "may this text name a
     # run?" and holds a runs folder for its outside callers (run setup, the family gate), so
     # neither re-derives the sidecar clause or the hold's refusals.
-    "run_name_fault", "hold_runs_folder"}
+    "run_name_fault", "hold_runs_folder",
+    # #1105 PR 2 review (PR #1236): an open's one refusal family, and the one opener of a
+    # command line's `--tenant T <run_id>`.
+    "RunUnreachable", "open_requested_run"}
 #: Every public name today's code from-imports from the two moved modules (R4-26), but
 #: `resolve_run_bundle` (deleted by #1105 PR 2, F-13).
 TODAYS_IMPORTED = frozenset({
@@ -372,7 +375,7 @@ def test_1105_the_package_holds_exactly_its_seven_pinned_submodules():  # name k
         f"{sorted(LAYOUT_NAMES - layout_public)}, extra {sorted(layout_public - LAYOUT_NAMES)}")
 
 
-def test_1105_the_door_serves_exactly_its_68_public_names():  # 70 since the owner rulings, 71 with #1224's ORACLE_HELD_SUFFIX, 72 with #1105 PR 2's declared change 0, 71 once F-13 deleted resolve_run_bundle; the spec graph cites this name
+def test_1105_the_door_serves_exactly_its_68_public_names():  # 70 since the owner rulings, 71 with #1224's ORACLE_HELD_SUFFIX, 72 with #1105 PR 2's declared change 0, 71 once F-13 deleted resolve_run_bundle, 73 with PR 2's review (RunUnreachable, open_requested_run); the spec graph cites this name
     """defender.run_repository.__all__ is exactly the 71 public names: the layout's 53 (the
     door's layout surface equals _layout's public names, NM-06), Run, RunRecord, ArchivedWorld,
     RecordHandle, case_ref, RunId, RunsRepository, EpisodeRuns, Listed, RunAddress, RunAbsent
@@ -391,7 +394,7 @@ def test_1105_the_door_serves_exactly_its_68_public_names():  # 70 since the own
         f"__all__ differs from D1.3's 68 plus the two ruled names: missing "
         f"{sorted((LAYOUT_NAMES | NON_LAYOUT_PUBLIC) - served)}, extra "
         f"{sorted(served - LAYOUT_NAMES - NON_LAYOUT_PUBLIC)}")
-    assert len(served) == 71, f"{len(served)} public names, not 71"
+    assert len(served) == 73, f"{len(served)} public names, not 73"
     layout_public = {n for n in _module_defs(ast.parse(Path(_layout.__file__).read_text(
         "utf-8"))) if not n.startswith("_")}
     assert served - NON_LAYOUT_PUBLIC == layout_public, (
@@ -473,7 +476,7 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
                   "missing = [n for n in rr.__all__ if getattr(rr, n, None) is None]\n"
                   "print(len(rr.__all__), missing)\n")
     assert proc.returncode == 0, f"not every public name imports in a fresh interpreter: {_out(proc)}"
-    assert _out(proc).split()[0] == "71", f"not every public name imports in a fresh interpreter: {_out(proc)}"
+    assert _out(proc).split()[0] == "73", f"not every public name imports in a fresh interpreter: {_out(proc)}"
     assert "[]" in _out(proc), f"not every public name imports in a fresh interpreter: {_out(proc)}"
 
 

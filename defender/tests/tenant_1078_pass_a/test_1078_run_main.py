@@ -28,7 +28,7 @@ from defender.tests import _spec791
 from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
 from defender._episode_handle import Episode  # noqa: E402
-from defender.run_repository import RunId
+from defender.run_repository import RunId, RunRefused
 
 #: `_Investigate`'s parameters at base ed5386bc (run.py:230-233), plus the `tenant` #1106 added
 #: (the run's resolved `RunTenant` — its settings and grants, which the query tool needs) — D3:
@@ -442,8 +442,10 @@ def test_data_root_moves_after_runs_exist(tmp_path, monkeypatch):
     assert proc.returncode == 0, H.setup_output(proc)
     assert H.row_path(new, "acme").is_file()
 
-    location = H.owner_refusal(
-        lambda: H.accept(new, "acme").runs_repository().open(RunId.parse(src.name)))
+    # The open's refusal (`RunAbsent`: no runs folder under the new root, #1105 PR 2 review).
+    with pytest.raises(RunRefused) as opened:
+        H.accept(new, "acme").runs_repository().open(RunId.parse(src.name))
+    location = opened.value
     said = _refused(H.sibling_argv(manifest, "b", "--tenant", "acme"),
                     H.Recorder(tmp_path / "sib"))
     H.assert_verbatim(said, location, entry="run.py --episode (old root)")
@@ -573,9 +575,9 @@ def test_o3_grammar_refusal_parity(tmp_path, data_root, bad):
     (base / "r1").mkdir()
     reads = H.census(tmp_path)
     # #1105 PR 2: the runs-base record is read through the tenant's repository
-    # (`tenant_of_run_dir` is gone, F-13).
-    H.owner_refusal(lambda: H.accept(data_root, H.VALID_ID).runs_repository().open(
-        RunId.parse("r1")))
+    # (`tenant_of_run_dir` is gone, F-13) — its listing, which refuses the record as
+    # `TenantRefused` (an open answers `RunUnreachable` from it, #1105 PR 2 review).
+    H.owner_refusal(lambda: H.accept(data_root, H.VALID_ID).runs_repository().list())
     H.owner_refusal(H.ensure_runs_base_record, base, H.VALID_ID)
     assert H.census(tmp_path) == reads, "a refused record read wrote something"
 

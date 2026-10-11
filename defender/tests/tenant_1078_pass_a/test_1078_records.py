@@ -213,9 +213,10 @@ def test_o3_record_read_grammar(tmp_path, monkeypatch):
 
     Read through the owner's own reader (`read_tenant`, which `Run.for_tenant` uses), through
     `ensure_runs_base_record` and through the tenant's runs repository opening a run there
-    (#1105 PR 2: the replacement for `tenant_of_run_dir`, F-13); the control is the same record
-    naming a grammar id, which reads back."""
-    from defender.run_repository import RunId
+    (#1105 PR 2: the replacement for `tenant_of_run_dir`, F-13; an open answers the record's
+    refusal as `RunUnreachable` raised from it, #1105 PR 2 review); the control is the same
+    record naming a grammar id, which reads back."""
+    from defender.run_repository import RunId, RunUnreachable
 
     H.make_tenant(tmp_path / "data", T_ID)
     base = tmp_path / "data" / T_ID / "runs"
@@ -227,7 +228,9 @@ def test_o3_record_read_grammar(tmp_path, monkeypatch):
     H.owner_refusal(H.ensure_runs_base_record, base, T_ID)
     H.set_data_root(monkeypatch, tmp_path / "data")
     runs = H.accept(tmp_path / "data", T_ID).runs_repository()
-    H.owner_refusal(runs.open, RunId.parse("r1"))
+    with pytest.raises(RunUnreachable) as opened:
+        runs.open(RunId.parse("r1"))
+    assert isinstance(opened.value.__cause__, H.tenant().TenantRefused), repr(opened.value)
     good = tmp_path / "good"
     H.plant_record(good, T_ID)
     assert tenant.read_tenant(good).tenant_id == T_ID
@@ -424,7 +427,10 @@ def test_runs_base_record_torn_read(tmp_path, monkeypatch):
     run_dir.mkdir()
     runs = H.accept(root, T_ID).runs_repository()
     run_id = RunId.parse(run_dir.name)
-    absent = str(H.owner_refusal(runs.open, run_id))
+    # An open answers the record's refusal as `RunUnreachable` (#1105 PR 2 review).
+    with pytest.raises(RunRefused) as first:
+        runs.open(run_id)
+    absent = str(first.value)
     for trial in range(40):
         (base / H.RECORD_NAME).unlink(missing_ok=True)
         seen: list[str] = []

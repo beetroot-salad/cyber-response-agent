@@ -44,13 +44,10 @@ def _good(tmp_path: Path, *run_ids: str, tenant_id: str = H.T_ID):
 
 
 def _listings(t, run_id: str = "r1"):
-    """The repository methods that judge the whole runs folder's listing (PR 1's `list_run_ids`
-    and `run_exists`; `bound_runs` is gone, #1105 PR 2)."""
-    from defender.run_repository import RunId
-
+    """The repository methods that judge the whole runs folder's listing (PR 1's `list_run_ids`;
+    `bound_runs` is gone, #1105 PR 2; `run_exists` is gone, #1105 PR 2 review)."""
     return [
         ("runs.list", lambda: t.runs_repository().list()),
-        ("runs.exists", lambda: t.runs_repository().exists(RunId.parse(run_id))),
     ]
 
 
@@ -143,8 +140,11 @@ def test_1105_every_reader_refuses_a_linked_or_file_episodes(tmp_path, data_root
 @pytest.mark.parametrize("kind", ["file", "fifo"])
 def test_1105_every_function_refuses_a_non_directory_runs_folder(tmp_path, kind):
     """A regular file and a FIFO at tenant.runs are not "absent": every lookup and record
-    function raises TenantRefused (H2: every refusal of the hold other than absent), never an
-    empty answer."""
+    function raises TenantRefused (H2: every refusal of the hold other than absent) — an open,
+    `RunUnreachable` raised from it (#1105 PR 2 review: one refusal family) — never an empty
+    answer."""
+    from defender.run_repository import RunUnreachable
+
     root = tmp_path / "data"
     root.mkdir()
     t = H.tenant(root)
@@ -155,6 +155,8 @@ def test_1105_every_function_refuses_a_non_directory_runs_folder(tmp_path, kind)
         H.make_fifo(runs)
     for name, call in _every_function(t):
         err = H.raised(call)
+        if name == "runs.open":
+            err = err.__cause__ if H.is_a(err, RunUnreachable) else None
         assert H.is_a(err, _tenant.TenantRefused), (
             f"a {kind} at tenant.runs: {name} answered or raised {err!r}")
 
@@ -190,7 +192,7 @@ def test_1105_open_run_refuses_a_non_directory_at_the_runs_name(tmp_path, kind):
 ])
 def test_1105_a_sidecar_file_whose_owner_is_not_a_run_id_refuses_the_listings(tmp_path, name):
     """A regular file with a known sidecar suffix whose `<id>` RunId.parse refuses, beside a
-    good run: runs.list and runs.exists raise RunRefused naming it (rev 4.1: known sidecar
+    good run: runs.list raises RunRefused naming it (rev 4.1: known sidecar
     files are named `<id><suffix>` with `<id>` a run id; H4: any other entry refuses)."""
     from defender.run_repository import RunRefused
 
@@ -204,8 +206,8 @@ def test_1105_a_sidecar_file_whose_owner_is_not_a_run_id_refuses_the_listings(tm
 
 @pytest.mark.parametrize("kind", ["link", "fifo"])
 def test_1105_a_link_or_fifo_wearing_a_sidecar_name_refuses_the_listings(tmp_path, kind):
-    """A link and a FIFO named `r1.run-end.json` beside run r1: runs.list and runs.exists
-    raise RunRefused naming it. A known sidecar is a REGULAR file (rev 4.1)."""
+    """A link and a FIFO named `r1.run-end.json` beside run r1: runs.list raises RunRefused
+    naming it. A known sidecar is a REGULAR file (rev 4.1)."""
     from defender.run_repository import RunRefused
 
     t = _good(tmp_path, "r1")

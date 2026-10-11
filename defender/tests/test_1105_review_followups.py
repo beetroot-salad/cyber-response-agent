@@ -142,28 +142,36 @@ def test_a_record_over_the_cap_cut_mid_character_is_refused_as_over(tmp_path):
 
 def test_another_tenants_record_is_a_record_mismatch_everywhere(tmp_path):
     """`_tenant.json` naming another tenant is `TenantRecordMismatch` — what `Run.for_tenant`
-    raises — from the lookups and the listings alike, not a bare `TenantRefused`."""
+    raises — from the lookups and the listings alike, not a bare `TenantRefused`. An open
+    answers it as `RunUnreachable` raised from that `TenantRecordMismatch` (#1105 PR 2 review:
+    an open answers one refusal family)."""
     from defender._tenant import TenantRecordMismatch
     t = H.tenant(tmp_path / "data")
     runs = H.runs_folder(t)
     H.make_run(runs, "r0")
     H.plant_tenant_record(runs, H.U_ID)
-    for call in (lambda: t.runs_repository().open(R.RunId.parse("r0")),
-                 lambda: t.runs_repository().list(),
-                 lambda: t.runs_repository().exists(R.RunId.parse("r0")),
+    for call in (lambda: t.runs_repository().list(),
                  lambda: R.sibling_run_ids(t)):
         with pytest.raises(TenantRecordMismatch):
             call()
+    with pytest.raises(R.RunUnreachable) as opened:
+        t.runs_repository().open(R.RunId.parse("r0"))
+    assert isinstance(opened.value.__cause__, TenantRecordMismatch), repr(opened.value.__cause__)
 
 
 def test_an_absent_runs_folder_refusal_carries_no_stale_error(tmp_path):
-    """The absent folder's refusal is raised outside the open's `except`, so it carries no
-    `FileNotFoundError` as its context (a traceback that blamed the wrong error)."""
+    """The absent folder's refusal is raised outside the hold's `except`, so it carries no
+    `FileNotFoundError` as its context (a traceback that blamed the wrong error) — the
+    container's `TenantRefused` (here from `base_world_id`), and an open's `RunAbsent` (#1105
+    PR 2 review: an open answers an absent container as the run gone) alike."""
     from defender._tenant import TenantRefused
     t = H.tenant(tmp_path / "data")
     with pytest.raises(TenantRefused) as refused:
-        t.runs_repository().open(R.RunId.parse("r0"))
+        t.runs_repository().base_world_id()
     assert refused.value.__context__ is None, repr(refused.value.__context__)
+    with pytest.raises(R.RunAbsent) as absent:
+        t.runs_repository().open(R.RunId.parse("r0"))
+    assert absent.value.__context__ is None, repr(absent.value.__context__)
 
 
 @pytest.mark.parametrize(("label", "reason"), [
@@ -309,14 +317,14 @@ def test_a_sidecar_shaped_label_is_refused_at_the_family_gate():
             _family_doc("ep", "x.accounting_failures.json")))
 
 
-def test_run_exists_and_the_writer_agree_on_a_taken_id(tmp_path):
-    """An id that owns sidecar files but has no run folder is taken for both: `runs.exists`
-    (PR 1's `run_exists`) answers True and the writer refuses it as an arm."""
+def test_the_writer_refuses_an_arm_id_its_sidecar_files_hold(tmp_path):
+    """An id that owns sidecar files but has no run folder is taken: the writer refuses it as
+    an arm. (`runs.exists`, PR 1's `run_exists`, which agreed, is deleted — no production
+    caller, #1105 PR 2 review.)"""
     t = H.tenant(tmp_path / "data")
     runs = H.runs_folder(t)
     H.make_run(runs, "r0")
     (runs / "ep-a.run-end.json").write_text("{}", encoding="utf-8")
-    assert t.runs_repository().exists(R.RunId.parse("ep-a")) is True
     with pytest.raises(R.RunRefused, match="taken"):
         R.record_episode_runs(t, "ep", R.RunId.parse("r0"), {"a": R.RunId.parse("ep-a")})
 

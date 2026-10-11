@@ -393,14 +393,6 @@ ALLOW: tuple[Allowed, ...] = (
     Allowed(LEAD_AUTHOR, "_write_state", "attr", "path.write_text(content, encoding='utf-8')", N_E,
             "the run dir's lead_author/ state"),
     Allowed(LEAD_AUTHOR, "run", "construct", "open_drain_trees(paths, label)", D3, _OPENER),
-    # #1105 PR 2 (decision C, J8): the CLI's `--tenant T <run_id>` opens its run by id through
-    # the tenant's repository — the run's existence is the open's answer (`RunAbsent`), so
-    # `run` / `run_under_held_queue_lock` no longer probe `run_dir.is_dir()` themselves.
-    Allowed(LEAD_AUTHOR, "_open_requested_run", "call", "process_defender_dir()", N_E,
-            "the CLI's tenant acceptance: the checkout's defender dir, host state"),
-    Allowed(LEAD_AUTHOR, "_open_requested_run", "attr",
-            "tenant.runs_repository().open(RunId.parse(raw_run_id))", N_E,
-            "the run dir, opened by id through the request's tenant's repository"),
     Allowed(LEAD_AUTHOR, "_run_locked", "attr", "_done_sentinel(run_dir).is_file()", N_E,
             "the run dir's done sentinel"),
     Allowed(LEAD_AUTHOR, "_run_locked", "attr", "collected_marker.is_file()", N_E,
@@ -522,7 +514,7 @@ KNOWN_GAPS: tuple[Gap, ...] = ()
 
 #: The allow-list's size by reason at this base — a guard against an entry slipping in
 #: unannounced (update it with the table, and say why in the commit).
-ALLOW_COUNT_BY_REASON = {N_E: 9, D3: 23, N_D: 15, N_H: 9, B2: 17, N_A: 4}
+ALLOW_COUNT_BY_REASON = {N_E: 7, D3: 23, N_D: 15, N_H: 9, B2: 17, N_A: 4}
 
 
 def judge(

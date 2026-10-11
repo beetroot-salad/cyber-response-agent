@@ -105,7 +105,10 @@ NON_LAYOUT = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "ca
                         "episode_sibling_ids", "RunRefused",
                         # Owner rulings (the high and xhigh reviews): the two decisions the
                         # repository answers for its outside callers.
-                        "run_name_fault", "hold_runs_folder"})
+                        "run_name_fault", "hold_runs_folder",
+                        # #1105 PR 2 review (PR #1236): an open's one refusal family, and the
+                        # one opener of a command line's `--tenant T <run_id>`.
+                        "RunUnreachable", "open_requested_run"})
 
 _VE = "scripts/visualize/visualize_episode.py"
 _CLI = "learning/branch/cli.py"

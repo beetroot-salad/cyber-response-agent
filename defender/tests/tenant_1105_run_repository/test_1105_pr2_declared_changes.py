@@ -805,31 +805,37 @@ def test_dc8_the_claim_admits_only_the_new_row_shape(tmp_path):
 
 
 def test_dc8_a_row_that_cannot_be_reached_is_artifact_missing(tmp_path):
-    """Declared changes 8 and 11 / G21 (S9): a well-formed row whose tenant is refused (no such
-    tenant), whose run is absent in its tenant, whose run exists only in ANOTHER tenant, or
-    whose run folder is a link (never followed now) is quarantined at once as
-    "artifact-missing" — today's name for a run that cannot be reached — and never served. The
-    positive control in the same tick: U's own row is served with U's folder. RED at base: such
-    rows have no `run_dir` and take "unreadable" instead."""
+    """Declared changes 8 and 11 / G21 (S9, as the owner amended it on PR #1236): a well-formed
+    row whose run is GONE — absent in its tenant, or present only in ANOTHER tenant — is
+    quarantined at once as "artifact-missing" and never served. A row that cannot be reached
+    right now — its tenant refused (no such tenant), its run folder a link (never followed) —
+    is not: it is a counted transient attempt, re-queued (`test_1105_pr2_review_fixes.py` pins
+    the retry ceiling). The positive control in the same tick: U's own row is served with U's
+    folder. RED at base: such rows have no `run_dir` and take "unreadable" instead."""
     t, u, paths = _drain_scene(tmp_path)
     H.make_run(u.runs, "only-in-u")
     os.symlink(Path(t.runs) / "r1", Path(t.runs) / "linked")
-    unreachable = {
-        "ghost": {"case_id": "ghost", "tenant_id": "ghost", "run_id": "r1"},
+    gone = {
         "absent": {"case_id": "absent", "tenant_id": H.T_ID, "run_id": "nope"},
         "crossed": {"case_id": "crossed", "tenant_id": H.T_ID, "run_id": "only-in-u"},
+    }
+    not_now = {
+        "ghost": {"case_id": "ghost", "tenant_id": "ghost", "run_id": "r1"},
         "linked": {"case_id": "linked", "tenant_id": H.T_ID, "run_id": "linked"},
     }
-    for case_id, body in unreachable.items():
+    for case_id, body in {**gone, **not_now}.items():
         P.queue_row(paths, case_id, body)
     P.queue_row(paths, "own", {"case_id": "own", "tenant_id": H.U_ID, "run_id": "only-in-u"})
     lane = P.Lane()
     P.drain(paths, lane)
     assert lane.run_dirs == [Path(u.runs) / "only-in-u"], f"served {lane.run_dirs}"
-    for case_id in unreachable:
+    for case_id in gone:
         letter = P.dead_letter(paths, case_id)
         assert letter is not None, f"{case_id}: {letter!r}"
         assert letter.get("failed") == "artifact-missing", f"{case_id}: {letter!r}"
+    for case_id in not_now:
+        assert P.dead_letter(paths, case_id) is None, f"{case_id} was dead-lettered at once"
+        assert P.still_queued(paths, case_id), f"{case_id} was not re-queued"
 
 
 def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypatch):

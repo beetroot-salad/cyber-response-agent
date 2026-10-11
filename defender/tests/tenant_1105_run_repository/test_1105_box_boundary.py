@@ -22,7 +22,7 @@ is named `defender-run-<206-byte id>` (219 characters): CI starts that box under
 that refused the name fails the session's `start_box` here.
 The host tree is observed twice after the box stops: entry for entry and byte for byte
 (`H.tree_state`, the run's own folder excluded — the box writes there by design), and through
-the repository's own readers (`runs.list()`, `sibling_run_ids`, `runs.exists`), which must
+the repository's own readers (`runs.list()`, `sibling_run_ids`, `runs.open`), which must
 answer exactly what the planted tree says: the box neither hid a run nor forged a claim.
 
 WHERE IT RUNS, AND WHY IT CANNOT SKIP IN CI. The file carries the `box` marker, so CI's main
@@ -311,7 +311,7 @@ def test_1105_a_sandboxed_box_sees_only_its_own_run_folder_not_the_tenant_record
     assert s["control_on_host"] == CONTROL, "positive control: the control write lands on the host"
     t = s["tenant"]
     for name in (SIBLING_ID, RUN_ID):
-        assert t.runs_repository().exists(RunId.parse(name)) is True, (
+        assert t.runs_repository().open(RunId.parse(name)).run_dir.name == name, (
             f"the host's runs folder holds {name!r}, which the box must not list")
     for name in ("_tenant.json", "_episodes", f"{RUN_ID}{H.SIDECAR_SUFFIXES[0]}"):
         assert (s["runs"] / name).exists(), f"the host's runs folder holds {name}"

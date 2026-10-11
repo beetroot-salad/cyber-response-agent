@@ -3,13 +3,21 @@
 #1105 PR 2 (declared change 0): PR 1's Tenant-taking lookups are methods of the tenant's runs
 repository, their rules unchanged — `open_run(tenant, id)` is `tenant.runs_repository().open(id)`
 (an absent entry is `RunAbsent`, a `RunRefused`), `list_run_ids(tenant)` is `.list()` (a `Listed`:
-the same ids in the same order), `run_exists(tenant, id)` is `.exists(id)`, and the injected seam
-is the repository's (`RunsRepository(tenant, io=rec)`), whose constructor is where a non-Tenant
-is a `TypeError`. `bound_runs` is deleted (no production caller, F-13), and with it the tests that
-existed only for it. The prose below keeps PR 1's names for the rules they pin.
+the same ids in the same order), and the injected seam is the repository's
+(`RunsRepository(tenant, io=rec)`), whose constructor is where a non-Tenant is a `TypeError`.
+`bound_runs` is deleted (no production caller, F-13), and with it the tests that existed only for
+it. The prose below keeps PR 1's names for the rules they pin.
 
-`open_run(tenant, run_id)`, `list_run_ids(tenant)` and
-`run_exists(tenant, run_id)` take an accepted `Tenant` and a `RunId`; the runs folder is always
+#1105 PR 2 review (PR #1236): `run_exists` (`.exists`) is deleted — no production caller — and
+with it the tests and table rows that existed only for it (the occupancy rule it answered is the
+record writer's, `Listing.holds`, still pinned through the writer). And `open_run` answers ONE
+refusal family: a container fault (a link or a non-directory at `tenant.runs`, a `_tenant.json`
+missing, corrupt or naming another tenant) is `RunUnreachable`, a `RunRefused` raised from the
+container's `TenantRefused` (whose text it carries), and an absent runs folder is `RunAbsent`.
+Every other function keeps `TenantRefused` for the container (`_container_refusal` below).
+
+`open_run(tenant, run_id)` and `list_run_ids(tenant)` take an accepted `Tenant` (and a
+`RunId`); the runs folder is always
 `tenant.runs`. Each call opens it ONCE with `_io.hold(tenant.runs, follow=False)` (amendment A,
 DV-1) and works only relative to that handle: the tenant record is judged by `read_tenant`
 served through the held view plus an exact compare (DV-3), the folder's entries are listed once
@@ -83,7 +91,6 @@ def _every_function(t, *, run_id: str = "r1", episode_id: str = "ep9"):
     return [
         ("runs.open", lambda: t.runs_repository().open(RunId.parse(run_id))),
         ("runs.list", lambda: t.runs_repository().list()),
-        ("runs.exists", lambda: t.runs_repository().exists(RunId.parse(run_id))),
         ("record_episode_runs", lambda: record_episode_runs(
             t, episode_id, RunId.parse(run_id), {"a": RunId.parse(f"{episode_id}-a")})),
         ("episode_runs", lambda: episode_runs(t, "ep")),
@@ -101,7 +108,6 @@ def _reader_answers(t, **kw) -> dict:
     return {
         "runs.open": (str(run.run_dir), str(getattr(run, "tenant_id", None))),
         "runs.list": _ids(runs.list()),
-        "runs.exists": runs.exists(r1) is True,
         "episode_runs": {k: str(v) for k, v in dict(episode_runs(t, "ep", **kw)).items()},
         "sibling_run_ids": sorted(str(i) for i in sibling_run_ids(t, **kw)),
     }
@@ -109,6 +115,18 @@ def _reader_answers(t, **kw) -> dict:
 
 def _hold_calls(rec: H.RecordingIO):
     return rec.named("hold")
+
+
+def _container_refusal(name: str, err: object) -> bool:
+    """Whether `err` is how the function `name` refuses a container fault: `TenantRefused`, but
+    for an open, `RunUnreachable` raised from that `TenantRefused` (#1105 PR 2 review: opening
+    a run answers one refusal family)."""
+    from defender.run_repository import RunUnreachable
+
+    if name.startswith("runs.open"):
+        return H.is_a(err, RunUnreachable) and H.is_a(getattr(err, "__cause__", None),
+                                                      TenantRefused)
+    return H.is_a(err, TenantRefused)
 
 
 def _is_one_nofollow_hold_of(rec: H.RecordingIO, runs: Path) -> bool:
@@ -180,8 +198,8 @@ def test_1105_every_tenant_keyed_function_raises_type_error_before_any_read(tmp_
     """The runs repository's constructor (PR 2: the lookups are its methods, so the tenant is
     checked where the repository is built) and each tenant-keyed record function raise TypeError,
     before reading anything, when the tenant handed to it is not an accepted Tenant (a tenant id
-    str, a TenantId, a runs-folder Path, a RunTenant), and runs.open, runs.exists and the writer
-    raise it when a run id they take (open's and exists' run_id, the writer's source and arm ids)
+    str, a TenantId, a runs-folder Path, a RunTenant), and runs.open and the writer
+    raise it when a run id they take (open's run_id, the writer's source and arm ids)
     is not a RunId, a str included; the proof that nothing was
     read is a runs folder planted as a link, which would otherwise refuse with TenantRefused,
     and a recording io= seam passed to each refused call records no call at all. Positive
@@ -218,7 +236,6 @@ def test_1105_every_tenant_keyed_function_raises_type_error_before_any_read(tmp_
                 f"{name}({type(bad).__name__}) touched the seam before its TypeError: {rec.calls}")
     for name, call in (
         ("runs.open", lambda io: RunsRepository(t, io=io).open("r1")),
-        ("runs.exists", lambda io: RunsRepository(t, io=io).exists("r1")),
         ("record_episode_runs/source",
          lambda io: record_episode_runs(t, "ep", "r1", {"a": arm}, io=io)),
         ("record_episode_runs/arm",
@@ -238,7 +255,6 @@ def test_1105_every_tenant_keyed_function_raises_type_error_before_any_read(tmp_
     runs = t.runs_repository()
     assert runs.open(rid).run_dir == t.runs / "r1", "runs.open over a good folder"
     assert _ids(runs.list()) == ["r1"], "runs.list over a good folder"
-    assert runs.exists(rid) is True, "runs.exists over a good folder"
     assert record_episode_runs(t, "ep", src, {"a": arm}) is None, "the writer answers"
     assert {k: str(v) for k, v in episode_runs(t, "ep").items()} == {"a": "ep-a"}
     assert _ids(sibling_run_ids(t)) == ["ep-a"], "sibling_run_ids reads the written record"
@@ -257,7 +273,7 @@ def test_1105_the_repository_answers_from_the_tenant_it_is_handed_and_reads_no_e
     H.make_run(t.runs, "ep-a")
     expected = {
         "runs.open": (str(t.runs / "r1"), t.id), "runs.list": ["r1", "r2"],
-        "runs.exists": True, "episode_runs": {"a": "ep-a"},
+        "episode_runs": {"a": "ep-a"},
         "sibling_run_ids": ["ep-a"],
     }
     assert _reader_answers(t) == expected, f"baseline answers: {_reader_answers(t)}"
@@ -323,7 +339,6 @@ def test_1105_every_repository_function_takes_an_injected_io_like_the_handle(tmp
     cases = (
         ("runs.open", lambda io: RunsRepository(t, io=io).open(rid)),
         ("runs.list", lambda io: RunsRepository(t, io=io).list()),
-        ("runs.exists", lambda io: RunsRepository(t, io=io).exists(rid)),
         ("record_episode_runs", lambda io: record_episode_runs(
             t, "ep", rid, {"a": RunId.parse("ep-a")}, io=io)),
         ("episode_runs", lambda io: episode_runs(t, "ep", io=io)),
@@ -349,7 +364,7 @@ def test_1105_every_repository_function_takes_an_injected_io_like_the_handle(tmp
 
 
 # ==========================================================================================
-# The name rule, the entry rule and run_exists.
+# The name rule and the entry rule.
 # ==========================================================================================
 
 def test_1105_open_run_refuses_each_sidecar_suffixed_id_as_run_refused(tmp_path):
@@ -391,18 +406,17 @@ def test_1105_open_run_refuses_each_sidecar_suffixed_id_as_run_refused(tmp_path)
 def test_1105_a_directory_named_like_a_sidecar_or_staged_sidecar_makes_the_listings_refuse(
         tmp_path):
     """A real directory named 'r1.run-end.json', or 'r1.run-end.json.staged-0123456789abcdef', in
-    tenant.runs makes list_run_ids and run_exists raise RunRefused naming it (a
+    tenant.runs makes list_run_ids raise RunRefused naming it (a
     directory is not a known sidecar file, and the sidecar clause refuses it as a run). Positive
     control: the same folder with a regular file of each name beside the run r1 lists r1, and a
     real directory named 'r1.run-end.json-2', 'run-end.json' or 'r1.run-end.json.staged-g' is
     a run the listing lists."""
-    from defender.run_repository import RunId, RunRefused
+    from defender.run_repository import RunRefused
 
     _root, t = _good(tmp_path, "r1")
     for name in ("r1.run-end.json", f"r1.run-end.json{H.STAGED_TAIL}"):
         os.mkdir(t.runs / name)
-        for fn, call in (("runs.list", lambda: t.runs_repository().list()),
-                         ("runs.exists", lambda: t.runs_repository().exists(RunId.parse("r1")))):
+        for fn, call in (("runs.list", lambda: t.runs_repository().list()),):
             err = H.raised(call)
             assert H.is_a(err, RunRefused), f"{fn} over a directory named {name!r} gave {err!r}"
             assert name in H.message(err), f"{fn}'s refusal does not name {name!r}"
@@ -414,24 +428,6 @@ def test_1105_a_directory_named_like_a_sidecar_or_staged_sidecar_makes_the_listi
     runs_now = sorted(["r1", *_OUTSIDE_THE_SIDECAR_CLAUSE])
     assert _ids(t.runs_repository().list()) == runs_now, (
         f"names just outside the sidecar clause are runs (MF-21 B): {_ids(t.runs_repository().list())}")
-
-
-def test_1105_run_exists_is_true_for_a_run_or_a_sidecar_file_and_false_for_nothing(tmp_path):
-    """run_exists(tenant, id) reads the held listing: it answers True when a run or a known
-    sidecar file (a staged one included) is at the name, and False when nothing is; it does not
-    apply the sidecar clause to its argument. An unexpected entry, at the name or elsewhere in
-    the folder, refuses (p2_run_entry_link_refuses)."""
-    from defender.run_repository import RunId
-
-    _root, t = _good(tmp_path, "r1")
-    H.plant_sidecars(t.runs, "r1")
-    assert t.runs_repository().exists(RunId.parse("r1")) is True, "a run at the name"
-    for suffix in H.SIDECAR_SUFFIXES:
-        assert t.runs_repository().exists(RunId.parse(f"r1{suffix}")) is True, f"a sidecar r1{suffix}"
-    assert t.runs_repository().exists(RunId.parse(f"r1.run-end.json{H.STAGED_TAIL}")) is True, "staged"
-    assert t.runs_repository().exists(RunId.parse("r9")) is False, "nothing at r9"
-    assert t.runs_repository().exists(RunId.parse("r9.run-end.json")) is False, (
-        "a sidecar-suffixed id with nothing at it is False, not refused: no sidecar clause here")
 
 
 def test_1105_a_refused_name_is_never_probed_on_disk(tmp_path):
@@ -487,8 +483,7 @@ def test_1105_the_lookups_refuse_a_tenant_record_exactly_when_read_tenant_does(t
 
     def lookups():
         return (("runs.open", lambda: t.runs_repository().open(RunId.parse("r1"))),
-                ("runs.list", lambda: t.runs_repository().list()),
-                ("runs.exists", lambda: t.runs_repository().exists(RunId.parse("r1"))))
+                ("runs.list", lambda: t.runs_repository().list()))
 
     record.write_text(json.dumps({**good, "extra": 1}), encoding="utf-8")
     assert read_tenant(t.runs).tenant_id == t.id, "read_tenant admits an extra key"
@@ -498,17 +493,17 @@ def test_1105_the_lookups_refuse_a_tenant_record_exactly_when_read_tenant_does(t
     assert H.is_a(H.raised(read_tenant, t.runs), TenantRefused), "read_tenant refuses a BOM"
     for name, call in lookups():
         err = H.raised(call)
-        assert H.is_a(err, TenantRefused), f"{name} over a BOM record gave {err!r}"
+        assert _container_refusal(name, err), f"{name} over a BOM record gave {err!r}"
     record.write_text(H.deep_json(), encoding="utf-8")
     assert H.raised(read_tenant, t.runs) is not None, "read_tenant does not admit it"
     for name, call in lookups():
         err = H.raised(call)
-        assert H.is_a(err, TenantRefused), f"{name} over a 200,000-deep record gave {err!r}"
+        assert _container_refusal(name, err), f"{name} over a 200,000-deep record gave {err!r}"
         assert not isinstance(err, RecursionError), f"{name} let the raw error out"
     record.write_text(json.dumps({**good, "tenant_id": f"{t.id}-2"}), encoding="utf-8")
     for name, call in lookups():
         err = H.raised(call)
-        assert H.is_a(err, TenantRefused), f"{name} over a record naming {t.id}-2 gave {err!r}"
+        assert _container_refusal(name, err), f"{name} over a record naming {t.id}-2 gave {err!r}"
 
 
 def test_1105_an_other_tenant_refusal_names_the_file_and_the_id_and_no_run_of_that_tenant(
@@ -525,20 +520,18 @@ def test_1105_an_other_tenant_refusal_names_the_file_and_the_id_and_no_run_of_th
     _swap_record(t.runs, H.U_ID)
     record = str(t.runs / "_tenant.json")
     for name, call in (("runs.open", lambda: t.runs_repository().open(RunId.parse("asked-1"))),
-                       ("runs.list", lambda: t.runs_repository().list()),
-                       ("runs.exists", lambda: t.runs_repository().exists(RunId.parse("asked-1")))):
+                       ("runs.list", lambda: t.runs_repository().list())):
         err = H.raised(call)
-        assert H.is_a(err, TenantRefused), f"{name} gave {err!r}"
+        assert _container_refusal(name, err), f"{name} gave {err!r}"
         text = H.message(err)
         assert record in text, f"{name}'s refusal does not name {record}: {text}"
         assert H.U_ID in text, f"{name}'s refusal does not name the found id: {text}"
         assert "zq-run" not in text, f"{name}'s refusal leaks a run id: {text}"
     _swap_record(t.runs, "beta\n\x1b[31m forged")
     for name, call in (("runs.open", lambda: t.runs_repository().open(RunId.parse("asked-1"))),
-                       ("runs.list", lambda: t.runs_repository().list()),
-                       ("runs.exists", lambda: t.runs_repository().exists(RunId.parse("asked-1")))):
+                       ("runs.list", lambda: t.runs_repository().list())):
         err = H.raised(call)
-        assert H.is_a(err, TenantRefused), f"{name} over a control-character id gave {err!r}"
+        assert _container_refusal(name, err), f"{name} over a control-character id gave {err!r}"
         text = H.message(err)
         assert record in text, f"{name}'s refusal does not name {record}: {text!r}"
         assert not H.has_raw_control(text), (
@@ -635,9 +628,10 @@ def test_1105_run_for_tenant_refuses_a_runs_folder_with_no_tenant_record(tmp_pat
 def test_1105_open_run_checks_types_then_name_then_folder_then_record_then_entry(tmp_path):
     """open_run checks in order: a str id over a linked runs folder raises TypeError; a
     sidecar-suffixed RunId over a linked runs folder raises RunRefused; a linked runs folder
-    whose target holds a record naming this tenant raises TenantRefused (the hold refuses it); a
-    real folder whose record names another tenant, with a link at the entry, raises
-    TenantRefused; a good record with an absent entry raises RunRefused."""
+    whose target holds a record naming this tenant raises RunUnreachable from TenantRefused (the
+    hold refuses it); a real folder whose record names another tenant, with a link at the entry,
+    raises RunUnreachable from TenantRefused (the record is judged before the entry); a good
+    record with an absent entry raises RunRefused."""
     from defender.run_repository import RunId, RunRefused
 
     root = tmp_path / "data"
@@ -652,12 +646,13 @@ def test_1105_open_run_checks_types_then_name_then_folder_then_record_then_entry
     err = H.raised(t.runs_repository().open, RunId.parse("r1.run-end.json"))
     assert H.is_a(err, RunRefused), f"2. a sidecar id over the link gave {err!r}"
     err = H.raised(t.runs_repository().open, RunId.parse("r1"))
-    assert H.is_a(err, TenantRefused), f"3. the linked folder gave {err!r}"
+    assert _container_refusal("runs.open", err), f"3. the linked folder gave {err!r}"
     os.unlink(t.runs)
     H.plant_tenant_record(t.runs, H.U_ID)
     os.symlink(target / "r1", t.runs / "r1")
     err = H.raised(t.runs_repository().open, RunId.parse("r1"))
-    assert H.is_a(err, TenantRefused), f"4. another tenant's record (entry a link) gave {err!r}"
+    assert _container_refusal("runs.open", err), (
+        f"4. another tenant's record (entry a link) gave {err!r}")
     os.unlink(t.runs / "r1")
     _swap_record(t.runs, t.id)
     err = H.raised(t.runs_repository().open, RunId.parse("r1"))
@@ -688,7 +683,7 @@ def test_1105_open_run_serves_a_real_directory_entry_and_refuses_an_absent_one_n
 def test_1105_a_held_run_is_not_rechecked_and_a_fresh_open_run_is(tmp_path):
     """After open_run hands out a Run, replacing _tenant.json with one naming another tenant
     leaves the held Run's run_dir and tenant_id as they were (it is not re-checked), while a
-    fresh open_run for the same id raises TenantRefused."""
+    fresh open_run for the same id raises RunUnreachable from TenantRefused."""
     from defender.run_repository import RunId
 
     _root, t = _good(tmp_path, "r1")
@@ -697,15 +692,15 @@ def test_1105_a_held_run_is_not_rechecked_and_a_fresh_open_run_is(tmp_path):
     _swap_record(t.runs, H.U_ID)
     assert (run.run_dir, run.tenant_id) == (t.runs / "r1", t.id), "the held Run moved"
     err = H.raised(t.runs_repository().open, RunId.parse("r1"))
-    assert H.is_a(err, TenantRefused), f"a fresh runs.open was not refused: {err!r}"
+    assert _container_refusal("runs.open", err), f"a fresh runs.open was not refused: {err!r}"
 
 
 def test_1105_no_lookup_or_record_reader_writes_anything(tmp_path):
     """Driving every lookup and record reader over an absent, an empty and a populated runs
     folder leaves the data root's tree byte-for-byte and entry-for-entry unchanged: no folder,
     record or file is created. Over the empty folder, whose _tenant.json is absent, open_run,
-    list_run_ids, run_exists, episode_runs and sibling_run_ids each raise
-    TenantRefused (O3: a runs folder with no _tenant.json refuses). Positive control: run setup
+    list_run_ids, episode_runs and sibling_run_ids each refuse the container (O3: a runs folder
+    with no _tenant.json refuses; `_container_refusal`). Positive control: run setup
     does create the runs folder and _tenant.json, and record_episode_runs does create
     _episodes/."""
     from defender.run_repository import (
@@ -721,7 +716,6 @@ def test_1105_no_lookup_or_record_reader_writes_anything(tmp_path):
         out = {}
         for name, call in (("runs.open", lambda: t.runs_repository().open(rid)),
                            ("runs.list", lambda: _ids(t.runs_repository().list())),
-                           ("runs.exists", lambda: t.runs_repository().exists(rid)),
                            ("episode_runs", lambda: dict(episode_runs(t, "ep"))),
                            ("sibling_run_ids", lambda: _ids(sibling_run_ids(t)))):
             box: dict = {}
@@ -742,11 +736,10 @@ def test_1105_no_lookup_or_record_reader_writes_anything(tmp_path):
         before = H.tree_state(root)
         answers = drive_readers()
         if state == "empty":
-            for name in ("runs.open", "runs.list", "runs.exists", "episode_runs",
-                         "sibling_run_ids"):
-                assert H.is_a(answers[name], TenantRefused), (
+            for name in ("runs.open", "runs.list", "episode_runs", "sibling_run_ids"):
+                assert _container_refusal(name, answers[name]), (
                     f"{name} over a runs folder with no _tenant.json gave {answers[name]!r}, "
-                    "not TenantRefused")
+                    "not the container's refusal")
         if state == "populated":
             assert answers["runs.list"] == ["r1"], f"populated folder answers: {answers}"
         assert H.tree_state(root) == before, f"a reader wrote over the {state} folder"
@@ -788,10 +781,11 @@ def test_1105_list_run_ids_returns_sorted_run_ids_minus_record_claimed_ids(tmp_p
 
 def test_1105_a_run_setup_made_for_t_opens_for_t_and_no_other_tenant_reaches_it(tmp_path):
     """A run materialize_run created for tenant T opens with open_run(T, id); for a second tenant
-    U accepted under the same data root (hand-planted row), open_run(U, id) raises TenantRefused
-    while U has no runs folder, and RunRefused once U has its own folder and record but no run of
-    that id; it never hands out a Run whose run_dir is under T.runs."""
-    from defender.run_repository import RunId, RunRefused
+    U accepted under the same data root (hand-planted row), open_run(U, id) raises RunAbsent
+    while U has no runs folder (the run is gone with it), and RunRefused once U has its own
+    folder and record but no run of that id; it never hands out a Run whose run_dir is under
+    T.runs."""
+    from defender.run_repository import RunAbsent, RunId, RunRefused
 
     root = tmp_path / "data"
     root.mkdir()
@@ -800,7 +794,8 @@ def test_1105_a_run_setup_made_for_t_opens_for_t_and_no_other_tenant_reaches_it(
     assert t.runs_repository().open(RunId.parse("r1")).run_dir == t.runs / "r1", "T's run opens for T"
     u = H.tenant(root, H.U_ID)
     err = H.raised(u.runs_repository().open, RunId.parse("r1"))
-    assert H.is_a(err, TenantRefused), f"U with no runs folder gave {err!r}"
+    assert H.is_a(err, RunAbsent), f"U with no runs folder gave {err!r}"
+    assert str(t.runs) not in H.message(err), "U's refusal names T's runs folder"
     H.runs_folder(u)
     err = H.raised(u.runs_repository().open, RunId.parse("r1"))
     assert H.is_a(err, RunRefused), f"U with its own folder and no r1 gave {err!r}"
@@ -810,7 +805,8 @@ def test_1105_a_run_setup_made_for_t_opens_for_t_and_no_other_tenant_reaches_it(
 def test_1105_open_run_never_hands_out_a_handle_into_another_tenants_folder(tmp_path):
     """With tenant A's run r1 on disk, open_run(B, r1) never returns a Run whose run_dir resolves
     under A.runs: B.runs as a link to A.runs, B's _tenant.json naming A, and B.runs/r1 as a link
-    to A.runs/r1 each raise (TenantRefused, TenantRefused, RunRefused). Positive control:
+    to A.runs/r1 each raise (RunUnreachable, RunUnreachable — each from TenantRefused — and
+    RunRefused). Positive control:
     open_run(A, r1) reaches A's run."""
     from defender.run_repository import RunId, RunRefused
 
@@ -819,12 +815,12 @@ def test_1105_open_run_never_hands_out_a_handle_into_another_tenants_folder(tmp_
     r1 = RunId.parse("r1")
     os.symlink(a.runs, b.runs)
     err = H.raised(b.runs_repository().open, r1)
-    assert H.is_a(err, TenantRefused), f"B.runs a link to A.runs gave {err!r}"
+    assert _container_refusal("runs.open", err), f"B.runs a link to A.runs gave {err!r}"
     os.unlink(b.runs)
     H.plant_tenant_record(b.runs, a.id)
     H.make_run(b.runs, "r1")
     err = H.raised(b.runs_repository().open, r1)
-    assert H.is_a(err, TenantRefused), f"B's record naming A gave {err!r}"
+    assert _container_refusal("runs.open", err), f"B's record naming A gave {err!r}"
     shutil.rmtree(b.runs)
     H.runs_folder(b)
     os.symlink(a.runs / "r1", b.runs / "r1")
@@ -834,37 +830,20 @@ def test_1105_open_run_never_hands_out_a_handle_into_another_tenants_folder(tmp_
     assert run.run_dir.resolve() == (a.runs / "r1").resolve(), "A reaches its own run"
 
 
-def test_1105_run_exists_answers_only_for_this_tenants_folder(tmp_path):
-    """run_exists(A, x) is False when x exists only in tenant B's runs folder under the same data
-    root, and a RunId cannot be built for '../x' or 'a/b', so run_exists has no way to name a
-    path outside A.runs. Positive control: run_exists(B, x) is True."""
-    from defender.run_repository import RunId, RunRefused
-
-    root, a = _good(tmp_path, "r1")
-    b = H.tenant(root, H.U_ID)
-    H.runs_folder(b)
-    H.make_run(b.runs, "x")
-    assert a.runs_repository().exists(RunId.parse("x")) is False, "A sees B's x"
-    assert b.runs_repository().exists(RunId.parse("x")) is True, "B's own x"
-    for text in ("../x", "a/b", f"../{H.U_ID}/runs/x"):
-        err = H.raised(RunId.parse, text)
-        assert H.is_a(err, RunRefused), f"RunId.parse({text!r}) gave {err!r}"
-
-
 def test_1105_a_box_writable_tenant_claim_neither_grants_nor_refuses_a_lookup(tmp_path):
     """A run's provenance stamp, an episode manifest and an episode folder that name another
-    tenant change no answer of open_run, list_run_ids or run_exists for the request's tenant.
+    tenant change no answer of open_run or list_run_ids for the request's tenant.
     Positive control: a _tenant.json naming another tenant does refuse."""
     from defender.run_repository import RunId
 
     _root, t = _good(tmp_path, "r1", "r2")
 
     def answers():
-        return (str(t.runs_repository().open(RunId.parse("r1")).run_dir), _ids(t.runs_repository().list()),
-                t.runs_repository().exists(RunId.parse("r2")))
+        return (str(t.runs_repository().open(RunId.parse("r1")).run_dir),
+                _ids(t.runs_repository().list()))
 
     before = answers()
-    assert before == (str(t.runs / "r1"), ["r1", "r2"], True), f"baseline: {before}"
+    assert before == (str(t.runs / "r1"), ["r1", "r2"]), f"baseline: {before}"
     (t.runs / "r1" / "provenance.json").write_text(
         json.dumps({"tenant_id": H.U_ID, "world_id": "w"}) + "\n", encoding="utf-8")
     episode = t.episodes / "ep1"
@@ -881,12 +860,12 @@ def test_1105_a_box_writable_tenant_claim_neither_grants_nor_refuses_a_lookup(tm
 def test_1105_a_legacy_run_folder_named_off_the_rules_makes_the_listings_refuse_naming_it(
         tmp_path):
     """A real directory in tenant.runs whose name today's id rules refuse, one off the grammar
-    ('Bad Name', 'Run1') and one of 207 bytes, makes list_run_ids and run_exists raise
+    ('Bad Name', 'Run1') and one of 207 bytes, makes list_run_ids raise
     RunRefused naming that folder; renaming or moving it lets the listing answer. Positive
     control: a 206-byte directory beside the runs is listed. "Naming" is checked as the name's
     first 40 characters appearing in the message (design NF-8 may truncate a long name past
     them)."""
-    from defender.run_repository import RunId, RunRefused
+    from defender.run_repository import RunRefused
 
     ok_long = "r" + "1" * 205
     _root, t = _good(tmp_path, "r1", ok_long)
@@ -894,8 +873,7 @@ def test_1105_a_legacy_run_folder_named_off_the_rules_makes_the_listings_refuse_
     assert _ids(t.runs_repository().list()) == expected, f"the 206-byte folder lists: {_ids(t.runs_repository().list())}"
     for legacy in ("Bad Name", "Run1", "r" + "2" * 206):
         os.mkdir(t.runs / legacy)
-        for fn, call in (("runs.list", lambda: t.runs_repository().list()),
-                         ("runs.exists", lambda: t.runs_repository().exists(RunId.parse("r1")))):
+        for fn, call in (("runs.list", lambda: t.runs_repository().list()),):
             err = H.raised(call)
             assert H.is_a(err, RunRefused), f"{fn} beside {legacy[:12]!r} gave {err!r}"
             assert legacy[:40] in H.message(err), f"{fn}'s refusal does not name the folder"
@@ -910,7 +888,8 @@ def test_1105_a_legacy_run_folder_named_off_the_rules_makes_the_listings_refuse_
 
 def test_1105_a_link_at_tenant_runs_refuses_every_function_naming_it(tmp_path):
     """With tenant.runs a link to another tenant's runs folder, each lookup and tenant-keyed
-    record function raises TenantRefused naming tenant.runs and the link fault, never a raw
+    record function refuses the container (`_container_refusal`) naming tenant.runs and the
+    link fault, never a raw
     OSError, and the other tenant's folder is byte-unchanged; a link to a folder whose own record
     names this tenant refuses the same way, so it is the no-follow hold that refuses, not the
     record compare. Positive control: the same calls answer over a real tenant.runs, and over a
@@ -934,7 +913,7 @@ def test_1105_a_link_at_tenant_runs_refuses_every_function_naming_it(tmp_path):
         target_before = H.tree_state(target)
         for name, call in _every_function(t):
             err = H.raised(call)
-            assert H.is_a(err, TenantRefused), f"{name} over a link to {target.name} gave {err!r}"
+            assert _container_refusal(name, err), f"{name} over a link to {target.name} gave {err!r}"
             text = H.message(err)
             assert str(t.runs) in text, f"{name}: {text}"
             assert "link" in text.lower(), f"{name}: {text}"
@@ -961,7 +940,8 @@ def test_1105_a_link_at_tenant_runs_refuses_every_function_naming_it(tmp_path):
 
 def test_1105_a_tenant_record_naming_another_tenant_refuses_every_function(tmp_path):
     """With tenant.runs/_tenant.json naming another tenant, each lookup and tenant-keyed record
-    function raises TenantRefused naming the record, writes nothing and returns no run of that
+    function refuses the container (`_container_refusal`) naming the record, writes nothing and
+    returns no run of that
     folder (O3's 'refused for any other tenant'); two accepted tenants with their records swapped
     are each refused. Positive control: the record naming this tenant answers."""
     root = tmp_path / "data"
@@ -977,7 +957,8 @@ def test_1105_a_tenant_record_naming_another_tenant_refuses_every_function(tmp_p
         record = str(me.runs / "_tenant.json")
         for name, call in _every_function(me):
             err = H.raised(call)
-            assert H.is_a(err, TenantRefused), f"{name}({me.id}) with a swapped record gave {err!r}"
+            assert _container_refusal(name, err), (
+                f"{name}({me.id}) with a swapped record gave {err!r}")
             assert record in H.message(err), f"{name}'s refusal does not name {record}"
     assert H.tree_state(root) == before, "a refused call wrote something"
     for me in (t, u):
@@ -989,7 +970,7 @@ def test_1105_a_tenant_record_naming_another_tenant_refuses_every_function(tmp_p
 
 def test_1105_a_link_at_a_runs_name_refuses_naming_it_and_is_never_followed(tmp_path):
     """With tenant.runs/r2 a link to a run folder (inside the same runs folder, or another
-    tenant's), list_run_ids and run_exists raise RunRefused naming r2, open_run(tenant,
+    tenant's), list_run_ids raises RunRefused naming r2, open_run(tenant,
     r2) raises RunRefused naming the path, and record_episode_runs refuses an arm whose name is
     such a link (planted at ep-b: an arm is shaped f'{episode_id}-{label}', so no arm is named
     r2); nothing reads through the link. Positive control: the same folder without the link
@@ -1003,8 +984,7 @@ def test_1105_a_link_at_a_runs_name_refuses_naming_it_and_is_never_followed(tmp_
     for target in (t.runs / "r1", u.runs / "r1"):
         os.symlink(target, t.runs / "r2")
         target_before = H.tree_state(target)
-        for name, call in (("runs.list", lambda: t.runs_repository().list()),
-                           ("runs.exists", lambda: t.runs_repository().exists(RunId.parse("r1")))):
+        for name, call in (("runs.list", lambda: t.runs_repository().list()),):
             err = H.raised(call)
             assert H.is_a(err, RunRefused), f"{name} beside a link at r2 gave {err!r}"
             assert "r2" in H.message(err), H.message(err)
@@ -1021,18 +1001,16 @@ def test_1105_a_link_at_a_runs_name_refuses_naming_it_and_is_never_followed(tmp_
     assert not (t.runs / "_episodes" / "ep.json").exists(), "the refused record was written"
     os.unlink(t.runs / "ep-b")
     assert _ids(t.runs_repository().list()) == ["r1"], "without the link"
-    assert t.runs_repository().exists(RunId.parse("r1")) is True, "runs.exists without the link"
     assert record_episode_runs(t, "ep", RunId.parse("r1"), {"b": RunId.parse("ep-b")}) is None
 
 
-def test_1105_open_run_and_run_exists_answer_beside_a_torn_record_and_a_stray_name_in_episodes(
+def test_1105_open_run_and_run_exists_answer_beside_a_torn_record_and_a_stray_name_in_episodes(  # name kept: the spec graph cites it; run_exists is gone (#1105 PR 2 review)
         tmp_path):
-    """P2's Reach: each function judges what it reads, and only that (design D2: open_run and
-    run_exists do not read _episodes, episode_runs(ep) reads only ep's record, and open_run
-    judges only its own entry). With tenant.runs/_episodes holding a torn record (a good record
-    claiming ep-a, cut short) and a stray file README, open_run(tenant, id) still hands out the
-    run for r1 and for ep-a, the id the torn record would claim, and run_exists answers True for
-    r1 and ep-a and False for the absent r9, as it would with no _episodes: neither reads
+    """P2's Reach: each function judges what it reads, and only that (design D2: open_run does
+    not read _episodes, episode_runs(ep) reads only ep's record, and open_run judges only its own
+    entry). With tenant.runs/_episodes holding a torn record (a good record claiming ep-a, cut
+    short) and a stray file README, open_run(tenant, id) still hands out the run for r1 and for
+    ep-a, the id the torn record would claim, as it would with no _episodes: it does not read
     _episodes. Beside the same torn record and README, episode_runs(tenant, 'nope') answers {}
     and a good record ep2 is answered by episode_runs(tenant, 'ep2'). With a directory
     'Bad Name' planted beside r1 (and _episodes removed), open_run(tenant, r1) still serves.
@@ -1052,10 +1030,6 @@ def test_1105_open_run_and_run_exists_answer_beside_a_torn_record_and_a_stray_na
         err = H.raised(t.runs_repository().open, RunId.parse(rid))
         assert err is None, f"runs.open({rid}) read _episodes and refused a healthy run: {err!r}"
         assert t.runs_repository().open(RunId.parse(rid)).run_dir == t.runs / rid, f"runs.open({rid}) serves"
-    for rid, answer in (("r1", True), ("ep-a", True), ("r9", False)):
-        err = H.raised(t.runs_repository().exists, RunId.parse(rid))
-        assert err is None, f"runs.exists({rid}) read _episodes and refused: {err!r}"
-        assert t.runs_repository().exists(RunId.parse(rid)) is answer, f"runs.exists({rid}) is not {answer}"
     assert H.tree_state(root) == before, "a lookup wrote something"
     err = H.raised(episode_runs, t, "nope")
     assert err is None, f"episode_runs('nope') read beyond its own record and refused: {err!r}"
@@ -1085,13 +1059,15 @@ def test_1105_open_run_and_run_exists_answer_beside_a_torn_record_and_a_stray_na
 
 def test_1105_an_absent_runs_folder_answers_empty_and_creates_nothing(tmp_path):
     """For an accepted tenant with no runs folder, list_run_ids (PR 2: runs.list, a Listed)
-    lists [] with absent=True, run_exists returns False, episode_runs returns {} and sibling_run_ids
-    the empty set, episode_sibling_ids over a Bound of the absent folder returns the empty set,
-    and open_run and record_episode_runs raise TenantRefused; none of them creates anything.
+    lists [] with absent=True, episode_runs returns {} and sibling_run_ids the empty set,
+    episode_sibling_ids over a Bound of the absent folder returns the empty set, open_run raises
+    RunAbsent (the run is gone with its folder) and record_episode_runs TenantRefused; none of
+    them creates anything.
     Afterwards run setup creates the folder, its record and a run, and the same Tenant gets that
     run from open_run and list_run_ids."""
     from defender.run_repository import (
-        Listed, RunId, episode_runs, episode_sibling_ids, record_episode_runs, sibling_run_ids,
+        Listed, RunAbsent, RunId, episode_runs, episode_sibling_ids, record_episode_runs,
+        sibling_run_ids,
     )
 
     root = tmp_path / "data"
@@ -1102,16 +1078,14 @@ def test_1105_an_absent_runs_folder_answers_empty_and_creates_nothing(tmp_path):
     assert isinstance(listed, Listed), f"runs.list gave {listed!r}"
     assert list(listed) == [], f"runs.list gave {listed!r}"
     assert listed.absent is True, f"runs.list's absent is {listed.absent!r}"
-    assert t.runs_repository().exists(RunId.parse("r1")) is False, "runs.exists over an absent folder"
     assert dict(episode_runs(t, "ep")) == {}, "episode_runs over an absent folder"
     assert set(sibling_run_ids(t)) == set(), "sibling_run_ids over an absent folder"
     with _io.bind(t.runs) as bound:
         assert set(episode_sibling_ids(bound)) == set(), "episode_sibling_ids over absent"
-    for name, call in (("runs.open", lambda: t.runs_repository().open(RunId.parse("r1"))),
-                       ("record_episode_runs", lambda: record_episode_runs(
-                           t, "ep", RunId.parse("r1"), {"a": RunId.parse("ep-a")}))):
-        err = H.raised(call)
-        assert H.is_a(err, TenantRefused), f"{name} over an absent folder gave {err!r}"
+    err = H.raised(t.runs_repository().open, RunId.parse("r1"))
+    assert H.is_a(err, RunAbsent), f"runs.open over an absent folder gave {err!r}"
+    err = H.raised(record_episode_runs, t, "ep", RunId.parse("r1"), {"a": RunId.parse("ep-a")})
+    assert H.is_a(err, TenantRefused), f"record_episode_runs over an absent folder gave {err!r}"
     assert H.tree_state(root) == before, "something was created"
     assert not t.runs.exists(), "something was created"
     run_common.materialize_run(H.alert_file(tmp_path / "alerts"), "r1", tenant=t)
@@ -1123,24 +1097,14 @@ def test_1105_an_absent_runs_folder_answers_empty_and_creates_nothing(tmp_path):
 def test_1105_a_run_with_sidecar_files_beside_it_lists_as_the_one_run(tmp_path):
     """A run folder r1 with its four sidecar files beside it and a staged one
     (r1.run-end.json.staged-<16 hex>) lists as the one run r1 in list_run_ids, which does not
-    refuse, and run_exists answers True for r1 and for each sidecar name; sidecar files
-    left for a run whose folder is gone are accepted the same way, that id is not listed, and
-    run_exists answers True for it (owner ruling: the writer's "taken"). A
-    run whose id is 206 bytes (the bound) with the longest sidecar suffix's staged file beside it
-    (<id>.accounting_failures.json.staged-<16 hex>, a 255-byte name made on the real filesystem)
-    lists as that one run in list_run_ids, and run_exists answers True for it."""
-    from defender.run_repository import RunId
-
+    refuse; sidecar files left for a run whose folder is gone are accepted the same way, and
+    that id is not listed. A run whose id is 206 bytes (the bound) with the longest sidecar
+    suffix's staged file beside it (<id>.accounting_failures.json.staged-<16 hex>, a 255-byte
+    name made on the real filesystem) lists as that one run in list_run_ids."""
     _root, t = _good(tmp_path, "r1")
-    made = H.plant_sidecars(t.runs, "r1")
+    H.plant_sidecars(t.runs, "r1")
     H.plant_sidecars(t.runs, "gone")
     assert _ids(t.runs_repository().list()) == ["r1"], f"runs.list gave {_ids(t.runs_repository().list())}"
-    assert t.runs_repository().exists(RunId.parse("r1")) is True, "r1 exists"
-    for path in made:
-        assert t.runs_repository().exists(RunId.parse(path.name)) is True, f"{path.name} exists"
-    # Owner ruling (xhigh review): "taken" has one definition, the record writer's, so an id
-    # whose folder is gone but whose sidecar files remain is taken (was: False).
-    assert t.runs_repository().exists(RunId.parse("gone")) is True, "the gone run's sidecars still hold its id"
     longest = max(H.SIDECAR_SUFFIXES, key=len)
     long_id = "r1-" + "a" * (H.RUN_ID_BOUND - 3)
     H.make_run(t.runs, long_id)
@@ -1151,7 +1115,6 @@ def test_1105_a_run_with_sidecar_files_beside_it_lists_as_the_one_run(tmp_path):
     want = sorted(["r1", long_id])
     assert _ids(t.runs_repository().list()) == want, (
         f"runs.list beside a 255-byte staged sidecar gave {[x[:12] for x in _ids(t.runs_repository().list())]}")
-    assert t.runs_repository().exists(RunId.parse(long_id)) is True, "the 206-byte run exists"
 
 
 def test_1105_every_lookup_and_record_function_closes_its_held_handle_on_each_path(tmp_path):
@@ -1159,7 +1122,7 @@ def test_1105_every_lookup_and_record_function_closes_its_held_handle_on_each_pa
     lookup and record function on its success path and on each refusal path (TypeError before
     any read opens none; TenantRefused; RunRefused). The RunRefused paths include one after the
     hold for each lookup and record function: a folder named 'Bad Name' (list_run_ids), a stray
-    README in _episodes (sibling_run_ids), a link at run_exists' own entry, for
+    README in _episodes (sibling_run_ids), a link at runs.open's own entry, for
     record_episode_runs an arm another record claims, a link at _episodes and a different record
     already at the episode's name, and for episode_runs its own torn record."""
     from defender.run_repository import (
@@ -1177,7 +1140,6 @@ def test_1105_every_lookup_and_record_function_closes_its_held_handle_on_each_pa
     rid = RunId.parse("r1")
     success = (("runs.open", lambda: t.runs_repository().open(rid)),
                ("runs.list", lambda: t.runs_repository().list()),
-               ("runs.exists", lambda: t.runs_repository().exists(rid)),
                ("record_episode_runs", lambda: record_episode_runs(
                    t, "ep2", rid, {"b": RunId.parse("ep2-b")})),
                ("episode_runs", lambda: episode_runs(t, "ep")),
@@ -1205,8 +1167,8 @@ def test_1105_every_lookup_and_record_function_closes_its_held_handle_on_each_pa
         ("sibling_run_ids", lambda: (t.runs / "_episodes" / "README").write_text(
             "notes\n", encoding="utf-8"),
          lambda: sibling_run_ids(t), lambda: (t.runs / "_episodes" / "README").unlink()),
-        ("runs.exists", lambda: os.symlink(t.runs / "r1", t.runs / "r2"),
-         lambda: t.runs_repository().exists(RunId.parse("r2")), lambda: os.unlink(t.runs / "r2")),
+        ("runs.open/a link at its entry", lambda: os.symlink(t.runs / "r1", t.runs / "r2"),
+         lambda: t.runs_repository().open(RunId.parse("r2")), lambda: os.unlink(t.runs / "r2")),
         ("record_episode_runs/claimed arm",
          lambda: H.plant_record(t.runs, "zz", t.id, "r1", {"a": "ep5-a"}),
          lambda: record_episode_runs(t, "ep5", rid, {"a": RunId.parse("ep5-a")}),
@@ -1230,7 +1192,7 @@ def test_1105_every_lookup_and_record_function_closes_its_held_handle_on_each_pa
     _swap_record(t.runs, H.U_ID)
     for name, call in success:
         d, err = delta(call)
-        assert H.is_a(err, TenantRefused), f"{name} TenantRefused path: {d}, {err!r}"
+        assert _container_refusal(name, err), f"{name} TenantRefused path: {d}, {err!r}"
         assert d == 0, f"{name} TenantRefused path: {d}, {err!r}"
 
 
@@ -1255,25 +1217,23 @@ def test_1105_run_for_tenant_over_a_deeply_nested_tenant_record_refuses_as_tenan
 
 
 def test_1105_refusals_quoting_a_disk_read_entry_name_escape_it_and_stay_one_line(tmp_path):
-    """a run folder named 'a<newline>[run.py] forged' or 'x<ESC>[31m' makes list_run_ids and
-    run_exists raise RunRefused, and a stray entry of that kind in _episodes makes
+    """a run folder named 'a<newline>[run.py] forged' or 'x<ESC>[31m' makes list_run_ids
+    raise RunRefused, and a stray entry of that kind in _episodes makes
     the _episodes readers list_run_ids and sibling_run_ids raise RunRefused (255-byte
     names included on both arms), each message holding no raw newline or escape character and
-    still naming the entry (a visible run of its characters appears); run_exists does not read
-    _episodes (P2's Reach); run setup's claimed-id refusal over the same _episodes is exactly one
+    still naming the entry (a visible run of its characters appears); run setup's claimed-id refusal over the same _episodes is exactly one
     stderr line (splitlines() == 1) with no traceback; positive control: the same call over a
     plain-named stray entry names it verbatim
     A run folder and a stray entry carrying DEL, a C1 control (U+009B) and U+2028 are among the
     hostile names (91 BF-09)."""
-    from defender.run_repository import RunId, RunRefused, sibling_run_ids
+    from defender.run_repository import RunRefused, sibling_run_ids
 
     _root, t = _good(tmp_path, "r1")
     hostile = (("a\n[run.py] forged", "[run.py] forged"), ("x\x1b[31m", "[31m"),
                ("n\n" + "c" * 253, "ccc"), ("d\x7f\x9b\u2028[c1] forged", "[c1] forged"))
     for name, visible in hostile:
         os.mkdir(t.runs / name)
-        for fn, call in (("runs.list", lambda: t.runs_repository().list()),
-                         ("runs.exists", lambda: t.runs_repository().exists(RunId.parse("r1")))):
+        for fn, call in (("runs.list", lambda: t.runs_repository().list()),):
             err = H.raised(call)
             assert H.is_a(err, RunRefused), f"{fn} beside a folder {name[:12]!r} gave {err!r}"
             text = H.message(err)

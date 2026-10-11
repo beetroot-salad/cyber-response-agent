@@ -444,7 +444,8 @@ def test_s7_j26_symlinked_tenant_folder_accepted(tmp_path, monkeypatch, data_roo
     H.source_run(real_runs)
     src2 = root2 / TID / "runs" / T.SOURCE_RUN_ID
     owner2 = _repository_refusal(root2, src2.name)
-    assert isinstance(owner2, H.tenant().TenantRefused), (
+    # An open answers a container fault as `RunUnreachable` from it (#1105 PR 2 review).
+    assert isinstance(owner2.__cause__, H.tenant().TenantRefused), (
         f"T's runs repository did not refuse a linked <root>/T/runs as a container: {owner2!r}")
     before2 = {root2: H.census(root2), real_runs: H.census(real_runs)}
     result, spawn, agent = _launch(src2)

@@ -71,7 +71,14 @@ def main(root: Path) -> int:
         "session store: the run's case pointer does not name the owner's path")
 
     # WHERE A RESUME FINDS IT: the store a sibling forks into, derived from the pointer alone.
-    source = branch.open_source_store(run_dir)
+    # A resume door that refuses the run's store (its own derivation disagrees with the
+    # pointer) fails HERE, at the session store — since #1105 PR 2's review `open_store` takes
+    # the path from the owner's one hand-out, so a store module remembering the names is
+    # caught by the resume door's `store_path_for`, not by the run's own create.
+    try:
+        source = branch.open_source_store(run_dir)
+    except branch.BranchError as refused:
+        raise AssertionError(f"session store: a resume refused the run's store: {refused}") from None
     try:
         assert source.path == want, (
             f"session store: a resume opened {source.path}, but the owner names {want}")

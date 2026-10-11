@@ -4,25 +4,27 @@ D-create; amended by the fork decisions of 6100061869).
 The accepted `Tenant` hands out its repository — `runs = tenant.runs_repository()` (the spelling
 F-11 names: it imports the package lazily). Below it everything is ids:
 
-* natural container: `runs.open(run_id) -> Run`, `runs.list() -> Listed`, `runs.exists(run_id)`,
+* natural container: `runs.open(run_id) -> Run`, `runs.list() -> Listed`,
   `runs.create(run_id) -> Run`, `runs.resolve(address) -> Run` — PR 1's rules (H1–H6), no
   `Tenant` argument, no environment read;
 * errors: `RunRefused` as today, and `RunAbsent(RunRefused)` for an absent entry (in `_errors.py`,
   served by the door); container faults stay `TenantRefused` (`TenantRecordMismatch`,
-  `TenantRecordCorrupt`);
+  `TenantRecordCorrupt`) — except from an open, which answers `RunUnreachable(RunRefused)`
+  raised from that `TenantRefused`, and `RunAbsent` for an absent container (#1105 PR 2
+  review, PR #1236; `test_1105_pr2_review_fixes.py`);
 * the episode view `runs.episode(episode_id) -> EpisodeRuns`, opened through the episode owner
-  from `(tenant.data_root, episode_id)`: `view.open(arm_id)`, `view.list()`, `view.create(arm_id)`,
+  from `(tenant.data_root, episode_id)`: `view.open(arm_id)`, `view.create(arm_id)`,
   `view.create_container()`, `view.base_world_id()`, `view.arm_id(label) -> RunId`,
   `view.episode` (the owner's handle); a PRESENT container's `_tenant.json` is judged when the
   view opens; an ABSENT one has nothing to judge; an UNREADABLE one (a link, a non-directory) is
-  recorded, not raised;
+  recorded (`view.state`), not raised;
 * `runs.episode_files(episode_id) -> Episode`: the owner's handle alone, the judge's door — it
   reads nothing in `runs/`;
 * `RunAddress(tenant_id, run_id, episode_id | None)`: frozen, fields checked at construction, the
   stored/transport form; rehydration is "accept its tenant, then open".
 
 SPELLINGS. The design names every method above, `Tenant.runs_repository()`, `RunAbsent`,
-`RunAddress` and its three fields, and `Listed`'s `absent` (and, from a view, `unreadable`). It
+`RunAddress` and its three fields, and `Listed`'s `absent`. It
 leaves `Listed`'s run-id spelling to the implementer: this file reads a `Listed` as an iterable
 of `RunId` in `list_run_ids`' order (`_ids()` below — the ONE place to rename it). Where the
 design leaves an error class open (a view's open over an absent container; `resolve` of another
@@ -176,37 +178,42 @@ def test_run_absent_tells_an_absent_run_from_a_refused_entry(tmp_path):
     assert Path(runs.open(_rid("r1")).run_dir) == Path(t.runs) / "r1"
 
 
-def test_a_container_fault_is_the_tenants_refusal_not_an_absent_run(tmp_path):
-    """Container faults stay `TenantRefused` (P2; S4): an absent runs folder (open needs it), a
-    link at `<T>/runs` (never followed), a record naming another tenant
-    (`TenantRecordMismatch`), and a folder with no record. None is a `RunAbsent`. The positive
-    control: the folder made right, the run opens."""
-    from defender.run_repository import RunAbsent
+def test_a_container_fault_is_the_tenants_refusal_not_an_absent_run(tmp_path):  # name kept; the owner changed the class (#1105 PR 2 review)
+    """Container faults are the container's refusal, never a `RunAbsent` (P2; S4) — reaching an
+    open as `RunUnreachable`, a `RunRefused` raised from the container's `TenantRefused` (#1105
+    PR 2 review: an open answers one refusal family): a link at `<T>/runs` (never followed), a
+    record naming another tenant (`TenantRecordMismatch`), and a folder with no record. An
+    ABSENT runs folder is the one container state an open answers `RunAbsent` (the run is gone
+    with it). The positive control: the folder made right, the run opens."""
+    from defender.run_repository import RunAbsent, RunUnreachable
 
     root = tmp_path / "data"
     root.mkdir()
     t = H.tenant(root, H.T_ID)
     runs = t.runs_repository()
     absent = H.raised(runs.open, _rid("r1"))
-    assert isinstance(absent, TenantRefused), repr(absent)
-    assert not isinstance(absent, RunAbsent), repr(absent)
+    assert isinstance(absent, RunAbsent), repr(absent)
 
     elsewhere = tmp_path / "elsewhere-runs"
     H.plant_tenant_record(elsewhere, H.T_ID)
     H.make_run(elsewhere, "r1")
     os.symlink(elsewhere, t.runs)
     linked = H.raised(runs.open, _rid("r1"))
-    assert isinstance(linked, TenantRefused), f"a linked runs folder was followed: {linked!r}"
+    assert isinstance(linked, RunUnreachable), f"a linked runs folder was followed: {linked!r}"
+    assert isinstance(linked.__cause__, TenantRefused), repr(linked.__cause__)
     os.unlink(t.runs)
 
     H.plant_tenant_record(t.runs, H.U_ID)
     H.make_run(t.runs, "r1")
     foreign = H.raised(runs.open, _rid("r1"))
-    assert isinstance(foreign, TenantRecordMismatch), repr(foreign)
+    assert isinstance(foreign, RunUnreachable), repr(foreign)
+    assert isinstance(foreign.__cause__, TenantRecordMismatch), repr(foreign.__cause__)
 
     (Path(t.runs) / "_tenant.json").unlink()
     recordless = H.raised(runs.open, _rid("r1"))
-    assert isinstance(recordless, TenantRefused), repr(recordless)
+    assert isinstance(recordless, RunUnreachable), repr(recordless)
+    assert isinstance(recordless.__cause__, TenantRefused), repr(recordless.__cause__)
+    assert not isinstance(recordless, RunAbsent), repr(recordless)
 
     H.plant_tenant_record(t.runs, H.T_ID)
     assert Path(runs.open(_rid("r1")).run_dir) == Path(t.runs) / "r1"
@@ -244,24 +251,6 @@ def test_list_tells_an_absent_container_from_an_empty_one_and_judges_every_entry
     stray = H.raised(runs.list)
     assert isinstance(stray, RunRefused), repr(stray)
     assert "stray.txt" in str(stray), repr(stray)
-
-
-def test_exists_answers_occupancy(tmp_path):
-    """`runs.exists(run_id)` is `run_exists`: a run folder at the id, or a sidecar file the id
-    owns with no folder (the id is still taken), answers True; a free id, False; an absent
-    runs folder, False."""
-    root = tmp_path / "data"
-    root.mkdir()
-    t = H.tenant(root, H.T_ID)
-    runs = t.runs_repository()
-    assert runs.exists(_rid("r1")) is False
-
-    H.runs_folder(t)
-    H.make_run(t.runs, "r1")
-    (Path(t.runs) / "gone.run-end.json").write_text("{}\n", encoding="utf-8")
-    assert runs.exists(_rid("r1")) is True
-    assert runs.exists(_rid("gone")) is True
-    assert runs.exists(_rid("free")) is False
 
 
 def test_create_holds_the_container_writes_its_record_and_hands_out_the_run(tmp_path):
@@ -386,7 +375,7 @@ def test_a_run_address_holds_its_episode_id_to_the_owners_episode_grammar(episod
 def test_an_arm_created_for_t_opens_for_t_through_its_episode_and_never_as_a_natural_run(
         tmp_path, episodes):
     """O3 / O4: `runs.episode(ep)` over a container naming T opens the arm `view.arm_id(label)`
-    (`<ep>-<label>`, a `RunId`) at `<episode>/runs/<ep>-<label>` for T; `view.list()` lists it;
+    (`<ep>-<label>`, a `RunId`) at `<episode>/runs/<ep>-<label>` for T;
     `view.episode` is the owner's handle on the episode folder; `view.base_world_id()` is the
     container record's own. The same id through the natural container is `RunAbsent` (an arm
     is reachable only through its episode)."""
@@ -403,7 +392,6 @@ def test_an_arm_created_for_t_opens_for_t_through_its_episode_and_never_as_a_nat
     arm = view.open(arm_id)
     assert Path(arm.run_dir) == ep / "runs" / f"{EP}-{LABEL}"
     assert str(arm.tenant_id) == H.T_ID
-    assert _ids(view.list()) == [f"{EP}-{LABEL}"]
     assert Path(view.episode.dir) == ep
     assert view.base_world_id() == _tenant.read_tenant(ep / "runs").base_world_id
     assert isinstance(H.raised(runs.open, arm_id), RunAbsent)
@@ -426,13 +414,14 @@ def test_the_view_refuses_a_container_naming_another_tenant_or_none_at_once(tmp_
     assert isinstance(recordless, TenantRefused), f"a recordless container opened: {recordless!r}"
 
     _tenant.ensure_runs_base_record(ep / "runs", H.T_ID)
-    assert _ids(runs.episode(EP).list()) == [f"{EP}-{LABEL}"]
+    view = runs.episode(EP)
+    assert Path(view.open(view.arm_id(LABEL)).run_dir) == ep / "runs" / f"{EP}-{LABEL}"
 
 
 def test_an_absent_container_opens_the_view_but_no_arm_until_the_launcher_creates_it(
         tmp_path, episodes):
     """An episode before RUNS has no container and so no record to judge (N-ep): the view opens,
-    `list()` answers absent, and `view.open` / `view.create` refuse — the create making nothing
+    its `state` is absent, and `view.open` / `view.create` refuse — the create making nothing
     (G5: an arm is never made in a container nobody bound). `view.create_container()` makes
     `runs/` with T's record (D-create b); then `view.create(arm_id)` hands out the arm's `Run`
     inside it. A second `create_container()` adopts what is there (C-19)."""
@@ -441,9 +430,8 @@ def test_an_absent_container_opens_the_view_but_no_arm_until_the_launcher_create
     view = t.runs_repository().episode(EP)
     arm_id = view.arm_id(LABEL)
 
-    listed = view.list()
-    assert listed.absent is True
-    assert _ids(listed) == []
+    assert view.state == "absent"
+    assert not view.present
     assert isinstance(H.raised(view.open, arm_id), _refusal_classes())
     assert isinstance(H.raised(view.create, arm_id), _refusal_classes())
     assert not (ep / "runs").exists(), "a create over an absent container made it"
@@ -464,8 +452,8 @@ def test_an_absent_container_opens_the_view_but_no_arm_until_the_launcher_create
 def test_an_unreadable_container_is_recorded_not_raised_and_never_written_through(
         tmp_path, episodes):
     """R51-20 / G25: a link at `<episode>/runs` — to a real folder holding an arm and no
-    record — is an UNREADABLE container. The view opens (the page reads it as absent); its
-    listing is empty with `unreadable` set; `view.open` refuses; `view.create_container()`
+    record — is an UNREADABLE container. The view opens (the page reads it as absent), its
+    `state` unreadable with the reason recorded; `view.open` refuses; `view.create_container()`
     refuses before minting a record; nothing is written through the link."""
     _root, t = _good(tmp_path)
     ep = _episode(episodes)
@@ -476,9 +464,8 @@ def test_an_unreadable_container_is_recorded_not_raised_and_never_written_throug
     before = H.tree_state(target)
 
     view = t.runs_repository().episode(EP)
-    listed = view.list()
-    assert _ids(listed) == [], f"a linked container listed {_ids(listed)}"
-    assert listed.unreadable, f"a linked container listed {_ids(listed)}"
+    assert view.state == "unreadable", f"a linked container read as {view.state}"
+    assert view.unreadable_reason, "a linked container's reason was not recorded"
     assert isinstance(H.raised(view.open, view.arm_id(LABEL)), _refusal_classes())
     assert isinstance(H.raised(view.create_container), _refusal_classes())
     assert H.tree_state(target) == before
@@ -527,4 +514,4 @@ def test_a_bad_episode_id_or_an_unset_episodes_base_is_refused_before_anything_i
     monkeypatch.delenv("DEFENDER_EPISODES_BASE")
     assert H.raised(runs.episode, EP) is not None
     monkeypatch.setenv("DEFENDER_EPISODES_BASE", str(episodes))
-    assert _ids(runs.episode(EP).list()) == []
+    assert runs.episode(EP).present
