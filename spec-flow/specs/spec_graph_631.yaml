@@ -146,8 +146,10 @@ demands:
 
   - id: started_at_fails_closed
     kind: behavior
-    form: test
-    discharged_by: test_missing_started_at_does_not_restart_the_clock
+    form: clause
+    status: retired
+    outcome:
+      nl: "RETIRED by #1235 — there is no replaceable budget.json whose missing `started_at` could restart the wall clock — the origin sits in the run process's memory and nothing outside the process can drop it; `test_missing_started_at_does_not_restart_the_clock`, which discharged this demand, was deleted with the behaviour it pinned."
     binds: ["update_budget_locked", "interacts(update_budget_locked->budget_json)",
             "budget_json.domain.distinguished[started_at]"]
     moved_by: D2
@@ -608,7 +610,7 @@ demands:
     # contradict them.
 
   - {id: concurrent_increments_neither_lost_nor_duplicated, kind: uniqueness, form: test,
-     discharged_by: test_concurrent_increments_to_budget_json_are_neither_lost_nor_duplicated_under_contention,
+     discharged_by: test_concurrent_increments_to_the_run_budget_are_neither_lost_nor_duplicated_under_contention,
      binds: ["budget_json.identity", "interacts(update_budget_locked->budget_json)",
              "interacts(gather->budget_json)", "run_investigation",
              "drives(run_investigation->gather)"]}
@@ -665,8 +667,8 @@ demands:
     # investigation.md still validates under the narrowing.
 
   # --- D4: accounting-write failure ----------------------------------------
-  - {id: isolated_accounting_write_failure_fails_open, kind: behavior, form: test,
-     discharged_by: test_one_failed_accounting_write_costs_one_call_of_overshoot,
+  - {id: isolated_accounting_write_failure_fails_open, kind: behavior, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1235 — there is no accounting write to fail — the budget is memory — and the accounting-failure machinery (the <run>.accounting_failures.json sidecar, its alias-refusal log and the accounting kill limbs) is retired; `test_one_failed_accounting_write_costs_one_call_of_overshoot`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_make_hooks->budget_json)", "accounting_failure_state",
              "accounting_failure_state.domain",
              "accounting_failure_state.domain.distinguished[0]",
@@ -678,8 +680,8 @@ demands:
     # D4 (§7 round 3): ONE failure costs ONE call of overshoot and nothing more — the
     # counter is monotonic, so the next call re-crosses and trips. The run continues.
 
-  - {id: sustained_accounting_failure_is_an_environment_fault, kind: behavior, form: test,
-     discharged_by: test_consecutive_accounting_write_failures_stop_or_mark_the_run,
+  - {id: sustained_accounting_failure_is_an_environment_fault, kind: behavior, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1235 — there is no accounting write to fail — the budget is memory — and the accounting-failure machinery (the <run>.accounting_failures.json sidecar, its alias-refusal log and the accounting kill limbs) is retired; `test_consecutive_accounting_write_failures_stop_or_mark_the_run`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["accounting_failure_state", "accounting_failure_state.domain",
              "accounting_failure_state.domain.distinguished[consecutive_failures]",
              "interacts(_make_hooks->accounting_failure_state)", "budget_kill_exception"]}
@@ -691,8 +693,8 @@ demands:
     # The id is kept (it was minted for this limb and still names it); what changed is that
     # it now binds ONE member rather than the facet, per R4's per-member discipline.
 
-  - {id: intermittent_accounting_failure_trips_the_elapsed_stamp, kind: behavior, form: test,
-     discharged_by: test_an_intermittent_accounting_failure_trips_the_first_failure_stamp,
+  - {id: intermittent_accounting_failure_trips_the_elapsed_stamp, kind: behavior, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1235 — there is no accounting write to fail — the budget is memory — and the accounting-failure machinery (the <run>.accounting_failures.json sidecar, its alias-refusal log and the accounting kill limbs) is retired; `test_an_intermittent_accounting_failure_trips_the_first_failure_stamp`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["accounting_failure_state", "accounting_failure_state.domain",
              "accounting_failure_state.domain.distinguished[first_failure_at]",
              "interacts(_make_hooks->accounting_failure_state)", "budget_kill_exception"]}
@@ -709,8 +711,10 @@ demands:
   # --- D2: the run-scoped sentinel -----------------------------------------
   - id: budget_json_carries_a_run_scoped_sentinel
     kind: domain-outcome
-    form: test
-    discharged_by: test_budget_state_carries_a_run_scoped_sentinel_from_before_the_first_call
+    form: clause
+    status: retired
+    outcome:
+      nl: "RETIRED by #1235 — a foreign run_id in a replaced file cannot reach memory, so the sentinel that told a replaced file from a cold start has nothing to tell (its open-shape half moved into `test_a_second_open_budget_starts_a_fresh_budget_for_the_folder`); `test_budget_state_carries_a_run_scoped_sentinel_from_before_the_first_call`, which discharged this demand, was deleted with the behaviour it pinned."
     binds: ["budget_json.domain", "budget_json.domain.distinguished[run_id]",
             "budget_json.domain.distinguished[created_at]", "budget_json.identity",
             "interacts(update_budget_locked->budget_json)",
@@ -1124,8 +1128,8 @@ demands:
     # otherwise diverge from the writer's newline count.
 
   # --- P5: the enforcement read's consistency ------------------------------
-  - {id: enforcement_read_is_lock_consistent, kind: behavior, form: test,
-     discharged_by: test_the_enforcing_read_of_budget_json_is_never_torn,
+  - {id: enforcement_read_is_lock_consistent, kind: behavior, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1235 — the enforcing read is of the process's own memory under its one lock, not a cross-process read of budget.json that a concurrent writer could tear; `test_the_enforcing_read_of_budget_json_is_never_torn`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["budget_json.access[fs]", "interacts(check_budgets->budget_json)",
              "interacts(_make_hooks->budget_json)", "budget_json.identity"]}
     # From probe P5 (75-probes-mechanism, executed) — a mechanism fact D9 makes consequential.
@@ -1150,7 +1154,7 @@ demands:
   - id: budget_origin_is_cross_process_wall_clock
     kind: domain-outcome
     form: test
-    discharged_by: test_budget_origin_is_a_cross_process_wall_clock
+    discharged_by: test_budget_origin_is_a_wall_clock_the_elapsed_check_honours
     binds: ["budget_json.domain.distinguished[created_at]",
             "budget_json.domain.distinguished[started_at]",
             "interacts(check_budgets->budget_json)",
@@ -1170,19 +1174,27 @@ demands:
 
   # --- R27: open_budget idempotence (B4 makes origin stability load-bearing) --
   - {id: open_budget_is_idempotent_on_the_origin, kind: behavior, form: test,
-     discharged_by: test_a_second_open_budget_preserves_the_origin_and_counters,
+     discharged_by: test_a_second_open_budget_starts_a_fresh_budget_for_the_folder,
      binds: ["budget_json.domain.distinguished[created_at]",
              "budget_json.domain.distinguished[started_at]",
+             "budget_json.domain.distinguished[run_id]",
              "interacts(run_investigation->budget_json)",
              "interacts(update_budget_locked->budget_json)"]}
+    # #1235 INVERTED THIS DEMAND (the id is kept; it is bound by other nodes). The budget is
+    # the run process's memory, and `open_budget` is the run's start: a second open starts a
+    # FRESH budget for the folder (counters zero, a new origin no earlier than the first, the
+    # new run id), because a run folder is never re-run into (`run_common._setup_state`
+    # refuses). `discharged_by` follows the test to its inverted name; it also asserts the
+    # opened state's run_id, which is what now binds `budget_json.domain.distinguished[run_id]`
+    # (the retired sentinel demand bound it before). The text below is the pre-#1235 reading.
     # R27: several tests call open_budget on an existing run dir, and B4 makes the
     # origin's stability load-bearing, but nothing pinned that a second open preserves
     # created_at / started_at and does not zero accrued counters. Re-originating on a
     # second open is exactly the silent wall-clock restart D2 forbids.
 
   # --- R27: where the accounting-failure detection state lives ---------------
-  - {id: accounting_failure_state_persists_off_the_run_dir, kind: behavior, form: test,
-     discharged_by: test_accounting_failure_state_persists_outside_the_sealed_run_dir,
+  - {id: accounting_failure_state_persists_off_the_run_dir, kind: behavior, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1235 — the accounting-failure state it located off the sealed run dir no longer exists (the accounting-failure machinery (the <run>.accounting_failures.json sidecar, its alias-refusal log and the accounting kill limbs) is retired); `test_accounting_failure_state_persists_outside_the_sealed_run_dir`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["accounting_failure_state", "accounting_failure_state.domain",
              "interacts(_make_hooks->accounting_failure_state)"]}
     # R27: the D4/NF4 detection state is READ while the run dir is sealed (B16-B18 seal

@@ -4966,7 +4966,10 @@ demands:
   provisional_lifted: §7 (70-resolutions.md)
 - id: b_p153
   kind: behavior
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: "RETIRED by #1235 — the oracle-credited wall-clock origin it carried across a resumed run lived in budget.json; the budget is now the run process's own memory and `open_budget` starts a fresh budget for the folder, and a run is never re-driven into a used folder (`run_common._setup_state` refuses). `test_resumed_sibling_investigator_clock_after_oracle_time_was_credited`, which discharged this demand, was deleted with the behaviour it pinned."
   binds:
   - oracle
   - run_investigation
@@ -4978,7 +4981,6 @@ demands:
   binds_derived: true
   assembly_note: binds derived at assembly from the clause and the premise's obligation tags (O4); the premise carried no `# binds:` line
   source: '45-dispositions ''Bound now'' (untagged: holds under every reading of the cluster)'
-  discharged_by: test_resumed_sibling_investigator_clock_after_oracle_time_was_credited
   seed_docstring: 'oracle time spent before the crash never counts toward a limit the resumed run enforces (O4). Resolved reading (—): '
   resolved_by: auto
   provisional_lifted: §7 (70-resolutions.md)
