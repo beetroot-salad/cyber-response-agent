@@ -112,17 +112,17 @@ def _report_disposition(run_dir: Path) -> str:
 
 def tenant_runs(raw_tenant: str) -> list[Run]:
     """Every natural run of the tenant `raw_tenant` names (accepted under the configured data
-    root), in id order: `runs.list()` — whose listing rule refuses an entry that is not a run
-    (`RunRefused`, naming it) — then `runs.open` for each. An absent runs folder holds none.
-    `TenantRefused` when the tenant cannot be accepted."""
+    root), in id order: `runs.all_runs()`, one hold of the runs folder whose listing rule
+    refuses an entry that is not a run (`RunRefused`, naming it). An absent runs folder holds
+    none. `TenantRefused` when the tenant cannot be accepted or its runs folder cannot be
+    held."""
     from defender import _tenant
     from defender._paths import process_defender_dir
 
     tenant = _tenant.accept_tenant(
         _tenant.resolve_data_root(), _tenant.requested_tenant_id(raw_tenant),
         defender_dir=process_defender_dir())
-    runs = tenant.runs_repository()
-    return [runs.open(run_id) for run_id in runs.list()]
+    return tenant.runs_repository().all_runs()
 
 
 def in_context_cases(

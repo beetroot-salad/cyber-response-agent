@@ -8,7 +8,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
@@ -629,30 +629,15 @@ def _parse_run_page_args(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def _open_run(ns: argparse.Namespace, tenant: Any) -> Run:
-    """The run the request names, opened by id through the request's tenant's repository —
-    `runs.open` for a natural run, the episode view's `open` for an arm. Neither follows a link
-    at the run's name, and an absent run is `RunAbsent`."""
-    from defender.run_repository import RunId
-
-    runs = tenant.runs_repository()
-    run_id = RunId.parse(ns.run_id)
-    if ns.episode is None:
-        return runs.open(run_id)
-    with runs.episode(ns.episode) as view:
-        return view.open(run_id)
-
-
 def main(argv: list[str]) -> int:
     """Re-render a finished run of the request's tenant (`--tenant`), opened by id through its
-    repository, through the same step `run.py` takes, with every line stamped with the run and
+    repository (`open_requested_run`: a natural run, or with `--episode` an arm of that
+    episode), through the same step `run.py` takes, with every line stamped with the run and
     the REQUEST's tenant (never the tenant a box-writable stamp names). Exits 1 when the run
-    cannot be opened, when the record was not saved, or when a `dev` copy failed — refreshing
-    that copy is often why an operator re-renders."""
+    cannot be opened (the refusal printed on stderr), when the record was not saved, or when a
+    `dev` copy failed — refreshing that copy is often why an operator re-renders."""
     from defender import _log, _tenant
-    from defender._episode_handle import EpisodeRefused
-    from defender._paths import process_defender_dir
-    from defender.run_repository import RunRefused
+    from defender.run_repository import open_requested_run
 
     try:
         ns = _parse_run_page_args(argv[1:])
@@ -661,18 +646,14 @@ def main(argv: list[str]) -> int:
               f"[--update-ticket] ({bad})", file=sys.stderr)
         return 64
     try:
-        tenant = _tenant.accept_tenant(
-            _tenant.resolve_data_root(), _tenant.requested_tenant_id(ns.tenant),
-            defender_dir=process_defender_dir())
-    except _tenant.TenantRefused as refused:
-        print(f"this re-render's tenant cannot be used: {refused}", file=sys.stderr)
+        run = open_requested_run(_tenant.resolve_data_root(), ns.tenant, ns.run_id,
+                                 episode_id=ns.episode)
+    except _tenant.TenantRefused as no_root:  # the data root's own refusal names its variable
+        run = str(no_root)
+    if isinstance(run, str):
+        print(f"visualize_run: {run}", file=sys.stderr)
         return 1
-    with _log.run_context(ns.run_id, str(tenant.id), logger=_logger):
-        try:
-            run = _open_run(ns, tenant)
-        except (RunRefused, _tenant.TenantRefused, EpisodeRefused, OSError) as refused:
-            _logger.error("the run cannot be opened: %s", refused)
-            return 1
+    with _log.run_context(ns.run_id, str(run.tenant_id), logger=_logger):
         try:
             copy = publish_page(run, update_ticket=ns.update_ticket)
         except VisualizeFailed:

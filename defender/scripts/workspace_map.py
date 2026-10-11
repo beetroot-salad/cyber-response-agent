@@ -138,17 +138,15 @@ def main(argv: list[str]) -> int:
     # The CLI reads the checkout's roster itself; an unreadable adapters tree is a one-line
     # refusal and exit 2, not a traceback.
     from defender import _tenant
-    from defender._paths import process_defender_dir
-    from defender.run_repository import RunId, RunRefused
+    from defender.run_repository import open_requested_run
     from defender.runtime.verbs import RegistryError, read_roster
 
     try:
-        tenant = _tenant.accept_tenant(
-            _tenant.resolve_data_root(), _tenant.requested_tenant_id(ns.tenant),
-            defender_dir=process_defender_dir())
-        run = tenant.runs_repository().open(RunId.parse(ns.run_id))
-    except (_tenant.TenantRefused, RunRefused) as refused:
-        sys.stderr.write(f"workspace_map: {refused}\n")
+        run = open_requested_run(_tenant.resolve_data_root(), ns.tenant, ns.run_id)
+    except _tenant.TenantRefused as no_root:  # the data root's own refusal names its variable
+        run = str(no_root)
+    if isinstance(run, str):
+        sys.stderr.write(f"workspace_map: {run}\n")
         return 2
     try:
         roster = read_roster(adapters_under(DEFENDER_DIR))

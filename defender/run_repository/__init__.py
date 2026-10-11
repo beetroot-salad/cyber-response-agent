@@ -43,13 +43,13 @@ if TYPE_CHECKING:
         RunId,
     )
     from defender.run_repository._lookup import (
-        RunsRepository, EpisodeRuns, Listed, RunAddress,
+        RunsRepository, EpisodeRuns, Listed, RunAddress, open_requested_run,
     )
     from defender.run_repository._record import (
         record_episode_runs, episode_runs, sibling_run_ids, episode_sibling_ids,
     )
     from defender.run_repository._errors import (
-        RunRefused, RunAbsent,
+        RunRefused, RunAbsent, RunUnreachable,
     )
     from defender.run_repository._held import (
         hold_runs_folder, run_name_fault,
@@ -75,9 +75,10 @@ _HOMES: dict[str, str] = {
     ), "_layout"),
     **dict.fromkeys(("Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref",), "_handle"),
     **dict.fromkeys(("RunId",), "_id"),
-    **dict.fromkeys(("RunsRepository", "EpisodeRuns", "Listed", "RunAddress",), "_lookup"),
+    **dict.fromkeys(("RunsRepository", "EpisodeRuns", "Listed", "RunAddress",
+                     "open_requested_run",), "_lookup"),
     **dict.fromkeys(("record_episode_runs", "episode_runs", "sibling_run_ids", "episode_sibling_ids",), "_record"),
-    **dict.fromkeys(("RunRefused", "RunAbsent",), "_errors"),
+    **dict.fromkeys(("RunRefused", "RunAbsent", "RunUnreachable",), "_errors"),
     **dict.fromkeys(("hold_runs_folder", "run_name_fault",), "_held"),
 }
 
@@ -96,8 +97,9 @@ __all__ = [
     "is_case_answer_key", "gather_summaries_shape", "artifact_file", "plain_file", "artifact_dir",
     "contained_payload", "Run", "RunRecord", "ArchivedWorld",
     "RecordHandle", "case_ref", "RunId", "RunsRepository", "EpisodeRuns", "Listed", "RunAddress",
-    "record_episode_runs", "episode_runs", "sibling_run_ids", "episode_sibling_ids", "RunRefused",
-    "RunAbsent", "hold_runs_folder", "run_name_fault",
+    "open_requested_run", "record_episode_runs", "episode_runs", "sibling_run_ids",
+    "episode_sibling_ids", "RunRefused", "RunAbsent", "RunUnreachable", "hold_runs_folder",
+    "run_name_fault",
 ]
 
 

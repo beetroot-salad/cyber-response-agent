@@ -385,6 +385,32 @@ class BatchDisposition:
         )
 
 
+def _data_root() -> Path:
+    """The configured data root (`resolve_data_root`: `TenantRefused` when it is unset or
+    bad) — the lane's one place that reads it, asked only when a curation row is to be
+    served."""
+    from defender import _tenant
+
+    return _tenant.resolve_data_root()
+
+
+def _retry_or_exhaust(
+    state: LearningState, claim: Claimed, attempts: int, max_retries: int, cause: object,
+) -> None:
+    """A transient failure of one counted attempt (`attempts`, this attempt's count): the row
+    re-queued for a later tick carrying that count, or — at `max_retries` — quarantined
+    `transient-exhausted`. The one transient lane: a lead-author run's `_LeadAuthorRetry` and a
+    row whose run cannot be reached right now both end here."""
+    if attempts >= max_retries:
+        state.quarantine(claim, f"transient-exhausted after {attempts} attempt(s): {cause!r}")
+        return
+    claim.spec["attempts"] = attempts
+    _requeue_or_drop(
+        state, claim,
+        note=f"transient on {claim.identity} (attempt {attempts}/{max_retries})",
+    )
+
+
 def _drain_lead_author_markers(
     paths: LoopPaths,
     state: LearningState,
@@ -392,20 +418,27 @@ def _drain_lead_author_markers(
     *,
     box: Any = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
+    data_root: Path | None = None,
 ) -> list[ServedMarker]:
     """Claim the queued curation requests and serve each one's run to `run_lead_author`.
 
-    A row stores its run's address (#1105 D-stored). The data root is resolved once, before
-    anything is claimed: with none, the tick refuses (`TenantRefused`) and every row stays
-    queued for a tick that can serve it. Each claim is rehydrated before its attempt is
-    counted — its tenant accepted (once per tick), its run opened through that tenant's
-    repository — and a row whose run cannot be reached that way is quarantined at once as
-    `artifact-missing` (S9: immediate, uncounted, no retry)."""
-    from defender import _tenant
+    A row stores its run's address (#1105 D-stored). `data_root` is the one the tick resolved
+    before its worktree and box existed (`lead_author_drain`); when it resolved none (nothing
+    was queued then), it is resolved here at the first claim, and with no claim never — so a
+    pitfalls-only tick needs no `DEFENDER_DATA_ROOT`. With none configured, the tick refuses
+    (`TenantRefused`) and the row waits, claimed, for a tick that can serve it.
+
+    Each claim is rehydrated before it is served — its tenant accepted (once per tick: a
+    refusal is cached for the tick too), its run opened through that tenant's repository. A row
+    whose run is GONE (`RunAbsent`) is quarantined at once as `artifact-missing` (uncounted, no
+    retry). Any other refusal — the tenant's acceptance, a container that cannot be trusted or
+    read right now (`RunUnreachable`), an entry refused at the run's name — is a counted attempt
+    on the transient lane: re-queued until `LEAD_AUTHOR_MAX_RETRIES`, then quarantined
+    `transient-exhausted` (owner decision on #1236, changing rev 5.1's S9)."""
+    from defender.run_repository import RunAbsent
 
     max_retries = env_int("LEAD_AUTHOR_MAX_RETRIES", 3)
-    data_root = _tenant.resolve_data_root()
-    accepted: dict[str, Tenant | None] = {}
+    accepted: dict[str, Tenant | Exception] = {}
     # `case_id`: this queue's live writer (`enqueue_curation`) mints the filename from the
     # case, so that is what an unreadable row's dead letter is keyed on.
     claims = state.claim(
@@ -414,13 +447,19 @@ def _drain_lead_author_markers(
     served: list[ServedMarker] = []
     for claim in claims:
         spec = claim.spec
+        if data_root is None:
+            data_root = _data_root()
         run = _rehydrate(claim, data_root, accepted)
-        if run is None:
+        if isinstance(run, RunAbsent):
             state.quarantine(claim, "artifact-missing")
             continue
         # Every serve is an attempt, counted before the agent runs: a claim the apply never
         # reached is reclaimed next tick, and a run that taints every tree must hit the ceiling.
         attempts = int(spec.get("attempts", 0)) + 1
+        if not isinstance(run, Run):
+            # Not reached right now (see the docstring): a counted, transient attempt.
+            _retry_or_exhaust(state, claim, attempts, max_retries, run)
+            continue
         if attempts > max_retries:
             state.quarantine(
                 claim, f"served {attempts - 1} time(s) without being recorded done")
@@ -442,16 +481,7 @@ def _drain_lead_author_markers(
                 )
             except _LeadAuthorRetry as e:
                 drained = False
-                if attempts >= max_retries:
-                    state.quarantine(
-                        claim, f"transient-exhausted after {attempts} attempt(s): {e!r}")
-                else:
-                    spec["attempts"] = attempts
-                    _requeue_or_drop(
-                        state, claim,
-                        note=f"transient on {claim.identity} "
-                             f"(attempt {attempts}/{max_retries})",
-                    )
+                _retry_or_exhaust(state, claim, attempts, max_retries, e)
         if drained:
             # Not unlinked here: the claim stays in `inflight/` until the tree passes the
             # scrub (`BatchDisposition.apply`).
@@ -460,11 +490,14 @@ def _drain_lead_author_markers(
     return served
 
 
-def _rehydrate(claim: Claimed, data_root: Path, accepted: dict[str, Tenant | None]) -> Run | None:
+def _rehydrate(
+    claim: Claimed, data_root: Path, accepted: dict[str, Tenant | Exception],
+) -> Run | Exception:
     """The run `claim`'s address names: its tenant accepted under `data_root` — as a natural
     run's acceptance has it, with no box mount beside the runs base (`box_mounted=()`), once
-    per tenant per tick — then the run opened through that tenant's repository, which never
-    follows a link at its name. `None`, logged, when either step refuses."""
+    per tenant per tick, a refusal included — then the run opened through that tenant's
+    repository, which never follows a link at its name. Else the refusal, logged: the
+    tenant's `TenantRefused`, or the open's `RunRefused` (`RunAbsent` when the run is gone)."""
     from defender import _tenant
     from defender.run_repository import RunRefused
 
@@ -476,15 +509,15 @@ def _rehydrate(claim: Claimed, data_root: Path, accepted: dict[str, Tenant | Non
                 data_root, address.tenant_id, defender_dir=_paths.process_defender_dir())
         except _tenant.TenantRefused as refused:
             _logger.warning(f"{claim.identity}: its tenant cannot be accepted ({refused})")
-            accepted[key] = None
+            accepted[key] = refused
     tenant = accepted[key]
-    if tenant is None:
-        return None
+    if isinstance(tenant, Exception):
+        return tenant
     try:
         return tenant.runs_repository().resolve(address)
-    except (RunRefused, _tenant.TenantRefused) as refused:
+    except RunRefused as refused:
         _logger.warning(f"{claim.identity}: its run cannot be opened ({refused})")
-        return None
+        return refused
 
 
 def _invoke_pitfalls(
@@ -559,11 +592,12 @@ def _drain_lead_author(
     box: Any = None,
     lock_wait_seconds: int | None = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
+    data_root: Path | None = None,
 ) -> BatchDisposition:
     # The batch's box is stopped between agent runs and runs only inside each spawn's
     # `box_for_run`, so no host step of the tick runs beside a process an agent left (#1195).
     served = _drain_lead_author_markers(
-        paths, state, run_lead_author, box=box, git_timeout=git_timeout)
+        paths, state, run_lead_author, box=box, git_timeout=git_timeout, data_root=data_root)
     pitfalls = _drain_pitfalls(
         paths, state, run_pitfalls, box=box, lock_wait_seconds=lock_wait_seconds,
         git_timeout=git_timeout,
@@ -895,7 +929,7 @@ def lead_author_drain(
         if not locked:
             _logger.warning("lead_author_drain: another drainer holds the lock — exiting")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             return 0
-        # The per-author queue lock (the one a by-hand `lead_author.py <run_dir>` takes) is
+        # The per-author queue lock (the one a by-hand `lead_author.py --tenant T <run_id>` takes) is
         # held for the whole tick: the `done` sentinel is only written after the scrub, and a
         # by-hand run in that gap would see no sentinel and re-serve the run. Contended, the
         # tick skips before claiming anything.
@@ -903,12 +937,18 @@ def lead_author_drain(
             if not queue_locked:
                 _logger.warning("lead_author_drain: another lead-author run holds the queue lock — skipping")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
                 return 0
+            # A queued row is served only under a data root: resolved here, before a worktree
+            # or a box exists (the rule above), so a missing or bad setting refuses the tick
+            # with every row still queued. A tick with nothing queued (pitfalls only) never
+            # reads it; a row that lands after this check resolves it at its claim.
+            data_root = _data_root() if state.has_requests() else None
             return _run_worktree_batch(
                 paths, state, branch, label=LEAD_AUTHOR_DRAIN_LABEL,
                 has_work=_has_lead_author_work,
                 do_work=lambda wt_paths, *, box=None: _drain_lead_author(
                     wt_paths, state, run_lead_author, run_pitfalls, box=box,
                     lock_wait_seconds=lock_wait_seconds, git_timeout=git_timeout,
+                    data_root=data_root,
                 ),
                 start_box=start_box, stop_box=stop_box, scrub=scrub,
             )

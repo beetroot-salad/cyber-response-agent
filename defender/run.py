@@ -482,7 +482,7 @@ def _open_world_source(runs: Any, world: Any) -> Run:
 
     try:
         return runs.open(RunId.parse(world.family.source_run_id))
-    except (RunRefused, _tenant.TenantRefused) as refused:
+    except RunRefused as refused:
         sys.exit(f"[run.py] the episode's source run cannot be opened: {refused}")
 
 

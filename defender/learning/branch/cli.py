@@ -366,7 +366,7 @@ def _open_launch_source(runs: RunsRepository, source_run_id: str) -> Run:
     path where the id belongs is refused by `RunId.parse`."""
     try:
         return runs.open(RunId.parse(source_run_id))
-    except (RunRefused, _tenant.TenantRefused) as refusal:
+    except RunRefused as refusal:
         raise LauncherRefused(
             f"[branch] source run {source_run_id!r} of tenant {runs.tenant_id!r}: "
             f"{refusal}") from refusal
@@ -1185,8 +1185,8 @@ def verify_family(
     folder's name): the `Run` its episode view opened, or the refusal the open raised. A
     `RunAbsent` is a missing arm folder, read as before: a world with no scrub verdict, so its
     own `not archived` record. Any other refusal (an entry that is not a real directory,
-    declared change 5) is likewise that world's own `not archived` record, and nothing is read
-    through it. `base_world_id` is the episode container's record's
+    declared change 5, or a container that cannot be reached, `RunUnreachable`) is likewise that
+    world's own `not archived` record, and nothing is read through it. `base_world_id` is the episode container's record's
     (`EpisodeRuns.base_world_id`), carried into the family stamp when one is written.
 
     `source` is the source run's stamp as judged by `preflight_episode`. Required with no
@@ -1606,7 +1606,9 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
 def _finished_arms(view: EpisodeRuns, labels: Sequence[str]) -> dict[str, Run | RunRefused]:
     """Every finished arm, opened by id through the episode's view (`view.open(view.arm_id(
     label))`, whose entry rule takes only a real directory), or the refusal the open raised —
-    `verify_family` records each as that world's own fault."""
+    `verify_family` records each as that world's own fault. An open refuses only with
+    `RunRefused`, a container that went bad after the siblings ran included (`RunUnreachable`),
+    so no refusal escapes VERIFY."""
     arms: dict[str, Run | RunRefused] = {}
     for label in labels:
         try:

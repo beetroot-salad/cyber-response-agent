@@ -730,7 +730,7 @@ def _load_arm(w: WorldEntry, view: EpisodeRuns, episode_dir: Path, episode_id: s
         run = view.open(view.arm_id(w.label, episode_id=episode_id))
         with run.reader() as reader:
             w.result = _result_event(reader)
-    except (RunRefused, TenantRefused, OSError):
+    except (RunRefused, OSError):
         return
     w.run_dir_name = run.run_dir.name
     w.run_page = _run_page_link(run, episode_dir)

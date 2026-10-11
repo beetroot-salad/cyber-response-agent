@@ -510,30 +510,21 @@ def main(argv: list[str]) -> int:
                    help=f"the defender run, by its id — its folder holds "
                         f"{names['EXECUTED_QUERIES']} + {names['RAW_MARKER']}/")
     args = p.parse_args(argv)
-    run_ = _open_requested_run(args.tenant, args.run_id)
-    if run_ is None:
+    from defender import _tenant
+    from defender.run_repository import open_requested_run
+
+    # The request's tenant, accepted under the configured data root, and its run opened by id
+    # through that tenant's repository (a link at the run's name is never followed). A refusal
+    # is printed, not logged: a log level must never hide it.
+    try:
+        run_ = open_requested_run(_tenant.resolve_data_root(), args.tenant, args.run_id)
+    except _tenant.TenantRefused as no_root:  # the data root's own refusal names its variable
+        run_ = str(no_root)
+    if isinstance(run_, str):
+        print(f"lead_author: {run_}", file=sys.stderr)  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
         return 2
     # By hand this serves the lead-author lane's own queue under its lock, so it names that lane.
     return run(run_, label=_loop_config.LEAD_AUTHOR_DRAIN_LABEL, paths=_loop_config.loop_paths())
-
-
-def _open_requested_run(raw_tenant: str, raw_run_id: str) -> Run | None:
-    """The run `--tenant T <run_id>` names, opened through T's repository (the request's
-    tenant, accepted under the configured data root); `None`, logged, when the tenant or the
-    run is refused — a link at the run's name is never followed."""
-    from defender import _tenant
-    from defender._paths import process_defender_dir
-    from defender.run_repository import RunId, RunRefused
-
-    try:
-        tenant = _tenant.accept_tenant(
-            _tenant.resolve_data_root(), _tenant.requested_tenant_id(raw_tenant),
-            defender_dir=process_defender_dir())
-        return tenant.runs_repository().open(RunId.parse(raw_run_id))
-    except (_tenant.TenantRefused, RunRefused) as refused:
-        _logger.critical(f"run {raw_run_id!r} of tenant {raw_tenant!r} cannot be opened: "
-                         f"{refused}")
-        return None
 
 
 #: Re-exports: callers import these names from here; their real homes are the source
