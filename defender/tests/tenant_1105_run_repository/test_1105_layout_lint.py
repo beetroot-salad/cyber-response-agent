@@ -141,7 +141,7 @@ EXPECTED_CATEGORIES: dict[str, frozenset[str]] = {
                          "_episode_paths.py", "_episode_handle.py", "_tenant.py"}),
     "running-investigation": frozenset({
         "hooks/budget_enforcer.py", "hooks/record_lead.py",
-        "runtime/challenge_gate.py", "runtime/circuit_breaker.py", "runtime/close_tool.py",
+        "runtime/challenge_gate.py", "runtime/close_tool.py",
         "runtime/driver/__init__.py", "runtime/driver/_build.py",
         "runtime/lead_zero/__init__.py", "runtime/lead_zero/_capture.py", "runtime/observe.py",
         "runtime/permission/files.py", "runtime/permission/policies/_common.py",
@@ -753,7 +753,7 @@ def test_1105_layout_lint_puts_every_layout_importer_in_exactly_one_category(tmp
         f"{sorted(r for r in EXPECTED_CATEGORIES if table.get(r) != EXPECTED_CATEGORIES[r])}")
     every = [m for mods in table.values() for m in mods]
     assert len(every) == len(set(every)), "a module sits in more than one row"
-    assert sum(len(v) for r, v in EXPECTED_CATEGORIES.items() if r != "owners") == 57
+    assert sum(len(v) for r, v in EXPECTED_CATEGORIES.items() if r != "owners") == 56  # #1235: runtime/circuit_breaker.py no longer imports the layout
     root = _planted(tmp_path)
     for module in _ROW_SAMPLE.values():
         _add(root, module, "from defender.run_repository import RunPaths  # noqa: F401\n\n\n"
