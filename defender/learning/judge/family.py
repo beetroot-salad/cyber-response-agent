@@ -720,7 +720,7 @@ def _missing_required_input(
     # missing; a parent that exists but cannot be listed decides nothing here — the read that
     # follows refuses it as malformed. `run_inputs_required=False` is the pass's own reading:
     # the served ledger (absent: no call reached it, `read_world_facts`' `absent_ledger_ok`)
-    # and the alert (absent: the sibling union and rule key fall back) are not required —
+    # and the alert (absent: the rule key falls back) are not required —
     # whether a world ran is its own record's to say (S8).
     served_dir = LAYOUT.served
     served = bound.under(served_dir).entries()

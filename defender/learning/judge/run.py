@@ -15,7 +15,7 @@ its `effort` is a plain string evaluated once at import, so it is only a default
 different defaults (`claude-opus-5` / `high` vs `kimi-k3` / `medium`) and tags its scores with the
 resolved model, so setting either knob affects both. And `run.py`'s all-roles preflight checks
 every registered definition's model at investigation startup, so a `JUDGE_MODEL` no provider
-routes makes every alert run (and `--resume` sibling) exit rc 2. Separating them needs a knob
+routes makes every alert run (and every `--episode E --world L` sibling) exit rc 2. Separating them needs a knob
 name of the judge's own.
 """
 
