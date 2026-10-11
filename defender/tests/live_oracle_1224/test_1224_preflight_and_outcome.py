@@ -39,7 +39,9 @@ from typing import Any
 
 import pytest
 
+from defender import _episode_handle as EH
 from defender import _yaml
+from defender.tests import _episode_1025 as E
 from defender.tests import _judge_921 as J
 from defender.tests import _state1135
 from defender.tests.live_oracle_1224 import _spec1224 as S
@@ -274,13 +276,12 @@ class _Spawn(S.FakeSpawn):
         self._mine = threading.Lock()
 
     def _ep(self, argv: list[str]) -> Path:
-        """The episode this child belongs to: the episodes-root child any argv path is under
-        (the sibling's command line names its manifest), else the derived episode id."""
-        root = self.root.resolve()
-        for tok in argv:
-            path = Path(tok)
-            if path.is_absolute() and root in path.resolve().parents:
-                return root / path.resolve().relative_to(root).parts[0]
+        """The episode this child belongs to: the episodes-root child its `--episode` id names
+        (#1105 PR 2: the sibling's command line names its episode by id), else the derived
+        episode id."""
+        for i, tok in enumerate(argv):
+            if tok == "--episode" and i + 1 < len(argv):
+                return self.root / argv[i + 1]
         return self.root / S.EPISODE_ID
 
     def __call__(self, argv: list[str], *, env: dict[str, str] | None = None,
@@ -298,8 +299,7 @@ class _Spawn(S.FakeSpawn):
             S.world_record(ep, world, spec["reason"], call=spec.get("call"),
                            detail=spec.get("detail", ""))
         if self.plant and world:
-            S.T.sibling_run_dir(S.mod(S.CLI).sibling_runs_base(ep), world,
-                                tenant_id=S.FIXTURE_TENANT)
+            S.T.sibling_run_dir(ep / "runs", world, tenant_id=S.FIXTURE_TENANT)
         if self.hook is not None and world:
             self.hook(world)
         return super().__call__(argv, env=env, **kw)
@@ -321,14 +321,15 @@ def _main(src: Path, est: S.Estate, *, doc: dict | None = None, spawn: Any = Non
     cli = S.mod(S.CLI)
     message = ""
     try:
-        rc = cli.main([str(src), str(S.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
-                      spawn=spawn, **seams)
+        # #1105 PR 2 (declared change 1): the tenant and the source run by id.
+        rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(S.BRANCH_MESSAGE_ID),
+                       "--continuation-prompt", "go"], spawn=spawn, **seams)
     except SystemExit as stop:
         if isinstance(stop.code, int):
             rc = stop.code
         else:
             rc, message = 2, str(stop.code)
-    ep = cli.episode_dir_for(S.EPISODE_ID, tenant=S.T.current_tenant())
+    ep = EH.episode_dir(S.T.current_tenant().data_root, S.EPISODE_ID)
     return S.Launch(rc=rc, message=message, spawn=spawn, ep=ep)
 
 
@@ -780,8 +781,7 @@ def test_input_every_world_has_no_facts(tmp_path):
         assert S.ledger_rows(run.ep, w) == []
 
     judge = S.FakeJudge()
-    S.sym(S.JUDGE, "grade_episode")(run.ep, judge=judge, runs_base=tmp_path / "defender-runs",
-                                    state=_state1135.state_over(tmp_path / "judge-state"))
+    J.grade_at(run.ep, judge=judge, state=_state1135.state_over(tmp_path / "judge-state"))
     assert judge.prompts == [], "a refused episode is not graded (no model call)"
 
 
@@ -1021,7 +1021,7 @@ def test_1224_world_dir_holds_both_oracle_state_and_the_archived_run(tmp_path, e
     _assert_routed(oracle)
 
     oracle_b = S.oracle_dir(run.ep, "b").resolve()
-    for forbidden in (run.ep / "worlds", S.mod(S.CLI).sibling_runs_base(run.ep)):
+    for forbidden in (run.ep / "worlds", run.ep / "runs"):
         forbidden = Path(forbidden).resolve()
         assert forbidden not in oracle_b.parents
         assert oracle_b != forbidden
@@ -1450,13 +1450,12 @@ def test_outcome_record_is_cut_short_by_a_launcher_crash(tmp_path, state):
 
     judge = S.FakeJudge(default="unused")
     try:
-        S.sym(S.JUDGE, "grade_episode")(ep, judge=judge, runs_base=tmp_path / "defender-runs",
-                                        state=_state1135.state_over(tmp_path / "judge-state"))
+        J.grade_at(ep, judge=judge, state=_state1135.state_over(tmp_path / "judge-state"))
     except S.sym(S.JUDGE, "JudgeRefused"):
         pass
     assert judge.prompts == [], "no record is not an accepted record: nothing is graded"
 
-    page = Path(S.sym(S.VISUALIZE, "render_episode")(ep))
+    page = Path(E.render_episode(ep, module=S.mod(S.VISUALIZE)))  # #1105 PR 2 (declared change 4)
     html = page.read_text(encoding="utf-8").lower()
     assert "outcome" in html
     assert any(w in html for w in ("missing", "unreadable", "no record"))
@@ -1522,7 +1521,7 @@ def test_1224_archive_fails_after_the_siblings_ran(tmp_path, episodes_root):
     def link_cs_report(world: str) -> None:
         if world != "c":
             return
-        tree = S.mod(S.CLI).sibling_runs_base(spawn.eps[-1]) / f"{S.EPISODE_ID}-{world}"
+        tree = spawn.eps[-1] / "runs" / f"{S.EPISODE_ID}-{world}"
         report = tree / "report.md"
         report.unlink()
         report.symlink_to(outside)

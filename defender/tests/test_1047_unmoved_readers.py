@@ -28,10 +28,10 @@ WHAT IS PINNED HERE, and why each one is a real question rather than a formality
   of `report.md` the design's non-obligations deliberately leave alone (forks F-AA and the
   `episode_verdicts_docstring_unaddressed` waiver). Their disagreement with the graded record
   is ACCEPTED, and what these tests pin is the acceptance, not a repair.
-* `render.sibling_union`'s walk of the operator's runs base, which now holds a new leaf beside
-  every run dir (settled premise 118, probe #32). The tolerance is currently guaranteed by
-  seven independent screens rather than by one rule, and nothing pinned that they all keep
-  screening.
+* the walks of the operator's runs base, which now holds a new leaf beside every run dir
+  (settled premise 118, probe #32). The tolerance is currently guaranteed by seven independent
+  screens rather than by one rule, and nothing pinned that they all keep screening. (#1105 PR 2,
+  J3: the judge's `render.sibling_union` walk is gone.)
 * `review_record.<n>.json` and `provenance.json` — the waiver `review_record_gains_no_field`,
   made executable.
 
@@ -140,27 +140,15 @@ def test_sibling_union_still_short_circuits_when_the_gradable_set_is_empty(tmp_p
     short) — probe #28's "nothing crashes" finding, pinned as a demand rather than left as a
     probed-but-unpinned tolerance.
 
-    Two halves: the set really is empty for an all-cut-short episode (before this piece a
-    host-forced world still counted as measuring, claim h2, so the state was unreachable), and
-    the union over the short-circuited argument is empty rather than a walk of the operator's
-    whole runs base. Positive control: the same union over a real runs base DOES return rows,
-    so "empty" is a short-circuit and not a broken walk."""
+    The set really is empty for an all-cut-short episode (before this piece a host-forced world
+    still counted as measuring, claim h2, so the state was unreachable). (#1105 PR 2, J3: the
+    same-alert sibling union this set short-circuited — `render.sibling_union` — left the
+    judge, so the union half and its positive control went with it.)"""
     family = S.mod("learning.judge.family")
-    render = S.mod("learning.judge.render")
     ep = _all_cut_short(tmp_path)
     graded = S.graded(ep)
     assert [label for label, row in graded.items() if family.is_gradable_row(row)] == [], (
         "an episode whose every non-control world was cut short still has a measuring world")
-
-    rows, _meta = render.sibling_union(None, alert_id=S.ALERT_ID, source_run_id=None)
-    assert rows == [], "the short-circuited union walked something and returned rows"
-
-    base, src = S.runs_base(tmp_path / "populated")
-    walked, _meta = render.sibling_union(base, alert_id=S.ALERT_ID, source_run_id=None)
-    assert isinstance(walked, list), (
-        "the control failed: the union over a real runs base did not answer with rows at all, "
-        "so the empty answer above proves nothing about the short-circuit")
-    assert src.exists()
 
 
 def test_pass_lessons_commit_still_returns_none_when_the_gradable_set_is_empty(tmp_path):
@@ -295,10 +283,10 @@ def test_the_sibling_prior_walks_a_runs_base_that_now_holds_run_end_records(tmp_
     scrub-verdict sidecar has sat there since #771), and every walker screens.
 
     Probe #32's own recommended test (claim p32): the tolerance is currently guaranteed by
-    seven independent screens rather than by one rule, and nothing pins that they all keep
-    screening. Three walkers are driven, not one, because a rule that lives in seven places can
-    be lost in one of them: the sibling prior, the held-out index and the lesson tracer."""
-    render = S.mod("learning.judge.render")
+    screening. Two walkers are driven, not one, because a rule that lives in seven places can
+    be lost in one of them: the held-out index and the lesson tracer. (#1105 PR 2, J3: the third,
+    the judge's sibling prior `render.sibling_union`, left the judge, and its half went with
+    it.)"""
     trace_lesson = S.mod("learning.ops.trace_lesson")
     base, src = S.runs_base(tmp_path)
     # The lesson tracer only counts a run dir that LOADED the lesson, so the fixture gives it
@@ -307,24 +295,24 @@ def test_the_sibling_prior_walks_a_runs_base_that_now_holds_run_end_records(tmp_
     (src / "lessons_loaded.jsonl").write_text(
         json.dumps({"lesson_name": lesson, "ts": "2026-09-16T11:00:00Z"}) + "\n",
         encoding="utf-8")
-    before = render.sibling_union(base, alert_id=S.ALERT_ID, source_run_id=None)
     slugs = [src.name]
     index_before = S.mod("evals.held_out").index_runs(slugs, base)
-    traced_before = trace_lesson.in_context_cases(lesson, None, base)
+    # #1105 PR 2 (declared change 10, J8): the tracer walks the tenant's own runs, by id
+    # (`tenant_runs` lists them under the repository's listing rule).
+    traced_before = trace_lesson.in_context_cases(
+        lesson, None, trace_lesson.tenant_runs(base.parent.name))
     assert traced_before, (
         "the fixture failed: the lesson tracer found no case to count, so its walk answers the "
         "empty list whatever sits beside the run dir")
     S.plant_sidecar(src, truncated_by="request-limit")
     assert S.sidecar_path(src).parent == base, (
         "the fixture did not put the new leaf under the runs base, so this walks nothing new")
-    assert render.sibling_union(base, alert_id=S.ALERT_ID, source_run_id=None) == before, (
-        "the sibling prior's walk answered differently once a run-end record sat beside the "
-        "run dir")
     assert S.mod("evals.held_out").index_runs(slugs, base) == index_before, (
         "the held-out index answered differently once a run-end record sat beside the run dir")
-    assert trace_lesson.in_context_cases(lesson, None, base) == traced_before, (
+    assert trace_lesson.in_context_cases(
+            lesson, None, trace_lesson.tenant_runs(base.parent.name)) == traced_before, (
         "the lesson tracer's walk answered differently once a run-end record sat beside the "
-        "run dir — the third of the seven screens the docstring names")
+        "run dir — the second of the seven screens the docstring names")
 
 
 def test_the_review_record_and_the_provenance_stamp_are_unchanged_for_a_cut_short_world(

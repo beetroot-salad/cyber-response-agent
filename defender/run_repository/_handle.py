@@ -1,12 +1,13 @@
 """The file-backed `Run` handle: five sub-collections, a `RunRecord` value object, and a
 per-kind `RecordHandle` every record accessor answers.
 
-`Run.for_tenant(tenant_id, run_id, *, runs_base, io=)` is the constructor run setup uses; it
-refuses a runs folder with no tenant record. `Run.at(directory)` is the eval/fixture/tooling
-escape hatch with no runs base. `Run.under` builds the handle with no I/O: `for_tenant` uses it
-after judging the record, and so does the repository's `open_run`, which judged the record
-through its own held runs folder. Outside the package every constructor is gated by
-`scripts/lint/lint_run_layout_imports.py`; application code gets a `Run` from `open_run`.
+`Run.for_tenant(tenant_id, run_id, *, runs_base, io=)` is the constructor the repository's
+creates use; it refuses a runs folder with no tenant record. `Run.at(directory)` is the
+eval/fixture/tooling escape hatch with no runs base. `Run.under` builds the handle with no I/O:
+`for_tenant` uses it after judging the record, and so does the repository's `open`, which
+judged the record through its own held runs folder. Outside the package every constructor is
+gated by `scripts/lint/lint_run_layout_imports.py`; application code gets a `Run` from its
+tenant's repository (`tenant.runs_repository().open(run_id)`, `.create`, or an episode view's).
 
 Every accessor answers a `RecordHandle` (`.path`, `.read`, and the record's own write verb),
 never parsed contents. Asking for `.path` creates nothing; writes create the holding directory
@@ -21,10 +22,11 @@ db. The session db itself is opened through `session_store.open_store`. The two 
 """
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -205,7 +207,8 @@ class RecordHandle:
     def _do_open(self):
         # Resolve first so the owner's refusals apply to `.open()` as to `.path`.
         _ = self.path
-        return self.open_store(case_id=self._lineage_id, runs_base=self._sessions_runs_base)
+        return self.open_store(case_id=self._lineage_id,
+                               sessions=SessionPaths(self._sessions_runs_base))
 
 
 class _RecordHandleGroup:
@@ -295,6 +298,39 @@ class Run:
     def subcollections(self) -> tuple[str, ...]:
         return GROUPS
 
+    @property
+    def id(self) -> RunId:
+        """The address's run half, as a `RunId` (the run folder's own name, which the
+        constructors admitted). Not `run_id`: that is one of the twelve descriptive fields,
+        which live on `RunRecord` (fork D-F2) — `run.record.run_id` is what the stamp says."""
+        return RunId.parse(self.run_dir.name)
+
+    def runs_base_export(self) -> str:
+        """The value `DEFENDER_RUNS_BASE` carries for this run's children (its container), as
+        the layout owner hands it out (`RunPaths.runs_base_export`, #1105 PR 2)."""
+        return RunPaths(self.run_dir).runs_base_export()
+
+    def make_run_dir(self) -> None:
+        """Make the run folder and its `gather_raw/` (run setup), judged component by component
+        from the container — the trust root this handle holds — so a link at the run id or at
+        `gather_raw` is refused and nothing above the container is judged. The container is
+        never handed out for it (#1105 PR 2, J15)."""
+        self._io.guarded_mkdir(RunPaths(self.run_dir).gather_raw,
+                               base=self._runs_base_for("make_run_dir", "gather_raw"))
+
+    @contextlib.contextmanager
+    def reader(self) -> Iterator[_real_io.Bound]:
+        """A no-follow reader over this run's folder (#1105 D-read), for a caller that reads the
+        run's records as one bound tree (the episode page's per-arm reads): the container is
+        held no-follow — a link there is refused — and every read walks no-follow below it,
+        so the caller formats no path. Held for the `with` block only. A handle built from a
+        bare directory (`Run.at`) holds no container and refuses (`ValueError`)."""
+        held = self._io.hold(self._runs_base_for("reader", "run folder"), follow=False)
+        try:
+            yield held.view().under(self.run_dir.name)
+        finally:
+            held.close()
+
     def _record_partial_failure(self, note: str) -> None:
         self.partial_failures = (*self.partial_failures, note)
 
@@ -363,7 +399,7 @@ class Run:
         cls, runs_base: Path, run_id: str | RunId, *, io: Any = _real_io,
         tenant_id: str | None = None,
     ) -> Run:
-        """The no-I/O builder `for_tenant` and `open_run` share — not a public front door. The
+        """The no-I/O builder `for_tenant` and the repository's `open` share — not a public front door. The
         id is a `RunId`, or text `RunId.parse` admits (`RunRefused` otherwise): the repository
         has one admission rule, its 206-byte bound included, so no handle is built for a run
         whose sidecar files could not be named."""

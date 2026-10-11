@@ -13,9 +13,9 @@ THREE §7 RESOLUTIONS ARE APPLIED HERE AS SETTLED:
 * **J8** — the sibling's recorded commit is resolved to a SHA once per pass and threaded; an
   absent commit or path renders as an explicit `unavailable: <reason>` line rather than failing
   the world; an `allow_dirty` family is surfaced as a caveat.
-* **J9** — the union is the OPERATOR's runs base, the source run the episode branched from is
-  EXCLUDED and said to be, only runs that reached a close are included, an unreadable sibling is
-  skipped with a counted note, and the union is computed once per pass.
+* **J9** — RETIRED by #1105 PR 2 (J3): the same-alert sibling union over the operator's runs
+  base, and its trial spread, left the judge's input — the judge reads only the episode it is
+  handed — and the tests that pinned the union went with it.
 * **J14** — the withholding's scope is stated across ALL FOUR views, not the manifest alone.
 
 RED against `d1b8b06a`: `learning/judge/render.py` does not exist, no reader anywhere indexes
@@ -47,7 +47,7 @@ def _render():
     return J.mod("learning.judge.render")
 
 
-def _prompts(tmp_path, ep, *, runs_base=None, **kw):
+def _prompts(tmp_path, ep, **kw):
     """Drive the real episode-grading pass and hand back what the model seam was SHOWN.
 
     Every payload assertion in this file reads `judge.prompts`, never the canned reply: a fake
@@ -55,9 +55,8 @@ def _prompts(tmp_path, ep, *, runs_base=None, **kw):
     channel is what O4/O5/O9 are about.
     """
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    J.mod("learning.judge").grade_episode(
-        ep, judge=judge, runs_base=runs_base if runs_base is not None
-        else tmp_path / "defender-runs", **{"state": _state1135.env_state(), **kw})
+    J.grade_at(
+        ep, judge=judge, **{"state": _state1135.env_state(), **kw})
     return judge
 
 
@@ -68,12 +67,13 @@ def _prompts(tmp_path, ep, *, runs_base=None, **kw):
 
 def test_921_judge_input_carries_per_lead_chain_coverage_siblings_lessons_spread(tmp_path):
     """The rendered input carries, PER LEAD, goal -> params -> payload -> summary ->
-    resolutions, plus coverage against the discriminator, the sibling trials of the same
-    alert, the lessons loaded, and the trial spread.
+    resolutions, plus coverage against the discriminator and the lessons loaded.
 
     A judge input built from the two documents alone is O4's stated failing mode and is exactly
-    what scored 0.2-0.3/3 while inventing 2.0-2.8 false findings per reply (C9). All four views
-    are asserted as present, because the measured collapse was of the whole set.
+    what scored 0.2-0.3/3 while inventing 2.0-2.8 false findings per reply (C9). Every view
+    is asserted as present, because the measured collapse was of the whole set. (#1105 PR 2,
+    J3: the same-alert sibling union and its trial spread left the judge's input — the judge
+    reads only the episode it is handed — so their two assertions went with them.)
 
     `document_rows` — the lead's raw queries-table rows, stringified whole — left the chain with
     #1017 (D3): nothing in the prompt can act on `system_key`, `payload_sha256`, `payload_path`,
@@ -82,8 +82,7 @@ def test_921_judge_input_carries_per_lead_chain_coverage_siblings_lessons_spread
     `tests/e2e/test_1017_query_row_surface.py` pins what the leads view may and may not carry.
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    base, _src = J.runs_base(tmp_path)
-    judge_input = _render().render(ep, "b", runs_base=base)
+    judge_input = _render().render(ep, "b")
 
     chain = judge_input.leads["l-001"]
     for link in ("goal", "params", "payload", "summary", "resolutions"):
@@ -91,9 +90,7 @@ def test_921_judge_input_carries_per_lead_chain_coverage_siblings_lessons_spread
     assert "document_rows" not in chain, \
         "the per-lead chain still carries the raw row dump #1017 removed"
     assert judge_input.calls, "the per-call view (#1224's successor to coverage) is empty"
-    assert judge_input.siblings is not None, "the sibling-trials view is absent, not empty"
     assert judge_input.lessons, "the lessons-loaded view is empty"
-    assert judge_input.spread is not None, "the trial spread is absent"
 
 
 def test_921_call_rows_carry_window_and_scope_key_against_the_discriminator(tmp_path):
@@ -105,8 +102,7 @@ def test_921_call_rows_carry_window_and_scope_key_against_the_discriminator(tmp_
     family's predicate (`holding_system` is retired with cluster staging).
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    base, _src = J.runs_base(tmp_path)
-    judge_input = _render().render(ep, "b", runs_base=base)
+    judge_input = _render().render(ep, "b")
 
     assert judge_input.calls, "no call rows to check"
     for row in judge_input.calls:
@@ -117,28 +113,6 @@ def test_921_call_rows_carry_window_and_scope_key_against_the_discriminator(tmp_
     assert '"scope_key": "host.name"' in calls, calls
     assert '"window": "24h"' in calls, calls
     assert judge_input.discriminator["predicate"] in judge_input.manifest_text
-
-
-def test_921_sibling_union_is_the_runs_base_trials_sharing_the_alert_id(tmp_path):
-    """The sibling union is the runs sharing the alert's `alert_id`.
-
-    No reader at base indexes the runs base by `alert_id` — the queue's grouping key is
-    `alert_rule_key`, a different key — so this is a NEW walk that opens each candidate run's
-    `alert.json`, a file that is model-writable by construction. Driven with two runs under one
-    alert id and one under another, so the union is a selection rather than "everything found".
-    """
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    base, _src = J.runs_base(tmp_path)
-    for name, alert in (("trial-1", J.ALERT_ID), ("trial-2", J.ALERT_ID),
-                        ("other", "unrelated-rule")):
-        run = base / name
-        run.mkdir(parents=True, exist_ok=True)
-        (run / "alert.json").write_text(json.dumps({"alert_id": alert}), encoding="utf-8")
-        (run / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-
-    union = {row["run_id"] for row in _render().render(ep, "b", runs_base=base).siblings}
-    assert {"trial-1", "trial-2"} <= union
-    assert "other" not in union, "a run under a different alert id entered the union"
 
 
 def test_921_reply_without_the_three_pass_tables_is_refused(tmp_path):
@@ -259,81 +233,6 @@ def test_921_graded_world_keeps_its_own_facts_and_is_not_withheld(tmp_path):
     assert "withheld" not in graded_block, "the graded world's facts were marked withheld"
 
 
-def test_921_first_run_alert_coverage_view_states_the_empty_union(tmp_path):
-    """A first-run alert has an empty sibling union and an empty spread, and the coverage view
-    SAYS SO explicitly.
-
-    Nothing is inferred from the absence — an unstated absence is what a model fills in, and
-    C11 measured what a model fills a gap with. Driven against a runs base holding no run under
-    this alert id at all.
-    """
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    empty_base = tmp_path / "empty-runs"
-    empty_base.mkdir(parents=True, exist_ok=True)
-    judge_input = _render().render(ep, "b", runs_base=empty_base)
-
-    assert judge_input.siblings == []
-    assert judge_input.spread == []
-    rendered = judge_input.as_prompt_sections()["calls"]
-    assert "no sibling" in rendered.lower() or "first run" in rendered.lower(), (
-        "the call view (#1224's successor to coverage) is silent about an empty union; "
-        "silence is what a model fills in")
-
-
-def test_921_the_sibling_union_excludes_the_source_run_and_unclosed_siblings(tmp_path):
-    """J9, settled with the human: the union is the OPERATOR's runs base; the SOURCE RUN the
-    episode branched from is EXCLUDED and the coverage view says so; only runs that reached a
-    close are included; an unreadable sibling is skipped with a COUNTED note; and the union is
-    computed ONCE per pass and threaded to every world's render.
-
-    This is why J9 is not hygiene. If the union were the runs base AND included the source run,
-    the judge would be shown the run's own close as a "sibling trial" — precisely the `current`
-    arm's measured failure (C9: 2.0-2.8 false findings per reply, restating the run's own
-    close), so the default answer would partly undo the experiment this whole design rests on.
-
-    The episode's own `{episode_dir}/runs/` are the graded trajectories themselves, not
-    independent trials, and are not the root scanned.
-    """
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")],
-                                               "c": [J.oracle_row("c")]})
-    base, src = J.runs_base(tmp_path)
-    (src / "alert.json").write_text(json.dumps({"alert_id": J.ALERT_ID}), encoding="utf-8")
-
-    closed = base / "closed-trial"
-    closed.mkdir(parents=True, exist_ok=True)
-    (closed / "alert.json").write_text(json.dumps({"alert_id": J.ALERT_ID}), encoding="utf-8")
-    (closed / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-
-    in_flight = base / "in-flight-trial"
-    in_flight.mkdir(parents=True, exist_ok=True)
-    (in_flight / "alert.json").write_text(json.dumps({"alert_id": J.ALERT_ID}), encoding="utf-8")
-
-    unreadable = base / "unreadable-trial"
-    unreadable.mkdir(parents=True, exist_ok=True)
-    (unreadable / "alert.json").write_bytes(b"\xff\xfe not json")
-
-    # The episode's own sibling runs live here, deliberately outside the operator's base.
-    (ep / "runs").mkdir(parents=True, exist_ok=True)
-    own = ep / "runs" / f"{J.EPISODE_ID}-b"
-    own.mkdir(parents=True, exist_ok=True)
-    (own / "alert.json").write_text(json.dumps({"alert_id": J.ALERT_ID}), encoding="utf-8")
-    (own / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-
-    view = _render().render(ep, "b", runs_base=base)
-    union = {row["run_id"] for row in view.siblings}
-    assert union == {"closed-trial"}, f"the union is {sorted(union)}"
-    assert view.union_notes["source_run_excluded"] == src.name, (
-        "the source run was excluded silently; the coverage view has to say so")
-    assert view.union_notes["skipped_unreadable"] == 1
-    assert view.union_notes["skipped_unclosed"] == 1
-
-    # Computed once per pass and threaded: both worlds see the identical union object's rows.
-    other = _render().render(ep, "c", runs_base=base)
-    judge = _prompts(tmp_path, ep, runs_base=base, draws=1)
-    assert other.siblings == view.siblings
-    assert judge.prompts[0].count("closed-trial") >= 1
-
-
 # ---------------------------------------------------------------------------------------
 # O8 / D7 — reproducible from the archive, the runs base and the checkout
 # ---------------------------------------------------------------------------------------
@@ -350,13 +249,12 @@ def test_921_render_reads_no_sibling_run_dir(tmp_path):
     import shutil
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    base, _src = J.runs_base(tmp_path)
     runs = ep / "runs"
     runs.mkdir(parents=True, exist_ok=True)
     (runs / f"{J.EPISODE_ID}-b").mkdir(parents=True, exist_ok=True)
     shutil.rmtree(runs)
 
-    view = _render().render(ep, "b", runs_base=base)
+    view = _render().render(ep, "b")
     assert view.leads, "the per-lead chain was empty once the run dir was gone"
     assert view.lessons, "the lessons view needed the sibling's run dir"
 
@@ -372,14 +270,13 @@ def test_921_render_builds_the_input_from_the_archive_the_runs_base_and_the_comm
     import shutil
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    base, _src = J.runs_base(tmp_path)
     runs = ep / "runs"
     J.sibling_run_dir(runs, "b")
     git_show = J.FakeGitShow(bodies={("deadbee", "defender/lessons/L1.md"): "# L1 body\n"})
 
-    with_dirs = _render().render(ep, "b", runs_base=base, git_show=git_show)
+    with_dirs = _render().render(ep, "b", git_show=git_show)
     shutil.rmtree(runs)
-    without = _render().render(ep, "b", runs_base=base, git_show=git_show)
+    without = _render().render(ep, "b", git_show=git_show)
 
     assert with_dirs.as_prompt_sections() == without.as_prompt_sections(), (
         "the rendered input changed when the sibling run dirs were removed")
@@ -471,14 +368,14 @@ def test_921_the_archived_directory_input_refuses_a_non_artifact_entry_and_keeps
     # that world LOUDLY and says which input was short.
     partial = J.accepted_episode(tmp_path / "partial",
                                  ledgers={"b": [J.oracle_row("b")], "c": []})
-    assert J.rows(J.grade(partial, runs_base=tmp_path / "defender-runs"))["b"].get(
+    assert J.rows(J.grade(partial))["b"].get(
         "ungradable") is not True, (
         "the control failed: the intact episode did not grade world b at all")
     # The control's final grade would short-circuit the re-grade (`judge.yaml` is idempotent).
     (partial / "judge.yaml").unlink()
     (partial / "worlds" / "b" / "gather_summaries" / "l-001.md").unlink()
 
-    rows = J.rows(J.grade(partial, runs_base=tmp_path / "defender-runs"))
+    rows = J.rows(J.grade(partial))
     assert rows["b"].get("malformed") is True, (
         "a world the archive left short graded normally, on a thinner view than it appears to "
         "have")
@@ -499,11 +396,10 @@ def test_921_lesson_bodies_are_not_archived_and_are_read_at_the_recorded_commit(
     that shows no lesson at all.
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    base, _src = J.runs_base(tmp_path)
     git_show = J.FakeGitShow(
         bodies={("deadbee", "defender/lessons/L1.md"): "# L1\n\nthe body\n"})
 
-    view = _render().render(ep, "b", runs_base=base, git_show=git_show)
+    view = _render().render(ep, "b", git_show=git_show)
     assert git_show.asked == [("deadbee", "defender/lessons/L1.md")], (
         "the lesson body was not read at the sibling's recorded commit")
     assert "the body" in view.as_prompt_sections()["lessons"]
@@ -521,7 +417,6 @@ def test_921_a_lesson_recorded_on_several_rows_renders_its_body_once_and_says_ho
     told or it weighs the body as read. Control on the same render: two DIFFERENT lessons
     still render two bodies."""
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    base, _src = J.runs_base(tmp_path)
     rows = [
         {"lesson_name": "L1", "ts": "2026-07-28T17:00:00Z", "kind": "read", "role": "main"},
         {"lesson_name": "L1", "ts": "2026-07-28T17:01:00Z", "kind": "push", "role": "main"},
@@ -536,7 +431,7 @@ def test_921_a_lesson_recorded_on_several_rows_renders_its_body_once_and_says_ho
     })
 
     lessons = _render().render(
-        ep, "b", runs_base=base, git_show=git_show).as_prompt_sections()["lessons"]
+        ep, "b", git_show=git_show).as_prompt_sections()["lessons"]
     assert lessons.count("the first body") == 1, (
         f"a lesson on three rows rendered its body {lessons.count('the first body')} times")
     assert lessons.count("the second body") == 1, "control: the other lesson still renders"
@@ -567,14 +462,13 @@ def test_921_an_unavailable_lesson_body_is_marked_rather_than_rendered_as_nothin
     absence without being able to tell them apart.
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    base, _src = J.runs_base(tmp_path)
 
     for commit, note in (("cafebabe", "absent commit"), ("deadbee", "absent path")):
         (ep / "worlds" / "b" / "provenance.json").write_text(
             json.dumps(J.provenance_record(commit=commit)), encoding="utf-8")
         git_show = J.FakeGitShow(bodies={})
         lessons = _render().render(
-            ep, "b", runs_base=base, git_show=git_show).as_prompt_sections()["lessons"]
+            ep, "b", git_show=git_show).as_prompt_sections()["lessons"]
         assert git_show.asked, f"{note}: the render never asked for the body"
         assert "unavailable" in lessons.lower(), (
             f"{note}: the slot rendered as nothing, which the judge reads as a lesson with no "
@@ -596,9 +490,9 @@ def test_921_the_lesson_commit_is_pinned_once_per_pass_and_allow_dirty_is_a_cave
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")],
                                                "c": [J.oracle_row("c")]})
     git_show = J.FakeGitShow(bodies={("deadbee", "defender/lessons/L1.md"): "# L1 body\n"})
-    J.mod("learning.judge").grade_episode(
+    J.grade_at(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-        runs_base=tmp_path / "defender-runs", git_show=git_show, draws=1,
+        git_show=git_show, draws=1,
         state=_state1135.env_state())
 
     assert set(git_show.revs) == {"deadbee"}, (
@@ -609,8 +503,6 @@ def test_921_the_lesson_commit_is_pinned_once_per_pass_and_allow_dirty_is_a_cave
     # A dirty sibling tree is a caveat in the judge's own input, not a silent equivalence.
     dirty = J.accepted_episode(tmp_path / "dirty", ledgers={"b": [J.oracle_row("b")], "c": []},
                                dirty=True)
-    base, _src = J.runs_base(tmp_path / "dirty")
-    lessons = _render().render(dirty, "b", runs_base=base,
-                               git_show=J.FakeGitShow(bodies={})).as_prompt_sections()["lessons"]
+    lessons = _render().render(dirty, "b", git_show=J.FakeGitShow(bodies={})).as_prompt_sections()["lessons"]
     assert "dirty" in lessons.lower(), (
         "an allow_dirty family's lesson view claims a reproducibility it does not have")

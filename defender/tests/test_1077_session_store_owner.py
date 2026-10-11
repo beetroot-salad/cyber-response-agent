@@ -84,10 +84,10 @@ def test_store_path_for_refuses_an_id_that_is_not_case_stable(runs_base, case_id
     lowercase spelling of the same id resolves, to exactly the owner's path."""
     _is_the_subject(case_id)
     with pytest.raises(InvalidCaseId):
-        store_path_for(case_id, runs_base=runs_base)
+        store_path_for(case_id, sessions=SessionPaths(runs_base))
 
     lower = case_id.casefold()
-    assert store_path_for(lower, runs_base=runs_base) == _owner_path(runs_base, lower), (
+    assert store_path_for(lower, sessions=SessionPaths(runs_base)) == _owner_path(runs_base, lower), (
         "positive control: a case-stable id resolves to the owner's path")
 
 
@@ -108,7 +108,7 @@ def test_open_store_refuses_an_id_that_is_not_case_stable_and_creates_nothing(
         before = _tree(tmp_path)
         raised: BaseException | None = None
         try:
-            handle = open_store(case_id=case_id, runs_base=runs_base)
+            handle = open_store(case_id=case_id, sessions=SessionPaths(runs_base))
         except InvalidCaseId as exc:
             raised = exc
         else:
@@ -121,7 +121,7 @@ def test_open_store_refuses_an_id_that_is_not_case_stable_and_creates_nothing(
 
     refuses_and_creates_nothing("before any store exists beside the runs base")
 
-    with open_store(case_id=lower, runs_base=runs_base) as handle:
+    with open_store(case_id=lower, sessions=SessionPaths(runs_base)) as handle:
         assert handle.path == _owner_path(runs_base, lower), (
             "positive control: the lowercase id's store is not at the owner's path")
         assert handle.path.is_file(), "positive control: the lowercase id opened no store file"
@@ -136,8 +136,8 @@ def test_store_path_for_refuses_a_value_that_is_not_a_string(runs_base, case_id)
     (those escape the resume door's handler and take the run down). Positive control: a
     well-formed id resolves."""
     with pytest.raises(InvalidCaseId):
-        store_path_for(case_id, runs_base=runs_base)
-    assert store_path_for("case-alpha", runs_base=runs_base) == _owner_path(
+        store_path_for(case_id, sessions=SessionPaths(runs_base))
+    assert store_path_for("case-alpha", sessions=SessionPaths(runs_base)) == _owner_path(
         runs_base, "case-alpha")
 
 
@@ -148,7 +148,7 @@ def test_the_store_and_the_owner_agree_on_every_admitted_id(runs_base, case_id):
     not only the id the other tests use."""
     assert CASE_ID_RE.match(case_id)
     assert case_id == case_id.casefold()
-    assert store_path_for(case_id, runs_base=runs_base) == _owner_path(runs_base, case_id)
+    assert store_path_for(case_id, sessions=SessionPaths(runs_base)) == _owner_path(runs_base, case_id)
 
 
 def test_the_store_owner_is_built_from_the_runs_base_and_run_paths_answers_through_it(
@@ -160,7 +160,7 @@ def test_the_store_owner_is_built_from_the_runs_base_and_run_paths_answers_throu
     run = RunPaths(runs_base / "any-run")
     assert owner.sessions_dir == run.sessions_dir(runs_base) == runs_base.parent / "sessions"
     assert owner.session_db("case-alpha") == run.session_db(runs_base, "case-alpha") == (
-        store_path_for("case-alpha", runs_base=runs_base))
+        store_path_for("case-alpha", sessions=SessionPaths(runs_base)))
     assert owner.session_db("case-alpha").parent == owner.sessions_dir
     assert owner.sessions_dir.parent == owner.trust_root
     for ask in (lambda: owner.session_db("Case-Alpha"),
@@ -181,7 +181,7 @@ def test_a_fresh_run_handed_a_case_unstable_id_ends_through_the_handled_store_ex
     before = _tree(tmp_path)
 
     def mixed_case_factory(case_id: str, rd: Path):
-        return open_store(case_id=f"Case-{case_id}", runs_base=rd.parent)
+        return open_store(case_id=f"Case-{case_id}", sessions=SessionPaths(rd.parent))
 
     summary = replay.drive(run_dir, run_id="1077-mixed-fresh", main=replay.ReplayFn([
         replay.Turn(text="Nothing to do; stopping."),

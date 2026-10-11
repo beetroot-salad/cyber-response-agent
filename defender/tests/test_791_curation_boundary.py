@@ -39,7 +39,7 @@ from defender import run as run_py  # noqa: E402
 from defender import run_common  # noqa: E402
 from defender.learning.core import drains  # noqa: E402
 from defender.runtime import scrub as scrub_mod  # noqa: E402
-from defender.tests._state1135 import set_state_dir  # noqa: E402
+from defender.tests._state1135 import curation_run_dir, run_of, set_state_dir  # noqa: E402
 from defender.tests._spec791 import (  # noqa: E402
     SCRUB_PROPERTY_TEST,
     TAIL_SEAM,
@@ -72,10 +72,25 @@ def state(tmp_path, monkeypatch):
     return loop_paths(tmp_path)
 
 
-def _certified_run(tmp_path, *, name="case-791", alert_bytes=None) -> Path:
-    run_dir = make_run_dir(tmp_path, name=name, disposition="benign", alert_bytes=alert_bytes)
+def _certified_run(*, name="case-791", alert_bytes=None) -> Path:
+    """A finished, certified natural run `name`, where run setup leaves one (#1105 PR 2):
+    `<data root>/<T>/runs/<name>` under a real tenant (`curation_run_dir`), so the curation row
+    it files is an address the drain can rehydrate. Hand it to run end as `run_of(run_dir)`."""
+    run_dir = make_run_dir(curation_run_dir(name).parent, name=name, disposition="benign",
+                           alert_bytes=alert_bytes)
     scrub_mod.scrub(run_dir)
     return run_dir
+
+
+def _opened(body: dict) -> Path:
+    """The run folder a curation row's address opens to, the way the drain rehydrates it: its
+    tenant accepted under the data root, the run resolved through that tenant's repository."""
+    from defender import _paths, _tenant
+    from defender.run_repository import RunAddress
+
+    tenant = _tenant.accept_tenant(_tenant.resolve_data_root(), body["tenant_id"],
+                                   defender_dir=_paths.process_defender_dir())
+    return tenant.runs_repository().resolve(RunAddress(body["tenant_id"], body["run_id"])).run_dir
 
 
 def _held_out_set(tmp_path, alert_bytes: bytes) -> Path:
@@ -140,8 +155,8 @@ def test_791_finished_investigation_drives_catalog_curation(tmp_path, state):
     fire" is not evidence the lane is alive — the lane has to be observed consuming the
     request. The placement is cheap because the marker is byte-identical to today's and the
     lane already consumes the INVESTIGATION run dir, not the learning one (E9/PR5)."""
-    run_dir = _certified_run(tmp_path)
-    assert run_common.enqueue_curation(run_dir, run_dir / "alert.json") is True
+    run_dir = _certified_run()
+    assert run_common.enqueue_curation(run_of(run_dir), run_dir / "alert.json") is True
 
     assert author_markers(state), "the investigation boundary asked for no curation"
 
@@ -149,7 +164,7 @@ def test_791_finished_investigation_drives_catalog_curation(tmp_path, state):
     branch = SpecBranch(tmp_path / "worktrees")
     rc = drains.lead_author_drain(
         state,
-        run_lead_author=lambda _paths, _state, rd, *, box=None, **_kw: served.append(rd),
+        run_lead_author=lambda _paths, _state, run, *, box=None, **_kw: served.append(run.run_dir),
         run_pitfalls=lambda *_a, **_kw: 0,
         branch=branch, start_box=noop_start_box, stop_box=noop_stop_box, scrub=noop_scrub,
     )
@@ -167,17 +182,20 @@ def test_791_the_curation_marker_names_the_case_and_the_run_dir(tmp_path, state)
     on the case means the request's identity no longer determines the run dir it points at. The
     run dir must still be carried and must still resolve, because it is the only thing the
     drain hands the curator."""
-    run_dir = _certified_run(tmp_path)
-    run_common.enqueue_curation(run_dir, run_dir / "alert.json")
+    run_dir = _certified_run()
+    run_common.enqueue_curation(run_of(run_dir), run_dir / "alert.json")
 
     markers = sorted((state.state_root / "author-queue").glob("*.json"))
     assert len(markers) == 1
     body = marker_body(markers[0])
 
     assert body.get("case_id"), f"the curation request names no case: {body}"
-    assert body.get("run_dir"), f"the curation request carries no run dir: {body}"
-    assert Path(body["run_dir"]).is_dir(), "the run dir the drain would hand the curator is gone"
-    assert Path(body["run_dir"]).resolve() == run_dir.resolve()
+    # #1105 PR 2 declared change 8: the request carries the run's address, where it carried
+    # its folder; "resolvable" is the drain's own rehydration of that address.
+    assert body.get("tenant_id"), f"the curation request names no tenant: {body}"
+    assert body.get("run_id"), f"the curation request names no run: {body}"
+    assert _opened(body).is_dir(), "the run the drain would hand the curator is gone"
+    assert _opened(body).resolve() == run_dir.resolve()
 
 
 def test_791_a_retried_investigation_coalesces_onto_one_curation_request(tmp_path, state):
@@ -190,17 +208,17 @@ def test_791_a_retried_investigation_coalesces_onto_one_curation_request(tmp_pat
     ids for one case drive two curations. Accepted cost, recorded: a legitimate later
     re-investigation of the same case needs its own way to ask."""
     alert = json.dumps({"rule": {"id": "5710"}, "case": "one-and-the-same"}).encode("utf-8")
-    first = _certified_run(tmp_path, name="run-A", alert_bytes=alert)
-    second = _certified_run(tmp_path, name="run-B", alert_bytes=alert)
+    first = _certified_run(name="run-a", alert_bytes=alert)
+    second = _certified_run(name="run-b", alert_bytes=alert)
 
-    run_common.enqueue_curation(first, first / "alert.json")
-    run_common.enqueue_curation(second, second / "alert.json")
+    run_common.enqueue_curation(run_of(first), first / "alert.json")
+    run_common.enqueue_curation(run_of(second), second / "alert.json")
 
     markers = sorted((state.state_root / "author-queue").glob("*.json"))
     assert len(markers) == 1, \
         f"a retry added a second curation request instead of coalescing: {[m.name for m in markers]}"
     body = marker_body(markers[0])
-    assert Path(body["run_dir"]).resolve() == second.resolve(), \
+    assert _opened(body).resolve() == second.resolve(), \
         "the coalesced request still points at the run the retry replaced"
 
 
@@ -223,17 +241,17 @@ def test_791_a_curation_re_ask_issued_mid_drain_is_not_destroyed(tmp_path, state
     Driven the way the probe that refuted the queue's idempotence was driven: the re-ask is
     issued from inside the serve, which is the only window in which it can be destroyed."""
     alert = json.dumps({"rule": {"id": "5710"}, "case": "one-and-the-same"}).encode("utf-8")
-    first = _certified_run(tmp_path, name="run-A", alert_bytes=alert)
-    second = _certified_run(tmp_path, name="run-B", alert_bytes=alert)
-    run_common.enqueue_curation(first, first / "alert.json")
+    first = _certified_run(name="run-a", alert_bytes=alert)
+    second = _certified_run(name="run-b", alert_bytes=alert)
+    run_common.enqueue_curation(run_of(first), first / "alert.json")
 
     served: list[Path] = []
 
-    def serve_and_re_ask(_paths, _state, run_dir, *, box=None, **_kw):
-        served.append(run_dir)
+    def serve_and_re_ask(_paths, _state, run, *, box=None, **_kw):
+        served.append(run.run_dir)
         if len(served) == 1:
             # The operator re-investigates the case while the lane is curating it.
-            run_common.enqueue_curation(second, second / "alert.json")
+            run_common.enqueue_curation(run_of(second), second / "alert.json")
 
     def drain() -> None:
         drains.lead_author_drain(
@@ -271,11 +289,11 @@ def test_791_a_failed_curation_write_costs_the_investigation_nothing(tmp_path, s
     The write is broken by putting a FILE where the queue directory must be — a real fault
     through the real primitive, and one that this container's uid cannot ignore the way it
     ignores a permission bit."""
-    run_dir = _certified_run(tmp_path)
+    run_dir = _certified_run()
     (state.state_root / "author-queue").parent.mkdir(parents=True, exist_ok=True)
     (state.state_root / "author-queue").write_text("not a directory\n", encoding="utf-8")
 
-    assert run_common.enqueue_curation(run_dir, run_dir / "alert.json") is False, \
+    assert run_common.enqueue_curation(run_of(run_dir), run_dir / "alert.json") is False, \
         "a failed curation write did not report itself"
 
     broken = SpecTail(state)
@@ -310,7 +328,7 @@ def test_791_curation_refuses_a_held_out_alert_copy_by_content(tmp_path, state):
     digest set is empty and the net that is semantically right is the one currently doing
     nothing (PR2b). A test leaning on the shipped set asserts nothing."""
     fixtures = _held_out_set(tmp_path, HELD_OUT_ALERT)
-    copied = _certified_run(tmp_path, name="scored-alert", alert_bytes=HELD_OUT_ALERT)
+    copied = _certified_run(name="scored-alert", alert_bytes=HELD_OUT_ALERT)
     alert = copied / "alert.json"
 
     assert run_common.is_held_out_fixture(alert, fixtures) is False, \
@@ -318,12 +336,12 @@ def test_791_curation_refuses_a_held_out_alert_copy_by_content(tmp_path, state):
         "here and this test would not be about the digest at all"
     assert run_common.is_held_out_alert_copy(alert, fixtures) is True
 
-    assert run_common.enqueue_curation(copied, alert, fixtures_dir=fixtures) is False
+    assert run_common.enqueue_curation(run_of(copied), alert, fixtures_dir=fixtures) is False
     assert author_markers(state) == [], "a held-out alert copy reached the committed catalog"
 
-    ordinary = _certified_run(tmp_path, name="ordinary")
+    ordinary = _certified_run(name="ordinary")
     assert run_common.enqueue_curation(
-        ordinary, ordinary / "alert.json", fixtures_dir=fixtures
+        run_of(ordinary), ordinary / "alert.json", fixtures_dir=fixtures
     ) is True, "the net starves curation of ordinary runs"
 
 
@@ -413,13 +431,14 @@ def test_791_enqueue_curation_cannot_be_called_unguarded(tmp_path, state):
     Driven with no caller-side check whatsoever, which is the misuse being ruled out."""
     fixtures = _held_out_set(tmp_path, HELD_OUT_ALERT)
     for label, run_dir, kw in (
-        ("truncated", _certified_run(tmp_path, name="t"), {"truncated_by": "budget"}),
+        ("truncated", _certified_run(name="t"), {"truncated_by": "budget"}),
         ("held-out-copy",
-         _certified_run(tmp_path, name="h", alert_bytes=HELD_OUT_ALERT), {}),
-        ("unverified", make_run_dir(tmp_path, name="u", disposition="benign"), {}),
+         _certified_run(name="h", alert_bytes=HELD_OUT_ALERT), {}),
+        ("unverified", make_run_dir(curation_run_dir("u").parent, name="u",
+                                    disposition="benign"), {}),
     ):
         assert run_common.enqueue_curation(
-            run_dir, run_dir / "alert.json", fixtures_dir=fixtures, **kw
+            run_of(run_dir), run_dir / "alert.json", fixtures_dir=fixtures, **kw
         ) is False, f"{label}: the unguarded call went through"
     assert author_markers(state) == [], "an unguarded call reached the committed catalog"
 

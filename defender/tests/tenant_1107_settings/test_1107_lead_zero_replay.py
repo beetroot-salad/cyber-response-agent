@@ -93,7 +93,22 @@ def _identity_worlds() -> list[dict]:
 
 
 def _resume_argv(manifest: Path) -> list[str]:
-    return H.resume_argv(manifest, "b", "--tenant", S.PLAYGROUND_ID)
+    """The sibling's command line (#1105 PR 2, declared change 6: `--tenant T --episode <id>
+    --world b`); its episode is opened under the episodes base `_sibling_episode` configures."""
+    return H.sibling_argv(manifest, "b", "--tenant", S.PLAYGROUND_ID)
+
+
+def _sibling_episode(tmp_path: Path, doc: dict, *, root: Path, monkeypatch: Any) -> Path:
+    """The episode a sibling opens by id (#1105 PR 2): under `root`, the configured episodes
+    base the sibling is pointed at, with its container made for the playground tenant as the
+    launcher's `EpisodeRuns.create_container` leaves it before the first sibling."""
+    from defender import _tenant
+
+    episode = T.episode(tmp_path, doc=doc, episode_id=T.EPISODE_ID, root=root)
+    (episode / "runs").mkdir(exist_ok=True)
+    _tenant.ensure_runs_base_record(episode / "runs", S.PLAYGROUND_ID)
+    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(root))
+    return episode
 
 
 def _jsonl_text(run_dir: Path) -> str:
@@ -308,7 +323,7 @@ def test_o5_missing_es_container_run_completes(tmp_path, monkeypatch, d9_tenant)
 
 # ---- resumed runs re-resolve at their own start --------------------------------------------------
 
-def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root):
+def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root, monkeypatch):
     """A run or a sibling world resumed after its tenant's config.env and mapping.yaml were
     edited re-resolves at the resume's own start and addresses the edited values (N7: no
     snapshot file); within the resumed run the values then stay fixed (O2)."""
@@ -336,9 +351,9 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root):
         S.mapping_path(folder).write_text(T1106.mapping_text(reporter="archived"),
                                           encoding="utf-8")
 
-    episode = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(source),
-                                                   worlds=_identity_worlds()),
-                        episode_id=T.EPISODE_ID, root=tmp_path / "episodes")
+    episode = _sibling_episode(tmp_path, T.family_doc(source_run_dir=str(source),
+                                                      worlds=_identity_worlds()),
+                               root=tmp_path / "episodes", monkeypatch=monkeypatch)
     sibling = S.RunRecorder(tmp_path / "sibling", before_lifecycle=edit_within)
     rc, refused = S.drive_run(_resume_argv(episode / "family.yaml"), sibling,
                               visualize=sibling.visualize)
@@ -364,7 +379,7 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root):
         assert S.holders(where, edited) == [], (where, S.holders(where, edited))
 
 
-def test_s7_mf7e_old_manifest_resume_runs_elastic_down(tmp_path, data_root):
+def test_s7_mf7e_old_manifest_resume_runs_elastic_down(tmp_path, data_root, monkeypatch):
     """Resuming a sibling whose manifest records no corpus patterns over a tenant with no elastic
     folder, or a bad one, proceeds: record.elastic is None or a ConfigFault, the resumed
     sibling runs with its Elastic reads failing, and nothing refuses the investigation (O5).
@@ -383,8 +398,8 @@ def test_s7_mf7e_old_manifest_resume_runs_elastic_down(tmp_path, data_root):
             S.drop_key(folder, "elastic", "ELASTIC_ES_CONTAINER")
         doc = T.family_doc(source_run_dir=str(source), worlds=_identity_worlds())
         assert "configured_patterns" not in doc, sorted(doc)
-        episode = T.episode(tmp_path, doc=doc, episode_id=T.EPISODE_ID,
-                            root=tmp_path / f"episodes-{arm}")
+        episode = _sibling_episode(tmp_path, doc, root=tmp_path / f"episodes-{arm}",
+                                   monkeypatch=monkeypatch)
         sibling = S.RunRecorder(tmp_path / f"sibling-{arm}")
 
         rc, refused = S.drive_run(_resume_argv(episode / "family.yaml"), sibling,

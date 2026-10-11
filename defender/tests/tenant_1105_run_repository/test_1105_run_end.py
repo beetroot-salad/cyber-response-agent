@@ -76,11 +76,12 @@ class _Tail(SpecTail):
         if self.fail == PAGE:
             raise run_common.VisualizeFailed("spec 1105: the page was not saved (RG-08-d)")
 
-    def enqueue(self, run_dir: Any, alert: Any, **kw: Any) -> bool:
+    def enqueue(self, run: Any, alert: Any, **kw: Any) -> bool:
+        # `run.main` hands its enqueue seam the run's `Run` (#1105 PR 2), passed on unchanged.
         self.order.append(ENQUEUE)
         if self.fail == ENQUEUE:
             raise OSError(errno.ENOSPC, "spec 1105: the queue is full (RG-08-c)")
-        return run_common.enqueue_curation(run_dir, alert, **kw)
+        return run_common.enqueue_curation(run, alert, **kw)
 
 
 def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None):

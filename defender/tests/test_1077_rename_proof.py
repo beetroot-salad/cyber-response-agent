@@ -234,10 +234,10 @@ _SESSION_NAMES = ("SESSIONS_DIRNAME", "SESSION_DB_SUFFIX")
 #: What a store module that REMEMBERS the store's names looks like — the negative control's
 #: `store_path_for`. Spliced in by AST, not by anchoring on the delegating line, so the control
 #: does not depend on how the delegation happens to be spelled.
-_HAND_COMPOSED_STORE_PATH_FOR = '''def store_path_for(case_id: str, *, runs_base: Path) -> Path:
+_HAND_COMPOSED_STORE_PATH_FOR = '''def store_path_for(case_id: str, *, sessions: SessionPaths) -> Path:
     if not isinstance(case_id, str) or not CASE_ID_RE.match(case_id):
         raise InvalidCaseId(repr(case_id))
-    return Path(runs_base).parent / "sessions" / f"{case_id}.db"
+    return Path(sessions.runs_base).parent / "sessions" / f"{case_id}.db"
 '''
 
 
@@ -363,14 +363,18 @@ def test_the_session_store_follows_the_owners_method_not_just_its_constants(tmp_
 #: owner's own answer as outside the tree, while one that asks the owner follows it.
 _TRUST_ROOT_RETURN = "return self.runs_base.parent\n"
 _TRUST_ROOT_RETURN_MOVED = f'return self.runs_base.parent.parent / "{_TOKEN}-state"\n'
-_STORE_MKDIR_ASKED = "guarded_mkdir(path.parent, base=SessionPaths(runs_base).trust_root)"
-_STORE_MKDIR_HAND_COMPOSED = "guarded_mkdir(path.parent, base=Path(runs_base).parent)"
+#: (#1105 fork S(b): the owner hands the store its path AND its mkdir root together, through the
+#: `SessionPaths` it is given; the hand-composed control re-derives the root from the runs base.)
+_STORE_MKDIR_ASKED = "guarded_mkdir(path.parent, base=root)"
+_STORE_MKDIR_HAND_COMPOSED = "guarded_mkdir(path.parent, base=Path(sessions.runs_base).parent)"
 
 _OPEN_ONE_STORE = (
     "import sys\n"
     "from pathlib import Path\n"
+    "from defender.run_repository import SessionPaths\n"
     "from defender.runtime import session_store\n"
-    "with session_store.open_store(case_id='case-alpha', runs_base=Path(sys.argv[1])) as h:\n"
+    "with session_store.open_store(case_id='case-alpha', sessions=SessionPaths(Path(sys.argv[1])))"
+    " as h:\n"
     "    print(f'STORE={h.path}')\n")
 
 

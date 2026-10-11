@@ -8,12 +8,13 @@ import subprocess
 import uuid
 from defender._model import model
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from collections.abc import Callable
 
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL,
     DrainLabel,
+    FatalConfigError,
     LEAD_AUTHOR_DRAIN_LABEL,
     LoopPaths,
     author_max_attempts,
@@ -40,6 +41,8 @@ from defender.learning.core.persist import (
 )
 from defender.learning.core.pitfalls_disposition import PitfallsDisposition
 from defender.learning.core.quarantine import preserve_tainted_tree
+# A runtime import, not a `TYPE_CHECKING` one: `ServedMarker` (a model) names it as a field.
+from defender.run_repository import Run
 from defender.learning.core.state import (
     AUTHOR_DRAIN_LOCK,
     FINDINGS,
@@ -55,6 +58,9 @@ from defender.learning.core.state import (
     StateRefused,
 )
 
+if TYPE_CHECKING:
+    from defender._tenant import Tenant
+
 _logger = logging.getLogger(__name__)
 
 
@@ -63,7 +69,7 @@ class _LeadAuthorRetry(Exception):
 
 
 def _invoke_lead_author(
-    paths: LoopPaths, state: LearningState, run_dir: Path, *, label: DrainLabel, box: Any = None,
+    paths: LoopPaths, state: LearningState, run: Run, *, label: DrainLabel, box: Any = None,
     on_done: Callable[[str | None], None], git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> None:
     """The lead-author lane's default work step for one claim. `label` is the lane's (bound in by
@@ -80,12 +86,12 @@ def _invoke_lead_author(
         rc = _run_curator_module(
             "lead_author",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             lambda mod: mod.run_under_held_queue_lock(
-                run_dir, paths=paths, state=state, trees=trees, box=box, on_done=on_done,
+                run, paths=paths, state=state, trees=trees, box=box, on_done=on_done,
                 git_timeout=git_timeout,
             ),
         )
     if rc not in (0, None):
-        raise LeadAuthorError(f"lead-author for {run_dir.name} returned rc={rc}")
+        raise LeadAuthorError(f"lead-author for {run.id} returned rc={rc}")
     if rc is None:
         raise _LeadAuthorRetry("lead-author hit a swallowed transient (rc=None)")
 
@@ -318,11 +324,13 @@ def _requeue_or_drop(state: LearningState, claim: Claimed, *, note: str) -> None
 
 @model(frozen=True)
 class ServedMarker:
-    """One lead-author request the tick served cleanly: the claim still in `inflight/`,
-    whether the curator reached the exit that records the run done (the no-executed-leads,
-    no-pending-drafts exit doesn't), and its commit (`None` for done without a commit)."""
+    """One lead-author request the tick served cleanly: the claim still in `inflight/`, the run
+    it served (opened from the claim's address), whether the curator reached the exit that
+    records the run done (the no-executed-leads, no-pending-drafts exit doesn't), and its
+    commit (`None` for done without a commit)."""
 
     claim: Claimed
+    run: Run
     done: bool
     sha: str | None
 
@@ -359,7 +367,7 @@ class BatchDisposition:
 
         for marker in self.served:
             if marker.done:
-                write_done_sentinel(marker.claim.run_dir, marker.sha)
+                write_done_sentinel(marker.run.run_dir, marker.sha)
         for marker in self.served:
             state.done(marker.claim)
         if self.pitfalls is not None:
@@ -377,15 +385,62 @@ class BatchDisposition:
         )
 
 
+def _data_root() -> Path:
+    """The configured data root — the lane's one place that reads it, asked only by a tick
+    that has a curation row queued when it starts. A missing or bad setting is the stage's
+    configuration refusal (`FatalConfigError`, raised from `resolve_data_root`'s
+    `TenantRefused`): `_run_stage` logs it on one line and exits 2."""
+    from defender import _tenant
+
+    try:
+        return _tenant.resolve_data_root()
+    except _tenant.TenantRefused as refused:
+        raise FatalConfigError(str(refused)) from refused
+
+
+def _retry_or_exhaust(
+    state: LearningState, claim: Claimed, attempts: int, max_retries: int, cause: object,
+) -> None:
+    """A transient failure of one counted attempt (`attempts`, this attempt's count): the row
+    re-queued for a later tick carrying that count, or — at `max_retries` — quarantined
+    `transient-exhausted`. The one transient lane: a lead-author run's `_LeadAuthorRetry` and a
+    row whose run cannot be reached right now both end here."""
+    if attempts >= max_retries:
+        state.quarantine(claim, f"transient-exhausted after {attempts} attempt(s): {cause!r}")
+        return
+    claim.spec["attempts"] = attempts
+    _requeue_or_drop(
+        state, claim,
+        note=f"transient on {claim.identity} (attempt {attempts}/{max_retries})",
+    )
+
+
 def _drain_lead_author_markers(
     paths: LoopPaths,
     state: LearningState,
     run_lead_author: Callable[..., None],
     *,
     box: Any = None,
+    data_root: Path,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> list[ServedMarker]:
+    """Claim the queued curation requests and serve each one's run to `run_lead_author`.
+
+    A row stores its run's address (#1105 D-stored); `data_root` is the one the tick resolved
+    before its worktree and box existed (`lead_author_drain`), and every claim is served under
+    it. A tick that resolved none (no row was queued when it started) never reaches here.
+
+    Each claim is rehydrated before it is served — its tenant accepted (once per tick: a
+    refusal is cached for the tick too), its run opened through that tenant's repository. A row
+    whose run is GONE (`RunAbsent`) is quarantined at once as `artifact-missing` (uncounted, no
+    retry). Any other refusal — the tenant's acceptance, a container that cannot be trusted or
+    read right now (`RunUnreachable`), an entry refused at the run's name — is a counted attempt
+    on the transient lane: re-queued until `LEAD_AUTHOR_MAX_RETRIES`, then quarantined
+    `transient-exhausted` (owner decision on #1236, changing rev 5.1's S9)."""
+    from defender.run_repository import RunAbsent
+
     max_retries = env_int("LEAD_AUTHOR_MAX_RETRIES", 3)
+    accepted: dict[str, Tenant | Exception] = {}
     # `case_id`: this queue's live writer (`enqueue_curation`) mints the filename from the
     # case, so that is what an unreadable row's dead letter is keyed on.
     claims = state.claim(
@@ -393,10 +448,18 @@ def _drain_lead_author_markers(
     )
     served: list[ServedMarker] = []
     for claim in claims:
-        spec, run_dir = claim.spec, claim.run_dir
+        spec = claim.spec
+        run = _rehydrate(claim, data_root, accepted)
+        if isinstance(run, RunAbsent):
+            state.quarantine(claim, "artifact-missing")
+            continue
         # Every serve is an attempt, counted before the agent runs: a claim the apply never
         # reached is reclaimed next tick, and a run that taints every tree must hit the ceiling.
         attempts = int(spec.get("attempts", 0)) + 1
+        if not isinstance(run, Run):
+            # Not reached right now (see the docstring): a counted, transient attempt.
+            _retry_or_exhaust(state, claim, attempts, max_retries, run)
+            continue
         if attempts > max_retries:
             state.quarantine(
                 claim, f"served {attempts - 1} time(s) without being recorded done")
@@ -411,28 +474,49 @@ def _drain_lead_author_markers(
             try:
                 drained = run_or_dead_letter(
                     functools.partial(
-                        run_lead_author, paths, state, run_dir, box=box, on_done=done.append,
+                        run_lead_author, paths, state, run, box=box, on_done=done.append,
                     ),
                     functools.partial(_quarantine_lead_author_failure, state, claim),
                     propagate=(_LeadAuthorRetry,),
                 )
             except _LeadAuthorRetry as e:
                 drained = False
-                if attempts >= max_retries:
-                    state.quarantine(
-                        claim, f"transient-exhausted after {attempts} attempt(s): {e!r}")
-                else:
-                    spec["attempts"] = attempts
-                    _requeue_or_drop(
-                        state, claim,
-                        note=f"transient on {claim.identity} "
-                             f"(attempt {attempts}/{max_retries})",
-                    )
+                _retry_or_exhaust(state, claim, attempts, max_retries, e)
         if drained:
             # Not unlinked here: the claim stays in `inflight/` until the tree passes the
             # scrub (`BatchDisposition.apply`).
-            served.append(ServedMarker(claim, done=bool(done), sha=done[-1] if done else None))
+            served.append(ServedMarker(claim, run=run, done=bool(done),
+                                       sha=done[-1] if done else None))
     return served
+
+
+def _rehydrate(
+    claim: Claimed, data_root: Path, accepted: dict[str, Tenant | Exception],
+) -> Run | Exception:
+    """The run `claim`'s address names: its tenant accepted under `data_root` — as a natural
+    run's acceptance has it, with no box mount beside the runs base (`box_mounted=()`), once
+    per tenant per tick, a refusal included — then the run opened through that tenant's
+    repository, which never follows a link at its name. Else the refusal, logged: the
+    tenant's `TenantRefused`, or the open's `RunRefused` (`RunAbsent` when the run is gone)."""
+    from defender import _tenant
+    from defender.run_repository import RunRefused
+
+    address = claim.address
+    key = str(address.tenant_id)
+    if key not in accepted:
+        try:
+            accepted[key] = _tenant.requested_tenant(data_root, address.tenant_id)
+        except _tenant.TenantRefused as refused:
+            _logger.warning(f"{claim.identity}: its tenant cannot be accepted ({refused})")
+            accepted[key] = refused
+    tenant = accepted[key]
+    if isinstance(tenant, Exception):
+        return tenant
+    try:
+        return tenant.runs_repository().resolve(address)
+    except RunRefused as refused:
+        _logger.warning(f"{claim.identity}: its run cannot be opened ({refused})")
+        return refused
 
 
 def _invoke_pitfalls(
@@ -504,14 +588,19 @@ def _drain_lead_author(
     run_lead_author: Callable[..., None],
     run_pitfalls: Callable[..., int],
     *,
+    data_root: Path | None,
     box: Any = None,
     lock_wait_seconds: int | None = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> BatchDisposition:
+    """The tick's work: the curation requests served under `data_root`, then the pitfalls
+    curation. `data_root` is `None` when no request was queued as the tick started
+    (`lead_author_drain`): the tick then claims none — a row that lands mid-tick waits, queued,
+    for the next tick — and only the pitfalls step runs."""
     # The batch's box is stopped between agent runs and runs only inside each spawn's
     # `box_for_run`, so no host step of the tick runs beside a process an agent left (#1195).
-    served = _drain_lead_author_markers(
-        paths, state, run_lead_author, box=box, git_timeout=git_timeout)
+    served = [] if data_root is None else _drain_lead_author_markers(
+        paths, state, run_lead_author, box=box, data_root=data_root, git_timeout=git_timeout)
     pitfalls = _drain_pitfalls(
         paths, state, run_pitfalls, box=box, lock_wait_seconds=lock_wait_seconds,
         git_timeout=git_timeout,
@@ -843,7 +932,7 @@ def lead_author_drain(
         if not locked:
             _logger.warning("lead_author_drain: another drainer holds the lock — exiting")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
             return 0
-        # The per-author queue lock (the one a by-hand `lead_author.py <run_dir>` takes) is
+        # The per-author queue lock (the one a by-hand `lead_author.py --tenant T <run_id>` takes) is
         # held for the whole tick: the `done` sentinel is only written after the scrub, and a
         # by-hand run in that gap would see no sentinel and re-serve the run. Contended, the
         # tick skips before claiming anything.
@@ -851,12 +940,19 @@ def lead_author_drain(
             if not queue_locked:
                 _logger.warning("lead_author_drain: another lead-author run holds the queue lock — skipping")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
                 return 0
+            # A queued row is served only under a data root: resolved here, once, before a
+            # worktree or a box exists (the rule above), so a missing or bad setting refuses
+            # the tick (`FatalConfigError`) with every row still queued. A tick with nothing
+            # queued now reads no root and claims no row: one that lands mid-tick waits for
+            # the next tick.
+            data_root = _data_root() if state.has_requests() else None
             return _run_worktree_batch(
                 paths, state, branch, label=LEAD_AUTHOR_DRAIN_LABEL,
                 has_work=_has_lead_author_work,
                 do_work=lambda wt_paths, *, box=None: _drain_lead_author(
                     wt_paths, state, run_lead_author, run_pitfalls, box=box,
                     lock_wait_seconds=lock_wait_seconds, git_timeout=git_timeout,
+                    data_root=data_root,
                 ),
                 start_box=start_box, stop_box=stop_box, scrub=scrub,
             )

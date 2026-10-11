@@ -67,6 +67,7 @@ from defender.tests._lead_author_1134 import (
 from defender.tests._repo import query_template, seed_skills_repo
 from defender.tests._shared_readers_1134 import RefusesFolder, kernel_watch
 from defender.tests.test_1111_rooted_io import census, in_time
+from defender.tests._state1135 import run_of
 from defender.tests.test_1134_lead_author_handle import (
     CONTENT_CASES,
     DECLARED,
@@ -221,7 +222,7 @@ def test_the_runs_commit_gate_reads_what_the_agent_left_through_the_trees(
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
-    run_dir = _run_dir(tmp_path)
+    run_dir = _run_dir()
     target = write(tmp_path / "outside" / Path(what.name).name, what.text)
     at = paths.skills_dir / what.name
 
@@ -239,7 +240,7 @@ def test_the_runs_commit_gate_reads_what_the_agent_left_through_the_trees(
     watch = {"opens": [target]} if left == "link" else {"reads": [target]}
     with lead_trees(paths) as trees, kernel_watch(**watch) as events:
         got = outcome(lambda: lead_author.run(
-            run_dir, label=LEAD, paths=paths, deps=_deps(paths, trees, spawn, [ELASTIC_LEAD])))
+            run_of(run_dir), label=LEAD, paths=paths, deps=_deps(paths, trees, spawn, [ELASTIC_LEAD])))
         seen = events()
 
     assert spawn.calls, "the agent was never reached, so the gate never ran"
@@ -377,9 +378,9 @@ def test_two_claims_over_one_paths_each_mint_through_their_own_trees(
     paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
     reached: list[str] = []
     for i, lead in enumerate((WAZUH_LEAD, ELASTIC_LEAD)):
-        run_dir = _run_dir(tmp_path / f"claim-{i}", (lead.query_id, lead.system, lead.verb))
+        run_dir = _run_dir((lead.query_id, lead.system, lead.verb), run_id=f"claim-{i}")
         try:
-            drains._invoke_lead_author(paths, _state1135.state_for_paths(paths), run_dir, label=LEAD, on_done=lambda _sha: None)
+            drains._invoke_lead_author(paths, _state1135.state_for_paths(paths), run_of(run_dir), label=LEAD, on_done=lambda _sha: None)
         except FatalConfigError:
             reached.append(lead.query_id)
 
@@ -414,7 +415,7 @@ def test_the_lift_bypass_reads_a_pending_draft_through_the_trees(
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
-    run_dir = _run_dir(tmp_path)
+    run_dir = _run_dir()
     target = write(tmp_path / "outside" / "contradicts.md", CONTRADICTING)
     at = paths.skills_dir / "elastic/_draft/contradicts.md"
     if left == "plain":
@@ -426,7 +427,7 @@ def test_the_lift_bypass_reads_a_pending_draft_through_the_trees(
 
     with lead_trees(paths) as trees, kernel_watch(reads=[target]) as events:
         got = outcome(lambda: lead_author.run(
-            run_dir, label=LEAD, paths=paths, deps=_deps(paths, trees, spawn, [])))
+            run_of(run_dir), label=LEAD, paths=paths, deps=_deps(paths, trees, spawn, [])))
         seen = events()
 
     assert seen == [], f"the hard link's outside file was read: {seen}"
@@ -456,7 +457,7 @@ def test_the_runs_catalog_loads_go_through_the_deps_held_mount(tmp_path: Path, r
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
-    run_dir = _run_dir(tmp_path)
+    run_dir = _run_dir()
     write(paths.skills_dir / TEMPLATE_NAME, marked_template("wazuh.probe"))
     lead = _lead("wazuh.probe", system="wazuh", verb="noverb", params={"index": "idx-7"})
     spawn = LeadAuthorSpawn(rc=1)
@@ -464,7 +465,7 @@ def test_the_runs_catalog_loads_go_through_the_deps_held_mount(tmp_path: Path, r
     seam = {"os_": refuser} if refused else {}
 
     with DrainTrees.open((paths.skills_dir,), **seam) as trees:
-        rc = lead_author.run(run_dir, label=LEAD, paths=paths,
+        rc = lead_author.run(run_of(run_dir), label=LEAD, paths=paths,
                              deps=_deps(paths, trees, spawn, [lead]))
 
     if not refused:

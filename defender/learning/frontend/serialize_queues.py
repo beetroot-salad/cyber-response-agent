@@ -176,7 +176,9 @@ def _channel_view(spec: _ChannelSpec, state: LearningState) -> dict:
 
 def _markers(state: LearningState) -> dict:
     """Both failed-request folders: the lead-author claim and the pending-delivery scan each
-    quarantine into one."""
+    quarantine into one. A row shows the run address a curation request stores (#1105
+    D-stored, rev 5.1 J13): `tenant_id` and `run_id`, each null when the record carries none
+    (a delivery record, or a row too broken to have one)."""
     rows: list[dict] = []
     unreadable = 0
     for queue, (found, bad) in (
@@ -186,7 +188,8 @@ def _markers(state: LearningState) -> dict:
         unreadable += bad
         rows += [
             {"queue": queue, "identity": stem, "failed": _str(spec.get("failed")),
-             "run_dir": _opt_str(spec.get("run_dir"))}
+             "tenant_id": _opt_str(spec.get("tenant_id")),
+             "run_id": _opt_str(spec.get("run_id"))}
             for stem, spec in found
         ]
     rows.sort(key=lambda r: (r["queue"], r["identity"]))

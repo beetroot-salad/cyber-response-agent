@@ -35,6 +35,7 @@ from defender.tests._declared869 import (
 from defender.runtime.verbs import read_roster
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.tests._lead_author_1134 import drafts_under, lane_tree_for, lead_deps, skills_view
+from defender.tests._state1135 import curation_run_dir, run_of
 
 #: The name driven at every composition site. It must be undeclared under BOTH membership
 #: readings (NF2): a MARKER-ONLY name is declared at the three union sites and undeclared at
@@ -187,10 +188,10 @@ def test_an_empty_declared_set_refuses_the_lead_author_lane(tmp_path, monkeypatc
     )
     assert deps.systems == frozenset()
 
-    run_dir = tmp_path / "run-x"
-    (run_dir / "gather_raw").mkdir(parents=True)
+    run_dir = curation_run_dir("run-x")
+    (run_dir / "gather_raw").mkdir()
     with pytest.raises(LeadAuthorError):
-        lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths, deps=deps)
+        lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths, deps=deps)
 
     assert spawn.calls == [], "the agent must not be spawned against an empty declared set"
     assert head_files(repo) == before

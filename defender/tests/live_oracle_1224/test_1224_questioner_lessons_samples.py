@@ -240,9 +240,8 @@ def _grade(tmp_path: Path, judge: _ScopedJudge) -> tuple[Any, Path]:
     paths = W.loop_paths(tmp_path)
     ep = S.judged_episode(tmp_path)
     S.samples_record(ep, _default_samples(S.SYSTEMS))
-    S.sym(S.JUDGE, "grade_episode")(ep, judge=judge, state=W.learning_state(paths),
-                                    runs_base=ep.parent / "runs-base", draws=1,
-                                    git_show=J.FakeGitShow())
+    J.grade_at(ep, judge=judge, state=W.learning_state(paths), draws=1,
+               git_show=J.FakeGitShow())
     return paths, ep
 
 

@@ -185,13 +185,16 @@ def test_d2_a_folder_exposes_no_public_name_beyond_path_and_ensure(opened, key):
 
 def test_d2_the_episode_and_its_worlds_expose_only_the_designs_surface(opened):
     """D2': an `Episode` answers its two doors (`open`, `create`), `.dir`, `.view()`,
-    `.close()`, and the record table's records and folders by name — its episode-root ones, and
-    `world(label)`, which answers the `world.*` ones. Nothing else is public: no accessor for the
-    held root, no second constructor, no write outside the records."""
-    top = {k for k in (*S.RECORD_VERBS, *S.FOLDERS) if not k.startswith("world.")}
+    `.close()`, and the record table's
+    records and folders by name — its episode-root ones but `runs`, which is private since
+    #1105 PR 2 (its one hand-out is `box_mounted_container`), and `world(label)`, which answers
+    the `world.*` ones. Nothing else is public: no accessor for the held root, no other
+    constructor, no write outside the records."""
+    top = {k for k in (*S.RECORD_VERBS, *S.FOLDERS)
+           if not k.startswith("world.") and k not in S.PRIVATE_FOLDERS}
     in_world = {k.removeprefix("world.") for k in (*S.RECORD_VERBS, *S.FOLDERS)
                 if k.startswith("world.")}
-    episode_class = {"open", "create", "close", "view", "world", *top}
+    episode_class = {"open", "create", "close", "view", "world", "box_mounted_container", *top}
     assert S.public_names(S.Episode()) == episode_class, (
         f"the Episode class exposes {sorted(S.public_names(S.Episode()) - episode_class)} "
         f"beyond the design's surface, and lacks {sorted(episode_class - S.public_names(S.Episode()))}")
@@ -225,11 +228,12 @@ def test_d2_each_folder_is_addressed_by_its_layout_name_and_answers_no_record_ve
 
 
 def test_d2_the_runs_folder_is_the_siblings_runs_base(tree):
-    """`episode.runs.path` is what the launcher hands siblings as their runs base: the same
-    path `cli.sibling_runs_base` answers."""
-    cli = S.mod("learning.branch.cli")
+    """The runs folder's path is the siblings' container: the same path the handle's one
+    hand-out of it, `box_mounted_container`, answers (#1105 PR 2: `cli.sibling_runs_base` is
+    gone, F-13; the container is the runs repository's episode view, built on this handle)."""
     with S.open_episode(tree.ep) as episode:
-        assert Path(episode.runs.path) == cli.sibling_runs_base(tree.ep) == tree.ep / "runs"
+        assert (Path(S.resolve(episode, "runs").path) == Path(episode.box_mounted_container)
+                == tree.ep / "runs")
 
 
 def test_d2_the_owner_spells_the_wire_log_name_under_wire_logs():

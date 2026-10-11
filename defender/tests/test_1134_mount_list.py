@@ -88,7 +88,7 @@ import pytest
 
 from defender import _io
 from defender.learning.core import config, drains
-from defender.tests._state1135 import enqueue_case, state_for_paths
+from defender.tests._state1135 import curation_run_dir, enqueue_case, state_for_paths
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL, DrainLabel, LoopPaths,
 )
@@ -1096,8 +1096,7 @@ def test_the_lead_lane_mounts_its_leafs_skills_and_its_work_step_holds_it(
     `paths` rather than the leaf, a lane that hands the box or the work step a `LoopPaths` of
     its own making, and a box and work step that disagree."""
     d = start_drive(tmp_path, LEAD, kind, prefix)
-    run_dir = tmp_path / "runs" / "run-1"
-    run_dir.mkdir(parents=True)
+    run_dir = curation_run_dir("run-1")
     with state_for_paths(d.paths) as state:
         enqueue_case(state, "case-1", run_dir)
 

@@ -802,7 +802,7 @@ def test_1204_a_read_fault_inside_the_knowledge_git_still_writes_the_whole_stamp
 def test_1204_a_fork_sibling_materialised_through_the_real_path_stamps_the_clones_commit(
         tmp_path, monkeypatch):
     """O1/D3/C3: "every executed run, fork siblings included" — a branched sibling is a `run.py
-    --resume` process that reaches the same `materialize_run`, with a `ResumeWorld` resolved
+    --episode` process (`--resume` before #1105 PR 2) that reaches the same `materialize_run`, with a `ResumeWorld` resolved
     from its episode's manifest. Stamped on a versioned tenant, the SIBLING's stamp carries
     `{"commit": <the clone's HEAD>}` beside its lineage (world, source run, branch point) — so
     `verify_family` has a knowledge commit to compare on every real sibling, not only on
@@ -817,12 +817,16 @@ def test_1204_a_fork_sibling_materialised_through_the_real_path_stamps_the_clone
     _base, src = H.tenant_source(data_root, TENANT_ID, row=False)
     episode_dir = tmp_path / "episodes" / T.EPISODE_ID
     manifest = H.family_for(src, episode_dir)
-    world = H.run_py().resume_world(
-        Episode.open(manifest.parent), "b",
-        tenant=lambda: H.T1106.run_tenant(H.accept(data_root, TENANT_ID)))
-
-    run_dir = run_common.materialize_run(
-        src / "alert.json", world.run_id, tenant=tenant, world=world).run_dir
+    with Episode.open(manifest.parent) as episode:
+        world = H.run_py().resume_world(
+            episode, "b", tenant=lambda: H.T1106.run_tenant(H.accept(data_root, TENANT_ID)))
+        # #1105 PR 2: the arm is made through the sibling's episode view, over the container
+        # the launcher made for the tenant (`family_for` plants it).
+        view = tenant.runs_repository().episode(episode.dir.name, held=episode,
+                                                container_required=True)
+        run_dir = run_common.materialize_run(
+            src / "alert.json", world.run_id, tenant=tenant, world=world,
+            episode_runs=view).run_dir
     assert run_dir.parent == episode_dir / "runs", "precondition: the fork path, not a fresh run"
     doc = json.loads(RunPaths(run_dir).provenance.read_text(encoding="utf-8"))
     assert doc["world_id"] == world.world_id

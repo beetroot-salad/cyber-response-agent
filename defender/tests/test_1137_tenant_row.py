@@ -618,14 +618,15 @@ def test_create_tenant_refuses_as_it_did(tmp_path, shape):
 
 
 # ======================================================================================
-# O1: no path seam reached from the tenant module, except by the stamp until #1105 PR 2.
+# O1: no path seam reached from the tenant module, except by the stamp until #1187.
 # ======================================================================================
 
 #: The functions of `defender/_tenant.py` that may still reach a path seam, and why. Both are
-#: the runs-folder stamp's, which #1105 PR 2 retires; the list is empty once it lands.
+#: the runs-folder stamp's, which #1187 retires (#1105 PR 2 kept the stamp, E-10); the list is
+#: empty once it lands.
 STAMP_SEAM_CALLERS: dict[str, str] = {
-    "read_tenant": "retired by #1105 PR 2",
-    "ensure_runs_base_record": "retired by #1105 PR 2",
+    "read_tenant": "retired by #1187",
+    "ensure_runs_base_record": "retired by #1187",
 }
 
 _TENANT_MODULE = "_tenant.py"
@@ -735,7 +736,7 @@ def test_o1_each_allow_listed_stamp_function_still_reaches_a_seam(function):
     assert reached, (
         f"{function} is on STAMP_SEAM_CALLERS ({STAMP_SEAM_CALLERS[function]}) but no longer "
         "reaches a path seam in defender/_tenant.py. Delete its entry from STAMP_SEAM_CALLERS "
-        "in this file: the list is meant to empty out as #1105 PR 2 retires the stamp.")
+        "in this file: the list is meant to empty out as #1187 retires the stamp.")
 
 
 

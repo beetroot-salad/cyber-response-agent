@@ -534,8 +534,8 @@ def _enqueue_report(  # noqa: C901, PLR0912, PLR0913, PLR0915 — see `enqueue_r
         w["world"] for w in world_rows if is_gradable_row(w) and isinstance(w.get("world"), str)))
     row_of = {w["world"]: w for w in world_rows if isinstance(w, dict) and "world" in w}
     run_id = episode_dir.name
-    # The one rule for which world's alert is the episode's, shared with the orchestration so
-    # the rule key and the sibling union agree.
+    # The one rule for which world's alert is the episode's (`episode_alert`, which the
+    # episode page reads too), so the rule key and the page name the same alert.
     alert_rule_key = derive_alert_rule_key(episode_alert(view, graded_labels))
     defender_blocked = defender_lane_blocked(verdict_word)
 

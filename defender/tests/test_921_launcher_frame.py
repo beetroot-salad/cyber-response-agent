@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from defender import _episode_handle as EH
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests import _state1135
@@ -67,7 +68,7 @@ class _LazySibling(J.FakeSibling):
         super().__init__(Path("/nonexistent-until-launch"))
 
     def __call__(self, argv, *, env=None, **kw):
-        self.episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
+        self.episode_dir = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
         return super().__call__(argv, env=env, **kw)
 
 
@@ -152,13 +153,12 @@ def test_921_unaccepted_episodes_are_not_graded(tmp_path):
     RECORDED rather than expressed as an absent file. Positive control in the same drive: the
     accepted episode does get graded, so the negative cannot pass on a judge that never runs.
     """
-    judge_mod = J.mod("learning.judge")
     no_record = J.sym("learning.branch.outcome", "NO_RECORD")
     seen = {}
     for outcome in ("accepted", "unusable", "refused", "incomplete"):
         ep = J.accepted_episode(tmp_path / outcome, outcome=outcome)
         judge = J.scripted_judge()
-        judge_mod.grade_episode(ep, judge=judge, runs_base=tmp_path / outcome / "defender-runs", state=env_state())
+        J.grade_at(ep, judge=judge, state=env_state())
         seen[outcome] = (judge.calls, (ep / "judge.yaml").is_file())
         if outcome != "accepted":
             record = J.judge_record(ep)
@@ -205,17 +205,15 @@ def test_921_existing_judge_yaml_stops_a_second_grade(tmp_path):
     last; this demand pins the gate itself. Positive control: the same episode with no
     `judge.yaml` IS graded, so the negative cannot pass on a judge that never runs.
     """
-    judge_mod = J.mod("learning.judge")
     ep = J.accepted_episode(tmp_path)
-    base = tmp_path / "defender-runs"
 
     first = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    judge_mod.grade_episode(ep, judge=first, runs_base=base, state=env_state())
+    J.grade_at(ep, judge=first, state=env_state())
     assert first.calls > 0, "the control failed: the first pass never reached the model"
     before = (ep / "judge.yaml").read_text(encoding="utf-8")
 
     second = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    judge_mod.grade_episode(ep, judge=second, runs_base=base, state=env_state())
+    J.grade_at(ep, judge=second, state=env_state())
     assert second.calls == 0, "a second grade ran over an episode already graded"
     assert (ep / "judge.yaml").read_text(encoding="utf-8") == before
 
@@ -224,7 +222,7 @@ def test_921_existing_judge_yaml_stops_a_second_grade(tmp_path):
     (ep / "judge.yaml").write_text("\x00not: [a, family, grade", encoding="utf-8")
     third = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
     with pytest.raises(J.refusals()):
-        judge_mod.grade_episode(ep, judge=third, runs_base=base, state=env_state())
+        J.grade_at(ep, judge=third, state=env_state())
 
 
 # ---------------------------------------------------------------------------------------
@@ -242,16 +240,14 @@ def test_921_both_episode_write_sinks_go_through_write_guarded(tmp_path):
     symlink planted at either sink's path is refused rather than written THROUGH, which is what
     a bare `write_text` would do.
     """
-    judge_mod = J.mod("learning.judge")
     ep = J.accepted_episode(tmp_path)
-    base = tmp_path / "defender-runs"
     outside = tmp_path / "outside.yaml"
     outside.write_text("untouched\n", encoding="utf-8")
     (ep / "judge.yaml").symlink_to(outside)
 
     with pytest.raises(J.refusals()):
-        judge_mod.grade_episode(
-            ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), runs_base=base, state=env_state())
+        J.grade_at(
+            ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), state=env_state())
     assert outside.read_text(encoding="utf-8") == "untouched\n", (
         "the family record was written THROUGH an aliased target")
 
@@ -261,8 +257,8 @@ def test_921_both_episode_write_sinks_go_through_write_guarded(tmp_path):
     draw_dir.mkdir(parents=True, exist_ok=True)
     (draw_dir / "0.yaml").symlink_to(outside)
     with pytest.raises(J.refusals()):
-        judge_mod.grade_episode(
-            ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), runs_base=base, state=env_state())
+        J.grade_at(
+            ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), state=env_state())
     assert outside.read_text(encoding="utf-8") == "untouched\n"
 
 
@@ -280,12 +276,10 @@ def test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_c
     made unwritable, so the append raises where it really would, and the assertion is that no
     `judge.yaml` exists afterwards.
     """
-    judge_mod = J.mod("learning.judge")
     ep = J.accepted_episode(tmp_path)
-    base = tmp_path / "defender-runs"
 
-    grade = judge_mod.grade_episode(
-        ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), runs_base=base, state=env_state())
+    grade = J.grade_at(
+        ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), state=env_state())
     record = J.judge_record(ep)
     assert record["enqueued_rows"] == grade.enqueued_rows
     assert record["enqueued_rows"] > 0, "a gradable episode with findings enqueued nothing"
@@ -304,9 +298,9 @@ def test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_c
     refused = LearningState.open(LoopPaths(repo_root=tmp_path / "second", state_dir=queue_dir))
     # `StateRefused` is deliberately not an `OSError`, so it is not folded into `JudgeRefused`.
     with pytest.raises((*J.refusals(), StateRefused)):
-        judge_mod.grade_episode(
+        J.grade_at(
             ep2, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
-            runs_base=tmp_path / "second" / "defender-runs", state=refused)
+            state=refused)
     assert not (ep2 / "judge.yaml").exists(), (
         "the family record was written before the enqueue: its presence would then certify an "
         "enqueue that never happened")
@@ -335,7 +329,6 @@ def test_921_the_three_knobs_are_resolved_once_and_an_oversized_lead_is_truncate
     The knob names carry no `DEFENDER_` prefix, matching `QUESTIONER_EFFORT`: run1/G23 executed
     that convention, and a judge knob spelled with the prefix would be unsettable.
     """
-    judge_mod = J.mod("learning.judge")
     monkeypatch.setenv(J.DRAWS_KNOB, "2")
     monkeypatch.setenv(J.MODEL_KNOB, "kimi-k3")
     monkeypatch.setenv(J.EFFORT_KNOB, "xhigh")
@@ -348,7 +341,7 @@ def test_921_the_three_knobs_are_resolved_once_and_an_oversized_lead_is_truncate
         "x" * 4000 + "\nTAIL-OF-THE-OVERSIZED-LEAD\n", encoding="utf-8")
 
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    judge_mod.grade_episode(ep, judge=judge, runs_base=tmp_path / "defender-runs", state=env_state())
+    J.grade_at(ep, judge=judge, state=env_state())
 
     record = J.judge_record(ep)
     assert record["draws"]["configured"] == 2
@@ -369,6 +362,6 @@ def test_921_the_three_knobs_are_resolved_once_and_an_oversized_lead_is_truncate
     # #1224 (N22): the call list is the one view the cap never cuts — under any cap the judge
     # still gets each call with its decision word — so the bound is over every OTHER view.
     sections = J.mod("learning.judge.render").render(
-        ep, "b", tmp_path / "defender-runs", payload_cap=3000).as_prompt_sections()
+        ep, "b", payload_cap=3000).as_prompt_sections()
     assert sum(len(body) for name, body in sections.items() if name != "calls") <= 3000, (
         "the rendered views together exceed the operator's payload cap")

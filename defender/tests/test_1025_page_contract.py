@@ -34,6 +34,7 @@ from pathlib import Path
 
 import pytest
 
+from defender import _episode_handle as EH
 from defender.tests import _episode_1025 as E
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
@@ -62,14 +63,22 @@ def visualize_episode():
 
 
 def render(ep) -> E.Page:
-    """`visualize_episode().render_episode(<dir>)` — the real entry point — then the page it
-    wrote, parsed."""
+    """`visualize_episode().render_episode(runs, <episode id>)` — the real entry point — then
+    the page it wrote, parsed."""
     return E.render(ep, module=visualize_episode())
 
 
-def cli(argv, capsys):
-    """`visualize_episode().main(argv)` with its stdout / stderr captured."""
-    return E.cli(argv, capsys, module=visualize_episode())
+def cli(argv, capsys, *, episodes_base=None):
+    """`visualize_episode().main(argv)` with its stdout / stderr captured, under the episodes
+    base `episodes_base` when given."""
+    return E.cli(argv, capsys, module=visualize_episode(), episodes_base=episodes_base)
+
+
+def cli_on(episode_dir, capsys):
+    """`visualize_episode().main(["--tenant", T, <episode id>])` for the episode at
+    `episode_dir`, under the episodes base holding it (#1105 PR 2, declared change 4: the CLI
+    names the episode by id, no longer by folder path)."""
+    return E.cli_on(episode_dir, capsys, module=visualize_episode())
 
 
 def hook_page(episode_dir) -> E.Page:
@@ -104,7 +113,7 @@ def test_1025_render_episode_writes_learning_html_beside_judge_yaml_and_returns_
     whichever of the two serial drivers (the launcher hook, the standalone CLI) made the call.
     """
     ep = E.sample_episode(tmp_path)
-    out = visualize_episode().render_episode(ep.dir)
+    out = E.render_episode(ep.dir, module=visualize_episode())
     assert Path(out) == ep.page, f"render_episode returned {out!r}, not the page's path"
     assert ep.page.is_file()
     assert (ep.dir / "judge.yaml").is_file()
@@ -116,7 +125,7 @@ def test_1025_render_episode_writes_learning_html_beside_judge_yaml_and_returns_
     assert "sec-verdict" in page.by_id
     before = ep.page.stat().st_mtime_ns
     os.utime(ep.page, ns=(before - 2_000_000_000, before - 2_000_000_000))
-    again = visualize_episode().render_episode(ep.dir)
+    again = E.render_episode(ep.dir, module=visualize_episode())
     assert Path(again) == ep.page
     assert ep.page.stat().st_mtime_ns > before - 2_000_000_000, "the second call did not replace"
     assert ep.page.read_bytes() == first, "a re-render of the same records changed the bytes"
@@ -124,28 +133,30 @@ def test_1025_render_episode_writes_learning_html_beside_judge_yaml_and_returns_
 
 def test_1025_visualize_episode_cli_exits_zero_on_an_episode_dir_and_one_with_no_page_otherwise(
         tmp_path, capsys):
-    """`main([dir])` returns 0 and prints the page path; `main([])`, `main([a file])`,
-    `main([a dir with no family.yaml])` return 1, print one reason line to stderr, and leave no
-    `learning.html`. Rejected: an index over all episodes (issue fork 1) — a second argument is
-    refused the same way.
+    """`main(["--tenant", T, <id>])` returns 0 and prints the page path; `main([])`, an id
+    naming a file, an id naming a dir with no family.yaml return 1, print one reason line to
+    stderr, and leave no `learning.html`. Rejected: an index over all episodes (issue fork 1) —
+    a second argument is refused the same way. (#1105 PR 2, declared change 4: the episode is
+    named by id under the episodes base, no longer by folder path.)
     """
     ep = E.sample_episode(tmp_path)
-    rc, out, err = cli([str(ep.dir)], capsys)
+    rc, out, err = cli_on(ep.dir, capsys)
     assert rc == 0, (rc, out, err)
     assert str(ep.page) in out, (rc, out, err)
     assert ep.page.is_file()
 
-    a_file = tmp_path / "just-a-file"
+    base = ep.dir.parent
+    a_file = base / "just-a-file"
     a_file.write_text("x", encoding="utf-8")
-    bare = tmp_path / "no-manifest"
+    bare = base / "no-manifest"
     bare.mkdir()
     ep.page.unlink()
-    for argv in ([], [str(a_file)], [str(bare)], [str(ep.dir), str(bare)]):
-        rc, out, err = cli(argv, capsys)
+    for argv in ([], E.cli_argv(a_file), E.cli_argv(bare), [*E.cli_argv(ep.dir), bare.name]):
+        rc, out, err = cli(argv, capsys, episodes_base=base)
         assert rc == 1, f"main({argv}) returned {rc}: out={out!r} err={err!r}"
         assert len(_err_lines(err)) == 1, f"main({argv}) wrote {err!r} to stderr, not one line"
         assert not (bare / E.PAGE_NAME).exists()
-        assert not (tmp_path / E.PAGE_NAME).exists()
+        assert not (base / E.PAGE_NAME).exists()
         assert not ep.page.exists(), f"main({argv}) wrote the page"
 
 
@@ -160,7 +171,7 @@ def test_1025_a_link_planted_at_learning_html_is_refused_not_written_through(tmp
     outside.write_text("OUTSIDE", encoding="utf-8")
     E.plant_link(ep.page, outside)
     with pytest.raises(OSError, match="non-plain or aliased") as refused:
-        visualize_episode().render_episode(ep.dir)
+        E.render_episode(ep.dir, module=visualize_episode())
     assert getattr(refused.value, "write_guarded_alias", None) is True, refused.value
     assert ep.page.is_symlink(), "the planted link was replaced"
     assert outside.read_text(encoding="utf-8") == "OUTSIDE", "the page was written THROUGH the link"
@@ -184,6 +195,8 @@ def test_1025_a_render_creates_or_changes_exactly_one_file_learning_html_and_tou
     ep = E.sample_episode(tmp_path)
     mirror = run_visualizations_dir / E.EPISODE_ID
     assert not mirror.exists(), "precondition: a stale mirror from another run"
+    # #1105 PR 2 (declared change 4): the container carries the record the launcher leaves.
+    E.plant_container_record(ep.dir)
     before = E.snapshot(ep.dir)
     page = render(ep)
     after = E.snapshot(ep.dir)
@@ -238,10 +251,9 @@ def test_1025_a_render_fault_is_printed_and_changes_neither_the_exit_status_nor_
     still returns 0, `judge.yaml` is written, stderr carries a "could not be rendered" line and
     the link's target is untouched; the control launch without the link writes the page.
     """
-    launcher = _cli()
     outside = tmp_path / "outside.html"
     outside.write_text("OUTSIDE", encoding="utf-8")
-    episode_dir = launcher.episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths())
+    episode_dir = EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID)
     judge = _PlantingJudge(episode_dir, outside, default=J.as_reply_text(J.reply_doc()))
     launch = ST._launch(tmp_path, judge=judge)
     err = capsys.readouterr().err
@@ -272,7 +284,7 @@ def test_1025_preflight_refused_episode_and_the_page(tmp_path, capsys):
     assert not (ep / "runs").exists()
     assert not (ep / E.PAGE_NAME).exists(), "the launcher rendered on the refused exit"
 
-    rc, out, err = cli([str(ep)], capsys)
+    rc, out, err = cli_on(ep, capsys)
     assert rc == 0, (out, err)
     page = E.read_page(ep)
     assert "no grade record" in page.text_of("sec-verdict")
@@ -294,7 +306,7 @@ def test_1025_how_the_operator_learns_where_the_page_is(tmp_path, capsys):
     assert launch.rc == 0
     assert page.is_file()
     assert str(page) in err, f"stderr never named the page: {err!r}"
-    rc, out, _err = cli([str(launch.episode_dir)], capsys)
+    rc, out, _err = cli_on(launch.episode_dir, capsys)
     assert rc == 0
     assert str(page) in out
 
@@ -306,14 +318,14 @@ def test_1025_the_cli_exit_status_for_a_degraded_page(tmp_path, capsys):
     """
     ep = E.sample_episode(tmp_path)
     E.plant_raw(ep.dir / "judge.yaml", "- not\n- a grade\n")
-    rc, out, err = cli([str(ep.dir)], capsys)
+    rc, out, err = cli_on(ep.dir, capsys)
     assert rc == 0, (out, err)
     assert ep.page.is_file()
     assert "grade record unreadable" in E.read_page(ep.dir).text_of("sec-verdict")
     assert "grade record unreadable" in err, err
 
     E.plant_link(ep.page, tmp_path / "nowhere")
-    rc, out, err = cli([str(ep.dir)], capsys)
+    rc, out, err = cli_on(ep.dir, capsys)
     assert rc == 1, (rc, out, err)
     assert _err_lines(err), (rc, out, err)
 
@@ -334,32 +346,44 @@ def test_1025_cli_invoked_with_no_positional_argument(tmp_path, capsys):
 
 
 def test_1025_cli_argument_names_an_existing_regular_file_not_a_directory(tmp_path, capsys):
-    """`main([<file>])` returns 1, one reason line on stderr, no page (d01)."""
+    """An episode id naming a regular file under the episodes base returns 1, one reason line
+    on stderr, no page (d01; #1105 PR 2, declared change 4: the argument is an id, so the
+    file is planted at an episode's name rather than passed as a path)."""
     ep = E.sample_episode(tmp_path)
-    rc, out, err = cli([str(ep.dir / "family.yaml")], capsys)
+    a_file = ep.dir.parent / "a-regular-file"
+    a_file.write_bytes((ep.dir / "family.yaml").read_bytes())
+    rc, out, err = cli(E.cli_argv(a_file), capsys, episodes_base=ep.dir.parent)
     assert rc == 1, (rc, out, err)
     assert len(_err_lines(err)) == 1, (rc, out, err)
     assert not ep.page.exists()
 
 
 def test_1025_relative_and_trailing_slash_arguments(tmp_path, monkeypatch, capsys):
-    """The page lands at `<episode_dir>/learning.html` for a cwd-relative path, a trailing
-    slash and resolvable `..` segments alike; every link on the page is relative
-    (`runs/<episode>-<world>/runtime.html`) so the argument's spelling and the cwd change
-    nothing (d11).
+    """The page lands at `<episode_dir>/learning.html` whatever the cwd; every link on the page
+    is relative (`runs/<episode>-<world>/runtime.html`) so the cwd changes nothing (d11).
+
+    #1105 PR 2 (declared change 4): the argument is an episode id under the configured
+    episodes base, no longer a path, so its path spellings (a trailing slash, `..` segments)
+    are not ids — each is refused with no page — and the cwd is the only thing left to vary.
     """
     ep = E.sample_episode(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    rel = ep.dir.relative_to(tmp_path)
     renders = []
-    for spelling in (f"{rel}/", f"{rel.parent}/../{rel}", str(rel)):
+    for cwd in (tmp_path, ep.dir.parent, ep.dir):
+        monkeypatch.chdir(cwd)
         if ep.page.exists():
             ep.page.unlink()
-        rc, out, err = cli([spelling], capsys)
-        assert rc == 0, (spelling, rc, out, err)
-        assert ep.page.is_file(), (spelling, rc, out, err)
+        rc, out, err = cli_on(ep.dir, capsys)
+        assert rc == 0, (cwd, rc, out, err)
+        assert ep.page.is_file(), (cwd, rc, out, err)
         renders.append(ep.page.read_bytes())
-    assert len(set(renders)) == 1, "the argument's spelling changed the page"
+    assert len(set(renders)) == 1, "the cwd changed the page"
+    for spelling in (f"{ep.dir.name}/", f"../{ep.dir.parent.name}/{ep.dir.name}"):
+        ep.page.unlink()
+        rc, out, err = cli(["--tenant", E.cli_argv(ep.dir)[1], spelling], capsys,
+                           episodes_base=ep.dir.parent)
+        assert rc == 1, (spelling, rc, out, err)
+        assert not ep.page.exists(), f"a path-spelled id {spelling!r} rendered the page"
+        render(ep)
     page = E.read_page(ep.dir)
     world_links = [h for h in page.hrefs if h.endswith("runtime.html")]
     assert world_links, "no world link on the page"
@@ -394,7 +418,7 @@ def test_1025_runs_base_and_episodes_base_env_vars_point_at_nonexistent_paths_du
 def _refused_manifest(tmp_path, capsys, plant) -> tuple[int, str, str, E.Episode]:
     ep = E.sample_episode(tmp_path)
     plant(ep.dir / "family.yaml")
-    rc, out, err = cli([str(ep.dir)], capsys)
+    rc, out, err = cli_on(ep.dir, capsys)
     assert not ep.page.exists(), "a page was written from an unreadable manifest"
     return rc, out, err, ep
 
@@ -530,11 +554,15 @@ def test_1025_byte_identity_across_two_interpreter_processes(tmp_path):
     """
     ep = E.sample_episode(tmp_path)
     target = visualize_episode().__name__
-    code = (f"from pathlib import Path; from {target} import render_episode; "
-            f"render_episode(Path({str(ep.dir)!r}))")
+    # #1105 PR 2 (declared change 4): the page is reached by id, through the tenant's
+    # repository — the CLI's own `main`, so the child builds the request the way an operator does.
+    code = (f"import sys; from {target} import main; "
+            f"sys.exit(main({E.cli_argv(ep.dir)!r}))")
+    E.plant_container_record(ep.dir)
     pages = []
     for seed in ("1", "424242"):
         env = dict(os.environ, PYTHONHASHSEED=seed, PYTHONPATH=str(T.DEFENDER.parent))
+        env[T.EPISODES_BASE_ENV] = str(ep.dir.parent)
         proc = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True,
                               text=True, cwd=str(tmp_path))
         assert proc.returncode == 0, proc.stderr
@@ -551,11 +579,13 @@ def test_1025_two_renders_in_flight_against_the_same_episode_dir(tmp_path):
     render (J3: no lock, no snapshot guarantee, determinism instead).
     """
     ep = E.sample_episode(tmp_path)
+    # #1105 PR 2 (declared change 4): the container carries the record the launcher leaves.
+    E.plant_container_record(ep.dir)
     errors: list[BaseException] = []
 
     def go() -> None:
         try:
-            visualize_episode().render_episode(ep.dir)
+            E.render_episode(ep.dir, module=visualize_episode())
         except BaseException as bad:  # noqa: BLE001 — collected and asserted below
             errors.append(bad)
 
@@ -614,12 +644,14 @@ def test_1025_episode_dir_given_through_a_symlink(tmp_path, capsys):
     """`episodes/latest -> <id>` as the CLI argument is accepted (J4): exit 0, the page written
     inside the TARGET beside `judge.yaml`, and every world link composed from names
     (`runs/<episode>-<world>/runtime.html`) — identical whether computed against the link or
-    its target.
+    its target. (#1105 PR 2, declared change 4: `latest` is named as an id under the episodes
+    base that holds the link.)
     """
     ep = E.sample_episode(tmp_path)
     latest = ep.dir.parent / "latest"
     latest.symlink_to(ep.dir, target_is_directory=True)
-    rc, out, err = cli([str(latest)], capsys)
+    E.plant_container_record(ep.dir)
+    rc, out, err = cli(E.cli_argv(latest), capsys, episodes_base=ep.dir.parent)
     assert rc == 0, (out, err)
     assert ep.page.is_file()
     assert not ep.page.is_symlink()
@@ -645,7 +677,7 @@ def test_1025_questioner_or_preflight_abort_leaves_a_partial_directory(tmp_path,
     """
     launcher = _cli()
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-preflight"))
-    oracle_seam = ST._Interrupting(launcher.episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths()))
+    oracle_seam = ST._Interrupting(EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID))
     ep, _b, _a = ST._abort(tmp_path, launcher.LauncherRefused,
                            oracle=ST.S.oracle(then=ST.S.Move(None, raises=oracle_seam)))
     assert oracle_seam.calls > 0, "the control failed: pre-flight's oracle was never reached"
@@ -653,7 +685,7 @@ def test_1025_questioner_or_preflight_abort_leaves_a_partial_directory(tmp_path,
     assert (ep / "family.yaml").is_file()
     assert not (ep / "outcome.yaml").exists()
     assert not (ep / "runs").exists()
-    rc, out, err = cli([str(ep)], capsys)
+    rc, out, err = cli_on(ep, capsys)
     assert rc == 0, (out, err)
     page = E.read_page(ep)
     assert "no grade record" in page.text_of("sec-verdict")
@@ -668,7 +700,7 @@ def test_1025_questioner_or_preflight_abort_leaves_a_partial_directory(tmp_path,
     assert page.elements(cls="rc-sample-system"), records
 
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-questioner"))
-    questioner = ST._Interrupting(launcher.episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths()))
+    questioner = ST._Interrupting(EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID))
     ep2, _b, _a = ST._abort(tmp_path, launcher.LauncherRefused, questioner=questioner)
     assert not (ep2 / "family.yaml").exists(), "the control failed: the manifest was written"
     # The abort above still primes the capture before the interrupt lands (priming precedes the
@@ -676,7 +708,7 @@ def test_1025_questioner_or_preflight_abort_leaves_a_partial_directory(tmp_path,
     # standalone CLI's — drained here so the assertion below is about the CLI's OWN report,
     # not noise the launcher run left sitting in the shared capsys buffer.
     capsys.readouterr()
-    rc, out, err = cli([str(ep2)], capsys)
+    rc, out, err = cli_on(ep2, capsys)
     assert rc == 1, (out, err)
     assert len(_err_lines(err)) == 1, (out, err)
     assert not (ep2 / E.PAGE_NAME).exists(), (out, err)
@@ -696,7 +728,7 @@ def test_1025_an_interrupt_during_the_render(tmp_path):
     listing = sorted(p.name for p in ep.dir.iterdir())
     with pytest.raises(KeyboardInterrupt), \
             E.when_inside(E.raise_now(KeyboardInterrupt("mid-render"))) as seen:
-        visualize_episode().render_episode(ep.dir)
+        E.render_episode(ep.dir, module=visualize_episode())
     assert seen["hit"], "the interrupt never landed inside the render"
     assert ep.page.read_bytes() == previous, "a partial page replaced the previous one"
     assert sorted(p.name for p in ep.dir.iterdir()) == listing, "a staged temporary was left"
@@ -705,7 +737,7 @@ def test_1025_an_interrupt_during_the_render(tmp_path):
             E.when_inside(E.raise_now(KeyboardInterrupt("mid-render"))) as seen:
         ST._launch(tmp_path)
     assert seen["hit"], "the interrupt never landed inside the launcher's render"
-    launched = _cli().episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths())
+    launched = EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID)
     assert (launched / "judge.yaml").is_file(), "the grade was not on disk before the render"
     assert not (launched / E.PAGE_NAME).exists(), "a partial page was left by the interrupt"
     assert not [p for p in launched.iterdir() if p.name.startswith(".")], "a staged temp is left"
@@ -725,6 +757,8 @@ def test_1025_standalone_render_of_a_live_episode(tmp_path):
     with (ep.dir / "served" / f"{T.world_token(E.GRADED_WORLD)}.jsonl").open(
             "a", encoding="utf-8") as fh:
         fh.write('{"system": "elastic", "verb": "es')
+    # #1105 PR 2 (declared change 4): the container carries the record the launcher leaves.
+    E.plant_container_record(ep.dir)
     before = E.snapshot(ep.dir)
     page = render(ep)
     after = E.snapshot(ep.dir)
@@ -745,7 +779,7 @@ def test_1025_a_refused_write_leaves_no_residue(tmp_path):
     E.plant_link(ep.page, tmp_path / "nowhere")
     listing = sorted(p.name for p in ep.dir.iterdir())
     with pytest.raises(OSError, match="non-plain or aliased"):
-        visualize_episode().render_episode(ep.dir)
+        E.render_episode(ep.dir, module=visualize_episode())
     assert sorted(p.name for p in ep.dir.iterdir()) == listing, "a staged temporary was left"
     assert ep.page.is_symlink()
     ep.page.unlink()
@@ -763,7 +797,7 @@ def test_1025_a_render_that_raises_midway_keeps_the_previous_page(tmp_path):
     listing = sorted(p.name for p in ep.dir.iterdir())
     with pytest.raises(RuntimeError, match="mid-build"), \
             E.when_inside(E.raise_now(RuntimeError("mid-build"))) as seen:
-        visualize_episode().render_episode(ep.dir)
+        E.render_episode(ep.dir, module=visualize_episode())
     assert seen["hit"]
     assert not ep.page.exists(), "a partial page was written"
     assert sorted(p.name for p in ep.dir.iterdir()) == listing
@@ -772,7 +806,7 @@ def test_1025_a_render_that_raises_midway_keeps_the_previous_page(tmp_path):
     previous = ep.page.read_bytes()
     with pytest.raises(RuntimeError, match="mid-build"), \
             E.when_inside(E.raise_now(RuntimeError("mid-build"))) as seen:
-        visualize_episode().render_episode(ep.dir)
+        E.render_episode(ep.dir, module=visualize_episode())
     assert seen["hit"]
     assert ep.page.read_bytes() == previous
 
@@ -787,7 +821,7 @@ def test_1025_a_read_only_episode_directory(tmp_path, capsys):
     ep = E.sample_episode(tmp_path)
     ep.dir.chmod(0o555)
     try:
-        rc, out, err = cli([str(ep.dir)], capsys)
+        rc, out, err = cli_on(ep.dir, capsys)
     finally:
         ep.dir.chmod(0o755)
     assert rc == 1, (rc, out, err)
@@ -804,7 +838,7 @@ def test_1025_a_read_only_episode_directory(tmp_path, capsys):
             self.episode_dir.chmod(0o555)
             return reply
 
-    launched = _cli().episode_dir_for(T.EPISODE_ID, tenant=ST._tenant_paths())
+    launched = EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID)
     judge = _ReadOnlyJudge(launched, default=J.as_reply_text(J.reply_doc()))
     try:
         launch = ST._launch(tmp_path, judge=judge)
@@ -859,6 +893,9 @@ def test_1025_every_class_the_page_emits_has_a_rule_in_the_css_it_ships(tmp_path
     E.write_trace(ep.dir, "questioner:z", usage=None, duration_ms=None, model=None)
     doc = E.sample_grade()
     doc["worlds"].append(E.ungradable_row("ghost_world"))
+    # #1105 PR 2 (declared change 4/J3): the `runs/` dirs above are no roster lines any more,
+    # so the unnameable label comes from a grade-record row (the record's labels still are).
+    doc["worlds"].append(E.ungradable_row("bad name!"))
     doc["unqueueable_findings"] = [f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/9: dropped"]
     E.write_judge(ep.dir, doc)
     page = render(ep)
@@ -893,9 +930,12 @@ def test_1025_the_standalone_script_runs_with_no_pythonpath_from_any_cwd(tmp_pat
     ep = E.sample_episode(tmp_path)
     script = Path(visualize_episode().__file__)
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    # #1105 PR 2 (declared change 4): `--tenant T <episode id>` under the episodes base.
+    env[T.EPISODES_BASE_ENV] = str(ep.dir.parent)
+    E.plant_container_record(ep.dir)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    proc = subprocess.run([sys.executable, str(script), str(ep.dir)], env=env,
+    proc = subprocess.run([sys.executable, str(script), *E.cli_argv(ep.dir)], env=env,
                           capture_output=True, text=True, cwd=str(elsewhere))
     assert proc.returncode == 0, proc.stderr
     assert "ModuleNotFoundError" not in proc.stderr, proc.stderr

@@ -62,6 +62,7 @@ from defender.runtime.agent_definition import (  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime.tools import AgentDeps  # noqa: E402
+from defender.run_repository import SessionPaths
 
 _DEFENDER = Path(__file__).resolve().parents[1]
 
@@ -417,7 +418,7 @@ def test_main_extra_capabilities_is_unconditional(tmp_path, monkeypatch):
     the canonical replacement for the two pre-#705 assertions this test used to make."""
     from defender.runtime import session_store
 
-    store = session_store.open_store(case_id="case-harness", runs_base=tmp_path / "runs")
+    store = session_store.open_store(case_id="case-harness", sessions=SessionPaths(tmp_path / "runs"))
     session_id = store.new_session(agent_id="main")
 
     monkeypatch.delenv("DEFENDER_COMPACTION", raising=False)

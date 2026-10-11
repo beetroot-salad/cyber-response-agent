@@ -25,6 +25,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -95,12 +96,14 @@ def _golden_alert(tmp_path: Path) -> Path:
     return alert
 
 
-def _sibling_world(tmp_path: Path, root: Path, label: str = "b"):
+def _sibling_world(tmp_path: Path, root: Path, label: str = "b", **family: Any):
     """A pass-(A) episode (under the OLD episodes base, outside the data root) whose manifest
-    names a source at T's tenant location, and the `ResumeWorld` a sibling resolves from it."""
+    names a source at T's tenant location, and the `ResumeWorld` a sibling resolves from it.
+    `family` passes through to `H.family_for` (#1105 PR 2: the container the launcher makes
+    with T's record is planted unless `container=None`)."""
     _base, src = H.tenant_source(root, T_ID, row=False)
     ep = tmp_path / "episodes" / T.EPISODE_ID
-    manifest = H.family_for(src, ep)
+    manifest = H.family_for(src, ep, **family)
     world = H.run_py().resume_world(
         Episode.open(manifest.parent), label,
         tenant=lambda: H.T1106.run_tenant(H.accept(root, T_ID)))
@@ -171,15 +174,17 @@ def test_g_r7_family_base_world_id_coherence(tmp_path, tenant_root):
     is unaffected by which tenant_id the record now carries — read off a record minted under
     pass (A)'s new derivation, base_world_id still round-trips into the stamp unchanged.
 
-    Two fresh runs of T share the base's one base_world_id, and the launcher's own reader of
-    it (`learning/branch/cli._family_base_world_id`) answers the same value."""
+    Two fresh runs of T share the base's one base_world_id, and the repository's own reader of
+    it (#1105 PR 2: `RunsRepository.base_world_id`, which replaced the launcher's
+    `cli._family_base_world_id`, F-13) answers the same value."""
     alert = H.plant_alert(tmp_path / "in")
     r1 = Path(_materialize(alert, "r1", T_ID))
     r2 = Path(_materialize(alert, "r2", T_ID))
     record = json.loads((r1.parent / H.RECORD_NAME).read_text(encoding="utf-8"))
     assert record["tenant_id"] == T_ID
     assert _stamp(r1)["world_id"] == _stamp(r2)["world_id"] == record["base_world_id"]
-    assert H.branch_cli()._family_base_world_id({"a": r1}) == record["base_world_id"]
+    assert H.accept(tenant_root, T_ID).runs_repository().base_world_id() == \
+        record["base_world_id"]
 
 
 # ======================================================================================
@@ -337,48 +342,71 @@ def test_tenant_row_deleted_mid_materialize(tmp_path, tenant_root):
 
 def test_d2_sibling_runs_base(tmp_path, tenant_root):
     """A sibling's materialize puts its run dir under EpisodePaths(world.episode_dir).runs and
-    mints or reads that base's record for T.
+    reads that base's record for T.
 
-    Two worlds of one pass-(A) episode: the first mints `<ep>/runs/_tenant.json` naming T, the
-    second reads it (one base_world_id), and neither lands under `<root>/T/runs/` (O4's gap
-    until (B))."""
-    src, ep, world_b = _sibling_world(tmp_path, tenant_root, "b")
+    #1105 PR 2 (declared change 6, G5): the container is the launcher's to make — run setup
+    never creates it — so over an ABSENT container a sibling's materialize is refused and
+    nothing is made. Once the launcher has made it with T's record
+    (`EpisodeRuns.create_container`), two worlds of one pass-(A) episode both land in it and
+    read its one record (one base_world_id), and neither lands under `<root>/T/runs/` (O4's
+    gap until (B))."""
+    src, ep, world_b = _sibling_world(tmp_path, tenant_root, "b", container=None)
     world_c = H.run_py().resume_world(
         Episode.open(ep), "c", tenant=lambda: H.T1106.run_tenant(H.accept(tenant_root, T_ID)))
     alert = src / "alert.json"
-    rb = Path(_materialize(alert, world_b.run_id, T_ID, world=world_b))
-    record_path = ep / "runs" / H.RECORD_NAME
-    minted = json.loads(record_path.read_text(encoding="utf-8"))
-    rc = Path(_materialize(alert, world_c.run_id, T_ID, world=world_c))
+    with Episode.open(ep) as episode:
+        view = H.accept(tenant_root, T_ID).runs_repository().episode(ep.name, held=episode)
+        assert view.state == "absent"
+        _refused(lambda: _materialize(alert, world_b.run_id, T_ID, world=world_b,
+                                      episode_runs=view))
+        assert not (ep / "runs").exists(), "a sibling's run setup made the episode container"
+        view.create_container()
+        record_path = ep / "runs" / H.RECORD_NAME
+        minted = json.loads(record_path.read_text(encoding="utf-8"))
+        rb = Path(_materialize(alert, world_b.run_id, T_ID, world=world_b, episode_runs=view))
+        rc = Path(_materialize(alert, world_c.run_id, T_ID, world=world_c, episode_runs=view))
     assert rb == ep / "runs" / world_b.run_id
     assert rc == ep / "runs" / world_c.run_id
     assert minted["tenant_id"] == T_ID
     assert json.loads(record_path.read_text(encoding="utf-8")) == minted, "the record changed"
+    assert _stamp(rb)["world_id"] == world_b.world_id
     assert H.entries(tenant_root / T_ID / "runs") == sorted([H.RECORD_NAME, src.name])
 
 
 def test_s7_j24_widened_refusal_on_sibling_path(tmp_path, monkeypatch, tenant_root):
     """A sibling's materialize, whose runs base is EpisodePaths(ep).runs rather than
     runs_base_for(T), still meets the widened learning-state refusal: resolve_data_root,
-    reached through tenant_of_run_dir, refuses a learning state root equal to, inside, or
+    reached through the sibling's entry, refuses a learning state root equal to, inside, or
     containing the data root.
 
-    The sibling's derivation (`tenant_of_run_dir` on its source) and its materialize both
-    carry the widened refusal verbatim, and no sibling run dir is made; the control is the
-    same sibling with a disjoint learning root."""
-    src, ep, world = _sibling_world(tmp_path, tenant_root, "b")
+    The sibling's entry (#1105 PR 2: `run.py --tenant T --episode <ep>` resolves the data root
+    itself; `tenant_of_run_dir` is gone, F-13) and its materialize both carry the widened
+    refusal verbatim, and no sibling run dir is made; the control is the same sibling with a
+    disjoint learning root."""
+    src, ep, world = _sibling_world(tmp_path, tenant_root, "b", monkeypatch=monkeypatch)
     alert = src / "alert.json"
-    for learning in (tenant_root, tenant_root / T_ID / "learning", tmp_path):
-        monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(learning))
-        widened = H.owner_refusal(H.resolve_data_root)
-        H.assert_verbatim(str(H.owner_refusal(H.tenant_of_run_dir, src)), widened,
-                          entry="tenant_of_run_dir")
-        text = _refused(lambda: _materialize(alert, world.run_id, T_ID, world=world))
-        H.assert_verbatim(text, widened, entry="the sibling's materialize_run")
-        assert not (ep / "runs" / world.run_id).exists()
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path.parent / "elsewhere-learning"))
-    assert H.tenant_of_run_dir(src) == T_ID
-    assert Path(_materialize(alert, world.run_id, T_ID, world=world)).is_dir()
+    argv = H.sibling_argv(ep / "family.yaml", "b", "--tenant", T_ID)
+    with Episode.open(ep) as episode:
+        view = H.accept(tenant_root, T_ID).runs_repository().episode(
+            ep.name, held=episode, container_required=True)
+        for n, learning in enumerate((tenant_root, tenant_root / T_ID / "learning", tmp_path)):
+            monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(learning))
+            widened = H.owner_refusal(H.resolve_data_root)
+            _rc, refused = H.drive_main(argv, H.Recorder(tmp_path / f"sib-{n}"))
+            assert refused is not None, "the sibling's entry accepted a widened learning root"
+            H.assert_verbatim(H.refusal_text(refused), widened,
+                              entry="the sibling's entry (run.py --episode)")
+            text = _refused(lambda: _materialize(alert, world.run_id, T_ID, world=world,
+                                                 episode_runs=view))
+            H.assert_verbatim(text, widened, entry="the sibling's materialize_run")
+            assert not (ep / "runs" / world.run_id).exists()
+        monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR",
+                           str(tmp_path.parent / "elsewhere-learning"))
+        rc, refused = H.drive_main(argv, H.Recorder(tmp_path / "sib-ok"))
+        assert refused is None, H.refusal_text(refused)
+        assert rc == 0, rc
+        assert Path(_materialize(alert, world.run_id, T_ID, world=world,
+                                 episode_runs=view)).is_dir()
 
 
 # ======================================================================================

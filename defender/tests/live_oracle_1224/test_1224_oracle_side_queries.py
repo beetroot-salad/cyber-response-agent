@@ -42,6 +42,7 @@ from typing import Any
 
 import pytest
 
+from defender import _episode_handle as EH
 from defender import _yaml
 from defender.runtime.verbs import ModuleVerbRegistry, VerbContext, VerbRegistry
 from defender.scripts.adapters import faults
@@ -264,13 +265,15 @@ def _launch(tmp_path: Path, est: S.Estate, monkeypatch: Any, *, oracle: S.Script
     cli = S.mod(S.CLI)
     message = ""
     try:
-        rc = cli.main([str(src), str(S.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
+        # #1105 PR 2 (declared change 1): the tenant and the source run by id.
+        rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(S.BRANCH_MESSAGE_ID),
+                       "--continuation-prompt", "go"],
                       spawn=spawn, questioner=S.questioner_for(), preflight=S.no_preflight,
                       live_tree=T.source_capture(), roster=est.roster(),
                       oracle=oracle.model, verifier=verifier.model)
     except SystemExit as stop:
         rc, message = (stop.code, "") if isinstance(stop.code, int) else (2, str(stop.code))
-    ep = cli.episode_dir_for(S.EPISODE_ID, tenant=T.current_tenant())
+    ep = EH.episode_dir(T.current_tenant().data_root, S.EPISODE_ID)
     return S.Launch(rc=rc, message=message, spawn=spawn, ep=ep)
 
 
@@ -789,12 +792,12 @@ def test_1224_preflight_reader_cannot_be_built_without_a_gather_grant(tmp_path):
     grant_error = S.sym("runtime.verb_grant", "GrantError")
 
     with pytest.raises(grant_error):
-        preflight_replay(ep, roster=est.roster(), tenant=grantless,
+        preflight_replay(ep, source=T.open_source(src), roster=est.roster(), tenant=grantless,
                          oracle=S.oracle(then=S.submit(BASE)).model,
                          verifier=S.passing_verifier().model)
     assert est.calls() == [], "a reader with no gather grant sent a call"
 
-    preflight_replay(ep, roster=est.roster(), tenant=rt,
+    preflight_replay(ep, source=T.open_source(src), roster=est.roster(), tenant=rt,
                      oracle=S.oracle(then=S.submit(BASE)).model,
                      verifier=S.passing_verifier().model)
     assert _hits(est, "idp", "query", ALICE), "positive control: the granted replay was sent"
@@ -818,7 +821,7 @@ def test_1224_launcher_read_side_left_after_the_change_refuses_ungranted_calls(t
         S.captured(c.system, c.verb, c.params, c.payload)
         for c in (CALL_IDP, WRITE_CALL, UNGRANTED_CALL)])
     S.sym(S.CLI, S.COINED["fn.preflight"])(
-        ep, roster=est.roster(), tenant=est.run_tenant(),
+        ep, source=T.open_source(src), roster=est.roster(), tenant=est.run_tenant(),
         oracle=S.oracle(then=S.submit(BASE)).model, verifier=S.passing_verifier().model)
 
     tenant_adapter = est.calls()

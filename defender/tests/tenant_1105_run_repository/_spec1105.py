@@ -4,7 +4,8 @@ The change (`spec-flow/specs/spec_graph_1105-pr1-run-repository.yaml`; design re
 by rev 4.1, `.spec-flow/design-rev4.md`, read through `.spec-flow/frontiers/70-resolutions.md`):
 a package `defender/run_repository/` absorbs the run handle (`_run_handle.py` -> `_handle.py`)
 and the layout owner (`_run_paths.py` -> `_layout.py`), and gains `RunId` (`_id.py`), the
-lookups (`_lookup.py`: `open_run`, `list_run_ids`, `bound_runs`, `run_exists`), the
+lookups (`_lookup.py`; PR 1's four Tenant-taking functions, the tenant-scoped repository's
+methods since #1105 PR 2), the
 episode -> runs record (`_record.py`: `record_episode_runs`, `episode_runs`,
 `sibling_run_ids`, `episode_sibling_ids`) and `RunRefused` (`_errors.py`). The door
 (`__init__.py`) serves the public surface lazily. Every lookup and tenant-keyed record function
@@ -37,7 +38,7 @@ the test that needs them. The repository's injected `io=` seam (NM-10) is used h
 calls (`RecordingIO`), never to inject a fault (the owner's test shape; `w_fault_injected_io`).
 
 COINED NAMES. The design names every public function, `RunId.parse` / `RunId.mint(label, *,
-clock=)`, `bound_runs(tenant)`'s `absent`, `_io.hold(root, *, follow=)` and
+clock=)`, the held listing's `absent`, `_io.hold(root, *, follow=)` and
 `Bound.read(name, *, max_bytes=)`. It names the injected seam only as "a keyword-only injected
 I/O seam, default the real `defender._io`, as `Run.for_tenant` takes" — this suite spells it
 `io=` (`Run.for_tenant(..., io=)`'s own name, ledger 20-demands F-2). If write-code-from-spec

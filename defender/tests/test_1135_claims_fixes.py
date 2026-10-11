@@ -62,8 +62,10 @@ def test_releasing_a_claim_or_a_delivery_survives_an_ordinary_unlink_failure(tmp
 
     paths = make_paths(tmp_path)
     state = LearningState.open(paths)
-    (tmp_path / "r").mkdir()
-    state.enqueue_curation("case-1", {"case_id": "case-1", "run_dir": str((tmp_path / "r").resolve())})
+    from defender.tests._state1135 import curation_row, curation_run_dir
+
+    # The row is the run's address (#1105 PR 2 declared change 8), where it named its folder.
+    state.enqueue_curation("case-1", curation_row("case-1", curation_run_dir("r")))
     [claim] = list(state.claim("case_id"))
 
     def denied(self, name):

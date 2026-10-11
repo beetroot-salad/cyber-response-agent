@@ -86,7 +86,7 @@ EPISODE_MODULE = "_episode_paths"
 #: module it gains is an owner without a list edit.
 RUN_REPOSITORY_FILES = tuple(sorted(
     f"run_repository/{p.name}" for p in (DEFENDER / "run_repository").glob("*.py")))
-OWNER_MODULE_FILES = (*RUN_REPOSITORY_FILES, "_episode_paths.py", "_tenant.py")
+OWNER_MODULE_FILES = (*RUN_REPOSITORY_FILES, "_episode_paths.py", "_episode_handle.py", "_tenant.py")
 
 
 def handle() -> Any:

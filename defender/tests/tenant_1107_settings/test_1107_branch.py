@@ -85,7 +85,9 @@ def _launch(src: Path, root: Path, seams: dict[str, Any]) -> tuple[Any, BaseExce
     (#1120: the launcher reads it from `DEFENDER_DATA_ROOT`; no flag names it). Returns (rc, None)
     or (None, the SystemExit it refused with)."""
     S._require_data_root(root)
-    argv = [str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", H.CONTINUATION]
+    # #1105 PR 2 (declared change 1): the tenant and the source run by id.
+    argv = ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
+            "--continuation-prompt", H.CONTINUATION]
     try:
         return cli.main(argv, **seams), None
     except SystemExit as refused:
@@ -287,7 +289,7 @@ def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatc
     _base, src = H.tenant_source(data_root, TID)
     root = data_root
     folder = S.plant(root, TID, marker="mf17")
-    manifest = H.family_for(src, tmp_path / "episodes" / T.EPISODE_ID)
+    manifest = H.family_for(src, tmp_path / "episodes" / T.EPISODE_ID, monkeypatch=monkeypatch)
     # At launch the Elastic part was whole ...
     assert isinstance(_resolve(root).elastic, S.record_type("ElasticSettings")), \
         "the tenant's Elastic part was not whole at launch"
@@ -296,7 +298,7 @@ def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatc
 
     rec = S.RunRecorder(tmp_path / "sibling-run")
     rc, refused = S.drive_run(
-        H.resume_argv(manifest, "b", "--tenant", TID), rec,
+        H.sibling_argv(manifest, "b", "--tenant", TID), rec,
         visualize=rec.visualize)
 
     assert refused is None, f"the sibling was refused: {H.refusal_text(refused)!r}"

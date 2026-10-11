@@ -251,7 +251,7 @@ def episode_runs(tenant: Tenant, episode_id: str, *, io: Any = _io) -> dict[str,
     the runs folder is absent. Another episode's record is never read."""
     tenant = require_accepted_tenant(tenant)
     episode_id = _admit_episode_id(episode_id)
-    with hold_runs(tenant, io) as runs:
+    with hold_runs(tenant, io, folder=Path(tenant.runs)) as runs:
         if runs.absent:
             return {}
         name = _record_name(episode_id)
@@ -265,7 +265,7 @@ def sibling_run_ids(tenant: Tenant, *, io: Any = _io) -> set[RunId]:
     """Every run id any of the tenant's good records claims; the empty set when the runs folder
     or `_episodes` is absent. One corrupt record refuses the whole answer (fail closed)."""
     tenant = require_accepted_tenant(tenant)
-    with hold_runs(tenant, io) as runs:
+    with hold_runs(tenant, io, folder=Path(tenant.runs)) as runs:
         return set() if runs.absent else claimed_ids(runs)
 
 
@@ -341,7 +341,7 @@ def record_episode_runs(tenant: Tenant, episode_id: str, source_run_id: RunId,
                          f"{_RECORD_CAP} bytes")
     name = _record_name(episode_id)
     path = episode_record_path(tenant.runs, episode_id)
-    with hold_runs(tenant, io) as held:
+    with hold_runs(tenant, io, folder=Path(tenant.runs)) as held:
         view = held.require_present().view
         listing = held.listing()
         records = _read_records(view, where=str(held.folder), tenant_id=tenant.id, io=io)

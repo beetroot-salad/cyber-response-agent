@@ -28,8 +28,28 @@ from defender.tests._fold_936 import (
     _rows,
 )
 from defender.tests._lessons_corpus import _main_deps, _write_lesson
+from defender.tests.tenant_1105_run_repository import _spec1105 as H1105  # #1105 PR 2 (J8, declared change 10)
 
 DEFENDER = Path(__file__).resolve().parents[1]
+
+#: The tenant whose runs the tracer walks — #1105 PR 2 (J8, declared change 10).
+TID = H1105.T_ID
+
+
+def _tenant_runs() -> Path:
+    """The tenant's natural runs folder `<data root>/<T>/runs`, with its tenant record — #1105
+    PR 2 (J8, declared change 10): the tracer takes a required `--tenant` and walks that
+    tenant's runs (`--runs-dir` is gone). The data root is conftest's autouse per-test one; the
+    tenant is set up here, on request, so tests that never trace keep a tenant-free root."""
+    from defender import _tenant
+    from defender.tests._data_root_1078 import current_data_root
+
+    root = current_data_root()
+    H1105.tenant(root, TID)
+    runs = root / TID / "runs"
+    runs.mkdir(exist_ok=True)
+    _tenant.ensure_runs_base_record(runs, TID)
+    return runs
 
 
 # O5 / O8 — `kind` and `role` on every row
@@ -202,10 +222,11 @@ def _row(lesson: str, ts: str = "2026-06-05T00:00:00+00:00", **extra) -> dict:
 
 
 def _named(tmp_path: Path, capsys, lesson: str = "L") -> dict[str, list[str]]:
-    """`trace_lesson <lesson>` over `<tmp>/lessons` and `<tmp>/runs`, as `{case_id: cells}`."""
+    """`trace_lesson <lesson>` over `<tmp>/lessons` and the tenant's runs (`_tenant_runs`), as
+    `{case_id: cells}`."""
     tl = _tl()
     rc = tl.main([lesson, "--lessons-dir", str(tmp_path / "lessons"),
-                  "--runs-dir", str(tmp_path / "runs")])
+                  "--tenant", TID])  # #1105 PR 2 (J8, declared change 10)
     cap = capsys.readouterr()
     assert rc == 0, cap.err
     lines = cap.out.splitlines()
@@ -220,7 +241,7 @@ def test_trace_names_the_evidence_class_behind_each_case(tmp_path, capsys):
     push-only case must not render identically; a legacy `{lesson_name, ts}` row still
     counts (O8), it just says so."""
     _mk_lesson(tmp_path / "lessons", "L")
-    runs = tmp_path / "runs"
+    runs = _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
     _mk_run(runs, "case-read", [_row("L", kind="read", role="main")])
     _mk_run(runs, "case-push", [_row("L", kind="push", role="main")])
     _mk_run(runs, "case-gather", [_row("L", kind="read", role="gather")])
@@ -241,7 +262,7 @@ def test_evidence_precedence_is_read_over_push_over_indirect_over_unknown(tmp_pa
     rows count — a MAIN read from before the lesson's `created_at` is outside the window and
     cannot lift a push-only case to `read`."""
     _mk_lesson(tmp_path / "lessons", "L", created_at="2026-06-04")
-    runs = tmp_path / "runs"
+    runs = _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
     legacy, gather = _row("L"), _row("L", kind="read", role="gather")
     push, main_read = _row("L", kind="push", role="main"), _row("L", kind="read", role="main")
     _mk_run(runs, "all-four", [legacy, gather, push, main_read])
@@ -264,7 +285,7 @@ def test_the_index_counts_cases_with_a_main_read_in_a_fourth_column(tmp_path, ca
     pushes reads `N\\t0`. Legacy rows are `unknown`, not assumed reads."""
     _mk_lesson(tmp_path / "lessons", "L", created_at="2026-06-04")
     _mk_lesson(tmp_path / "lessons", "M", created_at="2026-06-04")
-    runs = tmp_path / "runs"
+    runs = _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
     _mk_run(runs, "case-read", [_row("L", kind="read", role="main"), _row("M", kind="push", role="main")])
     _mk_run(runs, "case-push", [_row("L", kind="push", role="main"), _row("M", kind="read", role="gather")])
     _mk_run(runs, "case-legacy", [_row("L"), _row("M")])
@@ -274,7 +295,7 @@ def test_the_index_counts_cases_with_a_main_read_in_a_fourth_column(tmp_path, ca
         _row("L", kind="push", role="main"), _row("M", kind="push", role="main")])
 
     tl = _tl()
-    rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
+    rc = tl.main(["--all", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])  # #1105 PR 2 (J8, declared change 10)
     cap = capsys.readouterr()
     assert rc == 0, cap.err
     assert sorted(cap.out.splitlines()) == ["L\td\t4\t1", "M\td\t4\t0"], (
@@ -287,7 +308,7 @@ def test_the_evidence_column_is_a_closed_vocabulary_whatever_the_row_carries(tmp
     closed values — never its own bytes, never an extra column or row. Positive control on
     the same column: a clean `kind: read` row renders `read`."""
     _mk_lesson(tmp_path / "lessons", "L")
-    runs = tmp_path / "runs"
+    runs = _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
     _mk_run(runs, "clean", [_row("L", kind="read", role="main")])
     _mk_run(runs, "tab-kind", [_row("L", kind="read\tFORGED", role="main")])
     _mk_run(runs, "newline-kind", [_row("L", kind="push\nforged\trow", role="main")])
@@ -301,7 +322,7 @@ def test_the_evidence_column_is_a_closed_vocabulary_whatever_the_row_carries(tmp
     _mk_run(runs, "list-role", [_row("L", kind="read", role=["main"])])
 
     tl = _tl()
-    rc = tl.main(["L", "--lessons-dir", str(tmp_path / "lessons"), "--runs-dir", str(runs)])
+    rc = tl.main(["L", "--lessons-dir", str(tmp_path / "lessons"), "--tenant", TID])  # #1105 PR 2 (J8, declared change 10)
     cap = capsys.readouterr()
     assert rc == 0, cap.err
     lines = cap.out.splitlines()

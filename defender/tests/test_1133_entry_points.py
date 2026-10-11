@@ -10,10 +10,12 @@ here through the smallest real entry point, with its own injection seams (`start
 a positive control on the same address.
 
 The writers take the `Episode` now (D3'): `start_family(episode, ...)`,
-`verify_family(episode, ...)`, `archive_episode(episode, run_dirs)`,
+`verify_family(episode, arms, ...)`, `archive_episode(episode, run_dirs)`,
 `prime_base(source_run_dir, episode)`; the manifest reader
 takes a view (rev 3, R1): `load_family(view)`; `prepare_episode(...)` returns the `Episode`. The doors
-keep their path signatures: `cli.main`, `grade_episode(episode_dir, ...)`.
+take ids since #1105 PR 2 (declared change 4): `cli.main` (`--tenant T <source_run_id>`) and
+`grade_episode(runs, episode_id, ...)`, the episode opened by id through the tenant's runs
+repository (`runs.episode_files`) under the configured episodes root.
 
 Every link is planted twice over: pointing at a host folder OUTSIDE the episode, and at a folder
 elsewhere INSIDE the episode. An owner accessor's containment resolve stops an outside link, so
@@ -22,7 +24,8 @@ only the inside one reaches a reverted write, and only the handle's no-follow wa
 - H1 the migrated sites: a symlink at a folder the site ensures, or at a holding folder of it;
   a symlink (live or dangling) at a record the site writes. The entry point refuses (or, where
   the site is best-effort, contains the refusal), what the link reaches is unchanged, and the
-  plant is left in place: `cli.start_family`'s `runs.ensure()`, `cli.verify_family`'s
+  plant is left in place: the RUNS step's `runs/` ensure (`EpisodeRuns.create_container`,
+  before `cli.start_family`), `cli.verify_family`'s
   `worlds.ensure()` and family stamp, `archive.archive_episode`'s `world.dir.ensure()` and run-dir pointer, the judge's two
   `draws.ensure()`, its draw write, its framed wire log (contained) and `judge.yaml`.
 - O3 / O6 through the judge's door: while the judge is paid, exactly one descriptor is open on
@@ -63,6 +66,7 @@ from typing import Any
 import pytest
 import yaml
 
+from defender import _episode_handle as EH
 from defender._episode_paths import LAYOUT
 from defender.run_repository import WIRE_LOG_NAMES
 from defender.tests import _judge_921 as J
@@ -194,6 +198,17 @@ def branch_cli() -> Any:
     return T.mod("learning.branch.cli")
 
 
+def start_family(episode: Any, spawn: Any) -> dict[str, int]:
+    """The launcher's RUNS step for tenant `acme` (#1105 PR 2): the siblings' container made
+    through the episode's view (`EpisodeRuns.create_container`, the `runs/` ensure
+    `start_family` no longer does), then the siblings started."""
+    from defender.tests._data_root_1078 import set_up_tenant
+
+    acme = set_up_tenant(Path(os.environ["DEFENDER_DATA_ROOT"]), "acme")
+    acme.runs_repository().episode(episode.dir.name, held=episode).create_container()
+    return branch_cli().start_family(episode, ["b", "c"], spawn=spawn, tenant_id="acme")
+
+
 # =======================================================================================
 # H1 — the launcher's folders: the siblings' runs base, `worlds/`
 # =======================================================================================
@@ -214,9 +229,10 @@ class Spawned:
 @pytest.mark.parametrize("reach", REACH)
 def test_h1_start_family_refuses_a_linked_runs_base_and_starts_no_sibling_there(
         tmp_path, host, reach):
-    """`start_family` makes the siblings' runs base with `episode.runs.ensure()`, which refuses
-    a link at `runs/`: the core's unmarked ELOOP, raised before the runs-base tenant record is
-    minted and before any sibling starts. The folder the link reaches gains nothing (no
+    """The launcher's RUNS step makes the siblings' runs base through the episode's view
+    (`EpisodeRuns.create_container`, #1105 PR 2: `episode._runs.ensure()`), which refuses a link
+    at `runs/`: the core's unmarked ELOOP, raised before the runs-base tenant record is minted and
+    before any sibling starts (`start_family`). The folder the link reaches gains nothing (no
     `_tenant.json`) and the link is left.
 
     A reverted `os.makedirs(runs, exist_ok=True)` accepts the link, mints the tenant record in
@@ -224,7 +240,6 @@ def test_h1_start_family_refuses_a_linked_runs_base_and_starts_no_sibling_there(
 
     Control on the same address: with nothing planted, `runs/` is a real folder holding the
     episode tenant's record and both siblings are started."""
-    cli = branch_cli()
     ep = tmp_path / "episodes" / EPISODE_ID
     ep.mkdir(parents=True)
     planted = link_folder(ep / "runs", reach=reach, ep=ep, host=host)
@@ -232,8 +247,7 @@ def test_h1_start_family_refuses_a_linked_runs_base_and_starts_no_sibling_there(
     spawn = Spawned()
 
     with S.open_episode(ep) as episode:
-        raised = S.raised_by(lambda: cli.start_family(
-            episode, ["b", "c"], spawn=spawn, tenant_id="acme"))
+        raised = S.raised_by(lambda: start_family(episode, spawn))
 
     assert_folder_refusal(raised, planted, where="start_family over a linked runs/")
     assert spawn.argvs == [], f"a sibling started over a linked runs base: {spawn.argvs}"
@@ -243,7 +257,7 @@ def test_h1_start_family_refuses_a_linked_runs_base_and_starts_no_sibling_there(
 
     planted.remove()
     with S.open_episode(ep) as episode:
-        exits = cli.start_family(episode, ["b", "c"], spawn=spawn, tenant_id="acme")
+        exits = start_family(episode, spawn)
     assert exits == {"b": 0, "c": 0}
     assert len(spawn.argvs) == 2
     assert_real_folder(ep / "runs")
@@ -265,12 +279,14 @@ def test_h1_verify_family_refuses_a_linked_worlds_folder_before_anything_is_arch
     Control on the same address: with nothing planted, `worlds/` is a real folder."""
     cli = branch_cli()
     ep = T.episode(tmp_path)
-    dirs = [T.sibling_run_dir(ep / "runs", w, scrub_ran=scrub_ran) for w in T.WORLDS]
+    for w in T.WORLDS:
+        T.sibling_run_dir(ep / "runs", w, scrub_ran=scrub_ran)
     planted = link_folder(ep / "worlds", reach=reach, ep=ep, host=host)
     before, host_before = planted.state(), S.census(host)
 
     with S.open_episode(ep) as episode:
-        raised = S.raised_by(lambda: cli.verify_family(episode, dirs,
+        arms = T.family_arms(episode, T.WORLDS)
+        raised = S.raised_by(lambda: cli.verify_family(episode, arms,
                                                        source=T.provenance_record()))
 
     assert_folder_refusal(raised, planted, where="verify_family over a linked worlds/")
@@ -280,7 +296,8 @@ def test_h1_verify_family_refuses_a_linked_worlds_folder_before_anything_is_arch
 
     planted.remove()
     with S.open_episode(ep) as episode:
-        report = cli.verify_family(episode, dirs, source=T.provenance_record())
+        report = cli.verify_family(episode, T.family_arms(episode, T.WORLDS),
+                                   source=T.provenance_record())
     assert report["comparable"] is scrub_ran, report
     assert_real_folder(ep / "worlds")
     if scrub_ran:
@@ -301,13 +318,15 @@ def test_h1_the_family_stamp_refuses_a_link_at_its_name_and_writes_nothing_throu
     carrying the agreed commit."""
     cli = branch_cli()
     ep = T.episode(tmp_path)
-    dirs = [T.sibling_run_dir(ep / "runs", w, commit="cafe1") for w in T.WORLDS]
+    for w in T.WORLDS:
+        T.sibling_run_dir(ep / "runs", w, commit="cafe1")
     planted = link_file(ep / "provenance.json", kind, reach=reach, ep=ep, host=host)
     before, host_before = planted.state(), S.census(host)
 
     with S.open_episode(ep) as episode:
+        arms = T.family_arms(episode, T.WORLDS)
         raised = S.raised_by(lambda: cli.verify_family(
-            episode, dirs, source=T.provenance_record(commit="cafe1")))
+            episode, arms, source=T.provenance_record(commit="cafe1")))
 
     S.assert_refusal(refusal_in(raised), kind, where="the family stamp over a link")
     assert planted.state() == before, "the family stamp was written through the link"
@@ -316,7 +335,8 @@ def test_h1_the_family_stamp_refuses_a_link_at_its_name_and_writes_nothing_throu
 
     planted.remove()
     with S.open_episode(ep) as episode:
-        cli.verify_family(episode, dirs, source=T.provenance_record(commit="cafe1"))
+        cli.verify_family(episode, T.family_arms(episode, T.WORLDS),
+                          source=T.provenance_record(commit="cafe1"))
     stamp = ep / "provenance.json"
     assert_plain_file(stamp)
     assert json.loads(stamp.read_text(encoding="utf-8"))["agreed"]["commit"] == "cafe1"
@@ -434,8 +454,8 @@ def judged_episode(tmp_path: Path) -> Path:
 def grade(tmp_path: Path, ep: Path, judge: ScriptedJudge) -> Any:
     """The judge pass, or the refusal it raised."""
     try:
-        return J.mod("learning.judge").grade_episode(
-            ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=2, state=env_state())
+        return J.grade_at(
+            ep, judge=judge, draws=2, state=env_state())
     except Exception as refused:  # noqa: BLE001 — the refusal is the observation
         return refused
 
@@ -704,7 +724,7 @@ def test_h4_the_priming_claim_alone_keeps_a_second_launcher_out_while_the_first_
     capture = T.mod("learning.branch.capture")
     ledger = T.mod("learning.branch.ledger")
     _base, src = T.runs_base(tmp_path)
-    ep = cli.episode_dir_for(T.EPISODE_ID, tenant=T.current_tenant())
+    ep = EH.episode_dir(T.current_tenant().data_root, T.EPISODE_ID)
     claim = ep / "served" / ".priming"
     priming, second_done = threading.Event(), threading.Event()
     first: dict[str, Any] = {}

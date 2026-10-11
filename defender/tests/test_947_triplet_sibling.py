@@ -1,8 +1,9 @@
-"""#947 — a sibling is a `run.py --resume` PROCESS (M6, M7, O6, O9, O10).
+"""#947 — a sibling is a `run.py --episode` PROCESS (M6, M7, O6, O9, O10).
 
 D1's whole content: the launcher writes the manifest, pre-flights the family and starts N
-processes; learning never executes the driver in its own process. So `run.py` grows `--resume <manifest>
---world X` and otherwise runs an ordinary run — its own preflight, run-dir materialisation and
+processes; learning never executes the driver in its own process. So `run.py` grows
+`--episode <episode_id> --world X` (#1105 PR 2, declared change 6: `--resume <manifest>` before
+it) and otherwise runs an ordinary run — its own preflight, run-dir materialisation and
 stamp, box, scrub and verdict, in that order — while the resume path refuses the ticket flag and
 forces the no-learn branch so a synthetic sibling never writes a ticket row or a queue marker.
 
@@ -28,7 +29,6 @@ from defender._episode_handle import Episode
 from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T
 from defender.tests.live_oracle_1224 import _spec1224 as S1224
-from defender.tests._data_root_1078 import current_data_root
 
 TOKEN_B = T.world_token("b")
 
@@ -52,9 +52,26 @@ def _no_preflight(*_args, **_kw) -> int:
     return 0
 
 
-def _resume_argv(manifest, world="b", tenant=T.SOURCE_TENANT):
-    """A sibling's command line — naming its tenant, as every run does (#1078)."""
-    return ["--resume", str(manifest), "--world", world, "--tenant", tenant]
+def _sibling_argv(manifest, world="b", tenant=T.SOURCE_TENANT):
+    """A sibling's command line — naming its tenant, as every run does (#1078), and its episode
+    by id (#1105 PR 2, declared change 6: the episode whose manifest is `manifest`, opened under
+    the configured episodes base)."""
+    return ["--tenant", tenant, "--episode", manifest.parent.name, "--world", world]
+
+
+def _episode(tmp_path, src, *, container=T.SOURCE_TENANT):
+    """The episode a sibling opens by id: under the configured episodes base (`_tmp_roots`),
+    its manifest naming the source run `src`, and its container `<episode>/runs` made with
+    `container`'s record (`None`: left absent) — what the launcher's `create_container` leaves
+    before it starts the first sibling (#1105 PR 2)."""
+    from defender import _tenant
+
+    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)),
+                   root=tmp_path / "episodes-root")
+    if container is not None:
+        (ep / "runs").mkdir(exist_ok=True)
+        _tenant.ensure_runs_base_record(ep / "runs", container)
+    return ep
 
 
 class _Recorder:
@@ -78,16 +95,17 @@ class _Recorder:
 
 
 def test_947_run_py_accepts_resume_manifest_and_world(tmp_path):
-    """The sibling entry point accepts a manifest path and a world label, and the parsed
-    namespace carries both, so a family's manifest is the whole of what a sibling is told."""
+    """The sibling entry point accepts an episode id and a world label (#1105 PR 2: the
+    episode by id, not its manifest's path), and the parsed namespace carries both, so a
+    family's manifest is the whole of what a sibling is told."""
     manifest = T.write_family(tmp_path / "ep")
-    ns = _run().parse_args(_resume_argv(manifest))
-    assert ns.resume == manifest
+    ns = _run().parse_args(_sibling_argv(manifest))
+    assert ns.episode == manifest.parent.name
     assert ns.world == "b"
 
 
 def test_947_resume_makes_the_positional_alert_illegal(tmp_path):
-    """Under the resume flag the positional alert is illegal: supplying both refuses at the
+    """Under `--episode` the positional alert is illegal: supplying both refuses at the
     parser, naming the conflict, because the manifest already names the source run the alert
     would come from."""
     manifest = T.write_family(tmp_path / "ep")
@@ -96,13 +114,13 @@ def test_947_resume_makes_the_positional_alert_illegal(tmp_path):
     import contextlib
     import io
 
-    assert _run().parse_args(_resume_argv(manifest)).world == "b"
+    assert _run().parse_args(_sibling_argv(manifest)).world == "b"
     err = io.StringIO()
     with contextlib.redirect_stderr(err), pytest.raises(SystemExit) as bad:
-        _run().parse_args([str(alert), *_resume_argv(manifest)])
+        _run().parse_args([str(alert), *_sibling_argv(manifest)])
     assert bad.value.code == 2
     assert "alert" in err.getvalue()
-    assert "--resume" in err.getvalue()
+    assert "--episode" in err.getvalue()
 
 
 def test_947_sibling_runs_from_manifest_and_what_it_points_at(tmp_path):
@@ -110,9 +128,9 @@ def test_947_sibling_runs_from_manifest_and_what_it_points_at(tmp_path):
     only the manifest path and a world label it resolves the episode dir, the source run, the
     branch point and its own world, and completes."""
     base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    ep = _episode(tmp_path, src)
     order: list[str] = []
-    rc = _run().main(_resume_argv(ep / "family.yaml"), lifecycle=_Recorder(order),
+    rc = _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=_Recorder(order),
                      visualize=lambda p, **kw: None, preflight=_no_preflight)
     assert rc == 0
     assert order == ["lifecycle"]
@@ -123,9 +141,9 @@ def test_947_resume_run_returns_its_own_run_dir_and_verdict(tmp_path):
     dir on disk carrying the report, and its scrub verdict written at the sidecar path beside
     that directory."""
     base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    ep = _episode(tmp_path, src)
     rec = _Recorder([])
-    rc = _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec,
+    rc = _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=rec,
                      visualize=lambda p, **kw: None, preflight=_no_preflight)
     run_dir = rec.kwargs["run_dir"]
     assert rc == 0
@@ -137,10 +155,10 @@ def test_947_resume_with_a_world_the_manifest_does_not_declare_refuses_before_ma
     """A world label the manifest does not declare refuses before the run dir is materialised
     and before any box starts: nothing is written under the runs base at all."""
     base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    ep = _episode(tmp_path, src)
     before = sorted(p.name for p in base.iterdir())
     with pytest.raises(SystemExit) as bad:
-        _run().main(_resume_argv(ep / "family.yaml", world="zzz"),
+        _run().main(_sibling_argv(ep / "family.yaml", world="zzz"),
                     lifecycle=_Recorder([]), visualize=lambda p, **kw: None,
                     preflight=_no_preflight)
     assert "zzz" in str(bad.value)
@@ -151,11 +169,17 @@ def test_947_resume_refuses_update_ticket(tmp_path, d9_tenant):
     """The resume path refuses the ticket flag outright rather than accepting and ignoring it:
     the two ticket calls are ordered around the curation marker, so suppressing one of them
     would break the pairing instead of the obligation. (The requested tenant exists, so the
-    refusal is the flag's, not the tenant's.)"""
-    manifest = T.write_family(tmp_path / "ep")
-    assert _run().parse_args(_resume_argv(manifest)).update_ticket is False
+    refusal is the flag's, not the tenant's — and #1105 PR 2: the episode is under the
+    configured episodes base with its container made for that tenant, so the refusal is not
+    the episode's either.)"""
+    from defender import _tenant
+
+    manifest = T.write_family(tmp_path / "episodes-root" / "ep")
+    (manifest.parent / "runs").mkdir()
+    _tenant.ensure_runs_base_record(manifest.parent / "runs", d9_tenant)
+    assert _run().parse_args(_sibling_argv(manifest)).update_ticket is False
     with pytest.raises(SystemExit) as bad:
-        _run().main([*_resume_argv(manifest), "--update-ticket"],
+        _run().main([*_sibling_argv(manifest), "--update-ticket"],
                     lifecycle=_Recorder([]), visualize=lambda p, **kw: None,
                     preflight=_no_preflight)
     assert "--update-ticket" in str(bad.value)
@@ -170,7 +194,7 @@ def test_947_a_sibling_run_writes_no_ticket_row(tmp_path):
     """A sibling run writes no ticket row on any of its exits: the writer seam records nothing
     for a resumed run, on the opening call and on the closing one alike."""
     base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    ep = _episode(tmp_path, src)
 
     class Writer:
         def __init__(self):
@@ -186,7 +210,7 @@ def test_947_a_sibling_run_writes_no_ticket_row(tmp_path):
             self.tenants.append(tenant)
 
     writer = Writer()
-    _run().main(_resume_argv(ep / "family.yaml"), lifecycle=_Recorder([]),
+    _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=_Recorder([]),
                 visualize=lambda p, **kw: None, preflight=_no_preflight, ticket_writer=writer)
     assert writer.calls == []
 
@@ -197,10 +221,10 @@ def test_947_a_sibling_run_writes_no_queue_marker(tmp_path):
     SAME seam the positive control below drives, because a directory that does not exist is
     empty of a sibling's marker whatever the resume path did."""
     base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    ep = _episode(tmp_path, src)
     seen: list[str] = []
     rec = _Recorder([])
-    _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
+    _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
                 preflight=_no_preflight,
                 enqueue=lambda run_dir, alert, truncated_by=None: seen.append(run_dir.name))
     assert seen == [], "a sibling reached the curation lane"
@@ -212,11 +236,13 @@ def test_947_an_ordinary_run_still_enqueues_for_curation(tmp_path):
     unset still reaches the curation lane, so the sibling's silence is a refusal rather than a
     channel that never carries anything."""
     base, src = T.runs_base(tmp_path)
-    tenant_id = T.mod("_tenant").tenant_of_run_dir(current_data_root(), src)
+    # #1105 PR 2: the request names the tenant whose location the run sits at
+    # (`tenant_of_run_dir` is gone, F-13); its runs-base record agrees.
+    tenant_id = T.mod("_tenant").read_tenant(base).tenant_id
     seen: list[str] = []
     _run().main([str(src / "alert.json"), "--tenant", tenant_id], lifecycle=_Recorder([]),
                 visualize=lambda p, **kw: None, preflight=_no_preflight,
-                enqueue=lambda run_dir, alert, truncated_by=None: seen.append(run_dir.name))
+                enqueue=lambda run, alert, truncated_by=None: seen.append(str(run.id)))
     assert seen, "an ordinary run reached no curation lane"
 
 
@@ -245,7 +271,7 @@ def test_947_resume_path_builds_a_world_registry_and_world_ledger(tmp_path):
     ledger file and the world's facts, and hands it to the driver as the injected verb
     registry."""
     base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    ep = _episode(tmp_path, src)
     seen: dict = {}
     _run()._drive_investigation(
         alert_path=src / "alert.json", run_dir=src, run_id=src.name,
@@ -253,7 +279,7 @@ def test_947_resume_path_builds_a_world_registry_and_world_ledger(tmp_path):
         tenant=T1106.fixture_run_tenant(),
         world=_run().resume_world(
         Episode.open(ep), "b", tenant=T1106.fixture_run_tenant),
-        episode=Episode.open(ep), serving=S1224.serving(),
+        episode=Episode.open(ep), serving=S1224.serving(), source=T.open_source(src),
         investigate=lambda **kw: seen.update(kw) or {},
     )
     registry = seen["verbs"]
@@ -266,7 +292,7 @@ def test_947_resume_path_never_constructs_the_production_registry(tmp_path):
     through its world registry, so no post-branch query can reach a real adapter body by way of
     the registry the ordinary path builds."""
     base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    ep = _episode(tmp_path, src)
     built: list[str] = []
 
     class Watching(T.mod("runtime.verbs").ModuleVerbRegistry):
@@ -280,7 +306,7 @@ def test_947_resume_path_never_constructs_the_production_registry(tmp_path):
         tenant=T1106.fixture_run_tenant(),
         world=_run().resume_world(
         Episode.open(ep), "b", tenant=T1106.fixture_run_tenant),
-        episode=Episode.open(ep), serving=S1224.serving(),
+        episode=Episode.open(ep), serving=S1224.serving(), source=T.open_source(src),
         registry_cls=Watching, investigate=lambda **kw: {})
     assert built == []
 
@@ -308,7 +334,7 @@ def test_947_episode_dir_is_derived_as_the_manifest_parent(tmp_path):
     world ledger resolve: the ledger it writes is the file beside the family's primed base
     recording, wherever the manifest lives."""
     base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    ep = _episode(tmp_path, src)
     world = _run().resume_world(
         Episode.open(ep), "b", tenant=T1106.fixture_run_tenant)
     assert world.episode_dir == ep
@@ -320,9 +346,9 @@ def test_a_sibling_resumes_through_its_requested_tenant(tmp_path):
     world as the manifest records it — its served systems read off the document, no settings
     looked up — and with T as the run's tenant."""
     base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    ep = _episode(tmp_path, src)
     lifecycle = _Recorder([])
-    rc = _run().main([*_resume_argv(ep / "family.yaml"), "--no-learn"],
+    rc = _run().main([*_sibling_argv(ep / "family.yaml"), "--no-learn"],
                      lifecycle=lifecycle, visualize=lambda p, **kw: None, preflight=_no_preflight)
     assert rc == 0
     assert lifecycle.kwargs["world"].family.served_systems == T.SERVED_SYSTEMS
@@ -339,13 +365,13 @@ def test_a_sibling_whose_runs_base_names_another_tenant_than_the_episodes_is_ref
 
     base, src = T.runs_base(tmp_path)
     assert _tenant.read_tenant(base).tenant_id == T1106.PLAYGROUND_ID
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    ep = _episode(tmp_path, src, container=None)
     other = ep / "runs"
     other.mkdir(exist_ok=True)
     _tenant.ensure_runs_base_record(other, "acme")
     lifecycle = _Recorder([])
     with pytest.raises(SystemExit) as refused:
-        _run().main([*_resume_argv(ep / "family.yaml"), "--no-learn"],
+        _run().main([*_sibling_argv(ep / "family.yaml"), "--no-learn"],
                     lifecycle=lifecycle, visualize=lambda p, **kw: None, preflight=_no_preflight)
     text = str(refused.value)
     assert "'acme'" in text, text
@@ -359,7 +385,7 @@ def test_947_every_comparing_site_reads_the_same_world_token(tmp_path):
     identity all carry the same composed token."""
     ledger_mod = T.mod("learning.branch.ledger")
     base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    ep = _episode(tmp_path, src)
     world = _run().resume_world(
         Episode.open(ep), "b", tenant=T1106.fixture_run_tenant)
     assert world.token == TOKEN_B
@@ -379,7 +405,7 @@ def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path
     its stamp, the box lifecycle, then the verdict — so the sibling is an ordinary run in every
     respect but where its evidence comes from."""
     base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    ep = _episode(tmp_path, src)
     order: list[str] = []
     rec = _Recorder(order)
     tenant = T.mod("_tenant").read_tenant(base)
@@ -393,7 +419,7 @@ def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path
         return T.sym("run_repository", "Run").for_tenant(
             tenant.tenant_id, run_dir.name, runs_base=base)
 
-    _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
+    _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
                 preflight=lambda m, **_kw: order.append("preflight") or 0,
                 materialize=materialize)
     assert order == ["preflight", "materialize", "lifecycle"]
@@ -407,7 +433,7 @@ def test_947_each_sibling_runs_the_runtime_box_lifecycle(tmp_path):
     scan runs on the reaped tree — four events in that sequence, because a run that started a
     box first and then did anything else at all is not the lifecycle O9 names."""
     base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    ep = _episode(tmp_path, src)
     events: list[str] = []
     run_dir = base / f"{T.EPISODE_ID}-b"
     (run_dir / "gather_raw").mkdir(parents=True)
@@ -427,9 +453,9 @@ def test_947_each_sibling_captures_its_own_provenance_stamp(tmp_path):
     """Each sibling captures its OWN provenance stamp inside its own process, written into its
     own run dir before any agent exists — never a stamp hoisted once above the family."""
     base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    ep = _episode(tmp_path, src)
     rec = _Recorder([])
-    _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
+    _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
                 preflight=_no_preflight)
     stamp = rec.kwargs["run_dir"] / "provenance.json"
     assert stamp.is_file()
@@ -440,9 +466,9 @@ def test_947_sibling_run_id_is_episode_id_dash_x_beside_the_source(tmp_path):
     """A sibling's run id is the episode id joined to its world label, and its run dir carries
     that name — a grammar every naming rule between the manifest and the alias already admits."""
     base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    ep = _episode(tmp_path, src)
     rec = _Recorder([])
-    _run().main(_resume_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
+    _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
                 preflight=_no_preflight)
     assert rec.kwargs["run_dir"].name == f"{T.EPISODE_ID}-b"
     assert T.sym("_run_id", "is_valid_run_id")(f"{T.EPISODE_ID}-b")
@@ -457,8 +483,8 @@ def test_947_run_py_screens_the_source_alert_before_reading_it(tmp_path):
     secret.write_text('{"stolen": true}', encoding="utf-8")
     (src / "alert.json").unlink()
     (src / "alert.json").symlink_to(secret)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    ep = _episode(tmp_path, src)
     with pytest.raises(SystemExit) as bad:
-        _run().main(_resume_argv(ep / "family.yaml"), lifecycle=_Recorder([]),
+        _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=_Recorder([]),
                     visualize=lambda p, **kw: None, preflight=_no_preflight)
     assert "alert" in str(bad.value)

@@ -100,14 +100,16 @@ _FIELD_TYPES = _field_types()
 def open_source_store(run_dir: Path) -> Any:
     """The finished run's own store, opened for writing.
 
-    A sibling forks into the source database, where the prefix rows live. `runs_base` is
-    derived as the writer did (`run_dir.parent`) and checked against the path the pointer
-    recorded: `open_store` creates-if-missing, so a wrong derivation would silently open an
-    empty database. Both sides are resolved before comparing, since callers spell paths
-    differently (relative, `..`, symlinked `/tmp` on macOS).
+    A sibling forks into the source database, where the prefix rows live. The store's path is
+    derived as the writer did (the run folder's own `RunPaths.session_paths()`) and checked
+    against the path the pointer recorded: `open_store` creates-if-missing, so a wrong
+    derivation would silently open an empty database. Both sides are resolved before
+    comparing, since callers spell paths differently (relative, `..`, symlinked `/tmp` on
+    macOS).
     """
     # Resolve first: `Path("run-x").parent` is `.`, which would derive the store under the cwd.
     run_dir = Path(run_dir).resolve()
+    sessions = RunPaths(run_dir).session_paths()
     # Every malformed-pointer failure (including `store_path_for`'s `InvalidCaseId`) becomes
     # `BranchError`, which the driver's store-setup handler catches.
     try:
@@ -115,17 +117,17 @@ def open_source_store(run_dir: Path) -> Any:
             read_text_utf8(RunPaths(run_dir).session_pointer))
         recorded = Path(pointer["store_path"]).resolve()
         case_id = pointer["case_id"]
-        derived = session_store.store_path_for(case_id, runs_base=run_dir.parent).resolve()
+        derived = session_store.store_path_for(case_id, sessions=sessions).resolve()
     except (OSError, ValueError, KeyError, TypeError) as e:
         raise BranchError(
             f"{run_dir} carries no readable case pointer "
             f"({RUN_LAYOUT.session_pointer}): {e!r}") from e
     if derived != recorded:
         raise BranchError(
-            f"{run_dir} records its store at {recorded}, but its case {case_id!r} under "
-            f"runs_base {run_dir.parent} resolves to {derived} — opening the derived path "
-            "would create an empty database and lose the branch point")
-    return session_store.open_store(case_id=case_id, runs_base=run_dir.parent)
+            f"{run_dir} records its store at {recorded}, but its case {case_id!r} resolves "
+            f"to {derived} beside the run — opening the derived path would create an empty "
+            "database and lose the branch point")
+    return session_store.open_store(case_id=case_id, sessions=sessions)
 
 
 def source_store_if_any(run_dir: Path) -> Any:

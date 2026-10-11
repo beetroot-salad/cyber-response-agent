@@ -1025,7 +1025,7 @@
    "assert stale.read_bytes() == (run_dir / PAGE).read_bytes(), 'the stale page was not replaced'",
    "assert str(refused.value) in records[0].getMessage(), f\"the warning does not carry the refusal's message: {records[0].getMessage()!r}\"",
    "assert type_name in message, f\"the warning does not name the error's type {type_name}: {message!r}\"",
-   "assert vr.main(['visualize_run.py', str(run_dir)]) == 0",
+   "assert vr.main(_run_page_argv(tenant, run_dir)) == 0",
    "assert vr.mirror_page(page, run_dir.name) == 'copied'",
    "assert vr.mirror_page(page, run_dir.name) == 'copied'",
    "assert vr.mirror_page(page, run_dir.name) == 'copied'",

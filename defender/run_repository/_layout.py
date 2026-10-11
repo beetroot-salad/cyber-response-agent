@@ -114,8 +114,6 @@ _STAGED_TAIL = re.compile(r"\.staged-[0-9a-f]+\Z")
 
 #: The sessions directory is a sibling of the runs base, never a child.
 SESSIONS_DIRNAME = "sessions"
-
-
 # ==========================================================================================
 # THE LAYOUT — every run record as a path relative to the run dir.
 #
@@ -450,21 +448,42 @@ class RunPaths:
         return self.run_dir / RUN_LAYOUT.provenance
 
     # -- upward: the runs base, and the sessions dir beside it -------------------------------
+    #
+    # A sidecar sits beside the run folder, in its container. Each accessor takes that
+    # container, or — `runs_base` left out — derives it here, from the folder (#1105 PR 2,
+    # J15): a caller holding only its run folder never names the container itself.
 
-    def run_end_sidecar(self, runs_base: Path) -> Path:
-        return Path(runs_base) / f"{self.run_dir.name}{RUN_END_SIDECAR_SUFFIX}"
+    def _container(self, runs_base: Path | None) -> Path:
+        return self.run_dir.parent if runs_base is None else Path(runs_base)
 
-    def scrub_verdict(self, runs_base: Path) -> Path:
-        return Path(runs_base) / f"{self.run_dir.name}{SCRUB_VERDICT_SUFFIX}"
+    def run_end_sidecar(self, runs_base: Path | None = None) -> Path:
+        return self._container(runs_base) / f"{self.run_dir.name}{RUN_END_SIDECAR_SUFFIX}"
 
-    def accounting_failures(self, runs_base: Path) -> Path:
-        return Path(runs_base) / f"{self.run_dir.name}{ACCOUNTING_FAILURES_SUFFIX}"
+    def scrub_verdict(self, runs_base: Path | None = None) -> Path:
+        return self._container(runs_base) / f"{self.run_dir.name}{SCRUB_VERDICT_SUFFIX}"
 
-    def ticket_write(self, runs_base: Path) -> Path:
-        return Path(runs_base) / f"{self.run_dir.name}{TICKET_WRITE_SUFFIX}"
+    def accounting_failures(self, runs_base: Path | None = None) -> Path:
+        return self._container(runs_base) / f"{self.run_dir.name}{ACCOUNTING_FAILURES_SUFFIX}"
 
-    def oracle_held(self, runs_base: Path) -> Path:
-        return Path(runs_base) / f"{self.run_dir.name}{ORACLE_HELD_SUFFIX}"
+    def ticket_write(self, runs_base: Path | None = None) -> Path:
+        return self._container(runs_base) / f"{self.run_dir.name}{TICKET_WRITE_SUFFIX}"
+
+    def oracle_held(self, runs_base: Path | None = None) -> Path:
+        return self._container(runs_base) / f"{self.run_dir.name}{ORACLE_HELD_SUFFIX}"
+
+    def runs_base_export(self) -> str:
+        """The value a host or box child's `DEFENDER_RUNS_BASE` carries for this run (the
+        derived per-run corpus root: the run's container), handed out here so the exporting
+        caller stores it without naming the folder (#1105 PR 2, row 26). The value is the run
+        folder's parent, as before; the exporting functions keep the variable's one spelling.
+
+        @owns DEFENDER_RUNS_BASE — the exported runs base of a run's children."""
+        return str(self.run_dir.parent)
+
+    def session_paths(self) -> SessionPaths:
+        """The session store's paths for this run's container (`SessionPaths`), derived here
+        from the run folder (#1105 PR 2, fork S): the store's caller hands them on whole."""
+        return SessionPaths(self.run_dir.parent)
 
     def sessions_dir(self, runs_base: Path) -> Path:
         """The sessions directory (a sibling of the runs base), from `SessionPaths`."""
@@ -504,11 +523,12 @@ class SessionPaths:
         refuse_bad_case_id(lineage_id)
         return self.sessions_dir / f"{lineage_id}{SESSION_DB_SUFFIX}"
 
+    def store(self, lineage_id: str) -> tuple[Path, Path]:
+        """The store for `lineage_id` and the root its directory is made under, as one hand-out
+        (#1105 PR 2, fork S): the session store opens the first and guards its mkdir at the
+        second, and names neither the runs base nor the trust root itself."""
+        return self.session_db(lineage_id), self.trust_root
 
-# A run bundle is always `runs_dir / <run_id>`, so a recorded `source_run_dir` contributes
-# only a name. Degenerate names map to a child that cannot exist, reading as a missing bundle.
-_NO_BUNDLE = "_unresolvable_source_run_dir"
-_NAMELESS = {"", ".", ".."}
 
 #: The lead-id alphabet, the body of `l-<body>`. Every lead-id validator and payload path
 #: shape composes off this; if they disagreed, gather's read gate could refuse gather's own
@@ -635,20 +655,6 @@ def artifact_dir(path: Path) -> bool:
     `copytree(symlinks=True)` still follows a symlinked root.
     """
     return _lstat_is(path, stat.S_ISDIR)
-
-
-def resolve_run_bundle(runs_dir: Path, source_run_dir: object) -> Path:
-    """The run bundle a recorded ``source_run_dir`` names, always under ``runs_dir``.
-
-    The recorded string is a label, never an address: only its last segment is honored, so
-    neither a traversal nor an absolute path can move the read off the runs root.
-
-    Typed ``object``: the value comes off a queued JSONL row, and a non-string must read as a
-    missing bundle rather than raise mid-batch."""
-    if not isinstance(source_run_dir, str):
-        return runs_dir / _NO_BUNDLE
-    name = Path(source_run_dir.rstrip("/")).name
-    return runs_dir / (_NO_BUNDLE if name in _NAMELESS else name)
 
 
 def contained_payload(run_dir: Path, payload_path: object) -> Path | None:

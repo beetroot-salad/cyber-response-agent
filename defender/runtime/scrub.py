@@ -116,7 +116,7 @@ def _render_findings(run_dir: Path, findings: Sequence[Finding]) -> str:
 
 def verdict_path(tree: Path) -> Path:
     tree = Path(tree)
-    return RunPaths(tree).scrub_verdict(tree.parent)
+    return RunPaths(tree).scrub_verdict()
 
 
 def _write_verdict(tree: Path, doc: dict) -> None:

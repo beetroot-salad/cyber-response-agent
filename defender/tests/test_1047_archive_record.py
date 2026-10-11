@@ -62,6 +62,7 @@ import pytest
 from defender._episode_handle import Episode
 from defender.tests import _spec1047 as S
 from defender.tests import _tenants1106 as T1106
+from defender.tests import _triplet_947 as T
 
 
 def _archive():
@@ -347,7 +348,7 @@ def test_the_run_end_sidecar_leaf_never_collides_with_a_run_dir_or_another_sibli
     uniqueness demand exists for, and driving one writer twice would not produce it."""
     ep = S.episode(tmp_path)
     cli = S.mod("learning.branch.cli")
-    runs = cli.sibling_runs_base(ep)
+    runs = ep / "runs"  # the siblings' container (#1105 PR 2: `cli.sibling_runs_base` is gone)
     written: dict[str, object] = {}
     faults: list[BaseException] = []
 
@@ -367,6 +368,9 @@ def test_the_run_end_sidecar_leaf_never_collides_with_a_run_dir_or_another_sibli
         return 0
 
     with Episode.open(ep) as episode:
+        # #1105 PR 2: the launcher makes the container (with the tenant's record) before the
+        # first sibling; `start_family` no longer does.
+        T.episode_view(episode)
         cli.start_family(episode, ["b", "c"], spawn=spawn, tenant_id=T1106.PLAYGROUND_ID)
     if faults:
         raise faults[0]
@@ -391,7 +395,7 @@ def test_sidecar_write_ordering_relative_to_the_archives_own_run_dir_discovery(t
     non-blocking seam would let the archive run against a sibling that had not written yet."""
     ep = S.episode(tmp_path)
     cli = S.mod("learning.branch.cli")
-    runs = cli.sibling_runs_base(ep)
+    runs = ep / "runs"  # the siblings' container (#1105 PR 2: `cli.sibling_runs_base` is gone)
     dirs: dict[str, object] = {}
     faults: list[BaseException] = []
 
@@ -407,6 +411,7 @@ def test_sidecar_write_ordering_relative_to_the_archives_own_run_dir_discovery(t
         return 0
 
     with Episode.open(ep) as episode:
+        T.episode_view(episode)  # the container, as the launcher makes it (#1105 PR 2)
         exits = cli.start_family(episode, ["b", "c"], spawn=spawn, tenant_id=T1106.PLAYGROUND_ID)
     if faults:
         raise faults[0]

@@ -36,6 +36,7 @@ from defender.tests._declared869 import (
 )
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.tests._lead_author_1134 import drafts_under, lead_deps, skills_view
+from defender.tests._state1135 import curation_run_dir, run_of
 
 DECLARED = frozenset({"elastic"})
 
@@ -268,9 +269,9 @@ def test_discover_system_drafts_hands_out_no_undeclared_directory(
         lead_deps(paths),
         invoke_agent=spawn, extract=lambda _rd: ([], []),
     )
-    run_dir = tmp_path / "run-x"
-    (run_dir / "gather_raw").mkdir(parents=True)
-    lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths, deps=deps)
+    run_dir = curation_run_dir("run-x")
+    (run_dir / "gather_raw").mkdir()
+    lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths, deps=deps)
 
     handed = spawn.calls[-1]["pending_drafts"]
     assert [d["system"] for d in handed] == ["elastic"]

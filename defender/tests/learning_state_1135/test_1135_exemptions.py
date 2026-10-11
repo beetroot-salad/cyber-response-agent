@@ -22,7 +22,6 @@ import pytest
 from defender import run as run_py
 from defender import run_common
 from defender.run_repository import case_ref
-from defender.learning import judge as judge_mod
 from defender.learning.branch import cli as branch_cli
 from defender.learning.core import config
 from defender.learning.core.config import FatalConfigError, LoopPaths
@@ -73,6 +72,15 @@ def _gradable_episode(tmp_path: Path) -> Path:
     return ep
 
 
+def _launcher_grade(ep: Path) -> BaseException | None:
+    """The launcher's `_grade` over the episode at `ep`, caught (#1105 PR 2: by id, through the
+    request's tenant's repository — `_grade(runs, episode_id=, judge=)` — the episode opened
+    under the configured episodes base, here its own parent)."""
+    with J.episodes_base(ep.parent):
+        return S.caught(lambda: branch_cli._grade(J.judge_runs(), episode_id=ep.name,
+                                                  judge=_model()))
+
+
 def _model() -> J.FakeJudge:
     """The judge's model seam: records its prompts, answers the scripted reply."""
     return J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
@@ -121,7 +129,10 @@ def test_e1_a_refused_curation_request_costs_the_investigation_nothing(tmp_path:
     paths = S.built_paths(tmp_path)
     monkeypatch.setenv(ENV, str(paths.state_root))
     satisfy_entrypoint_keys(monkeypatch, tmp_path)
-    run_dir = make_run_dir(tmp_path / "runs-1135", name="case-1135", disposition="benign")
+    # #1105 PR 2 (declared change 8): run end hands the curation request its `Run` — a natural
+    # run of a real tenant (`S.curation_run_dir`) — and the row it files is that run's address.
+    run_dir = make_run_dir(S.curation_run_dir("case-1135").parent, name="case-1135",
+                           disposition="benign")
     scrub_mod.scrub(run_dir)
     case_id = case_ref((run_dir / "alert.json").read_bytes())
 
@@ -140,7 +151,7 @@ def test_e1_a_refused_curation_request_costs_the_investigation_nothing(tmp_path:
     caplog.set_level(logging.INFO)
     answered: list[bool] = []
     escaped = S.caught(lambda: answered.append(
-        run_common.enqueue_curation(run_dir, run_dir / "alert.json")))
+        run_common.enqueue_curation(S.run_of(run_dir), run_dir / "alert.json")))
     assert escaped is None, f"the refused curation request raised {escaped!r} into the investigation"
     assert answered == [False], f"a refused curation request answered {answered!r}, not False"
     logged = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
@@ -165,7 +176,7 @@ def test_e1_a_refused_curation_request_costs_the_investigation_nothing(tmp_path:
     os.unlink(planted)
     answered.clear()
     assert S.caught(lambda: answered.append(
-        run_common.enqueue_curation(run_dir, run_dir / "alert.json"))) is None, \
+        run_common.enqueue_curation(S.run_of(run_dir), run_dir / "alert.json"))) is None, \
         "the unplanted enqueue raised"
     assert answered == [True], f"the unplanted enqueue answered {answered!r}"
     assert S.entry_kind(paths.state_root / "author-queue" / f"{case_id}.json") == "file", \
@@ -260,13 +271,12 @@ def test_e3_a_refused_findings_queue_leaves_the_launch_unaffected(tmp_path: Path
         planted = S.plant(paths.state_root / FINDINGS.queue, "symlink", target=target)
     else:
         root = tmp_path / "absent" / "learning-state"
-    runs_base = _judge_roots(tmp_path, monkeypatch, root)
+    _judge_roots(tmp_path, monkeypatch, root)
     ep = _gradable_episode(tmp_path)
     archived = S.tree_snapshot(ep)
 
     caplog.set_level(logging.INFO)
-    escaped = S.caught(lambda: branch_cli._grade(ep, episode_id="ep-1135", judge=_model(),
-                                                 runs_base=runs_base))
+    escaped = _launcher_grade(ep)
     assert escaped is None, f"_grade raised {escaped!r} into the launch"
     after = S.tree_snapshot(ep)
     rewritten = sorted(k for k, v in archived.items() if after.get(k) != v)
@@ -306,8 +316,7 @@ def test_e3_a_refused_findings_queue_leaves_the_launch_unaffected(tmp_path: Path
         root.mkdir(parents=True)
     control = _gradable_episode(tmp_path / "control")
     caplog.clear()
-    escaped = S.caught(lambda: branch_cli._grade(control, episode_id="ep-1135-control",
-                                                 judge=_model(), runs_base=runs_base))
+    escaped = _launcher_grade(control)
     assert escaped is None, f"the control's _grade raised {escaped!r}"
     failed = [_record_text(r) for r in caplog.records if r.levelno >= logging.WARNING]
     assert not failed, f"the control's grade logged a failure with no fault planted: {failed}"
@@ -378,12 +387,11 @@ def test_describe_strings_keep_every_display_reader_coherent(tmp_path: Path, mon
     appended; the queue page's state_root field (rendered by frontend/build.py) and
     visualize_episode's "enqueued to" line render the same string."""
     paths = S.built_paths(tmp_path)
-    runs_base = _judge_roots(tmp_path, monkeypatch, paths.state_root)
+    _judge_roots(tmp_path, monkeypatch, paths.state_root)
     ep = _gradable_episode(tmp_path)
     state = S.LearningState.open(paths)
 
-    graded = S.caught(lambda: judge_mod.grade_episode(ep, judge=_model(), runs_base=runs_base,
-                                                      draws=1, state=state))
+    graded = S.caught(lambda: J.grade_at(ep, judge=_model(), draws=1, state=state))
     assert graded is None, f"grade_episode did not grade on the handle it was handed (RF5): {graded!r}"
     record = J.judge_record(ep)
     findings = state.describe(S.coined("FINDINGS"))
@@ -406,7 +414,11 @@ def test_describe_strings_keep_every_display_reader_coherent(tmp_path: Path, mon
     assert read_back == S.jsonl_rows(paths.state_root / FINDINGS.queue), \
         "enqueued_to does not name the queue the grade appended to"
 
-    shown = visualize_episode.build_page(ep)
+    # #1105 PR 2 (declared change 4): the page builds from the episode view, opened by id
+    # through the tenant's repository under the configured episodes base.
+    with J.episodes_base(ep.parent), visualize_episode.open_episode_view(
+            J.judge_runs(), ep.name) as view:
+        shown = visualize_episode.build_page(view)
     assert f"enqueued to {findings}" in shown, \
         "visualize_episode's defender 'enqueued to' line does not render describe(FINDINGS)"
     assert f"enqueued to {questioner}" in shown, \

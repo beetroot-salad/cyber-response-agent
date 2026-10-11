@@ -50,7 +50,7 @@ def _judge():
 
 
 def _grade(tmp_path, ep, judge):
-    return J.grade(ep, runs_base=tmp_path / "defender-runs", judge=judge, state=env_state())
+    return J.grade(ep, judge=judge, state=env_state())
 
 
 def _queued() -> list[dict]:
@@ -67,6 +67,15 @@ def _withhold(ep, reason: str = WITHHELD) -> None:
     production writer."""
     with Episode.open(ep) as episode:
         T.mod("learning.branch.outcome").write_not_comparable(episode, reason)
+
+
+def _container(ep):
+    """The siblings' container `<ep>/runs`, made with the tenant's record as the launcher makes
+    it before the first sibling (#1105 PR 2: `verify_family` opens each arm by id through the
+    episode's view, so the arms live there)."""
+    with Episode.open(ep) as episode:
+        T.episode_view(episode)
+    return ep / "runs"
 
 
 def _stampless(tmp_path):
@@ -151,14 +160,15 @@ def test_verify_family_records_why_it_withheld_the_stamp_and_the_judge_names_it(
     """Seventh round (finding 3): `verify_family`'s reason was only logged. Now a family whose
     sibling ran another commit has no stamp, its reason is in `not_comparable.yaml`, and the
     judge's stamp names it."""
-    base, _src = T.runs_base(tmp_path)
+    T.runs_base(tmp_path)
     ep = S.judged_episode(tmp_path, outcome=None)
     S.outcome_record(ep, "accepted", family_stamp=False)
-    dirs = [T.sibling_run_dir(base, w, commit="cafef00" if w == "b" else "deadbee")
-            for w in ("a", "b")]
+    base = _container(ep)
+    for w in ("a", "b"):
+        T.sibling_run_dir(base, w, commit="cafef00" if w == "b" else "deadbee")
     with Episode.open(ep) as episode:
         report = T.mod("learning.branch.cli").verify_family(
-            episode, dirs, source=T.provenance_record())
+            episode, T.family_arms(episode, ("a", "b")), source=T.provenance_record())
     assert report["comparable"] is False
     assert not (ep / "provenance.json").exists()
     recorded = (ep / "not_comparable.yaml").read_text(encoding="utf-8")
@@ -202,14 +212,15 @@ def test_a_per_world_fault_leaves_the_family_stamp_to_the_verified_siblings(tmp_
     sibling's other commit is no part of it — nothing records the family not comparable, and
     the judge grades the rest."""
 
-    base, _src = T.runs_base(tmp_path)
+    T.runs_base(tmp_path)
     ep = S.judged_episode(tmp_path, outcome=None, labels=("b",))
     S.outcome_record(ep, "accepted", family_stamp=False)
-    dirs = [T.sibling_run_dir(base, "b"),
-            T.sibling_run_dir(base, "c", scrub_ran=None, commit="cafef00")]
+    base = _container(ep)
+    T.sibling_run_dir(base, "b")
+    T.sibling_run_dir(base, "c", scrub_ran=None, commit="cafef00")
     with Episode.open(ep) as episode:
         report = T.mod("learning.branch.cli").verify_family(
-            episode, dirs, source=T.provenance_record())
+            episode, T.family_arms(episode, ("b", "c")), source=T.provenance_record())
     assert report["comparable"] is True, report
     assert "'c'" in report["reason"]
     assert report["not_comparable"] == ""

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import html
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -281,6 +282,24 @@ def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second
 
 # gl5 / rp1 — the render surface R4 loaded and every reasoning artifact missed
 
+def _into_tenant_runs(run_dir: Path) -> tuple[str, Path]:
+    """`(T, run_dir)` with the driven run moved to where the run page's repository opens it.
+
+    #1105 PR 2 (declared change 7): the standalone re-render is `--tenant T <run_id>` and opens
+    the run by id through T's repository, so the run moves to `<data root>/<T>/runs/<run_id>`,
+    the runs folder carrying `_tenant.json` naming T (the real writer). The store stays where
+    the drive put it: the run's pointer names it by its absolute path. (Not driven there in
+    place: `_driven_run` puts the store under the same folder it puts the run in.)"""
+    from defender import _tenant
+    from defender.tests._data_root_1078 import current_data_root, ensure_d9_tenant
+
+    tenant = ensure_d9_tenant()
+    runs = current_data_root() / tenant / "runs"
+    runs.mkdir(exist_ok=True)
+    _tenant.ensure_runs_base_record(runs, _tenant.TenantId(tenant))
+    return tenant, Path(shutil.move(run_dir, runs / run_dir.name))
+
+
 def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_path):
     """`runtime.html` is written whole (a replacing write) under ONE `run_id`, and it has two
     drivers: the standalone re-render (`visualize_run.main`, #1110 O8) and the post-run step
@@ -301,6 +320,7 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
 
     marker = "RENDERED-RUN-MARKER-705-b7c8d9"
     run_dir, store, _replay = _driven_run(tmp_path, run_id="two-drivers", text=marker)
+    tenant, run_dir = _into_tenant_runs(run_dir)
     session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
     assistant_events = [e for e in _trace_events(run_dir) if e.get("type") == "assistant"]
     assert assistant_events, "the run produced no projection for either driver to render from"
@@ -310,7 +330,7 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
                 for name in ("runtime.html",)}
 
     # driver A — the standalone re-render, in-process
-    assert visualize_run.main(["visualize_run.py", str(run_dir)]) == 0
+    assert visualize_run.main(["visualize_run.py", "--tenant", tenant, run_dir.name]) == 0
     after_a = pages()
     for name, page in after_a.items():
         assert marker in page, (
@@ -361,6 +381,7 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
     from defender.run_repository import Run
 
     run_dir, store, _replay = _driven_run(tmp_path, run_id=f"failclosed-{breakage}")
+    tenant, run_dir = _into_tenant_runs(run_dir)
 
     # positive control — intact, the post-run step renders the page and does not raise
     run_common.visualize(Run.at(run_dir))
@@ -378,15 +399,17 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
             Path(str(body["store_path"]) + suffix).unlink(missing_ok=True)
         store.close()
 
-    # the standalone re-render really exits non-zero — the real script, the real argv, the
-    # real broken input
+    # the standalone re-render really exits non-zero — the real script, the real argv
+    # (`--tenant T <run_id>`, #1105 PR 2 declared change 7), the real broken input
     script = run_common.DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
-    child = subprocess.run(  # noqa: S603 — this interpreter, the renderer script, the run dir
-        [sys.executable, str(script), str(run_dir)],
+    child = subprocess.run(  # noqa: S603 — this interpreter, the renderer script, the run id
+        [sys.executable, str(script), "--tenant", tenant, run_dir.name],
         capture_output=True, text=True, encoding="utf-8", check=False)
     assert child.returncode != 0, (
         f"the visualizer exited 0 with an unresolvable store ({breakage}); its stdout was "
         f"{child.stdout!r}")
+    # 64 is the CLI's usage refusal: a non-zero exit for its argv, not for the broken store.
+    assert child.returncode != 64, f"the re-render refused its arguments: {child.stderr!r}"
 
     # and the post-run step surfaces it rather than swallowing it to stderr
     with pytest.raises(run_common.VisualizeFailed) as raised:

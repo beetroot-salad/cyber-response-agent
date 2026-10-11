@@ -39,6 +39,7 @@ from defender.learning.core import drains
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL
 from defender.tests import _by_path as P
 from defender.tests import _drain719 as D
+from defender.tests import _judge_921 as J
 from defender.tests import _world_1007 as W
 from defender.tests._curator1134 import author_trees
 from defender.tests.e2e import _box665 as B
@@ -692,7 +693,6 @@ def test_nothing_lands_outside_the_declared_write_set(tmp_path, monkeypatch):
     the episode dir. Nothing removes an episode dir, so an unbudgeted artifact per world per
     episode grows forever, and no test anywhere would object.
     """
-    judge_mod = W.mod("learning.judge")
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
     _base, _src, root = W.configured_layout(tmp_path, monkeypatch)
     doc = W.family_doc(worlds=[W.base_world(), W.world_doc("b", facts=[W.fact()])])
@@ -703,8 +703,7 @@ def test_nothing_lands_outside_the_declared_write_set(tmp_path, monkeypatch):
     W.write_samples(ep)
     before = {p.relative_to(ep) for p in ep.rglob("*") if p.is_file()}
 
-    judge_mod.grade_episode(ep, judge=W.FakeJudge(W.reply_document()),
-                            state=W.learning_state(paths), runs_base=ep.parent / "runs-base")
+    J.grade_at(ep, judge=W.FakeJudge(W.reply_document()), state=W.learning_state(paths))
 
     after = {p.relative_to(ep) for p in ep.rglob("*") if p.is_file()}
     allowed = {Path(W.JUDGE_NAME), Path(W.OUTCOME_NAME), Path(W.SAMPLES_NAME)}

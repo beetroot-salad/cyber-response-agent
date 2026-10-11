@@ -41,6 +41,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     drive,
     materialize,
 )
+from defender.run_repository import SessionPaths  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -182,7 +183,7 @@ def test_the_handles_session_access_reaches_todays_store_seam_with_no_new_guaran
         assert not hasattr(session, invented), (
             f"the handle claims a concurrency guarantee today's code does not make: {invented}")
 
-    direct = store_mod.open_store(case_id="case-alpha", runs_base=base)
+    direct = store_mod.open_store(case_id="case-alpha", sessions=SessionPaths(base))
     try:
         assert session.path == direct.path, "the handle resolves a different database"
     finally:

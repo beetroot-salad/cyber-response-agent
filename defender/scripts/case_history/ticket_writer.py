@@ -254,7 +254,7 @@ def receipt_path(run_dir: Path) -> Path:
     Never inside the run dir, where the box is root while it runs and could plant a receipt or
     block the host's write with a directory at its name."""
     run_dir = Path(run_dir)
-    return RunPaths(run_dir).ticket_write(run_dir.parent)
+    return RunPaths(run_dir).ticket_write()
 
 
 def clear_receipt(run_dir: Path) -> None:

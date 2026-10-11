@@ -161,7 +161,7 @@ def account_call(
 
 def _accounting_failure_path(run_dir: Path) -> Path:
     run_dir = Path(run_dir)
-    return RunPaths(run_dir).accounting_failures(run_dir.parent)
+    return RunPaths(run_dir).accounting_failures()
 
 
 def accounting_failure_state(run_dir: Path) -> dict:
@@ -262,7 +262,7 @@ def _turn_key(run_dir: Path) -> str:
 
 def _oracle_held_path(run_dir: Path) -> Path:
     run_dir = Path(run_dir)
-    return RunPaths(run_dir).oracle_held(run_dir.parent)
+    return RunPaths(run_dir).oracle_held()
 
 
 def _seconds(value: object) -> float:

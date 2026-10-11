@@ -166,12 +166,16 @@ EXPECTED_FINDINGS_DEADLETTER = [
 EXPECTED_MARKERS = [
     # sorted by (queue, identity): "delivery" before "lead_author", whatever the
     # directories' own walk order is.
+    # #1105 PR 2 (review): a row shows the run address it stores, `tenant_id` and `run_id`,
+    # each null when the record carries none; an old row's `run_dir` is no longer shown.
     {"queue": "delivery", "identity": "z-delivery-1",
-     "failed": "unreadable pending-delivery record", "run_dir": None},
+     "failed": "unreadable pending-delivery record", "tenant_id": None, "run_id": None},
     {"queue": "lead_author", "identity": "run-a",
-     "failed": "unreadable: run_dir is not an absolute path", "run_dir": None},
+     "failed": "unreadable: run_dir is not an absolute path", "tenant_id": None,
+     "run_id": "run-a"},
     {"queue": "lead_author", "identity": "run-b",
-     "failed": "artifact-missing <img src=x onerror=alert(2)>", "run_dir": "/srv/runs/run-b"},
+     "failed": "artifact-missing <img src=x onerror=alert(2)>", "tenant_id": None,
+     "run_id": "run-b"},
 ]
 
 EXPECTED_DELIVERIES = [

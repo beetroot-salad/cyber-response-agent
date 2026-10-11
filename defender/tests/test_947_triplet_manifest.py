@@ -51,11 +51,12 @@ def test_947_family_schema_and_loader_live_in_runtime_branch():
 
 def test_947_family_manifest_carries_every_declared_field(tmp_path):
     """A loaded family carries the launcher's derived half, the operator's instrument field
-    and the questioner's authored half as one document: episode id, source run dir and id,
-    branch message id, fences, T0, the continuation prompt, the served systems, the base story,
-    the discriminator and the worlds — every field the data model declares, none omitted."""
+    and the questioner's authored half as one document: episode id, source run id, branch
+    message id, fences, T0, the continuation prompt, the served systems, the base story, the
+    discriminator and the worlds — every field the data model declares, none omitted. (#1105
+    PR 2, declared change 9: the source is named by id only; `source_run_dir` is no field.)"""
     fam = _load(T.family_doc())
-    for slot in ("episode_id", "source_run_dir", "source_run_id", "branch_message_id",
+    for slot in ("episode_id", "source_run_id", "branch_message_id",
                  "fences_at", "as_of", "continuation_prompt", "served_systems", "base_story",
                  "discriminator", "worlds"):
         assert getattr(fam, slot) is not None, f"the manifest lost {slot}"
@@ -251,7 +252,8 @@ def test_947_one_identity_gate_refuses_every_bad_world_identity_before_launch(tm
         # the assertions below are satisfied by the wrong refusal.
         with pytest.raises(T.refusals()) as refused:
             T.mod("learning.branch.cli").main(
-                [str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
+                ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
+                 "--continuation-prompt", "go"],
                 spawn=spawn, preflight=_no_preflight,
                 questioner=questioner, live_tree=T.source_capture())
         assert questioner.calls > 0, "the launch was refused before the identity gate ran"

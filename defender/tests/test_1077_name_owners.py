@@ -26,6 +26,7 @@ from defender.tests import _spec1077 as S
 from defender.tests import _triplet_947 as T
 from defender.tests._by_path import DEFENDER, load_module
 from defender.tests import _tenants1106 as T1106  # noqa: E402
+from defender.run_repository import SessionPaths
 
 
 @pytest.fixture
@@ -487,10 +488,10 @@ def test_session_db_refuses_a_lineage_id_the_case_id_pattern_rejects(base, run_d
             "this test reads it, it does not re-spell it")
         _refuses(run_dir, base, lineage)
         with pytest.raises(InvalidCaseId):
-            store_path_for(lineage, runs_base=base)
+            store_path_for(lineage, sessions=SessionPaths(base))
     # Positive control: the id today's resolver admits resolves to today's path.
     assert S.RunPaths(run_dir).session_db(base, S.LINEAGE_ID) == store_path_for(
-        S.LINEAGE_ID, runs_base=base)
+        S.LINEAGE_ID, sessions=SessionPaths(base))
 
 
 def test_session_db_lineage_id_failing_case_id_pattern(base, run_dir):
@@ -503,7 +504,7 @@ def test_session_db_lineage_id_failing_case_id_pattern(base, run_dir):
     assert repr(hostile) in str(refusal) or hostile in str(refusal), (
         "the refusal names the value it refused, as today's does")
     assert S.RunPaths(run_dir).session_db(base, S.LINEAGE_ID) == store_path_for(
-        S.LINEAGE_ID, runs_base=base), "positive control: a valid lineage id still resolves"
+        S.LINEAGE_ID, sessions=SessionPaths(base)), "positive control: a valid lineage id still resolves"
 
 
 def test_session_db_lineage_id_empty(base, run_dir):

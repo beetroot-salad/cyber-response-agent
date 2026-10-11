@@ -83,7 +83,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--lead-author-drain", action="store_true",
         help="LEAD-AUTHOR stage: in a fresh lead-author/ worktree, curate the gather "
-             "catalog + system skills for each queued run dir and open one lead-author "
+             "catalog + system skills for each queued run and open one lead-author "
              "PR (separate from the lessons PR; takes no run_dir; one drainer at a time).",
     )
     ns = parser.parse_args(argv[1:])

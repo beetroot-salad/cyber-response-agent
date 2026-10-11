@@ -23,6 +23,7 @@ from pathlib import Path
 
 from defender._episode_handle import Episode
 from defender.tests import _state1135
+from defender.tests import _judge_921 as J
 from defender.tests import _world_1007 as W
 
 #: A second served system, for the scenarios that tell two systems' samples apart.
@@ -53,8 +54,7 @@ def render_prompt(ep: Path, label: str = "b") -> str:
 
 
 def grade(ep: Path, judge):
-    return W.mod("learning.judge").grade_episode(
-        ep, judge=judge, runs_base=ep.parent / "runs-base", state=_state1135.env_state())
+    return J.grade_at(ep, judge=judge, state=_state1135.env_state())
 
 
 def world_buckets(result, label: str = "b") -> list[str]:

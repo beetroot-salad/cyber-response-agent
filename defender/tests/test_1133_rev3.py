@@ -27,8 +27,8 @@ amendment "rev 3" on #1133; every name the suite calls is gathered in `_spec1133
   append leaves no descriptor open; a durable append into a missing holding folder is
   `FileNotFoundError` and makes nothing.
 - **Patches.** The minting check judges the WHOLE token (`Control` is refused by
-  `check_minted_token`, `Ledger.for_world`); `--resume` with no held episode is
-  `SystemExit` (driven through `run._resume_target`: `run.main` always holds one).
+  `check_minted_token`, `Ledger.for_world`); `--episode` (#1105 PR 2's sibling edge) with no
+  held episode is `SystemExit` (driven through `run._resume_target`: `run.main` always holds one).
 
 Every plant is a real filesystem entry, every fault a real primitive or the entry point's own
 seam (`io=`, `os_=`, `judge=`, `prime=`); every negative has a positive control on the same
@@ -62,6 +62,7 @@ from typing import Any
 
 import pytest
 
+from defender import _episode_handle as EH
 from defender import _io
 from defender._episode_paths import LAYOUT
 from defender.tests import _judge_921 as J
@@ -653,8 +654,8 @@ class SwappingJudge:
 
 def _grade(tmp_path: Path, ep: Path, judge: Any) -> Any:
     try:
-        return J.mod("learning.judge").grade_episode(
-            ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=2,
+        return J.grade_at(
+            ep, judge=judge, draws=2,
             state=_state1135.env_state())
     except Exception as refused:  # noqa: BLE001 — the refusal is the observation
         return refused
@@ -954,7 +955,7 @@ def _launcher(tmp_path: Path) -> tuple[Any, Path, Any, Path]:
     cli = mod("learning.branch.cli")
     _base, src = T.runs_base(tmp_path)
     tenant = T.current_tenant()
-    return cli, src, tenant, cli.episode_dir_for(T.EPISODE_ID, tenant=tenant)
+    return cli, src, tenant, EH.episode_dir(tenant.data_root, T.EPISODE_ID)
 
 
 def test_r3_the_launchers_default_primer_primes_an_empty_capture_once_and_warns(
@@ -966,7 +967,7 @@ def test_r3_the_launchers_default_primer_primes_an_empty_capture_once_and_warns(
     cli, src, tenant, ep = _launcher(tmp_path)
     (src / "executed_queries.jsonl").write_text("", encoding="utf-8")
     caplog.set_level(logging.WARNING)
-    with cli.prepare_episode(T.EPISODE_ID, src, tenant=tenant) as episode:
+    with cli.prepare_episode(T.EPISODE_ID, src, data_root=tenant.data_root) as episode:
         assert Path(episode.dir) == ep
     base = ep / LAYOUT.served_base
     assert base.read_bytes() == b""
@@ -1068,15 +1069,15 @@ def test_patch_the_minting_check_judges_the_whole_token(token, minted):
 
 
 def test_patch_resume_with_no_held_episode_is_refused_never_an_ordinary_run(tmp_path):
-    """`--resume` with no held episode is refused (`SystemExit`), never an ordinary run: `main`
-    always holds one for `--resume`, so this guard is driven on `run._resume_target` directly.
-    Controls: with no `--resume` the answer is `None` (an ordinary run); with the episode held,
-    it is the manifest's world."""
+    """A sibling (`--episode`, #1105 PR 2's id edge for what was `--resume`) with no held
+    episode is refused (`SystemExit`), never an ordinary run: `main` always holds one for
+    `--episode`, so this guard is driven on `run._resume_target` directly. Controls: with no
+    `--episode` the answer is `None` (an ordinary run); with the episode held, it is the
+    manifest's world."""
     run = mod("run")
     _base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
-    ns = run.parse_args(["--resume", str(ep / LAYOUT.family), "--world", "b",
-                         "--tenant", T.SOURCE_TENANT])
+    ns = run.parse_args(["--tenant", T.SOURCE_TENANT, "--episode", ep.name, "--world", "b"])
 
     def settings() -> Path:
         raise AssertionError("the tenant's record was resolved for a manifest that names them")
@@ -1088,5 +1089,5 @@ def test_patch_resume_with_no_held_episode_is_refused_never_an_ordinary_run(tmp_
     assert run._resume_target(ordinary, episode=None, tenant=settings) is None
     with S.open_episode(ep) as episode:
         world = run._resume_target(ns, episode=episode, tenant=settings)
-    assert world is not None, "a held episode's --resume answered no world"
+    assert world is not None, "a held episode's --episode answered no world"
     assert world.label == "b", world

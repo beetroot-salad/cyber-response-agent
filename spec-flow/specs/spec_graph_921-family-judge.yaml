@@ -747,10 +747,12 @@ demands:
 
   - id: sibling_union_by_alert_id
     kind: behavior
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1105 PR 2 — J3 (owner fork decision, 2026-10-10): the judge''s same-alert union is removed and the judge reads only the episode it is handed; `test_921_sibling_union_is_the_runs_base_trials_sharing_the_alert_id`, which discharged this demand, was deleted with it (a declared removal).'
     source: "M1, O4"
     binds: ['interacts(judge_render->runs_base)', 'runs_base.access[sibling_union_scan]']
-    discharged_by: test_921_sibling_union_is_the_runs_base_trials_sharing_the_alert_id
     seed_docstring: >-
       The sibling union is the runs sharing the alert's `alert_id`. No reader at base indexes
       the runs base by `alert_id` (run1/G8) — the queue's grouping key is `alert_rule_key`, a
@@ -826,10 +828,12 @@ demands:
 
   - id: first_run_alert_says_the_union_is_empty
     kind: domain-outcome
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1105 PR 2 — J3 (owner fork decision, 2026-10-10): the judge''s same-alert union is removed and the judge reads only the episode it is handed; `test_921_first_run_alert_coverage_view_states_the_empty_union`, which discharged this demand, was deleted with it (a declared removal).'
     source: "N10"
     binds: ['runs_base.domain.distinguished[empty-union]', 'judge_prompt.payload']
-    discharged_by: test_921_first_run_alert_coverage_view_states_the_empty_union
     seed_docstring: >-
       A first-run alert has an empty sibling union and an empty spread, and the coverage view
       SAYS SO explicitly. Nothing is inferred from the absence — an unstated absence is what a
@@ -1593,13 +1597,15 @@ demands:
 
   - id: a_world_label_colliding_with_a_real_run_id_is_refused_at_manifest_load
     kind: uniqueness
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1105 PR 2 — J3 follow-through (2026-10-10): the judge''s world-label collision check over the runs base (G17) is removed — it guarded `resolve_run_bundle`, which had no production caller (F-13 deleted it) — so a world label equal to a natural run id now grades; `test_921_a_world_label_colliding_with_a_real_run_id_is_refused_at_manifest_load`, which discharged this demand, was deleted with it (declared change 3).'
     source: "phase-F finding 3 (J12's third promoted break), HUMAN-RESOLVED at the phase-F seam (`70-resolutions.md`, Round 2)"
     binds:
       - 'family_manifest.payload'
       - 'family_manifest.access[questioner_authored]'
       - 'findings_jsonl.payload'
-    discharged_by: test_921_a_world_label_colliding_with_a_real_run_id_is_refused_at_manifest_load
     seed_docstring: >-
       A world label that COLLIDES WITH A REAL RUN ID under the runs base is refused at manifest
       load, alongside J5 tier 3's duplicate-label refusal. A family row carries `source_run_dir:
@@ -1642,13 +1648,15 @@ demands:
 
   - id: the_sibling_union_excludes_the_source_run_and_unclosed_siblings
     kind: behavior
-    form: test
+    form: clause
+    status: retired
+    outcome:
+      nl: 'RETIRED by #1105 PR 2 — J3 (owner fork decision, 2026-10-10): the judge''s same-alert union is removed and the judge reads only the episode it is handed; `test_921_the_sibling_union_excludes_the_source_run_and_unclosed_siblings`, which discharged this demand, was deleted with it (a declared removal).'
     source: "45-dispositions J9, HUMAN-RESOLVED at §7"
     binds:
       - 'runs_base.access[sibling_union_scan]'
       - 'runs_base.domain.distinguished[source-run-in-the-union]'
       - 'interacts(judge_render->runs_base)'
-    discharged_by: test_921_the_sibling_union_excludes_the_source_run_and_unclosed_siblings
     seed_docstring: >-
       The union is the OPERATOR's runs base; the SOURCE RUN the episode branched from is
       EXCLUDED and the coverage view says so; only runs that reached a close are included; an
