@@ -38,7 +38,6 @@ from defender import _git
 from defender._knowledge import KnowledgePaths
 from defender._paths import DefenderPaths, adapters_under
 from defender._vocab import HOST_ONLY_DISPOSITION
-from defender.scripts.gather_tools.record_query import open_query_mirror
 
 from .. import branch
 from .. import compaction
@@ -56,6 +55,7 @@ from .. import challenge_gate
 from .. import circuit_breaker
 from .. import review_roles
 from ..close_tool import register_close_tool
+from ..query_tool import open_query_mirror
 from ..circuit_breaker import RunAborted
 from ..permission.policies import _common
 from ..providers import BuiltModel

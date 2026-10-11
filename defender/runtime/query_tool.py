@@ -37,6 +37,7 @@ from defender.scripts.gather_tools.record_query import (
     append_query_row,
     dead_end_reason,
     live_lead_rows,
+    open_query_mirror,  # noqa: F401 — re-export: the driver opens the run's view through the query tool, never `scripts.*` directly (#1080 import direction)
     names_something_readable,
     payload_digest,
     payload_status,
