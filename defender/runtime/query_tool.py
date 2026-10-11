@@ -36,7 +36,7 @@ from defender.scripts.gather_tools.record_query import (
     RepeatTrip,
     append_query_row,
     dead_end_reason,
-    lead_rows,
+    live_lead_rows,
     names_something_readable,
     payload_digest,
     payload_status,
@@ -286,12 +286,12 @@ class QueryCapture(AbstractCapability[Any]):
         schema, and the grant check's unresolvable-verb branch); the domains do not overlap.
 
         Identity and `system_key` are extracted by the caller, which holds the right argument
-        surface and the raw string. One `lead_rows` read feeds both predicates so they answer
+        surface and the raw string. One `live_lead_rows` read feeds both predicates so they answer
         over the same table state. Repeat is asked first because its message is more specific
         (it names the repeated request). The budget is identity-blind, which is how it catches
         loops the repeat guard cannot (a new undeclared name each turn, whitespace drift)."""
         lead_id = _dispatched_lead(deps)
-        rows = lead_rows(deps.run_dir, lead_id)
+        rows = live_lead_rows(deps.run_dir, lead_id)
         trip = rejection_trip(
             rows, lead_id,
             system=system, verb=verb, params=params, system_key=system_key,
@@ -545,7 +545,7 @@ class QueryCapture(AbstractCapability[Any]):
 
         # Repeat guard above `_screen`, so a repeated bad call trips instead of earning yet
         # another identical `ModelRetry`.
-        rows = lead_rows(deps.run_dir, deps.lead_id)
+        rows = live_lead_rows(deps.run_dir, deps.lead_id)
         trip = repeat_trip(rows, deps.lead_id, system=system, verb=verb, params=params)
         if trip is not None:
             # A sentinel id, not the model's: offline collectors partition on `query_id`, and a

@@ -87,18 +87,15 @@ unreachable by root containment rather than by a named deny.
 | review_record | 1 | `review_record.<turn>.json` | — | — | run.observability.review_record | one per close attempt |
 | tool_trace | 1 | `tool_trace.jsonl` | — | — | run.observability.tool_trace | a whole-file rebuild from the session store, written once after the agent returns |
 | policy_denials | 1 | `policy_denials.jsonl` | — | — | run.tables.policy_denials |  |
-| budget | 1 | `budget.json` | — | — | run.observability.budget | counter, locked json |
-| circuit_breaker | 1 | `circuit_breaker.json` | — | — | run.observability.circuit_breaker | counter |
 | lessons_loaded | 1 | `lessons_loaded.jsonl` | — | lessons_loaded.jsonl | run.observability.lessons_loaded | receipt of corpus consumption; `hooks/record_lesson_load` is the reader-side classifier |
 | ticket_reads | 1 | `ticket_reads/<seq>.json` | cap | — | run.tables.ticket_reads | retired writer (the old pipeline judge, `permission/files.py:394-395`); only the path shape (`run_repository/_layout.py:231-233`) and the read cap survive |
-| session_pointer | 1 | `session_store_pointer.json` | — | — | run.observability.session_pointer | written by the driver before the first turn |
 | runtime_html | 1 | `runtime.html` | (inlines MAIN's transcript; safe on timing only, `run_repository/_layout.py`, the comment on `WIRE_LOG_DIR`) | — | run.observability.runtime_html | copied to the main checkout's `run-visualizations/` on `dev` deployments only, written as the checkout's owner (`visualize_run.mirror_page`, #1084/#1110) |
 | box_sentinel | 1 | `.box-sentinel` | — | — | run.observability.box_sentinel | `unlink_on_fault=False` (`_lifecycle.py:105-106`), left behind on a fault as evidence (`:96-102`); the mount-check sentinel `.box-sentinel-<uuid>` (`:109-117`) is a different, self-cleaning family |
 | provenance | 1 | `provenance.json` | outright | provenance.json | run.facts.provenance | stamped by the host at materialize time |
 | run_end | 2 | `<run>.run-end.json` | — | run_end.json (renamed, `archive.py:148`) | run.facts.run_end | cleared by the host at `run_common.py:71-77` before a reused id |
 | scrub_verdict | 2 | `<run>.scrub-verdict.json` | — | scrub_verdict.json (renamed, `archive.py:79`) | run.facts.scrub_verdict |  |
-| accounting | 2 | `<run>.accounting_failures.json` | — | — | run.facts.accounting |  |
 | ticket_write | 2 | `<run>.ticket-write.json` | — | — | run.observability.ticket_write | the case-ticket write's receipt, written by the host's record step (`ticket_writer._write_receipt`); moved out of the run dir by #1107 so the box can neither plant nor block it |
+| session_pointer | 2 | `<run>.session-pointer.json` | — | — | run.observability.session_pointer | the run -> case link (which case's session store holds this run), written by the driver before the first turn; moved out of the run dir by #1235 so the box can neither forge nor delete it |
 | session_db | 3 | `<sessions>/<lineage id>.db` | — | — | run.session.session_db | SQLite; the connection at `_bare_connect` carries every read and append |
 | family | 4 | `family.yaml` | — | — | episode.family | the fork point, declared once per episode |
 | family_stamp | 4 | `provenance.json` | — | — | episode.family_stamp | a different shape from the run stamp; written by `verify_family` |

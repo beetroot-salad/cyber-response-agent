@@ -38,6 +38,7 @@ from defender import _git
 from defender._knowledge import KnowledgePaths
 from defender._paths import DefenderPaths, adapters_under
 from defender._vocab import HOST_ONLY_DISPOSITION
+from defender.scripts.gather_tools.record_query import open_query_mirror
 
 from .. import branch
 from .. import compaction
@@ -52,6 +53,7 @@ from .. import toon_gate as toon_gate_mod
 from ..agent_definition import AgentDefinition, ResolvedRoots, ToolSet, bind
 from ..agent_role import GATHER_AGENT_ID_PREFIX, AgentRole
 from .. import challenge_gate
+from .. import circuit_breaker
 from .. import review_roles
 from ..close_tool import register_close_tool
 from ..circuit_breaker import RunAborted
@@ -460,7 +462,12 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     catalog, correlation_catalog = _dispatch_catalogs(defender_dir, roster, tenant.grants)
     limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
     budget_started_monotonic = time.monotonic()
+    # The run's live decision state lives in this process (#1235): the budget, the breaker and
+    # the queries table's live view all start here, before lead-0 and before any tool call. The
+    # queries view loads from the table as the host seeded it (a branch sibling's prefix rows).
     open_budget(run_dir, run_id)
+    circuit_breaker.open_breaker(run_dir)
+    open_query_mirror(run_dir)
     # Under `wire_logs/`, not the run root, so it is outside the agents' one-segment run-dir
     # read shape.
     logger = observe.RequestLogger(observe.wire_log_path(run_dir))

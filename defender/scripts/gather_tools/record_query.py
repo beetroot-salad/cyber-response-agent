@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shlex
 import sys
+import threading
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -139,6 +141,44 @@ def lead_rows(run_dir: Path, lead: str) -> list[dict]:
     return [r for r in rows if isinstance(r, dict) and r.get("lead_id") == lead]
 
 
+#: The queries table's live view, per run folder (`os.path.abspath`), in this process's memory
+#: (#1235). The run's own decisions (the repeat guard, the rejection budget, seq allocation, a
+#: reducer failure's system) read it, never the file: the file is the model's view and the
+#: learning loop's record, and the box can write it. Rows are the parsed lines the host wrote.
+_MIRRORS: dict[str, list[dict]] = {}
+_MIRROR_LOCK = threading.Lock()
+
+
+def _mirror_key(run_dir: Path) -> str:
+    return os.path.abspath(run_dir)
+
+
+def open_query_mirror(run_dir: Path) -> None:
+    """Load the run's live view from the table as the host left it before the run (a branch
+    sibling's seeded prefix; nothing for a fresh run), replacing any earlier view of the folder.
+    Called once at run start, before lead-0 and before any tool call."""
+    rows = read_jsonl_rows(RunPaths(run_dir).executed_queries)
+    with _MIRROR_LOCK:
+        _MIRRORS[_mirror_key(run_dir)] = rows
+
+
+def _live_rows(run_dir: Path) -> list[dict]:
+    """A copy of the run's live rows. `LookupError` when this process never opened the view:
+    a live reader running before the run started is a wiring fault, not an empty table."""
+    with _MIRROR_LOCK:
+        try:
+            return list(_MIRRORS[_mirror_key(run_dir)])
+        except KeyError:
+            raise LookupError(
+                f"the queries table's live view for {run_dir} was never opened "
+                "(open_query_mirror runs at run start)") from None
+
+
+def live_lead_rows(run_dir: Path, lead: str) -> list[dict]:
+    """This lead's rows from the run's live view, in append order."""
+    return [r for r in _live_rows(run_dir) if r.get("lead_id") == lead]
+
+
 def payload_status(exit_code: int, payload: Any) -> str:
     """The `payload_status` column's rule — `error` / `empty` / `ok` — for a decoded payload.
 
@@ -254,7 +294,12 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
             "internal: append_query_row's row disagrees with QUERY_ROW_COLUMNS: "
             f"{tuple(row)} != {QUERY_ROW_COLUMNS}"
         )
-    write_guarded(RunPaths(run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
+    line = json.dumps(row)
+    write_guarded(RunPaths(run_dir).executed_queries, line + "\n", mode="append")
+    # After the write, so a row the table refused never counts; the parsed line, so the live
+    # view holds exactly what the file says (non-finite floats, tuples and keys as written).
+    with _MIRROR_LOCK:
+        _MIRRORS[_mirror_key(run_dir)].append(json.loads(line))
     return row
 
 
@@ -286,10 +331,7 @@ def system_for_payload_operands(run_dir: Path, operands: Iterable[Path]) -> str:
     keys = [k for operand in operands if (k := _payload_key(operand, base)) is not None]
     if not keys:
         return ""
-    try:
-        rows = read_jsonl_rows(RunPaths(run_dir).executed_queries)
-    except OSError:
-        return ""
+    rows = _live_rows(run_dir)
     wanted = set(keys)
     by_key = {
         (r.get("lead_id"), r.get("seq")): r
@@ -334,7 +376,7 @@ def repeat_note(  # noqa: PLR0913 — one parameter per row field the comparison
     identity = _result_identity(payload_digest, payload_sha256)
     repeat_seq: int | None = None
     same_payload: int | None = None
-    for rec in lead_rows(run_dir, lead):
+    for rec in live_lead_rows(run_dir, lead):
         # Same counted domain as `repeat_trip`: these rows never reached the backend.
         if rec.get("query_id") in ABOVE_PLACEMENT_QUERY_IDS:
             continue
@@ -387,7 +429,7 @@ def repeat_note(  # noqa: PLR0913 — one parameter per row field the comparison
 
 
 def _next_seq(run_dir: Path, lead: str) -> int:
-    return len(lead_rows(run_dir, lead))
+    return len(live_lead_rows(run_dir, lead))
 
 
 # The repeat circuit breaker: a lead issuing the same request (`lead_id`, `system`, `verb`,

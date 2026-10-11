@@ -16,7 +16,7 @@ from pydantic import model_validator
 
 
 
-from defender.run_repository import RUN_LAYOUT, RunPaths, artifact_file
+from defender.run_repository import RunPaths, artifact_file
 
 from .. import session_store
 from defender._io import read_text_utf8
@@ -114,14 +114,14 @@ def open_source_store(run_dir: Path) -> Any:
     # `BranchError`, which the driver's store-setup handler catches.
     try:
         pointer = json.loads(
-            read_text_utf8(RunPaths(run_dir).session_pointer))
+            read_text_utf8(RunPaths(run_dir).session_pointer()))
         recorded = Path(pointer["store_path"]).resolve()
         case_id = pointer["case_id"]
         derived = session_store.store_path_for(case_id, sessions=sessions).resolve()
     except (OSError, ValueError, KeyError, TypeError) as e:
         raise BranchError(
             f"{run_dir} carries no readable case pointer "
-            f"({RUN_LAYOUT.session_pointer}): {e!r}") from e
+            f"({RunPaths(run_dir).session_pointer().name}): {e!r}") from e
     if derived != recorded:
         raise BranchError(
             f"{run_dir} records its store at {recorded}, but its case {case_id!r} resolves "
@@ -139,7 +139,7 @@ def source_store_if_any(run_dir: Path) -> Any:
     mismatch still propagates as a refusal rather than silently taking a storeless fallback
     (wrong T0, the finished document's frontier, no fixed prefix).
     """
-    if not artifact_file(RunPaths(Path(run_dir)).session_pointer):
+    if not artifact_file(RunPaths(Path(run_dir)).session_pointer()):
         return None
     return open_source_store(run_dir)
 

@@ -65,8 +65,6 @@ LINT_HARD_GATED_MODULES: frozenset[str] = frozenset({
     "runtime/observe.py",
     "runtime/driver/",
     "runtime/session_store.py",
-    "hooks/budget_enforcer.py",
-    "runtime/circuit_breaker.py",
     "runtime/query_tool.py",
     "runtime/tools_gather.py",
     "hooks/record_lead.py",

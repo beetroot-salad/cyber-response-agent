@@ -14,9 +14,9 @@ never parsed contents. Asking for `.path` creates nothing; writes create the hol
 through the same injected `io=` seam as every read.
 
 Every read and write goes through the rooted seam (`_io.rooted_read`, `rooted_mkdir`,
-`rooted_write`, `rooted_locked_for_rewrite`): the record's trust root, whose spelling is
+`rooted_write`): the record's trust root, whose spelling is
 followed, and its name relative to that root, which never is (#1111). The trust root is the run
-dir; the runs base for the four sidecars; `SessionPaths(runs_base).trust_root` for the session
+dir; the runs base for the sidecars; `SessionPaths(runs_base).trust_root` for the session
 db. The session db itself is opened through `session_store.open_store`. The two model-authored documents are validated against
 `_artifact_schema` at every write, so no writer bypasses the schema.
 """
@@ -43,55 +43,52 @@ GROUPS = ("tables", "facts", "documents", "observability", "session")
 #: Must mirror `defender/tests/_spec1077.py::GROUP_MEMBERS`, the spec for this table.
 GROUP_MEMBERS: dict[str, tuple[str, ...]] = {
     "tables": ("queries", "policy_denials", "leads", "payloads", "ticket_reads"),
-    "facts": ("alert", "provenance", "run_end", "scrub_verdict", "accounting"),
+    "facts": ("alert", "provenance", "run_end", "scrub_verdict"),
     "documents": ("investigation", "report", "gather_summaries", "lead_author", "source_refs"),
     "observability": (
         "wire_log", "review_trace", "forward_check_trace", "tool_trace", "review_record",
-        "budget", "circuit_breaker", "lessons_loaded", "ticket_write", "runtime_html",
-        "box_sentinel", "session_pointer"),
+        "lessons_loaded", "ticket_write", "runtime_html", "box_sentinel", "session_pointer"),
     "session": ("session_db",),
 }
 MEMBER_ACCESSOR: dict[str, str] = {
     "queries": "executed_queries", "policy_denials": "policy_denials", "leads": "lead_claim",
     "payloads": "payload", "ticket_reads": "ticket_read",
     "alert": "alert", "provenance": "provenance", "run_end": "run_end_sidecar",
-    "scrub_verdict": "scrub_verdict", "accounting": "accounting_failures",
+    "scrub_verdict": "scrub_verdict",
     "investigation": "investigation", "report": "report",
     "gather_summaries": "gather_summary", "lead_author": "lead_author",
     "source_refs": "source_refs",
     "wire_log": "wire_log", "review_trace": "review_trace",
     "forward_check_trace": "forward_check_trace", "tool_trace": "tool_trace",
-    "review_record": "review_record", "budget": "budget",
-    "circuit_breaker": "circuit_breaker", "lessons_loaded": "lessons_loaded",
+    "review_record": "review_record", "lessons_loaded": "lessons_loaded",
     "ticket_write": "ticket_write", "runtime_html": "runtime_html",
     "box_sentinel": "box_sentinel", "session_pointer": "session_pointer",
     "session_db": "session_db",
 }
 #: The one write verb per member — per record, not per group, since the group only says how a
-#: record is read. `append` (JSONL), `write` (whole document or write-once fact), `update` (the
-#: `flock`ed JSON states), `open` (session store), or none.
+#: record is read. `append` (JSONL), `write` (whole document or write-once fact), `open`
+#: (session store), or none. (No `update` member remains: the two `flock`ed JSON states, the
+#: budget and the breaker, became the run process's memory in #1235.)
 MEMBER_VERB: dict[str, str | None] = {
     "queries": "append", "policy_denials": "append", "leads": "write", "payloads": "write",
     "ticket_reads": "write",
     "alert": "write", "provenance": "write", "run_end": "write", "scrub_verdict": "write",
-    "accounting": "write",
     "investigation": "write", "report": "write", "gather_summaries": "write",
     "lead_author": None, "source_refs": "write",
     "wire_log": "append", "review_trace": "append", "forward_check_trace": "append",
-    "tool_trace": "append", "review_record": "write", "budget": "update",
-    "circuit_breaker": "update", "lessons_loaded": "append", "ticket_write": "write",
+    "tool_trace": "append", "review_record": "write", "lessons_loaded": "append",
+    "ticket_write": "write",
     "runtime_html": "write", "box_sentinel": "write", "session_pointer": "write",
     "session_db": "open",
 }
 UPWARD_ACCESSORS = (
-    "run_end_sidecar", "scrub_verdict", "accounting_failures", "ticket_write", "sessions_dir",
+    "run_end_sidecar", "scrub_verdict", "ticket_write", "session_pointer", "sessions_dir",
     "session_db")
-#: The four sidecars sit directly in the runs base, so they are anchored there. (The session
-#: db's `open_store` anchors its own directory.)
-_SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "accounting", "ticket_write")
+#: The sidecars sit directly in the runs base, so they are anchored there. (The session db's
+#: `open_store` anchors its own directory.)
+_SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "ticket_write", "session_pointer")
 #: Written once through the exclusive lane (a second lead claim must collide). The scrub
-#: verdict and accounting counter are facts too but are rewritten, so they use `replace` like
-#: every other `write`.
+#: verdict is a fact too but is rewritten, so it uses `replace` like every other `write`.
 _WRITE_ONCE_MEMBERS = frozenset({"alert", "provenance", "run_end", "leads"})
 #: The two model-authored documents, held to their content schema at every write.
 _SCHEMA_GATED_MEMBERS = {"investigation": RUN_LAYOUT.investigation.name,
@@ -136,8 +133,6 @@ class RecordHandle:
             self.write = self._do_write
         elif self._verb == "append":
             self.append = self._do_append
-        elif self._verb == "update":
-            self.update = self._do_update
         elif self._verb == "open":
             self.open = self._do_open
 
@@ -195,14 +190,6 @@ class RecordHandle:
             if self._group != "observability" or self._on_partial_failure is None:
                 raise
             self._on_partial_failure(f"{self._member}: append failed")
-
-    def _do_update(self, patch: dict) -> None:
-        root, name = self._address()
-        self._mkdir(root, name)
-        # The `_io` op reads, changes and rewrites the record; the handle never reads it
-        # (#1174 amendment 2), and unusable content starts over from `{}`.
-        self._io.locked_json_update(self._io.rooted_locked_for_rewrite(root, name),
-                                    lambda state: state.update(patch), default=dict)
 
     def _do_open(self):
         # Resolve first so the owner's refusals apply to `.open()` as to `.path`.

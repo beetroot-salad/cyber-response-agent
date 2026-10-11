@@ -15,7 +15,7 @@ from typing import Annotated, Any
 
 from pydantic import SkipValidation
 
-from defender._io import read_jsonl_rows, read_text_utf8
+from defender._io import read_text_utf8
 from defender.run_repository import RunPaths
 from defender.hooks.budget_enforcer import (
     BudgetKill,
@@ -70,8 +70,8 @@ class _CaptureDeps:
 
 
 def _rows_for(run_dir: Path, lead_id: str) -> list[dict]:
-    return [r for r in read_jsonl_rows(RunPaths(run_dir).executed_queries)
-            if r.get("lead_id") == lead_id]
+    from defender.scripts.gather_tools.record_query import live_lead_rows
+    return live_lead_rows(run_dir, lead_id)
 
 
 def _last_row_seq(run_dir: Path, lead_id: str) -> int:
@@ -177,21 +177,8 @@ def _record_manual_row(
 
 
 def _breaker_failures(run_dir: Path) -> int:
-    # Read through the breaker's own reader (bounded, nesting-guarded, shape-checked, #1174
-    # O10). Unusable state must degrade only this read, not item 1's whole resolution.
-    state = circuit_breaker._load(run_dir)
-    if state.get("_unreadable"):
-        return 0
-    systems = state.get("systems")
-    if not isinstance(systems, dict):
-        return 0
-    sysrec = systems.get(ITEM1_SYSTEM)
-    if not isinstance(sysrec, dict):
-        return 0
-    try:
-        return int(sysrec.get("failures", 0) or 0)
-    except (TypeError, ValueError):
-        return 0
+    rec = circuit_breaker.breaker_state(run_dir)["systems"].get(ITEM1_SYSTEM)
+    return rec["failures"] if rec else 0
 
 
 class _CallLedger:

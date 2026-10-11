@@ -711,11 +711,11 @@ def write_case_pointer(
     body: dict = {"case_id": case_id, "store_path": str(store_path)}
     if session_id is not None:
         body["session_id"] = session_id
-    write_guarded(RunPaths(run_dir).session_pointer, json.dumps(body))
+    write_guarded(RunPaths(run_dir).session_pointer(), json.dumps(body))
 
 
 def resolve_store_path(run_dir: Path) -> Path:
-    data = json.loads(read_text_utf8(RunPaths(run_dir).session_pointer))
+    data = json.loads(read_text_utf8(RunPaths(run_dir).session_pointer()))
     return Path(data["store_path"])
 
 
@@ -723,7 +723,7 @@ def resolve_session_id(run_dir: Path) -> str | None:
     """The session this run owns, or `None` when the pointer names none (a fresh run); the
     caller then falls back to `main_session_id`.
     """
-    data = json.loads(read_text_utf8(RunPaths(run_dir).session_pointer))
+    data = json.loads(read_text_utf8(RunPaths(run_dir).session_pointer()))
     session_id = data.get("session_id")
     return session_id if isinstance(session_id, str) and session_id else None
 

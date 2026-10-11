@@ -38,9 +38,8 @@ _logger = logging.getLogger(__name__)
 
 
 def _budget_state_for_enforcement(state: dict, deps: AgentDeps) -> dict:
-    """`budget.json`'s state with the host's own clock facts laid over it: the in-memory
-    monotonic origin, and the oracle-held seconds from host state (#1224 S15) — neither read
-    from the box-writable file."""
+    """The run's budget state with the host's own clock facts laid over it: the in-memory
+    monotonic origin, and the oracle-held seconds from host state (#1224 S15)."""
     return {**state, "started_monotonic": deps.budget_started_monotonic,
             ENFORCEMENT_HELD_KEY: oracle_held(deps.run_dir)}
 
@@ -63,19 +62,14 @@ def _budget_short_circuit(
 
 
 def _account_executed_call(deps: AgentDeps, tool_name: str, *, active: bool, limits: dict) -> None:
-    try:
-        call_tier = tier(tool_name, deps.role)
-        if active:
-            state = account_call(deps.run_dir, deps.run_id, tool_name, limits=limits, tier=call_tier)
-        else:
-            state = update_budget_locked(deps.run_dir, deps.run_id, tool_name, limits=limits)
-        state = _budget_state_for_enforcement(state, deps)
-        for w in check_budgets(state, limits):
-            _logger.warning(f"{w}")
-    except BudgetKill:
-        raise
-    except Exception as e:  # noqa: BLE001 — budget accounting must never break the run
-        _logger.warning(f"budget accounting skipped: {e!r}")
+    call_tier = tier(tool_name, deps.role)
+    if active:
+        state = account_call(deps.run_dir, deps.run_id, tool_name, limits=limits, tier=call_tier)
+    else:
+        state = update_budget_locked(deps.run_dir, deps.run_id, tool_name, limits=limits)
+    state = _budget_state_for_enforcement(state, deps)
+    for w in check_budgets(state, limits):
+        _logger.warning(f"{w}")
 
 
 def _stamp_duration(store: Any, session_id: str | None, duration_ms: float) -> None:

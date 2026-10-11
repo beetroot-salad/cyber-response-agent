@@ -1220,8 +1220,7 @@ def write_atomic(path: Path, text: str) -> None:
 # the target; `append`/`update` open with O_NOFOLLOW. `_refuse_unless_plain` runs first in
 # every mode and raises one exception type for symlink, hard link and directory alike, so
 # callers handle them uniformly. The `.write_guarded_alias` attribute on the raised OSError
-# lets a caller that must distinguish "aliased" from an ordinary occupied name (the budget
-# accounting exemption) do so.
+# lets a caller that must distinguish "aliased" from an ordinary occupied name do so.
 def stage_name(path: Path) -> Path:
     """An unpredictable staged name in `path`'s own directory. Never a predictable
     `<name>.tmp`, so an occupied staged name is always hostile and `O_EXCL` failing on it is
