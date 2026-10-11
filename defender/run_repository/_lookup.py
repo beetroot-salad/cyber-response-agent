@@ -8,15 +8,16 @@ which asks the episode owner (the one reader of `DEFENDER_EPISODES_BASE`) for th
 
 * natural container: `runs.open(run_id) -> Run`, `runs.list() -> Listed`,
   `runs.all_runs() -> list[Run]`, `runs.create(run_id)`, `runs.resolve(address) -> Run`;
-* the episode view `runs.episode(episode_id) -> EpisodeRuns`: `open`, `create`,
+* the episode view `runs.episode(episode_id) -> EpisodeRuns`: `open`, `arms`, `create`,
   `create_container`, `base_world_id`, `arm_id`, and `episode`, the owner's handle;
 * `open_requested_run(data_root, tenant, run_id)`: a command line's `--tenant T <run_id>`,
   opened, or its refusal as text;
-* `runs.episode_files(episode_id) -> Episode`: the owner's handle alone (the judge's door);
+* `runs.episode_files(episode_id) -> Episode`: the owner's handle, its container's tenant
+  record judged as `episode` judges it (the judge's door);
 * `RunAddress(tenant_id, run_id, episode_id | None)`: the stored and transported address.
 
-Each lookup opens its container ONCE, no-follow (`_held.hold_runs`), and does every read
-relative to that handle, closing it before it returns. One held handle is how a link at the
+Each lookup opens its container ONCE, no-follow (`_hand_out`, `_held.hold_runs`), and does
+every read relative to that handle, closing it before it returns. One held handle is how a link at the
 container itself is refused, and how one call's listing, tenant record and claims all come from
 one folder; it is not race protection (P1: the host is not malicious).
 
@@ -39,11 +40,12 @@ write's staged file included. Each method judges what it reads: `open` does not 
 from __future__ import annotations
 
 import builtins
+import contextlib
 import dataclasses
 import stat
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from defender import _io
 from defender._shown import escaped, quoted
@@ -71,38 +73,150 @@ def _unclaimed(runs: HeldRuns) -> list[RunId]:
     return [run_id for run_id in runs.listing().runs if run_id not in claimed]
 
 
+def _unreachable_run(folder: Path, run_id: RunId, fault: TenantRefused) -> RunUnreachable:
+    """Run `run_id`'s refusal when its container cannot be held or its record does not name
+    the tenant: `RunUnreachable`, raised from (here: caused by) the container's refusal."""
+    refused = RunUnreachable(f"{Path(folder) / str(run_id)} cannot be reached: {fault}")
+    refused.__cause__ = fault
+    return refused
+
+
+def _at_entry(runs: HeldRuns, run_id: RunId, io: Any) -> Run | RunRefused:
+    """The run at `<folder>/<run_id>` of the held, judged folder, judged from its own entry
+    (never followed): a real directory is the `Run` (built by `Run.under`: the record was
+    judged through the held folder, and `Run.for_tenant` would read it again, by path);
+    nothing there is `RunAbsent`; anything else a `RunRefused` naming the path."""
+    name = str(run_id)
+    path = runs.folder / name
+    entry = io.stat_entry(runs.view, name)
+    if entry.st is None:
+        if entry.absent:
+            return RunAbsent(f"{path} is absent")
+        return RunRefused(f"{path} could not be judged: {entry.reason}")
+    if not stat.S_ISDIR(entry.st.st_mode):
+        return RunRefused(f"{path} is not a real directory (a link, a file or another entry) "
+                          "— it is never followed or opened as a run")
+    return Run.under(runs.folder, name, io=io, tenant_id=runs.tenant.id)
+
+
+class Handout:
+    """One hold's answer (`_hand_out`): a `Run`, or that id's `RunRefused`, per id in order,
+    and — for the block only — a no-follow reader over each run handed out, walked from the
+    held folder (no second hold). `absent` when the container was not there."""
+
+    def __init__(self, answers: dict[RunId, Run | RunRefused], *, absent: bool = False,
+                 view: _io.Bound | None = None) -> None:
+        self._answers = answers
+        self.absent = absent
+        self._view = view
+
+    def __getitem__(self, run_id: RunId) -> Run | RunRefused:
+        return self._answers[run_id]
+
+    def ids(self) -> builtins.list[RunId]:
+        return builtins.list(self._answers)
+
+    def values(self) -> builtins.list[Run | RunRefused]:
+        return builtins.list(self._answers.values())
+
+    def reader(self, run_id: RunId) -> _io.Bound:
+        """A no-follow reader over the run `run_id` this hold handed out, as `Run.reader()`
+        gives one but walked from the held folder (valid inside the `with` block only). An id
+        that was refused, or a hold that judged nothing, refuses (`RunRefused`)."""
+        answer = self._answers[run_id]
+        if isinstance(answer, RunRefused):
+            raise answer
+        if self._view is None:
+            raise RunRefused(f"run {quoted(str(run_id))} was not handed out by a held folder")
+        return self._view.under(str(run_id))
+
+
+@contextlib.contextmanager
+def _hand_out(tenant: Tenant, folder: Path, io: Any,
+              run_ids: Sequence[RunId] | None = None) -> Iterator[Handout]:
+    """The one single-hold routine (#1105 PR 2 review): `folder` held ONCE, no-follow, its
+    `_tenant.json` judged ONCE through that hold, and a `Run` handed out per id — every lookup
+    of runs (`open`, `list`, `all_runs`, an episode view's `open` and `arms`) goes through it.
+
+    * `run_ids` `None` — the listing: every run the held folder holds, minus the ids a good
+      episode record claims, sorted by text. The listing judges every entry (a stray refuses
+      it, `RunRefused`); a container that cannot be held or judged raises `TenantRefused`; an
+      absent one is `absent` with no runs.
+    * `run_ids` given — each id judged at its own entry (`_at_entry`), so one arm's entry
+      never spoils another's; a sidecar-shaped id is that id's `RunRefused`. The container's
+      own faults are every id's: absent is `RunAbsent` (the run is gone with it), one that
+      cannot be held or whose record does not name the tenant `RunUnreachable`.
+
+    The handle is closed when the block ends; the handed-out `Run`s outlive it."""
+    folder = Path(folder)
+    asked = None if run_ids is None else [require_run_id(r) for r in run_ids]
+    held: _io.Held | None = None
+    unholdable: TenantRefused | None = None
+    try:
+        held = hold_runs_folder(folder, io=io)
+    except FileNotFoundError:
+        pass
+    except TenantRefused as fault:
+        if asked is None:
+            raise
+        unholdable = fault
+    if held is None:
+        if asked is None:
+            yield Handout({}, absent=True)
+        elif unholdable is not None:
+            yield Handout({r: _unreachable_run(folder, r, unholdable) for r in asked})
+        else:
+            yield Handout({r: RunAbsent(f"{folder / str(r)} is absent: its runs folder "
+                                        f"{folder} is absent") for r in asked}, absent=True)
+        return
+    try:
+        runs = HeldRuns(tenant, held, io, folder=folder)
+        answers: dict[RunId, Run | RunRefused]
+        view: _io.Bound | None = None
+        if asked is None:
+            answers = {r: Run.under(folder, str(r), io=io, tenant_id=tenant.id)
+                       for r in _unclaimed(runs)}
+            view = runs.view
+        else:
+            try:
+                view = runs.judged()
+            except TenantRefused as fault:
+                answers = {r: _unreachable_run(folder, r, fault) for r in asked}
+            else:
+                answers = {r: refused if (refused := _id_refusal(r)) is not None
+                           else _at_entry(runs, r, io) for r in asked}
+        yield Handout(answers, view=view)
+    finally:
+        held.close()
+
+
+def _id_refusal(run_id: RunId) -> RunRefused | None:
+    """`refuse_sidecar_id`'s refusal of `run_id` as a value, or `None`."""
+    try:
+        refuse_sidecar_id(run_id)
+    except RunRefused as refused:
+        return refused
+    return None
+
+
 def _open(tenant: Tenant, folder: Path, run_id: RunId, io: Any) -> Run:
     """The run `run_id` of `tenant` in the container `folder`, as a `Run` addressed
-    `(tenant.id, run_id)`.
+    `(tenant.id, run_id)` — `_hand_out` over the one id, its refusal raised.
 
     In order: the id's type; the sidecar clause; the held folder — absent is `RunAbsent` (the
     run is gone with it), one that cannot be held or whose tenant record does not name the
     tenant is `RunUnreachable`, raised from the `TenantRefused` that judged it; the entry
     `<folder>/<run_id>`, which must be a real directory — nothing there is `RunAbsent`,
     anything else `RunRefused`, each naming the path. So the only refusal is `RunRefused` (see
-    the module docstring). The handle is built by `Run.under` (DV-2): the record was judged
-    through the held folder, and `Run.for_tenant` would read it a second time, by path. A
-    handed-out `Run` is not checked again (NF-12). `_episodes` is not read: whether a sibling
-    may be opened is its caller's."""
+    the module docstring). A handed-out `Run` is not checked again (NF-12). `_episodes` is not
+    read: whether a sibling may be opened is its caller's."""
     run_id = require_run_id(run_id)
     refuse_sidecar_id(run_id)
-    name = str(run_id)
-    path = Path(folder) / name
-    try:
-        with hold_runs(tenant, io, folder=folder) as runs:
-            if runs.absent:
-                raise RunAbsent(f"{path} is absent: its runs folder {folder} is absent")
-            entry = io.stat_entry(runs.view, name)
-            if entry.st is None:
-                if entry.absent:
-                    raise RunAbsent(f"{path} is absent")
-                raise RunRefused(f"{path} could not be judged: {entry.reason}")
-            if not stat.S_ISDIR(entry.st.st_mode):
-                raise RunRefused(f"{path} is not a real directory (a link, a file or another "
-                                 "entry) — it is never followed or opened as a run")
-    except TenantRefused as unreachable:
-        raise RunUnreachable(f"{path} cannot be reached: {unreachable}") from unreachable
-    return Run.under(folder, name, io=io, tenant_id=tenant.id)
+    with _hand_out(tenant, folder, io, [run_id]) as out:
+        answer = out[run_id]
+    if isinstance(answer, RunRefused):
+        raise answer
+    return answer
 
 
 @dataclasses.dataclass(frozen=True)
@@ -122,17 +236,12 @@ class Listed:
 
 
 def _list_container(tenant: Tenant, folder: Path, io: Any) -> Listed:
-    """The container's runs, sorted by text, minus every id a good episode record claims.
-    Every entry is judged (rev 4.1 H4): a stray refuses the listing, naming it. An absent
-    container is `Listed(absent=True)`; one that cannot be held raises `TenantRefused`."""
-    try:
-        held = hold_runs_folder(folder, io=io)
-    except FileNotFoundError:
-        return Listed(absent=True)
-    try:
-        return Listed(tuple(_unclaimed(HeldRuns(tenant, held, io, folder=folder))))
-    finally:
-        held.close()
+    """The container's runs, sorted by text, minus every id a good episode record claims
+    (`_hand_out`'s listing). Every entry is judged (rev 4.1 H4): a stray refuses the listing,
+    naming it. An absent container is `Listed(absent=True)`; one that cannot be held raises
+    `TenantRefused`."""
+    with _hand_out(tenant, folder, io) as out:
+        return Listed(absent=True) if out.absent else Listed(tuple(out.ids()))
 
 
 def _refuse_claimed(view: _io.Bound, folder: Path, run_id: RunId, io: Any) -> None:
@@ -205,24 +314,15 @@ class RunsRepository:
 
     def all_runs(self) -> builtins.list[Run]:
         """Every run `list()` answers, as a `Run` addressed `(tenant, run_id)`, in the same
-        order — from ONE hold of the container, whose `_tenant.json` is judged once, rather
-        than a hold and a record read per run. The listing judged every entry (a run is a real
-        directory there), so each handle is built by `Run.under`, as `open` builds one, with no
+        order — from ONE hold of the container, whose `_tenant.json` is judged once
+        (`_hand_out`'s listing), rather than a hold and a record read per run. The listing
+        judged every entry (a run is a real directory there), so each handle is built with no
         further read: the listing is the snapshot (P1), and a run removed after it is still
         handed out, its records then reading as absent — nothing here raises for it, as a
         per-id `open` would. An absent container holds none; one that cannot be held, or whose
         record does not name the tenant, refuses (`TenantRefused`), as `list` does."""
-        folder = Path(self._tenant.runs)
-        try:
-            held = hold_runs_folder(folder, io=self._io)
-        except FileNotFoundError:
-            return []
-        try:
-            ids = _unclaimed(HeldRuns(self._tenant, held, self._io, folder=folder))
-        finally:
-            held.close()
-        return [Run.under(folder, str(run_id), io=self._io, tenant_id=self._tenant.id)
-                for run_id in ids]
+        with _hand_out(self._tenant, Path(self._tenant.runs), self._io) as out:
+            return [cast(Run, run) for run in out.values()]
 
     def create(self, run_id: RunId, *, pinned: bool = False) -> Run:
         """The `Run` run setup builds at `run_id` in the tenant's natural container (D-create
@@ -247,7 +347,7 @@ class RunsRepository:
         container refuses (`TenantRefused`): `create` makes it first."""
         if self._created is not None:
             return self._created.base_world_id
-        with hold_runs(self._tenant, self._io) as held:
+        with hold_runs(self._tenant, self._io, folder=Path(self._tenant.runs)) as held:
             return held.require_present().record().base_world_id
 
     def resolve(self, address: RunAddress) -> Run:
@@ -288,13 +388,17 @@ class RunsRepository:
                            container_required=container_required, io=self._io)
 
     def episode_files(self, episode_id: str) -> Episode:
-        """The episode owner's handle on `episode_id` alone, opened under the tenant's data
-        root and reading nothing in `runs/` (C-26): the judge's door. Refusals are the owner's
-        (`EpisodeRefused`, `FileNotFoundError`, `NotADirectoryError`); nothing is created. The
-        caller closes it."""
-        from defender._episode_handle import Episode, episode_dir
-
-        return Episode.open(episode_dir(self._tenant.data_root, episode_id))
+        """The episode owner's handle on `episode_id`, opened under the tenant's data root:
+        the judge's door. Its container is judged as `episode` judges it (the same view's
+        judgement, G20): a PRESENT container whose `_tenant.json` names another tenant is
+        `TenantRecordMismatch`, a missing or corrupt one `TenantRefused`; an absent or
+        unreadable container is not this door's to refuse. Nothing else in `runs/` is read.
+        The owner's refusals are its own (`EpisodeRefused`, `FileNotFoundError`,
+        `NotADirectoryError`); nothing is created. The caller closes the handle."""
+        view = EpisodeRuns(self._tenant, episode_id, held=None, container_required=False,
+                           io=self._io)
+        # The view's one resource is the episode handle, handed to the caller to close.
+        return view.episode
 
 
 #: An episode container's states, as the view records them when it opens.
@@ -399,6 +503,17 @@ class EpisodeRuns:
         the tenant `RunUnreachable`."""
         return _open(self._tenant, self._folder, arm_id, self._io)
 
+    @contextlib.contextmanager
+    def arms(self, arm_ids: Sequence[RunId]) -> Iterator[Handout]:
+        """Every arm of `arm_ids` from ONE hold of the container, its `_tenant.json` judged
+        once (`_hand_out`): `handout[arm_id]` is the arm's `Run`, or the refusal `open` would
+        raise for it — each arm judged at its own entry, the container's faults every arm's
+        (`RunAbsent` when it is gone, `RunUnreachable` when it cannot be held or judged) — and
+        `handout.reader(arm_id)` a no-follow reader over a handed-out arm, walked from the held
+        container, for the block only."""
+        with _hand_out(self._tenant, self._folder, self._io, arm_ids) as out:
+            yield out
+
     def create(self, arm_id: RunId) -> Run:
         """The `Run` run setup builds for arm `arm_id` (D-create (a)). The container must
         already be there and name the tenant — an arm is never made in a container nobody
@@ -446,12 +561,10 @@ def open_requested_run(data_root: Path, raw_tenant: str, raw_run_id: str, *,
     the request, never raised or logged: the command line prints it on stderr and exits with its
     own status (defender/CLAUDE.md: a refusal is a value, not a diagnostic)."""
     from defender._episode_handle import EpisodeRefused
-    from defender._paths import process_defender_dir
-    from defender._tenant import accept_tenant, requested_tenant_id
+    from defender._tenant import requested_tenant
 
     try:
-        tenant = accept_tenant(data_root, requested_tenant_id(raw_tenant),
-                               defender_dir=process_defender_dir())
+        tenant = requested_tenant(data_root, raw_tenant)
         runs = tenant.runs_repository()
         run_id = RunId.parse(raw_run_id)
         if episode_id is None:

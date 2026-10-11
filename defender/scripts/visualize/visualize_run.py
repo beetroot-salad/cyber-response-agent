@@ -631,13 +631,13 @@ def _parse_run_page_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     """Re-render a finished run of the request's tenant (`--tenant`), opened by id through its
-    repository (`open_requested_run`: a natural run, or with `--episode` an arm of that
+    repository (`open_command_line_run`: a natural run, or with `--episode` an arm of that
     episode), through the same step `run.py` takes, with every line stamped with the run and
     the REQUEST's tenant (never the tenant a box-writable stamp names). Exits 1 when the run
     cannot be opened (the refusal printed on stderr), when the record was not saved, or when a
     `dev` copy failed — refreshing that copy is often why an operator re-renders."""
-    from defender import _log, _tenant
-    from defender.run_repository import open_requested_run
+    from defender import _log
+    from defender._command_line_run import open_command_line_run
 
     try:
         ns = _parse_run_page_args(argv[1:])
@@ -645,11 +645,7 @@ def main(argv: list[str]) -> int:
         print("usage: visualize_run.py --tenant T [--episode EPISODE_ID] <run_id> "
               f"[--update-ticket] ({bad})", file=sys.stderr)
         return 64
-    try:
-        run = open_requested_run(_tenant.resolve_data_root(), ns.tenant, ns.run_id,
-                                 episode_id=ns.episode)
-    except _tenant.TenantRefused as no_root:  # the data root's own refusal names its variable
-        run = str(no_root)
+    run = open_command_line_run(ns.tenant, ns.run_id, episode_id=ns.episode)
     if isinstance(run, str):
         print(f"visualize_run: {run}", file=sys.stderr)
         return 1

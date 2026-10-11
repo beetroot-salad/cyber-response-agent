@@ -171,13 +171,12 @@ RESIDUE = frozenset({
     # Link-following reads of things that are not episode records: a sibling's scrub verdict,
     # the sidecar beside its run dir (screened by `artifact_file` first); the source run's
     # investigation and alert (run records, #1105); the episode page's own stylesheet asset.
-    # #1105 PR 2 (decision C): the tenant-scoped runs repository's and the episode view's
-    # `open(run_id)` — a run opened by id through its owner, not a `Path.open` — which this
-    # census's by-name rule cannot tell apart from one.
-    ("learning.branch.cli", "_finished_arms", ".open"),
+    # #1105 PR 2 (decision C): the tenant-scoped runs repository's `open(run_id)` — a run
+    # opened by id through its owner, not a `Path.open` — which this census's by-name rule
+    # cannot tell apart from one. (VERIFY's and the page's per-arm opens left with PR 2's
+    # review: both take every arm from one hold, `EpisodeRuns.arms`.)
     ("learning.branch.cli", "_open_launch_source", ".open"),
     ("run", "_open_world_source", ".open"),
-    ("scripts.visualize.visualize_episode", "_load_arm", ".open"),
 })
 
 #: `_io` functions that do no I/O; any OTHER public `_io` function called from the handle is a

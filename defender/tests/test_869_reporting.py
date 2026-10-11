@@ -297,7 +297,8 @@ def test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record(tmp_pa
 
     capsys.readouterr()
     for _tick in range(5):
-        drains._drain_lead_author_markers(paths, state, refusing_lane)
+        drains._drain_lead_author_markers(paths, state, refusing_lane,
+                                          data_root=drains._data_root())
 
     assert len(calls) == 1, f"the refusal was retried: {len(calls)} invocations"
     assert not (paths.state_root / "author-queue" / "case-1.json").exists()

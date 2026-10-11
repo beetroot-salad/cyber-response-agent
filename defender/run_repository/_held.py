@@ -1,8 +1,8 @@
 """The held runs folder (#1105 H1–H4): the one object every lookup and tenant-keyed record
 function works through, and the argument checks they share.
 
-`hold_runs(tenant, io)` opens `tenant.runs` — or the folder the repository's episode view
-names, an episode's container — ONCE, no-follow, and yields a `HeldRuns` for the block,
+`hold_runs(tenant, io, folder=...)` opens `tenant.runs` — or the folder the repository's episode
+view names, an episode's container — ONCE, no-follow, and yields a `HeldRuns` for the block,
 closing the handle when it ends. The object is the call's whole view of the folder:
 
 * `absent` — the folder's one expected state other than present (empty answers);
@@ -292,12 +292,12 @@ def hold_runs_folder(folder: Path, *, create: bool = False, io: Any = _io) -> _i
 
 
 @contextmanager
-def hold_runs(tenant: Tenant, io: Any, *, folder: Path | None = None) -> Iterator[HeldRuns]:
-    """`folder` — `tenant.runs` when not given; an episode's container when the repository's
-    episode view hands its own — held open no-follow for the block (`absent` when it does not
-    exist, the one expected state of the folder itself) by `hold_runs_folder`; the handle is
-    closed when the block ends, however it ends."""
-    folder = Path(tenant.runs) if folder is None else Path(folder)
+def hold_runs(tenant: Tenant, io: Any, *, folder: Path) -> Iterator[HeldRuns]:
+    """`folder` — a runs folder of `tenant`'s, which every caller names: `tenant.runs`, or an
+    episode's container that the repository's episode view hands — held open no-follow for the
+    block (`absent` when it does not exist, the one expected state of the folder itself) by
+    `hold_runs_folder`; the handle is closed when the block ends, however it ends."""
+    folder = Path(folder)
     try:
         held = hold_runs_folder(folder, io=io)
     except FileNotFoundError:

@@ -18,8 +18,9 @@ F-11 names: it imports the package lazily). Below it everything is ids:
   `view.episode` (the owner's handle); a PRESENT container's `_tenant.json` is judged when the
   view opens; an ABSENT one has nothing to judge; an UNREADABLE one (a link, a non-directory) is
   recorded (`view.state`), not raised;
-* `runs.episode_files(episode_id) -> Episode`: the owner's handle alone, the judge's door — it
-  reads nothing in `runs/`;
+* `runs.episode_files(episode_id) -> Episode`: the owner's handle, the judge's door — it judges
+  the container's `_tenant.json` as `runs.episode` does (PR 2's second review round) and reads
+  nothing else in `runs/`;
 * `RunAddress(tenant_id, run_id, episode_id | None)`: frozen, fields checked at construction, the
   stored/transport form; rehydration is "accept its tenant, then open".
 
@@ -473,14 +474,22 @@ def test_an_unreadable_container_is_recorded_not_raised_and_never_written_throug
 
 
 def test_episode_files_is_the_owners_handle_alone_and_creates_nothing(tmp_path, episodes):
-    """`runs.episode_files(ep)` is the judge's door: the owner's handle on the episode folder,
-    reading nothing in `runs/` (C-26) — so it opens whatever the container holds, even a record
-    naming another tenant. A missing episode and a file at the episode's name are refused, and
-    nothing is created (#1133 O4.8.2, G23)."""
+    """`runs.episode_files(ep)` is the judge's door: the owner's handle on the episode folder.
+    Since PR #1236's second review round it judges the container's `_tenant.json` as
+    `runs.episode` does (C-26 amended, owner decision): a record naming another tenant is
+    refused (`TenantRecordMismatch`) and nothing is created; the tenant's own container opens.
+    A missing episode and a file at the episode's name are refused, and nothing is created
+    (#1133 O4.8.2, G23)."""
+    from defender._tenant import TenantRecordMismatch
+
     _root, t = _good(tmp_path)
     ep = _episode(episodes, container=H.U_ID)
     runs = t.runs_repository()
 
+    before = H.tree_state(episodes)
+    assert isinstance(H.raised(runs.episode_files, EP), TenantRecordMismatch)
+    assert H.tree_state(episodes) == before, "a refused door changed the episode"
+    (ep / "runs" / "_tenant.json").write_text(H.tenant_record_text(H.T_ID), encoding="utf-8")
     handle = runs.episode_files(EP)
     try:
         assert Path(handle.dir) == ep

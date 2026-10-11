@@ -14,6 +14,7 @@ from collections.abc import Callable
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL,
     DrainLabel,
+    FatalConfigError,
     LEAD_AUTHOR_DRAIN_LABEL,
     LoopPaths,
     author_max_attempts,
@@ -26,7 +27,6 @@ from defender.learning.core.config import (
 )
 from defender import _git
 from defender._claim_git import ClaimGit
-from defender import _paths
 from defender._paths import DefenderPaths
 from defender.runtime import box as box_mod
 from defender.learning.author import drain
@@ -386,12 +386,16 @@ class BatchDisposition:
 
 
 def _data_root() -> Path:
-    """The configured data root (`resolve_data_root`: `TenantRefused` when it is unset or
-    bad) — the lane's one place that reads it, asked only when a curation row is to be
-    served."""
+    """The configured data root — the lane's one place that reads it, asked only by a tick
+    that has a curation row queued when it starts. A missing or bad setting is the stage's
+    configuration refusal (`FatalConfigError`, raised from `resolve_data_root`'s
+    `TenantRefused`): `_run_stage` logs it on one line and exits 2."""
     from defender import _tenant
 
-    return _tenant.resolve_data_root()
+    try:
+        return _tenant.resolve_data_root()
+    except _tenant.TenantRefused as refused:
+        raise FatalConfigError(str(refused)) from refused
 
 
 def _retry_or_exhaust(
@@ -417,16 +421,14 @@ def _drain_lead_author_markers(
     run_lead_author: Callable[..., None],
     *,
     box: Any = None,
+    data_root: Path,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
-    data_root: Path | None = None,
 ) -> list[ServedMarker]:
     """Claim the queued curation requests and serve each one's run to `run_lead_author`.
 
-    A row stores its run's address (#1105 D-stored). `data_root` is the one the tick resolved
-    before its worktree and box existed (`lead_author_drain`); when it resolved none (nothing
-    was queued then), it is resolved here at the first claim, and with no claim never — so a
-    pitfalls-only tick needs no `DEFENDER_DATA_ROOT`. With none configured, the tick refuses
-    (`TenantRefused`) and the row waits, claimed, for a tick that can serve it.
+    A row stores its run's address (#1105 D-stored); `data_root` is the one the tick resolved
+    before its worktree and box existed (`lead_author_drain`), and every claim is served under
+    it. A tick that resolved none (no row was queued when it started) never reaches here.
 
     Each claim is rehydrated before it is served — its tenant accepted (once per tick: a
     refusal is cached for the tick too), its run opened through that tenant's repository. A row
@@ -447,8 +449,6 @@ def _drain_lead_author_markers(
     served: list[ServedMarker] = []
     for claim in claims:
         spec = claim.spec
-        if data_root is None:
-            data_root = _data_root()
         run = _rehydrate(claim, data_root, accepted)
         if isinstance(run, RunAbsent):
             state.quarantine(claim, "artifact-missing")
@@ -505,8 +505,7 @@ def _rehydrate(
     key = str(address.tenant_id)
     if key not in accepted:
         try:
-            accepted[key] = _tenant.accept_tenant(
-                data_root, address.tenant_id, defender_dir=_paths.process_defender_dir())
+            accepted[key] = _tenant.requested_tenant(data_root, address.tenant_id)
         except _tenant.TenantRefused as refused:
             _logger.warning(f"{claim.identity}: its tenant cannot be accepted ({refused})")
             accepted[key] = refused
@@ -589,15 +588,19 @@ def _drain_lead_author(
     run_lead_author: Callable[..., None],
     run_pitfalls: Callable[..., int],
     *,
+    data_root: Path | None,
     box: Any = None,
     lock_wait_seconds: int | None = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
-    data_root: Path | None = None,
 ) -> BatchDisposition:
+    """The tick's work: the curation requests served under `data_root`, then the pitfalls
+    curation. `data_root` is `None` when no request was queued as the tick started
+    (`lead_author_drain`): the tick then claims none — a row that lands mid-tick waits, queued,
+    for the next tick — and only the pitfalls step runs."""
     # The batch's box is stopped between agent runs and runs only inside each spawn's
     # `box_for_run`, so no host step of the tick runs beside a process an agent left (#1195).
-    served = _drain_lead_author_markers(
-        paths, state, run_lead_author, box=box, git_timeout=git_timeout, data_root=data_root)
+    served = [] if data_root is None else _drain_lead_author_markers(
+        paths, state, run_lead_author, box=box, data_root=data_root, git_timeout=git_timeout)
     pitfalls = _drain_pitfalls(
         paths, state, run_pitfalls, box=box, lock_wait_seconds=lock_wait_seconds,
         git_timeout=git_timeout,
@@ -937,10 +940,11 @@ def lead_author_drain(
             if not queue_locked:
                 _logger.warning("lead_author_drain: another lead-author run holds the queue lock — skipping")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
                 return 0
-            # A queued row is served only under a data root: resolved here, before a worktree
-            # or a box exists (the rule above), so a missing or bad setting refuses the tick
-            # with every row still queued. A tick with nothing queued (pitfalls only) never
-            # reads it; a row that lands after this check resolves it at its claim.
+            # A queued row is served only under a data root: resolved here, once, before a
+            # worktree or a box exists (the rule above), so a missing or bad setting refuses
+            # the tick (`FatalConfigError`) with every row still queued. A tick with nothing
+            # queued now reads no root and claims no row: one that lands mid-tick waits for
+            # the next tick.
             data_root = _data_root() if state.has_requests() else None
             return _run_worktree_batch(
                 paths, state, branch, label=LEAD_AUTHOR_DRAIN_LABEL,

@@ -79,7 +79,9 @@ def test_lead_author_max_retries_bad_value_raises_fatal_config(tmp_path, monkeyp
     state = _state1135.state_for_paths(paths)
     _state1135.enqueue_run(state, run_dir)
     with pytest.raises(FatalConfigError, match="LEAD_AUTHOR_MAX_RETRIES"):
-        drains._drain_lead_author_markers(paths, state, lambda _p, _s, _rd, *, box=None, **_kw: None)
+        drains._drain_lead_author_markers(
+            paths, state, lambda _p, _s, _rd, *, box=None, **_kw: None,
+            data_root=drains._data_root())
 
 
 
@@ -209,7 +211,8 @@ def test_lead_author_marker_drain_reraises_fatal_lift_threshold(tmp_path, monkey
         lead_author._lift_threshold()
 
     with pytest.raises(FatalConfigError):
-        drains._drain_lead_author_markers(paths, state, _run_lead_author)
+        drains._drain_lead_author_markers(
+            paths, state, _run_lead_author, data_root=drains._data_root())
 
     failed_dir = paths.state_root / "author-queue" / "failed"
     assert not (failed_dir / f"{run_dir.name}.json").exists()
@@ -243,7 +246,9 @@ def test_lead_author_drain_unlinks_marker_on_success(tmp_path, monkeypatch):
     state = _state1135.state_for_paths(paths)
     _state1135.enqueue_run(state, run_dir)
 
-    drains._drain_lead_author_markers(paths, state, lambda _p, _s, _rd, *, box=None, **_kw: None)
+    drains._drain_lead_author_markers(
+        paths, state, lambda _p, _s, _rd, *, box=None, **_kw: None,
+        data_root=drains._data_root())
 
     assert not (paths.state_root / "author-queue" / f"{run_dir.name}.json").exists()
     assert not (paths.state_root / "author-queue" / "failed" / f"{run_dir.name}.json").exists()
@@ -261,7 +266,8 @@ def test_lead_author_drain_quarantines_a_plain_failure(tmp_path, monkeypatch):
     def _run_lead_author(_paths, _state, _run_dir, *, box=None, **_kw):
         raise RuntimeError("poison run dir")
 
-    drains._drain_lead_author_markers(paths, state, _run_lead_author)
+    drains._drain_lead_author_markers(
+        paths, state, _run_lead_author, data_root=drains._data_root())
 
     assert not (paths.state_root / "author-queue" / f"{run_dir.name}.json").exists()
     failed = paths.state_root / "author-queue" / "failed" / f"{run_dir.name}.json"
@@ -283,7 +289,8 @@ def test_lead_author_drain_requeues_a_transient_with_bumped_attempts(tmp_path, m
     def _run_lead_author(_paths, _state, _run_dir, *, box=None, **_kw):
         raise drains._LeadAuthorRetry("rc=None transient")
 
-    drains._drain_lead_author_markers(paths, state, _run_lead_author)
+    drains._drain_lead_author_markers(
+        paths, state, _run_lead_author, data_root=drains._data_root())
 
     marker = paths.state_root / "author-queue" / f"{run_dir.name}.json"
     assert marker.exists()

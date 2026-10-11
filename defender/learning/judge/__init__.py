@@ -430,10 +430,11 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
 ) -> EpisodeGrade:
     """Grade episode `episode_id` of `runs`'s tenant (#1105 PR 2: the judge takes the
     repository and an id). Its door is `runs.episode_files(episode_id)`, the episode owner's
-    handle alone, held for the whole pass (one descriptor while the judge is paid, none after):
-    a bad id, an unusable episodes root, a missing episode or a file at its name is
-    `JudgeRefused`, and nothing is created. The judge reads only the episode it is handed — no
-    tenant's runs (J3)."""
+    handle once its container's tenant record is judged, held for the whole pass (one
+    descriptor while the judge is paid, none after): a bad id, an unusable episodes root, a
+    missing episode, a file at its name, or a present container whose record names another
+    tenant (or none) is `JudgeRefused`, and nothing is created. The judge reads only the
+    episode it is handed — no tenant's runs (J3)."""
     import yaml
 
     try:
@@ -453,12 +454,15 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
 def _open_episode(runs: RunsRepository, episode_id: str) -> Episode:
     """The pass's one handle, through the judge's door: every read through its view, every
     write through it. A missing episode is refused, never recreated by the not-graded stamp;
-    the owner's refusals (a bad id, an unusable root, a file at the name) are `JudgeRefused`."""
+    the owner's refusals (a bad id, an unusable root, a file at the name) and the container
+    record's (another tenant's, or none: `TenantRefused`) are `JudgeRefused`."""
+    from defender._tenant import TenantRefused
+
     try:
         return runs.episode_files(episode_id)
     except FileNotFoundError as missing:
         raise JudgeRefused(f"episode {episode_id}: no such episode directory") from missing
-    except (OSError, ValueError) as refused:
+    except (OSError, ValueError, TenantRefused) as refused:
         raise JudgeRefused(f"episode {episode_id}: {refused}") from refused
 
 

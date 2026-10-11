@@ -226,14 +226,13 @@ _ENTRY_MODULES = {
     "defender/skills/connect/validate_scaffold.py": 1,
     # #1105 PR 2 (part 2 item 12, N3): the lead-author drain resolves the root once per tick
     # before it claims (declared change 8), and each edge J8 makes require `--tenant` resolves
-    # the root it accepts that tenant under: the lead author, the tracer, the run page, the
-    # episode page and workspace_map.
+    # the root it accepts that tenant under: the tracer, the episode page, and — through their
+    # one shared entry step (`_command_line_run.open_command_line_run`, PR 2's review) — the
+    # lead author, the run page and workspace_map.
     "defender/learning/core/drains.py": 1,
-    "defender/learning/leads/lead_author/__init__.py": 1,
     "defender/learning/ops/trace_lesson.py": 1,
-    "defender/scripts/visualize/visualize_run.py": 1,
     "defender/scripts/visualize/visualize_episode.py": 1,
-    "defender/scripts/workspace_map.py": 1,
+    "defender/_command_line_run.py": 1,
 }
 
 #: Functions that take a Tenant or the data root after piece 1 and must resolve nothing (C8).

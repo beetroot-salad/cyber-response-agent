@@ -218,7 +218,7 @@ SECTION_TITLES: dict[str, str] = {
     "answers": "VIEW 2 — THE ANSWERS THOSE CALLS WERE SERVED, by call number",
     "leads": "VIEW 3 — PER-LEAD CHAIN (goal -> params -> payload -> refused -> summary -> "
              "resolutions)",
-    "lessons": "VIEW 5 — LESSONS THAT REACHED THIS WORLD (name, how it reached the model — "
+    "lessons": "VIEW 4 — LESSONS THAT REACHED THIS WORLD (name, how it reached the model — "
                "read, or pushed as a description only — and the body at its recorded commit "
                "for you to judge against, whether or not the model read it)",
     "document": "THE JUDGED WORLD'S OWN investigation.md",  # lint-run-records: ok — a message naming the record for the model or operator, not a path

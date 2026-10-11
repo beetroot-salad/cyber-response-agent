@@ -783,7 +783,8 @@ class LearningState:
 
     def _claim_spec(self, name: str) -> tuple[dict | None, str]:
         """The claimed record's spec, or `(None, reason)` for one that cannot be served. A row
-        that parses but is no mapping is unreadable too: asking it for `run_dir` would raise
+        that parses but is no mapping is unreadable too: `_address_fault` asks it for its
+        `tenant_id` and `run_id` (`spec.get`), which on a list or a scalar would raise
         `AttributeError` past every dead-letter path."""
         try:
             text, _present = self._read(name)

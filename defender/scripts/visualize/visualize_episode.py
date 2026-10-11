@@ -23,6 +23,7 @@ edges the page exists to explain. If a decision is not recorded, fix the writer.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import math
 import re
 import sys
@@ -32,12 +33,9 @@ from typing import TYPE_CHECKING, Any
 if __name__ == "__main__" and (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender._tenant import (
-    TenantRefused, accept_tenant, requested_tenant_id, resolve_data_root,
-)
+from defender._tenant import TenantRefused, requested_tenant, resolve_data_root
 from defender._clock import parse_iso_utc
 from defender._episode_handle import Episode, EpisodeRefused
-from defender._paths import process_defender_dir
 from defender._io import Bound, read_text_utf8
 from defender._report import ReportRead
 from defender._run_id import is_valid_run_id
@@ -75,7 +73,7 @@ from defender.scripts.visualize.visualize_primitives import (
 )
 
 if TYPE_CHECKING:
-    from defender.run_repository import EpisodeRuns, Run, RunsRepository
+    from defender.run_repository import EpisodeRuns, Run, RunId, RunsRepository
 
 #: The page's own stylesheet, inlined after the shared run-page `CSS`, which knows nothing of
 #: this page's classes. `test_1025_every_class_the_page_emits_has_a_rule` keeps them in step.
@@ -700,11 +698,10 @@ def _load_episode(episode_dir: Path, bound: Bound, view: EpisodeRuns) -> _Episod
         ep.draws[label] = (_load_draws(bound, label)
                            if label == _FAMILY_LABEL or ep.entries[label].nameable
                            else ({}, DrawsSkipReport()))
-    for w in ep.entries.values():
-        if not w.nameable:
-            continue
-        if view.present:
-            _load_arm(w, view, episode_dir, ep.episode_id)
+    nameable_worlds = [w for w in ep.entries.values() if w.nameable]
+    if view.present:
+        _load_arms(nameable_worlds, view, episode_dir, ep.episode_id)
+    for w in nameable_worlds:
         w.archive = _load_world_archive(bound, w.label)
     for item in ep.sectioned:
         entry = ep.entries.get(item.label)
@@ -717,23 +714,35 @@ def _load_episode(episode_dir: Path, bound: Bound, view: EpisodeRuns) -> _Episod
     return ep
 
 
-def _load_arm(w: WorldEntry, view: EpisodeRuns, episode_dir: Path, episode_id: str) -> None:
-    """World `w`'s arm, opened by id through the episode view (`view.open(view.arm_id(label))`,
+def _load_arms(worlds: list[WorldEntry], view: EpisodeRuns, episode_dir: Path,
+               episode_id: str) -> None:
+    """Every world's arm, from ONE hold of the episode's container (`view.arms`, its
+    `_tenant.json` judged once for all of them), each opened by id (`<episode_id>-<label>`,
     whose entry rule takes only a real directory): its run folder's name, its run page's link
-    relative to the episode page, and its result event, read through the arm's own no-follow
-    reader. Anything the open refuses — nothing at the id, a link or a file there, a label no
-    run id can carry, a container gone since the view opened — leaves the arm absent.
+    relative to the episode page, and its result event, read through a no-follow reader walked
+    from that same hold. Anything refused for an arm — nothing at the id, a link or a file
+    there, a label no run id can carry, a container gone since the view opened — leaves that
+    arm absent.
 
-    The arm id is composed from `episode_id`, the manifest's own (`<episode_id>-<label>`, as
-    before): a page requested through a link name (`episodes/latest`, J4) names the same arms."""
-    try:
-        run = view.open(view.arm_id(w.label, episode_id=episode_id))
-        with run.reader() as reader:
-            w.result = _result_event(reader)
-    except (RunRefused, OSError):
-        return
-    w.run_dir_name = run.run_dir.name
-    w.run_page = _run_page_link(run, episode_dir)
+    The arm id is composed from `episode_id`, the manifest's own (as before): a page requested
+    through a link name (`episodes/latest`, J4) names the same arms."""
+    ids: dict[str, RunId] = {}
+    for w in worlds:
+        with contextlib.suppress(RunRefused):
+            ids[w.label] = view.arm_id(w.label, episode_id=episode_id)
+    with view.arms(list(ids.values())) as handout:
+        for w in worlds:
+            if w.label not in ids:
+                continue
+            run = handout[ids[w.label]]
+            if isinstance(run, RunRefused):
+                continue
+            try:
+                w.result = _result_event(handout.reader(ids[w.label]))
+            except (RunRefused, OSError):
+                continue
+            w.run_dir_name = run.run_dir.name
+            w.run_page = _run_page_link(run, episode_dir)
 
 
 def _run_page_link(run: Run, episode_dir: Path) -> str:
@@ -769,7 +778,7 @@ def _finite(value: Any) -> float | None:
 def _build_roster(ep: _Episode, grade_row_labels: list[str], *, grade_present: bool,
                   reached_container: bool) -> tuple[dict[str, WorldEntry], list[RosterItem], int]:
     """Every world label that gets a section: manifest worlds ∪ `judge.yaml` rows. Each one's
-    arm is opened by id later (`_load_arm`); an entry in `runs/` that is neither is never shown
+    arm is opened by id later (`_load_arms`); an entry in `runs/` that is neither is never shown
     (#1105 J3: the roster is the manifest's, not a listing of the container).
 
     Returns the entries by label (manifest order first), the classified roster, and the count
@@ -2244,9 +2253,7 @@ def main(argv: list[str]) -> int:
         print(f"usage: visualize_episode.py --tenant T <episode_id> ({bad})", file=sys.stderr)
         return 1
     try:
-        tenant = accept_tenant(
-            resolve_data_root(), requested_tenant_id(ns.tenant),
-            defender_dir=process_defender_dir())
+        tenant = requested_tenant(resolve_data_root(), ns.tenant)
         view = open_episode_view(tenant.runs_repository(), ns.episode_id)
     except (TenantRefused, JudgeRefused) as bad:
         # One line: the refusal may wrap a multi-line YAML parser error.

@@ -459,11 +459,13 @@ class Lane:
 
 
 def drain(paths: Any, lane: Lane) -> list[Any]:
-    """One lead-author tick's claim loop (`_drain_lead_author_markers`) over `paths`."""
+    """One lead-author tick's claim loop (`_drain_lead_author_markers`) over `paths`, under
+    the data root the tick resolves before it claims (`drains._data_root`: with none
+    configured, the tick's configuration refusal, raised before any claim)."""
     from defender.learning.core import drains
 
     state = _state1135.state_for_paths(paths)
-    return drains._drain_lead_author_markers(paths, state, lane)
+    return drains._drain_lead_author_markers(paths, state, lane, data_root=drains._data_root())
 
 
 def loop_paths(tmp_path: Path) -> Any:

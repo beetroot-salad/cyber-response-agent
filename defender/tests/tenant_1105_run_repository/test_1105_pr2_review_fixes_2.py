@@ -102,7 +102,8 @@ def test_1_a_tick_with_rows_and_no_data_root_is_the_stages_configuration_refusal
     assert "\n" not in critical[0].getMessage()
     assert all(r.exc_info is None for r in caplog.records), "a traceback was logged"
     assert box.started == [], "a box was started for a tick that could not serve its rows"
-    assert _queued_top(paths, "case-t") and not _inflight(paths, "case-t")
+    assert _queued_top(paths, "case-t")
+    assert not _inflight(paths, "case-t")
     assert lane.handed == []
 
     monkeypatch.setenv(P.DATA_ROOT_ENV, root)
@@ -233,7 +234,8 @@ def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant
 
     run_dir = curation_run_dir("r-real", tenant_id=d9_tenant)
     opened = open_command_line_run(d9_tenant, "r-real")
-    assert isinstance(opened, Run) and Path(opened.run_dir) == run_dir, opened
+    assert isinstance(opened, Run), opened
+    assert Path(opened.run_dir) == run_dir
 
     argv, main, status = {
         "lead_author": (["--tenant", d9_tenant, "r-real"], R1._lead_author_main(), 2),
@@ -243,7 +245,8 @@ def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant
     }[cli]
     monkeypatch.delenv(P.DATA_ROOT_ENV)
     refused = open_command_line_run(d9_tenant, "r-real")
-    assert isinstance(refused, str) and P.DATA_ROOT_ENV in refused, refused
+    assert isinstance(refused, str), refused
+    assert P.DATA_ROOT_ENV in refused, refused
     with R1._no_logging():
         got = P.drive_cli(main, argv)
     assert got.rc == status, f"{cli}: {got.rc} {got.err!r}"
@@ -268,7 +271,7 @@ def _count_record_reads(monkeypatch: Any, container: Path) -> list[Path]:
             seen.append(Path(folder))
         return real(folder, *args, **kwargs)
 
-    monkeypatch.setattr(_held, "read_tenant", counting)
+    monkeypatch.setattr(_held, "read_tenant", counting)  # lint-monkeypatch: ok — a pure spy (delegates unchanged); the held record read goes through `Bound.read`, which the `io=` seam does not see
     return seen
 
 
@@ -289,11 +292,12 @@ def test_3_verify_judges_the_container_once_for_every_arm(tmp_path, monkeypatch)
         seen = _count_record_reads(monkeypatch, ep / "runs")
         arms = cli._finished_arms(view, ("a", "b", "c", "l"))
         assert len(seen) == 1, f"the container's record was judged {len(seen)} times"
-        assert isinstance(arms["a"], Run) and Path(arms["a"].run_dir) == ep / "runs" / f"{EP}-a"
-        assert isinstance(arms["b"], Run) and Path(arms["b"].run_dir) == ep / "runs" / f"{EP}-b"
+        for label in ("a", "b"):
+            assert isinstance(arms[label], Run), arms[label]
+            assert Path(arms[label].run_dir) == ep / "runs" / f"{EP}-{label}"
         assert isinstance(arms["c"], RunAbsent), arms["c"]
-        assert isinstance(arms["l"], RunRefused) and not isinstance(arms["l"], RunAbsent), (
-            arms["l"])
+        assert isinstance(arms["l"], RunRefused), arms["l"]
+        assert not isinstance(arms["l"], RunAbsent), arms["l"]
 
         seen.clear()
         for label in ("a", "b"):
@@ -310,7 +314,8 @@ def test_3_the_page_judges_the_container_once_more_for_all_its_arms(tmp_path, mo
 
     est, src = P.launch_source(tmp_path)
     got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src))
-    assert got.raised is None and got.rc == 0, f"the launch did not run: {got!r}"
+    assert got.raised is None, f"the launch did not run: {got!r}"
+    assert got.rc == 0, f"the launch did not run: {got!r}"
     ep = R1._episodes() / P.EPISODE_ID
     runs = _tenant.accept_tenant(P.data_root(), P.LAUNCH_TENANT,
                                  defender_dir=H.DEFENDER).runs_repository()
@@ -368,7 +373,8 @@ def test_6_grading_another_tenants_episode_is_refused(tmp_path):
 
     est, src = P.launch_source(tmp_path)
     got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src))
-    assert got.raised is None and got.rc == 0, f"the launch did not run: {got!r}"
+    assert got.raised is None, f"the launch did not run: {got!r}"
+    assert got.rc == 0, f"the launch did not run: {got!r}"
     ep = R1._episodes() / P.EPISODE_ID
     (ep / "judge.yaml").unlink(missing_ok=True)
     other = P.second_tenant(P.data_root(), H.U_ID)
@@ -424,7 +430,11 @@ def test_7_the_judge_prompts_views_are_numbered_without_a_gap(tmp_path):
     est, src = P.launch_source(tmp_path)
     got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src))
     assert got.judge.prompts, "the judge was never asked"
-    for prompt in got.judge.prompts:
-        seen = sorted({int(n) for n in re.findall(r"VIEW (\d+) —", prompt)})
-        assert seen, "control: a prompt carries no view"
+    # The per-world prompts carry the views; the family-level call carries none.
+    viewed = [sorted({int(n) for n in re.findall(r"VIEW (\d+) —", prompt)})
+              for prompt in got.judge.prompts]
+    viewed = [seen for seen in viewed if seen]
+    assert viewed, "control: no prompt carries a view"
+    assert any(lessons in prompt for prompt in got.judge.prompts), "control: no lessons view"
+    for seen in viewed:
         assert seen == list(range(1, max(seen) + 1)), f"a gap in the prompt's views: {seen}"

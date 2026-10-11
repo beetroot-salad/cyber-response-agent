@@ -210,16 +210,17 @@ def _world_reasons(episode_dir: Path) -> dict[str, str]:
 
 
 def test_a_a_container_spoiled_after_the_siblings_ran_is_recorded_and_judged(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, caplog):
     """Driven through the launcher (`learning/branch/cli.main`): the siblings ran, then their
     container's `_tenant.json` was spoiled. VERIFY records each finished world as `not
     archived` (its run folder refused), the launch returns a status rather than raising, and
-    the judge step still runs (it writes `judge.yaml`; with no world archived it asks no
-    model). The page then refuses the spoiled container on its own, non-fatal
-    to the launch, so it is not asserted. Positive control: a clean launch under fresh roots
-    archives the worlds and records none `not archived`. RED before the fix: the container's
-    `TenantRefused` escapes VERIFY, the launch raises, and neither the records nor the judge
-    step are reached."""
+    the judge step is still reached — and, since PR #1236's second review round, its door
+    judges the container's record as the episode view does, so it refuses the spoiled record
+    (logged by the launcher, non-fatal) and writes no `judge.yaml`. The page then refuses the
+    spoiled container on its own, non-fatal to the launch, so it is not asserted. Positive
+    control: a clean launch under fresh roots archives the worlds, records none `not
+    archived` and grades. RED before the fix: the container's `TenantRefused` escapes VERIFY,
+    the launch raises, and neither the records nor the judge step are reached."""
     est, src = P.launch_source(tmp_path)
     ep = _episodes() / P.EPISODE_ID
     got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src),
@@ -230,7 +231,10 @@ def test_a_a_container_spoiled_after_the_siblings_ran_is_recorded_and_judged(
     reasons = _world_reasons(ep)
     assert set(reasons.values()) == {"not archived"}, reasons
     assert sorted(reasons) == ["a", "b", "c"], reasons
-    assert (ep / "judge.yaml").is_file(), "the judge step never ran after VERIFY"
+    judged = [r.getMessage() for r in caplog.records if "the judge pass failed" in r.getMessage()]
+    assert judged, "the judge step was not reached after VERIFY"
+    assert "_tenant.json" in judged[0], f"the judge refused something else: {judged}"
+    assert not (ep / "judge.yaml").exists(), "the judge graded a spoiled container"
 
     control_root = tmp_path / "control"
     control_root.mkdir()
@@ -377,10 +381,14 @@ def test_c_a_pitfalls_only_tick_needs_no_data_root(tmp_path, monkeypatch):
 
 
 def test_c_a_tick_with_rows_and_no_data_root_refuses_before_any_box(tmp_path, monkeypatch):
-    """With a curation row queued and `DEFENDER_DATA_ROOT` unset, the tick refuses
-    (`TenantRefused`) before its box is started — the row still queued, not claimed. Positive
-    control: the root restored, the same tick starts the box and serves the row. RED before the
-    fix: the box is started first and the refusal comes from inside the batch."""
+    """With a curation row queued and `DEFENDER_DATA_ROOT` unset, the tick refuses before its
+    box is started — the row still queued, not claimed. The refusal is the stage's
+    configuration refusal (`FatalConfigError`, raised from the data root's `TenantRefused`:
+    PR #1236's second review round). Positive control: the root restored, the same tick starts
+    the box and serves the row. RED before the fix: the box is started first and the refusal
+    comes from inside the batch."""
+    from defender.learning.core.config import FatalConfigError
+
     t = _good(tmp_path, "r1")
     root = os.environ[P.DATA_ROOT_ENV]
     paths = P.loop_paths(tmp_path)
@@ -389,7 +397,8 @@ def test_c_a_tick_with_rows_and_no_data_root_refuses_before_any_box(tmp_path, mo
     box = _Box()
     lane = P.Lane()
     err = H.raised(_tick, paths, lane=lane, pitfalls=[], box=box)
-    assert isinstance(err, _tenant.TenantRefused), f"the tick did not refuse: {err!r}"
+    assert isinstance(err, FatalConfigError), f"the tick did not refuse: {err!r}"
+    assert isinstance(err.__cause__, _tenant.TenantRefused), err.__cause__
     assert box.started == [], "a box was started for a tick that could not serve its rows"
     assert _queued(paths, "case-t") is not None, "the row left the queue"
     assert lane.handed == []

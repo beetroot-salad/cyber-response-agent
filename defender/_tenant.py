@@ -474,6 +474,20 @@ def accept_tenant(
     return Tenant(id=tenant_id, data_root=Path(data_root), row=row, _token=_ACCEPTED)
 
 
+def requested_tenant(data_root: Path, raw: object) -> Tenant:
+    """The tenant a request names — a command line's raw `--tenant` text, or the `TenantId` a
+    stored row carries — accepted under `data_root`: the ONE acceptance step every request
+    without a box of its own shares (the tracer, the pages, the `--tenant T <run_id>` opener,
+    the curation drain's rehydration). The id is held to `requested_tenant_id` (absent is
+    refused; no default tenant), then `accept_tenant` with the running process's `defender/`
+    and no box mount beside the runs base — a process that mounts more (`run.py`, a sibling)
+    accepts with its own mounts. `TenantRefused` at the first check that fails."""
+    from defender._paths import process_defender_dir
+
+    return accept_tenant(data_root, requested_tenant_id(raw),
+                         defender_dir=process_defender_dir())
+
+
 def accept_placed_knowledge(
     data_root: Path, raw_id: object, *, defender_dir: Path, box_mounted: Iterable[Path] = (),
 ) -> tuple[Path, bool]:

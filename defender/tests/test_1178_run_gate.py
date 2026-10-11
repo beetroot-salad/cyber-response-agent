@@ -1113,7 +1113,8 @@ def _drain(s: LeadScene, lanes: Lanes, **kw: Any) -> Any:
     """`drains._drain_lead_author` over the scene's paths, on a learning-state handle over its
     root (as the lane's entry opens one), its two work steps `lanes`'."""
     return drains._drain_lead_author(s.paths, _state1135.state_for_paths(s.paths), lanes.run_lead,
-                                     lanes.run_pitfalls, **kw)
+                                     lanes.run_pitfalls,
+                                     data_root=drains._data_root(), **kw)
 
 
 def _failed(s: LeadScene) -> list[str]:

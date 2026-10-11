@@ -117,11 +117,8 @@ def tenant_runs(raw_tenant: str) -> list[Run]:
     none. `TenantRefused` when the tenant cannot be accepted or its runs folder cannot be
     held."""
     from defender import _tenant
-    from defender._paths import process_defender_dir
 
-    tenant = _tenant.accept_tenant(
-        _tenant.resolve_data_root(), _tenant.requested_tenant_id(raw_tenant),
-        defender_dir=process_defender_dir())
+    tenant = _tenant.requested_tenant(_tenant.resolve_data_root(), raw_tenant)
     return tenant.runs_repository().all_runs()
 
 

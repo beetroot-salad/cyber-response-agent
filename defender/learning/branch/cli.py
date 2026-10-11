@@ -65,6 +65,7 @@ from defender._episodes_root import (
     EpisodeRefused,
     episode_dir,
     episodes_root,
+    refuse_bad_episode_id,
 )
 from defender._io import (
     NotPlainEntry,
@@ -162,8 +163,9 @@ def prepare_episode(
     N17: a launch never reuses an episode directory. The derived id is tried first; a name
     already taken (a finished episode, a dead launch's debris, a launch still running beside
     this one) moves on to `<id>-r2`, `<id>-r3`, ... — the episode owner's exclusive create
-    (`Episode.create(episode_dir(...))`, under the configured root for `data_root`, the one the request's
-    tenant was accepted under) is the claim, so two launchers racing for one name cannot both
+    (`Episode.create(<root>/<id>)`, the id judged by `refuse_bad_episode_id` as `episode_dir`
+    judges it, under the configured root for `data_root` — resolved once — the one the
+    request's tenant was accepted under) is the claim, so two launchers racing for one name cannot both
     win it, and nothing a dead launch left is adopted. The minted id is the directory's name;
     every later record derives from it.
 
@@ -178,7 +180,7 @@ def prepare_episode(
     for n in range(1, MAX_LAUNCHES + 1):
         candidate = episode_id if n == 1 else f"{episode_id}-r{n}"
         try:
-            episode = Episode.create(episode_dir(data_root, candidate), exclusive=True)
+            episode = Episode.create(root / refuse_bad_episode_id(candidate), exclusive=True)
         except EpisodeRefused as refused:
             raise _owner_refusal(refused) from refused
         except FileExistsError:
@@ -1604,18 +1606,23 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
 
 
 def _finished_arms(view: EpisodeRuns, labels: Sequence[str]) -> dict[str, Run | RunRefused]:
-    """Every finished arm, opened by id through the episode's view (`view.open(view.arm_id(
-    label))`, whose entry rule takes only a real directory), or the refusal the open raised —
-    `verify_family` records each as that world's own fault. An open refuses only with
-    `RunRefused`, a container that went bad after the siblings ran included (`RunUnreachable`),
-    so no refusal escapes VERIFY."""
+    """Every finished arm, from ONE hold of the episode's container (`view.arms`, its
+    `_tenant.json` judged once), each arm judged at its own entry (only a real directory is a
+    run) — or the refusal for it, which `verify_family` records as that world's own fault: an
+    arm that is missing or not a real directory is its own; a container that went bad after the
+    siblings ran is every arm's `RunUnreachable` (or `RunAbsent` when it is gone). A label no
+    run id can carry is that arm's `RunRefused`. So no refusal escapes VERIFY."""
     arms: dict[str, Run | RunRefused] = {}
+    ids: dict[str, RunId] = {}
     for label in labels:
         try:
-            arms[label] = view.open(view.arm_id(label))
+            ids[label] = view.arm_id(label)
         except RunRefused as refused:
             arms[label] = refused
-    return arms
+    with view.arms(list(ids.values())) as handout:
+        for label, arm_id in ids.items():
+            arms[label] = handout[arm_id]
+    return {label: arms[label] for label in labels}
 
 
 def _container_base_world(view: EpisodeRuns, episode_id: str) -> str | None:

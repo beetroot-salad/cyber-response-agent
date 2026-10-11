@@ -800,7 +800,8 @@ def test_lead_author_drain_resets_worktree_between_markers(tmp_path: Path):
              / "wazuh" / "auth-events.md").unlink()
             raise RuntimeError("scope-gate boom")
 
-    drains._drain_lead_author_markers(paths, state_for_paths(paths), run_lead_author)
+    drains._drain_lead_author_markers(paths, state_for_paths(paths), run_lead_author,
+                                      data_root=drains._data_root())
 
     assert clean_at_entry["case-a-poison"] is True
     assert clean_at_entry["case-b-good"] is True
