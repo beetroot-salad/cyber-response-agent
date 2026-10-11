@@ -24,13 +24,14 @@ implementation that spells it otherwise makes `check_binds` skip the concept sil
     `repeat_threshold` refinement and in `handoff.forks`, where the implementer meets it.
 
 `lead_rows(run_dir, lead) -> list[dict]`
-    THE read the guard derives its count from: this lead's rows off
-    `{run_dir}/executed_queries.jsonl`, in file order, torn/unparseable lines dropped, and
-    `[]` on ANY `OSError`. It is a seam because F-Q's fail-open posture is otherwise
-    unobservable — `read_jsonl_rows` propagates `PermissionError` and only `PermissionError`
-    (P-d, executed), so the guard needs exactly one `except OSError` and the spec has to be
-    able to drive it. It is also the third copy of the read+filter loop `_next_seq` and
-    `repeat_note` already carry, which `lint_duplicate_helpers` would flag (G20).
+    The FILE reader: this lead's rows off `{run_dir}/executed_queries.jsonl`, in file order,
+    torn/unparseable lines dropped, and `[]` on ANY `OSError`. It is no longer the guard's
+    read (#1235 F1): the guard derives its count from `live_lead_rows(run_dir, lead)`, the
+    host's in-memory mirror of the rows it recorded, loaded once at run start by
+    `open_query_mirror` (with this reader's posture on a torn, foreign or non-UTF-8 table)
+    and appended to only after a row's file write succeeded — so nothing written into the
+    run folder mid-run moves the count. `lead_rows` stays for the post-run readers that mean
+    the file, and this suite uses it only that way.
 
 `repeat_trip(rows, lead, *, system, verb, params, threshold=REPEAT_THRESHOLD, system_key="") -> RepeatTrip | None`
     THE predicate, over queries-table ROWS, keyed `(lead_id, system, verb, canonical(params),
@@ -75,7 +76,7 @@ How faults are induced here
 Down the hierarchy, never off it. Almost everything below is *real input through the real
 primitive in the test itself*: real malformed tool arguments through the real pydantic arg
 schema, a real adapter module that raises at import through the real `ModuleVerbRegistry`, a
-real torn line and a real chmod-000 file through the real `read_jsonl_rows`, real concurrency
+real torn line and real invalid UTF-8 through the real table loader, real concurrency
 through the real two-calls-in-one-turn shape. Where a fake stands in for a dependency it is
 the harness's `verbs=` injection seam and it injects faults ONLY — never classifies, never
 decides policy — and its fault content cites the executed claim that observed it on the real
@@ -114,7 +115,6 @@ green `test_repeat_replay_*` does not discharge either of them.
 """
 from __future__ import annotations
 
-import os
 import re
 import unicodedata
 from pathlib import Path
@@ -383,8 +383,9 @@ def _row(
 
 def _seed(run_dir: Path, rows: list[dict]) -> None:
     """Pre-seed the queries table (and each row's sidecar) exactly as a resumed or
-    already-running lead leaves it. The count is DERIVED per call from rows on disk, so a
-    seeded table and an organically-accumulated one are the same input to the guard."""
+    already-running lead leaves it, BEFORE the run opens: the driver loads the table into the
+    host's mirror at run start (`open_query_mirror`), so a seeded table and an
+    organically-accumulated one are the same input to the guard."""
     for row in rows:
         rel = row.get("payload_path")
         if not rel:
@@ -695,9 +696,9 @@ def test_repeat_trip_predicate_seam(tmp_path):
     # rejected: keying on payload_digest instead of request identity — C10: pr815's l-015 seq
     #   8/16/17 returned the same 745-byte empty payload for three genuinely different
     #   questions, so a digest key refuses correct work.
-    # rejected: persisting the count in circuit_breaker.json — the count is DERIVED per call
-    #   from rows already on disk; the existing breaker persists because it is run-scoped and
-    #   cross-lead, this predicate is lead-scoped.
+    # rejected: a separate persisted count — the count is DERIVED per call from the queries
+    #   rows the host recorded (its in-memory mirror of the table, #1235); the breaker keeps
+    #   its own state because it is run-scoped and cross-lead, this predicate is lead-scoped.
     assert REPEAT_THRESHOLD == 3, "C11's fitted floor did not ship as the module constant"
 
     key = {"system": "elastic", "verb": "query", "params": {"native_query": "FROM logs"}}
@@ -1174,11 +1175,14 @@ def test_repeat_key_separates_requests_that_differ_by_a_byte(tmp_path):
 
 def test_repeat_count_is_derived_from_the_table(tmp_path):
     """repeat_count_is_derived_from_the_table — M1's one deliberate choice, "no new persisted
-    state, no new file": the count `repeat_trip` reads is a pure function of the lead's rows
-    in `executed_queries` on disk and of nothing in the session. A lead that accumulated its
-    occurrences organically and a lead whose table was PRE-SEEDED before the process started
-    trip at the same occurrence — in the seeded run the session never executed the request
-    even once, and the guard still refuses it."""
+    state, no new file": the count `repeat_trip` reads is derived from the run's queries table
+    as the HOST holds it (#1235 F1) — the rows present when the run opened, which the driver
+    loads into its in-memory mirror at run start (`open_query_mirror`), plus the rows the host
+    recorded since. A lead that accumulated its occurrences organically and a lead whose table
+    was PRE-SEEDED before the run started trip at the same occurrence — in the seeded run the
+    session never executed the request even once, and the guard still refuses it. (That a row
+    written into the folder MID-run moves nothing is pinned in
+    `e2e/test_1235_queries_and_pointer.py`.)"""
     organic_rec = VerbRecorder()
     organic = _run(tmp_path / "organic", verbs=elastic_ok(organic_rec), run_id="d807-derive-a", turns=[
         q("elastic", "query", {"native_query": "FROM logs"}),
@@ -1196,20 +1200,26 @@ def test_repeat_count_is_derived_from_the_table(tmp_path):
         turns=[q("elastic", "query", {"native_query": "FROM logs"}), DONE],
     )
     assert seeded_rec.calls == [], \
-        "the session executed the request — the count came from memory, not from the table"
+        "the session executed the request — the rows present at run start were not loaded " \
+        "into the host's table"
     assert seeded.own_rows[2]["exit_code"] == 64
     assert INCOMPLETE_IDIOM in seeded.summary()
 
 
 def test_repeat_count_is_zero_before_the_lead_has_rows(tmp_path):
     """repeat_count_is_zero_before_the_lead_has_rows — the first call of a lead reads ZERO
-    prior occurrences from `executed_queries`: never an error, never a trip. This covers both
-    the absent file (the table does not exist yet) and the file that exists with no rows for
-    THIS lead."""
+    prior occurrences from the queries table: never an error, never a trip. This covers both
+    the absent file (the table does not exist yet — the host's table opens empty over it) and
+    the file that exists with no rows for THIS lead."""
+    from defender.scripts.gather_tools.record_query import live_lead_rows, open_query_mirror
+
     missing = tmp_path / "missing" / "run"
     missing.mkdir(parents=True)
-    assert lead_rows(missing, LEAD) == [], "a lead with no table rows must read as zero occurrences"
-    assert repeat_trip(lead_rows(missing, LEAD), LEAD, system="elastic", verb="query",
+    assert lead_rows(missing, LEAD) == [], "the file reader raised over an absent table"
+    open_query_mirror(missing)
+    assert live_lead_rows(missing, LEAD) == [], \
+        "a lead with no table rows must read as zero occurrences"
+    assert repeat_trip(live_lead_rows(missing, LEAD), LEAD, system="elastic", verb="query",
                        params={"native_query": "FROM logs"}) is None
 
     rec = VerbRecorder()
@@ -1224,13 +1234,17 @@ def test_repeat_count_is_zero_before_the_lead_has_rows(tmp_path):
 
 
 def test_repeat_predicate_fails_open_on_a_damaged_table(tmp_path):
-    """repeat_predicate_fails_open_on_a_damaged_table — the guard inherits the posture BOTH
-    existing readers of `executed_queries` already have and must not be the first reader that
-    raises. `lead_rows` drops a torn trailing line, skips a foreign row carrying no `lead_id`,
-    survives a stored `params` that is not a dict, survives invalid UTF-8, and returns `[]` on
-    any OSError — a chmod-000 table yields zero prior occurrences and the call proceeds rather
-    than crashing the query tool. Stated cost: tampering and corruption are therefore
-    SILENT."""
+    """repeat_predicate_fails_open_on_a_damaged_table — #1235 F1 moved this demand from the
+    guard's per-call read to the ONE load of the table the run makes: the guard no longer
+    reads `executed_queries.jsonl` per call, it reads the host's mirror, which
+    `open_query_mirror` loads at run start. The loader keeps the posture the guard's read had
+    over a damaged table: it drops a torn trailing line, keeps a foreign row carrying no
+    `lead_id` out of every lead, survives a stored `params` that is not a dict, and survives
+    invalid UTF-8 — so the guard over the loaded rows still counts the lead's real
+    occurrences and still trips. (The chmod-000 and directory-at-the-name arms retired with the
+    per-call read: what the loader does with an unreadable table is not pinned.)"""
+    from defender.scripts.gather_tools.record_query import live_lead_rows, open_query_mirror
+
     run_dir = tmp_path / "damaged"
     run_dir.mkdir(parents=True)
     table = RunPaths(run_dir).executed_queries
@@ -1242,11 +1256,13 @@ def test_repeat_predicate_fails_open_on_a_damaged_table(tmp_path):
     ])
     write_guarded(table, '{"lead_id": "l-001", "seq": 4, "sys', mode="append")
 
-    rows = lead_rows(run_dir, LEAD)
+    open_query_mirror(run_dir)
+    rows = live_lead_rows(run_dir, LEAD)
     assert [r["seq"] for r in rows] == [0, 2, 3], \
-        "a torn line, a foreign row shape or a non-dict params field was not survived"
+        "a torn line, a foreign row shape or a non-dict params field was not survived by the load"
     assert repeat_trip(rows, LEAD, system="elastic", verb="query",
-                       params={"native_query": "FROM logs"}) is not None
+                       params={"native_query": "FROM logs"}) is not None, \
+        "the loaded rows no longer count the lead's two real occurrences"
 
     bad_utf8 = tmp_path / "utf8" / "run"
     bad_utf8.mkdir(parents=True)
@@ -1254,29 +1270,9 @@ def test_repeat_predicate_fails_open_on_a_damaged_table(tmp_path):
         b'{"lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "query", '
         b'"params": {"native_query": "\xff\xfeFROM logs"}}\n'
     )
-    assert len(lead_rows(bad_utf8, LEAD)) == 1, \
-        "invalid UTF-8 raised where read_jsonl_rows' errors='replace' does not (P-d)"
-
-    # P-d, executed as a non-root user: of the three read faults F-Q hedged over, only
-    # PermissionError propagates out of `read_jsonl_rows` — a directory returns [] via
-    # is_file() and invalid UTF-8 never raises at all. Root ignores permission bits, so this
-    # arm is meaningless there (defender/CLAUDE.md says so of the four #631 siblings); CI runs
-    # non-root and it is the arm with the teeth.
-    a_dir = tmp_path / "isdir" / "run"
-    (a_dir / "executed_queries.jsonl").mkdir(parents=True)
-    assert lead_rows(a_dir, LEAD) == []
-
-    if os.geteuid() != 0:
-        locked = tmp_path / "locked" / "run"
-        locked.mkdir(parents=True)
-        append_jsonl(RunPaths(locked).executed_queries, [
-            _row(LEAD, 0, "elastic", "query", {"native_query": "FROM logs"}),
-        ])
-        RunPaths(locked).executed_queries.chmod(0o000)
-        with pytest.raises(PermissionError):
-            read_jsonl_rows(RunPaths(locked).executed_queries)
-        assert lead_rows(locked, LEAD) == [], \
-            "the guard's own read propagated PermissionError — it must fail OPEN"
+    open_query_mirror(bad_utf8)
+    assert len(live_lead_rows(bad_utf8, LEAD)) == 1, \
+        "invalid UTF-8 raised or dropped the row where read_jsonl_rows' errors='replace' keeps it"
 
 
 def test_tripping_call_carries_no_repeat_note(three_identical_requests):
@@ -1327,7 +1323,10 @@ def test_repeat_key_is_the_shipped_request_key(tmp_path):
     assert "seq 0" in r.summary(), \
         "seq 0 is the earliest matching row in this in-order run — the guard named another"
 
-    rows = lead_rows(r.run_dir, LEAD)
+    from defender.scripts.gather_tools.record_query import live_lead_rows
+
+    # The guard's own rows: the host's table, read post-run in this process (#1235 F1).
+    rows = live_lead_rows(r.run_dir, LEAD)
     key = _query_rules._request_key("elastic", "sshd-auth-window", {"native_query": "FROM logs"})
     counted = [
         row for row in rows

@@ -647,6 +647,9 @@ def test_request_keys_stored_before_the_move_are_compared_with_keys_computed_aft
         assert request_key(call["system"], call["verb"], call["params"]) == stored, call
 
     run_dir = _materialize(tmp_path / "run", g["files"])
+    # The resumed call is recorded by the writer, which allocates its seq from the host's
+    # in-memory queries table: opened over the stored table, as a run's start opens it (#1235).
+    rq.open_query_mirror(run_dir)
     (tmp_path / "episodes").mkdir()
     got = drive_stored_run(run_dir, tmp_path / "episodes" / "ep-1", request_key=request_key,
                            lead_rows=lead_rows, repeat_trip=repeat_trip, append=append)
@@ -820,6 +823,8 @@ def test_same_call_live_and_after_the_row_is_read_back(tmp_path):
     g = _g()["roundtrip"]
     request_key = _flat(_RK)
     rq = S.module_at("defender/scripts/gather_tools/record_query.py")
+    # Never driven: the writer's host table is opened as a run's start opens it (#1235).
+    rq.open_query_mirror(tmp_path / "run")
     got = drive_roundtrip(tmp_path / "run", request_key=request_key,
                           append=rq.append_query_row, lead_rows=rq.lead_rows,
                           repeat_trip=rq.repeat_trip)

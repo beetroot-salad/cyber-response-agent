@@ -389,7 +389,7 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
         assert (run_dir / name).is_file(), f"{name} was not written on the healthy path"
         (run_dir / name).unlink()
 
-    pointer = RunPaths(run_dir).session_pointer
+    pointer = RunPaths(run_dir).session_pointer()
     if breakage == "missing-pointer":
         pointer.unlink()
     else:

@@ -554,6 +554,9 @@ def sidecar_doc(run_dir: Path) -> dict | None:
 #: that list, held in one place so a negative that walks it cannot be quietly narrowed.
 FORGEABLE_NAMES = (
     "run_end.json",
+    # Not written inside the run dir since #1235 F2 (the case pointer is a host-only sidecar
+    # beside it now), but the box can still plant a file at the old name; kept, like the two
+    # state names below.
     "session_store_pointer.json",
     "ticket_write.json",
     "provenance.json",

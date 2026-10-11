@@ -207,10 +207,16 @@ def test_budget_kill_is_not_control_flow(tmp_path):
 
 def _drive_gather_query(run_dir: Path, registry):
     """Drive ONE real `query` call on a real GATHER agent against an injected verb
-    registry — the seam `run_investigation(verbs=…)` already exposes (#611)."""
+    registry — the seam `run_investigation(verbs=…)` already exposes (#611).
+
+    The query tool's guards read the host's in-memory queries mirror (#1235), which a run opens
+    at its start; this folder never goes through the driver, so the mirror is opened here."""
     import asyncio
     from dataclasses import replace
 
+    from defender.scripts.gather_tools.record_query import open_query_mirror
+
+    open_query_mirror(run_dir)
     model = ScriptedModel([[("query", {"system": "elastic", "verb": "esql",
                                        "params": {"index": "logs"},
                                        "query_id": "elastic.probe"})]])

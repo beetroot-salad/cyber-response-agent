@@ -682,8 +682,10 @@ def test_a_handle_built_from_a_bare_directory_lacks_the_input_the_upward_accesso
     bare = S.Run().at(world)
     assert bare.runs_base is None
 
+    # #1235 F2: the run -> case pointer is a sidecar beside the run dir now, so its member is an
+    # upward accessor too and needs the runs base like the facts sidecars.
     for group, name in (("facts", "run_end"), ("facts", "scrub_verdict"),
-                        ("session", "session_db")):
+                        ("observability", "session_pointer"), ("session", "session_db")):
         with pytest.raises(Exception) as excinfo:  # noqa: PT011
             S.member(bare, group, name, *S.member_args(name)).path  # noqa: B018
         said = str(excinfo.value)
@@ -696,6 +698,11 @@ def test_a_handle_built_from_a_bare_directory_lacks_the_input_the_upward_accesso
     run_dir = S.seed_run_tree(S.make_run_dir(base))
     tenanted = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
     assert S.member(tenanted, "facts", "run_end").path.parent == base
+    pointer = S.member(tenanted, "observability", "session_pointer").path
+    assert pointer == S.RunPaths(run_dir).session_pointer(base), \
+        "run.observability.session_pointer is not the layout's sidecar accessor"
+    assert pointer.parent == base and not pointer.is_relative_to(run_dir), \
+        "the case pointer member still resolves inside the run directory"
 
 
 # ---------------------------------------------------------------------------------------

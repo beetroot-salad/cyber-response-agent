@@ -474,16 +474,24 @@ def test_run_paths_accessor_set_is_exactly_its_artifacts_after_the_meta_accessor
     `run_end_sidecar`, and no longer a property here.
 
     #1235 removed `budget` and `circuit_breaker` (in-memory state now, no file) and the
-    accounting-failures sidecar's accessor."""
+    accounting-failures sidecar's accessor, and moved the run -> case pointer out of the run dir
+    into a sidecar beside it: `session_pointer` is now an upward accessor taking the runs base,
+    like `run_end_sidecar` and `ticket_write`, and no longer a property here (15 left)."""
     accessors = {n for n, v in vars(RunPaths).items() if isinstance(v, property)}
     assert accessors == {
         "alert", "report", "investigation", "executed_queries", "gather_raw", "wire_log",
         "provenance",
         # #1077 D1
         "source_refs", "gather_summaries", "lead_author", "tool_trace", "policy_denials",
-        "lessons_loaded", "session_pointer",
+        "lessons_loaded",
         "runtime_html", "box_sentinel",
     }, f"the artifact accessor set drifted: {sorted(accessors)}"
+    # #1235 F2: the case pointer is a sidecar beside the run dir — a method taking the runs
+    # base, not a property resolving a name inside the folder.
+    assert callable(vars(RunPaths).get("session_pointer")), (
+        "RunPaths.session_pointer is not the sidecar accessor #1235 made it")
+    assert RunPaths(tmp_path / "run-1").session_pointer() == (
+        tmp_path / "run-1.session-pointer.json"), "the case pointer is not beside the run dir"
     # #1235: `budget` and `circuit_breaker` left — the counters and the breaker are the run
     # process's memory, no longer files in the run dir, so no accessor may name them.
     assert not {"budget", "circuit_breaker"} & set(vars(RunPaths)), (

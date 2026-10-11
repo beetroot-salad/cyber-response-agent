@@ -765,7 +765,12 @@ def test_the_tables_second_writer_grows_the_column_too(tmp_path):
     Driven through the production function on a real run dir rather than over a hand-built row,
     because "the second writer agrees with the first" is exactly the claim a fixture restating
     the keys cannot make."""
+    from defender.scripts.gather_tools.record_query import open_query_mirror
+
     run_dir = materialize(tmp_path, GOLDEN_AB3)
+    # Never driven, so the host's in-memory queries table is opened here the way the driver
+    # opens it at run start: the writer allocates its seq from that table (#1235).
+    open_query_mirror(run_dir)
     lead_zero._record_manual_row(
         lead_zero._CaptureDeps(
             run_dir=run_dir, defender_dir=DEFENDER, run_id="d871-second-writer",

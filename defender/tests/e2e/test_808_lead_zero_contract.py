@@ -160,7 +160,7 @@ def test_lead_zero_returns_section_text_entities_and_status(tmp_path):
     these four arms shared one, so all four shell fetches carried an identical request key —
     same `native_query`, same `index`, same `limit`/`sort`; only the injected answer differed,
     and the injected answer is not part of the key. `QueryCapture`'s repeat guard reads
-    `lead_rows(deps.run_dir, deps.lead_id)` off DISK, keys on
+    the lead's rows (since #1235 off the host's in-memory mirror of the table), keys on
     `(lead_id, system, verb, canonical(params))`, and trips at `REPEAT_THRESHOLD = 3`
     (`occurrence = len(matches) + 1`, executed): resolves #3 and #4 were refused before the
     injected envelope could reach lead-0, making `STATUS_TRUNCATED` UNSATISFIABLE for any
@@ -185,6 +185,11 @@ def test_lead_zero_returns_section_text_entities_and_status(tmp_path):
     def _resolve(name, **kw):
         """One arm, in its OWN run dir with its OWN recorder — see the docstring."""
         run_dir = materialize_alert(tmp_path / name, alert_doc())
+        # Called outside the driver, so the host's queries mirror (#1235) is opened here as
+        # the driver opens it at run start: lead-0's calls go through the query capture.
+        from defender.scripts.gather_tools.record_query import open_query_mirror
+
+        open_query_mirror(run_dir)
         rec = VerbRecorder()
         return lead_zero.resolve_lead_zero(
             run_dir=run_dir, defender_dir=defender_dir(),
@@ -407,7 +412,7 @@ def test_a_scenario_that_injects_no_registry_reaches_no_backend_at_all(tmp_path)
         "no registry, but the block does not say the resolution was unavailable"
     assert res.rows_for(L0) == [], "a queries row was written for a call never made"
     assert res.payloads(L0) == [], "a payload was persisted for a call never made"
-    assert res.breaker.get("systems", {}) == {} and res.breaker.get("total_failures", 0) == 0, \
+    assert res.breaker == {"systems": {}, "total_failures": 0}, \
         f"a run that reached no backend spent breaker budget: {res.breaker}"
     assert not res.has_sidecar(L3), \
         "the correlation lead dispatched off a resolution that never happened"

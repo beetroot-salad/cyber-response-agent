@@ -230,6 +230,9 @@ def test_record_charges_the_breaker_to_the_rows_own_system(tmp_path):
 
     Observed failing by (today): `TypeError` on the first call — `breaker_key` is required."""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
+    # No driver opened this folder: open the host's queries table over it, as the driver does
+    # at run start (#1235 F1) — `_record` allocates each row's seq from that table.
+    record_query.open_query_mirror(run_dir)
     capture = QueryCapture(_real_registry(tmp_path)[1])
 
     row = _record(capture, run_dir, system="elastic", exit_code=DEFAULT_FAULT_EXIT)

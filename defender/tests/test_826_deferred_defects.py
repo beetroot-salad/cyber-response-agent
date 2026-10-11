@@ -152,10 +152,14 @@ def test_the_sort_param_is_visible_to_the_model_on_both_search_verbs():
 # ITEM 3 — ask (2)'s repeat notice never fired for a FAILING repeat.
 
 def _write(tmp_path: Path, rows: list[dict]) -> Path:
+    """Seed the queries table, then open the host's in-memory mirror of it (#1235): the live
+    readers (`repeat_note` here) read the mirror, which a run loads at its start — this folder
+    never went through the driver, so the test opens it as the driver would."""
     from defender._io import append_jsonl
     from defender.run_repository import RunPaths
 
     append_jsonl(RunPaths(tmp_path).executed_queries, rows)
+    rq.open_query_mirror(tmp_path)
     return tmp_path
 
 

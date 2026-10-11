@@ -145,7 +145,10 @@ def _pass_a_sibling(tmp_path: Path, root: Path, episodes: Path) -> tuple[Path, P
     shutil.copy(src / "alert.json", sib / "alert.json")
     shutil.copy(src / "investigation.md", sib / "investigation.md")
     (sib / "provenance.json").write_text(json.dumps(T.provenance_record()), encoding="utf-8")
-    shutil.copy(src / "session_store_pointer.json", sib / "session_store_pointer.json")
+    # #1235: the case pointer is a host-only sidecar beside each run dir, not a file in it.
+    from defender.run_repository import RunPaths
+
+    shutil.copy(RunPaths(src).session_pointer(), RunPaths(sib).session_pointer())
     return src, ep, sib
 
 
@@ -888,7 +891,11 @@ def test_o4_fork_store_location(tmp_path, data_root):
         br.attach_case_pointer(store, spec, sib, case_id="minted-case", session_id=session_id)
     finally:
         store.close()
-    pointer = json.loads((sib / "session_store_pointer.json").read_text(encoding="utf-8"))
+    from defender.run_repository import RunPaths
+
+    pointer = json.loads(RunPaths(sib).session_pointer().read_text(encoding="utf-8"))
+    assert not (sib / "session_store_pointer.json").exists(), (
+        "the fork wrote its case pointer inside the box-writable run dir")
     expected = H.sessions_dir(data_root, TID) / f"{T.SOURCE_CASE_ID}.db"
     assert Path(pointer["store_path"]).resolve() == expected.resolve()
     assert not (sib.parent.parent / "sessions").exists(), "the fork opened a store of its own"

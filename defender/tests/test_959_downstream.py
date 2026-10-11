@@ -87,6 +87,12 @@ def _gather_scene(tmp_path: Path, result: BoxResult, *, lead_id: str = "l-1"):
     dfn.mkdir(parents=True)
     payload = run / "gather_raw" / lead_id / "0.json"
     payload.write_text("{}", encoding="utf-8")
+    # The run's queries mirror, as the driver opens it at run start (#1235): the shim-failure
+    # row's seq and its `system=` attribution are read from it, and this folder went through
+    # no driver.
+    from defender.scripts.gather_tools.record_query import open_query_mirror
+
+    open_query_mirror(run)
     box = Box(result)
     deps = dataclasses.replace(
         bind(T1106.fixture_gather_def(), run, defender_dir=dfn, box=box), lead_id=lead_id,

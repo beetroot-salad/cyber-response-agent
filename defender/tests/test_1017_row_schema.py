@@ -258,12 +258,14 @@ def test_record_returns_the_parsed_row_as_read_not_a_reprojection(tmp_path):
     on a row LACKING the two new columns (no `""` is invented into the record), and on a row
     whose `error_class` key is absent (no derived class is written back into it).
 
-    A replay built from the surface hands the guard exactly what `record_query.lead_rows` hands
-    it live; a re-projection of the typed fields would coerce `None` to `""`, derive
-    `error_class`, and turn `raw_ref` back into a string — each a byte the guard did not see.
+    A replay built from the surface hands the guard exactly what its live table hands it: since
+    #1235 F1 that is `record_query.live_lead_rows`, the host's in-memory table, loaded from these
+    very lines at run start (`open_query_mirror`) — so `record()` must equal the loaded rows
+    too. A re-projection of the typed fields would coerce `None` to `""`, derive `error_class`,
+    and turn `raw_ref` back into a string — each a byte the guard did not see.
 
     Observed failing by: `record()` missing, or any key of the returned dict differing from
-    the line on disk."""
+    the line on disk or from the row the host's table loaded."""
     full = _row(0, system_key=KEY_MARKER)
     pre_871 = _row(1)
     for key in ("system_key", "payload_sha256"):
@@ -281,6 +283,11 @@ def test_record_returns_the_parsed_row_as_read_not_a_reprojection(tmp_path):
     rows = load_queries(tmp_path)
     assert [r.record() for r in rows] == [full, pre_871, no_class, odd], \
         "record() is not the row as read"
+    from defender.scripts.gather_tools.record_query import live_lead_rows, open_query_mirror
+
+    open_query_mirror(tmp_path)
+    assert json.dumps([r.record() for r in rows]) == json.dumps(live_lead_rows(tmp_path, LEAD)), \
+        "record() is not what the guard's live table loaded from these lines"
     assert (rows[3].seq, rows[3].system, rows[3].params, rows[3].exit_code) == (3, "None", {}, 64), \
         "the typed view stopped coercing — the equality above is then a tautology"
     assert "system_key" not in rows[1].record(), \
@@ -304,7 +311,9 @@ def test_c16_a_replay_over_records_does_not_trip_where_the_run_did_not(tmp_path)
 
     Both halves are asserted on one table: the typed `error_class` IS the derived value (the
     positive control — the surface still derives), and `rejection_trip` over `record()`s is
-    `None`, byte-for-byte what the live guard answered over `lead_rows`.
+    `None`, byte-for-byte what the live guard answers over its own table — the host's
+    in-memory rows (`live_lead_rows`, #1235 F1), loaded from this file at run start and
+    asserted here to equal the file's rows byte for byte.
 
     Observed failing by: `record()` returning the typed fields re-projected, on which the
     predicate trips."""
@@ -318,7 +327,12 @@ def test_c16_a_replay_over_records_does_not_trip_where_the_run_did_not(tmp_path)
         rec.pop("error_class")
         rec.pop("system_key")
     _table(tmp_path, old)
-    raw = record_query.lead_rows(tmp_path, LEAD)
+    from defender.scripts.gather_tools.record_query import live_lead_rows, open_query_mirror
+
+    open_query_mirror(tmp_path)
+    raw = live_lead_rows(tmp_path, LEAD)
+    assert json.dumps(raw) == json.dumps(record_query.lead_rows(tmp_path, LEAD)), \
+        "the host's table loaded rows other than the file's — the guard reads what it did not see"
     assert [("error_class" in r) for r in raw] == [False, False], \
         "the fixture did not land as two class-less rows, so the claim below is vacuous"
 

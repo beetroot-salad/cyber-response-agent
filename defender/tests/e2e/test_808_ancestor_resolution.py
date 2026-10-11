@@ -279,12 +279,16 @@ def test_a_shell_fetch_that_answers_does_not_stand_in_for_the_ancestor_calls(tmp
     `_(unavailable: … found nothing)`, reintroducing this finding's own defect through the
     branch it did not name."""
     from defender.runtime import lead_zero
+    from defender.scripts.gather_tools.record_query import open_query_mirror
 
     def _resolve(name, alert=None, **kw):
         """One arm in its OWN run dir — the shared-run-dir starvation
         `test_lead_zero_returns_section_text_entities_and_status` documents applies here too: these
         arms carry identical shell predicates."""
         run_dir = materialize_alert(tmp_path / name, alert if alert is not None else alert_doc())
+        # Called outside the driver, so the host's queries mirror (#1235) is opened here as
+        # the driver opens it at run start: lead-0's calls go through the query capture.
+        open_query_mirror(run_dir)
         rec = VerbRecorder()
         result = lead_zero.resolve_lead_zero(
             run_dir=run_dir, defender_dir=defender_dir(),
@@ -394,12 +398,14 @@ def test_one_ancestor_fetch_answering_does_not_establish_an_absence_for_the_othe
     that absence is real, is the common case, and must keep its plain sentence with no
     failed-fetch note beside it — or the note says nothing by always firing."""
     from defender.runtime import lead_zero
+    from defender.scripts.gather_tools.record_query import open_query_mirror
 
     def _resolve(name, table):
         run_dir = materialize_alert(tmp_path / name, alert_doc(ancestors=[
             ancestor("anc-auth", index=AUTH_BACKING),
             ancestor("anc-falco", index=FALCO_BACKING),
         ]))
+        open_query_mirror(run_dir)  # outside the driver: open it as run start does (#1235)
         rec = VerbRecorder()
         result = lead_zero.resolve_lead_zero(
             run_dir=run_dir, defender_dir=defender_dir(),
@@ -1008,7 +1014,12 @@ def test_the_rendered_block_survives_a_failed_queries_table_write(tmp_path):
     what this demand requires is that the rendered block still carries what was resolved.
 
     The complementary condition is the same scenario without the squat: the block carries the
-    same content AND the row lands."""
+    same content AND the row lands.
+
+    #1235: the driver also loads the host's queries mirror from this table at run start, before
+    lead-0 resolves, and the squat is already there then — so this scenario also pins that a
+    directory at the table's name loads as no rows (`read_jsonl_rows`' posture) rather than
+    ending the run at the open."""
     control = run(tmp_path / "ok", run_id="lz808-order-ok",
                   answer=answer_hits([hit(ts="2026-05-25T15:22:00.000Z",
                                           message="Accepted password for dev.dana")]))
@@ -1070,7 +1081,7 @@ def test_no_usable_ancestor_identifier_issues_no_fetch_at_all(tmp_path):
     assert len(res.rows_for(L0)) == 1, \
         "a queries row records an ancestor call that must not have happened"
     assert len(res.payloads(L0)) <= 1, "a payload was persisted for a call that must not happen"
-    assert res.breaker.get("systems", {}) == {} and res.breaker.get("total_failures", 0) == 0, \
+    assert res.breaker == {"systems": {}, "total_failures": 0}, \
         f"the refused fetch spent breaker budget: {res.breaker}"
     assert "SOMEONE ELSE'S NEWEST DOCUMENT" not in res.message_zero, \
         "documents no ancestor asked for reached MAIN under this alert's own heading"

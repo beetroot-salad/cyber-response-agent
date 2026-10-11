@@ -322,7 +322,7 @@ def seed_executed_query(
     the time. Seeding through that function rather than by hand is what keeps this fixture a
     real historical row instead of the test's own idea of one."""
     from defender.run_repository import RunPaths
-    from defender.scripts.gather_tools.record_query import append_query_row
+    from defender.scripts.gather_tools.record_query import append_query_row, open_query_mirror
 
     gather = RunPaths(run_dir).gather_raw
     gather.mkdir(parents=True, exist_ok=True)
@@ -330,6 +330,9 @@ def seed_executed_query(
         gather / f"{lead_id}.lead.json",
         json.dumps({"goal": goal, "what_to_summarize": []}) + "\n",
     )
+    # Each seeded row is a historical run's write: the writer takes its seq from the run's
+    # queries mirror (#1235), opened over the table as it stands, as a run start opens it.
+    open_query_mirror(run_dir)
     return append_query_row(
         run_dir, lead_id=lead_id, system=system, verb=verb, query_id=query_id,
         params={"query": "FROM logs"}, raw_command=f"{system} {verb}",

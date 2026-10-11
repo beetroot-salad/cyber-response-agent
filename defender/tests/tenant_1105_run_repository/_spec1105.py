@@ -69,11 +69,13 @@ FIXTURE = WORKTREE / "knowledge" / "tenant-fixture"
 T_ID = "acme"
 U_ID = "beta"
 
-#: The five host-only sidecar suffixes (D2.1, R4-35; #1224 added the oracle-held record),
+#: The six host-only sidecar suffixes (D2.1, R4-35; #1224 added the oracle-held record; #1235
+#: F2 the run -> case pointer, moved out of the run folder; the accounting-failures suffix stays
+#: reserved after #1235 retired its record, since the run-id bound is derived from it),
 #: spelled HERE rather than imported from the layout: the suite pins the design's list, so a
 #: layout that drops one is caught.
 SIDECAR_SUFFIXES = (".run-end.json", ".scrub-verdict.json", ".accounting_failures.json",
-                    ".ticket-write.json", ".oracle-held.json")
+                    ".ticket-write.json", ".oracle-held.json", ".session-pointer.json")
 #: The staged-name tail a sidecar write creates first (`_io.staged_leaf`: `.staged-` plus 16
 #: lowercase hex digits, R41-23) — the shape MF-21 (DV-5) adds to the sidecar clause.
 STAGED_TAIL = ".staged-0123456789abcdef"

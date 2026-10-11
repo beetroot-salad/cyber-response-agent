@@ -148,8 +148,11 @@ def test_1105_run_id_parse_admits_206_bytes_and_refuses_207():
     # The census, derived from the real constants rather than restated (R4-35).
     from defender import run_repository as rr
 
+    # #1235 F2 adds the case pointer's sidecar; it is shorter than the accounting suffix, so
+    # the bound stays 206.
     suffixes = (rr.RUN_END_SIDECAR_SUFFIX, rr.SCRUB_VERDICT_SUFFIX,
-                rr.ACCOUNTING_FAILURES_SUFFIX, rr.TICKET_WRITE_SUFFIX, rr.ORACLE_HELD_SUFFIX)
+                rr.ACCOUNTING_FAILURES_SUFFIX, rr.TICKET_WRITE_SUFFIX, rr.ORACLE_HELD_SUFFIX,
+                rr.SESSION_POINTER_SUFFIX)
     assert sorted(suffixes) == sorted(H.SIDECAR_SUFFIXES)
     staged_tail = len(_io.staged_leaf("x")) - len("x")
     assert staged_tail == len(H.STAGED_TAIL) == 24
@@ -181,7 +184,8 @@ def test_1105_run_id_mint_folds_then_bounds_the_id_and_never_truncates():
 
 def test_1105_run_id_parse_admits_a_sidecar_suffixed_id():
     """RunId.parse admits 'r1.run-end.json', 'r1.scrub-verdict.json',
-    'r1.accounting_failures.json', 'r1.ticket-write.json' and the staged shape
+    'r1.accounting_failures.json', 'r1.ticket-write.json', 'r1.oracle-held.json',
+    'r1.session-pointer.json' and the staged shape
     'r1.run-end.json.staged-0123456789abcdef': the sidecar clause, staged shape included, belongs
     to the repository's open and run setup, not to RunId, because its `exists` takes a RunId and
     answers for a known sidecar file at such a name."""

@@ -368,8 +368,9 @@ def test_1105_every_repository_function_takes_an_injected_io_like_the_handle(tmp
 # ==========================================================================================
 
 def test_1105_open_run_refuses_each_sidecar_suffixed_id_as_run_refused(tmp_path):
-    """open_run refuses with RunRefused an id ending in each of the four host-only sidecar
-    suffixes (.run-end.json, .scrub-verdict.json, .accounting_failures.json, .ticket-write.json)
+    """open_run refuses with RunRefused an id ending in each of the host-only sidecar
+    suffixes (.run-end.json, .scrub-verdict.json, .accounting_failures.json, .ticket-write.json,
+    .oracle-held.json, .session-pointer.json — `H.SIDECAR_SUFFIXES`)
     and an id of the staged shape (a sidecar suffix, then '.staged-', then lowercase hex
     digits), even when the runs folder is absent (the clause runs before the hold). Positive
     control: 'r1' over a good folder holding r1 opens, and so does each name just outside the
@@ -1095,7 +1096,7 @@ def test_1105_an_absent_runs_folder_answers_empty_and_creates_nothing(tmp_path):
 
 
 def test_1105_a_run_with_sidecar_files_beside_it_lists_as_the_one_run(tmp_path):
-    """A run folder r1 with its four sidecar files beside it and a staged one
+    """A run folder r1 with its sidecar files (`H.SIDECAR_SUFFIXES`) beside it and a staged one
     (r1.run-end.json.staged-<16 hex>) lists as the one run r1 in list_run_ids, which does not
     refuse; sidecar files left for a run whose folder is gone are accepted the same way, and
     that id is not listed. A run whose id is 206 bytes (the bound) with the longest sidecar

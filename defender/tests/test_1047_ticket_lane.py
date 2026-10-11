@@ -60,6 +60,7 @@ report's readability.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from defender.tests import _spec1047 as S
 
@@ -483,16 +484,25 @@ def test_no_planted_file_under_the_run_dir_changes_which_comment_record_case_tic
 
 def test_a_forged_session_store_pointer_file_is_never_consulted_by_the_ticket_lane_for_any_exit_class(
         tmp_path):
-    """A forged session_store_pointer.json is never consulted for any exit class: F3 reading A
-    was chosen precisely to avoid the pointer file, and reading B was rejected as the
+    """A forged case pointer is never consulted for any exit class: F3 reading A was chosen
+    precisely to avoid recovering the case from the pointer, and reading B was rejected as the
     box-writable input the design's own negative universal forbids.
 
-    The box is ROOT on the run dir's mount (flagged fact F4), so both of the pointer's fields
-    are rewritable after the host wrote them — a lane that recovered a case id from it would be
-    reading an attacker-chosen value. Three forgeries: a pointer naming another case, a pointer
-    that is not JSON at all, and a pointer that is a dangling symlink. None of them may move
-    the lane, and none of them may make it raise."""
-    pointer_name = S.sym("run_repository", "RUN_LAYOUT").session_pointer.name
+    #1235 moved the run -> case link out of the run dir to a host-only sidecar beside it
+    (`RunPaths.session_pointer()`), so it is forged at BOTH addresses: inside the run dir under
+    the retired in-folder name (where the box, ROOT on the run dir's mount per flagged fact F4,
+    can still plant one), and at the sidecar itself — a lane that recovered a case id from the
+    link wherever it now lives would be moved by the second. Three forgeries at each: a pointer
+    naming another case, a pointer that is not JSON at all, and an empty one; then a dangling
+    symlink at each. None of them may move the lane, and none of them may make it raise."""
+    in_folder_name = "session_store_pointer.json"
+
+    def addresses(run_dir: Path) -> dict[str, Path]:
+        sidecar = S.sym("run_repository", "RunPaths")(run_dir).session_pointer()
+        assert sidecar.parent == run_dir.parent, (
+            f"the case pointer is not a sidecar beside the run dir: {sidecar}")
+        return {"in-folder": run_dir / in_folder_name, "sidecar": sidecar}
+
     forgeries = {
         "other-case": json.dumps({"case_id": "someone-elses-case", "session_id": "sid"}),
         "not-json": "{{{ not json at all",
@@ -502,20 +512,22 @@ def test_a_forged_session_store_pointer_file_is_never_consulted_by_the_ticket_la
         control = S.record_ticket(
             S.closed_run_dir(tmp_path / f"control-{exit_class}", disposition="unresolved"),
             truncated_by=exit_class)
-        for name, content in forgeries.items():
-            run_dir = S.closed_run_dir(tmp_path / f"{name}-{exit_class}",
-                                       disposition="unresolved")
-            (run_dir / pointer_name).write_text(content, encoding="utf-8")
-            fake = S.record_ticket(run_dir, truncated_by=exit_class)
-            assert [c.path.split("/")[-1] for c in fake.calls] == \
-                   [c.path.split("/")[-1] for c in control.calls], (
-                f"{exit_class}/{name}: a forged pointer file moved the ticket lane")
+        for where in ("in-folder", "sidecar"):
+            for name, content in forgeries.items():
+                run_dir = S.closed_run_dir(tmp_path / f"{where}-{name}-{exit_class}",
+                                           disposition="unresolved")
+                addresses(run_dir)[where].write_text(content, encoding="utf-8")
+                fake = S.record_ticket(run_dir, truncated_by=exit_class)
+                assert [c.path.split("/")[-1] for c in fake.calls] == \
+                       [c.path.split("/")[-1] for c in control.calls], (
+                    f"{exit_class}/{where}/{name}: a forged case pointer moved the ticket lane")
 
-    dangling = S.closed_run_dir(tmp_path / "dangling", disposition="unresolved")
-    (dangling / pointer_name).symlink_to(tmp_path / "nowhere.json")
-    assert len(S.record_ticket(dangling, truncated_by="request-limit").records) == 1, (
-        "a dangling symlink at the pointer's name stopped the ticket lane, so something is "
-        "reading it")
+    for where in ("in-folder", "sidecar"):
+        dangling = S.closed_run_dir(tmp_path / f"dangling-{where}", disposition="unresolved")
+        addresses(dangling)[where].symlink_to(tmp_path / "nowhere.json")
+        assert len(S.record_ticket(dangling, truncated_by="request-limit").records) == 1, (
+            f"a dangling symlink at the case pointer's {where} address stopped the ticket lane, "
+            "so something is reading it")
 
 
 def test_a_forged_ticket_write_receipt_claiming_prior_closure_does_not_suppress_the_real_record_or_note_call(

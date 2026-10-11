@@ -372,6 +372,10 @@ def test_the_learning_side_join_still_splits_the_sentinel_row(tmp_path):
     (tmp_path / "gather_raw").mkdir(parents=True)
     write(tmp_path / "gather_raw" / "l-001.lead.json",
           json.dumps({"goal": "reduce the elastic envelope", "what_to_summarize": []}) + "\n")
+    # The writer takes its seq from the run's queries mirror, opened as a run start opens it.
+    from defender.scripts.gather_tools.record_query import open_query_mirror
+
+    open_query_mirror(tmp_path)
     append_query_row(
         tmp_path, lead_id="l-001", system="elastic", verb="query", query_id="elastic.esql",
         params={"native_query": "FROM logs"}, raw_command="elastic query",

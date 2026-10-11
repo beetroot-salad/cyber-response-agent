@@ -356,9 +356,10 @@ ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
 #: The UPWARD accessors (cluster B, dissolved by decision 10): their root is the runs base, not
 #: the run directory. (#1107 moved the ticket receipt out of the box-writable run dir, making it
 #: the fourth sidecar; #1235 retired the accounting-failures sidecar's accessor — its suffix
-#: stays reserved in the layout — leaving three.) `session_db`'s root is the sessions directory, a sibling of the
-#: runs base (claims C10/C15).
-SIDECAR_ACCESSORS = ("run_end_sidecar", "scrub_verdict", "ticket_write")
+#: stays reserved in the layout — and moved the run -> case pointer out of the run dir into a
+#: sidecar of its own, `<run_id>.session-pointer.json`, F2.) `session_db`'s root is the sessions
+#: directory, a sibling of the runs base (claims C10/C15).
+SIDECAR_ACCESSORS = ("run_end_sidecar", "scrub_verdict", "ticket_write", "session_pointer")
 UPWARD_ACCESSORS = (*SIDECAR_ACCESSORS, "sessions_dir", "session_db")
 
 
@@ -526,7 +527,8 @@ def seed_run_tree(run_dir: Path) -> Path:
 # timestamps (`budget.json`, `tool_trace.jsonl`), a per-run random security salt embedded in
 # otherwise-meaningful text (`review_record.<turn>.json`, the three
 # `wire_logs/review_*_trace.jsonl`) and random per-run session/case identifiers
-# (`session_store_pointer.json`, `tool_trace.jsonl`). So the observer is two checks now:
+# (`session_store_pointer.json` — then in the run dir, a sidecar beside it since #1235 —,
+# `tool_trace.jsonl`). So the observer is two checks now:
 #
 #   STRUCTURAL (strict, load-bearing) — `snapshot` / `tree_diff`: the run directory produces
 #   the SAME SET OF NAMES, with no file or directory added, removed, renamed or moved. A

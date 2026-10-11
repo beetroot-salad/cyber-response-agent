@@ -238,7 +238,9 @@ def test_dc1_a_source_under_a_linked_runs_folder_is_refused(tmp_path):
     RED at base: `tenant_of_run_dir` compares resolved paths, so the linked storeless source
     launches."""
     est, src = P.launch_source(tmp_path)
-    (src / "session_store_pointer.json").unlink()
+    from defender.run_repository import RunPaths
+
+    RunPaths(src).session_pointer().unlink()
     runs = src.parent
     moved = tmp_path / "runs-elsewhere"
     runs.rename(moved)

@@ -990,7 +990,11 @@ CENSUS: tuple[Writer, ...] = (
            _invoke_observe_logger, "runtime/observe.py", cite="C1", mkdirs_component=True),
     Writer("denial_logger", "policy_denials.jsonl", "append-open", "unmeasured",
            _invoke_denial_logger, "runtime/observe.py", cite="C1,G12"),
-    Writer("write_case_pointer", "session_store_pointer.json", "write_text", "unmeasured",
+    # #1235 F2: the run -> case pointer left the run dir for a host-only sidecar beside it,
+    # `<run_id>.session-pointer.json` in the runs base — named relative to the run dir the way
+    # the tenant record's row is (`run_tree`'s dir is `run-771`). Still a setup writer, still
+    # required to refuse a planted alias at its own name.
+    Writer("write_case_pointer", "../run-771.session-pointer.json", "write_text", "unmeasured",
            _invoke_case_pointer, "runtime/session_store.py", cite="C1,R4"),
     # #1235: the `budget_enforcer` and `circuit_breaker` rows retired with their artifacts.
     # The budget counters and the breaker live in the run process's memory; nothing writes

@@ -87,8 +87,14 @@ def test_store_path_is_not_under_the_runs_base(tmp_path):
     ss.write_case_pointer(run_dir, case_id="case-alpha", store_path=store.path)
     resolved = Path(ss.resolve_store_path(run_dir))
     assert base.resolve() not in resolved.resolve().parents
-    assert [p for p in base.iterdir()] == [run_dir], (
-        "the runs base must contain only run dirs — nothing for held_out/trace_lesson to skip")
+    # #1235: the case pointer is a host-only sidecar BESIDE the run dir (`<run_id>.session-
+    # pointer.json`, like `.run-end.json`), so the runs base holds the run dir and that run's
+    # own sidecar — exactly those two, and still no store file.
+    pointer = RunPaths(run_dir).session_pointer()
+    assert pointer.name == f"{run_dir.name}.session-pointer.json", pointer
+    assert sorted(base.iterdir()) == sorted([run_dir, pointer]), (
+        "the runs base must contain only run dirs and their own host sidecars — no store file "
+        "for held_out/trace_lesson to skip")
 
 
 def test_the_resolver_rejects_a_non_conforming_case_id(tmp_path):
@@ -406,7 +412,7 @@ def test_run_dir_case_id_and_session_id_deliberately_diverge(tmp_path):
 
     assert len({"case-alpha", session_id, run_dir.name}) == 3, (
         "the fixture must make the three differ, or a wrong reach reads as correct")
-    pointer = json.loads(RunPaths(run_dir).session_pointer.read_text())
+    pointer = json.loads(RunPaths(run_dir).session_pointer().read_text())
     assert pointer["case_id"] == "case-alpha" != run_dir.name
     rows = dict(sql(store, "SELECT session_id, case_id FROM session"))
     assert rows[fork] == "case-alpha", "case_id is inherited by the fork"

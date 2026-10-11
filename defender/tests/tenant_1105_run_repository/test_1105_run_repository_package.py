@@ -46,7 +46,8 @@ PACKAGE_FILES = ("__init__.py", "_layout.py", "_handle.py", "_lookup.py", "_reco
 #: The 53 public names `defender/_run_paths.py` defines at module level at 80888efb (R4-42),
 #: plus #1224's ORACLE_HELD_SUFFIX, minus `resolve_run_bundle` (deleted by #1105 PR 2, F-13),
 #: minus BUDGET and CIRCUIT_BREAKER (#1235: the counters and the breaker are in-memory state, so
-#: neither names a run record any more).
+#: neither names a run record any more), with SESSION_POINTER (the in-folder name) replaced by
+#: SESSION_POINTER_SUFFIX (#1235 F2: the case pointer is a sidecar beside the run folder).
 LAYOUT_NAMES = frozenset({
     "WIRE_LOG_DIR", "WIRE_LOG", "PROVENANCE", "GATE_METADATA_KEY", "ALERT", "REPORT",
     "INVESTIGATION", "EXECUTED_QUERIES", "SOURCE_REFS", "RAW_MARKER", "GATHER_SUMMARIES_DIRNAME",
@@ -54,7 +55,7 @@ LAYOUT_NAMES = frozenset({
     "TRACE_SUFFIX", "REVIEW_TRACE_SUFFIX", "JSONL_EXT", "AGENT_TRACE_SUFFIX",
     "AGENT_FRAMED_TRACE_SUFFIX", "SERVED_PREFIX", "PAYLOAD_SUFFIX", "SESSION_DB_SUFFIX",
     "TOOL_TRACE", "POLICY_DENIALS", "LESSONS_LOADED",
-    "SESSION_POINTER", "RUNTIME_HTML", "BOX_SENTINEL", "RUN_END_SIDECAR_SUFFIX",
+    "SESSION_POINTER_SUFFIX", "RUNTIME_HTML", "BOX_SENTINEL", "RUN_END_SIDECAR_SUFFIX",
     "SCRUB_VERDICT_SUFFIX", "ACCOUNTING_FAILURES_SUFFIX", "TICKET_WRITE_SUFFIX",
     "ORACLE_HELD_SUFFIX", "SESSIONS_DIRNAME", "RunLayout", "RUN_LAYOUT", "WireLogNames", "WIRE_LOG_NAMES", "RunPaths",
     "SessionPaths", "LEAD_ID_BODY", "LEAD_ID_RE", "GATHER_RAW_SHAPE", "CASE_ANSWER_KEY_NAMES",
@@ -396,7 +397,8 @@ def test_1105_the_door_serves_exactly_its_68_public_names():  # 70 since the own
         f"__all__ differs from D1.3's 68 plus the two ruled names: missing "
         f"{sorted((LAYOUT_NAMES | NON_LAYOUT_PUBLIC) - served)}, extra "
         f"{sorted(served - LAYOUT_NAMES - NON_LAYOUT_PUBLIC)}")
-    # 71 since #1235 dropped BUDGET and CIRCUIT_BREAKER.
+    # 71 since #1235 dropped BUDGET and CIRCUIT_BREAKER (and swapped SESSION_POINTER for
+    # SESSION_POINTER_SUFFIX, one for one).
     assert len(served) == 71, f"{len(served)} public names, not 71"
     layout_public = {n for n in _module_defs(ast.parse(Path(_layout.__file__).read_text(
         "utf-8"))) if not n.startswith("_")}

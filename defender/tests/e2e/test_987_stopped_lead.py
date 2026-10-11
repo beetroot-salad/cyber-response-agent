@@ -198,6 +198,12 @@ def run_lead(  # noqa: PLR0913 — one parameter per thing a scenario varies
     ones."""
     run_dir = materialize(root, GOLDEN_AB3)
     budget_enforcer.open_budget(run_dir, run_dir.name)
+    # The real `_run_gather` runs without the driver, so this opens the run's host state the
+    # way the driver does at run start: the budget above, and the queries table the query
+    # tool's guards and row writer read (#1235 F1).
+    from defender.scripts.gather_tools.record_query import open_query_mirror
+
+    open_query_mirror(run_dir)
     # #1106: a run hands MAIN's deps its tenant's record, which every lead inherits.
     deps = replace(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER),
                    tenant=T1106.fixture_run_tenant())

@@ -395,15 +395,14 @@ def test_replayed_message_zero_listing_matches_the_production_run_dir_file_set(
     assert "meta.json" not in listed, "the replayed message 0 still advertises the removed file"
     production_names = {p.name for p in prod_dir.iterdir()}
     # `production_names` is `materialize_run`'s snapshot, taken BEFORE
-    # `run_investigation` starts; `tool_trace.jsonl` and (#705)
-    # `session_store_pointer.json` are both written by `run_investigation` itself, between
-    # that snapshot and message 0 — present in a real run by the time the model sees the
-    # listing, just not in this earlier snapshot. The wire log is written in that window too
-    # but is NOT allowed for here: it lands under `wire_logs/`, which the map suppresses along
-    # with `gather_raw/` because the read gate refuses both.
-    assert set(listed) <= production_names | {
-        "tool_trace.jsonl", "session_store_pointer.json",
-    }, (
+    # `run_investigation` starts; `tool_trace.jsonl` is written by `run_investigation` itself,
+    # between that snapshot and message 0 — present in a real run by the time the model sees
+    # the listing, just not in this earlier snapshot. The case pointer (#705) used to be the
+    # second such file; #1235 moved it to a host-only sidecar BESIDE the run dir, so it is no
+    # longer allowed for here. The wire log is written in that window too but is NOT allowed
+    # for here: it lands under `wire_logs/`, which the map suppresses along with `gather_raw/`
+    # because the read gate refuses both.
+    assert set(listed) <= production_names | {"tool_trace.jsonl"}, (
         f"the replayed listing names files a production run dir never has: "
         f"{set(listed) - production_names}"
     )

@@ -24,11 +24,18 @@ from defender.scripts.gather_tools.record_query import _next_seq
 
 
 def test_next_seq_counts_rows_not_files(tmp_path):
+    """The next seq counts the lead's table ROWS — not the payload files under `gather_raw/` —
+    as the host's mirror holds them (#1235): rows on disk count once the run's mirror is opened
+    over them, which is what a run start does."""
+    from defender.scripts.gather_tools.record_query import open_query_mirror
+
+    open_query_mirror(tmp_path)
     assert _next_seq(tmp_path, "l-001") == 0
     append_jsonl(tmp_path / "executed_queries.jsonl", [
         {"lead_id": "l-001", "seq": 0, "payload_path": None},
         {"lead_id": "l-002", "seq": 0, "payload_path": "gather_raw/l-002/0.json"},
     ])
+    open_query_mirror(tmp_path)
     assert _next_seq(tmp_path, "l-001") == 1
     assert _next_seq(tmp_path, "l-002") == 1
 

@@ -129,8 +129,13 @@ def params_of_depth(depth: int, chain: Callable[[int], Any] = dict_chain) -> dic
 
 
 def _run_dir(root: Path) -> Path:
+    """A run folder the writer can be driven on: its queries mirror opened as a run start opens
+    it (#1235), since the writer takes each row's seq from the mirror."""
+    from defender.scripts.gather_tools.record_query import open_query_mirror
+
     run_dir = root
     RunPaths(run_dir).gather_raw.mkdir(parents=True, exist_ok=True)
+    open_query_mirror(run_dir)
     return run_dir
 
 
