@@ -84,6 +84,10 @@ def _run_dir(tmp_path: Path, name: str = "run") -> Path:
     (rd / "gather_raw").mkdir(parents=True)
     (rd / "gather_summaries").mkdir(parents=True)
     (rd / "alert.json").write_text(json.dumps({"rule": {"name": "probe"}}))
+    # #1235: the queries table's live view opens at run start; this fixture is a run that
+    # started, so its writers and guards have one to read.
+    from defender.scripts.gather_tools.record_query import open_query_mirror
+    open_query_mirror(rd)
     return rd
 
 

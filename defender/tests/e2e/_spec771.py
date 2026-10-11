@@ -887,8 +887,13 @@ def _invoke_queries_table(run_dir: Path) -> Any:
 
     # #1106 M4: gather is bound with a RUN's grant (the playground tenant's), never a
     # process-level one carried by `GATHER_DEF`.
+    from defender.scripts.gather_tools.record_query import open_query_mirror
+
     deps = replace(bind(_tenants1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER),
                    lead_id="l-001")
+    # #1235: the queries table's live view opens at run start (`driver.run_investigation`);
+    # this writer is driven outside a run, so it opens the view a started run would have.
+    open_query_mirror(run_dir)
     return asyncio.run(QueryCapture(registry=None)._record(
         deps, system="elastic", verb="search", query_id="elastic.ad-hoc", params={},
         payload=[{"a": 1}], exit_code=0, detail="", system_key="",
