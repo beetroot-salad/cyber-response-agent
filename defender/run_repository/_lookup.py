@@ -207,10 +207,11 @@ class RunsRepository:
         """Every run `list()` answers, as a `Run` addressed `(tenant, run_id)`, in the same
         order — from ONE hold of the container, whose `_tenant.json` is judged once, rather
         than a hold and a record read per run. The listing judged every entry (a run is a real
-        directory there), so each handle is built by `Run.under`, as `open` builds one; a run
-        removed after the listing is simply not returned. An absent container holds none; one
-        that cannot be held, or whose record does not name the tenant, refuses
-        (`TenantRefused`), as `list` does."""
+        directory there), so each handle is built by `Run.under`, as `open` builds one, with no
+        further read: the listing is the snapshot (P1), and a run removed after it is still
+        handed out, its records then reading as absent — nothing here raises for it, as a
+        per-id `open` would. An absent container holds none; one that cannot be held, or whose
+        record does not name the tenant, refuses (`TenantRefused`), as `list` does."""
         folder = Path(self._tenant.runs)
         try:
             held = hold_runs_folder(folder, io=self._io)
