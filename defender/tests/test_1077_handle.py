@@ -701,7 +701,8 @@ def test_a_handle_built_from_a_bare_directory_lacks_the_input_the_upward_accesso
     pointer = S.member(tenanted, "observability", "session_pointer").path
     assert pointer == S.RunPaths(run_dir).session_pointer(base), \
         "run.observability.session_pointer is not the layout's sidecar accessor"
-    assert pointer.parent == base and not pointer.is_relative_to(run_dir), \
+    assert pointer.parent == base, "the case pointer member is not beside the run directory"
+    assert not pointer.is_relative_to(run_dir), \
         "the case pointer member still resolves inside the run directory"
 
 

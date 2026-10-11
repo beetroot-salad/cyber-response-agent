@@ -411,7 +411,8 @@ def test_a_second_open_budget_starts_a_fresh_budget_for_the_folder(tmp_path):
     first = open_budget(tmp_path, "run-1")
     assert first["run_id"] == "run-1"
     assert (first["tool_calls"], first["subagent_spawns"]) == (0, 0)
-    assert first["created_at"] and first["started_at"], "open_budget minted no origin"
+    assert first["created_at"], "open_budget minted no origin"
+    assert first["started_at"], "open_budget minted no origin"
     update_budget_locked(tmp_path, "run-1", "bash", limits=DEFAULT_LIMITS)
     update_budget_locked(tmp_path, "run-1", "gather", limits=DEFAULT_LIMITS)
     accrued = _budget(tmp_path)

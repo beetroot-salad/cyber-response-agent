@@ -939,8 +939,8 @@ def test_the_run_reads_the_roster_before_any_model_call(tmp_path, monkeypatch):
     control = materialize(tmp_path / "control", GOLDEN_AB3)
     drive(control, run_id="r-1035-ctl", main=ReplayFn([Turn(text="Investigation complete.")]))
     opened = read_budget(control)
-    assert opened.get("run_id") == "r-1035-ctl" and opened.get("created_at"), \
-        f"the control run opened no budget: {opened}"
+    assert opened.get("run_id") == "r-1035-ctl", f"the control run opened no budget: {opened}"
+    assert opened.get("created_at"), f"the control run opened no budget: {opened}"
 
     root = tmp_path / "tree"
     root.mkdir()

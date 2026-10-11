@@ -382,15 +382,17 @@ def test_the_live_readers_answer_from_the_rows_the_host_recorded_not_from_the_fi
     assert rq._next_seq(run_dir, LEAD) == 2, "truncating the table reset the next seq"
     note = rq.repeat_note(run_dir, LEAD, seq=2, system="elastic", verb="query",
                           params={"q": "a"}, **_result_of(_PAYLOAD))
-    assert note is not None and "REPEAT" in note and "seq 0" in note, \
-        "truncating the table erased a repeat the host recorded"
+    assert note is not None, "truncating the table erased a repeat the host recorded"
+    assert "REPEAT" in note, "truncating the table erased a repeat the host recorded"
+    assert "seq 0" in note, "truncating the table erased a repeat the host recorded"
 
     z = _append(rq, run_dir, params={"q": "z"}, payload=_SAME_LENGTH)
     assert z["seq"] == 2
     note = rq.repeat_note(run_dir, LEAD, seq=3, system="elastic", verb="query",
                           params={"q": "z"}, **_result_of(_SAME_LENGTH))
-    assert note is not None and "REPEAT" in note and "seq 2" in note, \
-        "the control: a request the host recorded does make the note fire"
+    assert note is not None, "the control: a request the host recorded does make the note fire"
+    assert "REPEAT" in note, "the control: a request the host recorded does make the note fire"
+    assert "seq 2" in note, "the control: a request the host recorded does make the note fire"
 
 
 def test_mirror_rows_are_the_lines_written_not_the_dicts_the_writer_built(tmp_path):
@@ -437,7 +439,7 @@ def test_a_row_whose_write_failed_neither_enters_the_mirror_nor_spends_a_seq(tmp
     saved = table.read_bytes()
     table.unlink()
     table.mkdir()
-    with pytest.raises(OSError):
+    with pytest.raises(OSError, match="non-plain or aliased entry"):
         _append(rq, run_dir, params={"q": "lost"})
     assert [r["params"] for r in rq.live_lead_rows(run_dir, LEAD)] == [{"q": "a"}], \
         "a row whose line was never written entered the mirror"
