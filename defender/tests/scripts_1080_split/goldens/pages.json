@@ -720,7 +720,7 @@
    "assert validate_companion(produced, None) == []",
    "assert validate_companion(produced_inv, None) == []",
    "assert wire_log.is_file(), 'the wire log is not where this belt is looking — a missing file reads as zero live records, so the assertion below would pass without measuring anything'",
-   "assert {p.name for p in run_dir.parent.iterdir()} == before | {sidecar_path(run_dir).name}, \"the append created something outside the run dir and the host's own run-end sidecar\""
+   "assert {p.name for p in run_dir.parent.iterdir()} == before | host_sidecars, \"the append created something outside the run dir and the host's own sidecars\""
   ],
   "defender/tests/e2e/test_query_tool_611.py": [
    "assert '<run-' not in on_disk, 'the persisted payload must be the raw bytes, never wrapped'",
