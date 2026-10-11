@@ -197,7 +197,7 @@ def run_lead(  # noqa: PLR0913 — one parameter per thing a scenario varies
     `FunctionModel`; the tools, capabilities, instructions and retry policy are the shipped
     ones."""
     run_dir = materialize(root, GOLDEN_AB3)
-    budget_enforcer.open_budget(run_dir, budget_enforcer.DEFAULT_LIMITS)
+    budget_enforcer.open_budget(run_dir, run_dir.name)
     # #1106: a run hands MAIN's deps its tenant's record, which every lead inherits.
     deps = replace(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER),
                    tenant=T1106.fixture_run_tenant())

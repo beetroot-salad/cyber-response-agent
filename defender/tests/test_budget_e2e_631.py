@@ -29,9 +29,7 @@ strictly REMOVES the property the mechanism exists for.
 """
 from __future__ import annotations
 
-import json
 import re
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -41,7 +39,7 @@ from defender.run_repository import RunPaths
 from defender.hooks.budget_enforcer import (
     BUDGET_REFUSAL_MESSAGE,
     DEFAULT_LIMITS,
-    open_budget,
+    read_budget,
     update_budget_locked,
 )
 from defender.runtime.lead_zero import RESERVED_LEAD_IDS
@@ -78,7 +76,9 @@ def caps(**over) -> dict:
 
 
 def budget(run_dir: Path) -> dict:
-    return json.loads((run_dir / "budget.json").read_text())
+    """The run's budget counters: the run process's memory (#1235 — no `budget.json` is
+    written), read post-run in this process, where `drive` ran the run."""
+    return read_budget(run_dir)
 
 
 def own_rows(run_dir: Path) -> list[dict]:
@@ -153,7 +153,7 @@ def test_budget_trip_returns_summary_and_writes_trace(tmp_path, enforced):
     assert summary["requests"] >= 2
     assert (run_dir / "tool_trace.jsonl").is_file()
     assert RunPaths(run_dir).wire_log.is_file()
-    assert (run_dir / "budget.json").is_file()
+    assert budget(run_dir).get("run_id") == "trip", "the run opened no budget of its own"
 
 
 def test_a_budget_killed_run_carries_truncated_by_budget(tmp_path, enforced):
@@ -287,20 +287,32 @@ def test_budget_kill_and_breaker_kill_are_independent(tmp_path, enforced):
     depends on the other's.
 
     Driven both ways round: a run whose budget trips while the breaker's own state
-    file already sits at a nonzero failure count still ends on the budget, with the
+    already sits at a nonzero failure count still ends on the budget, with the
     breaker's record untouched; and a breaker abort on an un-tripped budget still ends
-    the run with the budget's counters intact and no truncated_by mark."""
+    the run with the budget's counters intact and no truncated_by mark.
+
+    The nonzero breaker state is charged INSIDE the run, through the production
+    `record_outcome`, on MAIN's first request: the driver opens a fresh breaker at run start
+    (#1235), so a charge made before `drive` would be reset, not carried."""
     from defender.runtime import circuit_breaker
 
     run_dir = materialize(tmp_path, GOLDEN)
-    circuit_breaker.record_outcome(run_dir, "elastic", 2)
-    before = json.loads((run_dir / "circuit_breaker.json").read_text())
+    before: dict = {}
+
+    class ChargedBreaker(ReplayFn):
+        def __call__(self, messages, info):  # noqa: ANN001 — the framework's callable protocol
+            if self.calls == 0:
+                circuit_breaker.record_outcome(run_dir, "elastic", 2)
+                before.update(circuit_breaker.breaker_state(run_dir))
+            return super().__call__(messages, info)
+
     summary = drive(run_dir, run_id="both",
-                    main=ReplayFn(tail_turns(run_dir, 15)),
+                    main=ChargedBreaker(tail_turns(run_dir, 15)),
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
                                 grace_seconds=600))
+    assert before.get("total_failures") == 1, "the in-run charge never reached the breaker"
     assert summary["truncated_by"] == "budget", "the budget did not fire first"
-    assert json.loads((run_dir / "circuit_breaker.json").read_text()) == before, (
+    assert circuit_breaker.breaker_state(run_dir) == before, (
         "the budget kill reached into the breaker's state"
     )
 
@@ -318,8 +330,8 @@ def test_budget_kill_and_breaker_kill_are_independent(tmp_path, enforced):
                     gather=gather, verbs=verbs, limits=caps())
     assert summary["truncated_by"] is None, "the budget wrongly marked a breaker-ended run"
     assert budget(other)["tool_calls"] < DEFAULT_LIMITS["max_tool_calls"]
-    breaker_state = json.loads((other / "circuit_breaker.json").read_text())
-    assert breaker_state, "the breaker never engaged, so arm 2 controls nothing"
+    engaged = circuit_breaker.breaker_state(other)
+    assert engaged["total_failures"] > 0, "the breaker never engaged, so arm 2 controls nothing"
     assert circuit_breaker.record_outcome
 
 
@@ -365,40 +377,6 @@ def test_stopped_tool_is_refused_not_withdrawn(tmp_path, enforced):
         "the refused call's handler ran — the seam did not short-circuit"
     )
 
-
-def test_real_run_uses_a_local_monotonic_origin_after_a_backward_clock_step(
-    tmp_path, enforced,
-):
-    run_dir = materialize(tmp_path, GOLDEN)
-
-    class BackwardClockStep(ReplayFn):
-        def __call__(self, messages, info):
-            if self.calls == 0:
-                state = budget(run_dir)
-                future = (datetime.now(UTC) + timedelta(days=30)).isoformat()
-                state["created_at"] = future
-                state["started_at"] = future
-                (run_dir / "budget.json").write_text(
-                    json.dumps(state, indent=2), encoding="utf-8",
-                )
-            return super().__call__(messages, info)
-
-    replay = BackwardClockStep([
-        Turn(tool_calls=[("bash", {"command": "echo must-not-run"})]),
-        Turn(text="Acknowledged."),
-    ])
-    drive(
-        run_dir,
-        run_id="clock-step",
-        main=replay,
-        limits=caps(max_tool_calls=100, wall_clock_timeout=0, grace_seconds=600),
-    )
-
-    history = "\n".join(replay.seen)
-    on_disk = budget(run_dir)
-    assert refusal_stem() in history, "the backward wall-clock step disabled refusal"
-    assert on_disk["tool_calls"] == 0, "the clock-defeated tool reached its handler"
-    assert "started_monotonic" not in on_disk, "the process-local origin leaked to budget.json"
 
 
 def test_repeated_reissue_accumulates_no_retries(tmp_path, enforced):
@@ -478,7 +456,7 @@ def test_refusal_message_content(tmp_path, enforced):
 
 
 def test_refused_call_does_not_increment_tool_calls(tmp_path, enforced, capsys):
-    """A call refused at the execute seam leaves tool_calls unchanged in budget.json
+    """A call refused at the execute seam leaves tool_calls unchanged in the run's budget
     AND emits NOTHING on the stderr channel — across a long run of consecutive
     refusals no budget warning or exceeded line appears — so a model looping on a
     stopped tool can neither spend the ten-call tail band MAIN needs for its report
@@ -664,9 +642,11 @@ def test_kill_lands_between_two_report_writes(tmp_path, enforced):
 
 
 def test_main_and_gather_share_one_budget(tmp_path, unenforced):
-    """MAIN and every GATHER subagent increment the ONE budget.json keyed by run dir,
-    so the caps bound the pool rather than each agent separately — and the file the
-    subagent's calls land in is the same file MAIN's do, not a second one."""
+    """MAIN and every GATHER subagent increment the ONE budget keyed by run dir, so the
+    caps bound the pool rather than each agent separately — and the state the subagent's
+    calls land in is the same in-memory state MAIN's do (#1235), not a second one: MAIN's
+    bash, MAIN's gather dispatch and the subagent's own query all count in it. No
+    `budget.json` is written anywhere."""
     recorder = VerbRecorder()
 
     def esql(ctx, *, index: str) -> dict:
@@ -690,7 +670,8 @@ def test_main_and_gather_share_one_budget(tmp_path, unenforced):
           ]),
           gather=gather, verbs=verbs, limits=caps())
 
-    assert len(list((run_dir).glob("**/budget.json"))) == 1
+    assert not list(tmp_path.glob("**/budget.json")), (
+        "a budget.json was written: the counters are the run process's memory (#1235)")
     state = budget(run_dir)
     assert state["subagent_spawns"] == 1
     assert state["tool_calls"] >= 3, (
@@ -817,9 +798,17 @@ def test_subagent_dispatched_into_an_already_stopped_pool(tmp_path, enforced):
 
     verbs = FakeVerbs({"elastic": {"esql": esql}})
     run_dir = materialize(tmp_path, GOLDEN)
-    open_budget(run_dir, "stopped")
     limits = caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600)
-    update_budget_locked(run_dir, "stopped", "bash", limits=limits)
+
+    class StoppedPool(ReplayFn):
+        """Spends the pool to its cap through the production `update_budget_locked` on MAIN's
+        first request — inside the run, after the driver opened its fresh budget (#1235: a
+        budget seeded before `drive` would be reset by that open, not carried)."""
+
+        def __call__(self, messages, info):  # noqa: ANN001 — the framework's callable protocol
+            if self.calls == 0:
+                update_budget_locked(run_dir, "stopped", "bash", limits=limits)
+            return super().__call__(messages, info)
 
     gather = ReplayFn([
         Turn(tool_calls=[("query", {"system": "elastic", "verb": "esql",
@@ -827,7 +816,7 @@ def test_subagent_dispatched_into_an_already_stopped_pool(tmp_path, enforced):
                                     "query_id": "elastic.probe"})]),
         Turn(text="PARTIAL SUMMARY: refused before any result"),
     ])
-    main = ReplayFn([
+    main = StoppedPool([
         Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
                                      "goal": "g", "what_to_summarize": ["w"]})]),
         Turn(text="done"),

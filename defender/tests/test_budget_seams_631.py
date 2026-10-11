@@ -38,6 +38,7 @@ from defender.hooks.budget_enforcer import (  # noqa: E402
     DEFAULT_LIMITS,
     BudgetKill,
     open_budget,
+    read_budget,
     tier,
     update_budget_locked,
 )
@@ -306,7 +307,7 @@ def test_limits_threaded_from_boundary(tmp_path):
         "no refusal at 12 calls against an injected cap of 3 — DEFAULT_LIMITS (200) was "
         "read inside the hook instead of the threaded value"
     )
-    state = json.loads((run_dir / "budget.json").read_text())
+    state = read_budget(run_dir)
     assert state["tool_calls"] == 3, "the injected cap did not bound the executed calls"
 
 

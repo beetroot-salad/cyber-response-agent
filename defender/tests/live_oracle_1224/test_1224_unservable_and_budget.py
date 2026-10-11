@@ -167,20 +167,19 @@ class _Run:
         return [r for r in self.rows
                 if r.get("system") == system and (r.get("params") or {}).get("q") == q]
 
-    def _json(self, name: str) -> dict:
-        path = self.run_dir / name
-        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-
     @property
     def breaker(self) -> dict:
-        return self._json("circuit_breaker.json")
+        """The run's circuit-breaker state, as the run's own process holds it (#1235: in
+        memory, never a file in the run dir). Every run here is driven in this process."""
+        return S.sym("runtime.circuit_breaker", "breaker_state")(self.run_dir)
 
     def failures(self, system: str) -> int:
         return int(self.breaker.get("systems", {}).get(system, {}).get("failures", 0))
 
     @property
     def budget(self) -> dict:
-        return self._json("budget.json")
+        """The run's budget counters, as the run's own process holds them (#1235)."""
+        return S.sym("hooks.budget_enforcer", "read_budget")(self.run_dir)
 
     @property
     def trace_result(self) -> dict:

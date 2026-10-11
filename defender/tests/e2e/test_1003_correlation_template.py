@@ -22,7 +22,9 @@ and a check that refused them would kill every sibling world after an operator d
 template. Both arms are driven over the SAME mismatched tree the refusal test uses.
 
 THE ORACLES. A typed error out of `run_investigation` naming both pairs; the run dir's own
-artifacts (`budget.json`, `wire_logs/`, the `l-00c` sidecar); the fake models' request
+artifacts (`wire_logs/`, the `l-00c` sidecar) and the run's in-memory budget (#1235: no
+`budget.json` is written any more; `read_budget` answers `{}` for a folder none was opened
+for); the fake models' request
 counts; the fake registry's call record. For O4, the sidecar's authored text outside the
 untrusted frame — the same split `test_808_correlation_lead` cuts — scanned for vendor
 tokens, with the frame proven non-empty and proven to have carried the tokens the strip
@@ -127,7 +129,8 @@ def test_a_catalog_whose_template_disagrees_with_the_table_refuses_the_run_befor
     tree's template binds `verb: query`; the process's table grants the holder
     `elastic.alerts`; the process's config names this template. The run must end at
     `run_investigation`'s own frame with the typed refusal naming BOTH pairs and the id —
-    and NOTHING downstream happened: no `budget.json` (the check precedes `open_budget`), no
+    and NOTHING downstream happened: no budget opened (`read_budget` is `{}`: the check precedes
+    `open_budget`), no
     `wire_logs/` (precedes the logger), no `l-00c` sidecar (precedes `prepare_correlation_
     lead`), no verb call (precedes item 1), and neither fake model was asked for a turn.
 
@@ -159,7 +162,9 @@ def test_a_catalog_whose_template_disagrees_with_the_table_refuses_the_run_befor
     assert "elastic.query" in message, f"the template's pair is not named:\n{message}"
     assert "elastic.alerts" in message, f"the table's pair is not named:\n{message}"
 
-    assert not (run_dir / "budget.json").exists(), "the budget opened before the check"
+    from defender.hooks.budget_enforcer import read_budget
+
+    assert read_budget(run_dir) == {}, "the budget opened before the check"
     assert not (run_dir / "wire_logs").exists(), "the wire log opened before the check"
     assert not (run_dir / "gather_raw" / f"{L3}.lead.json").exists(), "l-00c was claimed before the check"
     assert rec.calls == [], f"a backend call was issued before the check: {rec.verbs}"
@@ -268,7 +273,9 @@ def test_the_config_is_read_from_the_tree_the_run_reads(tmp_path):
               verbs=elastic_backend(VerbRecorder(), answer_hits(ANCESTORS)), defender_dir=tree,
               tenant=tenant)
     assert str(config) in str(caught.value), str(caught.value)
-    assert not (run_dir / "budget.json").exists(), "the budget opened before the config was read"
+    from defender.hooks.budget_enforcer import read_budget
+
+    assert read_budget(run_dir) == {}, "the budget opened before the config was read"
 
 
 # =========================================================================================

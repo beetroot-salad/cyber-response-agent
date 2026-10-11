@@ -916,7 +916,8 @@ def _never_called(messages, info):  # pragma: no cover — reached only by a reg
 def test_the_run_reads_the_roster_before_any_model_call(tmp_path, monkeypatch):
     """P9, the run — `run_investigation` over a checkout whose adapters directory this process
     cannot read raises `RegistryError` naming the directory OUT of its own frame: before the
-    budget file opens (`budget.json` is absent from the run dir afterwards), before the wire
+    budget opens (#1235: the run process holds no budget for the folder afterwards — the
+    control run, driven over the readable checkout first, does), before the wire
     log opens, and before any model is asked anything (the injected main model raises if it
     is ever called). The run's OWN tree is the readable real checkout here; it is the
     CHECKOUT roster the `nothing-to-try` gate reads that is pointed at a repo root with no
@@ -928,7 +929,18 @@ def test_the_run_reads_the_roster_before_any_model_call(tmp_path, monkeypatch):
     first of them to run read the roster lazily under its own guard and re-filed the host's
     fault as the document's."""
     pytest.importorskip("pydantic_ai")
-    from defender.tests.e2e._replay_harness import GOLDEN_AB3, drive, materialize
+    from defender.hooks.budget_enforcer import read_budget
+    from defender.tests.e2e._replay_harness import (
+        GOLDEN_AB3, ReplayFn, Turn, drive, materialize,
+    )
+
+    # Control, same read: a run over the readable checkout DOES open its budget, so the empty
+    # read below is "never opened", not a reader that answers `{}` for every folder.
+    control = materialize(tmp_path / "control", GOLDEN_AB3)
+    drive(control, run_id="r-1035-ctl", main=ReplayFn([Turn(text="Investigation complete.")]))
+    opened = read_budget(control)
+    assert opened.get("run_id") == "r-1035-ctl" and opened.get("created_at"), \
+        f"the control run opened no budget: {opened}"
 
     root = tmp_path / "tree"
     root.mkdir()
@@ -938,7 +950,7 @@ def test_the_run_reads_the_roster_before_any_model_call(tmp_path, monkeypatch):
     with pytest.raises(RegistryError) as exc:
         drive(run_dir, run_id="r-1035", main=_never_called)
     assert str(_repo_adapters(root)) in str(exc.value), exc.value
-    assert not (run_dir / "budget.json").exists(), "the budget opened before the roster was read"
+    assert read_budget(run_dir) == {}, "the budget opened before the roster was read"
     assert not (run_dir / "wire_logs").exists(), "the wire log opened before the roster was read"
 
 

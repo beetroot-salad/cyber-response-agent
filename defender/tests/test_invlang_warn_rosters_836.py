@@ -131,7 +131,10 @@ def test_exactly_one_agent_definition_is_offered_fix_row():
 # R1 — the budget roster, and what tail tier does and does not buy
 
 def _budgeted(tmp_path, tool_calls: int):
-    """A run dir whose real `budget.json` records `tool_calls` executed calls."""
+    """A run dir whose real budget — the run process's in-memory record, opened and counted
+    through the production `open_budget` / `update_budget_locked` (#1235) — holds
+    `tool_calls` executed calls. Never driven through `run_investigation`, whose own
+    `open_budget` would start the budget over."""
     from defender.hooks.budget_enforcer import open_budget, update_budget_locked
 
     deps, run = main_deps(tmp_path)

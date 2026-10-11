@@ -407,12 +407,15 @@ def test_no_module_in_the_repo_still_imports_the_deleted_hook_module():
 
 def test_update_json_locked_survives_the_sibling_removal(tmp_path):
     """The hooks run-dir module loses its salt reader but not itself: the flock'd
-    read-modify-write behind the per-run budget and circuit-breaker files remains importable
-    AND functional. Removing a member is not removing the module.
+    read-modify-write behind the oracle-held credit (the host-only sidecar beside a branched
+    run's folder, #1224 S15) remains importable AND functional. Removing a member is not
+    removing the module.
 
-    It has two live consumers (the budget enforcer, the circuit breaker), asserted below on
-    the BINDING rather than on the module object — a module is truthy whether or not it
-    consumes anything, which made the old assertion vacuous. `resolve_run_dir` was this
+    Its live consumer is asserted below on the BINDING rather than on the module object — a
+    module is truthy whether or not it consumes anything, which made the old assertion vacuous.
+    (#1235 retired its two other consumers' files: the budget counters and the circuit breaker
+    are the run process's memory, so `circuit_breaker` no longer binds it, and the budget
+    enforcer binds it only for the oracle-held credit.) `resolve_run_dir` was this
     module's other survivor and the lesson-load recorder its third consumer, until #667
     deleted the `claude -p` entrypoint that was the only reason either existed; both left
     d21 with it."""
@@ -421,7 +424,7 @@ def test_update_json_locked_survives_the_sibling_removal(tmp_path):
         "fail-open minted a token no other surface knew"
     )
 
-    target = tmp_path / "budget.json"
+    target = tmp_path / "state.json"
     hooks_run_dir.update_json_locked(target, lambda s: s.__setitem__("tool_calls", 1))
     state = hooks_run_dir.update_json_locked(
         target, lambda s: s.__setitem__("tool_calls", s["tool_calls"] + 1)
@@ -434,13 +437,9 @@ def test_update_json_locked_survives_the_sibling_removal(tmp_path):
     )
 
     from defender.hooks import budget_enforcer
-    from defender.runtime import circuit_breaker
 
     assert budget_enforcer.update_json_locked is hooks_run_dir.update_json_locked, (
-        "the budget_enforcer consumer no longer binds update_json_locked"
-    )
-    assert circuit_breaker.update_json_locked is hooks_run_dir.update_json_locked, (
-        "the circuit_breaker consumer no longer binds update_json_locked"
+        "the budget_enforcer's oracle-held credit no longer binds update_json_locked"
     )
 
 
@@ -472,16 +471,23 @@ def test_run_paths_accessor_set_is_exactly_its_artifacts_after_the_meta_accessor
 
     #1107 moved the ticket receipt out of the run dir to a sidecar in the runs base (beside the
     scrub verdict), so `ticket_write` is now an upward accessor taking the runs base, like
-    `run_end_sidecar`, and no longer a property here."""
+    `run_end_sidecar`, and no longer a property here.
+
+    #1235 removed `budget` and `circuit_breaker` (in-memory state now, no file) and the
+    accounting-failures sidecar's accessor."""
     accessors = {n for n, v in vars(RunPaths).items() if isinstance(v, property)}
     assert accessors == {
         "alert", "report", "investigation", "executed_queries", "gather_raw", "wire_log",
         "provenance",
         # #1077 D1
         "source_refs", "gather_summaries", "lead_author", "tool_trace", "policy_denials",
-        "budget", "circuit_breaker", "lessons_loaded", "session_pointer",
+        "lessons_loaded", "session_pointer",
         "runtime_html", "box_sentinel",
     }, f"the artifact accessor set drifted: {sorted(accessors)}"
+    # #1235: `budget` and `circuit_breaker` left — the counters and the breaker are the run
+    # process's memory, no longer files in the run dir, so no accessor may name them.
+    assert not {"budget", "circuit_breaker"} & set(vars(RunPaths)), (
+        "RunPaths still names the budget or breaker file #1235 retired")
     assert not hasattr(RunPaths(tmp_path), "meta"), "RunPaths still resolves a meta.json path"
 
     doc = " ".join((RunPaths.__doc__ or "").split())

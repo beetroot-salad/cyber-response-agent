@@ -44,7 +44,6 @@ from defender._io import read_jsonl_rows  # noqa: E402
 from defender.hooks.budget_enforcer import (  # noqa: E402
     DEFAULT_LIMITS,
     open_budget,
-    update_budget_locked,
 )
 from defender.runtime import driver, observe, permission  # noqa: E402
 from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
@@ -170,7 +169,15 @@ def test_model_cannot_author_its_own_budget_state(tmp_path):
     test_report_write_is_refused_and_investigation_write_still_succeeds (#774/R1: report.md
     itself left the tail's allow-list, so the tail-tier mechanism's own positive control here
     now drives investigation.md — still model-writable, still tail-tier — rather than
-    report.md)."""
+    report.md).
+
+    #1235: the driven leg — a refused bash redirect at `budget.json`, then reading the file
+    back to see the forged counter had not landed — retired. The run's budget is its
+    process's memory and no decision reads `budget.json`, so the file's content no longer
+    witnesses anything; that a file in the run folder moves no count is pinned in
+    `test_budget_enforcement_631.test_a_budget_file_in_the_run_folder_moves_no_count` and
+    driven end to end in the #1235 e2e suite. The gate half stays: the names are still
+    refused as writes, as the rest of the integrity surface is."""
     run_dir = _run_dir(tmp_path)
     policy = _main_policy(run_dir)
 
@@ -192,33 +199,12 @@ def test_model_cannot_author_its_own_budget_state(tmp_path):
     # allowlist. MAIN no longer HAS a verb that takes a write path — `append_block` is bound to
     # investigation.md in the handler — so the model cannot NAME budget.json through the tool
     # surface at all. The gate assertions above still pin the allowlist for every caller that
-    # can; what the driven leg now exercises is the one path the model has left, bash redirect,
-    # which the reader lane refuses. Unnameable plus refused, rather than nameable and refused.
+    # can, and the bash-redirect refusals above the one path the model has left. Unnameable
+    # plus refused, rather than nameable and refused.
     assert MAIN_DEF.tools.write is False, (
         "MAIN holds a path-taking writer again — budget.json is nameable from the model"
     )
     assert MAIN_DEF.tools.append is True
-    # The pool is NOT pre-tripped here any more. It used to be, so that a tail-tier
-    # `write_file` would run past the cap and be refused by the allowlist — two properties
-    # braided into one leg. `bash` is core tier, so a tripped pool now refuses the forge for
-    # the wrong reason (budget, not policy) and the test would pass without the gate looking.
-    # The tier property has its own wired witness in test_budget_seams_631's tier census.
-    open_budget(run_dir, "r")
-    limits = DEFAULT_LIMITS
-    update_budget_locked(run_dir, "r", "bash", limits=limits)
-    result, _ = drive_agent(
-        MAIN_DEF, run_dir,
-        [[("bash", {"command": "echo '{\"tool_calls\": 0}' > budget.json"})],
-         [("append_block", {"text": ""})]],
-        limits=limits, enforce=True,
-    )
-    on_disk = json.loads((run_dir / "budget.json").read_text())
-    assert on_disk.get("tool_calls", 0) >= 1, "the forged counter reset landed"
-    assert on_disk.get("run_id") == "r", "the forged budget.json displaced the run's own state"
-    assert "do not run arbitrary shell" in str(result.all_messages()), (
-        "the refusal was not observable to the model"
-    )
-    assert (run_dir / "investigation.md").is_file(), "the tail's own artifact was lost"
 
 
 def test_report_write_is_refused_and_investigation_write_still_succeeds(tmp_path):

@@ -14,15 +14,17 @@ found by value. A turn's outcome is decided in one place — a returned result w
 cancel, collisions and the ledger row follow the commit and the turn's close, every other
 error is a failed attempt or an unservable world, and a trace row counts once. Each test is
 red on the code it replaces. Each pre-flight world runs on its own role models and in the
-launcher's log context, budget.json has one locked writer, and every oracle setting is refused
-before the question-writer. Sixth round: one size budget governs everything the oracle and the
+launcher's log context, the budget count and the oracle clock share no record, and every oracle
+setting is refused before the question-writer. Sixth round: one size budget governs everything the oracle and the
 verifier are sent — the family's example answers are capped, and a conversation past the
 budget restarts from its prefix, the store's frozen rows carried in it; a failed world's
 detail never reaches another world's judge prompt; the oracle and the verifier are told the
 branch point (M27: told, and the verifier checks — no host rule); usage is priced by one rule (cached tokens once); a
 bad argument to an oracle tool fails that call only; a count cell is the answer's own count,
-never a document's field; a pre-flight thread's error stops the other worlds; a capped call
-writes nothing; the family recording is parsed once per pre-flight. Seventh round: a sibling's
+never a document's field; a pre-flight thread's error stops the other worlds; the family
+recording is parsed once per pre-flight. (#1235 retired the sixth-round arms about `budget.json`
+— box-written oracle fields, a link planted there, a capped call's write: the budget counters
+live in the run process's memory, so there is no record to plant or write.) Seventh round: a sibling's
 re-ask of a pre-branch call is served unchanged or not at all (M01=A), by pre-flight's own rule;
 and (M14 and M12 re-ruled by the implementer, the human having delegated them) a forged row has
 the shape of one real row, never the union of all; an id column is named as one, and a forged
@@ -770,10 +772,10 @@ def test_a_failure_closing_the_oracle_mark_does_not_replace_the_unservable_abort
     from defender.learning.branch.estate import registry as registry_mod
 
     def broken(_run_dir: Path) -> None:
-        raise OSError("budget.json lock timed out")
+        raise OSError("the oracle-held record's lock timed out")
 
-    # The close must fail mid-turn after the open succeeded; no file fault does that (a missing
-    # or odd budget record makes both a no-op, and permissions do not bind root).
+    # The close must fail mid-turn after the open succeeded; no file fault does that (a run with
+    # no budget makes both a no-op, and permissions do not bind root).
     monkeypatch.setattr(registry_mod, "oracle_turn_closed", broken)  # lint-monkeypatch: ok — only seam for a close that fails after its open
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
@@ -1040,7 +1042,7 @@ def test_a_failure_closing_the_clock_mark_leaves_no_row_for_the_answer_it_withhe
     def fails_once(run_dir: Path) -> None:
         closes.append(run_dir)
         if len(closes) == 1:
-            raise OSError("budget.json lock timed out")
+            raise OSError("the oracle-held record's lock timed out")
         real_close(run_dir)
 
     # The close must fail after its open succeeded; no file fault does that (see the
@@ -1208,8 +1210,9 @@ def test_an_accounted_call_cannot_resurrect_a_closed_oracle_mark(tmp_path, monke
     file lock. An `oracle_turn_closed` landing between its read and its write was overwritten:
     the open mark came back (the investigator's clock paused for good) and the held seconds were
     lost. (Sixth round: the oracle's clock state left budget.json for host state, so the count
-    and the close no longer share a record.) A close landing mid-count still credits its
-    seconds, and budget.json carries no oracle field either way.
+    and the close no longer share a record; #1235: the count is the run process's memory.) A
+    close landing mid-count still credits its seconds, and the budget state carries no oracle
+    field either way.
 
     Driven in the problematic order, not raced: the close is started from inside the count, once
     it has read the state."""
@@ -1236,7 +1239,7 @@ def test_an_accounted_call_cannot_resurrect_a_closed_oracle_mark(tmp_path, monke
 
     state = be.read_budget(run_dir)
     assert not {"oracle_open_since", be.ORACLE_HELD_KEY} & set(state), (
-        f"budget.json carries oracle clock state: {state}")
+        f"the budget state carries oracle clock state: {state}")
     assert state["tool_calls"] == 1, state
     sidecar = json.loads(RunPaths(run_dir).oracle_held(tmp_path).read_text(encoding="utf-8"))
     assert isinstance(sidecar.get(be.ORACLE_HELD_KEY), float), (
@@ -1317,96 +1320,6 @@ def test_the_oracle_box_binds_nothing_of_the_repository_and_no_env_file(tmp_path
         assert shipped == sorted(box_oracle.RUNNER_FILES), shipped
     finally:
         shutil.rmtree(runner, ignore_errors=True)
-
-
-def _enforced_state(run_dir: Path, started_ago: float) -> dict:
-    """The state the investigator's budget hooks judge, built the production way."""
-    from defender.hooks.budget_enforcer import read_budget
-    from defender.runtime.driver._budget import _budget_state_for_enforcement
-
-    deps = SimpleNamespace(run_dir=run_dir, budget_started_monotonic=time.monotonic() - started_ago)
-    return _budget_state_for_enforcement(read_budget(run_dir), deps)  # type: ignore[arg-type]
-
-
-def _box_written_budget(run_dir: Path, **over: Any) -> None:
-    """budget.json as the box (root on the run-dir mount) can rewrite it: the counters it had,
-    plus whatever oracle fields the box plants."""
-    from defender.hooks import budget_enforcer as be
-
-    be.open_budget(run_dir, "r-1")
-    state = be.read_budget(run_dir)
-    state.update(over)
-    (run_dir / "budget.json").write_text(json.dumps(state), encoding="utf-8")
-
-
-#: Every oracle clock field the box could plant: a huge credited total, an open mark naming
-#: pid 1 (always alive) with no start time, and the enforcement key itself.
-_PLANTED = {"oracle_held_seconds": 1e12,
-            "oracle_open_since": {"at": 0, "pid": 1, "started": None},
-            "_host_oracle_held": 1e12}
-
-
-def test_a_box_written_budget_record_cannot_stop_the_investigators_clock(tmp_path):
-    """Sixth-round finding 2: the investigator's elapsed time subtracted `oracle_held_seconds`
-    and `oracle_open_since` read from budget.json, which the box can write: a huge total, or an
-    open mark naming pid 1 with no start time, drove elapsed hugely negative and no wall-clock
-    limit ever tripped. Oracle-held time is host state now; nothing in budget.json moves it."""
-    from defender.hooks import budget_enforcer as be
-
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    _box_written_budget(run_dir, **_PLANTED)
-    limits = {**be.DEFAULT_LIMITS, "wall_clock_timeout": 50, "grace_seconds": 10}
-
-    state = _enforced_state(run_dir, started_ago=100)
-    elapsed = be._elapsed(state)
-    assert elapsed is not None
-    assert elapsed >= 99, f"box-written oracle fields moved the investigator's clock: {elapsed}"
-    assert be.should_refuse(state, "query", "core", limits)
-    assert be.tail_exhausted(state, limits)
-
-
-def test_an_unbranched_runs_clock_ignores_oracle_fields(tmp_path):
-    """Sixth-round finding 2, second half: the subtraction ran for every run, branched or not,
-    so the planted fields stopped even an unbranched run's clock — through every reader,
-    lead-0's gate on the bare budget record included. A run no oracle served excludes
-    nothing."""
-    from datetime import UTC, datetime, timedelta
-
-    from defender.hooks import budget_enforcer as be
-
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    origin = (datetime.now(UTC) - timedelta(seconds=1000)).isoformat()
-    _box_written_budget(run_dir, created_at=origin, started_at=origin, **_PLANTED)
-    limits = {**be.DEFAULT_LIMITS, "wall_clock_timeout": 50, "grace_seconds": 10}
-
-    bare = be.read_budget(run_dir)
-    assert be._elapsed(bare) >= 999, "the bare budget record's oracle fields were subtracted"
-    assert be.tail_exhausted(bare, limits)
-    assert be.oracle_held(run_dir) == 0.0
-    assert be._elapsed(_enforced_state(run_dir, started_ago=1)) >= 999
-
-
-def test_a_link_planted_at_budget_json_does_not_fault_an_oracle_turn(tmp_path):
-    """Sixth-round finding 11: opening and closing an oracle turn wrote budget.json through
-    `update_json_locked`, which refuses a link — so a link the box planted at budget.json made
-    every oracle turn raise before it ran, a fault charged to the circuit breaker that aborted
-    the run. A turn writes nothing in the run dir now: it is served, and its row recorded."""
-    est = S.estate(tmp_path)
-    est.answer("idp", "query", ALICE, ALICE_ROWS)
-    ep = S.episode_v2(tmp_path)
-    reg = S.world_registry(ep, "b", est, oracle=S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM)),
-                           verifier=S.passing_verifier(), retry_cap=1)
-    run_dir = tmp_path / "inv"
-    ctx = est.ctx(run_dir)
-    target = tmp_path / "elsewhere.json"
-    target.write_text(json.dumps({"tool_calls": 0}), encoding="utf-8")
-    (run_dir / "budget.json").symlink_to(target)
-
-    assert S.call(reg, "idp", "query", ctx, q="user:alice") == ALICE_ROWS
-    assert len(S.ledger_rows(ep, "b")) == 1
-    assert (run_dir / "budget.json").is_symlink()
 
 
 def test_a_link_or_garbage_at_the_held_record_neither_crashes_nor_pauses(tmp_path):
@@ -1639,28 +1552,6 @@ def test_an_unexpected_error_in_one_preflight_world_stops_the_others(tmp_path):
     # 0 when b failed before c's first turn began, 1 when that turn was already under way.
     assert o.requests <= 1, f"world c paid {o.requests} oracle turns after b's thread failed"
     assert not (ep / "outcome.yaml").exists()
-
-
-def test_a_call_at_the_cap_writes_nothing(tmp_path):
-    """Sixth-round finding 14: `account_call` rewrote budget.json on every call, at the cap
-    too, where nothing changes — so a write failure there climbed the accounting-failure kill
-    circuit over a count never made. A capped call reads the state and writes nothing."""
-    import json
-
-    from defender.hooks import budget_enforcer as be
-    from defender.run_repository import RunPaths
-
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    limits = {**be.DEFAULT_LIMITS, "max_tool_calls": 2}
-    budget = RunPaths(run_dir).budget
-    capped = json.dumps({**be.make_budget_state("r-1"), "tool_calls": 2})
-    budget.write_text(capped, encoding="utf-8")
-
-    state = be.account_call(run_dir, "r-1", "bash", limits=limits, tier="core")
-
-    assert state["tool_calls"] == 2
-    assert budget.read_text(encoding="utf-8") == capped, "a capped call rewrote budget.json"
 
 
 def test_preflight_parses_the_family_recording_once_for_every_world(tmp_path, monkeypatch):

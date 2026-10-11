@@ -149,8 +149,6 @@ audit record and breaker outcome asserted downstream is production code's work.
 """
 from __future__ import annotations
 
-import json
-
 from defender.run_repository import RunPaths
 import re
 from collections.abc import Callable, Mapping
@@ -536,10 +534,14 @@ class _Run:
 
 
 def breaker_doc(run_dir: Path) -> dict:
-    """The run's circuit-breaker document, `{}` before the first write — THE reader, which the
-    harness result classes here and in `e2e/_lead_zero_808.py` expose as `.breaker`."""
-    p = run_dir / "circuit_breaker.json"
-    return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+    """The run's circuit-breaker state, read from the run's in-process state (#1235: nothing
+    writes `circuit_breaker.json` any more) — `{"systems": {}, "total_failures": 0}` before the
+    first recorded failure. THE reader, which the harness result classes here and in
+    `e2e/_lead_zero_808.py` expose as `.breaker`. A driven run's state stays readable in this
+    process after the run, until the next run on the same folder opens it again."""
+    from defender.runtime.circuit_breaker import breaker_state
+
+    return breaker_state(run_dir)
 
 
 def q(system: str, verb: str, params: dict | None = None, query_id: str | None = None) -> Turn:

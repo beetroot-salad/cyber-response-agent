@@ -558,6 +558,9 @@ FORGEABLE_NAMES = (
     "ticket_write.json",
     "provenance.json",
     "lessons_loaded.jsonl",
+    # No host writer since #1235 (the counters and the breaker are in-memory state), but the
+    # box can still plant a file at either name inside its own rw bind, and dropping them
+    # would only narrow every negative that walks this list. Kept deliberately.
     "circuit_breaker.json",
     "budget.json",
     "tool_trace.jsonl",

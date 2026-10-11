@@ -915,11 +915,11 @@ def test_oracle_provider_rate_limits_every_sibling_at_once(tmp_path):
 
     Each world's sibling is driven as a WHOLE investigation (one gather lead: the original idp
     call, then an idp lookup the tenant answers with a real `TransportFault`, then done) and
-    compared with an UNBRANCHED run of the same script over the same estate: its budget.json
-    counters (`tool_calls`, `subagent_spawns`) and its circuit_breaker.json failure counts equal
-    the unbranched run's — the 429 adds no tool call and no breaker failure. Positive control
-    for both channels: the unbranched run counts its own calls and its real infra failure
-    (exit 2, GA-40), so both files are written and read.
+    compared with an UNBRANCHED run of the same script over the same estate: its budget
+    counters (`tool_calls`, `subagent_spawns`) and its circuit-breaker failure counts — the
+    run's in-process state (#1235) — equal the unbranched run's: the 429 adds no tool call and
+    no breaker failure. Positive control for both channels: the unbranched run counts its own
+    calls and its real infra failure (exit 2, GA-40), so both states are written and read.
     """
     est = S.estate(tmp_path)
     est.answer("idp", "query", _Q1, _BASE)
@@ -937,7 +937,7 @@ def test_oracle_provider_rate_limits_every_sibling_at_once(tmp_path):
                                                           grant_home=rt.table_pointer)
     plain_dir, _plain_gather = S.drive_gather(tmp_path / "unbranched", verbs=plain_registry,
                                               tenant=est.place(), gather_turns=turns())
-    plain_budget = _run_json(plain_dir, "budget.json")
+    plain_budget = _budget(plain_dir)
     plain_breaker = _breaker_counts(plain_dir)
     assert plain_budget.get("tool_calls"), "positive control: the run's calls are counted"
     assert plain_breaker["total"], "positive control: the real infra failure is on the breaker"
@@ -963,7 +963,7 @@ def test_oracle_provider_rate_limits_every_sibling_at_once(tmp_path):
         for leak in ("ModelHTTPError", f"provider answered {S.RATE_LIMITED}"):
             assert leak not in seen, (w, "transcript", leak)
             assert leak not in evidence, (w, "evidence", leak)
-        budget = _run_json(run_dir, "budget.json")
+        budget = _budget(run_dir)
         for key in ("tool_calls", "subagent_spawns"):
             assert budget.get(key) == plain_budget.get(key), (w, key, budget, plain_budget)
         assert _breaker_counts(run_dir) == plain_breaker, (
@@ -976,15 +976,17 @@ def test_oracle_provider_rate_limits_every_sibling_at_once(tmp_path):
         assert "provider answered" not in ledger_text
 
 
-def _run_json(run_dir: Path, name: str) -> dict:
-    """A run-state JSON file at the run root, read raw off disk (absent: `{}`)."""
-    path = Path(run_dir) / name
-    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+def _budget(run_dir: Path) -> dict:
+    """The run's budget counters, as the run's own process holds them (#1235: in memory, never
+    a file in the run dir; `{}` when no budget was opened). The run was driven in this
+    process."""
+    return S.sym("hooks.budget_enforcer", "read_budget")(Path(run_dir))
 
 
 def _breaker_counts(run_dir: Path) -> dict:
-    """circuit_breaker.json's failure counts: per system, and the run total."""
-    doc = _run_json(run_dir, "circuit_breaker.json")
+    """The run's circuit-breaker failure counts (its in-process state, #1235): per system, and
+    the run total."""
+    doc = S.sym("runtime.circuit_breaker", "breaker_state")(Path(run_dir))
     return {"systems": {s: (rec or {}).get("failures", 0)
                         for s, rec in (doc.get("systems") or {}).items()},
             "total": doc.get("total_failures", 0)}

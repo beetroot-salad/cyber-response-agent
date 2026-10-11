@@ -168,8 +168,9 @@ class _Run:
 
     @property
     def breaker(self) -> dict:
-        p = self.run_dir / "circuit_breaker.json"
-        return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+        """The run's breaker state: the run process's memory (#1235), read post-run in-process;
+        blank (`{"systems": {}, "total_failures": 0}`) when nothing was charged."""
+        return circuit_breaker.breaker_state(self.run_dir)
 
 
 def run_gather(

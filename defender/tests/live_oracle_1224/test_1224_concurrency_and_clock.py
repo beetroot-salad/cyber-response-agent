@@ -311,7 +311,10 @@ def _own_rows(run_dir: Path) -> list[dict]:
 
 
 def _budget(run_dir: Path) -> dict:
-    return json.loads((run_dir / "budget.json").read_text(encoding="utf-8"))
+    """The run's budget counters, as the run's own process holds them (#1235: in memory, never
+    a file in the run dir). The siblings here are driven in this process (`H.drive`), so the
+    registry still holds the run's state after it ends."""
+    return S.sym("hooks.budget_enforcer", "read_budget")(run_dir)
 
 
 def _held_record(run_dir: Path) -> dict:

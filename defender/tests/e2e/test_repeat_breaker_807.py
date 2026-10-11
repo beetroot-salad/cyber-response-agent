@@ -114,7 +114,6 @@ green `test_repeat_replay_*` does not discharge either of them.
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import unicodedata
@@ -229,12 +228,37 @@ class _Res:
 
     @property
     def breaker(self) -> dict:
-        p = self.run_dir / "circuit_breaker.json"
-        return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+        """The run's infra-breaker state as the run's own process holds it (#1235: in memory,
+        never a file in the run dir; `_BLANK_BREAKER` when nothing failed). The run was driven
+        in this process, so the registry still holds it after the run ends."""
+        from defender.runtime.circuit_breaker import breaker_state
+
+        return breaker_state(self.run_dir)
 
     @property
     def denials(self) -> list[dict]:
         return read_jsonl_rows(RunPaths(self.run_dir).policy_denials)
+
+
+#: The breaker state of a run in which nothing failed (#1235: `breaker_state`'s blank shape).
+_BLANK_BREAKER = {"systems": {}, "total_failures": 0}
+
+
+class _SeedsBreaker(ReplayFn):
+    """MAIN's replay, which on its FIRST model request — inside the run, after the driver's
+    `open_breaker` has started the run's breaker (#1235) — records each `(system, exit_code)`
+    through the PRODUCTION `circuit_breaker.record_outcome`, then answers as scripted. A seed
+    written before `drive` would be reset by that open, so the run would not start from it."""
+
+    def __init__(self, turns: list[Turn], run_dir: Path, outcomes: list[tuple[str, int]]):
+        super().__init__(turns)
+        self._run_dir, self._outcomes = run_dir, list(outcomes)
+
+    def __call__(self, messages, info):  # noqa: ANN001 — the framework's callable protocol
+        if self.calls == 0:
+            for system, exit_code in self._outcomes:
+                circuit_breaker.record_outcome(self._run_dir, system, exit_code)
+        return super().__call__(messages, info)
 
 
 def _dispatch(lead: str, system: str) -> tuple[str, dict]:
@@ -255,14 +279,16 @@ def _run(
     tables — is production code.
 
     `breaker` pre-seeds infra-breaker state through the PRODUCTION `record_outcome`, one
-    (system, exit_code) per call, so a run can start from a breaker document an earlier,
-    unrelated failure already wrote rather than from a fresh one."""
+    (system, exit_code) per call, on MAIN's first model request — inside the run, after the
+    driver opened the run's breaker and before the lead is dispatched (`_SeedsBreaker`) — so the
+    lead starts from a breaker an earlier, unrelated failure already tripped rather than from a
+    fresh one."""
     run_dir = materialize(root, GOLDEN_AB3)
     if seed:
         _seed(run_dir, seed)
-    for brk_system, brk_exit in (breaker or []):
-        circuit_breaker.record_outcome(run_dir, brk_system, brk_exit)
-    main = ReplayFn([Turn(tool_calls=[_dispatch(lead, system)]), Turn(text="Investigation complete.")])
+    main_turns = [Turn(tool_calls=[_dispatch(lead, system)]), Turn(text="Investigation complete.")]
+    main = (_SeedsBreaker(main_turns, run_dir, breaker) if breaker
+            else ReplayFn(main_turns))
     gather = ReplayFn(turns)
     drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
     return _Res(run_dir, main, gather)
@@ -907,17 +933,17 @@ def test_repeat_trip_row_is_agent_fixable(three_identical_requests):
 def test_repeat_trip_leaves_the_infra_breaker_untouched(tmp_path, three_identical_requests):
     """repeat_trip_leaves_the_infra_breaker_untouched — a repeat is an AGENT dead end, not an
     unreachable system: the trip must NOT increment `circuit_breaker` and must not mark the
-    system DOWN for the rest of the run. Driven in both starting states — from a fresh run dir
-    (no breaker document is created at all) and from a run whose breaker document an EARLIER,
-    UNRELATED infra failure already wrote, where that earlier trip must survive the repeat trip
-    byte for byte. Positive control on the same address under the complementary condition: an
-    exit-2 adapter fault DOES write breaker state, so the observation channel can see the
-    difference."""
+    system DOWN for the rest of the run. Driven in both starting states — from a fresh run
+    (no breaker failure is recorded at all, and no breaker file is written) and from a run whose
+    breaker an EARLIER, UNRELATED infra failure already tripped, where that earlier trip must
+    survive the repeat trip unchanged. Positive control on the same address under the
+    complementary condition: an exit-2 adapter fault DOES record breaker state, so the
+    observation channel (the run's in-process breaker state, #1235) can see the difference."""
     r, rec = three_identical_requests
     assert r.own_rows[2]["exit_code"] == 64, "no trip happened, so the negative is vacuous"
+    assert r.breaker == _BLANK_BREAKER, "the repeat trip recorded infra-breaker state"
     assert not (r.run_dir / "circuit_breaker.json").exists(), \
-        "the repeat trip wrote infra-breaker state"
-    assert r.breaker == {}
+        "a breaker file was written into the run dir (#1235: the breaker is in memory only)"
     assert circuit_breaker.is_tripped(r.run_dir, "elastic") is False
 
     # The SAME trip, in a run that already carries an unrelated system's infra trip: two real
@@ -979,7 +1005,7 @@ def test_trip_row_is_distinguishable_from_a_finished_leads_rows(tmp_path):
     """trip_row_is_distinguishable_from_a_finished_leads_rows — O4's contrast, and what is
     absent today: a stopped lead's record in `executed_queries` carries a non-zero exit and a
     non-null `error_class`, while a lead that finished has rows that are ALL exit 0 with
-    `error_class` null and no `circuit_breaker` state. Both leads are in one run, so the
+    `error_class` null and no `circuit_breaker` failure. Both leads are in one run, so the
     difference is a property of the rows and not of the fixture."""
     rec = VerbRecorder()
     r = _run_two_leads(tmp_path, verbs=elastic_ok(rec), run_id="d807-contrast", turns=[
@@ -999,7 +1025,7 @@ def test_trip_row_is_distinguishable_from_a_finished_leads_rows(tmp_path):
     assert any(row["error_class"] is not None for row in stopped)
     assert [row["exit_code"] for row in finished] == [0]
     assert [row["error_class"] for row in finished] == [None]
-    assert r.breaker == {}
+    assert r.breaker == _BLANK_BREAKER
 
 
 def test_dead_end_return_contract(tmp_path):
@@ -1891,5 +1917,6 @@ def test_repeat_of_a_failing_request_still_trips(tmp_path):
     assert len(rec.calls) == 2, "the third identical failing request still reached the backend"
     rows = r.own_rows
     assert [row["exit_code"] for row in rows] == [1, 1, 64]
-    assert r.breaker == {}, "an agent-fixable failure opened the infra breaker and answered first"
+    assert r.breaker == _BLANK_BREAKER, \
+        "an agent-fixable failure opened the infra breaker and answered first"
     assert INCOMPLETE_IDIOM in r.summary()

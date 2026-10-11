@@ -73,6 +73,7 @@ from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     hit,
     materialize_alert,
     run,
+    seeding_store_factory,
 )
 from defender.tests.e2e._replay_harness import ReplayFn, Turn, VerbRecorder  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import ROW_KEYS  # noqa: E402
@@ -347,8 +348,10 @@ def test_lead_zero_issues_its_backend_calls_through_the_query_capture_seam(tmp_p
         assert circuit_breaker.is_tripped(run_dir, "elastic"), \
             "the seed did not trip elastic — the screen below would have nothing to refuse"
 
+    # Tripped inside the run, after the driver opened its in-process breaker and before lead-0
+    # resolves (#1235: a trip seeded on the folder before `drive` is reset by that open).
     tripped = run(tmp_path / "tripped", run_id="lz808-tripped",
-                  answer=answer_hits(TWO_ACTORS), before=_trip)
+                  answer=answer_hits(TWO_ACTORS), in_run=_trip)
     assert tripped.rec.calls == [], (
         "lead-0 reached the backend through a TRIPPED elastic breaker — the direct-registry "
         "via inherits neither the breaker screen nor the five others (P2, executed), and this "
@@ -404,8 +407,8 @@ def test_a_scenario_that_injects_no_registry_reaches_no_backend_at_all(tmp_path)
         "no registry, but the block does not say the resolution was unavailable"
     assert res.rows_for(L0) == [], "a queries row was written for a call never made"
     assert res.payloads(L0) == [], "a payload was persisted for a call never made"
-    assert not (res.run_dir / "circuit_breaker.json").is_file(), \
-        "a run that reached no backend spent breaker budget"
+    assert res.breaker.get("systems", {}) == {} and res.breaker.get("total_failures", 0) == 0, \
+        f"a run that reached no backend spent breaker budget: {res.breaker}"
     assert not res.has_sidecar(L3), \
         "the correlation lead dispatched off a resolution that never happened"
 
@@ -454,10 +457,14 @@ def test_a_run_ending_arm_inside_lead_zero_still_produces_a_run_summary(tmp_path
     not screened away before it runs), leaving lead-0's own failure as the fifth — exactly
     `RUN_FAIL_KILL_LIMIT`, which `record_outcome` answers with `RunAborted` (g10/E2)."""
     run_dir_seed = materialize_alert(tmp_path / "seeded", alert_doc())
-    for system in ("cmdb", "cmdb", "identity", "identity"):
-        circuit_breaker.record_outcome(run_dir_seed, system, 2)
-    assert not circuit_breaker.is_tripped(run_dir_seed, "elastic"), \
-        "the seed tripped elastic itself — lead-0's call would be screened, not executed"
+
+    def _seed(run_dir):
+        # Seeded inside the run, after the driver opened its in-process breaker and before
+        # lead-0 resolves (#1235: a seed made on the folder before `drive` is reset by that open).
+        for system in ("cmdb", "cmdb", "identity", "identity"):
+            circuit_breaker.record_outcome(run_dir, system, 2)
+        assert not circuit_breaker.is_tripped(run_dir, "elastic"), \
+            "the seed tripped elastic itself — lead-0's call would be screened, not executed"
 
     rec = VerbRecorder()
     from defender.tests.e2e._replay_harness import drive
@@ -467,6 +474,7 @@ def test_a_run_ending_arm_inside_lead_zero_still_produces_a_run_summary(tmp_path
         run_dir_seed, run_id="lz808-aborted", main=main,
         gather=ReplayFn([Turn(text="correlation summary")]),
         verbs=elastic_backend(rec, answer_raising(TransportFault("transport down"))),
+        store_factory=seeding_store_factory(_seed),
     )
 
     assert summary is not None, \
@@ -475,5 +483,8 @@ def test_a_run_ending_arm_inside_lead_zero_still_produces_a_run_summary(tmp_path
     assert (run_dir_seed / "tool_trace.jsonl").is_file(), \
         "the run ended before `write_trace`, so nothing records that it happened"
     res = Res(run_dir_seed, main, None, rec)
+    assert res.breaker["total_failures"] == circuit_breaker.RUN_FAIL_KILL_LIMIT, (
+        f"lead-0's failure was not the run-ending one — the arm under test never fired: "
+        f"{res.breaker}")
     assert UNAVAILABLE in res.section(), \
         "the run-ending arm was swallowed silently rather than degrading the slot"

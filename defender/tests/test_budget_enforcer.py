@@ -1,7 +1,8 @@
 """Tests for defender/hooks/budget_enforcer.py.
 
 Warning-only budget LIBRARY: counts tool calls / subagent spawns per run
-into ``{run_dir}/budget.json`` and returns warning strings at 75% / 100%.
+in the run process's memory, keyed by the run folder (#1235: no ``budget.json``),
+and returns warning strings at 75% / 100%.
 Emitting them is the caller's job (`runtime/driver.py`'s `after_tool_execute`).
 
 The `claude -p` PostToolUse entrypoint these tests used to drive — stdin
@@ -11,11 +12,10 @@ drive the two functions the driver actually calls.
 
 from __future__ import annotations
 
-import json
-
 from defender.hooks.budget_enforcer import (
     DEFAULT_LIMITS,
     check_budgets,
+    read_budget,
     update_budget_locked,
 )
 
@@ -28,7 +28,7 @@ def test_counts_tool_calls_and_spawns(tmp_path):
     _bump(tmp_path, "bash")
     _bump(tmp_path, "gather")
     _bump(tmp_path, "read_file")
-    budget = json.loads((tmp_path / "budget.json").read_text())
+    budget = read_budget(tmp_path)
     assert budget["tool_calls"] == 3
     assert budget["subagent_spawns"] == 1
 
@@ -38,7 +38,7 @@ def test_only_gather_counts_as_a_spawn(tmp_path):
     either name is registered now, so neither is a spawn — `gather` is."""
     for name in ("Task", "Agent", "bash", "read_file"):
         _bump(tmp_path, name)
-    budget = json.loads((tmp_path / "budget.json").read_text())
+    budget = read_budget(tmp_path)
     assert budget["tool_calls"] == 4
     assert budget["subagent_spawns"] == 0
 

@@ -114,7 +114,8 @@ def test_circuit_breaker_kill_switch_aborts_run(tmp_path):
     assert result["output"] is None
     assert main.calls == 1
     assert gather.calls == circuit_breaker.RUN_FAIL_KILL_LIMIT
-    cb = json.loads((run_dir / "circuit_breaker.json").read_text())
+    # The breaker's counts are the run process's memory (#1235), read post-run in-process.
+    cb = circuit_breaker.breaker_state(run_dir)
     assert cb["total_failures"] == circuit_breaker.RUN_FAIL_KILL_LIMIT
     qlines = _own_qlines(run_dir)
     assert len(qlines) == circuit_breaker.RUN_FAIL_KILL_LIMIT
@@ -185,7 +186,7 @@ def test_tripped_system_dispatch_returns_down_message(tmp_path):
 
     assert main.calls == 3
     assert gather.calls == 4
-    cb = json.loads((run_dir / "circuit_breaker.json").read_text())
+    cb = circuit_breaker.breaker_state(run_dir)
     assert cb["systems"]["elastic"]["failures"] == circuit_breaker.PER_SYSTEM_FAIL_LIMIT
     qlines = _own_qlines(run_dir)
     assert len(qlines) == circuit_breaker.PER_SYSTEM_FAIL_LIMIT

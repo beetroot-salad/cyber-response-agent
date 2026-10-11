@@ -1,65 +1,46 @@
-"""#631 — the enforced budget's LIBRARY half: the cap table, the state file, the
-tail band, the validating read, and the accounting-failure detection state.
+"""#631 — the enforced budget's LIBRARY half: the cap table, the run's budget state, the
+tail band and the validating read.
 
-This module drives `defender.hooks.budget_enforcer` directly — the two functions the
-driver's hooks call (`update_budget_locked`, `check_budgets`) plus the surface #631
-adds around them. The run-level demands (the refusal seam, the kill, the report tail)
-live in `tests/e2e/test_budget_enforcement_631.py`, which drives the real
-`run_investigation` through the replay harness.
+This module drives `defender.hooks.budget_enforcer` directly — the functions the driver's
+hooks call (`open_budget`, `update_budget_locked`, `account_call`, `check_budgets`) plus the
+surface #631 adds around them. The run-level demands (the refusal seam, the kill, the report
+tail) live in `tests/test_budget_e2e_631.py`, which drives the real `run_investigation`
+through the replay harness.
 
-RED AGAINST HEAD IS THE EXPECTED STATE. At `483b5809` the module is warning-only:
-`BudgetKill`, `tier`, `tail_exhausted`, `account_call`, `open_budget`,
-`accounting_failure_state` and `grace_seconds` do not exist, `wall_clock_timeout` is
-1800, and `check_budgets` fails open on every hostile counter shape (PB8, executed).
-Each of those is the demanded CORRECTION, pinned here; none is the ambient string.
+#1235 moved the state into the run's own process: the counters are an in-memory record keyed
+by the run folder, read back through `read_budget`, and no `budget.json` is written or read.
+The tests whose subject was the file — a counter authored on disk, a torn cross-process read,
+a failed accounting write and the accounting-failure sidecar that counted it — retired with
+it. The concurrency demands stay, now over the in-memory state's one lock.
 
-Faults are induced down the hierarchy: every failure in this module is real input
-through the real primitive — an unwritable run dir, a counter authored on disk, a
-forward-dated `started_at`, real concurrent threads and processes on one flock. No
-fault here is invented; each names the executed claim that observed it.
+Faults are induced down the hierarchy: every failure in this module is real input through
+the real primitive — a forward-dated `started_at`, a hostile counter shape handed to the
+validating read, real concurrent threads on one budget. No fault here is invented; each names
+the executed claim that observed it.
 """
 from __future__ import annotations
 
-import json
-import os
-import stat
-import subprocess
-import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import pytest
-
 from defender.hooks.budget_enforcer import (
     DEFAULT_LIMITS,
     TAIL_ALLOWANCE,
-    BudgetKill,
-    accounting_failure_state,
     account_call,
     check_budgets,
     open_budget,
+    read_budget,
     tail_exhausted,
     update_budget_locked,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
 
 def _budget(run_dir: Path) -> dict:
-    return json.loads((run_dir / "budget.json").read_text())
-
-
-def _author_budget(run_dir: Path, **fields) -> None:
-    """Author budget.json exactly as the model's own `write_file` grant would.
-
-    This is the fault primitive PO51/PB8 (both executed) established: MAIN's compiled
-    write scope admits `budget.json`, so an authored counter is a REAL input to the
-    enforcing read, not an imagined one."""
-    (run_dir / "budget.json").write_text(json.dumps(fields))
+    """The run's budget as the process holds it (#1235: memory, not a file)."""
+    return read_budget(run_dir)
 
 
 def _tight(**over) -> dict:
@@ -111,67 +92,6 @@ def test_tail_ends_on_count_or_clock(tmp_path):
     assert not tail_exhausted({"tool_calls": 5, "started_monotonic": now - 119}, limits)
     assert tail_exhausted({"tool_calls": 5, "started_monotonic": now - 121}, limits)
 
-
-
-def test_missing_started_at_does_not_restart_the_clock(tmp_path):
-    """A budget.json missing started_at does not get a fresh timestamp backfilled on
-    the enforcing path: a recreated budget file must not silently restart the wall
-    clock and void the cap.
-
-    D2 supersedes the `setdefault` backfill as the EVIDENCE this rests on, and VR1
-    refines it: the cross-process origin is `created_at`, a WALL-CLOCK timestamp
-    written at open (time.monotonic() is not comparable across the six writer processes
-    budget.json is shared by). The run opened with that origin, so a file that comes
-    back without it is a replacement, not a cold start, and the run's own writer must
-    not silently mint a FRESH origin later than the run's real start."""
-    open_budget(tmp_path, "run-1")
-    original = _budget(tmp_path)
-    assert original["run_id"] == "run-1"
-    origin = original.get("created_at")
-    assert origin, "open_budget wrote no cross-process wall-clock origin (VR1)"
-
-    _author_budget(tmp_path, run_id="run-1", tool_calls=0, subagent_spawns=0)
-    after_write = update_budget_locked(tmp_path, "run-1", "bash", limits=DEFAULT_LIMITS)
-    after = _budget(tmp_path)
-
-    new_origin = after.get("created_at")
-    assert new_origin in (None, origin), (
-        "the run's writer re-minted a fresh clock origin over a replaced budget.json, "
-        "restarting the wall clock and voiding the cap"
-    )
-    assert not _reads_as_healthy(after_write, DEFAULT_LIMITS), (
-        "a budget.json replaced mid-run read as a cold start and admitted the call"
-    )
-
-
-def test_budget_state_carries_a_run_scoped_sentinel_from_before_the_first_call(tmp_path):
-    """budget.json carries {run_id, created_at} written before the first tool call, and
-    a file whose run_id is not this run's is detected as a replacement rather than
-    accepted as reset counters.
-
-    The comparison lives at update_budget_locked, which holds the AUTHORITATIVE run_id
-    — blind reader R13: check_budgets(dict) has no run history and no channel to tell
-    "absent after present" from "absent at cold start", so the detection cannot be
-    asserted through that seam. Driven through the seam that DOES carry the run_id: the
-    model authors a file with reset counters under a different run_id, and the run's own
-    writer must not let the enforcing read then admit the call. (Recorded fork VR3-F1:
-    whether "absent-after-present" — the model wiping the whole sentinel while keeping
-    THIS run's id — is separable through any seam is a design question this pass does
-    not settle.)"""
-    state = open_budget(tmp_path, "run-abc")
-    assert state["run_id"] == "run-abc"
-    assert state["created_at"], "no cross-process wall-clock origin written at open (VR1)"
-    assert state["tool_calls"] == 0
-    on_disk = _budget(tmp_path)
-    assert on_disk["run_id"] == "run-abc"
-    assert on_disk["created_at"] == state["created_at"]
-
-    _author_budget(tmp_path, run_id="not-this-run", created_at="2020-01-01T00:00:00+00:00",
-                   tool_calls=0, subagent_spawns=0)
-    after = update_budget_locked(tmp_path, "run-abc", "bash", limits=DEFAULT_LIMITS)
-    assert not _reads_as_healthy(after, DEFAULT_LIMITS), (
-        "a budget.json bearing a foreign run_id was accepted as this run's reset counters"
-    )
 
 
 def test_unreadable_started_at_does_not_silently_drop_the_wall_clock_limb(tmp_path):
@@ -324,8 +244,8 @@ def test_no_trip_state_no_reset(tmp_path):
     a reset.
 
     The positive control is test_main_and_gather_share_one_budget (e2e), which shows
-    the counters DO move on the one shared budget.json — without it 'never reset' is
-    satisfied by a writer that never writes."""
+    the counters DO move on the one budget MAIN and gather share — without it 'never
+    reset' is satisfied by a writer that never writes."""
     open_budget(tmp_path, "run-1")
     limits = _tight(max_tool_calls=1000, max_subagent_spawns=1000)
     seen: list[tuple[int, int]] = []
@@ -335,7 +255,7 @@ def test_no_trip_state_no_reset(tmp_path):
         seen.append((state["tool_calls"], state["subagent_spawns"]))
         for surface in (state, _budget(tmp_path)):
             assert not any(k in surface for k in trip_keys), (
-                f"a trip flag was persisted into budget.json: {surface!r}"
+                f"a trip flag was recorded into the run's budget: {surface!r}"
             )
 
     assert [c for c, _ in seen] == sorted(c for c, _ in seen)
@@ -420,21 +340,19 @@ def test_a_call_that_finished_after_its_pool_tripped_does_not_land_its_effect(tm
     )
 
 
-def test_concurrent_increments_to_budget_json_are_neither_lost_nor_duplicated_under_contention(
+def test_concurrent_increments_to_the_run_budget_are_neither_lost_nor_duplicated_under_contention(
     tmp_path,
 ):
     """Every increment committed by many concurrently-executing calls across MAIN and
-    its GATHER siblings survives intact under real contention on the one flock: the
-    final tool_calls equals the number of calls that committed, with none lost and
-    none double-counted.
+    its GATHER siblings survives intact under real thread contention on the one
+    in-memory budget: the final tool_calls equals the number of calls that committed,
+    with none lost and none double-counted.
 
     Bound at the COMPOSITION frame that fans the writers, not at a leg: a single-leg
-    test cannot see the cross-leg collision the demand exists for. This arm drives
-    real THREAD contention on the one flock; the cross-PROCESS lost-update conservation
-    (six real writer processes, P5's shape) is asserted in
-    test_the_enforcing_read_of_budget_json_is_never_torn, which reads the final count
-    back after 6 × 150 committed increments (blind reader R17 flagged the mismatch
-    between this docstring's process argument and its thread drive)."""
+    test cannot see the cross-leg collision the demand exists for. #1235: the budget is
+    the run process's own state (MAIN, gather and lead-0 share it, keyed by the run
+    folder), so the conservation this pins is the read-check-increment under its one
+    lock; the cross-PROCESS arm retired with the file it shared."""
     open_budget(tmp_path, "run-1")
     limits = _tight(max_tool_calls=10_000, max_subagent_spawns=10_000)
     n_workers, per_worker = 12, 40
@@ -452,208 +370,17 @@ def test_concurrent_increments_to_budget_json_are_neither_lost_nor_duplicated_un
     assert final["subagent_spawns"] == 4 * per_worker
 
 
-def test_the_enforcing_read_of_budget_json_is_never_torn(tmp_path):
-    """The enforcement-side read of budget.json is consistent under concurrent
-    writers — it never observes the truncate-then-write window — so the trip decision
-    is taken over a whole record rather than an empty one.
+def test_budget_origin_is_a_wall_clock_the_elapsed_check_honours(tmp_path):
+    """The run's clock origin is a WALL-CLOCK timestamp, not a bare time.monotonic()
+    float, and the elapsed check still measures the run's true age from it when the
+    monotonic origin it is handed is fresher than the run.
 
-    P5 (executed) against six real concurrent writer PROCESSES: the naive
-    `json.loads` reader saw the window in 1745 of 4000 reads (43.6%); the same reader
-    routed through the lock was 0 of 4000. The failure is SILENT and FAILS OPEN — a
-    torn read yields {}, check_budgets({}) returns [], and the enforcing read then
-    ADMITS the call. This test re-probes reality with real processes rather than
-    pinning the taxonomy once."""
-    from defender.hooks import budget_enforcer
-
-    open_budget(tmp_path, "run-1")
-    writer_src = (
-        "import sys;"
-        f"sys.path.insert(0, {str(REPO_ROOT)!r});"
-        "from defender.hooks.budget_enforcer import update_budget_locked, DEFAULT_LIMITS;"
-        "from pathlib import Path;"
-        f"rd = Path({str(tmp_path)!r});"
-        "[update_budget_locked(rd, 'run-1', 'bash', limits={**DEFAULT_LIMITS,"
-        " 'max_tool_calls': 10**6}) for _ in range(150)]"
-    )
-    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT)}
-    procs = [subprocess.Popen([sys.executable, "-c", writer_src], env=env)
-             for _ in range(6)]
-    try:
-        torn = 0
-        reads = 0
-        live_reads = 0
-        started = False
-        while any(p.poll() is None for p in procs) and reads < 4000:
-            state = budget_enforcer.read_budget(tmp_path)
-            reads += 1
-            if state.get("tool_calls"):
-                started = True
-            if not started:
-                continue
-            live_reads += 1
-            if not state or "tool_calls" not in state or state.get("tool_calls") == 0:
-                torn += 1
-    finally:
-        for p in procs:
-            p.wait()
-    assert all(p.returncode == 0 for p in procs), "a writer subprocess crashed"
-    assert reads > 0, "the read loop never ran against a live writer"
-    assert live_reads > 0, "the read loop never observed a live (post-first-increment) writer"
-    assert _budget(tmp_path)["tool_calls"] == 6 * 150, (
-        "cross-process increments were lost or double-counted under contention"
-    )
-    assert torn == 0, f"the enforcing read observed {torn} torn states in {live_reads} live reads"
-
-
-
-def _seal(run_dir: Path) -> None:
-    """Make the accounting write fail: the run dir and its `budget.json` read-only. The file
-    too, because the accounting write is a locked in-place rewrite of `budget.json` (the one
-    writer every budget update shares), which a read-only directory alone does not stop."""
-    budget = run_dir / "budget.json"
-    if budget.exists():
-        budget.chmod(stat.S_IRUSR)
-    run_dir.chmod(stat.S_IRUSR | stat.S_IXUSR)
-
-
-def _unseal(run_dir: Path) -> None:
-    run_dir.chmod(stat.S_IRWXU)
-    budget = run_dir / "budget.json"
-    if budget.exists():
-        budget.chmod(stat.S_IRUSR | stat.S_IWUSR)
-
-
-def test_one_failed_accounting_write_costs_one_call_of_overshoot(tmp_path):
-    """A single failed accounting write does not stop the run and costs exactly one
-    call of overshoot: the counter is monotonic, so the next call re-crosses the cap
-    and trips.
-
-    The healthy state is the falsy member bound at its own address — zero consecutive
-    failures and no first-failure stamp — and an implementation that cannot tell
-    "zero failures" from "no state" reads a fresh run as a standing fault or a
-    standing fault as fresh."""
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    open_budget(run_dir, "run-1")
-    limits = _tight(max_tool_calls=3, accounting_failure_max_consecutive=3,
-                    accounting_failure_max_elapsed=3600)
-
-    assert accounting_failure_state(run_dir)["consecutive_failures"] == 0
-    assert accounting_failure_state(run_dir)["first_failure_at"] is None
-
-    for _ in range(2):
-        account_call(run_dir, "run-1", "bash", limits=limits, tier="core")
-    assert _budget(run_dir)["tool_calls"] == 2
-
-    _seal(run_dir)
-    try:
-        account_call(run_dir, "run-1", "bash", limits=limits, tier="core")
-    finally:
-        _unseal(run_dir)
-    assert _budget(run_dir)["tool_calls"] == 2, "the failed write landed anyway"
-    assert accounting_failure_state(run_dir)["consecutive_failures"] == 1
-
-    state = account_call(run_dir, "run-1", "bash", limits=limits, tier="core")
-    assert state["tool_calls"] == 3
-    assert any("tool_calls at 3/3" in m for m in check_budgets(state, limits))
-    assert accounting_failure_state(run_dir)["consecutive_failures"] == 0
-
-
-def test_consecutive_accounting_write_failures_stop_or_mark_the_run(tmp_path):
-    """A STANDING accounting-write failure is an environment fault, not slack: once
-    consecutive failures reach the count's own threshold the run stops with the
-    budget kill, because enforcement has silently left the run.
-
-    The count RESETS ON SUCCESS, which is what keeps it from firing on an
-    intermittent fault — and is exactly why it cannot be the only mechanism; its
-    sibling, test_an_intermittent_accounting_failure_trips_the_first_failure_stamp,
-    covers the gap it leaves."""
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    open_budget(run_dir, "run-1")
-    limits = _tight(max_tool_calls=1000, accounting_failure_max_consecutive=3,
-                    accounting_failure_max_elapsed=3600)
-
-    _seal(run_dir)
-    try:
-        account_call(run_dir, "run-1", "bash", limits=limits, tier="core")
-        account_call(run_dir, "run-1", "bash", limits=limits, tier="core")
-        with pytest.raises(BudgetKill):
-            account_call(run_dir, "run-1", "bash", limits=limits, tier="core")
-    finally:
-        _unseal(run_dir)
-    assert accounting_failure_state(run_dir)["consecutive_failures"] >= 3
-
-    fresh = tmp_path / "run2"
-    fresh.mkdir()
-    open_budget(fresh, "run-2")
-    _seal(fresh)
-    try:
-        account_call(fresh, "run-2", "bash", limits=limits, tier="core")
-    finally:
-        _unseal(fresh)
-    account_call(fresh, "run-2", "bash", limits=limits, tier="core")
-    assert accounting_failure_state(fresh)["consecutive_failures"] == 0
-
-
-def test_an_intermittent_accounting_failure_trips_the_first_failure_stamp(tmp_path):
-    """An accounting write that fails INTERMITTENTLY — every other call, so the
-    consecutive count never advances past one — still trips: the first-failure stamp
-    does not reset on success, so once the elapsed time since the first failure
-    passes the stamp's own separate threshold the run stops with the budget kill.
-
-    THE DISCRIMINATING SEQUENCE IS ALTERNATING, and it is what the count limb cannot
-    catch by construction: a test that drove only consecutive failures would pass
-    against an implementation that shipped the count and skipped the stamp."""
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    open_budget(run_dir, "run-1")
-    limits = _tight(max_tool_calls=1000, accounting_failure_max_consecutive=3,
-                    accounting_failure_max_elapsed=0.2)
-
-    def alternating_call(fail: bool):
-        if fail:
-            _seal(run_dir)
-            try:
-                return account_call(run_dir, "run-1", "bash", limits=limits, tier="core")
-            finally:
-                _unseal(run_dir)
-        return account_call(run_dir, "run-1", "bash", limits=limits, tier="core")
-
-    alternating_call(fail=True)
-    stamp = accounting_failure_state(run_dir)["first_failure_at"]
-    assert stamp is not None
-
-    with pytest.raises(BudgetKill):  # noqa: PT012 — the alternating drive must run inside the block until the stamp trips
-        deadline = time.monotonic() + 5
-        fail = False
-        while time.monotonic() < deadline:
-            alternating_call(fail=fail)
-            fail = not fail
-            assert accounting_failure_state(run_dir)["consecutive_failures"] < 3
-            time.sleep(0.02)
-        pytest.fail("the first-failure stamp never tripped on an alternating fault")
-
-    assert accounting_failure_state(run_dir)["first_failure_at"] == stamp, (
-        "the stamp reset on success — it must measure elapsed degradation"
-    )
-
-
-
-def test_budget_origin_is_a_cross_process_wall_clock(tmp_path):
-    """The run's clock origin is a WALL-CLOCK timestamp — the shared, cross-process-
-    comparable anchor — not a bare time.monotonic() float, and a reader in a DIFFERENT
-    process (with its own, unrelated monotonic clock) still measures the run's true age
-    from it.
-
-    VR1 (§7 round 6) refines D12: budget.json is a cross-process shared file (M8: one
-    pool for MAIN and every GATHER subagent; the torn-read test drives six writer
-    PROCESSES), and time.monotonic() is NOT comparable across processes. So `created_at`
-    is persisted as wall clock and each process uses its own monotonic source only for a
-    within-process delta: `elapsed = max(wall_delta, local_monotonic_delta)`. This is
-    R27's first-raised correctness hole, pinned as a demand rather than left to
-    assumption — a wall origin defeated by a fresh-monotonic reader in another process is
-    exactly the cap-evasion VR1 closes."""
+    VR1 (§7 round 6): `elapsed = max(wall_delta, local_monotonic_delta)`. #1235 keeps
+    the state in the run's process, so the cross-process reader this once guarded is
+    gone, but the hazard is still in-process: a deps object built with a fresh
+    `budget_started_monotonic` (`bind`'s default, which `lead_zero._items` names) would
+    hand the check a clock that started late, and the wall origin is what still sees
+    the run's real age."""
     state = open_budget(tmp_path, "run-1")
     created = state["created_at"]
     parsed = datetime.fromisoformat(created)
@@ -661,56 +388,102 @@ def test_budget_origin_is_a_cross_process_wall_clock(tmp_path):
 
     limits = _tight(wall_clock_timeout=100, max_tool_calls=10_000)
     old_wall = (datetime.now(UTC) - timedelta(seconds=500)).isoformat()
-    cross_process = {"run_id": "run-1", "tool_calls": 1,
-                     "started_at": old_wall, "created_at": old_wall,
-                     "started_monotonic": time.monotonic()}
+    late_monotonic = {"run_id": "run-1", "tool_calls": 1,
+                      "started_at": old_wall, "created_at": old_wall,
+                      "started_monotonic": time.monotonic()}
     assert any("wall_clock" in m and "Budget exceeded" in m
-               for m in check_budgets(cross_process, limits)), (
-        "a reader with a fresh monotonic clock could not see the run's true age from the "
-        "wall origin — the wall-clock cap is defeated by reading from another process"
+               for m in check_budgets(late_monotonic, limits)), (
+        "a fresh monotonic origin hid the run's true age from the wall origin — the "
+        "wall-clock cap is defeated by a late-started clock"
     )
 
 
-def test_a_second_open_budget_preserves_the_origin_and_counters(tmp_path):
-    """open_budget is idempotent on the origin: a second call against an existing
-    budget.json (a re-entrant setup, a retried invocation) preserves created_at and
-    does NOT zero the counters a real run has already accrued.
+def test_a_second_open_budget_starts_a_fresh_budget_for_the_folder(tmp_path):
+    """`open_budget` is the run's start (#1235): it starts a FRESH in-memory budget for
+    the run folder — counters at zero, a new origin no earlier than the first, the new
+    run id — replacing whatever this process held for that folder. A run folder is
+    resumed only before any run used it (`run_common._setup_state`), so there is no
+    re-entrant open to preserve counters across; a stale budget surviving a new run's
+    start is the failure.
 
-    R27: B4 makes the origin's stability load-bearing but nothing pins it, and
-    re-originating on a second open is exactly the silent wall-clock restart D2
-    forbids."""
+    Positive control: before the second open, the first budget DID accrue a call, so
+    the zero after it is a reset, not a writer that never counted."""
     first = open_budget(tmp_path, "run-1")
-    created, origin = first.get("created_at"), first.get("started_at")
-    assert created, "open_budget wrote no cross-process origin"
+    assert first["run_id"] == "run-1"
+    assert (first["tool_calls"], first["subagent_spawns"]) == (0, 0)
+    assert first["created_at"] and first["started_at"], "open_budget minted no origin"
     update_budget_locked(tmp_path, "run-1", "bash", limits=DEFAULT_LIMITS)
+    update_budget_locked(tmp_path, "run-1", "gather", limits=DEFAULT_LIMITS)
+    accrued = _budget(tmp_path)
+    assert (accrued["tool_calls"], accrued["subagent_spawns"]) == (2, 1), \
+        "the first budget never counted — the reset below would prove nothing"
 
-    second = open_budget(tmp_path, "run-1")
-    assert second.get("created_at") == created, "a second open_budget re-minted the origin"
-    assert second.get("started_at") == origin, "a second open_budget re-minted started_at"
-    assert _budget(tmp_path)["tool_calls"] == 1, "a second open_budget reset the counters"
+    second = open_budget(tmp_path, "run-2")
+    assert second["run_id"] == "run-2", "the second open kept the first run's identity"
+    assert (second["tool_calls"], second["subagent_spawns"]) == (0, 0), \
+        "a new run's start inherited the previous run's counters"
+    assert datetime.fromisoformat(second["created_at"]) >= \
+        datetime.fromisoformat(first["created_at"]), "the second origin predates the first"
+    assert _budget(tmp_path) == second, "read_budget does not answer the budget just opened"
 
 
-def test_accounting_failure_state_persists_outside_the_sealed_run_dir(tmp_path):
-    """The accounting-failure detection state is read WHILE the run dir is sealed — the
-    very condition it exists to detect — so it cannot live in the run dir. A failure
-    recorded against a sealed run dir is still readable, and the count still advances.
+def test_the_budget_writes_no_file_into_the_run_folder_or_its_container(tmp_path):
+    """#1235 D3: the budget is the run process's memory. A whole run's worth of
+    accounting — the open, counted calls, calls at the cap and past it, on both tiers —
+    leaves nothing on disk: no `budget.json` in the run folder, no sidecar beside it,
+    no file anywhere under the runs base.
 
-    R27: B16-B18 silently require this (they seal the run dir, then read
-    accounting_failure_state); here it is made explicit. If the state lived in the
-    sealed run dir it could be neither written nor read, and the count would never
-    advance past zero — enforcement would leave the run undetectably."""
+    Positive control: the same sequence DID count, so the empty tree is not a writer
+    that never ran — `read_budget` shows the calls it took and the cap it held."""
+    runs_base = tmp_path / "runs"
+    run_dir = runs_base / "run-1235"
+    run_dir.mkdir(parents=True)
+    limits = _tight(max_tool_calls=3)
+
+    open_budget(run_dir, "run-1235")
+    update_budget_locked(run_dir, "run-1235", "gather", limits=limits)
+    for _ in range(4):
+        account_call(run_dir, "run-1235", "bash", limits=limits, tier="core")
+    account_call(run_dir, "run-1235", "read_file", limits=limits, tier="tail")
+
+    on_disk = sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*")
+                     if not p.is_dir())
+    assert on_disk == [], f"the budget wrote files: {on_disk}"
+
+    state = _budget(run_dir)
+    assert state["tool_calls"] == 4, \
+        f"expected the gather, two core calls up to the cap of 3 and one tail call: {state}"
+    assert state["subagent_spawns"] == 1, state
+
+
+def test_a_budget_file_in_the_run_folder_moves_no_count(tmp_path):
+    """#1235 D3, at the library: a `budget.json` sitting in a run folder — planted, or
+    left from an older run — is not the run's budget. A folder no budget was opened for
+    reads `{}` and has no clock for an oracle turn to pause, whatever file sits there;
+    an opened folder's counts and cap answer from memory, so a planted file claiming
+    zero calls does not re-open a capped pool.
+
+    Positive control on the same folder: the budget opened for it is the one read, and
+    it has a clock."""
+    from defender.hooks import budget_enforcer as be
+
+    never_opened = tmp_path / "never-opened"
+    never_opened.mkdir()
+    (never_opened / "budget.json").write_text(
+        '{"run_id": "x", "tool_calls": 7, "subagent_spawns": 0}', encoding="utf-8")
+    assert be.read_budget(never_opened) == {}, "a planted file was read as a budget"
+    assert be._has_clock(never_opened) is False, "a planted file gave the folder a clock"
+
     run_dir = tmp_path / "run"
     run_dir.mkdir()
+    limits = _tight(max_tool_calls=2)
     open_budget(run_dir, "run-1")
-    limits = _tight(accounting_failure_max_consecutive=3,
-                    accounting_failure_max_elapsed=3600)
-    _seal(run_dir)
-    try:
+    assert be._has_clock(run_dir) is True, "an opened budget has no clock"
+    for _ in range(2):
         account_call(run_dir, "run-1", "bash", limits=limits, tier="core")
-        recorded = accounting_failure_state(run_dir)
-    finally:
-        _unseal(run_dir)
-    assert recorded["consecutive_failures"] == 1, (
-        "the failure count did not advance — the detection state cannot live inside the "
-        "sealed run dir whose sealing it is meant to detect"
-    )
+    (run_dir / "budget.json").write_text(
+        '{"run_id": "run-1", "tool_calls": 0, "subagent_spawns": 0}', encoding="utf-8")
+
+    state = account_call(run_dir, "run-1", "bash", limits=limits, tier="core")
+    assert state["tool_calls"] == 2, "a planted zero re-opened the capped pool"
+    assert be.read_budget(run_dir)["tool_calls"] == 2, be.read_budget(run_dir)

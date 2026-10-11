@@ -8,7 +8,8 @@ names. This file is the new observer.
 DECISION 21 REDESIGNED IT, SUPERSEDING DECISION 14 IN FULL. An executed probe — two `_replay()`
 calls against `main`, same run id, diffed — proved the "byte-identical, two exemptions" promise
 false independently of this issue's own code: eight files differ for reasons that predate the
-refactor entirely (wall-clock timestamps in `budget.json` and `tool_trace.jsonl`; a per-run
+refactor entirely (wall-clock timestamps in `budget.json` — no longer written since #1235 —
+and `tool_trace.jsonl`; a per-run
 random security salt inside `review_record.<turn>.json` and the three
 `wire_logs/review_*_trace.jsonl`; random per-run session/case identifiers in
 `session_store_pointer.json` and `tool_trace.jsonl`). So the observer is two checks:
@@ -20,7 +21,7 @@ random security salt inside `review_record.<turn>.json` and the three
 * CONTENT, narrow — bytes are compared for `investigation.md` and `report.md` only: the two
   artifacts the model generates from the same fixed replay input and that a human reads.
 
-THERE IS NO EXEMPTION LIST. Everything else in the tree — budget, tool trace, session pointer,
+THERE IS NO EXEMPTION LIST. Everything else in the tree — tool trace, session pointer,
 the wire logs, the review records and traces — gets no byte assertion at all: not exempted with
 a reason, not normalised, simply not compared, because it was never stable to begin with. That
 also subsumes decision 18's wire-log amendment: the wire log was never byte-compared here, so
@@ -98,7 +99,7 @@ def test_a_replayed_fixture_run_tree_carries_the_same_set_of_names(tmp_path: Pat
     # And the per-run-unstable files ARE in the compared name set: their names are pinned even
     # though their bytes are not.
     names = set(S.snapshot(run_dir))
-    for unstable in ("budget.json", "tool_trace.jsonl", "session_store_pointer.json"):
+    for unstable in ("tool_trace.jsonl", "session_store_pointer.json"):
         assert unstable in names, (
             f"{unstable} is outside the structural check. Its BYTES are not compared (it "
             "carries a clock or a per-run uuid); its NAME is, and that is the whole point of "
@@ -126,7 +127,6 @@ def test_bytes_are_compared_for_the_investigation_and_the_report_and_nothing_els
     # whose bytes decision 18's writer id changes on every run and which under decision 14
     # would have needed the second exemption decision 21 makes unnecessary.
     for unstable, payload in (
-            ("budget.json", '{"spent_usd": 0.99}\n'),
             ("tool_trace.jsonl", '{"tool": "tampered"}\n'),
             ("session_store_pointer.json", '{"case_id": "deadbeef"}\n'),
             ("wire_logs/llm_requests.jsonl", '{"writer_id": "main"}\n'),
@@ -352,8 +352,9 @@ def test_every_run_dir_writer_stays_key_disjoint_at_the_composition_frame(tmp_pa
         claim("challenge_gate", owner.review_trace(role))
     claim("_alias", run_dir / ".alias-probe-deadbeefdeadbeef-symlink")
     claim("box", owner.box_sentinel)
-    for fixed in ("tool_trace", "executed_queries", "policy_denials", "budget",
-                  "circuit_breaker", "lessons_loaded", "wire_log", "provenance"):
+    # #1235: `budget` and `circuit_breaker` are no longer run records (in-memory state).
+    for fixed in ("tool_trace", "executed_queries", "policy_denials", "lessons_loaded",
+                  "wire_log", "provenance"):
         claim("Run", getattr(owner, fixed))
 
     # No key is a PREFIX of another either: a writer whose reserved space is a directory must

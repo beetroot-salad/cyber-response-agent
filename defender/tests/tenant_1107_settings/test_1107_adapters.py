@@ -703,8 +703,11 @@ def _own_rows(run_dir: Path) -> list[dict]:
 
 
 def _breaker_doc(run_dir: Path) -> dict:
-    path = run_dir / "circuit_breaker.json"
-    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    """The run's breaker state, read from the run's in-process state (#1235: nothing writes
+    `circuit_breaker.json` any more); it stays readable here after the driven run."""
+    from defender.runtime.circuit_breaker import breaker_state
+
+    return breaker_state(run_dir)
 
 
 def test_sibling_system_calls_share_one_docker_context_partial_failure(tmp_path, monkeypatch):

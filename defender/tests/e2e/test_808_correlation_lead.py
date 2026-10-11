@@ -607,7 +607,8 @@ def test_the_cut_off_correlation_session_ends_on_its_own_marked_final_request(tm
 
 def test_lead_zeros_calls_and_item_threes_dispatch_move_the_runs_own_counters(tmp_path):
     """K23 — harness pre-turn work is CHARGED and VISIBLE: the budget hooks are chained around
-    lead-0's calls, so item 1's backend calls move `budget.json`'s `tool_calls`, and item 3's
+    lead-0's calls, so item 1's backend calls move the run's budget `tool_calls` (in-process
+    state since #1235), and item 3's
     dispatch moves `subagent_spawns` through an accounting path of its own.
 
     The mechanism has to be built, and P7 (both legs, executed) is why routing alone does not
@@ -644,7 +645,7 @@ def test_lead_zeros_calls_and_item_threes_dispatch_move_the_runs_own_counters(tm
 
     spawns = charged.budget.get("subagent_spawns", 0)
     assert spawns == 1, (
-        f"budget.json records {spawns} subagent spawns for a run whose only dispatch was "
+        f"the run's budget records {spawns} subagent spawns for a run whose only dispatch was "
         "item 3's — the harness dispatch escapes the spawn cap entirely (P7b)"
     )
     assert idle.budget.get("subagent_spawns", 0) == 0, \

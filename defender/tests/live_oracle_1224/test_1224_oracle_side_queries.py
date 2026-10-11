@@ -363,10 +363,10 @@ def _stamps(rows: Iterable[Mapping[str, Any]]) -> list[float]:
 
 
 def _breaker(run_dir: Path) -> dict:
-    path = Path(run_dir) / "circuit_breaker.json"
-    if not path.is_file():
-        return {"systems": {}, "total_failures": 0}
-    return json.loads(path.read_text(encoding="utf-8"))
+    """The run's circuit-breaker state, as the run's own process holds it (#1235: in memory,
+    never a file in the run dir; blank when nothing failed). The run was driven in this
+    process."""
+    return S.sym("runtime.circuit_breaker", "breaker_state")(run_dir)
 
 
 # An Elasticsearch that answers from a three-document index: one document dated before the
@@ -2093,8 +2093,9 @@ def test_p006_base_answer_text_asks_the_oracle_to_explore_without_end(tmp_path):
     sent = [r for r in est.calls("edr") if r["params"] in reads]
     assert len(sent) == len(reads)
     assert _densest(_stamps(sent), 1.0 - SLACK) <= rate
-    budget_enforcer = json.loads((Path(run_dir) / "budget.json").read_text(encoding="utf-8"))
-    control = json.loads((Path(control_dir) / "budget.json").read_text(encoding="utf-8"))
+    read_budget = S.sym("hooks.budget_enforcer", "read_budget")
+    budget_enforcer = read_budget(Path(run_dir))
+    control = read_budget(Path(control_dir))
     assert budget_enforcer["tool_calls"] == control["tool_calls"], (
         "the oracle's queries were charged to the investigator's budget")
     assert [(r["system"], r["verb"]) for r in S.lead_rows(run_dir)] == [("idp", "query")]

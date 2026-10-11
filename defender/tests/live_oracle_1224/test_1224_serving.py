@@ -161,8 +161,9 @@ def _row_view(row: dict) -> dict:
 
 
 def _breaker(run_dir: Path) -> dict:
-    path = Path(run_dir) / "circuit_breaker.json"
-    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    """The run's circuit-breaker state, as the run's own process holds it (#1235: in memory,
+    never a file in the run dir); the run was driven in this process."""
+    return S.sym("runtime.circuit_breaker", "breaker_state")(run_dir)
 
 
 def _parallel_turn(*calls: tuple[str, str, dict]) -> Any:

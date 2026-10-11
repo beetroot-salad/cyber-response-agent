@@ -1070,8 +1070,8 @@ def test_no_usable_ancestor_identifier_issues_no_fetch_at_all(tmp_path):
     assert len(res.rows_for(L0)) == 1, \
         "a queries row records an ancestor call that must not have happened"
     assert len(res.payloads(L0)) <= 1, "a payload was persisted for a call that must not happen"
-    assert not (res.run_dir / "circuit_breaker.json").is_file(), \
-        "the refused fetch spent breaker budget"
+    assert res.breaker.get("systems", {}) == {} and res.breaker.get("total_failures", 0) == 0, \
+        f"the refused fetch spent breaker budget: {res.breaker}"
     assert "SOMEONE ELSE'S NEWEST DOCUMENT" not in res.message_zero, \
         "documents no ancestor asked for reached MAIN under this alert's own heading"
     assert UNAVAILABLE in res.section()

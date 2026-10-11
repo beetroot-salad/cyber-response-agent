@@ -9,10 +9,6 @@
       "file",
       null
     ],
-    "budget.json": [
-      "file",
-      null
-    ],
     "gather_raw": [
       "dir",
       null
