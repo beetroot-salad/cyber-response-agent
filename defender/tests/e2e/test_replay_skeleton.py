@@ -280,8 +280,11 @@ def test_main_cannot_name_a_write_path_at_all(tmp_path):
     drive(run_dir, run_id=run_id, main=replay)
 
     assert (run_dir / "investigation.md").read_text() == "+ probe\n"
-    assert {p.name for p in run_dir.parent.iterdir()} == before | {sidecar_path(run_dir).name}, (
-        "the append created something outside the run dir and the host's own run-end sidecar"
+    # #1235 F2: the run -> case link is also a host sidecar beside the run dir.
+    from defender.run_repository import RunPaths
+    host_sidecars = {sidecar_path(run_dir).name, RunPaths(run_dir).session_pointer().name}
+    assert {p.name for p in run_dir.parent.iterdir()} == before | host_sidecars, (
+        "the append created something outside the run dir and the host's own sidecars"
     )
 
 

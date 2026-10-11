@@ -370,7 +370,10 @@ def test_d2_sibling_runs_base(tmp_path, tenant_root):
     assert minted["tenant_id"] == T_ID
     assert json.loads(record_path.read_text(encoding="utf-8")) == minted, "the record changed"
     assert _stamp(rb)["world_id"] == world_b.world_id
-    assert H.entries(tenant_root / T_ID / "runs") == sorted([H.RECORD_NAME, src.name])
+    # #1235 F2: the source run's case link is a host sidecar beside its run dir.
+    from defender.run_repository import RunPaths
+    assert H.entries(tenant_root / T_ID / "runs") == sorted(
+        [H.RECORD_NAME, src.name, RunPaths(src).session_pointer().name])
 
 
 def test_s7_j24_widened_refusal_on_sibling_path(tmp_path, monkeypatch, tenant_root):
