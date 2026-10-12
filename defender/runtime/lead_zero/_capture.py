@@ -192,8 +192,6 @@ class _CallLedger:
                 vctx = VerbContext(defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=env,
                                    tenant=_tenant_of(deps), run_state=deps.run_state)
                 envelope = await asyncio.to_thread(fn, vctx, **params)
-                _record_manual_row(deps, verb, params, envelope, exit_code=0)
-                return envelope, ""
             except (circuit_breaker.RunAborted, asyncio.CancelledError,
                     KeyboardInterrupt, GeneratorExit):
                 # Control-flow signals propagate; they are never the query's fault.
@@ -205,6 +203,11 @@ class _CallLedger:
             except BaseException:  # noqa: BLE001 — an unmapped capped-call fault must not raise
                 _record_manual_row(deps, verb, params, None, exit_code=_UNMAPPED_FAULT_EXIT)
                 return None, ""
+            # Outside the `try`: the call succeeded, and its row is already in the state when the
+            # view write is refused — that OSError is not the call's fault and must not record a
+            # second row for it (one backend call, one row).
+            _record_manual_row(deps, verb, params, envelope, exit_code=0)
+            return envelope, ""
         envelope, text = await _capture_issue(capture, deps, verb, params, env)
         after = self.state.breaker_failures(ITEM1_SYSTEM)
         if after > before:
