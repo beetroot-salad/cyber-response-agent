@@ -39,12 +39,10 @@ def _roots(tmp_path, monkeypatch):
 def _judge():
     """A judge double that would grade every world with a queueable finding if asked."""
     finding = J.finding_doc(bucket="lead-quality", subject="defender",
-                            topic="the lead was never revisited",
-                            evidence=["investigation.md#l-001"])
+                            topic="the lead was never revisited")
     world = J.reply_doc(findings=[finding])
     world.update(bucket="lead-quality", systems=["idp"])
-    family = J.reply_doc(findings=[])
-    family["verdict_word"] = "survived"
+    family = J.family_reply()
     return J.scripted_judge(default=S.as_reply_text(world),
                             family_default=S.as_reply_text(family))
 
@@ -98,7 +96,7 @@ def test_an_accepted_family_with_no_family_stamp_is_stamped_not_comparable(tmp_p
     assert stamp.get("outcome") == "not comparable", J.judge_record(ep)
     assert "provenance.json" in stamp.get("reason", ""), stamp
     assert WITHHELD in stamp["reason"], stamp
-    assert J.judge_record(ep).get("episode_outcome") == "not-graded"
+    assert "episode_outcome" not in J.judge_record(ep), "the record carries the retired word"
     assert judge.calls == 0, f"a not-comparable family bought model calls: {judge.agent_ids}"
     assert not any(J.draw_files(ep, label) for label in S.WORLDS), "draws were written"
     assert _queued() == [], "a not-comparable family queued findings"
@@ -213,7 +211,9 @@ def test_a_per_world_fault_leaves_the_family_stamp_to_the_verified_siblings(tmp_
     the judge grades the rest."""
 
     T.runs_base(tmp_path)
-    ep = S.judged_episode(tmp_path, outcome=None, labels=("b",))
+    # #1234 A3: the control is archived too — every world is judged against it, and a family
+    # whose control is not usable is stamped not graded.
+    ep = S.judged_episode(tmp_path, outcome=None, labels=("a", "b"))
     S.outcome_record(ep, "accepted", family_stamp=False)
     base = _container(ep)
     T.sibling_run_dir(base, "b")
