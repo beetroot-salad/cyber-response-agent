@@ -720,7 +720,7 @@
    "assert validate_companion(produced, None) == []",
    "assert validate_companion(produced_inv, None) == []",
    "assert wire_log.is_file(), 'the wire log is not where this belt is looking — a missing file reads as zero live records, so the assertion below would pass without measuring anything'",
-   "assert {p.name for p in run_dir.parent.iterdir()} == before | {sidecar_path(run_dir).name}, \"the append created something outside the run dir and the host's own run-end sidecar\""
+   "assert {p.name for p in run_dir.parent.iterdir()} == before | host_sidecars, \"the append created something outside the run dir and the host's own sidecars\""
   ],
   "defender/tests/e2e/test_query_tool_611.py": [
    "assert '<run-' not in on_disk, 'the persisted payload must be the raw bytes, never wrapped'",
@@ -777,7 +777,7 @@
    "assert cfg_a['URL_BASE'] == 'http://tree-a:9200'",
    "assert cfg_b['URL_BASE'] == 'http://tree-b:9200', \"the second tree's verb read the first tree's config (an import-time DEFENDER_DIR)\"",
    "assert circuit_breaker.RUN_FAIL_KILL_LIMIT == 5",
-   "assert circuit_breaker.is_tripped(r.run_dir, 'elastic')",
+   "assert circuit_breaker.is_tripped(r.state, 'elastic')",
    "assert ctx_ann is VerbContext or (isinstance(ctx_ann, str) and ctx_ann.rpartition('.')[2] == 'VerbContext'), f'{system}.{name}: leading param `{sig_params[0].name}` is not annotated VerbContext — nothing distinguishes the carriage from a model param the ctx would overwrite'",
    "assert descriptor_catalog(a / 'skills', read_roster(a / 'scripts' / 'adapters'), grant) is not None",
    "assert descriptor_catalog(b / 'skills', read_roster(b / 'scripts' / 'adapters'), grant) is not None",

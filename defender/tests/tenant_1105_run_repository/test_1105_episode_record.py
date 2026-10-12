@@ -283,7 +283,7 @@ def test_1105_the_writer_refuses_every_input_that_would_hide_a_run_or_claim_an_i
         ("labels equal under case folding", "ep", src, {"a": _rid("ep-a"), "A": _rid("ep-a")}),
         # A label the family model admits (no '-'), so only the sidecar clause refuses it.
         ("a sidecar-suffixed arm", "ep", src,
-         {"x.accounting_failures.json": _rid("ep-x.accounting_failures.json")}),
+         {"x.accounting_failures.json": _rid("ep-x.accounting_failures.json")}),  # lint-stale-ref: ok — the reserved sidecar suffix, not the removed `RunPaths.accounting_failures()`
         ("an arm not shaped episode-label", "ep", src, {"a": _rid("other")}),
         # Multi-fault by necessity: two labels give two different f'{episode_id}-{label}' arms.
         ("two labels on one id", "ep", src, {"a": _rid("ep-a"), "b": _rid("ep-a")}),

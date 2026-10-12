@@ -861,8 +861,8 @@ jobs:
       # so `def read_json_locked(path) -> dict: return json.loads(raw)` type-checks CLEAN —
       # the tree sits at zero mypy errors with that lie in it. This gate is not duplicating
       # mypy; it closes the one hole mypy has agreed to stop asking about. It fires at the
-      # SEAM and deliberately NOT at the readers of a laundered value: narrowing _run_dir
-      # fixes circuit_breaker and budget_enforcer and every future reader, where chasing
+      # SEAM and deliberately NOT at the readers of a laundered value: narrowing the seam
+      # (#878's was hooks/_run_dir, retired by #1235) fixes every reader, where chasing
       # readers institutionalizes the per-reader hardening that caused the defect. The second
       # check is the same rule for time: a bare `datetime.fromisoformat` outside the module
       # owning `defender._clock.parse_iso_utc`, whose docstring names the naive-vs-aware

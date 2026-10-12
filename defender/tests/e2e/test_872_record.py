@@ -59,9 +59,10 @@ def _payload() -> dict:
 
 
 def _substituting_run(tmp_path: Path, *, turns: int = 2, stores: list | None = None,
-                      gather: bool = False):
+                      gather: bool = False, summaries: list | None = None):
     """One driven run in which a foreign result IS substituted — the shared setup for every
-    demand in this module, and the positive control each of the negatives needs."""
+    demand in this module, and the positive control each of the negatives needs. `summaries`
+    receives what `drive()` returned, whose `run_state` is the run's own state (#1235)."""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     calls = [Turn(tool_calls=[("fetch_rows", {})]) for _ in range(turns)]
     if gather:
@@ -77,7 +78,9 @@ def _substituting_run(tmp_path: Path, *, turns: int = 2, stores: list | None = N
         seams["verbs"] = elastic_ok(rec)
     if stores is not None:
         seams["store_factory"] = store_factory(tmp_path / "store", sink=stores)
-    drive(run_dir, run_id=RUN_ID, main=main, **seams)
+    summary = drive(run_dir, run_id=RUN_ID, main=main, **seams)
+    if summaries is not None:
+        summaries.append(summary)
     return run_dir, main
 
 
@@ -516,8 +519,10 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
     """
     from defender.runtime import lead_zero
 
-    def _manual_row(run_dir: Path) -> None:
-        """`lead_zero`'s row — the table's second writer — written into the run under test.
+    def _manual_row(run_dir: Path, summary: dict) -> None:
+        """`lead_zero`'s row — the table's second writer — written into the run under test,
+        through that run's own state (the driver summary's `run_state`, #1235), so its seq
+        follows the run's rows.
 
         Called through the module's own function rather than re-assembled here: until #1017
         the frozen keys were spelled INLINE at that site (a count this docstring deliberately
@@ -526,13 +531,15 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
         test's idea of the row against itself either way."""
         deps = lead_zero._CaptureDeps(
             run_dir=run_dir, defender_dir=DEFENDER, run_id=RUN_ID,
-            lead_id="l-000",
+            lead_id="l-000", run_state=summary["run_state"],
         )
         lead_zero._record_manual_row(
             deps, "search", {"index": "logs"}, {"rows": [{"a": 1}]}, exit_code=0,
         )
 
-    gated_dir, main = _substituting_run(tmp_path / "gated", turns=2, gather=True)
+    summaries: list = []
+    gated_dir, main = _substituting_run(tmp_path / "gated", turns=2, gather=True,
+                                        summaries=summaries)
     assert _every_view(main, toons.dumps(_payload())), (
         "the gated run did not substitute, so the two runs are the same run"
     )
@@ -546,14 +553,15 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
         })]),
         Turn(text="Complete."),
     ])
-    drive(idle_dir, run_id=RUN_ID, main=idle_main,
-          gather=ReplayFn([q("elastic", "query", {"native_query": "FROM logs"}), DONE]),
-          verbs=elastic_ok(rec))
+    summaries.append(drive(
+        idle_dir, run_id=RUN_ID, main=idle_main,
+        gather=ReplayFn([q("elastic", "query", {"native_query": "FROM logs"}), DONE]),
+        verbs=elastic_ok(rec)))
 
     # The second writer's own spelling, appended to each run's table after the run that
     # differs is over — so the comparison below spans both lanes rather than one.
-    for run_dir in (gated_dir, idle_dir):
-        _manual_row(run_dir)
+    for run_dir, summary in zip((gated_dir, idle_dir), summaries, strict=True):
+        _manual_row(run_dir, summary)
 
     gated_rows = read_jsonl_rows(RunPaths(gated_dir).executed_queries)
     idle_rows = read_jsonl_rows(RunPaths(idle_dir).executed_queries)

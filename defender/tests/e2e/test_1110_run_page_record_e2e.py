@@ -443,7 +443,10 @@ def _records_of(run) -> Callable[[Path], bool]:
     from defender.runtime import session_store
 
     store = session_store.resolve_store_path(run.run_dir)
-    exact = {run.facts.run_end.path, run.facts.scrub_verdict.path, run.facts.accounting.path,
+    # #1235: the accounting-failures sidecar retired (no `run.facts.accounting` member), and
+    # the case pointer is a runs-base sidecar now, not a file in the run dir.
+    exact = {run.facts.run_end.path, run.facts.scrub_verdict.path,
+             run.observability.session_pointer.path,
              *(Path(f"{store}{suffix}") for suffix in ("", "-wal", "-shm", "-journal"))}
 
     def is_record(path: Path) -> bool:
@@ -600,8 +603,8 @@ def test_1110_o4_o5_a_failed_copy_is_a_warning_not_a_failed_render(
 
 def test_1110_o4_a_run_whose_store_cannot_be_resolved_is_not_rendered_and_writes_no_page(
         tmp_path):
-    """O4 (the render precondition, M1). A run dir relocated without its session-store pointer
-    is refused BEFORE anything is written: the post-run step raises `VisualizeFailed` naming
+    """O4 (the render precondition, M1). A run dir with no case pointer (since #1235 the host-
+    only sidecar beside it; a hand-copied folder has none) is refused BEFORE anything is written: the post-run step raises `VisualizeFailed` naming
     the run dir, no page record exists, and the handle's `io` never saw a write of the record.
 
     Positive control on the same run: the pointer restored, the same call writes the record."""
@@ -609,7 +612,7 @@ def test_1110_o4_a_run_whose_store_cannot_be_resolved_is_not_rendered_and_writes
     io = ArgRecordingIo()
     run = tenant_run(run_dir, io=io)
     record = run.observability.runtime_html.path
-    pointer = RunPaths(run_dir).session_pointer
+    pointer = RunPaths(run_dir).session_pointer()
     saved = pointer.read_bytes()
     pointer.unlink()
 

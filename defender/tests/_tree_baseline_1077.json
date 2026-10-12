@@ -9,10 +9,6 @@
       "file",
       null
     ],
-    "budget.json": [
-      "file",
-      null
-    ],
     "gather_raw": [
       "dir",
       null
@@ -34,10 +30,6 @@
       null
     ],
     "review_record.1.json": [
-      "file",
-      null
-    ],
-    "session_store_pointer.json": [
       "file",
       null
     ],

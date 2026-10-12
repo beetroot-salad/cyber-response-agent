@@ -247,8 +247,9 @@ def test_message_zeros_run_dir_listing_names_the_queries_table(lead_zero_hits_ru
     """R7 `interacts(workspace_map->run_dir_listing)` — message 0's own run-dir listing names
     `executed_queries.jsonl`, because lead-0's rows are appended BEFORE `orientation()` runs
     and the queries table is not one of the names `workspace_map._unlisted()` suppresses
-    (`gather_raw`, `wire_logs/`, `budget.json`, and since #976 the provenance stamp — read the
-    set there rather than a count from here) (g12/E5, executed).
+    (`gather_raw`, `wire_logs/`, and since #976 the provenance stamp — read the set there
+    rather than a count from here; `budget.json` left the set with #1235, which writes no such
+    file) (g12/E5, executed).
 
     The listing is a pinned surface — `test_salt_origin_647.py:480-516` asserts its contents —
     so this is not cosmetic: a new name appears in it on every run, the design does not
@@ -265,8 +266,6 @@ def test_message_zeros_run_dir_listing_names_the_queries_table(lead_zero_hits_ru
     )
     assert "gather_raw" not in listing, \
         "the listing started enumerating gather_raw, which it has always skipped"
-    assert "budget.json" not in listing, \
-        "the listing started enumerating budget.json, which it has always skipped"
 
 
 def test_scrub_walks_the_run_dir_lead_zero_wrote_into(tmp_path):

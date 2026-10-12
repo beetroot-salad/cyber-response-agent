@@ -71,6 +71,7 @@ from defender.run_repository import RunPaths  # noqa: E402
 from defender.runtime import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
+from defender.runtime.run_state import RunState  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import VerbRegistry  # noqa: E402
 from defender.tests import _review_bundle  # noqa: E402
@@ -444,11 +445,11 @@ def _default_tenant() -> Any:
     return _tenants1106.fixture_tenant()
 
 
-def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per INJECTION SEAM
+def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJECTION SEAM
         run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
         toolset=None, resume=None, defender_dir: Path | None = None,
-        tenant: Any = None, orient_shim: Any = None):
+        tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None) -> dict:
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
@@ -545,7 +546,35 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
     has, and no scenario here is about them. Real, they were over a third of the whole unit
     suite's CPU (three interpreters per drive, ~0.7s of a ~0.95s replay) and made every replay
     depend on the checked-in lessons corpus. A scenario about those sections passes
-    `orient._shim`."""
+    `orient._shim`.
+
+    `run_state` is the run's live state (#1235 round 3). Production's summary does not carry
+    it: `run_investigation(run_state=…)` is the seam, resolved once at its boundary to
+    `RunState(run_dir, run_id)` when handed none. The harness builds that same state itself,
+    injects it, and returns it in ITS OWN result under `"run_state"` — the one place a driven
+    test reaches a run's state. A scenario whose run ends by RAISING (no result comes back)
+    builds the state first and passes it here, so it still holds what the run decided on.
+    `driver_summary` is the same drive returning production's summary untouched."""
+    state = run_state if run_state is not None else RunState(run_dir, run_id)
+    summary = driver_summary(
+        run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs, limits=limits, box=box,
+        store_factory=store_factory, review_stages=review_stages, bounds=bounds,
+        toolset=toolset, resume=resume, defender_dir=defender_dir, tenant=tenant,
+        orient_shim=orient_shim, run_state=state,
+    )
+    return {**summary, "run_state": state}
+
+
+def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter each
+        run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
+        limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
+        toolset=None, resume=None, defender_dir: Path | None = None,
+        tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None) -> dict:
+    """`drive`'s run (every seam as `drive` documents it), returning `run_investigation`'s own
+    summary exactly as production's caller gets it. `run_state` is what the run is handed
+    (`run_investigation(run_state=…)`), the caller keeping its reference; omitted, it is not
+    passed at all, so the run resolves its own at the boundary — production's path (`run.py`
+    hands none)."""
     _refuse_conflicting_store_seams(resume, store_factory)
     tree = defender_dir if defender_dir is not None else DEFENDER
     main_built = BuiltModel(FunctionModel(main), None)
@@ -579,6 +608,8 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
         seams["toolset"] = toolset
     if resume is not None:
         seams["resume"] = resume
+    if run_state is not None:
+        seams["run_state"] = run_state
     seams["box"] = box if box is not None else box_mod.unboxed_executor(
         env=run_common.run_env(tree, run_dir),
     )

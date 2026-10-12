@@ -51,8 +51,8 @@ pytest.importorskip("pydantic_ai")
 
 from defender import _io  # noqa: E402
 from defender.agents import MAIN_DEF  # noqa: E402
-from defender.hooks import budget_enforcer, record_lead  # noqa: E402
-from defender.runtime import circuit_breaker, tools as runtime_tools  # noqa: E402
+from defender.hooks import record_lead  # noqa: E402
+from defender.runtime import tools as runtime_tools  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.tests.e2e._spec771 import (  # noqa: E402
     CENSUS,
@@ -61,8 +61,6 @@ from defender.tests.e2e._spec771 import (  # noqa: E402
     POSTURES,
     X5_MEASURED_SITES,
     Writer,
-    accounting_sidecar,
-    alias_refusals,
     drive_drain_restore,
     drive_fault_exit_trace,
     drive_normal_exit_trace,
@@ -519,7 +517,7 @@ def test_each_writer_keeps_its_exception_posture_when_the_write_is_refused(write
     with a REAL directory squatting the artifact name (an ordinary, root-proof write failure
     with no alias anywhere — the shape 47-reground used), and once with a real planted symlink.
     Arm one is the site's posture as it exists at HEAD; arm two must reproduce it. That is what
-    lets the demand cover fifteen rows without an author's prior standing in for a measurement
+    lets the demand cover every row without an author's prior standing in for a measurement
     at the eleven sites X5 never looked at — and it re-probes the premise on every run rather
     than pinning a table that drifts the moment a handler moves.
 
@@ -545,10 +543,9 @@ def test_each_writer_keeps_its_exception_posture_when_the_write_is_refused(write
     its own altitude — the census carried that label on the wrong writer until the anchor
     demand went back to the ledger's own four sites.
 
-    The fatal-looking fifth case is NOT here: §7 D3 exempts an alias refusal from every failure
-    circuit, so the budget site's escalation no longer rides on this demand. Its own pair is
-    `test_an_alias_refusal_is_recorded_but_never_ends_the_run` and
-    `test_a_genuine_accounting_write_failure_still_kills_on_the_elapsed_limb`."""
+    The fatal-looking fifth case is NOT here: §7 D3 exempted an alias refusal from every failure
+    circuit, and #1235 then retired the budget site's write altogether (the counters live in the
+    run process's memory), so no accounting escalation is left to ride on this demand."""
     ordinary_dir = tmp_path / f"{writer.id}-ordinary"
     ordinary_dir.mkdir()
     ordinary_run = run_tree(ordinary_dir)
@@ -584,10 +581,11 @@ def test_each_writer_keeps_its_exception_posture_when_the_write_is_refused(write
 @pytest.mark.parametrize("site", X5_MEASURED_SITES, ids=lambda s: s.posture)
 def test_the_four_call_site_postures_the_ledger_measured_are_unchanged(site, tmp_path):
     """measured_postures_anchored_to_the_ledger — each of the four call sites X5 measured still
-    produces, under the fault X5 induced there, the observable X5 recorded: the accounting site
-    returns normally while its silent failure counter advances, the gather raw-payload writer
-    returns None, the lead sidecar writer returns 0, and the startup sentinel raises a box
-    fault rather than an ordinary `OSError`.
+    produces, under the fault X5 induced there, the observable X5 recorded: the gather
+    raw-payload writer returns None, the lead sidecar writer returns 0, and the startup sentinel
+    raises a box fault rather than an ordinary `OSError`. (The fourth, the accounting site's
+    swallow-continue, retired with #1235: the budget is counted in memory, so that site has no
+    write to fail.)
 
     THE ANCHOR FOR F1, and the reason the parity demand alone is not one. F1's content is
     "every call site keeps the posture it has TODAY"; measuring "today" during the test run
@@ -680,191 +678,7 @@ def test_the_census_still_exhibits_all_four_measured_posture_classes(tmp_path):
     )
 
 
-def test_an_alias_refusal_is_recorded_but_never_ends_the_run(tmp_path):
-    """alias_refusal_exempt_from_every_failure_circuit — a write refused BECAUSE an alias was
-    planted is recorded in the accounting sidecar OUTSIDE the run dir, and counts toward
-    nothing: the accounting failure counter does not advance, the first-failure stamp is never
-    set, no number of such refusals raises `BudgetKill`, and the shared tree gains no new
-    artifact for the record.
-
-    §7 D3, and it is a deliberate narrow amendment to F1's preserve-every-posture rule.
-    Without it F1's own rationale — do not hand the box a reliable denial-of-service lever
-    (plant a link, kill the run) — was false in three places. X14 measured the lever and it is
-    worse than the ledger recorded: one refusal, one success, then a single further refusal
-    past the elapsed threshold ends the run, and the posture that makes it reachable is CI's.
-
-    §7 D7 DECIDES WHERE THE RECORD LIVES, and it is mechanism rather than tidiness. An in-tree
-    JSONL sink would have been a sixteenth writer into the attacker-controlled tree — absent
-    from the census, absent from the lint's gate list, and reachable by the exact plant this
-    change exists to stop: the box plants an alias at the record's own name, the record write
-    is refused, and D3's own accepted cost (a refused write may be swallowed at its site) makes
-    that silent. The mechanism observing the attack would have been suppressible BY the attack.
-    So the record goes to the sidecar the demand already bound — a sibling of the run dir (X6),
-    outside every box mount, and where the failure circuit already writes.
-
-    The last assertion is the negative half of D7 and is what keeps the fix from drifting back:
-    no new artifact appears inside the tree.
-
-    THE ENFORCEMENT FLAG CANNOT CHANGE WHICH IDIOM THIS DEMAND EXERCISES, and that is stated
-    rather than assumed because X13's refutation ends with an instruction not to inherit a
-    posture. `account_call` is driven directly, BELOW the branch: the flag is read at the hook
-    build site and decides whether the accounting hook fires at all, while `account_call`
-    itself always reaches the staged-temp write. So this pair pins one idiom under both values
-    of the flag, and needs neither arm nor a pinned environment to say which."""
-    run = run_tree(tmp_path)
-    target = outside(tmp_path)
-    plant_symlink(run / "budget.json", target)
-    before_tree = {str(p.relative_to(run)) for p in run.rglob("*")}
-    limits = {**budget_enforcer.DEFAULT_LIMITS, "accounting_failure_max_elapsed": 0}
-
-    for _ in range(10):
-        budget_enforcer.account_call(run, "r-771", "bash", limits=limits, tier="main")
-
-    state = budget_enforcer.accounting_failure_state(run)
-    assert state["consecutive_failures"] == 0, (
-        "an alias refusal advanced the accounting failure counter — the DoS lever is back"
-    )
-    assert state["first_failure_at"] is None, (
-        "an alias refusal set the first-failure stamp, which never clears (X14) — two more "
-        "refusals past the window would then end the run"
-    )
-    assert target.read_bytes() == b"ORIGINAL OUTSIDE\n", "the refused write still redirected"
-
-    recorded = alias_refusals(run)
-    assert recorded, (
-        f"the refusal was exempted from the circuit AND left no record in "
-        f"{accounting_sidecar(run).name} — D3 requires both halves"
-    )
-    assert any(str(r.get("path", "")).endswith("budget.json") for r in recorded), (
-        f"the record names no refused path, so an operator cannot act on it: {recorded}"
-    )
-    assert not accounting_sidecar(run).is_relative_to(run), (
-        "the record landed inside the run dir after all — D7 sites it outside every box mount "
-        "precisely so the box cannot plant an alias at the record's own name"
-    )
-    new_in_tree = {str(p.relative_to(run)) for p in run.rglob("*")} - before_tree
-    assert not new_in_tree, (
-        f"recording the refusal created new entries INSIDE the shared tree ({sorted(new_in_tree)}) "
-        f"— the extra writer D7 removed, back again and still absent from the census and the lint"
-    )
-
-
-def test_a_genuine_accounting_write_failure_still_kills_on_the_elapsed_limb(tmp_path):
-    """genuine_accounting_failure_still_escalates — a write that fails for a reason that is NOT
-    an alias refusal still counts: past the elapsed threshold, a single further failure raises
-    `BudgetKill`, and the kill names the elapsed limb rather than the consecutive one.
-
-    The positive control for D3's exemption — without it, "no alias refusal ever ends the run"
-    is also satisfied by an escalation circuit that was accidentally disabled for everything.
-
-    X14, re-probed EXECUTED, changed the magnitude: `_reset_accounting_failure` zeroes
-    `consecutive_failures` and never clears `first_failure_at`, so past 300s against a 1200s
-    wall clock TWO refused writes total end the run. A test written against "five consecutive"
-    passes while that path stays open, which is why the elapsed limb is what is asserted.
-
-    LIKE ITS PAIR, THIS DRIVES `account_call` DIRECTLY, below the enforcement flag's branch —
-    the flag decides whether the accounting hook fires, not which idiom `account_call` uses —
-    so the posture X13 warned against inheriting is not inherited here either."""
-    run = run_tree(tmp_path)
-    (run / "budget.json").mkdir()          # a directory squatting the artifact name: a REAL,
-    # root-proof write failure with no alias anywhere (the same shape 47-reground used for the
-    # breaker, chosen because root ignores permission bits and `defender/CLAUDE.md` records
-    # four #631 tests that invert under root for exactly that reason).
-    limits = {**budget_enforcer.DEFAULT_LIMITS,
-              "accounting_failure_max_consecutive": 1000,
-              "accounting_failure_max_elapsed": 0}
-
-    def drive_three() -> None:
-        for _ in range(3):
-            budget_enforcer.account_call(run, "r-771", "bash", limits=limits, tier="main")
-
-    with pytest.raises(budget_enforcer.BudgetKill) as e:
-        drive_three()
-
-    assert "elapsed" in str(e.value).lower(), (
-        f"the kill came from the consecutive limb, not the elapsed one X14 measured: {e.value}"
-    )
-
-
-def test_a_refused_circuit_breaker_write_does_not_crash_the_run(tmp_path):
-    """breaker_refused_write_does_not_crash_the_run — a refused write to `circuit_breaker.json`
-    raises no uncaught `OSError` out of the run: the refusal is contained at the writer, the
-    outside target is untouched, and the investigation continues.
-
-    A rider on §7 D3, fixed regardless of the exemption. 47-reground executed this: today
-    `update_json_locked` opens `r+` with no `OSError` handling, `record_outcome` does not catch
-    either, and the call site sits OUTSIDE the query tool's control-flow except — so the error
-    propagates past `_drive_agent` (which catches only four named types) and crashes the
-    process HARDER than `BudgetKill`, with no partial-trace branch firing. That is a plain
-    robustness bug, and this demand is what keeps it fixed."""
-    run = run_tree(tmp_path)
-    target = outside(tmp_path)
-    original = target.read_bytes()
-    plant_symlink(run / "circuit_breaker.json", target)
-
-    circuit_breaker.record_outcome(run, "elastic", 2)
-
-    assert target.read_bytes() == original, "the breaker's write followed the alias"
-
-
-def test_a_refused_circuit_breaker_read_is_not_silently_reported_as_untripped(tmp_path):
-    """breaker_refused_read_is_observable — when the breaker's state cannot be read, the run
-    does not silently report "not tripped": the unreadable state is observable to the operator
-    rather than indistinguishable from a healthy, freshly-initialised breaker.
-
-    The second rider on §7 D3. 47-reground executed it: `_load` wraps its read in
-    `except (JSONDecodeError, OSError): return _blank()`, so with the state file sabotaged
-    `is_tripped()` returned `False` and `down_message()` returned its normal templated string.
-    A safety mechanism that reports its own absence as health is disarmed, and nothing today
-    can tell the difference."""
-    run = run_tree(tmp_path)
-    (run / "circuit_breaker.json").mkdir()   # unreadable as a file, and root-proof
-
-    assert circuit_breaker.is_tripped(run, "elastic"), (
-        "an unreadable breaker state read as a healthy UNTRIPPED breaker — the disarmed "
-        "safety mechanism 47-reground executed. It must fail closed, the same direction §7 D2 "
-        "takes for an unmarked tree."
-    )
-    assert "unreadable" in circuit_breaker.down_message(run, "elastic").lower(), (
-        "the operator is shown the ordinary breaker-tripped message, so a corrupted state file "
-        "is indistinguishable from real infrastructure degradation"
-    )
-
-
-# the two budget idioms, the seam, the lint, and the callers outside every box
-def test_budget_write_is_alias_safe_under_both_enforcement_postures(tmp_path, monkeypatch):
-    """budget_write_alias_safe_under_the_enforce_flag — `budget.json` is alias-safe under BOTH
-    values of the enforcement flag: the flag-on lane (stage-then-rename) and the flag-off lane
-    (locked read-modify-write) each leave the outside target byte-identical.
-
-    The flag SELECTS WHICH OF TWO IDIOMS writes the artifact, so a test that exercises one
-    certifies nothing about the other. X13, re-probed by MEASUREMENT rather than inference:
-    both CI pytest jobs set the flag for the whole collected suite, and the audit counted 759
-    stagings of `budget.json.tmp` in one suite run. The B4-unsafe lane is therefore the
-    CI-DEFAULT lane, including for every test in this file — so the posture is PINNED here
-    explicitly on both arms rather than inherited, which would silently exercise one branch
-    twice."""
-    for value, arm in (("1", "enforcing"), ("0", "locked")):
-        monkeypatch.setenv("DEFENDER_BUDGET_ENFORCE", value)
-        d = tmp_path / arm
-        d.mkdir()
-        run = run_tree(d)
-        target = outside(d)
-        original = target.read_bytes()
-        plant_symlink(run / "budget.json", target)
-
-        try:
-            if value == "1":
-                budget_enforcer.account_call(
-                    run, "r-771", "bash", limits=budget_enforcer.DEFAULT_LIMITS, tier="main")
-            else:
-                budget_enforcer.update_budget_locked(run, "r-771", "bash")
-        except OSError:
-            pass
-
-        assert target.read_bytes() == original, f"the {arm} budget idiom followed the alias"
-
-
+# the locked idiom, the seam, the lint, and the callers outside every box
 def test_locked_json_open_fails_before_the_lock_is_acquired(tmp_path):
     """locked_json_open_refuses_before_the_lock — the locked read-modify-write idiom refuses at
     the OPEN, with `ELOOP`, so `flock` is never taken on the outside target and its bytes are
@@ -959,10 +773,12 @@ def test_a_new_shared_tree_writer_is_a_lint_finding(tmp_path):
 
     tree = tmp_path / "src"
     (tree / "pkg").mkdir(parents=True)
+    # The wrapped callee is `append_jsonl`, the lint's surviving unsafe `_io` callee: the
+    # original wrapper over `write_atomic` lost its subject when #1235 deleted that helper.
     (tree / "pkg" / "wrapper.py").write_text(
-        "from defender._io import write_atomic\n"
-        "def _write_thing_atomic(run_dir, state):\n"
-        "    write_atomic(run_dir / 'thing.json', state)\n",
+        "from defender._io import append_jsonl\n"
+        "def _write_thing_rows(run_dir, rows):\n"
+        "    append_jsonl(run_dir / 'thing.jsonl', rows)\n",
         encoding="utf-8",
     )
     (tree / "pkg" / "guarded.py").write_text(

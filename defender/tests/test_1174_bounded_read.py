@@ -3,7 +3,7 @@
 The design (issue comment on #1174): every plain-file reader in `_io` — `Bound.read` (so
 `read_jsonl`), `rooted_read`, `read_plain`, `read_plain_bytes`, `read_guarded`,
 `read_bytes_guarded` — and the two read-modify-write reads through the rewrite handles
-(`_run_handle`'s `update` verb, `hooks/_run_dir.update_json_locked`) owe:
+(`_run_handle`'s `update` verb, `_io.locked_json_update` over `locked_for_rewrite`) owe:
 
 - O1: a file over `READ_LIMIT` (64 MiB) is refused before any byte is read, path-free; a file
   that grows past it while read is refused too; no `MemoryError`.
@@ -33,14 +33,7 @@ from typing import Any
 import pytest
 
 from defender import _io
-from defender.run_repository import _handle as H
 from defender.run_repository import RunPaths
-from defender.hooks import _run_dir
-from defender.hooks import budget_enforcer as BE
-from defender.runtime import circuit_breaker as CB
-from defender.runtime.lead_zero import _capture as CAP
-from defender.runtime.lead_zero._spec import ITEM1_SYSTEM
-from defender.tests import _spec1077 as S
 
 MiB = 1024 * 1024
 NAME = "rec.txt"
@@ -514,10 +507,30 @@ def test_o5_an_empty_file_is_an_empty_read(root, reader):
 # Amendment 2 — the locked JSON update and read (M4/M7), the wrappers (M5), the breaker (M6)
 # ---------------------------------------------------------------------------------------
 #
-# Callers get contents, never a handle to read. Unusable run-state content — too big,
+# Callers get contents, never a handle to read. Unusable state content — too big,
 # undecodable, not JSON, nested past `JSON_NESTING_LIMIT`, not an object — heals to the default
-# on the update (O6) and reads as `{}` (O8) or, for the breaker, as tripped (O10). A read fault
-# that is not about the content propagates out of the update (O7).
+# on the update (O6) and reads as `{}` (O8). A read fault that is not about the content
+# propagates out of the update (O7).
+#
+# #1235: the budget counters and the circuit breaker left the run folder for the run process's
+# memory, and the run handle's two locked `update` members (`budget`, `circuit_breaker`) went
+# with them. The arms that planted unusable `budget.json` / `circuit_breaker.json` content, and
+# the breaker's "unusable state reads as tripped" branch (O10, H3, H8, H9), retired with the
+# files. O6/O8 are pinned on the shared locked update and read (`_io.locked_json_update` over
+# `locked_for_rewrite`, `_io.locked_json_read` over `locked_for_read`) over a plain state file.
+# (The oracle-held sidecar left with #1235 too: the oracle's held time is the run's in-memory
+# state. Round 3 deleted `hooks/_run_dir`'s two wrappers over these, which had no production
+# caller left; the arms that pinned only the wrappers — H6, H13 — left with them.)
+
+
+def update_locked(path: Path, mutate: Callable[[dict], Any], **kw: Any) -> dict:
+    """The shared locked read-modify-write: `_io.locked_json_update` over `locked_for_rewrite`."""
+    return _io.locked_json_update(_io.locked_for_rewrite(path), mutate, **kw)
+
+
+def read_locked(path: Path) -> dict:
+    """The shared locked read: `_io.locked_json_read` over `locked_for_read`."""
+    return _io.locked_json_read(_io.locked_for_read(path))
 
 
 def _deep(depth: int) -> bytes:
@@ -561,77 +574,22 @@ def load(path: Path) -> Any:
 
 
 @pytest.mark.parametrize("kind", UNUSABLE)
-def test_o6_open_budget_heals_unusable_content_to_the_default_with_the_change(tmp_path, kind):
-    """`open_budget` runs outside any `try` at a resumed run's start; on unusable content it
-    starts from the default, applies its change and writes, rather than raising."""
-    run_dir = run_dir_at(tmp_path)
-    plant_unusable(RunPaths(run_dir).budget, kind)
-    state = BE.open_budget(run_dir, "run-1174")
-    assert state["run_id"] == "run-1174"
-    assert state["tool_calls"] == 0
-    assert load(RunPaths(run_dir).budget) == state
-
-
-@pytest.mark.parametrize("kind", UNUSABLE)
-def test_o6_update_budget_locked_heals(tmp_path, kind):
-    run_dir = run_dir_at(tmp_path)
-    plant_unusable(RunPaths(run_dir).budget, kind)
-    state = BE.update_budget_locked(run_dir, "run-1174", "gather")
-    assert state["run_id"] == "run-1174"
-    assert state["tool_calls"] == 1
-    assert state["subagent_spawns"] == 1
-    assert load(RunPaths(run_dir).budget) == state
-
-
-def _infra_exit() -> int:
-    return min(CB.INFRA_EXIT_CODES)
-
-
-@pytest.mark.parametrize("kind", UNUSABLE)
-def test_o6_record_outcome_heals_and_counts(tmp_path, kind):
-    """Before, a too-big or too-deep state made `record_outcome` stop counting for the rest of
-    the run (its `except` logs and returns `{}`). Now it starts over and counts."""
-    run_dir = run_dir_at(tmp_path)
-    plant_unusable(RunPaths(run_dir).circuit_breaker, kind)
-    state = CB.record_outcome(run_dir, "elastic", _infra_exit())
-    assert state["systems"]["elastic"]["failures"] == 1
-    assert state["total_failures"] == 1
-    assert load(RunPaths(run_dir).circuit_breaker) == state
-
-
-def _budget_handle(run_dir: Path, io: Any = _io) -> Any:
-    # #1105 NH-3: a run is built only under a runs folder whose tenant record names its
-    # tenant; run setup writes the record first, so the handle's caller does here too.
-    if not (run_dir.parent / S.TENANT_RECORD_NAME).exists():
-        S.plant_tenant_record(run_dir.parent)
-    run = H.Run.for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=run_dir.parent, io=io)
-    group = next(g for g, names in H.GROUP_MEMBERS.items() if "budget" in names)
-    return S.member(run, group, "budget", *S.member_args("budget"))
-
-
-@pytest.mark.parametrize("kind", UNUSABLE)
-def test_o6_the_run_handle_update_heals(tmp_path, kind):
-    run_dir = run_dir_at(tmp_path)
-    h = _budget_handle(run_dir)
-    plant_unusable(h.path, kind)
-    h.update({"k": 1})
-    assert load(h.path) == {"k": 1}
+def test_o6_the_locked_update_heals_unusable_content_to_the_default_with_the_change(
+        tmp_path, kind):
+    """The shared locked update on unusable content starts from the default, applies its
+    change and writes, rather than raising."""
+    p = tmp_path / "state.json"
+    plant_unusable(p, kind)
+    state = update_locked(p, lambda d: d.update(k=1), default=dict)
+    assert state == {"k": 1}
+    assert load(p) == state
 
 
 def test_o6_control_valid_documents_are_merged_not_reset(tmp_path):
-    run_dir = run_dir_at(tmp_path)
-    BE.open_budget(run_dir, "run-1174")
-    BE.update_budget_locked(run_dir, "run-1174", "x")
-    BE.update_budget_locked(run_dir, "run-1174", "x")
-    assert load(RunPaths(run_dir).budget)["tool_calls"] == 2
-    CB.record_outcome(run_dir, "elastic", _infra_exit())
-    CB.record_outcome(run_dir, "elastic", _infra_exit())
-    assert load(RunPaths(run_dir).circuit_breaker)["systems"]["elastic"]["failures"] == 2
-    h = _budget_handle(run_dir)
-    h.update({"a": 1})
-    h.update({"b": 2})
-    assert load(h.path)["a"] == 1
-    assert load(h.path)["b"] == 2
+    p = tmp_path / "state.json"
+    update_locked(p, lambda d: d.update(a=1), default=dict)
+    update_locked(p, lambda d: d.update(b=2), default=dict)
+    assert load(p) == {"a": 1, "b": 2}
 
 
 def test_o6_the_rewrite_leaves_exactly_the_new_document(tmp_path):
@@ -639,7 +597,7 @@ def test_o6_the_rewrite_leaves_exactly_the_new_document(tmp_path):
     one leaves no tail and no leading NULs, byte for byte."""
     p = tmp_path / "state.json"
     p.write_text(json.dumps({"long": "x" * 5000}))
-    _run_dir.update_json_locked(p, lambda d: (d.clear(), d.update(k=1)))
+    update_locked(p, lambda d: (d.clear(), d.update(k=1)))
     assert load(p) == {"k": 1}
     assert not p.read_bytes().startswith(b"\x00")
     assert p.read_bytes() == json.dumps({"k": 1}, indent=2).encode()
@@ -669,16 +627,14 @@ def efbig_fault(_fd: int, _n: int) -> bytes:
 
 @pytest.mark.parametrize("fault", [eio, eagain, vanishing_read, efbig_fault],
                          ids=["EIO", "EAGAIN", "vanished", "EFBIG-from-a-fault"])
-@pytest.mark.parametrize("opener", ["path", "rooted"])
-def test_o7_a_read_fault_propagates_out_of_the_update_and_changes_nothing(
-        tmp_path, fault, opener):
+def test_o7_a_read_fault_propagates_out_of_the_update_and_changes_nothing(tmp_path, fault):
     """Healing is decided by type: only the step's own size refusal heals, so an unrelated
-    `EFBIG` raised by a fault propagates like `EIO`."""
+    `EFBIG` raised by a fault propagates like `EIO`. (The rooted opener's arm left with #1235,
+    which deleted `_io.rooted_locked_for_rewrite`.)"""
     p = tmp_path / "state.json"
     p.write_text('{"keep": true}')
     f = FaultOs(read_fault=fault)
-    cm = (_io.locked_for_rewrite(p, os_=f) if opener == "path"
-          else _io.rooted_locked_for_rewrite(tmp_path, "state.json", os_=f))
+    cm = _io.locked_for_rewrite(p, os_=f)
     with pytest.raises(OSError):  # noqa: PT011 — each fault keeps its own errno and words
         _io.locked_json_update(cm, lambda d: d.update(k=1), default=dict, os_=f)
     assert p.read_text() == '{"keep": true}'
@@ -688,10 +644,10 @@ def test_o7_a_read_fault_propagates_out_of_the_update_and_changes_nothing(
 
 
 @pytest.mark.parametrize("kind", UNUSABLE)
-def test_o8_read_budget_answers_empty_for_unusable_content(tmp_path, kind):
-    run_dir = run_dir_at(tmp_path)
-    plant_unusable(RunPaths(run_dir).budget, kind)
-    assert BE.read_budget(run_dir) == {}
+def test_o8_the_locked_read_answers_empty_for_unusable_content(tmp_path, kind):
+    p = tmp_path / "state.json"
+    plant_unusable(p, kind)
+    assert read_locked(p) == {}
 
 
 @pytest.mark.parametrize("fault", [eio, eagain, vanishing_read], ids=["EIO", "EAGAIN", "vanished"])
@@ -705,17 +661,7 @@ def test_o8_the_locked_read_answers_empty_for_any_read_error(tmp_path, fault):
 def test_o8_control_the_locked_read_answers_the_document(tmp_path):
     p = tmp_path / "state.json"
     p.write_text('{"a": 1}')
-    assert _io.locked_json_read(_io.locked_for_read(p)) == {"a": 1}
-    assert _run_dir.read_json_locked(p) == {"a": 1}
-
-
-def test_o8_reading_creates_neither_budget_nor_sidecar(tmp_path):
-    run_dir = run_dir_at(tmp_path)
-    assert BE.read_budget(run_dir) == {}
-    assert not RunPaths(run_dir).budget.exists()
-    assert BE.accounting_failure_state(run_dir) == {
-        "consecutive_failures": 0, "first_failure_at": None}
-    assert not BE._accounting_failure_path(run_dir).exists()
+    assert read_locked(p) == {"a": 1}
 
 
 def test_o8_the_locked_read_refuses_a_link_without_following_it(tmp_path):
@@ -723,23 +669,7 @@ def test_o8_the_locked_read_refuses_a_link_without_following_it(tmp_path):
     target.write_text('{"secret": 1}')
     p = tmp_path / "state.json"
     p.symlink_to(target)
-    assert _run_dir.read_json_locked(p) == {}
-
-
-def test_o8_a_sparse_sidecar_reads_as_no_failures(tmp_path):
-    run_dir = run_dir_at(tmp_path)
-    sparse(BE._accounting_failure_path(run_dir), 1 << 40)
-    assert BE.accounting_failure_state(run_dir) == {
-        "consecutive_failures": 0, "first_failure_at": None}
-
-
-def test_o8_account_call_survives_a_sparse_budget(tmp_path):
-    """`account_call` reads through `read_budget` before every tool call: a sparse plant there
-    reads as no state, never `MemoryError`."""
-    run_dir = run_dir_at(tmp_path)
-    sparse(RunPaths(run_dir).budget, 1 << 40)
-    state = BE.account_call(run_dir, "run-1174", "x", limits=BE.DEFAULT_LIMITS, tier="main")
-    assert state["tool_calls"] == 1
+    assert read_locked(p) == {}
 
 
 # -- O11: the path update judges plainness on the descriptor ---------------------------------
@@ -760,7 +690,7 @@ class HardLinkBeforeOpen(FaultOs):
 
 
 def test_o11_a_hard_link_planted_after_the_precheck_is_refused_on_the_descriptor(tmp_path):
-    p = tmp_path / "budget.json"
+    p = tmp_path / "state.json"
     p.write_text('{"keep": true}')
     f = HardLinkBeforeOpen(p, tmp_path / "other")
     with pytest.raises(OSError, match="non-plain") as ei:
@@ -771,42 +701,12 @@ def test_o11_a_hard_link_planted_after_the_precheck_is_refused_on_the_descriptor
 
 
 def test_o11_control_without_the_plant_the_update_lands(tmp_path):
-    p = tmp_path / "budget.json"
+    p = tmp_path / "state.json"
     p.write_text('{"keep": true}')
     f = FaultOs()
     _io.locked_json_update(_io.locked_for_rewrite(p, os_=f), lambda d: d.update(k=1),
                            default=dict, os_=f)
     assert load(p) == {"keep": True, "k": 1}
-
-
-# -- O10: the breaker reads fail closed on any unusable content ------------------------------
-
-
-@pytest.mark.parametrize("kind", UNUSABLE)
-def test_o10_the_breaker_reads_unusable_state_as_tripped(tmp_path, kind):
-    run_dir = run_dir_at(tmp_path)
-    plant_unusable(RunPaths(run_dir).circuit_breaker, kind)
-    assert CB._load(run_dir).get("_unreadable") is True
-    assert CB.is_tripped(run_dir, "elastic") is True
-    assert CB.is_tripped(run_dir, "any_other_system") is True
-
-
-@pytest.mark.parametrize("kind", UNUSABLE)
-def test_o10_breaker_failures_degrades_without_raising(tmp_path, kind):
-    """`_breaker_failures` reads through `_load`: unusable state degrades only this read (0),
-    never `MemoryError` or `RecursionError`."""
-    run_dir = run_dir_at(tmp_path)
-    plant_unusable(RunPaths(run_dir).circuit_breaker, kind)
-    assert CAP._breaker_failures(run_dir) == 0
-
-
-def test_o10_control_a_valid_state_reads_as_before(tmp_path):
-    run_dir = run_dir_at(tmp_path)
-    RunPaths(run_dir).circuit_breaker.write_text(json.dumps(
-        {"systems": {ITEM1_SYSTEM: {"failures": 2}}, "total_failures": 2}))
-    assert CAP._breaker_failures(run_dir) == 2
-    assert CB._load(run_dir).get("_unreadable") is None
-    assert CB.is_tripped(run_dir, "never_failed") is False
 
 
 # -- O1 widened, O9: the canonical wrappers ---------------------------------------------------
@@ -932,19 +832,6 @@ def in_thread(fn: Callable[[], Any], *, deadline: float = 10.0) -> Any:
 # -- H1: the read opener --------------------------------------------------------------------
 
 
-def test_h1_a_fifo_at_the_budget_path_reads_as_empty_and_does_not_hang(tmp_path):
-    run_dir = run_dir_at(tmp_path)
-    os.mkfifo(RunPaths(run_dir).budget)
-    assert in_thread(lambda: BE.read_budget(run_dir)) == {}
-
-
-def test_h1_a_hard_linked_budget_reads_as_empty(tmp_path):
-    run_dir = run_dir_at(tmp_path)
-    RunPaths(run_dir).budget.write_text('{"tool_calls": 3}')
-    os.link(RunPaths(run_dir).budget, tmp_path / "elsewhere")
-    assert BE.read_budget(run_dir) == {}
-
-
 def test_h1_the_read_opener_takes_a_shared_lock(tmp_path):
     p = tmp_path / "state.json"
     p.write_text("{}")
@@ -957,25 +844,6 @@ def test_h1_the_read_opener_takes_a_shared_lock(tmp_path):
                 fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)  # a writer waits
         finally:
             os.close(other)
-
-
-# -- H3: the breaker's readers are bounded ---------------------------------------------------
-
-
-def test_h3_a_1tib_breaker_state_reads_as_tripped(tmp_path):
-    run_dir = run_dir_at(tmp_path)
-    sparse(RunPaths(run_dir).circuit_breaker, 1 << 40)
-    assert CB.is_tripped(run_dir, "elastic") is True
-    assert CAP._breaker_failures(run_dir) == 0
-
-
-def test_h3_a_valid_state_padded_past_the_limit_reads_as_tripped(tmp_path):
-    """Valid JSON — `{"systems": {}}`, healthy if read — padded with spaces past the limit: a
-    bounded reader refuses it (tripped); an unbounded one would read it as healthy."""
-    run_dir = run_dir_at(tmp_path)
-    body = b'{"systems": {}}'
-    RunPaths(run_dir).circuit_breaker.write_bytes(body + b" " * (64 * MiB + 1 - len(body)))
-    assert CB.is_tripped(run_dir, "elastic") is True
 
 
 # -- H2, H12 (amended by #1188 D1/D2): the cap only lowers; the wire log streams ------------
@@ -1245,50 +1113,6 @@ def test_h5_a_procfs_file_reads_to_the_same_full_content():
     assert _io.read_text_soft(proc) == (want, None)
 
 
-# -- H6: the run handle's update does not heal from a read fault -----------------------------
-
-
-class _EioUpdateIo:
-    """`_io` for a run handle, except its `locked_json_update` reads through an `os_` whose
-    `read` raises `EIO`."""
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(_io, name)
-
-    @staticmethod
-    def locked_json_update(open_locked: Any, mutate: Any, *, default: Any = dict) -> dict:
-        return _io.locked_json_update(open_locked, mutate, default=default,
-                                      os_=FaultOs(read_fault=eio))
-
-
-def test_h6_the_run_handle_update_raises_on_a_read_fault_and_changes_nothing(tmp_path):
-    run_dir = run_dir_at(tmp_path)
-    h = _budget_handle(run_dir, io=_EioUpdateIo())
-    h.path.parent.mkdir(parents=True, exist_ok=True)
-    h.path.write_text('{"keep": true}')
-    with pytest.raises(OSError, match="Input/output"):
-        h.update({"k": 1})
-    assert h.path.read_text() == '{"keep": true}'
-
-
-@pytest.mark.parametrize("fault", [eio, eagain, vanishing_read], ids=["EIO", "EAGAIN", "vanished"])
-def test_h6_update_json_locked_propagates_a_read_fault_through_its_seam(tmp_path, fault):
-    """The hooks entry point `open_budget`, `update_budget_locked` and `record_outcome` share
-    takes `os_`, so O7 is pinned there, not only on `_io`."""
-    p = tmp_path / "budget.json"
-    p.write_text('{"keep": true}')
-    with pytest.raises(OSError):  # noqa: PT011 — each fault keeps its own errno and words
-        _run_dir.update_json_locked(p, lambda d: d.update(k=1), os_=FaultOs(read_fault=fault))
-    assert p.read_text() == '{"keep": true}'
-
-
-def test_h6_read_json_locked_answers_empty_on_a_read_fault_through_its_seam(tmp_path):
-    p = tmp_path / "budget.json"
-    p.write_text('{"keep": true}')
-    assert _run_dir.read_json_locked(p, os_=FaultOs(read_fault=eio)) == {}
-    assert _run_dir.read_json_locked(p, os_=FaultOs()) == {"keep": True}
-
-
 # -- H7: a fault inside the read opener -------------------------------------------------------
 
 
@@ -1299,32 +1123,6 @@ def test_h7_a_fault_in_the_read_opener_answers_empty(tmp_path, fail):
     f = OpenerFaultOs(fail)
     assert _io.locked_json_read(_io.locked_for_read(p, os_=f), os_=f) == {}
     assert fail in f.calls
-
-
-# -- H8, H9: the breaker's readers on falsy, linked and overflowing state ---------------------
-
-
-@pytest.mark.parametrize("doc", ["null", "[]", "0", "false", '""', "[1, 2]"])
-def test_h8_a_falsy_or_non_object_breaker_state_reads_as_tripped(tmp_path, doc):
-    run_dir = run_dir_at(tmp_path)
-    RunPaths(run_dir).circuit_breaker.write_text(doc)
-    assert CB.is_tripped(run_dir, "elastic") is True
-    assert CAP._breaker_failures(run_dir) == 0
-
-
-def test_h9_breaker_failures_does_not_follow_a_link(tmp_path):
-    run_dir = run_dir_at(tmp_path)
-    real = tmp_path / "real.json"
-    real.write_text(json.dumps({"systems": {ITEM1_SYSTEM: {"failures": 3}}, "total_failures": 3}))
-    RunPaths(run_dir).circuit_breaker.symlink_to(real)
-    assert CAP._breaker_failures(run_dir) == 0
-
-
-def test_h9_breaker_failures_survives_an_overflowing_count(tmp_path):
-    run_dir = run_dir_at(tmp_path)
-    RunPaths(run_dir).circuit_breaker.write_text(
-        f'{{"systems": {{"{ITEM1_SYSTEM}": {{"failures": 1e999}}}}, "total_failures": 1}}')
-    assert CAP._breaker_failures(run_dir) == 0
 
 
 # -- H10: the rewrite goes through the seam, whole -------------------------------------------
@@ -1357,7 +1155,7 @@ def test_h11_a_document_at_exactly_the_nesting_limit_is_merged(tmp_path):
     p = tmp_path / "state.json"
     p.write_bytes(_deep(_io.JSON_NESTING_LIMIT - 1))  # the outer object makes it LIMIT deep
     assert _io.json_nesting_depth(p.read_text()) == _io.JSON_NESTING_LIMIT
-    state = _run_dir.update_json_locked(p, lambda d: d.update(k=1))
+    state = update_locked(p, lambda d: d.update(k=1))
     assert "a" in state
     assert state["k"] == 1
 
@@ -1366,17 +1164,4 @@ def test_h11_one_past_the_nesting_limit_heals(tmp_path):
     p = tmp_path / "state.json"
     p.write_bytes(_deep(_io.JSON_NESTING_LIMIT))
     assert _io.json_nesting_depth(p.read_text()) == _io.JSON_NESTING_LIMIT + 1
-    assert _run_dir.update_json_locked(p, lambda d: d.update(k=1)) == {"k": 1}
-
-
-# -- H13: one indent setting on both former paths ---------------------------------------------
-
-
-def test_h13_both_update_paths_write_the_same_form(tmp_path):
-    run_dir = run_dir_at(tmp_path)
-    h = _budget_handle(run_dir)
-    h.update({"a": 1, "b": [1, 2]})
-    assert h.path.read_bytes() == json.dumps({"a": 1, "b": [1, 2]}, indent=2).encode()
-    p = tmp_path / "state.json"
-    state = _run_dir.update_json_locked(p, lambda d: d.update(a=1, b=[1, 2]))
-    assert p.read_bytes() == json.dumps(state, indent=2).encode()
+    assert update_locked(p, lambda d: d.update(k=1)) == {"k": 1}

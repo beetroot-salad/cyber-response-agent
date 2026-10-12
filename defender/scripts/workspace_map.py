@@ -20,15 +20,15 @@ REPO_ROOT = DEFENDER_DIR.parent
 #: Run-dir children the map does not name. The map is inlined into MAIN's message 0 as its
 #: directory view (MAIN has no `ls`), so naming a path the gate refuses only teaches it to ask
 #: for one (`test_gather_raw_suppressed`). `gather_raw/` and `wire_logs/` are actually refused
-#: by `permission.files`. `budget.json` and the provenance stamp are operator infrastructure
-#: and are only hidden, not out of reach: every run-root file is inside MAIN's and GATHER's
+#: by `permission.files`. The provenance stamp is operator infrastructure and is only hidden,
+#: not out of reach: every run-root file is inside MAIN's and GATHER's
 #: `under(run, SEG)` read shape.
 def _unlisted() -> frozenset[str]:
     """The run-dir entries this view suppresses, asked of `RUN_LAYOUT` per call so a writer's
     rename cannot make a suppressed file silently reappear in MAIN's message 0."""
     return frozenset({
         RUN_LAYOUT.gather_raw.name, RUN_LAYOUT.wire_log_dir.name,
-        RUN_LAYOUT.budget.name, RUN_LAYOUT.provenance.name,
+        RUN_LAYOUT.provenance.name,
     })
 
 

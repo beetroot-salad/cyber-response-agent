@@ -297,7 +297,11 @@ def _into_tenant_runs(run_dir: Path) -> tuple[str, Path]:
     runs = current_data_root() / tenant / "runs"
     runs.mkdir(exist_ok=True)
     _tenant.ensure_runs_base_record(runs, _tenant.TenantId(tenant))
-    return tenant, Path(shutil.move(run_dir, runs / run_dir.name))
+    # #1235 F2: the run -> case link is a sidecar beside the run folder, so the move carries it.
+    from defender.run_repository import RunPaths
+    moved = runs / run_dir.name
+    shutil.move(RunPaths(run_dir).session_pointer(), RunPaths(moved).session_pointer())
+    return tenant, Path(shutil.move(run_dir, moved))
 
 
 def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_path):
@@ -389,7 +393,7 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
         assert (run_dir / name).is_file(), f"{name} was not written on the healthy path"
         (run_dir / name).unlink()
 
-    pointer = RunPaths(run_dir).session_pointer
+    pointer = RunPaths(run_dir).session_pointer()
     if breakage == "missing-pointer":
         pointer.unlink()
     else:

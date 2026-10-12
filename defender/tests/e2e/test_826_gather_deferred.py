@@ -126,6 +126,16 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
     question a reader comparing leads is actually asking."""
     stamped: list[tuple[str, str]] = []
 
+    def _deps(run_dir: Path):  # noqa: ANN202
+        # `_run_gather` screens the run's breaker before it dispatches, so the main deps carry
+        # the run's state, as the driver's do (#1235).
+        from dataclasses import replace
+
+        from defender.runtime.run_state import RunState
+
+        return replace(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER),
+                       run_state=RunState(run_dir, "d826-terminators"))
+
     def _factory_raising(exc: BaseException):
         class _Agent:
             async def run(self, *a, **kw):
@@ -152,7 +162,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
 
     for i, (factory, expected) in enumerate(arms.items()):
         run_dir = materialize(tmp_path / f"arm{i}", GOLDEN_AB3)
-        deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)
+        deps = _deps(run_dir)
         lead = f"l-00{i}"
         out = asyncio.run(tools_gather._run_gather(
             deps, factory, 40,
@@ -177,7 +187,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
 
     for i, (exc, expected) in enumerate(propagating.items()):
         run_dir = materialize(tmp_path / f"prop{i}", GOLDEN_AB3)
-        deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)
+        deps = _deps(run_dir)
         lead = f"l-01{i}"
         with pytest.raises(type(exc)):
             asyncio.run(tools_gather._run_gather(
@@ -194,7 +204,7 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
             return SimpleNamespace(output="measured.")
 
     run_dir = materialize(tmp_path / "clean", GOLDEN_AB3)
-    deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)
+    deps = _deps(run_dir)
     before = len(stamped)
     asyncio.run(tools_gather._run_gather(
         deps, lambda agent_id, system, request_limit: _Clean(), 40,

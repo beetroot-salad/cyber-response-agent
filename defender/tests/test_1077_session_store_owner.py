@@ -216,7 +216,7 @@ def source_run(_finished_run) -> Iterator[tuple[Path, Path]]:
     """The module's finished run, with its case pointer restored after each test — the tests
     below rewrite only the pointer."""
     root, run_dir = _finished_run
-    pointer_file = RunPaths(run_dir).session_pointer
+    pointer_file = RunPaths(run_dir).session_pointer()
     saved = pointer_file.read_bytes()
     yield root, run_dir
     pointer_file.write_bytes(saved)
@@ -235,7 +235,7 @@ def test_a_resume_whose_pointer_carries_a_case_unstable_id_fails_as_branch_error
     from defender.runtime import branch, session_store
 
     root, run_dir = source_run
-    pointer_file = RunPaths(run_dir).session_pointer
+    pointer_file = RunPaths(run_dir).session_pointer()
     pointer = json.loads(pointer_file.read_text(encoding="utf-8"))
     case_id, recorded = pointer["case_id"], Path(pointer["store_path"])
     assert case_id == case_id.casefold(), f"the run minted a case-unstable id: {case_id!r}"
@@ -286,7 +286,7 @@ def test_a_resume_whose_pointer_carries_no_string_case_id_fails_as_branch_error(
     from defender.runtime import branch
 
     root, run_dir = source_run
-    pointer_file = RunPaths(run_dir).session_pointer
+    pointer_file = RunPaths(run_dir).session_pointer()
     pointer = json.loads(pointer_file.read_text(encoding="utf-8"))
     branch.open_source_store(run_dir).close()
 

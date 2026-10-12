@@ -35,6 +35,7 @@ Underscore-prefixed so pytest does not collect it.
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 import sys
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,7 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender.agents import MAIN_DEF  # noqa: E402
 from defender.runtime import challenge_gate, driver, observe  # noqa: E402
+from defender.runtime.run_state import RunState  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.tests import _review_bundle  # noqa: E402
@@ -181,7 +183,9 @@ def main_deps(tmp_path: Path) -> tuple[Any, Path]:
     run.mkdir(parents=True)
     dfn = tmp_path / "defender"
     dfn.mkdir(parents=True)
-    return bind(MAIN_DEF, run, defender_dir=dfn), run
+    # Carrying a run's state, as every MAIN the driver builds does: the enforced budget hooks
+    # raise on deps that carry none (#1235 round 3).
+    return replace(bind(MAIN_DEF, run, defender_dir=dfn), run_state=RunState(run, "r-836")), run
 
 
 def seed_investigation(run_dir: Path, text: str) -> Path:

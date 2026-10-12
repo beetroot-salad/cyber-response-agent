@@ -297,9 +297,9 @@ def test_grant_pattern_refuses_a_bare_string():
 
 
 def test_query_row_hands_back_the_record_it_was_read_from():
-    """`QueryRow.record()` is "the parsed JSON record, byte-for-byte what
-    `record_query.lead_rows` hands the guard live, never a re-projection of the typed fields"
-    (#1017 C16), and its docstring makes "`params` is the same object" part of that promise.
+    """`QueryRow.record()` is "the parsed JSON record, byte-for-byte what [the run's rows hand]
+    the guard live, never a re-projection of the typed fields" (#1017 C16; since #1235 those
+    rows are the run's state, `RunState.lead_rows`), and its docstring makes "`params` is the same object" part of that promise.
     A validated `dict` field is REBUILT on every construction, which turns both into copies
     in silence — the typed view then IS the re-projection the distinction exists to refuse."""
     from defender.learning.lead_repository import QueryRow

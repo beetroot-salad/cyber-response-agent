@@ -144,9 +144,12 @@ def test_agentdeps_gains_no_window_field(tmp_path):
     assert {f.name for f in fields(AgentDeps)} == {
 
         "run_dir", "defender_dir", "run_id", "policy", "cwd_anchor", "box",
-        "budget_started_monotonic", "authored_paths", "review_state", "roots", "tool_config",
+        "authored_paths", "review_state", "roots", "tool_config",
         # #1107: the run's tenant record every dispatched verb is handed — not a window.
         "tenant",
+        # #1235 round 2: the run's one live state (budget and its clock origin — the retired
+        # `budget_started_monotonic` — breaker, queries) — not a window either.
+        "run_state",
     }
 
 

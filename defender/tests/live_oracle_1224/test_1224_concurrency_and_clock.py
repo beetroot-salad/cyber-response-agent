@@ -20,10 +20,11 @@ and a wall-clock limit of a second or two against several seconds of oracle-held
 refusal is read as `test_budget_e2e_631` reads it — the refusal message's literal stem in what
 the gather lead was shown, plus the wire log's `budget_refusal` row.
 
-COINED HERE (S15): the run's host-only oracle-held sidecar (`RunPaths.oracle_held`, beside the
-run dir, where the box cannot write — not `budget.json`) carries the excluded oracle-held total
-under `ORACLE_HELD_KEY` (`oracle_held_seconds`), spelled once in
-`_spec1224.COINED["budget.oracle_held"]`.
+S15 since #1235 round 2: the excluded oracle-held total lives on the run's one `RunState`
+(`budget_enforcer.oracle_held(state)`), read off the summary the driver returns
+(`summary["run_state"]`); no file holds it — the host-only `.oracle-held.json` sidecar retired,
+so no credit outlives its run (#1239). The investigator's call count is read off the same
+object (`state.budget_snapshot()`).
 
 RED AGAINST HEAD (96e4cdb0) IS THE EXPECTED STATE: `WorldRegistry` takes no oracle seam, the
 launcher no `roster` / `oracle` / `verifier`.
@@ -48,9 +49,6 @@ from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests.live_oracle_1224 import _spec1224 as S
 
-#: S15's coined key in the host-only oracle-held sidecar: the seconds the investigator's clock
-#: excludes.
-ORACLE_HELD_KEY = S.ORACLE_HELD_KEY  # coined in _spec1224 (COINED["budget.oracle_held"])
 ENFORCE = "DEFENDER_BUDGET_ENFORCE"
 
 EMPTY: dict = {"rows": []}
@@ -310,14 +308,16 @@ def _own_rows(run_dir: Path) -> list[dict]:
             if r.get("lead_id") not in RESERVED_LEAD_IDS]
 
 
-def _budget(run_dir: Path) -> dict:
-    return json.loads((run_dir / "budget.json").read_text(encoding="utf-8"))
+def _budget(summary: dict) -> dict:
+    """The run's budget counters, read off the run's one `RunState`, which the driver hands back
+    as `summary["run_state"]` (#1235: no file in the run dir holds them)."""
+    return summary["run_state"].budget_snapshot()
 
 
-def _held_record(run_dir: Path) -> dict:
-    """The run's host-only oracle-held sidecar beside the run dir (`{}` when absent)."""
-    path = RunPaths(run_dir).oracle_held(run_dir.parent)
-    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+def _credited(summary: dict) -> float:
+    """The oracle-held seconds the run's clock excluded, read off the run's `RunState` after the
+    run (#1235 round 2: no sidecar holds them)."""
+    return S.sym("hooks.budget_enforcer", "oracle_held")(summary["run_state"])
 
 
 def _slow_adapter(est: S.Estate, system: str, seconds: float) -> None:
@@ -391,9 +391,10 @@ def test_conc_10_overlapping_oracle_turns_and_the_investigator_clock(tmp_path, m
 
     Settled (S11, S12): turns in one sibling cannot overlap, so no interval is credited twice
     (O4). Two parallel leads each issue one uncached call at once; then each repeats its call
-    (its own stored answer) as the next tool call. The excluded total recorded in the run's
-    budget record is at least the time the doubles held the turn and never more than the run's
-    real elapsed time."""
+    (its own stored answer) as the next tool call. The excluded total the run's state credited
+    (`oracle_held(summary["run_state"])`, #1235 round 2) is at least the time the doubles held
+    the turn and never more than the run's real elapsed time — and no file holds it: no
+    `.oracle-held.json` is written anywhere (the credit asserted here is the positive control)."""
     monkeypatch.setenv(ENFORCE, "true")
     est = S.estate(tmp_path)
     one, two = S.query_params("user:alice-1"), S.query_params("user:alice-2")
@@ -402,7 +403,7 @@ def test_conc_10_overlapping_oracle_turns_and_the_investigator_clock(tmp_path, m
     verifier = S.passing_verifier(fault=S.Fault(delay=0.4))
     reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=verifier, retry_cap=3)
     began = time.monotonic()
-    run_dir, router, _ = _drive(
+    run_dir, router, summary = _drive(
         tmp_path, verbs=reg, tenant=est.place(), limits=_limits(1.5),
         leads={"l-001": [_q(one), _q(one), S.done_turn()],
                "l-002": [_q(two), _q(two), S.done_turn()]})
@@ -413,10 +414,12 @@ def test_conc_10_overlapping_oracle_turns_and_the_investigator_clock(tmp_path, m
     for lead in ("l-001", "l-002"):
         assert _refusal_stem() not in router.shown(lead), f"{lead} was refused for oracle time"
     assert _refused_queries(run_dir) == []
-    held = _held_record(run_dir).get(ORACLE_HELD_KEY)
-    assert isinstance(held, (int, float)), f"the oracle-held sidecar records no {ORACLE_HELD_KEY}"
+    held = _credited(summary)
+    assert isinstance(held, float), f"the run's state credits no oracle-held seconds: {held!r}"
     assert held >= 0.9 * _held(oracle, verifier), "oracle-held time was not given back"
     assert held <= wall, "oracle time was given back twice (more than the run's real elapsed)"
+    assert list(tmp_path.rglob("*.oracle-held.json")) == [], (
+        "the oracle-held credit was written to a file — it lives only on the run's state")
 
 
 def test_conc_11_limit_check_while_another_lead_is_in_the_oracle(tmp_path, monkeypatch):
@@ -484,7 +487,7 @@ def test_conc_12_queue_wait_behind_another_leads_turn(tmp_path, monkeypatch):
         _wait(lambda: len(oracle.started) >= 1, what="lead one's oracle turn")
         return _q(other)
 
-    run_dir, router, _ = _drive(
+    run_dir, router, summary = _drive(
         tmp_path, verbs=reg, tenant=est.place(), limits=_limits(1.5),
         leads={"l-001": [_q(ALICE), S.done_turn()],
                "l-002": [queued, _q(other), S.done_turn()]})
@@ -495,7 +498,7 @@ def test_conc_12_queue_wait_behind_another_leads_turn(tmp_path, monkeypatch):
         "queue or limiter wait behind lead one's turn was counted")
     assert [r["exit_code"] for r in _own_rows(run_dir) if r["lead_id"] == "l-002"] == [0, 0]
     # Two gathers, one query on lead one, two on lead two — and nothing for the oracle.
-    assert _budget(run_dir)["tool_calls"] == 5, (
+    assert _budget(summary)["tool_calls"] == 5, (
         "the investigator's tool-call count is not one per investigator call")
 
 
@@ -541,56 +544,6 @@ def test_slow_real_system_and_slow_oracle_in_one_call(tmp_path, monkeypatch):
         "two slow base reads crossed the limit and nothing was refused — real latency must count")
     assert not [c for c in est.calls("edr", "query") if c["params"] == third], (
         "the refused call reached the tenant")
-
-
-def test_resumed_sibling_investigator_clock_after_oracle_time_was_credited(tmp_path,
-                                                                            monkeypatch):
-    """b_p153 — oracle time given back before a crash stays given back in the run that
-    resumes it.
-
-    Settled (S15, IMPLIED #153; Amendment 2 change 3 with O4). The first run takes a slow
-    oracle turn and ends; the budget record keeps the excluded total. A second run resumes
-    into the same run directory (the same wall-clock origin): its first call is not refused
-    although real elapsed time since the origin is past the limit. Downtime between the two is
-    not oracle time and counts as today (kept negligible here). Positive control: the resumed
-    lead's own latency then crosses the limit and its next call is refused."""
-    monkeypatch.setenv(ENFORCE, "true")
-    est = S.estate(tmp_path)
-    other = S.query_params("user:bob")
-    ep = _episode(tmp_path, [("idp", "query", ALICE, {"rows": [BASE_ROW]}),
-                             ("idp", "query", other, EMPTY)])
-    oracle = S.oracle(*_forge_and_submit("fg-1", _forged(1), [BASE_ROW]),
-                      fault=S.Fault(delay=1.3))
-    verifier = S.passing_verifier(fault=S.Fault(delay=0.6))
-    tenant = est.place()
-    reg = S.world_registry(ep, "b", est, oracle=oracle, verifier=verifier, retry_cap=3)
-    run_dir, _router, _ = _drive(tmp_path, verbs=reg, tenant=tenant, limits=_limits(2.5),
-                                 leads={"l-001": [_q(ALICE), S.done_turn()]})
-    held = _held_record(run_dir).get(ORACLE_HELD_KEY)
-    assert isinstance(held, (int, float)), (
-        "the oracle-held total did not reach the persisted budget record")
-    assert held >= 0.9 * _held(oracle, verifier), (
-        "the oracle-held total did not reach the persisted budget record")
-
-    resumed = S.world_registry(ep, "b", est, oracle=S.oracle(then=S.submit(EMPTY, S.EMPTY_CLAIM)),
-                               verifier=S.passing_verifier(), retry_cap=3)
-
-    def own_latency() -> Any:
-        # Past the 2.5 s limit on its own: the pre-crash non-oracle time is not a quantity this
-        # scenario controls (each oracle answer sleeps 1.3 s, so the first run's held total is
-        # ~3.2 s, not 1.9 s, leaving ~0.7 s of uncredited time — not the ~1 s a 1.5 s sleep needed).
-        time.sleep(2.6)
-        return _q(other)
-
-    _, router, _ = _drive(tmp_path, verbs=resumed, tenant=tenant, limits=_limits(2.5),
-                          run_dir=run_dir,
-                          leads={"l-002": [_q(other), own_latency, S.done_turn()]})
-    shown = router.seen["l-002"]
-    assert _refusal_stem() not in "\n".join(shown[:2]), (
-        "the resumed run counted oracle time spent before the crash")
-    assert _refusal_stem() in "\n".join(shown[2:]), (
-        "the resumed run enforces no clock at all — the negative above proves nothing")
-    assert _held_record(run_dir).get(ORACLE_HELD_KEY, 0) >= held, "the excluded total was reset"
 
 
 # --------------------------------------------------------------------------------------
@@ -1400,7 +1353,7 @@ def test_oracle_trace_sink_is_already_open_when_a_second_oracle_turn_starts(tmp_
     assert len(rows) == 2
     assert all(r["exit_code"] == 0 for r in rows)
     assert len(S.ledger_rows(ep, "b")) == 2, "oracle-side traffic landed in the world ledger"
-    assert _budget(run_dir)["tool_calls"] == 3, "oracle requests were charged to the investigator"
+    assert _budget(summary)["tool_calls"] == 3, "oracle requests were charged to the investigator"
     investigator_requests = sum(1 for r in wire if r.get("kind") == "request")
     assert summary["requests"] <= investigator_requests, (
         "the run's request count includes oracle-side requests")

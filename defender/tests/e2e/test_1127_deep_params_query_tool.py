@@ -4,7 +4,8 @@ The query tool is the one place a MODEL authors the params the queries table sto
 the pre-#1127 base (the issue's C1/C3/C12/C13, measured through this harness):
 
 * params nested 100+ deep (the map counted) were written as a row its own reader skips, so the
-  lead's rejection budget and both repeat guards — which read `lead_rows` — never saw them. A
+  lead's rejection budget and both repeat guards — which then read the table back per call
+  (`lead_rows`; since #1235 they read the run's own state) — never saw them. A
   model, or alert text steering it, could be rejected forever by nesting deep (C3);
 * from about 600 levels `_rejection_guard`'s key recursed out of the rejection handler and the
   RUN died with `RecursionError` (C12);

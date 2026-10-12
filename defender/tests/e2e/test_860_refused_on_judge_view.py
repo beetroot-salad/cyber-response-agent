@@ -633,9 +633,13 @@ def test_m2_a_siblings_inherited_table_carries_the_source_runs_denial(tmp_path):
     stayed behind in the source run's own files would have been the #860 gap re-opened for
     every inherited lead.
 
-    Observed failing by: the sibling's table lacking the `∅.denied` row, or the join over the
-    sibling filing it anywhere but `sentinels`."""
+    Observed failing by: the sibling's table lacking the `∅.denied` row, the join over the
+    sibling filing it anywhere but `sentinels`, or the sibling's run state not holding the rows
+    seeding wrote (#1235 round 2: seeding records each inherited row into the state)."""
+    from defender._io import read_jsonl_rows
+    from defender.run_repository import RunPaths
     from defender.runtime.branch._seed import _inherit_evidence
+    from defender.runtime.run_state import RunState
 
     rec = VerbRecorder()
     r = run_gather(tmp_path / "source", verbs=_registry(rec), turns=[
@@ -645,12 +649,18 @@ def test_m2_a_siblings_inherited_table_carries_the_source_runs_denial(tmp_path):
 
     sibling = tmp_path / "sibling"
     sibling.mkdir()
-    _inherit_evidence(r.run_dir, sibling, {LEAD})
+    state = RunState(sibling, "d860-sibling")
+    _inherit_evidence(r.run_dir, state, {LEAD})
     inherited = {lead.lead_id: lead for lead in joined(sibling)}
     assert set(inherited) == {LEAD}, f"the sibling inherited leads {sorted(inherited)}"
     assert [(row.query_id, row.system, row.verb) for row in inherited[LEAD].sentinels] \
         == [(DENIED_QUERY_ID, *DENIED_PAIR)]
     assert [row.query_id for row in inherited[LEAD].queries] == ["elastic.query"]
+    tabled = [row for row in read_jsonl_rows(RunPaths(sibling).executed_queries)
+              if row.get("lead_id") == LEAD]
+    assert [row["query_id"] for row in tabled] == [DENIED_QUERY_ID, "elastic.query"]
+    assert list(state.lead_rows(LEAD)) == tabled, (
+        "the sibling's run state does not hold the rows seeding wrote to its table")
 
 
 # ---------------------------------------------------------------------------------------

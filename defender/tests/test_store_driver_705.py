@@ -146,38 +146,41 @@ def test_run_investigation_takes_a_store_factory_seam(tmp_path):
     assert Path(result["store_path"]) == Path(handle.path)
 
 
-def test_run_investigation_mints_a_case_id_and_writes_a_run_dir_pointer(tmp_path):
+def test_run_investigation_mints_a_case_id_and_writes_a_run_dir_pointer(
+    tmp_path,
+):
     """`run_investigation` mints `case_id` at entry and writes `{case_id, store_path}` into
-    the run dir, so a child process holding only a run dir resolves the same store without
-    re-deriving the runs base — and two executions of one investigation reach one file.
+    the run's host-only pointer sidecar BESIDE the run dir (`<run_id>.session-pointer.json` in
+    its container, #1235 F2), so a child process holding only a run dir resolves the same
+    store without re-deriving the runs base — and two executions of one investigation reach
+    one file. Nothing named the old in-folder pointer is written inside the run dir.
 
     R6 rejects aliasing `case_id := run_dir.name`: the pre-seam probe confirmed two
     executions of one investigation get two run dirs, hence two case ids, hence two store
     FILES, making O13's inheritance and O11's single-file claim unsatisfiable — every fork
     demand in the spec would pass VACUOUSLY while forking is silently impossible. The
-    resolver's contract is the pointer file, not a convention."""
+    resolver's contract is the pointer record, not a convention.
+
+    (#1235 retired the relocation arm: a run folder copied elsewhere no longer carries its
+    case link, which is host state beside the folder — the copiers it cited are gone or never
+    open a store.)"""
     ss = store_mod()
     run_dir = materialize(tmp_path, GOLDEN)
     result = drive(run_dir, run_id="pointer",
                    main=ReplayFn([Turn(text="done")]),
                    store_factory=store_factory(tmp_path))
 
-    pointer = RunPaths(run_dir).session_pointer
-    assert pointer.is_file(), f"no run-dir pointer at {pointer}"
+    pointer = RunPaths(run_dir).session_pointer()
+    assert pointer.parent == run_dir.parent, f"the pointer is not beside the run dir: {pointer}"
+    assert pointer.is_file(), f"no case pointer sidecar at {pointer}"
     body = json.loads(pointer.read_text())
     assert set(body) >= {"case_id", "store_path"}, body
     assert body["case_id"] == result["case_id"]
+    assert not (run_dir / "session_store_pointer.json").exists(), (
+        "the case pointer is still written inside the box-writable run dir")
 
     resolved = ss.resolve_store_path(run_dir)
     assert Path(resolved) == Path(body["store_path"]) == Path(result["store_path"])
-
-    relocated = tmp_path / "elsewhere" / "copied-run"
-    relocated.parent.mkdir(parents=True, exist_ok=True)
-    import shutil
-    shutil.copytree(run_dir, relocated)
-    assert Path(ss.resolve_store_path(relocated)) == Path(body["store_path"]), (
-        "a relocated run dir must still resolve its store — run dirs ARE relocated today "
-        "by persist.py's allowlist copy and evals/harness.py's copytree")
 
 
 # the capability, its seam, and the flag that no longer gates it

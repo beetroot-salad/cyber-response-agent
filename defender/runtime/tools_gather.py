@@ -18,6 +18,7 @@ from defender.run_repository import RunPaths
 from defender.hooks.budget_enforcer import BudgetKill
 
 from . import circuit_breaker
+from .run_state import run_state_of
 from . import permission
 from . import session_store
 from . import tools
@@ -60,8 +61,9 @@ GatherFactory = Callable[[str, str, int], Any]
 
 
 def _tripped_message(deps: GatherDeps, system: str | None) -> str | None:
-    if system and circuit_breaker.is_tripped(deps.run_dir, system):
-        return circuit_breaker.down_message(deps.run_dir, system)
+    state = run_state_of(deps)
+    if system and circuit_breaker.is_tripped(state, system):
+        return circuit_breaker.down_message(state, system)
     return None
 
 
@@ -497,8 +499,9 @@ async def _run_gather(  # noqa: C901 — one except arm per way a gather run can
         if claimed != CLAIMED:
             raise ModelRetry(_LEAD_UNCLAIMED_RETRY.format(lead_id=lead_id))
 
-    if circuit_breaker.is_tripped(deps.run_dir, system):
-        return circuit_breaker.down_message(deps.run_dir, system)
+    state = run_state_of(deps)
+    if circuit_breaker.is_tripped(state, system):
+        return circuit_breaker.down_message(state, system)
 
     from defender.runtime.agent_definition import bind
     from defender.runtime.driver import gather_def_for
@@ -520,7 +523,8 @@ async def _run_gather(  # noqa: C901 — one except arm per way a gather run can
         gbase,
         run_id=deps.run_id,
         lead_id=lead_id,
-        budget_started_monotonic=deps.budget_started_monotonic,
+        # The run's state, by reference: the lead counts into the run's one budget and breaker.
+        run_state=deps.run_state,
         stop=stop,
         tenant=deps.tenant,
     )

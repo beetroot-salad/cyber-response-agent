@@ -137,8 +137,10 @@ PAYLOAD = [
 class _Run:
     """One driven replay: the run dir plus the two replay models and the tables on disk."""
 
-    def __init__(self, run_dir: Path, main: ReplayFn, gather: ReplayFn):
+    def __init__(self, run_dir: Path, main: ReplayFn, gather: ReplayFn,
+                 summary: dict | None = None):
         self.run_dir, self.main, self.gather = run_dir, main, gather
+        self.summary = summary if summary is not None else {}
 
     @property
     def rows(self) -> list[dict]:
@@ -167,9 +169,15 @@ class _Run:
         return (self.run_dir / "gather_raw" / LEAD / f"{seq}.json").read_text(encoding="utf-8")
 
     @property
+    def state(self):
+        """The run's one `RunState` (#1235 round 2), as the driver's summary hands it back."""
+        return self.summary["run_state"]
+
+    @property
     def breaker(self) -> dict:
-        p = self.run_dir / "circuit_breaker.json"
-        return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+        """The run's breaker state, off the run's `RunState` (#1235), read post-run;
+        blank (`{"systems": {}, "total_failures": 0}`) when nothing was charged."""
+        return self.state.breaker_snapshot()
 
 
 def run_gather(
@@ -188,8 +196,8 @@ def run_gather(
         Turn(text="Investigation complete."),
     ])
     gather = ReplayFn(turns)
-    drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
-    return _Run(run_dir, main, gather)
+    summary = drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
+    return _Run(run_dir, main, gather, summary)
 
 
 def q(system: str, verb: str, params: dict, query_id: str | None = None) -> Turn:
@@ -1468,4 +1476,4 @@ def test_e2e_replay_harness_has_an_injected_verb_seam(tmp_path):
         q("elastic", "probe", {}), q("elastic", "probe", {}), DONE,
     ])
     assert [row["exit_code"] for row in r.own_rows] == [2, 2]
-    assert circuit_breaker.is_tripped(r.run_dir, "elastic")
+    assert circuit_breaker.is_tripped(r.state, "elastic")

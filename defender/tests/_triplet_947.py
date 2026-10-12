@@ -590,8 +590,8 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
     return base, src
 
 
-#: The case this fixture's source run belongs to. One id, because the case POINTER in the run
-#: dir and the store the pointer names have to agree — that reconciliation is what
+#: The case this fixture's source run belongs to. One id, because the run's case POINTER (the
+#: sidecar beside the run dir) and the store the pointer names have to agree — that reconciliation is what
 #: `open_source_store` checks, and it is the whole reason a branch can find its source's session.
 SOURCE_CASE_ID = "case-947-fresh"
 
@@ -613,12 +613,13 @@ def seed_source_session(base: Path, src: Path) -> None:
     Idempotent: `runs_base` is called more than once in some scenarios, and a second session
     under one case id would make "the run's own main session" ambiguous.
     """
+    from defender.run_repository import RunPaths, SessionPaths
+
     ss = mod("runtime.session_store")
-    if (src / "session_store_pointer.json").exists():
+    # #1235: the case pointer is a host-only sidecar beside the run dir, not a file in it.
+    if RunPaths(src).session_pointer().exists():
         return
     from defender.tests import _session_store_705 as S
-
-    from defender.run_repository import SessionPaths
 
     # #1105 fork S(b): the store takes the layout owner's hand-out for the runs base.
     store = ss.open_store(case_id=SOURCE_CASE_ID, sessions=SessionPaths(base))

@@ -37,9 +37,7 @@ from defender._env import FatalConfigError  # noqa: E402
 from defender.hooks.budget_enforcer import (  # noqa: E402
     DEFAULT_LIMITS,
     BudgetKill,
-    open_budget,
     tier,
-    update_budget_locked,
 )
 from defender.runtime import driver, observe  # noqa: E402
 from defender.runtime.agent_definition import bind, effective_tools_for  # noqa: E402
@@ -86,10 +84,29 @@ def _run_dir(tmp_path: Path, name: str = "run") -> Path:
     return rd
 
 
-def drive_agent(defn, run_dir: Path, turns, *, limits, enforce: bool | None = None,
+def _state(run_dir: Path, run_id: str = "r"):
+    """The run's state, as `run_investigation` starts it (#1235 round 2): the budget a driven
+    agent counts against is this object, carried on its deps, and nothing keyed by the folder."""
+    from defender.runtime.run_state import RunState
+
+    return RunState(run_dir, run_id)
+
+
+def _seed_calls(state, n: int) -> None:
+    """Spend `n` calls of the state's pool up front, the way the run's earlier calls would."""
+    from defender.hooks.budget_enforcer import count_call
+
+    for _ in range(n):
+        count_call(state, "bash")
+
+
+def drive_agent(defn, run_dir: Path, turns, *, limits, state, enforce: bool | None = None,
                 agent_id: str = "main", request_limit: int = 40):
     """Build ONE agent through the real `build_agent_core` and drive it — the real
-    hooks, the real tools, the real gate — against an injected `FunctionModel`."""
+    hooks, the real tools, the real gate — against an injected `FunctionModel`.
+
+    `state` is the run's `RunState` its deps carry (#1235 round 2), the one the budget hooks
+    count against."""
     model = ScriptedModel(turns)
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
     from dataclasses import replace as _replace
@@ -111,7 +128,7 @@ def drive_agent(defn, run_dir: Path, turns, *, limits, enforce: bool | None = No
     # disagree (the judge — see agent_definition.effective_tools_for) would raise; this probe
     # is about the budget/accounting hooks, not the verb grant.
     bindable = _replace(defn, tools=effective_tools_for(defn))
-    deps = bind(bindable, run_dir, defender_dir=DEFENDER, box=box)
+    deps = _replace(bind(bindable, run_dir, defender_dir=DEFENDER, box=box), run_state=state)
     import asyncio
 
     async def _go():
@@ -150,7 +167,7 @@ def test_budget_kill_is_not_control_flow(tmp_path):
     from defender.runtime.tools_gather import GatherRequest
 
     run_dir = _run_dir(tmp_path)
-    open_budget(run_dir, "run-1")
+    state = _state(run_dir, "run-1")
 
     class KillingVerbs(VerbRegistry):
         def __init__(self):
@@ -165,7 +182,7 @@ def test_budget_kill_is_not_control_flow(tmp_path):
             return {"esql": esql}
 
     with pytest.raises(BudgetKill):
-        _drive_gather_query(run_dir, KillingVerbs())
+        _drive_gather_query(run_dir, KillingVerbs(), state)
     assert not (run_dir / "executed_queries.jsonl").exists(), (
         "the kill was filed as a query fault — a row claims a call that never ran"
     )
@@ -180,8 +197,10 @@ def test_budget_kill_is_not_control_flow(tmp_path):
         def verbs(self, system):
             raise BudgetKill("tail exhausted")
 
+    run2 = _run_dir(tmp_path, "run2")
+    run2_state = _state(run2, "run2")
     with pytest.raises(BudgetKill):
-        _drive_gather_query(_run_dir(tmp_path, "run2"), KillingRegistry())
+        _drive_gather_query(run2, KillingRegistry(), run2_state)
 
     seen_gather_deps = []
 
@@ -194,19 +213,25 @@ def test_budget_kill_is_not_control_flow(tmp_path):
         return _KillingAgent()
 
     import asyncio
-    deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)
+    from dataclasses import replace
+
+    deps = replace(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER), run_state=state)
     with pytest.raises(BudgetKill):
         asyncio.run(runtime_tools._run_gather(
             deps, killing_factory, 40,
             GatherRequest("l-001", "elastic", "goal", ("what",)),
             T1106.fixture_grants().gather, catalog=None,
         ))
-    assert seen_gather_deps[0].budget_started_monotonic == deps.budget_started_monotonic
+    assert seen_gather_deps[0].run_state is deps.run_state, \
+        "the gather was handed some state other than the parent run's own object"
 
 
-def _drive_gather_query(run_dir: Path, registry):
+def _drive_gather_query(run_dir: Path, registry, state):
     """Drive ONE real `query` call on a real GATHER agent against an injected verb
-    registry — the seam `run_investigation(verbs=…)` already exposes (#611)."""
+    registry — the seam `run_investigation(verbs=…)` already exposes (#611).
+
+    The query tool's guards read the run's `RunState` its deps carry (#1235 round 2); this
+    folder never goes through the driver, so the caller hands the state in."""
     import asyncio
     from dataclasses import replace
 
@@ -223,7 +248,7 @@ def _drive_gather_query(run_dir: Path, registry):
     )
     deps = replace(bind(gather_def, run_dir,
                         defender_dir=DEFENDER), lead_id="l-001",
-                   tenant=T1106.fixture_run_tenant())
+                   tenant=T1106.fixture_run_tenant(), run_state=state)
 
     async def _go():
         with override_allow_model_requests(False):
@@ -297,17 +322,50 @@ def test_limits_threaded_from_boundary(tmp_path):
     assert "limits" in inspect.signature(_replay_harness.drive).parameters
 
     run_dir = _run_dir(tmp_path, "seam")
-    open_budget(run_dir, "r")
+    state = _state(run_dir)
     injected = {**DEFAULT_LIMITS, "max_tool_calls": 3, "wall_clock_timeout": 3600,
                 "grace_seconds": 600}
     script = [[("bash", {"command": f"echo {i}"})] for i in range(12)]
-    result, _ = drive_agent(MAIN_DEF, run_dir, script, limits=injected, enforce=True)
+    result, _ = drive_agent(MAIN_DEF, run_dir, script, limits=injected, enforce=True,
+                            state=state)
     assert "BUDGET" in str(result.all_messages()).upper(), (
         "no refusal at 12 calls against an injected cap of 3 — DEFAULT_LIMITS (200) was "
         "read inside the hook instead of the threaded value"
     )
-    state = json.loads((run_dir / "budget.json").read_text())
-    assert state["tool_calls"] == 3, "the injected cap did not bound the executed calls"
+    assert state.budget_snapshot()["tool_calls"] == 3, \
+        "the injected cap did not bound the executed calls"
+
+
+def test_the_hook_counts_on_the_state_the_deps_carry_and_on_nothing_else(tmp_path):
+    """#1235 round 2: the budget hook counts each executed call on the `RunState` the deps
+    carry and on nothing keyed by the folder. Two runs on ONE folder, each with its own fresh
+    state, each count exactly their own call: the first run's count does not carry into the
+    second's, and the second run's call does not land in the first's. Under the enforcing
+    posture, so the short-circuit reads the carried state too: at a cap of 1 the second run's
+    call is not refused on a count it never made.
+
+    Positive control on the same folder and state: a further call on the FIRST state, already
+    at its cap, is refused and leaves that count where it was."""
+    limits = {**DEFAULT_LIMITS, "max_tool_calls": 1, "wall_clock_timeout": 3600,
+              "grace_seconds": 600}
+    run_dir = _run_dir(tmp_path, "one-folder")
+    script = [[("bash", {"command": "echo counted"})]]
+
+    first = _state(run_dir)
+    drive_agent(MAIN_DEF, run_dir, script, limits=limits, enforce=True, state=first)
+    second = _state(run_dir)
+    result, _ = drive_agent(MAIN_DEF, run_dir, script, limits=limits, enforce=True,
+                            state=second)
+    assert "BUDGET" not in str(result.all_messages()).upper(), \
+        "the second run's call was refused on the first run's count"
+    assert second.budget_snapshot()["tool_calls"] == 1, "the second run's state did not count"
+    assert first.budget_snapshot()["tool_calls"] == 1, \
+        "the second run's call landed in the first run's state"
+
+    again, _ = drive_agent(MAIN_DEF, run_dir, script, limits=limits, enforce=True, state=first)
+    assert "BUDGET" in str(again.all_messages()).upper(), \
+        "the control: a call on a state at its cap was not refused"
+    assert first.budget_snapshot()["tool_calls"] == 1, "a refused call moved the count"
 
 
 def test_caps_are_not_operator_configurable(tmp_path, monkeypatch):
@@ -401,16 +459,17 @@ def test_tier_table_over_the_real_census(tmp_path):
     assert tier("gather", AgentRole.MAIN) == "core"
 
     run_dir = _run_dir(tmp_path, "census")
-    open_budget(run_dir, "r")
+    state = _state(run_dir)
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 1}
-    update_budget_locked(run_dir, "r", "bash", limits=limits)
+    _seed_calls(state, 1)
     # #774/R1: report.md left the tail entirely (it left MAIN's write allow-list, full stop —
     # the close tool is its only writer now); investigation.md is the tail-tier artifact still
     # standing, and it makes the identical point (a tail-tier write survives a tripped pool).
     inv = run_dir / "investigation.md"
     script = [[("bash", {"command": "echo hi"})],
               [("append_block", {"text": "+ tail-tier append\n"})]]
-    result, _ = drive_agent(MAIN_DEF, run_dir, script, limits=limits, enforce=True)
+    result, _ = drive_agent(MAIN_DEF, run_dir, script, limits=limits, enforce=True,
+                            state=state)
     text = str(result.all_messages())
     assert "BUDGET" in text.upper(), "the core-tier bash was not refused on a tripped pool"
     assert inv.is_file(), "the tail-tier append_block was refused inside the tail band"
@@ -427,18 +486,18 @@ def test_same_tool_name_on_two_agents(tmp_path):
               "grace_seconds": 600}
 
     main_dir = _run_dir(tmp_path, "pair-main")
-    open_budget(main_dir, "r")
-    update_budget_locked(main_dir, "r", "bash", limits=limits)
+    main_state = _state(main_dir)
+    _seed_calls(main_state, 1)
     main_result, _ = drive_agent(
         MAIN_DEF, main_dir, [[("read_file", {"path": str(main_dir / "alert.json")})]],
-        limits=limits, enforce=True)
+        limits=limits, enforce=True, state=main_state)
 
     gather_dir = _run_dir(tmp_path, "pair-gather")
-    open_budget(gather_dir, "r")
-    update_budget_locked(gather_dir, "r", "bash", limits=limits)
+    gather_state = _state(gather_dir)
+    _seed_calls(gather_state, 1)
     gather_result, _ = drive_agent(
         T1106.fixture_gather_def(), gather_dir, [[("read_file", {"path": str(gather_dir / "alert.json")})]],
-        limits=limits, enforce=True, agent_id="gather:l-001")
+        limits=limits, enforce=True, agent_id="gather:l-001", state=gather_state)
 
     assert "BUDGET" not in str(main_result.all_messages()).upper(), (
         "read_file (tail on MAIN) was refused on a tripped pool"
@@ -477,12 +536,11 @@ def test_gather_keeps_its_request_limit(tmp_path):
     from pydantic_ai.exceptions import UsageLimitExceeded
 
     run_dir = _run_dir(tmp_path, "grl")
-    open_budget(run_dir, "r")
     never_stops = [[("read_file", {"path": str(run_dir / "alert.json")})]] * 200
     with pytest.raises(UsageLimitExceeded):
         drive_agent(T1106.fixture_gather_def(), run_dir, never_stops, limits=DEFAULT_LIMITS,
                     enforce=False, agent_id="gather:l-001",
-                    request_limit=driver.GATHER_REQUEST_LIMIT)
+                    request_limit=driver.GATHER_REQUEST_LIMIT, state=_state(run_dir))
 
 
 
@@ -628,13 +686,12 @@ def test_every_agent_construction_pins_retries_explicitly(tmp_path):
     assert driver.DEFAULT_TOOL_RETRIES == 10
 
     run_dir = _run_dir(tmp_path, "retries")
-    open_budget(run_dir, "r")
     missing = str(run_dir / "nope" / "absent.json")
     script = [[("read_file", {"path": missing})],
               [("read_file", {"path": missing})],
               []]
     result, model = drive_agent(MAIN_DEF, run_dir, script, limits=DEFAULT_LIMITS,
-                                enforce=False)
+                                enforce=False, state=_state(run_dir))
     assert model.calls >= 3, "the loop did not reach its stopping turn — a denial aborted it"
     assert result.output is not None, "two consecutive denials aborted — retries was not pinned"
 

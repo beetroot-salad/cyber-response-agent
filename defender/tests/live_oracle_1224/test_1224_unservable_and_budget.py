@@ -34,7 +34,7 @@ import shutil
 import subprocess
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -156,6 +156,18 @@ class _Run:
     main: Any
     gather: Any
     raised: BaseException | None = None
+    #: What `drive()` returned (None for a run that ended by raising), and the run states the
+    #: investigator's calls carried into the registry (`S.tap_run_states`).
+    summary: dict | None = None
+    carried: list[Any] = field(default_factory=list)
+
+    @property
+    def state(self) -> Any:
+        """The run's one `RunState` (#1235 round 2): the driver's `summary["run_state"]`, or —
+        for a run that ended by raising — the one state its calls carried."""
+        if self.summary is not None:
+            return self.summary["run_state"]
+        return S.the_run_state(self.carried)
 
     @property
     def rows(self) -> list[dict]:
@@ -167,20 +179,19 @@ class _Run:
         return [r for r in self.rows
                 if r.get("system") == system and (r.get("params") or {}).get("q") == q]
 
-    def _json(self, name: str) -> dict:
-        path = self.run_dir / name
-        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-
     @property
     def breaker(self) -> dict:
-        return self._json("circuit_breaker.json")
+        """The run's circuit-breaker state, read off the run's `RunState` (#1235: never a file in
+        the run dir)."""
+        return self.state.breaker_snapshot()
 
     def failures(self, system: str) -> int:
         return int(self.breaker.get("systems", {}).get(system, {}).get("failures", 0))
 
     @property
     def budget(self) -> dict:
-        return self._json("budget.json")
+        """The run's budget counters, read off the run's `RunState` (#1235)."""
+        return self.state.budget_snapshot()
 
     @property
     def trace_result(self) -> dict:
@@ -226,9 +237,10 @@ def _drive(root: Path, est: S.Estate, verbs: Any, turns: list[Any], *,
     H = S.replay_harness()
     run_dir = H.materialize(root / RUN_ID, H.GOLDEN_AB3)
     run = _Run(run_dir, _main_fn(system), H.ReplayFn(list(turns)))
+    run.carried = S.tap_run_states(verbs)
     try:
-        H.drive(run_dir, run_id=RUN_ID, main=run.main, gather=run.gather, verbs=verbs,
-                limits=limits, tenant=est.place())
+        run.summary = H.drive(run_dir, run_id=RUN_ID, main=run.main, gather=run.gather,
+                              verbs=verbs, limits=limits, tenant=est.place())
     except Exception as exc:  # noqa: BLE001 — only the coined class is kept, the rest re-raise
         if not _unservable(exc):
             raise
@@ -290,8 +302,10 @@ def _resume(ep: Path, est: S.Estate, *, oracle: S.ScriptedModel, verifier: S.Scr
         sib.run = _Run(run_dir, _main_fn(), H.ReplayFn(list(turns)))
         reg = S.world_registry(ep, label, est, oracle=oracle, verifier=verifier,
                                world=kw.get("world"), **knobs)
-        return H.drive(run_dir, run_id=run_dir.name, main=sib.run.main,
-                       gather=sib.run.gather, verbs=reg, tenant=est.place())
+        sib.run.carried = S.tap_run_states(reg)
+        sib.run.summary = H.drive(run_dir, run_id=run_dir.name, main=sib.run.main,
+                                  gather=sib.run.gather, verbs=reg, tenant=est.place())
+        return sib.run.summary
 
     # #1105 PR 2 (declared change 6): `--tenant T --episode <episode id> --world L`.
     argv = ["--tenant", S.FIXTURE_TENANT, "--episode", ep.name, "--world", label]

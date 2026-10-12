@@ -765,16 +765,23 @@ def test_the_tables_second_writer_grows_the_column_too(tmp_path):
     Driven through the production function on a real run dir rather than over a hand-built row,
     because "the second writer agrees with the first" is exactly the claim a fixture restating
     the keys cannot make."""
+    from defender._io import read_jsonl_rows
+    from defender.run_repository import RunPaths
+    from defender.runtime.run_state import RunState
+
     run_dir = materialize(tmp_path, GOLDEN_AB3)
+    # Never driven, so the run's state is started here the way the driver starts it: the
+    # writer allocates its seq from that state (#1235).
     lead_zero._record_manual_row(
         lead_zero._CaptureDeps(
             run_dir=run_dir, defender_dir=DEFENDER, run_id="d871-second-writer",
-            lead_id="l-000",
+            lead_id="l-000", run_state=RunState(run_dir, "d871-second-writer"),
         ),
         "search", {"index": "logs"}, {"rows": [{"a": 1}]}, exit_code=0,
     )
 
-    rows = record_query.lead_rows(run_dir, "l-000")
+    rows = [r for r in read_jsonl_rows(RunPaths(run_dir).executed_queries)
+            if r.get("lead_id") == "l-000"]
     assert len(rows) == 1, "the second writer left no row, so the contract below is vacuous"
     assert set(rows[0]) == ROW_KEYS, \
         "the two writers disagree about the row's keys — one file, two shapes"

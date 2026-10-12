@@ -166,7 +166,7 @@ def test_the_tenant_record_is_written_through_write_guarded_and_read_through_rea
     S.tenant().ensure_runs_base_record(base, T_ID, io=writer)
     assert any(op.startswith("write_guarded") for op in writer.ops), (
         f"the create reached {writer.ops}; D2 says `write_guarded`, not a raw `os.open`")
-    assert "write_atomic" not in writer.ops
+    assert "write_atomic" not in writer.ops  # lint-stale-ref: ok — an absence assertion naming the deleted `_io.write_atomic`, still true
     assert "open_guarded" not in writer.ops
 
     reader = S.RecordingIo()

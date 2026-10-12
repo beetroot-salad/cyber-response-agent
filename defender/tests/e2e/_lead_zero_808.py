@@ -433,13 +433,20 @@ class Res:
         return (self.run_dir / "gather_summaries" / f"{lead}.md").read_text(encoding="utf-8")
 
     @property
+    def state(self) -> Any:
+        """The run's one `RunState` (#1235), as `drive()` hands it back (the harness injects it):
+        the only place a driven run's budget and breaker are read."""
+        return self.summary_dict["run_state"]
+
+    @property
     def budget(self) -> dict:
-        path = self.run_dir / "budget.json"
-        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        """The run's budget snapshot, off the run's state (#1235: nothing writes `budget.json`
+        any more, and no process-wide table keyed by the folder holds it)."""
+        return self.state.budget_snapshot()
 
     @property
     def breaker(self) -> dict:
-        return breaker_doc(self.run_dir)
+        return breaker_doc(self.state)
 
     @property
     def denials(self) -> list[dict]:
@@ -504,6 +511,11 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
     `before(run_dir)` runs on the materialized run dir just before the driver starts — the
     seam a scenario needs to plant a REAL fault in the tree the run is about to write into
     (a directory squatting an artifact's own name, a pre-claimed lead sidecar).
+
+    Host state lead-0 must already find (a tripped breaker) has no seam here: since #1235's
+    round 2 it lives on the run's `RunState`, which the driver creates and no seam hands out
+    before lead-0. A scenario about it calls `lead_zero.resolve_lead_zero(run_state=…)` over a
+    state it built, or seeds through the run's own verbs, whose context carries the state.
 
     `defender_dir` is the tree the run READS (#1003) — `drive`'s own seam of that name,
     passed through only when supplied, so a scenario over a planted catalog (a template

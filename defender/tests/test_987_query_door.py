@@ -140,8 +140,15 @@ class Agent:
 
 def dispatch(root: Path, agent, *, ceiling: int = 40, stamps: list | None = None,
              handed: list | None = None) -> str:
+    from dataclasses import replace
+
+    from defender.runtime.run_state import RunState
+
     run_dir = materialize(root, GOLDEN_AB3)
-    deps = bind(MAIN_DEF, run_dir, defender_dir=DEFENDER)
+    # MAIN's deps carry the run's one `RunState` (#1235 round 2), as the driver hands them:
+    # the dispatch's breaker screen reads it.
+    deps = replace(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER),
+                   run_state=RunState(run_dir, "r-987"))
 
     def factory(agent_id: str, system: str, request_limit: int):
         if handed is not None:

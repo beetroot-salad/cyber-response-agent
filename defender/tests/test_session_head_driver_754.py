@@ -1,4 +1,6 @@
-"""#754 — the three demands that bind OUTSIDE `session_store.py`, driven end to end.
+"""#754 — the demands that bind OUTSIDE `session_store.py`, driven end to end. (The third,
+"the pointer path is trusted verbatim across a relocated run dir", retired with the relocation
+contract in #1235: the case link is host state beside the run folder, not in a copy of it.)
 
 Flat under `defender/tests/` for the same mechanical reason `test_store_driver_705.py` is:
 `check_binds` globs the suite dir non-recursively, so a `discharged_by` pointing into
@@ -19,15 +21,11 @@ decision can kill a production process.
 """
 from __future__ import annotations
 
-import shutil
-from pathlib import Path
-
 import pytest
 
 pytest.importorskip("pydantic_ai")
 
 from defender.tests._session_head_754 import (  # noqa: E402
-    session_analysis,
     head_of,
     legacy_v1_store_file,
     log_rows,
@@ -152,42 +150,3 @@ def test_a_store_error_during_setup_ends_the_run_through_the_handled_exit(tmp_pa
     assert control["truncated_by"] is None, (
         f"control: the same run against a current-version store completes; got {control}")
     assert control["output"], control
-
-
-def test_the_pointer_path_is_trusted_verbatim_across_a_relocated_run_dir(tmp_path):
-    """    The store path a run dir resolves is the one its pointer file records, verbatim: copy a
-    finished run dir anywhere else and the copy still resolves the ORIGINAL absolute store
-    path, still opens it read-only, and still renders the same transcript — the resolver's
-    contract is the pointer file, not a convention about where the run dir sits.
-
-    The lack of confinement is an existing CONTRACT rather than an oversight, in service of the
-    allowlist copy and the eval harness's copytree, both of which relocate run dirs that must
-    keep resolving their store. This pins it so the confinement question cannot be "fixed" into
-    a silent regression later; the paired waiver records what the reader does NOT do and why
-    changing it was declined here."""
-    # provenance: PR-25 (executed break-attempt); test_store_driver_705.py:191-197 already makes
-    # the relocation case explicit.
-    ss = store_mod()
-    run_dir = materialize(tmp_path, GOLDEN)
-    result = drive(run_dir, run_id="relocated",
-                   main=ReplayFn([Turn(text="Investigation complete.")]),
-                   store_factory=store_factory(tmp_path))
-
-    original = Path(result["store_path"])
-    assert ss.resolve_store_path(run_dir) == original
-    here = session_analysis(run_dir)
-    assert here, "the run must have rendered a transcript from its own run dir"
-
-    relocated = tmp_path / "elsewhere" / "copied-run"
-    relocated.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(run_dir, relocated)
-
-    assert ss.resolve_store_path(relocated) == original, (
-        "a relocated run dir resolves the ORIGINAL absolute store path, unchanged")
-    assert not str(original).startswith(str(relocated)), (
-        "the fixture must place the store outside the copy, or the assertion is vacuous")
-    reader = ss.open_store_for_read(ss.resolve_store_path(relocated))
-    assert sql(reader, "SELECT COUNT(*) FROM session")[0][0] >= 1, (
-        "and the reader opens it and serves a live query from there")
-    assert [coord for _m, coord in session_analysis(relocated)] == [
-        coord for _m, coord in here], "the copy renders the same transcript as the original"

@@ -43,6 +43,7 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import inspect
+import json
 from pathlib import Path
 
 import pytest
@@ -76,6 +77,14 @@ GOLDEN_INVESTIGATION = DEFENDER / "fixtures-e2e" / "golden-v2sshd" / "investigat
 def branch_mod():
     """`defender.runtime.branch` — PR 1's new module, imported per test."""
     return importlib.import_module("defender.runtime.branch")
+
+
+def _sibling_state(sibling_dir: Path):  # noqa: ANN202 — a `RunState` (#1235: not imported at top)
+    """A fresh run state for the sibling at `sibling_dir`: what the driver hands seeding as
+    its third argument (#1235 round 2, where it was the sibling's run dir)."""
+    from defender.runtime.run_state import RunState
+
+    return RunState(sibling_dir, sibling_dir.name)
 
 
 # the caller contract: fork's seeding and send-role hydration are one number
@@ -411,7 +420,8 @@ def test_a_resumed_run_inherits_the_document_its_history_claims(tmp_path):
     sibling_dir = tmp_path / "defender-runs" / "run-sibling-doc"
     sibling_dir.mkdir(parents=True, exist_ok=True)
 
-    branch.open_main_session(store, spec_at(store, run_dir, returns[1]), sibling_dir)
+    branch.open_main_session(store, spec_at(store, run_dir, returns[1]),
+                             _sibling_state(sibling_dir))
 
     seeded = (sibling_dir / "investigation.md").read_text(encoding="utf-8")
     from defender.skills.invlang.parser import INVLANG_FENCE_RE
@@ -439,7 +449,10 @@ def test_a_resumed_run_inherits_the_evidence_its_prefix_names(tmp_path):
 
     COPIED, because the sibling appends to both. A link would put the sibling's new rows into
     the source run's own table — corrupting the base of the comparison the branch exists to
-    produce."""
+    produce.
+
+    And RECORDED: the sibling's run state holds each inherited row as seeding writes it
+    (#1235 round 2), so the lead's rows the live run reads are the table's."""
     branch = branch_mod()
     document = GOLDEN_INVESTIGATION.read_text(encoding="utf-8")
     store, run_dir, session_id, _ = _source_run(tmp_path)
@@ -453,11 +466,17 @@ def test_a_resumed_run_inherits_the_evidence_its_prefix_names(tmp_path):
     (run_dir / "gather_raw" / "l-001" / "0.json").write_text('{"hits": []}', encoding="utf-8")
     sibling_dir = tmp_path / "defender-runs" / "run-sibling-evidence"
     sibling_dir.mkdir(parents=True, exist_ok=True)
+    state = _sibling_state(sibling_dir)
 
-    branch.open_main_session(store, spec_at(store, run_dir, returns[1]), sibling_dir)
+    branch.open_main_session(store, spec_at(store, run_dir, returns[1]), state)
 
     assert (sibling_dir / "executed_queries.jsonl").read_text(encoding="utf-8") == (
         run_dir / "executed_queries.jsonl").read_text(encoding="utf-8")
+    tabled = [json.loads(line) for line in (sibling_dir / "executed_queries.jsonl").read_text(
+        encoding="utf-8").splitlines()]
+    assert [row["lead_id"] for row in tabled] == ["l-001"], "the fixture's one inherited row"
+    assert list(state.lead_rows("l-001")) == tabled, (
+        "the sibling's run state does not hold the rows seeding wrote to its table")
     assert (sibling_dir / "gather_raw" / "l-001" / "0.json").is_file(), (
         "the payload sidecar the inherited prefix names is not in the sibling's run dir")
     # Copied, not shared: writing to the sibling's table leaves the source's alone.
@@ -488,7 +507,7 @@ def test_a_run_dir_holding_evidence_is_refused_before_anything_forks(tmp_path):
     spec = spec_at(store, run_dir, path_ids[-1])
 
     with pytest.raises(branch.BranchError, match="already holds"):
-        branch.open_main_session(store, spec, sibling_dir)
+        branch.open_main_session(store, spec, _sibling_state(sibling_dir))
 
     assert len(sql(store, "SELECT session_id FROM session WHERE parent_session_id = ?",
                    (session_id,))) == before, (
@@ -508,7 +527,7 @@ def test_a_fresh_run_seeds_no_document(tmp_path):
     fresh = tmp_path / "defender-runs" / "run-fresh"
     fresh.mkdir(parents=True, exist_ok=True)
 
-    assert branch.seed_investigation(None, None, fresh) == 0
+    assert branch.seed_investigation(None, None, _sibling_state(fresh)) == 0
     assert not (fresh / "investigation.md").exists(), (
         "a fresh run's document was created before its first append")
 
@@ -530,7 +549,8 @@ def test_a_reused_run_dir_is_refused_rather_than_seeded_over(tmp_path):
     (sibling_dir / "investigation.md").write_text("someone else's work\n", encoding="utf-8")
 
     with pytest.raises(branch.BranchError, match="already holds"):
-        branch.seed_investigation(store, spec_at(store, run_dir, returns[0]), sibling_dir)
+        branch.seed_investigation(store, spec_at(store, run_dir, returns[0]),
+                                  _sibling_state(sibling_dir))
 
 
 def test_a_prefix_that_would_not_validate_is_refused_rather_than_seeded(tmp_path):
@@ -575,7 +595,7 @@ def test_a_prefix_that_would_not_validate_is_refused_rather_than_seeded(tmp_path
 
     with pytest.raises(branch.BranchError, match="does not pass validation"):
         branch.seed_investigation(
-            store, spec_at(store, run_dir, returns[1]), sibling_dir)
+            store, spec_at(store, run_dir, returns[1]), _sibling_state(sibling_dir))
 
     assert not (sibling_dir / "investigation.md").exists(), (
         "the refusal came after the write — the sibling holds a document it can never repair"
@@ -597,7 +617,7 @@ def test_a_prefix_that_validates_is_still_seeded(tmp_path):
     # document, so the branch point maps past it); the claim is that a well-formed prefix is
     # still seeded rather than refused.
     assert branch.seed_investigation(
-        store, spec_at(store, run_dir, returns[0]), sibling_dir) > 0
+        store, spec_at(store, run_dir, returns[0]), _sibling_state(sibling_dir)) > 0
     assert (sibling_dir / "investigation.md").is_file()
 
 

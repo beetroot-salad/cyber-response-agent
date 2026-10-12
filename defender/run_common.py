@@ -158,10 +158,11 @@ def _admit_run_id(alert: Path, run_id: str | None) -> RunId:
 
 
 def _sidecars(run: Run) -> tuple[Path, ...]:
-    """The four files beside the run dir, keyed by its run id: the run-end record, the scrub
-    verdict, the accounting failures and the ticket receipt (#1107 moved it out of the tree)."""
-    return (run.facts.run_end.path, run.facts.scrub_verdict.path, run.facts.accounting.path,
-            run.observability.ticket_write.path)
+    """The files beside the run dir, keyed by its run id: the run-end record, the scrub
+    verdict, the ticket receipt (#1107 moved it out of the tree) and the run -> case link
+    (#1235 did)."""
+    return (run.facts.run_end.path, run.facts.scrub_verdict.path,
+            run.observability.ticket_write.path, run.observability.session_pointer.path)
 
 
 def _clear_stale_sidecars(run: Run) -> None:

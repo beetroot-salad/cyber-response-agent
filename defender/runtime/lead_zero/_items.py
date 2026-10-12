@@ -13,15 +13,17 @@ from typing import Any
 
 from defender.hooks.budget_enforcer import (
     BudgetKill,
+    count_call,
 )
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
 from defender.runtime import circuit_breaker
+from defender.runtime.run_state import RunState
 from defender.runtime.verb_grant import VerbGrant
 from defender.runtime.tenant_settings import elastic_problem
 from defender.runtime.verbs import VerbRegistry, redact_settings_path
 from ._agreement import CorrelationDispatch
 from ._spec import ALERT_ID_FIELD, BUILDING_BLOCK_FIELD, CORRELATION_REQUEST_LIMIT, GROUP_ID_FIELD, HARNESS_PROVENANCE, ITEM1_GOAL, ITEM1_SYSTEM, ITEM1_WHAT_TO_SUMMARIZE, L0, L3, SHORTFALL, STATUS_EMPTY, STATUS_FAILED, STATUS_RESOLVED, STATUS_TRUNCATED
-from ._capture import _CallLedger, _budget_account, _budget_gate, _build_deps, _last_row_seq, _sanitize
+from ._capture import _CallLedger, _budget_gate, _build_deps, _last_row_seq, _sanitize
 from ._render import _render_doc, _sort_chrono, _unavailable
 from ._capture import _declare_l_finding
 
@@ -99,10 +101,11 @@ async def _fetch_batched(ancestors: list[dict], issue) -> tuple[list[tuple[dict,
 
 
 async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — shell fetch, group/fallback branches and per-call budget gating are one resolution
-    *, run_dir: Path, defender_dir: Path, run_id: str, alert: dict,
+    *, run_state: RunState, defender_dir: Path, alert: dict,
     capture: Any, env: dict, limits: dict, tenant: Any,
 ) -> tuple[str, str]:
-    deps = _build_deps(run_dir, defender_dir, run_id, L0, tenant)
+    run_dir = run_state.run_dir
+    deps = _build_deps(run_state, defender_dir, L0, tenant)
     claimed = claim_lead({
         "run_dir": str(run_dir), "lead_id": L0, "goal": ITEM1_GOAL,
         "what_to_summarize": ITEM1_WHAT_TO_SUMMARIZE, "provenance": HARNESS_PROVENANCE,
@@ -131,7 +134,7 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — shell fetch, group
     if not isinstance(ancestor_events, list):
         ancestor_events = []
 
-    ledger = _CallLedger(run_dir)
+    ledger = _CallLedger(run_state)
     issued_any = False
     answered_any = False
     # Counts, not booleans: with one call per backing index, some ancestor calls can answer
@@ -149,16 +152,17 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — shell fetch, group
         issued_any = True
         if ancestor:
             ancestor_issued += 1
-        _budget_gate(run_dir, limits)
+        _budget_gate(run_state, limits)
         envelope, _text = await ledger.call(capture, deps, verb, params, env)
-        _budget_account(run_dir, run_id, "query", limits)
+        # Harness work the budget hooks never see, so it is counted here, with no cap check.
+        count_call(run_state, "query")
         if envelope is not None:
             answered_any = True
             if ancestor:
                 ancestor_answered += 1
         # Read after the call: the elision pointer names the payload of the fetch that
         # returned the document.
-        return envelope, _last_row_seq(run_dir, L0)
+        return envelope, _last_row_seq(run_state, L0)
 
     shell: dict | None = None
     if isinstance(alert_id, str) and alert_id.strip():
@@ -314,10 +318,9 @@ def _correlation_contract(
 
 
 async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch: the narrowed registry, the session/terminator wiring, the pre-claimed seam call — one composition frame
-    *, run_dir: Path, defender_dir: Path, run_id: str,
+    *, run_state: RunState, defender_dir: Path,
     goal: str, what_to_summarize: list[str], verbs: Any, limits: dict,
-    make_model: Any, logger: Any, box: Any, store: Any = None,
-    budget_started_monotonic: float = 0.0, catalog: str | None,
+    make_model: Any, logger: Any, box: Any, store: Any = None, catalog: str | None,
     dispatch: CorrelationDispatch, tenant: Any,
 ) -> str | None:
     """The async half of item 3: dispatch the gather subagent for `l-00c` through
@@ -329,8 +332,9 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
     from it and not from `_spec`'s constants, so the frame that checked the template against
     the table and the frame that dispatches on the result are one derivation.
 
-    `tenant` is the run's record (#1107), carried onto the lead's deps so every verb it
-    dispatches reads that tenant's settings."""
+    `tenant` is the run's record (#1107), and `run_state` the run's live state (#1235), both
+    carried onto the lead's deps: every verb it dispatches reads that tenant's settings, and
+    every call it makes counts into the run's one budget and breaker."""
     from ..agent_definition import bind
     from ..agent_role import GATHER_AGENT_ID_PREFIX
     from ..driver import build_gather_agent, gather_def_for
@@ -379,14 +383,11 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
         except Exception as e:  # noqa: BLE001 — the store may already be the reason we're here
             _logger.warning(f"correlation lead truncated_by write skipped: {e!r}")
 
-    gbase = bind(gather_def_for(dispatch.grant), run_dir, defender_dir=defender_dir, box=box)
+    gbase = bind(gather_def_for(dispatch.grant), run_state.run_dir, defender_dir=defender_dir,
+                 box=box)
     assert isinstance(gbase, GatherDeps)
-    # Carry the run's budget-clock origin; `bind`'s default would start a fresh clock and
-    # overstate the remaining wall-clock budget.
-
     gdeps = replace(
-        gbase, run_id=run_id, lead_id=L3, budget_started_monotonic=budget_started_monotonic,
-        tenant=tenant,
+        gbase, run_id=run_state.run_id, lead_id=L3, run_state=run_state, tenant=tenant,
     )
 
     request = GatherRequest(L3, dispatch_system, goal, tuple(what_to_summarize))

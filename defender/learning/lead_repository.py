@@ -90,8 +90,9 @@ class QueryRow:
         default=None, repr=False, compare=False)
 
     def record(self) -> dict:
-        """The row as read — the parsed JSON record exactly as `record_query.lead_rows` hands
-        the guard live, never a re-projection of the typed fields.
+        """The row as read — the parsed JSON record, the shape the run's `RunState.lead_rows`
+        hands the guard live (each row the parse of its table line), never a re-projection of
+        the typed fields.
 
         The typed view coerces while the guard reads keys verbatim, so a replay over
         re-projected rows could reach a verdict the live run never reached. This is what makes

@@ -85,15 +85,12 @@ user that runs defender; a destination already occupied makes setup refuse, nami
 message. (Adopting an existing (B)/(C) installation whose old entries are root-owned may need
 setup run as root — that adoption case only.)
 
-**Running the suite as root fails five tests that are not broken.** Four are the
-accounting-failure tests in `tests/test_budget_enforcement_631.py`
-(`test_one_failed_accounting_write_costs_one_call_of_overshoot` and its three
-siblings); the fifth is
+**Running the suite as root fails one test that is not broken:**
 `tests/test_921_launcher_frame.py::test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_counts`.
-All five simulate a failing write by chmod'ing a directory to `r-x`, and root
-ignores permission bits — so the write lands and the test asserts "the failed
-write landed anyway". CI runs non-root and they pass there. Confirm against CI
-before chasing them; don't "fix" the tests.
+It simulates a failing write by chmod'ing a directory to `r-x`, and root ignores permission
+bits — so the write lands and the test asserts "the failed write landed anyway". CI runs
+non-root and it passes there. (The four accounting-failure tests that failed the same way
+retired with #1235.) Confirm against CI before chasing them; don't "fix" the tests.
 
 ## Run dir + the two tables
 

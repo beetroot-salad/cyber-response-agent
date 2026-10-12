@@ -57,6 +57,7 @@ from ..close_tool import register_close_tool
 from ..circuit_breaker import RunAborted
 from ..permission.policies import _common
 from ..providers import BuiltModel
+from ..run_state import RunState
 from ..tools import (
     AgentDeps,
     GatherDeps,
@@ -91,7 +92,6 @@ from ._prompts import (
 from ._budget import (
     _account_executed_call,
     _budget_short_circuit,
-    _budget_state_for_enforcement,
     _make_hooks,
     _stamp_duration,
 )
@@ -125,13 +125,11 @@ from defender.hooks.budget_enforcer import (
     BudgetKill,
     account_call,
     check_budgets,
-    open_budget,
-    read_budget,
+    count_call,
     refusal_message,
     should_refuse,
     tail_exhausted,
     tier,
-    update_budget_locked,
 )
 
 _logger = logging.getLogger(__name__)
@@ -178,12 +176,29 @@ def _run_summary(  # noqa: PLR0913 — one dict literal's full field set, named 
     """The one shape `run_investigation` returns on every exit, so exits cannot drift apart.
 
     `end` (exit class, and whether the model had already closed) is flattened on so `run.py`'s
-    post-steps read it in-process rather than off disk."""
+    post-steps read it in-process rather than off disk. The run's live state is not on it
+    (#1235): a caller that wants it hands it in (`run_investigation(run_state=…)`) and keeps its
+    own reference."""
     return {
         "output": output, "model": model_name, "requests": requests,
         "truncated_by": end.truncated_by, "closed_before_cut": end.closed_before_cut,
         "exit_reason": exit_reason, "case_id": case_id, "store_path": store_path,
     }
+
+
+def _run_state_at_boundary(run_state: RunState | None, run_dir: Path, run_id: str) -> RunState:
+    """The run's one live state (#1235), resolved once: the one the caller handed in, which
+    must be this run's — started for this folder, as spelled, under this run id — or, when
+    handed none, a new one for the run (production's path: `run.py` hands none). Another
+    run's state is a `ValueError`: counting this run on it would charge that run's budget
+    and breaker, and leave this one's decisions reading a state they never wrote."""
+    if run_state is None:
+        return RunState(run_dir, run_id)
+    if (run_state.run_dir, run_state.run_id) != (Path(run_dir), run_id):
+        raise ValueError(
+            f"run_investigation was handed the state of run {run_state.run_id!r} on "
+            f"{run_state.run_dir}, not this run's ({run_id!r} on {run_dir})")
+    return run_state
 
 
 def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | None) -> None:
@@ -442,9 +457,17 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     resume: Any = None,
     tenant: RunTenant,
     orient_shim: orient.ShimRunner | None = None,
+    run_state: RunState | None = None,
 ) -> dict:
     # `tenant` is resolved once at the entry point (settings folder, permissions, item 3's
     # dispatch identity). Required: there is no process-level fallback.
+    #
+    # The run's live decision state (#1235): its budget and clock, its breaker, its queries
+    # rows. Resolved first — a state for another run is refused before anything is read or
+    # driven — and carried by reference to every role of the run; a branch sibling's seeding
+    # records its inherited rows into it. The summary does not hand it out: a caller that wants
+    # it passes its own.
+    state = _run_state_at_boundary(run_state, run_dir, run_id)
     model_name = resolve_main_model(model_name)
     # Captured before the default is resolved below: with no injected `verbs=`, lead-0 must not
     # inherit MAIN-gather's default registry.
@@ -459,8 +482,6 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     )
     catalog, correlation_catalog = _dispatch_catalogs(defender_dir, roster, tenant.grants)
     limits = limits if limits is not None else DEFAULT_LIMITS  # lint-default: ok — DI seam owning its default (the cap table, threaded inward)
-    budget_started_monotonic = time.monotonic()
-    open_budget(run_dir, run_id)
     # Under `wire_logs/`, not the run root, so it is outside the agents' one-segment run-dir
     # read shape.
     logger = observe.RequestLogger(observe.wire_log_path(run_dir))
@@ -493,7 +514,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         # A resume joins the source run's case, so the case pointer comes from the store, not
         # the uuid minted above (they match on a fresh run). `run_dir` is passed because a
         # resumed MAIN inherits the investigation document as well as the message history.
-        session_id, resume_history = branch.open_main_session(store, resume, run_dir)
+        session_id, resume_history = branch.open_main_session(store, resume, state)
         # Written after the session opens, so a refused branch leaves no pointer naming the
         # source run's store. Rebound so `_run_summary` names the case this run joined.
         case_id = branch.attach_case_pointer(
@@ -519,8 +540,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         )
 
     prompt, lead_zero_block, lead_zero_status = _opening_prompt(
-        resume, run_dir, alert_path, defender_dir,
-        systems=tuple(roster.accepted), verbs=lead_zero_verbs, limits=limits, run_id=run_id,
+        resume, state, alert_path, defender_dir,
+        systems=tuple(roster.accepted), verbs=lead_zero_verbs, limits=limits,
         tenant=tenant, orient_shim=orient_shim,
     )
 
@@ -538,13 +559,11 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             goal, what_to_summarize = contract
             # Account the spawn explicitly: `subagent_spawns` counts the "gather" tool name,
             # which a harness dispatch never emits.
-            lead_zero_mod._budget_account(run_dir, run_id, "gather", limits)
+            count_call(state, "gather")
             correlation_task = asyncio.ensure_future(lead_zero_mod.dispatch_correlation(
-                run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
+                run_state=state, defender_dir=defender_dir,
                 goal=goal, what_to_summarize=what_to_summarize, verbs=lead_zero_verbs,
                 limits=limits, make_model=make_model, logger=logger, box=box, store=store,
-                # Share the run's budget-clock origin rather than a fresh stamp.
-                budget_started_monotonic=budget_started_monotonic,
                 catalog=correlation_catalog, dispatch=correlation,
                 tenant=tenant,
             ))
@@ -558,10 +577,11 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     deps = replace(
         bind(MAIN_DEF, run_dir, defender_dir=defender_dir, box=box),
         run_id=run_id,
-        budget_started_monotonic=budget_started_monotonic,
-        # The run's tenant record rides on MAIN's deps so every gather lead it dispatches
-        # inherits it (`_run_gather` carries it onto the lead's deps) — #1106 M3, #1107.
+        # The run's tenant record and its state ride on MAIN's deps so every gather lead it
+        # dispatches inherits them (`_run_gather` carries both onto the lead's deps) —
+        # #1106 M3, #1107, #1235.
         tenant=tenant,
+        run_state=state,
     )
 
     t0 = time.time()
@@ -635,7 +655,6 @@ __all__ = [
     "_affinity_key",
     "_branch_clock",
     "_budget_short_circuit",
-    "_budget_state_for_enforcement",
     "_clock",
     "_common",
     "_compaction_enabled",
@@ -677,12 +696,10 @@ __all__ = [
     "gather_model",
     "json",
     "observe",
-    "open_budget",
     "orient",
     "os",
     "permission",
     "providers",
-    "read_budget",
     "refusal_message",
     "register_close_tool",
     "register_gather_tool",
@@ -701,7 +718,6 @@ __all__ = [
     "tier",
     "time",
     "toon_gate_mod",
-    "update_budget_locked",
     "uuid",
     "write_guarded",
 ]

@@ -336,7 +336,7 @@ def test_the_draft_is_created_through_the_held_mount(tmp_path: Path, full: bool,
     its bytes.
 
     Catches: a writer that asks `entry_kind`, then writes by path at the mount's own
-    spelling (`write_atomic(skills._where / name)`), which the held `os_` never sees."""
+    spelling (a path write to `skills._where / name`), which the held `os_` never sees."""
     repo = bare_skills(tmp_path)
     skills_dir = repo / "defender" / "skills"
     seam = NoSpaceUnder(skills_dir / "gather/queries/elastic") if full else RealOs()

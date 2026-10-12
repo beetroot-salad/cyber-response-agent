@@ -13,6 +13,7 @@ from typing import Any
 
 from .. import orient
 from ..circuit_breaker import RunAborted
+from ..run_state import RunState
 
 from defender import _clock
 from defender._env import env_bool
@@ -49,11 +50,12 @@ def _main_instructions(defender_dir: Path) -> str:
 
 
 def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams
-    run_dir: Path, alert_path: Path, defender_dir: Path,
+    run_state: RunState, alert_path: Path, defender_dir: Path,
     *, systems: Sequence[str], verbs: Any = None, limits: dict = DEFAULT_LIMITS,
-    run_id: str | None = None, tenant: Any, orient_shim: orient.ShimRunner | None = None,
+    tenant: Any, orient_shim: orient.ShimRunner | None = None,
 ) -> tuple[str, str, str]:
-    """The fresh run's opening prompt, including lead-0's section.
+    """The fresh run's opening prompt, including lead-0's section, whose calls land in the
+    run's state.
 
     A `BudgetKill` or `RunAborted` inside `resolve_lead_zero` degrades the section rather than
     ending the run before MAIN's first prompt. Returns `(prompt, ancestor_block, status)`; the
@@ -62,6 +64,7 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams
 
     from .. import lead_zero as lead_zero_mod
 
+    run_dir = run_state.run_dir
     ancestor_block = ""
     status = lead_zero_mod.STATUS_FAILED
     try:
@@ -72,8 +75,8 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams
         except Exception:  # noqa: BLE001 — orientation-adjacent work must never break the run
             env = {}
         result = lead_zero_mod.resolve_lead_zero(
-            run_dir=run_dir, defender_dir=defender_dir, alert_path=alert_path,
-            verbs=verbs, limits=limits, run_id=run_id, tenant=tenant, env=env,
+            run_state=run_state, defender_dir=defender_dir, alert_path=alert_path,
+            verbs=verbs, limits=limits, tenant=tenant, env=env,
         )
         lead_zero_text = lead_zero_mod.render_orient_section(
             result, run_dir, correlation_system=tenant.grants.correlation_system,
@@ -112,8 +115,8 @@ def _coordinates(run_dir: Path, alert_path: Path) -> str:
 
 
 def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the resume it chooses between
-    resume: Any, run_dir: Path, alert_path: Path, defender_dir: Path,
-    *, systems: Sequence[str], verbs: Any, limits: dict, run_id: str | None,
+    resume: Any, run_state: RunState, alert_path: Path, defender_dir: Path,
+    *, systems: Sequence[str], verbs: Any, limits: dict,
     tenant: Any, orient_shim: orient.ShimRunner | None = None,
 ) -> tuple[str, str, str]:
     """MAIN's first message — for a fresh run or a resumed one.
@@ -128,12 +131,12 @@ def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the r
     """
     if resume is None:
         return _user_prompt(
-            run_dir, alert_path, defender_dir, systems=systems, verbs=verbs, limits=limits,
-            run_id=run_id, tenant=tenant, orient_shim=orient_shim,
+            run_state, alert_path, defender_dir, systems=systems, verbs=verbs, limits=limits,
+            tenant=tenant, orient_shim=orient_shim,
         )
     prompt = (
         f"{resume.continuation_prompt}\n\n"
-        f"{_coordinates(run_dir, alert_path)}{_branch_clock(resume)}")
+        f"{_coordinates(run_state.run_dir, alert_path)}{_branch_clock(resume)}")
     return prompt, "", ""
 
 

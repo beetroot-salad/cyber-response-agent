@@ -5,9 +5,9 @@ The contract is issue #1111's discuss-issue design ("the handle's reads AND writ
 no-follow from the record's trust root") and its implementation-start addendum (`create`
 keeps #1078's complete-or-absent lane). The seam is four `defender._io` functions whose names
 and signatures the design fixes: `rooted_read(root, name, *, binary=False)`,
-`rooted_mkdir(root, folder_name)`, `rooted_write(root, name, text, *, mode, stage_name=,
-open_unnamed=)` and `rooted_locked_for_rewrite(root, name)` (yielding the locked record's
-descriptor and its `fstat`, #1174 amendment 2). Each takes a
+`rooted_mkdir(root, folder_name)` and `rooted_write(root, name, text, *, mode, stage_name=,
+open_unnamed=)`. (The fourth, `rooted_locked_for_rewrite`, #1174 amendment 2, left with #1235:
+the last record that updated in place became in-memory run state.) Each takes a
 trust root, whose spelling is followed, and a name relative to it, which never is. The handle
 (`RecordHandle`, `Run.record`, `ArchivedWorld`) reaches them through its `io=` seam.
 
@@ -34,8 +34,8 @@ What each section pins:
   `rooted_*` call, carrying the trust root, the name relative to it, the mode and the payload,
   and sees no other `_io` call (in particular, no path-based seam).
 - The seam's own narrow rules, driven directly: the name grammar, a missing parent, the plant
-  rows, `create`'s complete-or-absent lane and its `open_unnamed=` fallback, `replace`'s staged
-  name, and the lock.
+  rows, `create`'s complete-or-absent lane and its `open_unnamed=` fallback, and `replace`'s
+  staged name.
 
 The member matrix is ENUMERATED from the shipped tables (`_handle.GROUP_MEMBERS`,
 `MEMBER_VERB`, `ArchivedWorld.members`), and each member's trust root and relative name are
@@ -57,7 +57,6 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import errno
-import fcntl
 import json
 import os
 import random
@@ -89,9 +88,10 @@ RUN_ID = "run-1111"
 #: deadline only bounds a regression, so it fails the test rather than wedging the run.
 DEADLINE = 3.0
 
-#: The design's M1 seam. A member op makes these `_io` calls and no others.
-ROOTED_OPS = frozenset({"rooted_read", "rooted_write", "rooted_mkdir",
-                        "rooted_locked_for_rewrite", "locked_json_update"})
+#: The design's M1 seam. A member op makes these `_io` calls and no others. (`update`'s pair,
+#: `rooted_locked_for_rewrite` handed to `locked_json_update`, left with #1235: no member
+#: updates in place any more.)
+ROOTED_OPS = frozenset({"rooted_read", "rooted_write", "rooted_mkdir"})
 
 #: Today's write-once members (`create`; a second write is refused). Not #1111's to change.
 WRITE_ONCE = frozenset({"alert", "provenance", "run_end", "leads"})
@@ -961,9 +961,7 @@ def test_o8_a_write_crosses_the_io_seam_as_rooted_calls_carrying_root_name_mode_
     - Exactly one writing call, on the record's relative name. `write` is
       `rooted_write(mode="create")` for a write-once record and `mode="replace"` otherwise,
       with the given text. `append` is ONE `rooted_write(mode="append")` whose text is the
-      whole batch as JSONL. `update` is ONE `rooted_locked_for_rewrite` opener on the name,
-      handed to ONE `locked_json_update` (#1174 amendment 2: the `_io` op that reads, changes
-      and rewrites the record; the handle never reads the file itself).
+      whole batch as JSONL. (No member has had an `update` verb since #1235.)
     - Before it, a `rooted_mkdir` on the same root: for a record in a subfolder, of that
       folder. The folder's spelling for a root-level record is left to the implementation.
     - The two schema-gated documents first read their current text with `rooted_read` of the
@@ -983,22 +981,18 @@ def test_o8_a_write_crosses_the_io_seam_as_rooted_calls_carrying_root_name_mode_
     assert all(Path(a["root"]) == root for _, a in calls if "root" in a), (
         f"{m}: not all on {root}: {calls}")
 
-    writer = "rooted_locked_for_rewrite" if m.verb == "update" else "rooted_write"
-    at = [i for i, op in enumerate(ops) if op == writer]
-    assert len(at) == 1, f"{m}.{m.verb}: {len(at)} {writer} calls in {ops}"
+    at = [i for i, op in enumerate(ops) if op == "rooted_write"]
+    assert len(at) == 1, f"{m}.{m.verb}: {len(at)} rooted_write calls in {ops}"
     a = calls[at[0]][1]
     assert PurePosixPath(a["name"]) == m.rel
     if m.verb == "write":
         assert a["mode"] == ("create" if m.name in WRITE_ONCE else "replace")
         assert a["text"] == document(m, "seam")
-    elif m.verb == "append":
+    else:
+        assert m.verb == "append", f"{m}.{m.verb}: no member updates since #1235"
         assert a["mode"] == "append"
         assert a["text"].endswith("\n")
         assert [json.loads(line) for line in a["text"].splitlines()] == rows(m, "seam")
-    else:
-        updates = [a for op, a in calls if op == "locked_json_update"]
-        assert len(updates) == 1, f"{m}.update: {ops}"
-        assert ops.index("rooted_locked_for_rewrite") < ops.index("locked_json_update"), ops
 
     mkdirs = [i for i, op in enumerate(ops) if op == "rooted_mkdir"]
     assert mkdirs, f"{m}: no rooted_mkdir made its holding folder: {ops}"
@@ -1055,8 +1049,7 @@ def test_o8_run_record_reads_its_four_sources_as_rooted_reads(tree):
 
 
 # =======================================================================================
-# The seam itself — `_io.rooted_read` / `rooted_mkdir` / `rooted_write` /
-# `rooted_locked_for_rewrite`, driven directly
+# The seam itself — `_io.rooted_read` / `rooted_mkdir` / `rooted_write`, driven directly
 # =======================================================================================
 
 #: A name two folders deep, so each folder is planted in turn.
@@ -1451,95 +1444,6 @@ def test_rooted_write_refuses_an_unknown_mode_and_writes_nothing(scratch):
     assert census(scratch.tmp) == before
 
 
-# -- rooted_locked_for_rewrite -----------------------------------------------------------
-
-def _rewrite(fd: int, text: str) -> None:
-    os.lseek(fd, 0, os.SEEK_SET)
-    os.ftruncate(fd, 0)
-    os.write(fd, text.encode())
-
-
-def test_rooted_locked_for_rewrite_yields_the_record_locked_at_position_0(scratch):
-    """The locked read-modify-write: the record's descriptor at position 0 and its `fstat`,
-    under an exclusive `flock` that a second open cannot take until the block exits. What the
-    block writes persists."""
-    target = scratch.real_folders()
-    target.write_text('{"k": 1}', encoding="utf-8")
-    with _io.rooted_locked_for_rewrite(scratch.root, DEEP) as (fd, st):
-        assert os.lseek(fd, 0, os.SEEK_CUR) == 0
-        assert st.st_size == len('{"k": 1}')
-        assert os.read(fd, 100) == b'{"k": 1}'
-        other = os.open(target, os.O_RDONLY)
-        try:
-            with pytest.raises(BlockingIOError):
-                fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        finally:
-            os.close(other)
-        _rewrite(fd, '{"k": 2}')
-    assert target.read_text(encoding="utf-8") == '{"k": 2}'
-    other = os.open(target, os.O_RDONLY)
-    try:
-        fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    finally:
-        os.close(other)
-
-
-def test_rooted_locked_for_rewrite_creates_a_missing_record_and_reads_its_bytes(scratch):
-    target = scratch.real_folders()
-    with _io.rooted_locked_for_rewrite(scratch.root, DEEP) as (fd, st):
-        assert st.st_size == 0
-        assert os.read(fd, 10) == b""
-    assert target.is_file()
-    assert os.lstat(target).st_nlink == 1
-    target.write_bytes(b"\x00raw")
-    with _io.rooted_locked_for_rewrite(scratch.root, "a/b/rec.json") as (fd, _st):
-        assert os.read(fd, 10) == b"\x00raw"
-
-
-@pytest.mark.parametrize(("kind", "folder"), list(_seam_plants()))
-def test_rooted_locked_for_rewrite_refuses_every_plant_before_its_block_runs(
-        scratch, kind, folder):
-    """O2/O3/O6 for `update`'s seam: the same rows as `rooted_write`, promptly, before the
-    block runs, with nothing changed. Control: the plant removed, the block runs on the
-    record."""
-    planted = _plant_deep(scratch, kind, folder)
-    before = census(scratch.tmp)
-    entered: list[bool] = []
-
-    def lock() -> None:
-        with _io.rooted_locked_for_rewrite(scratch.root, DEEP):
-            entered.append(True)
-
-    assert_row(raised_by(lock, fifo=planted.fifo), kind, where="rooted_locked_for_rewrite")
-    assert entered == [], "the locked block ran on a plant"
-    assert census(scratch.tmp) == before
-
-    planted.remove()
-    scratch.real_folders()
-    lock()
-    assert entered == [True]
-
-
-def test_rooted_locked_for_rewrite_follows_the_roots_own_spelling(scratch):
-    target = scratch.real_folders()
-    target.write_text("{}", encoding="utf-8")
-    alias = scratch.tmp / "alias"
-    alias.symlink_to(scratch.root, target_is_directory=True)
-    with _io.rooted_locked_for_rewrite(alias, DEEP) as (fd, _st):
-        assert os.read(fd, 10) == b"{}"
-
-
-@pytest.mark.parametrize("name", BAD_NAMES)
-def test_rooted_locked_for_rewrite_refuses_a_name_outside_the_grammar(scratch, name):
-    (scratch.root / "a").mkdir()
-    before = census(scratch.tmp)
-    lock = _io.rooted_locked_for_rewrite
-    # The grammar's type is the contract, not its wording.
-    with pytest.raises(ValueError), lock(scratch.root, name):  # noqa: PT011
-        pass
-    assert census(scratch.tmp) == before
-
-
 # =======================================================================================
 # Three holes an adversary greened the first commit through: a device at the leaf, the race
 # window between the leaf's check and its open, and `create`'s DEFAULT lane. The seam takes
@@ -1576,8 +1480,9 @@ def plant_device(path: Path, kind: str) -> Planted:
     return Planted(kind, path)
 
 
-#: The seam ops a leaf judge guards: both reads, each write mode, and the lock.
-SEAM_OPS = ("read", "read_bytes", "create", "replace", "append", "lock")
+#: The seam ops a leaf judge guards: both reads and each write mode. (The lock,
+#: `rooted_locked_for_rewrite`, left with #1235.)
+SEAM_OPS = ("read", "read_bytes", "create", "replace", "append")
 
 
 def seam_op(s: Scratch, op: str, **kw: Any) -> Callable[[], Any]:
@@ -1588,18 +1493,13 @@ def seam_op(s: Scratch, op: str, **kw: Any) -> Callable[[], Any]:
         return lambda: _io.rooted_read(s.root, DEEP, binary=True, **kw)
     if op in MODES:
         return lambda: _io.rooted_write(s.root, DEEP, f"{op} landed\n", mode=op, **kw)
-
-    def lock() -> None:
-        with _io.rooted_locked_for_rewrite(s.root, DEEP, **kw) as (fd, _st):
-            _rewrite(fd, "lock landed\n")
-
-    return lock
+    raise AssertionError(f"no seam op {op!r}")
 
 
 def assert_seam_refused(op: str, kind: str, fn: Callable[[], Any], *,
                         fifo: Path | None = None) -> None:
-    """A read answers `(None, reason)`; every write mode and the lock raise O6's row for
-    `kind`. Promptly, either way."""
+    """A read answers `(None, reason)`; every write mode raises O6's row for `kind`.
+    Promptly, either way."""
     if op.startswith("read"):
         got = in_time(fn, fifo=fifo)
         assert got[0] is None, f"{op} of a {kind} leaf returned {got[0]!r}"
@@ -1630,7 +1530,7 @@ def assert_seam_lands(s: Scratch, op: str, **kw: Any) -> None:
 def test_o1_o2_o6_a_device_node_at_the_leaf_is_refused_as_non_plain(scratch, kind, op):
     """O1/O2/O6: a character or block device at the record's name is "any other non-plain
     leaf". A read is `(None, reason)` (a /dev/null that read back '' would be a leak of
-    whatever the device yields); every write mode and the lock raise the unmarked ELOOP row
+    whatever the device yields); every write mode raises the unmarked ELOOP row
     and write nothing into it. Control: the node removed, the same op lands.
 
     Real device nodes, so it runs where `mknod` of a device is allowed and skips elsewhere;
@@ -1730,8 +1630,8 @@ def test_o1_o2_o6_the_leaf_judge_is_an_allow_list_whatever_type_the_leaf_reports
     """O1/O2/O6 on every host: the leaf is plain only when it is a regular file with one name
     (`S_ISREG` and `st_nlink == 1`), never "not one of the kinds a test plants". A real plain
     file whose `stat` and `fstat` report a device, a FIFO, a socket, a directory or a type no
-    `S_IF*` constant names is refused (read `(None, reason)`; each write mode and the lock the
-    unmarked ELOOP row); reported as a symlink, the marked ELOOP; as a regular file with two
+    `S_IF*` constant names is refused (read `(None, reason)`; each write mode the unmarked
+    ELOOP row); reported as a symlink, the marked ELOOP; as a regular file with two
     names, the marked EMLINK. The file is unchanged. Control: the same op through an unposed
     pass-through lands."""
     target = scratch.real_folders()
@@ -1747,14 +1647,14 @@ def test_o1_o2_o6_the_leaf_judge_is_an_allow_list_whatever_type_the_leaf_reports
 
 # -- hole 2: the race window between the leaf's check and its open ------------------------
 
-@pytest.mark.parametrize("op", ["read", "read_bytes", "append", "lock"])
+@pytest.mark.parametrize("op", ["read", "read_bytes", "append"])
 @pytest.mark.parametrize("pose", sorted(p for p in POSES if p != "as_symlink"))
 def test_o2_o3_the_opened_leaf_is_rejudged_on_its_descriptor(scratch, pose, op):
     """M1's change from today: the leaf is judged again on the descriptor it was opened as,
     so what the pre-open check saw is not the last word. Here the pre-open `stat` answers
     truthfully (a plain file) and only `fstat` of the opened leaf reports another kind: the
-    read is `(None, reason)`, and `append` and the lock (the modes that open the leaf itself)
-    raise that kind's row and write nothing. Control: unposed, the op lands."""
+    read is `(None, reason)`, and `append` (the mode that opens the leaf itself) raises that
+    kind's row and writes nothing. Control: unposed, the op lands."""
     target = scratch.real_folders()
     target.write_bytes(b"plain\n")
     fmt, nlink = POSES[pose]
@@ -1787,7 +1687,7 @@ class _SwapsAfterCheck(PassThroughOs):
                     self._swap()
 
 
-@pytest.mark.parametrize("op", ["append", "lock"])
+@pytest.mark.parametrize("op", ["append"])
 @pytest.mark.parametrize("swap", ["hardlink", "fifo", "symlink", "directory"])
 def test_o2_o3_a_plant_swapped_in_after_the_leaf_check_is_refused_on_the_descriptor(
         scratch, swap, op):
@@ -1839,7 +1739,7 @@ def test_o2_o3_a_plant_swapped_in_after_the_leaf_check_is_refused_on_the_descrip
 
 # -- one plainness rule, read and write alike ---------------------------------------------
 
-@pytest.mark.parametrize("op", ["read", "read_bytes", "bound_read", "append", "lock"])
+@pytest.mark.parametrize("op", ["read", "read_bytes", "bound_read", "append"])
 def test_a_file_a_replace_unnamed_after_it_was_opened_still_counts_as_plain(scratch, op):
     """A replace landing between an op's open and its descriptor check leaves the opened file
     with no name (`st_nlink == 0`). That file is still the plain record the op opened: the

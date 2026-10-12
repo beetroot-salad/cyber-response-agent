@@ -26,8 +26,9 @@ Three executed facts shape every demand in this file.
     the same collision routed through `gather_dispatch` raises `ModelRetry` (E7a, executed),
     and a harness dispatch has no model to retry, so that exception escapes into
     `_user_prompt`, which sits outside every handler in `run_investigation`.
-  * `record_query._next_seq` allocates from the rows already on disk for that lead, BEFORE
-    the payload write. A lead-0-private counter would re-claim a slot the shared one already
+  * `record_query._next_seq` allocates from the rows the run already holds for that lead
+    (since #1235's round 2, the run's `RunState`, seeded with a branch sibling's inherited
+    rows as they are written to its table), BEFORE the payload write. A lead-0-private counter would re-claim a slot the shared one already
     handed out, silently overwriting a payload sidecar.
 
 Two checked-in prose surfaces say `claim_lead` "raises" on a reused id (CLAUDE.md:75,
@@ -214,30 +215,40 @@ def test_lead_zero_appends_query_rows_keyed_l000(tmp_path):
 def test_lead_zero_and_the_model_share_one_payload_seq_counter(tmp_path):
     """R2 `gather_payloads.identity` — lead-0 allocates its payload `seq` from the SAME
     counter the model's query path uses (`record_query._next_seq`, which counts this lead's
-    rows already on disk), never from a lead-0-private one. A private counter re-claims a slot
-    the shared one already handed out, and `gather_raw/{lead_id}/{seq}.json` is a
+    rows the run already holds), never from a lead-0-private one. A private counter re-claims
+    a slot the shared one already handed out, and `gather_raw/{lead_id}/{seq}.json` is a
     unique-key sink: the second writer silently overwrites the first's payload.
 
-    Driven at the composition frame, over a run dir that already carries a row for the
-    reserved id — the only way one writer's allocation can be observed against another's."""
+    Over a run that already carries a row for the reserved id — the only way one writer's
+    allocation can be observed against another's. Since #1235's round 2 the counter is the
+    run's `RunState`, which reads no file: a row the run holds is one seeded into its state as
+    it was written to the table (`inherit_rows`, the branch seeding's own step). No seam hands
+    the driver's state out before lead-0, so the entry point is called directly over a state
+    this test seeded that way — the same `resolve_lead_zero` the driver calls."""
+    from defender.runtime import lead_zero
+    from defender.runtime.run_state import RunState
+    from defender.tests import _tenants1106
+
     run_dir = materialize_alert(tmp_path, alert_doc(ancestors=[ancestor("anc-1")]))
     prior = {"lead_id": L0, "seq": 0, "system": "elastic", "verb": "query",
              "query_id": "elastic.ad-hoc", "params": {}, "raw_command": "elastic query",
              "payload_path": f"gather_raw/{L0}/0.json", "exit_code": 0,
              "error_class": None, "payload_status": "persisted", "payload_digest": "exit=0"}
     append_jsonl(RunPaths(run_dir).executed_queries, [prior])
+    state = RunState(run_dir, "lz808-seq")
+    state.inherit_rows([prior])
     slot = run_dir / "gather_raw" / L0 / "0.json"
     slot.parent.mkdir(parents=True, exist_ok=True)
     slot.write_text('["THE EARLIER PAYLOAD"]', encoding="utf-8")
 
-    from defender.tests.e2e._lead_zero_808 import elastic_backend
-    from defender.tests.e2e._replay_harness import ReplayFn, VerbRecorder, drive
+    from defender.tests.e2e._lead_zero_808 import defender_dir, elastic_backend
+    from defender.tests.e2e._replay_harness import VerbRecorder
 
     rec = VerbRecorder()
-    drive(run_dir, run_id="lz808-seq",
-          main=ReplayFn([Turn(text="Investigation complete.")]),
-          gather=ReplayFn([Turn(text="correlation summary")]),
-          verbs=elastic_backend(rec, answer_hits(DOCS)))
+    lead_zero.resolve_lead_zero(
+        run_state=state, defender_dir=defender_dir(), alert_path=run_dir / "alert.json",
+        tenant=_tenants1106.fixture_run_tenant(), env={},
+        verbs=elastic_backend(rec, answer_hits(DOCS)))
 
     rows = [r for r in read_jsonl_rows(RunPaths(run_dir).executed_queries)
             if r.get("lead_id") == L0]

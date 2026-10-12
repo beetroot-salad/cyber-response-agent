@@ -223,9 +223,12 @@ def test_g16_a_source_pointer_naming_another_tenants_store_is_refused_before_any
     its `.resolve()` stay.) The positive control is the source's own pointer: it launches."""
     import json
 
+    from defender.run_repository import RunPaths
+
     est, src = P.launch_source(tmp_path)
     beta = P.second_tenant(P.data_root(), "beta")
-    pointer = src / "session_store_pointer.json"
+    # #1235: the case pointer is the host-only sidecar beside the run folder.
+    pointer = RunPaths(src).session_pointer()
     honest = pointer.read_text(encoding="utf-8")
     doc = json.loads(honest)
     foreign = Path(beta.sessions) / Path(doc["store_path"]).name
