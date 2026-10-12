@@ -692,7 +692,7 @@ def test_main_and_gather_share_one_budget(tmp_path, unenforced):
 
     assert len(list((run_dir).glob("**/budget.json"))) == 1
     state = budget(run_dir)
-    assert state["subagent_spawns"] == 1
+    assert state["subagent_spawns"] == 2, "the pool: the correlation lead (#1222) plus the one lead"
     assert state["tool_calls"] >= 3, (
         f"the gather subagent's own query did not spend the shared pool: {state}"
     )
@@ -780,10 +780,10 @@ def test_refused_gather_and_the_spawn_counter(tmp_path, enforced):
         Turn(text="done"),
     ])
     drive(run_dir, run_id="spawn", main=replay, gather=gather, verbs=verbs,
-          limits=caps(max_subagent_spawns=1, max_tool_calls=500,
+          limits=caps(max_subagent_spawns=2, max_tool_calls=500,  # l-00c takes the first
                       wall_clock_timeout=3600, grace_seconds=600))
 
-    assert budget(run_dir)["subagent_spawns"] == 1, (
+    assert budget(run_dir)["subagent_spawns"] == 2, (  # the correlation lead plus l-001
         "a refused gather was charged to the spawn counter"
     )
     assert (run_dir / "gather_raw" / "l-001.lead.json").exists(), (
@@ -893,7 +893,7 @@ def test_stopped_query_writes_no_row(tmp_path, enforced):
               Turn(text="done"),
           ]),
           gather=gather,
-          verbs=verbs, limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
+          verbs=verbs, limits=caps(max_tool_calls=2, wall_clock_timeout=3600,  # l-00c spends one
                                    grace_seconds=600))
 
     assert gather.calls >= 1, "the subagent never ran, so the ordering was not exercised"
@@ -995,7 +995,7 @@ def test_gather_abort_becomes_measurement_string(tmp_path, enforced):
         Turn(text="PARTIAL SUMMARY: refused"),
     ])
     drive(other, run_id="gref", main=main_b, gather=gather_b, verbs=verbs,
-          limits=caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600))
+          limits=caps(max_tool_calls=2, wall_clock_timeout=3600, grace_seconds=600))  # l-00c spends one
     assert gather_b.calls >= 2, "the subagent did not keep working past the refusal"
     history = "\n".join(main_b.seen)
     assert "PARTIAL SUMMARY: refused" in history

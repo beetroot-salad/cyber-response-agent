@@ -58,6 +58,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from defender.tests._alert_plant import plant_alert
 
 from defender._episode_handle import Episode
 from defender.tests import _spec1047 as S
@@ -314,6 +315,7 @@ def test_the_host_side_record_source_is_not_reachable_from_inside_a_box(tmp_path
 
     run_dir = tmp_path / "defender-runs" / "2026-09-16T12-00-00Z_case-1047"
     run_dir.mkdir(parents=True, exist_ok=True)
+    plant_alert(run_dir)
     sidecar = S.sidecar_path(run_dir)
     # An explicit rootfs: the tree is fake (no `box.Dockerfile`/`uv.lock`/`pyproject.toml`),
     # and with `rootfs` unset the builder would resolve the image from it and refuse (#1092).

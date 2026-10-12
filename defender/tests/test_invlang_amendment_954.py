@@ -1260,9 +1260,11 @@ def test_a_precedent_case_carrying_the_repeated_id_warning_is_not_loaded_as_clea
     sound precedent, and the corpus is what a later run reasons from.
     """
     from defender.skills.invlang.corpus import load_corpus
+    from defender.tests._alert_plant import plant_alert
 
     case = tmp_path / "case-1"
     case.mkdir()
+    plant_alert(case)
     (case / "investigation.md").write_text(REPEAT_DOC + CONCLUDE_BENIGN, encoding="utf-8")
 
     companions, report = load_corpus(tmp_path)

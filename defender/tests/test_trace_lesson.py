@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from defender.tests._by_path import load_trace_lesson
+from defender.tests._alert_plant import plant_alert
 
 
 def _load():
@@ -17,6 +18,7 @@ def _load():
 def _mk_run(runs: Path, name: str, *, disposition: str, loads: list[dict]):
     rd = runs / name
     rd.mkdir(parents=True)
+    plant_alert(rd)
     (rd / "report.md").write_text(f"---\ndisposition: {disposition}\n---\nbody\n")
     (rd / "lessons_loaded.jsonl").write_text(
         "".join(json.dumps(r) + "\n" for r in loads)

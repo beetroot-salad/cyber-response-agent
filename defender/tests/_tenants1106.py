@@ -404,7 +404,8 @@ def plant_census_settings(repo: Path, rows: dict, *, template_rows: dict | None 
                               else rows)):
         folder = repo / "knowledge" / name
         files = {"lead-zero.yaml": lead_zero_text(CENSUS_LEAD_ZERO_ID),
-                 "systems/case-history/mapping.yaml": mapping_text()}
+                 "systems/case-history/mapping.yaml": mapping_text(),
+                 "alert-mapping.yaml": ALERT_MAPPING_TEXT}
         for rel, text in files.items():
             (folder / "settings" / rel).parent.mkdir(parents=True, exist_ok=True)
             (folder / "settings" / rel).write_text(text, encoding="utf-8")

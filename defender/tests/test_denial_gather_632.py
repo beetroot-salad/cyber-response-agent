@@ -139,7 +139,7 @@ def test_a_denial_reaches_the_model_even_when_its_row_cannot_be_written(tmp_path
         def __call__(self, messages, info):  # noqa: ANN001 — the framework's callable protocol
             if self.calls == 0:
                 table = RunPaths(self.run_dir).executed_queries
-                table.unlink()
+                table.unlink(missing_ok=True)  # the correlation lead (#1222) may have written no row
                 table.mkdir()
             return super().__call__(messages, info)
 

@@ -36,6 +36,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender.skills.invlang.corpus import load_corpus  # noqa: E402
 from defender.tests._locale import C_LOCALE_ENV  # noqa: E402
+from defender.tests._alert_plant import plant_alert
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 
@@ -63,15 +64,14 @@ summary                "{summary}"
 
 def _case(runs: Path, case_id: str, *, summary: str = "plain summary",
           investigation: bytes | None = None, alert: bytes | None = None) -> Path:
-    """One run dir: investigation.md + its sibling alert.json. Written as BYTES so a case can
-    carry an undecodable one without the fixture itself having to pick an encoding."""
+    """One run dir: investigation.md + its alert input directory (alert and record). The
+    companion is written as BYTES so a case can carry an undecodable one without the fixture
+    itself having to pick an encoding."""
     d = runs / case_id
     d.mkdir(parents=True)
     body = _COMPANION.format(summary=summary).encode() if investigation is None else investigation
     (d / "investigation.md").write_bytes(body)
-    (d / "alert.json").write_bytes(
-        json.dumps({"rule": {"id": f"sig-{case_id}"}}).encode() if alert is None else alert
-    )
+    plant_alert(d, {"rule": {"id": f"sig-{case_id}"}} if alert is None else alert)
     return d
 
 
@@ -102,11 +102,12 @@ def test_an_undecodable_alert_json_degrades_the_signature_it_does_not_sink_the_c
     `except (OSError, json.JSONDecodeError)` — and `JSONDecodeError` is a *sibling* of
     `UnicodeDecodeError` under `ValueError`, not its superclass, so it does not hold one either.
 
-    `alert.json` is vendor-supplied bytes, i.e. the likeliest undecodable file in the run dir. A
-    signature that can't be read costs the case its cross-case join key; it must not cost the
-    corpus the whole case, and it must not kill the shim."""
+    Since #1222 an undecodable alert never gets a run record (admission refuses it), so the
+    reachable form of this is a recorded run whose alert yields no signature. A signature that
+    is absent costs the case its cross-case join key; it must not cost the corpus the whole
+    case, and it must not kill the shim."""
     runs = tmp_path / "runs"
-    _case(runs, "badalert", alert=b'{"rule": {"id": "sig-\xff\xfe"}}')
+    _case(runs, "badalert", alert={"alert_id": "no-signature-here"})
 
     companions, report = load_corpus(runs)
 

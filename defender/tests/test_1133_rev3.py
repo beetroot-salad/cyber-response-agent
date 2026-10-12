@@ -69,6 +69,7 @@ from defender.tests import _spec1133 as S
 from defender.tests import _triplet_947 as T
 from defender.tests.test_947_capture_prime import append_call, call_row, source_run
 from defender.tests import _state1135
+from defender.run_repository import RunPaths
 
 EPISODE_ID = "ep-1133"
 #: Bytes that are not UTF-8: a plain file holding them is a refused text read.
@@ -1084,7 +1085,7 @@ def test_patch_resume_with_no_held_episode_is_refused_never_an_ordinary_run(tmp_
     with pytest.raises(SystemExit):
         run._resume_target(ns, episode=None, tenant=settings)
 
-    ordinary = run.parse_args([str(src / "alert.json"), "--tenant", T.SOURCE_TENANT])
+    ordinary = run.parse_args([str(RunPaths(src).alert), "--tenant", T.SOURCE_TENANT])
     assert run._resume_target(ordinary, episode=None, tenant=settings) is None
     with S.open_episode(ep) as episode:
         world = run._resume_target(ns, episode=episode, tenant=settings)

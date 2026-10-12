@@ -822,7 +822,7 @@ def test_1204_a_fork_sibling_materialised_through_the_real_path_stamps_the_clone
         tenant=lambda: H.T1106.run_tenant(H.accept(data_root, TENANT_ID)))
 
     run_dir = run_common.materialize_run(
-        src / "alert.json", world.run_id, tenant=tenant, world=world).run_dir
+        RunPaths(src).alert, world.run_id, tenant=tenant, world=world).run_dir
     assert run_dir.parent == episode_dir / "runs", "precondition: the fork path, not a fresh run"
     doc = json.loads(RunPaths(run_dir).provenance.read_text(encoding="utf-8"))
     assert doc["world_id"] == world.world_id
