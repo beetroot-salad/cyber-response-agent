@@ -1,6 +1,12 @@
-# spec_graph — mechanical granularity checks for write-tests spec graphs
+# spec_graph — historical graph checks and standalone suite checks
 
-A write-tests spec graph (`spec_graph_*.yaml`, committed beside the tests) is a lossy projection
+The requirements graph is retired from the active pipeline. Graph-only commands remain for
+existing committed artifacts; their corpus CI gate is retired. This repository's former graph configuration is archived at `references/project-config.json`; supply it
+with `--config` when investigating old artifacts. `calls` and `nullstub` also accept suite paths directly and remain
+useful without a graph. Historical schemas and rules are in [references/schema.md](references/schema.md),
+[references/rules.md](references/rules.md), and [references/frontier.md](references/frontier.md).
+
+A historical write-tests spec graph (`spec_graph_*.yaml`, committed beside the tests) is a lossy projection
 of the code's behavioral domain: *demands* bound to graph elements, with gate rules R0–R8 computing
 blind-spot shapes over the bindings. The gate rules are only as good as the partition, the axes,
 and the binding-edges they're handed — so a graph **coarser than reality** passes green while real

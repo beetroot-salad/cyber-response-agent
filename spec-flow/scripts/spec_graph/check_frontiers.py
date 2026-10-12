@@ -42,7 +42,7 @@ import _config
 
 _STATUS = {"complete", "design-refuted", "blocked"}
 _DIGEST_CAP = 15
-# One line, so a finding stays one line; write-tests' references/frontier.md has the full shape.
+# One line, so a finding stays one line; spec_graph/references/frontier.md has the full shape.
 _FRONTMATTER_EXAMPLE = (
     "`---` / `phase: C-judge` / `status: complete` / `inputs: [40-premises.md]` / `---`"
 )

@@ -7,7 +7,7 @@ effort: high
 
 # Discuss issue
 
-Own the **design**: what the feature adds, its boundaries, its data models and flows, and the architecture chosen to implement it. Tests will be its executable contract; coverage graphs and other agent scaffolding are downstream work. A design is ready when it supports the promised behavior and guides consequential decisions, not when it enumerates every imaginable case.
+Own the **design**: what the feature adds, its boundaries, its data models and flows, and the architecture chosen to implement it. Tests will be its executable contract; coverage records are downstream agent scaffolding. A design is ready when it supports the promised behavior and guides consequential decisions, not when it enumerates every imaginable case.
 
 ## 1. Open with the problem, not the solution
 

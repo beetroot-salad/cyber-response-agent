@@ -7,7 +7,7 @@ effort: high
 
 # Write code with no spec
 
-This combined lane is retained for existing runs. New work uses `write-tests` followed by `write-code-from-tests`, which accepts compact contracts for small changes and optional graphs for larger or historical ones. The instructions below preserve the earlier run's worktree isolation, tests-before-code ordering, adversarial check, ownership and CI-repair discipline.
+This combined lane is retained for existing runs. New work uses `write-tests` followed by `write-code-from-tests`, which consumes the design, committed tests and compact coverage/review record. The instructions below preserve the earlier run's worktree isolation, tests-before-code ordering, adversarial check, ownership and CI-repair discipline.
 
 **Guardrail, checked continuously, not just at the start:** if while working the change turns out to touch more than one entry point, needs a decomposition decision, or opens a fork whose two readings imply a different data model — stop. That's what `discuss-issue` and `write-tests` are for. Kick back rather than improvising a data model at the keyboard.
 

@@ -17,7 +17,7 @@ Read the current discuss-issue design and decisions, grounding evidence, and pro
 
 Use a dedicated git worktree, adopting an appropriate existing one or creating a branch from the intended base. Record its base commit. Confirm the interpreter and imports resolve into this worktree; validate affected baseline/harness behavior before interpreting failures. Keep the tests separate from implementation: **do not write or commit production skeletons, implementation, or policy-bearing substitute code**. If implementation already exists, this is contract repair; record that fact rather than claim a new independent tests-first run.
 
-Read **references/contract.md** for the compact coverage record, checkpoints, and handoff. Initialize working state under `.spec-flow/` and exclude scratch state through the worktree's git exclude mechanism. Use stable design obligation and finding IDs. Do not require the old numbered frontier chain, premise files, or a graph before writing tests.
+Read **references/contract.md** for the compact coverage record, checkpoints, and handoff. Initialize working state under `.spec-flow/` and exclude scratch state through the worktree's git exclude mechanism. Use stable design obligation and finding IDs. The design and executable tests are the contract; do not produce a separate formal spec or require numbered frontier files.
 
 ## 2. Author the contract
 
@@ -35,7 +35,7 @@ Dispatch a fresh intent reviewer using **references/review.md**. It receives the
 
 Start with one reviewer. Add a lensed design reading only for a named risk or unresolved interaction; its output must identify a concrete gap or design tension, not an unbounded list of hypotheticals. A tests-only blind reader is optional when the inferred contract is itself in doubt. Have someone reconcile its output against the actual design; unread review output adds no protection.
 
-Run relevant deterministic checks directly; they need no dedicated agent. Use the project's targeted test command, collection and applicable lint/type checks. For supported Python suites, `spec-graph calls <suite-dir> [--target <module>]` and `spec-graph nullstub <suite-dir> --python <project-interpreter>` can expose missing calls and vacuity without a graph. Read the results, not just exit codes: expected red, test breakage, and demand-specific assertion failure are different evidence. Detailed triage is in **references/review.md**. Record unavailable checks and their consequences.
+Run relevant deterministic checks directly; they need no dedicated agent. Use the project's targeted test command, collection and applicable lint/type checks. For supported Python suites, `spec-graph calls <suite-dir> [--target <module>]` and `spec-graph nullstub <suite-dir> --python <project-interpreter>` can expose missing calls and vacuity directly from the suite; these commands do not create or require a separate spec artifact. Read the results, not just exit codes: expected red, test breakage, and demand-specific assertion failure are different evidence. Detailed triage is in **references/review.md**. Record unavailable checks and their consequences.
 
 ## 4. Reconcile, patch or dissolve
 
@@ -70,4 +70,4 @@ An exhausted budget with a known blocker means **blocked/incomplete**, with the 
 
 Follow **references/contract.md**. Commit the executable contract separately before implementation; preserve an immutable tests ref for both honest and adversarial implementers. Communicate coverage, uncertainty, design amendments, and required implementation-stage checks. Do not start coding or ship a PR from this skill.
 
-**Handoff formats:** `write-code-from-tests` accepts the committed suite plus compact coverage/review record; no graph is required. Use **references/graph-export.md** only when a caller or repository requires a graph, or to maintain an existing graph contract. Any export finding re-enters the same review loop. State the immutable contract ref, handoff format, and next action explicitly.
+**Handoff:** give `write-code-from-tests` the committed suite and compact coverage/review record linked to the current design. State the immutable contract ref and next action. Do not generate or maintain `spec_graph_*.yaml`; requirements belong in the design and enforcing tests, not a parallel spec.

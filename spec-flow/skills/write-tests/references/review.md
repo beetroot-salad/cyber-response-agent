@@ -28,7 +28,7 @@ Use focused test-only counterexamples, mutations, or null stubs where useful. Th
 
 ## Interpret execution evidence honestly
 
-For Python projects, `spec-graph calls <suite-dir> [--target <module>]` checks static target reachability and `spec-graph nullstub <suite-dir> --python <interpreter>` runs tests against a temporary do-nothing target. Both work without a graph; use equivalent checks for other stacks. Follow project interpreter and injection conventions.
+For Python projects, `spec-graph calls <suite-dir> [--target <module>]` checks static target reachability and `spec-graph nullstub <suite-dir> --python <interpreter>` runs tests against a temporary do-nothing target. Both consume the suite directly; use equivalent checks for other stacks. Follow project interpreter and injection conventions.
 
 Classify results per test or meaningful assertion group:
 

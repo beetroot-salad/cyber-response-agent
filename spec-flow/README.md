@@ -1,6 +1,6 @@
 # spec-flow
 
-A spec-first pipeline from GitHub issue to merged PR, as a Claude Code plugin.
+A design-and-tests pipeline from GitHub issue to merged PR, as a Claude Code plugin.
 
 The design records intended behavior, scope, data models, flows, architecture and trade-offs.
 **The tests are the executable contract between that design and code.** Write them before
@@ -9,8 +9,8 @@ them while an adversary looks for intent violations the tests permit. Findings c
 design, the contract or the code; group them by cause before patching or choosing a dissolving change.
 
 Coverage records are agent scaffolding. `write-tests` starts with a compact map and scales
-investigation/review to uncertainty, coupling and failure consequences. `write-code-from-tests` consumes that compact contract directly; a validated graph export is
-optional for callers that require it or historical graph contracts. A graph or green suite does
+investigation/review to uncertainty, coupling and failure consequences. `write-code-from-tests` consumes that compact contract directly. There is no separate formal
+spec artifact: the design records requirements and the tests enforce them. A green suite does
 not prove complete intent.
 
 ```
@@ -35,9 +35,9 @@ every edge case. The merge remains human-approved.
 | Skill | What it does |
 |---|---|
 | `/spec-flow:discuss-issue` | Opens with only the problem and open questions, then grounds and reviews a design covering behavior, scope, data models, flows, and architecture. Groups findings into fixes or dissolving design choices; hands off a human-facing intent+design doc with supporting probed claims. Also handles design amendments discovered by tests or code. |
-| `/spec-flow:write-tests` | Authors contract tests early, independently reviews fidelity and discrimination, and iterates through patches or design amendments. Commits tests before implementation with a compact coverage/review record; exports a validated graph when the implementation consumer requires it. Known blockers prevent a ready handoff. |
-| `/spec-flow:write-code-from-tests` | Dispatches honest implementers and test-breaking adversaries from the same committed contract. Reconciles findings, completes deferred verification, ships and repairs CI; graphs are optional. |
-| `/spec-flow:write-code-from-spec` | Compatibility entry delegating to write-code-from-tests for older invocations and graph handoffs. |
+| `/spec-flow:write-tests` | Authors contract tests early, independently reviews fidelity and discrimination, and iterates through patches or design amendments. Commits tests before implementation with a compact coverage/review record. Known blockers prevent a ready handoff. |
+| `/spec-flow:write-code-from-tests` | Dispatches honest implementers and test-breaking adversaries from the same committed contract. Reconciles findings, completes deferred verification, ships and repairs CI. |
+| `/spec-flow:write-code-from-spec` | Compatibility entry delegating to write-code-from-tests for older invocations and historical resumes. |
 | `/spec-flow:write-code-with-no-spec` | Legacy combined lane for existing runs; new small changes use write-tests then write-code-from-tests. |
 | `/spec-flow:finalize` | Meets the shipped PR **cold**: applies every fix it's confident in, files the rest, feeds process findings back to the human, and re-greens the PR. |
 | `/spec-flow:ship` | Branch, commit, push, open a PR. Used by the phases above; useful on its own. |
@@ -90,9 +90,8 @@ The method is portable; a project's gate is not. Everything repo-specific lives 
   and the traps that make a green local run a lie.
 - `tests` — where tests live, the existing fake/replay harness to build on, and how fakes are meant
   to enter the code (what the project's CI forbids).
-- `specGraph` — read as data by the two checkers: the project's source roots and entrypoint stems.
-  (The alias maps are an escape hatch, normally empty — a spec graph is supposed to name things what
-  the code names them, and a private synonym silently disables the check for that concept.)
+- `codeGraph` — optional Python source-reference lookup configuration for `symbol-refs`;
+  it does not model feature requirements.
 - `conventions` — the default branch, the **danger lens** (what kind of hostile reality this system
   faces; `write-tests` selects focused review where relevant), and a pointer to the project's **principles** document (what every fork
   is judged against — the project owns it; asked of the owner, never guessed).
@@ -118,6 +117,10 @@ thing driving it can stay dumb.
 
 ## Requirements
 
-`git` and the `gh` CLI (authenticated). The spec_graph checks need a Python with PyYAML; the
-bundled `spec-graph` command finds one (or falls back to `uv run --with pyyaml python`), so there is
-nothing to configure.
+`git` and the `gh` CLI (authenticated). The optional Python suite checks (`spec-graph calls`
+and `spec-graph nullstub`) use the tests directly and need Python with PyYAML; the bundled
+command discovers an interpreter or falls back to `uv run --with pyyaml python`.
+
+The requirements graph is retired from the pipeline. Existing committed graphs and their
+checkers remain available for historical investigation; the graph-maintenance CI gate is retired and its project configuration is archived beside the tooling. new work does not create, read, or maintain
+them. Historical graph documentation lives under `scripts/spec_graph/references/`.

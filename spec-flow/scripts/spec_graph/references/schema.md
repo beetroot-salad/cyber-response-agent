@@ -1,6 +1,8 @@
+> Historical graph documentation. The active pipeline uses design and executable tests; do not use this document to generate or maintain a new formal spec.
+
 # The spec-coverage graph — schema
 
-Read only for the legacy graph interface used by write-code-from-tests or an explicit graph consumer. **graph-export.md** gives the current export procedure; this language does not require the retired phase pipeline.
+This records the schema consumed by the historical graph checkers. It is not an input or deliverable of the active skills.
 
 The language the spec is written in. Two layers — **demands** (what we require) and **structure** (what exists or will exist) — joined by one relation, `binds`. The demand list is the spec proper; structure is its address space. An **obligation** is a missing demand the gate computes — a structure element the change touches whose contract lacks a binding demand; rules.md owns the definition and the residue types.
 
@@ -185,13 +187,13 @@ Two extractors populate the graph; their outputs meet at the gate.
 - the consumers of anything the design removes — found by *reading* prompts and call-sites (a prompt line reading "grep, not index" names a consumer of grep), never by signature grep — naming the sweep that established the list;
 - the real semantics of every external tool driven (`--help`, docs — not priors);
 - every config knob: type, default, distinguished members, documented alternatives — and, per documented alternative, whether the shipped default stays valid under it (`crosses_validation`);
-- every **consequence-bearing fact** on a path the change touches — a side-effecting call on a read/write path, an unbounded sink, a shared trace/sink — flagged with the disposition it expects (the premise/claim it feeds, or an explicit `no-consequence`), so a consequential fact cannot remain inert narrative; independent review reconciles its disposition (review.md).
+- every **consequence-bearing fact** on a path the change touches — a side-effecting call on a read/write path, an unbounded sink, a shared trace/sink — flagged with the disposition it expects (the premise/claim it feeds, or an explicit `no-consequence`), so a consequential fact cannot remain inert narrative; independent review reconciles its disposition (historical independent review).
 
 **Demand extraction (structure, `provenance: design`)** materializes the rest: resolving `binds:` addresses pulls the demanded boundaries, facets, and edges into existence. At spec time the delta *is* this demand-implied structure.
 
 Both extractors fill every invariant field or write `unknown`. Reconciliation is bidirectional (rules.md R0): every normative design sentence binds ≥1 element; every delta element traces to a design sentence.
 
-**Extraction completeness is the gate's single point of failure**: an element missing from the graph is invisible to every rule, and a clean gate then *certifies* the blind spot. `spec-graph trace` now derives the two riskiest censuses from the code — `drivers` (changed module → the entrypoints that reach it) and `resource` (declared sink → writers/readers with path templates) — with an honest floor for what a static walk cannot resolve; the floor lines, boundary-identity keying across passes, and any census the tools don't cover stay on the reader. The brief still names how each list was established (a tool run is the probe), the exporter reconciles ids and axes across the contract and grounding, and independent review challenges missing contexts and interactions (review.md).
+**Extraction completeness is the gate's single point of failure**: an element missing from the graph is invisible to every rule, and a clean gate then *certifies* the blind spot. `spec-graph trace` now derives the two riskiest censuses from the code — `drivers` (changed module → the entrypoints that reach it) and `resource` (declared sink → writers/readers with path templates) — with an honest floor for what a static walk cannot resolve; the floor lines, boundary-identity keying across passes, and any census the tools don't cover stay on the reader. The brief still names how each list was established (a tool run is the probe), the exporter reconciles ids and axes across the contract and grounding, and independent review challenges missing contexts and interactions (historical independent review).
 
 ## Worked example — demands first
 
