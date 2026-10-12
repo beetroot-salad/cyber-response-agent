@@ -314,7 +314,7 @@ def test_a_sidecar_shaped_label_is_refused_at_the_family_gate():
     from defender.runtime.branch import _family
     with pytest.raises(_family.FamilyError, match="world-token alphabet"):
         _family.check_identities(_family.parse_family(
-            _family_doc("ep", "x.accounting_failures.json")))
+            _family_doc("ep", "x.accounting_failures.json")))  # lint-stale-ref: ok — the reserved sidecar suffix, not the removed `RunPaths.accounting_failures()`
 
 
 def test_the_writer_refuses_an_arm_id_its_sidecar_files_hold(tmp_path):
