@@ -218,21 +218,22 @@ class _ScopedJudge:
 
 
 def _world_reply(systems: list[Any], *, bucket: str = "lead-quality") -> str:
-    """A v2 world-scope judge reply: a top-level bucket, the systems the world's facts touched,
-    and one `subject: world` finding (no pattern, no holding system)."""
+    """A world-scope judge reply in the #1234 shape: a top-level bucket, the systems the
+    world's facts touched, and one world finding (no pattern, no holding system) naming the
+    same systems as its own (A5: a questioner row carries its finding's systems) and citing the
+    manifest's discriminator (a design finding, so it is queued)."""
     finding = J.finding_doc(
-        bucket="fact-placement", subject="world",
+        bucket="unreachable", subject="world",
         claim="the world's fact sat where the investigator could not see it",
         root_cause="the fact touched a system the tenant does not serve",
-        anchor="world b", topic="fact placement", evidence=["investigation.md#l-001"])
+        anchor="world b", topic="fact placement", systems=list(systems))
     return S.as_reply_text(J.reply_doc(findings=[finding], bucket=bucket,
                                        systems=list(systems)))
 
 
 def _family_reply() -> str:
-    words = sorted(S.sym(S.VOCAB, "JUDGE_OUTCOME_ENUM"))
-    word = "survived" if "survived" in words else words[0]
-    return S.as_reply_text(J.reply_doc(findings=[], verdict_word=word))
+    """A family-scope reply in the #1234 shape: no family word (A17), no findings."""
+    return S.as_reply_text(J.family_reply())
 
 
 def _grade(tmp_path: Path, judge: _ScopedJudge) -> tuple[Any, Path]:
@@ -624,8 +625,12 @@ def test_1224_questioner_finding_rows_queued_before_the_change(tmp_path, caplog)
     N23 (auto): the seed lesson becomes an explicit empty systems list. The pre-change row
     reaches the questioner curator's gate beside a v2 row carrying systems [idp], which is
     admitted; the old row is not authored, so no lesson can select a tenant by guess from its
-    pattern or holding system, and the warning names its finding id. Today's gate is
-    idempotency-only and authors both."""
+    pattern or holding system, and the warning names its finding id.
+
+    #1234 (A4, I10): a row queued before #1234 also carries the family word its appender wrote
+    (`judge_outcome`, forced to None), a retired name — such a row is HELD naming it, never
+    authored and never consumed. The v2 row carries no retired name; the no-systems row of
+    N23 is spelled without one, so the drain arm is still pinned on its own."""
     caplog.set_level(logging.WARNING)
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
     curator = S.mod("learning.author.questioner.run")
@@ -633,17 +638,26 @@ def test_1224_questioner_finding_rows_queued_before_the_change(tmp_path, caplog)
                                           trees=author_trees(paths))
 
     def row(fid: str, **shape: Any) -> dict:
-        return dict(D.finding_row(fid, run_id="ep-1", direction=W.SUBJECT_WORLD),
-                    subject=W.SUBJECT_WORLD, type="fact-placement", world="b",
-                    provenance="model", subject_anchor="world b", subject_topic="facts",
-                    judge_outcome="survived", source_run_dir="episodes/ep-1", **shape)
+        built = dict(D.finding_row(fid, run_id="ep-1", direction=W.SUBJECT_WORLD),
+                     subject=W.SUBJECT_WORLD, type="unreachable", world="b",
+                     provenance="model", subject_anchor="world b", subject_topic="facts",
+                     source_run_dir="episodes/ep-1", **shape)
+        built.pop("judge_outcome")   # `_drain719.finding_row` spells the pre-#1234 family word
+        return built
 
     old = row("ep-1/b/0/0", pattern="logs-*", holding_system="elastic")
     new = row("ep-1/b/0/1", systems=["idp"])
+    retired = {**row("ep-1/b/0/2", systems=["idp"]), "judge_outcome": None}
 
-    held, consumed, to_author = cfg.gate([old, new], cfg)
+    held, consumed, to_author = cfg.gate([old, new, retired], cfg)
 
+    held_ids = {r["finding_id"]: r.get("held_reason") for r in held}
+    assert "judge_outcome" in str(held_ids.get("ep-1/b/0/2")), (
+        f"a pre-#1234 row carrying judge_outcome was not held naming it: {held_ids}")
     authored = [r["finding_id"] for r in to_author]
+    assert "ep-1/b/0/2" not in authored, "a row carrying a retired name was authored"
+    assert "ep-1/b/0/2" not in [r["finding_id"] for r in consumed], (
+        "a row carrying a retired name was consumed rather than held")
     assert "ep-1/b/0/1" in authored, f"the v2 row (systems [idp]) was not authored: {authored}"
     assert "ep-1/b/0/0" not in authored, (
         "a pre-change row with no systems was handed to the curator to author a lesson from")
