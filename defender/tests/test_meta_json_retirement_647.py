@@ -481,6 +481,8 @@ def test_run_paths_accessor_set_is_exactly_its_artifacts_after_the_meta_accessor
         "source_refs", "gather_summaries", "lead_author", "tool_trace", "policy_denials",
         "budget", "circuit_breaker", "lessons_loaded", "session_pointer",
         "runtime_html", "box_sentinel",
+        # #1222 A1: the read-only input directory, and the record beside the alert
+        "alert_input_dir", "alert_record",
     }, f"the artifact accessor set drifted: {sorted(accessors)}"
     assert not hasattr(RunPaths(tmp_path), "meta"), "RunPaths still resolves a meta.json path"
 

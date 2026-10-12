@@ -1,0 +1,37 @@
+"""Plant a run's alert and its record the way `materialize_run` leaves them (#1222 A1).
+
+Shared by the hand-built run folders of the older suites: since the front door settles an alert
+once, a folder with an `alert.json` and no record is not a run. Underscore-prefixed so pytest
+does not collect it; it defines no tests.
+"""
+from __future__ import annotations
+
+import json
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
+from defender import _alert_input
+from defender.run_repository import RunPaths
+
+#: The mapping a hand-built folder's record is derived with: the committed tenants' mapping.
+COMMITTED_MAPPING: Mapping[str, str] = {
+    "signature": "rule.id", "event_time": "alert_timestamp", "summary": "rule.description"}
+
+
+def plant_alert(run_dir: Path, alert: bytes | Mapping[str, Any] | None = None, *,
+                mapping: Mapping[str, str] = COMMITTED_MAPPING) -> bytes:
+    """`alert` (bytes written verbatim, or a document serialised as JSON; default `{}`) and its
+    record in `run_dir`'s input directory, the facts derived through `mapping`. Returns the
+    bytes planted."""
+    raw = alert if isinstance(alert, bytes) else json.dumps(
+        {} if alert is None else dict(alert)).encode("utf-8")
+    paths = RunPaths(Path(run_dir))
+    paths.alert_input_dir.mkdir(parents=True, exist_ok=True)
+    admitted = _alert_input.admit(raw)
+    facts = _alert_input.derive_facts(
+        admitted.document, _alert_input.AlertMapping(paths=dict(mapping)))
+    paths.alert.write_bytes(raw)
+    paths.alert_record.write_text(
+        _alert_input.record_text(admitted.digest, facts), encoding="utf-8")
+    return raw

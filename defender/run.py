@@ -457,21 +457,23 @@ def resume_world(episode: Episode, world_label: str, *, tenant: Callable[[], Any
         _family.load_family(episode.view()), world_label, episode.dir)
 
 
-def _screened_source_alert(source_run_dir: Path) -> Path:
-    """The source run's alert, or the refusal that says it is not a plain file.
+def _screened_source_alert(episode_dir: Path) -> Path:
+    """The alert a sibling investigates — the source run's, as launch copied it into the
+    episode — or the refusal that says it is not a plain file.
 
-    The source run dir was a box's writable bind, so `alert.json` may be a planted link, and
-    `materialize_run` follows links. Checked before the copy so outside bytes never become
-    this run's alert.
+    The episode dir is the launcher's own, but a link planted at the copy's name would have
+    `materialize_run` follow it. Checked before the copy so outside bytes never become this
+    run's alert.
     """
+    from defender._episode_paths import EpisodePaths
     from defender.run_repository import artifact_file
 
-    alert = RunPaths(Path(source_run_dir)).alert
+    alert = EpisodePaths(Path(episode_dir)).source_alert
     if not artifact_file(alert):
         sys.exit(
-            f"source alert {alert} is not a plain file — the alert is the case input this "
-            "sibling investigates, and a link wearing its name would copy bytes from outside "
-            "the source run into this run dir")
+            f"the episode's copy of the source alert {alert} is not a plain file — the alert "
+            "is the case input this sibling investigates, and a link wearing its name would "
+            "copy bytes from outside the episode into this run dir")
     return alert
 
 
@@ -559,7 +561,7 @@ def _case_input(ns: argparse.Namespace, world: Any) -> tuple[Path, str | None]:
     run's alert, screened before the preflight like other argument errors), else the
     operator's."""
     if world is not None:
-        return _screened_source_alert(Path(world.family.source_run_dir)), world.run_id
+        return _screened_source_alert(Path(world.episode_dir)), world.run_id
     return ns.alert.resolve(), ns.run_id
 
 

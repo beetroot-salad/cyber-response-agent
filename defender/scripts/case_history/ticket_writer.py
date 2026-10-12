@@ -8,7 +8,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
 
-from defender._io import read_text_utf8, write_guarded
+from defender import _alert_input
+from defender._io import write_guarded
 from defender._model import model
 from defender.run_repository import RunPaths
 from defender.runtime import case_ticket, run_end
@@ -95,13 +96,15 @@ def open_case_ticket(
         except AdapterFault as e:
             _logger.warning(f"open: {_reason_of(e, tenant)}; skipping ticket write")
             return
-        alert_path = RunPaths(run_dir).alert
-        if not alert_path.is_file():
-            _logger.warning(f"alert.json not found in {run_dir}; skipping open")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+        # The open leg meets the run's RECORD alone: the facts were settled once at run start,
+        # and no byte of the alert is read here.
+        record = _alert_input.read_record(RunPaths(run_dir).alert_record)
+        if record is None:
+            _logger.warning(f"{run_dir.name} has no readable record of its alert; skipping open")
             return
-        alert = json.loads(read_text_utf8(alert_path))
         case_id = run_dir.name
-        payload = case_ticket.alert_to_open_payload(alert, case_id, mapping=tenant.ticket_mapping)
+        payload = case_ticket.alert_to_open_payload(
+            record.facts, case_id, mapping=tenant.ticket_mapping)
         status, body = deps.request(config, "POST", "/tickets", payload, ctx=ctx)
         if status is None:
             _logger.warning(f"open {case_id}: {body}")

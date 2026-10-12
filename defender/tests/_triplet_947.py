@@ -482,7 +482,30 @@ def episode(tmp_path: Path, *, doc: dict | None = None,
     if not base.exists():
         base.write_text("", encoding="utf-8")
     write_family(ep, doc)
+    _plant_source_input(ep, (doc or {}).get("source_run_dir"))
     return ep
+
+
+def _plant_source_input(ep: Path, source_run_dir: str | None) -> None:
+    """The source run's alert and record, as a launch copies them into the episode (#1222 A1):
+    the source run's own when it holds them, else a plain one."""
+    from defender._episode_paths import EpisodePaths
+    from defender.run_repository import RunPaths
+    from defender.tests._alert_plant import plant_alert
+
+    mine = EpisodePaths(ep)
+    source = RunPaths(Path(source_run_dir)) if source_run_dir else None
+    if source is not None and source.alert.is_file() and source.alert_record.is_file():
+        mine.source_alert.write_bytes(source.alert.read_bytes())
+        mine.source_record.write_bytes(source.alert_record.read_bytes())
+        return
+    scratch = ep / ".source-input"
+    raw = plant_alert(scratch, {"rule": {"id": "v2-cross-tier-ssh-pivot"}})
+    scratch_paths = RunPaths(scratch)
+    mine.source_alert.write_bytes(raw)
+    mine.source_record.write_bytes(scratch_paths.alert_record.read_bytes())
+    import shutil
+    shutil.rmtree(scratch)
 
 
 def branchable_investigation() -> str:
@@ -564,8 +587,9 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
         _tenant.ensure_runs_base_record(base, tenant_id)
     src = base / source_run_id
     (src / "gather_raw").mkdir(parents=True, exist_ok=True)
-    (src / "alert.json").write_text(json.dumps({"rule": {"id": "v2-cross-tier-ssh-pivot"}}),
-                                    encoding="utf-8")
+    from defender.tests._alert_plant import plant_alert
+
+    plant_alert(src, {"rule": {"id": "v2-cross-tier-ssh-pivot"}})
     (src / "investigation.md").write_text(branchable_investigation(), encoding="utf-8")
     (src / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
     (src / "executed_queries.jsonl").write_text("", encoding="utf-8")

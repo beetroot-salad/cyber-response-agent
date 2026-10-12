@@ -24,8 +24,8 @@ from defender._yaml import safe_load as _yaml_safe_load
 from defender._text import is_content_less
 from defender._vocab import normalized_judge_outcome
 from defender._episode_paths import LAYOUT
+from defender import _alert_input
 from defender.learning.core.config import QUEUEABLE_FINDING_TYPES
-from defender.learning.core.persist import derive_alert_rule_key
 from defender.learning.core.state import (
     FINDINGS,
     QUESTIONER_FINDINGS,
@@ -46,6 +46,16 @@ from defender.learning.judge.run import (
 
 #: Outcomes whose episode is never a defender failure to author from.
 _UNQUEUEABLE_VERDICTS = frozenset({"discard", "corpus-contradiction"})
+
+
+#: The key a finding files under when its episode's alert carries no recorded signature.
+UNKEYED = "unkeyed"
+
+
+def rule_key_of(record: _alert_input.AlertRecord | None) -> str:
+    """The episode's recorded signature verbatim, or `unkeyed` — the alert's bytes are not read."""
+    signature = None if record is None else record.facts.signature
+    return signature if signature is not None else UNKEYED
 
 
 def _validate_row(row: dict[str, Any], *, episode_dir: Path | None = None) -> None:
@@ -536,7 +546,7 @@ def _enqueue_report(  # noqa: C901, PLR0912, PLR0913, PLR0915 — see `enqueue_r
     run_id = episode_dir.name
     # The one rule for which world's alert is the episode's, shared with the orchestration so
     # the rule key and the sibling union agree.
-    alert_rule_key = derive_alert_rule_key(episode_alert(view, graded_labels))
+    alert_rule_key = rule_key_of(episode_alert(view))
     defender_blocked = defender_lane_blocked(verdict_word)
 
     defender_rows: list[dict[str, Any]] = []

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 
+from defender import _alert_input
 from defender._io import (
     guarded_mkdir, load_json_artifact, read_guarded, read_jsonl_rows, read_plain_bytes,
     write_guarded,
@@ -126,12 +127,13 @@ def source_alert(source_run_dir: Path) -> dict[str, Any] | None:
     not a plain file, or not a JSON object `load_json_artifact` accepts (nested too deep
     included). The one reader of it for the question-writer and the branching oracle's real
     data (#1224): never raises."""
-    alert = RunPaths(source_run_dir).alert
+    source = RunPaths(source_run_dir)
     try:
-        if not artifact_file(alert):
-            return None
-        doc, unreadable = load_json_artifact(_plain_bytes(alert).decode("utf-8"))
-    except (OSError, ValueError, BranchError):
+        # Read only as the run's record vouches for it: a replaced alert is no alert here.
+        raw, _record = _alert_input.verified_alert(
+            source.alert, source.alert_record, run_name=Path(source_run_dir).name)
+        doc, unreadable = load_json_artifact(raw.decode("utf-8"))
+    except (OSError, ValueError, BranchError, _alert_input.AlertReplaced):
         return None
     return doc if unreadable is None and isinstance(doc, dict) else None
 
@@ -143,18 +145,21 @@ def _inherit_evidence(source_run_dir: Path, run_dir: Path, leads: set[str]) -> N
     record. Absent directories are fine (`validate` already refused an empty queries table).
     Truncated to `leads` held at the branch point, so later evidence does not leak in.
     """
-    # The alert (case input) is copied here so every resume caller gets it, even if a launcher
-    # already did. Not in `_inherited()`: a freshly materialised sibling legitimately holds it.
-    alert = RunPaths(source_run_dir).alert
-    if alert.exists() or alert.is_symlink():
-        if not artifact_file(alert):
-            raise BranchError(
-                f"{alert} is not a plain file — the alert is the case input both siblings "
-                f"investigate, and one that is {_not_a_plain_file(alert)} is not the source "
-                "run's own")
-        # Bytes, matching `materialize_run`'s `shutil.copy`, so the copy is exact even if not
-        # valid UTF-8.
-        write_guarded(RunPaths(run_dir).alert, _plain_bytes(alert))
+    # The alert (case input) and its record: a sibling `materialize_run` made already holds
+    # them (from the episode's copy); one built any other way gets the source's, checked
+    # against its record's digest on the way. Not in `_inherited()`: a freshly materialised
+    # sibling legitimately holds them.
+    source, sibling = RunPaths(source_run_dir), RunPaths(run_dir)
+    if not sibling.alert.exists() and (source.alert.exists() or source.alert.is_symlink()):
+        try:
+            raw, _record = _alert_input.verified_alert(
+                source.alert, source.alert_record, run_name=Path(source_run_dir).name)
+        except _alert_input.AlertReplaced as replaced:
+            raise BranchError(str(replaced)) from replaced
+        record_text, _reason = read_guarded(source.alert_record)
+        guarded_mkdir(sibling.alert_input_dir, base=run_dir)
+        write_guarded(sibling.alert, raw)
+        write_guarded(sibling.alert_record, record_text or "")
 
     queries = RunPaths(source_run_dir).executed_queries
     if queries.exists() or queries.is_symlink():

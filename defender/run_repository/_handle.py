@@ -22,13 +22,12 @@ db. The session db itself is opened through `session_store.open_store`. The two 
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import json
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from defender import _artifact_schema, _episode_paths, _provenance, _report
+from defender import _alert_input, _artifact_schema, _episode_paths, _provenance, _report
 from defender import _io as _real_io
 from defender import _tenant
 from defender.run_repository import _layout
@@ -392,8 +391,7 @@ class Run:
         prov = self._provenance(faults)
         exit_class = self._exit_class(owner, faults) if self.runs_base is not None else None
         disposition, review_outcome = self._report_fields()
-        alert_bytes, _reason = self._io.rooted_read(
-            self.run_dir, RUN_LAYOUT.alert, binary=True)
+        alert_ref = self._alert_ref()
         return RunRecord(
             tenant_id=prov.tenant_id if prov is not None else None,
             world_id=prov.world_id if prov is not None else None,
@@ -401,7 +399,7 @@ class Run:
             dirty=prov.dirty if prov is not None else None,
             model=prov.model if prov is not None else None,
             run_id=self.run_dir.name,
-            alert_ref=case_ref(alert_bytes) if alert_bytes is not None else None,
+            alert_ref=alert_ref,
             # Lineage comes from the stamp, never a `family.yaml` guessed from the runs base.
             parent_run_id=prov.parent_run_id if prov is not None else None,
             fork_turn=prov.fork_turn if prov is not None else None,
@@ -410,6 +408,23 @@ class Run:
             review_outcome=review_outcome,
             faults=tuple(faults),
         )
+
+    def _alert_ref(self) -> str | None:
+        """The run's curation key, from its record's digest — `None` for a folder with no
+        record. A stored alert whose bytes no longer match the record is refused
+        (`AlertReplaced`, naming the run): the key must never follow replaced bytes."""
+        record_text, _reason = self._io.rooted_read(self.run_dir, RUN_LAYOUT.alert_record)
+        record = None if record_text is None else _alert_input.parse_record(record_text)
+        if record is None:
+            return None
+        alert_bytes, _reason = self._io.rooted_read(
+            self.run_dir, RUN_LAYOUT.alert, binary=True)
+        if alert_bytes is not None and _alert_input.digest_of(alert_bytes) != record.digest:
+            raise _alert_input.AlertReplaced(
+                f"the alert stored for run {self.run_dir.name} does not match the digest its "
+                "record carries — the run's input was replaced or damaged, and nothing is "
+                "read from it")
+        return case_ref_of_digest(record.digest)
 
     def _provenance(self, faults: list[str]) -> _provenance.RunProvenance | None:
         raw, _reason = self._io.rooted_read(self.run_dir, RUN_LAYOUT.provenance)
@@ -460,9 +475,15 @@ class Run:
         outcome = fm.get("outcome") if isinstance(fm, dict) else None
         return read.disposition, (outcome if isinstance(outcome, str) else None)
 
+def case_ref_of_digest(digest: str) -> str:
+    """The curation key a run is known by: `case-<the alert's sha256 digest>[:16]`, the digest
+    its record carries."""
+    return f"case-{digest[:16]}"
+
+
 def case_ref(alert_bytes: bytes) -> str:
-    """The curation key a run is known by: `case-<sha256 of the alert's bytes>[:16]`."""
-    return f"case-{hashlib.sha256(alert_bytes).hexdigest()[:16]}"
+    """`case_ref_of_digest` for alert bytes in hand."""
+    return case_ref_of_digest(_alert_input.digest_of(alert_bytes))
 
 
 # ---------------------------------------------------------------------------------------

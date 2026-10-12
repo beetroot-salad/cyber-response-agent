@@ -50,7 +50,6 @@ from __future__ import annotations
 import asyncio
 import functools
 import re
-import shutil
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -180,7 +179,7 @@ class NeverEndsModel:
 
     def __init__(self, run_dir: Path):
         self.calls = 0
-        self._alert = str(run_dir / "alert.json")
+        self._alert = str(RunPaths(run_dir).alert)
 
     def __call__(self, messages, info) -> ModelResponse:
         self.calls += 1
@@ -384,9 +383,17 @@ def materialize(tmp_path: Path, golden: Path) -> Path:
     run_dir = tmp_path / "run"
     paths = RunPaths(run_dir)
     paths.gather_raw.mkdir(parents=True)
-    shutil.copy(golden / "alert.json", paths.alert)
+    plant_alert(run_dir, (golden / "alert.json").read_bytes())
     _provenance.write(paths.provenance, _harness_provenance())
     return run_dir
+
+
+def plant_alert(run_dir: Path, raw: bytes) -> None:
+    """The alert and its record in the run's input directory, as `materialize_run` leaves them
+    (the committed tenants' mapping derives the facts)."""
+    from defender.tests import _alert_plant
+
+    _alert_plant.plant_alert(run_dir, raw)
 
 
 @functools.cache
@@ -600,7 +607,7 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
     )
     with override_allow_model_requests(False):
         return asyncio.run(driver.run_investigation(
-            alert_path=run_dir / "alert.json", run_dir=run_dir, run_id=run_id,
+            alert_path=RunPaths(run_dir).alert, run_dir=run_dir, run_id=run_id,
             defender_dir=tree, make_model=make_model, tenant=run_tenant,
             orient_shim=orient_shim if orient_shim is not None else no_orient_shims, **seams,
         ))

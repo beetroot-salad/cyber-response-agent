@@ -22,6 +22,7 @@ from typing import Any
 
 import contextlib
 
+from defender import _alert_input
 from defender._io import Bound, bind
 from defender._episode_paths import LAYOUT, WORLD_LEAVES, OracleStorePaths
 from defender.run_repository import RUN_LAYOUT
@@ -39,7 +40,6 @@ from defender.learning.judge.family import (
     discriminator_of,
     episode_id_of,
     json_mapping,
-    json_mapping_of,
     has_refusals,
     _repository_leads,
     lead_chain,
@@ -251,8 +251,8 @@ def _exclusion_lines(union_notes: dict[str, Any]) -> list[str]:  # noqa: D401
                    f"{union_notes['runs_base_unreadable']} — so the sibling union was never "
                    "attempted — this is not a statement that no sibling trial exists)")
     if union_notes.get("alert_unidentified"):
-        out.append("(this episode's own alert.json carries no alert id, so the sibling union "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-                   "had nothing to match trials against and was never attempted — this is not "
+        out.append("(this episode carries no usable record of the alert it investigates, so the "
+                   "sibling union had nothing to match trials against and was never attempted — this is not "
                    "a statement that no sibling trial exists)")
     for key, what in (("skipped_unreadable", "could not be read"),
                       ("skipped_unclosed", "never reached a close")):
@@ -319,23 +319,24 @@ def _world_entry(doc: dict[str, Any], label: str) -> dict[str, Any]:
 
 
 def _sibling_row(
-    run: Bound, run_id: str, *, alert_id: str | None,
+    run: Bound, run_id: str, *, digest: str | None,
 ) -> tuple[dict[str, Any] | None, str | None]:
     """Classify one directory under the runs base.
 
     `(row, None)`: a finished trial of this alert. `(None, key)`: a skipped trial of this
     alert, `key` naming its count in `union_notes`. `(None, None)`: not a trial of this alert
-    (e.g. no `alert.json`), so not counted as a skip either.
+    (no record, or a record of another alert), so not counted as a skip either.
 
-    `read_archived_report` never raises, so one bad byte in an unrelated run cannot refuse the
-    grade. Both reads are no-follow."""
-    alert_rec = run.read(RUN_LAYOUT.alert)
-    if alert_rec.absent:
+    A trial is a run whose record carries the episode's digest: the stored alert is not read,
+    so one rewritten on the host is still listed. `read_archived_report` never raises, so one
+    bad byte in an unrelated run cannot refuse the grade. Both reads are no-follow."""
+    record_rec = run.read(RUN_LAYOUT.alert_record)
+    if record_rec.absent:
         return None, None
-    alert_doc = json_mapping_of(alert_rec.text)
-    if alert_doc is None:
+    record = _alert_input.parse_record(record_rec.text) if record_rec.text else None
+    if record is None:
         return None, "skipped_unreadable"
-    if alert_doc.get("alert_id") != alert_id:
+    if record.digest != digest:
         return None, None
     read = read_archived_report(run, RUN_LAYOUT.report)
     if read.absent:
@@ -346,7 +347,7 @@ def _sibling_row(
 
 
 def sibling_union(
-    runs_base: Path | None, *, alert_id: str | None, source_run_id: str | None,
+    runs_base: Path | None, *, digest: str | None, source_run_id: str | None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """The sibling union: every finished trial of this alert under the operator's runs base.
 
@@ -356,14 +357,14 @@ def sibling_union(
         "source_run_excluded": None, "skipped_unreadable": 0, "skipped_unclosed": 0,
         "runs_base_unset": runs_base is None, "runs_base_missing": False,
         "runs_base_unreadable": None,
-        "alert_unidentified": alert_id is None,
+        "alert_unidentified": digest is None,
     }
     if runs_base is None:
         return [], notes
     siblings: list[dict[str, Any]] = []
     runs_base = Path(runs_base)
-    if alert_id is None:
-        # No id to match on: `None == None` would match every unrelated run lacking one.
+    if digest is None:
+        # No digest to match on: `None == None` would match every unrelated run lacking one.
         return siblings, notes
     # The root itself may be a link (the operator's own configuration); entries under it are
     # box-writable and judged no-follow.
@@ -381,7 +382,7 @@ def sibling_union(
             if source_run_id is not None and run_id == source_run_id:
                 notes["source_run_excluded"] = run_id
                 continue
-            row, skipped = _sibling_row(runs.under(run_id), run_id, alert_id=alert_id)
+            row, skipped = _sibling_row(runs.under(run_id), run_id, digest=digest)
             if row is not None:
                 siblings.append(row)
             elif skipped is not None:
@@ -389,32 +390,20 @@ def sibling_union(
     return siblings, notes
 
 
-def _world_alert_id(world: Bound) -> str | None:
-    data = json_mapping(world, WORLD_LEAVES.alert)
-    return data.get("alert_id") if data is not None else None
-
-
-def episode_alert(bound: Bound, labels: list[str]) -> dict[str, Any]:
-    """The alert this episode's worlds all investigate: the first world's `alert.json` that
-    carries an `alert_id`, else the first that parses.
+def episode_alert(bound: Bound) -> _alert_input.AlertRecord | None:
+    """The record of the alert this episode's worlds all investigate: the copy launch put in the
+    episode (A1), or `None` when there is none or it is not one.
 
     Shared by the sibling union and the enqueue's `alert_rule_key`, so both key on the same
-    world.
-    """
-    fallback: dict[str, Any] = {}
-    for label in labels:
-        # A label off box-writable `judge.yaml` may not be a path component; skip it.
-        try:
-            data = json_mapping(bound, LAYOUT.world(label).alert)
-        except ValueError:
-            continue
-        if data is None:
-            continue
-        if data.get("alert_id") is not None:
-            return data
-        if not fallback:
-            fallback = data
-    return fallback
+    record."""
+    read = bound.read(LAYOUT.source_record)
+    return _alert_input.parse_record(read.text) if read.text else None
+
+
+def episode_digest(bound: Bound) -> str | None:
+    """The episode's alert digest (the union's key), or `None` when it has no usable record."""
+    record = episode_alert(bound)
+    return None if record is None else record.digest
 
 
 def _render_samples(samples_doc: dict[str, Any], served: list[str]) -> str:
@@ -650,7 +639,7 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
     siblings, union_notes = union if union is not None else sibling_union(
         Path(runs_base) if runs_base is not None else None,
         # Read only on this fallback path; the orchestration always supplies the union.
-        alert_id=_world_alert_id(world), source_run_id=doc.get("source_run_id"))
+        digest=episode_digest(bound), source_run_id=doc.get("source_run_id"))
     spread = Counter(s.get("disposition") for s in siblings)
     # Sorted by key: the tally can hold both strings and `None`, which do not compare.
     spread_rows = [

@@ -47,6 +47,11 @@ GATE_METADATA_KEY = "json"
 # ======================================================================================
 
 ALERT = "alert.json"
+#: The read-only input directory the run's alert and its record sit in (#1222 A1): a DIRECTORY
+#: the box binds read-only, because a single-file bind is undone by a host rename.
+ALERT_INPUT_DIRNAME = "alert_input"
+#: The run's record, beside the alert: its byte digest and the three facts derived at run start.
+ALERT_RECORD = "record.json"
 REPORT = "report.md"
 INVESTIGATION = "investigation.md"
 EXECUTED_QUERIES = "executed_queries.jsonl"
@@ -132,8 +137,16 @@ class RunLayout:
     # -- content the run produced -----------------------------------------------------------
 
     @property
+    def alert_input_dir(self) -> PurePosixPath:
+        return PurePosixPath(ALERT_INPUT_DIRNAME)
+
+    @property
     def alert(self) -> PurePosixPath:
-        return PurePosixPath(ALERT)
+        return self.alert_input_dir / ALERT
+
+    @property
+    def alert_record(self) -> PurePosixPath:
+        return self.alert_input_dir / ALERT_RECORD
 
     @property
     def report(self) -> PurePosixPath:
@@ -315,7 +328,7 @@ WIRE_LOG_NAMES = WireLogNames()
 class RunPaths:
     """One run's directories and its accessors — every name a run reads or writes.
 
-    18 accessors (a census test checks this count against the set it pins).
+    20 accessors (a census test checks this count against the set it pins).
 
     Accessors resolve relative to ``run_dir``, except the five sidecars, `sessions_dir` and
     `session_db`, which take the runs base explicitly.
@@ -333,8 +346,16 @@ class RunPaths:
     # -- content the run produced -----------------------------------------------------------
 
     @property
+    def alert_input_dir(self) -> Path:
+        return self.run_dir / RUN_LAYOUT.alert_input_dir
+
+    @property
     def alert(self) -> Path:
         return self.run_dir / RUN_LAYOUT.alert
+
+    @property
+    def alert_record(self) -> Path:
+        return self.run_dir / RUN_LAYOUT.alert_record
 
     @property
     def report(self) -> Path:

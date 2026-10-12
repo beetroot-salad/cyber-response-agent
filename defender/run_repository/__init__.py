@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from defender.run_repository._layout import (
-        WIRE_LOG_DIR, WIRE_LOG, PROVENANCE, GATE_METADATA_KEY, ALERT, REPORT, INVESTIGATION,
+        WIRE_LOG_DIR, WIRE_LOG, PROVENANCE, GATE_METADATA_KEY, ALERT, ALERT_INPUT_DIRNAME, ALERT_RECORD, REPORT, INVESTIGATION,
         EXECUTED_QUERIES, SOURCE_REFS, RAW_MARKER, GATHER_SUMMARIES_DIRNAME, LEAD_AUTHOR_DIRNAME,
         TICKET_READS_MARKER, LEAD_CLAIM_SUFFIX, REVIEW_RECORD_PREFIX, TRACE_SUFFIX,
         REVIEW_TRACE_SUFFIX, JSONL_EXT, AGENT_TRACE_SUFFIX, AGENT_FRAMED_TRACE_SUFFIX,
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
         resolve_run_bundle, contained_payload,
     )
     from defender.run_repository._handle import (
-        Run, RunRecord, ArchivedWorld, RecordHandle, case_ref,
+        Run, RunRecord, ArchivedWorld, RecordHandle, case_ref, case_ref_of_digest,
     )
     from defender.run_repository._id import (
         RunId,
@@ -57,7 +57,7 @@ if TYPE_CHECKING:
 #: Each public name and the submodule that defines it.
 _HOMES: dict[str, str] = {
     **dict.fromkeys((
-        "WIRE_LOG_DIR", "WIRE_LOG", "PROVENANCE", "GATE_METADATA_KEY", "ALERT", "REPORT",
+        "WIRE_LOG_DIR", "WIRE_LOG", "PROVENANCE", "GATE_METADATA_KEY", "ALERT", "ALERT_INPUT_DIRNAME", "ALERT_RECORD", "REPORT",
         "INVESTIGATION", "EXECUTED_QUERIES", "SOURCE_REFS", "RAW_MARKER",
         "GATHER_SUMMARIES_DIRNAME", "LEAD_AUTHOR_DIRNAME", "TICKET_READS_MARKER",
         "LEAD_CLAIM_SUFFIX", "REVIEW_RECORD_PREFIX", "TRACE_SUFFIX", "REVIEW_TRACE_SUFFIX",
@@ -72,7 +72,7 @@ _HOMES: dict[str, str] = {
         "gather_summaries_shape", "artifact_file", "plain_file", "artifact_dir",
         "resolve_run_bundle", "contained_payload",
     ), "_layout"),
-    **dict.fromkeys(("Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref",), "_handle"),
+    **dict.fromkeys(("Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref", "case_ref_of_digest",), "_handle"),
     **dict.fromkeys(("RunId",), "_id"),
     **dict.fromkeys(("open_run", "list_run_ids", "bound_runs", "run_exists",), "_lookup"),
     **dict.fromkeys(("record_episode_runs", "episode_runs", "sibling_run_ids", "episode_sibling_ids",), "_record"),
@@ -81,7 +81,7 @@ _HOMES: dict[str, str] = {
 }
 
 __all__ = [
-    "WIRE_LOG_DIR", "WIRE_LOG", "PROVENANCE", "GATE_METADATA_KEY", "ALERT", "REPORT",
+    "WIRE_LOG_DIR", "WIRE_LOG", "PROVENANCE", "GATE_METADATA_KEY", "ALERT", "ALERT_INPUT_DIRNAME", "ALERT_RECORD", "REPORT",
     "INVESTIGATION", "EXECUTED_QUERIES", "SOURCE_REFS", "RAW_MARKER", "GATHER_SUMMARIES_DIRNAME",
     "LEAD_AUTHOR_DIRNAME", "TICKET_READS_MARKER", "LEAD_CLAIM_SUFFIX", "REVIEW_RECORD_PREFIX",
     "TRACE_SUFFIX", "REVIEW_TRACE_SUFFIX", "JSONL_EXT", "AGENT_TRACE_SUFFIX",
@@ -94,7 +94,7 @@ __all__ = [
     "SessionPaths", "LEAD_ID_BODY", "LEAD_ID_RE", "GATHER_RAW_SHAPE", "CASE_ANSWER_KEY_NAMES",
     "is_case_answer_key", "gather_summaries_shape", "artifact_file", "plain_file", "artifact_dir",
     "resolve_run_bundle", "contained_payload", "Run", "RunRecord", "ArchivedWorld",
-    "RecordHandle", "case_ref", "RunId", "open_run", "list_run_ids", "bound_runs", "run_exists",
+    "RecordHandle", "case_ref", "case_ref_of_digest", "RunId", "open_run", "list_run_ids", "bound_runs", "run_exists",
     "record_episode_runs", "episode_runs", "sibling_run_ids", "episode_sibling_ids", "RunRefused",
     "hold_runs_folder", "run_name_fault",
 ]

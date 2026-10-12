@@ -556,7 +556,7 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orche
     git_show = _memoized_show(git_show if git_show is not None else render_mod._git_show_default)
     union = render_mod.sibling_union(
         Path(runs_base) if runs_base is not None and gradable else None,
-        alert_id=_pass_alert_id(bound, gradable),
+        digest=render_mod.episode_digest(bound),
         source_run_id=manifest.get("source_run_id"))
 
     per_world_draws: dict[str, dict[int, dict[str, Any]]] = {}
@@ -689,12 +689,6 @@ def _pass_lessons_commit(bound: Bound, labels: list[str]) -> str | None:
         if commit is not None:
             return str(commit)
     return None
-
-
-def _pass_alert_id(bound: Bound, labels: list[str]) -> Any:
-    """The alert this episode's worlds all investigate (they share one source run) — the
-    union's key. Through `render.episode_alert`, the same rule the enqueue uses."""
-    return render_mod.episode_alert(bound, labels).get("alert_id")
 
 
 def read_grade(episode_dir: Path) -> EpisodeGrade | None:
