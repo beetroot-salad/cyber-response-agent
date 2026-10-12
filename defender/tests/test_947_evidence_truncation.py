@@ -58,6 +58,7 @@ from defender.tests._branch_947 import (  # noqa: E402
     spec_at,
 )
 from defender.tests._session_store_705 import store_mod  # noqa: E402
+from defender.tests._alert_plant import plant_alert
 
 #: The tool a lead is dispatched through. The design calls it `gather_dispatch`; the runtime
 #: registers it as `gather` (`tools_gather.register_gather_tool`, and `driver.py`'s own comment
@@ -556,7 +557,7 @@ def test_a_sibling_that_already_has_its_alert_is_not_refused_as_seeded(tmp_path)
     docstring records for an empty `gather_raw/`."""
     store, run_dir, session_id, returns = gathering_source(tmp_path)
     target = sibling_dir(tmp_path)
-    RunPaths(target).alert.write_text(ALERT_DOC, encoding="utf-8")
+    plant_alert(target, ALERT_DOC.encode("utf-8"))
 
     resume(store, run_dir, returns[1], target)
 

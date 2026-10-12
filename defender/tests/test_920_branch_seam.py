@@ -51,6 +51,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender.tests._branch_947 import ALERT_DOC, spec_at  # noqa: E402
 from defender.tests._session_head_754 import message_ids  # noqa: E402
+from defender.tests._alert_plant import plant_alert  # noqa: E402
 from defender.tests._session_store_705 import (  # noqa: E402
     DEFENDER,
     complete_pair,
@@ -201,7 +202,7 @@ def _source_run(tmp_path, *, case_id: str = "case-source"):
     # Every real run dir holds its alert before anything else happens
     # (`run_common.materialize_run`), and the sibling investigates the same one — so a
     # source run without one is not a shape a branch is ever taken from (#947).
-    (run_dir / "alert.json").write_text(ALERT_DOC, encoding="utf-8")
+    plant_alert(run_dir, ALERT_DOC.encode("utf-8"))
     session_id = store.new_session(agent_id="main")
     sel.ingest(store, session_id, [user_request("investigate the alert"), *complete_pair()],
                agent_id="main")

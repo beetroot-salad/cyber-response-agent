@@ -27,6 +27,7 @@ import pytest
 
 from defender.tests import _tenants1106 as T
 from defender.tests.tenant_1107_settings import _spec1107 as S
+from defender.tests._alert_plant import plant_alert
 
 MARK = "injected"
 
@@ -109,7 +110,8 @@ def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming
 
 def test_the_open_payload_renders_the_injected_tenants_mapping(injected):
     case_ticket = T.mod("runtime.case_ticket")
-    alert = {"rule": {"id": "r-1", "description": "d"}, "timestamp": "2026-09-26T00:00:00Z"}
+    from defender._alert_input import AlertFacts
+    alert = AlertFacts(signature="r-1", event_time="2026-09-26T00:00:00Z", summary="d")
     payload = case_ticket.alert_to_open_payload(
         alert, "case-1", mapping=_record(injected).ticket_mapping)
     assert payload["reporter"] == "injected-reporter"
@@ -141,9 +143,8 @@ def test_the_ticket_writer_posts_to_the_injected_tenants_store_with_its_mapping(
     writer = T.mod("scripts.case_history.ticket_writer")
     run_dir = tmp_path / "run-1106"
     run_dir.mkdir()
-    (run_dir / "alert.json").write_text(json.dumps(
-        {"rule": {"id": "r-1", "description": "d"}, "timestamp": "2026-09-26T00:00:00Z"}),
-        encoding="utf-8")
+    plant_alert(run_dir, {"rule": {"id": "r-1", "description": "d"},
+                          "timestamp": "2026-09-26T00:00:00Z"})
     sent: list[tuple] = []
 
     def request(config, method, path, body=None, *, ctx):

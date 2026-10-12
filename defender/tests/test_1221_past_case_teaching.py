@@ -24,6 +24,8 @@ import re
 from pathlib import Path
 
 from defender._paths import PATHS
+from defender.run_repository import RunPaths
+from defender.tests._alert_plant import plant_alert
 from defender.runtime import case_ticket, orient
 from defender.runtime.driver import _gather_instructions
 from defender.tests._spec767 import require
@@ -44,9 +46,8 @@ def _paragraphs_naming(text: str, needle: str) -> list[str]:
 def _main_orientation(tmp_path: Path) -> str:
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    alert = tmp_path / "alert.json"
-    alert.write_text(json.dumps({"rule": {"id": "5710"}}), encoding="utf-8")
-    return orient.orientation(run_dir, DEFENDER, alert, systems=())
+    plant_alert(run_dir, {"rule": {"id": "5710"}})
+    return orient.orientation(run_dir, DEFENDER, RunPaths(run_dir).alert, systems=())
 
 
 def test_1221_gather_is_taught_that_a_tagged_comment_is_a_past_case():

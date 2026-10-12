@@ -24,6 +24,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 
 from defender.tests import _spec1077 as S
+from defender.tests._alert_plant import plant_alert
 
 
 @pytest.fixture
@@ -394,6 +395,7 @@ def test_the_run_record_answers_the_twelve_fields_read_only(base, run_dir):
     run = _tenanted(base)
     S.plant_stamp(run_dir, commit="c0ffee", dirty=False, model="m", scope="defender",
                   tenant_id=S.DEFAULT_TENANT_ID, world_id="w0")
+    plant_alert(run_dir, {"rule": {"id": "sig-1077"}})
     record = run.record
 
     assert record.run_id == run_dir.name
@@ -402,7 +404,7 @@ def test_the_run_record_answers_the_twelve_fields_read_only(base, run_dir):
     assert record.model == "m"
     assert record.tenant_id == S.DEFAULT_TENANT_ID
     assert record.world_id == "w0"
-    assert record.alert_ref == S.alert_ref(run_dir / "alert.json")
+    assert record.alert_ref == S.alert_ref(S.RunPaths(run_dir).alert)
     # The records behind the remaining five are absent here, so those fields read None (h16).
     for absent in ("parent_run_id", "fork_turn", "exit_class", "disposition", "review_outcome"):
         assert getattr(record, absent) is None, f"{absent} is not None with its record absent"
@@ -570,7 +572,7 @@ def test_handle_over_a_companion_corpus_directory_that_is_merely_someones_parent
     companion.write_text("# not a run\n", encoding="utf-8")
 
     # The live site builds from the FILE's parent, which is a directory — unaffected by h09.
-    assert S.RunPaths(companion.parent).alert == corpus / "alert.json", (
+    assert S.RunPaths(companion.parent).alert == corpus / "alert_input" / "alert.json", (
         "RunPaths still composes ad hoc over an arbitrary companion-corpus directory")
     assert S.Run().at(companion.parent).runs_base is None
     gate = S.gate()

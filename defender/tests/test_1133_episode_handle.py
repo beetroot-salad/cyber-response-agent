@@ -191,7 +191,9 @@ def test_d2_the_episode_and_its_worlds_expose_only_the_designs_surface(opened):
     top = {k for k in (*S.RECORD_VERBS, *S.FOLDERS) if not k.startswith("world.")}
     in_world = {k.removeprefix("world.") for k in (*S.RECORD_VERBS, *S.FOLDERS)
                 if k.startswith("world.")}
-    episode_class = {"open", "create", "close", "view", "world", *top}
+    # `source_alert` / `source_record`: the copies a launch puts in the episode (#1222 A1).
+    episode_class = {"open", "create", "close", "view", "world", "source_alert",
+                     "source_record", *top}
     assert S.public_names(S.Episode()) == episode_class, (
         f"the Episode class exposes {sorted(S.public_names(S.Episode()) - episode_class)} "
         f"beyond the design's surface, and lacks {sorted(episode_class - S.public_names(S.Episode()))}")
