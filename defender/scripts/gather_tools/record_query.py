@@ -7,7 +7,7 @@ import json
 import re
 import shlex
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -134,8 +134,9 @@ def system_fingerprint(raw_system: Any, recorded_system: str) -> str:
 # The run's own decisions over the queries table — the repeat guard, the rejection budget, the
 # repeat note, seq allocation, a reducer failure's system — read the rows on the run's
 # `RunState` (#1235), never the file: the file is the model's view and the learning loop's
-# record, and the box can write it. The state holds the parsed lines the host wrote, plus a
-# branch sibling's inherited prefix as seeding wrote it.
+# input, and the box can write it. The state is the record: every row the run appended, as its
+# line parses, recorded before that line is written (so a refused view write still counts), plus
+# a branch sibling's inherited prefix as seeding wrote it.
 
 
 def payload_status(exit_code: int, payload: Any) -> str:
@@ -210,7 +211,8 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
     payload_digest: str, system_key: str,
 ) -> dict:
     """@owns QUERY_ROW_COLUMNS — the single append to the queries table: allocate the lead's
-    next seq, persist the payload sidecar, and append one row in `QUERY_ROW_COLUMNS` order.
+    next seq, persist the payload sidecar, record the row in the run's state, and append its
+    line in `QUERY_ROW_COLUMNS` order.
 
     Every writer goes through here. A row whose keys or order differ from the declaration is a
     `RuntimeError` at the first write. Params past `PARAMS_NESTING_LIMIT` are `ParamsTooDeep`
@@ -221,10 +223,15 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
     should have fingerprinted. It cannot be derived here because the string it fingerprints is
     absent from the row.
 
-    One operation on the run's `state`, under its lock: the seq is taken from the state, the
-    payload persisted, the line written, and only then is the row recorded in the state — the
-    parsed line, so the live readers hold exactly what the file says. An exception at any step
-    leaves the state as it was: no row, no seq spent."""
+    The run's `state` is the record of the call; `executed_queries.jsonl` is the model's view of
+    it (#1235 round 3). So, under the state's lock: the seq is taken from the state, the payload
+    sidecar persisted (best-effort: a sidecar that cannot land is a row with no payload), the row
+    recorded in the state, and only then the view line written. A refused view write raises its
+    `OSError` with the row already recorded and its seq spent — the call it records was made, and
+    every live decision (the guards, the seq, the repeat note) still counts it. What is refused
+    before anything — too-deep params, a row that disagrees with the declaration — records
+    nothing. The state holds the row as its line parses (`json.loads(json.dumps(row))`), so it and
+    the view agree on every line that landed."""
     # First, so too-deep params are refused before a seq is taken or a sidecar written.
     stored_params = _json_safe_params(dict(params))
     with state.lock:
@@ -255,10 +262,11 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
                 f"{tuple(row)} != {QUERY_ROW_COLUMNS}"
             )
         line = json.dumps(row)
-        write_guarded(RunPaths(state.run_dir).executed_queries, line + "\n", mode="append")
-        # After the write, so a row the table refused never counts; the parsed line, so the
-        # state holds exactly what the file says (non-finite floats, tuples and keys as written).
+        # Before the view write, so a refused write cannot hide the call from the run; the
+        # parsed line, so the state holds exactly what the file says (non-finite floats, tuples
+        # and keys as written) and no reader shares the dict handed back to the caller.
         state.rows.setdefault(lead_id, []).append(json.loads(line))
+        write_guarded(RunPaths(state.run_dir).executed_queries, line + "\n", mode="append")
     return row
 
 
@@ -389,8 +397,7 @@ def repeat_note(  # noqa: PLR0913 — one parameter per row field the comparison
 
 def _next_seq(state: RunState, lead: str) -> int:
     """The lead's next seq: one past the rows the run holds for it, inherited ones included."""
-    with state.lock:
-        return len(state.rows.get(lead, ()))
+    return state.row_count(lead)
 
 
 # The repeat circuit breaker: a lead issuing the same request (`lead_id`, `system`, `verb`,
@@ -498,7 +505,7 @@ class GatherDeadEnd(Exception):
 
 
 def _trip(
-    rows: list[dict], lead: str, *, system: Any, verb: Any, params: Any, threshold: int,
+    rows: Sequence[dict], lead: str, *, system: Any, verb: Any, params: Any, threshold: int,
     in_domain, system_key: Any,
 ) -> RepeatTrip | None:
     """The counting loop both guards drive over the domain `in_domain` selects, so they cannot
@@ -530,7 +537,7 @@ def _trip(
 
 
 def repeat_trip(
-    rows: list[dict], lead: str, *, system: Any, verb: Any, params: Any,
+    rows: Sequence[dict], lead: str, *, system: Any, verb: Any, params: Any,
     threshold: int = REPEAT_THRESHOLD, system_key: Any = "",
 ) -> RepeatTrip | None:
     """`None` below `threshold` occurrences of this request in `rows`, else the `RepeatTrip`
@@ -563,7 +570,7 @@ def in_rejection_domain(row: Any) -> bool:
 
 
 def rejection_trip(
-    rows: list[dict], lead: str, *, system: Any, verb: Any, params: Any, system_key: Any,
+    rows: Sequence[dict], lead: str, *, system: Any, verb: Any, params: Any, system_key: Any,
     threshold: int = REPEAT_THRESHOLD,
 ) -> RepeatTrip | None:
     """The companion guard: `repeat_trip` over the rejections that never reached
@@ -586,7 +593,7 @@ def rejection_trip(
 
 
 def rejection_budget_trip(
-    rows: list[dict], lead: str, *, budget: int = REJECTION_BUDGET,
+    rows: Sequence[dict], lead: str, *, budget: int = REJECTION_BUDGET,
 ) -> RejectionBudgetTrip | None:
     """`None` while this call is below the lead's `budget`-th above-guard rejection, else the
     trip. The guarded call counts: `budget - 1` prior rows trip.

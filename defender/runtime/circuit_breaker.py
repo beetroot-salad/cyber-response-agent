@@ -1,7 +1,6 @@
 
 from __future__ import annotations
 
-import copy
 from typing import TYPE_CHECKING
 
 from defender._clock import now_iso
@@ -54,7 +53,8 @@ class RunAborted(Exception):
 
 # The run's breaker lives on the run's `RunState` (#1235): only the run's own process charges or
 # reads it, so no file holds it, and nothing the box writes into the run folder can trip or
-# untrip a system. Read it with `state.breaker_snapshot()`.
+# untrip a system. Read it with `state.breaker_failures(system)`, or `state.breaker_snapshot()`
+# for the whole of it.
 
 
 def record_outcome(state: RunState, system: str, exit_code: int) -> dict:
@@ -69,7 +69,8 @@ def record_outcome(state: RunState, system: str, exit_code: int) -> dict:
         state.breaker["total_failures"] += 1
         if sysrec["failures"] >= PER_SYSTEM_FAIL_LIMIT and "tripped_at" not in sysrec:
             sysrec["tripped_at"] = now_iso()
-        snapshot = copy.deepcopy(state.breaker)
+        # Inside the charge's lock (it is reentrant), so the copy is the breaker this charge left.
+        snapshot = state.breaker_snapshot()
     if snapshot["total_failures"] >= RUN_FAIL_KILL_LIMIT:
         raise RunAborted(snapshot["total_failures"], list(snapshot["systems"]))
     return snapshot
@@ -78,13 +79,12 @@ def record_outcome(state: RunState, system: str, exit_code: int) -> dict:
 def is_tripped(state: RunState, system: str) -> bool:
     if not system:
         return False
-    rec = state.breaker_snapshot()["systems"].get(system)
-    return bool(rec) and rec["failures"] >= PER_SYSTEM_FAIL_LIMIT
+    return state.breaker_failures(system) >= PER_SYSTEM_FAIL_LIMIT
 
 
 def down_message(state: RunState, system: str) -> str:
-    rec = state.breaker_snapshot()["systems"].get(system, {})
-    n = rec.get("failures", PER_SYSTEM_FAIL_LIMIT)
+    # A system never charged has no count to name; the trip boundary stands in for it.
+    n = state.breaker_failures(system) or PER_SYSTEM_FAIL_LIMIT
     return (
         f"[circuit-breaker] System '{system}' is DOWN for this run: {n} "
         f"connectivity/auth failures or timeouts (adapter exit 2 / 124) tripped the "

@@ -91,17 +91,6 @@ def _wall_origin(state: dict) -> datetime | None:
     return None
 
 
-#: The key `_budget_state_for_enforcement` sets on the in-memory enforcement state to hand
-#: `_elapsed` the host's oracle-held seconds. It is never read from a state that names no host
-#: value: `_elapsed` honours only a `_HostHeld`, which no JSON document can produce.
-ENFORCEMENT_HELD_KEY = "_host_oracle_held"
-
-
-class _HostHeld(float):
-    """Oracle-held seconds the host measured (`oracle_held`). A distinct type so a same-named
-    key in a budget state, a plain number, subtracts nothing."""
-
-
 # S15 (#1224): the seconds a branched world's oracle held the turn, which every investigator
 # time limit excludes, are the run's own host state (`RunState.oracle_credited`, and the open
 # turn's start). Nothing persists them, so no credit outlives its run (#1239).
@@ -132,10 +121,24 @@ def oracle_held(state: RunState) -> float:
         held = state.oracle_credited
         if state.oracle_opened is not None:
             held += max(0.0, time.monotonic() - state.oracle_opened)
-    return _HostHeld(held)
+    return held
+
+
+def enforcement_state(state: RunState) -> dict:
+    """The run's budget as every enforcing check reads it: the counters and the wall-clock
+    origin (`budget_snapshot`), the monotonic origin beside it (`started_monotonic`), and the
+    seconds oracle turns held the world (`oracle_held`), which `_elapsed` subtracts.
+
+    The one builder of that view: the budget hooks (`driver._budget`) and lead-0's gate both
+    read it, so on the same state they answer "is the tail spent?" from one clock."""
+    return {**state.budget_snapshot(), "started_monotonic": state.started_monotonic,
+            "oracle_held": oracle_held(state)}
 
 
 def _elapsed(state: dict) -> float | None:
+    """The investigator's elapsed seconds: the larger of the wall-clock and monotonic deltas
+    (a wall clock stepped back cannot extend the run), less the oracle-held seconds the state
+    carries (`enforcement_state`; none for a bare budget). `None` when it names no origin."""
     deltas: list[float] = []
     origin = _wall_origin(state)
     if origin is not None:
@@ -145,8 +148,7 @@ def _elapsed(state: dict) -> float | None:
         deltas.append(time.monotonic() - mono)
     if not deltas:
         return None
-    held = state.get(ENFORCEMENT_HELD_KEY)
-    return max(deltas) - (float(held) if isinstance(held, _HostHeld) else 0.0)
+    return max(deltas) - state.get("oracle_held", 0.0)
 
 
 def tail_exhausted(state: dict, limits: dict) -> bool:

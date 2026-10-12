@@ -19,7 +19,7 @@ from defender._io import read_text_utf8
 from defender.run_repository import RunPaths
 from defender.hooks.budget_enforcer import (
     BudgetKill,
-    count_call,
+    enforcement_state,
     tail_exhausted,
 )
 from defender.runtime import circuit_breaker
@@ -71,16 +71,12 @@ class _CaptureDeps:
     tenant: Annotated[Any, SkipValidation] = None
 
 
-def _rows_for(state: RunState, lead_id: str) -> list[dict]:
-    return state.lead_rows(lead_id)
-
-
 def _last_row_seq(state: RunState, lead_id: str) -> int:
     """The queries-table `seq` of the last call under `lead_id`, which documents from that
     call are elided against (a document's position in the block is not its payload's seq).
     `-1` when no row exists."""
-    rows = _rows_for(state, lead_id)
-    seq = rows[-1].get("seq") if rows else None
+    row = state.last_row(lead_id)
+    seq = row.get("seq") if row is not None else None
     return seq if isinstance(seq, int) else -1
 
 
@@ -92,7 +88,7 @@ async def _capture_issue(
 
     Returns `(envelope_or_None, raw_result_text)`; `None` covers both a screened call and one
     that was attempted but failed."""
-    before = len(_rows_for(deps.run_state, deps.lead_id))
+    before = deps.run_state.row_count(deps.lead_id)
     call = SimpleNamespace(tool_name="query")
     args = {"system": ITEM1_SYSTEM, "verb": verb, "params": params}
     # Kept so a later write failure can recover the result without re-issuing the call.
@@ -110,15 +106,15 @@ async def _capture_issue(
     try:
         text = await capture.wrap_tool_execute(ctx, call=call, args=args, handler=handler)
     except (OSError, ValueError):
-        # A queries-table write that cannot land costs the evidence row, not the evidence,
-        # and must not trigger a second backend call.
+        # A queries-table line that cannot land (the row is in the run's state all the same) or
+        # a row refused before it is recorded costs the record, not the evidence, and must not
+        # trigger a second backend call.
         envelope = captured[0] if captured else None
         return (envelope if isinstance(envelope, dict) else None), ""
-    after = _rows_for(deps.run_state, deps.lead_id)
-    if len(after) <= before:
+    if deps.run_state.row_count(deps.lead_id) <= before:
         return None, text
-    row = after[-1]
-    if row.get("exit_code") != 0:
+    row = deps.run_state.last_row(deps.lead_id)
+    if row is None or row.get("exit_code") != 0:
         return None, text
     payload_path = row.get("payload_path")
     if not isinstance(payload_path, str):
@@ -177,11 +173,6 @@ def _record_manual_row(
     )
 
 
-def _breaker_failures(state: RunState) -> int:
-    rec = state.breaker_snapshot()["systems"].get(ITEM1_SYSTEM)
-    return rec["failures"] if rec else 0
-
-
 class _CallLedger:
     """Tracks item 1's contribution to the per-system breaker, so later infra failures can
     still be issued without being recorded past the cap."""
@@ -193,7 +184,7 @@ class _CallLedger:
     async def call(self, capture, deps, verb, params, env):
         from defender.scripts.adapters.faults import AdapterFault
 
-        before = _breaker_failures(self.state)
+        before = self.state.breaker_failures(ITEM1_SYSTEM)
         if self.capped:
             # Past the cap: bypass QueryCapture's `record_outcome`, still writing a row.
             try:
@@ -215,7 +206,7 @@ class _CallLedger:
                 _record_manual_row(deps, verb, params, None, exit_code=_UNMAPPED_FAULT_EXIT)
                 return None, ""
         envelope, text = await _capture_issue(capture, deps, verb, params, env)
-        after = _breaker_failures(self.state)
+        after = self.state.breaker_failures(ITEM1_SYSTEM)
         if after > before:
             self.capped = True
         return envelope, text
@@ -240,16 +231,12 @@ def _build_deps(
 
 
 def _budget_gate(state: RunState, limits: dict) -> None:
-    """Not gated on `DEFENDER_BUDGET_ENFORCE`: lead-0 is harness work, not a model tool
-    refusal."""
-    if tail_exhausted(state.budget_snapshot(), limits):
+    """Refuse lead-0's next call once the run's budget tail is spent, read off the clock the
+    budget hooks read (`enforcement_state`: the monotonic origin beside the wall one, less the
+    oracle-held seconds), so lead-0 and the hooks agree on the same state. Not gated on
+    `DEFENDER_BUDGET_ENFORCE`: lead-0 is harness work, not a model tool refusal."""
+    if tail_exhausted(enforcement_state(state), limits):
         raise BudgetKill("lead-0's own call refused: the run's budget tail is exhausted")
-
-
-def _budget_account(state: RunState, tool_name: str) -> None:
-    """Count one of lead-0's own calls on the run's budget, with no cap check: harness work
-    the budget hooks never see, so it is counted here."""
-    count_call(state, tool_name)
 
 
 def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> None:

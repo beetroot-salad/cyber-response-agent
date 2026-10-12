@@ -173,7 +173,6 @@ class QueryCapture(AbstractCapability[Any]):
     def __init__(self, registry: Any, role: str = "gather"):
         self._registry = registry
         self._role = role
-        self._seq_lock = asyncio.Lock()
 
     def _denial_logger_for(self, run_dir: Any) -> Any:
         # Per run dir, not per capability: each gather lead has its own QueryCapture over one
@@ -594,15 +593,22 @@ class QueryCapture(AbstractCapability[Any]):
     ) -> tuple[dict, str]:
         """Append the row and charge the circuit breaker to its `system`.
 
+        The charge is the call's outcome, not the view's: it lands whether or not the row's
+        view line could be written. A refused write (`append_query_row` has already recorded
+        the row in the run's state) is charged first and then propagates; the run is not told
+        the call was viewed.
+
         A coarsened row charges `""`, which `record_outcome` skips; the rejection guards bound
-        those instead. `system_key` has no default so every writer must state it explicitly."""
+        those instead. `system_key` has no default so every writer must state it explicitly.
+
+        No lock of its own: `append_query_row` takes the seq and records the row under the
+        run state's lock, and nothing here awaits between the two."""
         lead_id = _dispatched_lead(deps)
         state = run_state_of(deps)
 
         text = "" if exit_code != 0 else json.dumps(payload, default=str)
 
-        async with self._seq_lock:
-            # Kept locked in case an `await` is ever added inside.
+        try:
             row = append_query_row(
                 state,
                 lead_id=lead_id,
@@ -624,8 +630,8 @@ class QueryCapture(AbstractCapability[Any]):
                 ),
                 system_key=system_key,
             )
-
-        circuit_breaker.record_outcome(state, system, exit_code)
+        finally:
+            circuit_breaker.record_outcome(state, system, exit_code)
         return row, text
 
     def _model_view(self, deps, row: dict, text: str, exit_code: int, detail: str) -> str:

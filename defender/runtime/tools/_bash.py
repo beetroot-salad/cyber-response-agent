@@ -61,9 +61,12 @@ def _record_shim_failure(
     * gather only (`GatherDeps.lead_id`): the row is per-lead;
     * a non-zero exit — failures, not every call;
     * the reducer is the terminal stage: the box reports only the last stage's exit code, so
-      otherwise the code cannot be attributed to the reducer;
-    * best-effort — it must never fail the command it observes. The run's state is taken
-      first, outside that: deps carrying none are a wiring fault, not a row that failed.
+      otherwise the code cannot be attributed to the reducer.
+
+    The run's state is required: gather deps carrying none are a wiring fault, and that
+    `TypeError` (`run_state_of`) propagates. Only the row's append is best-effort — a refused
+    table write (the row is already in the state, `append_query_row`) or any other failure
+    recording it never fails the command it observes.
     """
     if not isinstance(deps, GatherDeps) or deps.lead_id is None or result.rc == 0:
         return

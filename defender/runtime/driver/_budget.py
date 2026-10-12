@@ -1,9 +1,10 @@
 """The spend ceiling: what a call costs, when the run stops, and who records it.
 
 These hooks are the only place a request is accounted; a harness dispatch that bypasses them
-must account itself. They count on the run's `RunState` the deps carry (#1235). Deps that carry
-none belong to a role with no run (a learning stage, a review role): nothing is counted or
-refused for them, in either posture.
+must account itself. They count on the run's `RunState` the deps carry (#1235). An enforced role
+(`budget_enforced`: MAIN and gather) needs one: deps that carry none are a wiring fault, and its
+first tool call raises (`run_state_of`) rather than run with no budget at all. A role that is
+not enforced may carry none — a learning stage, a review role — and then nothing is counted.
 """
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ from pydantic_ai.capabilities.hooks import Hooks
 
 
 from .. import observe
-from ..run_state import RunState
+from ..run_state import RunState, run_state_of
 from ..verbs import ServingAbort
 from ..tools import (
     AgentDeps,
@@ -24,12 +25,11 @@ from ..tools import (
 from defender.hooks.budget_enforcer import (
     BUDGET_EXEMPT_TOOLS,
     DEFAULT_LIMITS,
-    ENFORCEMENT_HELD_KEY,
     BudgetKill,
     account_call,
     check_budgets,
     count_call,
-    oracle_held,
+    enforcement_state,
     refusal_message,
     should_refuse,
     tail_exhausted,
@@ -39,22 +39,17 @@ from defender.hooks.budget_enforcer import (
 _logger = logging.getLogger(__name__)
 
 
-def _budget_state_for_enforcement(budget: dict, state: RunState) -> dict:
-    """The run's budget with the host's own clock facts laid over it, both off the run's
-    state: the monotonic origin, and the oracle-held seconds (#1224 S15)."""
-    return {**budget, "started_monotonic": state.started_monotonic,
-            ENFORCEMENT_HELD_KEY: oracle_held(state)}
-
-
 def _budget_short_circuit(
     deps: AgentDeps, tool_name: str, limits: dict,
     logger: observe.RequestLogger, agent_id: str,
 ) -> str | None:
+    """The enforced posture's check ahead of a call: `BudgetKill` past the tail, the refusal
+    text at a cap, else `None`. Deps with no run state raise (`run_state_of`)."""
     # Exemption before the unconditional tail kill: the review gate's forced turns can push a
     # run past the tail, and closing must stay possible then.
-    if tool_name in BUDGET_EXEMPT_TOOLS or deps.run_state is None:
+    if tool_name in BUDGET_EXEMPT_TOOLS:
         return None
-    state = _budget_state_for_enforcement(deps.run_state.budget_snapshot(), deps.run_state)
+    state = enforcement_state(run_state_of(deps))
     if tail_exhausted(state, limits):
         raise BudgetKill(f"budget tail exhausted at {tool_name}")
     if should_refuse(state, tool_name, tier(tool_name, deps.role), limits):
@@ -64,14 +59,17 @@ def _budget_short_circuit(
 
 
 def _account_executed_call(deps: AgentDeps, tool_name: str, *, active: bool, limits: dict) -> None:
-    run_state = deps.run_state
+    """Count one executed call on the run's state: against the cap when `active` (the enforced
+    posture, whose deps must carry a state — `run_state_of` raises otherwise), with no cap check
+    when not (deps carrying no state then count nothing). Logs the budget warnings after."""
+    run_state: RunState | None = run_state_of(deps) if active else deps.run_state
     if run_state is None:
         return
     if active:
-        budget = account_call(run_state, tool_name, limits=limits, tier=tier(tool_name, deps.role))
+        account_call(run_state, tool_name, limits=limits, tier=tier(tool_name, deps.role))
     else:
-        budget = count_call(run_state, tool_name)
-    for w in check_budgets(_budget_state_for_enforcement(budget, run_state), limits):
+        count_call(run_state, tool_name)
+    for w in check_budgets(enforcement_state(run_state), limits):
         _logger.warning(f"{w}")
 
 

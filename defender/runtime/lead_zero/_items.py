@@ -13,6 +13,7 @@ from typing import Any
 
 from defender.hooks.budget_enforcer import (
     BudgetKill,
+    count_call,
 )
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
 from defender.runtime import circuit_breaker
@@ -22,7 +23,7 @@ from defender.runtime.tenant_settings import elastic_problem
 from defender.runtime.verbs import VerbRegistry, redact_settings_path
 from ._agreement import CorrelationDispatch
 from ._spec import ALERT_ID_FIELD, BUILDING_BLOCK_FIELD, CORRELATION_REQUEST_LIMIT, GROUP_ID_FIELD, HARNESS_PROVENANCE, ITEM1_GOAL, ITEM1_SYSTEM, ITEM1_WHAT_TO_SUMMARIZE, L0, L3, SHORTFALL, STATUS_EMPTY, STATUS_FAILED, STATUS_RESOLVED, STATUS_TRUNCATED
-from ._capture import _CallLedger, _budget_account, _budget_gate, _build_deps, _last_row_seq, _sanitize
+from ._capture import _CallLedger, _budget_gate, _build_deps, _last_row_seq, _sanitize
 from ._render import _render_doc, _sort_chrono, _unavailable
 from ._capture import _declare_l_finding
 
@@ -153,7 +154,8 @@ async def _resolve_item1(  # noqa: C901, PLR0912, PLR0915 — shell fetch, group
             ancestor_issued += 1
         _budget_gate(run_state, limits)
         envelope, _text = await ledger.call(capture, deps, verb, params, env)
-        _budget_account(run_state, "query")
+        # Harness work the budget hooks never see, so it is counted here, with no cap check.
+        count_call(run_state, "query")
         if envelope is not None:
             answered_any = True
             if ancestor:
