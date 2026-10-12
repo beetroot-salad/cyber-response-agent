@@ -244,8 +244,9 @@ def _read_input_file(path: Path, what: str) -> bytes | None:
 
 def _write_input_once(run: Run, door: _FrontDoor) -> None:
     """The alert and its record are write-once, in the run's read-only input directory: written
-    through the guarded exclusive lane when absent; when present they must agree with what run
-    start admitted, byte for byte, or the id is being reused for another case. Nothing present
+    through the guarded exclusive lane when absent; when present the alert must agree with what
+    run start admitted, byte for byte, and the record must carry that alert's digest (its facts
+    are not compared), or the id is being reused for another case. Nothing present
     is rewritten (a restart keeps both files' bytes, inode and mtime), and the record found wins
     over the one just derived (a mapping edited since stays the operator's business for the next
     run)."""

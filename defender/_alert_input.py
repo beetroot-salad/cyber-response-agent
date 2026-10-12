@@ -2,7 +2,7 @@
 run's record — the one owner of each, so no reader re-derives what another already settled.
 
 * `admit` — run start's check of the operator's raw alert bytes, before any run folder exists.
-  Strict UTF-8, no byte-order mark, exactly one JSON object the parser can follow, no unpaired
+  Strict UTF-8, no byte-order mark, exactly one JSON object the parser can follow (what Python's `json` accepts: a duplicate member is last-wins, by ruling), no unpaired
   surrogate escape. A refusal is `AlertRefused`, a fixed sentence naming the cause and echoing
   nothing of the alert.
 * `AlertMapping` / `settings_reasons` / `load_alert_mapping` — the tenant's REQUIRED

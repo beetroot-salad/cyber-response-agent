@@ -72,14 +72,20 @@ class CorrelationDeadlineError(ValueError):
 
 def correlation_deadline(limits: dict) -> float:
     """@owns correlation_deadline — the correlation deadline in seconds from the run's cap
-    table, or `CorrelationDeadlineError` naming the setting. The one reader: the run-start
-    check and the dispatch both call it, so the value that was checked is the value used."""
+    table, or `CorrelationDeadlineError` naming the setting. The one reader: called once at run
+    start, and the value it returns is passed on to the dispatch, so the value that was checked
+    is the value used."""
     if DEADLINE_KEY not in limits:
         raise CorrelationDeadlineError(
             f"the cap table has no {DEADLINE_KEY!r}: the correlation lead is bound by one "
             "deadline and is not run without it")
     value = limits[DEADLINE_KEY]
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    try:
+        usable = (not isinstance(value, bool) and isinstance(value, (int, float))
+                  and math.isfinite(value))
+    except OverflowError:  # an integer too large for a float is not a usable number of seconds
+        usable = False
+    if not usable:
         raise CorrelationDeadlineError(
             f"{DEADLINE_KEY} must be a finite number of seconds, got {value!r}")
     if value <= 0:

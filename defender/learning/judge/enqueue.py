@@ -1,4 +1,4 @@
-"""The judge's appender: thirteen-key finding rows onto the defender and questioner queues.
+"""The judge's appender: thirteen-key finding rows (fourteen when the run recorded a signature) onto the defender and questioner queues.
 
 Refuses a row missing `finding_id`/`run_id`/`direction` before it reaches the shared findings
 gate (where it would raise a bare `KeyError` and stuck-record the whole keyed batch), and
@@ -218,7 +218,7 @@ def append_world_rows_report(episode_dir: Path, rows: list[dict[str, Any]], *,
 def _resolving_citations(finding: dict[str, Any]) -> list[str]:
     """A finding's evidence pointers minus the ones `_draw_document` recorded as not resolving.
 
-    The unresolved ones stay off the row (the queue shape is fixed at thirteen keys) and remain
+    The unresolved ones stay off the row (the queue shape is fixed at thirteen keys, fourteen with `recorded_signature`) and remain
     readable on the draw document `source_run_dir` names."""
     # Model-authored YAML: neither key is known to be a list, and a bare string would iterate
     # into one-character citations. `str()` because YAML scalars like dates are not
