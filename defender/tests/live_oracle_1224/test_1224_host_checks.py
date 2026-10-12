@@ -57,6 +57,7 @@ import pytest
 
 from defender.scripts.adapters import faults
 from defender.tests import _judge_921 as J
+from defender.tests._alert_plant import plant_alert
 from defender.tests._state1135 import state_over
 from defender.tests.live_oracle_1224 import _spec1224 as S
 
@@ -693,12 +694,12 @@ def _sid_attempt(fid: str, event_id: str, *, base_rows: tuple = (SID_ROW,),
 
 
 def _plant_alert(tmp_path: Path) -> Path:
-    """The source run's alert (`alert.json`), in the source run dir the manifest names and in
-    the sibling's run dir, which resumes from it."""
+    """The source run's alert and its record (#1222), in the source run dir the manifest names
+    and in the sibling's run dir, which resumes from it."""
     src = tmp_path / "source-run"
     for where in (src, tmp_path / "run"):
         where.mkdir(parents=True, exist_ok=True)
-        (where / "alert.json").write_text(json.dumps(ALERT), encoding="utf-8")
+        plant_alert(where, json.dumps(ALERT).encode("utf-8"))
     return src
 
 

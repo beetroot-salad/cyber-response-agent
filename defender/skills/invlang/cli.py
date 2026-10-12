@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from defender._io import use_utf8_stdio
+from defender._shown import quoted
 
 from .advisory import VALID_CLASSES, advisory_recall
 from .corpus import load_corpus
@@ -229,7 +230,7 @@ def _handle_hypothesis_vocabulary_cmd(args, corpus, report) -> int:
             # Runs that predate the record are not a corpus of this version: counted, not hidden.
             sys.stdout.write(
                 f"\n_({len(norecord)} past run folder(s) skipped for having no run record: "
-                f"{', '.join(p.parent.name for p in norecord)})_")
+                f"{', '.join(quoted(p.parent.name) for p in norecord)})_")
         if os.environ.get("DEFENDER_BOX"):
             # Past runs are not mounted in the sandbox: an empty listing here is not a finding.
             sys.stdout.write(

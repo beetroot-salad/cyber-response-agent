@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -8,7 +9,6 @@ from pathlib import Path
 from defender import _alert_input
 from defender._frontmatter import strip_frontmatter
 from defender._io import read_text_soft
-from defender.run_repository import RunPaths
 from defender._untrusted import wrap_fresh
 
 _DEFENDER_DIR = Path(__file__).resolve().parents[1]
@@ -79,6 +79,19 @@ _NO_SIGNATURE = (
     "signature-keyed lesson lookup ran and no corpus vocabulary is shown)_")
 
 
+#: A signature the host may speak aloud (outside an untrusted frame): word characters, dots and
+#: hyphens only. The wider key alphabet (`:/@+=`) can spell a path, a command or a label, so such
+#: a signature is only ever shown inside a frame and the host's own lines say "that signature".
+_SPOKEN_SIGNATURE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+
+
+def _spoken(sig: str) -> str:
+    """How the host's own prose refers to the signature: by value when it is a plain word-shaped
+    key (an operator reading the section can tell which lookup it was), else as 'that signature'.
+    """
+    return f"`{sig}`" if _SPOKEN_SIGNATURE.fullmatch(sig) else "that signature"
+
+
 def _build_lessons_section(env: dict[str, str], sig: str | None, shim: ShimRunner) -> str | None:
     tags = shim(["defender-lessons", "--tags"], env)
     # An exact, case-sensitive lookup of the whole entry: the signature is a key, not a pattern.
@@ -105,8 +118,8 @@ def _build_lessons_section(env: dict[str, str], sig: str | None, shim: ShimRunne
         )
     elif hits is None:
         lesson_lines.append(
-            "_(the lessons lookup for that signature did not finish: this is not a finding "
-            "that no lesson matches)_")
+            f"_(the lessons lookup for {_spoken(sig or '')} did not finish: this is not a "
+            "finding that no lesson matches)_")
     elif sig:
         lesson_lines.append("_(no lessons matched that signature)_")
     if not sig:
@@ -133,12 +146,12 @@ def _build_corpus_vocab_section(
     )
     if vocab_out is None:
         return (
-            "## Corpus hypothesis vocabulary — for this run's signature\n"
+            f"## Corpus hypothesis vocabulary — for this run's signature {_spoken(sig)}\n"
             "_(unavailable: the corpus lookup did not finish, so this says nothing about "
             "whether past runs exist for this signature)_")
     if vocab_out:
         return (
-            "## Corpus hypothesis vocabulary — for this run's signature "
+            f"## Corpus hypothesis vocabulary — for this run's signature {_spoken(sig)} "
             "(reuse these `?name`s where the semantics match)\n"
             # `?name`s and descriptions past runs' models wrote: framed as the lessons are.
             + wrap_fresh(vocab_out, "untrusted")
@@ -162,7 +175,7 @@ def orientation(
     # The alert is read once, checked against the digest the run recorded at its start; the
     # signature is the record's, never derived here (a replaced alert is refused by name).
     alert_bytes, record = _alert_input.verified_alert(
-        Path(alert_path), RunPaths(run_dir).alert_record, run_name=Path(run_dir).name)
+        Path(alert_path), _alert_input.record_beside(Path(alert_path)), run_name=Path(run_dir).name)
     sig = record.signature
 
     sections: list[str] = [

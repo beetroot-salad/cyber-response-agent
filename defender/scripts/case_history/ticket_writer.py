@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from defender import _alert_input
-from defender._io import write_guarded
+from defender._io import read_guarded, write_guarded
 from defender._model import model
 from defender.run_repository import RunPaths
 from defender.runtime import case_ticket, run_end
@@ -268,9 +268,10 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
 
 def _prior_open_refusal(run_dir: Path) -> str | None:
     """The open leg's refusal text this attempt left in the receipt, or `None`."""
+    text, _reason = read_guarded(receipt_path(run_dir))
     try:
-        prior = json.loads(receipt_path(run_dir).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        prior = json.loads(text) if text is not None else None
+    except ValueError:
         return None
     reason = prior.get("reason") if isinstance(prior, dict) else None
     return reason if isinstance(reason, str) and reason.startswith(OPEN_REFUSED) else None

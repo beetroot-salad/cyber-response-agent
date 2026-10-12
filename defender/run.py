@@ -623,9 +623,8 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
         world = _resume_target(ns, episode=episode, tenant=tenant_of)
         _sibling_tenant_agrees(world, accepted)
 
-        alert, run_id = _case_input(ns, world, episode)
-
-        # The tenant's settings, resolved before anything is spent; nothing below reads them again.
+        # The tenant's settings (and with them the one tenant check), resolved before the input
+        # is read and before anything is spent; nothing below reads them again.
         tenant = tenant_of()
 
         model = driver.resolve_main_model(ns.model)
@@ -635,6 +634,10 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
         if rc:
             return rc
         seams = _world_seams(world, oracle=oracle, verifier=verifier)
+
+        # The input is read after the tenant check and the role preflight: a tenant the check
+        # refuses is told so before anything about its input is.
+        alert, run_id = _case_input(ns, world, episode)
 
         # The handle, not just its directory: the post-run step saves the run page through it.
         run = materialize(alert, run_id, tenant=accepted, model=model, world=world)

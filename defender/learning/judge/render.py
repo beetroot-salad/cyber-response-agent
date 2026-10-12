@@ -342,7 +342,7 @@ def _sibling_row(
     record_rec = run.read(RUN_LAYOUT.alert_record)
     if record_rec.absent:
         return None, "skipped_unrecorded", "it has no record of the alert"
-    record = _alert_input.parse_record(record_rec.text) if record_rec.text else None
+    record = _alert_input.parse_alert_record(record_rec.text) if record_rec.text else None
     if record is None:
         return None, "skipped_unreadable", "its record of the alert cannot be read"
     if record.digest != digest:
@@ -425,7 +425,7 @@ def episode_record(bound: Bound) -> _alert_input.AlertRecord | None:
 
     Shared by the sibling union and the enqueue's rule key, so both key on the same record."""
     read = bound.read(LAYOUT.source_record)
-    return _alert_input.parse_record(read.text) if read.text else None
+    return _alert_input.parse_alert_record(read.text) if read.text else None
 
 
 def episode_alert(bound: Bound) -> dict[str, Any]:

@@ -238,7 +238,7 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit pe
             asyncio.CancelledError, KeyboardInterrupt, GeneratorExit, SystemExit):
         raise
     except Exception as e:  # noqa: BLE001 — the lead's own dispatch must never break the run
-        _logger.warning(f"correlation lead dispatch failed ({type(e).__name__}); naming it", exc_info=True)
+        _logger.warning(f"correlation lead dispatch failed ({type(e).__name__}); naming it")
         return CorrelationOutcome(ending=ENDING_DISPATCH_RAISED, system=system)
     if not ends:
         return CorrelationOutcome(ending=ENDING_DISPATCH_RAISED, system=system)

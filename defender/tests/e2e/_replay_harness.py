@@ -443,7 +443,9 @@ def _awaiting(fn):
     delay or a hang that must be awaited ON THE EVENT LOOP, so a deadline can cut it), which a
     sync `FunctionModel` function would be handed back unawaited."""
     async def call(messages, info):
-        out = fn(messages, info)
+        # The double runs on a worker thread, as a sync `FunctionModel` function always has: a
+        # double that blocks (waits on another lead) must not stall the event loop.
+        out = await asyncio.to_thread(fn, messages, info)
         return await out if inspect.isawaitable(out) else out
 
     call.__name__ = getattr(fn, "__name__", type(fn).__name__)

@@ -1,14 +1,11 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from defender.run_repository import (
-    ALERT_INPUT_DIRNAME,
-    ALERT_RECORD,
     GATHER_RAW_SHAPE,
-    RUN_LAYOUT,
+    alert_input_shape,
     gather_summaries_shape,
 )
 from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS
@@ -39,7 +36,7 @@ def read_shapes(
         under(run, gather_summaries_shape(SEG)),
         # The alert and its record: the one directory down the input directory holds (#1222).
         # A shape of its own, so `wire_logs/` stays out of reach.
-        under(run, rf"{ALERT_INPUT_DIRNAME}/(?:{re.escape(RUN_LAYOUT.alert.name)}|{re.escape(ALERT_RECORD)})"),
+        under(run, alert_input_shape()),
     ]
     if raw:
         # The shared shape, not a local spelling: it must match the lead-id validators, or

@@ -10,6 +10,7 @@ from typing import Annotated
 from pydantic import SkipValidation
 
 from defender import _alert_input
+from defender._shown import quoted
 from defender._io import read_text_soft
 from defender._model import model
 from defender.run_repository import RunPaths
@@ -62,9 +63,9 @@ class LoadReport:
         per-row parse warnings; otherwise only the dropped-row count is shown, since one bad
         block often drops many identical rows.
         """
-        lines = [f"  skipped {path.parent.name}: {reason}" for path, reason in self.skipped]
+        lines = [f"  skipped {quoted(path.parent.name)}: {reason}" for path, reason in self.skipped]
         for path, warnings in self.partial:
-            lines.append(f"  partial {path.parent.name}: {len(warnings)} row(s) skipped")
+            lines.append(f"  partial {quoted(path.parent.name)}: {len(warnings)} row(s) skipped")
             if verbose:
                 lines += [f"    [{w.block} row {w.row_index}] {w.reason}" for w in warnings]
         return lines

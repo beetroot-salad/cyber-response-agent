@@ -414,7 +414,7 @@ class Run:
         record. A stored alert whose bytes no longer match the record is refused
         (`AlertReplaced`, naming the run): the key must never follow replaced bytes."""
         record_text, _reason = self._io.rooted_read(self.run_dir, RUN_LAYOUT.alert_record)
-        record = None if record_text is None else _alert_input.parse_record(record_text)
+        record = None if record_text is None else _alert_input.parse_alert_record(record_text)
         if record is None:
             return None
         alert_bytes, _reason = self._io.rooted_read(

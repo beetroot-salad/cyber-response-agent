@@ -18,7 +18,7 @@ if str(REPO_ROOT) not in sys.path:
 from defender import _alert_input, _io, _provenance, _tenant  # noqa: E402
 from defender._io import guarded_mkdir, read_bytes_capped  # noqa: E402
 from defender.run_repository import (  # noqa: E402
-    ALERT, RUN_LAYOUT, Run, RunId, RunPaths, RunRefused, artifact_dir, case_ref_of_digest,
+    RUN_LAYOUT, Run, RunId, RunPaths, RunRefused, artifact_dir, artifact_file, case_ref_of_digest,
     episode_sibling_ids,
     hold_runs_folder, run_name_fault,
 )
@@ -218,7 +218,7 @@ def _admit_input(alert: Path, *, tenant: _tenant.Tenant, world: ResumeWorld | No
 
         record_path = EpisodePaths(world.episode_dir).source_record
         text, reason = _io.read_guarded(record_path)
-        parsed = None if text is None else _alert_input.parse_record(text)
+        parsed = None if text is None else _alert_input.parse_alert_record(text)
         if text is None or parsed is None or parsed.digest != admitted.digest:
             sys.exit(f"[run.py] episode {world.episode_dir.name}: its copy of the source alert does not "
                      f"match the record beside it "
@@ -257,7 +257,7 @@ def _write_input_once(run: Run, door: _FrontDoor) -> None:
             f"run dir {run.run_dir} already holds a different alert than the one given — a run "
             "id names one case; pick a fresh id for a different alert")
     if held_record is not None:
-        kept = _alert_input.parse_record(held_record.decode("utf-8", errors="replace"))
+        kept = _alert_input.parse_alert_record(held_record.decode("utf-8", errors="replace"))
         if kept is None or kept.digest != _alert_input.digest_of(door.raw):
             sys.exit(
                 f"run dir {run.run_dir} holds a record that is not this alert's "
@@ -279,7 +279,7 @@ def _unseal(input_dir: Path) -> None:
     """Make the input directory (and what it holds) writable for the owner, for the one write
     run start makes into it. Best effort: the box's read-only bind is the real protection."""
     with contextlib.suppress(OSError):
-        if input_dir.is_dir() and not input_dir.is_symlink():
+        if artifact_dir(input_dir):
             input_dir.chmod(0o755)
 
 
@@ -288,10 +288,10 @@ def _seal(input_dir: Path) -> None:
     process running as the same user cannot rewrite them by accident. Best effort, like
     `_unseal`: the box's read-only bind is what holds against the run."""
     with contextlib.suppress(OSError):
-        if not input_dir.is_dir() or input_dir.is_symlink():
+        if not artifact_dir(input_dir):
             return
         for child in input_dir.iterdir():
-            if child.is_file() and not child.is_symlink():
+            if artifact_file(child):
                 child.chmod(0o444)
         input_dir.chmod(0o555)
 
@@ -413,18 +413,10 @@ def held_out_alert_digests(fixtures_dir: Path = HELD_OUT_FIXTURES) -> set[str]:
         return out
     for child in sorted(fixtures_dir.iterdir()):
         try:
-            out.add(_alert_input.digest_of(read_bytes_capped(child / ALERT)))
+            out.add(_alert_input.digest_of(read_bytes_capped(child / "alert.json")))  # lint-run-records: ok — a held-out fixture folder's own file, not a run's record
         except OSError:
             continue
     return out
-
-
-def is_held_out_alert_copy(alert: Path, fixtures_dir: Path = HELD_OUT_FIXTURES) -> bool:
-    try:
-        digest = _alert_input.digest_of(read_bytes_capped(alert))
-    except OSError:
-        return False
-    return digest in held_out_alert_digests(fixtures_dir)
 
 
 def learning_refusal_gate(

@@ -6,6 +6,7 @@ import re
 import stat
 from pathlib import Path, PurePosixPath
 
+from defender import _alert_input
 from defender._io import ALIAS_READ_REFUSAL, _mark_alias, is_plain_entry
 from defender._run_id import refuse_bad_case_id
 
@@ -51,7 +52,7 @@ ALERT = "alert.json"
 #: the box binds read-only, because a single-file bind is undone by a host rename.
 ALERT_INPUT_DIRNAME = "alert_input"
 #: The run's record, beside the alert: its byte digest and the three facts derived at run start.
-ALERT_RECORD = "record.json"
+ALERT_RECORD = _alert_input.RECORD_FILE
 REPORT = "report.md"
 INVESTIGATION = "investigation.md"
 EXECUTED_QUERIES = "executed_queries.jsonl"
@@ -569,6 +570,13 @@ def gather_summaries_shape(segment: str) -> str:
     a read grant, so an unescaped metacharacter would silently widen it.
     """
     return f"{re.escape(GATHER_SUMMARIES_DIRNAME)}/{segment}"
+
+def alert_input_shape() -> str:
+    """The run's alert and its record, `alert_input/<alert|record>`, as a regex fragment with
+    every name escaped (it builds a read grant)."""
+    return (f"{re.escape(ALERT_INPUT_DIRNAME)}/"
+            f"(?:{re.escape(ALERT)}|{re.escape(ALERT_RECORD)})")
+
 
 # `resolve()` on a hostile operand — a symlink cycle, an embedded NUL, a name past PATH_MAX.
 _RESOLVE_ERRORS = (OSError, RuntimeError, ValueError)

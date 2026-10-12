@@ -38,7 +38,7 @@ import pytest
 from defender.run_repository import RunPaths
 
 from defender import run as run_py  # noqa: E402
-from defender import run_common  # noqa: E402
+from defender import _alert_input, run_common  # noqa: E402
 from defender.learning.core import drains  # noqa: E402
 from defender.runtime import scrub as scrub_mod  # noqa: E402
 from defender.tests._state1135 import set_state_dir  # noqa: E402
@@ -318,7 +318,7 @@ def test_791_curation_refuses_a_held_out_alert_copy_by_content(tmp_path, state):
     assert run_common.is_held_out_fixture(alert, fixtures) is False, \
         "the run's own alert copy is inside the fixtures dir — the path net would catch it " \
         "here and this test would not be about the digest at all"
-    assert run_common.is_held_out_alert_copy(alert, fixtures) is True
+    assert _alert_input.digest_of(alert.read_bytes()) in run_common.held_out_alert_digests(fixtures)
 
     assert run_common.enqueue_curation(copied, alert, fixtures_dir=fixtures) is False
     assert author_markers(state) == [], "a held-out alert copy reached the committed catalog"

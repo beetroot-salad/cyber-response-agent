@@ -149,7 +149,8 @@ def _inherit_evidence(source_run_dir: Path, run_dir: Path, leads: set[str]) -> N
     # them (from the episode's copy); one built any other way gets the source's, checked
     # against its record's digest on the way. Not in `_inherited()`: a freshly materialised
     # sibling legitimately holds them.
-    source, sibling = RunPaths(source_run_dir), RunPaths(run_dir)
+    source = RunPaths(source_run_dir)
+    sibling = RunPaths(run_dir)
     if not sibling.alert.exists() and (source.alert.exists() or source.alert.is_symlink()):
         try:
             raw, _record = _alert_input.verified_alert(

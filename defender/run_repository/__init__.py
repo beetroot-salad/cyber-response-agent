@@ -32,7 +32,7 @@ if TYPE_CHECKING:
         TICKET_WRITE_SUFFIX, ORACLE_HELD_SUFFIX,
         SESSIONS_DIRNAME, RunLayout, RUN_LAYOUT, WireLogNames, WIRE_LOG_NAMES,
         RunPaths, SessionPaths, LEAD_ID_BODY, LEAD_ID_RE, GATHER_RAW_SHAPE, CASE_ANSWER_KEY_NAMES,
-        is_case_answer_key, gather_summaries_shape, artifact_file, plain_file, artifact_dir,
+        is_case_answer_key, gather_summaries_shape, alert_input_shape, artifact_file, plain_file, artifact_dir,
         resolve_run_bundle, contained_payload,
     )
     from defender.run_repository._handle import (
@@ -69,7 +69,7 @@ _HOMES: dict[str, str] = {
         "SESSIONS_DIRNAME", "RunLayout", "RUN_LAYOUT", "WireLogNames",
         "WIRE_LOG_NAMES", "RunPaths", "SessionPaths", "LEAD_ID_BODY", "LEAD_ID_RE",
         "GATHER_RAW_SHAPE", "CASE_ANSWER_KEY_NAMES", "is_case_answer_key",
-        "gather_summaries_shape", "artifact_file", "plain_file", "artifact_dir",
+        "gather_summaries_shape", "alert_input_shape", "artifact_file", "plain_file", "artifact_dir",
         "resolve_run_bundle", "contained_payload",
     ), "_layout"),
     **dict.fromkeys(("Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref", "case_ref_of_digest",), "_handle"),
@@ -92,7 +92,7 @@ __all__ = [
     "ORACLE_HELD_SUFFIX",
     "SESSIONS_DIRNAME", "RunLayout", "RUN_LAYOUT", "WireLogNames", "WIRE_LOG_NAMES", "RunPaths",
     "SessionPaths", "LEAD_ID_BODY", "LEAD_ID_RE", "GATHER_RAW_SHAPE", "CASE_ANSWER_KEY_NAMES",
-    "is_case_answer_key", "gather_summaries_shape", "artifact_file", "plain_file", "artifact_dir",
+    "is_case_answer_key", "gather_summaries_shape", "alert_input_shape", "artifact_file", "plain_file", "artifact_dir",
     "resolve_run_bundle", "contained_payload", "Run", "RunRecord", "ArchivedWorld",
     "RecordHandle", "case_ref", "case_ref_of_digest", "RunId", "open_run", "list_run_ids", "bound_runs", "run_exists",
     "record_episode_runs", "episode_runs", "sibling_run_ids", "episode_sibling_ids", "RunRefused",

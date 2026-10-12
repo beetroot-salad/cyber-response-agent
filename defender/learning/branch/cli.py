@@ -347,10 +347,6 @@ def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a mode
         source_who=f"source run {source_run_dir}", allow_dirty=allow_dirty).refusal
     if refusal is not None:
         raise LauncherRefused(f"[branch] {refusal}")
-    # The source run dir is a prior box's rw bind: its alert is read only as the run's record
-    # vouches for it (a link planted at its name, or a replaced file, would put outside bytes
-    # into the questioner's prompt).
-    source_input(Path(source_run_dir))
     rc = preflight(model, branching=True)
     if rc:
         raise LauncherRefused(

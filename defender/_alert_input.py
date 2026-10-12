@@ -27,7 +27,7 @@ from typing import Any
 
 import yaml
 
-from defender import _io
+from defender import _io, _yaml
 
 #: The alert mapping's name under a tenant's `settings/`, and the case-history mapping's.
 ALERT_MAPPING_REL = "alert-mapping.yaml"
@@ -179,7 +179,7 @@ class AlertMapping:
         return self.paths.get(fact)
 
 
-def _check_mapping_doc(doc: Any) -> AlertMapping:
+def _check_mapping_doc(doc: object) -> AlertMapping:
     """The parsed file, or `AlertMappingFault`."""
     if not isinstance(doc, dict):
         raise AlertMappingFault(_reasons("shape"))
@@ -201,9 +201,11 @@ def _check_mapping_doc(doc: Any) -> AlertMapping:
 def parse_mapping(text: str) -> AlertMapping:
     """The alert mapping in `text`, or `AlertMappingFault` carrying a fixed reason."""
     try:
-        doc = yaml.safe_load(text)
+        doc: object = _yaml.safe_load(text)
     except (yaml.YAMLError, RecursionError):
         raise AlertMappingFault(_reasons("yaml")) from None
+    if not isinstance(doc, dict):
+        raise AlertMappingFault(_reasons("shape"))
     return _check_mapping_doc(doc)
 
 
@@ -235,7 +237,7 @@ def settings_reasons(settings: _io.Bound) -> list[str]:
     case_text, case_kind = _read_setting(settings, CASE_MAPPING_REL)
     if case_text is not None:
         try:
-            case_doc = yaml.safe_load(case_text)
+            case_doc = _yaml.safe_load(case_text)
         except (yaml.YAMLError, RecursionError):
             reasons.append(_reasons("case_yaml"))
         else:
@@ -343,7 +345,17 @@ def record_text(digest: str, facts: AlertFacts) -> str:
     return json.dumps({DIGEST_KEY: digest, **facts.as_json()}, indent=1, ensure_ascii=False) + "\n"
 
 
-def parse_record(text: str) -> AlertRecord | None:
+#: The record's file name inside the input directory, beside the alert (the layout's
+#: `ALERT_RECORD` is this value).
+RECORD_FILE = "record.json"
+
+
+def record_beside(alert_path: Path) -> Path:
+    """Where the record sits for an alert stored at `alert_path`: the same directory."""
+    return alert_path.with_name(RECORD_FILE)
+
+
+def parse_alert_record(text: str) -> AlertRecord | None:
     """The record in `text`, or `None` when it is not one: not a JSON object, no hex digest. A
     fact that is not text, or a signature that is not key-shaped, reads as absent — the record
     is the run's certificate, never a place a malformed value reaches a sink."""
@@ -369,7 +381,7 @@ def read_record(record_path: Path) -> AlertRecord | None:
     """The record at `record_path` (read no-follow, bounded), or `None` when there is none or it
     is not one."""
     text, _reason = _io.read_guarded(record_path)
-    return None if text is None else parse_record(text)
+    return None if text is None else parse_alert_record(text)
 
 
 def verified_input(alert_path: Path, record_path: Path, *, run_name: str) -> tuple[bytes, str]:
@@ -382,7 +394,7 @@ def verified_input(alert_path: Path, record_path: Path, *, run_name: str) -> tup
         "(or one of the two is missing) — the run's input was replaced or damaged, and nothing "
         "is read from it")
     text, _reason = _io.read_guarded(record_path)
-    record = None if text is None else parse_record(text)
+    record = None if text is None else parse_alert_record(text)
     if text is None or record is None:
         raise refusal
     raw, _reason = _io.read_bytes_guarded(alert_path)
@@ -394,6 +406,6 @@ def verified_input(alert_path: Path, record_path: Path, *, run_name: str) -> tup
 def verified_alert(alert_path: Path, record_path: Path, *, run_name: str) -> tuple[bytes, AlertRecord]:
     """The stored alert's bytes and the record they match (see `verified_input`)."""
     raw, text = verified_input(alert_path, record_path, run_name=run_name)
-    record = parse_record(text)
+    record = parse_alert_record(text)
     assert record is not None  # verified_input just parsed it
     return raw, record
