@@ -156,6 +156,16 @@ def test_a_reply_carrying_two_conflicting_verdict_lines_raises_773(tmp_path):
     assert LESSON in clean.head_files()
 
 
+def _family_row(fid: str) -> dict:
+    """A `direction: family` row in the post-#1234 shape the family partition admits: no
+    retired `judge_outcome`, and the three fields the judge now writes (#1234 M7)."""
+    row = S.finding_row(fid, run_id=fid, direction="family",
+                        contrast_evidence=["worlds/b/investigation.md", "worlds/a/investigation.md"],
+                        on_verdict_path=True, world_label_doubted=False)
+    del row["judge_outcome"]
+    return row
+
+
 def test_an_exempt_pair_is_recorded_as_a_first_class_pair_verdict_773(tmp_path):
     """EXEMPT is a `PairVerdict` value recorded wherever GOOD and BAD are, not an invisible
     short-circuit: a family-exempt pair on a file whose other pair went BAD appears in that
@@ -166,7 +176,7 @@ def test_an_exempt_pair_is_recorded_as_a_first_class_pair_verdict_773(tmp_path):
     sc = S.build_scene(
         tmp_path,
         rows=[
-            S.finding_row("fam", run_id="fam", direction="family", judge_outcome="survived"),
+            _family_row("fam"),
             S.finding_row("bad", run_id="bad"),
         ],
         curator=S.FakeCurator(writes={"l1.md": S.lesson("fam", "bad")}),
@@ -346,7 +356,7 @@ def test_a_file_cited_only_by_a_family_finding_commits_on_exempt_773(tmp_path):
     `row.get("direction") == "family"`, one equality test. O8: EXEMPT satisfies O1."""
     sc = S.build_scene(
         tmp_path,
-        rows=[S.finding_row("fam", run_id="fam", direction="family", judge_outcome="survived")],
+        rows=[_family_row("fam")],
         curator=S.FakeCurator(writes={"l1.md": S.lesson("fam")}),
         verifier=S.FakeVerifier(default="BAD"),
     )

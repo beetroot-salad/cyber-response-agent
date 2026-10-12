@@ -249,12 +249,13 @@ def test_no_tool_grant_reaches_the_corpus_author_that_selects_a_runs_dir_path_77
     assert not hasattr(curator_engine.CORPUS_AUTHOR_DEF.tools, "forward_check")
 
 
-def test_the_author_result_still_carries_observability_gaps_773(tmp_path):
-    """N3: the curator's `observability_gaps` field stays exactly as it is — unread by code
-    (C5) and untouched by this delta.
+def test_an_author_result_still_emitting_observability_gaps_strings_is_tolerated_773(tmp_path):
+    """N3, as #1234 M7 leaves it: `observability_gaps` is no longer a declared result field,
+    and a curator still emitting it as a list of strings is tolerated as unread noise (the
+    partition check refuses only row-shaped stray keys), so the tick behaves identically to
+    one that does not carry it.
 
-    The gap ledger here is the forward check's; merging the two is a follow-up. A tick whose
-    result carries the field behaves identically to one that does not."""
+    The gap ledger here is the forward check's; merging the two is a follow-up."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
