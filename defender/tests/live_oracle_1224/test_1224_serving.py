@@ -971,9 +971,11 @@ def test_input_fact_lies_outside_every_window_the_investigator_asks_for(tmp_path
 
     Judge side, as asserted: world b's own world-scope draw (the judge double's call naming
     world b) is handed the fact's statement and the `passthrough` decisions, and `judge.yaml`
-    records for world b exactly the bucket the judge model replied (`analyze-discipline`) —
-    graded from the reply, neither withheld (no bucket) nor given a host-computed one. What
-    the judge model concludes about an unreached fact is its judgement and is not pinned."""
+    records for world b exactly the bucket the judge model replied (`lead-quality`) — graded
+    from the reply, neither withheld (no bucket) nor given a host-computed one. What the judge
+    model concludes about an unreached fact is its judgement and is not pinned. (#1234 A5: a
+    world never shown its facts may not be filed under a discipline bucket — the reply is
+    refused and re-asked — so the scripted reply is `lead-quality`, not `analyze-discipline`.)"""
     est = S.estate(tmp_path)
     ep = _episode(tmp_path, captured=[])
     early = S.query_params("user:alice", start="2026-07-27T00:00:00Z",
@@ -998,7 +1000,7 @@ def test_input_fact_lies_outside_every_window_the_investigator_asks_for(tmp_path
     assert "2026-07-27T06:00:00Z" in verifier.seen[0]
 
     judged = S.judged_episode(tmp_path / "judged", ledgers={"b": S.ledger_rows(ep, "b")})
-    judge = S.FakeJudge(default=S.judge_reply(bucket="analyze-discipline"))
+    judge = S.FakeJudge(default=S.judge_reply(bucket="lead-quality"))
     _grade(judged, judge)
     world_b = [p for p, agent in zip(judge.prompts, judge.agent_ids, strict=True)
                if S.judge_label(agent) == "b"]
@@ -1006,7 +1008,7 @@ def test_input_fact_lies_outside_every_window_the_investigator_asks_for(tmp_path
     assert any(statement in p and S.PASSTHROUGH in p for p in world_b), (
         "world b's draw was not handed its fact and its passthrough decisions")
     row_b = J.world_rows(J.judge_record(judged)).get("b") or {}
-    assert row_b.get("bucket") == "analyze-discipline", (
+    assert row_b.get("bucket") == "lead-quality", (
         f"judge.yaml does not record the judge model's bucket for world b: {row_b!r}")
 
 

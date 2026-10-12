@@ -1622,8 +1622,9 @@ def test_p034_placeholder_values_in_id_columns(tmp_path):
 
 #: A judge reply in the coined v2 shape (a world-scope `bucket` and `systems`, the family-scope
 #: `verdict_word`), so one default answers both scopes; its content is not the subject.
-_JUDGE_REPLY = S.as_reply_text(J.reply_doc(findings=[], bucket="none", systems=[],
-                                           verdict_word="caught"))
+#: #1234: no `verdict_word` — the family word is retired and a reply carrying it is refused
+#: by that name (A17).
+_JUDGE_REPLY = S.as_reply_text(J.reply_doc(findings=[], bucket="none", systems=[]))
 
 
 def _judged_in_place(ep: Path) -> None:
