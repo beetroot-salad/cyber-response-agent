@@ -8,7 +8,8 @@ outside the lock. The release obligation's own hole (R4) was fixed in place.
 
 Round 3 moved two of them to the review's fix list: an enforced role with no state now RAISES
 (O2), and the state no longer rides the summary — it is injected, and `drive()` hands it back
-(O6).
+(O6). The store-setup exit's test retired with it: once `drive()` hands back what it injected,
+it could not fail; the boundary check before store setup is `test_1235_adversary_round3`'s.
 """
 from __future__ import annotations
 
@@ -37,11 +38,7 @@ from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     run,
 )
 from defender.tests.e2e._replay_harness import (  # noqa: E402
-    GOLDEN_AB3,
-    ReplayFn,
     Turn,
-    drive,
-    materialize,
 )
 from defender.tests.e2e.test_1235_queries_and_pointer import (  # noqa: E402
     OLD_POINTER_NAME,
@@ -229,32 +226,6 @@ def test_lead_zeros_capped_call_carries_the_runs_state(tmp_path):
         "control: the uncapped call's context does not carry the run's state")
     assert res.rec.calls[1].ctx.run_state is res.state, (
         "lead-0's capped call's verb context does not carry the run's state")
-
-
-# ======================================================================================
-# the store-setup failure exit runs on the state drive injected.
-# ======================================================================================
-
-def test_the_store_setup_failure_exit_runs_on_the_injected_state(tmp_path):
-    """Round 3 (O6): production's summary carries no state on any exit; the state is injected
-    (`run_investigation(run_state=…)`) and the harness hands back the one it injected. On the
-    store-setup failure exit — the `_run_summary` site no turn reaches — `drive()` returns that
-    very object, and the run's id is its own.
-
-    Exploit it catches: the store-setup exit building a state of its own (`RunState(run_dir,
-    run_id)` again) instead of resolving the injected one once at the boundary; the summary's
-    absence of the key on this exit is `test_1235_round3_e2e`'s."""
-    def no_store(case_id: str, run_dir: Path):  # noqa: ARG001
-        raise OSError("k6: no store")
-
-    run_dir = materialize(tmp_path, GOLDEN_AB3)
-    mine = RunState(run_dir, "k6-store-fault")
-    summary = drive(run_dir, run_id="k6-store-fault",
-                    main=ReplayFn([Turn(text="Investigation complete.")]), store_factory=no_store,
-                    run_state=mine)
-    assert summary["truncated_by"] == session_store.TRUNCATED_BY_STORE, summary
-    assert summary["run_state"] is mine, "drive did not hand back the state it injected"
-    assert mine.run_id == "k6-store-fault"
 
 
 # ======================================================================================
