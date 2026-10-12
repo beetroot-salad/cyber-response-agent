@@ -51,6 +51,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
+from defender.runtime import run_end  # noqa: E402
 from defender.scripts.adapters.confinement import ConfinementFault, confine_index  # noqa: E402
 from defender.scripts.adapters.faults import TransportFault  # noqa: E402
 from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
@@ -991,24 +992,23 @@ def test_an_oversized_ancestor_message_is_elided_with_a_pointer_to_its_payload(t
         )
 
 
-def test_the_rendered_block_survives_a_failed_queries_table_write(tmp_path):
-    """K8(iii) — item 1 RENDERS FROM ITS IN-MEMORY RESULT AND WRITES THE TABLES AFTER, so the
-    run dir and the ORIENT text can never disagree about whether item 1 happened: a queries
-    table that cannot be written costs the run its evidence row, not its evidence.
+def test_a_failed_queries_table_write_in_item_1_ends_the_run_naming_the_table(tmp_path):
+    """K8(iii) under A12 (#1234) — item 1 renders from its in-memory result and writes the
+    tables after; when the queries-table write cannot land, the run ENDS, raising
+    `CallRecordWriteFailed` naming `executed_queries`, before any ORIENT text is built from
+    the result whose row was lost.
 
-    Two thirds of K8's recommendation left no trace through two §7 rounds; this is the ordering
-    half. The premise behind it is a promoted one —
-    `test_orient_text_says_unavailable_while_the_run_dir_shows_a_completed_write` — whose own
-    settled answer conceded that "no sentence states an ordering (write-then-render, or the
-    reverse) that would prevent it".
+    Before #1234 the table write's failure was dropped and the rendered block carried on
+    ("a queries table that cannot be written costs the run its evidence row, not its
+    evidence"). A12 reverses that: a call whose table row is missing would read as never
+    made, so the run and its ORIENT text can no longer disagree with the run dir in either
+    direction — there is no ORIENT text.
 
-    Ordering is only observable when one of the two steps fails, so the fault is REAL and made
-    in the test with the real primitive: a directory squatting the queries table's own name,
-    which no append can write through. What production does with that failure is production's;
-    what this demand requires is that the rendered block still carries what was resolved.
+    The fault is REAL and made with the real primitive: a directory squatting the queries
+    table's own name, which no append can write through.
 
-    The complementary condition is the same scenario without the squat: the block carries the
-    same content AND the row lands."""
+    The complementary condition is the same scenario without the squat: the block carries
+    the resolved ancestor AND the row lands."""
     control = run(tmp_path / "ok", run_id="lz808-order-ok",
                   answer=answer_hits([hit(ts="2026-05-25T15:22:00.000Z",
                                           message="Accepted password for dev.dana")]))
@@ -1017,21 +1017,13 @@ def test_the_rendered_block_survives_a_failed_queries_table_write(tmp_path):
 
     root = tmp_path / "squat"
     root.mkdir()
-    try:
-        res = run(root, run_id="lz808-order-fail",
-                  answer=answer_hits([hit(ts="2026-05-25T15:22:00.000Z",
-                                          message="Accepted password for dev.dana")]),
-                  before=lambda run_dir: RunPaths(run_dir).executed_queries.mkdir(parents=True))
-    except BaseException as exc:   # noqa: BLE001 — surfaced as this test's own assertion
-        raise AssertionError(
-            f"a queries-table write that cannot land ended the run: {exc!r} — item 1 wrote "
-            "before it rendered, so the failure took the evidence with it"
-        ) from exc
+    with pytest.raises(run_end.CallRecordWriteFailed) as caught:
+        run(root, run_id="lz808-order-fail",
+            answer=answer_hits([hit(ts="2026-05-25T15:22:00.000Z",
+                                    message="Accepted password for dev.dana")]),
+            before=lambda run_dir: RunPaths(run_dir).executed_queries.mkdir(parents=True))
 
-    assert "Accepted password for dev.dana" in res.section(), (
-        "the block lost the ancestors it had already resolved because their row could not be "
-        "written — the ORIENT text and the run dir now disagree in the other direction"
-    )
+    assert caught.value.record == run_end.TRUNCATED_BY_EXECUTED_QUERIES, caught.value
 
 
 # K13 — the degenerate id predicate, and its positive control

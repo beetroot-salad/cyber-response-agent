@@ -77,7 +77,7 @@ from defender.learning.branch.ledger import (  # noqa: E402
     payload_text,
     request_key,
 )
-from defender.runtime import driver, observe  # noqa: E402
+from defender.runtime import driver, observe, run_end  # noqa: E402
 from defender.runtime.tools import GatherDeps  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import (  # noqa: E402
@@ -777,14 +777,17 @@ def test_two_spellings_of_one_question_are_one_key(tmp_path):
 
 # 5. a failure keeps its row, and a world with no facts is served its base
 
-def test_a_ledger_write_failure_does_not_displace_the_failure_it_records(tmp_path):
-    """    When recording WHY a call failed itself fails, the call's own failure is what propagates.
+def test_a_ledger_write_failure_ends_the_run_and_keeps_the_failure_it_records(tmp_path):
+    """    When recording WHY a call failed itself fails, the run ends naming the served ledger,
+    and the call's own failure stays on the chain (A12, #1234).
 
-    The recording arms run inside a handler that records and then re-raises. A bare
-    `ledger.record(...)` there is a second exception source in front of the `raise`: an
-    unwritable ledger replaces the real system's error, and the two are not interchangeable —
-    the `OSError` is unrecognised, so `query_tool` files it as `DEFAULT_FAULT_EXIT`, an infra
-    code, counted against the sibling's breaker for a failure that is not the one it had."""
+    Before #1234 the system's error propagated and the failed ledger write was dropped; A12
+    reverses "the run carries on after a failed call-record write": a call whose served-ledger
+    row is missing would read as never served, so the registry raises `CallRecordWriteFailed`
+    naming `served_ledger` (the exit class the driver stamps when it ends the run). What the
+    old pin guarded stays guarded: the real system's error is not displaced by an
+    unrecognised `OSError` filed as an infra code — it is the context of the failed write,
+    and the refusal names the call whose row it could not write."""
     adapters = fake_estate(tmp_path)
     down = (adapters / "cmdb_adapter.py").read_text(encoding="utf-8").replace(
         'def get_host(ctx: VerbContext, *, host: str) -> dict:',
@@ -798,8 +801,17 @@ def test_a_ledger_write_failure_does_not_displace_the_failure_it_records(tmp_pat
 
     reg.ledger.record = _unwritable
 
-    with pytest.raises(RuntimeError, match="cmdb is down"):
+    with pytest.raises(run_end.CallRecordWriteFailed) as caught:
         reg.verbs("cmdb")["get-host"](run_ctx(tmp_path), host="canary-1")
+
+    assert caught.value.record == run_end.TRUNCATED_BY_SERVED_LEDGER, caught.value
+    assert "cmdb.get-host" in str(caught.value), "the refusal does not name the call"
+    write_failure = caught.value.__cause__
+    assert isinstance(write_failure, OSError), write_failure
+    system_error = write_failure.__context__
+    assert isinstance(system_error, RuntimeError), (
+        "the system's own failure was displaced from the chain by the ledger's")
+    assert "cmdb is down" in str(system_error), system_error
 
 
 def test_a_world_with_no_facts_reaches_the_adapter_unchanged(tmp_path):

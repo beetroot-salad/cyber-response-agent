@@ -55,7 +55,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime import circuit_breaker  # noqa: E402
+from defender.runtime import circuit_breaker, run_end  # noqa: E402
 from defender.runtime.circuit_breaker import DENIED_ERROR_CLASS  # noqa: E402
 from defender.tests import _tenants1106 as T1106  # noqa: E402
 from defender._query_rules import DENIED_QUERY_ID
@@ -114,19 +114,22 @@ def test_a_denied_verb_returns_a_legible_refusal_and_the_run_continues(tmp_path:
     assert "esql" in r.gather_saw
 
 
-def test_a_denial_reaches_the_model_even_when_its_row_cannot_be_written(tmp_path: Path):
-    """§7 R2, held at the row: a denial is a BUSINESS outcome the model must see and continue
-    past, and the `∅.denied` row (#860) is written after the audit record and before the
-    refusal is returned — so a row write that faults (the table replaced by a directory here;
-    a planted link or a full disk in the box) must not turn "not granted" into an `OSError`
-    that escapes the capability and ends the lead. Reported to stderr and dropped, the way
-    the estate seam drops a failed `refused` row: the refusal is what propagates.
+def test_a_denial_whose_row_cannot_be_written_ends_the_run_naming_the_table(tmp_path: Path):
+    """§7 R2 at the row, under A12 (#1234): the `∅.denied` row (#860) is written after the
+    audit record and before the refusal is returned, and a write of the query table that
+    faults (the table replaced by a directory here; a planted link or a full disk in the box)
+    ENDS the run, stamped `truncated_by: executed_queries`. Before #1234 the failure was
+    reported to stderr and dropped so the model saw the refusal and carried on; A12 reverses
+    that, because a call whose table row is missing would read as never made.
+
+    What the denial itself guarantees is kept: the denied verb's body never runs, and the
+    audit record — written FIRST — is on disk.
 
     The table is broken from INSIDE the gather leg's first model turn, so lead-0's own rows
     and the dispatch have already landed and only the denied call's write meets the fault.
 
-    Observed failing by: the gather loop stopping at one call (the exception ended the lead),
-    or the refusal text absent from what the model saw."""
+    Observed failing by: the gather loop continuing past the call whose row was lost, a
+    run-end record that does not name the query table, or a missing audit record."""
     from defender.run_repository import RunPaths
     from defender.tests._verb_authorization_632 import _Run
     from defender.tests.e2e._replay_harness import GOLDEN_AB3, ReplayFn, Turn, drive, materialize
@@ -157,10 +160,13 @@ def test_a_denial_reaches_the_model_even_when_its_row_cannot_be_written(tmp_path
     r = _Run(run_dir, main, gather)
 
     assert rec.calls == [], "the denied verb body ran"
-    assert r.gather.calls >= 2, \
-        "the row-write fault ended the lead: the refusal never came back as a result"
-    assert "not granted" in r.gather_saw, "the model did not see the refusal"
-    assert "esql" in r.gather_saw, "the refusal the model saw does not name the verb"
+    assert r.gather.calls == 1, \
+        "the lead carried on past a call whose query-table row could not be written"
+    end = run_end.parse_record(json.loads(
+        run_end.sidecar_path(run_dir).read_text(encoding="utf-8")))
+    assert end is not None, "the run left no run-end record"
+    assert end.truncated_by == run_end.TRUNCATED_BY_EXECUTED_QUERIES, (
+        f"the run did not end naming the failed table write: {end!r}")
     assert len(r.own_denials) == 1, "the audit record — written FIRST — is missing"
 
 
