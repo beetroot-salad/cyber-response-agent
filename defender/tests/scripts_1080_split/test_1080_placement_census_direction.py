@@ -249,7 +249,7 @@ def test_1080_no_module_outside_scripts_imports_a_module_under_it():
     """An AST census over every `.py` under `defender/` and the repo's `scripts/`, excluding
     `tests/` directories, finds no `import` or `from … import` that names `defender.scripts` or
     anything under it. Relative imports are resolved against their package. Under the
-    2026-10-04 scope cut the allowed exceptions are the 22 named (importer, target) pairs (22
+    2026-10-04 scope cut the allowed exceptions are the 20 named (importer, target) pairs (20
     import statements) into the `scripts/` modules the cut leaves where they are, each tagged
     with the issue that retires it (#1172/#1121, #1165, #1105; the case_ticket follow-up #1190
     retired its 3 pairs when it moved `case_ticket` under `defender/runtime/`, the live oracle
@@ -298,13 +298,13 @@ def test_1080_the_import_census_flags_a_planted_edge_and_exempts_tests(tmp_path)
 
 
 def test_1080_the_o1_exception_list_is_exactly_the_named_edges_and_none_is_stale():
-    """The import census's exception list holds exactly the 22 named (importer, target) pairs
+    """The import census's exception list holds exactly the 20 named (importer, target) pairs
     the 2026-10-04 scope cut, the case_ticket follow-up #1190 and the live oracle #1224 leave
-    standing — 22 import statements, the 59 base edges less the 22 the cut's moves retire, the 4
+    standing — 20 import statements, the 59 base edges less the 22 the cut's moves retire, the 4
     that #1190's move of `case_ticket` under `defender/runtime/` retires (`run_tenant`'s two,
-    `query_tool`'s and `estate/applier`'s) and the 11 that #1224's removal of cluster staging
-    retires — each tagged with the owner that retires it: #1172/#1121 (10: into
-    `_stub_transport`, `elastic_adapter`, `esql_text` and `faults`), #1165 (6:
+    `query_tool`'s and `estate/applier`'s) the 11 that #1224's removal of cluster staging
+    retires and the 2 that #1222's removal of lead-zero's item 1 retires — each tagged with the owner that retires it: #1172/#1121 (9: into
+    `_stub_transport`, `elastic_adapter`, `esql_text` and `faults`), #1165 (5:
     into `record_query` and `ticket_writer`) and #1105 (6: into the `visualize/` modules and
     `workspace_map`). No pair names `case_ticket` (it is no longer under `scripts/`). H4 (i)'s
     `ticket_writer -> _stub_transport` edge is internal to `scripts/` and is not listed. Every listed pair still exists in the tree, so an entry that outlives the
@@ -319,11 +319,11 @@ def test_1080_the_o1_exception_list_is_exactly_the_named_edges_and_none_is_stale
     """
     exceptions = C.o1_exceptions()
     pairs = [(i, t) for i, t, _ in exceptions]
-    assert len(pairs) == len(set(pairs)) == 22
+    assert len(pairs) == len(set(pairs)) == 20
     owners: dict[str, int] = {}
     for _, _, owner in exceptions:
         owners[owner] = owners.get(owner, 0) + 1
-    assert owners == {"#1172/#1121": 10, "#1165": 6, "#1105": 6}
+    assert owners == {"#1172/#1121": 9, "#1165": 5, "#1105": 6}
     assert all(not S.is_test_path(i) and not S.under(i, "defender/scripts")
                for i, _ in pairs)
     assert all(C.is_scripts_target(t) for _, t in pairs)

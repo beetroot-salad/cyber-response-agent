@@ -24,7 +24,8 @@ THE EXCEPTION LISTS ARE DATA HERE AND ASSERTED BY TESTS: O1's named (importer, t
 (`O1_EXCEPTIONS`) — since the 2026-10-04 scope cut, the pairs into the `scripts/` modules the cut
 leaves where they are, each tagged with the issue that retires it: 35 pairs (37 import statements)
 at the cut, 32 (33) since #1190 moved `case_ticket` under `defender/runtime/` and retired its 3,
-22 (22) since the live oracle (#1224) retired cluster staging and its 10;
+22 (22) since the live oracle (#1224) retired cluster staging and its 10,
+20 (20) since the alert front door (#1222) retired lead-zero's item 1 and its 2;
 O2's N5 edges (dF7 (a)): learning's page entry points importing reports (the O2 tests are parked
 with #1105 / #1172; their helpers stay here for the preserved copies). A listed edge that no
 longer exists is a finding ([218]), never a silent widening, so the list can only shrink.
@@ -86,7 +87,7 @@ _FAULTS = _S + "adapters.faults"
 _RECORD_QUERY = _S + "gather_tools.record_query"
 
 #: E1: O1's named exceptions — every (importer, target module) pair into `scripts/` the cut
-#: leaves standing, each with the owner that retires it: 22 pairs, 22 import statements. A pair
+#: leaves standing, each with the owner that retires it: 20 pairs, 20 import statements. A pair
 #: covers every import statement between the two files. Derived from `census()` at the base
 #: (59 statements) minus the 22 edges the cut's IN moves retire (`_venv`, `pricing`,
 #: `payload_view`, `sql`, `lessons_frontier`, and the ten importers of `record_query`'s query
@@ -95,21 +96,22 @@ _RECORD_QUERY = _S + "gather_tools.record_query"
 #: edge is inside `scripts/`, not listed; neither is `tenant.py`'s or `ticket_writer`'s import of
 #: the moved `case_ticket` (an importer inside `scripts/` is free). The live oracle (#1224)
 #: retired 10 pairs (11 statements): cluster staging and its elastic stager went, and the
-#: estate registry, redaction and `_family` no longer import `confinement` / `faults`.
+#: estate registry, redaction and `_family` no longer import `confinement` / `faults`. The
+#: alert front door (#1222) retired 2 more (2 statements) when lead-zero's item 1 and its
+#: capture of ancestor documents went: `lead_zero/_capture.py` imports neither `faults` nor
+#: `record_query` any more.
 O1_EXCEPTIONS: tuple[tuple[str, str, str], ...] = (
-    # #1172 / #1121 (10)
+    # #1172 / #1121 (9)
     ("defender/skills/connect/examples/example_adapter.py", STUB_TRANSPORT, "#1172/#1121"),
     ("defender/evals/oracle_golden/controls.py", _S + "adapters.elastic_adapter", "#1172/#1121"),
     ("defender/evals/oracle_golden/controls.py", _S + "adapters.esql_text", "#1172/#1121"),
-    ("defender/runtime/lead_zero/_capture.py", _FAULTS, "#1172/#1121"),
     ("defender/runtime/query_tool.py", _FAULTS, "#1172/#1121"),
     ("defender/runtime/run_tenant.py", _FAULTS, "#1172/#1121"),
     ("defender/runtime/tenant_settings.py", _FAULTS, "#1172/#1121"),
     ("defender/runtime/tools/__init__.py", _FAULTS, "#1172/#1121"),
     ("defender/runtime/tools/_bash.py", _FAULTS, "#1172/#1121"),
     ("defender/skills/connect/examples/example_adapter.py", _FAULTS, "#1172/#1121"),
-    # #1165 (6)
-    ("defender/runtime/lead_zero/_capture.py", _RECORD_QUERY, "#1165"),
+    # #1165 (5)
     ("defender/runtime/query_tool.py", _RECORD_QUERY, "#1165"),
     ("defender/runtime/tools/__init__.py", _RECORD_QUERY, "#1165"),
     ("defender/runtime/tools/_bash.py", _RECORD_QUERY, "#1165"),

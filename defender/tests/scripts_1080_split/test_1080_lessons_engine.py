@@ -37,7 +37,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from defender.run_repository import RunPaths
 from defender.runtime import orient
+from defender.tests._alert_plant import plant_alert
 from defender.tests.scripts_1080_split import _spec1080 as S
 
 GOLDEN = "lessons"
@@ -569,8 +571,8 @@ def orient_once(root: Path, tmp: Path, label: str, sig: str | None,
                 spec: Mapping[str, str | None]) -> dict[str, Any]:
     run_dir = tmp / "runs" / re.sub(r"\W+", "-", label)
     run_dir.mkdir(parents=True)
-    alert = run_dir / "alert.json"
-    alert.write_text(json.dumps({"rule": {"id": sig} if sig else {}}), encoding="utf-8")
+    plant_alert(run_dir, {"rule": {"id": sig}} if sig else {})
+    alert = RunPaths(run_dir).alert
     recorder = RecordingShim({"vocab": None, **spec})
     text = orient.orientation(run_dir, root / "defender", alert, systems=[], shim=recorder)
     section = lessons_section(text)
@@ -1007,14 +1009,17 @@ def test_lessons_corpus_folder_is_missing_empty_or_a_link_when_tags_are_listed(t
     by `orientation` through its shim seam (the `shim` keyword): a recording fake that hands each
     call to orient's own runner (the copy's real shim and engine) or answers a failure G22
     observed, plus one copy whose shim is deleted (the real runner then fails). Every row is the
-    base's: the recorded argv, the section text, and whether the vocabulary section survived (it
-    never does here: its shim always fails). Pinned as the base answers it: an alert with no
+    base's: the recorded argv, the section text, and whether the vocabulary section shows (since #1222
+    it names its failure rather than vanishing, and only an unsigned run has none). Pinned as the base answers it: an alert with no
     signature gets no Lessons section when the `--tags` call fails too, and a section holding only
     `### Viable tags` when that call answered."""
     engine_home()
     seen = observe_s062(tmp_path, monkeypatch.setenv)
     assert seen == golden("s062")
-    assert not any(r["vocabulary_section"] for r in seen["orient"].values())
+    # #1222 A6/O10: a failed vocabulary shim is named in its section, not dropped, so a row shows
+    # the section exactly when the run recorded a signature; an unsigned run is told so instead.
+    signed = {label for label, _v, sig, _spec, _gone in ORIENT_ROWS if sig}
+    assert {label for label, r in seen["orient"].items() if r["vocabulary_section"]} == signed
 
 
 def test_lessons_show_with_a_path_spelled_relative_absolute_and_through_a_link(tmp_path):

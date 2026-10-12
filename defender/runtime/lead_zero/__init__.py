@@ -25,7 +25,7 @@ from defender._io import read_text_utf8
 from defender.run_repository import RunPaths
 from defender.hooks.budget_enforcer import BudgetKill
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
-from defender.runtime import circuit_breaker, run_end, session_store
+from defender.runtime import circuit_breaker, run_end
 from defender.runtime.verb_grant import GrantError, VerbGrant
 from ._spec import (
     CORRELATION_HEADING,
@@ -161,6 +161,8 @@ def _classify_end(end: LeadEnd, run_dir: Path, system: str) -> str | None:
     """The ending of a lead that ran to its own end, or `None` for a usable summary. Decided
     from what the lead did (the harness's stops, the lead's call results), in a fixed order:
     a refused call names the breaker before any count of failures."""
+    from defender.runtime import session_store  # lazy: the store needs the agent framework, and the operator tools that read this package's census run without it
+
     if end.fault_terminator == session_store.TRUNCATED_BY_STORE:
         raise session_store.StoreError("the correlation lead's session could not be recorded")
     if end.breaker_refused is not None:
@@ -189,6 +191,8 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit pe
     Every way it fails to run or yields nothing is a returned ending, never a raise (A2); a
     run-level kill (`BudgetKill`, `RunAborted`), an interrupt, a store fault after the lead
     began, and a run folder that refuses its produced summary propagate and stop the run."""
+    from defender.runtime import session_store  # lazy, as in `_classify_end`
+
     system = dispatch.system
     if system is None:
         return CorrelationOutcome(ending=ENDING_WITHHELD)

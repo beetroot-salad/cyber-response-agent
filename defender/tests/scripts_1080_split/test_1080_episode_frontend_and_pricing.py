@@ -126,7 +126,6 @@ def _pricing_rows(usage_cost) -> list:
 O5_SUITES: dict[str, tuple[tuple[str, str | None], ...]] = {
     "defender/tests/e2e/test_replay_skeleton.py": (),
     "defender/tests/e2e/test_query_tool_611.py": (),
-    "defender/tests/e2e/test_808_run_dir_tables.py": (),
     "defender/tests/e2e/test_1084_mirror_e2e.py": (),
     "defender/tests/test_1096_entrypoint_closure.py": (),
 }
