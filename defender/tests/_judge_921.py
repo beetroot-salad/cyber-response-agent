@@ -149,18 +149,22 @@ MODEL_KNOB = "JUDGE_MODEL"
 EFFORT_KNOB = "JUDGE_EFFORT"
 CAP_KNOB = "JUDGE_PAYLOAD_CAP"
 
+#: #1234 A12: the host-written call id one served-ledger row and one query-table row share.
+CALL_ID = "call_id"
+
 #: The facts a world's row carries off its own archived record (`family.read_world`), all
 #: from X's own ledger, investigation and report. Spelled once so a scenario naming one cannot
 #: drift. (#1224 retired the mechanical pass's `holding_queried` / `scope_discriminated` /
 #: `doctored_answer_served`: the judge MODEL now decides each world's bucket.)
 PER_WORLD_FACTS = ("verdict", "resolution_moved", "malformed_rows", "served_nothing")
 
-#: The twelve keys `persist.py:315-330` writes and the queue's validator reads (C7).
-#: The DEFENDER-lane row's own thirteen keys — twelve at #921, plus `subject` (#1007 O1/M6).
+#: The DEFENDER-lane row's own fifteen keys (`enqueue.build_finding_row`): twelve at #921,
+#: plus `subject` (#1007 O1/M6); #1234 removed `judge_outcome` (A4) and added
+#: `contrast_evidence`, `on_verdict_path` and `world_label_doubted` (design M4, d00d).
 ROW_KEYS = (
     "schema_version", "finding_id", "run_id", "alert_rule_key", "direction", "subject", "type",
-    "subject_anchor", "subject_topic", "finding", "judge_outcome", "citations",
-    "source_run_dir",
+    "subject_anchor", "subject_topic", "finding", "citations", "source_run_dir",
+    "contrast_evidence", "on_verdict_path", "world_label_doubted",
 )
 
 
@@ -215,12 +219,21 @@ def write_ledger(episode_dir: Path, world_label: str, rows: list[dict], *,
 
     `raw=` writes the file's bytes verbatim, for the two states J3's reader posture is about: a
     torn JSON line mid-file and a duplicate pair-key whose rows disagree on `source`.
+
+    #1234 A12: every served row carries the host-written id of the call it answered
+    (`record_query.next_call_id`'s `<token>/<n>`), and the judge's usability read refuses a
+    ledger row without one of its run. A row that names no `call_id` key is written with
+    `<token>/<i>`, `i` its line index (a copy: the caller's dict is not touched); a row that
+    spells the key — `None` included — is written as given, for the scenarios about the id.
     """
     served = Path(episode_dir) / "served"
     served.mkdir(parents=True, exist_ok=True)
-    path = served / f"{world_token(world_label, episode_token=episode_token)}.jsonl"
+    token = world_token(world_label, episode_token=episode_token)
+    path = served / f"{token}.jsonl"
+    stamped = [r if CALL_ID in r else {**r, CALL_ID: f"{token}/{i}"}
+               for i, r in enumerate(rows)]
     path.write_text(
-        raw if raw is not None else "".join(json.dumps(r) + "\n" for r in rows),
+        raw if raw is not None else "".join(json.dumps(r) + "\n" for r in stamped),
         encoding="utf-8")
     return path
 
@@ -412,6 +425,7 @@ def accepted_episode(tmp_path: Path, *, root: Path | None = None,  # noqa: PLR09
     }
     ep = episode(tmp_path, doc=doc, root=root)
     base_capture(ep, [captured_row(system=holding_system, verb="esql")])
+    planted = {w.get("world_id") for w in worlds if w.get("role") != "A"}
     for label in labels:
         archived_judge_world(ep, label, disposition=declared[label], **world_kw)
         rows = (ledgers or {}).get(label)
@@ -419,6 +433,10 @@ def accepted_episode(tmp_path: Path, *, root: Path | None = None,  # noqa: PLR09
             write_ledger(ep, label, rows)
         elif label != "a":
             write_ledger(ep, label, [])
+        if label in planted:
+            # #1234 A3: a planted world's built layer (`oracle/<X>/`) is part of what it is
+            # judged on — no directory is a malformed world; an empty one is an empty store.
+            (ep / "oracle" / label).mkdir(parents=True, exist_ok=True)
     outcome_record(ep, outcome, family_stamp=family_stamp)
     return ep
 
@@ -559,57 +577,115 @@ def wire_logs(episode_dir: Path) -> list[Path]:
 # --------------------------------------------------------------------------------------
 
 
-def finding_doc(*, bucket: str = "lead-set", subject: str = "defender",
+#: #1234 A1: the default investigator finding's `contrast_evidence` — one report per default
+#: world of `accepted_episode` (`a`, `b`, `c`). Whichever planted world a scripted reply
+#: answers, the list holds a conduct pointer in that world and one in another usable run, the
+#: two-run pair the resolver requires (`pointers.Assessment.has_two_run_pair`); a pointer at a
+#: run outside the call's scope is merely unresolved, never the finding's drop.
+DEFAULT_CONTRAST = ("worlds/a/report.md", "worlds/b/report.md", "worlds/c/report.md")
+#: #1234 A1/A15: the default world finding's `evidence` — the manifest's family-level
+#: discriminator, a plan pointer that names no run, so the finding routes to the questioner
+#: lane from any world's draw.
+DEFAULT_WORLD_EVIDENCE = ("family.yaml#discriminator",)
+#: The routing key `reply_doc` splits a findings list on; never written into a reply.
+SUBJECT = "subject"
+
+
+def finding_doc(*, bucket: str = "lead-set", subject: str = "defender",  # noqa: PLR0913 — one keyword per finding field a scenario may state
                 claim: str = "the holding system was never re-queried",
                 root_cause: str = "the lead was set and never revisited",
                 anchor: str = "l-001", topic: str = "holding-system coverage",
                 evidence: list[str] | None = None,
-                discriminator_related: bool = True) -> dict:
-    """One `Finding`. `anchor` and `topic` are what `subject_anchor` / `subject_topic` fill from.
+                discriminator_related: bool = True,
+                systems: list[str] | None = None,
+                on_verdict_path: bool = True) -> dict:
+    """One filed finding in the #1234 reply shape, tagged with its `subject` for `reply_doc`.
 
-    `subject` defaults to `"defender"` (#1007 O1/M6 made the field required on every finding);
-    this suite predates the world/defender partition and is entirely about the defender lane."""
-    return {
-        "bucket": bucket, "subject": subject, "claim": claim, "root_cause": root_cause,
-        "anchor": anchor, "topic": topic,
-        "evidence": evidence if evidence is not None else ["investigation.md#l-001"],
-        "discriminator_related": discriminator_related,
-    }
+    `subject: "defender"` (the default) is an INVESTIGATOR finding: `evidence` fills its
+    `contrast_evidence` (default `DEFAULT_CONTRAST`) and `on_verdict_path` its boolean.
+    `subject: "world"` is a WORLD finding: `evidence` (default `DEFAULT_WORLD_EVIDENCE`) and its
+    own `systems` (default `[HOLDING_SYSTEM]`). `anchor` and `topic` are what `subject_anchor` /
+    `subject_topic` fill from. `discriminator_related` is accepted for its callers and written
+    nowhere: the amended finding carries no such field."""
+    del discriminator_related
+    doc: dict[str, Any] = {SUBJECT: subject, "bucket": bucket, "claim": claim,
+                           "root_cause": root_cause, "anchor": anchor, "topic": topic}
+    if subject == "defender":
+        doc["contrast_evidence"] = list(evidence if evidence is not None else DEFAULT_CONTRAST)
+        doc["on_verdict_path"] = on_verdict_path
+    else:
+        doc["systems"] = list(systems) if systems is not None else [HOLDING_SYSTEM]
+        doc["evidence"] = list(evidence if evidence is not None else DEFAULT_WORLD_EVIDENCE)
+    return doc
 
 
-def reply_doc(*, episode_outcome: str = "gradable", findings: list[dict] | None = None,
+def _filed(findings: list[dict]) -> tuple[list[dict], list[dict]]:
+    """`findings` split into the reply's investigator and world lists by each one's `subject`
+    tag (popped; a finding without one is an investigator finding when it carries
+    `contrast_evidence`, else a world finding), filing order kept."""
+    investigator: list[dict] = []
+    world: list[dict] = []
+    for raw in findings:
+        f = dict(raw)
+        subject = f.pop(SUBJECT, None)
+        is_investigator = (subject == "defender" if subject is not None
+                           else "contrast_evidence" in f)
+        (investigator if is_investigator else world).append(f)
+    return investigator, world
+
+
+def _pass_tables() -> dict[str, list[dict]]:
+    return {"correlations": [{"from": "l-001", "to": "l-002", "fact": "web-1"}],
+            "scope_checks": [{"lead": "l-001", "index": EVENTS_PATTERN, "window": "24h"}],
+            "derivations": [{"row": "h1", "from": "payload", "held": True}]}
+
+
+def reply_doc(*, episode_outcome: str | None = None, findings: list[dict] | None = None,  # noqa: PLR0913 — one keyword per reply field a scenario may state
               passes: bool = True, noise_floor_note: str = "one trial, no replicate",
               bucket: str | None = "lead-set", systems: list[str] | None = None,
-              **over: Any) -> dict:
-    """One world-scope `JudgeReply`. `passes=False` drops the three pass tables the prompt
-    demands.
+              gaps: list[dict] | None = None, **over: Any) -> dict:
+    """One world-scope reply in the #1234 shape: the world's `bucket` and `systems`, the three
+    filed lists (`investigator_findings`, `world_findings`, `gaps`) and the three pass tables
+    (`passes=False` drops them).
 
-    #1224: a world reply carries the model's own `bucket` for the world and the `systems` it
-    blames (`run._world_verdict`); `bucket=None` omits both. The default `systems` is the
-    family's `HOLDING_SYSTEM`, which `_triplet_947.SERVED_SYSTEMS` serves, so the host's one
-    `lead-set` rule (M20) admits the default reply. A family-scope reply is `family_reply`."""
-    doc: dict[str, Any] = {
-        "episode_outcome": episode_outcome,
-        "noise_floor_note": noise_floor_note,
-        "findings": findings if findings is not None else [finding_doc()],
-    }
+    `findings` (default one `finding_doc()`) is split into the two finding lists by each
+    finding's `subject` (`_filed`). `bucket=None` omits both `bucket` and `systems`; the
+    default `systems` is the family's `HOLDING_SYSTEM`, which `_triplet_947.SERVED_SYSTEMS`
+    serves, so the host's `lead-set` rule (M20) admits the default reply. `episode_outcome`
+    is retired (A17) and written only when a scenario passes one — the reply is then refused
+    by that name. A family-scope reply is `family_reply`."""
+    investigator, world = _filed(findings if findings is not None else [finding_doc()])
+    doc: dict[str, Any] = {"noise_floor_note": noise_floor_note}
+    if episode_outcome is not None:
+        doc["episode_outcome"] = episode_outcome
     if bucket is not None:
         doc["bucket"] = bucket
         doc["systems"] = list(systems) if systems is not None else [HOLDING_SYSTEM]
+    doc["investigator_findings"] = investigator
+    doc["world_findings"] = world
+    doc["gaps"] = list(gaps or [])
     if passes:
-        doc["correlations"] = [{"from": "l-001", "to": "l-002", "fact": "web-1"}]
-        doc["scope_checks"] = [{"lead": "l-001", "index": EVENTS_PATTERN, "window": "24h"}]
-        doc["derivations"] = [{"row": "h1", "from": "payload", "held": True}]
+        doc.update(_pass_tables())
     doc.update(over)
     return doc
 
 
-def family_reply(*, verdict_word: str = "survived", findings: list[dict] | None = None,
+def family_reply(*, verdict_word: str | None = None, findings: list[dict] | None = None,
+                 passes: bool = True, noise_floor_note: str = "the family as a whole",
                  **over: Any) -> dict:
-    """One family-scope `JudgeReply` (#1224): the family's `verdict_word`, and only
-    `subject: world` findings (none by default)."""
-    doc = reply_doc(findings=findings if findings is not None else [], bucket=None, **over)
-    doc["verdict_word"] = verdict_word
+    """One family-scope reply (#1234): family-scope `world_findings` only (none by default; a
+    `subject: defender` finding passed here is filed under `investigator_findings`, a world-only
+    key the validator refuses on a family reply). `verdict_word` is retired (A17) and written
+    only when a scenario passes one — the reply is then refused by that name."""
+    investigator, world = _filed(findings if findings is not None else [])
+    doc: dict[str, Any] = {"noise_floor_note": noise_floor_note, "world_findings": world}
+    if investigator:
+        doc["investigator_findings"] = investigator
+    if verdict_word is not None:
+        doc["verdict_word"] = verdict_word
+    if passes:
+        doc.update(_pass_tables())
+    doc.update(over)
     return doc
 
 
@@ -632,7 +708,8 @@ def as_reply_text(doc: dict, *, malformed: str | None = None) -> str:
         return _yaml.safe_dump(["gradable", "no findings"])
     if malformed == "lookalike-bucket":
         doc = dict(doc)
-        doc["findings"] = [dict(finding_doc(), bucket="Lead-Set")]
+        investigator, _world = _filed([dict(finding_doc(), bucket="Lead-Set")])
+        doc["investigator_findings"] = investigator
     return _yaml.safe_dump(doc, sort_keys=True)
 
 
