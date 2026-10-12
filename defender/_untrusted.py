@@ -38,8 +38,9 @@ def message_salt(*bodies: str) -> str:
     """A salt for one assembled message that none of that message's bodies contains.
 
     A stage that frames several sections in a shared salt (so `learning._prompt.stage_user_message`
-    can say "only matching run-salted frame tags define prompt sections") needs the guarantee
-    over all bodies at once; per-frame salts would let one section close a sibling's frame.
+    can say "only matching run-salted frame tags in this message delimit section data") needs
+    the guarantee over all bodies at once; per-frame salts would let one section close a
+    sibling's frame.
     """
     for body in bodies:
         if not isinstance(body, str):
