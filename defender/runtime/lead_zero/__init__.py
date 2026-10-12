@@ -29,12 +29,11 @@ from defender._untrusted import wrap_fresh
 from defender.hooks.budget_enforcer import (
     DEFAULT_LIMITS,
     BudgetKill,
-    read_budget,
     tail_exhausted,
-    update_budget_locked,
 )
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
 from defender.runtime import circuit_breaker
+from defender.runtime.run_state import RunState
 from defender.runtime.verb_grant import GrantError, VerbGrant
 from defender.runtime.verbs import VerbContext
 from ._spec import (
@@ -209,16 +208,15 @@ def _is_declared(run_dir: Path, lead_id: str) -> bool:
 # the entry point
 
 def resolve_lead_zero(
-    *, run_dir: Path, defender_dir: Path, alert_path: Path, verbs: Any,
-    limits: dict = DEFAULT_LIMITS, run_id: str | None = None, tenant: Any,
-    env: Mapping[str, str],
+    *, run_state: RunState, defender_dir: Path, alert_path: Path, verbs: Any,
+    limits: dict = DEFAULT_LIMITS, tenant: Any, env: Mapping[str, str],
 ) -> LeadZeroResult:
-    """Item 1's resolution, over the run's record (`tenant`, #1107) and the run's env (`env`,
-    built once by the driver and handed in: nothing in this package builds or reads the
-    environment itself). The tenant's alerts-index fallback reads the record's corpus-engine view."""
-    run_dir = Path(run_dir)
+    """Item 1's resolution, over the run's state (`run_state`, #1235: it names the run and
+    holds the budget, breaker and rows lead-0's calls land in), the run's record (`tenant`,
+    #1107) and the run's env (`env`, built once by the driver and handed in: nothing in this
+    package builds or reads the environment itself). The tenant's alerts-index fallback reads
+    the record's corpus-engine view."""
     defender_dir = Path(defender_dir)
-    resolved_run_id = run_id or run_dir.name
 
     if verbs is None:
         unavailable_text = _render_section(
@@ -245,7 +243,7 @@ def resolve_lead_zero(
     async def _go():
         try:
             return await _resolve_item1(
-                run_dir=run_dir, defender_dir=defender_dir, run_id=resolved_run_id,
+                run_state=run_state, defender_dir=defender_dir,
                 alert=alert, capture=capture, env=dict(env), limits=limits,
                 tenant=tenant,
             )
@@ -336,7 +334,6 @@ __all__ = [
     "json",
     "prepare_correlation_lead",
     "re",
-    "read_budget",
     "read_jsonl_rows",
     "read_text_soft",
     "render_orient_section",
@@ -345,6 +342,5 @@ __all__ = [
     "resolve_lead_zero",
     "sys",
     "tail_exhausted",
-    "update_budget_locked",
     "wrap_fresh",
 ]

@@ -36,8 +36,6 @@ from defender.scripts.gather_tools.record_query import (
     RepeatTrip,
     append_query_row,
     dead_end_reason,
-    live_lead_rows,
-    open_query_mirror,  # noqa: F401 — re-export: the driver opens the run's view through the query tool, never `scripts.*` directly (#1080 import direction)
     names_something_readable,
     payload_digest,
     payload_status,
@@ -63,6 +61,7 @@ from defender._query_rules import (
 )
 
 from . import circuit_breaker
+from .run_state import run_state_of
 from .verbs import (
     CALL_DELIVERY,
     DENIED,
@@ -287,12 +286,13 @@ class QueryCapture(AbstractCapability[Any]):
         schema, and the grant check's unresolvable-verb branch); the domains do not overlap.
 
         Identity and `system_key` are extracted by the caller, which holds the right argument
-        surface and the raw string. One `live_lead_rows` read feeds both predicates so they answer
-        over the same table state. Repeat is asked first because its message is more specific
-        (it names the repeated request). The budget is identity-blind, which is how it catches
-        loops the repeat guard cannot (a new undeclared name each turn, whitespace drift)."""
+        surface and the raw string. One read of the lead's rows on the run's state feeds both
+        predicates so they answer over the same rows. Repeat is asked first because its message
+        is more specific (it names the repeated request). The budget is identity-blind, which is
+        how it catches loops the repeat guard cannot (a new undeclared name each turn,
+        whitespace drift)."""
         lead_id = _dispatched_lead(deps)
-        rows = live_lead_rows(deps.run_dir, lead_id)
+        rows = run_state_of(deps).lead_rows(lead_id)
         trip = rejection_trip(
             rows, lead_id,
             system=system, verb=verb, params=params, system_key=system_key,
@@ -546,7 +546,7 @@ class QueryCapture(AbstractCapability[Any]):
 
         # Repeat guard above `_screen`, so a repeated bad call trips instead of earning yet
         # another identical `ModelRetry`.
-        rows = live_lead_rows(deps.run_dir, deps.lead_id)
+        rows = run_state_of(deps).lead_rows(deps.lead_id)
         trip = repeat_trip(rows, deps.lead_id, system=system, verb=verb, params=params)
         if trip is not None:
             # A sentinel id, not the model's: offline collectors partition on `query_id`, and a
@@ -597,14 +597,14 @@ class QueryCapture(AbstractCapability[Any]):
         A coarsened row charges `""`, which `record_outcome` skips; the rejection guards bound
         those instead. `system_key` has no default so every writer must state it explicitly."""
         lead_id = _dispatched_lead(deps)
+        state = run_state_of(deps)
 
         text = "" if exit_code != 0 else json.dumps(payload, default=str)
-        run_dir = deps.run_dir
 
         async with self._seq_lock:
             # Kept locked in case an `await` is ever added inside.
             row = append_query_row(
-                run_dir,
+                state,
                 lead_id=lead_id,
                 system=system,
                 verb=verb,
@@ -625,14 +625,14 @@ class QueryCapture(AbstractCapability[Any]):
                 system_key=system_key,
             )
 
-        circuit_breaker.record_outcome(run_dir, system, exit_code)
+        circuit_breaker.record_outcome(state, system, exit_code)
         return row, text
 
     def _model_view(self, deps, row: dict, text: str, exit_code: int, detail: str) -> str:
         note = _payload_note(deps, row)
         # Computed for failures too: a lead repeating a failing call is the most likely to loop.
         repeat = repeat_note(
-            deps.run_dir, deps.lead_id, seq=row["seq"], system=row["system"],
+            run_state_of(deps), deps.lead_id, seq=row["seq"], system=row["system"],
             verb=row["verb"], params=row["params"],
             payload_digest=row["payload_digest"], payload_sha256=row["payload_sha256"],
             exit_code=exit_code,
@@ -926,7 +926,7 @@ def register_query_tool(agent, registry) -> None:
         fn = registry.verbs(system)[verb]
         vctx = VerbContext(
             defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=_bash_env(deps),
-            tenant=deps.tenant,
+            tenant=deps.tenant, run_state=deps.run_state,
         )
         delivery = CallDelivery()
         token = CALL_DELIVERY.set(delivery)

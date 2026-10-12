@@ -311,9 +311,9 @@ def locked_json_update(
     contents, never a handle to read.
 
     `open_locked` is a context manager yielding the locked record's descriptor and its `fstat`
-    (:func:`locked_for_rewrite`, :func:`rooted_locked_for_rewrite`). The whole record is read
-    through the shared step; content unusable as state (over :data:`READ_LIMIT`, undecodable,
-    not JSON, too deep, not an object) starts over from `default()` (O6). Any other read fault
+    (:func:`locked_for_rewrite`). The whole record is read through the shared step; content
+    unusable as state (over :data:`READ_LIMIT`, undecodable, not JSON, too deep, not an
+    object) starts over from `default()` (O6). Any other read fault
     propagates and nothing is written (O7). `mutate` changes the state in place; it is written
     back whole, and returned."""
     with open_locked as (fd, st):
@@ -1208,10 +1208,6 @@ def append_jsonl(path: Path, rows: list[dict]) -> int:
     return len(rows)
 
 
-def write_atomic(path: Path, text: str) -> None:
-    write_guarded(path, text, mode="replace")
-
-
 # The alias-refusing write seam.
 #
 # Every host-side write into a shared box tree goes through `write_guarded` (or
@@ -1781,25 +1777,6 @@ def _replace_at(
         with contextlib.suppress(OSError):
             os_.unlink(staged, dir_fd=dir_fd)
         raise
-
-
-@contextlib.contextmanager
-def rooted_locked_for_rewrite(
-    root: Path, name: str | PurePath, *, os_: Any = os,
-) -> Iterator[tuple[int, os.stat_result]]:
-    """:func:`locked_for_rewrite` for `name` under `root`: the folders walked (never made), the
-    record judged, opened (created when absent) and judged again on its descriptor, then the
-    exclusive lock. Yields the locked descriptor, at position 0, and its `fstat`."""
-    _spelling, parts = _parse_name(name)
-    where = Path(root, *parts)
-    with _rooted(os_, root, parts[:-1]) as dir_fd:
-        _leaf_present(os_, dir_fd, parts[-1], where)
-        fd, st = _open_leaf_stat(os_, dir_fd, parts[-1], os.O_RDWR | os.O_CREAT, where)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        yield fd, st
-    finally:
-        os_.close(fd)
 
 
 # The held root (#1133): an `Episode`'s one open handle on its episode dir. Every verb works

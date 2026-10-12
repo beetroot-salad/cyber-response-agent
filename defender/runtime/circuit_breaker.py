@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import copy
-import os
-import threading
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from defender._clock import now_iso
+
+if TYPE_CHECKING:  # pragma: no cover — typing only
+    from defender.runtime.run_state import RunState
 
 PER_SYSTEM_FAIL_LIMIT = 2
 RUN_FAIL_KILL_LIMIT = 5
@@ -51,60 +52,38 @@ class RunAborted(Exception):
         )
 
 
-#: The run's breaker state, per run folder (`os.path.abspath`), in this process's memory
-#: (#1235). Only the run's own process charges or reads it, so no file holds it: nothing the box
-#: writes into the run folder can trip or untrip a system. It stays until the next
-#: `open_breaker` for the folder.
-_BREAKERS: dict[str, dict] = {}
-_BREAKER_LOCK = threading.Lock()
+# The run's breaker lives on the run's `RunState` (#1235): only the run's own process charges or
+# reads it, so no file holds it, and nothing the box writes into the run folder can trip or
+# untrip a system. Read it with `state.breaker_snapshot()`.
 
 
-def _blank() -> dict:
-    return {"systems": {}, "total_failures": 0}
-
-
-def _key(run_dir: Path) -> str:
-    return os.path.abspath(run_dir)
-
-
-def open_breaker(run_dir: Path) -> None:
-    """Start this run's breaker with no failures, replacing any earlier state for the folder."""
-    with _BREAKER_LOCK:
-        _BREAKERS[_key(run_dir)] = _blank()
-
-
-def breaker_state(run_dir: Path) -> dict:
-    """A copy of the run's breaker state: `{"systems": {name: {"failures": n, "tripped_at"?:
-    iso}}, "total_failures": n}`, blank when nothing was recorded."""
-    with _BREAKER_LOCK:
-        return copy.deepcopy(_BREAKERS.get(_key(run_dir), _blank()))
-
-
-def record_outcome(run_dir: Path, system: str, exit_code: int) -> dict:
+def record_outcome(state: RunState, system: str, exit_code: int) -> dict:
+    """Charge an infra failure (exit 2 / 124) to `system`, tripping it at
+    `PER_SYSTEM_FAIL_LIMIT`. Returns the breaker after, a copy; `{}` when nothing was charged.
+    `RunAborted` once the run's failures reach `RUN_FAIL_KILL_LIMIT`."""
     if not system or not is_infra_failure(exit_code):
         return {}
-    with _BREAKER_LOCK:
-        state = _BREAKERS.setdefault(_key(run_dir), _blank())
-        sysrec = state["systems"].setdefault(system, {"failures": 0})
+    with state.lock:
+        sysrec = state.breaker["systems"].setdefault(system, {"failures": 0})
         sysrec["failures"] += 1
-        state["total_failures"] += 1
+        state.breaker["total_failures"] += 1
         if sysrec["failures"] >= PER_SYSTEM_FAIL_LIMIT and "tripped_at" not in sysrec:
             sysrec["tripped_at"] = now_iso()
-        snapshot = copy.deepcopy(state)
+        snapshot = copy.deepcopy(state.breaker)
     if snapshot["total_failures"] >= RUN_FAIL_KILL_LIMIT:
         raise RunAborted(snapshot["total_failures"], list(snapshot["systems"]))
     return snapshot
 
 
-def is_tripped(run_dir: Path, system: str) -> bool:
+def is_tripped(state: RunState, system: str) -> bool:
     if not system:
         return False
-    rec = breaker_state(run_dir)["systems"].get(system)
+    rec = state.breaker_snapshot()["systems"].get(system)
     return bool(rec) and rec["failures"] >= PER_SYSTEM_FAIL_LIMIT
 
 
-def down_message(run_dir: Path, system: str) -> str:
-    rec = breaker_state(run_dir)["systems"].get(system, {})
+def down_message(state: RunState, system: str) -> str:
+    rec = state.breaker_snapshot()["systems"].get(system, {})
     n = rec.get("failures", PER_SYSTEM_FAIL_LIMIT)
     return (
         f"[circuit-breaker] System '{system}' is DOWN for this run: {n} "

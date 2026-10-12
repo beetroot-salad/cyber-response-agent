@@ -101,16 +101,13 @@ SCRUB_VERDICT_SUFFIX = ".scrub-verdict.json"
 ACCOUNTING_FAILURES_SUFFIX = ".accounting_failures.json"
 #: The case-ticket write's receipt: a host record the box must neither plant nor block (#1107).
 TICKET_WRITE_SUFFIX = ".ticket-write.json"
-#: The oracle-held seconds a branched run's investigator clock excludes (#1224 S15): host
-#: state the box must not be able to write, so it lives beside the run dir.
-ORACLE_HELD_SUFFIX = ".oracle-held.json"
 #: The run -> case link (which case's session store the run belongs to): host state, so it
 #: lives beside the run dir, not in it (#1235).
 SESSION_POINTER_SUFFIX = ".session-pointer.json"
-#: The six host-only sidecar names, each `<run id><suffix>` beside the run folder in the runs
+#: The five host-only sidecar names, each `<run id><suffix>` beside the run folder in the runs
 #: base (the accounting-failures name reserved, see above).
 _SIDECAR_SUFFIXES = (RUN_END_SIDECAR_SUFFIX, SCRUB_VERDICT_SUFFIX, ACCOUNTING_FAILURES_SUFFIX,
-                     TICKET_WRITE_SUFFIX, ORACLE_HELD_SUFFIX, SESSION_POINTER_SUFFIX)
+                     TICKET_WRITE_SUFFIX, SESSION_POINTER_SUFFIX)
 #: The tail a sidecar write's staged file carries before its rename (`_io.staged_leaf`:
 #: `.staged-` and lowercase hex digits; one or more, #1105 DV-5).
 _STAGED_TAIL = re.compile(r"\.staged-[0-9a-f]+\Z")
@@ -304,9 +301,9 @@ WIRE_LOG_NAMES = WireLogNames()
 class RunPaths:
     """One run's directories and its accessors — every name a run reads or writes.
 
-    15 accessors (a census test checks this count against the set it pins).
+    14 accessors (a census test checks this count against the set it pins).
 
-    Accessors resolve relative to ``run_dir``, except the five sidecars, `sessions_dir` and
+    Accessors resolve relative to ``run_dir``, except the four sidecars, `sessions_dir` and
     `session_db`, which take the runs base explicitly.
 
     ``provenance`` may be absent on an arbitrary run dir: read it via ``_provenance.read``
@@ -443,9 +440,6 @@ class RunPaths:
 
     def ticket_write(self, runs_base: Path | None = None) -> Path:
         return self._container(runs_base) / f"{self.run_dir.name}{TICKET_WRITE_SUFFIX}"
-
-    def oracle_held(self, runs_base: Path | None = None) -> Path:
-        return self._container(runs_base) / f"{self.run_dir.name}{ORACLE_HELD_SUFFIX}"
 
     def session_pointer(self, runs_base: Path | None = None) -> Path:
         """The run -> case link: which case's session store this run belongs to. Beside the

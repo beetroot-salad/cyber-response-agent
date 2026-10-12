@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import shlex
 import sys
-import threading
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
@@ -19,7 +17,6 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
 from defender._io import (
     READ_LIMIT,
     guarded_mkdir,
-    read_jsonl_rows,
     write_guarded,
 )
 from defender._model import model
@@ -32,6 +29,9 @@ from defender._query_rules import (
 from defender.run_repository import LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: `tools_gather` imports the pre-dispatch gate from here
 from defender._text import as_int, as_str, is_content_less
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS, error_class_for_exit
+
+if TYPE_CHECKING:  # pragma: no cover — typing only
+    from defender.runtime.run_state import RunState
 
 _ADAPTER_RE = re.compile(r"(?:^|/)(\w+)_adapter\.py$")
 _NON_ADAPTER = frozenset({"invlang"})
@@ -131,52 +131,11 @@ def system_fingerprint(raw_system: Any, recorded_system: str) -> str:
     return _sha256_hex(raw_system)
 
 
-def lead_rows(run_dir: Path, lead: str) -> list[dict]:
-    """This lead's rows from `executed_queries.jsonl`, in file order. `OSError` reads as zero
-    rows: reading this table must never crash the query tool."""
-    try:
-        rows = read_jsonl_rows(RunPaths(run_dir).executed_queries)
-    except OSError:
-        return []
-    return [r for r in rows if isinstance(r, dict) and r.get("lead_id") == lead]
-
-
-#: The queries table's live view, per run folder (`os.path.abspath`), in this process's memory
-#: (#1235). The run's own decisions (the repeat guard, the rejection budget, seq allocation, a
-#: reducer failure's system) read it, never the file: the file is the model's view and the
-#: learning loop's record, and the box can write it. Rows are the parsed lines the host wrote.
-_MIRRORS: dict[str, list[dict]] = {}
-_MIRROR_LOCK = threading.Lock()
-
-
-def _mirror_key(run_dir: Path) -> str:
-    return os.path.abspath(run_dir)
-
-
-def open_query_mirror(run_dir: Path) -> None:
-    """Load the run's live view from the table as the host left it before the run (a branch
-    sibling's seeded prefix; nothing for a fresh run), replacing any earlier view of the folder.
-    Called once at run start, before lead-0 and before any tool call."""
-    rows = read_jsonl_rows(RunPaths(run_dir).executed_queries)
-    with _MIRROR_LOCK:
-        _MIRRORS[_mirror_key(run_dir)] = rows
-
-
-def _live_rows(run_dir: Path) -> list[dict]:
-    """A copy of the run's live rows. `LookupError` when this process never opened the view:
-    a live reader running before the run started is a wiring fault, not an empty table."""
-    with _MIRROR_LOCK:
-        try:
-            return list(_MIRRORS[_mirror_key(run_dir)])
-        except KeyError:
-            raise LookupError(
-                f"the queries table's live view for {run_dir} was never opened "
-                "(open_query_mirror runs at run start)") from None
-
-
-def live_lead_rows(run_dir: Path, lead: str) -> list[dict]:
-    """This lead's rows from the run's live view, in append order."""
-    return [r for r in _live_rows(run_dir) if r.get("lead_id") == lead]
+# The run's own decisions over the queries table — the repeat guard, the rejection budget, the
+# repeat note, seq allocation, a reducer failure's system — read the rows on the run's
+# `RunState` (#1235), never the file: the file is the model's view and the learning loop's
+# record, and the box can write it. The state holds the parsed lines the host wrote, plus a
+# branch sibling's inherited prefix as seeding wrote it.
 
 
 def payload_status(exit_code: int, payload: Any) -> str:
@@ -246,7 +205,7 @@ QUERY_ROW_COLUMNS: tuple[str, ...] = (
 
 
 def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the caller must decide
-    run_dir: Path, *, lead_id: str, system: str, verb: str, query_id: str, params: dict,
+    state: RunState, *, lead_id: str, system: str, verb: str, query_id: str, params: dict,
     raw_command: str, payload_text: str, exit_code: int, payload_status: str,
     payload_digest: str, system_key: str,
 ) -> dict:
@@ -262,44 +221,44 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
     should have fingerprinted. It cannot be derived here because the string it fingerprints is
     absent from the row.
 
-    Atomicity is by thread confinement, not a lock: this function contains no `await`, and the
-    synchronous bash tool also runs on the event loop thread, so `(lead_id, seq)` stays unique.
-    Moving either writer off-thread would let two threads compute the same `_next_seq` and lose
-    a payload sidecar; add a cross-writer lock first."""
+    One operation on the run's `state`, under its lock: the seq is taken from the state, the
+    payload persisted, the line written, and only then is the row recorded in the state — the
+    parsed line, so the live readers hold exactly what the file says. An exception at any step
+    leaves the state as it was: no row, no seq spent."""
     # First, so too-deep params are refused before a seq is taken or a sidecar written.
     stored_params = _json_safe_params(dict(params))
-    seq = _next_seq(run_dir, lead_id)
-    payload_rel = persist_payload(run_dir, lead_id, seq, payload_text)
-    row: dict[str, Any] = {
-        "lead_id": lead_id,
-        "seq": seq,
-        "system": system,
-        "verb": verb,
-        "query_id": query_id,
-        "params": stored_params,
-        "raw_command": raw_command,
-        "payload_path": payload_rel,
-        "exit_code": exit_code,
-        "error_class": error_class_for_exit(exit_code),
-        "payload_status": payload_status,
-        "payload_digest": payload_digest,
-        # Derived here so it cannot disagree with the bytes just persisted.
-        "payload_sha256": payload_sha256(payload_text),
-        # Passed in: the raw string it fingerprints must not be on the row.
-        "system_key": system_key,
-    }
-    # Compared as a tuple: the on-disk key order is part of the contract.
-    if tuple(row) != QUERY_ROW_COLUMNS:
-        raise RuntimeError(
-            "internal: append_query_row's row disagrees with QUERY_ROW_COLUMNS: "
-            f"{tuple(row)} != {QUERY_ROW_COLUMNS}"
-        )
-    line = json.dumps(row)
-    write_guarded(RunPaths(run_dir).executed_queries, line + "\n", mode="append")
-    # After the write, so a row the table refused never counts; the parsed line, so the live
-    # view holds exactly what the file says (non-finite floats, tuples and keys as written).
-    with _MIRROR_LOCK:
-        _MIRRORS[_mirror_key(run_dir)].append(json.loads(line))
+    with state.lock:
+        seq = _next_seq(state, lead_id)
+        payload_rel = persist_payload(state.run_dir, lead_id, seq, payload_text)
+        row: dict[str, Any] = {
+            "lead_id": lead_id,
+            "seq": seq,
+            "system": system,
+            "verb": verb,
+            "query_id": query_id,
+            "params": stored_params,
+            "raw_command": raw_command,
+            "payload_path": payload_rel,
+            "exit_code": exit_code,
+            "error_class": error_class_for_exit(exit_code),
+            "payload_status": payload_status,
+            "payload_digest": payload_digest,
+            # Derived here so it cannot disagree with the bytes just persisted.
+            "payload_sha256": payload_sha256(payload_text),
+            # Passed in: the raw string it fingerprints must not be on the row.
+            "system_key": system_key,
+        }
+        # Compared as a tuple: the on-disk key order is part of the contract.
+        if tuple(row) != QUERY_ROW_COLUMNS:
+            raise RuntimeError(
+                "internal: append_query_row's row disagrees with QUERY_ROW_COLUMNS: "
+                f"{tuple(row)} != {QUERY_ROW_COLUMNS}"
+            )
+        line = json.dumps(row)
+        write_guarded(RunPaths(state.run_dir).executed_queries, line + "\n", mode="append")
+        # After the write, so a row the table refused never counts; the parsed line, so the
+        # state holds exactly what the file says (non-finite floats, tuples and keys as written).
+        state.rows.setdefault(lead_id, []).append(json.loads(line))
     return row
 
 
@@ -317,26 +276,26 @@ def _payload_key(operand: Path, base: Path) -> tuple[str, int] | None:
         return None
 
 
-def system_for_payload_operands(run_dir: Path, operands: Iterable[Path]) -> str:
+def system_for_payload_operands(state: RunState, operands: Iterable[Path]) -> str:
     """The system a reducer's failure belongs to: the system of the payload it read.
 
     Not `derive_system`, which would yield `"sql"` from a `defender-sql` argv and send the
     curator to a skill directory for a system that does not exist. The payload path joins back
     to the row that wrote it, keyed on the payload's own lead so cross-lead reads attribute
-    correctly. `""` when no operand is a run payload; the table is read only if one is."""
+    correctly. `""` when no operand is a run payload."""
     try:
-        base = RunPaths(run_dir).gather_raw.resolve()
+        base = RunPaths(state.run_dir).gather_raw.resolve()
     except OSError:
         return ""
     keys = [k for operand in operands if (k := _payload_key(operand, base)) is not None]
     if not keys:
         return ""
-    rows = _live_rows(run_dir)
     wanted = set(keys)
     by_key = {
         (r.get("lead_id"), r.get("seq")): r
-        for r in rows
-        if isinstance(r, dict) and (r.get("lead_id"), r.get("seq")) in wanted
+        for lead in {lead for lead, _seq in keys}
+        for r in state.lead_rows(lead)
+        if (r.get("lead_id"), r.get("seq")) in wanted
     }
     for key in keys:
         row = by_key.get(key)
@@ -361,7 +320,7 @@ def _result_identity(digest: Any, sha256: Any) -> tuple[str, str] | None:
 
 
 def repeat_note(  # noqa: PLR0913 — one parameter per row field the comparison reads
-    run_dir: Path, lead: str, *, seq: int, system: str, verb: str,
+    state: RunState, lead: str, *, seq: int, system: str, verb: str,
     params: dict, payload_digest: str, payload_sha256: str, exit_code: int = 0,
 ) -> str | None:
     """Name the earlier call in this lead that this one repeats, if any.
@@ -376,7 +335,7 @@ def repeat_note(  # noqa: PLR0913 — one parameter per row field the comparison
     identity = _result_identity(payload_digest, payload_sha256)
     repeat_seq: int | None = None
     same_payload: int | None = None
-    for rec in live_lead_rows(run_dir, lead):
+    for rec in state.lead_rows(lead):
         # Same counted domain as `repeat_trip`: these rows never reached the backend.
         if rec.get("query_id") in ABOVE_PLACEMENT_QUERY_IDS:
             continue
@@ -428,14 +387,16 @@ def repeat_note(  # noqa: PLR0913 — one parameter per row field the comparison
     return None
 
 
-def _next_seq(run_dir: Path, lead: str) -> int:
-    return len(live_lead_rows(run_dir, lead))
+def _next_seq(state: RunState, lead: str) -> int:
+    """The lead's next seq: one past the rows the run holds for it, inherited ones included."""
+    with state.lock:
+        return len(state.rows.get(lead, ()))
 
 
 # The repeat circuit breaker: a lead issuing the same request (`lead_id`, `system`, `verb`,
 # canonical `params`, `system_key`) `REPEAT_THRESHOLD` times has stopped reasoning, and that
-# call is refused before it reaches the backend. The count is derived per call from
-# `lead_rows`, excluding rows written above the guard's placement in
+# call is refused before it reaches the backend. The count is derived per call from the lead's
+# rows on the run's state, excluding rows written above the guard's placement in
 # `QueryCapture.wrap_tool_execute`, so live runs and replays agree.
 
 REPEAT_THRESHOLD = 3

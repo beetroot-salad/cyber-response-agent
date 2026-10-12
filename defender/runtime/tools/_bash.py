@@ -16,6 +16,7 @@ from .. import box as box_mod
 from .. import permission
 from ..permission.files import RESOLVE_ERRORS
 from ..agent_role import AgentRole
+from ..run_state import run_state_of
 
 from defender._untrusted import wrap_fresh
 from defender._env import FatalConfigError
@@ -61,23 +62,25 @@ def _record_shim_failure(
     * a non-zero exit — failures, not every call;
     * the reducer is the terminal stage: the box reports only the last stage's exit code, so
       otherwise the code cannot be attributed to the reducer;
-    * best-effort — it must never fail the command it observes.
+    * best-effort — it must never fail the command it observes. The run's state is taken
+      first, outside that: deps carrying none are a wiring fault, not a row that failed.
     """
     if not isinstance(deps, GatherDeps) or deps.lead_id is None or result.rc == 0:
         return
     lead_id: str = deps.lead_id
     if not permission.command_shape.terminal_reducer(list(decision.pipelines or ())):
         return
+    state = run_state_of(deps)
     stderr = result.err.decode("utf-8", "replace")
     recorded_command = command[:record_query.SHIM_COMMAND_MAX_CHARS]
     try:
         record_query.append_query_row(
-            deps.run_dir,
+            state,
             lead_id=lead_id,
             # The payload's system, not the argv's (`sql` is not a system). `""` when no run
             # payload was opened; routing uses the sentinel `query_id` either way.
             system=record_query.system_for_payload_operands(
-                deps.run_dir, _opened_operands(deps, decision),
+                state, _opened_operands(deps, decision),
             ),
             verb=_BASH_VERB,
             # Nothing to fingerprint: `system` comes from a path this run wrote, not the model.

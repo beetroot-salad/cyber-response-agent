@@ -1,20 +1,15 @@
 
 from __future__ import annotations
 
-import logging
-import math
-import os
-import threading
 import time
 from datetime import UTC, datetime
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from defender._clock import parse_iso_utc
-from defender.run_repository import RunPaths
-from defender.hooks._run_dir import read_json_locked, update_json_locked
 from defender.runtime.agent_role import AgentRole
 
-_logger = logging.getLogger(__name__)
+if TYPE_CHECKING:  # pragma: no cover — typing only
+    from defender.runtime.run_state import RunState
 
 DEFAULT_LIMITS = {
     "max_tool_calls": 200,
@@ -46,50 +41,10 @@ class BudgetKill(Exception):
     pass
 
 
-
-def make_budget_state(run_id: str) -> dict:
-    now = datetime.now(UTC).isoformat()
-    return {
-        "run_id": run_id,
-        "tool_calls": 0,
-        "subagent_spawns": 0,
-        "created_at": now,
-        "started_at": now,
-    }
-
-
-#: The run's budget state, per run folder (`os.path.abspath`), in this process's memory (#1235).
-#: Only the run's own process reads or writes it, so no file holds it: nothing the box writes
-#: into the run folder can move a count. It stays until the next `open_budget` for the folder,
-#: so the run's own process can read it back after the loop ends.
-_BUDGETS: dict[str, dict] = {}
-#: One lock for every read-modify-write of `_BUDGETS`: the cap check and the increment are one
-#: step, so no interleaving of this process's threads loses an increment or overshoots the cap.
-_BUDGET_LOCK = threading.Lock()
-
-
-def _budget_key(run_dir: Path) -> str:
-    return os.path.abspath(run_dir)
-
-
-def open_budget(run_dir: Path, run_id: str) -> dict:
-    """Start this run's budget: fresh counters and a wall-clock origin of now, replacing any
-    earlier budget this process held for the folder."""
-    forget_open_turn(run_dir)
-    state = make_budget_state(run_id)
-    with _BUDGET_LOCK:
-        _BUDGETS[_budget_key(run_dir)] = state
-        return dict(state)
-
-
-def read_budget(run_dir: Path) -> dict:
-    """The run's budget state, `{}` when this process opened none for the folder.
-
-    `{}` rather than `make_budget_state(...)`: callers treat absent counters as unspent, and a
-    fresh `created_at` would restart the wall clock on every read."""
-    with _BUDGET_LOCK:
-        return dict(_BUDGETS.get(_budget_key(run_dir), {}))
-
+# The run's budget and its oracle clock live on the run's `RunState` (#1235), which the
+# functions below take first and change under its lock. Only the run's own process reads or
+# writes them, so no file holds them: nothing the box writes into the run folder can move a
+# count or stop the clock.
 
 
 def _valid_count(value: object) -> int | None:
@@ -98,42 +53,32 @@ def _valid_count(value: object) -> int | None:
     return value if value >= 0 else None
 
 
-def _held_state(run_dir: Path, run_id: str) -> dict:
-    """The folder's live state, started if this process holds none. Call under `_BUDGET_LOCK`."""
-    return _BUDGETS.setdefault(_budget_key(run_dir), make_budget_state(run_id))
+def _count(state: RunState, tool_name: str) -> None:
+    """One call on the run's counters; `gather` is also a spawn. Call under `state.lock`."""
+    state.budget["tool_calls"] += 1
+    if tool_name == "gather":
+        state.budget["subagent_spawns"] += 1
 
 
-def update_budget_locked(
-    run_dir: Path, run_id: str, tool_name: str, *, limits: dict = DEFAULT_LIMITS
-) -> dict:
-    """Count one call with no cap check (the unenforced posture)."""
-    with _BUDGET_LOCK:
-        state = _held_state(run_dir, run_id)
-        state["tool_calls"] = (_valid_count(state.get("tool_calls")) or 0) + 1
-        if tool_name == "gather":
-            state["subagent_spawns"] = (_valid_count(state.get("subagent_spawns")) or 0) + 1
-        return dict(state)
+def count_call(state: RunState, tool_name: str) -> dict:
+    """Count one call with no cap check (the unenforced posture). Returns the budget after."""
+    with state.lock:
+        _count(state, tool_name)
+        return dict(state.budget)
 
 
-def account_call(
-    run_dir: Path, run_id: str, tool_name: str, *,
-    limits: dict, tier: str, exit_code: int = 0,
-) -> dict:
-    """Count one executed call against the pool, re-checking the cap at commit time.
+def account_call(state: RunState, tool_name: str, *, limits: dict, tier: str) -> dict:
+    """Count one executed call against the pool, re-checking the cap at commit time. Returns
+    the budget after.
 
-    The read, the cap check and the increment are one step under `_BUDGET_LOCK`, so no
-    interleaving with another thread can lose an increment; a call at the cap changes nothing.
-    (Oracle-held time is not in this state: it is in the run's `oracle-held` sidecar and this
-    process's open-turn memory.)"""
+    The read, the cap check and the increment are one step under the state's lock, so no
+    interleaving with another thread can lose an increment; a call at the cap changes
+    nothing."""
     limit = limits["max_tool_calls"] + (TAIL_ALLOWANCE if tier == "tail" else 0)
-    with _BUDGET_LOCK:
-        state = _held_state(run_dir, run_id)
-        current = _valid_count(state.get("tool_calls")) or 0
-        if current < limit:
-            state["tool_calls"] = current + 1
-            if tool_name == "gather":
-                state["subagent_spawns"] = (_valid_count(state.get("subagent_spawns")) or 0) + 1
-        return dict(state)
+    with state.lock:
+        if state.budget["tool_calls"] < limit:
+            _count(state, tool_name)
+        return dict(state.budget)
 
 
 def _wall_origin(state: dict) -> datetime | None:
@@ -146,15 +91,6 @@ def _wall_origin(state: dict) -> datetime | None:
     return None
 
 
-#: S15 (#1224): the seconds a branched world's oracle held the turn, which every investigator
-#: time limit excludes. HOST state, never in the run dir: the box can write the run dir, so a
-#: total or an open-turn mark read from there would let it stop the investigator's clock, and a
-#: link it planted there would fault every oracle turn. The credited total lives in the run's
-#: host-only sidecar beside the run dir (`RunPaths.oracle_held`), where it survives a resume;
-#: the turn open now lives in this process's memory — the registry holding it and the
-#: enforcer reading it are one process, and a process that dies holds no turn.
-ORACLE_HELD_KEY = "oracle_held_seconds"
-
 #: The key `_budget_state_for_enforcement` sets on the in-memory enforcement state to hand
 #: `_elapsed` the host's oracle-held seconds. It is never read from a state that names no host
 #: value: `_elapsed` honours only a `_HostHeld`, which no JSON document can produce.
@@ -166,94 +102,36 @@ class _HostHeld(float):
     key in a budget state, a plain number, subtracts nothing."""
 
 
-#: The oracle turn open now per run dir: its `time.monotonic()` start. One turn at a time per
-#: world (`WorldRegistry._turn`), and one world per run dir.
-_OPEN_TURNS: dict[str, float] = {}
-_OPEN_LOCK = threading.Lock()
+# S15 (#1224): the seconds a branched world's oracle held the turn, which every investigator
+# time limit excludes, are the run's own host state (`RunState.oracle_credited`, and the open
+# turn's start). Nothing persists them, so no credit outlives its run (#1239).
 
 
-def _turn_key(run_dir: Path) -> str:
-    return os.path.abspath(run_dir)
-
-
-def _oracle_held_path(run_dir: Path) -> Path:
-    run_dir = Path(run_dir)
-    return RunPaths(run_dir).oracle_held()
-
-
-def _seconds(value: object) -> float:
-    """A credited total as a usable number of seconds: anything else reads as none credited."""
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        number = float(value)
-        if math.isfinite(number) and number >= 0:
-            return number
-    return 0.0
-
-
-def _credited(run_dir: Path) -> float:
-    """The oracle-held seconds credited so far, from the host-only sidecar. Absent, linked,
-    unreadable or garbage reads as none: the clock then runs, it never pauses."""
-    try:
-        return _seconds(read_json_locked(_oracle_held_path(run_dir)).get(ORACLE_HELD_KEY))
-    except (OSError, ValueError):
-        return 0.0
-
-
-def _has_clock(run_dir: Path) -> bool:
-    """Whether this process holds a budget for the run (an enforcer whose clock an oracle turn
-    pauses)."""
-    with _BUDGET_LOCK:
-        return _budget_key(Path(run_dir)) in _BUDGETS
-
-
-def oracle_turn_opened(run_dir: Path) -> None:
+def oracle_turn_opened(state: RunState) -> None:
     """Pause the investigator's clock: an oracle turn holds the world from now until
-    `oracle_turn_closed`. A run with no budget record (no enforcer) has no clock to pause.
-    Writes nothing: the open turn is this process's memory, so nothing the box writes can
-    fault it."""
-    if not _has_clock(run_dir):
-        return
-    with _OPEN_LOCK:
-        _OPEN_TURNS[_turn_key(run_dir)] = time.monotonic()
+    `oracle_turn_closed`. One turn at a time per world (`WorldRegistry._turn`), so an open
+    mark is the turn's own; opening again restarts it."""
+    with state.lock:
+        state.oracle_opened = time.monotonic()
 
 
-def oracle_turn_closed(run_dir: Path) -> None:
-    """Resume the investigator's clock, crediting the closed turn's interval to the run's
-    host-only total, once. Never raises for the record: a turn whose credit cannot be written
-    still closes, and its time then counts toward the investigator's clock.
+def oracle_turn_closed(state: RunState) -> None:
+    """Resume the investigator's clock, crediting the closed turn's interval to the run, once.
 
-    @owns oracle_held_seconds"""
-    with _OPEN_LOCK:
-        opened = _OPEN_TURNS.pop(_turn_key(run_dir), None)
-    if opened is None:
-        return
-    interval = max(0.0, time.monotonic() - opened)
-
-    def _mutate(state: dict) -> None:
-        state[ORACLE_HELD_KEY] = _seconds(state.get(ORACLE_HELD_KEY)) + interval
-
-    try:
-        update_json_locked(_oracle_held_path(run_dir), _mutate, default=dict)
-    except OSError as e:
-        _logger.warning(f"the oracle turn's {interval:.1f}s could not be credited to the "
-                        f"investigator's clock ({e!r}); it counts as investigator time")
+    @owns oracle_credited"""
+    with state.lock:
+        opened, state.oracle_opened = state.oracle_opened, None
+        if opened is not None:
+            state.oracle_credited += max(0.0, time.monotonic() - opened)
 
 
-def forget_open_turn(run_dir: Path) -> None:
-    """Drop a turn left open in this process for `run_dir` (a run that ended mid-turn): a run
-    that starts again in this process starts with its clock running."""
-    with _OPEN_LOCK:
-        _OPEN_TURNS.pop(_turn_key(run_dir), None)
-
-
-def oracle_held(run_dir: Path) -> float:
-    """The oracle time the investigator's clock excludes for `run_dir`: the host-only credited
-    total plus the turn this process holds open now, if any. Zero for a run no oracle served."""
-    held = _credited(run_dir)
-    with _OPEN_LOCK:
-        opened = _OPEN_TURNS.get(_turn_key(run_dir))
-    if opened is not None:
-        held += max(0.0, time.monotonic() - opened)
+def oracle_held(state: RunState) -> float:
+    """The oracle time the investigator's clock excludes: the credited total plus the turn
+    open now, if any. Zero for a run no oracle served."""
+    with state.lock:
+        held = state.oracle_credited
+        if state.oracle_opened is not None:
+            held += max(0.0, time.monotonic() - state.oracle_opened)
     return _HostHeld(held)
 
 

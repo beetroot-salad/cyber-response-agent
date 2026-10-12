@@ -19,11 +19,11 @@ from defender._io import read_text_utf8
 from defender.run_repository import RunPaths
 from defender.hooks.budget_enforcer import (
     BudgetKill,
-    read_budget,
+    count_call,
     tail_exhausted,
-    update_budget_locked,
 )
 from defender.runtime import circuit_breaker
+from defender.runtime.run_state import RunState, run_state_of
 from defender.runtime.verbs import VerbContext
 from ._spec import ITEM1_SYSTEM, _ANY_RUN_TAG, _FENCE_RUN
 
@@ -61,24 +61,25 @@ class _CaptureDeps:
     defender_dir: Path
     run_id: str
     lead_id: str
+    #: The run's one live state (#1235): lead-0's rows, breaker charges and counts land in it,
+    #: as MAIN's and every gather lead's do. `SkipValidation`: the run's object, never a copy.
+    run_state: Annotated[RunState, SkipValidation]
     box: Any = None
-    budget_started_monotonic: float = 0.0
     #: The run's tenant record (#1107) — what item 1's verb context hands the adapter. `None`
     #: only for a caller with no run (a direct test of the recorder); a verb built over it is
     #: refused by `VerbContext`.
     tenant: Annotated[Any, SkipValidation] = None
 
 
-def _rows_for(run_dir: Path, lead_id: str) -> list[dict]:
-    from defender.scripts.gather_tools.record_query import live_lead_rows
-    return live_lead_rows(run_dir, lead_id)
+def _rows_for(state: RunState, lead_id: str) -> list[dict]:
+    return state.lead_rows(lead_id)
 
 
-def _last_row_seq(run_dir: Path, lead_id: str) -> int:
+def _last_row_seq(state: RunState, lead_id: str) -> int:
     """The queries-table `seq` of the last call under `lead_id`, which documents from that
     call are elided against (a document's position in the block is not its payload's seq).
     `-1` when no row exists."""
-    rows = _rows_for(run_dir, lead_id)
+    rows = _rows_for(state, lead_id)
     seq = rows[-1].get("seq") if rows else None
     return seq if isinstance(seq, int) else -1
 
@@ -91,7 +92,7 @@ async def _capture_issue(
 
     Returns `(envelope_or_None, raw_result_text)`; `None` covers both a screened call and one
     that was attempted but failed."""
-    before = len(_rows_for(deps.run_dir, deps.lead_id))
+    before = len(_rows_for(deps.run_state, deps.lead_id))
     call = SimpleNamespace(tool_name="query")
     args = {"system": ITEM1_SYSTEM, "verb": verb, "params": params}
     # Kept so a later write failure can recover the result without re-issuing the call.
@@ -100,7 +101,7 @@ async def _capture_issue(
     async def handler(_args: dict) -> Any:
         fn = capture._registry.verbs(ITEM1_SYSTEM)[verb]
         vctx = VerbContext(defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=env,
-                           tenant=_tenant_of(deps))
+                           tenant=_tenant_of(deps), run_state=deps.run_state)
         result = await asyncio.to_thread(fn, vctx, **params)
         captured.append(result)
         return result
@@ -113,7 +114,7 @@ async def _capture_issue(
         # and must not trigger a second backend call.
         envelope = captured[0] if captured else None
         return (envelope if isinstance(envelope, dict) else None), ""
-    after = _rows_for(deps.run_dir, deps.lead_id)
+    after = _rows_for(deps.run_state, deps.lead_id)
     if len(after) <= before:
         return None, text
     row = after[-1]
@@ -157,7 +158,7 @@ def _record_manual_row(
 
     text = json.dumps(payload, default=str) if exit_code == 0 else ""
     append_query_row(
-        deps.run_dir,
+        run_state_of(deps),
         lead_id=deps.lead_id,
         system=ITEM1_SYSTEM,
         verb=verb,
@@ -176,8 +177,8 @@ def _record_manual_row(
     )
 
 
-def _breaker_failures(run_dir: Path) -> int:
-    rec = circuit_breaker.breaker_state(run_dir)["systems"].get(ITEM1_SYSTEM)
+def _breaker_failures(state: RunState) -> int:
+    rec = state.breaker_snapshot()["systems"].get(ITEM1_SYSTEM)
     return rec["failures"] if rec else 0
 
 
@@ -185,20 +186,20 @@ class _CallLedger:
     """Tracks item 1's contribution to the per-system breaker, so later infra failures can
     still be issued without being recorded past the cap."""
 
-    def __init__(self, run_dir: Path):
-        self.run_dir = run_dir
+    def __init__(self, state: RunState):
+        self.state = state
         self.capped = False
 
     async def call(self, capture, deps, verb, params, env):
         from defender.scripts.adapters.faults import AdapterFault
 
-        before = _breaker_failures(self.run_dir)
+        before = _breaker_failures(self.state)
         if self.capped:
             # Past the cap: bypass QueryCapture's `record_outcome`, still writing a row.
             try:
                 fn = capture._registry.verbs(ITEM1_SYSTEM)[verb]
                 vctx = VerbContext(defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=env,
-                                   tenant=_tenant_of(deps))
+                                   tenant=_tenant_of(deps), run_state=deps.run_state)
                 envelope = await asyncio.to_thread(fn, vctx, **params)
                 _record_manual_row(deps, verb, params, envelope, exit_code=0)
                 return envelope, ""
@@ -214,7 +215,7 @@ class _CallLedger:
                 _record_manual_row(deps, verb, params, None, exit_code=_UNMAPPED_FAULT_EXIT)
                 return None, ""
         envelope, text = await _capture_issue(capture, deps, verb, params, env)
-        after = _breaker_failures(self.run_dir)
+        after = _breaker_failures(self.state)
         if after > before:
             self.capped = True
         return envelope, text
@@ -230,27 +231,25 @@ def _tenant_of(deps: Any) -> Any:
 
 
 def _build_deps(
-    run_dir: Path, defender_dir: Path, run_id: str, lead_id: str, tenant: Any,
+    state: RunState, defender_dir: Path, lead_id: str, tenant: Any,
 ) -> _CaptureDeps:
     return _CaptureDeps(
-        run_dir=run_dir, defender_dir=defender_dir, run_id=run_id, lead_id=lead_id,
-        tenant=tenant,
+        run_dir=state.run_dir, defender_dir=defender_dir, run_id=state.run_id, lead_id=lead_id,
+        run_state=state, tenant=tenant,
     )
 
 
-def _budget_gate(run_dir: Path, limits: dict) -> None:
+def _budget_gate(state: RunState, limits: dict) -> None:
     """Not gated on `DEFENDER_BUDGET_ENFORCE`: lead-0 is harness work, not a model tool
     refusal."""
-    state = read_budget(run_dir)
-    if tail_exhausted(state, limits):
+    if tail_exhausted(state.budget_snapshot(), limits):
         raise BudgetKill("lead-0's own call refused: the run's budget tail is exhausted")
 
 
-def _budget_account(run_dir: Path, run_id: str, tool_name: str, limits: dict) -> None:
-    import contextlib
-
-    with contextlib.suppress(Exception):  # accounting must never break the run
-        update_budget_locked(run_dir, run_id, tool_name, limits=limits)
+def _budget_account(state: RunState, tool_name: str) -> None:
+    """Count one of lead-0's own calls on the run's budget, with no cap check: harness work
+    the budget hooks never see, so it is counted here."""
+    count_call(state, tool_name)
 
 
 def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> None:
