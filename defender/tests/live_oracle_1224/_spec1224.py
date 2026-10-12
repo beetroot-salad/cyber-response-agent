@@ -1149,7 +1149,7 @@ def write_call_table(ep: Path, label: str, ledger: list[dict]) -> Path:
     breaker = mod("runtime.circuit_breaker")
     world = Path(ep) / "worlds" / label
     token = world_token(label)
-    lines = []
+    lines: list[str] = []
     for i, row in enumerate(ledger):
         cid = row.get(J.CALL_ID, f"{token}/{i}")
         if cid is None:
