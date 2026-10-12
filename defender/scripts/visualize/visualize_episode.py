@@ -1638,14 +1638,15 @@ def _render_roster_item(ep: _Episode, item: RosterItem) -> str:
 def _commit_state_html(label: str, row: dict[str, Any] | None) -> str:
     """The world's A6 commit state as judge.yaml records it — read off the row, never the
     queue: `queueing` is in progress (a pass stopped between this world's appends and its
-    commit; the next grade refuses it until reconciled), `queued` is graded, and a world with
-    no committed row is ungraded."""
+    commit; the next grade refuses it until reconciled), `queued` is graded (its commit is
+    complete), and a planted world with no committed row is ungraded. The control is judged
+    against, never graded, so it carries no such line."""
     state = (row or {}).get(STATE_KEY)
     if state == QUEUEING:
         text = (f"in progress — a pass stopped while committing world {label}: its findings "
                 "may be partly on the queues; reconcile them before the next grade")
     elif state == QUEUED:
-        text = "graded — its findings are queued"
+        text = "graded — its commit is complete"
     else:
         text = "ungraded — no committed grade for this world"
     return f'<div class="w-commit">{_uv(text)}</div>'
@@ -1665,7 +1666,8 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
                    f'unreadable</div>')
     if draws_report.skipped:
         bits.append(f'<div class="w-skipped">{draws_report.skipped} skipped</div>')
-    bits.append(_commit_state_html(label, entry.row))
+    if label != ep.control_label:
+        bits.append(_commit_state_html(label, entry.row))
 
     manifest_world = ep.manifest_world(label)
     if row is None:
