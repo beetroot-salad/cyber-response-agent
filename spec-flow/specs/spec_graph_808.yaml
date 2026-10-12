@@ -283,10 +283,14 @@ demands:
      discharged_by: test_usable_ancestor_identifiers_do_issue_the_batched_fetch}
     # d37's PAIRED POSITIVE CONTROL: same addresses, complementary condition.
 
-  - {id: d62_render_from_memory_then_write, kind: behavior, form: test,
+  - {id: d62_render_from_memory_then_write, kind: behavior, form: clause, status: retired,
      binds: ["interacts(lead_zero->orient_block).payload",
              "interacts(lead_zero->executed_queries)"],
-     discharged_by: test_the_rendered_block_survives_a_failed_queries_table_write,
+     outcome: {nl: "RETIRED by #1234 — A12 makes a failed query-table write end the run
+       (CallRecordWriteFailed naming executed_queries), so there is no ORIENT text left to
+       disagree with the run dir; `test_the_rendered_block_survives_a_failed_queries_table_write`,
+       which discharged this demand, was rewritten as
+       `test_a_failed_queries_table_write_in_item_1_ends_the_run_naming_the_table`."},
      rejected: [{nl: "write-then-render: a queries table that cannot be written would then
        cost the run its evidence rather than its evidence row, and the run dir and the ORIENT
        text would disagree about whether item 1 happened"}]}

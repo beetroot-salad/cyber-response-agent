@@ -1160,7 +1160,7 @@ demands:
     binds:
       - "AUTHOR_RESULT"
       - "observability_gaps"
-    discharged_by: test_the_author_result_still_carries_observability_gaps_773
+    discharged_by: test_an_author_result_still_emitting_observability_gaps_strings_is_tolerated_773  # renamed by #1234 (M7 retired the declared field)
     seed_docstring: >-
       AUTHOR_RESULT still accepts an observability_gaps list and the tick ignores it, as today
       (C5) — the gap ledger this change adds is the forward check's own.
@@ -1915,10 +1915,17 @@ demands:
 
   - id: s59_observability_gaps_carries_adversarial_content
     kind: negative
-    form: test
+    form: clause
+    status: retired
     source: "45-dispositions.md settled 59"
     binds: ["observability_gaps", "AUTHOR_RESULT"]
-    discharged_by: test_author_result_observability_gaps_carries_adversarial_content_773
+    outcome:
+      nl: >-
+        RETIRED by #1234 — M7 retired `observability_gaps` as a declared AUTHOR_RESULT field, so
+        row-shaped content under it is refused like any stray bucket key;
+        `test_author_result_observability_gaps_carries_adversarial_content_773`, which discharged
+        this demand, was rewritten as
+        `test_author_result_retired_observability_gaps_with_row_shaped_content_is_refused_773`.
     seed_docstring: >-
       Zero effect on the check or the commit: no code reads the field (C5/G12) and N3 keeps it as
       is.

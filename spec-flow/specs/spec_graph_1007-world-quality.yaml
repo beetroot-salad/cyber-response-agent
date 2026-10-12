@@ -175,7 +175,7 @@ demands:
 
   # ---- O1/M6: the subject partition, at the validator and at both appenders -----------------
   - {id: subject_required_on_every_finding, kind: shape, form: test,
-     discharged_by: test_every_finding_carries_a_subject,
+     discharged_by: test_every_finding_carries_its_subject_by_the_list_it_is_filed_under,  # renamed by #1234's migration
      binds: ["interacts(validate_reply->judge_reply).payload", "subject.domain.distinguished[defender]",
              "subject.domain.distinguished[world]"]}
   - {id: world_row_refused_at_defender_appender, kind: negative, form: test,
@@ -185,7 +185,7 @@ demands:
      discharged_by: test_defender_row_still_reaches_the_findings_channel,
      binds: ["interacts(append_rows->findings_channel)"]}
   - {id: world_row_type_not_gated_by_the_defender_vocabulary, kind: parity, form: test,
-     discharged_by: test_a_world_row_type_is_not_gated_against_the_defender_vocabulary,
+     discharged_by: test_each_channel_gates_a_row_type_against_its_own_vocabulary,  # renamed by #1234's migration
      binds: ["interacts(append_rows->questioner_findings_channel)", QUEUEABLE_FINDING_TYPES]}
   - {id: lessons_gate_refuses_direction_world, kind: negative, form: test,
      discharged_by: test_lessons_gate_refuses_direction_world_loudly,
@@ -353,14 +353,14 @@ demands:
   - {id: review_section_rendered_per_graded_world, kind: shape, form: clause,
      status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_the_per_world_prompt_carries_that_worlds_reachability_block`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(render->judge_prompt).payload", "interacts(render->reachability)"]}
-  - {id: per_world_prompt_holds_no_sibling_overlay, kind: negative, form: test,
-     discharged_by: test_the_per_world_prompt_holds_no_siblings_facts,
+  - {id: per_world_prompt_holds_no_sibling_overlay, kind: negative, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1234 — #1234 M3 replaced the \"other worlds' facts withheld\" rule: each reference run's facts sit inside that run's own labelled section of the per-world prompt; `test_the_per_world_prompt_holds_no_siblings_facts`, which discharged this demand, was deleted or rewritten with the behaviour it pinned."},
      binds: ["interacts(render->judge_prompt).payload", "interacts(_run_world_draws->wire_log)"]}
-  - {id: world_bucket_names_reach_the_prompt_as_examples, kind: shape, form: test,
-     discharged_by: test_the_world_buckets_reach_the_prompt_as_examples_not_as_an_enum,
+  - {id: world_bucket_names_reach_the_prompt_as_examples, kind: shape, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1234 — #1234 M4 closed the world-finding vocabulary (unreachable, incoherent, mislabelled), which reaches the prompt as that closed set; `test_the_world_buckets_reach_the_prompt_as_examples_not_as_an_enum`, which discharged this demand, was deleted or rewritten with the behaviour it pinned."},
      binds: ["interacts(render->judge_prompt).payload", world_finding_bucket]}
-  - {id: world_arm_admits_an_unlisted_bucket, kind: behavior, form: test,
-     discharged_by: test_validate_reply_admits_an_unlisted_world_bucket,
+  - {id: world_arm_admits_an_unlisted_bucket, kind: behavior, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1234 — #1234 M4 closed the world-finding vocabulary; an unlisted world bucket is refused at reply validation; `test_validate_reply_admits_an_unlisted_world_bucket`, which discharged this demand, was deleted or rewritten with the behaviour it pinned."},
      binds: ["_BUCKET_ENUM.domain.distinguished[world]", world_finding_bucket,
              "world_finding_bucket.domain.alternatives[any-unlisted-string]"]}
 
@@ -443,7 +443,7 @@ demands:
      discharged_by: test_the_vocabulary_census_pins_the_defender_sets_to_their_members,
      binds: [QUEUEABLE_FINDING_TYPES, PIPELINE_FINDING_TYPES, FAMILY_ONLY_FINDING_TYPES]}
   - {id: bucket_enum_is_per_subject, kind: domain-outcome, form: test,
-     discharged_by: test_the_bucket_enum_is_selected_by_subject,
+     discharged_by: test_the_bucket_vocabulary_is_selected_by_subject,  # renamed by #1234's migration
      binds: ["_BUCKET_ENUM.domain.distinguished[defender]", "_BUCKET_ENUM.domain.distinguished[world]"]}
   - {id: defender_family_row_gated_as_today, kind: survival, form: test,
      discharged_by: test_a_defender_family_row_is_gated_exactly_as_today,
@@ -485,11 +485,11 @@ demands:
      binds: ["interacts(_rejection->review_record)"]}
 
   # ---- S7: the evidence resolver, widened for one subject only ---------------------------------
-  - {id: evidence_resolver_admits_three_episode_files_for_world, kind: parity, form: test,
-     discharged_by: test_a_world_findings_evidence_pointer_admits_exactly_three_episode_files,
+  - {id: evidence_resolver_admits_three_episode_files_for_world, kind: parity, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1234 — #1234 A1 replaced the per-subject pointer allowlist with one typed, no-follow resolver over the episode's runs, manifest and oracle store; `test_a_world_findings_evidence_pointer_admits_exactly_three_episode_files`, which discharged this demand, was deleted or rewritten with the behaviour it pinned."},
      binds: ["judge_reply.access[world-subject]", "judge_reply.access[defender-subject]"]}
-  - {id: defender_evidence_stays_world_dir_only, kind: parity, form: test,
-     discharged_by: test_a_defender_findings_evidence_pointer_stays_world_dir_only,
+  - {id: defender_evidence_stays_world_dir_only, kind: parity, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1234 — #1234 M4/A1 widened investigator evidence into the reference runs (`contrast_evidence`, a two-run pair) through one typed, no-follow resolver; `test_a_defender_findings_evidence_pointer_stays_world_dir_only`, which discharged this demand, was deleted or rewritten with the behaviour it pinned."},
      binds: ["judge_reply.access[defender-subject]"]}
 
   # ---- S2 + Scale: the write-path census, and the recorded bound -------------------------------
@@ -519,17 +519,17 @@ demands:
      minted_from: "consensus test_world_bucket_is_non_string",
      discharged_by: test_a_non_string_world_bucket_is_refused,
      binds: [world_finding_bucket, "interacts(validate_reply->judge_reply).payload"]}
-  - {id: d_empty_or_unusable_world_bucket_is_admitted_verbatim, kind: domain-outcome, form: test,
+  - {id: d_empty_or_unusable_world_bucket_is_admitted_verbatim, kind: domain-outcome, form: clause,
      minted_from: "auto test_world_bucket_is_empty_string + test_world_bucket_is_whitespace_only + test_a_world_bucket_that_is_not_a_usable_string",
-     discharged_by: test_an_empty_or_whitespace_world_bucket_is_admitted_and_stored_verbatim,
+     status: retired, outcome: {nl: "RETIRED by #1234 — #1234 M4 closed the world-finding vocabulary; an empty, whitespace or unlisted world bucket is refused, never stored; `test_an_empty_or_whitespace_world_bucket_is_admitted_and_stored_verbatim`, which discharged this demand, was deleted or rewritten with the behaviour it pinned."},
      binds: [world_finding_bucket, "world_finding_bucket.domain.alternatives[any-unlisted-string]"]}
-  - {id: d_a_world_bucket_spelled_like_a_defender_bucket_is_admitted, kind: domain-outcome, form: test,
+  - {id: d_a_world_bucket_spelled_like_a_defender_bucket_is_admitted, kind: domain-outcome, form: clause,
      minted_from: "consensus test_a_world_bucket_spelled_exactly_like_a_defender_bucket + test_per_world_reply_bucket_is_a_defender_only_literal",
-     discharged_by: test_a_world_bucket_spelled_like_a_defender_bucket_is_admitted_and_read_by_subject,
+     status: retired, outcome: {nl: "RETIRED by #1234 — #1234 M4 closed the world-finding vocabulary and retired the per-finding `subject`: a world finding cannot carry a defender bucket, and the reply list a finding is filed under decides its channel; `test_a_world_bucket_spelled_like_a_defender_bucket_is_admitted_and_read_by_subject`, which discharged this demand, was deleted or rewritten with the behaviour it pinned."},
      binds: ["_BUCKET_ENUM.domain.distinguished[world]", "subject.domain.distinguished[world]"]}
   - {id: d_no_case_fold_or_trim_on_subject_anywhere, kind: negative, form: test,
      minted_from: "auto test_finding_subject_outside_the_two_values",
-     discharged_by: test_a_near_miss_subject_is_refused_with_no_case_fold_and_no_trim,
+     discharged_by: test_a_near_miss_subject_or_bucket_is_refused_with_no_case_fold_and_no_trim,  # renamed by #1234's migration
      binds: [subject, "interacts(validate_reply->judge_reply).payload",
              "interacts(append_rows->questioner_findings_channel)"]}
   - {id: d_a_staged_row_without_the_witness_field_reads_unmeasured, kind: survival, form: clause,
@@ -549,9 +549,9 @@ demands:
      minted_from: "consensus test_1007_m1_reachability_facts_recorded_for_a_world_review_then_rejects_on_another_ground",
      status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_the_reachability_facts_stay_on_the_record_when_the_world_is_later_rejected`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["interacts(_reachability->review_record)", "interacts(_rejection->review_record)"]}
-  - {id: d_evidence_pointer_traversal_is_refused_through_the_widened_set, kind: negative, form: test,
+  - {id: d_evidence_pointer_traversal_is_refused_through_the_widened_set, kind: negative, form: clause,
      minted_from: "consensus test_evidence_pointer_walks_traversal_syntax_through_the_widened_three_file_set",
-     discharged_by: test_traversal_syntax_is_refused_on_every_widened_episode_level_pointer,
+     status: retired, outcome: {nl: "RETIRED by #1234 — #1234 A1 replaced the widened per-subject allowlist with one typed, no-follow resolver, whose traversal and absolute-path refusals are pinned in judge_contrast_1234; `test_traversal_syntax_is_refused_on_every_widened_episode_level_pointer`, which discharged this demand, was deleted or rewritten with the behaviour it pinned."},
      binds: ["judge_reply.access[world-subject]"]}
   - {id: d_a_withheld_world_is_still_drawn, kind: negative, form: clause,
      minted_from: "consensus test_a_withheld_world_is_still_drawn_and_still_says_something_about_the_world",
@@ -571,9 +571,9 @@ demands:
      minted_from: "consensus test_the_witness_read_is_recorded_wherever_reads_are_recorded (brief F3)",
      status: retired, outcome: {nl: "RETIRED by #1224 — the live oracle replaced the replay review, its reachability block, the base witness, the withholding ladder, the mechanical world finding and pattern-keyed samples; `test_both_new_reads_go_through_the_recording_read_door_with_the_plain_ctx`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["base_pattern.access[base-arm]", "base_pattern.access[witness]"]}
-  - {id: d_family_draws_disagree_take_the_majority, kind: domain-outcome, form: test,
+  - {id: d_family_draws_disagree_take_the_majority, kind: domain-outcome, form: clause,
      minted_from: "consensus test_the_family_draws_do_not_agree",
-     discharged_by: test_disagreeing_family_draws_resolve_by_majority_as_today,
+     status: retired, outcome: {nl: "RETIRED by #1234 — #1234 retired the family verdict word and A13 combines the family call's draws by union; `test_disagreeing_family_draws_resolve_by_majority_as_today`, which discharged this demand, was deleted or rewritten with the behaviour it pinned."},
      binds: ["interacts(_run_family_draw->family_prompt).payload", "judge_record.identity"]}
   - {id: d_the_family_call_is_unconditional, kind: behavior, form: test,
      minted_from: "consensus test_the_family_call_is_made_for_an_episode_with_nothing_to_separate",
@@ -884,7 +884,7 @@ demands:
      binds: ["questioner_findings_channel.identity", "drives(_grade_world->append_rows)"]}
   - {id: d_the_world_lane_does_not_share_the_defender_lanes_unqueueable_early_return, kind: parity, form: test,
      minted_from: "A3(g): the world lane does NOT share the defender lane's unqueueable early return — a defender finding that cannot be queued must not silently take the world findings with it",
-     discharged_by: test_an_unqueueable_defender_finding_does_not_suppress_the_world_findings,
+     discharged_by: test_a_not_measured_world_queues_no_defender_row_and_still_queues_its_world_findings,  # renamed by #1234's migration
      binds: ["drives(_grade_world->append_rows)", "interacts(append_rows->findings_channel)",
              "interacts(append_rows->questioner_findings_channel)"]}
   - {id: d_an_ungradable_world_enqueues_no_findings_of_either_subject, kind: negative, form: test,
