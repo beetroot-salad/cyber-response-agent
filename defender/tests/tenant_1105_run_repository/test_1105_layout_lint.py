@@ -92,7 +92,7 @@ HELPERS = frozenset({"artifact_file", "artifact_dir", "plain_file", "contained_p
 NAMED_GATED = ("RunPaths", "RUN_LAYOUT", "SessionPaths", "WIRE_LOG_NAMES", "GATE_METADATA_KEY",
                "RunLayout", "WireLogNames", "resolve_run_bundle")
 #: The door's public names that are not layout names (D1.3).
-NON_LAYOUT = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref", "RunId",
+NON_LAYOUT = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref", "case_ref_of_digest", "RunId",
                         "open_run", "list_run_ids", "bound_runs", "run_exists",
                         "record_episode_runs", "episode_runs", "sibling_run_ids",
                         "episode_sibling_ids", "RunRefused",

@@ -54,7 +54,8 @@ LAYOUT_NAMES = frozenset({
     "TOOL_TRACE", "POLICY_DENIALS", "BUDGET", "CIRCUIT_BREAKER", "LESSONS_LOADED",
     "SESSION_POINTER", "RUNTIME_HTML", "BOX_SENTINEL", "RUN_END_SIDECAR_SUFFIX",
     "SCRUB_VERDICT_SUFFIX", "ACCOUNTING_FAILURES_SUFFIX", "TICKET_WRITE_SUFFIX",
-    "ORACLE_HELD_SUFFIX", "SESSIONS_DIRNAME", "RunLayout", "RUN_LAYOUT", "WireLogNames", "WIRE_LOG_NAMES", "RunPaths",
+    "ORACLE_HELD_SUFFIX", "ALERT_INPUT_DIRNAME", "ALERT_RECORD", "alert_input_shape",
+    "SESSIONS_DIRNAME", "RunLayout", "RUN_LAYOUT", "WireLogNames", "WIRE_LOG_NAMES", "RunPaths",
     "SessionPaths", "LEAD_ID_BODY", "LEAD_ID_RE", "GATHER_RAW_SHAPE", "CASE_ANSWER_KEY_NAMES",
     "is_case_answer_key", "gather_summaries_shape", "artifact_file", "plain_file", "artifact_dir",
     "resolve_run_bundle", "contained_payload",
@@ -64,7 +65,8 @@ LAYOUT_IMPORTED = ("ALIAS_READ_REFUSAL", "Path", "PurePosixPath", "annotations",
                    "errno", "is_plain_entry", "re", "refuse_bad_case_id", "stat")
 #: The private layout helpers `_episode_paths.py` imports from the submodule (R4-27).
 PRIVATE_HELPERS = ("_check_component", "_check_index", "_confine")
-HANDLE_NAMES = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref"})
+HANDLE_NAMES = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref",
+                          "case_ref_of_digest"})
 #: The door's 15 non-layout public names (D1.3).
 NON_LAYOUT_PUBLIC = HANDLE_NAMES | {
     "RunId", "open_run", "list_run_ids", "bound_runs", "run_exists", "record_episode_runs",
@@ -372,7 +374,7 @@ def test_1105_the_package_holds_exactly_its_seven_pinned_submodules():  # name k
 
 
 def test_1105_the_door_serves_exactly_its_68_public_names():  # 70 since the owner rulings, 71 with #1224's ORACLE_HELD_SUFFIX; the spec graph cites this name
-    """defender.run_repository.__all__ is exactly the 71 public names: the layout's 54 (the
+    """defender.run_repository.__all__ is exactly the 75 public names: the layout's 57 (the
     door's layout surface equals _layout's public names, NM-06), Run, RunRecord, ArchivedWorld,
     RecordHandle, case_ref, RunId, open_run, list_run_ids, bound_runs, run_exists,
     record_episode_runs, episode_runs, sibling_run_ids, episode_sibling_ids, RunRefused,
@@ -389,7 +391,7 @@ def test_1105_the_door_serves_exactly_its_68_public_names():  # 70 since the own
         f"__all__ differs from D1.3's 68 plus the two ruled names: missing "
         f"{sorted((LAYOUT_NAMES | NON_LAYOUT_PUBLIC) - served)}, extra "
         f"{sorted(served - LAYOUT_NAMES - NON_LAYOUT_PUBLIC)}")
-    assert len(served) == 71, f"{len(served)} public names, not 71"
+    assert len(served) == 75, f"{len(served)} public names, not 75"
     layout_public = {n for n in _module_defs(ast.parse(Path(_layout.__file__).read_text(
         "utf-8"))) if not n.startswith("_")}
     assert served - NON_LAYOUT_PUBLIC == layout_public, (
@@ -460,7 +462,7 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
     assert not seen["handle"], f"a layout name loaded more than the layout (R4-6): {seen}"
     assert not seen["tenant"], f"a layout name loaded more than the layout (R4-6): {seen}"
     assert not seen["pydantic"], f"a layout name loaded more than the layout (R4-6): {seen}"
-    assert seen["alert"] == str(RUN_LAYOUT.alert) == "alert.json", (
+    assert seen["alert"] == str(RUN_LAYOUT.alert) == "alert_input/alert.json", (
         f"the child's RUN_LAYOUT is not the door's: {seen}")
     assert seen["paths"] == RunPaths.__name__ == "RunPaths", f"the child's RunPaths: {seen}"
     proc = _child("from defender.run_repository import RunId, RunRefused\n"
@@ -471,7 +473,7 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
                   "missing = [n for n in rr.__all__ if getattr(rr, n, None) is None]\n"
                   "print(len(rr.__all__), missing)\n")
     assert proc.returncode == 0, f"not every public name imports in a fresh interpreter: {_out(proc)}"
-    assert _out(proc).split()[0] == "71", f"not every public name imports in a fresh interpreter: {_out(proc)}"
+    assert _out(proc).split()[0] == "75", f"not every public name imports in a fresh interpreter: {_out(proc)}"
     assert "[]" in _out(proc), f"not every public name imports in a fresh interpreter: {_out(proc)}"
 
 
@@ -798,9 +800,9 @@ def test_1105_lint_baselines_name_no_deleted_path_and_unused_public_names_cite_p
     moved = {
         "defender/run_repository/_handle.py: unused attribute 'logger_factory' (60% confidence)",
         "defender/run_repository/_handle.py: unused property 'subcollections' (60% confidence)",
-        "defender/run_repository/_handle.py: unused variable 'alert_ref' (60% confidence)",
-        "defender/run_repository/_handle.py: unused variable 'tables' (60% confidence)",
     }
+    # #1222: `alert_ref` and `tables` left the baseline too — the digest-keyed case reference and
+    # the judge's reads now give vulture a reader for both.
     # #1224: the fifth, `_layout.py`'s `resolve_run_bundle`, left the baseline — vulture no
     # longer reports it.
     assert moved <= set(baseline), (
@@ -1022,6 +1024,8 @@ def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_p
     t = H.tenant(tmp_path / "data", H.T_ID)
     runs = H.runs_folder(t)
     H.make_run(runs, "r1")
+    from defender.tests._alert_plant import plant_alert
+    plant_alert(runs / "r1")
     H.plant_record(runs, "r1-n1", t.id, "r1", {"a": "r1-n1-a"})
     run = open_run(t, RunId.parse("r1"))
     assert getattr(run, "run_dir", None) == runs / "r1", f"open_run handed out {run!r}"
