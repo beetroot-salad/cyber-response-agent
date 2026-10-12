@@ -290,7 +290,8 @@ def test_921_enqueue_refuses_discard_and_corpus_contradiction(tmp_path):
                    draws=1, state=env_state())
         record = J.judge_record(ep)
         rows = J.world_rows(record)
-        assert rows["b"]["measured"] is False and word in rows["b"]["not_measured_reason"]
+        assert rows["b"]["measured"] is False
+        assert word in rows["b"]["not_measured_reason"]
         assert record["enqueued_rows"] == 0
         assert J.enqueued_rows(record) == [], f"a world filing {word} appended defender rows"
         lanes = {e["lane"] for e in record["dispositions"]
@@ -440,7 +441,8 @@ def test_921_finding_row_carries_the_twelve_keys_persist_writes(tmp_path):
             f"row keys differ from the queue's shape: {sorted(set(row) ^ set(J.ROW_KEYS))}")
         assert row["direction"] == "family"
         assert "judge_outcome" not in row
-        assert row["contrast_evidence"] and isinstance(row["contrast_evidence"], list)
+        assert isinstance(row["contrast_evidence"], list)
+        assert row["contrast_evidence"]
         assert isinstance(row["on_verdict_path"], bool)
         assert isinstance(row["world_label_doubted"], bool)
         assert row["type"] in J.mod("learning.core.config").QUEUEABLE_FINDING_TYPES
@@ -689,7 +691,8 @@ def test_921_discard_needs_a_majority_of_draws(tmp_path):
 
     record = J.judge_record(ep)
     row = J.world_rows(record)["b"]
-    assert row["draws_disagree"] is True and row["measured"] is None, row
+    assert row["draws_disagree"] is True, row
+    assert row["measured"] is None, row
     assert J.enqueued_rows(record) == [], "a world whose draws disagree queued defender rows"
     assert {e["lane"] for e in record["dispositions"]
             if e["finding_id"].rsplit("/", 1)[1] == "0"} == {"draws_disagree"}
@@ -700,7 +703,8 @@ def test_921_discard_needs_a_majority_of_draws(tmp_path):
     J.grade_at(unanimous, judge=J.FakeJudge(default=incoherent, family_default=J.as_reply_text(
         J.family_reply())), draws=3, state=env_state())
     row = J.world_rows(J.judge_record(unanimous))["b"]
-    assert row["measured"] is False and row["draws_disagree"] is False, (
+    assert row["draws_disagree"] is False, row
+    assert row["measured"] is False, (
         "positive control: three draws agreeing on `incoherent` did not take the world out of "
         "measurement")
 
