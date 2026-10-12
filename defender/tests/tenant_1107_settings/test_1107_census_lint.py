@@ -79,17 +79,15 @@ def _has(findings: list[str], rel: str, line: int) -> bool:
 
 @pytest.mark.gate
 def test_d4_elastic_keys_one_place():
-    """Outside the ElasticSettings view and the elastic adapter, no platform module (runtime/,
-    learning/, run.py) reads an ELASTIC_* or ELASTICSEARCH_URL key out of a SystemConfig or a config
-    file. Platform code interprets the Elastic keys only through record.elastic. F12 resolved
-    (auto): the census flags reads of a key's value from a SystemConfig or a config file outside the
-    view; a verb-to-field mapping re-expressed over ElasticSettings attributes passes."""
+    """Outside the elastic adapter, no platform module (runtime/, learning/, run.py) reads an
+    ELASTIC_* or ELASTICSEARCH_URL key out of a SystemConfig or a config file. The Elastic view that
+    once held them for platform code went with #1222's M1, so the adapter is the one reader."""
     # The interacting sites at base: the estate stager's configured_patterns / default-index map,
     # staging's write_door_from_env, lead-zero's _resolve_item1 — each reads the keys raw.
     scanned, found = C.elastic_key_reads(REPO)
     assert scanned > 0, "the key census scanned no platform module — it can see nothing"
     assert found == [], (
-        "platform code reads Elastic keys raw instead of through record.elastic:\n"
+        "platform code reads Elastic keys raw instead of leaving them to the adapter:\n"
         + "\n".join(found))
 
 
@@ -104,11 +102,11 @@ def test_d4_keys_census_detects_planted(tmp_path):
                "\n"
                "def alerts_index_by_name(cfg):\n"
                "    return cfg.get(_KEY)  # @named-key\n")
-    # F12's pass case: a verb-to-field mapping over ElasticSettings attributes.
+    # A pass case: a verb-to-field mapping that names no Elastic key at all.
     passing = ("_FIELD = {'query': 'events_index', 'alerts': 'alerts_index'}\n"
                "\n"
                "def index_for(record, verb):\n"
-               "    return getattr(record.elastic, _FIELD[verb])\n")
+               "    return _FIELD[verb]\n")
     S.plant_module(tmp_path, "defender/runtime/planted_1107.py", planted)
     S.plant_module(tmp_path, "defender/learning/branch/view_user_1107.py", passing)
     at = _lines(planted)
@@ -120,7 +118,7 @@ def test_d4_keys_census_detects_planted(tmp_path):
         assert _has(found, "defender/runtime/planted_1107.py", at[label]), (
             f"the key census missed the planted {label} read of ELASTIC_ALERTS_INDEX: {found}")
     assert not [f for f in found if "view_user_1107" in f], (
-        f"the census flagged a mapping over ElasticSettings attributes (F12 passes it): {found}")
+        f"the census flagged a mapping that names no Elastic key: {found}")
 
 
 # ======================================================================================

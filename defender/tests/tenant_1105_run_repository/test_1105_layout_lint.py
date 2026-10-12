@@ -1083,12 +1083,12 @@ def class_level():
     return Tenant.runs
 
 
-def _tenant_of() -> Tenant:
+def _tenant_planted_by() -> Tenant:
     raise NotImplementedError
 
 
 def annotated_return():
-    return _tenant_of().runs
+    return _tenant_planted_by().runs
 
 
 @dataclasses.dataclass

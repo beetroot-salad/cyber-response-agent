@@ -46,11 +46,11 @@ class _Order(logging.Handler):
 
     def __init__(self, order: list[str]) -> None:
         super().__init__(level=logging.WARNING)
-        self._order = order
+        self._steps = order
 
     def emit(self, record: logging.LogRecord) -> None:
         if "narration cross-check FAILED" in record.getMessage():
-            self._order.append(CROSS_CHECK)
+            self._steps.append(CROSS_CHECK)
 
 
 class _Tail(SpecTail):

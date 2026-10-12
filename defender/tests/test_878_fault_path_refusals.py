@@ -169,9 +169,9 @@ def test_a_naive_created_at_does_not_raise_out_of_the_elapsed_check(tmp_path):
     `datetime.now(UTC) - origin` then raised `TypeError: can't subtract offset-naive and
     offset-aware datetimes`.
 
-    This is F-17's UNCONDITIONAL path: `lead_zero._budget_gate` is documented as not gated on
+    This is F-17's UNCONDITIONAL path: `lead_zero._budget_account` is documented as not gated on
     `DEFENDER_BUDGET_ENFORCE` (which defaults to False) and is called from `_issue` inside
-    `resolve_lead_zero`, whose only handler catches `BudgetKill` and `RunAborted` — so the
+    the correlation lead's driver, whose only handler catches `BudgetKill` and `RunAborted` — so the
     `TypeError` escaped `_user_prompt`, `run_investigation` and `main` before MAIN's first
     prompt was ever built.
 

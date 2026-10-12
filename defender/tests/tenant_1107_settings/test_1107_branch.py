@@ -29,7 +29,6 @@ from defender.runtime import run_tenant
 from defender.scripts.adapters import elastic_adapter
 from defender._episode_handle import Episode
 from defender.tests import _triplet_947 as T
-from defender.tests.e2e import _lead_zero_808 as LZ
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
 from defender.tests.tenant_1107_settings import _spec1107 as S
 

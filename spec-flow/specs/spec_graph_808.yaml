@@ -105,10 +105,11 @@ demands:
   # lead-0's own frame. It gains the three binds it did not carry: the QueryCapture seam, the
   # `status` value, and the handler at the lead-0 call site.
   # =========================================================================================
-  - {id: d0_lead_zero_return_contract, kind: behavior, form: test,
+  - {id: d0_lead_zero_return_contract, kind: behavior, form: clause,
      binds: ["lead_zero", "interacts(lead_zero->orient_block).payload",
              "drives(run_investigation->lead_zero)", "interacts(lead_zero->verb_registry)"],
-     discharged_by: test_lead_zero_returns_section_text_entities_and_status,
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_lead_zero_returns_section_text_entities_and_status`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."},
      rejected: [{nl: "a rendered `str` return: it cannot carry the entity sets d17 binds"},
                 {nl: "singular host/user/source-ip entities: K9 binds SETS, because the issue's
        own worked example resolves to two users from two source IPs"},
@@ -132,16 +133,18 @@ demands:
        is production behaviour and is not disabled, stubbed or dodged by varying predicates"}]}
 
   # ---- item 1: the ancestor resolution ----------------------------------------------------
-  - {id: d1_runs_before_first_model_turn, kind: behavior, form: test,
+  - {id: d1_runs_before_first_model_turn, kind: behavior, form: clause,
      binds: ["drives(run_investigation->lead_zero)", "interacts(lead_zero->orient_block)",
              "lead_id.domain.distinguished[l-000]", "lead_id.domain.distinguished[l-00c]"],
-     discharged_by: test_lead_zero_resolves_before_main_first_request}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_lead_zero_resolves_before_main_first_request`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d60_shell_alert_fetch_by_alert_id, kind: behavior, form: test,
+  - {id: d60_shell_alert_fetch_by_alert_id, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->elastic_query).payload", "signal_index",
              "elastic_query.access[verb-alerts]",
              "signal_index.domain.alternatives[a signal_index diverging from ELASTIC_ALERTS_INDEX]"],
-     discharged_by: test_item_one_fetches_the_shell_alert_by_alert_id_against_its_own_signal_index,
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_item_one_fetches_the_shell_alert_by_alert_id_against_its_own_signal_index`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."},
      rejected: [{nl: "F4 arm (a) — extending the alert projection to carry
        kibana.alert.group.id: brief R3/g17 (executed) show nothing under defender/ produces
        the run-dir alert.json, so it cannot be demanded of shipped code"},
@@ -156,29 +159,32 @@ demands:
     # caught it (FINDING 1). Its index costs no new input: r6/g20 (executed) show all five
     # checked-in fixtures carry `signal_index`.
 
-  - {id: d59_unusable_alert_id_issues_no_shell_fetch, kind: negative, form: test,
+  - {id: d59_unusable_alert_id_issues_no_shell_fetch, kind: negative, form: clause,
      binds: ["interacts(lead_zero->elastic_query).payload", "signal_index",
              "interacts(lead_zero->executed_queries)"],
-     discharged_by: test_an_alert_id_that_is_not_a_document_id_issues_no_shell_fetch}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_an_alert_id_that_is_not_a_document_id_issues_no_shell_fetch`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
     # K13's mechanism at its SECOND id-bearing predicate, on the same executed probe: P1a shows
     # an empty predicate returns the confined pattern's newest 20 documents, so a degenerate
     # `alert_id` would have `group.id` read off a stranger's document and every later branch
     # would follow it. PAIRED POSITIVE CONTROL: d60, the same address under the complementary
     # condition.
 
-  - {id: d58_unresolvable_shell_falls_back, kind: behavior, form: test,
+  - {id: d58_unresolvable_shell_falls_back, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->elastic_query).payload", "alert_group_id",
              "elastic_query.access[verb-query]"],
-     discharged_by: test_a_shell_alert_unresolvable_by_alert_id_falls_back_to_the_batched_fetch}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_a_shell_alert_unresolvable_by_alert_id_falls_back_to_the_batched_fetch`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
     # The second of K5's two now-testable premises. F10's own resolved rule ("fall back on no
     # group OR no building blocks") applied one state earlier: a shell fetch that finds nothing
     # is not evidence that this alert has no ancestors.
 
-  - {id: d2_building_block_primary_fetch, kind: behavior, form: test,
+  - {id: d2_building_block_primary_fetch, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->elastic_query).payload", "alert_group_id",
              "elastic_query.access[verb-alerts]", "alert_group_id.domain.distinguished[grp-0]",
              "signal_index.domain.alternatives[a signal_index diverging from ELASTIC_ALERTS_INDEX]"],
-     discharged_by: test_group_id_present_fetches_building_blocks_from_the_alerts_own_signal_index,
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_group_id_present_fetches_building_blocks_from_the_alerts_own_signal_index`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."},
      rejected: [{nl: "the .ds- -> datastream mapping is NOT the primary path; it is the
        fallback, and the primary path must reach no logs-* index at all"},
        {nl: "the ELASTIC_ALERTS_INDEX config constant: K16 reads the alert's own signal_index"},
@@ -186,10 +192,11 @@ demands:
        FAILED an implementation doing what §7 resolved twice: the sequence is the shell fetch
        THEN the group-scoped fetch"}]}
 
-  - {id: d3_chronological_ordering, kind: behavior, form: test,
+  - {id: d3_chronological_ordering, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->elastic_query).response",
              "interacts(lead_zero->orient_block).payload"],
-     discharged_by: test_resolved_ancestors_render_chronologically_on_both_paths,
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_resolved_ancestors_render_chronologically_on_both_paths`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."},
      rejected: [{nl: "the backend's own order: the adapter's default is newest-first, which
        renders #808's own worked example backwards"},
        {nl: "sorting by kibana.alert.group.index at the backend: resolve_sort admits exactly
@@ -199,63 +206,72 @@ demands:
     # ID RENAMED from `d3_group_index_ordering`: K4 resolved CHRONOLOGICAL on both paths, so a
     # slug naming group.index would name the reading the ledger refuted.
 
-  - {id: d4_ds_pattern_fallback_fetch, kind: behavior, form: test,
+  - {id: d4_ds_pattern_fallback_fetch, kind: behavior, form: clause,
      binds: ["ancestor_events", "interacts(lead_zero->elastic_query).payload",
              "elastic_query.access[verb-query]"],
-     discharged_by: test_no_group_falls_back_to_batched_id_fetch,
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_no_group_falls_back_to_batched_id_fetch`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."},
      rejected: [{nl: "exactly ONE backend call: the shell fetch precedes the branch, so the
        fallback is the shell fetch THEN one batched _id fetch — two calls, never one"}]}
 
-  - {id: d5_one_call_per_backing_index, kind: shape, form: test,
+  - {id: d5_one_call_per_backing_index, kind: shape, form: clause,
      binds: ["interacts(lead_zero->elastic_query).payload", "ancestor_events.domain",
              "confine_index.domain.distinguished[logs-system.auth-*,logs-falco-*]"],
-     discharged_by: test_one_backend_call_per_distinct_backing_index_never_one_per_ancestor,
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_one_backend_call_per_distinct_backing_index_never_one_per_ancestor`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."},
      rejected: [{nl: "'one backend call regardless of ancestor count', the design's own
        sentence: c4 (executed) refuses a comma-joined multi-index expression WHOLE, so two
        backing indices structurally cannot share a call"},
        {nl: "counting the shell fetch as one of the per-index calls: it precedes them and is
        keyed on the alert's own id, not on a backing index"}]}
 
-  - {id: d6_ds_to_datastream_mapping_general, kind: domain-outcome, form: test,
+  - {id: d6_ds_to_datastream_mapping_general, kind: domain-outcome, form: clause,
      binds: ["ancestor_events.domain.distinguished[.ds-logs-falco.alerts-default-2026.04.30-000003]",
              "confine_index"],
-     discharged_by: test_ds_backing_index_maps_to_a_confined_datastream_pattern,
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_ds_backing_index_maps_to_a_confined_datastream_pattern`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."},
      rejected: [{nl: "the ported form must NOT be project_alert.py's `\"system.auth\" in index`
        substring test — that is a special case, not a mapping, and it leaves the falco
        fixture's ancestor index unmapped and refused"},
        {nl: "a bare logs-*: the rewrite is a widening transformation on external input
        upstream of the only confinement gate"}]}
 
-  - {id: d6b_system_auth_backing_index, kind: domain-outcome, form: test,
+  - {id: d6b_system_auth_backing_index, kind: domain-outcome, form: clause,
      binds: ["ancestor_events.domain.distinguished[.ds-logs-system.auth-default-2026.05.24-000002]",
              "confine_index"],
-     discharged_by: test_the_system_auth_backing_index_maps_by_the_same_general_rule}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_the_system_auth_backing_index_maps_by_the_same_general_rule`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d6c_unmapped_backing_index_passthrough, kind: domain-outcome, form: test,
+  - {id: d6c_unmapped_backing_index_passthrough, kind: domain-outcome, form: clause,
      binds: ["ancestor_events.domain", "confine_index",
              "interacts(lead_zero->orient_block).payload"],
-     discharged_by: test_an_unmapped_backing_index_passes_through_unchanged_and_is_refused}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_an_unmapped_backing_index_passes_through_unchanged_and_is_refused`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d7_resolved_fields_in_block, kind: behavior, form: test,
+  - {id: d7_resolved_fields_in_block, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->orient_block).payload",
              "interacts(lead_zero->elastic_query).response"],
-     discharged_by: test_resolved_ancestor_docs_carry_timestamp_message_and_structured_fields}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_resolved_ancestor_docs_carry_timestamp_message_and_structured_fields`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d30_empty_backing_index, kind: domain-outcome, form: test,
+  - {id: d30_empty_backing_index, kind: domain-outcome, form: clause,
      binds: ["ancestor_events.domain.distinguished[]",
              "interacts(lead_zero->orient_block).payload"],
-     discharged_by: test_an_ancestor_with_no_backing_index_degrades_that_slot_only}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_an_ancestor_with_no_backing_index_degrades_that_slot_only`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d31_absent_signal_index, kind: domain-outcome, form: test,
+  - {id: d31_absent_signal_index, kind: domain-outcome, form: clause,
      binds: ["signal_index.domain.distinguished[]", "ELASTIC_ALERTS_INDEX",
              "interacts(lead_zero->elastic_query).payload"],
-     discharged_by: test_an_absent_signal_index_falls_back_to_the_configured_alerts_index}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_an_absent_signal_index_falls_back_to_the_configured_alerts_index`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d35_shortfall_note, kind: behavior, form: test,
+  - {id: d35_shortfall_note, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->orient_block).payload",
              "RETURNED_DOC_CAP.domain.distinguished[20]",
              "interacts(lead_zero->elastic_query).response"],
-     discharged_by: test_a_short_or_truncated_ancestor_fetch_carries_an_explicit_shortfall_note}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_a_short_or_truncated_ancestor_fetch_carries_an_explicit_shortfall_note`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
   - {id: d36_unparseable_body_distinct, kind: behavior, form: clause,
      outcome: {nl: "the shortfall note distinguishes a 200 response whose body did not parse
@@ -269,24 +285,27 @@ demands:
     # this needs a new field on `search_envelope`, which no §7 decision authorises, and the
     # FakeVerbs seam replaces the adapter, so the suite cannot express the difference at all.
 
-  - {id: d37_no_fetch_without_a_usable_id, kind: negative, form: test,
+  - {id: d37_no_fetch_without_a_usable_id, kind: negative, form: clause,
      binds: ["interacts(lead_zero->elastic_query).payload",
              "interacts(lead_zero->executed_queries)", "interacts(lead_zero->gather_payloads)",
              "interacts(lead_zero->circuit_breaker)", "interacts(lead_zero->orient_block).payload",
              "drives(lead_zero->gather_dispatch)"],
-     discharged_by: test_no_usable_ancestor_identifier_issues_no_fetch_at_all}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_no_usable_ancestor_identifier_issues_no_fetch_at_all`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d37b_batched_fetch_positive_control, kind: behavior, form: test,
+  - {id: d37b_batched_fetch_positive_control, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->elastic_query).payload",
              "interacts(lead_zero->executed_queries)", "interacts(lead_zero->gather_payloads)",
              "interacts(lead_zero->orient_block).payload"],
-     discharged_by: test_usable_ancestor_identifiers_do_issue_the_batched_fetch}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_usable_ancestor_identifiers_do_issue_the_batched_fetch`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
     # d37's PAIRED POSITIVE CONTROL: same addresses, complementary condition.
 
-  - {id: d62_render_from_memory_then_write, kind: behavior, form: test,
+  - {id: d62_render_from_memory_then_write, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->orient_block).payload",
              "interacts(lead_zero->executed_queries)"],
-     discharged_by: test_the_rendered_block_survives_a_failed_queries_table_write,
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_the_rendered_block_survives_a_failed_queries_table_write`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."},
      rejected: [{nl: "write-then-render: a queries table that cannot be written would then
        cost the run its evidence rather than its evidence row, and the run dir and the ORIENT
        text would disagree about whether item 1 happened"}]}
@@ -294,11 +313,12 @@ demands:
     # `test_orient_text_says_unavailable_while_the_run_dir_shows_a_completed_write` — is a
     # PROMOTION whose own settled answer conceded "no sentence states an ordering".
 
-  - {id: d61_breaker_contribution_capped, kind: behavior, form: test,
+  - {id: d61_breaker_contribution_capped, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->circuit_breaker)", "circuit_breaker.domain.distinguished[2]",
              "interacts(lead_zero->orient_block).payload",
              "interacts(lead_zero->elastic_query).payload"],
-     discharged_by: test_item_one_stops_at_one_recorded_per_system_failure,
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_item_one_stops_at_one_recorded_per_system_failure`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."},
      rejected: [{nl: "'closed by K7's routing, not by a cap of its own' — this demand's OWN
        first form, and it is FALSE: is_tripped returns failures >= PER_SYSTEM_FAIL_LIMIT, so
        after one recorded failure the screen PASSES and the second call executes. Two executed
@@ -324,10 +344,11 @@ demands:
     # both against the real primitive rather than restating either. A clause was right for
     # "orient.py stays a text assembler"; it is the wrong form for a number.
 
-  - {id: d63_raising_shell_falls_through, kind: behavior, form: test,
+  - {id: d63_raising_shell_falls_through, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->elastic_query).payload", "ancestor_events",
              "elastic_query.access[verb-query]", "circuit_breaker.domain.distinguished[64]"],
-     discharged_by: test_a_shell_fetch_that_raises_falls_through_to_the_ancestor_branch,
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_a_shell_fetch_that_raises_falls_through_to_the_ancestor_branch`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."},
      rejected: [{nl: "ending item 1 outright on a failed shell fetch: that discards ancestor
        evidence `ancestor_events` could still have supplied, over a blip that has nothing to
        do with the ancestors"},
@@ -345,24 +366,28 @@ demands:
     # pairing sentence — fall-through preserves the evidence, the cap prevents it costing the
     # breaker — becomes achievable on the arm where it previously could not hold.
 
-  - {id: d51_block_size_ceiling, kind: behavior, form: test,
+  - {id: d51_block_size_ceiling, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->orient_block).payload", "gather_payloads.identity"],
-     discharged_by: test_an_oversized_ancestor_message_is_elided_with_a_pointer_to_its_payload}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_an_oversized_ancestor_message_is_elided_with_a_pointer_to_its_payload`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d52_shell_alert_filtered, kind: behavior, form: test,
+  - {id: d52_shell_alert_filtered, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->elastic_query).response",
              "interacts(lead_zero->orient_block).payload", "alert_group_id"],
-     discharged_by: test_the_group_scoped_fetch_filters_the_shell_alert_out_of_its_own_result}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_the_group_scoped_fetch_filters_the_shell_alert_out_of_its_own_result`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d55_zero_building_blocks_falls_back, kind: behavior, form: test,
+  - {id: d55_zero_building_blocks_falls_back, kind: behavior, form: clause,
      binds: ["alert_group_id", "interacts(lead_zero->elastic_query).payload",
              "elastic_query.access[verb-alerts]", "elastic_query.access[verb-query]"],
-     discharged_by: test_a_group_that_resolves_to_no_building_blocks_falls_back}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_a_group_that_resolves_to_no_building_blocks_falls_back`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d56_absent_group_id_cell, kind: domain-outcome, form: test,
+  - {id: d56_absent_group_id_cell, kind: domain-outcome, form: clause,
      binds: ["alert_group_id.domain.distinguished[]",
              "interacts(lead_zero->elastic_query).payload"],
-     discharged_by: test_the_batched_predicate_never_reaches_a_second_backing_index,
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_the_batched_predicate_never_reaches_a_second_backing_index`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."},
      rejected: [{nl: "exactly ONE backend call at this cell either — the absent-group member
        is reached THROUGH the shell fetch, not instead of it"}]}
 
@@ -376,40 +401,46 @@ demands:
     # asserting a name this leaf invented is exactly the author-imagined fault the charge bans.
 
   # ---- item 1: the run-dir tables ---------------------------------------------------------
-  - {id: d8_claim_lead_l000_sidecar, kind: behavior, form: test,
+  - {id: d8_claim_lead_l000_sidecar, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->lead_sidecar)", "claim_lead",
              "lead_id.domain.distinguished[l-000]"],
-     discharged_by: test_lead_zero_claims_l000_lead_row}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_lead_zero_claims_l000_lead_row`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d28_claim_lead_swallow_arm, kind: domain-outcome, form: test,
+  - {id: d28_claim_lead_swallow_arm, kind: domain-outcome, form: clause,
      binds: ["claim_lead.domain.distinguished[0]", "interacts(lead_zero->lead_sidecar)",
              "interacts(lead_zero->executed_queries)"],
-     discharged_by: test_lead_zero_goal_construction_never_hits_claim_leads_silent_zero}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_lead_zero_goal_construction_never_hits_claim_leads_silent_zero`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d29_claim_lead_reuse_arm, kind: domain-outcome, form: test,
+  - {id: d29_claim_lead_reuse_arm, kind: domain-outcome, form: clause,
      binds: ["claim_lead.domain.distinguished[2]", "interacts(lead_zero->lead_sidecar)",
              "drives(run_investigation->lead_zero)"],
-     discharged_by: test_a_harness_side_reclaim_takes_claim_leads_return_two_arm,
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_a_harness_side_reclaim_takes_claim_leads_return_two_arm`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."},
      rejected: [{nl: "routing a harness-side re-claim through gather_dispatch: E7a (executed)
        raises ModelRetry with no model in the loop, escaping into `_user_prompt`"},
        {nl: "'claim_lead raises on a reused id' (CLAUDE.md:75, runtime-loop.md:89) — r1/r15
        (executed) refute it; it returns 2 and prints. The prose is stale and is itself a finding"}]}
 
-  - {id: d9_executed_queries_rows_l000, kind: behavior, form: test,
+  - {id: d9_executed_queries_rows_l000, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->executed_queries)", "executed_queries.identity",
              "gather_payloads.identity"],
-     discharged_by: test_lead_zero_appends_query_rows_keyed_l000}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_lead_zero_appends_query_rows_keyed_l000`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d26_gather_payload_seq_shared, kind: uniqueness, form: test,
+  - {id: d26_gather_payload_seq_shared, kind: uniqueness, form: clause,
      binds: ["gather_payloads.identity", "interacts(lead_zero->gather_payloads)",
              "interacts(query_tool->gather_payloads)"],
-     discharged_by: test_lead_zero_and_the_model_share_one_payload_seq_counter}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_lead_zero_and_the_model_share_one_payload_seq_counter`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d10_query_capture_routing_seam, kind: seam, form: test,
+  - {id: d10_query_capture_routing_seam, kind: seam, form: clause,
      binds: ["interacts(lead_zero->verb_registry)", "verb_registry.access[tool-query-capture]",
              "verb_registry.access[direct-registry]",
              "interacts(lead_zero->executed_queries).payload"],
-     discharged_by: test_lead_zero_issues_its_backend_calls_through_the_query_capture_seam,
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_lead_zero_issues_its_backend_calls_through_the_query_capture_seam`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."},
      rejected: [{nl: "the direct-registry call shape: P2 (executed) ran a DENIED verb to
        completion and ignored a TRIPPED breaker, because six of the eight screens live inside
        QueryCapture and are not inherited"},
@@ -418,43 +449,50 @@ demands:
     # RE-FORMED from `d10_query_row_shape_parity` per obligation N5. A demand that cannot fail
     # is not a demand; what can fail is the routing, and that is what this now binds.
 
-  - {id: d42_leads_table_provenance_field, kind: shape, form: test,
+  - {id: d42_leads_table_provenance_field, kind: shape, form: clause,
      binds: ["interacts(lead_zero->lead_sidecar).payload", "lead_id",
              "lead_id.access[harness-reserved]"],
-     discharged_by: test_the_leads_table_marks_lead_zeros_row_as_harness_authored}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_the_leads_table_marks_lead_zeros_row_as_harness_authored`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d11_lead_repository_joins_l000, kind: behavior, form: test,
+  - {id: d11_lead_repository_joins_l000, kind: behavior, form: clause,
      binds: ["interacts(lead_repository->lead_sidecar)",
              "interacts(lead_repository->executed_queries)"],
-     discharged_by: test_joined_sees_l000_as_a_non_orphan_lead}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_joined_sees_l000_as_a_non_orphan_lead`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d12_reserved_lead_ids_no_collision, kind: uniqueness, form: test,
+  - {id: d12_reserved_lead_ids_no_collision, kind: uniqueness, form: clause,
      binds: ["lead_sidecar.identity", "lead_id", "lead_id.access[harness-reserved]",
              "lead_id.access[model-minted]",
              "lead_id.domain.distinguished[l-000]", "lead_id.domain.distinguished[l-00c]"],
-     discharged_by: test_reserved_harness_lead_ids_never_collide_with_main_minted_ids}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_reserved_harness_lead_ids_never_collide_with_main_minted_ids`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d13_orient_section_degrades_unavailable, kind: behavior, form: test,
+  - {id: d13_orient_section_degrades_unavailable, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->orient_block).payload",
              "drives(run_investigation->lead_zero)", "circuit_breaker.domain.distinguished[64]"],
-     discharged_by: test_each_item_fails_independently_into_an_unavailable_note}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_each_item_fails_independently_into_an_unavailable_note`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d41_lead_zero_call_site_handler, kind: behavior, form: test,
+  - {id: d41_lead_zero_call_site_handler, kind: behavior, form: clause,
      binds: ["drives(run_investigation->lead_zero)", "circuit_breaker.domain.distinguished[2]",
              "interacts(lead_zero->circuit_breaker)"],
-     discharged_by: test_a_run_ending_arm_inside_lead_zero_still_produces_a_run_summary}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_a_run_ending_arm_inside_lead_zero_still_produces_a_run_summary`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
     # Obligation N3 (K8 + P3). `_user_prompt` is called at driver.py:838, outside every handler.
 
-  - {id: d14_lead_zero_module_owns_io, kind: seam, form: test,
+  - {id: d14_lead_zero_module_owns_io, kind: seam, form: clause,
      binds: ["lead_zero", "interacts(lead_zero->elastic_query)",
              "interacts(lead_zero->executed_queries)", "interacts(lead_zero->lead_sidecar)",
              "interacts(replay_harness->verb_registry)"],
-     discharged_by: test_lead_zero_rides_the_injected_verb_registry_seam}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_lead_zero_rides_the_injected_verb_registry_seam`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d49_no_registry_degrades, kind: behavior, form: test,
+  - {id: d49_no_registry_degrades, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->verb_registry)", "interacts(lead_zero->orient_block).payload",
              "interacts(replay_harness->verb_registry)", "drives(lead_zero->gather_dispatch)"],
-     discharged_by: test_a_scenario_that_injects_no_registry_reaches_no_backend_at_all}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_a_scenario_that_injects_no_registry_reaches_no_backend_at_all`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
     # K12. The paired complementary condition is d14, which drives the same scenario WITH a
     # registry and observes the call, the row and the payload.
 
@@ -468,32 +506,36 @@ demands:
        concerns"}]}
 
   # ---- the ORIENT block's trust framing ---------------------------------------------------
-  - {id: d38_one_outer_untrusted_frame, kind: behavior, form: test,
+  - {id: d38_one_outer_untrusted_frame, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->orient_block).payload", "orient_block"],
-     discharged_by: test_the_lead_zero_section_sits_in_one_untrusted_frame_with_its_own_salt,
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_the_lead_zero_section_sits_in_one_untrusted_frame_with_its_own_salt`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."},
      rejected: [{nl: "per-document wraps: they nest identical salt-derived tags and wrap()
        escapes nothing of its own delimiter shape (a2), so an inner close ends the outer span"},
        {nl: "no wrap at all: it ships the one ORIENT section with no trust framing"}]}
 
-  - {id: d39_forged_delimiter_cannot_close_the_frame, kind: negative, form: test,
+  - {id: d39_forged_delimiter_cannot_close_the_frame, kind: negative, form: clause,
      binds: ["interacts(lead_zero->orient_block).payload",
              "interacts(run_investigation->message_history).payload",
              "interacts(lead_zero->lead_sidecar).payload"],
-     discharged_by: test_a_forged_wrap_delimiter_in_ancestor_content_cannot_close_the_frame}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_a_forged_wrap_delimiter_in_ancestor_content_cannot_close_the_frame`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
     # K1's round-2 correction: the frame alone does not close R6's slot. Its paired positive
     # control is d39b. The `executed_queries` half of R6's walk is d57's recorded waiver.
 
-  - {id: d39b_benign_content_reaches_main, kind: behavior, form: test,
+  - {id: d39b_benign_content_reaches_main, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->orient_block).payload",
              "interacts(run_investigation->message_history).payload",
              "interacts(lead_zero->lead_sidecar).payload"],
-     discharged_by: test_benign_ancestor_content_reaches_main_verbatim_inside_the_frame}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_benign_ancestor_content_reaches_main_verbatim_inside_the_frame`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d24_no_join_keys_at_orient, kind: negative, form: test,
+  - {id: d24_no_join_keys_at_orient, kind: negative, form: clause,
      binds: ["interacts(lead_zero->orient_block).payload", "rule_query",
              "interacts(lead_zero->lead_sidecar).payload",
              "interacts(lead_zero->executed_queries).payload"],
-     discharged_by: test_orient_block_asserts_nothing_about_the_rules_join_keys}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_orient_block_asserts_nothing_about_the_rules_join_keys`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
     # PAIRED POSITIVE CONTROL: d7_resolved_fields_in_block, the resolved ancestor documents the
     # block DOES carry, echoed inline in the negative's own test so the pairing is visible.
 
@@ -507,14 +549,16 @@ demands:
      cites: [g4]}
 
   # ---- item 3: the correlation lead -------------------------------------------------------
-  - {id: d16_correlation_contract_harness_authored, kind: behavior, form: test,
+  - {id: d16_correlation_contract_harness_authored, kind: behavior, form: clause,
      binds: ["drives(lead_zero->gather_dispatch)", "interacts(lead_zero->lead_sidecar).payload"],
-     discharged_by: test_correlation_lead_goal_and_dimensions_are_fixed_by_the_harness}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_correlation_lead_goal_and_dimensions_are_fixed_by_the_harness`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d17_correlation_entities_from_item1, kind: behavior, form: test,
+  - {id: d17_correlation_entities_from_item1, kind: behavior, form: clause,
      binds: ["drives(lead_zero->gather_dispatch)",
              "interacts(lead_zero->elastic_query).response"],
-     discharged_by: test_correlation_contract_binds_the_entity_sets_resolved_by_item_one,
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_correlation_contract_binds_the_entity_sets_resolved_by_item_one`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."},
      rejected: [{nl: "a singular host/user/source-ip bind: it drops half the discriminator on
        #808's own worked example and selects nothing on the 2-of-5 fixtures whose host.name is
        null"},
@@ -523,11 +567,12 @@ demands:
        actor mattered three times as much. Deduplication is part of the set contract, not
        decoration, and the demand's own scenario now resolves dev.dana three times"}]}
 
-  - {id: d18_correlation_bounded_window, kind: behavior, form: test,
+  - {id: d18_correlation_bounded_window, kind: behavior, form: clause,
      binds: ["drives(lead_zero->gather_dispatch)", "alert_timestamp.domain",
              "alert_timestamp.domain.distinguished[not-a-timestamp]",
              "alert_timestamp.domain.distinguished[]"],
-     discharged_by: test_correlation_contract_bounds_a_window_around_alert_timestamp}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_correlation_contract_bounds_a_window_around_alert_timestamp`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
   - {id: d19_correlation_alerts_index_only, kind: behavior, form: test,
      binds: ["drives(lead_zero->gather_dispatch)", "elastic_query.access[verb-alerts]",
@@ -540,47 +585,51 @@ demands:
        {nl: "'already gated' as prose: confine_index has one call site, inside _search_verb,
        serving query and alerts only; esql's FROM target is never confined (g6/r19/P2)"}]}
 
-  - {id: d20_correlation_any_signature, kind: domain-outcome, form: test,
+  - {id: d20_correlation_any_signature, kind: domain-outcome, form: clause,
      binds: ["drives(lead_zero->gather_dispatch)", "rule_id.domain.distinguished[any]",
              "interacts(lead_zero->lead_sidecar).payload"],
-     discharged_by: test_correlation_lead_is_not_narrowed_to_the_alerts_own_rule_id}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_correlation_lead_is_not_narrowed_to_the_alerts_own_rule_id`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
   - {id: d21_correlation_reduced_budget, kind: domain-outcome, form: test,
      binds: ["GATHER_REQUEST_LIMIT.domain", "drives(lead_zero->gather_dispatch)",
              "GATHER_REQUEST_LIMIT.domain.alternatives[a reduced per-dispatch limit of 8 for the correlation lead]"],
-     discharged_by: test_correlation_lead_runs_under_a_request_limit_of_eight}
+     discharged_by: test_correlation_ceiling_is_eight_and_mains_leads_keep_forty}
 
   - {id: d32_main_leads_keep_the_full_limit, kind: parity, form: test,
      binds: ["GATHER_REQUEST_LIMIT.domain.distinguished[40]",
              "interacts(run_investigation->GATHER_REQUEST_LIMIT)",
              "drives(run_investigation->gather_dispatch)"],
-     discharged_by: test_mains_own_leads_still_run_under_the_full_forty}
+     discharged_by: test_correlation_ceiling_is_eight_and_mains_leads_keep_forty}
 
-  - {id: d22_correlation_after_item_one, kind: behavior, form: test,
+  - {id: d22_correlation_after_item_one, kind: behavior, form: clause,
      binds: ["drives(lead_zero->gather_dispatch)", "drives(run_investigation->lead_zero)"],
-     discharged_by: test_correlation_lead_is_dispatched_only_after_ancestors_resolve}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_correlation_lead_is_dispatched_only_after_ancestors_resolve`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d23_correlation_result_before_plan, kind: behavior, form: test,
+  - {id: d23_correlation_result_before_plan, kind: behavior, form: clause,
      binds: ["drives(lead_zero->gather_dispatch)",
              "interacts(run_investigation->message_history)",
              "message_history.access[correlation-injection]",
              "message_history.access[store-hydrate]"],
-     discharged_by: test_correlation_summary_reaches_main_before_its_second_request,
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_correlation_summary_reaches_main_before_its_second_request`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."},
      rejected: [{nl: "appending to the `messages` list: ProcessHistory returns
        selection.render(...) = hydrate(store, ...), a list rebuilt FROM the store, so a plain
        append is discarded (brief R2)"},
        {nl: "pinning arrival to 'before PLAN': ORIENT/PLAN are prompt phases with no runtime
        referent (r17), so a test at that address pins a proxy"}]}
 
-  - {id: d27_correlation_second_session, kind: uniqueness, form: test,
+  - {id: d27_correlation_second_session, kind: uniqueness, form: clause,
      binds: ["session_store.identity", "interacts(gather_dispatch->session_store)",
              "interacts(run_investigation->session_store)"],
-     discharged_by: test_correlation_lead_is_the_second_session_in_a_store_whose_first_is_empty}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_correlation_lead_is_the_second_session_in_a_store_whose_first_is_empty`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
   - {id: d53_gather_bookkeeping_seam, kind: seam, form: test,
      binds: ["drives(lead_zero->gather_dispatch)", "interacts(gather_dispatch->session_store)",
              "lead_id.access[harness-reserved]"],
-     discharged_by: test_the_correlation_lead_ends_with_the_same_bookkeeping_every_lead_gets,
+     discharged_by: test_correlation_session_cut_at_its_ceiling_reads_back_as_cut,
      rejected: [{nl: "reusing `_run_gather`'s own `_claim_lead` unchanged: F5 claims `l-00c` at
        run start, and tools_gather.py:277-285 raises ModelRetry on a reuse — so the seam would
        raise on EVERY run, with no model in the loop to retry (a3, executed)"}]}
@@ -589,10 +638,11 @@ demands:
     # `build_agent` (g19), so this is a seam to extract, not a wiring detail — and the extract
     # has one more requirement than K15 stated.
 
-  - {id: d40_lead_zero_work_is_accounted, kind: behavior, form: test,
+  - {id: d40_lead_zero_work_is_accounted, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->run_accounting)", "drives(lead_zero->gather_dispatch)",
              "run_accounting", "interacts(lead_zero->run_accounting).payload"],
-     discharged_by: test_lead_zeros_calls_and_item_threes_dispatch_move_the_runs_own_counters,
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_lead_zeros_calls_and_item_threes_dispatch_move_the_runs_own_counters`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."},
      rejected: [{nl: "discharging it as a side effect of K7's routing: P7 (both legs,
        executed) shows a harness-driven QueryCapture call left budget.json at {} while a
        positive control chaining the budget Hooks capability OUTSIDE QueryCapture moved it"},
@@ -611,42 +661,51 @@ demands:
     # a default. What CAN be asserted moved to the seam — d16's named count dimensions.
 
   # ---- the readers of a namespace that stops being all model-minted ------------------------
-  - {id: d43_join_surface_carries_provenance, kind: coherence, form: test,
+  - {id: d43_join_surface_carries_provenance, kind: coherence, form: clause,
      binds: ["interacts(lead_repository->lead_id)", "interacts(lead_repository->lead_sidecar)"],
-     discharged_by: test_the_join_surface_carries_lead_zeros_provenance_to_its_readers}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_the_join_surface_carries_lead_zeros_provenance_to_its_readers`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d44_cross_check_knows_reserved_ids, kind: coherence, form: test,
+  - {id: d44_cross_check_knows_reserved_ids, kind: coherence, form: clause,
      binds: ["interacts(cross_check_tables->lead_id)"],
-     discharged_by: test_the_narration_cross_check_no_longer_warns_on_the_harness_lead}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_the_narration_cross_check_no_longer_warns_on_the_harness_lead`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d45_golden_case_lead_set, kind: coherence, form: test,
+  - {id: d45_golden_case_lead_set, kind: coherence, form: clause,
      binds: ["interacts(build_case->lead_id)"],
-     discharged_by: test_the_golden_case_builder_keeps_a_scoreable_lead_set}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_the_golden_case_builder_keeps_a_scoreable_lead_set`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d46_invlang_accepts_the_citation, kind: coherence, form: test,
+  - {id: d46_invlang_accepts_the_citation, kind: coherence, form: clause,
      binds: ["interacts(invlang_validate->lead_id)", "interacts(lead_zero->investigation_md)"],
-     discharged_by: test_main_can_cite_lead_zeros_evidence_without_an_undeclared_lead_error}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_main_can_cite_lead_zeros_evidence_without_an_undeclared_lead_error`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d47_main_is_told_the_reserved_ids, kind: coherence, form: test,
+  - {id: d47_main_is_told_the_reserved_ids, kind: coherence, form: clause,
      binds: ["interacts(main_agent->lead_id)", "interacts(main_agent->message_history)"],
-     discharged_by: test_main_is_told_the_reserved_ids_are_already_taken}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_main_is_told_the_reserved_ids_are_already_taken`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d48_harness_writes_the_declaring_row, kind: behavior, form: test,
+  - {id: d48_harness_writes_the_declaring_row, kind: behavior, form: clause,
      binds: ["interacts(lead_zero->investigation_md)", "interacts(invlang_validate->lead_id)"],
-     discharged_by: test_the_harness_writes_lead_zeros_declaring_l_findings_row}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_the_harness_writes_lead_zeros_declaring_l_findings_row`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d33_message_zero_listing, kind: coherence, form: test,
+  - {id: d33_message_zero_listing, kind: coherence, form: clause,
      binds: ["interacts(workspace_map->run_dir_listing)", "interacts(lead_zero->run_dir_listing)"],
-     discharged_by: test_message_zeros_run_dir_listing_names_the_queries_table}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_message_zeros_run_dir_listing_names_the_queries_table`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d34_scrub_walks_the_new_names, kind: coherence, form: test,
+  - {id: d34_scrub_walks_the_new_names, kind: coherence, form: clause,
      binds: ["interacts(scrub->run_dir_listing)", "interacts(lead_zero->run_dir_listing)"],
-     discharged_by: test_scrub_walks_the_run_dir_lead_zero_wrote_into}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_scrub_walks_the_run_dir_lead_zero_wrote_into`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
 
-  - {id: d50_adapter_index_coherence, kind: coherence, form: test,
+  - {id: d50_adapter_index_coherence, kind: coherence, form: clause,
      binds: ["interacts(elastic_adapter->ELASTIC_ALERTS_INDEX)",
              "ELASTIC_ALERTS_INDEX.domain.alternatives[an index= parameter on query/alerts]"],
-     discharged_by: test_the_adapters_own_default_index_read_still_agrees_with_lead_zeros}
+     status: retired,
+     outcome: {nl: "RETIRED by #1222 (D1, A4) - lead-zero's item 1 (the ancestor fetch, its status plumbing and the tables it wrote) was deleted and the correlation lead now runs to its end before MAIN's opening message, so `test_the_adapters_own_default_index_read_still_agrees_with_lead_zeros`, which discharged this demand, went with it. A run's start is pinned by the #1222 suite (defender/tests/alert_front_door_1222)."}}
     # Obligation N7, minted by K16.
 
 structure:

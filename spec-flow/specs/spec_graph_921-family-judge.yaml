@@ -750,7 +750,7 @@ demands:
     form: test
     source: "M1, O4"
     binds: ['interacts(judge_render->runs_base)', 'runs_base.access[sibling_union_scan]']
-    discharged_by: test_921_sibling_union_is_the_runs_base_trials_sharing_the_alert_id
+    discharged_by: test_921_sibling_union_is_the_runs_base_trials_sharing_the_alert_digest
     seed_docstring: >-
       The sibling union is the runs sharing the alert's `alert_id`. No reader at base indexes
       the runs base by `alert_id` (run1/G8) — the queue's grouping key is `alert_rule_key`, a
