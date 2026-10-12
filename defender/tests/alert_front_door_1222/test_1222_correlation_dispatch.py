@@ -956,7 +956,7 @@ def _harness_drive(tmp_path: Path, *, gather: Any, run_id: str,
                                        "goal": "measure the host",
                                        "what_to_summarize": ["one count"]})]),
         H.Turn(text="Investigation complete.")])
-    H.drive(run_dir, run_id=run_id, main=main, gather=gather,
+    main.summary = H.drive(run_dir, run_id=run_id, main=main, gather=gather,
             verbs=_resolving_backend().registry(), tenant=planted.accept(),
             store_factory=S.store_factory(tmp_path / "db", sink=sink))
     return run_dir, main
@@ -998,7 +998,7 @@ def test_p001_incidental_replay_scripts_gather_for_mains_lead(tmp_path):
     rows = read_jsonl_rows(paths.executed_queries)
     assert [r for r in rows if r.get("lead_id") == S.L3] == [], "l-00c's default fake made a call"
     assert (run_dir / "gather_raw" / f"{S.L3}.lead.json").is_file(), "l-00c owns no leads row"
-    budget = json.loads((run_dir / "budget.json").read_text(encoding="utf-8"))
+    budget = main.summary["run_state"].budget_snapshot()
     assert budget.get("subagent_spawns") == 2, (
         f"the spawn count {budget.get('subagent_spawns')} is not l-00c plus MAIN's one lead")
     agents = sorted(a for _s, a in _session_rows(sink[-1]))

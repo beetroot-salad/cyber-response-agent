@@ -4,7 +4,8 @@ The change (`spec-flow/specs/spec_graph_1105-pr1-run-repository.yaml`; design re
 by rev 4.1, `.spec-flow/design-rev4.md`, read through `.spec-flow/frontiers/70-resolutions.md`):
 a package `defender/run_repository/` absorbs the run handle (`_run_handle.py` -> `_handle.py`)
 and the layout owner (`_run_paths.py` -> `_layout.py`), and gains `RunId` (`_id.py`), the
-lookups (`_lookup.py`: `open_run`, `list_run_ids`, `bound_runs`, `run_exists`), the
+lookups (`_lookup.py`; PR 1's four Tenant-taking functions, the tenant-scoped repository's
+methods since #1105 PR 2), the
 episode -> runs record (`_record.py`: `record_episode_runs`, `episode_runs`,
 `sibling_run_ids`, `episode_sibling_ids`) and `RunRefused` (`_errors.py`). The door
 (`__init__.py`) serves the public surface lazily. Every lookup and tenant-keyed record function
@@ -37,7 +38,7 @@ the test that needs them. The repository's injected `io=` seam (NM-10) is used h
 calls (`RecordingIO`), never to inject a fault (the owner's test shape; `w_fault_injected_io`).
 
 COINED NAMES. The design names every public function, `RunId.parse` / `RunId.mint(label, *,
-clock=)`, `bound_runs(tenant)`'s `absent`, `_io.hold(root, *, follow=)` and
+clock=)`, the held listing's `absent`, `_io.hold(root, *, follow=)` and
 `Bound.read(name, *, max_bytes=)`. It names the injected seam only as "a keyword-only injected
 I/O seam, default the real `defender._io`, as `Run.for_tenant` takes" — this suite spells it
 `io=` (`Run.for_tenant(..., io=)`'s own name, ledger 20-demands F-2). If write-code-from-spec
@@ -68,11 +69,13 @@ FIXTURE = WORKTREE / "knowledge" / "tenant-fixture"
 T_ID = "acme"
 U_ID = "beta"
 
-#: The five host-only sidecar suffixes (D2.1, R4-35; #1224 added the oracle-held record),
-#: spelled HERE rather than imported from the layout: the suite pins the design's list, so a
-#: layout that drops one is caught.
+#: The five host-only sidecar suffixes (D2.1, R4-35; #1235 F2 added the run -> case pointer,
+#: moved out of the run folder, and retired #1224's oracle-held record, whose credit is now the
+#: run's in-memory state; the accounting-failures suffix stays reserved after #1235 retired its
+#: record, since the run-id bound is derived from it), spelled HERE rather than imported from
+#: the layout: the suite pins the design's list, so a layout that drops one is caught.
 SIDECAR_SUFFIXES = (".run-end.json", ".scrub-verdict.json", ".accounting_failures.json",
-                    ".ticket-write.json", ".oracle-held.json")
+                    ".ticket-write.json", ".session-pointer.json")
 #: The staged-name tail a sidecar write creates first (`_io.staged_leaf`: `.staged-` plus 16
 #: lowercase hex digits, R41-23) — the shape MF-21 (DV-5) adds to the sidecar clause.
 STAGED_TAIL = ".staged-0123456789abcdef"
@@ -191,7 +194,8 @@ def make_run(runs: Path, run_id: str, *, alert: str = '{"alert": "seed"}\n') -> 
     """A real run folder `<runs>/<run_id>` holding an `alert.json`."""
     run_dir = Path(runs) / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "alert.json").write_text(alert, encoding="utf-8")
+    from defender.tests._alert_plant import plant_alert
+    plant_alert(run_dir, alert.encode("utf-8"))
     return run_dir
 
 

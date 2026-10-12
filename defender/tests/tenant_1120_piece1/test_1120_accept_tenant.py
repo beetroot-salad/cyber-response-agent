@@ -23,7 +23,6 @@ import pytest
 
 from defender import _tenant
 from defender.scripts import tenant as tenant_py
-from defender.tests import _spec1077 as S1077
 from defender.tests.tenant_1120_piece1 import _spec1120 as H
 
 # ======================================================================================
@@ -986,30 +985,24 @@ def test_1120_every_tenant_row_reader_refuses_what_accept_tenant_refuses(
         tmp_path: Path, plant_row_cell, accepted: bool) -> None:
     """Every reader of <root>/<id>/tenant.json reaches accept_tenant's verdict on each of its
     row cells — absent, corrupt, other-tenant, directory and missing-created-at refused, an
-    extra key accepted — and every refusal names <root>/acme/tenant.json: accept_tenant,
-    require_tenant, and tenant_of_run_dir (given the data root and a run dir under
-    <root>/acme/runs whose runs-base record names acme; D1 re-signs it to take the root).
-    The one-tenant guard refuse_foreign_data_root reads the row only for its presence and
+    extra key accepted — and every refusal names <root>/acme/tenant.json: accept_tenant and
+    require_tenant (#1105 PR 2 deleted the third reader, `tenant_of_run_dir`, F-13: a run is
+    opened through the accepted tenant's runs repository, so its row is read by
+    accept_tenant). The one-tenant guard refuse_foreign_data_root reads the row only for its presence and
     leaves its shape to acceptance (the row's own name exempt, pass-A J60; MF1 admits the
     placed knowledge beside a missing row), so it returns on every cell; `tenant.py setup`
     over each cell then refuses every present bad row naming tenant.json and leaves it
     byte-identical, stays silent over the extra-key row, and adopts the absent-row cell by
     writing the row."""
     verdicts: dict[str, str | None] = {}
-    for reader in ("accept_tenant", "require_tenant", "tenant_of_run_dir"):
+    for reader in ("accept_tenant", "require_tenant"):
         root = tmp_path / reader
         _cell_tree(root, plant_row_cell)
         if reader == "accept_tenant":
             verdicts[reader] = _verdict(_tenant, H.accept, _tenant, root, H.TID)
-        elif reader == "require_tenant":
+        else:
             verdicts[reader] = _verdict(_tenant, _tenant.require_tenant, root,
                                         _tenant.TenantId(H.TID))
-        else:
-            runs = H.tenant_folder(root) / "runs"
-            runs.mkdir(parents=True, exist_ok=True)
-            S1077.plant_tenant_record(runs, tenant_id=H.TID)
-            (runs / "r1").mkdir()
-            verdicts[reader] = _verdict(_tenant, _tenant.tenant_of_run_dir, root, runs / "r1")
         row = str(H.row_path(root))
         if accepted:
             assert verdicts[reader] is None, f"{reader} refused an extra-key row: {verdicts[reader]}"

@@ -50,6 +50,7 @@ from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.tests._lead_author_1134 import lead_trees
 from defender.tests._curator1134 import open_state
 from defender.tests._lead_author_1134 import lane_fields
+from defender.tests._state1135 import curation_run_dir, run_of
 
 
 @pytest.fixture
@@ -304,7 +305,7 @@ def test_a_threshold_of_one_curates_on_the_first_mistake(scene, monkeypatch):
 # The other two readers of the same moved count.
 
 
-def test_the_lead_author_log_line_counts_post_normalization_records(scene, tmp_path, capsys):
+def test_the_lead_author_log_line_counts_post_normalization_records(scene, capsys):
     """`lead_author.py:607`'s "N distinct mistake(s) in this run" line reports the
     POST-normalization count.
 
@@ -320,8 +321,7 @@ def test_the_lead_author_log_line_counts_post_normalization_records(scene, tmp_p
     demand unauthored.
     """
     repo, paths = scene
-    run_dir = tmp_path / "run-870"
-    run_dir.mkdir()
+    run_dir = curation_run_dir("run-870")  # a natural run, handed as its `Run` (#1105 PR 2)
     executed = [
         shim_lead(system="elastic", lead_id="l-001", sql="SELECT unnest(data)"),
         shim_lead(system="cmdb", lead_id="l-002", sql="SELECT unnest(data, 1)"),
@@ -340,7 +340,7 @@ def test_the_lead_author_log_line_counts_post_normalization_records(scene, tmp_p
     )
     capsys.readouterr()
 
-    assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
+    assert lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
 
     log = loop_log(capsys)
     counted = [ln for ln in log.splitlines() if "distinct mistake(s) in this run" in ln]
@@ -372,14 +372,18 @@ def test_the_learning_side_join_still_splits_the_sentinel_row(tmp_path):
     (tmp_path / "gather_raw").mkdir(parents=True)
     write(tmp_path / "gather_raw" / "l-001.lead.json",
           json.dumps({"goal": "reduce the elastic envelope", "what_to_summarize": []}) + "\n")
+    # The writer takes its seq from the run's state, started as a run start starts it (#1235).
+    from defender.runtime.run_state import RunState
+
+    state = RunState(tmp_path, "r870-threshold")
     append_query_row(
-        tmp_path, lead_id="l-001", system="elastic", verb="query", query_id="elastic.esql",
+        state, lead_id="l-001", system="elastic", verb="query", query_id="elastic.esql",
         params={"native_query": "FROM logs"}, raw_command="elastic query",
         payload_text="[]", exit_code=0, payload_status="ok", payload_digest="2 bytes",
         system_key="",
     )
     append_query_row(
-        tmp_path, lead_id="l-001", system="", verb="bash", query_id=BASH_SHIM_QUERY_ID,
+        state, lead_id="l-001", system="", verb="bash", query_id=BASH_SHIM_QUERY_ID,
         params={"command": "cat 0.json | defender-sql 'SELECT unnest(data)'"},
         raw_command="defender-sql", payload_text="", exit_code=1, payload_status="error",
         payload_digest=BINDER,

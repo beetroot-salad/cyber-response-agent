@@ -42,6 +42,7 @@ from typing import Any
 
 import pytest
 
+from defender import _episode_handle as EH
 from defender import _yaml
 from defender.runtime.verbs import ModuleVerbRegistry, VerbContext, VerbRegistry
 from defender.scripts.adapters import faults
@@ -264,13 +265,15 @@ def _launch(tmp_path: Path, est: S.Estate, monkeypatch: Any, *, oracle: S.Script
     cli = S.mod(S.CLI)
     message = ""
     try:
-        rc = cli.main([str(src), str(S.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
+        # #1105 PR 2 (declared change 1): the tenant and the source run by id.
+        rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(S.BRANCH_MESSAGE_ID),
+                       "--continuation-prompt", "go"],
                       spawn=spawn, questioner=S.questioner_for(), preflight=S.no_preflight,
                       live_tree=T.source_capture(), roster=est.roster(),
                       oracle=oracle.model, verifier=verifier.model)
     except SystemExit as stop:
         rc, message = (stop.code, "") if isinstance(stop.code, int) else (2, str(stop.code))
-    ep = cli.episode_dir_for(S.EPISODE_ID, tenant=T.current_tenant())
+    ep = EH.episode_dir(T.current_tenant().data_root, S.EPISODE_ID)
     return S.Launch(rc=rc, message=message, spawn=spawn, ep=ep)
 
 
@@ -286,6 +289,12 @@ def _gather(tmp_path: Path, reg: Any, est: S.Estate, *turns: Any) -> tuple[Path,
     """A whole investigation over `reg` whose one gather lead runs `turns` then stops."""
     return S.drive_gather(tmp_path, verbs=reg, tenant=est.place(),
                           gather_turns=[*turns, S.done_turn()])
+
+
+def _gather_run(tmp_path: Path, reg: Any, est: S.Estate, *turns: Any) -> tuple[Path, Any, Any]:
+    """`_gather`, also handing back the run's one `RunState` (#1235 round 2)."""
+    return S.drive_gather_run(tmp_path, verbs=reg, tenant=est.place(),
+                              gather_turns=[*turns, S.done_turn()])
 
 
 def _concurrently(*fns: Callable[[], Any]) -> None:
@@ -359,11 +368,10 @@ def _stamps(rows: Iterable[Mapping[str, Any]]) -> list[float]:
     return [float(r["t"]) for r in rows]
 
 
-def _breaker(run_dir: Path) -> dict:
-    path = Path(run_dir) / "circuit_breaker.json"
-    if not path.is_file():
-        return {"systems": {}, "total_failures": 0}
-    return json.loads(path.read_text(encoding="utf-8"))
+def _breaker(state: Any) -> dict:
+    """The run's circuit-breaker state, read off the run's one `RunState` (#1235: never a file
+    in the run dir; blank when nothing failed)."""
+    return state.breaker_snapshot()
 
 
 # An Elasticsearch that answers from a three-document index: one document dated before the
@@ -789,12 +797,12 @@ def test_1224_preflight_reader_cannot_be_built_without_a_gather_grant(tmp_path):
     grant_error = S.sym("runtime.verb_grant", "GrantError")
 
     with pytest.raises(grant_error):
-        preflight_replay(ep, roster=est.roster(), tenant=grantless,
+        preflight_replay(ep, source=T.open_source(src), roster=est.roster(), tenant=grantless,
                          oracle=S.oracle(then=S.submit(BASE)).model,
                          verifier=S.passing_verifier().model)
     assert est.calls() == [], "a reader with no gather grant sent a call"
 
-    preflight_replay(ep, roster=est.roster(), tenant=rt,
+    preflight_replay(ep, source=T.open_source(src), roster=est.roster(), tenant=rt,
                      oracle=S.oracle(then=S.submit(BASE)).model,
                      verifier=S.passing_verifier().model)
     assert _hits(est, "idp", "query", ALICE), "positive control: the granted replay was sent"
@@ -818,7 +826,7 @@ def test_1224_launcher_read_side_left_after_the_change_refuses_ungranted_calls(t
         S.captured(c.system, c.verb, c.params, c.payload)
         for c in (CALL_IDP, WRITE_CALL, UNGRANTED_CALL)])
     S.sym(S.CLI, S.COINED["fn.preflight"])(
-        ep, roster=est.roster(), tenant=est.run_tenant(),
+        ep, source=T.open_source(src), roster=est.roster(), tenant=est.run_tenant(),
         oracle=S.oracle(then=S.submit(BASE)).model, verifier=S.passing_verifier().model)
 
     tenant_adapter = est.calls()
@@ -1384,7 +1392,8 @@ def test_tenant_throttles_the_oracle_side_queries(tmp_path):
                       S.run_query("edr", "query", EXPLORE), S.submit(BASE))
     _e, ep, reg = _scene(tmp_path, oracle, est=est, rate=rate)
 
-    run_dir, gather = _gather(tmp_path, reg, est, S.query_turn("idp", "query", {"q": "user:alice"}))
+    run_dir, gather, state = _gather_run(tmp_path, reg, est,
+                                         S.query_turn("idp", "query", {"q": "user:alice"}))
 
     assert "429" in _returned(oracle, 1), "the oracle was not shown the throttle inside its turn"
     assert "sshd-explored-7f3a" in _returned(oracle, 4)
@@ -1395,7 +1404,7 @@ def test_tenant_throttles_the_oracle_side_queries(tmp_path):
     assert [(r["system"], r["exit_code"]) for r in evidence_rows] == [("idp", 0)]
     assert "429" not in "\n".join(gather.seen)
     assert "Too Many" not in json.dumps(evidence_rows)
-    assert _breaker(run_dir)["total_failures"] == 0, "the oracle's throttle charged the breaker"
+    assert _breaker(state)["total_failures"] == 0, "the oracle's throttle charged the breaker"
     world_ledger = S.ledger_rows(ep, "b")
     assert len(world_ledger) == 1
     assert world_ledger[0]["source"] != S.REAL_ERROR
@@ -1420,12 +1429,12 @@ def test_system_marked_down_by_real_failures_is_also_needed_by_the_oracle(tmp_pa
                       S.submit(BASE))
     _e, ep, reg = _scene(tmp_path, oracle, est=est)
 
-    run_dir, _g = _gather(tmp_path, reg, est,
-                          S.query_turn("edr", "query", {"q": "host:web-1"}),
-                          S.query_turn("edr", "query", {"q": "host:web-2"}),
-                          S.query_turn("idp", "query", {"q": "user:alice"}))
+    run_dir, _g, state = _gather_run(tmp_path, reg, est,
+                                     S.query_turn("edr", "query", {"q": "host:web-1"}),
+                                     S.query_turn("edr", "query", {"q": "host:web-2"}),
+                                     S.query_turn("idp", "query", {"q": "user:alice"}))
 
-    breaker = _breaker(run_dir)
+    breaker = _breaker(state)
     assert breaker["systems"].get("edr", {}).get("failures") == 2, (
         "positive control: the investigator's own failures did not trip edr")
     assert breaker["total_failures"] == 2, "the oracle's failed exploration fed the breaker"
@@ -2078,8 +2087,9 @@ def test_p006_base_answer_text_asks_the_oracle_to_explore_without_end(tmp_path):
     _e, ep, reg = _scene(tmp_path / "sibling", oracle, est=est, rate=rate)
     turn = S.query_turn("idp", "query", {"q": "user:alice"})
 
-    run_dir, _g = _gather(tmp_path / "sibling", reg, est, turn)
-    control_dir, _c = _gather(tmp_path / "control", _plain_registry(est), est, turn)
+    run_dir, _g, run_state = _gather_run(tmp_path / "sibling", reg, est, turn)
+    _control_dir, _c, control_state = _gather_run(tmp_path / "control", _plain_registry(est),
+                                                  est, turn)
 
     assert oracle.seen, "the investigator's call never reached the oracle"
     S.assert_wrapped_untrusted(oracle.all_seen(), "EXPLOREORDER-0097",
@@ -2090,8 +2100,8 @@ def test_p006_base_answer_text_asks_the_oracle_to_explore_without_end(tmp_path):
     sent = [r for r in est.calls("edr") if r["params"] in reads]
     assert len(sent) == len(reads)
     assert _densest(_stamps(sent), 1.0 - SLACK) <= rate
-    budget_enforcer = json.loads((Path(run_dir) / "budget.json").read_text(encoding="utf-8"))
-    control = json.loads((Path(control_dir) / "budget.json").read_text(encoding="utf-8"))
+    budget_enforcer = run_state.budget_snapshot()
+    control = control_state.budget_snapshot()
     assert budget_enforcer["tool_calls"] == control["tool_calls"], (
         "the oracle's queries were charged to the investigator's budget")
     assert [(r["system"], r["verb"]) for r in S.lead_rows(run_dir)] == [("idp", "query")]

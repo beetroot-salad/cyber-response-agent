@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from defender import _yaml
+from defender import _tenant, _yaml
 from defender.tests import _drain719 as D
 from defender.tests import _judge_921 as J
 from defender.tests.alert_front_door_1222 import _spec1222 as S
@@ -627,7 +627,9 @@ def test_r7_the_shared_lesson_readers_agree_on_an_unquoted_signature_entry(tmp_p
         assert [lesson.path.stem for lesson in iter_lessons(corpus)] == [name], (
             f"iter_lessons skipped the {spelling} lesson")
 
-    runs = tmp_path / "trace-runs"
+    runs = S.plant_tenant().accept().runs
+    runs.mkdir(parents=True, exist_ok=True)
+    _tenant.ensure_runs_base_record(runs, "acme")
     alert = S.generic_alert(rule_id="R-R7-TRACE")
     S.plant_run(runs, "r7-traced", alert=alert, record=False,
                 files={"lessons_loaded.jsonl": _loaded_row(name)})
@@ -636,7 +638,7 @@ def test_r7_the_shared_lesson_readers_agree_on_an_unquoted_signature_entry(tmp_p
     traced: dict[str, list[str]] = {}
     for spelling, corpus in corpora.items():
         capsys.readouterr()
-        assert main(["--all", "--lessons-dir", str(corpus), "--runs-dir", str(runs)]) == 0
+        assert main(["--all", "--lessons-dir", str(corpus), "--tenant", "acme"]) == 0
         traced[spelling] = [ln for ln in capsys.readouterr().out.splitlines()
                             if ln.startswith(f"{name}\t")]
     assert len(traced["unquoted"]) == 1, f"the tracer did not index the unquoted lesson once: {traced}"
@@ -736,7 +738,9 @@ def test_r7_the_eval_index_and_the_lesson_tracer_skip_a_recordless_run_folder_by
     says malicious), then with records planted.
     """
     slug, lesson = "fd-slug", "fd-traced"
-    fixtures, runs, corpus = tmp_path / "fixtures", tmp_path / "runs", tmp_path / "lessons"
+    fixtures, runs, corpus = tmp_path / "fixtures", S.plant_tenant().accept().runs, tmp_path / "lessons"
+    runs.mkdir(parents=True, exist_ok=True)
+    _tenant.ensure_runs_base_record(runs, "acme")
     _held_out_fixture(fixtures, slug)
     corpus.mkdir()
     (corpus / f"{lesson}.md").write_text(S.lesson_text(lesson), encoding="utf-8")
@@ -754,7 +758,7 @@ def test_r7_the_eval_index_and_the_lesson_tracer_skip_a_recordless_run_folder_by
         capsys.readouterr()
         held_out([str(runs), "--fixtures-dir", str(fixtures)])
         scored = capsys.readouterr()
-        assert trace(["--all", "--lessons-dir", str(corpus), "--runs-dir", str(runs)]) == 0
+        assert trace(["--all", "--lessons-dir", str(corpus), "--tenant", "acme"]) == 0
         traced = capsys.readouterr()
         return scored.out + scored.err, traced.out + traced.err
 
@@ -1018,7 +1022,7 @@ def test_p143_record_unreadable_partial_or_of_another_shape(tmp_path):
 
     Observed: past runs of one alert, each finished with a report: one with no record; records
     that are not JSON, cut short, missing the digest, or a JSON list; and one whole record. Read
-    by `load_corpus`, and by the judge's sibling union as the judge prompt shows it for an
+    by `load_corpus`; the judge excludes every prior run under J3 when grading an
     episode carrying that alert's copy and record.
     """
     sig = "R-P143"
@@ -1063,15 +1067,9 @@ def test_p143_record_unreadable_partial_or_of_another_shape(tmp_path):
     def naming(name: str) -> list[str]:
         return sorted({ln.replace(name, "<run>") for ln in lines if name in ln})
 
-    assert naming(served), "the judge's sibling union did not serve the recorded sibling"
-    for name in (*unreadable, none):
-        assert naming(name), f"the judge prompt does not name the skipped run {name!r}"
-    for name in unreadable:
-        assert not [ln for ln in lines if name in ln and none in ln], (
-            f"the judge prompt lists {name!r} (record unreadable) under one reason with the "
-            "recordless run")
-        assert naming(name) != naming(none), (
-            f"the judge prompt gives {name!r} the recordless run's reason: {naming(name)}")
+    # J3 retired the sibling union: neither served priors nor skip notes reach the judge.
+    for name in (*unreadable, none, served):
+        assert not naming(name), f"a prior run entered the judge prompt: {name!r}"
     assert all(planted), "the records could not be planted (S.COINED accessors)"
     assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
 

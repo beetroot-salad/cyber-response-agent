@@ -64,6 +64,16 @@ def _materialize(alert: Path, run_id: str | None, **kw):
     return H.run_common().materialize_run(alert, run_id, tenant=tenant, **kw).run_dir
 
 
+def _arm(alert: Path, world, ep: Path):
+    """`materialize_run` for a sibling arm of episode `ep` (#1105 PR 2): made through the
+    episode's view (`episode_runs=`), whose container the launcher makes with T_ID's record
+    before the first sibling — here `_triplet_947.episode_view` stands in for it."""
+    tenant = T1106.accept(current_data_root(), T_ID)
+    with Episode.open(ep) as episode:
+        return _materialize(alert, world.run_id, world=world,
+                            episode_runs=T.episode_view(episode, tenant=tenant))
+
+
 def _record(base: Path) -> dict:
     return json.loads((base / H.RECORD_NAME).read_text(encoding="utf-8"))
 
@@ -157,7 +167,7 @@ def test_the_tenant_record_is_written_through_write_guarded_and_read_through_rea
     S.tenant().ensure_runs_base_record(base, T_ID, io=writer)
     assert any(op.startswith("write_guarded") for op in writer.ops), (
         f"the create reached {writer.ops}; D2 says `write_guarded`, not a raw `os.open`")
-    assert "write_atomic" not in writer.ops
+    assert "write_atomic" not in writer.ops  # lint-stale-ref: ok — an absence assertion naming the deleted `_io.write_atomic`, still true
     assert "open_guarded" not in writer.ops
 
     reader = S.RecordingIo()
@@ -677,7 +687,7 @@ def test_a_forked_sibling_stamps_the_episode_token_and_an_unforked_run_the_base_
     assert _stamp(unforked)["fork_turn"] is None
 
     src, ep, world = _sibling_world(tmp_path, tenant_root, "b")
-    sibling = Path(_materialize(RunPaths(src).alert, world.run_id, world=world))
+    sibling = Path(_arm(RunPaths(src).alert, world, ep))
     assert _stamp(sibling)["world_id"] == world.world_id, (
         "a forked sibling stamps its ResumeWorld token, which is what `served/<token>.jsonl` "
         "keys on and what D3 writes into provenance")
@@ -715,7 +725,7 @@ def test_the_base_role_sibling_of_a_family(tenant_root, tmp_path):
     tokens = {}
     for label in ("a", "b"):          # 'a' is the base role
         world = H.run_py().resume_world(Episode.open(ep), label, tenant=_episode_tenant)
-        run = Path(_materialize(RunPaths(src).alert, world.run_id, world=world))
+        run = Path(_arm(RunPaths(src).alert, world, ep))
         tokens[label] = _stamp(run)["world_id"]
     expected = {label: H.run_py().resume_world(Episode.open(ep), label, tenant=_episode_tenant).world_id
                for label in ("a", "b")}
@@ -735,10 +745,32 @@ FAMILY_TENANT = "acme"
 
 
 def _family_dirs(tmp_path, tenant_id=FAMILY_TENANT, episode_id=None):
-    base, _src = T.runs_base(tmp_path, tenant_id=tenant_id)
-    ep = T.episode(tmp_path, episode_id=episode_id or T.EPISODE_ID)
-    dirs = [T.sibling_run_dir(base, w) for w in T.WORLDS]
+    """`(the siblings' runs base, the episode, the sibling run dirs)`. #1105 PR 2: an arm is
+    opened by id through its episode's view, so the siblings live where the launcher's do — the
+    episode's container `<ep>/runs`, made with the tenant's record (`episode_view`) — each at
+    its arm id `<episode_id>-<label>`."""
+    T.runs_base(tmp_path, tenant_id=tenant_id)
+    episode_id = episode_id or T.EPISODE_ID
+    ep = T.episode(tmp_path, episode_id=episode_id)
+    with Episode.open(ep) as episode:
+        T.episode_view(episode)
+    base = ep / "runs"
+    # `sibling_run_dir` names a dir `<T.EPISODE_ID>-<world_id>`; this episode's arm ids carry
+    # its own id, so the suffix past `T.EPISODE_ID` rides in front of the label.
+    suffix = episode_id[len(T.EPISODE_ID) + 1:]
+    dirs = [T.sibling_run_dir(base, f"{suffix}-{w}" if suffix else w) for w in T.WORLDS]
     return base, ep, dirs
+
+
+def _verify_family(ep: Path, dirs, **kw):
+    """`cli.verify_family` over the episode's arms (#1105 PR 2: `{label: Run | RunRefused}`,
+    each opened by id through the episode's view, and the family's base world from the
+    container's record — as the launcher's VERIFY step hands them)."""
+    with Episode.open(ep) as episode:
+        view = T.episode_view(episode)
+        arms = T.family_arms(episode, [d.name.rsplit("-", 1)[-1] for d in dirs])
+        return S.branch_cli().verify_family(episode, arms, base_world_id=view.base_world_id(),
+                                            **kw)
 
 
 def test_the_family_record_carries_the_familys_base_world(tmp_path):
@@ -750,8 +782,7 @@ def test_the_family_record_carries_the_familys_base_world(tmp_path):
         S.plant_stamp(d, **T.provenance_record(), tenant_id=FAMILY_TENANT,
                       world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
 
-    with Episode.open(ep) as episode:
-        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
+    report = _verify_family(ep, dirs, source=T.provenance_record())
     assert report["comparable"] is True, report["reason"]
     family = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
     assert family["base_world_id"] == tenant_record.base_world_id, (
@@ -768,8 +799,7 @@ def test_the_family_stamp_agrees_on_the_tenant_and_not_on_the_world(tmp_path):
         S.plant_stamp(d, **T.provenance_record(), tenant_id=FAMILY_TENANT,
                       world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
 
-    with Episode.open(ep) as episode:
-        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
+    report = _verify_family(ep, dirs, source=T.provenance_record())
     assert report["comparable"] is True, report["reason"]
     agreed = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))["agreed"]
     assert agreed["tenant_id"] == FAMILY_TENANT, (
@@ -789,8 +819,7 @@ def test_family_stamps_agreed_dict_is_all_slots_bound_minus_world_id(tmp_path):
         S.plant_stamp(d, **T.provenance_record(), tenant_id=FAMILY_TENANT,
                       world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
 
-    with Episode.open(ep) as episode:
-        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
+    report = _verify_family(ep, dirs, source=T.provenance_record())
     assert report["comparable"] is True, report["reason"]
     stamp = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
     agreed = stamp["agreed"]
@@ -808,8 +837,7 @@ def test_a_family_spanning_two_tenants_is_a_member_fault(tmp_path):
                       tenant_id="tenant-one" if i == 0 else "tenant-two",
                       world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
 
-    with Episode.open(ep) as episode:
-        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
+    report = _verify_family(ep, dirs, source=T.provenance_record())
     assert report["comparable"] is False, report["reason"]
     assert "tenant" in report["reason"], (
         f"a family spanning tenants is a fault, added to `_member_faults`: {report['reason']}")
@@ -826,8 +854,7 @@ def test_a_sibling_stamp_with_no_tenant_field_is_its_own_named_fault(tmp_path):
             fields["tenant_id"] = FAMILY_TENANT
         S.plant_stamp(d, **fields, world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
 
-    with Episode.open(ep) as episode:
-        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
+    report = _verify_family(ep, dirs, source=T.provenance_record())
     assert report["comparable"] is False, report["reason"]
     reason = report["reason"]
     named_fault = (
@@ -849,8 +876,7 @@ def test_the_cross_tenant_comparison_runs_over_the_stamped_siblings_and_records_
                       world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
     (dirs[2] / "provenance.json").unlink()      # not yet stamped
 
-    with Episode.open(ep) as episode:
-        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
+    report = _verify_family(ep, dirs, source=T.provenance_record())
     reason = report["reason"]
     counted = (
         f"the comparison must record how many siblings it skipped, so an unstamped sibling "
@@ -885,8 +911,7 @@ def test_verify_family_still_compares_only_commit_scope_and_model(tmp_path):
     for d in dirs:
         S.plant_stamp(d, **T.provenance_record(), tenant_id=FAMILY_TENANT,
                       world_id=f"{T.EPISODE_ID}.{d.name.rsplit('-', 1)[-1]}")
-    with Episode.open(ep) as episode:
-        report = S.branch_cli().verify_family(episode, dirs, source=T.provenance_record())
+    report = _verify_family(ep, dirs, source=T.provenance_record())
     assert report["comparable"] is True, (
         f"siblings differ on world_id BY DESIGN; if it reached the comparison every family "
         f"would be withheld its stamp: {report['reason']}")

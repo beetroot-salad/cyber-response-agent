@@ -187,7 +187,10 @@ def world(tmp_path: Path, capsys: Any, *, launchable: bool = False, **plant: Any
     if launchable:
         _base, src = T.runs_base(w.tmp, tenant_id=w.planted.tenant_id)
         w.source_run = src
-        w.episode = T.episode(w.tmp, doc=T.family_doc(source_run_dir=str(src)))
+        w.episode = T.episode(w.tmp, root=Path(os.environ["DEFENDER_EPISODES_BASE"]),
+                              doc=T.family_doc(source_run_dir=str(src)))
+        with S.sym("_episode_handle", "Episode").open(w.episode) as episode:
+            T.episode_view(episode, tenant=w.planted.accept())
     return w
 
 
@@ -272,7 +275,8 @@ def at_branch_launch(w: World) -> Verdict:
     text = ""
     try:
         S.mod("learning.branch.cli").main(
-            [str(w.source_run), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
+            ["--tenant", w.planted.tenant_id, w.source_run.name,
+             str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
             spawn=spawn, preflight=preflight, live_tree=T.source_capture())
     except SystemExit as stop:
         text = _exit_text(stop)
@@ -292,7 +296,7 @@ def at_sibling_resume(w: World) -> Verdict:
     text = ""
     try:
         S.mod("run").main(
-            ["--resume", str(w.episode / "family.yaml"), "--world", "b",
+            ["--episode", w.episode.name, "--world", "b",
              "--tenant", w.planted.tenant_id],
             lifecycle=lifecycle, visualize=lambda *_a, **_k: None, preflight=preflight)
     except SystemExit as stop:
@@ -497,7 +501,9 @@ def judge_grade(tmp: Path, label: str) -> Any:
     root = tmp / f"judge-{label}"
     ep = J.accepted_episode(root)
     S.plant_episode_copy(ep, alert=S.generic_alert(), facts={"signature": "R-1001"})
-    return J.grade(ep, runs_base=root / "defender-runs")
+    from defender.tests._data_root_1078 import set_up_tenant
+    repository = set_up_tenant(root / "judge-data", "acme").runs_repository()
+    return J.grade(ep, runs=repository)
 
 
 def judged(grade: Any) -> tuple[str, dict[str, Any]]:

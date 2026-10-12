@@ -306,6 +306,16 @@ def pays_every_price(disposition: str) -> str:
 # Driving the real entry points.
 # ---------------------------------------------------------------------------------------
 
+def _with_run_state(deps: Any) -> Any:
+    """`deps` carrying a run's state, as every MAIN the driver builds does: the enforced budget
+    hooks raise on deps that carry none (#1235 round 3)."""
+    from dataclasses import replace
+
+    from defender.runtime.run_state import RunState
+
+    return replace(deps, run_state=RunState(deps.run_dir, "r-923"))
+
+
 def main_deps(tmp_path: Path, companion: str | None = None) -> tuple[Any, Path]:
     """MAIN deps through the real `bind` seam — real compiled policy, real gate — with
     `companion` seeded as the run's `investigation.md`."""
@@ -318,7 +328,7 @@ def main_deps(tmp_path: Path, companion: str | None = None) -> tuple[Any, Path]:
         (run_dir / "investigation.md").write_text(companion, encoding="utf-8")
     dfn = tmp_path / "defender"
     dfn.mkdir(parents=True, exist_ok=True)
-    return bind(MAIN_DEF, run_dir, defender_dir=dfn), run_dir
+    return _with_run_state(bind(MAIN_DEF, run_dir, defender_dir=dfn)), run_dir
 
 
 #: "no argument given", so an EXPLICIT `stages=None` reaches the gate as the unbound bundle it
@@ -359,7 +369,7 @@ def ab3_deps(tmp_path: Path) -> tuple[Any, Path]:
     (run_dir / "investigation.md").write_bytes((GOLDEN_AB3 / "investigation.md").read_bytes())
     dfn = tmp_path / "defender"
     dfn.mkdir(parents=True, exist_ok=True)
-    return bind(MAIN_DEF, run_dir, defender_dir=dfn), run_dir
+    return _with_run_state(bind(MAIN_DEF, run_dir, defender_dir=dfn)), run_dir
 
 
 def real_targets(deps: Any) -> list[str]:

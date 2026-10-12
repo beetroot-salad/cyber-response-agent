@@ -22,8 +22,10 @@ and a check that refused them would kill every sibling world after an operator d
 template. Both arms are driven over the SAME mismatched tree the refusal test uses.
 
 THE ORACLES. A typed error out of `run_investigation` naming both pairs; the run dir's own
-artifacts (`budget.json`, `wire_logs/`, the `l-00c` sidecar); the fake models' request
-counts; the fake registry's call record. For O4, the sidecar's authored text outside the
+artifacts (`wire_logs/`, the `l-00c` sidecar) and, for a run that returns, the budget on its
+`RunState` (#1235: no `budget.json` is written any more, and a run that raises hands no state
+back — what it spent is read off the fake models and the fake registry instead); the fake
+models' request counts; the fake registry's call record. For O4, the sidecar's authored text outside the
 untrusted frame — the same split `test_808_correlation_lead` cuts — scanned for vendor
 tokens, with the frame proven non-empty and proven to have carried the tokens the strip
 removed.
@@ -120,8 +122,7 @@ def test_a_catalog_whose_template_disagrees_with_the_table_refuses_the_run_befor
     tree's template binds `verb: query`; the process's table grants the holder
     `elastic.alerts`; the process's config names this template. The run must end at
     `run_investigation`'s own frame with the typed refusal naming BOTH pairs and the id —
-    and NOTHING downstream happened: no `budget.json` (the check precedes `open_budget`), no
-    `wire_logs/` (precedes the logger), no `l-00c` sidecar (precedes `prepare_correlation_
+    and NOTHING downstream happened: no `wire_logs/` (precedes the logger), no `l-00c` sidecar (precedes `prepare_correlation_
     lead`), no verb call (precedes item 1), and neither fake model was asked for a turn.
 
     POSITIVE CONTROL on the same tree first: the template copied verbatim, and the run
@@ -152,7 +153,9 @@ def test_a_catalog_whose_template_disagrees_with_the_table_refuses_the_run_befor
     assert "elastic.query" in message, f"the template's pair is not named:\n{message}"
     assert "elastic.alerts" in message, f"the table's pair is not named:\n{message}"
 
-    assert not (run_dir / "budget.json").exists(), "the budget opened before the check"
+    # #1235 round 2: "no budget opened" has no read left — the run's budget lives on a
+    # `RunState` that writes nothing and that a raising run hands back to no one. What the
+    # budget would have counted (a backend call, a model turn) is read directly below.
     assert not (run_dir / "wire_logs").exists(), "the wire log opened before the check"
     assert not (run_dir / "gather_raw" / f"{L3}.lead.json").exists(), "l-00c was claimed before the check"
     assert rec.calls == [], f"a backend call was issued before the check: {rec.verbs}"
@@ -258,6 +261,8 @@ def test_the_config_is_read_from_the_tree_the_run_reads(tmp_path):
     assert f"`{SHIPPED_TEMPLATE_ID}`" not in goal, (
         f"the lead was told to bind the CHECKOUT's configured id, not the run tree's:\n{goal}"
     )
+    assert (res.run_dir / "wire_logs").is_dir(), \
+        "positive control: a run that read its config never opened its wire log"
 
     config.unlink()
     run_dir = materialize_alert(tmp_path / "noconfig", alert_doc())
@@ -267,7 +272,9 @@ def test_the_config_is_read_from_the_tree_the_run_reads(tmp_path):
               verbs=elastic_backend(VerbRecorder(), answer_hits(ANCESTORS)), defender_dir=tree,
               tenant=tenant)
     assert str(config) in str(caught.value), str(caught.value)
-    assert not (run_dir / "budget.json").exists(), "the budget opened before the config was read"
+    # #1235 round 2: the run's budget lives on a `RunState` a raising run hands back to no
+    # one, so "nothing was spent before the config was read" is read off the run dir instead.
+    assert not (run_dir / "wire_logs").exists(), "the run opened its logger before the config was read"
 
 
 # =========================================================================================

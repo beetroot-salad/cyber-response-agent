@@ -39,7 +39,9 @@ from typing import Any
 
 import pytest
 
+from defender import _episode_handle as EH
 from defender import _yaml
+from defender.tests import _episode_1025 as E
 from defender.tests import _judge_921 as J
 from defender.tests import _state1135
 from defender.tests.live_oracle_1224 import _spec1224 as S
@@ -274,13 +276,12 @@ class _Spawn(S.FakeSpawn):
         self._mine = threading.Lock()
 
     def _ep(self, argv: list[str]) -> Path:
-        """The episode this child belongs to: the episodes-root child any argv path is under
-        (the sibling's command line names its manifest), else the derived episode id."""
-        root = self.root.resolve()
-        for tok in argv:
-            path = Path(tok)
-            if path.is_absolute() and root in path.resolve().parents:
-                return root / path.resolve().relative_to(root).parts[0]
+        """The episode this child belongs to: the episodes-root child its `--episode` id names
+        (#1105 PR 2: the sibling's command line names its episode by id), else the derived
+        episode id."""
+        for i, tok in enumerate(argv):
+            if tok == "--episode" and i + 1 < len(argv):
+                return self.root / argv[i + 1]
         return self.root / S.EPISODE_ID
 
     def __call__(self, argv: list[str], *, env: dict[str, str] | None = None,
@@ -298,8 +299,7 @@ class _Spawn(S.FakeSpawn):
             S.world_record(ep, world, spec["reason"], call=spec.get("call"),
                            detail=spec.get("detail", ""))
         if self.plant and world:
-            S.T.sibling_run_dir(S.mod(S.CLI).sibling_runs_base(ep), world,
-                                tenant_id=S.FIXTURE_TENANT)
+            S.T.sibling_run_dir(ep / "runs", world, tenant_id=S.FIXTURE_TENANT)
         if self.hook is not None and world:
             self.hook(world)
         return super().__call__(argv, env=env, **kw)
@@ -321,14 +321,15 @@ def _main(src: Path, est: S.Estate, *, doc: dict | None = None, spawn: Any = Non
     cli = S.mod(S.CLI)
     message = ""
     try:
-        rc = cli.main([str(src), str(S.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
-                      spawn=spawn, **seams)
+        # #1105 PR 2 (declared change 1): the tenant and the source run by id.
+        rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(S.BRANCH_MESSAGE_ID),
+                       "--continuation-prompt", "go"], spawn=spawn, **seams)
     except SystemExit as stop:
         if isinstance(stop.code, int):
             rc = stop.code
         else:
             rc, message = 2, str(stop.code)
-    ep = cli.episode_dir_for(S.EPISODE_ID, tenant=S.T.current_tenant())
+    ep = EH.episode_dir(S.T.current_tenant().data_root, S.EPISODE_ID)
     return S.Launch(rc=rc, message=message, spawn=spawn, ep=ep)
 
 
@@ -780,8 +781,7 @@ def test_input_every_world_has_no_facts(tmp_path):
         assert S.ledger_rows(run.ep, w) == []
 
     judge = S.FakeJudge()
-    S.sym(S.JUDGE, "grade_episode")(run.ep, judge=judge, runs_base=tmp_path / "defender-runs",
-                                    state=_state1135.state_over(tmp_path / "judge-state"))
+    J.grade_at(run.ep, judge=judge, state=_state1135.state_over(tmp_path / "judge-state"))
     assert judge.prompts == [], "a refused episode is not graded (no model call)"
 
 
@@ -915,11 +915,11 @@ def test_oracle_provider_rate_limits_every_sibling_at_once(tmp_path):
 
     Each world's sibling is driven as a WHOLE investigation (one gather lead: the original idp
     call, then an idp lookup the tenant answers with a real `TransportFault`, then done) and
-    compared with an UNBRANCHED run of the same script over the same estate: its budget.json
-    counters (`tool_calls`, `subagent_spawns`) and its circuit_breaker.json failure counts equal
-    the unbranched run's — the 429 adds no tool call and no breaker failure. Positive control
-    for both channels: the unbranched run counts its own calls and its real infra failure
-    (exit 2, GA-40), so both files are written and read.
+    compared with an UNBRANCHED run of the same script over the same estate: its budget
+    counters (`tool_calls`, `subagent_spawns`) and its circuit-breaker failure counts — the
+    run's `RunState` (#1235) — equal the unbranched run's: the 429 adds no tool call and
+    no breaker failure. Positive control for both channels: the unbranched run counts its own
+    calls and its real infra failure (exit 2, GA-40), so both states are written and read.
     """
     est = S.estate(tmp_path)
     est.answer("idp", "query", _Q1, _BASE)
@@ -935,10 +935,10 @@ def test_oracle_provider_rate_limits_every_sibling_at_once(tmp_path):
     rt = est.run_tenant()
     plain_registry = S.sym(S.VERBS, "ModuleVerbRegistry")(est.roster(), rt.grants.gather,
                                                           grant_home=rt.table_pointer)
-    plain_dir, _plain_gather = S.drive_gather(tmp_path / "unbranched", verbs=plain_registry,
-                                              tenant=est.place(), gather_turns=turns())
-    plain_budget = _run_json(plain_dir, "budget.json")
-    plain_breaker = _breaker_counts(plain_dir)
+    _plain_dir, _plain_gather, plain_state = S.drive_gather_run(
+        tmp_path / "unbranched", verbs=plain_registry, tenant=est.place(), gather_turns=turns())
+    plain_budget = _budget(plain_state)
+    plain_breaker = _breaker_counts(plain_state)
     assert plain_budget.get("tool_calls"), "positive control: the run's calls are counted"
     assert plain_breaker["total"], "positive control: the real infra failure is on the breaker"
 
@@ -947,8 +947,8 @@ def test_oracle_provider_rate_limits_every_sibling_at_once(tmp_path):
         oracle = S.oracle(S.raising(S.RATE_LIMITED), S.submit(_BASE, S.EMPTY_CLAIM))
         reg = S.world_registry(ep, w, est, oracle=oracle, verifier=S.passing_verifier(),
                                retry_cap=2)
-        run_dir, gather = S.drive_gather(tmp_path / f"sibling-{w}", verbs=reg,
-                                         tenant=est.place(), gather_turns=turns())
+        run_dir, gather, state = S.drive_gather_run(tmp_path / f"sibling-{w}", verbs=reg,
+                                                    tenant=est.place(), gather_turns=turns())
 
         assert oracle.requests == 2, f"{w}: the rate-limited request was not followed"
         assert not oracle.overrun, f"{w}: the oracle was asked for more than the idp query"
@@ -963,10 +963,10 @@ def test_oracle_provider_rate_limits_every_sibling_at_once(tmp_path):
         for leak in ("ModelHTTPError", f"provider answered {S.RATE_LIMITED}"):
             assert leak not in seen, (w, "transcript", leak)
             assert leak not in evidence, (w, "evidence", leak)
-        budget = _run_json(run_dir, "budget.json")
+        budget = _budget(state)
         for key in ("tool_calls", "subagent_spawns"):
             assert budget.get(key) == plain_budget.get(key), (w, key, budget, plain_budget)
-        assert _breaker_counts(run_dir) == plain_breaker, (
+        assert _breaker_counts(state) == plain_breaker, (
             f"{w}: the rate limit reached the circuit breaker")
         rows = [r for r in S.ledger_rows(ep, w) if r["verb"] == "query"]
         assert rows, f"{w}: the served call left no world-ledger row"
@@ -976,15 +976,16 @@ def test_oracle_provider_rate_limits_every_sibling_at_once(tmp_path):
         assert "provider answered" not in ledger_text
 
 
-def _run_json(run_dir: Path, name: str) -> dict:
-    """A run-state JSON file at the run root, read raw off disk (absent: `{}`)."""
-    path = Path(run_dir) / name
-    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+def _budget(state: Any) -> dict:
+    """The run's budget counters, read off the run's one `RunState` (#1235: never a file in the
+    run dir)."""
+    return state.budget_snapshot()
 
 
-def _breaker_counts(run_dir: Path) -> dict:
-    """circuit_breaker.json's failure counts: per system, and the run total."""
-    doc = _run_json(run_dir, "circuit_breaker.json")
+def _breaker_counts(state: Any) -> dict:
+    """The run's circuit-breaker failure counts, read off the run's `RunState` (#1235): per
+    system, and the run total."""
+    doc = state.breaker_snapshot()
     return {"systems": {s: (rec or {}).get("failures", 0)
                         for s, rec in (doc.get("systems") or {}).items()},
             "total": doc.get("total_failures", 0)}
@@ -1021,7 +1022,7 @@ def test_1224_world_dir_holds_both_oracle_state_and_the_archived_run(tmp_path, e
     _assert_routed(oracle)
 
     oracle_b = S.oracle_dir(run.ep, "b").resolve()
-    for forbidden in (run.ep / "worlds", S.mod(S.CLI).sibling_runs_base(run.ep)):
+    for forbidden in (run.ep / "worlds", run.ep / "runs"):
         forbidden = Path(forbidden).resolve()
         assert forbidden not in oracle_b.parents
         assert oracle_b != forbidden
@@ -1450,13 +1451,12 @@ def test_outcome_record_is_cut_short_by_a_launcher_crash(tmp_path, state):
 
     judge = S.FakeJudge(default="unused")
     try:
-        S.sym(S.JUDGE, "grade_episode")(ep, judge=judge, runs_base=tmp_path / "defender-runs",
-                                        state=_state1135.state_over(tmp_path / "judge-state"))
+        J.grade_at(ep, judge=judge, state=_state1135.state_over(tmp_path / "judge-state"))
     except S.sym(S.JUDGE, "JudgeRefused"):
         pass
     assert judge.prompts == [], "no record is not an accepted record: nothing is graded"
 
-    page = Path(S.sym(S.VISUALIZE, "render_episode")(ep))
+    page = Path(E.render_episode(ep, module=S.mod(S.VISUALIZE)))  # #1105 PR 2 (declared change 4)
     html = page.read_text(encoding="utf-8").lower()
     assert "outcome" in html
     assert any(w in html for w in ("missing", "unreadable", "no record"))
@@ -1522,7 +1522,7 @@ def test_1224_archive_fails_after_the_siblings_ran(tmp_path, episodes_root):
     def link_cs_report(world: str) -> None:
         if world != "c":
             return
-        tree = S.mod(S.CLI).sibling_runs_base(spawn.eps[-1]) / f"{S.EPISODE_ID}-{world}"
+        tree = spawn.eps[-1] / "runs" / f"{S.EPISODE_ID}-{world}"
         report = tree / "report.md"
         report.unlink()
         report.symlink_to(outside)

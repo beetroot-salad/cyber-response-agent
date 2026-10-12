@@ -943,8 +943,8 @@ demands:
   # ---- round 4: the residue probe (PR-25) ---------------------------------
 
   - {id: the_pointer_path_is_trusted_verbatim_across_a_relocated_run_dir,
-     kind: behavior, form: test,
-     discharged_by: test_the_pointer_path_is_trusted_verbatim_across_a_relocated_run_dir,
+     kind: behavior, form: clause,
+     status: retired, outcome: {nl: "RETIRED by #1235 — the run->case pointer moved out of the run folder into the sidecar <run_id>.session-pointer.json (#1235), so a copied run folder carries no link and the relocation contract it pinned is retired by owner decision; `test_the_pointer_path_is_trusted_verbatim_across_a_relocated_run_dir`, which discharged this demand, was deleted with the behaviour it pinned."},
      binds: ["session_store_pointer", "interacts(run_investigation->session_store_pointer)",
              "interacts(visualize_run->session_store_pointer)",
              "session_store.access[pointer-file]"]}

@@ -310,7 +310,7 @@ def _main_append_fault_store(tmp: Path, sink: list) -> Callable[..., Any]:
     fault = SS.StoreFault(on="append", after=0, mode="disk-full")
 
     def factory(case_id: str, run_dir: Path) -> Any:
-        real = SS.store_mod().open_store(case_id=case_id, runs_base=base)
+        real = SS.store_mod().open_store(case_id=case_id, sessions=S.sym("run_repository", "SessionPaths")(base))
         handle = _AgentAppendFault(real, fault, agent_id="main")
         sink.append(handle)
         return handle
@@ -788,12 +788,12 @@ def test_p007_siem_down_at_run_start(tmp_path: Path) -> None:
     assert d.summary.get("truncated_by") != _run_end().TRUNCATED_BY_ABORTED, (
         "correlation's failures ended the run")
     assert d.main.requests >= 2, "MAIN did not get past its first turn"
-    assert S.sym("runtime.circuit_breaker", "is_tripped")(d.run_dir, "elastic"), (
+    assert S.sym("runtime.circuit_breaker", "is_tripped")(d.run_state, "elastic"), (
         f"the lead's failures did not mark elastic down: {d.breaker!r}")
     assert not d.router.dispatched("l-001"), (
         "MAIN's lead to the system the lead found down was dispatched as if it were healthy")
     assert d.rows_for("l-001") == [], "MAIN's lead reached the down system's backend"
-    mark = S.sym("runtime.circuit_breaker", "down_message")(d.run_dir, "elastic")
+    mark = S.sym("runtime.circuit_breaker", "down_message")(d.run_state, "elastic")
     assert mark in d.main.history_text, (
         "MAIN's dispatch to the down system did not meet the outage mark the lead left")
 
@@ -1196,4 +1196,3 @@ def test_p175_main_lead_named_l00c_when_no_harness_claim_exist(tmp_path: Path) -
         _assert_killed(d, _run_end().TRUNCATED_BY_ABORTED, "RunAborted")
         assert _session_ending(stores, lead) == _run_end().TRUNCATED_BY_ABORTED, (
             f"MAIN's {lead} reached the kill count and its session does not read as aborted")
-

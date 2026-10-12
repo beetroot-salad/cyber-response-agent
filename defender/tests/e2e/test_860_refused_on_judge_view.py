@@ -633,9 +633,13 @@ def test_m2_a_siblings_inherited_table_carries_the_source_runs_denial(tmp_path):
     stayed behind in the source run's own files would have been the #860 gap re-opened for
     every inherited lead.
 
-    Observed failing by: the sibling's table lacking the `∅.denied` row, or the join over the
-    sibling filing it anywhere but `sentinels`."""
+    Observed failing by: the sibling's table lacking the `∅.denied` row, the join over the
+    sibling filing it anywhere but `sentinels`, or the sibling's run state not holding the rows
+    seeding wrote (#1235 round 2: seeding records each inherited row into the state)."""
+    from defender._io import read_jsonl_rows
+    from defender.run_repository import RunPaths
     from defender.runtime.branch._seed import _inherit_evidence
+    from defender.runtime.run_state import RunState
 
     rec = VerbRecorder()
     r = run_gather(tmp_path / "source", verbs=_registry(rec), turns=[
@@ -645,12 +649,18 @@ def test_m2_a_siblings_inherited_table_carries_the_source_runs_denial(tmp_path):
 
     sibling = tmp_path / "sibling"
     sibling.mkdir()
-    _inherit_evidence(r.run_dir, sibling, {LEAD})
+    state = RunState(sibling, "d860-sibling")
+    _inherit_evidence(r.run_dir, state, {LEAD})
     inherited = {lead.lead_id: lead for lead in joined(sibling)}
     assert set(inherited) == {LEAD}, f"the sibling inherited leads {sorted(inherited)}"
     assert [(row.query_id, row.system, row.verb) for row in inherited[LEAD].sentinels] \
         == [(DENIED_QUERY_ID, *DENIED_PAIR)]
     assert [row.query_id for row in inherited[LEAD].queries] == ["elastic.query"]
+    tabled = [row for row in read_jsonl_rows(RunPaths(sibling).executed_queries)
+              if row.get("lead_id") == LEAD]
+    assert [row["query_id"] for row in tabled] == [DENIED_QUERY_ID, "elastic.query"]
+    assert list(state.lead_rows(LEAD)) == tabled, (
+        "the sibling's run state does not hold the rows seeding wrote to its table")
 
 
 # ---------------------------------------------------------------------------------------
@@ -737,8 +747,8 @@ def _prompt_for_world_b(ep: Path, base: Path) -> str:
     """Drive the REAL episode-grading pass and hand back the prompt the model seam was shown
     for world `b`'s first draw."""
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
-    J.mod("learning.judge").grade_episode(
-        ep, judge=judge, runs_base=base, state=_state1135.env_state())
+    J.grade_at(
+        ep, judge=judge, state=_state1135.env_state())
     return judge.prompts[judge.agent_ids.index("judge:b:0")]
 
 
@@ -884,7 +894,7 @@ def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, jud
         "the archive grew a second stream for what the table already carries"
 
     prompt = _prompt_for_world_b(ep, base)
-    judge_input = J.mod("learning.judge.render").render(ep, "b", runs_base=base)
+    judge_input = J.mod("learning.judge.render").render(ep, "b")
     chain = judge_input.leads[LEAD]
     expected = [
         _entry("rejected-before-dispatch", "elastic", False),

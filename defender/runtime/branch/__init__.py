@@ -41,6 +41,7 @@ from defender.run_repository import RunPaths, artifact_dir, artifact_file
 from defender._query_rules import is_reserved_query_id
 
 from .. import session_store
+from ..run_state import RunState
 from ._spec import (
     BranchError,
     BranchSpec,
@@ -219,7 +220,7 @@ def attach_case_pointer(
 
 
 def open_main_session(
-    store: Any, spec: BranchSpec | None, run_dir: Path,
+    store: Any, spec: BranchSpec | None, run_state: RunState,
 ) -> tuple[str, list | None]:
     """MAIN's session for this run, the history it starts from, and the document that history
     refers to.
@@ -227,7 +228,8 @@ def open_main_session(
     The one place the fresh/resumed choice is made. A fresh run gets a new session and `None`.
     A resume forks, returns the prefix via `hydrate(role="send")` (the same truncation `fork`
     seeded `last_render_len` with), and seeds `investigation.md` into the new run dir so the
-    inherited messages never point at a missing file.
+    inherited messages never point at a missing file; the queries rows it inherits are recorded
+    into the run's state as they are written (`seed_investigation`).
 
     Other faults (e.g. a pydantic `ValidationError` on a payload from another framework
     version, or the private `framework_view` import disappearing) are converted to
@@ -239,7 +241,7 @@ def open_main_session(
         # Every refusal before the fork: `store.fork` commits, and each retried refusal after
         # it would leave another orphan session in the source database.
         validate(store, spec)
-        refuse_seeded_run_dir(run_dir)
+        refuse_seeded_run_dir(run_state.run_dir)
         session = source_session(store, spec)
         session_id = store.fork(session, at_message_id=spec.branch_message_id)
         try:
@@ -249,7 +251,7 @@ def open_main_session(
                 # Re-seed to the framework's count, which `ingest` compares against. Inside the
                 # guard so a failure here still stamps the orphan.
                 store.set_last_render_len(session_id, len(visible))
-            seed_investigation(store, spec, run_dir)
+            seed_investigation(store, spec, run_state)
         except BaseException:
             # The fork cannot be rolled back; stamp it so it reads as ended, not mid-flight.
             stamp_dead_fork(store, session_id)

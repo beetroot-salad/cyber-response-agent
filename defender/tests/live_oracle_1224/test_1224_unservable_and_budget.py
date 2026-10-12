@@ -14,7 +14,7 @@ feedback, not attempts), N06 (N counts failures per call), M04=A, N12, N13, N19,
 
 Every scenario drives the REAL serving seam (`S.world_registry` + `S.call`), the REAL
 investigation (`_drive`, the replay harness with the registry injected as its verb seam), or the
-REAL sibling entry point (`_resume`: `run.main --resume`, whose lifecycle seam drives the real
+REAL sibling entry point (`_resume`: `run.main --episode`, whose lifecycle seam drives the real
 investigation over the world registry). Faults are real inputs (the fixture estate's real
 `AdapterFault` subclasses, GA-40; a removed adapter file; a directory where a store file must be
 written) or scripted model content the design names (O3). A model-provider outage is the
@@ -34,7 +34,7 @@ import shutil
 import subprocess
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -156,6 +156,18 @@ class _Run:
     main: Any
     gather: Any
     raised: BaseException | None = None
+    #: What `drive()` returned (None for a run that ended by raising), and the run states the
+    #: investigator's calls carried into the registry (`S.tap_run_states`).
+    summary: dict | None = None
+    carried: list[Any] = field(default_factory=list)
+
+    @property
+    def state(self) -> Any:
+        """The run's one `RunState` (#1235 round 2): the driver's `summary["run_state"]`, or —
+        for a run that ended by raising — the one state its calls carried."""
+        if self.summary is not None:
+            return self.summary["run_state"]
+        return S.the_run_state(self.carried)
 
     @property
     def rows(self) -> list[dict]:
@@ -167,20 +179,19 @@ class _Run:
         return [r for r in self.rows
                 if r.get("system") == system and (r.get("params") or {}).get("q") == q]
 
-    def _json(self, name: str) -> dict:
-        path = self.run_dir / name
-        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-
     @property
     def breaker(self) -> dict:
-        return self._json("circuit_breaker.json")
+        """The run's circuit-breaker state, read off the run's `RunState` (#1235: never a file in
+        the run dir)."""
+        return self.state.breaker_snapshot()
 
     def failures(self, system: str) -> int:
         return int(self.breaker.get("systems", {}).get(system, {}).get("failures", 0))
 
     @property
     def budget(self) -> dict:
-        return self._json("budget.json")
+        """The run's budget counters, read off the run's `RunState` (#1235)."""
+        return self.state.budget_snapshot()
 
     @property
     def trace_result(self) -> dict:
@@ -226,9 +237,10 @@ def _drive(root: Path, est: S.Estate, verbs: Any, turns: list[Any], *,
     H = S.replay_harness()
     run_dir = H.materialize(root / RUN_ID, H.GOLDEN_AB3)
     run = _Run(run_dir, _main_fn(system), H.ReplayFn(list(turns)))
+    run.carried = S.tap_run_states(verbs)
     try:
-        H.drive(run_dir, run_id=RUN_ID, main=run.main, gather=run.gather, verbs=verbs,
-                limits=limits, tenant=est.place())
+        run.summary = H.drive(run_dir, run_id=RUN_ID, main=run.main, gather=run.gather,
+                              verbs=verbs, limits=limits, tenant=est.place())
     except Exception as exc:  # noqa: BLE001 — only the coined class is kept, the rest re-raise
         if not _unservable(exc):
             raise
@@ -237,7 +249,7 @@ def _drive(root: Path, est: S.Estate, verbs: Any, turns: list[Any], *,
 
 
 # --------------------------------------------------------------------------------------
-# The sibling process (`run.py --resume`), its lifecycle seam driving the real investigation.
+# The sibling process (`run.py --episode`), its lifecycle seam driving the real investigation.
 # --------------------------------------------------------------------------------------
 
 
@@ -259,16 +271,26 @@ class _Sibling:
 def _sibling_episode(tmp_path: Path, monkeypatch: Any, est: S.Estate) -> Path:
     """A v2 episode whose source is a finished run on the fixture tenant (a sibling resumes
     from it). Called BEFORE a scenario scripts its own answers: the source run answers the
-    default captured calls."""
+    default captured calls.
+
+    #1105 PR 2: the sibling opens its episode by id under the configured episodes base, so the
+    episode lives there, and its container `runs/` is present with the tenant's record — what
+    the launcher makes before the first sibling (an absent container refuses the sibling)."""
+    from defender import _tenant
+
+    episodes = tmp_path / "episodes-root"
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
+    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(episodes))
     _base, src = S.source_run(tmp_path, est)
-    return S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)))
+    ep = S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)), root=episodes)
+    (ep / "runs").mkdir(exist_ok=True)
+    _tenant.ensure_runs_base_record(ep / "runs", S.FIXTURE_TENANT)
+    return ep
 
 
 def _resume(ep: Path, est: S.Estate, *, oracle: S.ScriptedModel, verifier: S.ScriptedModel,
             turns: list[Any], label: str = "b", **knobs: Any) -> _Sibling:
-    """World `label`'s sibling: the REAL `run.main --resume`, handed the oracle and verifier
+    """World `label`'s sibling: the REAL `run.main --episode`, handed the oracle and verifier
     through its coined seams; its lifecycle seam drives the real investigation (replay
     harness) over the world registry, so whatever escapes the investigation reaches the
     sibling's own abort path as it would in production."""
@@ -280,11 +302,13 @@ def _resume(ep: Path, est: S.Estate, *, oracle: S.ScriptedModel, verifier: S.Scr
         sib.run = _Run(run_dir, _main_fn(), H.ReplayFn(list(turns)))
         reg = S.world_registry(ep, label, est, oracle=oracle, verifier=verifier,
                                world=kw.get("world"), **knobs)
-        return H.drive(run_dir, run_id=run_dir.name, main=sib.run.main,
-                       gather=sib.run.gather, verbs=reg, tenant=est.place())
+        sib.run.carried = S.tap_run_states(reg)
+        sib.run.summary = H.drive(run_dir, run_id=run_dir.name, main=sib.run.main,
+                                  gather=sib.run.gather, verbs=reg, tenant=est.place())
+        return sib.run.summary
 
-    argv = ["--resume", str(ep / "family.yaml"), "--world", label, "--tenant",
-            S.FIXTURE_TENANT]
+    # #1105 PR 2 (declared change 6): `--tenant T --episode <episode id> --world L`.
+    argv = ["--tenant", S.FIXTURE_TENANT, "--episode", ep.name, "--world", label]
     try:
         sib.rc = S.mod(S.RUN).main(argv, lifecycle=lifecycle, visualize=_no_visualize,
                                    preflight=_no_preflight, oracle=oracle.model,

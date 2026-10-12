@@ -18,6 +18,8 @@ demand carries their intent now.
 """
 from __future__ import annotations
 
+from defender.run_repository import Run
+
 import importlib
 import os
 import subprocess
@@ -27,6 +29,7 @@ from pathlib import Path
 import pytest
 
 from defender.tests._alert_plant import plant_alert
+from defender import _episode_handle as EH
 
 
 def cli_mod():
@@ -101,7 +104,7 @@ def test_an_episode_id_that_is_not_one_safe_component_is_refused_before_priming(
         pytest.fail("prime_base was called before the episode id was validated")
 
     with pytest.raises(SystemExit, match="episode id"):
-        cli.prepare_episode(episode_id, tmp_path / "source", tenant=tenant_paths,
+        cli.prepare_episode(episode_id, Run(tmp_path / "source", runs_base=None), data_root=tenant_paths.data_root,
                             prime=primed_too_early)
 
     assert not episodes_root.exists()
@@ -115,7 +118,7 @@ def test_a_safe_episode_id_resolves_beneath_the_configured_episodes_root(
     #947 (F5-EPISODE-ROOT): the root is READ FROM CONFIGURATION and is never derived from the
     data root — deriving it is what put `episodes/` back inside the tree every tenant-tree
     walker descends and inside the checkout a sibling's own stamp is taken over."""
-    assert cli_mod().episode_dir_for("episode-001", tenant=tenant_paths) == (
+    assert EH.episode_dir(tenant_paths.data_root, "episode-001") == (
         episodes_root / "episode-001")
     assert tenant_paths.dir.parent not in (episodes_root / "episode-001").parents
 
@@ -149,7 +152,7 @@ def test_an_existing_episode_is_refused_even_if_only_stale_world_rows_remain(
         return PrimeReport()
 
     plant_alert(tmp_path / "source", {"rule": {"id": "r"}})
-    with cli.prepare_episode("episode-001", tmp_path / "source", tenant=tenant_paths,
+    with cli.prepare_episode("episode-001", Run.at(tmp_path / "source"), data_root=tenant_paths.data_root,
                              prime=prime) as fresh:
         assert fresh.dir == episodes_root / "episode-001-r2"
         assert list((fresh.dir / "served").glob("*.jsonl")) == []

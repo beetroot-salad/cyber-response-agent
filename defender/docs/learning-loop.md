@@ -5,7 +5,7 @@
 **Implementation cache; code wins on conflict.** The loop exists under
 `defender/learning/` as branched episode (`branch/cli.py`) → questioner
 (`branch/questioner/`) → pre-flight calibration through each world's live oracle
-(`branch/cli.py`, `branch/estate/`) → the family as `run.py --resume` processes → judge
+(`branch/cli.py`, `branch/estate/`) → the family as `run.py --episode` processes → judge
 (`judge/`) → findings queue → lessons curator (`author/lessons/`) with a
 per-lesson forward-check (`author/verify_forward/`) → `defender/lessons/*.md`.
 
@@ -129,12 +129,12 @@ Completed run dir (alert.json + investigation.md + report.md
                    + executed_queries.jsonl + gather_raw/)
         │
         ▼
-defender/learning/branch/cli.py <run_dir> <branch_message_id>
+defender/learning/branch/cli.py --tenant <T> <run_id> <branch_message_id>
         ├── 0. refusals         — everything that can refuse before anything is spent
         ├── 1. questioner       — family.yaml: a control world + one-axis counterfactuals
         ├── 2. pre-flight       — replay the original calls through each world's oracle;
         │                         outcome.yaml; two or more failed worlds → no sibling starts
-        ├── 3. the family       — each world as its own `run.py --resume`, served by its oracle
+        ├── 3. the family       — each world as its own `run.py --tenant <T> --episode <id> --world <label>`, served by its oracle
         ├── 4. archive          — episodes/<id>/worlds/<label>/, self-contained
         └── 5. judge            — judge.yaml + findings → learning/_pending/findings.jsonl
         │
@@ -225,7 +225,9 @@ declared — a comparator that could would have a verdict predictable from the
 label, and the label is what the measurement must be independent of.
 
 **3. `Step.RUNS`, the family as processes.** Each world runs as its own `run.py
---resume` **child process**, started together under `{episode_dir}/runs/`. The
+--tenant <T> --episode <episode_id> --world <label>` **child process** (it opens the
+episode and its source run by id; the launcher creates the siblings' container
+`{episode_dir}/runs/` before starting them). The
 launcher drives no investigation in its own process and has no path to one:
 being a process is what gets a sibling the box lifecycle, the reap scan, its own
 role preflight and its own provenance stamp.
@@ -361,10 +363,10 @@ defender/lessons/*.md         # committed lessons read at PLAN time
 ```
 
 **`learning/runs/` is an orphan.** It holds per-case directories the deleted
-pipeline's persist step wrote, and `ops/trace_lesson.py` still scans it to answer
-"which cases was this lesson in context for" — so that answer covers only
-pre-cutover cases and silently stops growing. Re-pointing the tracer at
-`episodes/` is unfinished work, not a decision.
+pipeline's persist step wrote; nothing reads it. `ops/trace_lesson.py --tenant <T>`
+answers "which cases was this lesson in context for" from that tenant's natural
+runs (`<T>/runs`, through the tenant's run repository; a stray entry there
+refuses the trace).
 
 ## Evaluation
 

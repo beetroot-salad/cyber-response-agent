@@ -11,6 +11,7 @@ import contextlib
 import hashlib
 import json
 import math
+import os
 import sqlite3
 import uuid
 from dataclasses import field
@@ -640,10 +641,12 @@ def _find_nonrepresentable(obj: Any) -> Any:
 
 # open / resolve
 
-def store_path_for(case_id: str, *, runs_base: Path) -> Path:
-    """The store for `case_id` beside `runs_base`. Raises `InvalidCaseId` for a malformed or
-    non-case-stable id."""
-    return SessionPaths(runs_base).session_db(case_id)
+def store_path_for(case_id: str, *, sessions: SessionPaths) -> Path:
+    """The store for `case_id`, as the layout owner's `sessions` (a run's
+    `RunPaths.session_paths()`) names it (#1105 fork S(b)). Raises `InvalidCaseId` for a
+    malformed or non-case-stable id."""
+    store, _root = sessions.store(case_id)
+    return store
 
 
 def _refuse_stale_version(conn: sqlite3.Connection) -> None:
@@ -655,10 +658,14 @@ def _refuse_stale_version(conn: sqlite3.Connection) -> None:
         raise UnknownSchemaVersion(f"store reports schema version {version}")
 
 
-def open_store(*, case_id: str, runs_base: Path) -> StoreHandle:
-    path = store_path_for(case_id, runs_base=runs_base)
-    # Guarded under the trust root `SessionPaths` names, not one composed here.
-    guarded_mkdir(path.parent, base=SessionPaths(runs_base).trust_root)
+def open_store(*, case_id: str, sessions: SessionPaths) -> StoreHandle:
+    """The store for `case_id`, created if missing. The layout owner (`sessions`, a run's
+    `RunPaths.session_paths()`) hands over both the store's path and the root its directory
+    is made under (#1105 fork S(b)): this module reads neither a runs base nor a trust root."""
+    # The store's path and the root its directory is made under, from the owner's one
+    # hand-out (the one `store_path_for`, which the resume door asks, reads too), asked once.
+    path, root = sessions.store(case_id)
+    guarded_mkdir(path.parent, base=root)
     fresh = not path.exists()
     conn = _bare_connect(path)
     try:
@@ -706,11 +713,46 @@ def write_case_pointer(
     body: dict = {"case_id": case_id, "store_path": str(store_path)}
     if session_id is not None:
         body["session_id"] = session_id
-    write_guarded(RunPaths(run_dir).session_pointer, json.dumps(body))
+    write_guarded(RunPaths(run_dir).session_pointer(), json.dumps(body))
+
+
+class LegacyRunLink(StoreError):
+    """A run recorded before #1235: its run -> case link is still the file inside the run
+    folder, and no link sits beside the folder. Refused, never read as "no session": which case
+    the run belongs to is unknown, and the run can be re-run."""
+
+
+#: The run -> case link's name inside the run folder before #1235 moved it beside the folder
+#: (`RunPaths.session_pointer`). Only its presence is ever looked at.
+_LEGACY_LINK_NAME = "session_store_pointer.json"
+
+
+def refuse_legacy_link(run_dir: Path) -> None:
+    """`LegacyRunLink` when `run_dir` still holds the link it was recorded with before #1235.
+
+    For a folder with no link beside it: a link beside the folder always wins, and a folder
+    with neither (a hand-copied run) has no session."""
+    run_dir = Path(run_dir)
+    if os.path.lexists(run_dir / _LEGACY_LINK_NAME):
+        raise LegacyRunLink(
+            f"run {run_dir.name} was recorded before #1235: its run -> case link is still "
+            f"inside the run folder ({_LEGACY_LINK_NAME}) and none sits beside it, so the case "
+            "it belongs to is unknown. Runs recorded before #1235 are not read; re-run it.")
+
+
+def _case_pointer(run_dir: Path) -> Any:
+    """The run -> case link beside `run_dir`, parsed. `FileNotFoundError` when there is none,
+    `LegacyRunLink` when the run was recorded before #1235."""
+    try:
+        text = read_text_utf8(RunPaths(run_dir).session_pointer())
+    except FileNotFoundError:
+        refuse_legacy_link(run_dir)
+        raise
+    return json.loads(text)
 
 
 def resolve_store_path(run_dir: Path) -> Path:
-    data = json.loads(read_text_utf8(RunPaths(run_dir).session_pointer))
+    data = _case_pointer(run_dir)
     return Path(data["store_path"])
 
 
@@ -718,7 +760,7 @@ def resolve_session_id(run_dir: Path) -> str | None:
     """The session this run owns, or `None` when the pointer names none (a fresh run); the
     caller then falls back to `main_session_id`.
     """
-    data = json.loads(read_text_utf8(RunPaths(run_dir).session_pointer))
+    data = _case_pointer(run_dir)
     session_id = data.get("session_id")
     return session_id if isinstance(session_id, str) and session_id else None
 

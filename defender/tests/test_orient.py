@@ -167,5 +167,3 @@ def test_orientation_writes_the_framing_note_only_over_framed_text(tmp_path):
     # The only framed text is the lookup key (alert-derived, not corpus text): no corpus note.
     assert "Framed text below" not in lessons, lessons
     assert lessons.strip().splitlines()[-1] == "_(no lessons matched that signature)_"
-
-

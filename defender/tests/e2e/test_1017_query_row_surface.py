@@ -159,19 +159,28 @@ def test_the_surface_reads_system_key_and_payload_sha256_off_a_real_table(tmp_pa
 
 def test_records_off_the_surface_are_byte_for_byte_what_the_guard_reads_live(tmp_path):
     """O2/D2 — `[r.record() for r in load_queries(run_dir) if r.lead_id == LEAD]` is EXACTLY
-    `record_query.lead_rows(run_dir, LEAD)`: same dicts, same order. `lead_rows` is the guard's
-    own live reader (N2), so this is the whole of what lets an offline replay hand the guard's
-    predicates what the run handed them.
+    what the guard read live: same dicts, same order. Since #1235 the guard's live reader is
+    the run's `RunState` (`state.lead_rows`) — whose rows are the lines the writer actually
+    wrote, read back — and never the FILE. So the three must agree byte for byte: the
+    surface's records, the file's rows and the state's rows (`drive()` hands back the state it
+    injected, read post-run in this process). That is the whole of what lets an offline replay
+    hand the guard's predicates what the run handed them.
 
-    Observed failing by: `record()` missing, or any key/value/order difference."""
+    Observed failing by: `record()` missing, or any key/value/order difference between the
+    surface, the file and the host's table."""
     rec = VerbRecorder()
     r = _run(tmp_path, run_id="d1017-records", verbs=elastic_ok(rec), turns=[
         _bad_args("ghostone", verb="ghostverb"), q("ghosttwo", "ghostverb", PARAMS),
         q("elastic", "query", PARAMS), DONE,
     ])
-    live = record_query.lead_rows(r.run_dir, LEAD)
-    assert len(live) == 3, "the three calls did not all leave rows"
-    assert [t.record() for t in load_queries(r.run_dir) if t.lead_id == LEAD] == live
+    live = r.state.lead_rows(LEAD)
+    on_file = [row for row in r.rows if row.get("lead_id") == LEAD]
+    assert len(live) == 3, "the three calls did not all leave rows on the run's state"
+    assert json.dumps(live) == json.dumps(on_file), \
+        "the run's state and the file disagree — the guard read rows the file does not hold"
+    records = [t.record() for t in load_queries(r.run_dir) if t.lead_id == LEAD]
+    assert json.dumps(records) == json.dumps(live), \
+        "the surface's records are not what the guard read live"
 
 
 def test_the_replay_through_the_surface_agrees_with_the_live_run(tmp_path):
@@ -203,8 +212,8 @@ def test_the_replay_through_the_surface_agrees_with_the_live_run(tmp_path):
     assert _replay_rejections([t.record() for t in load_queries(same.run_dir)]) \
         == [(LEAD, 2, "repeat")], \
         "a replay through the surface misses the trip the live run took"
-    # And the same answer the raw-dict oracle gives, on both — O2 is parity with the run, and
-    # parity with the reader the run's guard uses is how that is measured.
+    # And the same answer the raw-dict oracle gives, on both — O2 is parity with the run; the
+    # file's rows are what the guard read live (the host's table equals them, the test above).
     for r in (distinct, same):
         assert _replay_rejections([t.record() for t in load_queries(r.run_dir)]) \
             == _replay_rejections(r.rows)
@@ -283,7 +292,7 @@ def _judge_world(tmp_path: Path, rows: list[dict], *, goal: str = "GOAL_MARKER")
 def _leads_view(ep: Path, base: Path):
     """The per-lead chain and the rendered leads section — the address every O3 claim is
     made at, off the REAL `render` with the runs base seam pointed at this test's own."""
-    judge_input = J.mod("learning.judge.render").render(ep, "b", runs_base=base)
+    judge_input = J.mod("learning.judge.render").render(ep, "b")
     return judge_input.leads, judge_input.as_prompt_sections()["leads"]
 
 

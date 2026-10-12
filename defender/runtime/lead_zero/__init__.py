@@ -26,6 +26,7 @@ from defender.run_repository import RunPaths
 from defender.hooks.budget_enforcer import BudgetKill
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
 from defender.runtime import circuit_breaker, run_end
+from defender.runtime.run_state import RunState
 from defender.runtime.verb_grant import GrantError, VerbGrant
 from ._spec import (
     CORRELATION_HEADING,
@@ -163,7 +164,7 @@ def render_correlation_section(outcome: CorrelationOutcome, *, grant_home: str) 
     return f"{CORRELATION_HEADING}\n{reserved}\n\n{body}"
 
 
-def _classify_end(end: LeadEnd, run_dir: Path, system: str) -> str | None:
+def _classify_end(end: LeadEnd, run_state: RunState, system: str) -> str | None:
     """The ending of a lead that ran to its own end, or `None` for a usable summary. Decided
     from what the lead did (the harness's stops, the lead's call results), in a fixed order:
     a refused call names the breaker before any count of failures."""
@@ -179,7 +180,7 @@ def _classify_end(end: LeadEnd, run_dir: Path, system: str) -> str | None:
         return ENDING_REQUEST_LIMIT
     if end.fault_terminator is not None:
         return ENDING_DISPATCH_RAISED
-    rows = _rows_for(run_dir, L3)
+    rows = _rows_for(run_state, L3)
     if rows and all(r.get("exit_code") != 0 for r in rows):
         return ENDING_EVERY_CALL_FAILED
     if not summary:
@@ -188,8 +189,8 @@ def _classify_end(end: LeadEnd, run_dir: Path, system: str) -> str | None:
 
 
 async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit per way the lead fails to start; the dispatch seams
-    *, run_dir: Path, defender_dir: Path, run_id: str, verbs: Any, limits: dict,
-    make_model: Any, logger: Any, box: Any, store: Any, budget_started_monotonic: float,
+    *, run_state: RunState, defender_dir: Path, verbs: Any, limits: dict,
+    make_model: Any, logger: Any, box: Any, store: Any,
     catalog: str | None, dispatch: CorrelationDispatch, tenant: Any, deadline: float,
 ) -> CorrelationOutcome:
     """Run `l-00c` to its end inside `deadline` seconds and say how it ended.
@@ -202,7 +203,7 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit pe
     system = dispatch.system
     if system is None:
         return CorrelationOutcome(ending=ENDING_WITHHELD)
-    run_dir = Path(run_dir)
+    run_dir = run_state.run_dir
     pointer = RunPaths(run_dir).alert.relative_to(run_dir).as_posix()
     goal, what_to_summarize = correlation_contract(pointer, dispatch.template_id)
     claimed = claim_lead({
@@ -215,8 +216,8 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit pe
         return CorrelationOutcome(ending=ENDING_CLAIM_FAILED, system=system)
     # Account the spawn explicitly: `subagent_spawns` counts the "gather" tool name, which a
     # harness dispatch never emits. It spends the run's one budget; nothing is reserved for it.
-    _budget_account(run_dir, run_id, "gather", limits)
-    if circuit_breaker.is_tripped(run_dir, system):
+    _budget_account(run_state, "gather")
+    if circuit_breaker.is_tripped(run_state, system):
         return CorrelationOutcome(ending=ENDING_TRIPPED_BREAKER, system=system)
 
     from ..agent_role import GATHER_AGENT_ID_PREFIX
@@ -233,10 +234,10 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit pe
     try:
         async with asyncio.timeout(deadline) as frame:
             wrapped = await run_correlation_lead(
-                run_dir=run_dir, defender_dir=defender_dir, run_id=run_id, goal=goal,
+                run_state=run_state, defender_dir=defender_dir, goal=goal,
                 what_to_summarize=what_to_summarize, verbs=verbs, limits=limits,
                 make_model=make_model, logger=logger, box=box, store=store,
-                budget_started_monotonic=budget_started_monotonic, catalog=catalog,
+                catalog=catalog,
                 dispatch=dispatch, tenant=tenant, session_id=session_id,
                 on_stamp=lambda _reason: None, on_end=ends.append)
     except TimeoutError:
@@ -252,7 +253,7 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit pe
         return CorrelationOutcome(ending=ENDING_DISPATCH_RAISED, system=system)
     if not ends:
         return CorrelationOutcome(ending=ENDING_DISPATCH_RAISED, system=system)
-    ending = _classify_end(ends[-1], run_dir, system)
+    ending = _classify_end(ends[-1], run_state, system)
     if ending is not None:
         return CorrelationOutcome(ending=ending, system=system)
     # A run folder that refuses a produced summary stops the run: it is not the lead's ending.

@@ -177,9 +177,13 @@ def sibling_dir(tmp_path, name: str = "run-sibling") -> Path:
 
 
 def resume(store, run_dir, message_id, target: Path):
-    """Open the sibling the way the driver does, at `message_id`."""
+    """Open the sibling the way the driver does, at `message_id`, on a fresh run state for
+    `target` (#1235 round 2: seeding takes the sibling's `RunState`, not its run dir)."""
+    from defender.runtime.run_state import RunState
+
     branch = branch_mod()
-    return branch.open_main_session(store, spec_at(store, run_dir, message_id), target)
+    return branch.open_main_session(store, spec_at(store, run_dir, message_id),
+                                    RunState(target, target.name))
 
 
 # 1. which leads existed at the branch point
@@ -581,7 +585,9 @@ def test_the_sibling_does_not_inherit_the_source_runs_own_account_of_itself(tmp_
     hands the sibling the answer the pair exists to not share, and `run.py` parses that
     frontmatter as the run's headline. The counters (`budget.json`, `circuit_breaker.json`) are
     this run's spend and this run's per-system fault tallies: inherited, a sibling starts
-    pre-tripped or pre-spent for faults it never took. And the wire log is MAIN's whole
+    pre-tripped or pre-spent for faults it never took. (Since #1235 the counters live in the
+    run process's memory and no run writes either file, so these two arms now plant a stray
+    file at the old name; the sibling still must not carry it.) And the wire log is MAIN's whole
     transcript plus every gather payload verbatim — `_layout.WIRE_LOG_DIR` exists precisely
     so it is unreadable to the agents of its own run, and copying it into a fresh run dir
     re-opens that at the one moment the run dir is being assembled.

@@ -62,6 +62,7 @@ from defender.runtime.agent_definition import (  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime.tools import AgentDeps  # noqa: E402
+from defender.run_repository import SessionPaths
 
 _DEFENDER = Path(__file__).resolve().parents[1]
 
@@ -279,9 +280,16 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
         seen.append((agent_id, system))
         return _Agent()
 
+    from dataclasses import replace
+
+    from defender.runtime.run_state import RunState
+
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
-    deps = bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER)
+    # MAIN's deps carry the run's one `RunState` (#1235 round 2), as the driver hands them:
+    # the dispatch's breaker screen reads it.
+    deps = replace(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER),
+                   run_state=RunState(run_dir, "r-harness-b"))
     asyncio.run(tools_gather._run_gather(
         deps, _factory, 40,
         tools_gather.GatherRequest("l-005", "identity", "goal", ("what",)),
@@ -417,7 +425,7 @@ def test_main_extra_capabilities_is_unconditional(tmp_path, monkeypatch):
     the canonical replacement for the two pre-#705 assertions this test used to make."""
     from defender.runtime import session_store
 
-    store = session_store.open_store(case_id="case-harness", runs_base=tmp_path / "runs")
+    store = session_store.open_store(case_id="case-harness", sessions=SessionPaths(tmp_path / "runs"))
     session_id = store.new_session(agent_id="main")
 
     monkeypatch.delenv("DEFENDER_COMPACTION", raising=False)

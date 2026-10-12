@@ -1,5 +1,6 @@
-"""The runs repository (#1105): the one owner of run-folder layout, the run handle, run lookup
-and the episode -> runs record. This module is its door.
+"""The runs repository (#1105): the one owner of run-folder layout, the run handle, the
+tenant-scoped repository (`Tenant.runs_repository()`, PR 2) and the episode -> runs record.
+This module is its door.
 
 The door serves the public surface lazily (PEP 562 `__getattr__`): reading a name imports the
 one submodule that defines it, and nothing else. That is load-bearing twice over (R4-6):
@@ -26,14 +27,14 @@ if TYPE_CHECKING:
         EXECUTED_QUERIES, SOURCE_REFS, RAW_MARKER, GATHER_SUMMARIES_DIRNAME, LEAD_AUTHOR_DIRNAME,
         TICKET_READS_MARKER, LEAD_CLAIM_SUFFIX, REVIEW_RECORD_PREFIX, TRACE_SUFFIX,
         REVIEW_TRACE_SUFFIX, JSONL_EXT, AGENT_TRACE_SUFFIX, AGENT_FRAMED_TRACE_SUFFIX,
-        SERVED_PREFIX, PAYLOAD_SUFFIX, SESSION_DB_SUFFIX, TOOL_TRACE, POLICY_DENIALS, BUDGET,
-        CIRCUIT_BREAKER, LESSONS_LOADED, SESSION_POINTER, RUNTIME_HTML, BOX_SENTINEL,
+        SERVED_PREFIX, PAYLOAD_SUFFIX, SESSION_DB_SUFFIX, TOOL_TRACE, POLICY_DENIALS,
+        LESSONS_LOADED, RUNTIME_HTML, BOX_SENTINEL,
         RUN_END_SIDECAR_SUFFIX, SCRUB_VERDICT_SUFFIX, ACCOUNTING_FAILURES_SUFFIX,
-        TICKET_WRITE_SUFFIX, ORACLE_HELD_SUFFIX,
+        TICKET_WRITE_SUFFIX, SESSION_POINTER_SUFFIX,
         SESSIONS_DIRNAME, RunLayout, RUN_LAYOUT, WireLogNames, WIRE_LOG_NAMES,
         RunPaths, SessionPaths, LEAD_ID_BODY, LEAD_ID_RE, GATHER_RAW_SHAPE, CASE_ANSWER_KEY_NAMES,
         is_case_answer_key, gather_summaries_shape, alert_input_shape, artifact_file, plain_file, artifact_dir,
-        resolve_run_bundle, contained_payload,
+        contained_payload,
     )
     from defender.run_repository._handle import (
         Run, RunRecord, ArchivedWorld, RecordHandle, case_ref, case_ref_of_digest,
@@ -42,13 +43,13 @@ if TYPE_CHECKING:
         RunId,
     )
     from defender.run_repository._lookup import (
-        open_run, list_run_ids, bound_runs, run_exists,
+        RunsRepository, EpisodeRuns, Listed, RunAddress, open_requested_run,
     )
     from defender.run_repository._record import (
         record_episode_runs, episode_runs, sibling_run_ids, episode_sibling_ids,
     )
     from defender.run_repository._errors import (
-        RunRefused,
+        RunRefused, RunAbsent, RunUnreachable,
     )
     from defender.run_repository._held import (
         hold_runs_folder, run_name_fault,
@@ -62,21 +63,22 @@ _HOMES: dict[str, str] = {
         "GATHER_SUMMARIES_DIRNAME", "LEAD_AUTHOR_DIRNAME", "TICKET_READS_MARKER",
         "LEAD_CLAIM_SUFFIX", "REVIEW_RECORD_PREFIX", "TRACE_SUFFIX", "REVIEW_TRACE_SUFFIX",
         "JSONL_EXT", "AGENT_TRACE_SUFFIX", "AGENT_FRAMED_TRACE_SUFFIX", "SERVED_PREFIX",
-        "PAYLOAD_SUFFIX", "SESSION_DB_SUFFIX", "TOOL_TRACE", "POLICY_DENIALS", "BUDGET",
-        "CIRCUIT_BREAKER", "LESSONS_LOADED", "SESSION_POINTER", "RUNTIME_HTML", "BOX_SENTINEL",
+        "PAYLOAD_SUFFIX", "SESSION_DB_SUFFIX", "TOOL_TRACE", "POLICY_DENIALS",
+        "LESSONS_LOADED", "RUNTIME_HTML", "BOX_SENTINEL",
         "RUN_END_SIDECAR_SUFFIX", "SCRUB_VERDICT_SUFFIX", "ACCOUNTING_FAILURES_SUFFIX",
-        "TICKET_WRITE_SUFFIX", "ORACLE_HELD_SUFFIX",
+        "TICKET_WRITE_SUFFIX", "SESSION_POINTER_SUFFIX",
         "SESSIONS_DIRNAME", "RunLayout", "RUN_LAYOUT", "WireLogNames",
         "WIRE_LOG_NAMES", "RunPaths", "SessionPaths", "LEAD_ID_BODY", "LEAD_ID_RE",
         "GATHER_RAW_SHAPE", "CASE_ANSWER_KEY_NAMES", "is_case_answer_key",
         "gather_summaries_shape", "alert_input_shape", "artifact_file", "plain_file", "artifact_dir",
-        "resolve_run_bundle", "contained_payload",
+        "contained_payload",
     ), "_layout"),
     **dict.fromkeys(("Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref", "case_ref_of_digest",), "_handle"),
     **dict.fromkeys(("RunId",), "_id"),
-    **dict.fromkeys(("open_run", "list_run_ids", "bound_runs", "run_exists",), "_lookup"),
+    **dict.fromkeys(("RunsRepository", "EpisodeRuns", "Listed", "RunAddress",
+                     "open_requested_run",), "_lookup"),
     **dict.fromkeys(("record_episode_runs", "episode_runs", "sibling_run_ids", "episode_sibling_ids",), "_record"),
-    **dict.fromkeys(("RunRefused",), "_errors"),
+    **dict.fromkeys(("RunRefused", "RunAbsent", "RunUnreachable",), "_errors"),
     **dict.fromkeys(("hold_runs_folder", "run_name_fault",), "_held"),
 }
 
@@ -86,17 +88,18 @@ __all__ = [
     "LEAD_AUTHOR_DIRNAME", "TICKET_READS_MARKER", "LEAD_CLAIM_SUFFIX", "REVIEW_RECORD_PREFIX",
     "TRACE_SUFFIX", "REVIEW_TRACE_SUFFIX", "JSONL_EXT", "AGENT_TRACE_SUFFIX",
     "AGENT_FRAMED_TRACE_SUFFIX", "SERVED_PREFIX", "PAYLOAD_SUFFIX", "SESSION_DB_SUFFIX",
-    "TOOL_TRACE", "POLICY_DENIALS", "BUDGET", "CIRCUIT_BREAKER", "LESSONS_LOADED",
-    "SESSION_POINTER", "RUNTIME_HTML", "BOX_SENTINEL", "RUN_END_SIDECAR_SUFFIX",
+    "TOOL_TRACE", "POLICY_DENIALS", "LESSONS_LOADED",
+    "RUNTIME_HTML", "BOX_SENTINEL", "RUN_END_SIDECAR_SUFFIX",
     "SCRUB_VERDICT_SUFFIX", "ACCOUNTING_FAILURES_SUFFIX", "TICKET_WRITE_SUFFIX",
-    "ORACLE_HELD_SUFFIX",
+    "SESSION_POINTER_SUFFIX",
     "SESSIONS_DIRNAME", "RunLayout", "RUN_LAYOUT", "WireLogNames", "WIRE_LOG_NAMES", "RunPaths",
     "SessionPaths", "LEAD_ID_BODY", "LEAD_ID_RE", "GATHER_RAW_SHAPE", "CASE_ANSWER_KEY_NAMES",
     "is_case_answer_key", "gather_summaries_shape", "alert_input_shape", "artifact_file", "plain_file", "artifact_dir",
-    "resolve_run_bundle", "contained_payload", "Run", "RunRecord", "ArchivedWorld",
-    "RecordHandle", "case_ref", "case_ref_of_digest", "RunId", "open_run", "list_run_ids", "bound_runs", "run_exists",
-    "record_episode_runs", "episode_runs", "sibling_run_ids", "episode_sibling_ids", "RunRefused",
-    "hold_runs_folder", "run_name_fault",
+    "contained_payload", "Run", "RunRecord", "ArchivedWorld",
+    "RecordHandle", "case_ref", "case_ref_of_digest", "RunId", "RunsRepository", "EpisodeRuns", "Listed", "RunAddress",
+    "open_requested_run", "record_episode_runs", "episode_runs", "sibling_run_ids",
+    "episode_sibling_ids", "RunRefused", "RunAbsent", "RunUnreachable", "hold_runs_folder",
+    "run_name_fault",
 ]
 
 

@@ -31,7 +31,7 @@ import uuid
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import ValidationError
 from pydantic_core import core_schema
@@ -48,6 +48,9 @@ from defender._tenants import (
     TENANT_ID_FILE,
     TOP_LEVEL_ALLOWED,
 )
+
+if TYPE_CHECKING:
+    from defender.run_repository._lookup import RunsRepository
 
 _R = TypeVar("_R")
 
@@ -295,8 +298,7 @@ class _TenantLayout:
 class _TenantPaths(_TenantLayout):
     """The tenant's layout under a data root, guarded (M4). Private: the sites that need a
     tenant's locations before (or without) accepting it — acceptance itself (`accept_tenant`,
-    setup's `accept_placed_knowledge`), `create_tenant`, `require_tenant`, `tenant_of_run_dir`
-    — use it; everything after acceptance reads
+    setup's `accept_placed_knowledge`), `create_tenant`, `require_tenant` — use it; everything after acceptance reads
     `Tenant`. Constructing one creates nothing, and carries the two guards every such site
     must meet first: the data root is absolute (J03), and the tenant's folder is not inside
     the running checkout's box-mounted `defender/` (O11a)."""
@@ -417,6 +419,14 @@ class Tenant:
     def agent(self) -> Path:
         return self._layout.agent
 
+    def runs_repository(self) -> RunsRepository:
+        """This tenant's runs repository (#1105 PR 2, decision C): bound to this tenant, and
+        below it everything is ids. Only an accepted `Tenant` exists, so this is the one way a
+        repository is built. The package is imported here, lazily: it imports this module."""
+        from defender.run_repository._lookup import RunsRepository
+
+        return RunsRepository(self)
+
 
 def requested_tenant_id(raw: object) -> TenantId:
     """The tenant a request names (`--tenant`), checked against the id grammar — the ONE rule
@@ -463,6 +473,20 @@ def accept_tenant(
     row = _read_row(paths)
     _accept_knowledge(paths, defender_dir=defender_dir, box_mounted=box_mounted)
     return Tenant(id=tenant_id, data_root=Path(data_root), row=row, _token=_ACCEPTED)
+
+
+def requested_tenant(data_root: Path, raw: object) -> Tenant:
+    """The tenant a request names — a command line's raw `--tenant` text, or the `TenantId` a
+    stored row carries — accepted under `data_root`: the ONE acceptance step every request
+    without a box of its own shares (the tracer, the pages, the `--tenant T <run_id>` opener,
+    the curation drain's rehydration). The id is held to `requested_tenant_id` (absent is
+    refused; no default tenant), then `accept_tenant` with the running process's `defender/`
+    and no box mount beside the runs base — a process that mounts more (`run.py`, a sibling)
+    accepts with its own mounts. `TenantRefused` at the first check that fails."""
+    from defender._paths import process_defender_dir
+
+    return accept_tenant(data_root, requested_tenant_id(raw),
+                         defender_dir=process_defender_dir())
 
 
 def accept_placed_knowledge(
@@ -838,24 +862,3 @@ def _refuse_widened_learning_state_overlap(data_root: Path) -> None:
 def runs_base_for(tenant: Tenant) -> Path:
     """The accepted tenant's runs base, `<root>/<tenant>/runs`."""
     return tenant.runs
-
-
-def tenant_of_run_dir(data_root: Path, run_dir: Path) -> TenantId:
-    """The tenant a run dir belongs to, learned from its source's HOST-ONLY runs-base record
-    (never a stamp a box can write): the record at `run_dir.parent`, refused unless
-    `run_dir.parent` resolves to that tenant's runs base under `data_root` — a run dir left
-    over from before its tenant's current data root, or under an unrelated tree, is refused
-    rather than silently trusted. The data root is guarded before the record is read."""
-    data_root = Path(data_root)
-    _refuse_unusable_data_root(data_root)
-    run_dir = Path(run_dir)
-    runs_base = run_dir.parent
-    record = read_tenant(runs_base)
-    expected = _TenantPaths(data_root, record.tenant_id).runs
-    if _resolve_or_refuse(runs_base) != _resolve_or_refuse(expected):
-        raise TenantRefused(
-            f"{runs_base} does not match the current runs base for tenant "
-            f"{record.tenant_id!r} ({expected}) — refusing a run directory outside its "
-            "tenant's own tree")
-    require_tenant(data_root, record.tenant_id)
-    return record.tenant_id

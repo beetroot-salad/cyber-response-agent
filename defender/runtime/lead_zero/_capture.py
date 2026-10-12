@@ -5,23 +5,19 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from defender._io import read_jsonl_rows
+from defender.runtime.run_state import RunState
 from defender.run_repository import RunPaths
-from defender.hooks.budget_enforcer import update_budget_locked
+from defender.hooks.budget_enforcer import count_call
 
 _logger = logging.getLogger(__name__)
 
 
-def _rows_for(run_dir: Path, lead_id: str) -> list[dict]:
-    return [r for r in read_jsonl_rows(RunPaths(run_dir).executed_queries)
-            if r.get("lead_id") == lead_id]
+def _rows_for(state: RunState, lead_id: str) -> list[dict]:
+    return list(state.lead_rows(lead_id))
 
 
-def _budget_account(run_dir: Path, run_id: str, tool_name: str, limits: dict) -> None:
-    import contextlib
-
-    with contextlib.suppress(Exception):  # accounting must never break the run
-        update_budget_locked(run_dir, run_id, tool_name, limits=limits)
+def _budget_account(state: RunState, tool_name: str) -> None:
+    count_call(state, tool_name)
 
 
 def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> bool:

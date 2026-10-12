@@ -72,7 +72,7 @@ git clone <tenant repo> "$DEFENDER_DATA_ROOT/playground/knowledge"   # the tenan
 python3 defender/scripts/tenant.py migrate playground "$DEFENDER_DATA_ROOT/playground/knowledge"   # one-off, INSTEAD of the clone, for a data root made before #1120 (no knowledge/ yet); then setup
 python3 defender/scripts/tenant.py setup playground    # once, after the clone exits 0, before the first run
 python3 defender/run.py <alert.json> --tenant playground   # one investigation → run dir under $DEFENDER_DATA_ROOT/playground/runs/; --no-learn skips curation enqueue
-python3 defender/learning/branch/cli.py <run_dir> <branch_message_id>   # fork a finished run into a family of worlds and grade it
+python3 defender/learning/branch/cli.py --tenant playground <run_id> <branch_message_id>   # fork a finished run (by id, under the tenant's runs) into a family of worlds and grade it
 python3 defender/learning/loop.py --author-drain     # fold the findings queue into lessons; --lead-author-drain is the sibling stage
 python3 defender/api/serve.py --tenant <id>           # the stub platform API on 127.0.0.1:8000, seeded for the named tenant(s) (needs the `api` extra: `uv sync --extra dev --extra runtime --extra api`, as CI does — a bare `uv sync --extra api` uninstalls the others); tokens `<id>-analyst`
 ```
@@ -85,15 +85,12 @@ user that runs defender; a destination already occupied makes setup refuse, nami
 message. (Adopting an existing (B)/(C) installation whose old entries are root-owned may need
 setup run as root — that adoption case only.)
 
-**Running the suite as root fails five tests that are not broken.** Four are the
-accounting-failure tests in `tests/test_budget_enforcement_631.py`
-(`test_one_failed_accounting_write_costs_one_call_of_overshoot` and its three
-siblings); the fifth is
+**Running the suite as root fails one test that is not broken:**
 `tests/test_921_launcher_frame.py::test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_counts`.
-All five simulate a failing write by chmod'ing a directory to `r-x`, and root
-ignores permission bits — so the write lands and the test asserts "the failed
-write landed anyway". CI runs non-root and they pass there. Confirm against CI
-before chasing them; don't "fix" the tests.
+It simulates a failing write by chmod'ing a directory to `r-x`, and root ignores permission
+bits — so the write lands and the test asserts "the failed write landed anyway". CI runs
+non-root and it passes there. (The four accounting-failure tests that failed the same way
+retired with #1235.) Confirm against CI before chasing them; don't "fix" the tests.
 
 ## Run dir + the two tables
 
@@ -117,7 +114,7 @@ worlds that differ by one deliberate fact. Each world's corpus is staged into it
 and that staged estate is what the siblings' queries are answered from. Every world is replayed
 against the capture first: one that contradicts it, or whose declared difference no query could
 reach, ends the whole episode before any sibling runs. The accepted worlds then run as their own
-`run.py --resume` processes, and the **judge** grades the archived episode and appends its
+`run.py --tenant <T> --episode <episode_id> --world <label>` processes, and the **judge** grades the archived episode and appends its
 findings to `_pending/findings.jsonl`.
 
 That queue is the joint the cutover swung on — and since #1007 it is TWO queues, partitioned by

@@ -43,7 +43,7 @@ from defender.learning.core.quarantine import preserve_tainted_tree
 from defender.learning.leads import lead_author
 from defender.learning.leads.lead_author import LeadAuthorError
 from defender.runtime import scrub as scrub_mod
-from defender.tests._state1135 import state_for_paths
+from defender.tests._state1135 import curation_run_dir, run_of, state_for_paths
 from defender.tests._tree_listing_1134 import descriptors_under
 from defender.tests.e2e import _box665 as B
 from defender.tests.test_1134_mount_list import UNKNOWN_LABELS
@@ -172,8 +172,7 @@ def test_the_lead_author_refusal_names_the_labels_value(tmp_path: Path):
     the stub deps answers with a sentinel).
 
     Catches: `{label!r}` over a member, rendering `<DrainLabel.AUTHOR: 'author_drain'>`."""
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
+    run = run_of(curation_run_dir("run"))  # the opened run the lane is handed (#1105 PR 2)
     paths = _paths(tmp_path)
 
     class Reached(Exception):
@@ -184,13 +183,13 @@ def test_the_lead_author_refusal_names_the_labels_value(tmp_path: Path):
 
     deps = SimpleNamespace(paths=paths, state=SimpleNamespace(lock=lock))
     with pytest.raises(LeadAuthorError) as e:
-        lead_author.run(run_dir, label=AUTHOR_DRAIN_LABEL, deps=deps)  # type: ignore[arg-type]
+        lead_author.run(run, label=AUTHOR_DRAIN_LABEL, deps=deps)  # type: ignore[arg-type]
     msg = str(e.value)
     assert "the 'author_drain' lane does not mount" in msg, msg
     _assert_shows_value(msg, AUTHOR_DRAIN_LABEL)
 
     with pytest.raises(Reached):
-        lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)  # type: ignore[arg-type]
+        lead_author.run(run, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------------------
@@ -213,8 +212,7 @@ def test_the_lead_author_lane_raises_on_a_non_member_before_the_queue_lock(
     Catches: a `str`-mixin enum, a check that coerces a string, a name or a look-alike into a
     member (`DrainLabel(label)`, `DrainLabel[label]`, `.value` lookups), and a run that takes
     the queue lock before it uses the label."""
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
+    run = run_of(curation_run_dir("run"))  # the opened run the lane is handed (#1105 PR 2)
     paths = _paths(tmp_path)
 
     def lock(_role: object, *, wait: object) -> None:
@@ -222,14 +220,14 @@ def test_the_lead_author_lane_raises_on_a_non_member_before_the_queue_lock(
 
     deps = SimpleNamespace(paths=paths, state=SimpleNamespace(lock=lock))
     with pytest.raises(AttributeError):
-        lead_author.run(run_dir, label=value, deps=deps)  # type: ignore[arg-type]
+        lead_author.run(run, label=value, deps=deps)  # type: ignore[arg-type]
 
     with state_for_paths(paths).lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as held:
         assert held, "precondition: the test holds the queue lock"
-        assert lead_author.run(run_dir, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths) == \
+        assert lead_author.run(run, label=LEAD_AUTHOR_DRAIN_LABEL, paths=paths) == \
             lead_author.QUEUE_LOCK_SKIP_RC, "control: the held lock makes a member skip"
         with pytest.raises(AttributeError):
-            lead_author.run(run_dir, label=value, paths=paths)  # type: ignore[arg-type]
+            lead_author.run(run, label=value, paths=paths)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------------------

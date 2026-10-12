@@ -70,9 +70,8 @@ def _grade(ep: Path, tmp_path: Path):
     record already on disk is removed first, so a scenario that re-plants a fault and grades
     again sees a fresh pass rather than the idempotent re-read of the earlier one."""
     (ep / "judge.yaml").unlink(missing_ok=True)
-    return R.judge().grade_episode(ep, judge=J.FakeJudge(default=_REPLY),
-                                   runs_base=tmp_path / "defender-runs",
-                                   git_show=J.FakeGitShow(), state=_state1135.env_state())
+    return J.grade_at(ep, judge=J.FakeJudge(default=_REPLY), git_show=J.FakeGitShow(),
+                      state=_state1135.env_state())
 
 
 def _ledger_name(label: str) -> str:
@@ -364,7 +363,7 @@ def test_1049_the_gather_summary_refusal_names_gather_summaries_lead_md_with_no_
 
     R.plant_link(summary, ep / "family.yaml")
     base, _src = J.runs_base(tmp_path)
-    shown = R.mod("learning.judge.render").render(ep, "b", runs_base=base).leads["l-001"]["summary"]
+    shown = R.mod("learning.judge.render").render(ep, "b").leads["l-001"]["summary"]
     assert shown == linked, (shown, linked)
 
 
@@ -606,7 +605,7 @@ def test_1049_every_caller_coalesces_none_at_the_read_site(tmp_path):
     assert not any(r.get('ungradable') for r in grade.worlds)
 
     base, _src = J.runs_base(tmp_path)
-    shown = R.mod("learning.judge.render").render(ep, "b", runs_base=base)
+    shown = R.mod("learning.judge.render").render(ep, "b")
     assert shown.world_label == 'b'
     assert 'l-001' in shown.leads
 
@@ -1019,7 +1018,7 @@ def test_1049_a_lead_id_that_is_not_a_plain_component_never_reaches_name_constru
     row = _rows(grade)["b"]
     assert not row.get("ungradable"), row
     base, _src = J.runs_base(tmp_path)
-    shown = R.mod("learning.judge.render").render(ep, "b", runs_base=base).leads
+    shown = R.mod("learning.judge.render").render(ep, "b").leads
     assert "does not name a file inside this world" in shown[nul]["summary"], shown[nul]
 
     sample = E.sample_episode(tmp_path / "page")

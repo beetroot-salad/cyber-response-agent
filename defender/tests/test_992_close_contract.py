@@ -391,8 +391,8 @@ def test_budget_kill_and_circuit_breaker_are_not_closed_as_a_verdict(tmp_path):
     breaker's abort — do NOT take the post-loop forced close: no report.md, the challenged
     attempt's record intact, the review state still open, and the exit reason naming what
     cut the run short. Neither is a finding about the case (the breaker says the environment
-    is unreachable and asks for escalation; the budget kill fires on the run dir's own
-    accounting writes failing as often as on the tool tail), and everything downstream reads
+    is unreachable and asks for escalation; the budget kill fires on the tool tail or the
+    wall clock running out, never on the case), and everything downstream reads
     a report.md as one — the ticket lane closes the ticket on any readable report where a
     missing one leaves it open, the episode reader grades a world with a report where it
     skips one without, the held-out scorer counts `unresolved` as a wrong disposition rather

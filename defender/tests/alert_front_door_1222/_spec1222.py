@@ -1410,7 +1410,7 @@ def store_factory(tmp_path: Path, *, fault: SS.StoreFault | None = None,
     base = SS.runs_base(tmp_path)
 
     def factory(case_id: str, run_dir: Path) -> Any:
-        real = SS.store_mod().open_store(case_id=case_id, runs_base=base)
+        real = SS.store_mod().open_store(case_id=case_id, sessions=sym("run_repository", "SessionPaths")(base))
         handle = LeadSessionFault(real, fault or default, once=once)
         if sink is not None:
             sink.append(handle)
@@ -1587,6 +1587,7 @@ class Drive:
     enqueued: list[tuple[tuple[Any, ...], dict[str, Any]]] = field(default_factory=list)
     stores: list = field(default_factory=list)
     raised: BaseException | None = None
+    run_state: Any = None
 
     # --- MAIN -----------------------------------------------------------------------------
     @property
@@ -1639,13 +1640,11 @@ class Drive:
 
     @property
     def breaker(self) -> dict:
-        p = self._dir() / "circuit_breaker.json"
-        return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+        return self.run_state.breaker_snapshot() if self.run_state is not None else {}
 
     @property
     def budget(self) -> dict:
-        p = self._dir() / "budget.json"
-        return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+        return self.run_state.budget_snapshot() if self.run_state is not None else {}
 
     @property
     def investigation(self) -> str:
@@ -1715,6 +1714,10 @@ def drive_run(d: Drive, run_dir: Path, *, tenant: Any = None, verbs: Any = ..., 
         if value is not None:
             kw[name] = value
     d.run_dir = Path(run_dir)
+    if d.run_state is None:
+        d.run_state = sym("runtime.run_state", "RunState")(
+            run_dir, run_id or Path(run_dir).name)
+    kw["run_state"] = d.run_state
     out = H.drive(Path(run_dir), run_id=run_id or Path(run_dir).name, main=d.main,
                   gather=d.router, **kw)
     d.summary = out or {}
@@ -1791,6 +1794,7 @@ def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
             # The folder is the run's from here on, even if `before` raises (an interrupted run).
             d.run_dir = Path(kw["run_dir"])
             before(Path(kw["run_dir"]))
+            d.run_state = getattr(before, "run_state", None)
             return inner(**kw)
 
         lifecycle_fn: Callable[..., dict] = lifecycle_with_before

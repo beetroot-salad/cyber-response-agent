@@ -223,11 +223,13 @@ def test_a_world_id_carrying_upper_case_is_refused_at_the_mint() -> None:
 
 def test_an_episode_id_carrying_upper_case_is_refused() -> None:
     """The same rule, because the two are joined into one run id and an episode id names the
-    one directory holding the family's capture."""
-    from defender.learning.branch import cli
+    one directory holding the family's capture. (#1105 PR 2: the rule moved from the launcher
+    to the episode owner, `_episode_handle.refuse_bad_episode_id`, which refuses with
+    `EpisodeRefused`; the launcher re-raises it as its own `[branch]` refusal.)"""
+    from defender._episode_handle import EpisodeRefused, refuse_bad_episode_id
 
-    with pytest.raises(SystemExit):
-        cli.refuse_bad_episode_id("Ep1")
+    with pytest.raises(EpisodeRefused):
+        refuse_bad_episode_id("Ep1")
 
 
 # the outbound-body type

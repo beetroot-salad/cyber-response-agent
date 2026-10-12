@@ -55,6 +55,7 @@ from typing import Any
 
 import pytest
 
+from defender import _episode_handle as EH
 from defender import _provenance
 from defender._episode_handle import Episode
 from defender._provenance import RunProvenance
@@ -113,14 +114,18 @@ def _verify(tmp_path: Path, name: str, *, source: dict,
 
     #1224: the family's verdict is the report's `comparable` and its `reason` — the outcome
     record is pre-flight's, written once before any sibling starts, and verify never writes it
-    (so none exists here)."""
-    base, _src = T.runs_base(tmp_path)
-    dirs = [T.sibling_run_dir(base / name, w, **(siblings or {}).get(w, {})) for w in T.WORLDS]
-    if reverse:
-        dirs.reverse()
-    ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{name}")
+    (so none exists here).
+
+    #1105 PR 2: each family is its own episode (under its own root, named `name`), its siblings
+    planted in that episode's container and handed over as arms opened by id through the
+    episode's view (`T.family_arms`), in `T.WORLDS` order or reversed."""
+    ep = T.episode(tmp_path, root=tmp_path / "episodes" / name)
+    for w in T.WORLDS:
+        T.sibling_run_dir(ep / "runs", w, **(siblings or {}).get(w, {}))
+    labels = list(reversed(T.WORLDS)) if reverse else list(T.WORLDS)
     with Episode.open(ep) as episode:
-        report = _cli().verify_family(episode, dirs, source=source, allow_dirty=allow_dirty)
+        report = _cli().verify_family(episode, T.family_arms(episode, labels), source=source,
+                                      allow_dirty=allow_dirty)
     assert not (ep / "outcome.yaml").exists(), "verify wrote the outcome record pre-flight owns"
     stamp_path = ep / "provenance.json"
     stamp = json.loads(stamp_path.read_text(encoding="utf-8")) if stamp_path.exists() else None
@@ -374,7 +379,7 @@ def test_1204_a_launch_whose_siblings_read_another_knowledge_commit_ends_incompl
     the pin that the knowledge comparison runs on the siblings' per-process stamps, not only on
     the launcher's capture."""
     T.runs_base(tmp_path)
-    episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=T.current_tenant())
+    episode_dir = EH.episode_dir(T.current_tenant().data_root, T.EPISODE_ID)
     launch = A._prepare(tmp_path, spawn=J.FakeSibling(episode_dir, knowledge={"commit": K2}))
     assert launch.run(*argv) == 0, "the exit is about the launch; the outcome is the family's"
     assert launch.questioner.calls > 0, "the launch was refused at preflight instead"
@@ -663,14 +668,15 @@ def _cli_with_table(reclassified: dict[str, str], monkeypatch) -> Any:
 
 def _verify_with(cli: Any, tmp_path: Path, name: str, docs: dict[str, dict]) -> dict:
     """`cli.verify_family` over three real sibling stamp files whose documents are `docs`
-    (by label), against the default source."""
-    base, _src = T.runs_base(tmp_path)
-    dirs = [T.sibling_run_dir(base / name, w) for w in T.WORLDS]
+    (by label), against the default source — planted in the container of an episode of its own
+    (`name`) and handed over as arms opened through its view (#1105 PR 2)."""
+    ep = T.episode(tmp_path, root=tmp_path / "episodes" / name)
+    dirs = [T.sibling_run_dir(ep / "runs", w) for w in T.WORLDS]
     for d in dirs:
         (d / "provenance.json").write_text(json.dumps(docs[d.name[-1]]), encoding="utf-8")
-    ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{name}")
     with Episode.open(ep) as episode:
-        return cli.verify_family(episode, dirs, source=T.provenance_record())
+        return cli.verify_family(episode, T.family_arms(episode, T.WORLDS),
+                                 source=T.provenance_record())
 
 
 def test_1204_the_field_table_drives_the_comparison(tmp_path, monkeypatch):
@@ -710,15 +716,15 @@ def test_1204_fields_expected_to_differ_or_informational_are_not_compared(tmp_pa
     accepted; dirty siblings whose path samples, counts and reasons all differ are accepted
     under `--allow-dirty`, which waives the dirt and nothing else. Without this a table-driven
     loop that compared every field would refuse every real family."""
-    base, _src = T.runs_base(tmp_path)
-    dirs = [T.sibling_run_dir(base / "lineage", w) for w in T.WORLDS]
+    ep = T.episode(tmp_path, root=tmp_path / "episodes" / "lineage")
+    dirs = [T.sibling_run_dir(ep / "runs", w) for w in T.WORLDS]
     for turn, d in enumerate(dirs, start=1):
         doc = {**T.provenance_record(), "world_id": f"{T.EPISODE_ID}.{d.name[-1]}",
                "parent_run_id": f"source-{turn}", "fork_turn": turn}
         (d / "provenance.json").write_text(json.dumps(doc), encoding="utf-8")
-    ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-lineage")
     with Episode.open(ep) as episode:
-        report = _cli().verify_family(episode, dirs, source=T.provenance_record())
+        report = _cli().verify_family(episode, T.family_arms(episode, T.WORLDS),
+                                      source=T.provenance_record())
     assert report["comparable"] is True, report["reason"]
 
     report, _ = _verify(

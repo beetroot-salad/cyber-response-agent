@@ -248,8 +248,8 @@ def test_exactly_one_function_rewrites_a_pending_file(tmp_path: Path):
     the rewrite survives, which only the merging rotation gives.
 
     Under #1135 the rewrite is a `replace`-mode write of a channel's `.queue` through the
-    handle's one write door, so the census names that call shape (the old `write_atomic`
-    callers no longer exist under `defender/learning`)."""
+    handle's one write door, so the census names that call shape (the callers of the old
+    atomic-write helper no longer exist under `defender/learning`)."""
     import defender.learning as learning_pkg  # type: ignore[import-not-found]
 
     root = Path(learning_pkg.__path__[0]).resolve()  # namespace pkg: __file__ is None

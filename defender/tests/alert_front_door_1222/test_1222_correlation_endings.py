@@ -301,10 +301,12 @@ def _pre_trip(system: str = "elastic") -> Callable[[Path], None]:
     `circuit_breaker.record_outcome` (two connectivity failures, exit 2), PR-19's pre-tripped
     breaker."""
     def plant(run_dir: Path) -> None:
+        state = S.sym("runtime.run_state", "RunState")(run_dir, run_dir.name)
+        plant.run_state = state
         record = S.sym("runtime.circuit_breaker", "record_outcome")
         for _ in range(S.sym("runtime.circuit_breaker", "PER_SYSTEM_FAIL_LIMIT")):
-            record(run_dir, system, 2)
-        assert S.sym("runtime.circuit_breaker", "is_tripped")(run_dir, system)
+            record(state, system, 2)
+        assert S.sym("runtime.circuit_breaker", "is_tripped")(state, system)
     return plant
 
 
@@ -479,7 +481,7 @@ def test_o5_tripped_breaker_is_named_to_main(tmp_path: Path) -> None:
     assert "elastic" in sentence, (
         f"the tripped-breaker sentence does not tell MAIN which system is down: {sentence!r}")
     assert tripped.run_dir is not None
-    down = S.sym("runtime.circuit_breaker", "down_message")(tripped.run_dir, "elastic")
+    down = S.sym("runtime.circuit_breaker", "down_message")(tripped.run_state, "elastic")
     _assert_never_handed(tripped, down, "FD1222-TB-NARRATION", "docker exec curl timed out")
     _assert_continued(tripped, "tripped breaker", requests=2)
     _alone(control, ("tripped breaker", tripped), ("pre-tripped", pre_tripped))
@@ -647,7 +649,7 @@ def test_p008_l00c_own_failures_trip_its_system(tmp_path: Path) -> None:
         "l-00c's own failures tripped its system but MAIN's sentence is not 'tripped breaker'")
     assert "elastic" in sentence, f"the sentence does not name the system marked down: {sentence!r}"
     assert d.run_dir is not None
-    assert S.sym("runtime.circuit_breaker", "is_tripped")(d.run_dir, "elastic"), (
+    assert S.sym("runtime.circuit_breaker", "is_tripped")(d.run_state, "elastic"), (
         "l-00c's own failures did not mark its system down for the run")
     reached = [c for c in d.backend.rec.calls
                if c.params.get("native_query") == "FD1222-MAIN-L001-QUERY"]
@@ -990,4 +992,3 @@ def test_p191_lead_writes_a_summary_without_reading_the_alert(tmp_path: Path) ->
         S.assert_wrapped_untrusted(d.opening_message, mark, f"{label}: the lead's summary")
         assert _ending(d, control) == "", (
             f"{label}: a summary was named as an ending: {_ending(d, control)!r}")
-

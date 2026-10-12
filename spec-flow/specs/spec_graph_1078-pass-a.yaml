@@ -586,10 +586,12 @@ demands:
     + 2 wrappers). §7: J48 resolved (human): runs_base required keyword; C-P7 sizes the migration test-only.
 - id: d4_render_union_threaded
   kind: coherence
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1105 PR 2 — J3 (owner fork decision, 2026-10-10): the judge''s same-alert union is removed and the judge reads only the episode it is handed; `test_d4_render_union_threaded`, which discharged this demand, was deleted with it (a declared removal).'
   pass: A
   binds: [sibling_union, grade_episode, interacts(sibling_union->runs_base)]
-  discharged_by: test_d4_render_union_threaded
   seed_docstring: >-
     The judge render's sibling_union reads the same threaded runs_base_for(T). grade_episode's runs_base
     is a required keyword: calling it without one is a TypeError, never a skipped probe.
@@ -2249,10 +2251,12 @@ demands:
   note: P6 (is runs_base_for(T) the right base to probe?) stays carried.
 - id: s066
   kind: coherence
-  form: test
+  form: clause
+  status: retired
+  outcome:
+    nl: 'RETIRED by #1105 PR 2 — J3 (owner fork decision, 2026-10-10): the judge''s same-alert union is removed and the judge reads only the episode it is handed; `test_judge_sibling_union_after_the_switch`, which discharged this demand, was deleted with it (a declared removal).'
   pass: A
   binds: [sibling_union, interacts(sibling_union->runs_base)]
-  discharged_by: test_judge_sibling_union_after_the_switch
   seed_docstring: >-
     The judge's sibling union reads the threaded runs_base_for(T) only, so trials in the old runs base
     are absent from it (N4: old bases are not read for T).

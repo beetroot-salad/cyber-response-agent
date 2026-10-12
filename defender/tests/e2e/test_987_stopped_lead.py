@@ -67,7 +67,6 @@ from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.tests import _tenants1106 as T1106  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
-from defender.hooks import budget_enforcer  # noqa: E402
 from defender.runtime import driver, observe, session_store, tools_gather  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
@@ -99,6 +98,7 @@ from defender.tests.test_987_query_door import (  # noqa: E402
     frame_body,
     split,
 )
+from defender.run_repository import SessionPaths  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -196,10 +196,15 @@ def run_lead(  # noqa: PLR0913 — one parameter per thing a scenario varies
     `FunctionModel`; the tools, capabilities, instructions and retry policy are the shipped
     ones."""
     run_dir = materialize(root, GOLDEN_AB3)
-    budget_enforcer.open_budget(run_dir, budget_enforcer.DEFAULT_LIMITS)
+    # The real `_run_gather` runs without the driver, so this starts the run's state the way
+    # the driver does at run start and hands it to MAIN's deps: the budget, the breaker and the
+    # queries rows the query tool's guards and row writer read are all on it (#1235).
+    from defender.runtime.run_state import RunState
+
     # #1106: a run hands MAIN's deps its tenant's record, which every lead inherits.
     deps = replace(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER),
-                   tenant=T1106.fixture_run_tenant())
+                   tenant=T1106.fixture_run_tenant(),
+                   run_state=RunState(run_dir, run_dir.name))
     rec = VerbRecorder()
     model = GatherModel(responses)
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")
@@ -690,7 +695,7 @@ def test_the_stopped_leads_session_is_recorded_like_a_finished_ones(tmp_path):
     request, recorded under the lead's own session — and ends on that request, the trailing
     parity every finished gather session has (there is no gather-side run-end flush)."""
     base = runs_base(tmp_path / "db")
-    store = session_store.open_store(case_id="case-987", runs_base=base)
+    store = session_store.open_store(case_id="case-987", sessions=SessionPaths(base))
     session_id = store.new_session(agent_id=f"gather:{LEAD}")
     caps = driver._gather_extra_capabilities(store, session_id, f"gather:{LEAD}", request_limit=6)
 
@@ -718,7 +723,7 @@ def test_the_marked_final_request_is_recorded_as_it_was_sent(tmp_path):
     ceiling hook sits ahead of every extra capability on a gather agent — so the session
     holds the request the model actually read, sentence included, and not a shorter one."""
     base = runs_base(tmp_path / "db")
-    store = session_store.open_store(case_id="case-987c", runs_base=base)
+    store = session_store.open_store(case_id="case-987c", sessions=SessionPaths(base))
     session_id = store.new_session(agent_id=f"gather:{LEAD}")
     caps = driver._gather_extra_capabilities(store, session_id, f"gather:{LEAD}", request_limit=3)
 

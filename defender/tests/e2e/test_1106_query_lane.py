@@ -157,5 +157,3 @@ def test_the_gather_dispatch_advertises_exactly_the_runs_tenants_systems(
     # binds elastic.alerts, which A grants gather and B does not.
     listed = T.SHIPPED_CORRELATION_TEMPLATE in prompt
     assert listed is ("elastic" in reached), (own, listed)
-
-

@@ -452,6 +452,8 @@ _RUN_TENANT = "defender.runtime.run_tenant.RunTenant"
 #: new factory, or a stale entry, fails it.
 _TENANT_FACTORIES: dict[str, str] = {
     "defender._tenant.accept_tenant": _TENANT,
+    # #1105 PR 2 review: a request's tenant, accepted (the one step `accept_tenant` sits under).
+    "defender._tenant.requested_tenant": _TENANT,
     "defender.runtime.run_tenant.resolve_tenant": _RUN_TENANT,
     "defender.runtime.run_tenant.run_tenant_for": _RUN_TENANT,
     "defender.run._resolve_run_tenant": _RUN_TENANT,

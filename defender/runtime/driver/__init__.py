@@ -58,6 +58,7 @@ from ..close_tool import register_close_tool
 from ..circuit_breaker import RunAborted
 from ..permission.policies import _common
 from ..providers import BuiltModel
+from ..run_state import RunState
 from ..tools import (
     AgentDeps,
     GatherDeps,
@@ -92,7 +93,6 @@ from ._prompts import (
 from ._budget import (
     _account_executed_call,
     _budget_short_circuit,
-    _budget_state_for_enforcement,
     _make_hooks,
     _stamp_duration,
 )
@@ -126,13 +126,10 @@ from defender.hooks.budget_enforcer import (
     BudgetKill,
     account_call,
     check_budgets,
-    open_budget,
-    read_budget,
     refusal_message,
     should_refuse,
     tail_exhausted,
     tier,
-    update_budget_locked,
 )
 
 _logger = logging.getLogger(__name__)
@@ -154,7 +151,7 @@ StoreFactory = Callable[[str, Path], Any]
 
 
 def _default_store_factory(case_id: str, run_dir: Path) -> Any:
-    return session_store.open_store(case_id=case_id, runs_base=run_dir.parent)
+    return session_store.open_store(case_id=case_id, sessions=RunPaths(run_dir).session_paths())
 
 
 def _resolve_store_factory(resume: Any, store_factory: StoreFactory | None) -> StoreFactory:
@@ -179,12 +176,29 @@ def _run_summary(  # noqa: PLR0913 — one dict literal's full field set, named 
     """The one shape `run_investigation` returns on every exit, so exits cannot drift apart.
 
     `end` (exit class, and whether the model had already closed) is flattened on so `run.py`'s
-    post-steps read it in-process rather than off disk."""
+    post-steps read it in-process rather than off disk. The run's live state is not on it
+    (#1235): a caller that wants it hands it in (`run_investigation(run_state=…)`) and keeps its
+    own reference."""
     return {
         "output": output, "model": model_name, "requests": requests,
         "truncated_by": end.truncated_by, "closed_before_cut": end.closed_before_cut,
         "exit_reason": exit_reason, "case_id": case_id, "store_path": store_path,
     }
+
+
+def _run_state_at_boundary(run_state: RunState | None, run_dir: Path, run_id: str) -> RunState:
+    """The run's one live state (#1235), resolved once: the one the caller handed in, which
+    must be this run's — started for this folder, as spelled, under this run id — or, when
+    handed none, a new one for the run (production's path: `run.py` hands none). Another
+    run's state is a `ValueError`: counting this run on it would charge that run's budget
+    and breaker, and leave this one's decisions reading a state they never wrote."""
+    if run_state is None:
+        return RunState(run_dir, run_id)
+    if (run_state.run_dir, run_state.run_id) != (Path(run_dir), run_id):
+        raise ValueError(
+            f"run_investigation was handed the state of run {run_state.run_id!r} on "
+            f"{run_state.run_dir}, not this run's ({run_id!r} on {run_dir})")
+    return run_state
 
 
 def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | None) -> None:
@@ -417,7 +431,7 @@ def _stop_before_main(  # noqa: PLR0913 — the early stop's own facts
 async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the run's identity for an early stop
     correlation: CorrelationDispatch, *, run_dir: Path, defender_dir: Path, run_id: str,
     verbs: Any, limits: dict, make_model: MakeModel, logger: Any, box: Any, store: Any,
-    session_id: str, case_id: str, model_name: str | None, budget_started_monotonic: float,
+    session_id: str, case_id: str, model_name: str | None, run_state: RunState,
     catalog: str | None, tenant: RunTenant, deadline: float,
 ) -> tuple[str | None, dict | None]:
     """Run the correlation lead to its end and return `(the correlation section of MAIN's
@@ -438,9 +452,9 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
 
     try:
         outcome = await lead_zero_mod.run_correlation(
-            run_dir=run_dir, defender_dir=defender_dir, run_id=run_id, verbs=verbs,
+            run_state=run_state, defender_dir=defender_dir, verbs=verbs,
             limits=limits, make_model=make_model, logger=logger, box=box, store=store,
-            budget_started_monotonic=budget_started_monotonic, catalog=catalog,
+            catalog=catalog,
             dispatch=correlation, tenant=tenant, deadline=deadline)
     except (BudgetKill, RunAborted) as kill:
         _logger.warning(f"{kill}; stopping before the agent starts")
@@ -489,9 +503,17 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     resume: Any = None,
     tenant: RunTenant,
     orient_shim: orient.ShimRunner | None = None,
+    run_state: RunState | None = None,
 ) -> dict:
     # `tenant` is resolved once at the entry point (settings folder, permissions, item 3's
     # dispatch identity). Required: there is no process-level fallback.
+    #
+    # The run's live decision state (#1235): its budget and clock, its breaker, its queries
+    # rows. Resolved first — a state for another run is refused before anything is read or
+    # driven — and carried by reference to every role of the run; a branch sibling's seeding
+    # records its inherited rows into it. The summary does not hand it out: a caller that wants
+    # it passes its own.
+    state = _run_state_at_boundary(run_state, run_dir, run_id)
     model_name = resolve_main_model(model_name)
     # Captured before the default is resolved below: with no injected `verbs=`, lead-0 must not
     # inherit MAIN-gather's default registry.
@@ -513,8 +535,6 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     correlation_deadline = (
         lead_zero_deadline(limits) if correlation is not None and correlation.system is not None
         else 0.0)
-    budget_started_monotonic = time.monotonic()
-    open_budget(run_dir, run_id)
     # Under `wire_logs/`, not the run root, so it is outside the agents' one-segment run-dir
     # read shape.
     logger = observe.RequestLogger(observe.wire_log_path(run_dir))
@@ -547,7 +567,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         # A resume joins the source run's case, so the case pointer comes from the store, not
         # the uuid minted above (they match on a fresh run). `run_dir` is passed because a
         # resumed MAIN inherits the investigation document as well as the message history.
-        session_id, resume_history = branch.open_main_session(store, resume, run_dir)
+        session_id, resume_history = branch.open_main_session(store, resume, state)
         # Written after the session opens, so a refused branch leaves no pointer naming the
         # source run's store. Rebound so `_run_summary` names the case this run joined.
         case_id = branch.attach_case_pointer(
@@ -589,8 +609,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             correlation, run_dir=run_dir, defender_dir=defender_dir, run_id=run_id,
             verbs=lead_zero_verbs, limits=limits, make_model=make_model, logger=logger, box=box,
             store=store, session_id=session_id, case_id=case_id, model_name=model_name,
-            budget_started_monotonic=budget_started_monotonic, catalog=correlation_catalog,
-            tenant=tenant, deadline=correlation_deadline)
+            catalog=correlation_catalog,
+            tenant=tenant, run_state=state, deadline=correlation_deadline)
         if stopped is not None:
             return stopped
     prompt = _opening_prompt(
@@ -607,10 +627,11 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     deps = replace(
         bind(MAIN_DEF, run_dir, defender_dir=defender_dir, box=box),
         run_id=run_id,
-        budget_started_monotonic=budget_started_monotonic,
-        # The run's tenant record rides on MAIN's deps so every gather lead it dispatches
-        # inherits it (`_run_gather` carries it onto the lead's deps) — #1106 M3, #1107.
+        # The run's tenant record and its state ride on MAIN's deps so every gather lead it
+        # dispatches inherits them (`_run_gather` carries both onto the lead's deps) —
+        # #1106 M3, #1107, #1235.
         tenant=tenant,
+        run_state=state,
     )
 
     t0 = time.time()
@@ -683,7 +704,6 @@ __all__ = [
     "_affinity_key",
     "_branch_clock",
     "_budget_short_circuit",
-    "_budget_state_for_enforcement",
     "_clock",
     "_common",
     "_compaction_enabled",
@@ -724,12 +744,10 @@ __all__ = [
     "gather_model",
     "json",
     "observe",
-    "open_budget",
     "orient",
     "os",
     "permission",
     "providers",
-    "read_budget",
     "refusal_message",
     "register_close_tool",
     "register_gather_tool",
@@ -748,7 +766,6 @@ __all__ = [
     "tier",
     "time",
     "toon_gate_mod",
-    "update_budget_locked",
     "uuid",
     "write_guarded",
 ]

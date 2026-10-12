@@ -248,7 +248,7 @@ def graded_record(episode_dir: Path, *, judge: Any = None) -> Any:
     ep = Path(episode_dir)
     (ep / "judge.yaml").unlink(missing_ok=True)
     side = ep.parent / f".{ep.name}-judge"
-    return grade(ep, runs_base=side / "defender-runs", judge=judge,
+    return grade(ep, judge=judge,
                  state=state_over(side / "learning-state"))
 
 
@@ -555,10 +555,16 @@ def sidecar_doc(run_dir: Path) -> dict | None:
 #: that list, held in one place so a negative that walks it cannot be quietly narrowed.
 FORGEABLE_NAMES = (
     "run_end.json",
+    # Not written inside the run dir since #1235 F2 (the case pointer is a host-only sidecar
+    # beside it now), but the box can still plant a file at the old name; kept, like the two
+    # state names below.
     "session_store_pointer.json",
     "ticket_write.json",
     "provenance.json",
     "lessons_loaded.jsonl",
+    # No host writer since #1235 (the counters and the breaker are in-memory state), but the
+    # box can still plant a file at either name inside its own rw bind, and dropping them
+    # would only narrow every negative that walks this list. Kept deliberately.
     "circuit_breaker.json",
     "budget.json",
     "tool_trace.jsonl",

@@ -35,6 +35,8 @@ per-test table is in `.spec-flow/frontiers/82-writer-judge_and_episode.md`.
 """
 from __future__ import annotations
 
+from defender.run_repository import Run
+
 import json
 import os
 import re
@@ -65,7 +67,7 @@ RUN = "run"
 
 #: The judge prompt's union views, by the title each framed section opens with
 #: (`learning/judge/run.SECTION_TITLES`).
-SIBLINGS = "VIEW 4"
+SIBLINGS = "VIEW 4 — SIBLING TRIALS"
 SPREAD = "TRIAL SPREAD"
 #: The tenant every launcher scenario plants (`S.plant_tenant`'s default id).
 TENANT = "acme"
@@ -128,7 +130,7 @@ def _trial(base: Path, name: str, raw: bytes, *, report: bool = True,
 
 def _grade(ep: Path, base: Path, *, judge: J.FakeJudge | None = None) -> tuple[Any, J.FakeJudge]:
     fake = J.scripted_judge() if judge is None else judge
-    grade = S.mod(JUDGE).grade_episode(ep, runs_base=base, judge=fake, state=env_state(),
+    grade = J.grade_at(ep, runs_base=base, judge=fake, state=env_state(),
                                        draws=1, git_show=J.FakeGitShow())
     return grade, fake
 
@@ -186,8 +188,10 @@ def _union_notes(judge: J.FakeJudge) -> str:
 
 
 def _trials(judge: J.FakeJudge) -> set[str]:
-    """The run ids the judge model was shown as finished trials of this alert."""
-    return set(_TRIAL_LINE.findall(_view(_world_prompts(judge)[0], SIBLINGS)))
+    """J3: no prior trial or spread enters the judge's prompt."""
+    prompts = _world_prompts(judge)
+    assert all(SIBLINGS not in p and SPREAD not in p for p in prompts)
+    return set()
 
 
 def _lines_naming(text: str, stem: str) -> list[str]:
@@ -195,16 +199,9 @@ def _lines_naming(text: str, stem: str) -> list[str]:
 
 
 def _assert_named_skip(judge: J.FakeJudge, name: str, *, reason: str | None = "record") -> None:
-    """`name` is named in the union notes the judge received — on a line naming its `reason`
-    (default: the record it lacks) — and is not a trial."""
-    notes = _union_notes(judge)
-    lines = _lines_naming(notes, name)
-    assert lines, (f"the candidate {name!r} is not named in the union notes the judge model "
-                   f"received — a skipped run is named and counted:\n{notes}")
-    if reason is not None:
-        assert any(reason in line.lower() for line in lines), (
-            f"the line naming {name!r} gives no reason naming its {reason}: {lines}")
-    assert name not in _trials(judge), f"{name!r} was shown to the judge as a trial"
+    """J3: neither prior trials nor skipped-folder notes enter the judge's view."""
+    assert not _trials(judge)
+    assert all(name not in prompt for prompt in _world_prompts(judge))
 
 
 def _judge_refusal(ep: Path, base: Path) -> str:
@@ -278,7 +275,9 @@ def _source(tmp_path: Path, raw: bytes, *, record: bool = True, digest: str | No
 def _launch(planted: S.Planted, src: Path, episode_id: str = T.EPISODE_ID) -> Path:
     """`prepare_episode` over `src` (the real primer), the episode handle released."""
     cli = S.mod(CLI)
-    with cli.prepare_episode(episode_id, src, tenant=planted.accept()) as episode:
+    with cli.prepare_episode(episode_id, Run.at(src), data_root=planted.accept().data_root) as episode:
+        with planted.accept().runs_repository().episode(episode.dir.name, held=episode) as view:
+            view.create_container()
         return Path(episode.dir)
 
 
@@ -311,8 +310,13 @@ class _Lifecycle:
 def _resume_sibling(ep: Path, label: str = "b") -> Path:
     """World `label`'s sibling through the REAL `run.main --resume`; returns its run folder."""
     life = _Lifecycle()
+    with J.episodes_base(ep.parent):
+        return _resume_sibling_at(ep, label, life)
+
+
+def _resume_sibling_at(ep: Path, label: str, life: _Lifecycle) -> Path:
     rc = S.sym(RUN, "main")(
-        ["--resume", str(ep / "family.yaml"), "--world", label, "--tenant", TENANT, "--no-learn"],
+        ["--episode", ep.name, "--world", label, "--tenant", TENANT, "--no-learn"],
         lifecycle=life, visualize=lambda *_a, **_k: None, preflight=lambda *_a, **_k: 0,
         ticket_writer=S.NoTicket())
     assert life.run_dir is not None, f"the sibling never reached its run (rc={rc!r})"
@@ -347,9 +351,7 @@ def test_o11_episode_alert_is_the_episodes_copy(tmp_path):
     assert keys == {"SIG-COPY-O11"}, (
         f"the findings key is {keys}: not the copy's recorded signature (a world copy, the "
         "vendor rule.id, the tenant's mapping or the source run folder keyed them)")
-    assert _trials(judge) == {"trial-copy"}, (
-        f"the union shown to the judge is {_trials(judge)}: only the run whose recorded digest "
-        "is the episode copy's is a trial of this alert")
+    assert not _trials(judge), "J3: same-alert priors must stay outside the judge prompt"
 
 
 def test_o11_episode_without_a_record_is_refused_by_name(tmp_path):
@@ -461,7 +463,7 @@ def test_a8_a_folder_without_a_record_is_not_a_run(tmp_path, capsys):
     _trial(base, "trial-a8", raw, facts={"signature": "SIG-a8"})
     _grade_, judge = _grade(ep, base)
     _assert_named_skip(judge, src.name)
-    assert _trials(judge) == {"trial-a8"}
+    assert not _trials(judge), "J3: same-alert priors must stay outside the judge prompt"
 
 
 def test_r6_a_skipped_runs_name_cannot_forge_a_line_in_the_judge_notes_or_the_vocabulary(
@@ -509,22 +511,9 @@ def test_r6_a_skipped_runs_name_cannot_forge_a_line_in_the_judge_notes_or_the_vo
     _trial(control_base, plain, raw, record=False)
     _grade_, control = _grade(control_ep, control_base)
 
-    notes = _union_notes(judge)
-    siblings = _view(_world_prompts(judge)[0], SIBLINGS)
+    assert not _trials(judge)
     for prompt in _world_prompts(judge):
-        assert "\x1b" not in prompt, "a folder name's terminal escape reached the judge raw"
-        assert not _FORGED_HEADING.search(prompt), "a folder name forged a section in the prompt"
-        assert not _FENCE_OPENER.search(_view(prompt, SIBLINGS)), "a folder name opened a fence"
-        assert len(S.framed_bodies(prompt)) == len(S.framed_bodies(_world_prompts(control)[0])), (
-            "a folder name changed the prompt's frame structure")
-    for stem in [*hostile, plain]:
-        named = _lines_naming(siblings, stem)
-        assert len(named) == 1, f"the sibling view names {stem!r} on {len(named)} lines:\n{notes}"
-        assert "record" in named[0].lower(), f"the union note gives no reason: {named[0]!r}"
-    assert re.search(rf"(?<![\w.]){recordless}(?![\w.])", notes), (
-        f"the union notes do not count the {recordless} recordless folders:\n{notes}")
-    assert _trials(judge) == {"trial-r6"}
-    _assert_named_skip(control, plain)
+        assert all(stem not in prompt for stem in [*hostile, plain])
 
 
 def test_p039_pre_change_run_presented_to_branch_judge_or_visu(tmp_path, capsys):
@@ -590,7 +579,7 @@ def test_p069_source_alert_readable_but_mapping_absent_or_faul(tmp_path):
     ep, raw = _episode(tmp_path, "p069", signature="SIG-p069")
     _trial(planted.runs, "trial-p069", raw, facts={"signature": "SIG-p069"})
     _grade_, judge = _grade(ep, planted.runs)
-    assert _trials(judge) == {"trial-p069"}
+    assert not _trials(judge), "J3: same-alert priors must stay outside the judge prompt"
     assert set(_keys(_rows())) == {"SIG-p069"}
 
     before = len(_rows())
@@ -697,18 +686,6 @@ def test_p110_unmapped_tenant_piles_every_alert_under_one_key(tmp_path):
 # The sibling union: runs under the base whose recorded digest is the copy's
 # =================================================================================================
 
-def test_p113_same_alert_resubmitted_with_different_bytes(tmp_path):
-    """The union is the runs whose recorded digest equals the source's. A re-serialised copy is
-    not a trial."""
-    base = tmp_path / "runs"
-    doc = S.generic_alert(rule_id="R-VENDOR-p113", sig_field="SIG-p113")
-    ep, raw = _episode(tmp_path, "p113", raw=S.alert_bytes(doc))
-    _trial(base, "trial-same", raw)
-    _trial(base, "trial-reserialised", json.dumps(doc, indent=2, sort_keys=True).encode("utf-8"))
-    _trial(base, "trial-crlf", raw.replace(b"\n", b"\r\n"))
-    _trial(base, "trial-trailing-newline", raw + b"\n")
-    _grade_, judge = _grade(ep, base)
-    assert _trials(judge) == {"trial-same"}
 
 
 def test_p114_source_runs_box_rewrote_its_alert_to_another_ale(tmp_path):
@@ -727,20 +704,10 @@ def test_p114_source_runs_box_rewrote_its_alert_to_another_ale(tmp_path):
     _trial(base, "trial-a", raw, facts={"signature": "SIG-p114"})
     _trial(base, "trial-b", other, facts={"signature": "SIG-B-p114"})
     _grade_, judge = _grade(ep, base)
-    assert _trials(judge) == {"trial-a"}
+    assert not _trials(judge), "J3: same-alert priors must stay outside the judge prompt"
     assert set(_keys(_rows())) == {"SIG-p114"}
 
 
-def test_p117_unrelated_run_rewrites_its_alert_into_a_copy_of(tmp_path):
-    """A run of another alert cannot join the union by rewriting its alert."""
-    base = tmp_path / "runs"
-    ep, raw = _episode(tmp_path, "p117")
-    _trial(base, "trial-genuine", raw)
-    other = _alert("p117-other")
-    _trial(base, "trial-rewrote", raw, digest=S.sha256_hex(other),
-           facts={"signature": "SIG-p117-other"}, disposition="malicious")
-    _grade_, judge = _grade(ep, base)
-    assert _trials(judge) == {"trial-genuine"}
 
 
 def test_p119_source_run_dir_gone_when_the_episode_is_judged(tmp_path):
@@ -756,7 +723,7 @@ def test_p119_source_run_dir_gone_when_the_episode_is_judged(tmp_path):
     box = _bounded(lambda: _grade(ep, base, judge=judge), what="the judge pass")
     assert "raised" not in box, f"the pass failed: {box.get('raised')!r}"
     assert set(_keys(_rows())) == {"SIG-p119"}
-    assert _trials(judge) == {"trial-p119"}
+    assert not _trials(judge), "J3: same-alert priors must stay outside the judge prompt"
 
 
 def test_p120_source_alert_json_is_not_a_regular_file(tmp_path):
@@ -790,7 +757,7 @@ def test_p120_source_alert_json_is_not_a_regular_file(tmp_path):
     judge = J.scripted_judge()
     box = _bounded(lambda: _grade(ep, base, judge=judge), what="the judge pass")
     assert "raised" not in box, f"the pass failed: {box.get('raised')!r}"
-    assert _trials(judge) == {"trial-genuine"}
+    assert not _trials(judge), "J3: same-alert priors must stay outside the judge prompt"
     for prompt in judge.prompts:
         assert marker not in prompt, "a link target's bytes reached the judge's prompt"
     for name in ("cand-link-record", "cand-fifo-record"):
@@ -818,7 +785,7 @@ def test_p121_family_record_names_a_hostile_source_run(tmp_path):
         _trial(base, f"trial-{name}", raw)
         _grade_, judge = _grade(ep, base)
         assert set(_keys(_rows()[before:])) == {f"SIG-p121-{name}"}, name
-        assert _trials(judge) == {f"trial-{name}"}, name
+        assert not _trials(judge), "J3: same-alert priors must stay outside the judge prompt"
         for prompt in judge.prompts:
             assert marker not in prompt, f"{name}: the hostile source run's bytes were read"
 
@@ -832,123 +799,19 @@ def test_p122_source_run_id_in_the_episode_record_names_a_diff(tmp_path):
     _trial(base, "trial-p122", raw)
     _grade_, judge = _grade(ep, base)
     assert set(_keys(_rows())) == {"SIG-p122"}
-    assert _trials(judge) == {"trial-p122"}
+    assert not _trials(judge), "J3: same-alert priors must stay outside the judge prompt"
 
 
-def test_p123_runs_base_is_not_the_one_holding_the_source_run(tmp_path):
-    """The union is the base's runs whose recorded digest equals the episode's. No other
-    tenant's run is read.
-
-    Another tenant's runs folder holds the source run and a matching trial carrying a marker."""
-    marker = "OTHER-TENANT-p123"
-    handed = tmp_path / "tenant-a" / "runs"
-    other = tmp_path / "tenant-b" / "runs"
-    ep, raw = _episode(tmp_path, "p123")
-    _trial(handed, "trial-handed", raw)
-    _trial(other, T.SOURCE_RUN_ID, raw)
-    theirs = _trial(other, "trial-other-tenant", raw)
-    (theirs / "report.md").write_text(T.report_text("malicious", body=marker), encoding="utf-8")
-    _grade_, judge = _grade(ep, handed)
-    assert _trials(judge) == {"trial-handed"}
-    for prompt in judge.prompts:
-        assert "trial-other-tenant" not in prompt, "another tenant's run reached the judge"
-        assert marker not in prompt, "another tenant's run's bytes reached the judge"
 
 
-def test_p124_candidate_run_alert_unreadable_counted_as_a_tria(tmp_path):
-    """A candidate whose record cannot be read is not a trial. It is listed by name with its
-    reason. No hang, no following links outside the base, capped reads.
-
-    Records: torn JSON, a directory, one byte over the read cap, a link out of the base."""
-    base = tmp_path / "runs"
-    ep, raw = _episode(tmp_path, "p124")
-    _trial(base, "trial-genuine", raw)
-    torn = _trial(base, "cand-torn", raw)
-    S.record_file(torn).write_bytes(b'{"digest": "' + S.sha256_hex(raw).encode() + b'"')
-    recdir = _trial(base, "cand-record-dir", raw)
-    S.record_file(recdir).unlink()
-    S.record_file(recdir).mkdir()
-    huge = _trial(base, "cand-oversize", raw)
-    cap = S.sym("_io", "READ_LIMIT")
-    pad = b" " * (cap + 1 - len(S.record_file(huge).read_bytes()))
-    S.record_file(huge).write_bytes(S.record_file(huge).read_bytes() + pad)
-    far = _trial(tmp_path / "outside", "far-run", raw)
-    linked = _trial(base, "cand-linked", raw)
-    S.record_file(linked).unlink()
-    S.record_file(linked).symlink_to(S.record_file(far))
-
-    judge = J.scripted_judge()
-    box = _bounded(lambda: _grade(ep, base, judge=judge), what="the judge pass")
-    assert "raised" not in box, f"the pass failed: {box.get('raised')!r}"
-    assert _trials(judge) == {"trial-genuine"}
-    for name in ("cand-torn", "cand-record-dir", "cand-oversize", "cand-linked"):
-        _assert_named_skip(judge, name)
 
 
-def test_p125_identical_alert_run_in_flight_when_the_judge_wal(tmp_path):
-    """A run still in progress is not in the union.
-
-    Positive control: the finished run of the same alert is."""
-    base = tmp_path / "runs"
-    ep, raw = _episode(tmp_path, "p125")
-    _trial(base, "trial-finished", raw)
-    _trial(base, "trial-in-flight", raw, report=False)
-    _grade_, judge = _grade(ep, base)
-    assert _trials(judge) == {"trial-finished"}
 
 
-def test_p126_a_trial_finishes_between_two_judge_passes(tmp_path):
-    """A later pass includes trials finished since the first. Queue rows already written are
-    left.
-
-    The first pass leaves world c ungraded (its model call fails), so a later pass grades it;
-    a trial finishes in between."""
-    base = tmp_path / "runs"
-    ep, raw = _episode(tmp_path, "p126")
-    _trial(base, "trial-early", raw)
-    _grade_, first = _grade(ep, base, judge=J.scripted_judge(fault=T.Fault(fail_on=("judge:c:",))))
-    assert _trials(first) == {"trial-early"}
-    rows = _rows()
-    _trial(base, "trial-late", raw)
-    _grade_, later = _grade(ep, base)
-    assert _trials(later) == {"trial-early", "trial-late"}, (
-        "the later pass did not include the trial finished since the first")
-    assert _rows()[:len(rows)] == rows, "the later pass rewrote rows the first queued"
 
 
-def test_p127_candidate_run_vanishes_between_listing_and_readi(tmp_path):
-    """A run removed between listing and reading takes the ordinary unreadable-candidate path.
-
-    The state a prune leaves between listing and reading — the folder listed, its files already
-    unlinked (children before the directory) — is named like any recordless candidate."""
-    base = tmp_path / "runs"
-    ep, raw = _episode(tmp_path, "p127")
-    _trial(base, "trial-genuine", raw)
-    _trial(base, "cand-recordless", raw, record=False)
-    pruned = _trial(base, "cand-pruned", raw)
-    for path in sorted(pruned.rglob("*"), key=lambda p: len(p.parts), reverse=True):
-        path.rmdir() if path.is_dir() else path.unlink()
-    assert pruned.is_dir()
-    assert not any(pruned.iterdir())
-    _grade_, judge = _grade(ep, base)
-    assert _trials(judge) == {"trial-genuine"}
-    _assert_named_skip(judge, "cand-recordless")
-    _assert_named_skip(judge, "cand-pruned")
-    assert _rows(), "the pass stopped on the pruned candidate"
 
 
-def test_p129_the_episodes_own_sibling_runs_are_not_trials_of_it(tmp_path):
-    """The episode's own sibling runs live under `<episode>/runs`, outside the runs base the
-    union walks, so they are never in its union.
-
-    Positive control: a matching run under the walked base is."""
-    base = tmp_path / "runs"
-    ep, raw = _episode(tmp_path, "p129")
-    for label in ("b", "c"):
-        _trial(ep / "runs", f"{ep.name}-{label}", raw)
-    _trial(base, "trial-p129", raw)
-    _grade_, judge = _grade(ep, base)
-    assert _trials(judge) == {"trial-p129"}
 
 
 @dataclass
@@ -966,27 +829,6 @@ class _RewritingJudge(J.FakeJudge):
         return super().__call__(prompt, role=role, agent_id=agent_id, **kw)
 
 
-def test_p130_source_alert_changes_between_the_pass_reading_it(tmp_path):
-    """One judge pass uses one snapshot of the episode's record.
-
-    The record (and its alert) is rewritten to another alert's between the union and the
-    findings key: the key stays the snapshot's, the one the union was taken by."""
-    base = tmp_path / "runs"
-    ep, raw = _episode(tmp_path, "p130", signature="SIG-p130")
-    _trial(base, "trial-p130", raw)
-    other = _alert("p130-other")
-
-    def rewrite() -> None:
-        S.episode_alert_file(ep).write_bytes(other)
-        S.episode_record_file(ep).write_text(json.dumps(
-            S.record_doc(other, signature="SIG-REWRITTEN-p130")), encoding="utf-8")
-
-    judge = _RewritingJudge(default=J.as_reply_text(J.reply_doc()),
-                            family_default=J.as_reply_text(J.family_reply()), rewrite=rewrite)
-    _grade(ep, base, judge=judge)
-    assert _trials(judge) == {"trial-p130"}
-    assert set(_keys(_rows())) == {"SIG-p130"}, (
-        "the pass keyed its findings off a second read of a record that changed mid-pass")
 
 
 def test_p159_episode_launched_before_the_change_is_judged_aft(tmp_path):
@@ -1013,7 +855,8 @@ def test_p159_episode_launched_before_the_change_is_judged_aft(tmp_path):
 def _page_rule(ep: Path) -> str:
     """The episode page's rule header, off the page `render_episode` writes."""
     visualize_episode = S.mod(VISUALIZE)
-    page = Path(visualize_episode.render_episode(ep))
+    with J.episodes_base(ep.parent):
+        page = Path(visualize_episode.render_episode(J.judge_runs(), ep.name))
     html = page.read_text(encoding="utf-8")
     found = re.findall(r'<span class="hd-alert">([^<]*)</span>', html)
     assert len(found) == 1, f"the episode page's header carries {len(found)} alert spans"

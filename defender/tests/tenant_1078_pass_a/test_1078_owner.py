@@ -82,8 +82,9 @@ def test_o3_length_boundary(tmp_path):
 @pytest.mark.parametrize("tenant_id", ["playground", "defender"])
 def test_o3_valid_id_round_trip(tmp_path, monkeypatch, tenant_id):
     """A valid id ('playground', and 'defender' under a data root outside the checkout)
-    round-trips: create_tenant writes it, require_tenant and TenantPaths accept it, and
-    tenant_of_run_dir on a run dir under its runs base returns it."""
+    round-trips: create_tenant writes it, require_tenant and TenantPaths accept it, and a run
+    dir under its runs base opens, by id through its accepted tenant's runs repository, as its
+    run (#1105 PR 2: `tenant_of_run_dir` is gone, F-13)."""
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     written = H.create_tenant(root, tenant_id)
@@ -96,7 +97,17 @@ def test_o3_valid_id_round_trip(tmp_path, monkeypatch, tenant_id):
     H.plant_record(base, tenant_id)
     run_dir = base / "r1"
     run_dir.mkdir()
-    assert H.tenant_of_run_dir(run_dir) == tenant_id
+    assert _opened_tenant(root, tenant_id, "r1") == tenant_id
+
+
+def _opened_tenant(root: Path, tenant_id: str, run_id: str) -> str:
+    """The tenant the run `run_id` is addressed to, opened through `tenant_id`'s runs repository
+    under `root` once its operator-placed knowledge is there (#1120 DC2) — the replacement for
+    `tenant_of_run_dir` (#1105 PR 2, F-13)."""
+    from defender.run_repository import RunId
+
+    H.place_knowledge_for_rows()
+    return H.accept(root, tenant_id).runs_repository().open(RunId.parse(run_id)).tenant_id
 
 
 def test_tenant_id_at_domain_minimum_length(tmp_path):
@@ -430,9 +441,10 @@ def _common_refusal_class(refusals: dict[str, BaseException]) -> type:
 
 def test_d0_return_contract(tmp_path, monkeypatch):
     """require_tenant returns a TenantRow whose tenant_id equals the requested id and whose
-    created_at is the row's; tenant_of_run_dir returns the tenant id as a str; create_tenant
-    returns the TenantRow it wrote; TenantPaths accessors return absolute Paths under .dir.
-    The owner functions (TenantPaths, create_tenant, require_tenant, tenant_of_run_dir,
+    created_at is the row's; a run opened through the accepted tenant's runs repository is
+    addressed to the tenant id as a str (#1105 PR 2: `tenant_of_run_dir` is gone, F-13);
+    create_tenant returns the TenantRow it wrote; TenantPaths accessors return absolute Paths
+    under .dir. The owner functions (TenantPaths, create_tenant, require_tenant,
     ensure_runs_base_record, resolve_data_root, TenantId) refuse by raising one
     refusal class, TenantRefused, whose message names the refused value; run.py main surfaces a tenant
     refusal as SystemExit carrying a '[run.py] ...' message before the preflight, exactly as
@@ -466,7 +478,7 @@ def _d0_return_values(root: Path) -> None:
     base = H.runs_dir(root, "playground")
     H.plant_record(base, "playground")
     (base / "r1").mkdir()
-    derived = H.tenant_of_run_dir(base / "r1")
+    derived = _opened_tenant(root, "playground", "r1")
     assert derived == "playground"
     assert isinstance(derived, H.tenant().TenantId)  # a str subtype: the id, parsed
 
@@ -485,8 +497,6 @@ def _d0_owner_refusals(tmp_path: Path, root: Path, monkeypatch) -> dict:
         "TenantPaths": (H.owner_refusal(H.TenantPaths, root, "Acme-Corp"), "Acme-Corp"),
         "create_tenant": (H.owner_refusal(H.create_tenant, tmp_path / "x", "a/b"), "a/b"),
         "require_tenant": (H.owner_refusal(H.require_tenant, root, "acme"), "acme"),
-        "tenant_of_run_dir": (H.owner_refusal(H.tenant_of_run_dir, old_base / "r0"),
-                              str(old_base)),
         "ensure_runs_base_record": (
             H.owner_refusal(H.ensure_runs_base_record, other_base, "playground"),
             "someone-else"),
@@ -513,11 +523,18 @@ def _d0_entry_surfaces(tmp_path: Path, root: Path, refusals: dict) -> None:
     H.assert_verbatim(text, refusals["require_tenant"][0], entry="run.py main")
     assert not rec.spent, f"run.py spent before refusing: {rec.order}"
 
-    launched = H.drive_launch(refusals["old_run_dir"][1])
+    # #1105 PR 2: the launcher opens its source by id through the request's tenant's runs
+    # repository, which does not hold an old-layout run; it passes that refusal through.
+    from defender.run_repository import RunId, RunRefused
+
+    old_run_dir = refusals["old_run_dir"][1]
+    H.place_knowledge_for_rows()
+    with pytest.raises(RunRefused) as not_held:
+        H.accept(root, "playground").runs_repository().open(RunId.parse(old_run_dir.name))
+    launched = H.drive_launch(old_run_dir, tenant_id="playground")
     assert isinstance(launched, H.branch_cli().LauncherRefused), (
-        f"the launcher did not surface the tenant refusal as LauncherRefused: {launched!r}")
-    H.assert_verbatim(H.refusal_text(launched), refusals["tenant_of_run_dir"][0],
-                      entry="the branch launcher")
+        f"the launcher did not surface the source refusal as LauncherRefused: {launched!r}")
+    H.assert_verbatim(H.refusal_text(launched), not_held.value, entry="the branch launcher")
 
     fresh = tmp_path / "fresh-root"
     H.place_knowledge(fresh, "playground")  # #1120 DC2: the operator's clone precedes setup

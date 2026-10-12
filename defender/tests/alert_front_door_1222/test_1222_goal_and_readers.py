@@ -602,7 +602,8 @@ class _Views:
     @functools.cached_property
     def episode_page(self) -> str:
         assert self.judge_prompts, "the episode was never graded"
-        return S.sym("scripts.visualize.visualize_episode", "build_page")(self.episode)
+        with J.episodes_base(self.episode.parent), J.judge_runs().episode(self.episode.name) as view:
+            return S.sym("scripts.visualize.visualize_episode", "build_page")(view)
 
     @functools.cached_property
     def episode_page_parsed(self) -> _Page:
@@ -1205,4 +1206,3 @@ def test_p193_alert_bytes_reach_the_leads_session_and_summary(tmp_path: Path) ->
     assert "S07-QUOTE" in v.episode_slot("ld-summary"), (
         "control: the episode page shows l-00c's summary as text")
     assert S.RUN_TAG_CLOSE not in v.episode_page
-

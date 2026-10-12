@@ -62,14 +62,16 @@ Address grammar: an address is an attribute path on an ``Episode``. A bare name 
 
 Entry points, with the signatures the suite calls (D3', rev 3):
 
-* ``cli.prepare_episode(episode_id, source_run_dir, *, tenant, prime=)`` -> the ``Episode``
+* ``cli.prepare_episode(episode_id, source_run_dir, *, data_root, prime=)`` -> the ``Episode``
   (closed by ``prepare_episode`` itself on its own exception; since #1224 it always creates a
   fresh directory); ``prime(source_run_dir, episode)``; its default primer is ``prime_base``
   with ``allow_empty=True`` (R3); ``cli._prime_once(episode, episode_id, source_run_dir,
   prime)`` (the claim, driven directly for R2's folder row and for an occupied claim:
   ``prepare_episode`` has no ``io=`` seam and never adopts a taken directory);
-* ``cli.start_family(episode, labels, *, spawn=, tenant_id=)``;
-  ``cli.verify_family(episode, run_dirs, *, source=)``;
+* ``cli.start_family(episode, labels, *, spawn=, tenant_id=)`` (the container made first,
+  ``tenant.runs_repository().episode(ep, held=episode).create_container()``);
+  ``cli.verify_family(episode, arms, *, source=)`` (``arms`` each label's arm opened by id
+  through that view, #1105 PR 2);
   ``archive.archive_episode(episode, run_dirs)``;
 * ``capture.prime_base(source_run_dir, episode, *, allow_empty=False)``;
 * ``ledger.Ledger.for_world(episode, world_id)`` (``LedgerError`` at construction for a bad or
@@ -77,14 +79,14 @@ Entry points, with the signatures the suite calls (D3', rev 3):
 * ``_family.load_family(view, ...)`` -- ``view`` a ``Bound`` (``episode.view()`` or a
   reader's own ``bind``);
 * ``episode.delta_o(episode_dir, *, invoke=)``;
-* ``run._resume_target(ns, *, episode, settings)`` (``--resume`` with no held episode is
-  ``SystemExit``);
+* ``run._resume_target(ns, *, episode, tenant)`` (``--episode`` with no held episode is
+  ``SystemExit``); ``run.py``'s sibling door is ``--tenant T --episode <episode_id> --world L``
+  since #1105 PR 2 (``--resume`` is gone);
 * ``enqueue.draws_on_disk(view, label)`` / ``draws_on_disk_report(view, label)``;
 * ``judge._run_world_draws(episode, label, *, judge, draws, model, effort, prompt)`` (S1) ->
   ``(completed, documents, malformed)``;
-* the path doors ``judge.grade_episode(episode_dir, ...)``, ``visualize_episode.render_episode(
-  episode_dir)``, ``run.main([... "--resume", <manifest>, ...], ...)`` and ``cli.main`` keep
-  their signatures.
+* the doors ``judge.grade_episode(runs, episode_id, ...)`` (by id since #1105 PR 2),
+  ``visualize_episode.render_episode(...)``, ``run.main([...], ...)`` and ``cli.main``.
 
 Underscore-prefixed so pytest does not collect it.
 """
@@ -150,8 +152,12 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
 }
 
 #: D1's folders (kept by D2'): `served`, `runs`, `worlds`, `world(label).dir`,
-#: `world(label).draws`.
+#: `world(label).draws`. `runs` is the handle's PRIVATE `_runs` since #1105 PR 2 (F-13): the
+#: container and its arms are the runs repository's episode view, built on this handle, and
+#: the one public hand-out of its path is `box_mounted_container` (`PRIVATE_FOLDERS`).
 FOLDERS: tuple[str, ...] = ("served", "runs", "worlds", "world.dir", "world.draws")
+#: The folders the handle serves under a private attribute (the key's name, `_`-prefixed).
+PRIVATE_FOLDERS: tuple[str, ...] = ("runs",)
 
 #: Every verb name a record could answer. `read` stays listed although rev 3 grants it to no
 #: record, so the class and surface pins check its ABSENCE on every record. (#1224 removed the
@@ -247,6 +253,8 @@ def resolve(episode: Any, key: str) -> Any:
     """The record or folder at `key` on `episode` (the address grammar in the docstring)."""
     head, dot, rest = key.partition(".")
     owner, attr = (episode.world(LABEL), rest) if (head == "world" and dot) else (episode, key)
+    if owner is episode and attr in PRIVATE_FOLDERS:
+        attr = f"_{attr}"
     got = getattr(owner, attr)
     if inspect.ismethod(got) or inspect.isfunction(got):
         return got(*RECORD_ARGS[key])

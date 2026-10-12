@@ -408,6 +408,11 @@ demands:
      # read needs one `except OSError`, and this demand pins it: a chmod-000 table yields zero
      # prior occurrences and the call proceeds. (F-Q, non-material, auto — "any case that
      # propagates mints a small demand on the guard's own read".)
+     # #1235 NARROWED THE TEST, NOT THE DEMAND: the guard no longer reads the file per call
+     # (it reads an in-memory view loaded once by `open_query_mirror`), so the chmod-000 and
+     # directory-at-the-name arms retired with the per-call read they exercised. The torn /
+     # foreign-row / non-dict-params / bad-UTF-8 arms moved to `open_query_mirror` +
+     # `live_lead_rows`, and the test keeps this name because this demand binds it.
      # premises carried: test_predicate_reads_a_table_with_a_torn_trailing_line,
      #   test_foreign_row_shape_in_the_table, test_stored_params_field_is_not_a_dict (the "no
      #   raise" half; the resulting key collision is F-A's shape arriving from a corrupt row and

@@ -41,6 +41,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     drive,
     materialize,
 )
+from defender.run_repository import SessionPaths  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -182,7 +183,7 @@ def test_the_handles_session_access_reaches_todays_store_seam_with_no_new_guaran
         assert not hasattr(session, invented), (
             f"the handle claims a concurrency guarantee today's code does not make: {invented}")
 
-    direct = store_mod.open_store(case_id="case-alpha", runs_base=base)
+    direct = store_mod.open_store(case_id="case-alpha", sessions=SessionPaths(base))
     try:
         assert session.path == direct.path, "the handle resolves a different database"
     finally:
@@ -335,25 +336,14 @@ def test_the_append_only_tables_written_by_two_routes_at_once(tmp_path: Path):
 
 
 def test_a_writer_that_runs_outside_the_driver_process(tmp_path: Path):
-    """The accounting sidecar (a hook), the alias-ban probe (host-initiated inside the box) and
-    the model's own shell all write outside the driver process today, and D5's 'writer methods
-    wrap today's seams unchanged' keeps that true after the migration."""
+    """The alias-ban probe (host-initiated inside the box) and the model's own shell write
+    outside the driver process today, and D5's 'writer methods wrap today's seams unchanged'
+    keeps that true after the migration."""
     base = S.make_runs_base(tmp_path)
     run_dir = S.seed_run_tree(S.make_run_dir(base, "run-outside"))
-    owner = S.RunPaths(run_dir)
 
-    # (1) THE HOOK, in its own process: the accounting sidecar lands beside the runs base.
-    sidecar = owner.accounting_failures(base)
-    assert sidecar.parent == base
-    assert sidecar.name.startswith(run_dir.name)
-    hook = subprocess.run(
-        [sys.executable, "-c",
-         "import sys, pathlib\n"
-         f"sys.path.insert(0, {str(S.REPO_ROOT)!r})\n"
-         "pathlib.Path(sys.argv[1]).write_text('{\"failures\": 1}\\n')\n",
-         str(sidecar)], capture_output=True, text=True, timeout=120)
-    assert hook.returncode == 0, hook.stderr
-    assert sidecar.is_file(), "the hook's write outside the driver process did not land"
+    # (1) THE HOOK's arm retired with #1235: the accounting-failures sidecar it wrote is gone
+    # (the budget is counted in the run process's memory, and nothing writes the sidecar).
 
     # (2) THE ALIAS PROBE, host-initiated INSIDE the box: claim C14 is REFUTED-as-stated —
     # the model's bash is NOT the only in-box run-dir writer, this probe is the second.

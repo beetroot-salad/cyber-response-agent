@@ -20,13 +20,18 @@ from defender.tests._by_path import load_lint_gate
 
 _DEFENDER = Path(__file__).resolve().parents[1]
 
-#: (the module, the line its runs base is bound on, the name the planted join appends).
-#: `materialize_run`'s `tenant` is an annotated parameter, which the lint tags. The branch
-#: launcher's tenant is `_episode_tenant(...)`, which the lint follows since #1160 because
-#: `defender.learning.branch.cli._episode_tenant` is an entry of `_astlib._TENANT_FACTORIES`.
+#: (the module, the line after which the join is planted, the tenant's runs base the join
+#: reads, the name it appends). `materialize_run`'s `tenant` is an annotated parameter, which
+#: the lint tags. The branch launcher's tenant is `_episode_tenant(...)`, which the lint
+#: follows since #1160 because `defender.learning.branch.cli._episode_tenant` is an entry of
+#: `_astlib._TENANT_FACTORIES`.
+#: #1105 PR 2 (D7″, #1210): neither module binds `tenant.runs` any more — each takes the
+#: tenant's runs repository on the anchor line — so the planted join reads the tenant's runs
+#: base itself, right where the module now holds the tenant.
 _SITES = [
-    ("run_common.py", "        runs_base = tenant.runs\n", "run_id"),
-    ("learning/branch/cli.py", "    runs_base = tenant.tenant.runs\n", "run_id"),
+    ("run_common.py", "            runs = tenant.runs_repository()\n", "tenant.runs", "run_id"),
+    ("learning/branch/cli.py", "    runs = tenant.tenant.runs_repository()\n", "tenant.tenant.runs",
+     "run_id"),
 ]
 
 
@@ -34,24 +39,23 @@ def _lint():
     return load_lint_gate("lint_run_records", name=f"lint_run_records_1120_{uuid.uuid4().hex}")
 
 
-def _planted_join(rel: str, anchor: str, name: str) -> tuple[str, str, int]:
-    """`(the real module's source, that source with one unchecked join planted right after its
-    runs base is bound, the planted line's number)`."""
+def _planted_join(rel: str, anchor: str, base: str, name: str) -> tuple[str, str, int]:
+    """`(the real module's source, that source with one unchecked join under the tenant's runs
+    base `base` planted right after `anchor`, the planted line's number)`."""
     source = (_DEFENDER / rel).read_text(encoding="utf-8")
-    assert anchor in source, f"precondition: {rel} no longer binds its runs base as {anchor!r}"
-    base = anchor.split("=")[0].strip()
+    assert anchor in source, f"precondition: {rel} no longer holds its tenant as {anchor!r}"
     indent = anchor[: len(anchor) - len(anchor.lstrip())]
     planted = source.replace(anchor, f"{anchor}{indent}_planted = {base} / {name}\n", 1)
     return source, planted, planted[: planted.index("_planted =")].count("\n") + 1
 
 
-@pytest.mark.parametrize(("rel", "anchor", "name"), _SITES, ids=[s[0] for s in _SITES])
+@pytest.mark.parametrize(("rel", "anchor", "base", "name"), _SITES, ids=[s[0] for s in _SITES])
 def test_a_join_planted_under_the_runs_base_is_flagged(
-        tmp_path: Path, rel: str, anchor: str, name: str) -> None:
-    """The real module, with one unchecked join planted right after its runs base is bound:
+        tmp_path: Path, rel: str, anchor: str, base: str, name: str) -> None:
+    """The real module, with one unchecked join planted right after it holds its tenant (#1105 PR 2):
     the lint reports a finding on the planted line. Control: the unplanted module adds none
     on that line."""
-    source, planted, line = _planted_join(rel, anchor, name)
+    source, planted, line = _planted_join(rel, anchor, base, name)
     lint = _lint()
 
     S.plant(tmp_path / "planted", rel, planted)
@@ -73,8 +77,8 @@ def test_the_branch_launchers_tenant_is_followed_through_its_table_entry(tmp_pat
     because the def is annotated `-> RunTenant`. The same planted source in one tree at the
     real path and at `_RELOCATED`: the join at the real path is flagged, the one at the
     relocated path is not."""
-    rel, anchor, name = _SITES[1]
-    _, planted, line = _planted_join(rel, anchor, name)
+    rel, anchor, base, name = _SITES[1]
+    _, planted, line = _planted_join(rel, anchor, base, name)
     S.plant(tmp_path, rel, planted)
     S.plant(tmp_path, _RELOCATED, planted)
     displays = [f.display for f in _lint().scan(tmp_path)]

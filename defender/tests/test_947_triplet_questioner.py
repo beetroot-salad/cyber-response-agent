@@ -23,6 +23,7 @@ import re
 import pytest
 import yaml
 
+from defender import _episode_handle as EH
 from defender._episode_handle import Episode
 
 from defender.tests import _triplet_947 as T
@@ -153,21 +154,23 @@ def test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling(t
     # source check below).
     worlds = [T.base_world(), T.world_doc("b", facts=[]), T.world_doc("c", facts=[])]
     questioner = T.FakeAgent(T.family_doc(worlds=worlds), *worlds[1:])
-    rc = cli.main([str(src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
+    rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
+                   "--continuation-prompt", "go"],
                   preflight=lambda model, **_kw: seen.append("family") or 0,
                   spawn=spawn, live_tree=T.source_capture(), questioner=questioner)
     assert rc == 1
     assert questioner.calls == 3
     assert spawn.launches == []
     with Episode.open(
-            cli.episode_dir_for(T.EPISODE_ID, tenant=T.current_tenant())) as episode:
+            EH.episode_dir(T.current_tenant().data_root, T.EPISODE_ID)) as episode:
         outcome = T.sym("learning.branch.outcome", "read_outcome")(episode.view())
     assert outcome["outcome"] == "refused", outcome
     assert "carries a fact" in outcome["reason"], outcome
     assert seen == ["family"]
     run_src = (T.DEFENDER / "run.py").read_text(encoding="utf-8")
     assert "preflight_role_models" in run_src
-    assert "--resume" in run_src, "the sibling entry point has no resume path to preflight in"
+    # #1105 PR 2 (declared change 6): the sibling's edge is `--episode <id>`, not `--resume`.
+    assert "--episode" in run_src, "the sibling entry point has no episode path to preflight in"
 
 
 # ---------------------------------------------------------------------------------------

@@ -76,9 +76,9 @@ def _family_reply() -> str:
 
 
 def _grade(ep: Path, tmp_path: Path, judge: J.FakeJudge) -> None:
-    """The REAL judge over the episode, driven by `judge` (it writes `judge.yaml`)."""
-    S.sym(S.JUDGE, "grade_episode")(ep, judge=judge, runs_base=tmp_path / "defender-runs",
-                                    draws=1, state=_state1135.env_state())
+    """The REAL judge over the episode, driven by `judge` (it writes `judge.yaml`): by id
+    (#1105 PR 2, `_judge_921.grade_at`)."""
+    J.grade_at(ep, judge=judge, draws=1, state=_state1135.env_state())
 
 
 def _oracle_row(label: str = "b", *, q: str = "user:alice", payload: object = None) -> dict:

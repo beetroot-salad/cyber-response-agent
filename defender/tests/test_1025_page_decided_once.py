@@ -180,7 +180,7 @@ def test_1025_a_manifest_id_that_names_no_token_reads_no_ledger_outside_the_epis
     outside.write_text("{torn\n{torn\n", encoding="utf-8")
     refused = E.sym("learning.judge", "JudgeRefused")
     with pytest.raises(refused, match=r"\.\./\.\./x") as caught:
-        E.page_module().render_episode(ep.dir)
+        E.render_episode(ep.dir)
     assert "x.stray" not in str(caught.value), caught.value
     assert not ep.page.exists(), "a page was written for a manifest the reader refused"
 
@@ -189,8 +189,11 @@ def test_1025_a_runs_directory_wearing_a_worlds_label_is_sectioned_once(tmp_path
     """`runs/<label>/` beside `runs/<ep>-<label>/`: the stray's roster label would be the
     world's own, so it was a second roster item under the same `world-`/`leads-` ids,
     silently overwriting the world's leads block. Now one item per label: every id on the
-    page is unique, the world's own section and leads block render once, and the shadowed
-    directory is named on the off-roster line rather than lost."""
+    page is unique and the world's own section and leads block render once.
+
+    #1105 PR 2 (declared change 4/J3): the roster is the manifest's, each arm opened by id,
+    so the shadowing `runs/<label>/` is no roster line at all — it is not shown (before, it
+    was named on an off-roster "not sectioned twice" line)."""
     ep = E.sample_episode(tmp_path)
     (ep.dir / "runs" / E.GRADED_WORLD).mkdir()
     page = render(ep)
@@ -199,9 +202,8 @@ def test_1025_a_runs_directory_wearing_a_worlds_label_is_sectioned_once(tmp_path
     assert page.all_ids.count(f"world-{E.GRADED_WORLD}") == 1
     assert page.all_ids.count(f"leads-{E.GRADED_WORLD}") == 1
     assert "l-001" in page.text_of(f"leads-{E.GRADED_WORLD}")
-    shadowed = page.one(cls="fr-shadowed-runs").text()
-    assert E.GRADED_WORLD in shadowed, shadowed
-    assert "not sectioned twice" in shadowed, shadowed
+    assert page.elements(cls="fr-shadowed-runs") == []
+    assert "not sectioned twice" not in page.text
     assert f"Worlds ({len(E.WORLDS)})" in page.text_of("sec-worlds")
 
 
@@ -215,7 +217,10 @@ def test_1025_a_dropped_count_covers_only_the_draws_the_findings_walk_opens(tmp_
     findings: the walk never opens its draws. Its `dropped_findings: 4` was still summed
     into tile 3's "dropped" while its two findings were counted nowhere, so the split did
     not sum to the total it headed. Now the dropped count is read off the same labels the
-    findings are."""
+    findings are.
+
+    #1105 PR 2 (declared change 4/J3): the bare arm is no manifest arm, so it is no longer a
+    section either; the heading counts the manifest's worlds alone."""
     ep = E.sample_episode(tmp_path)
     E.run_dir(ep.dir, "x")
     E.draw_document(ep.dir, "x", 0, E.draw_doc(
@@ -226,7 +231,8 @@ def test_1025_a_dropped_count_covers_only_the_draws_the_findings_walk_opens(tmp_
     assert "0 dropped" in tile, tile
     assert not [d for d in page.elements(cls="fr-dropped") if " of x:" in d.text()], \
         page.text_of("sec-findings")
-    assert f"Worlds ({len(E.WORLDS) + 1})" in page.text_of("sec-worlds")
+    assert f"Worlds ({len(E.WORLDS)})" in page.text_of("sec-worlds")
+    assert "world-x" not in page.by_id
 
 
 # ---------------------------------------------------------------------------------------

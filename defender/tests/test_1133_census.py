@@ -9,9 +9,10 @@ the episode dir.
 CALL to and every other REFERENCE to a write-capable callee:
 
 * the path seams `write_guarded`, `read_guarded`, `read_bytes_guarded`, `read_plain`,
-  `read_plain_bytes`, `locked_for_rewrite`, `guarded_mkdir`, `open_guarded`, `write_atomic`,
-  `append_jsonl`, and `stage_trace_path` — bare, through an `as` alias, or as an attribute of
-  any receiver (`_io.write_guarded`, `self.io.write_guarded`);
+  `read_plain_bytes`, `locked_for_rewrite`, `guarded_mkdir`, `open_guarded`, `append_jsonl`,
+  and `stage_trace_path` (`write_atomic` left the vocabulary when #1235 deleted it) — bare,
+  through an `as` alias, or as an attribute of any receiver (`_io.write_guarded`,
+  `self.io.write_guarded`);
 * every `defender._io` writer: any `rooted_*`, rev 2's `hold` and `hold_new` (a module that
   holds a root itself is a second handle), `open_nofollow_fd`, `open_unnamed`,
   `open_unnamed_at`, `sweep_staged`, and any private `_io._<name>`;
@@ -131,7 +132,7 @@ O5_MODULES = MODULES
 #: D6's pinned vocabulary: the path seams, spelled by their own name wherever they come from.
 PATH_SEAMS = frozenset({
     "write_guarded", "read_guarded", "read_bytes_guarded", "read_plain", "read_plain_bytes",
-    "locked_for_rewrite", "guarded_mkdir", "open_guarded", "write_atomic", "append_jsonl",
+    "locked_for_rewrite", "guarded_mkdir", "open_guarded", "append_jsonl",
     "stage_trace_path",
 })
 #: The `_io` writers beneath the seams (plus any `rooted_*` and any private `_io._<name>`),
@@ -171,6 +172,12 @@ RESIDUE = frozenset({
     # Link-following reads of things that are not episode records: a sibling's scrub verdict,
     # the sidecar beside its run dir (screened by `artifact_file` first); the source run's
     # investigation and alert (run records, #1105); the episode page's own stylesheet asset.
+    # #1105 PR 2 (decision C): the tenant-scoped runs repository's `open(run_id)` — a run
+    # opened by id through its owner, not a `Path.open` — which this census's by-name rule
+    # cannot tell apart from one. (VERIFY's and the page's per-arm opens left with PR 2's
+    # review: both take every arm from one hold, `EpisodeRuns.arms`.)
+    ("learning.branch.cli", "_open_launch_source", ".open"),
+    ("run", "_open_world_source", ".open"),
 })
 
 #: `_io` functions that do no I/O; any OTHER public `_io` function called from the handle is a
@@ -448,7 +455,7 @@ _spill = Path.write_bytes
 
 
 class Holder:
-    sink = _io.write_atomic
+    sink = _io.locked_for_rewrite
 
     def method(self, p):
         wg(p, "x")
@@ -603,7 +610,7 @@ _os.open("x", 0)
         # Module-level aliases and the references that bind them.
         ("m", "<module>", "write_guarded"), ("m", "<module>", "append_jsonl"),
         ("m", "<module>", "read_guarded"), ("m", "<module>", "os.open"),
-        ("m", "Holder", "write_atomic"),
+        ("m", "Holder", "locked_for_rewrite"),
         ("m", "Holder.method", "write_guarded"), ("m", "Holder.method", "append_jsonl"),
         ("m", "Holder.method", ".touch"), ("m", "Holder.method", "rooted_unlink"),
         # A default value is a reference in the function it belongs to.
@@ -971,8 +978,8 @@ NB_READERS = frozenset({
     # D3' "stay path-typed": pre-door, or the episode dir itself.
     ("learning.branch.cli", "preflight_episode"),
     ("learning.branch.cli", "refuse_claimed_episode"),
-    ("learning.branch.cli", "episode_dir_for"),
-    ("learning.branch.cli", "sibling_runs_base"),
+    # (#1105 PR 2 deleted `episode_dir_for` — the owner's `episode_dir` — and
+    # `sibling_runs_base`, F-13.)
     ("learning.branch.cli", "sibling_argv"),
     ("runtime.branch._family", "resume_world_from"),
     ("run", "main"),
@@ -1027,9 +1034,11 @@ DOORS_TOLERATED = frozenset({
 DOORS_REQUIRED = (
     ("learning.branch.cli", ("prepare_episode",), "create"),
     ("run", ("main",), "open"),
-    ("learning.judge", ("grade_episode", "_grade_episode"), "open"),
-    ("scripts.visualize.visualize_episode", ("render_episode",), "open"),
     ("learning.branch.cli", ("preflight_replay",), "open"),
+    # #1105 PR 2 (decision C, declared changes 3 and 4): the judge's and the page's doors take an
+    # episode id and hold their `Episode` through the tenant's runs repository
+    # (`runs.episode_files(ep)`, `runs.episode(ep)`), which opens it by id — so neither calls
+    # `Episode.open` itself any more.
 )
 
 

@@ -58,9 +58,10 @@ def _payload() -> dict:
 
 
 def _substituting_run(tmp_path: Path, *, turns: int = 2, stores: list | None = None,
-                      gather: bool = False):
+                      gather: bool = False, summaries: list | None = None):
     """One driven run in which a foreign result IS substituted — the shared setup for every
-    demand in this module, and the positive control each of the negatives needs."""
+    demand in this module, and the positive control each of the negatives needs. `summaries`
+    receives what `drive()` returned, whose `run_state` is the run's own state (#1235)."""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     calls = [Turn(tool_calls=[("fetch_rows", {})]) for _ in range(turns)]
     if gather:
@@ -76,7 +77,9 @@ def _substituting_run(tmp_path: Path, *, turns: int = 2, stores: list | None = N
         seams["verbs"] = elastic_ok(rec)
     if stores is not None:
         seams["store_factory"] = store_factory(tmp_path / "store", sink=stores)
-    drive(run_dir, run_id=RUN_ID, main=main, **seams)
+    summary = drive(run_dir, run_id=RUN_ID, main=main, **seams)
+    if summaries is not None:
+        summaries.append(summary)
     return run_dir, main
 
 
@@ -525,9 +528,10 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
         })]),
         Turn(text="Complete."),
     ])
-    drive(idle_dir, run_id=RUN_ID, main=idle_main,
-          gather=ReplayFn([q("elastic", "query", {"native_query": "FROM logs"}), DONE]),
-          verbs=elastic_ok(rec))
+    drive(
+        idle_dir, run_id=RUN_ID, main=idle_main,
+        gather=ReplayFn([q("elastic", "query", {"native_query": "FROM logs"}), DONE]),
+        verbs=elastic_ok(rec))
 
     gated_rows = read_jsonl_rows(RunPaths(gated_dir).executed_queries)
     idle_rows = read_jsonl_rows(RunPaths(idle_dir).executed_queries)

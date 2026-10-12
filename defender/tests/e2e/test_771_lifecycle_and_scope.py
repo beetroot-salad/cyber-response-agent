@@ -423,22 +423,23 @@ def test_an_entry_that_changes_shape_between_listing_and_inspection_is_refused(t
 
 def test_the_pre_first_turn_setup_writers_are_individually_guarded_in_any_order(tmp_path):
     """setup_writer_order_is_not_load_bearing — the pre-first-turn setup writers (the startup
-    sentinel, the budget file and the session pointer) each refuse a planted alias on their own,
-    in whatever order they run.
+    sentinel and the session pointer; #1235 retired the budget file, whose counters now live in
+    the run's process memory) each refuse a planted alias on their own, in whatever order they
+    run.
 
     PINNED PROVISIONALLY (§7 H10.1): the design does not say what order M2's probe runs in
-    against these three, and the pin is that the order is NOT load-bearing because each is
+    against these, and the pin is that the order is NOT load-bearing because each is
     individually guarded. If any ordering IS load-bearing, this pin is wrong — and it is
     written as a per-writer property precisely so that a wrong pin fails here rather than
     silently holding through a reordering.
 
-    THE THREE SHARE ONE TREE, in each order. Running each writer into a private run dir
-    exercises three independent writers and calls the sequence an order — the arrangement
+    THE WRITERS SHARE ONE TREE, in each order. Running each writer into a private run dir
+    exercises independent writers and calls the sequence an order — the arrangement
     cannot observe an ordering effect at all, because nothing the first writer does is visible
     to the second. Order is only load-bearing through shared state, so the sequence is driven
-    against one tree with all three aliases planted up front, and then again reversed."""
-    setup = [w for w in CENSUS if w.id in {"start_box", "budget_enforcer", "write_case_pointer"}]
-    assert len(setup) == 3, "the pre-first-turn setup writer set drifted from the pin's three"
+    against one tree with every alias planted up front, and then again reversed."""
+    setup = [w for w in CENSUS if w.id in {"start_box", "write_case_pointer"}]
+    assert len(setup) == 2, "the pre-first-turn setup writer set drifted from the pin's two"
 
     for label, order in (("forward", setup), ("reversed", list(reversed(setup)))):
         d = tmp_path / label

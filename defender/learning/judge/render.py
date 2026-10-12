@@ -2,11 +2,12 @@
 other world's facts.
 
 Ported from `experiments/judge-context-921/variants/contexts.py::render_proposed`, the measured
-arm. Reads only `episode_dir`, `runs_base`, and the checkout at the sibling's recorded commit —
-never a sibling's own run dir, which may be gone.
+arm. Reads only `episode_dir` and the checkout at the sibling's recorded commit — never a
+sibling's own run dir, which may be gone, and never the tenant's runs: the judge reads only the
+episode it is handed (#1105 J3 removed the same-alert sibling union and its spread).
 
 Every world but the judged one has its facts withheld in the rendered family, and the lessons
-and spread views likewise exclude the other worlds' contribution. Every model-bound text the
+view likewise excludes the other worlds' contribution. Every model-bound text the
 host did not author arrives inside an untrusted frame (M26).
 """
 
@@ -14,7 +15,6 @@ from __future__ import annotations
 
 import json
 import re
-from collections import Counter
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
@@ -22,10 +22,9 @@ from typing import Any
 
 import contextlib
 
-from defender import _alert_input, _shown
-from defender._io import ENTRY_DIR, ENTRY_FILE, Bound, bind
+from defender import _alert_input
+from defender._io import Bound, bind
 from defender._episode_paths import LAYOUT, WORLD_LEAVES, OracleStorePaths
-from defender.run_repository import RUN_LAYOUT
 from defender.hooks.record_lesson_load import (
     EVIDENCE_INDIRECT,
     EVIDENCE_PUSH,
@@ -45,7 +44,6 @@ from defender.learning.judge.family import (
     _repository_leads,
     lead_chain,
     render_refused,
-    read_archived_report,
     read_manifest,
     read_samples_record,
     read_world_facts,
@@ -69,7 +67,7 @@ def _git_show_default(cwd: Path, rev: str, path: str) -> str | None:
 @model
 class JudgeInput:
     """The judge's whole rendered input for one (world, pass). Never stored — derived fresh
-    on every `render()` call from the archive, the runs base and the checkout."""
+    on every `render()` call from the archive and the checkout."""
 
     world_label: str
     discriminator: dict[str, Any]
@@ -77,10 +75,7 @@ class JudgeInput:
     #: Every ledger row of the judged world, in ledger order: its decision word, the call, and
     #: for an `oracle` row its claim and verifier verdict. The answers render separately.
     calls: list[dict[str, Any]] = field(default_factory=list)
-    siblings: list[dict[str, Any]] = field(default_factory=list)
     lessons: list[dict[str, Any]] = field(default_factory=list)
-    spread: list[dict[str, Any]] = field(default_factory=list)
-    union_notes: dict[str, Any] = field(default_factory=dict)
     manifest_text: str = ""
     document_text: str = ""
     report_text: str = ""
@@ -106,16 +101,14 @@ class JudgeInput:
             "family": self.family_text,
             "answers": _render_answers(self.calls),
             "leads": _render_leads(self.leads),
-            "siblings": _render_siblings(self.siblings, self.union_notes),
             "lessons": _render_lessons(self.lessons),
-            "spread": _render_spread(self.spread, self.union_notes),
             "document": self.document_text,
             "report": self.report_text,
             "samples": self.samples_text,
             "oracle": self.oracle_text,
         }, self.payload_cap)
         ordered = {"manifest": capped["manifest"], "family": capped["family"],
-                   "calls": _render_calls(self.calls, self.union_notes)}
+                   "calls": _render_calls(self.calls)}
         ordered.update((k, v) for k, v in capped.items() if k not in ordered)
         return ordered
 
@@ -124,8 +117,8 @@ def _cap_sections(sections: dict[str, str], payload_cap: int | None) -> dict[str
     """The rendered views, trimmed so their total length is at most `payload_cap`.
 
     Equal share of what is left, smallest section first: a view that fits is never cut and
-    hands its unused share on, so the bytes come off whichever view is actually large (not the
-    small, load-bearing spread view)."""
+    hands its unused share on, so the bytes come off whichever view is actually large (not a
+    small, load-bearing one)."""
     if payload_cap is None or sum(len(body) for body in sections.values()) <= payload_cap:
         return sections
     remaining, left = payload_cap, len(sections)
@@ -184,12 +177,10 @@ def _claim_text(row: dict[str, Any]) -> str:
     return f" — claim {_json(claim)}; verifier verdict {_json(verdict)}"
 
 
-def _render_calls(calls: list[dict[str, Any]], union_notes: dict[str, Any]) -> str:
+def _render_calls(calls: list[dict[str, Any]]) -> str:
     """VIEW 1: one line per call, numbered, naming its decision word — never cut by the cap."""
-    note = union_notes.get("coverage_note")
-    prefix = f"{note}\n" if note else ""
     if not calls:
-        return prefix + "This world's investigator made no call that reached the ledger.\n"
+        return "This world's investigator made no call that reached the ledger.\n"
     lines = []
     for n, row in enumerate(calls, 1):
         line = (f"- call #{n} [{row.get('source')}] system={row.get('system')} "
@@ -197,7 +188,7 @@ def _render_calls(calls: list[dict[str, Any]], union_notes: dict[str, Any]) -> s
         if row.get("source") == ORACLE:
             line += _claim_text(row)
         lines.append(line)
-    return prefix + "\n".join(lines) + "\n"
+    return "\n".join(lines) + "\n"
 
 
 def _render_answers(calls: list[dict[str, Any]]) -> str:
@@ -207,69 +198,6 @@ def _render_answers(calls: list[dict[str, Any]]) -> str:
         return "No answer was served to this world.\n"
     return "".join(f"- call #{n} answer: {row.get('payload_text')}\n"
                    for n, row in enumerate(calls, 1))
-
-
-def _render_siblings(siblings: list[dict[str, Any]], union_notes: dict[str, Any]) -> str:
-    lines = [f"- {row.get('run_id')}: disposition={row.get('disposition')}" for row in siblings]
-    if not siblings and _union_empty_after_a_walk(union_notes):
-        lines = ["This is a first-run alert: no sibling trial is recorded."]
-    excluded = union_notes.get("source_run_excluded")
-    if excluded:
-        lines.append(f"(the source run {excluded!r} this episode branched from is excluded)")
-    lines.extend(_exclusion_lines(union_notes))
-    return "\n".join(lines) + "\n"
-
-
-def _union_unattempted(union_notes: dict[str, Any]) -> bool:
-    """Was the sibling walk never actually made? Shared by all three union views: an
-    unattempted union is not "no sibling exists"."""
-    return bool(union_notes.get("runs_base_unset") or union_notes.get("runs_base_missing")
-                or union_notes.get("runs_base_unreadable") or union_notes.get("alert_unidentified"))
-
-
-def _union_empty_after_a_walk(union_notes: dict[str, Any]) -> bool:
-    """May a view say "this is a first-run alert" — did a walk run and find nothing, with
-    nothing dropped? An excluded source run or a skipped trial means something was found."""
-    return not (_union_unattempted(union_notes)
-                or union_notes.get("source_run_excluded")
-                or union_notes.get("skipped_unreadable")
-                or union_notes.get("skipped_unclosed")
-                or union_notes.get("skipped_unrecorded")
-                or union_notes.get("skipped_runs"))
-
-
-def _exclusion_lines(union_notes: dict[str, Any]) -> list[str]:  # noqa: D401
-    """What the union dropped or never attempted, stated in the view — a model fills in
-    unstated absences."""
-    out = []
-    if union_notes.get("runs_base_unset"):
-        out.append("(no runs base was named for this pass, so the sibling union was never "
-                   "attempted — this is not a statement that no sibling trial exists)")
-    if union_notes.get("runs_base_missing"):
-        out.append("(the runs base named for this pass is not a directory, so the sibling "
-                   "union was never attempted — this is not a statement that no sibling "
-                   "trial exists)")
-    if union_notes.get("runs_base_unreadable"):
-        out.append(f"(the runs base named for this pass could not be listed — "
-                   f"{union_notes['runs_base_unreadable']} — so the sibling union was never "
-                   "attempted — this is not a statement that no sibling trial exists)")
-    if union_notes.get("alert_unidentified"):
-        out.append("(this episode carries no usable record of the alert it investigates, so the "
-                   "sibling union had nothing to match trials against and was never attempted — this is not "
-                   "a statement that no sibling trial exists)")
-    for key, what in (("skipped_unreadable", "could not be read"),
-                      ("skipped_unclosed", "never reached a close"),
-                      ("skipped_unrecorded", "carry no record of the alert, so are not runs")):
-        count = union_notes.get(key) or 0
-        if count:
-            out.append(f"({count} further trial(s) of this alert {what} and are excluded here "
-                       "and from the spread below)" if key != "skipped_unrecorded" else
-                       f"({count} folder(s) under the runs base {what} and are excluded here "
-                       "and from the spread below)")
-    # Each skipped folder by name, one inert escaped line apiece: a name is a folder's, not ours.
-    for name, why in union_notes.get("skipped_runs") or []:
-        out.append(f"- skipped {_shown.quoted(name)}: {why}")
-    return out
 
 
 def _render_lessons(lessons: list[dict[str, Any]]) -> str:
@@ -297,126 +225,11 @@ def _render_lessons(lessons: list[dict[str, Any]]) -> str:
     return "\n\n".join(lines) + "\n"
 
 
-def _render_spread(spread: list[dict[str, Any]], union_notes: dict[str, Any]) -> str:
-    """The spread: `disposition` and `count` per row (the tally across siblings).
-
-    An empty spread only claims "no other trial" when the walk ran and dropped nothing,
-    agreeing with the siblings view."""
-    if not spread:
-        if not _union_empty_after_a_walk(union_notes):
-            return ("The spread is empty because the sibling union it tallies is — see the "
-                    "sibling view above for why; this is not a statement that no other trial "
-                    "of this alert exists.\n")
-        return "No other trial of this alert is recorded; the spread is empty.\n"
-    lines = [
-        f"- disposition={_spread_label(row.get('disposition'))}: {row.get('count')} trial(s)"
-        for row in spread
-    ]
-    return "\n".join(lines) + "\n"
-
-
-def _spread_label(disposition: Any) -> str:
-    """A spread key as text; `None` (a report with no disposition) is named, not printed."""
-    return "(none recorded)" if disposition is None else str(disposition)
-
-
 def _world_entry(doc: dict[str, Any], label: str) -> dict[str, Any]:
     for world in doc.get("worlds") or ():
         if isinstance(world, dict) and world.get("world_id") == label:
             return world
     raise JudgeRefused(f"the manifest declares no world {label!r}")
-
-
-def _sibling_row(
-    run: Bound, run_id: str, *, digest: str | None,
-) -> tuple[dict[str, Any] | None, str | None, str]:
-    """Classify one directory under the runs base.
-
-    `(row, None, "")`: a finished trial of this alert. `(None, key, why)`: a skipped folder,
-    `key` naming its count in `union_notes`, `why` the reason shown beside its name.
-    `(None, None, "")`: a run of another alert, not counted as a skip.
-
-    A trial is a run whose record carries the episode's digest: the stored alert is not read,
-    so one rewritten on the host is still listed. `read_archived_report` never raises, so one
-    bad byte in an unrelated run cannot refuse the grade. Both reads are no-follow."""
-    record_rec = run.read(RUN_LAYOUT.alert_record)
-    if record_rec.absent:
-        return None, "skipped_unrecorded", "it has no record of the alert"
-    record = _alert_input.parse_alert_record(record_rec.text) if record_rec.text else None
-    if record is None:
-        return None, "skipped_unreadable", "its record of the alert cannot be read"
-    if record.digest != digest:
-        return None, None, ""
-    read = read_archived_report(run, RUN_LAYOUT.report)
-    if read.absent:
-        return None, "skipped_unclosed", "it never reached a close (no report)"
-    if not read.text:
-        return None, "skipped_unreadable", "its report cannot be read"
-    return {"run_id": run_id, "disposition": read.disposition}, None, ""
-
-
-def _take_entry(
-    runs: Bound, run_id: str, kind: str, *, digest: str, source_run_id: str | None,
-    siblings: list[dict[str, Any]], notes: dict[str, Any],
-) -> None:
-    """File one entry of the runs base: a trial, a named skip, the excluded source run, or
-    nothing (a plain file, a `_`-prefixed bookkeeping folder, a run of another alert)."""
-    if kind == ENTRY_FILE or run_id.startswith("_"):
-        return
-    if kind != ENTRY_DIR:
-        # A link or special file where a run folder would be: never followed, named.
-        notes["skipped_runs"].append((run_id, "not a plain directory (a link or special file)"))
-        return
-    if source_run_id is not None and run_id == source_run_id:
-        notes["source_run_excluded"] = run_id
-        if runs.under(run_id).read(RUN_LAYOUT.alert_record).absent:
-            notes["skipped_runs"].append((run_id, "it has no record of the alert"))
-        return
-    row, skipped, why = _sibling_row(runs.under(run_id), run_id, digest=digest)
-    if row is not None:
-        siblings.append(row)
-    elif skipped is not None:
-        notes[skipped] += 1
-        notes["skipped_runs"].append((run_id, why))
-
-
-def sibling_union(
-    runs_base: Path | None, *, digest: str | None, source_run_id: str | None,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """The sibling union: every finished trial of this alert under the operator's runs base.
-
-    Computed once per pass (every world shares the alert). `runs_base=None` is recorded as
-    "never attempted", not rendered as an empty union."""
-    notes: dict[str, Any] = {
-        "source_run_excluded": None, "skipped_unreadable": 0, "skipped_unclosed": 0,
-        "skipped_unrecorded": 0, "skipped_runs": [],
-        "runs_base_unset": runs_base is None, "runs_base_missing": False,
-        "runs_base_unreadable": None,
-        "alert_unidentified": digest is None,
-    }
-    if runs_base is None:
-        return [], notes
-    siblings: list[dict[str, Any]] = []
-    runs_base = Path(runs_base)
-    if digest is None:
-        # No digest to match on: `None == None` would match every unrelated run lacking one.
-        return siblings, notes
-    # The root itself may be a link (the operator's own configuration); entries under it are
-    # box-writable and judged no-follow.
-    with bind(runs_base) as runs:
-        listing = runs.entries()
-        if listing.reason is not None:
-            # Present but not listable: a different fact from missing.
-            notes["runs_base_unreadable"] = listing.reason
-            return siblings, notes
-        if listing.absent:
-            # The runs base need not exist (a tenant with no run yet, or a typo); nobody looked.
-            notes["runs_base_missing"] = True
-            return siblings, notes
-        for run_id, kind in sorted((listing.entries or {}).items()):
-            _take_entry(runs, run_id, kind, digest=digest, source_run_id=source_run_id,
-                        siblings=siblings, notes=notes)
-    return siblings, notes
 
 
 def episode_record(bound: Bound) -> _alert_input.AlertRecord | None:
@@ -542,27 +355,24 @@ def render_family_text(record: dict[str, Any] | None,
 
 
 def render(  # noqa: PLR0913 — the keyword tail is the per-pass hand-over that avoids re-reading what the caller has read
-    episode_dir: Path, world_label: str, runs_base: Path | None = None, *,
+    episode_dir: Path, world_label: str, *,
     git_show: Any = None, lessons_commit: str | None = None, payload_cap: int | None = None,
     facts: WorldFacts | None = None, samples: dict[str, Any] | None = None,
-    union: tuple[list[dict[str, Any]], dict[str, Any]] | None = None,
     manifest: dict[str, Any] | None = None, bound: Bound | None = None,
     family_text: str | None = None,
 ) -> JudgeInput:
     """The judge's rendered input for one non-control world.
 
-    `runs_base` is for the sibling union. `git_show` is the `(cwd, rev, path) -> str | None`
-    seam for reading a lesson body at a recorded commit. `lessons_commit` overrides the
-    per-world provenance read. `facts`, `union`, `manifest`, `samples`, `family_text` and
-    `bound` are the caller's already-read per-pass inputs; each is read or computed here only
-    when not handed over.
+    `git_show` is the `(cwd, rev, path) -> str | None` seam for reading a lesson body at a
+    recorded commit. `lessons_commit` overrides the per-world provenance read. `facts`,
+    `manifest`, `samples`, `family_text` and `bound` are the caller's already-read per-pass
+    inputs; each is read or computed here only when not handed over.
     """
     episode_dir = Path(episode_dir)
     with (contextlib.nullcontext(bound) if bound is not None else bind(episode_dir)) as bound:
-        return _render_bound_world(bound, episode_dir, world_label, runs_base, git_show=git_show,
+        return _render_bound_world(bound, episode_dir, world_label, git_show=git_show,
                        lessons_commit=lessons_commit, payload_cap=payload_cap, facts=facts,
-                       samples=samples, union=union, manifest=manifest,
-                       family_text=family_text)
+                       samples=samples, manifest=manifest, family_text=family_text)
 
 
 def _manifest_text(doc: dict[str, Any], judged_label: str) -> str:
@@ -602,10 +412,9 @@ def _manifest_text(doc: dict[str, Any], judged_label: str) -> str:
 
 
 def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
-    bound: Bound, episode_dir: Path, world_label: str, runs_base: Path | None, *,
+    bound: Bound, episode_dir: Path, world_label: str, *,
     git_show: Any, lessons_commit: str | None, payload_cap: int | None,
     facts: WorldFacts | None, samples: dict[str, Any] | None,
-    union: tuple[list[dict[str, Any]], dict[str, Any]] | None,
     manifest: dict[str, Any] | None, family_text: str | None,
 ) -> JudgeInput:
     from defender.learning.judge.run import served_systems_of
@@ -674,31 +483,13 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
                         "note": "unavailable: the row's `lesson_name` is not a string",
                         "dirty": dirty, "exposure": None})
 
-    siblings, union_notes = union if union is not None else sibling_union(
-        Path(runs_base) if runs_base is not None else None,
-        # Read only on this fallback path; the orchestration always supplies the union.
-        digest=episode_digest(bound), source_run_id=doc.get("source_run_id"))
-    spread = Counter(s.get("disposition") for s in siblings)
-    # Sorted by key: the tally can hold both strings and `None`, which do not compare.
-    spread_rows = [
-        {"disposition": k, "count": v}
-        for k, v in sorted(spread.items(), key=lambda kv: (kv[0] is None, str(kv[0])))
-    ] if siblings else []
-
     leads = {lid: lead_chain(world, lid, resolutions_by_lead, leads=by_id)
              for lid in sorted(lead_ids)}
-
-    # A copy: the union is shared across worlds, and the note below is this world's alone.
-    union_notes = dict(union_notes)
-    if _union_empty_after_a_walk(union_notes) and not siblings:
-        # The empty union is stated here, the first thing the prompt says about the union.
-        union_notes["coverage_note"] = "this is a first-run alert: no sibling trial is recorded"
 
     return JudgeInput(
         world_label=world_label,
         discriminator=discriminator_of(doc),
-        leads=leads, calls=calls, siblings=siblings, lessons=lessons,
-        spread=spread_rows, union_notes=union_notes,
+        leads=leads, calls=calls, lessons=lessons,
         manifest_text=_manifest_text(doc, world_label), document_text=text,
         report_text=report_text, samples_text=samples_text, family_text=family_text,
         oracle_text=render_oracle_store(bound, world_label), payload_cap=payload_cap,
@@ -753,5 +544,4 @@ def _usable_commit(commit: Any) -> str | None:
     return commit if isinstance(commit, str) and _COMMIT_RE.match(commit) else None
 
 
-__all__ = ["JudgeInput", "episode_alert", "episode_record", "family_status", "render", "render_family_text",
-           "sibling_union"]
+__all__ = ["JudgeInput", "episode_alert", "family_status", "render", "render_family_text"]

@@ -273,12 +273,13 @@ def test_d8_retired_runs_knob_text():
     "Tells an operator to set it" is read as: names the retired `/tmp/defender-runs` default,
     assigns the knob a path, says to set/point/export it, or uses `$DEFENDER_RUNS_BASE` in a
     file that never says the value is the derived `<root>/<T>/runs` (`run_dir.parent`). The
-    launcher's entry on the list is `cli.episodes_root`, read alone."""
+    launcher's entry on the list is `episodes_root`, read alone — since #1105 PR 2 the episode
+    owner's (`_episodes_root.episodes_root`; the launcher's `cli.episodes_root` is gone)."""
     found = []
     for path in RETIRED_KNOB_FILES:
         assert path.is_file(), f"D8's retired-knob file {path} moved"
         found += _knob_instructions(path)
-    found += _knob_instructions(DEFENDER / "learning" / "branch" / "cli.py",
+    found += _knob_instructions(DEFENDER / "_episodes_root.py",
                                 only_function="episodes_root")
     assert found == [], "retired DEFENDER_RUNS_BASE knob text survives:\n  " + "\n  ".join(found)
 

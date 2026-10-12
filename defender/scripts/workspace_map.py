@@ -20,15 +20,15 @@ REPO_ROOT = DEFENDER_DIR.parent
 #: Run-dir children the map does not name. The map is inlined into MAIN's message 0 as its
 #: directory view (MAIN has no `ls`), so naming a path the gate refuses only teaches it to ask
 #: for one (`test_gather_raw_suppressed`). `gather_raw/` and `wire_logs/` are actually refused
-#: by `permission.files`. `budget.json` and the provenance stamp are operator infrastructure
-#: and are only hidden, not out of reach: every run-root file is inside MAIN's and GATHER's
+#: by `permission.files`. The provenance stamp is operator infrastructure and is only hidden,
+#: not out of reach: every run-root file is inside MAIN's and GATHER's
 #: `under(run, SEG)` read shape.
 def _unlisted() -> frozenset[str]:
     """The run-dir entries this view suppresses, asked of `RUN_LAYOUT` per call so a writer's
     rename cannot make a suppressed file silently reappear in MAIN's message 0."""
     return frozenset({
         RUN_LAYOUT.gather_raw.name, RUN_LAYOUT.wire_log_dir.name,
-        RUN_LAYOUT.budget.name, RUN_LAYOUT.provenance.name,
+        RUN_LAYOUT.provenance.name,
     })
 
 
@@ -125,19 +125,31 @@ def _template_counts(queries_dir: Path) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        sys.stderr.write("usage: workspace_map.py <run_dir>\n")
-        return 2
+    """`workspace_map.py --tenant T <run_id>` (#1105 declared change 10, J8): the map of T's
+    run, opened by id through T's repository (a path where the id belongs is refused). The
+    library call (`workspace_map(run_dir, ...)`, the running investigation's) is unchanged."""
+    import argparse
+
+    p = argparse.ArgumentParser(prog="workspace_map.py")
+    p.add_argument("--tenant", required=True,
+                   help="the tenant whose run is mapped; required, with no default")
+    p.add_argument("run_id", help="the run, by its id")
+    ns = p.parse_args(argv[1:])
     # The CLI reads the checkout's roster itself; an unreadable adapters tree is a one-line
     # refusal and exit 2, not a traceback.
+    from defender._command_line_run import open_command_line_run
     from defender.runtime.verbs import RegistryError, read_roster
 
+    run = open_command_line_run(ns.tenant, ns.run_id)
+    if isinstance(run, str):
+        sys.stderr.write(f"workspace_map: {run}\n")
+        return 2
     try:
         roster = read_roster(adapters_under(DEFENDER_DIR))
     except RegistryError as e:
         sys.stderr.write(f"workspace_map: {e}\n")
         return 2
-    print(workspace_map(Path(argv[1]), systems=tuple(roster.accepted)), end="")
+    print(workspace_map(Path(run.run_dir), systems=tuple(roster.accepted)), end="")
     return 0
 
 

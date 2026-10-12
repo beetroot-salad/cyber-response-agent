@@ -112,9 +112,9 @@ write-code-from-spec names anything differently it renames it HERE, never in a t
   Knobs (environment, set with `monkeypatch.setenv`): `ORACLE_MODEL`, `ORACLE_CHECK_MODEL`,
     `ORACLE_EFFORT`, `ORACLE_CHECK_EFFORT`, `ORACLE_RETRY_CAP`, `ORACLE_RATE` (queries/second
     per episode), `ORACLE_BUDGET`, `ORACLE_TURN_DEADLINE` (seconds).
-  The run's host-only oracle-held sidecar (`RunPaths.oracle_held`, beside the run dir — never
-    the box-writable `budget.json`) carries the investigator clock's excluded oracle-held total
-    under `oracle_held_seconds` (S15).
+  The investigator clock's excluded oracle-held total lives on the run's one `RunState`
+    (#1235 round 2: `budget_enforcer.oracle_held(state)`, read off `drive(...)["run_state"]`);
+    no file holds it, so no credit outlives its run (S15; the retired sidecar was #1239).
 
 EVERY FAULT HERE IS A REAL INPUT THROUGH THE REAL PRIMITIVE, OR A FAKE CITING ITS CLAIM:
   * adapter errors are the real `AdapterFault` subclasses (`scripts/adapters/faults.py`), raised
@@ -239,7 +239,6 @@ COINED = {
     "knob.effort": "ORACLE_EFFORT",
     "knob.check_effort": "ORACLE_CHECK_EFFORT",
     "fn.preflight": "preflight_replay",
-    "budget.oracle_held": "oracle_held_seconds",
     "fn.samples": "system_samples",
     "kw.served_systems": "served_systems",
     "kw.samples": "samples",
@@ -270,7 +269,6 @@ OLD_MANIFEST_KEYS = ("overlay", "discriminator.holding_system", "discriminator.e
                      "captured_patterns", "configured_patterns")
 PREDATES = "predates the oracle"
 
-ORACLE_HELD_KEY = COINED["budget.oracle_held"]
 KNOB_MODEL = COINED["knob.model"]
 KNOB_CHECK_MODEL = COINED["knob.check_model"]
 KNOB_RETRY_CAP = COINED["knob.retry_cap"]
@@ -1297,6 +1295,50 @@ def plain_registry(est: Estate) -> Any:
                                             grant_home=rt.table_pointer)
 
 
+def run_state(run_dir: Path, run_id: str = "run-1224") -> Any:
+    """A fresh run's `RunState` (#1235 round 2) — what a direct registry call's context carries
+    when the scenario needs the investigator's clock to pause and resume (a context with no run
+    state pauses none). Imported lazily: the module is new in round 2."""
+    return sym("runtime.run_state", "RunState")(Path(run_dir), run_id)
+
+
+def tap_run_states(registry: Any) -> list[Any]:
+    """Every `RunState` the investigator's calls through `registry` carried
+    (`VerbContext.run_state`, #1235 round 2), in call order.
+
+    For a driven run that ends by RAISING (an escaped `OracleUnservable`), `drive()` returns
+    nothing, so its `["run_state"]` is out of reach; the verb context is the production carry
+    the state rides on, and this reads it there. Installed on the registry INSTANCE (its public
+    `verbs` lookup, through which the query tool and lead-0 resolve every callable), each verb
+    wrapped with `functools.wraps` so the query tool still validates the real signature."""
+    import functools
+
+    seen: list[Any] = []
+    lookup = registry.verbs
+
+    def tapped(system: str):
+        def tap(fn: Any) -> Any:
+            @functools.wraps(fn)
+            def carried(ctx: Any, **params: Any) -> Any:
+                seen.append(getattr(ctx, "run_state", None))
+                return fn(ctx, **params)
+
+            return carried
+
+        return {name: tap(fn) for name, fn in lookup(system).items()}
+
+    registry.verbs = tapped
+    return seen
+
+
+def the_run_state(seen: list[Any]) -> Any:
+    """The one `RunState` every tapped call carried (`tap_run_states`)."""
+    assert seen, "no investigator call reached the registry, so the run's state was never seen"
+    assert all(s is seen[0] for s in seen), "the run's calls carried more than one state"
+    assert seen[0] is not None, "the investigator's call carried no run state"
+    return seen[0]
+
+
 def call(registry: Any, system: str, verb: str, ctx: Any, **params: Any) -> Any:
     """One investigator call through the registry's wrapped verb — the production frame the
     query tool calls (`registry.verbs(system)[verb](ctx, **params)`)."""
@@ -1325,6 +1367,26 @@ def drive_gather(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system:
     the main loop dispatches ONE gather lead on `system`, whose scripted turns are
     `gather_turns` (`query_turn(...)`s then `DONE`), with the registry injected as `verbs=`.
     Returns `(run dir, the gather ReplayFn)` — `gather.seen` is what the investigator saw."""
+    run_dir, gather, _summary = _drive_one_gather(
+        tmp_path, verbs=verbs, gather_turns=gather_turns, system=system, run_id=run_id,
+        limits=limits, tenant=tenant, **kw)
+    return run_dir, gather
+
+
+def drive_gather_run(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system: str = "idp",
+                     run_id: str = "run-1224", limits: Any = None, tenant: Any = None,
+                     **kw: Any) -> tuple[Path, Any, Any]:
+    """`drive_gather`, also handing back the run's one `RunState` (#1235: `drive()` injects it
+    and returns it as `["run_state"]`) — where a scenario reads the run's budget or breaker,
+    which no file in the run dir holds."""
+    run_dir, gather, summary = _drive_one_gather(
+        tmp_path, verbs=verbs, gather_turns=gather_turns, system=system, run_id=run_id,
+        limits=limits, tenant=tenant, **kw)
+    return run_dir, gather, summary["run_state"]
+
+
+def _drive_one_gather(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system: str,
+                      run_id: str, limits: Any, tenant: Any, **kw: Any) -> tuple[Path, Any, dict]:
     H = replay_harness()
     run_dir = H.materialize(tmp_path / run_id, H.GOLDEN_AB3)
     main = H.ReplayFn([
@@ -1334,9 +1396,9 @@ def drive_gather(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system:
         H.Turn(text="Investigation complete."),
     ])
     gather = H.ReplayFn(gather_turns)
-    H.drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs, limits=limits,
-            tenant=tenant, **kw)
-    return run_dir, gather
+    summary = H.drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs,
+                      limits=limits, tenant=tenant, **kw)
+    return run_dir, gather, summary
 
 
 def done_turn() -> Any:
@@ -1477,7 +1539,9 @@ def _dispatch_after_branch_point(base: Path, src: Path, lead: str) -> None:
     from defender.runtime.branch._frontier import session_for_run
     from defender.tests import _session_store_705 as SS
 
-    store = ss.open_store(case_id=T.SOURCE_CASE_ID, runs_base=base)
+    from defender.run_repository import SessionPaths
+
+    store = ss.open_store(case_id=T.SOURCE_CASE_ID, sessions=SessionPaths(base))
     try:
         session_id = session_for_run(store, src)
         call_id = f"gather-{lead}-after-branch"
@@ -1526,8 +1590,10 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
         T.EPISODES_BASE_ENV) else None
     before = {p.name for p in root.iterdir()} if root is not None and root.is_dir() else set()
     try:
-        rc = cli.main([str(src), str(BRANCH_MESSAGE_ID), "--continuation-prompt", "go",
-                       *argv_extra], spawn=spawn, **seams)
+        # #1105 PR 2 (declared change 1): the tenant and the source run by id — the source sits
+        # at `<data root>/<tenant>/runs/<run id>`.
+        rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(BRANCH_MESSAGE_ID),
+                       "--continuation-prompt", "go", *argv_extra], spawn=spawn, **seams)
     except SystemExit as stop:
         if isinstance(stop.code, int):
             rc = stop.code
@@ -1541,7 +1607,9 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
     if len(fresh) == 1:
         ep = fresh[0]
     else:
-        ep = cli.episode_dir_for(EPISODE_ID, tenant=T.current_tenant())
+        from defender._episode_handle import episode_dir
+
+        ep = episode_dir(T.current_tenant().data_root, EPISODE_ID)
     return Launch(rc=rc, message=message, spawn=spawn, ep=ep)
 
 

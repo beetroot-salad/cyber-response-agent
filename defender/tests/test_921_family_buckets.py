@@ -31,7 +31,7 @@ def _tmp_roots(tmp_path, monkeypatch):
 def _grade(ep, **kw):
     """Grade `ep` afresh (a final `judge.yaml` short-circuits a second pass)."""
     (ep / "judge.yaml").unlink(missing_ok=True)
-    return J.grade(ep, runs_base=ep.parent / "defender-runs", **kw)
+    return J.grade(ep, **kw)
 
 
 # ---------------------------------------------------------------------------------------
@@ -169,14 +169,12 @@ def test_921_the_majority_denominator_is_completed_draws(tmp_path):
     raw transport failure arrive as the same `RunUnprocessable`. And a world with ZERO completed
     draws carries no bucket at all (#1224, O11): nothing but a draw supplies one.
     """
-    judge_mod = J.mod("learning.judge")
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     discard = J.as_reply_text(J.reply_doc(episode_outcome="discard"))
     # Two answers, then the seam degrades: `raise_after=2` is P9's one class, both ways.
     judge = J.FakeJudge(replies=[discard, discard], default=discard,
                         fault=J.Fault(raise_after=2))
-    judge_mod.grade_episode(ep, judge=judge, runs_base=tmp_path / "defender-runs", draws=4,
-                            state=env_state())
+    J.grade_at(ep, judge=judge, draws=4, state=env_state())
 
     record = J.judge_record(ep)
     assert record["draws"] == {"configured": 4, "completed": 2}, (
@@ -193,9 +191,8 @@ def test_921_the_majority_denominator_is_completed_draws(tmp_path):
                for r in reasons)
 
     dead = J.accepted_episode(tmp_path / "dead", ledgers={"b": [J.oracle_row("b")], "c": []})
-    judge_mod.grade_episode(dead, judge=J.FakeJudge(fault=J.Fault(raise_after=0)),
-                            runs_base=tmp_path / "dead" / "defender-runs", draws=2,
-                            state=env_state())
+    J.grade_at(dead, judge=J.FakeJudge(fault=J.Fault(raise_after=0)), draws=2,
+               state=env_state())
     dead_rows = J.world_rows(J.judge_record(dead))
     assert dead_rows["b"]["completed_draws"] == 0
     assert dead_rows["b"]["bucket"] is None, (

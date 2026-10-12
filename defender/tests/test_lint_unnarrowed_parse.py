@@ -376,12 +376,14 @@ def test_the_motivating_findings_are_in_the_shipped_baseline(real_tree_findings)
     motivating sites is still open and still reported — the positive control that this gate
     fires on REAL code and not only on the synthetic seams above.
 
-    THE OTHER THREE ARE FIXED, and are asserted GONE rather than deleted from this test (#878).
-    They were the whole reason the gate was landed, so "the gate no longer reports them" is the
-    statement worth keeping: `read_json_locked` and `update_json_locked` now narrow their parse
-    to a dict at the seam, and `_wall_origin` now goes through `_clock.parse_iso_utc`. Each is
-    also out of the shipped baseline, so a re-widening comes back as a NEW finding and fails the
-    ratchet — which is the regression this direction of the assertion protects.
+    THE OTHER THREE ARE FIXED. `_wall_origin` is asserted GONE rather than deleted from this
+    test (#878): it was part of the reason the gate was landed, so "the gate no longer reports
+    it" is the statement worth keeping — it now goes through `_clock.parse_iso_utc`, and it is out
+    of the shipped baseline, so a re-widening comes back as a NEW finding and fails the ratchet.
+    The other two, `hooks/_run_dir`'s `read_json_locked` and `update_json_locked`, narrowed their
+    parse to a dict at the seam (`_io.locked_json_read` / `locked_json_update`) and were then
+    deleted by #1235 round 3 with their last production caller, so there is no code left for
+    their fingerprints to name.
 
     (The one site left open at #878, `_l0_items._correlation_contract`, went with the ancestor
     fetch in #1222; the gate still reports real findings, so the positive control stands on the
@@ -389,12 +391,8 @@ def test_the_motivating_findings_are_in_the_shipped_baseline(real_tree_findings)
     fingerprints = {f.fingerprint for f in real_tree_findings}
     assert fingerprints, "the gate reports nothing on the real tree, so it has no positive control"
 
-    for fixed in (
-        "defender/hooks/_run_dir.py:read_json_locked:unnarrowed-parse",
-        "defender/hooks/_run_dir.py:update_json_locked:unnarrowed-parse",
-        "defender/hooks/budget_enforcer.py:_wall_origin:unowned-iso-parse",
-    ):
-        assert fixed not in fingerprints, f"{fixed} was re-widened after #878 narrowed it"
+    fixed = "defender/hooks/budget_enforcer.py:_wall_origin:unowned-iso-parse"
+    assert fixed not in fingerprints, f"{fixed} was re-widened after #878 narrowed it"
 
 
 @pytest.mark.gate

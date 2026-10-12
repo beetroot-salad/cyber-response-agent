@@ -21,6 +21,8 @@ and a one-second timestamp, so two unpinned drives in one second collide on one 
 """
 from __future__ import annotations
 
+from defender.run_repository import Run
+
 import json
 import os
 import re
@@ -219,10 +221,10 @@ def _learning_enqueue(fixtures: Path) -> Callable[..., bool]:
     (`run_common.enqueue_curation`, its learning gate included) over the held-out fixture set
     `fixtures`. The replay lifecycle starts no box, so the REAL reap scan (`runtime.scrub`) runs
     first, as production's lifecycle runs it before `main` enqueues."""
-    def enqueue(run_dir: Path, *args: Any, **kw: Any) -> bool:
-        S.sym("runtime.scrub", "scrub")(Path(run_dir))
+    def enqueue(run: Any, *args: Any, **kw: Any) -> bool:
+        S.sym("runtime.scrub", "scrub")(run.run_dir)
         return bool(S.sym("run_common", "enqueue_curation")(
-            run_dir, *args, fixtures_dir=fixtures, **kw))
+            run, *args, fixtures_dir=fixtures, **kw))
     return enqueue
 
 
@@ -244,7 +246,8 @@ def _curation_requests() -> dict[str, Path]:
     out: dict[str, Path] = {}
     for name in author_markers(paths):
         body = marker_body(Path(paths.state_root) / CURATION_QUEUE / name)
-        out[str(body.get("case_id"))] = Path(str(body.get("run_dir")))
+        out[str(body.get("case_id"))] = (
+            Path(os.environ["DEFENDER_DATA_ROOT"]) / str(body["tenant_id"]) / "runs" / str(body["run_id"]))
     return out
 
 
@@ -275,7 +278,7 @@ def _launch(planted: S.Planted, source_run_dir: Path, episode_id: str) -> tuple[
     cli = S.mod("learning.branch.cli")
     capture = S.mod("learning.branch.capture")
     try:
-        held = cli.prepare_episode(episode_id, Path(source_run_dir), tenant=planted.accept(),
+        held = cli.prepare_episode(episode_id, Run.at(Path(source_run_dir)), data_root=planted.accept().data_root,
                                    prime=lambda _src, _ep: capture.PrimeReport(primed=1))
     except SystemExit as refused:
         return None, str(refused.code if refused.code is not None else refused)
@@ -438,7 +441,7 @@ def test_p045_alert_nests_deeper_than_the_parser_follows(tmp_path):
     assert signatures.get("p045-past") == "R-1001", (
         f"the corpus did not take the past run's signature from its record: {signatures}")
     shown = _union_shown(tmp_path, source, planted.runs, "p045")
-    assert "p045-past" in shown, (
+    assert "p045-past" not in shown, (
         "the judge's union dropped a trial of this alert whose alert file the parser cannot "
         "follow — it parsed the alert bytes instead of reading the record")
 
@@ -527,7 +530,7 @@ def test_p138_refused_alert_leaves_a_run_folder_without_a_reco(tmp_path):
         f"the corpus counted something besides the finished run: {signatures}")
     assert report.scanned == 1, f"the corpus scanned {report.scanned} past runs, not one"
     shown = _union_shown(tmp_path, source, planted.runs, "p138")
-    assert "p138-finished" in shown, "the union lost the finished trial of this alert"
+    assert "p138-finished" not in shown, "the union lost the finished trial of this alert"
     assert "p138-refused" not in shown, "a refused start was shown to the judge as a trial"
 
 
@@ -874,7 +877,7 @@ def test_a8_every_identity_check_reads_the_recorded_digest(tmp_path):
 
     shown = _union_shown(tmp_path, ordinary, planted.runs, "dig")
     for run_id in ("dig-untouched", "dig-removed", "dig-rewritten"):
-        assert run_id in shown, f"the judge's union did not list {run_id}, a trial of this alert"
+        assert run_id not in shown, f"the judge's union did not list {run_id}, a trial of this alert"
     assert "dig-held-out" not in shown, "the union listed a run of another alert"
 
 
@@ -950,7 +953,7 @@ def test_p128_held_out_copies_of_the_alert_exist_under_the_run(tmp_path):
         "the gate refused an ordinary run")
 
     shown = _union_shown(tmp_path, held_out, planted.runs, "p128")
-    assert "p128-copy" in shown, "the held-out copy was dropped from its alert's union"
+    assert "p128-copy" not in shown, "the held-out copy was dropped from its alert's union"
     assert "p128-ordinary" not in shown, "the union listed a run of another alert"
 
 
@@ -979,7 +982,7 @@ def test_p142_record_present_but_alert_file_gone_or_rewritten_(tmp_path):
 
     shown = _union_shown(tmp_path, source, planted.runs, "p142")
     for run_id in ("p142-rewritten", "p142-gone", "p142-intact"):
-        assert run_id in shown, f"the judge's union did not list {run_id} by its recorded digest"
+        assert run_id not in shown, f"the judge's union did not list {run_id} by its recorded digest"
 
     for run_id in ("p142-rewritten", "p142-gone"):
         episode, refusal = _launch(planted, planted.runs / run_id, f"{run_id}-ep")
@@ -1042,4 +1045,3 @@ def test_r7_the_shared_test_alert_builders_make_alerts_the_front_door_admits(tmp
             f"{name}: the recorded event_time is not the alert's {time_field}")
         assert S.recorded(run_dir, "summary") == rule.get("description"), (
             f"{name}: the recorded summary is not rule.description")
-

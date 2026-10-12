@@ -164,18 +164,28 @@ def _document(episode_dir):
     return "".join(parts).encode("utf-8")
 
 
-def render_episode(episode_dir):
+def _write(episode_dir):
     page = Path(episode_dir) / PAGE_NAME
     page.write_bytes(_document(episode_dir))
     return page
 
 
+def render_episode(runs, episode_id):
+    # #1105 PR 2: the real door's shape (`runs`, an id); the folder is the view's, nothing judged.
+    with runs.episode(episode_id) as view:
+        return _write(view.episode.dir)
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv:
+    # `--tenant T <episode_id>`, read as dumbly: no tenant judged, the id joined to the root.
+    ids = [a for i, a in enumerate(argv) if a != "--tenant" and (i == 0 or argv[i - 1] != "--tenant")]
+    if ids:
         try:
-            print(render_episode(argv[0]))
-        except OSError:
+            from defender._episodes_root import episode_dir
+            from defender._tenant import resolve_data_root
+            print(_write(episode_dir(resolve_data_root(), ids[0])))
+        except Exception:
             pass          # a file, a missing dir: still "success" — the CLI tests must refuse this
     return 0
 '''

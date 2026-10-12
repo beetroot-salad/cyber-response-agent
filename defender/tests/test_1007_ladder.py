@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests import _judge_921 as J
 from defender.tests import _world_1007 as W
 from defender.tests._state1135 import env_state
 
@@ -44,13 +45,10 @@ def graded_episode(tmp_path: Path, monkeypatch, *, worlds=("b",)) -> Path:
 
 
 def grade(ep: Path, *, judge=None, **kw):
-    """`judge.grade_episode` through its own injection seams — never a live provider. #1078
-    D4/J48: `runs_base` is a required keyword; this wrapper defaults it to a harmless,
-    never-created sibling dir for every caller that does not care which base is threaded."""
-    kw.setdefault("runs_base", ep.parent / "runs-base")
+    """`judge.grade_episode` through its own injection seams — never a live provider — over the
+    episode at `ep`, by id (#1105 PR 2: `_judge_921.grade_at`)."""
     kw.setdefault("state", env_state())
-    judge_mod = W.mod("learning.judge")
-    return judge_mod.grade_episode(
+    return J.grade_at(
         ep, judge=judge if judge is not None else W.FakeJudge(W.reply_document()), **kw)
 
 

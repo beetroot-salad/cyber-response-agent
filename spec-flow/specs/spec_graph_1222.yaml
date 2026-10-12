@@ -1053,8 +1053,9 @@ demands:
     outside: principle 1 (resolve under the runs folder only).
 - id: o11_union_by_recorded_digest
   kind: behavior
-  form: test
-  discharged_by: test_o11_sibling_union_matches_runs_by_recorded_digest
+  form: clause
+  outcome:
+    nl: Retired by main's #1105 PR 2 J3 decision. The judge receives no same-alert sibling union or trial spread.
   binds:
   - interacts(sibling_union->runs_base)
   - interacts(sibling_union->alert_record)
@@ -3318,8 +3319,9 @@ demands:
     outside: principle 1 (anything a sandbox can write is attacker-influenced).
 - id: p113_same_alert_resubmitted_with_different_bytes
   kind: behavior
-  form: test
-  discharged_by: test_p113_same_alert_resubmitted_with_different_bytes
+  form: clause
+  outcome:
+    nl: Retired by main's #1105 PR 2 J3 decision. The judge receives no same-alert sibling union or trial spread.
   binds:
   - interacts(sibling_union->runs_base)
   - interacts(sibling_union->alert_record)
@@ -3388,8 +3390,9 @@ demands:
   - PR-35
 - id: p117_unrelated_run_rewrites_its_alert_into_a_copy_of
   kind: behavior
-  form: test
-  discharged_by: test_p117_unrelated_run_rewrites_its_alert_into_a_copy_of
+  form: clause
+  outcome:
+    nl: Retired by main's #1105 PR 2 J3 decision. The judge receives no same-alert sibling union or trial spread.
   binds:
   - interacts(sibling_union->runs_base)
   - interacts(sibling_union->alert_record)
@@ -3490,8 +3493,9 @@ demands:
   - PR-17
 - id: p123_runs_base_is_not_the_one_holding_the_source_run
   kind: behavior
-  form: test
-  discharged_by: test_p123_runs_base_is_not_the_one_holding_the_source_run
+  form: clause
+  outcome:
+    nl: Retired by main's #1105 PR 2 J3 decision. The judge receives no same-alert sibling union or trial spread.
   binds:
   - interacts(sibling_union->runs_base)
   - interacts(sibling_union->alert_record)
@@ -3502,8 +3506,9 @@ demands:
   binds_from: assembler
 - id: p124_candidate_run_alert_unreadable_counted_as_a_tria
   kind: behavior
-  form: test
-  discharged_by: test_p124_candidate_run_alert_unreadable_counted_as_a_tria
+  form: clause
+  outcome:
+    nl: Retired by main's #1105 PR 2 J3 decision. The judge receives no same-alert sibling union or trial spread.
   binds:
   - interacts(sibling_union->runs_base)
   - interacts(sibling_union->alert_record)
@@ -3518,8 +3523,9 @@ demands:
   - PR-18
 - id: p125_identical_alert_run_in_flight_when_the_judge_wal
   kind: behavior
-  form: test
-  discharged_by: test_p125_identical_alert_run_in_flight_when_the_judge_wal
+  form: clause
+  outcome:
+    nl: Retired by main's #1105 PR 2 J3 decision. The judge receives no same-alert sibling union or trial spread.
   binds:
   - interacts(sibling_union->runs_base)
   - interacts(sibling_union->alert_record)
@@ -3529,8 +3535,9 @@ demands:
   binds_from: assembler
 - id: p126_a_trial_finishes_between_two_judge_passes
   kind: behavior
-  form: test
-  discharged_by: test_p126_a_trial_finishes_between_two_judge_passes
+  form: clause
+  outcome:
+    nl: Retired by main's #1105 PR 2 J3 decision. The judge receives no same-alert sibling union or trial spread.
   binds:
   - interacts(sibling_union->runs_base)
   - interacts(_enqueue_report->learning_queue)
@@ -3540,8 +3547,9 @@ demands:
   binds_from: assembler
 - id: p127_candidate_run_vanishes_between_listing_and_readi
   kind: behavior
-  form: test
-  discharged_by: test_p127_candidate_run_vanishes_between_listing_and_readi
+  form: clause
+  outcome:
+    nl: Retired by main's #1105 PR 2 J3 decision. The judge receives no same-alert sibling union or trial spread.
   binds:
   - interacts(sibling_union->runs_base)
   - interacts(sibling_union->judge_prompt)
@@ -3572,8 +3580,9 @@ demands:
   - PR-18
 - id: p129_the_episodes_own_sibling_runs_are_trials_of_it
   kind: behavior
-  form: test
-  discharged_by: test_p129_the_episodes_own_sibling_runs_are_not_trials_of_it
+  form: clause
+  outcome:
+    nl: Retired by main's #1105 PR 2 J3 decision. The judge receives no same-alert sibling union or trial spread.
   renamed_test_from: test_p129_the_episodes_own_sibling_runs_are_trials_of_it
   note: 'The demand id keeps the premise''s label, which PR-18 overturned: the episode''s own sibling runs are NOT trials
     of it (they sit outside the walked base). The test was renamed to say what it asserts (blind F1, 92-reconciliation
@@ -3591,8 +3600,9 @@ demands:
   - PR-18
 - id: p130_source_alert_changes_between_the_pass_reading_it
   kind: behavior
-  form: test
-  discharged_by: test_p130_source_alert_changes_between_the_pass_reading_it
+  form: clause
+  outcome:
+    nl: Retired by main's #1105 PR 2 J3 decision. The judge receives no same-alert sibling union or trial spread.
   binds:
   - interacts(grade_episode->episode_dir)
   - interacts(sibling_union->alert_record)

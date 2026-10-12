@@ -42,6 +42,7 @@ from typing import Any
 
 import pytest
 
+from defender import _episode_handle as EH
 from defender._episode_handle import Episode
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
@@ -63,6 +64,16 @@ def _cli():
 def _tenant_paths():
     """#1078: the tenant `T.runs_base` (or `d9_tenant`) already created."""
     return T.current_tenant()
+
+
+def _verify(ep: Path, plant: Any = T.arm_run_dir, **kw: Any) -> dict:
+    """`cli.verify_family` over episode `ep`'s arms (#1105 PR 2): `plant(ep, world)` makes each
+    world's finished arm in `ep`'s own container (default `T.arm_run_dir(ep, world)`), and each
+    is opened by id through the episode's view (`T.family_arms`)."""
+    for world in T.WORLDS:
+        plant(ep, world)
+    with Episode.open(ep) as episode:
+        return _cli().verify_family(episode, T.family_arms(episode, T.WORLDS), **kw)
 
 
 #: A commit no fixture, no message and no argv could carry by accident — C13's sweep needs a
@@ -102,9 +113,10 @@ class Launch:
     rc: int | None = None
 
     def run(self, *argv_extra: str) -> int:
+        # #1105 PR 2 (declared change 1): the tenant and the source run by id.
         self.rc = _cli().main(
-            [str(self.src), str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go",
-             *argv_extra],
+            ["--tenant", self.src.parent.parent.name, self.src.name, str(T.BRANCH_MESSAGE_ID),
+             "--continuation-prompt", "go", *argv_extra],
             spawn=self.spawn, questioner=self.questioner, judge=self.judge,
             preflight=lambda model, **_kw: self.roles.append(model) or 0,
             live_tree=self.live_tree, roster=self.estate.roster(), oracle=self.oracle.model,
@@ -131,7 +143,7 @@ def _prepare(tmp_path, *, live_tree=None, siblings_at: str | None = "deadbee",
     """
     est = S.estate(tmp_path)
     _base, src = S.source_run(tmp_path, est, calls=[S.Call("idp", "query", QUERY, BASE)])
-    episode_dir = _cli().episode_dir_for(T.EPISODE_ID, tenant=_tenant_paths())
+    episode_dir = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
     return Launch(
         src=src, episode_dir=episode_dir, estate=est,
         spawn=J.FakeSibling(episode_dir, commit=siblings_at) if spawn is None else spawn,
@@ -401,12 +413,13 @@ def test_976_siblings_agreeing_at_a_commit_the_source_did_not_run_are_incomplete
     the commit, no family stamp is written, and every world is still archived per world. The
     positive control anchors the same siblings to a `cafe1` source and is accepted. Without
     this, sibling-to-sibling agreement alone archives a family that ran the wrong code."""
-    base, _src = T.runs_base(tmp_path)
-    dirs = [T.sibling_run_dir(base, w, commit="cafe1") for w in T.WORLDS]
+    T.runs_base(tmp_path)
+
+    def dirs(ep, w):
+        return T.arm_run_dir(ep, w, commit="cafe1")
 
     ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-drifted")
-    with Episode.open(ep) as episode:
-        report = _cli().verify_family(episode, dirs, source=T.provenance_record(commit="deadbee"))
+    report = _verify(ep, dirs, source=T.provenance_record(commit="deadbee"))
     assert report["comparable"] is False
     assert "source" in report["reason"], report["reason"]
     assert "commit" in report["reason"], report["reason"]
@@ -417,17 +430,17 @@ def test_976_siblings_agreeing_at_a_commit_the_source_did_not_run_are_incomplete
     # EQUALITY, NOT PREFIX (adversary H2): siblings at `cafe10` and at `cafe` are not siblings
     # of a `cafe1` source, whichever side an abbreviated sha would be read as extending.
     for extended in ("cafe10", "cafe"):
-        near = [T.sibling_run_dir(base / extended, w, commit=extended) for w in T.WORLDS]
+        def near(ep, w, extended=extended):
+            return T.arm_run_dir(ep, w, commit=extended)
+
         ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{extended}")
-        with Episode.open(ep) as episode:
-            report = _cli().verify_family(episode, near, source=T.provenance_record(commit="cafe1"))
+        report = _verify(ep, near, source=T.provenance_record(commit="cafe1"))
         assert report["comparable"] is False, extended
         assert "commit" in report["reason"], report["reason"]
         assert not (ep / "provenance.json").exists()
 
     ok = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-anchored")
-    with Episode.open(ok) as episode:
-        report = _cli().verify_family(episode, dirs, source=T.provenance_record(commit="cafe1"))
+    report = _verify(ok, dirs, source=T.provenance_record(commit="cafe1"))
     assert report["comparable"] is True
     stamp = json.loads((ok / "provenance.json").read_text(encoding="utf-8"))
     assert stamp["agreed"]["commit"] == "cafe1"
@@ -439,16 +452,14 @@ def test_976_siblings_whose_scope_differs_from_the_sources_are_incomplete(tmp_pa
     are `incomplete` on scope even at one commit; a source with NO scope is compared on commit
     alone and accepted. Without the negative, two stamps whose dirt bits answer different
     questions compare as one; without the positive, every pre-scope source is unverifiable."""
-    base, _src = T.runs_base(tmp_path)
-    dirs = [T.sibling_run_dir(base, w) for w in T.WORLDS]
+    T.runs_base(tmp_path)
 
     # WITH AND WITHOUT THE OVERRIDE (adversary H3): a scope mismatch is not dirt, so
     # `--allow-dirty` does not reach it at this tier any more than at preflight.
     for allow_dirty in (False, True):
-        ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-scoped-{allow_dirty}")
-        with Episode.open(ep) as episode:
-            report = _cli().verify_family(episode, dirs, source=T.provenance_record(scope="defender"),
-                                          allow_dirty=allow_dirty)
+        ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-scoped-{str(allow_dirty).lower()}")
+        report = _verify(ep, source=T.provenance_record(scope="defender"),
+                         allow_dirty=allow_dirty)
         assert report["comparable"] is False, allow_dirty
         assert "scope" in report["reason"], report["reason"]
         # The sibling label is quoted (`sibling 'b'`), so a possessive built onto it renders
@@ -457,8 +468,7 @@ def test_976_siblings_whose_scope_differs_from_the_sources_are_incomplete(tmp_pa
         assert not (ep / "provenance.json").exists()
 
     ok = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-unscoped")
-    with Episode.open(ok) as episode:
-        report = _cli().verify_family(episode, dirs, source=T.provenance_record(scope=None))
+    report = _verify(ok, source=T.provenance_record(scope=None))
     assert report["comparable"] is True
     stamp = json.loads((ok / "provenance.json").read_text(encoding="utf-8"))
     assert stamp["source"]["scope"] is None
@@ -469,23 +479,20 @@ def test_976_a_dirty_source_under_the_override_is_still_held_to_its_commit(tmp_p
     dirty sibling is — siblings at the source's commit are accepted, siblings at another are
     `incomplete`. Without this the override would either refuse every dirty source (dead flag)
     or waive the commit along with the dirt (the confound the override must not admit)."""
-    base, _src = T.runs_base(tmp_path)
-    at_source = [T.sibling_run_dir(base / "same", w) for w in T.WORLDS]
-    elsewhere = [T.sibling_run_dir(base / "moved", w, commit="cafe1") for w in T.WORLDS]
+    T.runs_base(tmp_path)
+
+    def elsewhere(ep, w):
+        return T.arm_run_dir(ep, w, commit="cafe1")
 
     ok = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-dirty-anchored")
-    with Episode.open(ok) as episode:
-        report = _cli().verify_family(episode, at_source, source=T.provenance_record(dirty=True),
-                                      allow_dirty=True)
+    report = _verify(ok, source=T.provenance_record(dirty=True), allow_dirty=True)
     assert report["comparable"] is True
     stamp = json.loads((ok / "provenance.json").read_text(encoding="utf-8"))
     assert stamp["source"]["dirty"] is True
     assert stamp["allow_dirty"] is True
 
     ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-dirty-drifted")
-    with Episode.open(ep) as episode:
-        report = _cli().verify_family(episode, elsewhere, source=T.provenance_record(dirty=True),
-                                      allow_dirty=True)
+    report = _verify(ep, elsewhere, source=T.provenance_record(dirty=True), allow_dirty=True)
     assert report["comparable"] is False
     assert "commit" in report["reason"], report["reason"]
     assert not (ep / "provenance.json").exists()
@@ -583,21 +590,17 @@ def test_976_the_authority_judges_the_sources_own_dirt_not_only_the_siblings(tmp
     beside the waiver. Without this a caller that reaches `verify_family` around the preflight
     (or a future second launcher) archives `source.dirty: true` beside `allow_dirty: false` —
     the exact record O5 says must never exist."""
-    base, _src = T.runs_base(tmp_path)
-    dirs = [T.sibling_run_dir(base, w) for w in T.WORLDS]
+    T.runs_base(tmp_path)
 
     ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-dirty-source-unwaived")
-    with Episode.open(ep) as episode:
-        report = _cli().verify_family(episode, dirs, source=T.provenance_record(dirty=True))
+    report = _verify(ep, source=T.provenance_record(dirty=True))
     assert report["comparable"] is False
     assert "source" in report["reason"], report["reason"]
     assert "dirty=True" in report["reason"], report["reason"]
     assert not (ep / "provenance.json").exists()
 
     ok = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-dirty-source-waived")
-    with Episode.open(ok) as episode:
-        report = _cli().verify_family(episode, dirs, source=T.provenance_record(dirty=True),
-                                      allow_dirty=True)
+    report = _verify(ok, source=T.provenance_record(dirty=True), allow_dirty=True)
     assert report["comparable"] is True
     stamp = json.loads((ok / "provenance.json").read_text(encoding="utf-8"))
     assert stamp["source"]["dirty"] is True
@@ -634,27 +637,27 @@ def test_976_a_verify_reason_the_override_cannot_reach_never_names_the_flag(tmp_
     are each never-waivable families, and none of their archived reasons names the flag; a
     family whose only fault is dirt does. Without this the logged reason sends the operator at a
     knob that does not turn (adversary H1, surviving at the tier whose messages are archived)."""
-    base, _src = T.runs_base(tmp_path)
+    T.runs_base(tmp_path)
     never = {
-        "dirty-and-drifted": [T.sibling_run_dir(base / "dd", w, commit="cafe1", dirty=(w == "b"))
-                              for w in T.WORLDS],
-        "silent": [T.sibling_run_dir(base / "s", w, **({"commit": None, "dirty": None,
-                                                        "unavailable": T.GIT_UNAVAILABLE}
-                                                       if w == "b" else {}))
-                   for w in T.WORLDS],
-        "drifted": [T.sibling_run_dir(base / "d", w, commit="cafe1") for w in T.WORLDS],
+        "dirty-and-drifted": lambda ep, w: T.arm_run_dir(ep, w, commit="cafe1",
+                                                         dirty=(w == "b")),
+        "silent": lambda ep, w: T.arm_run_dir(ep, w, **({"commit": None, "dirty": None,
+                                                         "unavailable": T.GIT_UNAVAILABLE}
+                                                        if w == "b" else {})),
+        "drifted": lambda ep, w: T.arm_run_dir(ep, w, commit="cafe1"),
     }
     for name, dirs in never.items():
         ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{name}")
-        with Episode.open(ep) as episode:
-            report = _cli().verify_family(episode, dirs, source=T.provenance_record())
+        report = _verify(ep, dirs, source=T.provenance_record())
         assert report["comparable"] is False, name
         reason = report["reason"]
         assert "allow-dirty" not in reason, (name, reason)
-    only_dirt = [T.sibling_run_dir(base / "od", w, dirty=(w == "b")) for w in T.WORLDS]
+
+    def only_dirt(ep, w):
+        return T.arm_run_dir(ep, w, dirty=(w == "b"))
+
     ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-only-dirt")
-    with Episode.open(ep) as episode:
-        report = _cli().verify_family(episode, only_dirt, source=T.provenance_record())
+    report = _verify(ep, only_dirt, source=T.provenance_record())
     assert report["comparable"] is False
     assert "allow-dirty" in report["reason"]
 
@@ -666,11 +669,13 @@ def test_976_siblings_off_the_anchor_are_named_against_the_source_once_each(tmp_
     sibling-to-sibling agreement covers only what the anchor does not pin: the model always,
     and the scope when the source stamped none. Without this the reason carries the same
     drift two or three times and an operator reads three problems where there is one."""
-    base, _src = T.runs_base(tmp_path)
-    two_commits = [T.sibling_run_dir(base / "tc", w, commit=f"c-{w}") for w in T.WORLDS]
+    T.runs_base(tmp_path)
+
+    def two_commits(ep, w):
+        return T.arm_run_dir(ep, w, commit=f"c-{w}")
+
     ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-two-commits")
-    with Episode.open(ep) as episode:
-        report = _cli().verify_family(episode, two_commits, source=T.provenance_record(commit="s"))
+    report = _verify(ep, two_commits, source=T.provenance_record(commit="s"))
     assert report["comparable"] is False
     reason = report["reason"]
     assert reason.count("while the source run it continues ran at") == len(T.WORLDS), reason
@@ -680,21 +685,24 @@ def test_976_siblings_off_the_anchor_are_named_against_the_source_once_each(tmp_
     # The scope is pinned by the anchor only when the source has one: against a pre-scope
     # source, two siblings measured over two scopes are still a disagreement — the one place
     # the sibling-to-sibling loop is the sole reader of the field.
-    two_scopes = [T.sibling_run_dir(base / "ts", w) for w in T.WORLDS]
-    T.source_stamp(two_scopes[1], scope="defender")
+    def two_scopes(ep, w):
+        arm = T.arm_run_dir(ep, w)
+        if w == T.WORLDS[1]:
+            T.source_stamp(arm, scope="defender")
+        return arm
+
     ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-two-scopes")
-    with Episode.open(ep) as episode:
-        report = _cli().verify_family(episode, two_scopes, source=T.provenance_record(scope=None))
+    report = _verify(ep, two_scopes, source=T.provenance_record(scope=None))
     assert report["comparable"] is False
     assert "siblings disagree on scope" in report["reason"], report["reason"]
     assert "measured over scope" not in report["reason"], report["reason"]
 
     # And a model split is the agreement loop's own fact, never the anchor's — told once.
-    two_models = [T.sibling_run_dir(base / "tm", w, model=("m-2" if w == "b" else "m-1"))
-                  for w in T.WORLDS]
+    def two_models(ep, w):
+        return T.arm_run_dir(ep, w, model=("m-2" if w == "b" else "m-1"))
+
     ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-two-models")
-    with Episode.open(ep) as episode:
-        report = _cli().verify_family(episode, two_models, source=T.provenance_record())
+    report = _verify(ep, two_models, source=T.provenance_record())
     assert report["comparable"] is False
     assert report["reason"].count("siblings disagree on model") == 1, report["reason"]
 
@@ -706,7 +714,7 @@ def test_976_a_family_of_no_siblings_is_incomplete_not_a_crash(tmp_path):
     (a manifest always has a base world), so this is the public entry's own answer."""
     ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-nobody")
     with Episode.open(ep) as episode:
-        report = _cli().verify_family(episode, [], source=T.provenance_record())
+        report = _cli().verify_family(episode, {}, source=T.provenance_record())
     assert report["comparable"] is False
     assert "no sibling" in report["reason"], report["reason"]
     assert report["worlds"] == []
@@ -756,11 +764,12 @@ def test_976_verify_family_requires_the_source_anchor(tmp_path):
     """M5: `verify_family` without `source=` is a `TypeError` — the anchor is keyword-required
     with no default, so no call site can keep the unanchored comparison by omission. Without
     this a default of `None` would let the launcher (or a future caller) skip M3 silently."""
-    base, _src = T.runs_base(tmp_path)
+    T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
-    dirs = [T.sibling_run_dir(base, w) for w in T.WORLDS]
+    for w in T.WORLDS:
+        T.arm_run_dir(ep, w)
     with Episode.open(ep) as episode, pytest.raises(TypeError):
-        _cli().verify_family(episode, dirs)
+        _cli().verify_family(episode, T.family_arms(episode, T.WORLDS))
     assert not (ep / "provenance.json").exists()
 
 

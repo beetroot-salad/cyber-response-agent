@@ -801,15 +801,16 @@ def _case_run_handle(tmp_path: Path) -> None:
 
 
 def _case_launcher(tmp_path: Path) -> None:
+    from defender.run_repository import Run
     prepare = S.sym("learning.branch.cli", "prepare_episode")
     d = _finished_run(tmp_path / "ok")
     assert d.tenant is not None
     accepted = d.tenant.accept()
-    prepare("s08-ok", d.run_dir, tenant=accepted).close()
+    prepare("s08-ok", Run.at(d.run_dir), data_root=accepted.data_root).close()
     bad = _finished_run(tmp_path / "bad")
     _replace_alert(bad.folder)
     with pytest.raises(Exception) as refused:  # noqa: PT011 — the refusal's class is the implementer's; its text is asserted
-        prepare("s08-bad", bad.run_dir, tenant=accepted).close()
+        prepare("s08-bad", Run.at(bad.run_dir), data_root=accepted.data_root).close()
     _assert_names_the_run_and_carries_no_byte(
         _refusal_text(refused.value, None), bad.folder, "the launcher")
     episodes = Path(os.environ[T.EPISODES_BASE_ENV])
@@ -1110,7 +1111,11 @@ def test_p154_sibling_and_world_boxes_and_their_directory(tmp_path):
     assert fresh_binds, "a fresh run's box mounts nothing read-only inside its run folder"
     assert [b["target"] for b in fresh_binds] == [str(S.input_dir(src))]
     # The launcher's copy in the episode (A1; launch itself is S11's), then a sibling resumed.
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src), source_run_id=src.name))
+    ep = T.episode(tmp_path, root=Path(os.environ[T.EPISODES_BASE_ENV]),
+                   doc=T.family_doc(source_run_dir=str(src), source_run_id=src.name))
+    from defender._episode_handle import Episode
+    with Episode.open(ep) as episode:
+        T.episode_view(episode, tenant=planted.accept()).close()
     copy = S.plant_episode_copy(ep, alert=fresh["alert"], record=S.read_record(src))
     # Then the source run's folder holds another alert with a record that agrees with it, so
     # "the episode's copy" is told apart from "whatever the source run holds now" (base copies
@@ -1120,7 +1125,7 @@ def test_p154_sibling_and_world_boxes_and_their_directory(tmp_path):
     lifecycle = functools.partial(_lifecycle(), start_box=_start_with(sib_daemon),
                                   investigate=_capture_inputs(sib))
     rc = S.sym("run", "main")(
-        ["--resume", str(ep / "family.yaml"), "--world", "b", "--tenant", planted.tenant_id],
+        ["--episode", ep.name, "--world", "b", "--tenant", planted.tenant_id],
         lifecycle=lifecycle, preflight=lambda *_a, **_k: 0, visualize=lambda *_a, **_k: None,
         ticket_writer=S.NoTicket())
     assert rc == 0, f"the sibling run failed (rc={rc})"

@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests import _judge_921 as J
 from defender.tests import _world_1007 as W
 from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS
 from defender.tests._state1135 import env_state
@@ -50,12 +51,9 @@ def family_episode(tmp_path: Path, monkeypatch, *, labels=("b", "c"),
 
 
 def grade(ep: Path, judge, **kw):
-    """#1078 D4/J48: `grade_episode`'s `runs_base` is a required keyword; this wrapper's
-    default (a harmless, never-created sibling dir) covers every indirect caller that does not
-    care which base is threaded."""
-    kw.setdefault("runs_base", ep.parent / "runs-base")
+    """`grade_episode` over the episode at `ep`, by id (#1105 PR 2: `_judge_921.grade_at`)."""
     kw.setdefault("state", env_state())  # #1135: the handle over the env-named root, as a launcher opens it
-    return W.mod("learning.judge").grade_episode(ep, judge=judge, **kw)
+    return J.grade_at(ep, judge=judge, **kw)
 
 
 def test_the_family_call_is_shown_every_world(tmp_path, monkeypatch):

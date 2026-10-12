@@ -43,10 +43,6 @@ def render(ep) -> E.Page:
     return E.render(ep, module=visualize_episode())
 
 
-def cli(argv, capsys):
-    return E.cli(argv, capsys, module=visualize_episode())
-
-
 def _heading_of(page: E.Page, row_id: str) -> str:
     group = page.group_of(row_id)
     for n in group.descendants():
@@ -89,7 +85,7 @@ def test_1025_a_scalar_worlds_field_in_the_manifest_is_refused_by_the_loader_gat
     manifest["worlds"] = 5
     T.write_family(ep.dir, manifest)
     with pytest.raises(E.sym("learning.judge", "JudgeRefused"), match="worlds"):
-        visualize_episode().render_episode(ep.dir)
+        E.render_episode(ep.dir, module=visualize_episode())
     assert not ep.page.exists(), "a page was written for a manifest the loader refused"
 
 
@@ -265,13 +261,13 @@ def test_1025_the_cli_diagnostic_is_the_records_refusal_not_a_phrase_on_the_page
     graded = E._world_findings_rows()
     graded[0]["claim"] = "the run left no grade record behind"
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=graded))
-    rc, out, err = cli([str(ep.dir)], capsys)
+    rc, out, err = E.cli_on(ep.dir, capsys, module=visualize_episode())
     assert rc == 0, (rc, out, err)
     assert str(ep.page) in out
     assert "no grade record" not in err, err
     assert "grade record unreadable" not in err, err
     E.plant_raw(ep.dir / "judge.yaml", "worlds: [\n")
-    rc, _out, err = cli([str(ep.dir)], capsys)
+    rc, _out, err = E.cli_on(ep.dir, capsys, module=visualize_episode())
     assert rc == 0
     assert "grade record unreadable" in err, err
 
@@ -310,7 +306,7 @@ def test_1025_a_manifest_label_off_the_directory_grammar_reads_nothing_from_disk
     T.write_family(ep.dir, manifest)
     with pytest.raises(E.sym("learning.judge", "JudgeRefused"),
                        match="world-token alphabet") as refused:
-        visualize_episode().render_episode(ep.dir)
+        E.render_episode(ep.dir, module=visualize_episode())
     assert "PLANTED-OUTSIDE" not in str(refused.value)
     assert not ep.page.exists(), "a page was written for a manifest the loader refused"
 
