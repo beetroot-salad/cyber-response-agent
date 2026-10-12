@@ -554,14 +554,14 @@ HEURISTIC = "heuristic (text-matched, not established)"
 
 def call_list(run: WorldFacts, *, j3: frozenset[str]) -> list[dict[str, Any]]:
     """One run's calls, joined by call id (A12): every query-table row in table order, numbered
-    from 1 (`call`), with its ledger partner's decision (`source`, `None`: inherited or
-    unserved) and whether it is a blocked call; then every UNMAPPED ledger row (an id no table
+    by its 0-based line index in the table (`call`, the numbering a `#<row>` pointer cites),
+    with its ledger partner's decision (`source`, `None`: inherited or unserved) and whether it is a blocked call; then every UNMAPPED ledger row (an id no table
     row carries), `call` `None`.
 
     @owns call — the call numbering every contrast row, call list and blocked list reads."""
     out: list[dict[str, Any]] = []
     joined_ids: set[Any] = set()
-    for n, row in enumerate(run.table_rows, 1):
+    for n, row in enumerate(run.table_rows):
         partner = ledger_partner(row, run.ledger_rows, run.token)
         if partner is not None:
             joined_ids.add(partner.get(CALL_ID))
