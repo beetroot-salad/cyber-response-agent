@@ -94,11 +94,12 @@ write-code-from-spec names anything differently it renames it HERE, never in a t
     `discriminator` keeps only `predicate`. `overlay`, `configured_patterns`,
     `captured_patterns`, `discriminator.holding_system` and `discriminator.envelope` refuse the
     manifest naming that it predates the oracle (O15).
-  Judge reply v2: a world-scope reply carries a top-level `bucket` (`lead-set`,
-    `lead-quality`, `analyze-discipline`, `decision-discipline`, `observability`, `none`) and
-    `systems: [..]`; findings carry no `pattern` / `holding_system`. A family-scope reply
-    carries `verdict_word` from `JUDGE_OUTCOME_ENUM`. `judge.yaml` records per world `bucket`,
-    `systems`, findings, and a family `validity: usable|unusable`.
+  Judge reply v2: a world-scope reply carries a top-level `bucket` and `systems: [..]`;
+    findings carry no `pattern` / `holding_system`. #1234 replaced the rest of this reply
+    (the `observability` bucket and the family-scope verdict word are retired names,
+    `learning/core/retired.py`; the reply's three lists and `judge.yaml`'s rows are
+    `judge_contrast_1234/_spec1234.py`'s). `judge.yaml` keeps a family
+    `validity: usable|unusable`.
   Lesson frontmatter: `systems: [..]` replaces `pattern` / `holding_system`.
   Question-writer: `author_family(*, source_run_dir, episode_dir, invoke, leads, alert, frontier,
     served_systems, samples, lessons)` (`stageable_patterns` -> `served_systems`,
