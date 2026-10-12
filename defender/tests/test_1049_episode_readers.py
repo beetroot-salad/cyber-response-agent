@@ -361,10 +361,16 @@ def test_1049_the_gather_summary_refusal_names_gather_summaries_lead_md_with_no_
     assert family.lead_chain(world, "family", {}, leads=by_id)["summary"] == "a lead named family\n"
     assert not hasattr(family, "_without_path"), "the reader-side scrub is still there"
 
+    # #1234 A3: the judge's usability read refuses a world whose gather summary is a link, so
+    # the judge is shown none of it — the world is set aside, its reason naming the leaf and no
+    # root (before #1234 the judge was shown the page's own sentence in the lead's chain).
     R.plant_link(summary, ep / "family.yaml")
-    base, _src = J.runs_base(tmp_path)
-    shown = R.mod("learning.judge.render").render(ep, "b").leads["l-001"]["summary"]
-    assert shown == linked, (shown, linked)
+    row = _rows(_grade(ep, tmp_path))["b"]
+    assert row.get("ungradable"), row
+    assert row.get("malformed") is True, row
+    assert "gather_summaries" in row["ungradable_reason"], row
+    assert R.ALIAS in row["ungradable_reason"], row
+    _root_free(row["ungradable_reason"], ep)
 
 
 # ---------------------------------------------------------------------------------------
@@ -435,8 +441,8 @@ def test_1049_a_document_that_is_not_the_grade_record_is_refused_as_judge_yaml(t
     ep = _episode(tmp_path)
     judge = R.judge()
     refused = R.refused_class()
-    sound = {"verdict_word": "caught", "worlds": [{"world": "b", "verdict": "malicious"}]}
-    for bad in ({**sound, "verdict_word": 5}, {1: "x"}, {**sound, "worlds": [{"verdict": "x"}]},
+    sound = {"validity": "usable", "worlds": [{"world": "b", "verdict": "malicious"}]}
+    for bad in ({**sound, "validity": 5}, {1: "x"}, {**sound, "worlds": [{"verdict": "x"}]},
                 {**sound, "not_graded": {"x": 1}}):
         R.write_bytes(ep / "judge.yaml", yaml.safe_dump(bad))
         with pytest.raises(refused) as caught:
@@ -446,7 +452,7 @@ def test_1049_a_document_that_is_not_the_grade_record_is_refused_as_judge_yaml(t
         _root_free(sentence, ep)
     R.write_bytes(ep / "judge.yaml", yaml.safe_dump(sound))
     grade = judge.read_grade(ep)
-    assert grade.verdict_word == 'caught'
+    assert grade.validity == 'usable'
     assert grade.episode_dir == ep
 
 
@@ -607,7 +613,7 @@ def test_1049_every_caller_coalesces_none_at_the_read_site(tmp_path):
     base, _src = J.runs_base(tmp_path)
     shown = R.mod("learning.judge.render").render(ep, "b")
     assert shown.world_label == 'b'
-    assert 'l-001' in shown.leads
+    assert 'l-001' in shown.focus.leads
 
     (ep / "outcome.yaml").unlink()
     record = _grade(ep, tmp_path)
@@ -626,10 +632,11 @@ def test_1049_grade_world_records_relative_names_in_ungradable_reason(tmp_path):
     intermediate link and passes the regular leaf, so the reader IS reached and the walk
     refuses at the worlds/<w''> component) — writes rows whose ungradable_reason names
     worlds/<w>/investigation.md / served/<token>.<label>.jsonl / worlds/<w''>/<leaf> (the
-    first leaf read_world_facts asks for under the aliased world) and not the root, and
-    every sibling's row lands in the same pass (#52). Rejected: a LINK at investigation.md
-    is 'missing its investigation.md' via artifact_file and never reaches the reader (c-13,
-    RF-R10).
+    first leaf the usability read asks for under the aliased world — since #1234 A3 the
+    call records, `executed_queries.jsonl`, come first) and not the root, and
+    every sibling's row lands in the same pass (#52). A LINK at investigation.md, once
+    'missing its investigation.md' via artifact_file (c-13, RF-R10), is since #1234 A3 a listed
+    input the read refuses as malformed, naming worlds/<w>/investigation.md.
     """
     ep = _episode(tmp_path, labels=("b", "c", "d", "e"))
     R.plant_hard_link(ep / "worlds" / "b" / "investigation.md", tmp_path / "scratch" / "inv-target.md")
@@ -652,15 +659,19 @@ def test_1049_grade_world_records_relative_names_in_ungradable_reason(tmp_path):
     assert R.ALIAS in c['ungradable_reason'], c
     assert d.get('ungradable'), d
     assert d.get('malformed') is True, d
-    assert ("worlds/d/investigation.md" in d["ungradable_reason"]
-            or "worlds/d/report.md" in d["ungradable_reason"]), d["ungradable_reason"]
+    assert any(f"worlds/d/{leaf}" in d["ungradable_reason"]
+               for leaf in ("executed_queries.jsonl", "investigation.md", "report.md")), (
+        d["ungradable_reason"])
     assert R.ALIAS in d["ungradable_reason"], d
     for row in (b, c, d):
         _root_free(row["ungradable_reason"], ep)
 
     R.plant_link(ep / "worlds" / "e" / "investigation.md", ep / "family.yaml")
     e = _rows(_grade(ep, tmp_path))["e"]
-    assert e["ungradable_reason"] == "world 'e' is missing its investigation.md", e
+    assert e.get("malformed") is True, e
+    assert e["ungradable_reason"].count("worlds/e/investigation.md") == 1, e
+    assert R.ALIAS in e["ungradable_reason"], e
+    _root_free(e["ungradable_reason"], ep)
 
 
 # ---------------------------------------------------------------------------------------
@@ -1018,7 +1029,7 @@ def test_1049_a_lead_id_that_is_not_a_plain_component_never_reaches_name_constru
     row = _rows(grade)["b"]
     assert not row.get("ungradable"), row
     base, _src = J.runs_base(tmp_path)
-    shown = R.mod("learning.judge.render").render(ep, "b").leads
+    shown = R.mod("learning.judge.render").render(ep, "b").focus.leads
     assert "does not name a file inside this world" in shown[nul]["summary"], shown[nul]
 
     sample = E.sample_episode(tmp_path / "page")
@@ -1044,8 +1055,9 @@ def test_every_refusal_shape_still_arrives_at_the_served_row_swallow_site_as_the
     is caught by type), so grade_episode completes and the sibling whose ledger holds a served
     row is graded; absent arrives as the primitive's absent state and is counted as no rows —
     with every sibling ledger absent each world is graded as having been served nothing, and
-    the pass still completes. Undecodable bytes are NOT a refusal on this reader — the twin
-    decodes with errors='replace' and counts malformed rows (d-07).
+    the pass still completes. Undecodable bytes are a refusal too since #1234 (A3/A21: the
+    judge reads a run's call records whole and refuses a line that does not parse as a row;
+    before, the twin decoded with errors='replace' and counted malformed rows, d-07).
     """
     shapes = {
         "alias": lambda p, ep: R.plant_link(p, ep / "family.yaml"),
@@ -1065,8 +1077,8 @@ def test_every_refusal_shape_still_arrives_at_the_served_row_swallow_site_as_the
         rows = _rows(grade)
         assert set(rows) == {"b", "c"}, shape
         assert not rows['c'].get('ungradable'), (shape, rows['c'])
-        assert bool(rows['b'].get('ungradable')) is (shape in ("alias", "directory", "mode_000")), (
-            shape, rows['b'])
+        assert bool(rows['b'].get('ungradable')) is (
+            shape in ("alias", "directory", "mode_000", "undecodable")), (shape, rows['b'])
 
     ep = _episode(tmp_path / "served-link", labels=("b", "c"))
     (ep / "served").rename(ep / "served-real")

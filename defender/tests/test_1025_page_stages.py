@@ -369,6 +369,9 @@ def test_1025_judge_trace_stems_with_underscored_labels_and_two_digit_draws(tmp_
     for n in range(1, 11):
         E.write_trace(ep.dir, f"judge:{E.PASSTHROUGH_WORLD}:{n}", prompt=f"draw {n} prompt")
         E.draw_document(ep.dir, E.PASSTHROUGH_WORLD, n, E.draw_doc(findings=[]))
+    # #1234 A6: a transcript shows for a draw the record names
+    E.write_judge(ep.dir, E.record_draws(E.sample_grade(), E.PASSTHROUGH_WORLD,
+                                         tuple(range(11))))
     page = render(ep)
     order = _tx_order(page, "stage-judge")
     assert order[0] == f"tx-judge_{E.FAMILY}_0_trace", order
@@ -678,6 +681,7 @@ def test_1025_a_big_integer_literal_is_that_fields_own_absence(tmp_path):
     rows[1]["usage"]["input_tokens"] = huge
     E.write_trace(ep.dir, "questioner:huge", rows)
     E.write_trace(ep.dir, f"judge:{E.GRADED_WORLD}:1", duration_ms=huge)
+    E.write_judge(ep.dir, E.record_draws(E.sample_grade(), E.GRADED_WORLD, (0, 1)))
     page = render(ep)
     runs = page.text_of("stage-runs")
     assert "unusable result event" in runs, runs

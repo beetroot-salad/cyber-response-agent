@@ -99,9 +99,11 @@ def _plant_per_copy_arms(copy: E.Episode) -> None:
 def _write_grade_over(copy: E.Episode) -> None:
     """`judge.yaml` written from the rows `family.read_world` — the sole producer of a row's
     `ungradable_reason` from the archive — computes over the planted tree, so the record
-    carries both `ungradable_reason` shapes: the reader's sentence (the hard-linked
-    investigation) and `_missing_required_input`'s (the link at the other world's report — the
-    pass no longer requires a served ledger, so the absent one is the leads block's note)."""
+    carries the reader's sentence for each planted world (the hard-linked investigation; the
+    other world's linked `gather_summaries/` — #1234 A3 refuses a listed-but-not-plain input as
+    malformed, naming it, where the link at that world's report once read as
+    `_missing_required_input`'s "missing its report.md"; the pass no longer requires a served
+    ledger, so the absent one is the leads block's note)."""
     family = R.family()
     with R.bind(copy.dir) as bound:
         manifest = family.read_manifest(bound)
@@ -176,7 +178,7 @@ def test_1049_an_episode_with_every_arm_planted_renders_no_root_and_byte_identic
     OSError-shaped arm (a link) at timing.json and a hard link at the graded world's
     investigation (C-02, C-03: scratch target, RF-J5); a link at another world's report; a
     symlinked gather_summaries/ in one world and a symlinked summary in another; judge.yaml
-    written from read_world's rows over that tree (both ungradable_reason shapes). Asserts
+    written from read_world's rows over that tree (each planted world's reader sentence). Asserts
     str(episode_dir), os.path.realpath(episode_dir), the EPISODES-BASE spelling
     str(episode_dir.parent) (the basename IS the episode id, which the title legitimately
     prints) and str(built) (a copied link keeps its absolute target) absent from learning.html
@@ -195,10 +197,12 @@ def test_1049_an_episode_with_every_arm_planted_renders_no_root_and_byte_identic
                        "nested", "build"):
             assert absent not in text, f"{absent!r} leaked into {copy.dir.name}'s page"
     assert one.page.read_bytes() == two.page.read_bytes(), "the two copies rendered differently"
-    # the record the page rendered reasons from does carry both shapes (the control is real)
+    # the record the page rendered reasons from carries each planted world's refusal (the control is real)
     rows = {r["world"]: r for r in J.judge_record(one.dir)["worlds"]}
     assert rows[E.GRADED_WORLD].get("malformed") is True, rows[E.GRADED_WORLD]
-    assert "missing its report.md" in rows[E.PASSTHROUGH_WORLD]["ungradable_reason"], rows[E.PASSTHROUGH_WORLD]
+    assert rows[E.PASSTHROUGH_WORLD].get("malformed") is True, rows[E.PASSTHROUGH_WORLD]
+    assert "gather_summaries" in rows[E.PASSTHROUGH_WORLD]["ungradable_reason"], (
+        rows[E.PASSTHROUGH_WORLD])
 
 
 # ---------------------------------------------------------------------------------------
@@ -260,7 +264,8 @@ def test_1049_every_planted_refusal_is_said_in_its_own_slot(tmp_path):
     assert f'worlds/{E.GRADED_WORLD}/investigation.md' in graded_world, graded_world
     passthrough_world = _world(page, E.PASSTHROUGH_WORLD)
     assert 'ungradable' in passthrough_world, passthrough_world
-    assert 'missing its report.md' in passthrough_world, passthrough_world
+    assert 'gather_summaries' in passthrough_world, passthrough_world
+    assert R.ALIAS in passthrough_world, passthrough_world
 
     for label in (LINKED_WORLD, DANGLING_WORLD):
         world = _world(page, label)
@@ -301,8 +306,8 @@ def _grade_record_refused_over_its_own_trees(tmp_path: Path) -> None:
     band = _grade_record_unreadable(E.render(linked), linked.dir)
     assert R.ALIAS in band, band
     shaped = E.sample_episode(tmp_path / "judge-shape")
-    sound = {"verdict_word": "caught", "worlds": [{"world": E.GRADED_WORLD, "verdict": "malicious"}]}
-    for bad in ({**sound, "verdict_word": 5}, {1: "x"}, {**sound, "worlds": [{"verdict": "x"}]},
+    sound = {"validity": "usable", "worlds": [{"world": E.GRADED_WORLD, "verdict": "malicious"}]}
+    for bad in ({**sound, "validity": 5}, {1: "x"}, {**sound, "worlds": [{"verdict": "x"}]},
                 {**sound, "not_graded": {"x": 1}}):
         E.plant_raw(shaped.dir / "judge.yaml", yaml.safe_dump(bad))
         band = _grade_record_unreadable(E.render(shaped), shaped.dir)

@@ -49,8 +49,9 @@ def _render(ep: Path) -> E.Page:
 
 
 class _ScopedJudge(J.FakeJudge):
-    """The judge double answering a world-scope draw with the v2 world reply (top-level
-    `bucket` and `systems`) and the family-scope draw with the v2 family reply (`verdict_word`).
+    """The judge double answering a world-scope draw with the world reply (top-level `bucket`
+    and `systems`) and the family-scope draw with the family reply (world findings only; #1234
+    retired the family's `verdict_word`).
     It scripts content only; the judge decides what the reply means."""
 
     def __init__(self, world: dict[str, str], family: str) -> None:
@@ -72,7 +73,7 @@ def _world_reply(bucket: str, systems: list[str], *, claim: str = "the lead neve
 
 
 def _family_reply() -> str:
-    return S.as_reply_text(J.reply_doc(findings=[], verdict_word="survived"))
+    return S.as_reply_text(J.family_reply())
 
 
 def _grade(ep: Path, tmp_path: Path, judge: J.FakeJudge) -> None:
@@ -210,8 +211,10 @@ def test_1224_episode_page_renders_a_v2_episode_from_the_models_output(tmp_path)
                                              payload="UpstreamFault: upstream said no")],
         "c": [S.ledger_row(S.PASSTHROUGH, label="c")]})
     S.outcome_record(ep, "accepted", reason="pre-flight calibrated every world")
-    _grade(ep, tmp_path, _ScopedJudge({"b": _world_reply("observability", ["idp"]),
-                                       "c": _world_reply("decision-discipline", ["edr"])},
+    # #1234: `observability` left the buckets (P-a), and a discipline bucket needs a world that
+    # was shown its facts (A5) — b, whose oracle answered a call; c was served passthrough only.
+    _grade(ep, tmp_path, _ScopedJudge({"b": _world_reply("decision-discipline", ["idp"]),
+                                       "c": _world_reply("lead-quality", ["edr"])},
                                       _family_reply()))
     page = _render(ep)
     text = page.text
@@ -221,10 +224,14 @@ def test_1224_episode_page_renders_a_v2_episode_from_the_models_output(tmp_path)
     for world in manifest["worlds"]:
         for fact in world["facts"]:
             assert fact["statement"] in text, f"world {world['world_id']}'s fact is not shown"
-    assert "observability" in text, "the judge model's per-world buckets are not shown"
+    assert "lead-quality" in text, "the judge model's per-world buckets are not shown"
     assert "decision-discipline" in text, "the judge model's per-world buckets are not shown"
     for decision in (S.ORACLE_DECISION, S.REAL_ERROR, S.PASSTHROUGH):
         assert decision in text, f"the served-answer decision {decision!r} is not shown"
+    # The judge transcripts quote the judge's prompt, whose world-finding vocabulary (#1234 A5)
+    # spells `unreachable`; a section is the page's own text, so the transcripts are set aside.
+    for tx in page.ids_with("tx-"):
+        text = text.replace(page.text_of(tx), "")
     lowered = text.lower()
     for gone in ("staging", "staged", "reachab", "envelope"):
         assert gone not in lowered, f"the page still renders a {gone!r} section"

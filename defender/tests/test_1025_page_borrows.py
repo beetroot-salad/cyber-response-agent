@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -176,57 +177,8 @@ def test_1025_read_world_facts_refuses_an_absent_ledger_on_every_path(tmp_path):
 
 
 # ---------------------------------------------------------------------------------------
-# One lane rule — `route_finding`, walked by the pass; its answers are the ledger below
+# One lane rule — the pass's (`route.fate`, #1234 A13); its answers are the ledger below
 # ---------------------------------------------------------------------------------------
-
-
-def test_1025_route_finding_is_the_rule_enqueue_report_walks(tmp_path):
-    """For every finding on the sample the lane `route_finding` names is the lane the pass
-    put it on: each judged world's four defender findings → defender rows; its world finding
-    → a world row; a `subject` naming neither channel → `unqueueable_findings`; under
-    `verdict_word: discard` both worlds' defender findings vanish (never eligible) and nothing
-    else moves."""
-    enqueue = E.mod("learning.judge.enqueue")
-    ep = E.sample_episode(tmp_path)
-    doc = E.sample_grade()
-    graded = E._world_findings_rows()
-    graded.append(E.finding(subject="Nobody", claim="off-channel"))
-    E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(findings=graded))
-
-    def lanes(verdict_word):
-        d = dict(doc, verdict_word=verdict_word)
-        report = enqueue.enqueue_report(ep.dir, d, state=_state1135.state_over(tmp_path / f"q-{verdict_word}"))
-        rows_by_row = {w["world"]: w for w in d["worlds"]}
-        blocked = enqueue.defender_lane_blocked(verdict_word)
-        routed = {}
-        for label, docs in ((E.GRADED_WORLD, graded),
-                            (E.PASSTHROUGH_WORLD, E._world_findings_rows())):
-            for i, f in enumerate(docs):
-                routed[f"{label}/0/{i}"] = enqueue.route_finding(
-                    label=label, finding=f, kind=enqueue.KIND_DRAW,
-                    world_row=rows_by_row.get(label), defender_blocked=blocked)[0]
-        return report, routed
-
-    report, routed = lanes("undecidable")
-    world_ids = {r["finding_id"].split("/", 1)[1] for r in report.world_rows}
-    unqueueable_ids = {line.split(": ", 1)[0].split("/", 1)[1] for line in report.unqueueable}
-    assert unqueueable_ids == {f"{E.GRADED_WORLD}/0/5"}, report.unqueueable
-    for coord, lane in routed.items():
-        if lane == enqueue.ROUTE_WORLD:
-            assert coord in world_ids, (coord, lane)
-        elif lane == enqueue.ROUTE_NO_CHANNEL:
-            assert coord in unqueueable_ids, (coord, lane)
-        else:
-            assert lane == enqueue.ROUTE_DEFENDER, (coord, lane)
-            assert coord not in world_ids | unqueueable_ids, (coord, lane)
-    assert report.appended == S.defender_enqueued, report
-    assert sum(1 for lane in routed.values() if lane == enqueue.ROUTE_DEFENDER) == S.defender_enqueued
-
-    report, routed = lanes("discard")
-    assert report.appended == 0, report
-    assert sum(1 for lane in routed.values()
-               if lane == enqueue.ROUTE_NEVER_ELIGIBLE) == S.defender_enqueued
-    assert {r["finding_id"].split("/", 1)[1] for r in report.world_rows} == world_ids
 
 
 def test_1025_a_world_spelled_family_never_doubles_the_family_lane(tmp_path):
@@ -297,33 +249,6 @@ def test_1025_the_docstring_names_the_launchers_real_hook():
     assert "def _render_page(" in cli_source
 
 
-def test_1025_a_record_naming_one_world_twice_never_files_its_world_finding_as_a_defender_lesson(
-        tmp_path):
-    """`enqueue_report` walks `graded_labels` off the FIRST gradable row per label while `row_of`
-    keeps the LAST, so a `judge.yaml` naming one world on two rows (gradable, then ungradable)
-    reaches `route_finding` with the ungradable row and is answered `ROUTE_UNGRADABLE` — a lane
-    the pass's if-chain did not handle, so the finding fell through to the DEFENDER row build:
-    a `subject: world` finding appended to `findings.jsonl` as `subject: defender`, and no line
-    said so. The dispatch is exhaustive now: the residue is named on `unqueueable` and the
-    finding reaches neither channel."""
-    enqueue = E.mod("learning.judge.enqueue")
-    ep = E.sample_episode(tmp_path)
-    doc = E.sample_grade()
-    doc["worlds"].append(E.ungradable_row(E.GRADED_WORLD))
-    E.draw_document(ep.dir, E.GRADED_WORLD, 0,
-                    E.draw_doc(findings=[E.finding(subject="world", claim="about the world")]))
-    report = enqueue.enqueue_report(ep.dir, doc, state=_state1135.state_over(tmp_path / "queue"))
-    coord = f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/0"
-    # Only the other judged world's four defender findings are queued; nothing of this one.
-    assert report.appended == S.defender_enqueued - 4, report
-    assert not [r for r in report.world_rows if r["finding_id"] == coord], report.world_rows
-    assert any(line.startswith(coord) and "ungradable" in line for line in report.unqueueable), \
-        report.unqueueable
-    queue = tmp_path / "queue"
-    for row_file in queue.rglob("*.jsonl"):
-        assert "about the world" not in row_file.read_text(encoding="utf-8"), row_file
-
-
 # ---------------------------------------------------------------------------------------
 # The ledger — the pass writes what it decided; the page reads it and decides nothing
 # ---------------------------------------------------------------------------------------
@@ -335,21 +260,32 @@ def _ledger_of(doc: dict) -> dict[str, tuple[str, str | None]]:
 
 def test_1025_the_fixture_ledger_is_the_passes_own(tmp_path):
     """`sample_grade()["dispositions"]` — the ledger every page test renders from — is,
-    entry for entry AND in walk order, what the real `enqueue_report` writes over the sample
-    episode's own draw documents and rows. A fixture ledger the pass would not
-    write is a fixture bug, and it fails here rather than as a page test that passed against
-    a record no pass produces."""
-    enqueue = E.mod("learning.judge.enqueue")
-    ep = E.sample_episode(tmp_path)
+    entry for entry AND in walk order, what a real `grade_episode` writes when its judge
+    answers each call with the sample episode's own draw document (#1234: the pass routes the
+    replies it draws, `route.fate`; nothing re-walks the documents on disk, A8). A fixture
+    ledger the pass would not write is a fixture bug, and it fails here rather than as a page
+    test that passed against a record no pass produces."""
+    ep = E.sample_episode(tmp_path, judge=False, traces=False)
+    replies = [J.as_reply_text(J.draw_doc(ep.dir, label, 0))
+               for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD)]
+    family = J.as_reply_text(J.draw_doc(ep.dir, E.FAMILY, 0))
+    for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD, E.FAMILY):
+        shutil.rmtree(ep.world(label) / "judge")
+    E.plant_container_record(ep.dir)
+    judge = J.FakeJudge(replies=replies, family_default=family)
+    J.grade_at(ep.dir, judge=judge, draws=1, state=_state1135.state_over(tmp_path / "queue"))
+    assert judge.agent_ids == [f"judge:{E.PASSTHROUGH_WORLD}:0", f"judge:{E.GRADED_WORLD}:0",
+                               f"judge:{E.FAMILY}:0"], judge.agent_ids
+    record = J.judge_record(ep.dir)
     doc = E.sample_grade()
-    report = enqueue.enqueue_report(ep.dir, doc, state=_state1135.state_over(tmp_path / "queue"))
-    assert report.dispositions == doc["dispositions"]
-    assert report.appended == doc["enqueued_rows"] == S.defender_enqueued
-    assert report.unqueueable == doc["unqueueable_findings"] == []
-
-    report = enqueue.enqueue_report(ep.dir, dict(doc, verdict_word="discard"),
-                                    state=_state1135.state_over(tmp_path / "queue-discard"))
-    assert report.dispositions == E.block_defender_lane(E.sample_grade(), "discard")["dispositions"]
+    assert record["dispositions"] == doc["dispositions"]
+    assert record["enqueued_rows"] == doc["enqueued_rows"] == S.defender_enqueued
+    assert record["world_enqueued_rows"] == doc["world_enqueued_rows"] == S.world_author
+    assert record["family"] == doc["family"]
+    for got, want in zip(record["worlds"], doc["worlds"], strict=True):
+        for key in ("world", "bucket", "systems", "draws", "measured", "draws_disagree",
+                    "world_label_doubted", "state", "completed_draws"):
+            assert got[key] == want[key], (got["world"], key, got[key], want[key])
 
 
 def test_1025_the_ledger_is_on_the_record_and_read_back_validated(tmp_path):
@@ -363,7 +299,7 @@ def test_1025_the_ledger_is_on_the_record_and_read_back_validated(tmp_path):
     grade = judge.read_grade(ep.dir)
     assert grade.dispositions == E.sample_dispositions()
     assert grade.dispositions[0] == enqueue.disposition_entry(
-        E.finding_id(E.FAMILY, 0, 0), enqueue.LANE_WORLD)
+        E.finding_id(E.PASSTHROUGH_WORLD, 0, 0), enqueue.LANE_DEFENDER)
 
     doc = E.sample_grade()
     del doc["dispositions"]
@@ -387,15 +323,13 @@ def test_1025_the_ledger_is_on_the_record_and_read_back_validated(tmp_path):
 
 
 def test_1025_the_page_shows_the_ledger_and_never_re_decides_a_lane(tmp_path):
-    """The page's disposition for a finding is the ledger's entry, full stop — the rows and
-    the verdict word are NOT consulted a second time. Pinned by a record no pass writes:
-    under `verdict_word: discard` (which closes the defender lane) one world's defender
-    entries are filed `defender` and the other's `unqueueable` with a reason no row gave. A
-    page that re-ran the lane rule over the rows would show "never eligible" for both; this one
-    shows the ledger's answer, and the accounting agrees with the record."""
+    """The page's disposition for a finding is the ledger's entry, full stop — the rows are NOT
+    consulted a second time. Pinned by a record no pass writes: both worlds measured, judged
+    and bucketed alike (so a lane rule re-run over the rows would queue all eight), yet one
+    world's defender entries are filed `defender` and the other's `unqueueable` with a reason no
+    row gave; the page shows the ledger's answer, and the accounting agrees with the record."""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
-    doc["verdict_word"] = "discard"
     doc["enqueued_rows"] = 4
     for i in range(4):
         E.set_lane(doc, E.PASSTHROUGH_WORLD, 0, i, "defender")
@@ -407,40 +341,33 @@ def test_1025_the_page_shows_the_ledger_and_never_re_decides_a_lane(tmp_path):
         assert "defender: enqueued" in passthrough, passthrough
         graded = page.group_of(f"f-{E.GRADED_WORLD}-0-{i}").text()
         assert "defender: unqueueable — a reason the rows never gave" in graded, graded
-        assert "never eligible" not in graded, graded
     acct = page.one(cls="vd-acct").text()
     assert "record: 4 enqueued · page found: 4" in acct, acct
     assert "record and page disagree" not in acct, acct
     three = page.text_of("vd-tile-3")
     for part in ("4 defender", "4 unqueueable"):
         assert part in three, (part, three)
-    assert "never eligible" not in three, three
 
 
 def test_1025_a_record_naming_one_world_twice_renders_exactly_what_the_pass_filed(tmp_path):
     """The #1042 review's case: `judge.yaml` names one judged world on TWO rows — the first
-    gradable, the second ungradable. The pass walks the label off the first gradable row but
-    routes its findings against the last row it keeps, so it files the world's findings
-    unqueueable (ungradable) rather than enqueued; a page that rebuilt the lane from one row per
-    label would disagree. With the ledger the page cannot: every finding of that world shows
-    the lane the pass filed, the other world's four show enqueued, and tile 3 and the
-    accounting carry the pass's own counts."""
-    enqueue = E.mod("learning.judge.enqueue")
+    gradable, the second ungradable — and its ledger files that world's findings unqueueable
+    (ungradable). A page that rebuilt the lane from one row per label would disagree with the
+    ledger; this one cannot: every finding of that world shows the lane the ledger filed, the
+    other world's four show enqueued, and tile 3 and the accounting carry the record's own
+    counts. (#1234: the record-walking `enqueue_report` that once wrote this ledger is retired,
+    A8; the ledger is planted.)"""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     doc["worlds"].append(E.ungradable_row(E.PASSTHROUGH_WORLD, declared="benign",
                                           reason="the second row says ungradable"))
-    report = enqueue.enqueue_report(ep.dir, doc, state=_state1135.state_over(tmp_path / "queue"))
-    doc["dispositions"] = report.dispositions
-    doc["unqueueable_findings"] = report.unqueueable
-    doc["enqueued_rows"] = report.appended
-    doc["world_findings"] = report.world_rows
+    for i in range(5):
+        E.set_lane(doc, E.PASSTHROUGH_WORLD, 0, i, "unqueueable",
+                   "world 'no_remote_session' is ungradable: the second row says ungradable")
+    doc["enqueued_rows"] = 4
+    doc["world_enqueued_rows"] = S.world_author - 1
     E.write_judge(ep.dir, doc)
     page = render(ep)
-    filed = {e["finding_id"]: e for e in report.dispositions}
-    quiet = [filed[E.finding_id(E.PASSTHROUGH_WORLD, 0, i)] for i in range(5)]
-    assert [e["lane"] for e in quiet] == [enqueue.LANE_UNQUEUEABLE] * 5, quiet
-    assert report.appended == 4, report
     for i in range(4):
         group = page.group_of(f"f-{E.PASSTHROUGH_WORLD}-0-{i}").text()
         assert "defender: unqueueable" in group, group
@@ -458,7 +385,7 @@ def test_1025_a_record_with_no_ledger_says_so_instead_of_guessing(tmp_path):
     """A `judge.yaml` written before the ledger existed (the two real archives the design doc
     quotes) renders every on-disk finding under one group, "record carries no disposition
     ledger — not enqueued": the page does not fall back to deciding lanes itself, tile 3
-    counts nothing as queued, and no stub is invented off `world_findings`."""
+    counts nothing as queued, and no stub is invented for a finding whose document is gone."""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     del doc["dispositions"]
