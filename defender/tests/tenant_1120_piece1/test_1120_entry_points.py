@@ -40,6 +40,7 @@ from defender.runtime import lead_zero
 from defender.runtime import run_tenant as run_tenant_mod
 from defender.runtime import session_store
 from defender.runtime.driver import _prompts as driver_prompts
+from defender.runtime.run_state import RunState
 from defender.scripts import policy_cli
 from defender.scripts import tenant as tenant_py
 from defender.skills.connect import validate_scaffold
@@ -680,8 +681,8 @@ def test_1120_every_run_tenant_reader_takes_the_accepted_tenant(
     run_dir.mkdir()
     alert = H.plant_alert(tmp_path / "in-prompt")
     prompt, _block, status = driver_prompts._user_prompt(  # noqa: SLF001 — the reader itself
-        run_dir, alert, H.DEFENDER, systems=["elastic"], verbs=_UntouchedVerbs(),
-        run_id="r-prompt", tenant=run_tenant)
+        RunState.start(run_dir, "r-prompt"), alert, H.DEFENDER, systems=["elastic"],
+        verbs=_UntouchedVerbs(), tenant=run_tenant)
     assert status == lead_zero.STATUS_EMPTY, (
         f"lead zero did not resolve from the Tenant's settings (status {status!r}):\n"
         f"{prompt[:3000]}")

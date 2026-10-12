@@ -482,9 +482,9 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
                   "missing = [n for n in rr.__all__ if getattr(rr, n, None) is None]\n"
                   "print(len(rr.__all__), missing)\n")
     assert proc.returncode == 0, f"not every public name imports in a fresh interpreter: {_out(proc)}"
-    # 71 since #1235: `BUDGET` and `CIRCUIT_BREAKER` left with their records, and
-    # `SESSION_POINTER` became `SESSION_POINTER_SUFFIX`.
-    assert _out(proc).split()[0] == "71", f"not every public name imports in a fresh interpreter: {_out(proc)}"
+    # 70 since #1235: `BUDGET`, `CIRCUIT_BREAKER` and `ORACLE_HELD_SUFFIX` left with their
+    # records, and `SESSION_POINTER` became `SESSION_POINTER_SUFFIX`.
+    assert _out(proc).split()[0] == "70", f"not every public name imports in a fresh interpreter: {_out(proc)}"
     assert "[]" in _out(proc), f"not every public name imports in a fresh interpreter: {_out(proc)}"
 
 

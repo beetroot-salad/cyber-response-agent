@@ -598,6 +598,9 @@ def test_census_and_pointer_scans_run_in_a_checkout_holding_nested_checkouts(tmp
 #: become an import of the paths helper). Its `main` and `_positive_int` stay: its `__main__`
 #: block travels with it (human, 2026-10-04).
 ALLOWED_DROPS = {"defender/scripts/lessons/lessons_frontier.py": {"REPO_ROOT"}}
+#: Remainder names a later issue deleted outright, so they are defined nowhere: #1235 moved the
+#: per-lead row read onto the run's `RunState.lead_rows`, and the file reader `lead_rows` left.
+RETIRED_REMAINDER = {"defender/scripts/gather_tools/record_query.py": {"lead_rows"}}
 RECORD_QUERY = "defender/scripts/gather_tools/record_query.py"
 #: record_query's query-rule slice, the cut's IN item 6 (95-cut): these names move to the flat
 #: tier under their base names; every other record_query name stays in it (#1165).
@@ -641,6 +644,10 @@ def _name_census(base_path: str, shared: set[str]) -> list[str]:
         if n in shared:
             new = [d for d in new if d in homes]
         if not _moves(base_path, n):
+            if n in RETIRED_REMAINDER.get(base_path, set()):
+                if new or base_path in S.definitions(n):
+                    problems.append(f"{base_path}::{n} was retired but is still defined -> {new}")
+                continue
             if new or base_path not in S.definitions(n):
                 problems.append(f"{base_path}::{n} must stay in {base_path} -> {new or 'gone'}")
             continue

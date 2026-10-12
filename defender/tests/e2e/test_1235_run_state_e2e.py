@@ -418,6 +418,13 @@ def test_nothing_holds_the_runs_state_once_the_caller_drops_the_summary(tmp_path
     Positive control: right after the run, the reference is live and the object holds the run's
     rows and counts, so what dies below is the run's state, not an empty stand-in.
 
+    The state is dropped FROM the summary rather than by dropping the summary: under this
+    harness the replay models are sync `FunctionModel`s that pydantic-ai runs through
+    `anyio.to_thread.run_sync`, and anyio caches the run's root task (whose result is the
+    summary) in a module-level table keyed by the event loop, so the summary itself outlives
+    `asyncio.run`. Production's callbacks are all async and never reach that path. What still
+    holds the state once the summary lets go of it is the production code's.
+
     Observed failing by: any process-wide registry of run states (round 1's three tables)."""
     answered: list[str] = []
 
@@ -440,6 +447,7 @@ def test_nothing_holds_the_runs_state_once_the_caller_drops_the_summary(tmp_path
     assert len(held.lead_rows(LEAD)) == 1, "the returned state does not hold the run's row"
     assert held.budget_snapshot()["tool_calls"] == 2
     del held
+    summary.pop("run_state")
     del summary
     gc.collect()
     assert answered == ["FROM hosts"]
