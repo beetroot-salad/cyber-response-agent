@@ -4,11 +4,13 @@
 callable directly without the launcher.
 
 The judge MODEL files findings; code routes them (P-c). Flow, per episode:
-1. The gates: a non-positive `JUDGE_DRAWS` is refused naming the knob, before anything else; a
-   world or the family row a stopped pass left `queueing` refuses the re-run naming it (A6);
-   a manifest predating the oracle is stamped not-graded (O15, ahead of the outcome gate);
-   pre-flight's `outcome.yaml` must say `accepted`; O5 counts the failed worlds; the family
-   stamp must certify the siblings comparable; the control must be usable (A3).
+1. The gates: a non-positive `JUDGE_DRAWS` is refused naming the knob, before anything else;
+   a manifest predating the oracle is stamped not-graded (O15, ahead of the outcome gate); a
+   world record for a label the manifest does not declare refuses the pass; pre-flight's
+   `outcome.yaml` must say `accepted`; O5 counts the failed worlds; the family stamp must
+   certify the siblings comparable; the control must be usable (A3). Every stamp carries the
+   recorded rows verbatim. Past the gates, a world or the family row a stopped pass left
+   `queueing` refuses the grade naming it (A6).
 2. `runs.read_run_set` — every run through the one usability read (`family.read_world`).
 3. Per planted world, in manifest order, unless its row is already `queued`: `render.render`
    + `run._build_prompt` (M3's layout under A9's cap, `layout.world_layout`); one model call per draw through
@@ -37,7 +39,12 @@ from pydantic import AfterValidator, TypeAdapter, ValidationError
 
 # `JudgeRefused` lives in `_errors.py` to avoid an import cycle; re-exported here.
 from defender._model import model  # noqa: E402
-from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS, LearningState  # noqa: E402
+from defender.learning.core.state import (  # noqa: E402
+    FINDINGS,
+    QUESTIONER_FINDINGS,
+    LearningState,
+    StateRefused,
+)
 from defender.learning.core.retired import (  # noqa: E402
     RETIRED_LANES,
     retired_keys,
@@ -236,7 +243,9 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
     draw. Returns `(completed_draws, draw documents by index, malformed replies, the last
     refusal's reason)`.
 
-    A failed call writes a draw record naming its failure and is not asked again. A reply the
+    A failed call writes a draw record naming its failure and is not asked again; a call
+    refused for its size (`_is_size_failure`) also ends the world's draws, since every later
+    draw sends the same prompt (A23). A reply the
     validator refuses is counted and asked again, up to `_REPLY_ATTEMPTS` asks per draw; a draw
     whose every ask was refused writes nothing. Documents are returned, not read back: the pass
     routes what it just produced, never a stale file from an earlier attempt."""
@@ -248,7 +257,12 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
     documents: dict[int, dict[str, Any]] = {}
     malformed = 0
     refusal: str | None = None
+    too_large = False
     for n in range(draws):
+        if too_large:
+            # A23: a call refused for its size is asked once — every later draw sends the same
+            # prompt, which would only be refused again.
+            break
         doc: dict[str, Any] | None = None
         for attempt in range(_REPLY_ATTEMPTS):
             agent_id = f"judge:{label}:{n}" if attempt == 0 else f"judge:{label}:{n}:{attempt}"
@@ -262,9 +276,14 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
             # an injected seam may raise anything; one bad call must not discard the other
             # worlds.
             except Exception as failed:  # noqa: BLE001 — one draw's blast radius
-                doc = {"failure_reason": f"{type(failed).__name__}: {failed}"}
+                # Writable whatever the exception carried (a lone surrogate would fail the
+                # draw file's write far from its cause).
+                reason = f"{type(failed).__name__}: {failed}".encode(
+                    "utf-8", "backslashreplace").decode("utf-8")
+                doc = {"failure_reason": reason}
                 _write_wire_log(episode, agent_id=agent_id, prompt=prompt,
-                                reply=None, failure=f"{type(failed).__name__}: {failed}")
+                                reply=None, failure=reason)
+                too_large = _is_size_failure(failed)
                 break
             _write_wire_log(episode, agent_id=agent_id, prompt=prompt,
                             reply=reply_text, failure=None)
@@ -293,6 +312,19 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
         # Not contained: a link planted at this sink refuses the pass.
         world.draw(n).write(_yaml.safe_dump(doc, sort_keys=False))
     return completed, documents, malformed, refusal
+
+
+def _is_size_failure(failed: BaseException) -> bool:
+    """Was this call refused for its size — the provider's HTTP 413, anywhere on the
+    exception's cause chain (`run_stage` wraps it in `RunUnprocessable`, P-AM28)?"""
+    seen: set[int] = set()
+    current: BaseException | None = failed
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if getattr(current, "status_code", None) == 413:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def _write_wire_log(
@@ -756,9 +788,15 @@ class _Pass:
         """The finding ids on the questioner queue, read once per pass: every id this pass
         mints is its own, so only a row an earlier pass queued can hold one."""
         if self.questioner_ids is None:
+            try:
+                rows = self.state.rows(QUESTIONER_FINDINGS)
+            except (StateRefused, OSError):
+                # The queue cannot be read, so nothing here can be dropped by its dedup either:
+                # the append that follows meets the same refusal and stops the pass loudly,
+                # with this world's row left `queueing` (A6).
+                return frozenset()
             self.questioner_ids = frozenset(
-                r["finding_id"] for r in self.state.rows(QUESTIONER_FINDINGS)
-                if isinstance(r.get("finding_id"), str))
+                r["finding_id"] for r in rows if isinstance(r.get("finding_id"), str))
         return self.questioner_ids
 
     def _commit(self, row: dict[str, Any], defender_rows: list[dict[str, Any]],

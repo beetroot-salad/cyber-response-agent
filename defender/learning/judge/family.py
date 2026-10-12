@@ -37,6 +37,7 @@ from pathlib import Path, PurePath
 from defender._io import Bound, bind
 from defender._report import ReportRead, parse_report_text
 from defender._run_id import is_valid_run_id
+from defender._text import unwritable_value
 from defender._vocab import normalized_disposition
 from defender._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
 from defender.learning.branch.ledger import (
@@ -478,6 +479,7 @@ def read_query_table(bound: Bound, label: str) -> list[dict[str, Any]] | None:
     if torn_table:
         raise JudgeRefused(f"world {label!r}: {table_name} holds {torn_table} line(s) that do "
                            "not parse as a row")
+    _refuse_unwritable(table, label=label, name=table_name)
     return table
 
 
@@ -507,6 +509,7 @@ def read_served_ledger(bound: Bound, label: str, *, episode_token: str) -> list[
         if not call_id_names_run(row.get(CALL_ID), token):
             raise JudgeRefused(f"world {label!r}: {ledger_name} row {i} carries no {CALL_ID} "
                                f"of this run ({row.get(CALL_ID)!r})")
+    _refuse_unwritable(ledger, label=label, name=ledger_name)
     return ledger
 
 
@@ -933,6 +936,7 @@ def _read_oracle_store(bound: Bound, world: dict[str, Any]) -> list[dict[str, An
     if foreign:
         raise JudgeRefused(f"world {label!r}: {name} holds forged rows for facts this world "
                            f"does not declare ({foreign[:3]!r})")
+    _refuse_unwritable(rows, label=label, name=name)
     return rows
 
 
@@ -945,14 +949,29 @@ def _read_run_records(world: Bound, *, label: str) -> None:
     alert = world.read(WORLD_LEAVES.alert)
     if alert.refusal is not None:
         raise JudgeRefused(f"world {label!r}: {alert.refusal}")
-    if not alert.absent and json_mapping_of(alert.text) is None:
-        raise JudgeRefused(f"world {label!r}: {WORLD_LEAVES.alert} is not a JSON mapping")
-    _rows, torn, lessons = world.read_jsonl(WORLD_LEAVES.lessons_loaded)
+    if not alert.absent:
+        mapping = json_mapping_of(alert.text)
+        if mapping is None:
+            raise JudgeRefused(f"world {label!r}: {WORLD_LEAVES.alert} is not a JSON mapping")
+        _refuse_unwritable([mapping], label=label, name=str(WORLD_LEAVES.alert))
+    rows, torn, lessons = world.read_jsonl(WORLD_LEAVES.lessons_loaded)
     if lessons.refusal is not None:
         raise JudgeRefused(f"world {label!r}: {lessons.refusal}")
     if torn:
         raise JudgeRefused(f"world {label!r}: {WORLD_LEAVES.lessons_loaded} holds {torn} "
                            "line(s) that do not parse as a row")
+    _refuse_unwritable(rows, label=label, name=str(WORLD_LEAVES.lessons_loaded))
+
+
+def _refuse_unwritable(rows: list[dict[str, Any]], *, label: str, name: str | PurePath) -> None:
+    """Refuse a record holding a value no record can carry (`_text.unwritable_value`: a lone
+    surrogate, a non-finite number), naming the file, the row and the cause (A3, well-formed):
+    such a row would fail the pass later, at a canonical key or a write, far from its file."""
+    for i, row in enumerate(rows):
+        bad = unwritable_value(row)
+        if bad is not None:
+            raise JudgeRefused(f"world {label!r}: {name} row {i} carries {bad}, which no "
+                               "record can carry")
 
 
 def _read_summaries(world: Bound, *, label: str) -> frozenset[str]:
