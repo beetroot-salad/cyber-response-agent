@@ -151,12 +151,28 @@ def _ledger_entries_name_a_lane(entries: list[dict[str, Any]]) -> list[dict[str,
 
 
 def _rows_name_their_world(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The one thing the record asks of a world row beyond being a mapping: it names its world.
-    Every other key belongs to the row's declared owners and is carried as written."""
+    """What the record asks of a world row beyond being a mapping: it names its world, and its
+    commit state, when it has one, is one of A6's two (`_check_state`). Every other key belongs
+    to the row's declared owners and is carried as written."""
     for row in rows:
         if not isinstance(row.get("world"), str):
             raise ValueError(f"a world row does not name its world: {row!r}")
+        _check_state(row, f"world {row['world']!r}")
     return rows
+
+
+def _check_state(row: dict[str, Any] | None, where: str) -> dict[str, Any] | None:
+    """A row's `state` is absent or one of A6's two, `queueing` and `queued`; any other value
+    is refused by name — a record whose commit state no pass wrote cannot say whether its
+    findings are on a queue."""
+    if row is not None and STATE_KEY in row and row[STATE_KEY] not in (QUEUEING, QUEUED):
+        raise ValueError(f"{where}'s {STATE_KEY} is {row[STATE_KEY]!r}, not {QUEUEING!r} or "
+                         f"{QUEUED!r}")
+    return row
+
+
+def _family_state(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    return _check_state(row, f"the {FAMILY_LABEL} row")
 
 
 def _empty_user() -> dict[str, list[dict[str, Any]]]:
@@ -186,7 +202,7 @@ class EpisodeGrade:
     #: O5's verdict on the family (M19=A): `usable`, `unusable`, or `None` where the pass never
     #: counted (a manifest refusal, an outcome other than `accepted`/`unusable`).
     validity: str | None = None
-    family: dict[str, Any] | None = None
+    family: Annotated[dict[str, Any] | None, AfterValidator(_family_state)] = None
     user: dict[str, list[dict[str, Any]]] = field(default_factory=_empty_user)
     #: The ledger, in walk order. `None` for a `not_graded` stamp; a pass that walked nothing
     #: writes `[]`.
@@ -833,7 +849,11 @@ class _Pass:
         except Exception as family_failed:  # noqa: BLE001 — the family call's own fault costs only itself, never the already-committed worlds
             family["draws_failed_reason"] = f"{type(family_failed).__name__}: {family_failed}"
             return
-        family.update(completed_draws=completed, malformed_replies=malformed)
+        # The draws this commit records, as a world row's `draws` does: the readers show these
+        # and no other file under the family's draw folder (A6).
+        family.update(completed_draws=completed, malformed_replies=malformed,
+                      draws=[{"draw": n} for n in sorted(documents)
+                             if "failure_reason" not in documents[n]])
         failures = [d["failure_reason"] for d in documents.values() if "failure_reason" in d]
         if failures:
             family["draws_failed_reason"] = failures[0]
@@ -902,6 +922,25 @@ def _pass_lessons_commit(bound: Bound, labels: list[str]) -> str | None:
         if commit is not None:
             return str(commit)
     return None
+
+
+def recorded_draws(grade: EpisodeGrade | None, label: str) -> frozenset[int]:
+    """The draw indices `grade` records for world `label` (`family`: the family row): a row
+    committed `queueing` or `queued` (A6) lists its draws; any other row, or none, records
+    none. A reader shows only these — never a draw file `judge.yaml` does not record, such as
+    one a stopped or wider earlier pass left on disk."""
+    if grade is None:
+        return frozenset()
+    if label == FAMILY_LABEL:
+        row = grade.family or {}
+    else:
+        row = next((r for r in grade.worlds if r.get("world") == label), {})
+    if row.get(STATE_KEY) not in (QUEUEING, QUEUED):
+        return frozenset()
+    draws = row.get("draws")
+    return frozenset(d["draw"] for d in draws if isinstance(d, dict)
+                     and isinstance(d.get("draw"), int) and not isinstance(d["draw"], bool)) \
+        if isinstance(draws, list) else frozenset()
 
 
 def read_grade(episode_dir: Path) -> EpisodeGrade | None:
@@ -991,4 +1030,5 @@ def _write_judge_yaml(episode: Episode, record: EpisodeGrade) -> None:
     episode.judge.write(_yaml.safe_dump(doc, sort_keys=False))
 
 
-__all__ = ["EpisodeGrade", "JudgeRefused", "NotGradedStamp", "grade_episode", "read_grade"]
+__all__ = ["EpisodeGrade", "JudgeRefused", "NotGradedStamp", "grade_episode", "read_grade",
+           "recorded_draws"]

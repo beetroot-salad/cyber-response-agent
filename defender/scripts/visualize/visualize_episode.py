@@ -46,7 +46,14 @@ from defender.learning.branch import archive
 from defender.learning.branch import outcome as outcome_mod
 from defender.learning.branch import timing as timing_mod
 from defender.learning.branch.steps import STEPS, Step
-from defender.learning.judge import JudgeRefused, read_grade
+from defender.learning.judge import (
+    QUEUED,
+    QUEUEING,
+    STATE_KEY,
+    JudgeRefused,
+    read_grade,
+    recorded_draws,
+)
 from defender.learning.judge import family
 from defender.learning.judge.enqueue import (
     LANE_DEFENDER,
@@ -711,9 +718,13 @@ def _load_episode(episode_dir: Path, bound: Bound, view: EpisodeRuns) -> _Episod
         n for n in ep.archived_world_dirs if family.world_label_names_directory(ep.episode_id, n)])
 
     for label in [*ep.entries, _FAMILY_LABEL]:
-        ep.draws[label] = (_load_draws(bound, label)
-                           if label == _FAMILY_LABEL or ep.entries[label].nameable
-                           else ({}, DrawsSkipReport()))
+        docs, skipped = (_load_draws(bound, label)
+                         if label == _FAMILY_LABEL or ep.entries[label].nameable
+                         else ({}, DrawsSkipReport()))
+        # Only the draws judge.yaml records for this row (A6): a file a stopped or wider
+        # earlier pass left on disk is never shown as this record's.
+        recorded = recorded_draws(grade, label)
+        ep.draws[label] = ({n: d for n, d in docs.items() if n in recorded}, skipped)
     nameable_worlds = [w for w in ep.entries.values() if w.nameable]
     if view.present:
         _load_arms(nameable_worlds, view, episode_dir, ep.episode_id)
@@ -1624,6 +1635,22 @@ def _render_roster_item(ep: _Episode, item: RosterItem) -> str:
     return _render_one_world(ep, item.label)
 
 
+def _commit_state_html(label: str, row: dict[str, Any] | None) -> str:
+    """The world's A6 commit state as judge.yaml records it — read off the row, never the
+    queue: `queueing` is in progress (a pass stopped between this world's appends and its
+    commit; the next grade refuses it until reconciled), `queued` is graded, and a world with
+    no committed row is ungraded."""
+    state = (row or {}).get(STATE_KEY)
+    if state == QUEUEING:
+        text = (f"in progress — a pass stopped while committing world {label}: its findings "
+                "may be partly on the queues; reconcile them before the next grade")
+    elif state == QUEUED:
+        text = "graded — its findings are queued"
+    else:
+        text = "ungraded — no committed grade for this world"
+    return f'<div class="w-commit">{_uv(text)}</div>'
+
+
 def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, PLR0915 — one world's whole section (state, bucket, facts, calls, archive)
     entry = ep.entries[label]
     # A `not_graded` stamp voids the family's word: every record-derived part (ladder,
@@ -1638,6 +1665,7 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
                    f'unreadable</div>')
     if draws_report.skipped:
         bits.append(f'<div class="w-skipped">{draws_report.skipped} skipped</div>')
+    bits.append(_commit_state_html(label, entry.row))
 
     manifest_world = ep.manifest_world(label)
     if row is None:
@@ -1978,15 +2006,20 @@ def _transcript_blocks_for_step(ep: _Episode, step: str) -> str:  # noqa: C901 �
             blocks.append(_transcript_block(ep.wire.traces[stem]))
     elif step == Step.JUDGE:
         # Family first, then each world in numeric draw order. Stems include framed-only
-        # twins, which is all some judge calls write.
+        # twins, which is all some judge calls write. Only the draws judge.yaml records (A6):
+        # a call log a stopped or wider earlier pass left is never shown as this record's.
         judge_stems = ep.wire.stems_for(Step.JUDGE)
-        family_stems = sorted((s for s in judge_stems if _stem_names_label(s, _FAMILY_LABEL)),
+        family_drawn = recorded_draws(ep.grade, _FAMILY_LABEL)
+        family_stems = sorted((s for s in judge_stems if _stem_names_label(s, _FAMILY_LABEL)
+                               and _draw_key_stem(s, _FAMILY_LABEL) in family_drawn),
                               key=lambda s: _draw_key_stem(s, _FAMILY_LABEL))
         for stem in family_stems:
             blocks.append(_transcript_block(ep.wire.traces[stem]))
         for label in sorted(ep.entries):
             # Not a bare `startswith`: `baseline` would also claim `baseline_2`'s stems.
-            label_stems = sorted((s for s in judge_stems if _stem_names_label(s, label)),
+            drawn = recorded_draws(ep.grade, label)
+            label_stems = sorted((s for s in judge_stems if _stem_names_label(s, label)
+                                  and _draw_key_stem(s, label) in drawn),
                                  key=lambda s: _draw_key_stem(s, label))
             for stem in label_stems:
                 blocks.append(_transcript_block(ep.wire.traces[stem]))
