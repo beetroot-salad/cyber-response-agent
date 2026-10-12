@@ -393,18 +393,22 @@ def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_pat
     family = _family()
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     world_dir = ep / "worlds" / "b"
+    # #1234 A12/A21: b's own calls carry b's host-written ids (`<token>/<n>`, past the served
+    # row's `/0`) — a row with no id of the run is an inherited pre-branch row, and one no other
+    # world's table shares makes b's table refused as edited.
+    token = J.world_token("b")
     rows = [
         {"lead_id": "l-001", "query_id": "q1", "params": {"index": "logs-*"},
-         "payload_digest": "d1"},
+         "payload_digest": "d1", "call_id": f"{token}/1"},
         {"lead_id": "l-001", "query_id": "q2", "params": {"index": "logs-2"},
-         "payload_digest": "d2"},
+         "payload_digest": "d2", "call_id": f"{token}/2"},
     ]
     _write_issued(world_dir, rows)
     (world_dir / "gather_raw" / "l-001.lead.json").write_text(
         json.dumps({"lead_id": "l-001", "goal": "find the pivot"}), encoding="utf-8")
     base, _src = J.runs_base(tmp_path)
 
-    shown = _render().render(ep, "b").leads
+    shown = _render().render(ep, "b").focus.leads
     facts = family.read_world_facts(J.mod("_io").bind(ep), "b", episode_token=J.EPISODE_TOKEN)
     expected = family.lead_chain(_world(ep, "b"), "l-001", facts.resolutions_by_lead,
                                  leads=family.leads_by_id(world_dir))
@@ -688,7 +692,8 @@ def test_read_grade_is_none_before_a_grade_and_the_same_record_grade_episode_ret
     an already-graded episode, because that path reads through the same function.
 
     Observably true: before any pass `read_grade` is `None`; after one, `read_grade`'s
-    `worlds`, `verdict_word`, `family_outcome` and `dispositions` equal the live pass's,
+    `worlds`, `family`, `user` and `dispositions` equal the live pass's (#1234: the family
+    row and the user record replace the retired `verdict_word` / `family_outcome`),
     and a second `grade_episode` (the existing-record path) equals `read_grade`.
 
     What failure looks like: the page parses YAML itself and disagrees with the pass on a
@@ -703,7 +708,7 @@ def test_read_grade_is_none_before_a_grade_and_the_same_record_grade_episode_ret
     again = _grade(ep, tmp_path)
 
     assert stored is not None
-    for field in ("worlds", "verdict_word", "family_outcome", "dispositions"):
+    for field in ("worlds", "family", "user", "dispositions"):
         assert getattr(stored, field) == getattr(live, field), (
             f"read_grade's {field!r} differs from the pass that wrote it")
         assert getattr(again, field) == getattr(stored, field), (
@@ -732,11 +737,11 @@ def test_read_grade_refuses_a_planted_link_a_non_mapping_and_a_torn_record(tmp_p
     record = ep / "judge.yaml"
     outside = tmp_path / "planted-judge.yaml"
     outside.write_text(yaml.safe_dump(
-        {"worlds": [{"world": "b", "bucket": None}], "verdict_word": "survived"}),
+        {"worlds": [{"world": "b", "bucket": None}], "validity": "usable"}),
         encoding="utf-8")
 
     record.write_text(outside.read_text(encoding="utf-8"), encoding="utf-8")
-    assert read_grade(ep).verdict_word == "survived", "positive control: a regular record"
+    assert read_grade(ep).validity == "usable", "positive control: a regular record"
 
     record.unlink()
     record.symlink_to(outside)
@@ -754,12 +759,14 @@ def test_read_grade_refuses_a_planted_link_a_non_mapping_and_a_torn_record(tmp_p
 
 
 def test_read_grade_reads_a_pre_oracle_record_with_defaults_and_invents_nothing(tmp_path):
-    """A record in the pre-#1224 shape — no `validity`, no `family_outcome`, no
+    """A record in the pre-#1224 shape — no `validity`, no family row, no
     `world_enqueued_rows`, a retired `withheld_findings` list, world rows carrying the retired
     ladder flags and no `systems` — reads without raising, with the reader's defaults for the
-    family-level absences, the retired key ignored, and NOTHING invented on the rows.
+    family-level absences, the retired key ignored, and NOTHING invented on the rows. (#1234
+    A4: a record carrying a name #1234 retired — `verdict_word`, `episode_outcome` — is refused
+    by that name instead; the last block pins it.)
 
-    Observably true: `validity is None`, `family_outcome is None`, `world_enqueued_rows == 0`,
+    Observably true: `validity is None`, `family is None`, `world_enqueued_rows == 0`,
     `graded_worlds == {"b", "c"}`, and BOTH world rows come back as written — no `systems` the
     archive never stored. Row `c` is the TEMPTING one: `bucket: None` and no `systems`, the
     shape a reply that named no system would leave; a reader that back-fills `systems: []`
@@ -774,8 +781,7 @@ def test_read_grade_reads_a_pre_oracle_record_with_defaults_and_invents_nothing(
     tempting_row = {"world": "c", "bucket": None, "holding_queried": True,
                     "doctored_answer_served": False, "difference_shown": False,
                     "withheld_reason": None}
-    old = {"worlds": [old_row, tempting_row], "verdict_word": "caught",
-           "episode_outcome": "gradable",
+    old = {"worlds": [old_row, tempting_row],
            "enqueued_rows": 0, "enqueued_to": "", "draws": {"completed": 1}, "knobs": {},
            "lessons_commit": None, "discard_evidence": {}, "queue_malformed_rows": 0,
            "unqueueable_findings": [], "withheld_findings": [{"world": "b"}]}
@@ -784,7 +790,7 @@ def test_read_grade_reads_a_pre_oracle_record_with_defaults_and_invents_nothing(
     grade = read_grade(ep)
 
     assert grade.validity is None
-    assert grade.family_outcome is None
+    assert grade.family is None
     assert grade.world_enqueued_rows == 0
     assert grade.graded_worlds == frozenset({"b", "c"})
     assert J.rows(grade)["b"] == old_row, (
@@ -795,29 +801,33 @@ def test_read_grade_reads_a_pre_oracle_record_with_defaults_and_invents_nothing(
     for label in ("b", "c"):
         assert "systems" not in J.rows(grade)[label]
 
-    new = dict(old, family_outcome="gradable", validity="usable",
+    new = dict(old, validity="usable",
                worlds=[dict(old_row, systems=["elastic"]), dict(tempting_row, systems=[])])
     (ep / "judge.yaml").write_text(yaml.safe_dump(new, sort_keys=False), encoding="utf-8")
     grade = read_grade(ep)
-    assert (grade.family_outcome, grade.validity) == ("gradable", "usable")
+    assert grade.validity == "usable"
     assert J.rows(grade)["b"]["systems"] == ["elastic"], (
         "positive control: a stored answer read back")
     assert J.rows(grade)["c"]["systems"] == [], (
         "a stored empty `systems` on a bucket-None row was overridden by the reader")
 
+    for retired in ("verdict_word", "episode_outcome"):
+        (ep / "judge.yaml").write_text(yaml.safe_dump(dict(old, **{retired: "caught"}),
+                                                      sort_keys=False), encoding="utf-8")
+        with pytest.raises(_refused(), match=retired):
+            read_grade(ep)
+
 
 def test_read_grade_reads_back_a_not_graded_stamp(tmp_path):
     """An episode the pass declined to grade leaves a `not_graded` stamp, and the reader hands
-    it back as one — `not_graded` set, `episode_outcome` the not-graded word — so a page can
-    say "not graded, and here is why" rather than "graded, undecidable".
+    it back as one — `not_graded` set, carrying the outcome word — so a page can say "not
+    graded, and here is why" rather than "graded". (#1234 retired the `episode_outcome` word
+    the stamp also carried.)
 
     Observably true: after a pass over an episode whose `outcome.yaml` says `refused`,
     `read_grade(ep).not_graded` is the `NotGradedStamp` the pass wrote, carrying that outcome
-    word, and
-    `episode_outcome == judge.NOT_GRADED`; positive control — a graded episode reads
-    `not_graded is None`.
+    word; positive control — a graded episode reads `not_graded is None`.
     """
-    judge = _judge()
     read_grade = J.sym("learning.judge", "read_grade")
     skipped = J.accepted_episode(tmp_path, outcome="refused")
     graded = J.accepted_episode(tmp_path / "graded")
@@ -828,20 +838,19 @@ def test_read_grade_reads_back_a_not_graded_stamp(tmp_path):
     stamp = read_grade(skipped)
     assert stamp.not_graded is not None, "the not-graded stamp did not read back"
     assert stamp.not_graded.outcome == "refused", repr(stamp.not_graded)
-    assert stamp.episode_outcome == judge.NOT_GRADED
     assert read_grade(graded).not_graded is None, "positive control: a graded episode"
 
 
 @pytest.mark.parametrize("damage", [
-    pytest.param({"world_findings": 5}, id="scalar-for-list"),
+    pytest.param({"dispositions": 5}, id="scalar-for-list"),
     pytest.param({"draws": 5}, id="scalar-for-mapping"),
-    pytest.param({"verdict_word": None}, id="null-for-str"),
+    pytest.param({"enqueued_to": None}, id="null-for-str"),
     pytest.param({"enqueued_rows": "3"}, id="numeric-text-for-int"),
     pytest.param({"worlds": [{"bucket": None}]}, id="row-naming-no-world"),
     pytest.param({"not_graded": {}}, id="empty-stamp"),
     pytest.param({"not_graded": "yes"}, id="non-mapping-stamp"),
     pytest.param({"not_graded": {"outcome": "refused", "reason": "x"},
-                  "episode_outcome": "not-graded", "world_findings": 5}, id="damaged-stamp"),
+                  "dispositions": 5}, id="damaged-stamp"),
     # A YAML mapping may key on `1:` — splatted as keywords that is `TypeError: keywords must
     # be strings` out of the constructor, a class no handler on the path converts.
     pytest.param({1: "planted"}, id="non-string-key"),
@@ -865,11 +874,11 @@ def test_a_record_of_the_wrong_shape_is_refused_not_defaulted_and_not_re_graded(
     """
     read_grade, refused = J.sym("learning.judge", "read_grade"), _refused()
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
-    sound = {"worlds": [{"world": "b", "bucket": None}], "verdict_word": "caught"}
+    sound = {"worlds": [{"world": "b", "bucket": None}], "validity": "usable"}
     record = ep / "judge.yaml"
 
     record.write_text(yaml.safe_dump(sound), encoding="utf-8")
-    assert read_grade(ep).verdict_word == "caught", "positive control: the sound record"
+    assert read_grade(ep).validity == "usable", "positive control: the sound record"
 
     planted = yaml.safe_dump({**sound, **damage})
     record.write_text(planted, encoding="utf-8")
