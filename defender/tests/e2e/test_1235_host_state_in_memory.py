@@ -4,15 +4,16 @@ A decision the host makes reads host memory, never a file in the run folder (#12
 D3, comment 6107812099). Before #1235 the call cap, the spawn cap, the wall clock and the
 breaker were each re-read from `budget.json` / `circuit_breaker.json` in the run folder on every
 call, so whatever wrote those files moved the decision. After it, nothing writes either file
-and nothing reads one: the run's own process holds the state (`budget_enforcer.read_budget`,
-`circuit_breaker.breaker_state`), and the accounting-failure sidecar that guarded the file
-writes retires with them (F3).
+and nothing reads one: the run's own process holds the state — since round 2 (comment
+6117481676) on the run's one `RunState`, which the driver returns as `summary["run_state"]`
+(`budget_snapshot()`, `breaker_snapshot()`) — and the accounting-failure sidecar that guarded
+the file writes retires with them (F3).
 
 What this module pins, each through the real driver (`drive`), with the mid-run write made
 in-process from the scripted model's own turn — the seam `test_denial_gather_632`'s
 `BreakingReplay` and `test_budget_e2e_631`'s clock-step replay already use. The plant always
-lands AFTER the driver opened the run (the model is first asked after `open_budget` /
-`open_breaker`), so it is a write into a live run, never a seed:
+lands AFTER the driver started the run's state (the model is first asked after
+`RunState.start`), so it is a write into a live run, never a seed:
 
   O1 (budget, breaker). Overwriting or deleting the state file in a live run's folder changes
      no refusal: the call cap still refuses at the cap, a tripped system stays tripped, a
@@ -25,8 +26,7 @@ lands AFTER the driver opened the run (the model is first asked after `open_budg
 The queries table's live reads (the repeat guard, the rejection budget) and the case pointer
 are pinned in the companion module for the second half of #1235.
 
-RED until #1235 lands: `circuit_breaker.breaker_state` does not exist, and every arm below
-that plants a file is today decided by the planted file.
+RED until #1235's round 2 lands: the driver's summary carries no `run_state`.
 """
 from __future__ import annotations
 
@@ -41,9 +41,7 @@ pytest.importorskip("pydantic_ai")
 from defender.hooks.budget_enforcer import (  # noqa: E402
     BUDGET_REFUSAL_MESSAGE,
     DEFAULT_LIMITS,
-    read_budget,
 )
-from defender.runtime import circuit_breaker  # noqa: E402
 from defender.scripts.adapters.faults import TransportFault  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN,
@@ -127,10 +125,10 @@ _FOUR_BASH = [
 _CAP_TWO = {**DEFAULT_LIMITS, "max_tool_calls": 2, "wall_clock_timeout": 3600, "grace_seconds": 600}
 
 
-def _drive_main(root: Path, main: ReplayFn, *, run_id: str, limits: dict) -> Path:
+def _drive_main(root: Path, main: ReplayFn, *, run_id: str, limits: dict) -> dict:
+    """Drive MAIN's script; returns the run's budget snapshot, read off the run's state."""
     run_dir = materialize(root, GOLDEN)
-    drive(run_dir, run_id=run_id, main=main, limits=limits)
-    return run_dir
+    return drive(run_dir, run_id=run_id, main=main, limits=limits)["run_state"].budget_snapshot()
 
 
 def _zeroed_budget(run_id: str) -> str:
@@ -144,9 +142,9 @@ def _zeroed_budget(run_id: str) -> str:
 def test_the_call_cap_refuses_at_the_cap(tmp_path, enforced):
     """Positive control for every budget arm below, on the same script and cap: with nothing
     planted, calls one and two run and calls three and four are refused, and the run counts
-    exactly two calls (in its own memory)."""
+    exactly two calls (on the run's own state)."""
     main = ReplayFn(list(_FOUR_BASH))
-    run_dir = _drive_main(tmp_path / "control", main, run_id="b1235-control", limits=_CAP_TWO)
+    budget = _drive_main(tmp_path / "control", main, run_id="b1235-control", limits=_CAP_TWO)
 
     assert _refusals(main) == 2, "the cap did not refuse the two calls past it"
     history = main.seen[-1]
@@ -154,7 +152,7 @@ def test_the_call_cap_refuses_at_the_cap(tmp_path, enforced):
     assert "ran-two" in history, "a call under the cap did not run"
     assert "ran-three" not in history, "a call past the cap ran"
     assert "ran-four" not in history, "a call past the cap ran"
-    assert read_budget(run_dir)["tool_calls"] == 2
+    assert budget["tool_calls"] == 2
 
 
 @pytest.mark.parametrize("plant", ["overwrite", "delete"])
@@ -176,7 +174,7 @@ def test_a_reset_budget_file_does_not_reopen_the_cap(tmp_path, enforced, plant):
     main = PlantingReplay(list(_FOUR_BASH), at=2, plant=reset)
     run_dir = materialize(tmp_path / plant, GOLDEN)
     run_dir_holder.append(run_dir)
-    drive(run_dir, run_id="b1235-reset", main=main, limits=_CAP_TWO)
+    state = drive(run_dir, run_id="b1235-reset", main=main, limits=_CAP_TWO)["run_state"]
 
     assert main.planted, "the plant never ran — this arm measured nothing"
     history = main.seen[-1]
@@ -185,7 +183,7 @@ def test_a_reset_budget_file_does_not_reopen_the_cap(tmp_path, enforced, plant):
     assert "ran-three" not in history, f"budget.json ({plant}) reopened the cap: a call past it ran"
     assert "ran-four" not in history, f"budget.json ({plant}) reopened the cap: a call past it ran"
     assert _refusals(main) == 2
-    assert read_budget(run_dir)["tool_calls"] == 2
+    assert state.budget_snapshot()["tool_calls"] == 2
 
 
 def test_a_planted_spent_budget_does_not_refuse_a_call_under_the_cap(tmp_path, enforced):
@@ -213,7 +211,7 @@ def test_a_planted_spent_budget_does_not_refuse_a_call_under_the_cap(tmp_path, e
     assert "ran-one" in history, "a planted budget.json refused a call under the cap"
     assert "ran-two" in history, "a planted budget.json refused a call under the cap"
     assert _refusals(main) == 2
-    assert read_budget(run_dir)["tool_calls"] == 2
+    assert summary["run_state"].budget_snapshot()["tool_calls"] == 2
 
 
 def test_a_planted_clock_origin_does_not_trip_the_wall_clock(tmp_path, enforced):
@@ -241,7 +239,7 @@ def test_a_planted_clock_origin_does_not_trip_the_wall_clock(tmp_path, enforced)
     assert summary.get("truncated_by") != "budget", "a planted origin killed the run"
     assert _refusals(main) == 0, "a planted origin tripped the wall clock"
     assert "ran-four" in main.seen[-1]
-    assert read_budget(run_dir)["tool_calls"] == 4
+    assert summary["run_state"].budget_snapshot()["tool_calls"] == 4
 
     spent = ReplayFn(list(_FOUR_BASH))
     _drive_main(tmp_path / "spent-clock", spent, run_id="b1235-clock-ctl",
@@ -271,7 +269,8 @@ def _cmdb(n: int) -> Turn:
     return q("cmdb", "probe", {"native_query": f"FROM hosts-{n}"})
 
 
-def _drive_gather(root: Path, gather: ReplayFn, *, verbs, run_id: str) -> Path:
+def _drive_gather(root: Path, gather: ReplayFn, *, verbs, run_id: str) -> dict:
+    """Drive one cmdb lead; returns the run's breaker snapshot, read off the run's state."""
     run_dir = materialize(root, GOLDEN_AB3)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
@@ -280,8 +279,8 @@ def _drive_gather(root: Path, gather: ReplayFn, *, verbs, run_id: str) -> Path:
         })]),
         Turn(text="Investigation complete."),
     ])
-    drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
-    return run_dir
+    return drive(run_dir, run_id=run_id, main=main, gather=gather,
+                 verbs=verbs)["run_state"].breaker_snapshot()
 
 
 def _down(gather: ReplayFn) -> bool:
@@ -295,12 +294,11 @@ def test_a_system_tripped_by_two_infra_failures_answers_down(tmp_path):
     state records the two failures and the trip."""
     rec = VerbRecorder()
     gather = ReplayFn([_cmdb(1), _cmdb(2), _cmdb(3), DONE])
-    run_dir = _drive_gather(tmp_path / "control", gather,
-                            verbs=_registry(rec, cmdb_fails=True), run_id="k1235-control")
+    state = _drive_gather(tmp_path / "control", gather,
+                          verbs=_registry(rec, cmdb_fails=True), run_id="k1235-control")
 
     assert len(rec.calls) == 2, "the tripped system was asked again"
     assert _down(gather)
-    state = circuit_breaker.breaker_state(run_dir)
     assert state["systems"]["cmdb"]["failures"] == 2
     assert "tripped_at" in state["systems"]["cmdb"]
     assert state["total_failures"] == 2
@@ -333,13 +331,12 @@ def test_a_reset_breaker_file_does_not_untrip_a_system(tmp_path, plant):
         })]),
         Turn(text="Investigation complete."),
     ])
-    drive(run_dir, run_id="k1235-reset", main=main, gather=gather,
-          verbs=_registry(rec, cmdb_fails=True))
+    state = drive(run_dir, run_id="k1235-reset", main=main, gather=gather,
+                  verbs=_registry(rec, cmdb_fails=True))["run_state"].breaker_snapshot()
 
     assert gather.planted, "the plant never ran — this arm measured nothing"
     assert len(rec.calls) == 2, f"circuit_breaker.json ({plant}) untripped cmdb: the verb ran again"
     assert _down(gather)
-    state = circuit_breaker.breaker_state(run_dir)
     assert state["systems"]["cmdb"]["failures"] == 2
     assert state["total_failures"] == 2
 
@@ -376,14 +373,14 @@ def test_a_planted_breaker_file_does_not_trip_a_healthy_system(tmp_path, plant):
         })]),
         Turn(text="Investigation complete."),
     ])
-    drive(run_dir, run_id="k1235-plant", main=main, gather=gather,
-          verbs=_registry(rec, cmdb_fails=False))
+    state = drive(run_dir, run_id="k1235-plant", main=main, gather=gather,
+                  verbs=_registry(rec, cmdb_fails=False))["run_state"]
 
     assert gather.planted
     assert len(rec.calls) == 1, f"a planted ({plant}) breaker file tripped a healthy system"
     assert not _down(gather)
     assert "web-01" in gather.seen[-1], "the healthy call's payload did not come back"
-    assert circuit_breaker.breaker_state(run_dir) == {"systems": {}, "total_failures": 0}
+    assert state.breaker_snapshot() == {"systems": {}, "total_failures": 0}
 
 
 # ======================================================================================
@@ -402,7 +399,7 @@ def test_a_run_leaves_none_of_the_retired_state_files(tmp_path, monkeypatch, pos
     the breaker writes no `budget.json`, no `circuit_breaker.json` and no
     `<run>.accounting_failures.json` — not in the run folder, not beside it, nowhere under the
     test's root — under both budget postures (the enforcing `account_call` and the
-    accounting-only `update_budget_locked`).
+    accounting-only `count_call`).
 
     Positive control, same run: the queries table exists and holds the lead's rows, and the
     run's own memory counted the calls and the breaker failure — so the absence is not a run
@@ -422,8 +419,8 @@ def test_a_run_leaves_none_of_the_retired_state_files(tmp_path, monkeypatch, pos
         Turn(text="Investigation complete."),
     ])
     gather = ReplayFn([_cmdb(1), _cmdb(2), DONE])
-    drive(run_dir, run_id="o2-1235", main=main, gather=gather,
-          verbs=_registry(rec, cmdb_fails=True))
+    state = drive(run_dir, run_id="o2-1235", main=main, gather=gather,
+                  verbs=_registry(rec, cmdb_fails=True))["run_state"]
 
     assert _retired_files(tmp_path) == [], "a retired host-state file was written"
 
@@ -434,6 +431,6 @@ def test_a_run_leaves_none_of_the_retired_state_files(tmp_path, monkeypatch, pos
     assert table.is_file(), "the run recorded no queries — the absence above measured nothing"
     own = [r for r in read_jsonl_rows(table) if r.get("lead_id") == LEAD]
     assert [r["exit_code"] for r in own] == [2, 2]
-    assert read_budget(run_dir)["tool_calls"] >= 4, "the run's calls were not counted"
-    assert read_budget(run_dir)["subagent_spawns"] >= 1
-    assert circuit_breaker.breaker_state(run_dir)["systems"]["cmdb"]["failures"] == 2
+    assert state.budget_snapshot()["tool_calls"] >= 4, "the run's calls were not counted"
+    assert state.budget_snapshot()["subagent_spawns"] >= 1
+    assert state.breaker_snapshot()["systems"]["cmdb"]["failures"] == 2

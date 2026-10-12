@@ -2,11 +2,11 @@
 link lives beside the run folder, not in it.
 
 F1 (comment 6107812099, "forks decided"): the repeat guard and the rejection budget used to
-re-read `executed_queries.jsonl` per call. They now read the host's in-memory mirror of the
-rows it recorded (`record_query.live_lead_rows`), loaded once at run start
-(`open_query_mirror`) and appended to only after a row's file write succeeded. The file is
-still written, byte for byte as before: it is the model's view and the learning loop's record,
-and no decision reads it back.
+re-read `executed_queries.jsonl` per call. They now read the rows the host recorded, held on the
+run's one `RunState` (round 2, comment 6117481676: `state.lead_rows(lead)`), which a row enters
+only after its file write succeeded and which no file is ever read into. The file is still
+written, byte for byte as before: it is the model's view and the learning loop's record, and no
+decision reads it back.
 
 F2: `session_store_pointer.json` — which case database a run's messages live in — leaves the
 run folder for a host-only sidecar beside it, `<run_id>.session-pointer.json` in the run's
@@ -24,10 +24,10 @@ What this module pins, through the real driver (`drive`) and the real readers:
      ANOTHER run's real store is ignored by the branch's source-store open and by the run
      page's store resolution (positive control: the sidecar's store is the one opened, and the
      planted store is a real, openable one); a hand-copied folder carries no link and reads as
-     "no session".
+     "no session" — unless it carries the old in-folder name, which since round 2 is a run
+     recorded before #1235 and is refused (`test_1235_run_state_e2e`'s R5).
 
-RED until #1235 lands: every guard arm below is today decided by the planted file, and the
-pointer is today written inside the folder (`RunPaths.session_pointer` is still a property).
+Round 1 made these green; round 2 keeps every claim and moves only how the state is reached.
 """
 from __future__ import annotations
 
@@ -333,16 +333,21 @@ def test_a_pointer_planted_inside_the_folder_is_not_the_case_link(tmp_path):
 def test_a_hand_copied_run_folder_carries_no_case_link(tmp_path):
     """O3: a run folder copied by hand into another container (the copy holding whatever the
     original folder held) carries no case link: the branch's source-store lookup answers "no
-    session" (`None`). Positive control: the original folder, with its sidecar, opens its store.
+    session" (`None`). The same copy with the old in-folder link planted in it is a run recorded
+    before #1235 (round 2): it is refused, never opened through that link. Positive control: the
+    original folder, with its sidecar, opens its store.
 
     Observed failing by: the copy opening the original's store through a link inside the folder."""
     run_dir = _finished_run(tmp_path / "a", "o3-copied")
     copy = tmp_path / "elsewhere" / "run"
     shutil.copytree(run_dir, copy)
-    (copy / OLD_POINTER_NAME).write_text(json.dumps(_pointer(run_dir)), encoding="utf-8")
 
     assert branch.source_store_if_any(copy) is None, \
         "a hand-copied folder opened a store through a link carried inside it"
+
+    (copy / OLD_POINTER_NAME).write_text(json.dumps(_pointer(run_dir)), encoding="utf-8")
+    with pytest.raises(branch.BranchError):
+        branch.source_store_if_any(copy)
 
     handle = branch.source_store_if_any(run_dir)
     assert handle is not None, "the original run's sidecar opened no store"
