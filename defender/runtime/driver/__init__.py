@@ -22,7 +22,6 @@ import sys
 import time
 import uuid
 from collections.abc import Callable, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -179,7 +178,7 @@ def _run_summary(  # noqa: PLR0913 — one dict literal's full field set, named 
     `end` (exit class, and whether the model had already closed) is flattened on so `run.py`'s
     post-steps read it in-process rather than off disk. `run_state` is the run's live state
     (#1235) as the run left it: its budget, breaker and queries rows. The summary is the only
-    thing that hands it out, so once the caller drops it nothing holds the run's state."""
+    thing that hands it out; nothing process-wide in defender refers to a run's state."""
     return {
         "output": output, "model": model_name, "requests": requests,
         "truncated_by": end.truncated_by, "closed_before_cut": end.closed_before_cut,
@@ -523,71 +522,57 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             run_state=run_state,
         )
 
-    # A sync callback pydantic-ai runs for this run — a sync model function or tool handed in
-    # through `make_model` or `toolset`; the run's own are all async — runs on the run's own
-    # worker threads. pydantic-ai's default, anyio's shared pool, records the loop's root task in
-    # a process-wide table that only the loop's collection clears, and the root task holds its
-    # loop: under `asyncio.run` this coroutine is that task, so its result — the summary
-    # carrying `run_state` — would outlive the run for the life of the process (#1235).
-    #
-    # Not shut down when the run returns: a call the run abandoned (a lead cancelled mid-call by
-    # a sibling's budget kill) runs on to its end on a thread outside the run, in a copy of the
-    # run's context, and may still reach this pool. Its threads exit once nothing refers to it.
-    # Opened before item 3 is scheduled: its task copies the context, the executor with it, when
-    # it is created.
-    threads = ThreadPoolExecutor(thread_name_prefix=f"run-{run_id}")
-    with Agent.using_thread_executor(threads):
-        prompt, lead_zero_block, lead_zero_status = _opening_prompt(
-            resume, run_state, alert_path, defender_dir,
-            systems=tuple(roster.accepted), verbs=lead_zero_verbs, limits=limits,
-            tenant=tenant, orient_shim=orient_shim,
-        )
+    prompt, lead_zero_block, lead_zero_status = _opening_prompt(
+        resume, run_state, alert_path, defender_dir,
+        systems=tuple(roster.accepted), verbs=lead_zero_verbs, limits=limits,
+        tenant=tenant, orient_shim=orient_shim,
+    )
 
-        # Item 3 is scheduled here (after item 1) and awaited in the store's render processor just
-        # before MAIN's second request. `correlation` is `None` when this run dispatches none.
-        correlation_task: Any = None
-        if correlation is not None:
-            from .. import lead_zero as lead_zero_mod
+    # Item 3 is scheduled here (after item 1) and awaited in the store's render processor just
+    # before MAIN's second request. `correlation` is `None` when this run dispatches none.
+    correlation_task: Any = None
+    if correlation is not None:
+        from .. import lead_zero as lead_zero_mod
 
-            contract = lead_zero_mod.prepare_correlation_lead(
-                run_dir, _alert_doc_soft(alert_path), lead_zero_block, lead_zero_status,
-                dispatch=correlation,
-            )
-            if contract is not None:
-                goal, what_to_summarize = contract
-                # Account the spawn explicitly: `subagent_spawns` counts the "gather" tool name,
-                # which a harness dispatch never emits.
-                lead_zero_mod._budget_account(run_state, "gather")
-                correlation_task = asyncio.ensure_future(lead_zero_mod.dispatch_correlation(
-                    run_state=run_state, defender_dir=defender_dir,
-                    goal=goal, what_to_summarize=what_to_summarize, verbs=lead_zero_verbs,
-                    limits=limits, make_model=make_model, logger=logger, box=box, store=store,
-                    catalog=correlation_catalog, dispatch=correlation,
-                    tenant=tenant,
-                ))
+        contract = lead_zero_mod.prepare_correlation_lead(
+            run_dir, _alert_doc_soft(alert_path), lead_zero_block, lead_zero_status,
+            dispatch=correlation,
+        )
+        if contract is not None:
+            goal, what_to_summarize = contract
+            # Account the spawn explicitly: `subagent_spawns` counts the "gather" tool name,
+            # which a harness dispatch never emits.
+            lead_zero_mod._budget_account(run_state, "gather")
+            correlation_task = asyncio.ensure_future(lead_zero_mod.dispatch_correlation(
+                run_state=run_state, defender_dir=defender_dir,
+                goal=goal, what_to_summarize=what_to_summarize, verbs=lead_zero_verbs,
+                limits=limits, make_model=make_model, logger=logger, box=box, store=store,
+                catalog=correlation_catalog, dispatch=correlation,
+                tenant=tenant,
+            ))
 
-        agent = build_agent(
-            defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
-            store=store, session_id=session_id, review_stages=stages, bounds=gate_bounds,
-            correlation_task=correlation_task, toolset=toolset, catalog=catalog,
-            gather_grant=tenant.grants.gather,
-        )
-        deps = replace(
-            bind(MAIN_DEF, run_dir, defender_dir=defender_dir, box=box),
-            run_id=run_id,
-            # The run's tenant record and its state ride on MAIN's deps so every gather lead it
-            # dispatches inherits them (`_run_gather` carries both onto the lead's deps) —
-            # #1106 M3, #1107, #1235.
-            tenant=tenant,
-            run_state=run_state,
-        )
+    agent = build_agent(
+        defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
+        store=store, session_id=session_id, review_stages=stages, bounds=gate_bounds,
+        correlation_task=correlation_task, toolset=toolset, catalog=catalog,
+        gather_grant=tenant.grants.gather,
+    )
+    deps = replace(
+        bind(MAIN_DEF, run_dir, defender_dir=defender_dir, box=box),
+        run_id=run_id,
+        # The run's tenant record and its state ride on MAIN's deps so every gather lead it
+        # dispatches inherits them (`_run_gather` carries both onto the lead's deps) —
+        # #1106 M3, #1107, #1235.
+        tenant=tenant,
+        run_state=run_state,
+    )
 
-        t0 = time.time()
-        run, end, exit_reason = await _drive_releasing_log(
-            logger, agent, prompt, deps, store, session_id, gate_bounds, resume_history,
-        )
-        wall_ms = (time.time() - t0) * 1000.0
-        await _reap_correlation_task(correlation_task)
+    t0 = time.time()
+    run, end, exit_reason = await _drive_releasing_log(
+        logger, agent, prompt, deps, store, session_id, gate_bounds, resume_history,
+    )
+    wall_ms = (time.time() - t0) * 1000.0
+    await _reap_correlation_task(correlation_task)
 
     result = run.result if run is not None else None
     try:
