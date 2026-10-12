@@ -126,7 +126,7 @@ def _main_deps(tmp_path: Path):
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     return run_dir, replace(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER),
-                            run_state=RunState.start(run_dir, "r-875"))
+                            run_state=RunState(run_dir, "r-875"))
 
 
 def _drive(tmp_path: Path, lead_id: str = "l-001"):

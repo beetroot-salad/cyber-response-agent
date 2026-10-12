@@ -8,7 +8,7 @@ tail) live in `tests/test_budget_e2e_631.py`, which drives the real `run_investi
 through the replay harness.
 
 #1235 moved the state into the run's own process: since round 2 (comment 6117481676) the
-counters live on the run's one `RunState` (`RunState.start` begins a run, `budget_snapshot()`
+counters live on the run's one `RunState` (`RunState(run_dir, run_id)` begins a run, `budget_snapshot()`
 reads it back), and no `budget.json` is written or read.
 The tests whose subject was the file — a counter authored on disk, a torn cross-process read,
 a failed accounting write and the accounting-failure sidecar that counted it — retired with
@@ -41,7 +41,7 @@ def _start(run_dir: Path, run_id: str):
     imported here because it does not exist before the implementation)."""
     from defender.runtime.run_state import RunState
 
-    return RunState.start(run_dir, run_id)
+    return RunState(run_dir, run_id)
 
 
 def _count(state, tool_name: str) -> dict:
@@ -404,7 +404,7 @@ def test_budget_origin_is_a_wall_clock_the_elapsed_check_honours(tmp_path):
 
 
 def test_a_second_run_state_for_the_folder_starts_a_fresh_budget(tmp_path):
-    """A run's state is the run's start (#1235 round 2): a second `RunState.start` for the
+    """A run's state is the run's start (#1235 round 2): a second `RunState(...)` for the
     SAME folder is a fresh budget — counters at zero, a new origin no earlier than the first,
     the new run id — and the first run's state keeps its own counts. A run folder is resumed
     only before any run used it (`run_common._setup_state`), so there is no re-entrant start

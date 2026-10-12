@@ -5,6 +5,10 @@ implementation the rest of the suite let through (named in its docstring as "Exp
 correlation lead on a second state, a folder-keyed fallback, a parse-gated legacy refusal,
 lead-0's capped call without the state, the store-setup exit without it, a breaker charge
 outside the lock. The release obligation's own hole (R4) was fixed in place.
+
+Round 3 moved two of them to the review's fix list: an enforced role with no state now RAISES
+(O2), and the state no longer rides the summary — it is injected, and `drive()` hands it back
+(O6).
 """
 from __future__ import annotations
 
@@ -65,9 +69,9 @@ def test_the_correlation_leads_calls_ride_the_runs_one_state(tmp_path):
 
     The correlation lead's two `alerts` calls are counted in the run's ONE pool (a difference
     against the same run whose correlation lead makes no call), its verb contexts carry the very
-    object the driver returns, and the run's state holds its rows.
+    object `drive()` returns, and the run's state holds its rows.
 
-    Exploit (greens the committed suite): `dispatch_correlation(..., run_state=RunState.start(
+    Exploit (greens the committed suite): `dispatch_correlation(..., run_state=RunState(
     run_dir, run_id))` — a second state for item 3. Its calls never reach the run's pool or the
     run's breaker (an elastic outage l-00c sees does not trip elastic for MAIN's leads, and
     RUN_FAIL_KILL_LIMIT is split across two counters), and its clock starts late."""
@@ -84,39 +88,39 @@ def test_the_correlation_leads_calls_ride_the_runs_one_state(tmp_path):
     assert idle.has_sidecar(L3), "the control run did not dispatch item 3 either"
     assert all(c.ctx.run_state is busy.state for c in mine), (
         "the correlation lead's verb context carried a state other than the run's")
-    assert busy.state.lead_rows(L3) == busy.rows_for(L3), (
+    assert list(busy.state.lead_rows(L3)) == busy.rows_for(L3), (
         "the run's state does not hold the correlation lead's rows")
     delta = busy.budget["tool_calls"] - idle.budget["tool_calls"]
     assert delta == 2, f"the correlation lead's two calls moved the run's pool by {delta}"
 
 
 # ======================================================================================
-# a deps that carries no state reaches no run's state, however it spells the folder.
+# an enforced role whose deps carry no state raises — it never reaches a live run's state.
 # ======================================================================================
 
-def test_a_deps_with_no_state_never_reaches_a_live_runs_state(tmp_path):
-    """Pin: "When deps.run_state is None ... the hook accounts nothing, refuses nothing, and
-    mints no state"; brief: "No process-wide tables remain ... Without a RunState there is no
-    state". Here a run's state is live and AT its cap for the very folder the hand-bound deps
-    name: an agent whose deps carry no state is neither refused nor counted on it.
+def test_a_deps_with_no_state_raises_and_never_reaches_a_live_runs_state(tmp_path):
+    """Round 3 (O2, the review's finding 2): an enforced role (MAIN, here) whose deps carry no
+    run state raises `TypeError` at its first tool call — round 2 let it through, counting and
+    refusing nothing, which ran an enforced role with no budget at all. A run's state is live
+    and AT its cap for the very folder the hand-bound deps name: the raise neither counts on it
+    nor is answered from it.
 
     Positive control, same folder and script: carried, the same call is refused at that cap.
 
-    Exploit (greens the committed suite): `RunState.start` registers each state in a module
-    table keyed by `os.path.abspath(run_dir)` (strong references, never removed), and the
-    budget hooks fall back to it when `deps.run_state is None` — round 1's folder-keyed table
-    kept as a fallback."""
+    Exploit it still catches: `RunState(...)` registers each state in a module table keyed by
+    `os.path.abspath(run_dir)` (strong references, never removed), and the budget hooks fall
+    back to it when `deps.run_state is None` — round 1's folder-keyed table kept as a fallback:
+    the call is then refused (or counted) instead of raising."""
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 1, "wall_clock_timeout": 3600,
               "grace_seconds": 600}
     run_dir = _run_dir(tmp_path, "k2")
-    live = RunState.start(run_dir, "k2-live")
+    live = RunState(run_dir, "k2-live")
     be.account_call(live, "bash", limits=limits, tier="core")
     assert live.budget_snapshot()["tool_calls"] == 1
     script = [[("bash", {"command": "echo k2"})]]
 
-    result, _ = drive_agent(MAIN_DEF, run_dir, script, limits=limits, enforce=True, state=None)
-    assert "BUDGET" not in str(result.all_messages()).upper(), (
-        "a deps carrying no state was refused on another run's count")
+    with pytest.raises(TypeError, match="RunState"):
+        drive_agent(MAIN_DEF, run_dir, script, limits=limits, enforce=True, state=None)
     assert live.budget_snapshot()["tool_calls"] == 1, (
         "a deps carrying no state counted its call into the live run's state")
 
@@ -228,25 +232,29 @@ def test_lead_zeros_capped_call_carries_the_runs_state(tmp_path):
 
 
 # ======================================================================================
-# the store-setup failure exit hands the run's state back too.
+# the store-setup failure exit runs on the state drive injected.
 # ======================================================================================
 
-def test_the_store_setup_failure_exit_hands_back_the_runs_state(tmp_path):
-    """Pin (commit 123c447a, THE HARNESS SEAM): "run_investigation(...)'s summary carries
-    "run_state" on every exit (the store-setup failure included)". Nothing drives that exit and
-    reads it.
+def test_the_store_setup_failure_exit_runs_on_the_injected_state(tmp_path):
+    """Round 3 (O6): production's summary carries no state on any exit; the state is injected
+    (`run_investigation(run_state=…)`) and the harness hands back the one it injected. On the
+    store-setup failure exit — the `_run_summary` site no turn reaches — `drive()` returns that
+    very object, and the run's id is its own.
 
-    Exploit (greens the committed suite): the store-setup failure exit's `_run_summary(...)`
-    omits `run_state` (or passes None)."""
+    Exploit it catches: the store-setup exit building a state of its own (`RunState(run_dir,
+    run_id)` again) instead of resolving the injected one once at the boundary; the summary's
+    absence of the key on this exit is `test_1235_round3_e2e`'s."""
     def no_store(case_id: str, run_dir: Path):  # noqa: ARG001
         raise OSError("k6: no store")
 
-    summary = drive(materialize(tmp_path, GOLDEN_AB3), run_id="k6-store-fault",
-                    main=ReplayFn([Turn(text="Investigation complete.")]), store_factory=no_store)
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    mine = RunState(run_dir, "k6-store-fault")
+    summary = drive(run_dir, run_id="k6-store-fault",
+                    main=ReplayFn([Turn(text="Investigation complete.")]), store_factory=no_store,
+                    run_state=mine)
     assert summary["truncated_by"] == session_store.TRUNCATED_BY_STORE, summary
-    state = summary.get("run_state")
-    assert isinstance(state, RunState), f"the store-setup exit handed back {state!r}"
-    assert state.run_id == "k6-store-fault"
+    assert summary["run_state"] is mine, "drive did not hand back the state it injected"
+    assert mine.run_id == "k6-store-fault"
 
 
 # ======================================================================================
@@ -267,7 +275,7 @@ def test_concurrent_breaker_charges_lose_no_failure(tmp_path):
     per, workers = 2000, 16
     try:
         for trial in range(8):
-            state = RunState.start(tmp_path, f"k7-{trial}")
+            state = RunState(tmp_path, f"k7-{trial}")
 
             def work(w: int, state: RunState = state) -> None:
                 for _ in range(per):

@@ -193,7 +193,7 @@ def test_lead_zero_returns_section_text_entities_and_status(tmp_path):
 
         rec = VerbRecorder()
         return lead_zero.resolve_lead_zero(
-            run_state=RunState.start(run_dir, f"lz808-{name}"), defender_dir=defender_dir(),
+            run_state=RunState(run_dir, f"lz808-{name}"), defender_dir=defender_dir(),
             alert_path=run_dir / "alert.json", tenant=_tenants1106.fixture_run_tenant(), env={},
             verbs=elastic_backend(rec, **kw),
         ), rec
@@ -360,7 +360,7 @@ def test_lead_zero_issues_its_backend_calls_through_the_query_capture_seam(tmp_p
             alert_path=state.run_dir / "alert.json", tenant=_tenants1106.fixture_run_tenant(),
             env={}, verbs=elastic_backend(rec, answer_hits(TWO_ACTORS)))
 
-    tripped_state = RunState.start(
+    tripped_state = RunState(
         materialize_alert(tmp_path / "tripped", alert_doc()), "lz808-tripped")
     for _ in range(circuit_breaker.PER_SYSTEM_FAIL_LIMIT):
         circuit_breaker.record_outcome(tripped_state, "elastic", 2)
@@ -378,7 +378,7 @@ def test_lead_zero_issues_its_backend_calls_through_the_query_capture_seam(tmp_p
 
     # Control on the same entry point: an untripped state's resolution reaches the backend.
     open_rec = VerbRecorder()
-    _resolve_over(RunState.start(
+    _resolve_over(RunState(
         materialize_alert(tmp_path / "untripped", alert_doc()), "lz808-untripped"), open_rec)
     assert open_rec.calls, \
         "the direct resolution never reaches the backend — the tripped arm above is vacuous"

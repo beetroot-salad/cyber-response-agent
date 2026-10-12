@@ -204,7 +204,7 @@ def run_lead(  # noqa: PLR0913 — one parameter per thing a scenario varies
     # #1106: a run hands MAIN's deps its tenant's record, which every lead inherits.
     deps = replace(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER),
                    tenant=T1106.fixture_run_tenant(),
-                   run_state=RunState.start(run_dir, run_dir.name))
+                   run_state=RunState(run_dir, run_dir.name))
     rec = VerbRecorder()
     model = GatherModel(responses)
     logger = observe.RequestLogger(run_dir / "llm_requests.jsonl")

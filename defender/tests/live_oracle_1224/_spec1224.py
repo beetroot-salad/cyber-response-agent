@@ -1299,15 +1299,15 @@ def run_state(run_dir: Path, run_id: str = "run-1224") -> Any:
     """A fresh run's `RunState` (#1235 round 2) — what a direct registry call's context carries
     when the scenario needs the investigator's clock to pause and resume (a context with no run
     state pauses none). Imported lazily: the module is new in round 2."""
-    return sym("runtime.run_state", "RunState").start(Path(run_dir), run_id)
+    return sym("runtime.run_state", "RunState")(Path(run_dir), run_id)
 
 
 def tap_run_states(registry: Any) -> list[Any]:
     """Every `RunState` the investigator's calls through `registry` carried
     (`VerbContext.run_state`, #1235 round 2), in call order.
 
-    For a driven run that ends by RAISING (an escaped `OracleUnservable`), the driver returns no
-    summary, so `summary["run_state"]` is out of reach; the verb context is the production carry
+    For a driven run that ends by RAISING (an escaped `OracleUnservable`), `drive()` returns
+    nothing, so its `["run_state"]` is out of reach; the verb context is the production carry
     the state rides on, and this reads it there. Installed on the registry INSTANCE (its public
     `verbs` lookup, through which the query tool and lead-0 resolve every callable), each verb
     wrapped with `functools.wraps` so the query tool still validates the real signature."""
@@ -1376,8 +1376,8 @@ def drive_gather(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system:
 def drive_gather_run(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system: str = "idp",
                      run_id: str = "run-1224", limits: Any = None, tenant: Any = None,
                      **kw: Any) -> tuple[Path, Any, Any]:
-    """`drive_gather`, also handing back the run's one `RunState` (#1235 round 2: the driver
-    returns it as `summary["run_state"]`) — where a scenario reads the run's budget or breaker,
+    """`drive_gather`, also handing back the run's one `RunState` (#1235: `drive()` injects it
+    and returns it as `["run_state"]`) — where a scenario reads the run's budget or breaker,
     which no file in the run dir holds."""
     run_dir, gather, summary = _drive_one_gather(
         tmp_path, verbs=verbs, gather_turns=gather_turns, system=system, run_id=run_id,

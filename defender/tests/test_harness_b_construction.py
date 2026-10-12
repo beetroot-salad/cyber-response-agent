@@ -289,7 +289,7 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
     # MAIN's deps carry the run's one `RunState` (#1235 round 2), as the driver hands them:
     # the dispatch's breaker screen reads it.
     deps = replace(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER),
-                   run_state=RunState.start(run_dir, "r-harness-b"))
+                   run_state=RunState(run_dir, "r-harness-b"))
     asyncio.run(tools_gather._run_gather(
         deps, _factory, 40,
         tools_gather.GatherRequest("l-005", "identity", "goal", ("what",)),

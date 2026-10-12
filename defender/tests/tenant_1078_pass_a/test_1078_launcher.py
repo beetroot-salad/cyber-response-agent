@@ -868,7 +868,7 @@ def _sibling_state(sib: Path):  # noqa: ANN202 — a `RunState` (#1235: not impo
     (#1235 round 2, where it was the sibling's run dir)."""
     from defender.runtime.run_state import RunState
 
-    return RunState.start(sib, sib.name)
+    return RunState(sib, sib.name)
 
 
 def test_o4_fork_store_location(tmp_path, data_root):

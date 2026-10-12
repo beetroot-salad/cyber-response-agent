@@ -62,7 +62,7 @@ def _substituting_run(tmp_path: Path, *, turns: int = 2, stores: list | None = N
                       gather: bool = False, summaries: list | None = None):
     """One driven run in which a foreign result IS substituted — the shared setup for every
     demand in this module, and the positive control each of the negatives needs. `summaries`
-    receives the driver's summary, whose `run_state` is the run's own state (#1235)."""
+    receives what `drive()` returned, whose `run_state` is the run's own state (#1235)."""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     calls = [Turn(tool_calls=[("fetch_rows", {})]) for _ in range(turns)]
     if gather:

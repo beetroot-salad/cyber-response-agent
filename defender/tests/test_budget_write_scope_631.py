@@ -234,7 +234,7 @@ def test_report_write_is_refused_and_investigation_write_still_succeeds(tmp_path
 
     drive_agent(MAIN_DEF, run_dir,
                 [[("append_block", {"text": inv_text})]],
-                limits=DEFAULT_LIMITS, enforce=True, state=RunState.start(run_dir, "r"))
+                limits=DEFAULT_LIMITS, enforce=True, state=RunState(run_dir, "r"))
     assert (run_dir / "investigation.md").read_text() == inv_text
     assert not (run_dir / "report.md").exists(), "report.md must not commit from the main loop"
 
@@ -376,7 +376,7 @@ def _drive_one_query(run_dir: Path, params: dict) -> list[dict]:
     from defender.runtime.run_state import RunState
 
     deps = replace(bind(gather_def, run_dir, defender_dir=DEFENDER),
-                   lead_id="l-001", run_state=RunState.start(run_dir, "r"))
+                   lead_id="l-001", run_state=RunState(run_dir, "r"))
 
     async def _go():
         with override_allow_model_requests(False):

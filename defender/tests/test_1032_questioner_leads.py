@@ -164,7 +164,7 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
     from defender._io import read_jsonl_rows
     from defender.runtime.run_state import RunState
 
-    state = RunState.start(tmp_path, "r1032-questioner")
+    state = RunState(tmp_path, "r1032-questioner")
     state.inherit_rows(read_jsonl_rows(RunPaths(tmp_path).executed_queries))
     append_query_row(
         state, lead_id=LEAD, system="", verb="bash", system_key="",

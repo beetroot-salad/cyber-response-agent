@@ -662,7 +662,7 @@ def test_request_keys_stored_before_the_move_are_compared_with_keys_computed_aft
 
     sibling = tmp_path / "resumed"
     sibling.mkdir()
-    state = RunState.start(sibling, "r1080-resumed")
+    state = RunState(sibling, "r1080-resumed")
     _inherit_evidence(run_dir, state, {c["lead_id"] for c in stored_calls()})
     (tmp_path / "episodes").mkdir()
     got = drive_stored_run(run_dir, tmp_path / "episodes" / "ep-1", request_key=request_key,
@@ -841,7 +841,7 @@ def test_same_call_live_and_after_the_row_is_read_back(tmp_path):
     from defender.runtime.run_state import RunState
 
     (tmp_path / "run").mkdir()
-    got = drive_roundtrip(RunState.start(tmp_path / "run", "r1080-roundtrip"),
+    got = drive_roundtrip(RunState(tmp_path / "run", "r1080-roundtrip"),
                           request_key=request_key, append=rq.append_query_row,
                           repeat_trip=rq.repeat_trip)
     assert got["live_key"] == got["learning_row_key"] == got["learning_record_key"] \

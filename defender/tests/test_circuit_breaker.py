@@ -47,7 +47,7 @@ def _state(run_dir):
     """A run's state (#1235 round 2): the breaker lives on the run's one `RunState`."""
     from defender.runtime.run_state import RunState
 
-    return RunState.start(run_dir, "run-cb")
+    return RunState(run_dir, "run-cb")
 
 
 def test_usage_error_does_not_trip_breaker(tmp_path):
@@ -76,7 +76,7 @@ def test_two_infra_failures_trip_breaker(tmp_path):
 
 
 def test_a_new_runs_state_starts_with_a_blank_breaker(tmp_path):
-    """A run's breaker starts blank (#1235: `RunState.start` is the run's start): whatever an
+    """A run's breaker starts blank (#1235: `RunState(...)` is the run's start): whatever an
     earlier run over the same folder tripped, the new run begins with no system down.
 
     Positive control: the earlier run's state WAS tripped, so the healthy read of the new one

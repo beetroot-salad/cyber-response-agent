@@ -29,7 +29,7 @@ def test_next_seq_counts_rows_not_files(tmp_path):
     a payload file backs it, and a payload file with no row counts nothing."""
     from defender.runtime.run_state import RunState
 
-    state = RunState.start(tmp_path, "r-next-seq")
+    state = RunState(tmp_path, "r-next-seq")
     assert _next_seq(state, "l-001") == 0
     state.inherit_rows([
         {"lead_id": "l-001", "seq": 0, "payload_path": None},

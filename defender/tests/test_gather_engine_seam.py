@@ -218,7 +218,7 @@ def _with_run_state(deps: tools.AgentDeps) -> tools.AgentDeps:
     an admitted dispatch's breaker screen reads it."""
     from defender.runtime.run_state import RunState
 
-    return replace(deps, run_state=RunState.start(deps.run_dir, "r-seam"))
+    return replace(deps, run_state=RunState(deps.run_dir, "r-seam"))
 
 
 def _seam_deps(tmp_path: Path):

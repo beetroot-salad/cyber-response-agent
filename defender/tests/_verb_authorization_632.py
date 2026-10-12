@@ -436,8 +436,8 @@ class _Run:
     def __init__(self, run_dir: Path, main: ReplayFn, gather: ReplayFn,
                  summary: dict | None = None):
         self.run_dir, self.main, self.gather = run_dir, main, gather
-        #: The driver's summary (`run_investigation`'s return); its `run_state` is the run's
-        #: one `RunState` (#1235 round 2), the only place a driven run's breaker is read.
+        #: What `drive()` returned: the driver's summary plus `run_state`, the run's one
+        #: `RunState` the harness injected (#1235), the only place a driven run's breaker is read.
         self.summary = summary if summary is not None else {}
 
     @property

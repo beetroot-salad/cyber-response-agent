@@ -158,7 +158,7 @@ def _write(tmp_path: Path, rows: list[dict]):  # noqa: ANN202 — a `RunState` (
     from defender.runtime.run_state import RunState
 
     tmp_path.mkdir(parents=True, exist_ok=True)
-    state = RunState.start(tmp_path, "r826")
+    state = RunState(tmp_path, "r826")
     state.inherit_rows(rows)
     return state
 

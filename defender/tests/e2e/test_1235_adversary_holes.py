@@ -95,7 +95,7 @@ def test_1235_the_query_tool_never_makes_a_state_of_its_own(tmp_path):
         record(deps)
     assert not RunPaths(run_dir).executed_queries.exists(), "a refused record wrote a row"
 
-    state = RunState.start(run_dir, "k-x3")
+    state = RunState(run_dir, "k-x3")
     record(replace(deps, run_state=state))
     assert [r["seq"] for r in state.lead_rows("l-001")] == [0]
     assert RunPaths(run_dir).executed_queries.is_file()
@@ -164,7 +164,7 @@ def test_1235_payload_attribution_reads_the_runs_state(tmp_path):
 
     run_dir = tmp_path / "run"
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
-    state = RunState.start(run_dir, "k-x5")
+    state = RunState(run_dir, "k-x5")
     row = rq.append_query_row(
         state, lead_id="l-001", system="elastic", verb="query", query_id="elastic.q",
         params={"q": "a"}, raw_command="elastic query", payload_text="{}", exit_code=0,
@@ -222,7 +222,7 @@ def test_1235_a_planted_breaker_file_refuses_no_dispatch(tmp_path):
 # atomic under real preemption.
 def test_1235_the_budget_snapshot_is_a_copy(tmp_path):
     from defender.runtime.run_state import RunState
-    state = RunState.start(tmp_path, "r")
+    state = RunState(tmp_path, "r")
     seen = state.budget_snapshot()
     seen["tool_calls"] = 999
     assert state.budget_snapshot()["tool_calls"] == 0
@@ -232,7 +232,7 @@ def test_1235_a_gather_at_the_cap_changes_nothing(tmp_path):
     from defender.hooks import budget_enforcer as be
     from defender.runtime.run_state import RunState
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 1}
-    state = RunState.start(tmp_path, "r")
+    state = RunState(tmp_path, "r")
     be.account_call(state, "bash", limits=limits, tier="core")
     be.account_call(state, "gather", limits=limits, tier="core")
     assert state.budget_snapshot()["subagent_spawns"] == 0
@@ -244,7 +244,7 @@ def test_1235_increments_survive_fine_grained_preemption(tmp_path):
     import threading
     from defender.hooks import budget_enforcer as be
     from defender.runtime.run_state import RunState
-    state = RunState.start(tmp_path, "r")
+    state = RunState(tmp_path, "r")
     limits = {**DEFAULT_LIMITS, "max_tool_calls": 10**9}
     old = sys.getswitchinterval()
     sys.setswitchinterval(1e-6)

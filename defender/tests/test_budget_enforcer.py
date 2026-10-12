@@ -21,7 +21,7 @@ from defender.hooks.budget_enforcer import (
 def _state(run_dir):
     from defender.runtime.run_state import RunState
 
-    return RunState.start(run_dir, run_dir.name)
+    return RunState(run_dir, run_dir.name)
 
 
 def _bump(state, tool_name: str) -> dict:

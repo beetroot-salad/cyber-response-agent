@@ -3,10 +3,10 @@ link lives beside the run folder, not in it.
 
 F1 (comment 6107812099, "forks decided"): the repeat guard and the rejection budget used to
 re-read `executed_queries.jsonl` per call. They now read the rows the host recorded, held on the
-run's one `RunState` (round 2, comment 6117481676: `state.lead_rows(lead)`), which a row enters
-only after its file write succeeded and which no file is ever read into. The file is still
-written, byte for byte as before: it is the model's view and the learning loop's record, and no
-decision reads it back.
+run's one `RunState` (round 2, comment 6117481676: `state.lead_rows(lead)`), which no file is
+ever read into; since round 3 a row is recorded there before its line is written, so the state is
+the record. The file is still written, byte for byte as before: it is the model's view and the
+learning loop's input, and no decision reads it back.
 
 F2: `session_store_pointer.json` — which case database a run's messages live in — leaves the
 run folder for a host-only sidecar beside it, `<run_id>.session-pointer.json` in the run's

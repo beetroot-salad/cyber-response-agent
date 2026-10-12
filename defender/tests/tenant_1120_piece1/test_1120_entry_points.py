@@ -681,7 +681,7 @@ def test_1120_every_run_tenant_reader_takes_the_accepted_tenant(
     run_dir.mkdir()
     alert = H.plant_alert(tmp_path / "in-prompt")
     prompt, _block, status = driver_prompts._user_prompt(  # noqa: SLF001 — the reader itself
-        RunState.start(run_dir, "r-prompt"), alert, H.DEFENDER, systems=["elastic"],
+        RunState(run_dir, "r-prompt"), alert, H.DEFENDER, systems=["elastic"],
         verbs=_UntouchedVerbs(), tenant=run_tenant)
     assert status == lead_zero.STATUS_EMPTY, (
         f"lead zero did not resolve from the Tenant's settings (status {status!r}):\n"

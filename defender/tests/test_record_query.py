@@ -14,8 +14,9 @@ still imports them:
     payload write must not reuse a `(lead_id, seq)`), which the frozen suite does not exercise;
   - and #1235's queries rows on the run's `RunState` (round 2, comment 6117481676): the live
     readers (`repeat_note`, `_next_seq`, the writer's seq, `system_for_payload_operands`) take
-    the state and read the rows it recorded, never `executed_queries.jsonl`, which stays the
-    record; a row enters the state only after its line was written.
+    the state and read the rows it recorded, never `executed_queries.jsonl`; since round 3 the
+    state is the record and the file the model's view of it, so a row enters the state before
+    its line is written and stays there when that write fails.
 
 The model-visible view left with #832: `build_truncated_view` / `PASSTHROUGH_SAMPLE_COUNT` /
 `_passthrough_max_bytes` are gone, and `payload_view.py` (specced by `test_payload_view.py`)
@@ -114,7 +115,7 @@ def _write_rows(tmp_path, rows):
     state: `repeat_note` reads it, never `executed_queries.jsonl`."""
     from defender.runtime.run_state import RunState
 
-    state = RunState.start(tmp_path, "rq")
+    state = RunState(tmp_path, "rq")
     state.inherit_rows(rows)
     return state
 
@@ -216,7 +217,7 @@ def test_repeat_note_is_silent_on_a_run_with_no_rows(tmp_path):
     from defender.runtime.run_state import RunState
 
     assert ge.repeat_note(
-        RunState.start(tmp_path, "rq"), "l-001", seq=3, system="elastic", verb="query",
+        RunState(tmp_path, "rq"), "l-001", seq=3, system="elastic", verb="query",
         params={"q": "a"}, **_result_of(_PAYLOAD),
     ) is None
 
@@ -242,7 +243,7 @@ def test_seq_stays_monotonic_when_a_payload_write_fails(tmp_path):
         q("elastic", "query", {"native_query": "b"}),
         DONE,
     ])
-    drive(run_dir, run_id="rq-seq", main=main, gather=gather, verbs=verbs)
+    state = drive(run_dir, run_id="rq-seq", main=main, gather=gather, verbs=verbs)["run_state"]
 
     # lead-0 (#808) resolves against GOLDEN_AB3 ahead of MAIN's own turn and writes its
     # own (l-000) row(s) into this same table — scope to `LEAD`'s own rows, which is
@@ -251,6 +252,9 @@ def test_seq_stays_monotonic_when_a_payload_write_fails(tmp_path):
     assert [r["seq"] for r in rows] == [0, 1]
     assert rows[0]["payload_path"] is None
     assert rows[1]["payload_path"] == f"gather_raw/{LEAD}/1.json"
+    # #1235 round 3: the state records the row as its line reads — a failed sidecar write is a
+    # row with no payload in both, not a path the state names and the view does not.
+    assert list(state.lead_rows(LEAD)) == rows
 
 
 def test_the_content_hash_never_folds_two_payloads_together(tmp_path):
@@ -268,11 +272,11 @@ def test_the_content_hash_never_folds_two_payloads_together(tmp_path):
 
 # ── #1235: the queries table's live reads come from the run's state ─────────────────────────
 #
-# `executed_queries.jsonl` stays the model's view and the learning loop's record, written
+# `executed_queries.jsonl` stays the model's view and the learning loop's input, written
 # exactly as before; the DECISIONS read from it live (the repeat guard, the rejection budget,
 # the repeat note, the next seq, a reducer failure's system) take the run's `RunState` (#1235
-# round 2) and read the rows it recorded. No file is ever read into it. The new names are
-# imported per test (they do not exist before the implementation).
+# round 2) and read the rows it recorded. No file is ever read into it, and since round 3 a
+# row is recorded there before its line is written: the state is the record.
 
 
 def _live():
@@ -288,7 +292,7 @@ def _bare_run(tmp_path, name: str = "run"):
 
     run_dir = tmp_path / name
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
-    return run_dir, RunState.start(run_dir, name)
+    return run_dir, RunState(run_dir, name)
 
 
 def _append(rq, state, *, params, payload=_PAYLOAD, lead=LEAD):
@@ -379,16 +383,41 @@ def test_state_rows_are_the_lines_written_not_the_dicts_the_writer_built(tmp_pat
         "the state aliases the writer's dict: an edit after the write reached the guards"
 
 
-def test_a_row_whose_write_failed_neither_enters_the_state_nor_spends_a_seq(tmp_path):
-    """R3 (#1235 round 2): appending a row is ONE operation on the run's state, and an
-    exception at any step leaves the state unchanged. The table is squatted by a directory
-    mid-run (which `write_guarded` refuses under any uid — a chmod would not bind root): the
-    write raises, the state keeps only the rows the file holds, and the next seq is the one the
-    failed row would have taken. Params too deep to store are refused before anything,
-    likewise. Once the table is writable again the next row takes that seq, and the state and
-    the file agree.
+def _plant_at(path, kind: str, outside) -> None:
+    """Squat `path` with what `write_guarded` refuses under any uid (a chmod would not bind
+    root): a symlink to a file outside the run, or a directory."""
+    path.unlink(missing_ok=True)
+    if kind == "symlink":
+        path.symlink_to(outside)
+    else:
+        path.mkdir()
 
-    Positive control: the row written before the fault, and the one after it, are both in."""
+
+def _unplant(path, kind: str, saved: bytes) -> None:
+    if kind == "symlink":
+        path.unlink()
+    else:
+        path.rmdir()
+    path.write_bytes(saved)
+
+
+@pytest.mark.parametrize("kind", ["symlink", "directory"])
+def test_a_row_whose_view_write_failed_is_in_the_state_with_its_seq_spent(tmp_path, kind):
+    """R3, round 3 (#1235): the run's state is the record of what the run did, and
+    `executed_queries.jsonl` is the model's view of it. An append validates first, then takes
+    the seq and records the row in the state, and only then writes the view. The table squatted
+    mid-run (a planted symlink, or a directory): the append raises the write's `OSError`, the row
+    IS in the state with the next seq — the call it records was made — and the following append
+    takes the seq after it. The view holds only the lines that landed, and the symlink's target
+    outside the run is untouched.
+
+    Params too deep to store are refused before anything: no row, no seq, no line — the control
+    that validation still comes first.
+
+    Positive control: the rows before and after the fault are in both the state and the view.
+
+    Observed failing by: round 2's ordering (write the line, then record), under which a
+    refused view write leaves an executed call out of every live decision."""
     from defender._query_rules import PARAMS_NESTING_LIMIT, ParamsTooDeep
     from defender.run_repository import RunPaths
 
@@ -398,16 +427,18 @@ def test_a_row_whose_write_failed_neither_enters_the_state_nor_spends_a_seq(tmp_
 
     table = RunPaths(run_dir).executed_queries
     saved = table.read_bytes()
-    table.unlink()
-    table.mkdir()
-    with pytest.raises(OSError, match="non-plain or aliased entry"):
-        _append(rq, state, params={"q": "lost"})
-    assert [r["params"] for r in state.lead_rows(LEAD)] == [{"q": "a"}], \
-        "a row whose line was never written entered the state"
-    assert rq._next_seq(state, LEAD) == 1, "the failed write spent a seq"
+    outside = tmp_path / "outside.jsonl"
+    outside.write_bytes(b"")
+    _plant_at(table, kind, outside)
+    with pytest.raises(OSError):  # noqa: PT011 — the symlink and the directory refuse in their own words
+        _append(rq, state, params={"q": "unviewed"})
+    assert [(r["seq"], r["params"]) for r in state.lead_rows(LEAD)] == \
+        [(0, {"q": "a"}), (1, {"q": "unviewed"})], \
+        "a row whose view write failed did not reach the state"
+    assert rq._next_seq(state, LEAD) == 2, "the recorded row's seq was not spent"
+    assert outside.read_bytes() == b"", "the append followed the planted link"
 
-    table.rmdir()
-    table.write_bytes(saved)
+    _unplant(table, kind, saved)
     deep: dict = {}
     cursor = deep
     for _ in range(PARAMS_NESTING_LIMIT + 2):
@@ -415,10 +446,14 @@ def test_a_row_whose_write_failed_neither_enters_the_state_nor_spends_a_seq(tmp_
         cursor = cursor["k"]
     with pytest.raises(ParamsTooDeep):
         _append(rq, state, params=deep)
-    assert rq._next_seq(state, LEAD) == 1, "a refused params spent a seq"
-    assert table.read_bytes() == saved, "a refused params wrote a line"
+    assert state.row_count(LEAD) == 2, "refused params reached the state"
+    assert rq._next_seq(state, LEAD) == 2, "refused params spent a seq"
+    assert table.read_bytes() == saved, "refused params wrote a line"
 
-    assert _append(rq, state, params={"q": "c"})["seq"] == 1
+    assert _append(rq, state, params={"q": "c"})["seq"] == 2
     assert [(r["seq"], r["params"]) for r in state.lead_rows(LEAD)] == \
-        [(0, {"q": "a"}), (1, {"q": "c"})]
-    assert state.lead_rows(LEAD) == _table_rows(run_dir)
+        [(0, {"q": "a"}), (1, {"q": "unviewed"}), (2, {"q": "c"})]
+    assert [r["seq"] for r in _table_rows(run_dir)] == [0, 2], \
+        "the view holds a line the refused write never landed, or lost one that did"
+    assert [r for r in state.lead_rows(LEAD) if r["seq"] != 1] == _table_rows(run_dir), \
+        "the rows that did land disagree between the state and the view"

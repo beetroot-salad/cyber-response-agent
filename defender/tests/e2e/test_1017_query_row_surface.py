@@ -108,7 +108,7 @@ def test_every_writer_of_the_table_leaves_rows_keyed_exactly_as_declared(tmp_pat
     # from the file (#1235), so this direct call builds the state a driver would and threads it.
     from defender.runtime.run_state import RunState
 
-    state = RunState.start(manual, "d1017-second-writer")
+    state = RunState(manual, "d1017-second-writer")
     lead_zero._record_manual_row(
         lead_zero._CaptureDeps(
             run_dir=manual, defender_dir=DEFENDER, run_id="d1017-second-writer",
@@ -184,8 +184,8 @@ def test_records_off_the_surface_are_byte_for_byte_what_the_guard_reads_live(tmp
     what the guard read live: same dicts, same order. Since #1235 the guard's live reader is
     the run's `RunState` (`state.lead_rows`) — whose rows are the lines the writer actually
     wrote, read back — and never the FILE. So the three must agree byte for byte: the
-    surface's records, the file's rows and the state's rows (the driver's summary carries the
-    state, read post-run in this process). That is the whole of what lets an offline replay
+    surface's records, the file's rows and the state's rows (`drive()` hands back the state it
+    injected, read post-run in this process). That is the whole of what lets an offline replay
     hand the guard's predicates what the run handed them.
 
     Observed failing by: `record()` missing, or any key/value/order difference between the

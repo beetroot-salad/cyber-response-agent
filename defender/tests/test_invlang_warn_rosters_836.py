@@ -132,14 +132,14 @@ def test_exactly_one_agent_definition_is_offered_fix_row():
 
 def _budgeted(tmp_path, tool_calls: int):
     """MAIN deps whose run's real budget — the run's `RunState`, started and counted through
-    the production `RunState.start` / `count_call` (#1235 round 2) and carried on the deps as
+    the production `RunState(...)` / `count_call` (#1235 round 2) and carried on the deps as
     the run's own — holds `tool_calls` executed calls. Never driven through
     `run_investigation`, which starts a state of its own."""
     from defender.hooks.budget_enforcer import count_call
     from defender.runtime.run_state import RunState
 
     deps, run = main_deps(tmp_path)
-    state = RunState.start(run, run.name)
+    state = RunState(run, run.name)
     for _ in range(tool_calls):
         count_call(state, "bash")
     return replace(deps, run_state=state), run

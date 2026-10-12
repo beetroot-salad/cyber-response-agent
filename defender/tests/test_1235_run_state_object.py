@@ -11,9 +11,10 @@ oracle_held`, `circuit_breaker.record_outcome / is_tripped / down_message`,
 What this module pins, at the object (the driven obligations are in
 `tests/e2e/test_1235_run_state_e2e.py`):
 
-  - `RunState.start` is a fresh run: zero counts, a blank breaker, no rows, no oracle credit.
+  - `RunState(run_dir, run_id)` is a fresh run: zero counts, a blank breaker, no rows, no oracle credit.
     It reads no file — whatever the folder or its container holds — and writes none.
-  - What the state hands out is a copy; nothing a caller does to it moves the run.
+  - Nothing a caller does to what the state hands out moves the run (snapshots are copies;
+    `lead_rows` is a tuple of the stored rows, for read-only use — round 3).
   - No process-wide table remains, and two states — even for one folder and one run id — share
     nothing; a row recorded through a deps object lands in the state that deps CARRIES, however
     the deps spell the folder.
@@ -23,8 +24,10 @@ What this module pins, at the object (the driven obligations are in
     credit lives only in the state, so a new state for the same run id starts with none (#1239)
     and no `.oracle-held.json` is written anywhere.
 
-R3 (a refused table write leaves the state unchanged) is `tests/test_record_query.py`'s
-`test_a_row_whose_write_failed_neither_enters_the_state_nor_spends_a_seq`.
+R3 is `tests/test_record_query.py`'s
+`test_a_row_whose_view_write_failed_is_in_the_state_with_its_seq_spent`: since round 3 the state
+is the record and `executed_queries.jsonl` the model's view, so a refused view write leaves the
+row IN the state with its seq spent (params refused before anything still record nothing).
 
 RED until the round-2 implementation lands: `defender.runtime.run_state` does not exist.
 """
@@ -75,7 +78,7 @@ def _tree(root: Path) -> dict[str, bytes | None]:
 # ======================================================================================
 
 def test_a_started_state_is_a_fresh_run_and_reads_and_writes_no_file(tmp_path):
-    """`RunState.start` begins a run: zero counts, a wall-clock origin of now (the same instant
+    """`RunState(run_dir, run_id)` begins a run: zero counts, a wall-clock origin of now (the same instant
     for `created_at` and `started_at`, timezone-aware), a blank breaker, no query rows, no
     oracle credit. The folder holds every file the run state used to be read from — a spent
     `budget.json`, a tripped `circuit_breaker.json`, `l-001` rows in `executed_queries.jsonl` —
@@ -102,7 +105,7 @@ def test_a_started_state_is_a_fresh_run_and_reads_and_writes_no_file(tmp_path):
     before = _tree(tmp_path)
     started = datetime.now(UTC)
 
-    state = RunState.start(run_dir, "r")
+    state = RunState(run_dir, "r")
 
     assert state.run_id == "r"
     assert state.run_dir == run_dir
@@ -114,7 +117,7 @@ def test_a_started_state_is_a_fresh_run_and_reads_and_writes_no_file(tmp_path):
     assert origin.tzinfo is not None, "the wall-clock origin is not timezone-aware"
     assert abs((origin - started).total_seconds()) < 5, "the origin is not the run's start"
     assert state.breaker_snapshot() == {"systems": {}, "total_failures": 0}
-    assert state.lead_rows(LEAD) == [], "rows on disk entered a fresh state"
+    assert list(state.lead_rows(LEAD)) == [], "rows on disk entered a fresh state"
     assert rq._next_seq(state, LEAD) == 0
     assert be.oracle_held(state) == 0.0, "a credit on disk entered a fresh state"
     assert cb.is_tripped(state, "elastic") is False
@@ -130,14 +133,16 @@ def test_a_started_state_is_a_fresh_run_and_reads_and_writes_no_file(tmp_path):
     assert len(state.lead_rows(LEAD)) == 1
 
 
-def test_what_the_state_hands_out_is_a_copy(tmp_path):
-    """Every read hands out a copy: editing the budget snapshot, the breaker snapshot (down to a
-    system's record), a returned row, or the dict `append_query_row` returned changes nothing
-    the run decides on.
+def test_what_the_state_hands_out_cannot_move_the_run(tmp_path):
+    """Nothing a caller does to what the state hands out moves the run: the budget and breaker
+    snapshots are copies (down to a system's record), the dict `append_query_row` returned is
+    not the row the state recorded, and `lead_rows` is a tuple — a caller cannot add a row to,
+    or drop one from, the lead through it. (Round 3: `lead_rows` hands out the stored rows
+    themselves, for read-only use, rather than a deep copy of each.)
 
     Positive control: the state's own operations do move the values those copies were read
     from."""
-    state = RunState.start(_run_dir(tmp_path), "r")
+    state = RunState(_run_dir(tmp_path), "r")
     cb.record_outcome(state, "elastic", 2)
     written = _append(state, params={"q": "a"})
 
@@ -146,10 +151,11 @@ def test_what_the_state_hands_out_is_a_copy(tmp_path):
     breaker = state.breaker_snapshot()
     breaker["systems"]["elastic"]["failures"] = 999
     breaker["total_failures"] = 999
-    row = state.lead_rows(LEAD)[0]
-    row["seq"] = 99
-    row["params"]["q"] = "edited"
-    written["params"]["q"] = "edited too"
+    written["params"]["q"] = "edited after the write"
+    written["seq"] = 99
+    rows = state.lead_rows(LEAD)
+    with pytest.raises((TypeError, AttributeError)):
+        rows.append({"lead_id": LEAD, "seq": 1})  # type: ignore[attr-defined]
 
     assert state.budget_snapshot()["tool_calls"] == 0
     assert state.breaker_snapshot() == {"systems": {"elastic": {"failures": 1}},
@@ -190,7 +196,7 @@ def test_two_states_for_one_folder_and_one_run_id_share_nothing(tmp_path):
 
     Positive control: each operation does move the state it was given."""
     run_dir = _run_dir(tmp_path)
-    one, two = RunState.start(run_dir, "same"), RunState.start(run_dir, "same")
+    one, two = RunState(run_dir, "same"), RunState(run_dir, "same")
 
     be.count_call(one, "gather")
     be.account_call(one, "bash", limits=be.DEFAULT_LIMITS, tier="core")
@@ -211,7 +217,7 @@ def test_two_states_for_one_folder_and_one_run_id_share_nothing(tmp_path):
         == (0, 0)
     assert cb.is_tripped(two, "elastic") is False
     assert two.breaker_snapshot() == {"systems": {}, "total_failures": 0}
-    assert two.lead_rows(LEAD) == []
+    assert list(two.lead_rows(LEAD)) == []
     assert rq._next_seq(two, LEAD) == 0
     assert be.oracle_held(two) == 0.0
 
@@ -234,7 +240,7 @@ def test_a_row_recorded_through_deps_lands_in_the_state_the_deps_carry(tmp_path)
 
     real = _run_dir(tmp_path / "real")
     (tmp_path / "link").symlink_to(tmp_path / "real", target_is_directory=True)
-    carried = RunState.start(tmp_path / "link" / "run", "r-carried")
+    carried = RunState(tmp_path / "link" / "run", "r-carried")
     deps = replace(bind(_tenants1106.fixture_gather_def(), real, defender_dir=DEFENDER),
                    lead_id=LEAD, run_state=carried)
 
@@ -244,9 +250,9 @@ def test_a_row_recorded_through_deps_lands_in_the_state_the_deps_carry(tmp_path)
 
     assert [r["params"] for r in carried.lead_rows(LEAD)] == [{"q": "a"}], \
         "the row did not land in the state the deps carry"
-    assert carried.lead_rows(LEAD) == [
+    assert list(carried.lead_rows(LEAD)) == [
         r for r in read_jsonl_rows(RunPaths(real).executed_queries) if r["lead_id"] == LEAD]
-    assert RunState.start(real, "r-carried").lead_rows(LEAD) == []
+    assert list(RunState(real, "r-carried").lead_rows(LEAD)) == []
 
 
 # ======================================================================================
@@ -254,7 +260,7 @@ def test_a_row_recorded_through_deps_lands_in_the_state_the_deps_carry(tmp_path)
 # ======================================================================================
 
 def test_concurrent_appends_to_one_lead_take_distinct_seqs_and_agree_with_the_table(tmp_path):
-    """A row append is one operation under the state's lock (seq, payload, table line, record):
+    """A row append is one operation under the state's lock (seq, record, payload, view line):
     eight threads appending five rows each to one lead under fine-grained preemption take the
     seqs 0..39 once each, and the state's rows are the table's rows, in the same order.
 
@@ -263,7 +269,7 @@ def test_concurrent_appends_to_one_lead_take_distinct_seqs_and_agree_with_the_ta
     import sys
 
     run_dir = _run_dir(tmp_path)
-    state = RunState.start(run_dir, "r")
+    state = RunState(run_dir, "r")
     old = sys.getswitchinterval()
     sys.setswitchinterval(1e-6)
     try:
@@ -279,7 +285,7 @@ def test_concurrent_appends_to_one_lead_take_distinct_seqs_and_agree_with_the_ta
     finally:
         sys.setswitchinterval(old)
 
-    rows = state.lead_rows(LEAD)
+    rows = list(state.lead_rows(LEAD))
     assert sorted(r["seq"] for r in rows) == list(range(40)), "two appends took one seq"
     assert [r["seq"] for r in rows] == list(range(40)), "the state's order is not the seq order"
     assert rows == read_jsonl_rows(RunPaths(run_dir).executed_queries), \
@@ -304,7 +310,7 @@ def test_every_state_has_a_clock_whose_credit_is_its_own(tmp_path):
     of the second is not a clock that never credits."""
     run_dir = _run_dir(tmp_path / "runs")
     before = _tree(tmp_path)
-    first = RunState.start(run_dir, "reused-id")
+    first = RunState(run_dir, "reused-id")
     assert be.oracle_held(first) == 0.0
 
     be.oracle_turn_opened(first)
@@ -321,7 +327,7 @@ def test_every_state_has_a_clock_whose_credit_is_its_own(tmp_path):
     be.oracle_turn_closed(first)
     assert be.oracle_held(first) >= credited + 0.015, "a second turn was not added"
 
-    second = RunState.start(run_dir, "reused-id")
+    second = RunState(run_dir, "reused-id")
     assert be.oracle_held(second) == 0.0, "a new run with a reused id inherited oracle credit"
     assert list(tmp_path.rglob("*.oracle-held.json")) == []
     assert _tree(tmp_path) == before, "the oracle clock wrote to disk"

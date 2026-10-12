@@ -3,7 +3,7 @@
 The design (issue comment on #1174): every plain-file reader in `_io` — `Bound.read` (so
 `read_jsonl`), `rooted_read`, `read_plain`, `read_plain_bytes`, `read_guarded`,
 `read_bytes_guarded` — and the two read-modify-write reads through the rewrite handles
-(`_run_handle`'s `update` verb, `hooks/_run_dir.update_json_locked`) owe:
+(`_run_handle`'s `update` verb, `_io.locked_json_update` over `locked_for_rewrite`) owe:
 
 - O1: a file over `READ_LIMIT` (64 MiB) is refused before any byte is read, path-free; a file
   that grows past it while read is refused too; no `MemoryError`.
@@ -34,7 +34,6 @@ import pytest
 
 from defender import _io
 from defender.run_repository import RunPaths
-from defender.hooks import _run_dir
 
 MiB = 1024 * 1024
 NAME = "rec.txt"
@@ -517,9 +516,21 @@ def test_o5_an_empty_file_is_an_empty_read(root, reader):
 # memory, and the run handle's two locked `update` members (`budget`, `circuit_breaker`) went
 # with them. The arms that planted unusable `budget.json` / `circuit_breaker.json` content, and
 # the breaker's "unusable state reads as tripped" branch (O10, H3, H8, H9), retired with the
-# files. The hooks' locked update and read (`hooks/_run_dir`) stay, so O6/O8 are pinned on those
-# seams over a plain state file. (The oracle-held sidecar, written and read through them, left
-# with #1235 too: the oracle's held time is the run's in-memory state.)
+# files. O6/O8 are pinned on the shared locked update and read (`_io.locked_json_update` over
+# `locked_for_rewrite`, `_io.locked_json_read` over `locked_for_read`) over a plain state file.
+# (The oracle-held sidecar left with #1235 too: the oracle's held time is the run's in-memory
+# state. Round 3 deleted `hooks/_run_dir`'s two wrappers over these, which had no production
+# caller left; the arms that pinned only the wrappers — H6, H13 — left with them.)
+
+
+def update_locked(path: Path, mutate: Callable[[dict], Any], **kw: Any) -> dict:
+    """The shared locked read-modify-write: `_io.locked_json_update` over `locked_for_rewrite`."""
+    return _io.locked_json_update(_io.locked_for_rewrite(path), mutate, **kw)
+
+
+def read_locked(path: Path) -> dict:
+    """The shared locked read: `_io.locked_json_read` over `locked_for_read`."""
+    return _io.locked_json_read(_io.locked_for_read(path))
 
 
 def _deep(depth: int) -> bytes:
@@ -563,21 +574,21 @@ def load(path: Path) -> Any:
 
 
 @pytest.mark.parametrize("kind", UNUSABLE)
-def test_o6_the_hooks_locked_update_heals_unusable_content_to_the_default_with_the_change(
+def test_o6_the_locked_update_heals_unusable_content_to_the_default_with_the_change(
         tmp_path, kind):
-    """`hooks/_run_dir.update_json_locked` (the hooks' locked writer) on unusable
-    content starts from the default, applies its change and writes, rather than raising."""
+    """The shared locked update on unusable content starts from the default, applies its
+    change and writes, rather than raising."""
     p = tmp_path / "state.json"
     plant_unusable(p, kind)
-    state = _run_dir.update_json_locked(p, lambda d: d.update(k=1), default=dict)
+    state = update_locked(p, lambda d: d.update(k=1), default=dict)
     assert state == {"k": 1}
     assert load(p) == state
 
 
 def test_o6_control_valid_documents_are_merged_not_reset(tmp_path):
     p = tmp_path / "state.json"
-    _run_dir.update_json_locked(p, lambda d: d.update(a=1), default=dict)
-    _run_dir.update_json_locked(p, lambda d: d.update(b=2), default=dict)
+    update_locked(p, lambda d: d.update(a=1), default=dict)
+    update_locked(p, lambda d: d.update(b=2), default=dict)
     assert load(p) == {"a": 1, "b": 2}
 
 
@@ -586,7 +597,7 @@ def test_o6_the_rewrite_leaves_exactly_the_new_document(tmp_path):
     one leaves no tail and no leading NULs, byte for byte."""
     p = tmp_path / "state.json"
     p.write_text(json.dumps({"long": "x" * 5000}))
-    _run_dir.update_json_locked(p, lambda d: (d.clear(), d.update(k=1)))
+    update_locked(p, lambda d: (d.clear(), d.update(k=1)))
     assert load(p) == {"k": 1}
     assert not p.read_bytes().startswith(b"\x00")
     assert p.read_bytes() == json.dumps({"k": 1}, indent=2).encode()
@@ -633,10 +644,10 @@ def test_o7_a_read_fault_propagates_out_of_the_update_and_changes_nothing(tmp_pa
 
 
 @pytest.mark.parametrize("kind", UNUSABLE)
-def test_o8_the_hooks_locked_read_answers_empty_for_unusable_content(tmp_path, kind):
+def test_o8_the_locked_read_answers_empty_for_unusable_content(tmp_path, kind):
     p = tmp_path / "state.json"
     plant_unusable(p, kind)
-    assert _run_dir.read_json_locked(p) == {}
+    assert read_locked(p) == {}
 
 
 @pytest.mark.parametrize("fault", [eio, eagain, vanishing_read], ids=["EIO", "EAGAIN", "vanished"])
@@ -650,8 +661,7 @@ def test_o8_the_locked_read_answers_empty_for_any_read_error(tmp_path, fault):
 def test_o8_control_the_locked_read_answers_the_document(tmp_path):
     p = tmp_path / "state.json"
     p.write_text('{"a": 1}')
-    assert _io.locked_json_read(_io.locked_for_read(p)) == {"a": 1}
-    assert _run_dir.read_json_locked(p) == {"a": 1}
+    assert read_locked(p) == {"a": 1}
 
 
 def test_o8_the_locked_read_refuses_a_link_without_following_it(tmp_path):
@@ -659,7 +669,7 @@ def test_o8_the_locked_read_refuses_a_link_without_following_it(tmp_path):
     target.write_text('{"secret": 1}')
     p = tmp_path / "state.json"
     p.symlink_to(target)
-    assert _run_dir.read_json_locked(p) == {}
+    assert read_locked(p) == {}
 
 
 # -- O11: the path update judges plainness on the descriptor ---------------------------------
@@ -1103,27 +1113,6 @@ def test_h5_a_procfs_file_reads_to_the_same_full_content():
     assert _io.read_text_soft(proc) == (want, None)
 
 
-# -- H6: the hooks' update does not heal from a read fault ----------------------------------
-
-
-@pytest.mark.parametrize("fault", [eio, eagain, vanishing_read], ids=["EIO", "EAGAIN", "vanished"])
-def test_h6_update_json_locked_propagates_a_read_fault_through_its_seam(tmp_path, fault):
-    """The hooks entry point (the locked writer) takes `os_`, so O7 is pinned
-    there, not only on `_io`."""
-    p = tmp_path / "state.json"
-    p.write_text('{"keep": true}')
-    with pytest.raises(OSError):  # noqa: PT011 — each fault keeps its own errno and words
-        _run_dir.update_json_locked(p, lambda d: d.update(k=1), os_=FaultOs(read_fault=fault))
-    assert p.read_text() == '{"keep": true}'
-
-
-def test_h6_read_json_locked_answers_empty_on_a_read_fault_through_its_seam(tmp_path):
-    p = tmp_path / "state.json"
-    p.write_text('{"keep": true}')
-    assert _run_dir.read_json_locked(p, os_=FaultOs(read_fault=eio)) == {}
-    assert _run_dir.read_json_locked(p, os_=FaultOs()) == {"keep": True}
-
-
 # -- H7: a fault inside the read opener -------------------------------------------------------
 
 
@@ -1166,7 +1155,7 @@ def test_h11_a_document_at_exactly_the_nesting_limit_is_merged(tmp_path):
     p = tmp_path / "state.json"
     p.write_bytes(_deep(_io.JSON_NESTING_LIMIT - 1))  # the outer object makes it LIMIT deep
     assert _io.json_nesting_depth(p.read_text()) == _io.JSON_NESTING_LIMIT
-    state = _run_dir.update_json_locked(p, lambda d: d.update(k=1))
+    state = update_locked(p, lambda d: d.update(k=1))
     assert "a" in state
     assert state["k"] == 1
 
@@ -1175,16 +1164,4 @@ def test_h11_one_past_the_nesting_limit_heals(tmp_path):
     p = tmp_path / "state.json"
     p.write_bytes(_deep(_io.JSON_NESTING_LIMIT))
     assert _io.json_nesting_depth(p.read_text()) == _io.JSON_NESTING_LIMIT + 1
-    assert _run_dir.update_json_locked(p, lambda d: d.update(k=1)) == {"k": 1}
-
-
-# -- H13: one indent setting on the hooks' update ---------------------------------------------
-#
-# (#1235: the run handle's `update` verb had two members, `budget` and `circuit_breaker`, which
-# left with their files, so the "both paths" comparison has one path left.)
-
-
-def test_h13_the_hooks_update_writes_the_indent_2_form(tmp_path):
-    p = tmp_path / "state.json"
-    state = _run_dir.update_json_locked(p, lambda d: d.update(a=1, b=[1, 2]))
-    assert p.read_bytes() == json.dumps(state, indent=2).encode()
+    assert update_locked(p, lambda d: d.update(k=1)) == {"k": 1}

@@ -156,7 +156,7 @@ class _Run:
     main: Any
     gather: Any
     raised: BaseException | None = None
-    #: The driver's summary (None for a run that ended by raising), and the run states the
+    #: What `drive()` returned (None for a run that ended by raising), and the run states the
     #: investigator's calls carried into the registry (`S.tap_run_states`).
     summary: dict | None = None
     carried: list[Any] = field(default_factory=list)

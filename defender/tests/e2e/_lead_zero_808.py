@@ -434,7 +434,7 @@ class Res:
 
     @property
     def state(self) -> Any:
-        """The run's one `RunState` (#1235 round 2), as the driver's summary hands it back:
+        """The run's one `RunState` (#1235), as `drive()` hands it back (the harness injects it):
         the only place a driven run's budget and breaker are read."""
         return self.summary_dict["run_state"]
 

@@ -84,7 +84,7 @@ def _sibling_state(sibling_dir: Path):  # noqa: ANN202 — a `RunState` (#1235: 
     its third argument (#1235 round 2, where it was the sibling's run dir)."""
     from defender.runtime.run_state import RunState
 
-    return RunState.start(sibling_dir, sibling_dir.name)
+    return RunState(sibling_dir, sibling_dir.name)
 
 
 # the caller contract: fork's seeding and send-role hydration are one number
@@ -475,7 +475,7 @@ def test_a_resumed_run_inherits_the_evidence_its_prefix_names(tmp_path):
     tabled = [json.loads(line) for line in (sibling_dir / "executed_queries.jsonl").read_text(
         encoding="utf-8").splitlines()]
     assert [row["lead_id"] for row in tabled] == ["l-001"], "the fixture's one inherited row"
-    assert state.lead_rows("l-001") == tabled, (
+    assert list(state.lead_rows("l-001")) == tabled, (
         "the sibling's run state does not hold the rows seeding wrote to its table")
     assert (sibling_dir / "gather_raw" / "l-001" / "0.json").is_file(), (
         "the payload sidecar the inherited prefix names is not in the sibling's run dir")

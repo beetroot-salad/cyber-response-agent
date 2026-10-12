@@ -5,7 +5,7 @@ D3, comment 6107812099). Before #1235 the call cap, the spawn cap, the wall cloc
 breaker were each re-read from `budget.json` / `circuit_breaker.json` in the run folder on every
 call, so whatever wrote those files moved the decision. After it, nothing writes either file
 and nothing reads one: the run's own process holds the state — since round 2 (comment
-6117481676) on the run's one `RunState`, which the driver returns as `summary["run_state"]`
+6117481676) on the run's one `RunState`, which `drive()` returns as `["run_state"]`
 (`budget_snapshot()`, `breaker_snapshot()`) — and the accounting-failure sidecar that guarded
 the file writes retires with them (F3).
 
@@ -13,7 +13,7 @@ What this module pins, each through the real driver (`drive`), with the mid-run 
 in-process from the scripted model's own turn — the seam `test_denial_gather_632`'s
 `BreakingReplay` and `test_budget_e2e_631`'s clock-step replay already use. The plant always
 lands AFTER the driver started the run's state (the model is first asked after
-`RunState.start`), so it is a write into a live run, never a seed:
+`RunState(...)`), so it is a write into a live run, never a seed:
 
   O1 (budget, breaker). Overwriting or deleting the state file in a live run's folder changes
      no refusal: the call cap still refuses at the cap, a tripped system stays tripped, a
@@ -26,7 +26,8 @@ lands AFTER the driver started the run's state (the model is first asked after
 The queries table's live reads (the repeat guard, the rejection budget) and the case pointer
 are pinned in the companion module for the second half of #1235.
 
-RED until #1235's round 2 lands: the driver's summary carries no `run_state`.
+Since round 3 production's summary carries no state: the harness injects it
+(`run_investigation(run_state=…)`) and `drive()` hands it back.
 """
 from __future__ import annotations
 

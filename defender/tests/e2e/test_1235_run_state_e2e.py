@@ -7,9 +7,10 @@ from that keying, and the redesign makes them impossible by construction: the dr
 is an operation on it, it rides on `AgentDeps.run_state` (gather leads get the parent's object)
 and on `VerbContext.run_state`, and it lives exactly as long as the run.
 
-The seam a driven test reads the state through is the driver's own return value:
-`run_investigation(...)["run_state"]`, which `drive(...)` hands back unchanged. It is the one
-place a test reaches a driven run's state.
+The seam a driven test reads the state through is the harness's own return value: since round
+3 production's summary carries no state — `run_investigation(run_state=…)` takes it — and
+`drive(...)` builds the run's state, injects it, and returns it under `"run_state"`. It is the
+one place a test reaches a driven run's state.
 
 What this module pins, each through the real driver:
 
@@ -30,8 +31,8 @@ What this module pins, each through the real driver:
       spelling of its folder counts one pool, and the gather lead's verb context carries the
       very object the driver returns; two runs with ONE run id driven in one process share
       nothing.
-  R4. State is released with the run: once the caller drops the summary, a weak reference to the
-      run's state dies.
+  R4. State is released with the run: once the caller drops what `drive()` returned, a weak
+      reference to the run's state dies.
   R5. A run recorded before #1235 (its case link still inside the folder, no sidecar) is refused
       loudly by every reader of the run -> case link, naming the run and saying to re-run it; it
       never reads as "no session".
@@ -108,7 +109,7 @@ class Asked:
         def query(ctx, *, native_query: str, limit: int = 10) -> list[dict]:
             if look:
                 self.states.append(ctx.run_state)
-                self.inherited_seen.append(ctx.run_state.lead_rows(LEAD))
+                self.inherited_seen.append(list(ctx.run_state.lead_rows(LEAD)))
             self.queries.append(native_query)
             return [{"run": self.tag, "q": native_query, "n": len(self.queries)}]
 
@@ -211,7 +212,7 @@ def test_the_siblings_state_holds_its_inherited_rows_from_its_first_call(tmp_pat
         "the sibling's first call did not see its inherited rows on the run's state")
     state = summary["run_state"]
     assert asked.states == [state], "the verb context carried a state other than the run's"
-    assert state.lead_rows(LEAD) == table_rows, (
+    assert list(state.lead_rows(LEAD)) == table_rows, (
         "the run's state and its table disagree about l-001")
 
 
@@ -377,7 +378,7 @@ def test_a_run_driven_through_a_symlinked_folder_counts_one_pool(tmp_path):
     assert state.run_dir.resolve() == (real / "run").resolve()
     snapshot = state.budget_snapshot()
     assert (snapshot["tool_calls"], snapshot["subagent_spawns"]) == (4, 1), snapshot
-    assert state.lead_rows(LEAD) == _rows(real / "run"), (
+    assert list(state.lead_rows(LEAD)) == _rows(real / "run"), (
         "the state's rows and the table read through the real spelling disagree")
     assert len(state.lead_rows(LEAD)) == 2
 
@@ -404,28 +405,30 @@ def test_two_runs_with_one_run_id_in_one_process_share_no_state(tmp_path):
     assert (a["tool_calls"], a["subagent_spawns"]) == (4, 1), f"the second run moved the first's pool: {a}"
     assert (b["tool_calls"], b["subagent_spawns"]) == (2, 0), f"the second run inherited counts: {b}"
     assert len(first.lead_rows(LEAD)) == 2
-    assert second.lead_rows(LEAD) == []
+    assert list(second.lead_rows(LEAD)) == []
 
 
 # ======================================================================================
 # R4 — the state is released with the run.
 # ======================================================================================
 
-def test_nothing_holds_the_runs_state_once_the_caller_drops_the_summary(tmp_path):
-    """R4: after `run_investigation` returns and the caller drops the summary, no process-wide
+def test_nothing_holds_the_runs_state_once_the_caller_drops_the_result(tmp_path):
+    """R4: after the run returns and the caller drops what `drive()` returned, no process-wide
     reference keeps the run's state — a weak reference to it dies at the next collection.
 
     Positive control: right after the run, the reference is live and the object holds the run's
     rows and counts, so what dies below is the run's state, not an empty stand-in.
 
-    The state is dropped FROM the summary rather than by dropping the summary: under this
-    harness the replay models are sync `FunctionModel`s that pydantic-ai runs through
-    `anyio.to_thread.run_sync`, and anyio caches the run's root task (whose result is the
-    summary) in a module-level table keyed by the event loop, so the summary itself outlives
-    `asyncio.run`. Production's callbacks are all async and never reach that path. What still
-    holds the state once the summary lets go of it is the production code's.
+    Round 2 had to pop the state OUT of the summary before dropping it: the replay models are
+    sync `FunctionModel`s that pydantic-ai runs through `anyio.to_thread.run_sync`, and anyio
+    caches the run's root task (whose result is `run_investigation`'s summary) in a module-level
+    table keyed by the event loop, so that summary outlives `asyncio.run`. Since round 3 the
+    summary carries no state (O6): `drive()`'s result is its own dict holding the state the
+    harness injected, so dropping it whole is the honest release, and whatever still holds the
+    state then is production's.
 
-    Observed failing by: any process-wide registry of run states (round 1's three tables)."""
+    Observed failing by: any process-wide registry of run states (round 1's three tables), and
+    a summary that still carries the state (anyio's cache would keep it alive)."""
     answered: list[str] = []
 
     def probe(ctx, *, native_query: str = "FROM hosts") -> list[dict]:
@@ -438,17 +441,16 @@ def test_nothing_holds_the_runs_state_once_the_caller_drops_the_summary(tmp_path
             "what_to_summarize": ["host inventory"]})]),
         Turn(text="Investigation complete."),
     ])
-    summary = drive(materialize(tmp_path, GOLDEN_AB3), run_id="r1235-v2-release", main=main,
-                    gather=ReplayFn([q("cmdb", "probe", {"native_query": "FROM hosts"}), DONE]),
-                    verbs=FakeVerbs({"cmdb": {"probe": probe}}))
-    ref = weakref.ref(summary["run_state"])
+    result = drive(materialize(tmp_path, GOLDEN_AB3), run_id="r1235-v2-release", main=main,
+                   gather=ReplayFn([q("cmdb", "probe", {"native_query": "FROM hosts"}), DONE]),
+                   verbs=FakeVerbs({"cmdb": {"probe": probe}}))
+    ref = weakref.ref(result["run_state"])
     held = ref()
     assert held is not None
     assert len(held.lead_rows(LEAD)) == 1, "the returned state does not hold the run's row"
     assert held.budget_snapshot()["tool_calls"] == 2
     del held
-    summary.pop("run_state")
-    del summary
+    del result
     gc.collect()
     assert answered == ["FROM hosts"]
     assert ref() is None, "something in the process still holds the run's state after the run"

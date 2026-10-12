@@ -89,7 +89,7 @@ def _state(run_dir: Path, run_id: str = "r"):
     agent counts against is this object, carried on its deps, and nothing keyed by the folder."""
     from defender.runtime.run_state import RunState
 
-    return RunState.start(run_dir, run_id)
+    return RunState(run_dir, run_id)
 
 
 def _seed_calls(state, n: int) -> None:

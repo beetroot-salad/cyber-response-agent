@@ -893,7 +893,7 @@ def _invoke_queries_table(run_dir: Path) -> Any:
     # (`driver.run_investigation` starts it); this writer is driven outside a run, so its deps
     # carry the state a started run would.
     deps = replace(bind(_tenants1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER),
-                   lead_id="l-001", run_state=RunState.start(run_dir, run_dir.name))
+                   lead_id="l-001", run_state=RunState(run_dir, run_dir.name))
     return asyncio.run(QueryCapture(registry=None)._record(
         deps, system="elastic", verb="search", query_id="elastic.ad-hoc", params={},
         payload=[{"a": 1}], exit_code=0, detail="", system_key="",

@@ -375,7 +375,7 @@ def test_the_learning_side_join_still_splits_the_sentinel_row(tmp_path):
     # The writer takes its seq from the run's state, started as a run start starts it (#1235).
     from defender.runtime.run_state import RunState
 
-    state = RunState.start(tmp_path, "r870-threshold")
+    state = RunState(tmp_path, "r870-threshold")
     append_query_row(
         state, lead_id="l-001", system="elastic", verb="query", query_id="elastic.esql",
         params={"native_query": "FROM logs"}, raw_command="elastic query",

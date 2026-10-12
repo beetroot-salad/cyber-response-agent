@@ -182,7 +182,7 @@ def resume(store, run_dir, message_id, target: Path):
 
     branch = branch_mod()
     return branch.open_main_session(store, spec_at(store, run_dir, message_id),
-                                    RunState.start(target, target.name))
+                                    RunState(target, target.name))
 
 
 # 1. which leads existed at the branch point

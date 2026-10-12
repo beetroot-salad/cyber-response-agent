@@ -25,8 +25,9 @@ implementation that spells it otherwise makes `check_binds` skip the concept sil
 
 The guard's ROWS (#1235)
     The guard derives its count from the rows the HOST recorded for the run, held on the run's
-    one `RunState` (`state.lead_rows(lead)`, #1235 round 2): each row enters it only after its
-    line was written, and a branch sibling's inherited rows enter it as seeding writes them —
+    one `RunState` (`state.lead_rows(lead)`, #1235 round 2): each row enters it as it is
+    appended (round 3: before its line is written), and a branch sibling's inherited rows enter
+    it as seeding writes them —
     no file is ever read into it, so nothing written into the run folder moves the count. The
     file reader `record_query.lead_rows` retired with round 2; this suite reads the FILE
     post-run through `read_jsonl_rows` (`_file_rows`) where it means the record.
@@ -200,14 +201,14 @@ def _file_rows(run_dir: Path, lead: str) -> list[dict]:
 
 class _Res:
     """One driven replay: the run dir, the two replay models, the tables on disk and the
-    driver's summary, whose `run_state` is the run's own state (#1235 round 2)."""
+    result `drive()` returned, whose `run_state` is the run's own state (#1235)."""
 
     def __init__(self, run_dir: Path, main: ReplayFn, gather: ReplayFn, summary: dict):
         self.run_dir, self.main, self.gather, self.summary_dict = run_dir, main, gather, summary
 
     @property
     def state(self):  # noqa: ANN201 — `RunState`, imported nowhere at module top (#1235)
-        """The run's `RunState`, as the driver returned it."""
+        """The run's `RunState`, as `drive()` returned it."""
         return self.summary_dict["run_state"]
 
     @property
@@ -1269,8 +1270,8 @@ def test_repeat_count_is_zero_before_the_lead_has_rows(tmp_path):
 
     missing = tmp_path / "missing" / "run"
     missing.mkdir(parents=True)
-    fresh = RunState.start(missing, "d807-zero-fresh")
-    assert fresh.lead_rows(LEAD) == [], "a lead with no table rows must read as zero occurrences"
+    fresh = RunState(missing, "d807-zero-fresh")
+    assert list(fresh.lead_rows(LEAD)) == [], "a lead with no table rows must read as zero occurrences"
     assert repeat_trip(fresh.lead_rows(LEAD), LEAD, system="elastic", verb="query",
                        params={"native_query": "FROM logs"}) is None
 

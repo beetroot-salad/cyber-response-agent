@@ -235,7 +235,7 @@ def test_lead_zero_and_the_model_share_one_payload_seq_counter(tmp_path):
              "payload_path": f"gather_raw/{L0}/0.json", "exit_code": 0,
              "error_class": None, "payload_status": "persisted", "payload_digest": "exit=0"}
     append_jsonl(RunPaths(run_dir).executed_queries, [prior])
-    state = RunState.start(run_dir, "lz808-seq")
+    state = RunState(run_dir, "lz808-seq")
     state.inherit_rows([prior])
     slot = run_dir / "gather_raw" / L0 / "0.json"
     slot.parent.mkdir(parents=True, exist_ok=True)

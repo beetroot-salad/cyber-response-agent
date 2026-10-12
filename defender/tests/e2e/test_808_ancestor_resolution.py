@@ -291,7 +291,7 @@ def test_a_shell_fetch_that_answers_does_not_stand_in_for_the_ancestor_calls(tmp
         # into it.
         rec = VerbRecorder()
         result = lead_zero.resolve_lead_zero(
-            run_state=RunState.start(run_dir, f"lz808-{name}"), defender_dir=defender_dir(),
+            run_state=RunState(run_dir, f"lz808-{name}"), defender_dir=defender_dir(),
             alert_path=run_dir / "alert.json", tenant=_tenants1106.fixture_run_tenant(), env={},
             verbs=elastic_backend(rec, **kw),
         )
@@ -408,7 +408,7 @@ def test_one_ancestor_fetch_answering_does_not_establish_an_absence_for_the_othe
         rec = VerbRecorder()
         result = lead_zero.resolve_lead_zero(
             # outside the driver: start the run's state as run start does (#1235)
-            run_state=RunState.start(run_dir, f"lz808-{name}"), defender_dir=defender_dir(),
+            run_state=RunState(run_dir, f"lz808-{name}"), defender_dir=defender_dir(),
             alert_path=run_dir / "alert.json", tenant=_tenants1106.fixture_run_tenant(), env={},
             verbs=elastic_backend(rec, answer=answer_by_index(table)),
         )
@@ -503,7 +503,7 @@ def test_item_one_stops_at_one_recorded_per_system_failure(tmp_path):
     )
     probe_dir = tmp_path / "probe"
     probe_dir.mkdir()
-    probe = RunState.start(probe_dir, "lz808-probe")
+    probe = RunState(probe_dir, "lz808-probe")
     circuit_breaker.record_outcome(probe, "elastic", 2)
     assert not circuit_breaker.is_tripped(probe, "elastic"), \
         "one infra failure now trips the breaker — the cap below is arguing about the wrong number"

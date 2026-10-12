@@ -171,7 +171,7 @@ def test_a_naive_origin_is_read_as_utc_not_dropped(tmp_path):
 def _state(tmp_path):
     from defender.runtime.run_state import RunState
 
-    return RunState.start(tmp_path, "run-878")
+    return RunState(tmp_path, "run-878")
 
 
 def test_a_healthy_state_still_reads_and_trips(tmp_path):

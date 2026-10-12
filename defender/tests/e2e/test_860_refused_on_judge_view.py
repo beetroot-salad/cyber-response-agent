@@ -649,7 +649,7 @@ def test_m2_a_siblings_inherited_table_carries_the_source_runs_denial(tmp_path):
 
     sibling = tmp_path / "sibling"
     sibling.mkdir()
-    state = RunState.start(sibling, "d860-sibling")
+    state = RunState(sibling, "d860-sibling")
     _inherit_evidence(r.run_dir, state, {LEAD})
     inherited = {lead.lead_id: lead for lead in joined(sibling)}
     assert set(inherited) == {LEAD}, f"the sibling inherited leads {sorted(inherited)}"
@@ -659,7 +659,7 @@ def test_m2_a_siblings_inherited_table_carries_the_source_runs_denial(tmp_path):
     tabled = [row for row in read_jsonl_rows(RunPaths(sibling).executed_queries)
               if row.get("lead_id") == LEAD]
     assert [row["query_id"] for row in tabled] == [DENIED_QUERY_ID, "elastic.query"]
-    assert state.lead_rows(LEAD) == tabled, (
+    assert list(state.lead_rows(LEAD)) == tabled, (
         "the sibling's run state does not hold the rows seeding wrote to its table")
 
 

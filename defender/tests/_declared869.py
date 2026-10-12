@@ -335,7 +335,7 @@ def seed_executed_query(
     # Each seeded row is a historical run's write: the writer takes its seq from that run's
     # state (#1235), which held the table as it stands — a run holds rows it did not write only
     # as an inherited prefix, so they are handed to it the way seeding hands them (round 2).
-    state = RunState.start(run_dir, "r869-historical")
+    state = RunState(run_dir, "r869-historical")
     state.inherit_rows(read_jsonl_rows(RunPaths(run_dir).executed_queries))
     return append_query_row(
         state, lead_id=lead_id, system=system, verb=verb, query_id=query_id,

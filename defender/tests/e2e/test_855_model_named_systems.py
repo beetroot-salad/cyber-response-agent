@@ -775,7 +775,7 @@ def test_the_tables_second_writer_grows_the_column_too(tmp_path):
     lead_zero._record_manual_row(
         lead_zero._CaptureDeps(
             run_dir=run_dir, defender_dir=DEFENDER, run_id="d871-second-writer",
-            lead_id="l-000", run_state=RunState.start(run_dir, "d871-second-writer"),
+            lead_id="l-000", run_state=RunState(run_dir, "d871-second-writer"),
         ),
         "search", {"index": "logs"}, {"rows": [{"a": 1}]}, exit_code=0,
     )

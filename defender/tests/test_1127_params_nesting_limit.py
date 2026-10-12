@@ -134,7 +134,7 @@ def _started(root: Path):  # noqa: ANN202 — a `RunState` (#1235: not imported 
     from defender.runtime.run_state import RunState
 
     RunPaths(root).gather_raw.mkdir(parents=True, exist_ok=True)
-    return RunState.start(root, "r1127-nesting")
+    return RunState(root, "r1127-nesting")
 
 
 def _rows(state) -> list[dict]:  # noqa: ANN001
@@ -409,7 +409,7 @@ def test_a_row_at_or_under_the_limit_is_written_verbatim_and_read_back(tmp_path,
     rows = _rows(run)
     assert len(rows) == 1, f"a depth-{depth} params row was written and then not read back"
     assert rows[0]["params"] == params, "the stored params are not the params the call carried"
-    assert run.lead_rows(LEAD) == rows, "the written row is not the row the run's state holds"
+    assert list(run.lead_rows(LEAD)) == rows, "the written row is not the row the run's state holds"
     assert _sidecar(run, 0).read_text(encoding="utf-8") == '["ok"]'
 
 
@@ -429,7 +429,7 @@ def test_a_row_past_the_limit_is_refused_as_too_deep_before_anything_is_written(
     assert not _sidecar(run, 0).exists(), \
         "the refused row still persisted its payload sidecar — an orphan the next row overwrites"
     assert _rows(run) == []
-    assert run.lead_rows(LEAD) == [], "the refused row still reached the run's state"
+    assert list(run.lead_rows(LEAD)) == [], "the refused row still reached the run's state"
 
 
 # ── the differential: predicate ⇔ cleaner ⇔ written line ───────────────────────────────────

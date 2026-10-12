@@ -105,7 +105,7 @@ def _run_state(run_dir: Path):
     `RunState`, no longer in a table keyed by the folder."""
     from defender.runtime.run_state import RunState
 
-    return RunState.start(run_dir, "t1107")
+    return RunState(run_dir, "t1107")
 
 
 def _breaker_run(run_dir: Path, outcomes: list[tuple[str, int]]) -> tuple[list[int], RunAborted | None]:
@@ -685,7 +685,7 @@ def _replay(tmp_path: Path, tenant_root: Path, verbs, calls: list[tuple[str, str
             *, lead_system: str):
     """Drive a real run through the replay harness: main dispatches one gather lead, gather
     replays `calls` as `query` tool calls against `verbs`. Returns (run_dir, main, gather,
-    run_state) — the run's `RunState` as the driver's summary hands it back (#1235)."""
+    run_state) — the run's `RunState` as `drive()` hands it back (#1235)."""
     from defender.tests.e2e._replay_harness import (
         GOLDEN_AB3, ReplayFn, Turn, drive, materialize)
 

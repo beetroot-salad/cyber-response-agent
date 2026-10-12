@@ -553,8 +553,8 @@ def test_a_minted_draft_leaves_no_partial_file_behind(tmp_path):
 
     `write_text` into the live catalog path left a window in which a crash lands a truncated
     file — and a truncated draft is one whose frontmatter no longer parses, which every reader
-    reports as "the minter wrote a bad file" rather than as a partial write. `_io.write_atomic`
-    stages under `{name}.staged-{hex}` and `os.replace`s, so a leftover from a failed run does
+    reports as "the minter wrote a bad file" rather than as a partial write. The guarded
+    replace write stages under `{name}.staged-{hex}` (`_io.staged_leaf`) and `os.replace`s, so a leftover from a failed run does
     not end in `.md` and matches neither corpus glob — asserted here, because a staged name
     that DID match would have the next sweep report it as a malformed template."""
     from defender._corpus import iter_query_templates

@@ -131,7 +131,7 @@ class _Box:
 
 class _Res:
     """One driven replay: the run dir, the two replay models, the box, the table, and the
-    driver's summary, whose `run_state` is the run's own state (#1235 round 2)."""
+    result `drive()` returned, whose `run_state` is the run's own state (#1235)."""
 
     def __init__(self, run_dir: Path, main: ReplayFn, gather: ReplayFn, box: _Box,
                  summary: dict | None = None):
@@ -140,7 +140,7 @@ class _Res:
 
     @property
     def state(self):  # noqa: ANN201 — `RunState`, imported nowhere at module top (#1235)
-        """The run's `RunState`, as the driver returned it in its summary."""
+        """The run's `RunState`, as `drive()` returned it."""
         assert self.summary_dict is not None, "this replay kept no driver summary"
         return self.summary_dict["run_state"]
 
