@@ -726,19 +726,24 @@ def test_1018_judge_a_bare_second_draw_completes_beside_a_malformed_first(tmp_pa
     assert rows["b"]["completed_draws"] == 1
     assert rows["b"]["malformed_replies"] == ASKS_PER_DRAW
     assert not (ep / "worlds" / "b" / "judge" / "0.yaml").exists()
-    assert J.draw_doc(ep, "b", 1)["episode_outcome"] == "gradable"
+    # #1234: the reply carries no `episode_outcome` (retired, A17); the completed draw's own
+    # answer is its world bucket.
+    assert J.draw_doc(ep, "b", 1)["bucket"] == "lead-set"
 
 
 def test_1018_judge_draft_then_corrected_verdict_records_neither(tmp_path):
     """Shape 6 at the judge — the silent-wrong-verdict case: a complete, SCHEMA-VALID draft
-    (`discard`, the judge's own vocabulary) followed by "Final answer:" and a corrected
-    `gradable` verdict with a finding. A parser taking the first block records `discard` (every
-    finding thrown away, no error); one taking the last records `gradable`. NEITHER is
-    recorded: no draw file, `completed_draws` 0, nothing enqueued, and the pass returns.
+    (bucket `none`, no finding — #1234's shape; `discard` retired with `episode_outcome`)
+    followed by "Final answer:" and a corrected `lead-set` verdict with a finding. A parser
+    taking the first block records `none` (every finding thrown away, no error); one taking
+    the last records `lead-set`. NEITHER is recorded: no draw file, `completed_draws` 0,
+    nothing enqueued, and the pass returns.
 
     Failing: a draw file exists with either outcome, or a row was enqueued."""
     ep = _episode(tmp_path)
-    draft = J.as_reply_text(J.reply_doc(episode_outcome="discard", findings=[]))
+    draft = J.as_reply_text(J.reply_doc(bucket="none", findings=[]))
+    assert J.mod("learning.judge.run").validate_reply(draft).bucket == "none", (
+        "control: the draft alone is a valid reply")
     final = _bare_verdict()
     shape_6 = (fenced(draft.rstrip("\n")) + "\n\nOn reflection that is wrong. Final answer:\n\n"
                + fenced(final.rstrip("\n")) + "\n")
@@ -777,49 +782,52 @@ def test_1018_validate_reply_wraps_the_parser_refusal_in_judge_refused(tmp_path)
     Failing: a `MalformedReply` (or anything else) escapes `validate_reply`."""
     run_mod = J.mod("learning.judge.run")
     JudgeRefused = J.sym("learning.judge", "JudgeRefused")
-    assert run_mod.validate_reply(_bare_verdict()).episode_outcome == "gradable"
+    assert run_mod.validate_reply(_bare_verdict()).bucket == "lead-set"
     with pytest.raises(JudgeRefused):
         run_mod.validate_reply(_fence_then_prose(_bare_verdict()))
     # BOTH SCOPES. `scope="family"` is the same seam's second caller (#1007 M5), and a wrap
     # discharged for the default scope alone lets a `MalformedReply` cross the family lane
-    # bare — where `grade_episode`'s family arm swallows it as `family_failed_reason` and
+    # bare — where `grade_episode`'s family arm swallows it as `draws_failed_reason` and
     # makes no further family draw.
     family_bare = _family_verdict()
-    assert run_mod.validate_reply(family_bare, scope="family").episode_outcome == "gradable"
+    # #1234 M6: a family reply carries family-scope world findings only, no bucket.
+    family_parsed = run_mod.validate_reply(family_bare, scope="family")
+    assert family_parsed.bucket is None
+    assert family_parsed.world_findings == []
     with pytest.raises(JudgeRefused):
         run_mod.validate_reply(_fence_then_prose(family_bare), scope="family")
 
 
 def _family_verdict() -> str:
-    """A verdict valid at FAMILY scope: the family's `verdict_word` (#1224) and no findings, so
-    nothing names a world or the defender."""
+    """A verdict valid at FAMILY scope: no findings (#1234 M6 retired the family's
+    `verdict_word`), so nothing names a world or the defender."""
     return J.as_reply_text(J.family_reply())
 
 
 def test_1018_judge_family_scope_fence_then_prose_costs_one_family_draw_not_the_family_call(
         tmp_path):
     """O2 at the family lane: a fence-then-prose reply on `judge:family:0` (draws=2) is ONE
-    malformed family ASK — `family_malformed_replies` 1, `family_failed_reason` None — the
-    draw asks again (#1224 N22) and completes, and the second family draw is still made and
-    completes, so `family_outcome` resolves. A refusal
-    that escapes `validate_reply` at this scope is caught by the family arm's `except
-    Exception` as a FAILED CALL: draw 1 never made, `family_malformed_replies` 0, and the
-    family outcome lost to one bad reply. Failing: `family_failed_reason` names
-    `MalformedReply`, or `judge:family:1` was never called."""
+    malformed family ASK — the family row's `malformed_replies` 1 and no `draws_failed_reason`
+    — the draw asks again (#1224 N22) and completes, and the second family draw is still made
+    and completes. A refusal that escapes `validate_reply` at this scope is caught by the
+    family arm's `except Exception` as a FAILED CALL: draw 1 never made, `malformed_replies` 0,
+    and the family call lost to one bad reply. Failing: `draws_failed_reason` names
+    `MalformedReply`, or `judge:family:1` was never called. (#1234: the family record is the
+    `family` row; `family_outcome` is retired, M6/A4.)"""
     ep = _episode(tmp_path)
     # Call order is world b's draws, world c's draws, then the family's: 2 + 2 + 2.
     judge = J.FakeJudge(replies=[_bare_verdict()] * 4 + [_fence_then_prose(_family_verdict())],
                         default=_family_verdict())
     _grade(tmp_path, ep, judge, draws=2)
 
-    record = J.judge_record(ep)
-    assert record["family_failed_reason"] is None, record["family_failed_reason"]
-    assert record["family_malformed_replies"] == 1
+    family = J.judge_record(ep)["family"]
+    assert family.get("draws_failed_reason") is None, family["draws_failed_reason"]
+    assert family["malformed_replies"] == 1
     family_calls = [a for a in judge.agent_ids if a.startswith(J.FAMILY_AGENT_PREFIX)]
     assert family_calls == ["judge:family:0", "judge:family:0:1", "judge:family:1"], (
         judge.agent_ids)
-    assert record["family_completed_draws"] == 2
-    assert record["family_outcome"] == "survived", "the bare family draws did not count"
+    assert family["completed_draws"] == 2, "the bare family draws did not count"
+    assert family["draws"] == [{"draw": 0}, {"draw": 1}]
     assert _wire_row(ep, "family", 0)["reply"] == _fence_then_prose(_family_verdict())
 
 
