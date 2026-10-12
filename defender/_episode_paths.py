@@ -127,6 +127,12 @@ class ArchivedWorldLeaves:
     def gather_summaries(self) -> PurePosixPath:
         return PurePosixPath(GATHER_SUMMARIES_DIRNAME)
 
+    @property
+    def executed_queries(self) -> PurePosixPath:
+        """The archived query table: the sibling run's own, copied under the world (#1234 A12:
+        the judge joins it to the served ledger by call id)."""
+        return PurePosixPath(RUN_LAYOUT.executed_queries)
+
     def gather_summary(self, lead_id: str) -> PurePosixPath:
         """`gather_summaries/<lead_id>.md`.
 
@@ -209,6 +215,10 @@ class WorldLayout:
     @property
     def gather_summaries(self) -> PurePosixPath:
         return self.dir / WORLD_LEAVES.gather_summaries
+
+    @property
+    def executed_queries(self) -> PurePosixPath:
+        return self.dir / WORLD_LEAVES.executed_queries
 
     def gather_summary(self, lead_id: str) -> PurePosixPath:
         return self.dir / WORLD_LEAVES.gather_summary(lead_id)

@@ -330,13 +330,6 @@ def discriminator_of(doc: dict[str, Any]) -> dict[str, Any]:
     return block if isinstance(block, dict) else {}
 
 
-def _control_declared(doc: dict[str, Any]) -> Any:
-    for world in doc.get("worlds") or ():
-        if isinstance(world, dict) and world.get("role") == BASE_ROLE:
-            return world.get("disposition_declared")
-    return None
-
-
 def _non_control_worlds(doc: dict[str, Any]) -> list[dict[str, Any]]:
     raw = doc.get("worlds")
     if not isinstance(raw, list):
@@ -483,10 +476,9 @@ def read_call_records(  # noqa: C901 — one refusal per way the two records can
     ledger row and the table row its id joins agree on `(system, verb, params)` (A21). An
     absent table or ledger is no calls (a world whose investigator asked nothing)."""
     from defender.learning.judge.calls import CALL_ID, call_id_names_run
-    from defender.run_repository._layout import RUN_LAYOUT
 
     token = world_token_for(episode_token, label)
-    table_name = LAYOUT.world(label).dir / RUN_LAYOUT.executed_queries
+    table_name = LAYOUT.world(label).executed_queries
     table, torn_table, table_read = bound.read_jsonl(table_name)
     if table_read.refusal is not None:
         raise JudgeRefused(f"world {label!r}: {table_read.refusal}")
@@ -900,8 +892,13 @@ def _read_oracle_store(bound: Bound, world: dict[str, Any]) -> list[dict[str, An
     if rec.absent:
         if world.get("role") == BASE_ROLE:
             return []
-        raise JudgeRefused(f"world {label!r}: its oracle store ({name}) is absent — a planted "
-                           "world's built layer is part of what it is judged on")
+        # The store is the directory: the oracle leaves `forged.jsonl` out when it froze no row
+        # (K5: its empty records are absent), so a store holding no forged file is an empty
+        # store. No readable directory is a planted world with no store (R6b): a failed read.
+        if bound.under(LAYOUT.oracle_dir(label)).entries().entries is None:
+            raise JudgeRefused(f"world {label!r}: its oracle store ({name}) is absent — a "
+                               "planted world's built layer is part of what it is judged on")
+        return []
     if torn:
         raise JudgeRefused(f"world {label!r}: {name} holds {torn} line(s) that do not parse "
                            "as a row")
@@ -930,8 +927,8 @@ def _read_summaries(world: Bound, *, label: str) -> frozenset[str]:
             continue
         rec = folder.read(name, errors="replace")
         if rec.text is None:
-            raise JudgeRefused(f"world {label!r}: {WORLD_LEAVES.gather_summaries / name} could "
-                               f"not be read: {rec.reason}")
+            raise JudgeRefused(f"world {label!r}: the gather summary {name!r} could not be "
+                               f"read: {rec.reason}")
         kept.add(name[:-len(".md")])
     return frozenset(kept)
 

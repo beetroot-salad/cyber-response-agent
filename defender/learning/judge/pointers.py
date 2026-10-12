@@ -32,7 +32,7 @@ from typing import Annotated, Any
 
 from pydantic import SkipValidation
 
-from defender._episode_paths import LAYOUT, ORACLE_DIRNAME, WORLD_LEAVES
+from defender._episode_paths import LAYOUT, WORLD_LEAVES
 from defender._io import Bound
 from defender._model import model
 from defender.learning.judge.calls import (
@@ -42,7 +42,6 @@ from defender.learning.judge.calls import (
     blocked_call_key,
 )
 from defender.learning.judge.family import WorldFacts
-from defender.run_repository._layout import RUN_LAYOUT
 
 #: The four pointer classes (A1).
 CONDUCT = "conduct"
@@ -57,9 +56,9 @@ _MAX_POINTER = 1024
 _CONDUCT_LEAVES = frozenset({str(WORLD_LEAVES.report), str(WORLD_LEAVES.investigation)})
 _CONTEXT_LEAVES = frozenset({str(WORLD_LEAVES.alert), str(WORLD_LEAVES.provenance),
                              str(WORLD_LEAVES.run_end), str(WORLD_LEAVES.lessons_loaded)})
-_TABLE_LEAF = str(RUN_LAYOUT.executed_queries)
+_TABLE_LEAF = str(WORLD_LEAVES.executed_queries)
 #: The manifest fragment naming one world's entry: `worlds/<label>`.
-_PLAN_WORLD_PREFIX = f"{LAYOUT.worlds}/"
+_PLAN_WORLD_PREFIX = str(LAYOUT.worlds) + "/"
 
 
 @model(frozen=True)
@@ -199,7 +198,7 @@ def _resolves(pointer: Any, scope: PointerScope) -> Resolution | None:  # noqa: 
     """The one resolver (A1): `pointer` mapped to exactly one run and one class, or `None`
     (unresolved). Never raises for any pointer a model could write.
 
-    @owns pointer_resolution — every judge site deciding whether an evidence pointer resolves
+    The one resolver: every judge site deciding whether an evidence pointer resolves
     (routing, the two-run rule, gap-only, design, a row's citations) calls this."""
     if not isinstance(pointer, str) or not pointer.strip() or len(pointer) > _MAX_POINTER \
             or any(ch in pointer for ch in "\x00\n\r*?~") or "://" in pointer:
@@ -216,9 +215,8 @@ def _resolves(pointer: Any, scope: PointerScope) -> Resolution | None:  # noqa: 
         return _world_pointer(scope, pointer, parts, fragment)
     if head == str(LAYOUT.served) and len(parts) == 2:
         return _served_pointer(scope, pointer, parts[1], fragment)
-    if head == ORACLE_DIRNAME and len(parts) >= 3:
-        if parts[1] not in scope.runs:
-            return None
+    if len(parts) >= 3 and parts[1] in scope.runs \
+            and "/".join(parts[:2]) == str(LAYOUT.oracle_dir(parts[1])):
         name = "/".join(parts)
         return Resolution(pointer=pointer, kind=BUILT, run=parts[1]) \
             if _reads_plain(scope.bound, name) else None

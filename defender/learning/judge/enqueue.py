@@ -50,6 +50,7 @@ from defender.learning.judge.run import (
     SUBJECT_DEFENDER,
     SUBJECT_WORLD,
     WORLD_FINDING_BUCKETS,
+    is_world_finding_bucket,
 )
 
 #: The doubt mark a defender row carries (design data model, I6).
@@ -57,10 +58,10 @@ WORLD_LABEL_DOUBTED = "world_label_doubted"
 #: The questioner channel's lane, under the name the page reads.
 LANE_WORLD = LANE_QUESTIONER
 #: The prefix of a plan-class citation (A1): what makes a world row design.
-_PLAN_PREFIX = f"{LAYOUT.family}#"
+_PLAN_PREFIX = str(LAYOUT.family) + "#"
 
 
-def _where(episode_dir: Path | None) -> str:
+def _refusal_prefix(episode_dir: Path | None) -> str:
     return f"episode {Path(episode_dir).name}: " if episode_dir is not None else ""
 
 
@@ -88,7 +89,7 @@ def _validate_row(row: dict[str, Any], *, episode_dir: Path | None = None) -> No
     """The rule for what may go on the defender queue: an investigator finding's row, typed
     with one of the queueable defender types, carrying `contrast_evidence`, a boolean
     `on_verdict_path` and a boolean `world_label_doubted` (design M7)."""
-    where = _where(episode_dir)
+    where = _refusal_prefix(episode_dir)
     _require_keys(row, where, "defender")
     # Exact match, no case-fold and no trim: this is the last screen before the curator.
     if row.get("subject") != SUBJECT_DEFENDER or row.get("direction") == SUBJECT_WORLD:
@@ -117,7 +118,7 @@ def _validate_world_row(row: dict[str, Any], *, episode_dir: Path | None = None)
     """The rule for what may go on the questioner channel: a design world finding's row — a
     world-finding bucket, its own `systems`, and a plan-class citation (A1) — the last screen
     before the questioner curator."""
-    where = _where(episode_dir)
+    where = _refusal_prefix(episode_dir)
     _require_keys(row, where, "questioner")
     if row.get("direction") != SUBJECT_WORLD or row.get("subject") != SUBJECT_WORLD:
         raise JudgeRefused(
@@ -125,7 +126,7 @@ def _validate_world_row(row: dict[str, Any], *, episode_dir: Path | None = None)
             f"direction={SUBJECT_WORLD!r} and subject={SUBJECT_WORLD!r}, not "
             f"direction={row.get('direction')!r} subject={row.get('subject')!r}")
     row_type = row.get("type")
-    if not isinstance(row_type, str) or row_type not in WORLD_FINDING_BUCKETS:
+    if not is_world_finding_bucket(row_type):
         raise JudgeRefused(f"{where}a questioner finding row's type={row_type!r} is not one of "
                            f"{sorted(WORLD_FINDING_BUCKETS)}")
     if not names_systems(row.get("systems")):
@@ -277,6 +278,12 @@ def _draw_text(bound: Bound, name: str, kind: str, report: DrawsSkipReport) -> s
     return text
 
 
+def draws_on_disk(view: Bound, label: str) -> dict[int, dict[str, Any]]:
+    """`draws_on_disk_report` without the skip report: every readable draw document of world
+    `label`, by index."""
+    return draws_on_disk_report(view, label)[0]
+
+
 def disposition_entry(finding_id: str, lane: str, reason: str | None = None) -> dict[str, Any]:
     """One ledger entry: the finding's id (`build_finding_row`'s spelling, whether or not a row
     was built), its lane, and the reason where the lane is a refusal."""
@@ -297,5 +304,5 @@ __all__ = [
     "DrawsSkipReport", "LANE_DEFENDER", "LANE_UNQUEUEABLE", "LANE_WORLD", "LEDGER_LANES",
     "WORLD_LABEL_DOUBTED", "append_rows", "append_world_rows", "build_finding_row",
     "check_disposition_entry", "defender_lane_blocked", "disposition_entry",
-    "draws_on_disk_report",
+    "draws_on_disk", "draws_on_disk_report",
 ]

@@ -18,7 +18,6 @@ if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
 from defender.learning.author import drain
 from defender.learning.author import shared as _shared
 from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
-from defender._vocab import normalized_judge_outcome
 from defender._yaml import safe_load
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL,
@@ -261,39 +260,33 @@ def _has_confident_ground_truth(direction: str, disposition: str | None) -> bool
     return disposition == "benign"
 
 
-#: The one `judge_outcome` admitted for authoring. An allowlist, so an absent, torn or
-#: `discard` outcome from any producer on this shared queue is never authored as if the
-#: family survived.
-_FAMILY_AUTHOR_OUTCOME = "survived"
-#: `judge_outcome` values skipped (consumed, never authored) rather than held. `discard` and
-#: `corpus-contradiction` are refused by the judge's appender, so a row carrying one came from
-#: an ungated producer and is held for a human.
-_FAMILY_SKIP_OUTCOMES = frozenset({"caught", "undecidable"})
-
-
 def _gate_family(entry: dict) -> tuple[str, dict] | None:
     """The family partition inside `_gate_findings`.
 
-    `None` admits the row for authoring; otherwise `("consumed"|"held", row)` says which list
-    the caller files it under.
+    `None` admits the row for authoring; otherwise `("held", row)` with the reason on the row.
 
-    A family row's ground truth is already resolved into `judge_outcome` by the judge, so
-    `source_refs.yaml` isn't read. `survived` is authored; `caught`/`undecidable` are consumed
-    without authoring (an outcome that will never change must not be held forever); anything
-    else is held with the unreadable value named on the row."""
-    # Through the appender's normalizer (casefold and trim), so `Caught` — valid and written
-    # verbatim — isn't mistaken for an unknown outcome.
-    outcome = normalized_judge_outcome(entry.get("judge_outcome"))
-    if outcome == _FAMILY_AUTHOR_OUTCOME:
-        return None
-    if outcome in _FAMILY_SKIP_OUTCOMES:
+    The judge queues a family row only for an investigator finding of a measured, unanimous
+    world (#1234 A7, A13), so the row's own fields are its ground truth: it must carry a
+    non-empty `contrast_evidence`, a boolean `on_verdict_path` and a boolean
+    `world_label_doubted`. A row carrying a retired name (a pre-#1234 row's `judge_outcome`)
+    or missing a new field is held naming it — never authored, never consumed (I10)."""
+    from defender.learning.core.retired import retired_keys
+
+    retired = retired_keys(entry)
+    if retired:
         rec = dict(entry)
-        rec["consumed_category"] = "consumed_family_skip"
-        return "consumed", rec
-    rec = dict(entry)
-    rec["held_reason"] = (
-        f"no_family_ground_truth(judge_outcome={entry.get('judge_outcome')!r})")
-    return "held", rec
+        rec["held_reason"] = f"retired_field({', '.join(retired)})"
+        return "held", rec
+    contrast = entry.get("contrast_evidence")
+    missing = [key for key, ok in (
+        ("contrast_evidence", isinstance(contrast, list) and bool(contrast)),
+        ("on_verdict_path", isinstance(entry.get("on_verdict_path"), bool)),
+        ("world_label_doubted", isinstance(entry.get("world_label_doubted"), bool))) if not ok]
+    if missing:
+        rec = dict(entry)
+        rec["held_reason"] = f"missing_field({', '.join(missing)})"
+        return "held", rec
+    return None
 
 
 def _gate_findings(

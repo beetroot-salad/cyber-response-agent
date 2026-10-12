@@ -58,8 +58,9 @@ def ledger_partner(table_row: Mapping[str, Any], ledger_rows: Sequence[Mapping[s
                    token: str) -> Mapping[str, Any] | None:
     """The ledger row joined to `table_row` by its call id, or `None` (inherited, or unserved).
 
-    @owns call_id — the one join of the two call records (A12): every reader pairing a table
-    row with what it was served asks this, never a `(system, verb, params)` match."""
+    The one join of the two call records (A12; the id itself is `record_query.next_call_id`'s):
+    every reader pairing a table row with what it was served asks this, never a
+    `(system, verb, params)` match."""
     call_id = table_row.get(CALL_ID)
     if not call_id_names_run(call_id, token):
         return None

@@ -547,8 +547,6 @@ TITLE_ALIGNED = "ALIGNED LEAD VIEW"
 TITLE_REFERENCES = "REFERENCE RUNS"
 TITLE_FOCUS = "JUDGED WORLD VIEWS"
 TITLE_NOISE = "NOISE CONTEXT"
-#: The family call's account of the worlds no reference set holds.
-TITLE_EXCLUDED = "WORLDS NOT AMONG THE RUNS"
 
 #: The words every text-matched (not established) row of the context is labelled with.
 HEURISTIC = "heuristic (text-matched, not established)"
@@ -706,13 +704,13 @@ class JudgeContext:
     @property
     def shown_its_facts(self) -> bool:
         """Was the judged world served any altered answer (its contrast row says)?"""
-        return bool(self.runs[0].contrast["shown_its_facts"])
+        return bool(self.contrast_rows[self.world_label]["shown_its_facts"])
 
 
-def _header_block(run: RunView, *, served: list[str], predicate: str) -> str:
+def _run_header_block(run: RunView, *, served: list[str], predicate: str) -> str:
     lines = [f"role: {run.role}", f"story: {run.story}", f"axis: {run.axis}",
              f"declared verdict: {run.declared}", f"label_basis: {run.label_basis}",
-             f"reached verdict (its archived report.md): {run.reached}",
+             f"reached verdict (its archived {WORLD_LEAVES.report}): {run.reached}",
              f"served systems: {', '.join(served) or '(none recorded)'}",
              f"discriminator predicate: {predicate}"]
     if not run.facts:
@@ -740,14 +738,14 @@ def _contrast_block(run: RunView) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _calls_block(run: RunView) -> str:
-    if not run.calls:
+def _calls_block(calls: list[dict[str, Any]]) -> str:
+    if not calls:
         return "This run made no call.\n"
     return "".join(
         f"- call #{c['call']} lead={c['lead']} [{c['source']}]"
         f"{' BLOCKED' if c['blocked'] else ''}{' inherited' if c['inherited'] else ''} "
         f"system={c['system']} verb={c['verb']} params={_json(c['params'])}\n"
-        for c in run.calls)
+        for c in calls)
 
 
 def _surfaces_block(surfaces: list[dict[str, Any]]) -> str:
@@ -799,7 +797,7 @@ def computed_sections(doc: dict[str, Any], runs: list[RunView],
 
     served, predicate = served_systems_of(doc), family_predicate(doc)
     return [
-        (TITLE_HEADER, [(f"run {run.label}", _header_block(run, served=served,
+        (TITLE_HEADER, [(f"run {run.label}", _run_header_block(run, served=served,
                                                            predicate=predicate))
                         for run in runs]),
         (TITLE_CONTRAST, [(f"run {run.label}", _contrast_block(run)) for run in runs]),
@@ -829,10 +827,14 @@ def world_sections(ctx: JudgeContext, doc: dict[str, Any]) -> list[Section]:
     refusal = cap_refusal(ctx.payload_cap, _charged(fixed), f"world {ctx.world_label}")
     if refusal is not None:
         raise JudgeRefused(refusal)
+    calls = ctx.reference_calls
     references = {f"run {run.label}": f"leads:\n{run.leads_text}\nreport:\n{run.report_text}"
-                                      f"\ncalls:\n{_calls_block(run)}"
+                                      f"\ncalls:\n{_calls_block(calls[run.label])}"
                   for run in ctx.runs[1:]}
-    focus_views = ctx.focus.as_prompt_sections(cap=None)
+    # VIEW 1 is the joined call list, numbered as the contrast rows number calls (A12), so a
+    # call number means one call across every section.
+    focus_list = _calls_block(ctx.focus_calls)
+    focus_views = {**ctx.focus.as_prompt_sections(cap=None), "calls": focus_list}
     budget = None if ctx.payload_cap is None else ctx.payload_cap - _charged(fixed)
     views_len = sum(len(v) for k, v in focus_views.items() if k != "calls")
     noise = ctx.noise_text
@@ -842,7 +844,7 @@ def world_sections(ctx: JudgeContext, doc: dict[str, Any]) -> list[Section]:
         noise_budget = max(budget - views_len - sum(map(len, references.values())), 0)
         noise = _cap_sections({"noise": noise}, noise_budget)["noise"]
         view_budget = max(budget - sum(map(len, references.values())) - len(noise), 0)
-        focus_views = ctx.focus.as_prompt_sections(cap=view_budget)
+        focus_views = {**ctx.focus.as_prompt_sections(cap=view_budget), "calls": focus_list}
     return [
         *fixed,
         (TITLE_REFERENCES, list(references.items()) or [(None, "No reference run.\n")]),

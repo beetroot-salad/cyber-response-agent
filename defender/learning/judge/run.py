@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from defender._model import model
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypeGuard
 
 from defender._untrusted import message_salt, wrap
 from defender.learning._prompt import stage_user_message
@@ -198,6 +198,13 @@ class InvestigatorFinding:
     contrast_evidence: list[str]
     on_verdict_path: bool
 
+    def document(self) -> dict[str, Any]:
+        """The finding as the draw document files it."""
+        return {"bucket": self.bucket, "claim": self.claim, "root_cause": self.root_cause,
+                "anchor": self.anchor, "topic": self.topic,
+                CONTRAST_EVIDENCE: list(self.contrast_evidence),
+                ON_VERDICT_PATH: self.on_verdict_path}
+
 
 @model(frozen=True)
 class WorldFinding:
@@ -211,6 +218,12 @@ class WorldFinding:
     topic: str
     evidence: list[str]
 
+    def document(self) -> dict[str, Any]:
+        """The finding as the draw document files it."""
+        return {"bucket": self.bucket, "systems": list(self.systems), "claim": self.claim,
+                "root_cause": self.root_cause, "anchor": self.anchor, "topic": self.topic,
+                EVIDENCE: list(self.evidence)}
+
 
 @model(frozen=True)
 class Gap:
@@ -221,6 +234,11 @@ class Gap:
     how: str
     evidence: list[str]
     kept_facts_from_investigator: bool
+
+    def document(self) -> dict[str, Any]:
+        """The gap as the draw document files it."""
+        return {GAP_WHAT: self.what, GAP_HOW: self.how, EVIDENCE: list(self.evidence),
+                KEPT_FACTS: self.kept_facts_from_investigator}
 
 
 @model(frozen=True)
@@ -248,7 +266,7 @@ def _require_list(doc: dict[str, Any], key: str, where: str = "the judge's reply
     return value
 
 
-def _text(raw: dict[str, Any], key: str, where: str) -> str:
+def _reply_text(raw: dict[str, Any], key: str, where: str) -> str:
     """A required text field: present, not null (`str(None)` would manufacture the content
     "None"), a scalar."""
     if key not in raw:
@@ -313,10 +331,16 @@ def _parse_investigator(raw: Any, index: int, *, shown_its_facts: bool | None,
         raise JudgeRefused(f"{where}.{ON_VERDICT_PATH}={raw.get(ON_VERDICT_PATH)!r} must be a "
                            "boolean")
     return InvestigatorFinding(
-        bucket=bucket, claim=_text(raw, "claim", where), root_cause=_text(raw, "root_cause", where),
-        anchor=_text(raw, "anchor", where), topic=_text(raw, "topic", where),
+        bucket=bucket, claim=_reply_text(raw, "claim", where), root_cause=_reply_text(raw, "root_cause", where),
+        anchor=_reply_text(raw, "anchor", where), topic=_reply_text(raw, "topic", where),
         contrast_evidence=_pointers(raw, CONTRAST_EVIDENCE, where),
         on_verdict_path=raw[ON_VERDICT_PATH])
+
+
+def is_world_finding_bucket(value: Any) -> TypeGuard[str]:
+    """Is `value` one of the three world-finding buckets, spelled exactly (A5)? The one test,
+    shared by the reply validator and the questioner appender's last screen."""
+    return isinstance(value, str) and value in WORLD_FINDING_BUCKETS
 
 
 def _parse_world_finding(raw: Any, index: int) -> WorldFinding:
@@ -324,14 +348,14 @@ def _parse_world_finding(raw: Any, index: int) -> WorldFinding:
     if not isinstance(raw, dict):
         raise JudgeRefused(f"{where} is not a mapping")
     bucket = raw.get("bucket")
-    if not isinstance(bucket, str) or bucket not in WORLD_FINDING_BUCKETS:
+    if not is_world_finding_bucket(bucket):
         raise JudgeRefused(
             f"{where}.bucket={bucket!r} is not one of {sorted(WORLD_FINDING_BUCKETS)} — a "
             "world finding names one of the three ways a world can be wrong")
     return WorldFinding(
         bucket=bucket, systems=_systems(raw.get("systems"), where, empty_ok=False),
-        claim=_text(raw, "claim", where), root_cause=_text(raw, "root_cause", where),
-        anchor=_text(raw, "anchor", where), topic=_text(raw, "topic", where),
+        claim=_reply_text(raw, "claim", where), root_cause=_reply_text(raw, "root_cause", where),
+        anchor=_reply_text(raw, "anchor", where), topic=_reply_text(raw, "topic", where),
         evidence=_pointers(raw, EVIDENCE, where))
 
 
@@ -341,7 +365,7 @@ def _parse_gap(raw: Any, index: int) -> Gap:
         raise JudgeRefused(f"{where} is not a mapping")
     if not isinstance(raw.get(KEPT_FACTS), bool):
         raise JudgeRefused(f"{where}.{KEPT_FACTS}={raw.get(KEPT_FACTS)!r} must be a boolean")
-    return Gap(what=_text(raw, GAP_WHAT, where), how=_text(raw, GAP_HOW, where),
+    return Gap(what=_reply_text(raw, GAP_WHAT, where), how=_reply_text(raw, GAP_HOW, where),
                evidence=_pointers(raw, EVIDENCE, where),
                kept_facts_from_investigator=raw[KEPT_FACTS])
 
@@ -468,9 +492,7 @@ def draw_document(reply: JudgeReply, *, scope: str) -> dict[str, Any]:
 
 
 def _finding_doc(finding: InvestigatorFinding | WorldFinding | Gap) -> dict[str, Any]:
-    from dataclasses import asdict
-
-    return asdict(finding)
+    return finding.document()
 
 
 def cites_sample(evidence: list[str], *, samples: Any, served_systems: Any) -> bool:
@@ -515,7 +537,7 @@ _DECISION_GLOSSARY = (
 
 #: The pointer grammar the judge is told (A1): every pointer is episode-relative.
 _POINTER_RULES = (
-    "EVERY EVIDENCE POINTER IS EPISODE-RELATIVE, never prose and never a quotation, optionally "
+    "EVERY EVIDENCE POINTER IS EPISODE-RELATIVE, never prose and never a quotation, optionally "  # lint-run-records: ok — the pointer grammar the model writes; it must spell each record's own name (A1)
     "with a `#fragment`:\n"
     "- a run's conduct: `worlds/<run>/report.md`, `worlds/<run>/investigation.md`, "
     "`worlds/<run>/gather_summaries/<lead>.md`, `worlds/<run>/executed_queries.jsonl#<row>` "
@@ -530,9 +552,10 @@ _POINTER_RULES = (
 )
 
 
-def _section_text(sections: list[Section], salt: str) -> str:
+def _section_frames(sections: list[Section], salt: str) -> list[str]:
     """Each section's host title, then each of its blocks: the block's host label (a run's)
-    outside the frame, its body inside one untrusted frame."""
+    outside the frame, its body inside one untrusted frame (A10: titles and run labels are host
+    text, so a body cannot forge one)."""
     out: list[str] = []
     for title, blocks in sections:
         out.append(f"\n## {title}\n")
@@ -540,16 +563,16 @@ def _section_text(sections: list[Section], salt: str) -> str:
             if label is not None:
                 out.append(f"\n### {label}\n")
             out.append(wrap(body, UNTRUSTED_TAG, salt))
-    return "".join(out)
+    return out
 
 
-def _framed(task: str, sections: list[Section]) -> str:
+def _framed_prompt(task: str, sections: list[Section]) -> str:
     """`task` (host text) and the sections behind the reader contract, on one salt no body
     holds."""
     bodies = [body for _title, blocks in sections for _label, body in blocks]
     salt = message_salt(task, *bodies, *(t for t, _b in sections),
                         *(label for _t, blocks in sections for label, _b in blocks if label))
-    return task + stage_user_message(salt, _section_text(sections, salt))
+    return task + stage_user_message(salt, *_section_frames(sections, salt))
 
 
 def _build_prompt(ctx: JudgeContext, *, sections: list[Section]) -> str:
@@ -598,7 +621,7 @@ def _build_prompt(ctx: JudgeContext, *, sections: list[Section]) -> str:
         f"it: bucket, systems, noise_floor_note, correlations, scope_checks, derivations, "
         f"{INVESTIGATOR_FINDINGS}, {WORLD_FINDINGS}, {GAPS}.\n"
     )
-    return _framed(task, sections)
+    return _framed_prompt(task, sections)
 
 
 def _build_family_prompt(*, sections: list[Section]) -> str:
@@ -620,7 +643,7 @@ def _build_family_prompt(*, sections: list[Section]) -> str:
         f"bucket, systems — the systems the flaw is about, each once — claim, root_cause, "
         f"anchor, topic, {EVIDENCE}).\n"
     )
-    return _framed(task, sections)
+    return _framed_prompt(task, sections)
 
 
 def family_predicate(manifest: dict[str, Any]) -> str:
@@ -643,5 +666,6 @@ __all__ = [
     "KEPT_FACTS", "LEAD_SET", "MISLABELLED", "NOT_MEASURED_BUCKETS", "NO_BUCKET",
     "ON_VERDICT_PATH", "SUBJECT_DEFENDER", "SUBJECT_WORLD", "WORLD_BUCKETS", "WORLD_FINDINGS",
     "WORLD_FINDING_BUCKETS", "WorldFinding", "_build_family_prompt", "_build_prompt",
-    "cites_sample", "draw_document", "family_predicate", "served_systems_of", "validate_reply",
+    "cites_sample", "draw_document", "family_predicate", "is_world_finding_bucket",
+    "served_systems_of", "validate_reply",
 ]

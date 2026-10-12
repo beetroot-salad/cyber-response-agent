@@ -26,6 +26,7 @@ from typing import Annotated, Any
 
 from pydantic import SkipValidation
 
+from defender._episode_paths import LAYOUT
 from defender._model import model
 from defender.learning.judge.pointers import Assessment, PointerScope, assess, named_rows
 from defender.learning.judge.run import (
@@ -79,7 +80,7 @@ def filed_findings(draw_doc: dict[str, Any]) -> Iterator[tuple[int, str, dict[st
     """`(index, kind, finding)` for every finding a draw filed: one index space over the three
     lists in filing order, counted before any drop (A13).
 
-    @owns finding_index — the `<index>` of every `finding_id`."""
+    The one numbering of the `<index>` of every `finding_id`."""
     index = 0
     for key in FILED_LISTS:
         for finding in draw_doc.get(key) or ():
@@ -247,7 +248,7 @@ def fate(item: Filed, *, focus: str | None, verdict: WorldVerdict | None, sample
     if item.kind == KIND_WORLD and focus is not None and cites_sample(
             list(a.filed), samples=samples, served_systems=served_systems):
         return LANE_UNQUEUEABLE, (
-            "cites `samples.yaml` somewhere other than a served system's own section of real "
+            f"cites `{LAYOUT.samples}` somewhere other than a served system's own section of real "
             "answers (O16: samples are shown only for served systems)")
     if a.gap_only:
         return LANE_USER_RECORD, None

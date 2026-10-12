@@ -63,9 +63,7 @@ _logger = logging.getLogger(__name__)
 DRAWS_KNOB = "JUDGE_DRAWS"
 CAP_KNOB = "JUDGE_PAYLOAD_CAP"
 
-#: The not-graded stamp's words. "not graded" is a fact about this record alone.
-NOT_GRADED = "not-graded"
-#: The stamp's word for a manifest the judge cannot read as a family of this design (O15).
+#: The not-graded stamp's word for a manifest the judge cannot read as a family of this design (O15).
 MANIFEST_REFUSED = "manifest refused"
 #: The stamp's word for an `accepted` family with no readable family stamp.
 NOT_COMPARABLE = outcome_mod.NOT_COMPARABLE
