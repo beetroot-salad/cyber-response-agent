@@ -50,7 +50,6 @@ from defender.learning.judge import JudgeRefused, read_grade
 from defender.learning.judge import family
 from defender.learning.judge.enqueue import (
     LANE_DEFENDER,
-    LANE_NEVER_ELIGIBLE,
     LANE_UNQUEUEABLE,
     LANE_WORLD,
     DrawsSkipReport,
@@ -1042,7 +1041,7 @@ def _finding_fields(finding: Any) -> dict[str, Any]:
 
 #: The ledger's lane → the page's disposition word (`_disposition_heading_raw`).
 _LANE_WORD = {LANE_DEFENDER: "defender", LANE_WORLD: "world_author",
-              LANE_UNQUEUEABLE: "unqueueable", LANE_NEVER_ELIGIBLE: "never_eligible"}
+              LANE_UNQUEUEABLE: "unqueueable"}
 
 
 def _off_ledger_disposition(ep: _Episode, label: str) -> tuple[str, str | None]:
@@ -1113,7 +1112,7 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
         entry = ledger.pop(coord, None)
         if entry is None:
             return (*_off_ledger_disposition(ep, label), None)
-        return _LANE_WORD[entry["lane"]], entry.get("reason"), entry["finding_id"]
+        return _LANE_WORD.get(entry["lane"], entry["lane"]), entry.get("reason"), entry["finding_id"]
 
     for label in walked_labels:
         docs, _report = ep.draws[label]
@@ -1153,7 +1152,7 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
                 subject = SUBJECT_WORLD
             else:
                 continue
-            disposition = _LANE_WORD[filed["lane"]]
+            disposition = _LANE_WORD.get(filed["lane"], filed["lane"])
             _bump(counts, disposition)
             rows.append(_Finding(
                 row_id=f"f-{label}-{draw_s}-{index_s}", label=label, draw=draw_s,

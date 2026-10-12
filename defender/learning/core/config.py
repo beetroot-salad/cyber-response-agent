@@ -131,13 +131,13 @@ def loop_paths() -> LoopPaths:
 LEARNING_DIR = DEFAULT_PATHS.learning_dir
 
 
-#: The four buckets a lesson can be authored from. Separate from `QUEUEABLE_FINDING_TYPES`,
-#: which also includes the family bucket below.
+#: The three buckets a lesson can be authored from. Separate from `QUEUEABLE_FINDING_TYPES`,
+#: which also includes the family bucket below. A deployment gap is never a defender type
+#: (#1234 P-a): it is reported to the user, never taught.
 PIPELINE_FINDING_TYPES = {
     "lead-set",
     "lead-quality",
     "analyze-discipline",
-    "observability",
 }
 #: A resolution moved past the branch's fence and the verdict still disagreed with the
 #: declared disposition. Produced only by the family judge's appender
