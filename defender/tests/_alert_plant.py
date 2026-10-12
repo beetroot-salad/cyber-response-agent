@@ -35,3 +35,18 @@ def plant_alert(run_dir: Path, alert: bytes | Mapping[str, Any] | None = None, *
     paths.alert_record.write_text(
         _alert_input.record_text(admitted.digest, facts), encoding="utf-8")
     return raw
+
+
+def plant_source_copy(episode_dir: Path, alert: bytes, *,
+                      mapping: Mapping[str, str] = COMMITTED_MAPPING) -> None:
+    """The copies a launch puts in an episode (#1222 A1): the source run's alert and its
+    record, which the judge reads in place of the world's `alert.json`."""
+    from defender._episode_paths import EpisodePaths
+
+    paths = EpisodePaths(Path(episode_dir))
+    admitted = _alert_input.admit(alert)
+    facts = _alert_input.derive_facts(
+        admitted.document, _alert_input.AlertMapping(paths=dict(mapping)))
+    paths.source_alert.write_bytes(alert)
+    paths.source_record.write_text(
+        _alert_input.record_text(admitted.digest, facts), encoding="utf-8")

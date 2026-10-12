@@ -35,6 +35,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.run_repository import RunPaths
+
 from defender import run as run_py  # noqa: E402
 from defender import run_common  # noqa: E402
 from defender.learning.core import drains  # noqa: E402
@@ -125,7 +127,7 @@ def test_791_the_investigation_tail_takes_its_dependencies_through_a_seam(tmp_pa
     assert tail.run_dirs, "main never drove the injected lifecycle"
     run_dir = tail.run_dirs[0]
     assert run_dir.is_dir(), "the lifecycle was handed a run dir that does not exist"
-    assert (run_dir / "alert.json").is_file(), \
+    assert RunPaths(run_dir).alert.is_file(), \
         "the lifecycle was handed a run dir the entrypoint had not materialized the alert into"
     for step in ("open_case_ticket", "lifecycle", "record_case_ticket", "visualize"):
         assert step in tail.names, f"the tail never reached {step} (ran {tail.names})"
@@ -311,7 +313,7 @@ def test_791_curation_refuses_a_held_out_alert_copy_by_content(tmp_path, state):
     nothing (PR2b). A test leaning on the shipped set asserts nothing."""
     fixtures = _held_out_set(tmp_path, HELD_OUT_ALERT)
     copied = _certified_run(tmp_path, name="scored-alert", alert_bytes=HELD_OUT_ALERT)
-    alert = copied / "alert.json"
+    alert = RunPaths(copied).alert
 
     assert run_common.is_held_out_fixture(alert, fixtures) is False, \
         "the run's own alert copy is inside the fixtures dir — the path net would catch it " \
@@ -323,7 +325,7 @@ def test_791_curation_refuses_a_held_out_alert_copy_by_content(tmp_path, state):
 
     ordinary = _certified_run(tmp_path, name="ordinary")
     assert run_common.enqueue_curation(
-        ordinary, ordinary / "alert.json", fixtures_dir=fixtures
+        ordinary, RunPaths(ordinary).alert, fixtures_dir=fixtures
     ) is True, "the net starves curation of ordinary runs"
 
 

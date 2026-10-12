@@ -119,21 +119,22 @@ def test_921_call_rows_carry_window_and_scope_key_against_the_discriminator(tmp_
     assert judge_input.discriminator["predicate"] in judge_input.manifest_text
 
 
-def test_921_sibling_union_is_the_runs_base_trials_sharing_the_alert_id(tmp_path):
-    """The sibling union is the runs sharing the alert's `alert_id`.
+def test_921_sibling_union_is_the_runs_base_trials_sharing_the_alert_digest(tmp_path):
+    """The sibling union is the runs whose record carries the episode's alert digest (#1222: it
+    was the runs sharing the alert's `alert_id`).
 
-    No reader at base indexes the runs base by `alert_id` — the queue's grouping key is
-    `alert_rule_key`, a different key — so this is a NEW walk that opens each candidate run's
-    `alert.json`, a file that is model-writable by construction. Driven with two runs under one
-    alert id and one under another, so the union is a selection rather than "everything found".
+    No reader indexes the runs base by alert — the queue's grouping key is `alert_rule_key`, a
+    different key — so this is a walk that opens each candidate run's record, not its
+    `alert.json`, a file that is model-writable by construction. Driven with two runs of one
+    alert and one of another, so the union is a selection rather than "everything found".
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     base, _src = J.runs_base(tmp_path)
-    for name, alert in (("trial-1", J.ALERT_ID), ("trial-2", J.ALERT_ID),
-                        ("other", "unrelated-rule")):
+    for name, alert in (("trial-1", J.ALERT_RAW), ("trial-2", J.ALERT_RAW),
+                        ("other", b'{"alert_id": "unrelated-rule"}')):
         run = base / name
         run.mkdir(parents=True, exist_ok=True)
-        (run / "alert.json").write_text(json.dumps({"alert_id": alert}), encoding="utf-8")
+        plant_alert(run, alert)
         (run / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
 
     union = {row["run_id"] for row in _render().render(ep, "b", runs_base=base).siblings}
@@ -297,26 +298,28 @@ def test_921_the_sibling_union_excludes_the_source_run_and_unclosed_siblings(tmp
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")],
                                                "c": [J.oracle_row("c")]})
     base, src = J.runs_base(tmp_path)
-    (src / "alert.json").write_text(json.dumps({"alert_id": J.ALERT_ID}), encoding="utf-8")
+    plant_alert(src, J.ALERT_RAW)
 
     closed = base / "closed-trial"
     closed.mkdir(parents=True, exist_ok=True)
-    (closed / "alert.json").write_text(json.dumps({"alert_id": J.ALERT_ID}), encoding="utf-8")
+    plant_alert(closed, J.ALERT_RAW)
     (closed / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
 
     in_flight = base / "in-flight-trial"
     in_flight.mkdir(parents=True, exist_ok=True)
-    (in_flight / "alert.json").write_text(json.dumps({"alert_id": J.ALERT_ID}), encoding="utf-8")
+    plant_alert(in_flight, J.ALERT_RAW)
 
     unreadable = base / "unreadable-trial"
     unreadable.mkdir(parents=True, exist_ok=True)
-    (unreadable / "alert.json").write_bytes(b"\xff\xfe not json")
+    # A run whose record is not one: counted as unreadable (the stored alert is never opened).
+    plant_alert(unreadable, J.ALERT_RAW)
+    RunPaths(unreadable).alert_record.write_bytes(b"\xff\xfe not json")
 
     # The episode's own sibling runs live here, deliberately outside the operator's base.
     (ep / "runs").mkdir(parents=True, exist_ok=True)
     own = ep / "runs" / f"{J.EPISODE_ID}-b"
     own.mkdir(parents=True, exist_ok=True)
-    (own / "alert.json").write_text(json.dumps({"alert_id": J.ALERT_ID}), encoding="utf-8")
+    plant_alert(own, J.ALERT_RAW)
     (own / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
 
     view = _render().render(ep, "b", runs_base=base)
@@ -402,7 +405,7 @@ def test_921_archive_writes_gather_summaries_lessons_loaded_and_alert_json(tmp_p
     (run_dir / "gather_summaries" / "l-001.md").write_text("summary\n", encoding="utf-8")
     (run_dir / "lessons_loaded.jsonl").write_text(
         json.dumps({"lesson_name": "L1"}) + "\n", encoding="utf-8")
-    (run_dir / "alert.json").write_text(json.dumps({"alert_id": J.ALERT_ID}), encoding="utf-8")
+    plant_alert(run_dir, J.ALERT_RAW)
 
     with Episode.open(ep) as episode:
         archived = archive.archive_episode(episode, {"b": run_dir})
