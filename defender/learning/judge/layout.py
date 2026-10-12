@@ -457,7 +457,12 @@ def _cut(block: Block, allowed: int) -> Block:
             break
         kept.append(part)
         room -= len(part.text)
-    if not any(isinstance(p, RunText) for p in kept):
+    if any(isinstance(p, RunText) for p in kept):
+        # Host text past the last frame kept is dropped, so the notice is the host line right
+        # after that frame (where a reader looks for the cut).
+        while isinstance(kept[-1], str):
+            kept.pop()
+    else:
         kept.append(RunText(""))
     return (label, [*kept, CUT_NOTICE])
 
