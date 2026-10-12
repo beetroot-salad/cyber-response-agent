@@ -149,7 +149,7 @@ FAMILY_RUN = "family"
 UNREAD = "unread"
 
 
-def _listed(entries: dict[tuple[str, str], tuple[int, Mapping[str, Any]]],
+def _tally(entries: dict[tuple[str, str], tuple[int, Mapping[str, Any]]],
             key: tuple[str, str], row: Mapping[str, Any], n: int = 1) -> None:
     count, first = entries.get(key, (0, row))
     entries[key] = (count + n, first)
@@ -253,7 +253,7 @@ def found_gaps(bound: Bound, manifest: Mapping[str, Any], *,
         entries: dict[tuple[str, str], tuple[int, Mapping[str, Any]]] = {}
         for row in ledger:
             if is_blocked_ledger_row(row):
-                _listed(entries, blocked_call_key(label, row), row)
+                _tally(entries, blocked_call_key(label, row), row)
         out += [{"run": key[0], **key_fields(first), "count": count}
                 for key, (count, first) in entries.items()]
     family: dict[tuple[str, str], tuple[int, Mapping[str, Any]]] = {}
@@ -265,10 +265,10 @@ def found_gaps(bound: Bound, manifest: Mapping[str, Any], *,
             f"the inherited pre-branch denial is identified across two or more readable query "
             f"tables, and {len(tables)} could be read ({why})")})
     for key, (count, first) in inherited_denial_rows(tables).items():
-        _listed(family, (FAMILY_RUN, key), first, count)
+        _tally(family, (FAMILY_RUN, key), first, count)
     for entry in not_replayable:
         if isinstance(entry, Mapping) and isinstance(entry.get("system"), str):
-            _listed(family, blocked_call_key(FAMILY_RUN, entry), entry)
+            _tally(family, blocked_call_key(FAMILY_RUN, entry), entry)
     out += [{"run": FAMILY_RUN, **key_fields(first), "count": count}
             for (count, first) in family.values()]
     return out

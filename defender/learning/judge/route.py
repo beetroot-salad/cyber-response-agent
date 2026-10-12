@@ -262,16 +262,25 @@ def fate(item: Filed, *, focus: str | None, verdict: WorldVerdict | None, sample
 def gap_entries(filed: list[Filed], verdict: WorldVerdict, *, world: str,
                 ) -> list[dict[str, Any]]:
     """The named gaps a world's draws list (A7: every draw names the same blocked call), once
-    each, with the blocked call's `(system, verb, params)`."""
+    each: the blocked call's run and `(system, verb, params)`, and what was blocked, how and
+    the evidence pointers as the first kept gap naming it (lowest draw, then filing order)
+    states them."""
     from defender.learning.judge.calls import key_fields
 
-    rows: dict[tuple[str, str], dict[str, Any]] = {}
-    for item in filed:
+    rows: dict[tuple[str, str], tuple[dict[str, Any], Filed]] = {}
+    for item in sorted(filed, key=lambda f: (f.draw, f.index)):
         if item.kind == KIND_GAP and item.dropped(world) is None:
             for key, row in named_rows(item.assessment).items():
-                rows.setdefault(key, row)
-    return [{"run": key[0], **key_fields(rows[key]), "world": world}
-            for key in sorted(verdict.listed_keys) if key in rows]
+                rows.setdefault(key, (row, item))
+    out = []
+    for key in sorted(verdict.listed_keys):
+        if key not in rows:
+            continue
+        row, item = rows[key]
+        out.append({"run": key[0], **key_fields(row), "world": world,
+                    "what": item.finding.get("what"), "how": item.finding.get("how"),
+                    "evidence": list(item.assessment.filed)})
+    return out
 
 
 __all__ = [

@@ -55,8 +55,28 @@ from defender.learning.judge.enqueue import (
     DrawsSkipReport,
     draws_on_disk_report,
 )
+from defender.learning.judge.route import (
+    LANE_DRAWS_DISAGREE,
+    LANE_DROPPED_NO_PAIR,
+    LANE_DROPPED_OTHER_RUN,
+    LANE_DROPPED_UNRESOLVED,
+    LANE_GAP_NOT_UNANIMOUS,
+    LANE_GAP_UNKEYED,
+    LANE_NOT_MEASURED,
+    LANE_UNAUTHORED,
+    LANE_USER_RECORD,
+)
 from defender.learning.judge.render import episode_alert
-from defender.learning.judge.run import SUBJECT_DEFENDER, SUBJECT_WORLD
+from defender.learning.judge.run import (
+    CONTRAST_EVIDENCE,
+    GAP_HOW,
+    GAP_WHAT,
+    GAPS,
+    INVESTIGATOR_FINDINGS,
+    SUBJECT_DEFENDER,
+    SUBJECT_WORLD,
+    WORLD_FINDINGS,
+)
 from defender.runtime.branch._family import (
     BASE_ROLE, ManifestPredatesOracle, episode_token_for,
 )
@@ -1009,36 +1029,63 @@ def _ledger_of(grade: Any) -> dict[str, dict[str, Any]] | None:
     return out
 
 
-def _world_findings_lookup(grade: Any) -> dict[str, dict[str, Any]]:
-    """The pass's `world_findings` rows by coordinate — the stub text for a world-lane entry
-    whose draw document is gone."""
-    out: dict[str, dict[str, Any]] = {}
-    for row in _items(grade.world_findings):
-        if isinstance(row, dict):
-            coord = _coordinate_of(row.get("finding_id"))
-            if coord is not None:
-                out.setdefault(coord, row)
-    return out
-
-
 def _bump(counts: dict[str, int], disposition: str) -> None:
-    if disposition in counts:
+    if disposition in _DROPPED_LANES:
+        counts["dropped"] += 1
+    elif disposition in counts:
         counts[disposition] += 1
 
 
 def _finding_fields(finding: Any) -> dict[str, Any]:
-    """One draw finding's fields as `_Finding` kwargs; a non-mapping finding has none."""
+    """One draw finding's fields as `_Finding` kwargs; a non-mapping finding has none. A gap's
+    `what`/`how` stand where a finding's claim and root cause do; an investigator finding's
+    pointers are its `contrast_evidence`."""
     if not isinstance(finding, dict):
         return {"raw": finding}
-    return {"claim": finding.get("claim"), "root_cause": finding.get("root_cause"),
+    claim = finding.get("claim") if "claim" in finding else finding.get(GAP_WHAT)
+    root = finding.get("root_cause") if "root_cause" in finding else finding.get(GAP_HOW)
+    evidence = finding.get(CONTRAST_EVIDENCE) if CONTRAST_EVIDENCE in finding \
+        else finding.get("evidence")
+    return {"claim": claim, "root_cause": root,
             "anchor": finding.get("anchor"), "topic": finding.get("topic"),
-            "bucket": finding.get("bucket"), "evidence": finding.get("evidence"),
+            "bucket": finding.get("bucket"), "evidence": evidence,
             "world_field": finding.get("world"), "raw": finding}
 
 
-#: The ledger's lane → the page's disposition word (`_disposition_heading_raw`).
+#: The subject a deployment gap addresses: the user, never a queue (A2).
+SUBJECT_USER = "user"
+
+#: A draw document's three filed lists, in A13's one index space (investigator, world, gap),
+#: each with the subject its findings address.
+_FILED_LISTS = ((INVESTIGATOR_FINDINGS, SUBJECT_DEFENDER), (WORLD_FINDINGS, SUBJECT_WORLD),
+                (GAPS, SUBJECT_USER))
+
+
+def _filed(doc: dict[str, Any]) -> list[tuple[Any, Any]]:
+    """`(subject, finding)` for every finding one draw filed, indexed as the ledger's ids are:
+    over the three lists in filing order, before any drop (A11, A13)."""
+    return [(subject, finding) for key, subject in _FILED_LISTS for finding in _items(doc.get(key))]
+
+
+#: The ledger's lane → the page's disposition word (`_disposition_heading_raw`); every other
+#: lane is its own word.
 _LANE_WORD = {LANE_DEFENDER: "defender", LANE_WORLD: "world_author",
               LANE_UNQUEUEABLE: "unqueueable"}
+
+#: The heading of every lane that sends a finding to no queue (A13), one per lane: no two
+#: lanes share one, and none quotes the finding's reason, so a lane's rows share theirs.
+_LANE_HEADING = {
+    LANE_USER_RECORD: "user record — listed for the user, not queued",
+    LANE_NOT_MEASURED: "not queued — the world is not measured",
+    LANE_UNAUTHORED: "not queued — the draw named no bucket",
+    LANE_DRAWS_DISAGREE: "not queued — the world's draws disagree",
+    LANE_GAP_NOT_UNANIMOUS: "not listed — a gap not every draw names",
+    LANE_GAP_UNKEYED: "not listed — a gap naming no blocked call",
+    LANE_DROPPED_UNRESOLVED: "dropped — no pointer resolves",
+    LANE_DROPPED_OTHER_RUN: "dropped — names only another run",
+    LANE_DROPPED_NO_PAIR: "dropped — no two-run contrast pair",
+}
+_DROPPED_LANES = frozenset({LANE_DROPPED_UNRESOLVED, LANE_DROPPED_OTHER_RUN, LANE_DROPPED_NO_PAIR})
 
 
 def _off_ledger_disposition(ep: _Episode, label: str) -> tuple[str, str | None]:
@@ -1092,7 +1139,7 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
             dropped = _count(doc.get("dropped_findings"))
             if dropped is not None:
                 counts["dropped"] += dropped
-            if not _items(doc.get("findings")) and doc.get("failure_reason"):
+            if not _filed(doc) and doc.get("failure_reason"):
                 out.draw_failures.append((label, draw, doc["failure_reason"]))
             elif dropped is not None:
                 out.dropped.append((label, draw, dropped))
@@ -1114,47 +1161,18 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
     for label in walked_labels:
         docs, _report = ep.draws[label]
         for draw, doc in docs.items():
-            for index, finding in enumerate(_items(doc.get("findings"))):
+            for index, (subject, finding) in enumerate(_filed(doc)):
                 coord = f"{label}/{draw}/{index}"
                 disposition, reason, recorded_id = _dispose(label, coord)
                 _bump(counts, disposition)
-                # A missing `subject` reads as the defender's, as the enqueue pass reads it.
-                subject = (finding.get("subject", SUBJECT_DEFENDER)
-                           if isinstance(finding, dict) else None)
                 rows.append(_Finding(
                     row_id=f"f-{label}-{draw}-{index}", label=label, draw=draw, index=index,
                     subject=subject, disposition=disposition, reason=reason, stub=False,
                     recorded_id=recorded_id, **_finding_fields(finding)))
 
 
-    # Record-only stubs: a ledger entry whose draw document is absent but whose text the
-    # record still carries (`world_findings` for a world-lane entry). Defender or dropped
-    # entries have no text on the record, so they only appear in the queue accounting. The grain is the document: a present document with fewer
-    # findings than the ledger knew renders nothing extra.
-    if ledger:
-        present_docs = {label: set(ep.draws[label][0]) for label in roster_labels}
-        world_rows_by_coord = _world_findings_lookup(grade)
-        for coord, filed in ledger.items():
-            label, draw_s, index_s = coord.rsplit("/", 2)
-            try:
-                draw_i: int | None = int(draw_s)
-            except ValueError:
-                draw_i = None
-            if draw_i is not None and draw_i in present_docs.get(label, set()):
-                continue
-            world_row = world_rows_by_coord.get(coord)
-            if filed["lane"] == LANE_WORLD and world_row is not None:
-                fields: dict[str, Any] = {"claim": world_row.get("finding")}
-                subject = SUBJECT_WORLD
-            else:
-                continue
-            disposition = _LANE_WORD.get(filed["lane"], filed["lane"])
-            _bump(counts, disposition)
-            rows.append(_Finding(
-                row_id=f"f-{label}-{draw_s}-{index_s}", label=label, draw=draw_s,
-                index=index_s, subject=subject, disposition=disposition,
-                reason=filed.get("reason"), stub=True, recorded_id=filed["finding_id"],
-                **fields))
+    # A ledger entry whose draw document is gone has no text on the record (#1234: the record
+    # carries lanes, not findings), so it shows only in the queue accounting.
 
     out.group_index = _group_numbering(rows)
     return out
@@ -1177,6 +1195,8 @@ def _disposition_heading_raw(f: _Finding) -> str:
     if f.disposition == "unqueueable":
         addressee = "defender" if f.subject == SUBJECT_DEFENDER else "world author"
         return f"{addressee}: unqueueable — {_raw(f.reason)}"
+    if f.disposition in _LANE_HEADING:
+        return _LANE_HEADING[f.disposition]
     if f.disposition == "world_ungradable":
         return f"not enqueued — world ungradable: {_raw(f.reason)}"
     if f.disposition == "no_grade_row":
@@ -1245,6 +1265,7 @@ def _render_document(ep: _Episode) -> str:
         _render_verdict(ep),
         _render_worlds(ep),
         _render_findings_section(ep),
+        _render_user_section(ep),
         _render_stages(ep),
         _render_leads_section(ep),
         _render_records(ep),
@@ -1476,9 +1497,8 @@ def _render_queue_accounting(grade: Any, counts: dict[str, int]) -> str:
         f'defender: {grade.enqueued_rows} enqueued to {_uv(grade.enqueued_to)}',
         f'questioner: {grade.world_enqueued_rows} enqueued to {_uv(grade.world_enqueued_to)}',
         f'unqueueable {counts["unqueueable"]}',
-        f'malformed {grade.queue_malformed_rows} / {grade.world_queue_malformed_rows}',
         f'dropped {counts["dropped"]}',
-        f'family malformed replies {grade.family_malformed_replies}',
+        f'family malformed replies {_uv(_mapping(grade.family).get("malformed_replies"))}',
     ]
     record_vs_page = f'record: {grade.enqueued_rows} enqueued · page found: {counts["defender"]}'
     if grade.enqueued_rows != counts["defender"]:
@@ -1491,6 +1511,67 @@ def _render_queue_accounting(grade: Any, counts: dict[str, int]) -> str:
 
     return f'<details class="vd-acct"><summary>Queue accounting</summary>' \
           f'{"".join(f"<div>{line_}</div>" for line_ in lines)}</details>'
+
+
+# =========================================================================================
+# The user section (judge.yaml's `user`: design M7, A2, A7, R1 (c))
+# =========================================================================================
+
+#: The user record's lists as the page titles them, in the record's own keys.
+_USER_LISTS = (
+    ("named_gaps", "deployment gaps the judge named (every completed draw names the call)"),
+    ("unkeyed_named_gaps", "named gaps with no blocked call, flagged as why the facts never "
+                           "reached the investigator"),
+    ("found_gaps", "blocked calls the code found in the archive"),
+    ("serving_findings", "serving findings"),
+    ("gap_findings", "findings resting only on blocked calls"),
+)
+
+
+def _user_value(value: Any) -> str:
+    """One field of a user-record entry as text: a string as it is, a mapping as `k=v` pairs
+    and a list item by item (so a quoted string reaches the page unchanged, never re-quoted),
+    escaped once by the caller."""
+    if isinstance(value, dict):
+        return ", ".join(f"{_raw(k)}={_user_value(v)}" for k, v in value.items())
+    if isinstance(value, list):
+        return "; ".join(_user_value(v) for v in value)
+    return _raw(value)
+
+
+def _user_entry_html(entry: Any) -> str:
+    """One entry: a found gap's call and count, or an unread input with its cause; any other
+    entry field by field. Every value is the record's, rendered as text."""
+    if not isinstance(entry, dict):
+        return f'<div class="us-entry">{_uv(_user_value(entry))}</div>'
+    if entry.get("unread"):
+        return (f'<div class="us-entry us-unread">run {_uv(_user_value(entry.get("run")))}: '
+                f'unread — {_uv(_user_value(entry.get("unread")))}</div>')
+    head = ""
+    if "system" in entry:
+        head = (f'run {_user_value(entry.get("run"))}: {_user_value(entry.get("system"))} '
+                f'{_user_value(entry.get("verb"))} {_user_value(entry.get("params"))}')
+        if "count" in entry:
+            head += f' — {_user_value(entry.get("count"))} time(s)'
+    rest = [f"{_raw(k)}: {_user_value(v)}" for k, v in entry.items()
+            if k not in ("run", "system", "verb", "params", "count")]
+    text = " · ".join(part for part in (head, *rest) if part)
+    return f'<div class="us-entry">{_uv(text)}</div>'
+
+
+def _render_user_section(ep: _Episode) -> str:
+    """judge.yaml's user section, every list whole (no cap: N13), each entry as data."""
+    grade = ep.grade
+    if grade is None:
+        return ""
+    user = _mapping(grade.user)
+    parts = []
+    for key, title in _USER_LISTS:
+        entries = _items(user.get(key))
+        body = "".join(_user_entry_html(e) for e in entries) or \
+            '<div class="us-entry">none</div>'
+        parts.append(f'<div class="us-list"><h3>{esc(title)} ({len(entries)})</h3>{body}</div>')
+    return _page_section("sec-user", "User record", "".join(parts))
 
 
 # =========================================================================================

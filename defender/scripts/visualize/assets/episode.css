@@ -195,3 +195,8 @@
   font-size: 0.9em;
 }
 .episode .rc-sample { margin-left: 1em; }
+
+/* #1234: judge.yaml's user section — named, found and serving entries, and unread inputs. */
+.episode .us-list { margin: 6px 0; }
+.episode .us-entry { font-size: 0.9em; padding: 1px 0 1px 12px; overflow-wrap: anywhere; }
+.episode .us-unread { color: var(--bad); }

@@ -39,6 +39,7 @@ from defender.learning.judge.calls import (
     is_blocked_ledger_row,
     is_blocked_table_row,
     is_inherited,
+    FAMILY_RUN,
     blocked_call_key,
 )
 from defender.learning.judge.family import WorldFacts
@@ -150,10 +151,14 @@ def _world_pointer(scope: PointerScope, pointer: str, parts: list[str],
             return None
         row = run.table_rows[index]
         blocked = is_blocked_table_row(row, run.ledger_rows, run.token, j3=scope.j3)
+        inherited = is_inherited(row, run.token)
+        # An inherited row that is blocked is J3's (A14): the family's blocked call, keyed
+        # under the family as its found gap is, whichever run's copy the pointer cites.
         return Resolution(
             pointer=pointer, kind=CONDUCT, run=label, blocked=blocked,
-            inherited_ordinary=is_inherited(row, run.token) and not blocked,
-            blocked_key=blocked_call_key(label, row) if blocked else None,
+            inherited_ordinary=inherited and not blocked,
+            blocked_key=blocked_call_key(FAMILY_RUN if inherited else label, row)
+            if blocked else None,
             blocked_row=dict(row) if blocked else None)
     if leaf in _CONTEXT_LEAVES:
         name = f"{LAYOUT.world(label).dir}/{leaf}"
