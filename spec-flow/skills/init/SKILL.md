@@ -13,6 +13,7 @@ Derive it from the repo, not from the user. Ask only what the repo genuinely can
 
 - **The gate.** The CI config is the source of truth — find it (`.github/workflows/*.yml`, or the project's equivalent) and read what it actually runs. Separate the **test** command from the other **checks** (lint, types, custom project lints); the skills run the test command constantly and the full set once before shipping.
 - **The test layout.** Where tests live. Whether an e2e/integration harness already exists that fakes the system's dependencies — `write-tests` builds on it rather than inventing parallel machinery, so name it precisely (path + how a new scenario is added, in a phrase).
+- **The source roots.** Record the repository-relative source directories and standalone entrypoint files as `sourceRoots` when repository checks consume a source census. Derive them from the shipped layout; this is code-location data, not a requirements graph.
 - **The injection idioms.** How fakes are meant to enter the code under test — a `deps` parameter, a constructor argument, a fixture — and what the project's CI *forbids* (a lint that ratchets monkey-patching, for instance). If a lint enforces it, name the lint.
 - **The traps.** The things that make a green local run a lie: a venv that resolves to the wrong tree from a worktree, an env var the suite needs, a service that must be up. These are what `gate.notes` is for.
 - **The code graph (Python only).** `symbol-refs` resolves who-references / where-defined via pyrefly, and pyrefly *silently* under-resolves unless its import root is on the search path — so this field is derived, not guessed. Give it `codeGraph`: `configDir`, the directory pyrefly should root at (where a `pyproject.toml` lives, or the package dir), and `searchPath`, the import roots **relative to configDir**. Derive `searchPath` from however the project already puts its package on `sys.path`: pytest's `pythonpath`, mypy's `mypy_path` / `explicit_package_bases`, a `src/` layout, an editable install. The case that bites is a **namespace package** (no `__init__.py`, `pyproject.toml` below the import root) — it needs the parent (`..`) added, mirroring pytest's `pythonpath=['..']`. A package at the repo root is just `configDir: "."`, `searchPath: ["."]`. Omit `codeGraph` entirely for a non-Python repo.
@@ -26,6 +27,7 @@ Write `.claude/spec-flow.json` in the shape below, then **run what you wrote** �
 ```json
 {
   "project": "<one line: what this codebase is, language, test framework>",
+  "sourceRoots": ["<repository-relative source directory or standalone entrypoint>"],
   "gate": {
     "ciConfig": ".github/workflows/ci.yml",
     "test": "<the exact command CI runs for tests>",

@@ -50,7 +50,8 @@ from defender.tests.scripts_1080_split import _spec1080 as S
 
 LINT_DIR = S.REPO_ROOT / "scripts" / "lint"
 SPEC_GRAPH_DIR = S.REPO_ROOT / "spec-flow" / "scripts" / "spec_graph"
-PROFILE = S.REPO_ROOT / ".claude" / "spec-flow.json"
+# Historical pointer checks use the archived graph configuration, not the active profile.
+PROFILE = S.REPO_ROOT / "spec-flow/scripts/spec_graph/references/project-config.json"
 CI = S.REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
 #: Every base module of `defender/scripts/` the design moves, and the symbols whose homes now

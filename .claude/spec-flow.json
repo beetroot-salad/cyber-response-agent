@@ -30,5 +30,15 @@
       "."
     ],
     "notes": "defender is a namespace package (no defender/__init__.py; pyproject at defender/, not the repo root), so pyrefly's import root defaults to defender/ and `defender.x` imports silently resolve to Unknown. searchPath is relative to configDir: `..` = repo root (makes `defender` a top-level package, mirroring pytest's pythonpath=['..']), `.` = defender/. The pyrefly-refs helper writes a temp configDir/pyrefly.toml from these and removes it per run."
-  }
+  },
+  "sourceRoots": [
+    "defender/runtime",
+    "defender/learning",
+    "defender/evals",
+    "defender/scripts",
+    "defender/run.py",
+    "defender/_venv.py",
+    "defender/_query_rules.py",
+    "defender/_pricing.py"
+  ]
 }

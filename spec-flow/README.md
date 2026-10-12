@@ -90,6 +90,7 @@ The method is portable; a project's gate is not. Everything repo-specific lives 
   and the traps that make a green local run a lie.
 - `tests` — where tests live, the existing fake/replay harness to build on, and how fakes are meant
   to enter the code (what the project's CI forbids).
+- `sourceRoots` — source directories and standalone entrypoints used by repository code censuses.
 - `codeGraph` — optional Python source-reference lookup configuration for `symbol-refs`;
   it does not model feature requirements.
 - `conventions` — the default branch, the **danger lens** (what kind of hostile reality this system
