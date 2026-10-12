@@ -606,6 +606,24 @@ def family_row(*, draws: tuple[int, ...] = (0,), **over: Any) -> dict[str, Any]:
     return row
 
 
+def record_draws(doc: dict[str, Any], label: str, draws: tuple[int, ...]) -> dict[str, Any]:
+    """`doc` (a `sample_grade()`-shaped record) re-stated as recording `draws` for `label`'s
+    row — a world row's `draws` (each with the row's bucket and systems) and
+    `completed_draws`, or the family row's for `FAMILY` — the record a pass that completed
+    those draws writes. The page shows a draw document only when the record names its draw
+    (#1234 A6: `judge.recorded_draws`), so a scenario adding a draw on disk records it here."""
+    if label == FAMILY:
+        kept = {k: v for k, v in (doc.get("family") or {}).items()
+                if k not in ("draws", "completed_draws")}
+        doc["family"] = family_row(draws=draws, **kept)
+        return doc
+    row = next(r for r in doc["worlds"] if r["world"] == label)
+    row["draws"] = [{"draw": n, "bucket": row.get("bucket"),
+                     "systems": list(row.get("systems") or [])} for n in draws]
+    row["completed_draws"] = len(draws)
+    return doc
+
+
 def ungradable_row(label: str, *, declared: str = "malicious",
                    reason: str = "oracle unservable — the oracle could not serve 'elastic' "
                                  "esql for this world") -> dict[str, Any]:
@@ -1145,7 +1163,7 @@ __all__ = [
     "PASSTHROUGH_WORLD", "SAMPLE", "SYSTEM", "WORLD_ENQUEUED_TO", "WORLDS",
     "Episode", "Node", "Page", "Rescue", "PAGE_FILE", "raise_now", "when_inside",
     "cli", "copy_episode", "draw_doc", "draw_document", "escaped", "every_step",
-    "family_draw_doc", "family_findings", "family_row", "finding", "mod", "page_module", "plant_fifo",
+    "family_draw_doc", "family_findings", "family_row", "finding", "mod", "record_draws", "page_module", "plant_fifo",
     "plant_link", "plant_raw", "read_page", "render", "result_event", "run_dir",
     "sample_episode", "sample_grade", "sample_manifest", "sample_manifest_worlds", "served_row",
     "snapshot", "sym", "trace_rows", "trace_stem", "ungradable_row", "world_row", "write_framed", "write_judge", "write_outcome", "write_samples", "write_stamp",
