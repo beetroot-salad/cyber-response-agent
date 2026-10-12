@@ -36,6 +36,8 @@ NOT_COMPARABLE_NAME = "not_comparable.yaml"
 LEARNING_HTML_NAME = "learning.html"
 #: The source run's alert and its record, copied into the episode at launch (#1222 A1): the
 #: judge's whole input about the alert, and the sibling runs' own input.
+#: The run's alert record inside a world's archive, beside its `alert.json`.
+ARCHIVED_ALERT_RECORD_NAME = "alert_record.json"
 SOURCE_ALERT_NAME = "source_alert.json"
 SOURCE_RECORD_NAME = "source_record.json"
 
@@ -128,6 +130,11 @@ class ArchivedWorldLeaves:
         return PurePosixPath(ALERT)
 
     @property
+    def alert_record(self) -> PurePosixPath:
+        """The run's alert record, archived beside the alert it vouches for."""
+        return PurePosixPath(ARCHIVED_ALERT_RECORD_NAME)
+
+    @property
     def gather_summaries(self) -> PurePosixPath:
         return PurePosixPath(GATHER_SUMMARIES_DIRNAME)
 
@@ -209,6 +216,10 @@ class WorldLayout:
     @property
     def alert(self) -> PurePosixPath:
         return self.dir / WORLD_LEAVES.alert
+
+    @property
+    def alert_record(self) -> PurePosixPath:
+        return self.dir / WORLD_LEAVES.alert_record
 
     @property
     def gather_summaries(self) -> PurePosixPath:
@@ -621,6 +632,10 @@ class WorldPaths:
     @property
     def alert(self) -> Path:
         return self._at(self.rel.alert, what="alert")
+
+    @property
+    def alert_record(self) -> Path:
+        return self._at(self.rel.alert_record, what="alert_record")
 
     @property
     def gather_summaries(self) -> Path:

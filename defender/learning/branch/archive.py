@@ -114,6 +114,7 @@ def _single_files(run_dir: Path, world: WorldPaths) -> tuple[tuple[Path, Path], 
         (run_end_sidecar_path(run_dir), world.run_end),
         (paths.lessons_loaded, world.lessons_loaded),
         (paths.alert, world.alert),
+        (paths.alert_record, world.alert_record),
     )
 
 

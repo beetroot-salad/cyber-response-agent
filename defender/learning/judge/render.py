@@ -40,6 +40,7 @@ from defender.learning.judge.family import (
     discriminator_of,
     episode_id_of,
     json_mapping,
+    json_mapping_of,
     has_refusals,
     _repository_leads,
     lead_chain,
@@ -390,19 +391,28 @@ def sibling_union(
     return siblings, notes
 
 
-def episode_alert(bound: Bound) -> _alert_input.AlertRecord | None:
+def episode_record(bound: Bound) -> _alert_input.AlertRecord | None:
     """The record of the alert this episode's worlds all investigate: the copy launch put in the
     episode (A1), or `None` when there is none or it is not one.
 
-    Shared by the sibling union and the enqueue's `alert_rule_key`, so both key on the same
-    record."""
+    Shared by the sibling union and the enqueue's rule key, so both key on the same record."""
     read = bound.read(LAYOUT.source_record)
     return _alert_input.parse_record(read.text) if read.text else None
 
 
+def episode_alert(bound: Bound) -> dict[str, Any]:
+    """The alert document the episode's copy holds, for display; `{}` when there is none, it is
+    not one JSON object, or its bytes are not the record's digest."""
+    record = episode_record(bound)
+    read = bound.read(LAYOUT.source_alert)
+    if record is None or not read.text or _alert_input.digest_of(read.text.encode("utf-8")) != record.digest:
+        return {}
+    return json_mapping_of(read.text) or {}
+
+
 def episode_digest(bound: Bound) -> str | None:
     """The episode's alert digest (the union's key), or `None` when it has no usable record."""
-    record = episode_alert(bound)
+    record = episode_record(bound)
     return None if record is None else record.digest
 
 
@@ -715,5 +725,5 @@ def _usable_commit(commit: Any) -> str | None:
     return commit if isinstance(commit, str) and _COMMIT_RE.match(commit) else None
 
 
-__all__ = ["JudgeInput", "episode_alert", "family_status", "render", "render_family_text",
+__all__ = ["JudgeInput", "episode_alert", "episode_record", "family_status", "render", "render_family_text",
            "sibling_union"]

@@ -105,6 +105,12 @@ class LauncherRefused(SystemExit):
     explanation rather than a traceback."""
 
 
+class SourceInputReplaced(LauncherRefused, Exception):
+    """The source run's stored alert does not match its record (#1222 A1). An operator's exit
+    like every launcher refusal, and ALSO an `Exception`, so a caller that guards a launch with
+    `except Exception` sees the refusal instead of the process leaving."""
+
+
 # ---------------------------------------------------------------------------------------
 # where an episode lives
 # ---------------------------------------------------------------------------------------
@@ -207,7 +213,7 @@ def source_input(source_run_dir: Path) -> tuple[bytes, str]:
         raw, _record = _alert_input.verified_alert(
             run_paths.alert, run_paths.alert_record, run_name=Path(source_run_dir).name)
     except _alert_input.AlertReplaced as replaced:
-        raise LauncherRefused(f"[branch] {replaced}") from replaced
+        raise SourceInputReplaced(f"[branch] {replaced}") from replaced
     record_text, _reason = _io.read_guarded(run_paths.alert_record)
     assert record_text is not None  # verified_alert just read it
     return raw, record_text

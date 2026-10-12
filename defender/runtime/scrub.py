@@ -135,6 +135,29 @@ def write_did_not_run(tree: Path, reason: str) -> None:
     _write_verdict(tree, {"ran": False, "reason": reason})
 
 
+def mark_unsandboxed(tree: Path) -> None:
+    """Add `"sandboxed": false` to the tree's verdict: the run had no box, so the read-only
+    input directory was never mounted and the alert's bytes are unbound — the learning gate
+    reads this and refuses the run (#1222). Best-effort, like every write of the verdict."""
+    p = verdict_path(tree)
+    try:
+        doc = json.loads(read_text_utf8(p))
+    except (OSError, json.JSONDecodeError):
+        doc = {}
+    if not isinstance(doc, dict):
+        doc = {}
+    _write_verdict(tree, {**doc, "sandboxed": False})
+
+
+def tree_unsandboxed(tree: Path) -> bool:
+    """Whether the verdict marks the run as having had no box (`mark_unsandboxed`)."""
+    try:
+        doc = json.loads(read_text_utf8(verdict_path(tree)))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(doc, dict) and doc.get("sandboxed") is False
+
+
 def tree_verified(tree: Path) -> bool:
     """Whether the verdict records `ran: true`; absent or anything else reads as unverified.
 

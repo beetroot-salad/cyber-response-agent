@@ -35,7 +35,7 @@ from defender.learning.core.state import (
 )
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.judge.family import is_gradable_row, read_manifest, read_samples_record
-from defender.learning.judge.render import episode_alert
+from defender.learning.judge.render import episode_record
 #: Imported, not re-spelled, so the appender's guard and `run.py`'s selector cannot drift.
 from defender.learning.judge.run import (
     SUBJECT_DEFENDER,
@@ -546,7 +546,7 @@ def _enqueue_report(  # noqa: C901, PLR0912, PLR0913, PLR0915 — see `enqueue_r
     run_id = episode_dir.name
     # The one rule for which world's alert is the episode's, shared with the orchestration so
     # the rule key and the sibling union agree.
-    alert_rule_key = rule_key_of(episode_alert(view))
+    alert_rule_key = rule_key_of(episode_record(view))
     defender_blocked = defender_lane_blocked(verdict_word)
 
     defender_rows: list[dict[str, Any]] = []

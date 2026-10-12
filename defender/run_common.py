@@ -453,6 +453,9 @@ def learning_refusal_gate(
             "findings must never feed a corpus it is scored against"
     from defender.runtime import scrub as _scrub
 
+    if _scrub.tree_unsandboxed(run_dir):
+        return f"{run_dir.name} ran without a sandbox, so its input directory was never bound " \
+            "read-only — nothing is learned from it"
     if not _scrub.tree_verified(run_dir):
         # No completed scan verdict: the crash path most likely to hold what a box planted.
         return f"{run_dir} carries no completed reap-scan verdict — an unverified tree " \

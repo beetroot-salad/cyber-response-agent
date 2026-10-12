@@ -280,6 +280,7 @@ def is_untrusted_read(path: Path) -> bool:
     p = Path(path)
     return (
         p.name == RUN_LAYOUT.alert.name
+        or p.parent.name == RUN_LAYOUT.alert_input_dir.name
         or is_captured_payload(p)
         or _names_query_draft(p)
     )
