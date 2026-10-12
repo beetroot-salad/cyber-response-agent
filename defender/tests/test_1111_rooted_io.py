@@ -81,6 +81,7 @@ from defender._artifact_schema import INVESTIGATION_FILE_MAX
 from defender._provenance import RunProvenance
 from defender.run_repository import RUN_LAYOUT, RunPaths, SessionPaths
 from defender.tests import _spec1077 as S
+from defender.tests._alert_plant import plant_alert
 from defender.tests._create_lane import assert_single_plain, no_unnamed_files
 from defender.tests._umask import umask
 
@@ -539,7 +540,7 @@ def _fill_record_sources(tree: Tree) -> None:
     owner.provenance.write_text(RunProvenance(
         commit="0" * 40, dirty=False, model="m-1111", tenant_id=S.DEFAULT_TENANT_ID,
         world_id="w-1111").as_json(), encoding="utf-8")
-    owner.alert.write_bytes(b'{"alert": "1111"}\n')
+    plant_alert(run_dir, b'{"alert": "1111"}\n')
     owner.report.write_text(S.report_text("# the report\n"), encoding="utf-8")
     owner.run_end_sidecar(tree.runs_base).write_text(
         json.dumps({"truncated_by": "budget", "closed_before_cut": False}), encoding="utf-8")
@@ -572,13 +573,14 @@ def test_o1_o3_a_plant_at_any_file_run_record_reads_counts_as_absent(tree, kind)
     plant's bytes would give, and never a hang (O3).
 
     Controls: every source feeds the record (removing it changes the record, so the negative
-    can see a leak), and restoring the plain file restores the full record. Floor: the four
-    reads the design names (provenance, alert bytes, report, run-end sidecar) are among those
+    can see a leak), and restoring the plain file restores the full record. Floor: the five
+    reads the design names (provenance, alert bytes, alert record, report, run-end sidecar) are among those
     recorded, so the enumeration cannot shrink to nothing."""
     _fill_record_sources(tree)
     sources = _record_sources(tree)
     owner = RunPaths(tree.runs_base / RUN_ID)
-    floor = {owner.provenance, owner.alert, owner.report, owner.run_end_sidecar(tree.runs_base)}
+    floor = {owner.provenance, owner.alert, owner.alert_record, owner.report,
+             owner.run_end_sidecar(tree.runs_base)}
     assert floor <= set(sources), f"run.record's recorded reads {sources} miss {floor}"
     full = tree.run().record
 
@@ -586,7 +588,11 @@ def test_o1_o3_a_plant_at_any_file_run_record_reads_counts_as_absent(tree, kind)
         body = src.read_bytes()
         src.unlink()
         absent = tree.run().record
-        assert absent != full, f"control: {src.name} does not feed run.record"
+        if src != owner.alert:
+            # The stored alert only vouches for the record's digest (#1222 A1): without it the
+            # record is what it was, so there is no control to run for it — the plant arms
+            # below are its test.
+            assert absent != full, f"control: {src.name} does not feed run.record"
         planted = plant_leaf(src, kind, host=tree.host, body=body)
         before = census(tree.tmp)
         got = in_time(lambda: tree.run().record, fifo=planted.fifo)
@@ -1030,9 +1036,10 @@ def test_o8_the_alert_bytes_are_written_as_given_through_the_create_lane(tree):
     assert [(w["mode"], w["text"]) for w in writes] == [("create", body)]
 
 
-def test_o8_run_record_reads_its_four_sources_as_rooted_reads(tree):
+def test_o8_run_record_reads_its_five_sources_as_rooted_reads(tree):
     """O8 over `Run.record`: its reads are `rooted_read`s and nothing else. The provenance,
-    the alert (as bytes, `binary=True`, for the hash) and the report are read on the run dir.
+    the alert (as bytes, `binary=True`, for the hash), the alert's record (#1222: the digest the
+    bytes are checked against) and the report are read on the run dir.
     The run-end sidecar is read on the runs base."""
     _fill_record_sources(tree)
     rec = S.RecordingIo()
@@ -1048,6 +1055,7 @@ def test_o8_run_record_reads_its_four_sources_as_rooted_reads(tree):
     want = sorted([
         (str(run_dir), RUN_LAYOUT.provenance.as_posix(), False),
         (str(run_dir), RUN_LAYOUT.alert.as_posix(), True),
+        (str(run_dir), RUN_LAYOUT.alert_record.as_posix(), False),
         (str(run_dir), RUN_LAYOUT.report.as_posix(), False),
         (str(tree.runs_base), RunPaths(run_dir).run_end_sidecar(tree.runs_base).name, False),
     ])
@@ -1962,12 +1970,18 @@ def _alert_leftovers(root: Path, body: bytes) -> tuple[list[str], int]:
     whole = 0
     for d in sorted(root.iterdir()):
         names = sorted(os.listdir(d))
-        if names not in ([], [RUN_LAYOUT.alert.name]):
+        if names not in ([], [RUN_LAYOUT.alert_input_dir.name]):
             bad.append(f"{d.name}: stray entries {names}")
             continue
         if not names:
             continue
-        alert = d / RUN_LAYOUT.alert.name
+        held = sorted(os.listdir(d / RUN_LAYOUT.alert_input_dir))
+        if held not in ([], [RUN_LAYOUT.alert.name]):
+            bad.append(f"{d.name}: stray entries {held} in the input directory")
+            continue
+        if not held:
+            continue
+        alert = d / RUN_LAYOUT.alert
         st = os.lstat(alert)
         if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
             bad.append(f"{d.name}: the alert is not one plain name ({st})")

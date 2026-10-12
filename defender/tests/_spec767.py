@@ -41,7 +41,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from defender._alert_input import AlertFacts
 from defender.tests import _tenants1106 as T1106
+from defender.tests._alert_plant import plant_alert
 from defender.tests.tenant_1107_settings import _spec1107 as S1107
 
 # --------------------------------------------------------------------------------------
@@ -141,11 +143,6 @@ def mapping_doc(  # noqa: PLR0913 — one keyword per MEMBER a demand exercises,
     other value is written as-is and must be ignored), `close_section` is FK27's stale lane and
     `extra_open` is an operator-added open field."""
     doc: dict[str, Any] = {
-        "source": {
-            "signature": "rule.id",
-            "summary": "rule.description",
-            "event_time": "timestamp",
-        },
         "open": {
             "key": "{case_id}",
             "summary": "{summary}",
@@ -321,10 +318,21 @@ def make_run(tmp_path: Path, name: str = "20260917T000000Z-sshd", *, alert: Any 
     run_dir = tmp_path / name
     run_dir.mkdir(parents=True, exist_ok=True)
     write_report(run_dir, **report_kw)
-    run_dir.joinpath("alert.json").write_text(
-        json.dumps(ALERT if alert is None else alert), encoding="utf-8"
-    )
+    plant_alert(run_dir, ALERT if alert is None else alert, mapping=ALERT_MAPPING)
     return run_dir
+
+
+#: The paths this suite's alerts carry their three facts at (the record's derivation, #1222).
+ALERT_MAPPING = {"signature": "rule.id", "event_time": "timestamp", "summary": "rule.description"}
+
+
+def facts_of(alert: dict[str, Any]) -> AlertFacts:
+    """The facts the front door records for `alert` under `ALERT_MAPPING` — what the mapper is
+    handed in place of the alert (#1222). The values pass as they are: whether a value is a
+    signature is the front door's rule, and these tests watch what the mapper does with one."""
+    rule = alert.get("rule") if isinstance(alert.get("rule"), dict) else {}
+    return AlertFacts(signature=rule.get("id") or None, event_time=alert.get("timestamp") or None,
+                      summary=rule.get("description") or None)
 
 
 # --------------------------------------------------------------------------------------
