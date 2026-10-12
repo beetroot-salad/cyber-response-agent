@@ -53,7 +53,7 @@ def _valid_count(value: object) -> int | None:
     return value if value >= 0 else None
 
 
-def _count(state: RunState, tool_name: str) -> None:
+def _tally(state: RunState, tool_name: str) -> None:
     """One call on the run's counters; `gather` is also a spawn. Call under `state.lock`."""
     state.budget["tool_calls"] += 1
     if tool_name == "gather":
@@ -63,7 +63,7 @@ def _count(state: RunState, tool_name: str) -> None:
 def count_call(state: RunState, tool_name: str) -> dict:
     """Count one call with no cap check (the unenforced posture). Returns the budget after."""
     with state.lock:
-        _count(state, tool_name)
+        _tally(state, tool_name)
         return dict(state.budget)
 
 
@@ -77,7 +77,7 @@ def account_call(state: RunState, tool_name: str, *, limits: dict, tier: str) ->
     limit = limits["max_tool_calls"] + (TAIL_ALLOWANCE if tier == "tail" else 0)
     with state.lock:
         if state.budget["tool_calls"] < limit:
-            _count(state, tool_name)
+            _tally(state, tool_name)
         return dict(state.budget)
 
 

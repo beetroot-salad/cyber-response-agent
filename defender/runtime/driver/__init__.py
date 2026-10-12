@@ -525,14 +525,18 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
 
     # A sync callback pydantic-ai runs for this run — a sync model function or tool handed in
     # through `make_model` or `toolset`; the run's own are all async — runs on the run's own
-    # worker threads, shut down with it. pydantic-ai's default, anyio's shared pool, records the
-    # loop's root task in a process-wide table that only the loop's collection clears, and the
-    # root task holds its loop: under `asyncio.run` this coroutine is that task, so its result —
-    # the summary carrying `run_state` — would outlive the run for the life of the process
-    # (#1235). Opened before item 3 is scheduled: its task copies the context, the executor
-    # with it, when it is created.
-    with (ThreadPoolExecutor(thread_name_prefix=f"run-{run_id}") as threads,
-          Agent.using_thread_executor(threads)):
+    # worker threads. pydantic-ai's default, anyio's shared pool, records the loop's root task in
+    # a process-wide table that only the loop's collection clears, and the root task holds its
+    # loop: under `asyncio.run` this coroutine is that task, so its result — the summary
+    # carrying `run_state` — would outlive the run for the life of the process (#1235).
+    #
+    # Not shut down when the run returns: a call the run abandoned (a lead cancelled mid-call by
+    # a sibling's budget kill) runs on to its end on a thread outside the run, in a copy of the
+    # run's context, and may still reach this pool. Its threads exit once nothing refers to it.
+    # Opened before item 3 is scheduled: its task copies the context, the executor with it, when
+    # it is created.
+    threads = ThreadPoolExecutor(thread_name_prefix=f"run-{run_id}")
+    with Agent.using_thread_executor(threads):
         prompt, lead_zero_block, lead_zero_status = _opening_prompt(
             resume, run_state, alert_path, defender_dir,
             systems=tuple(roster.accepted), verbs=lead_zero_verbs, limits=limits,
