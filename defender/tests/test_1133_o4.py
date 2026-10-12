@@ -541,7 +541,8 @@ def test_o4_6_a_plain_stale_draw_at_a_malformed_index_is_still_removed(tmp_path,
 
 
 def _run_draws(episode: Any, judge: ScriptedJudge) -> Any:
-    """`judge._run_world_draws(episode, "b", ...)`: the draw loop, handed the pass's Episode."""
+    """`judge._run_world_draws(episode, "b", ...)`: the draw loop, handed the pass's Episode.
+    Returns its `(completed, documents, malformed, last refusal's reason)` (#1234)."""
     return J.mod("learning.judge")._run_world_draws(
         episode, "b", judge=judge, draws=2, model="judge-model", effort="low",
         prompt="the framed prompt")
@@ -589,7 +590,7 @@ def test_s1_any_other_error_removing_a_stale_draw_stops_the_pass_and_keeps_nothi
 
     judge = _malformed_first()
     with S.open_episode(ep) as episode:
-        completed, documents, malformed = _run_draws(episode, judge)
+        completed, documents, malformed, _last_refusal = _run_draws(episode, judge)
     assert judge.agent_ids == [*_draw0_asks(), "judge:b:1"]
     assert (completed, malformed) == (1, len(_draw0_asks()))
     assert sorted(documents) == [1]
@@ -610,8 +611,8 @@ def test_s1_a_non_plain_draw_is_contained_logged_and_left(tmp_path, caplog, kind
 
     judge = _malformed_first()
     with S.open_episode(ep) as episode:
-        completed, _docs, malformed = S.in_time(lambda: _run_draws(episode, judge),
-                                                         fifo=planted.fifo)
+        completed, _docs, malformed, _last_refusal = S.in_time(
+            lambda: _run_draws(episode, judge), fifo=planted.fifo)
     assert judge.agent_ids == [*_draw0_asks(), "judge:b:1"], (
         "the loop stopped at a contained row")
     assert (completed, malformed) == (1, len(_draw0_asks()))

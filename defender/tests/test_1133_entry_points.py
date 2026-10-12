@@ -515,7 +515,7 @@ def test_h1_a_linked_family_draws_folder_is_refused_and_contained_to_the_family_
         tmp_path, roots, host, at, reach):
     """The family-level call makes its folder with `episode.world("family").draws.ensure()`:
     a link at `worlds/family/` or `worlds/family/judge/` is refused and contained to the family
-    call — recorded as `family_failed_reason` — so the judge is never called for it, the folder
+    call — recorded on the family row's `draws_failed_reason` (#1234) — so the judge is never called for it, the folder
     the link reaches gains nothing and the link is left.
 
     A reverted `os.makedirs(draws, exist_ok=True)` makes the draws folder through an inside
@@ -536,7 +536,7 @@ def test_h1_a_linked_family_draws_folder_is_refused_and_contained_to_the_family_
     assert judge.called_for("family") == [], (
         f"the judge was paid for the family call over a linked folder: "
         f"{judge.called_for('family')}")
-    reason = J.judge_record(ep).get("family_failed_reason") or ""
+    reason = (J.judge_record(ep).get("family") or {}).get("draws_failed_reason") or ""
     assert reason.startswith("OSError"), (
         f"the family call's setup refusal was not recorded: {reason!r}")
     assert planted.state() == before, f"the family call wrote through the link at {at}"
@@ -582,7 +582,7 @@ def test_h1_a_link_at_a_draws_name_refuses_the_pass_and_is_written_through_by_no
     regrade(tmp_path, ep, ScriptedJudge())
     draw = ep / "worlds" / "b" / "judge" / "0.yaml"
     assert_plain_file(draw)
-    assert yaml.safe_load(draw.read_text(encoding="utf-8"))["findings"]
+    assert yaml.safe_load(draw.read_text(encoding="utf-8"))["investigator_findings"]
 
 
 FRAMED = WIRE_LOG_NAMES.agent_framed_trace("judge:b:0")
