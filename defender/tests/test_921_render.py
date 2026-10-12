@@ -47,6 +47,24 @@ def _render():
     return J.mod("learning.judge.render")
 
 
+def _lessons_view(ctx) -> str:
+    """The judged world's lessons view as the prompt lays it out (`layout`'s `lessons` section
+    body, `render._render_lessons` over `JudgeContext.focus.lessons`; #1234 retired
+    `as_prompt_sections`)."""
+    return _render()._render_lessons(ctx.focus.lessons)
+
+
+def _world_prompt(ep, label: str = "b", **kw) -> str:
+    """World `label`'s prompt from the real assembler over the real render
+    (`run._build_prompt(ctx, manifest)`, #1234)."""
+    from defender._io import bind
+
+    with bind(ep) as bound:
+        manifest = J.mod("learning.judge.family").read_manifest(bound)
+    ctx = _render().render(ep, label, **kw)
+    return J.mod("learning.judge.run")._build_prompt(ctx, manifest)[0]
+
+
 def _prompts(tmp_path, ep, **kw):
     """Drive the real episode-grading pass and hand back what the model seam was SHOWN.
 
@@ -82,14 +100,15 @@ def test_921_judge_input_carries_per_lead_chain_coverage_siblings_lessons_spread
     `tests/e2e/test_1017_query_row_surface.py` pins what the leads view may and may not carry.
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    judge_input = _render().render(ep, "b")
+    ctx = _render().render(ep, "b")
+    judge_input = ctx.focus
 
     chain = judge_input.leads["l-001"]
     for link in ("goal", "params", "payload", "summary", "resolutions"):
         assert link in chain, f"the per-lead chain is missing its {link} link"
     assert "document_rows" not in chain, \
         "the per-lead chain still carries the raw row dump #1017 removed"
-    assert judge_input.calls, "the per-call view (#1224's successor to coverage) is empty"
+    assert ctx.focus_calls, "the per-call view (#1224's successor to coverage) is empty"
     assert judge_input.lessons, "the lessons-loaded view is empty"
 
 
@@ -99,20 +118,23 @@ def test_921_call_rows_carry_window_and_scope_key_against_the_discriminator(tmp_
 
     Those two columns are what M1 added to the ported view; since #1224 the per-call view
     (`JudgeInput.calls`, never cut by the cap) carries them, and the discriminator is the
-    family's predicate (`holding_system` is retired with cluster staging).
+    family's predicate (`holding_system` is retired with cluster staging). #1234: the call
+    list is the joined one (`JudgeContext.focus_calls`, A12), and what reaches the model is
+    read off the real prompt.
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    judge_input = _render().render(ep, "b")
+    ctx = _render().render(ep, "b")
 
-    assert judge_input.calls, "no call rows to check"
-    for row in judge_input.calls:
+    assert ctx.focus_calls, "no call rows to check"
+    for row in ctx.focus_calls:
         assert "window" in row["params"], f"call row without a window: {row}"
         assert "scope_key" in row["params"], f"call row without a scope key: {row}"
-    calls = judge_input.as_prompt_sections()["calls"]
-    assert "[oracle]" in calls, f"the call view does not name the decision word: {calls!r}"
-    assert '"scope_key": "host.name"' in calls, calls
-    assert '"window": "24h"' in calls, calls
-    assert judge_input.discriminator["predicate"] in judge_input.manifest_text
+        assert row["source"] == "oracle", f"the call row names no decision word: {row}"
+    prompt = _world_prompt(ep)
+    assert "oracle" in prompt, "the prompt does not name the decision word"
+    assert "host.name" in prompt, "the call's scope key never reached the prompt"
+    assert "24h" in prompt, "the call's window never reached the prompt"
+    assert ctx.focus.discriminator["predicate"] in prompt
 
 
 def test_921_reply_without_the_three_pass_tables_is_refused(tmp_path):
@@ -133,7 +155,7 @@ def test_921_reply_without_the_three_pass_tables_is_refused(tmp_path):
     with pytest.raises(J.refusals()):
         run_mod.validate_reply(J.as_reply_text(J.reply_doc(passes=False)))
     # Positive control: the same reply WITH the three tables validates.
-    assert run_mod.validate_reply(J.as_reply_text(J.reply_doc())).episode_outcome == "gradable"
+    assert run_mod.validate_reply(J.as_reply_text(J.reply_doc())).bucket == "lead-set"
 
 
 def test_921_prompt_names_the_graded_world_and_keeps_the_cap_and_quoting_rule(tmp_path):
@@ -169,20 +191,12 @@ def test_921_prompt_names_the_graded_world_and_keeps_the_cap_and_quoting_rule(tm
 
 
 def test_921_no_sibling_facts_reach_the_prompt(tmp_path):
-    """Every world but the graded one has its FACTS WITHHELD in the rendered manifest: no
-    sibling's facts reach the prompt.
-
-    The marking is render-layer only — the manifest's world fields are closed, so it can never
-    be a manifest field. Measured failing mode: 5/5 replies cited sibling facts as facts about
-    world A and 2/5 declared a corpus contradiction that does not exist (C11). (#1224: a world
-    is natural-language `facts`, where it was an overlay.)
-
-    J14, settled: the withholding's scope is stated across ALL FOUR views, not the manifest
-    alone. A negative that bound only the manifest would leave the summaries, the lessons view
-    and the trial spread ungoverned, and those carry sibling-derived content too — which is the
-    surface a leak actually ships through. The marker string is planted inside the sibling's
-    own fact AND inside the other views' sibling-derived slots, and none of them may appear
-    anywhere in the prompt.
+    """#1234 rewrite (design M1, M3): the withholding this pinned is REVERSED. A world is now
+    judged against its reference runs, so a sibling's facts DO reach its prompt — but only as
+    that reference run's facts, in its own labelled section, and the task says so; no sentence
+    claims any world's facts are withheld (the retired framing). The measured failing mode the
+    withholding answered (C11: sibling facts cited as facts about the judged world) is now
+    answered by the label and that sentence.
     """
     secret = "SIBLING-ONLY-INJECTED-FACT"
     worlds = [
@@ -193,28 +207,22 @@ def test_921_no_sibling_facts_reach_the_prompt(tmp_path):
     ]
     ep = J.accepted_episode(tmp_path, worlds=worlds,
                             ledgers={"b": [J.oracle_row("b")], "c": [J.oracle_row("c")]})
-    # The other views' sibling-derived slots carry the same marker.
-    (ep / "worlds" / "c" / "gather_summaries" / "l-001.md").write_text(
-        f"world c saw {secret}\n", encoding="utf-8")
-    (ep / "worlds" / "c" / "lessons_loaded.jsonl").write_text(
-        json.dumps({"lesson_name": secret, "loaded_at": "2026-07-28T17:00:00Z",
-                    "path": "defender/lessons/L1.md"}) + "\n", encoding="utf-8")
 
     judge = _prompts(tmp_path, ep, draws=1)
     graded_b = judge.prompts[judge.agent_ids.index("judge:b:0")]
-    assert secret not in graded_b, (
-        "a sibling world's content reached the prompt of a different world")
-    assert "facts are withheld" in graded_b, "no world has its facts withheld at all"
-    assert graded_b.count("facts are withheld") >= 2, (
-        "only one of the two non-graded worlds had its facts withheld")
+    assert secret in graded_b, "the reference run's facts never reached the judged world's prompt"
+    assert ("Each reference run's facts sit only in that run's labelled section of the "
+            "computed header; they are never facts about the judged world") in graded_b, (
+        "the prompt never says a reference run's facts are not the judged world's")
+    assert "withheld" not in graded_b.lower(), "the retired withholding sentence is still there"
 
 
 def test_921_graded_world_keeps_its_own_facts_and_is_not_withheld(tmp_path):
-    """The paired positive control: the graded world keeps its OWN facts and is not marked
-    withheld, so the withholding demand cannot pass on a render that withholds everything.
+    """The paired positive control: the graded world keeps its OWN facts and nothing marks them
+    withheld (#1234: no world's facts are; the withholding framing is retired, M3).
 
-    Without it, `assert secret not in prompt` is also green on an empty prompt — which is the
-    shape a bare negative fails in.
+    Without it, `assert secret in prompt` above is also green on a render that dumps every
+    world's facts under the judged world's own label.
     """
     mine = "GRADED-WORLD-OWN-INJECTED-FACT"
     worlds = [
@@ -229,8 +237,7 @@ def test_921_graded_world_keeps_its_own_facts_and_is_not_withheld(tmp_path):
     prompt = judge.prompts[judge.agent_ids.index("judge:b:0")]
 
     assert mine in prompt, "the graded world's own facts were withheld from its own grading"
-    graded_block = prompt[prompt.index("world b (role"):prompt.index("world b (role") + 400]
-    assert "withheld" not in graded_block, "the graded world's facts were marked withheld"
+    assert "withheld" not in prompt.lower(), "the graded world's facts were marked withheld"
 
 
 # ---------------------------------------------------------------------------------------
@@ -254,7 +261,7 @@ def test_921_render_reads_no_sibling_run_dir(tmp_path):
     (runs / f"{J.EPISODE_ID}-b").mkdir(parents=True, exist_ok=True)
     shutil.rmtree(runs)
 
-    view = _render().render(ep, "b")
+    view = _render().render(ep, "b").focus
     assert view.leads, "the per-lead chain was empty once the run dir was gone"
     assert view.lessons, "the lessons view needed the sibling's run dir"
 
@@ -278,9 +285,9 @@ def test_921_render_builds_the_input_from_the_archive_the_runs_base_and_the_comm
     shutil.rmtree(runs)
     without = _render().render(ep, "b", git_show=git_show)
 
-    assert with_dirs.as_prompt_sections() == without.as_prompt_sections(), (
+    assert with_dirs == without, (
         "the rendered input changed when the sibling run dirs were removed")
-    assert "# L1 body" in without.as_prompt_sections()["lessons"]
+    assert "# L1 body" in _lessons_view(without)
 
 
 def test_921_archive_writes_gather_summaries_lessons_loaded_and_alert_json(tmp_path):
@@ -402,7 +409,7 @@ def test_921_lesson_bodies_are_not_archived_and_are_read_at_the_recorded_commit(
     view = _render().render(ep, "b", git_show=git_show)
     assert git_show.asked == [("deadbee", "defender/lessons/L1.md")], (
         "the lesson body was not read at the sibling's recorded commit")
-    assert "the body" in view.as_prompt_sections()["lessons"]
+    assert "the body" in _lessons_view(view)
     assert not list((ep / "worlds" / "b").glob("**/L1.md")), (
         "a lesson BODY was archived; D7 keeps them out of the archive on purpose")
 
@@ -430,8 +437,7 @@ def test_921_a_lesson_recorded_on_several_rows_renders_its_body_once_and_says_ho
         ("deadbee", "defender/lessons/L2.md"): "# L2\n\nthe second body\n",
     })
 
-    lessons = _render().render(
-        ep, "b", git_show=git_show).as_prompt_sections()["lessons"]
+    lessons = _lessons_view(_render().render(ep, "b", git_show=git_show))
     assert lessons.count("the first body") == 1, (
         f"a lesson on three rows rendered its body {lessons.count('the first body')} times")
     assert lessons.count("the second body") == 1, "control: the other lesson still renders"
@@ -467,8 +473,7 @@ def test_921_an_unavailable_lesson_body_is_marked_rather_than_rendered_as_nothin
         (ep / "worlds" / "b" / "provenance.json").write_text(
             json.dumps(J.provenance_record(commit=commit)), encoding="utf-8")
         git_show = J.FakeGitShow(bodies={})
-        lessons = _render().render(
-            ep, "b", git_show=git_show).as_prompt_sections()["lessons"]
+        lessons = _lessons_view(_render().render(ep, "b", git_show=git_show))
         assert git_show.asked, f"{note}: the render never asked for the body"
         assert "unavailable" in lessons.lower(), (
             f"{note}: the slot rendered as nothing, which the judge reads as a lesson with no "
@@ -503,6 +508,6 @@ def test_921_the_lesson_commit_is_pinned_once_per_pass_and_allow_dirty_is_a_cave
     # A dirty sibling tree is a caveat in the judge's own input, not a silent equivalence.
     dirty = J.accepted_episode(tmp_path / "dirty", ledgers={"b": [J.oracle_row("b")], "c": []},
                                dirty=True)
-    lessons = _render().render(dirty, "b", git_show=J.FakeGitShow(bodies={})).as_prompt_sections()["lessons"]
+    lessons = _lessons_view(_render().render(dirty, "b", git_show=J.FakeGitShow(bodies={})))
     assert "dirty" in lessons.lower(), (
         "an allow_dirty family's lesson view claims a reproducibility it does not have")
