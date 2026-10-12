@@ -433,16 +433,20 @@ class Res:
         return (self.run_dir / "gather_summaries" / f"{lead}.md").read_text(encoding="utf-8")
 
     @property
-    def budget(self) -> dict:
-        """The run's budget, from the run's in-process state (#1235: nothing writes
-        `budget.json` any more); `{}` when no budget was opened for this folder."""
-        from defender.hooks.budget_enforcer import read_budget
+    def state(self) -> Any:
+        """The run's one `RunState` (#1235 round 2), as the driver's summary hands it back:
+        the only place a driven run's budget and breaker are read."""
+        return self.summary_dict["run_state"]
 
-        return read_budget(self.run_dir)
+    @property
+    def budget(self) -> dict:
+        """The run's budget snapshot, off the run's state (#1235: nothing writes `budget.json`
+        any more, and no process-wide table keyed by the folder holds it)."""
+        return self.state.budget_snapshot()
 
     @property
     def breaker(self) -> dict:
-        return breaker_doc(self.run_dir)
+        return breaker_doc(self.state)
 
     @property
     def denials(self) -> list[dict]:
@@ -490,7 +494,6 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
     store_factory: Any = None,
     stores: list | None = None,
     before: Callable[[Path], None] | None = None,
-    in_run: Callable[[Path], None] | None = None,
     defender_dir: Path | None = None,
     tenant: Any = None,
 ) -> Res:
@@ -509,11 +512,10 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
     seam a scenario needs to plant a REAL fault in the tree the run is about to write into
     (a directory squatting an artifact's own name, a pre-claimed lead sidecar).
 
-    `in_run(run_dir)` runs INSIDE the driver, after it opened the run's in-process host state
-    (budget, circuit breaker) and before lead-0 resolves — through `seeding_store_factory`.
-    It is where a scenario puts host state lead-0 must already find (a tripped breaker): since
-    #1235 that state lives in the run process's memory and the driver's open at run start
-    resets it, so a `before` seed would be gone by the time lead-0 runs.
+    Host state lead-0 must already find (a tripped breaker) has no seam here: since #1235's
+    round 2 it lives on the run's `RunState`, which the driver creates and no seam hands out
+    before lead-0. A scenario about it calls `lead_zero.resolve_lead_zero(run_state=…)` over a
+    state it built, or seeds through the run's own verbs, whose context carries the state.
 
     `defender_dir` is the tree the run READS (#1003) — `drive`'s own seam of that name,
     passed through only when supplied, so a scenario over a planted catalog (a template
@@ -550,8 +552,6 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
         kw["verbs"] = registry
     if limits is not None:
         kw["limits"] = limits
-    if in_run is not None:
-        store_factory = seeding_store_factory(in_run, store_factory)
     if store_factory is not None:
         kw["store_factory"] = store_factory
     if defender_dir is not None:
@@ -560,26 +560,6 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
         kw["tenant"] = tenant
     out = drive(run_dir, run_id=run_id, main=main, gather=gather, **kw)
     return Res(run_dir, main, gather, rec, out or {}, sink, doc.get("alert_id"))
-
-
-def seeding_store_factory(seed: Callable[[Path], None], inner: Any = None) -> Any:
-    """A `store_factory` — the driver's own injection seam — that runs `seed(run_dir)` and then
-    opens the run's store as `inner` does (default: the driver's own default factory).
-
-    The driver opens the run's host state in memory at run start (`open_budget` and, next to it,
-    `circuit_breaker.open_breaker`, #1235) BEFORE it opens the store, and lead-0 resolves after
-    the store is open. So the factory is the one seam that runs in-process after that open and
-    before lead-0's first call: a seed made there is the run's own state when lead-0 reads it,
-    where a seed made on the folder before `drive` is reset by the open."""
-    from defender.runtime import driver
-
-    opener = inner if inner is not None else driver._default_store_factory
-
-    def factory(case_id: str, run_dir: Path) -> Any:
-        seed(run_dir)
-        return opener(case_id, run_dir)
-
-    return factory
 
 
 def defender_dir() -> Path:

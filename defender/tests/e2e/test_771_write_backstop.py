@@ -517,7 +517,7 @@ def test_each_writer_keeps_its_exception_posture_when_the_write_is_refused(write
     with a REAL directory squatting the artifact name (an ordinary, root-proof write failure
     with no alias anywhere — the shape 47-reground used), and once with a real planted symlink.
     Arm one is the site's posture as it exists at HEAD; arm two must reproduce it. That is what
-    lets the demand cover fifteen rows without an author's prior standing in for a measurement
+    lets the demand cover every row without an author's prior standing in for a measurement
     at the eleven sites X5 never looked at — and it re-probes the premise on every run rather
     than pinning a table that drifts the moment a handler moves.
 
@@ -773,10 +773,12 @@ def test_a_new_shared_tree_writer_is_a_lint_finding(tmp_path):
 
     tree = tmp_path / "src"
     (tree / "pkg").mkdir(parents=True)
+    # The wrapped callee is `append_jsonl`, the lint's surviving unsafe `_io` callee: the
+    # original wrapper over `write_atomic` lost its subject when #1235 deleted that helper.
     (tree / "pkg" / "wrapper.py").write_text(
-        "from defender._io import write_atomic\n"
-        "def _write_thing_atomic(run_dir, state):\n"
-        "    write_atomic(run_dir / 'thing.json', state)\n",
+        "from defender._io import append_jsonl\n"
+        "def _write_thing_rows(run_dir, rows):\n"
+        "    append_jsonl(run_dir / 'thing.jsonl', rows)\n",
         encoding="utf-8",
     )
     (tree / "pkg" / "guarded.py").write_text(

@@ -406,19 +406,17 @@ def test_no_module_in_the_repo_still_imports_the_deleted_hook_module():
 
 
 def test_update_json_locked_survives_the_sibling_removal(tmp_path):
-    """The hooks run-dir module loses its salt reader but not itself: the flock'd
-    read-modify-write behind the oracle-held credit (the host-only sidecar beside a branched
-    run's folder, #1224 S15) remains importable AND functional. Removing a member is not
-    removing the module.
+    """The hooks run-dir module loses its salt reader but not itself: its flock'd
+    read-modify-write remains importable AND functional. Removing a member is not removing the
+    module.
 
-    Its live consumer is asserted below on the BINDING rather than on the module object — a
-    module is truthy whether or not it consumes anything, which made the old assertion vacuous.
-    (#1235 retired its two other consumers' files: the budget counters and the circuit breaker
-    are the run process's memory, so `circuit_breaker` no longer binds it, and the budget
-    enforcer binds it only for the oracle-held credit.) `resolve_run_dir` was this
-    module's other survivor and the lesson-load recorder its third consumer, until #667
-    deleted the `claude -p` entrypoint that was the only reason either existed; both left
-    d21 with it."""
+    #1235 retired the files of all three of its consumers: the budget counters, the circuit
+    breaker and the oracle-held credit (the host-only sidecar beside a branched run's folder,
+    #1224 S15) live on the run's `RunState` now (#1235 round 2), so neither `circuit_breaker` nor the budget
+    enforcer binds it and the binding assertion that stood here left with them.
+    `resolve_run_dir` was this module's other survivor and the lesson-load recorder one more
+    consumer, until #667 deleted the `claude -p` entrypoint that was the only reason either
+    existed; both left d21 with it."""
     assert not hasattr(hooks_run_dir, "read_meta_salt"), (
         "read_meta_salt survived — its only caller was the deleted hook entrypoint, and its "
         "fail-open minted a token no other surface knew"
@@ -434,12 +432,6 @@ def test_update_json_locked_survives_the_sibling_removal(tmp_path):
     assert not hasattr(hooks_run_dir, "resolve_run_dir"), (
         "resolve_run_dir survived — its last consumer was record_lesson_load's deleted "
         "entrypoint, and the in-process gates take the run dir from AgentDeps"
-    )
-
-    from defender.hooks import budget_enforcer
-
-    assert budget_enforcer.update_json_locked is hooks_run_dir.update_json_locked, (
-        "the budget_enforcer's oracle-held credit no longer binds update_json_locked"
     )
 
 

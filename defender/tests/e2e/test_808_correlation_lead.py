@@ -625,7 +625,8 @@ def test_lead_zeros_calls_and_item_threes_dispatch_move_the_runs_own_counters(tm
     both halves — `test_pre_turn_work_spends_the_run_s_own_clock_and_call_pool` — and both
     prior rounds resolved only the counters, while the `run_accounting` boundary's own prose
     said lead-0 spends "real wall clock before MAIN's first prompt". It is not bookkeeping:
-    `driver.py:795` starts `budget_started_monotonic` BEFORE `_user_prompt` at :838, the
+    the driver starts the run's clock BEFORE `_user_prompt` (`budget_started_monotonic` then;
+    since #1235's round 2 the monotonic origin of the run's `RunState`, started there), the
     enforcer's `wall_clock_timeout`/`grace_seconds` are measured from it, and evaluation
     happens inside the very `tool_execute` hook P7a proved a harness-driven call never enters
     — so today the clock is spent and unenforced at the same time. K23's own resolved
@@ -665,8 +666,8 @@ def test_lead_zeros_calls_and_item_threes_dispatch_move_the_runs_own_counters(tm
 
     # The clock, at the same seam as the counters. With the run's wall-clock budget already
     # spent, the enforcer must refuse lead-0's own call — which it can only do if lead-0's
-    # calls pass through it and are measured against `budget_started_monotonic`, the origin
-    # the driver starts BEFORE `_user_prompt`.
+    # calls pass through it and are measured against the run's clock — its `RunState`'s
+    # origin (#1235), which the driver starts BEFORE `_user_prompt`.
     clocked = run(tmp_path / "clocked", run_id="lz808-budget-clock",
                   answer=answer_hits(TWO_ACTORS), main_turns=main_turns,
                   limits={**DEFAULT_LIMITS, "wall_clock_timeout": 0, "grace_seconds": 0})

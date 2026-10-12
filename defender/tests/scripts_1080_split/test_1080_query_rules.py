@@ -363,13 +363,14 @@ def stored_calls() -> list[dict[str, Any]]:
     ]
 
 
-def write_calls(append: Any, run_dir: Path, calls: list[dict[str, Any]]) -> list[dict]:
-    """Record each call through `append` (the queries-table writer), as a granted query."""
+def write_calls(append: Any, run: Any, calls: list[dict[str, Any]]) -> list[dict]:
+    """Record each call through `append` (the queries-table writer), as a granted query. `run`
+    is what the writer takes first: the run's state (`RunState`, #1235)."""
     out = []
     for c in calls:
         text = c["payload_text"]
         out.append(append(
-            run_dir, lead_id=c["lead_id"], system=c["system"], verb=c["verb"],
+            run, lead_id=c["lead_id"], system=c["system"], verb=c["verb"],
             query_id=c["query_id"], params=c["params"], raw_command=f"{c['system']} {c['verb']}",
             payload_text=text, exit_code=c.get("exit_code", 0),
             payload_status=c.get("payload_status", "ok"),
@@ -431,18 +432,22 @@ def classify_reserved(run_dir: Path) -> dict[str, Any]:
     return {"leads": leads, "extracted": extracted}
 
 
-def drive_stored_run(run_dir: Path, episode_dir: Path, *, request_key: Any, lead_rows: Any,
+def drive_stored_run(run_dir: Path, episode_dir: Path, *, request_key: Any, state: Any,
                      repeat_trip: Any, append: Any) -> dict[str, Any]:
     """s086 over a materialised earlier run: today's key per stored call, the repeat guard's
     verdict over the stored rows, learning's ledger replaying the run (prime the family base
     from the run's capture, then serve each live call from it), and the run resumed — one more
-    identical call recorded into the stored table, then the guard's default verdict."""
+    identical call recorded after the stored rows, then the guard's default verdict.
+
+    The guard reads a run's state, never a file (#1235), so `state` is the RESUMED run's: a
+    branch sibling whose seeding inherited `run_dir`'s stored rows (round 2). The guard's
+    verdicts are over those rows, and the resumed call is recorded through it."""
     from defender._episode_handle import Episode
     from defender.learning.branch import capture, ledger
 
     calls = stored_calls()
     keys = [request_key(c["system"], c["verb"], c["params"]) for c in calls]
-    guard = [_trip(repeat_trip(lead_rows(run_dir, c["lead_id"]), c["lead_id"],
+    guard = [_trip(repeat_trip(state.lead_rows(c["lead_id"]), c["lead_id"],
                                system=c["system"], verb=c["verb"], params=c["params"],
                                threshold=2)) for c in calls]
     stored_rows = [json.loads(line) for line in
@@ -454,8 +459,8 @@ def drive_stored_run(run_dir: Path, episode_dir: Path, *, request_key: Any, lead
     ledger_keys = [ledger.request_key(c["system"], c["verb"], c["params"]) for c in calls]
     row_keys = [ledger.correlation_key_of(r) for r in stored_rows]
     first = calls[0]
-    resumed = write_calls(append, run_dir, [first])[0]
-    resumed_trip = _trip(repeat_trip(lead_rows(run_dir, first["lead_id"]), first["lead_id"],
+    resumed = write_calls(append, state, [first])[0]
+    resumed_trip = _trip(repeat_trip(state.lead_rows(first["lead_id"]), first["lead_id"],
                                      system=first["system"], verb=first["verb"],
                                      params=first["params"]))
     return {
@@ -475,17 +480,19 @@ def roundtrip_call() -> dict[str, Any]:
             "payload_text": json.dumps({"hits": []})}
 
 
-def drive_roundtrip(run_dir: Path, *, request_key: Any, append: Any, lead_rows: Any,
+def drive_roundtrip(state: Any, *, request_key: Any, append: Any,
                     repeat_trip: Any) -> dict[str, Any]:
     """s168: the live key, the row the writer stores, and the keys the learning side computes
     from that row after it is read back from disk (the repository's typed row, the raw record,
-    the ledger's join key), plus the guard over the read-back rows with the live params."""
+    the ledger's join key), plus the guard over the read-back rows with the live params — the
+    rows the run's `state` holds, each the written line read back (#1235)."""
     from defender.learning import lead_repository
     from defender.learning.branch import ledger
 
     c = roundtrip_call()
+    run_dir = state.run_dir
     live_key = request_key(c["system"], c["verb"], c["params"])
-    written = write_calls(append, run_dir, [c])[0]
+    written = write_calls(append, state, [c])[0]
     (row,) = lead_repository.load_queries(run_dir)
     raw = json.loads((run_dir / "executed_queries.jsonl").read_text(encoding="utf-8"))
     return {
@@ -495,7 +502,7 @@ def drive_roundtrip(run_dir: Path, *, request_key: Any, append: Any, lead_rows: 
         "learning_row_key": ledger.request_key(row.system, row.verb, row.params),
         "learning_record_key": ledger.correlation_key_of(row.record()),
         "rule_over_raw_record": request_key(raw["system"], raw["verb"], raw["params"]),
-        "guard": _trip(repeat_trip(lead_rows(run_dir, c["lead_id"]), c["lead_id"],
+        "guard": _trip(repeat_trip(state.lead_rows(c["lead_id"]), c["lead_id"],
                                    system=c["system"], verb=c["verb"], params=c["params"],
                                    threshold=2)),
     }
@@ -641,18 +648,25 @@ def test_request_keys_stored_before_the_move_are_compared_with_keys_computed_aft
     g = _g()["stored_run"]
     request_key = _flat(_RK)
     rq = S.module_at("defender/scripts/gather_tools/record_query.py")
-    lead_rows, repeat_trip = rq.lead_rows, rq.repeat_trip
+    repeat_trip = rq.repeat_trip
     append = rq.append_query_row
     for call, stored in zip(stored_calls(), g["keys"], strict=True):
         assert request_key(call["system"], call["verb"], call["params"]) == stored, call
 
     run_dir = _materialize(tmp_path / "run", g["files"])
-    # The resumed call is recorded by the writer, which allocates its seq from the host's
-    # in-memory queries table: opened over the stored table, as a run's start opens it (#1235).
-    rq.open_query_mirror(run_dir)
+    # The run resumed across the move is a branch sibling: its seeding inherits the stored
+    # table's rows onto its state, and the writer allocates the resumed call's seq after them
+    # (#1235 round 2 — no file is read into a state any other way).
+    from defender.runtime.branch._seed import _inherit_evidence
+    from defender.runtime.run_state import RunState
+
+    sibling = tmp_path / "resumed"
+    sibling.mkdir()
+    state = RunState.start(sibling, "r1080-resumed")
+    _inherit_evidence(run_dir, state, {c["lead_id"] for c in stored_calls()})
     (tmp_path / "episodes").mkdir()
     got = drive_stored_run(run_dir, tmp_path / "episodes" / "ep-1", request_key=request_key,
-                           lead_rows=lead_rows, repeat_trip=repeat_trip, append=append)
+                           state=state, repeat_trip=repeat_trip, append=append)
     assert got["keys"] == g["keys"]
     assert got["ledger_keys"] == g["keys"]
     assert got["row_keys"] == g["keys"]
@@ -823,10 +837,12 @@ def test_same_call_live_and_after_the_row_is_read_back(tmp_path):
     g = _g()["roundtrip"]
     request_key = _flat(_RK)
     rq = S.module_at("defender/scripts/gather_tools/record_query.py")
-    # Never driven: the writer's host table is opened as a run's start opens it (#1235).
-    rq.open_query_mirror(tmp_path / "run")
-    got = drive_roundtrip(tmp_path / "run", request_key=request_key,
-                          append=rq.append_query_row, lead_rows=rq.lead_rows,
+    # Never driven: the writer takes the run's state, started as a run's start starts it (#1235).
+    from defender.runtime.run_state import RunState
+
+    (tmp_path / "run").mkdir()
+    got = drive_roundtrip(RunState.start(tmp_path / "run", "r1080-roundtrip"),
+                          request_key=request_key, append=rq.append_query_row,
                           repeat_trip=rq.repeat_trip)
     assert got["live_key"] == got["learning_row_key"] == got["learning_record_key"] \
         == got["rule_over_raw_record"]

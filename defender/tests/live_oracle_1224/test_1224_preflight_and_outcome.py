@@ -917,7 +917,7 @@ def test_oracle_provider_rate_limits_every_sibling_at_once(tmp_path):
     call, then an idp lookup the tenant answers with a real `TransportFault`, then done) and
     compared with an UNBRANCHED run of the same script over the same estate: its budget
     counters (`tool_calls`, `subagent_spawns`) and its circuit-breaker failure counts — the
-    run's in-process state (#1235) — equal the unbranched run's: the 429 adds no tool call and
+    run's `RunState` (#1235) — equal the unbranched run's: the 429 adds no tool call and
     no breaker failure. Positive control for both channels: the unbranched run counts its own
     calls and its real infra failure (exit 2, GA-40), so both states are written and read.
     """
@@ -935,10 +935,10 @@ def test_oracle_provider_rate_limits_every_sibling_at_once(tmp_path):
     rt = est.run_tenant()
     plain_registry = S.sym(S.VERBS, "ModuleVerbRegistry")(est.roster(), rt.grants.gather,
                                                           grant_home=rt.table_pointer)
-    plain_dir, _plain_gather = S.drive_gather(tmp_path / "unbranched", verbs=plain_registry,
-                                              tenant=est.place(), gather_turns=turns())
-    plain_budget = _budget(plain_dir)
-    plain_breaker = _breaker_counts(plain_dir)
+    _plain_dir, _plain_gather, plain_state = S.drive_gather_run(
+        tmp_path / "unbranched", verbs=plain_registry, tenant=est.place(), gather_turns=turns())
+    plain_budget = _budget(plain_state)
+    plain_breaker = _breaker_counts(plain_state)
     assert plain_budget.get("tool_calls"), "positive control: the run's calls are counted"
     assert plain_breaker["total"], "positive control: the real infra failure is on the breaker"
 
@@ -947,8 +947,8 @@ def test_oracle_provider_rate_limits_every_sibling_at_once(tmp_path):
         oracle = S.oracle(S.raising(S.RATE_LIMITED), S.submit(_BASE, S.EMPTY_CLAIM))
         reg = S.world_registry(ep, w, est, oracle=oracle, verifier=S.passing_verifier(),
                                retry_cap=2)
-        run_dir, gather = S.drive_gather(tmp_path / f"sibling-{w}", verbs=reg,
-                                         tenant=est.place(), gather_turns=turns())
+        run_dir, gather, state = S.drive_gather_run(tmp_path / f"sibling-{w}", verbs=reg,
+                                                    tenant=est.place(), gather_turns=turns())
 
         assert oracle.requests == 2, f"{w}: the rate-limited request was not followed"
         assert not oracle.overrun, f"{w}: the oracle was asked for more than the idp query"
@@ -963,10 +963,10 @@ def test_oracle_provider_rate_limits_every_sibling_at_once(tmp_path):
         for leak in ("ModelHTTPError", f"provider answered {S.RATE_LIMITED}"):
             assert leak not in seen, (w, "transcript", leak)
             assert leak not in evidence, (w, "evidence", leak)
-        budget = _budget(run_dir)
+        budget = _budget(state)
         for key in ("tool_calls", "subagent_spawns"):
             assert budget.get(key) == plain_budget.get(key), (w, key, budget, plain_budget)
-        assert _breaker_counts(run_dir) == plain_breaker, (
+        assert _breaker_counts(state) == plain_breaker, (
             f"{w}: the rate limit reached the circuit breaker")
         rows = [r for r in S.ledger_rows(ep, w) if r["verb"] == "query"]
         assert rows, f"{w}: the served call left no world-ledger row"
@@ -976,17 +976,16 @@ def test_oracle_provider_rate_limits_every_sibling_at_once(tmp_path):
         assert "provider answered" not in ledger_text
 
 
-def _budget(run_dir: Path) -> dict:
-    """The run's budget counters, as the run's own process holds them (#1235: in memory, never
-    a file in the run dir; `{}` when no budget was opened). The run was driven in this
-    process."""
-    return S.sym("hooks.budget_enforcer", "read_budget")(Path(run_dir))
+def _budget(state: Any) -> dict:
+    """The run's budget counters, read off the run's one `RunState` (#1235: never a file in the
+    run dir)."""
+    return state.budget_snapshot()
 
 
-def _breaker_counts(run_dir: Path) -> dict:
-    """The run's circuit-breaker failure counts (its in-process state, #1235): per system, and
-    the run total."""
-    doc = S.sym("runtime.circuit_breaker", "breaker_state")(Path(run_dir))
+def _breaker_counts(state: Any) -> dict:
+    """The run's circuit-breaker failure counts, read off the run's `RunState` (#1235): per
+    system, and the run total."""
+    doc = state.breaker_snapshot()
     return {"systems": {s: (rec or {}).get("failures", 0)
                         for s, rec in (doc.get("systems") or {}).items()},
             "total": doc.get("total_failures", 0)}

@@ -158,13 +158,16 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
         _above_guard_row(0, "ONLYTRIPS_PARAMS_MARKER", lead_id="l-002"),
     ])
     shell = "cat gather_raw/l-001/0.json | SHIM_SHELL_MARKER --unnest"
-    # The writer allocates its seq from the host's in-memory mirror (#1235), loaded at run start;
-    # this folder never went through the driver, so open it over the hand-written table first.
-    from defender.scripts.gather_tools.record_query import open_query_mirror
+    # The writer allocates its seq from the run's state (#1235). A run holds rows it did not
+    # write only as a branch sibling's inherited prefix, so the hand-written table is handed to
+    # the state the way seeding hands it (`inherit_rows`, round 2) — no file is read into it.
+    from defender._io import read_jsonl_rows
+    from defender.runtime.run_state import RunState
 
-    open_query_mirror(tmp_path)
+    state = RunState.start(tmp_path, "r1032-questioner")
+    state.inherit_rows(read_jsonl_rows(RunPaths(tmp_path).executed_queries))
     append_query_row(
-        tmp_path, lead_id=LEAD, system="", verb="bash", system_key="",
+        state, lead_id=LEAD, system="", verb="bash", system_key="",
         query_id=BASH_SHIM_QUERY_ID, params={"command": shell}, raw_command=shell,
         payload_text="", exit_code=1, payload_status="error",
         payload_digest="exit=1; SHIM_STDERR_MARKER",

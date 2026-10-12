@@ -160,10 +160,10 @@ def _row_view(row: dict) -> dict:
     return {k: row.get(k) for k in _ROW_VIEW}
 
 
-def _breaker(run_dir: Path) -> dict:
-    """The run's circuit-breaker state, as the run's own process holds it (#1235: in memory,
-    never a file in the run dir); the run was driven in this process."""
-    return S.sym("runtime.circuit_breaker", "breaker_state")(run_dir)
+def _breaker(state: Any) -> dict:
+    """The run's circuit-breaker state, read off the run's one `RunState` (#1235: never a file
+    in the run dir)."""
+    return state.breaker_snapshot()
 
 
 def _parallel_turn(*calls: tuple[str, str, dict]) -> Any:
@@ -868,20 +868,20 @@ def test_p098_real_error_on_a_call_the_worlds_facts_cover(tmp_path):
         return [S.query_turn("idp", "query", ALICE), S.query_turn("idp", "query", BOB),
                 S.done_turn()]
 
-    real_dir, _ = S.drive_gather(tmp_path / "real", verbs=S.plain_registry(est),
-                                 tenant=est.place(), gather_turns=turns())
+    real_dir, _, real_state = S.drive_gather_run(tmp_path / "real", verbs=S.plain_registry(est),
+                                                 tenant=est.place(), gather_turns=turns())
     ep = _episode(tmp_path / "branch", captured=[])
     oracle = S.oracle(S.submit(BOB_BASE, S.EMPTY_CLAIM))
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier())
-    branch_dir, _ = S.drive_gather(tmp_path / "branch", verbs=reg, tenant=est.place(),
-                                   gather_turns=turns())
+    branch_dir, _, branch_state = S.drive_gather_run(tmp_path / "branch", verbs=reg,
+                                                     tenant=est.place(), gather_turns=turns())
 
     real_rows, branch_rows = _evidence(real_dir), _evidence(branch_dir)
     assert len(branch_rows) == len(real_rows) == 2
     assert _row_view(branch_rows[0]) == _row_view(real_rows[0])
     assert branch_rows[0]["exit_code"] != 0
-    assert _breaker(branch_dir).get("systems", {}).get("idp", {}).get("failures") == 1
-    assert _breaker(branch_dir).get("systems") == _breaker(real_dir).get("systems")
+    assert _breaker(branch_state).get("systems", {}).get("idp", {}).get("failures") == 1
+    assert _breaker(branch_state).get("systems") == _breaker(real_state).get("systems")
     assert "user:alice" not in oracle.all_seen(), "the oracle was never asked about the error"
     assert "user:bob" in oracle.all_seen(), "positive control: the answering call got a turn"
     assert _decisions(ep, "b") == [S.REAL_ERROR, S.PASSTHROUGH]

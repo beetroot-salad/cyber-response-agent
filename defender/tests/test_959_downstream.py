@@ -87,15 +87,15 @@ def _gather_scene(tmp_path: Path, result: BoxResult, *, lead_id: str = "l-1"):
     dfn.mkdir(parents=True)
     payload = run / "gather_raw" / lead_id / "0.json"
     payload.write_text("{}", encoding="utf-8")
-    # The run's queries mirror, as the driver opens it at run start (#1235): the shim-failure
-    # row's seq and its `system=` attribution are read from it, and this folder went through
-    # no driver.
-    from defender.scripts.gather_tools.record_query import open_query_mirror
+    # The run's state, as the driver starts it and hands it to gather deps (#1235): the
+    # shim-failure row's seq and its `system=` attribution are read from it, and this folder
+    # went through no driver.
+    from defender.runtime.run_state import RunState
 
-    open_query_mirror(run)
     box = Box(result)
     deps = dataclasses.replace(
         bind(T1106.fixture_gather_def(), run, defender_dir=dfn, box=box), lead_id=lead_id,
+        run_state=RunState.start(run, "r959-downstream"),
     )
     return deps, box, payload
 
@@ -174,7 +174,7 @@ def test_the_audit_rows_system_attribution_derives_from_the_authorised_operand_s
     deps, _box, payload = _gather_scene(tmp_path, BoxResult(1, b"", b"boom"))
     run = deps.run_dir
     record_query.append_query_row(
-        run, lead_id="l-1", system="elastic", verb="query", query_id="elastic.q", params={},
+        deps.run_state, lead_id="l-1", system="elastic", verb="query", query_id="elastic.q", params={},
         raw_command="seed", payload_text="{}", exit_code=0, payload_status="ok",
         payload_digest="d", system_key="",
     )
@@ -187,7 +187,7 @@ def test_the_audit_rows_system_attribution_derives_from_the_authorised_operand_s
         "named - a row that disagrees with the execution about which file was opened sends the "
         "curator at the wrong system"
     )
-    assert shim[0]["system"] == record_query.system_for_payload_operands(run, [payload])
+    assert shim[0]["system"] == record_query.system_for_payload_operands(deps.run_state, [payload])
 
     # ...and a reduce that opened no run payload attributes to nothing rather than guessing.
     deps2 = dataclasses.replace(deps, box=Box(BoxResult(1, b"", b"boom")))

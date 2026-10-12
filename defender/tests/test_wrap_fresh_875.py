@@ -117,10 +117,16 @@ class _Output:
 def _main_deps(tmp_path: Path):
     """MAIN's real deps, bound the way the driver binds them — and WITHOUT a `salt=` kwarg,
     which is the parameter this change deletes. Today `_for_run` mints a uuid4 for it; after
-    the change there is no field to mint."""
+    the change there is no field to mint. They carry the run's one `RunState` (#1235 round 2),
+    as the driver hands them: the dispatch's breaker screen reads it."""
+    from dataclasses import replace
+
+    from defender.runtime.run_state import RunState
+
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
-    return run_dir, bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER)
+    return run_dir, replace(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER),
+                            run_state=RunState.start(run_dir, "r-875"))
 
 
 def _drive(tmp_path: Path, lead_id: str = "l-001"):

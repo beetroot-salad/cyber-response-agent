@@ -23,15 +23,13 @@ implementation that spells it otherwise makes `check_binds` skip the concept sil
     test at this address would certify nothing. That half lives in the graph's
     `repeat_threshold` refinement and in `handoff.forks`, where the implementer meets it.
 
-`lead_rows(run_dir, lead) -> list[dict]`
-    The FILE reader: this lead's rows off `{run_dir}/executed_queries.jsonl`, in file order,
-    torn/unparseable lines dropped, and `[]` on ANY `OSError`. It is no longer the guard's
-    read (#1235 F1): the guard derives its count from `live_lead_rows(run_dir, lead)`, the
-    host's in-memory mirror of the rows it recorded, loaded once at run start by
-    `open_query_mirror` (with this reader's posture on a torn, foreign or non-UTF-8 table)
-    and appended to only after a row's file write succeeded — so nothing written into the
-    run folder mid-run moves the count. `lead_rows` stays for the post-run readers that mean
-    the file, and this suite uses it only that way.
+The guard's ROWS (#1235)
+    The guard derives its count from the rows the HOST recorded for the run, held on the run's
+    one `RunState` (`state.lead_rows(lead)`, #1235 round 2): each row enters it only after its
+    line was written, and a branch sibling's inherited rows enter it as seeding writes them —
+    no file is ever read into it, so nothing written into the run folder moves the count. The
+    file reader `record_query.lead_rows` retired with round 2; this suite reads the FILE
+    post-run through `read_jsonl_rows` (`_file_rows`) where it means the record.
 
 `repeat_trip(rows, lead, *, system, verb, params, threshold=REPEAT_THRESHOLD, system_key="") -> RepeatTrip | None`
     THE predicate, over queries-table ROWS, keyed `(lead_id, system, verb, canonical(params),
@@ -76,7 +74,7 @@ How faults are induced here
 Down the hierarchy, never off it. Almost everything below is *real input through the real
 primitive in the test itself*: real malformed tool arguments through the real pydantic arg
 schema, a real adapter module that raises at import through the real `ModuleVerbRegistry`, a
-real torn line and real invalid UTF-8 through the real table loader, real concurrency
+real torn line and real invalid UTF-8 through the real branch seeding, real concurrency
 through the real two-calls-in-one-turn shape. Where a fake stands in for a dependency it is
 the harness's `verbs=` injection seam and it injects faults ONLY — never classifies, never
 decides policy — and its fault content cites the executed claim that observed it on the real
@@ -123,7 +121,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender._io import append_jsonl, read_jsonl_rows, write_guarded  # noqa: E402
+from defender._io import append_jsonl, read_jsonl_rows  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
 from defender.learning.leads import lead_extraction  # noqa: E402
@@ -162,7 +160,6 @@ from defender.scripts.gather_tools.record_query import (
     GatherDeadEnd,
     RepeatTrip,
     in_rejection_domain,
-    lead_rows,
     rejection_budget_trip,
     rejection_trip,
     repeat_trip,
@@ -195,11 +192,23 @@ INCOMPLETE_IDIOM = "Treat this lead as incomplete and reason from what was captu
 SUMMARY_TURN = Turn(text="Before the stop I ran what I could; the answers are above.")
 
 
-class _Res:
-    """One driven replay: the run dir, the two replay models, and the tables on disk."""
+def _file_rows(run_dir: Path, lead: str) -> list[dict]:
+    """This lead's rows as the FILE holds them, in file order (the post-run record)."""
+    return [r for r in read_jsonl_rows(RunPaths(run_dir).executed_queries)
+            if r.get("lead_id") == lead]
 
-    def __init__(self, run_dir: Path, main: ReplayFn, gather: ReplayFn):
-        self.run_dir, self.main, self.gather = run_dir, main, gather
+
+class _Res:
+    """One driven replay: the run dir, the two replay models, the tables on disk and the
+    driver's summary, whose `run_state` is the run's own state (#1235 round 2)."""
+
+    def __init__(self, run_dir: Path, main: ReplayFn, gather: ReplayFn, summary: dict):
+        self.run_dir, self.main, self.gather, self.summary_dict = run_dir, main, gather, summary
+
+    @property
+    def state(self):  # noqa: ANN201 — `RunState`, imported nowhere at module top (#1235)
+        """The run's `RunState`, as the driver returned it."""
+        return self.summary_dict["run_state"]
 
     @property
     def rows(self) -> list[dict]:
@@ -228,37 +237,17 @@ class _Res:
 
     @property
     def breaker(self) -> dict:
-        """The run's infra-breaker state as the run's own process holds it (#1235: in memory,
-        never a file in the run dir; `_BLANK_BREAKER` when nothing failed). The run was driven
-        in this process, so the registry still holds it after the run ends."""
-        from defender.runtime.circuit_breaker import breaker_state
-
-        return breaker_state(self.run_dir)
+        """The run's infra-breaker state, off the run's own state (#1235: never a file in the
+        run dir; `_BLANK_BREAKER` when nothing failed)."""
+        return self.state.breaker_snapshot()
 
     @property
     def denials(self) -> list[dict]:
         return read_jsonl_rows(RunPaths(self.run_dir).policy_denials)
 
 
-#: The breaker state of a run in which nothing failed (#1235: `breaker_state`'s blank shape).
+#: The breaker state of a run in which nothing failed (`breaker_snapshot()`'s blank shape).
 _BLANK_BREAKER = {"systems": {}, "total_failures": 0}
-
-
-class _SeedsBreaker(ReplayFn):
-    """MAIN's replay, which on its FIRST model request — inside the run, after the driver's
-    `open_breaker` has started the run's breaker (#1235) — records each `(system, exit_code)`
-    through the PRODUCTION `circuit_breaker.record_outcome`, then answers as scripted. A seed
-    written before `drive` would be reset by that open, so the run would not start from it."""
-
-    def __init__(self, turns: list[Turn], run_dir: Path, outcomes: list[tuple[str, int]]):
-        super().__init__(turns)
-        self._run_dir, self._outcomes = run_dir, list(outcomes)
-
-    def __call__(self, messages, info):  # noqa: ANN001 — the framework's callable protocol
-        if self.calls == 0:
-            for system, exit_code in self._outcomes:
-                circuit_breaker.record_outcome(self._run_dir, system, exit_code)
-        return super().__call__(messages, info)
 
 
 def _dispatch(lead: str, system: str) -> tuple[str, dict]:
@@ -270,28 +259,64 @@ def _dispatch(lead: str, system: str) -> tuple[str, dict]:
 
 def _run(
     root: Path, *, verbs, turns: list[Turn], run_id: str, system: str = "elastic",
-    lead: str = LEAD, seed: list[dict] | None = None,
-    breaker: list[tuple[str, int]] | None = None,
+    lead: str = LEAD, planted: list[dict] | None = None,
 ) -> _Res:
     """Drive a REAL run: main dispatches one gather lead, the nested gather agent replays
     `turns` against the INJECTED verb registry. Everything between the two fakes — dispatch,
     the query tool, the repeat guard, the capture capability, the infra breaker, the two
     tables — is production code.
 
-    `breaker` pre-seeds infra-breaker state through the PRODUCTION `record_outcome`, one
-    (system, exit_code) per call, on MAIN's first model request — inside the run, after the
-    driver opened the run's breaker and before the lead is dispatched (`_SeedsBreaker`) — so the
-    lead starts from a breaker an earlier, unrelated failure already tripped rather than from a
-    fresh one."""
+    `planted` writes a queries table (and its sidecars) into the fresh folder BEFORE the run
+    starts — rows no host recorded for this run, which since #1235 round 2 no run reads into
+    its state. Rows a run DOES start with are a branch sibling's inherited prefix
+    (`_run_inherited`)."""
     run_dir = materialize(root, GOLDEN_AB3)
-    if seed:
-        _seed(run_dir, seed)
-    main_turns = [Turn(tool_calls=[_dispatch(lead, system)]), Turn(text="Investigation complete.")]
-    main = (_SeedsBreaker(main_turns, run_dir, breaker) if breaker
-            else ReplayFn(main_turns))
+    if planted:
+        _seed(run_dir, planted)
+    main = ReplayFn([Turn(tool_calls=[_dispatch(lead, system)]),
+                     Turn(text="Investigation complete.")])
     gather = ReplayFn(turns)
-    drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
-    return _Res(run_dir, main, gather)
+    summary = drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
+    return _Res(run_dir, main, gather, summary)
+
+
+def _run_inherited(
+    root: Path, *, table: bytes, rows: list[dict], verbs, turns: list[Turn], run_id: str,
+    system: str = "elastic", lead: str = LEAD,
+) -> _Res:
+    """Drive a REAL branch sibling (`drive(..., resume=spec)`) whose source's queries table is
+    `table` — the shape a resumed lead's run starts from. The source is
+    `_branch_947.legal_source` (a store, a case link, the golden document), which carries no
+    claim for its leads, so the sibling's MAIN can dispatch `lead` again; seeding copies the
+    table's rows for the inherited leads, and each `rows` entry's sidecar, into the sibling and
+    records them on the sibling's state (#1235 round 2) before its first turn."""
+    from defender.tests._branch_947 import GOLDEN_INVESTIGATION, legal_source, spec_at
+
+    store, source, _session, path_ids = legal_source(
+        root, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), queries=None)
+    RunPaths(source).executed_queries.write_bytes(table)
+    for row in rows:
+        rel = row.get("payload_path")
+        if rel:
+            (source / rel).parent.mkdir(parents=True, exist_ok=True)
+            (source / rel).write_text("" if row.get("exit_code") else "[]", encoding="utf-8")
+    spec = spec_at(store, source, path_ids[-1])
+    store.close()
+    sibling = root / "defender-runs" / "run-sibling-807"
+    RunPaths(sibling).gather_raw.mkdir(parents=True)
+    (sibling / "alert.json").write_bytes((source / "alert.json").read_bytes())
+    main = ReplayFn([Turn(tool_calls=[_dispatch(lead, system)]),
+                     Turn(text="Investigation complete.")])
+    gather = ReplayFn(turns)
+    summary = drive(sibling, run_id=run_id, main=main, gather=gather, verbs=verbs, resume=spec)
+    assert summary.get("truncated_by") is None, f"the sibling did not run to its end: {summary}"
+    return _Res(sibling, main, gather, summary)
+
+
+def _jsonl(rows: list[dict]) -> bytes:
+    import json
+
+    return "".join(json.dumps(r) + "\n" for r in rows).encode("utf-8")
 
 
 def _run_two_leads(
@@ -308,8 +333,8 @@ def _run_two_leads(
         Turn(text="Investigation complete."),
     ])
     gather = ReplayFn(turns)
-    drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
-    return _Res(run_dir, main, gather)
+    summary = drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
+    return _Res(run_dir, main, gather, summary)
 
 
 @pytest.fixture(scope="module")
@@ -382,10 +407,9 @@ def _row(
 
 
 def _seed(run_dir: Path, rows: list[dict]) -> None:
-    """Pre-seed the queries table (and each row's sidecar) exactly as a resumed or
-    already-running lead leaves it, BEFORE the run opens: the driver loads the table into the
-    host's mirror at run start (`open_query_mirror`), so a seeded table and an
-    organically-accumulated one are the same input to the guard."""
+    """Plant a queries table (and each row's sidecar) in a fresh run folder BEFORE the run
+    starts. No host recorded these rows for the run, and since #1235 round 2 no file is ever
+    read into a run's state: they are on disk and nowhere else."""
     for row in rows:
         rel = row.get("payload_path")
         if not rel:
@@ -813,17 +837,20 @@ def test_repeat_key_is_lead_scoped(tmp_path):
     lead never counts toward this lead's trip, whatever the physical write order. Two sibling
     leads each pay their own full N, and a re-dispatch to a new lead_id starts at zero
     occurrences. Control on the same address: the SAME two rows carrying THIS lead's id do
-    count, and the very same call is refused."""
+    count, and the very same call is refused. (The rows are a branch sibling's inherited
+    prefix — the one way a run starts holding rows, #1235 round 2.)"""
     rec = VerbRecorder()
     foreign = [
         _row(SIBLING, 0, "elastic", "query", {"native_query": "FROM logs"}),
         _row(SIBLING, 1, "elastic", "query", {"native_query": "FROM logs"}),
     ]
-    scoped = _run(tmp_path / "scoped", verbs=elastic_ok(rec), run_id="d807-scope", seed=foreign, turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        DONE,
-    ])
+    scoped = _run_inherited(
+        tmp_path / "scoped", table=_jsonl(foreign), rows=foreign, verbs=elastic_ok(rec),
+        run_id="d807-scope", turns=[
+            q("elastic", "query", {"native_query": "FROM logs"}),
+            q("elastic", "query", {"native_query": "FROM logs"}),
+            DONE,
+        ])
     assert len(rec.calls) == 2, "a sibling lead's rows were counted toward this lead's budget"
     assert INCOMPLETE_IDIOM not in scoped.summary()
 
@@ -832,10 +859,9 @@ def test_repeat_key_is_lead_scoped(tmp_path):
         _row(LEAD, 0, "elastic", "query", {"native_query": "FROM logs"}),
         _row(LEAD, 1, "elastic", "query", {"native_query": "FROM logs"}),
     ]
-    control = _run(tmp_path / "own", verbs=elastic_ok(own), run_id="d807-scope-ctl", seed=mine, turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        DONE,
-    ])
+    control = _run_inherited(
+        tmp_path / "own", table=_jsonl(mine), rows=mine, verbs=elastic_ok(own),
+        run_id="d807-scope-ctl", turns=[q("elastic", "query", {"native_query": "FROM logs"}), DONE])
     assert own.calls == [], "the control could not see a difference: this lead's own rows must count"
     assert INCOMPLETE_IDIOM in control.summary()
 
@@ -939,29 +965,43 @@ def test_repeat_trip_leaves_the_infra_breaker_untouched(tmp_path, three_identica
     breaker an EARLIER, UNRELATED infra failure already tripped, where that earlier trip must
     survive the repeat trip unchanged. Positive control on the same address under the
     complementary condition: an exit-2 adapter fault DOES record breaker state, so the
-    observation channel (the run's in-process breaker state, #1235) can see the difference."""
+    observation channel (the run's own state, #1235) can see the difference."""
     r, rec = three_identical_requests
     assert r.own_rows[2]["exit_code"] == 64, "no trip happened, so the negative is vacuous"
     assert r.breaker == _BLANK_BREAKER, "the repeat trip recorded infra-breaker state"
     assert not (r.run_dir / "circuit_breaker.json").exists(), \
         "a breaker file was written into the run dir (#1235: the breaker is in memory only)"
-    assert circuit_breaker.is_tripped(r.run_dir, "elastic") is False
+    assert circuit_breaker.is_tripped(r.state, "elastic") is False
 
-    # The SAME trip, in a run that already carries an unrelated system's infra trip: two real
-    # exit-2 outcomes on `cmdb` through the production `record_outcome` put it at
-    # PER_SYSTEM_FAIL_LIMIT = 2 (G12, executed), i.e. DOWN, before the lead's first call.
+    # The SAME trip, in a run that already carries an unrelated system's infra trip: an earlier
+    # lead's two real transport faults on `cmdb` (exit 2, through the real capture and the
+    # production `record_outcome`) put it at PER_SYSTEM_FAIL_LIMIT = 2 (G12, executed), i.e.
+    # DOWN, before this lead's first call.
     prior_rec = VerbRecorder()
-    prior = _run(
-        tmp_path / "prior", verbs=elastic_ok(prior_rec), run_id="d807-breaker-prior",
-        breaker=[("cmdb", 2), ("cmdb", 2)], turns=[
+
+    def cmdb_probe(ctx: VerbContext, *, native_query: str = "FROM hosts") -> list[dict]:
+        raise TransportFault("cmdb unreachable")
+
+    def elastic_query(ctx: VerbContext, *, native_query: str, limit: int = 10) -> list[dict]:
+        prior_rec.record("query", ctx, {"native_query": native_query, "limit": limit})
+        return PAYLOAD
+
+    prior = _run_two_leads(
+        tmp_path / "prior", run_id="d807-breaker-prior",
+        verbs=FakeVerbs({"cmdb": {"probe": cmdb_probe}, "elastic": {"query": elastic_query}}),
+        first=(SIBLING, "cmdb"), second=(LEAD, "elastic"), turns=[
+            q("cmdb", "probe", {"native_query": "FROM hosts-1"}),
+            q("cmdb", "probe", {"native_query": "FROM hosts-2"}),
+            SUMMARY_TURN,
             q("elastic", "query", {"native_query": "FROM logs"}),
             q("elastic", "query", {"native_query": "FROM logs"}),
             q("elastic", "query", {"native_query": "FROM logs"}),
             DONE,
         ])
-    assert prior.own_rows[2]["exit_code"] == 64, "no trip happened, so the negative is vacuous"
+    assert len(prior_rec.calls) == 2, "the elastic lead never reached its trip"
+    assert prior.rows_for(LEAD)[2]["exit_code"] == 64, "no trip happened, so the negative is vacuous"
     assert INCOMPLETE_IDIOM in prior.summary()
-    assert circuit_breaker.is_tripped(prior.run_dir, "cmdb") is True, \
+    assert circuit_breaker.is_tripped(prior.state, "cmdb") is True, \
         "the repeat trip cleared an unrelated system's earlier infra trip"
     assert prior.breaker["systems"]["cmdb"]["failures"] == 2, \
         "the repeat trip moved an unrelated system's failure count"
@@ -1176,13 +1216,16 @@ def test_repeat_key_separates_requests_that_differ_by_a_byte(tmp_path):
 def test_repeat_count_is_derived_from_the_table(tmp_path):
     """repeat_count_is_derived_from_the_table — M1's one deliberate choice, "no new persisted
     state, no new file": the count `repeat_trip` reads is derived from the run's queries table
-    as the HOST holds it (#1235 F1) — the rows present when the run opened, which the driver
-    loads into its in-memory mirror at run start (`open_query_mirror`), plus the rows the host
-    recorded since. A lead that accumulated its occurrences organically and a lead whose table
-    was PRE-SEEDED before the run started trip at the same occurrence — in the seeded run the
-    session never executed the request even once, and the guard still refuses it. (That a row
-    written into the folder MID-run moves nothing is pinned in
-    `e2e/test_1235_queries_and_pointer.py`.)"""
+    as the HOST holds it (#1235) — the rows the host recorded for the run, on the run's one
+    `RunState`, which for a resumed run (a branch sibling) include the rows seeding inherited
+    before its first turn. A lead that accumulated its occurrences organically and a resumed
+    lead whose inherited prefix holds them trip at the same occurrence — in the resumed run the
+    session never executed the request even once, and the guard still refuses it.
+
+    #1235 round 2: rows PLANTED in a fresh run's folder before it starts are not rows the host
+    recorded, and no file is read into a run's state — they count nothing, and the same call
+    runs (the inherited arm is its positive control). (That a row written into the folder
+    MID-run moves nothing is pinned in `e2e/test_1235_queries_and_pointer.py`.)"""
     organic_rec = VerbRecorder()
     organic = _run(tmp_path / "organic", verbs=elastic_ok(organic_rec), run_id="d807-derive-a", turns=[
         q("elastic", "query", {"native_query": "FROM logs"}),
@@ -1193,85 +1236,87 @@ def test_repeat_count_is_derived_from_the_table(tmp_path):
     assert len(organic_rec.calls) == 2
     assert organic.own_rows[2]["exit_code"] == 64
 
+    prefix = [_row(LEAD, s, "elastic", "query", {"native_query": "FROM logs"}) for s in (0, 1)]
     seeded_rec = VerbRecorder()
-    seeded = _run(
-        tmp_path / "seeded", verbs=elastic_ok(seeded_rec), run_id="d807-derive-b",
-        seed=[_row(LEAD, s, "elastic", "query", {"native_query": "FROM logs"}) for s in (0, 1)],
-        turns=[q("elastic", "query", {"native_query": "FROM logs"}), DONE],
+    seeded = _run_inherited(
+        tmp_path / "seeded", table=_jsonl(prefix), rows=prefix, verbs=elastic_ok(seeded_rec),
+        run_id="d807-derive-b", turns=[q("elastic", "query", {"native_query": "FROM logs"}), DONE],
     )
     assert seeded_rec.calls == [], \
-        "the session executed the request — the rows present at run start were not loaded " \
-        "into the host's table"
-    assert seeded.own_rows[2]["exit_code"] == 64
+        "the session executed the request — the rows the run inherited were not on its state"
+    assert seeded.rows_for(LEAD)[2]["exit_code"] == 64
     assert INCOMPLETE_IDIOM in seeded.summary()
+
+    planted_rec = VerbRecorder()
+    planted = _run(
+        tmp_path / "planted", verbs=elastic_ok(planted_rec), run_id="d807-derive-c",
+        planted=prefix, turns=[q("elastic", "query", {"native_query": "FROM logs"}), DONE],
+    )
+    assert len(planted_rec.calls) == 1, \
+        "rows planted in the folder before the run started were read into the run's state"
+    assert _file_rows(planted.run_dir, LEAD)[-1]["seq"] == 0, \
+        "the run's first row did not start its own seq at 0"
+    assert INCOMPLETE_IDIOM not in planted.summary()
 
 
 def test_repeat_count_is_zero_before_the_lead_has_rows(tmp_path):
     """repeat_count_is_zero_before_the_lead_has_rows — the first call of a lead reads ZERO
     prior occurrences from the queries table: never an error, never a trip. This covers both
-    the absent file (the table does not exist yet — the host's table opens empty over it) and
-    the file that exists with no rows for THIS lead."""
-    from defender.scripts.gather_tools.record_query import live_lead_rows, open_query_mirror
+    the absent file (a fresh run: no table yet, and the run's state starts with no rows) and
+    the table that exists with no rows for THIS lead (a branch sibling whose inherited prefix
+    holds only another lead's rows)."""
+    from defender.runtime.run_state import RunState
 
     missing = tmp_path / "missing" / "run"
     missing.mkdir(parents=True)
-    assert lead_rows(missing, LEAD) == [], "the file reader raised over an absent table"
-    open_query_mirror(missing)
-    assert live_lead_rows(missing, LEAD) == [], \
-        "a lead with no table rows must read as zero occurrences"
-    assert repeat_trip(live_lead_rows(missing, LEAD), LEAD, system="elastic", verb="query",
+    fresh = RunState.start(missing, "d807-zero-fresh")
+    assert fresh.lead_rows(LEAD) == [], "a lead with no table rows must read as zero occurrences"
+    assert repeat_trip(fresh.lead_rows(LEAD), LEAD, system="elastic", verb="query",
                        params={"native_query": "FROM logs"}) is None
 
     rec = VerbRecorder()
-    r = _run(
-        tmp_path / "foreign", verbs=elastic_ok(rec), run_id="d807-zero",
-        seed=[_row(SIBLING, s, "elastic", "query", {"native_query": "FROM logs"}) for s in (0, 1, 2)],
-        turns=[q("elastic", "query", {"native_query": "FROM logs"}), DONE],
+    foreign = [_row(SIBLING, s, "elastic", "query", {"native_query": "FROM logs"})
+               for s in (0, 1, 2)]
+    r = _run_inherited(
+        tmp_path / "foreign", table=_jsonl(foreign), rows=foreign, verbs=elastic_ok(rec),
+        run_id="d807-zero", turns=[q("elastic", "query", {"native_query": "FROM logs"}), DONE],
     )
     assert len(rec.calls) == 1, "the lead's first call was refused against another lead's rows"
-    assert lead_rows(r.run_dir, LEAD)[0]["seq"] == 0
+    assert _file_rows(r.run_dir, LEAD)[0]["seq"] == 0
     assert INCOMPLETE_IDIOM not in r.summary()
 
 
 def test_repeat_predicate_fails_open_on_a_damaged_table(tmp_path):
-    """repeat_predicate_fails_open_on_a_damaged_table — #1235 F1 moved this demand from the
-    guard's per-call read to the ONE load of the table the run makes: the guard no longer
-    reads `executed_queries.jsonl` per call, it reads the host's mirror, which
-    `open_query_mirror` loads at run start. The loader keeps the posture the guard's read had
-    over a damaged table: it drops a torn trailing line, keeps a foreign row carrying no
-    `lead_id` out of every lead, survives a stored `params` that is not a dict, and survives
-    invalid UTF-8 — so the guard over the loaded rows still counts the lead's real
-    occurrences and still trips. (The chmod-000 and directory-at-the-name arms retired with the
-    per-call read: what the loader does with an unreadable table is not pinned.)"""
-    from defender.scripts.gather_tools.record_query import live_lead_rows, open_query_mirror
-
-    run_dir = tmp_path / "damaged"
-    run_dir.mkdir(parents=True)
-    table = RunPaths(run_dir).executed_queries
-    append_jsonl(table, [
+    """repeat_predicate_fails_open_on_a_damaged_table — the guard never reads
+    `executed_queries.jsonl` per call (#1235): it counts the rows on the run's state. The one
+    read of a table INTO a run is a branch sibling's seeding, which reads the source's table and
+    records what it inherits — so that is where a damaged table is met now. A torn trailing
+    line, a foreign row carrying no `lead_id` and a stored `params` that is not a dict degrade
+    the inherited count and crash nothing: the sibling's state holds the lead's three real rows
+    (seqs 0, 2, 3), and the lead's two real occurrences still count, so its next identical
+    request is refused before the backend. Invalid UTF-8 in a row survives as that row. (The
+    chmod-000 and directory-at-the-name arms retired with the per-call read in round 1.)"""
+    torn = b'{"lead_id": "l-001", "seq": 4, "sys'
+    damaged = [
         _row(LEAD, 0, "elastic", "query", {"native_query": "FROM logs"}),
         {"seq": 1, "system": "elastic", "verb": "query", "params": {}},  # G17's 7-key judge row
         {**_row(LEAD, 2, "elastic", "query", {}), "params": "not-a-dict"},
         _row(LEAD, 3, "elastic", "query", {"native_query": "FROM logs"}),
-    ])
-    write_guarded(table, '{"lead_id": "l-001", "seq": 4, "sys', mode="append")
+    ]
+    rec = VerbRecorder()
+    r = _run_inherited(
+        tmp_path / "damaged", table=_jsonl(damaged) + torn, rows=damaged, verbs=elastic_ok(rec),
+        run_id="d807-damaged", turns=[q("elastic", "query", {"native_query": "FROM logs"}), DONE])
+    assert [row["seq"] for row in r.state.lead_rows(LEAD)][:3] == [0, 2, 3], \
+        "a torn line, a foreign row shape or a non-dict params field was not survived"
+    assert rec.calls == [], "the inherited rows no longer count the lead's two real occurrences"
+    assert INCOMPLETE_IDIOM in r.summary()
 
-    open_query_mirror(run_dir)
-    rows = live_lead_rows(run_dir, LEAD)
-    assert [r["seq"] for r in rows] == [0, 2, 3], \
-        "a torn line, a foreign row shape or a non-dict params field was not survived by the load"
-    assert repeat_trip(rows, LEAD, system="elastic", verb="query",
-                       params={"native_query": "FROM logs"}) is not None, \
-        "the loaded rows no longer count the lead's two real occurrences"
-
-    bad_utf8 = tmp_path / "utf8" / "run"
-    bad_utf8.mkdir(parents=True)
-    RunPaths(bad_utf8).executed_queries.write_bytes(
-        b'{"lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "query", '
-        b'"params": {"native_query": "\xff\xfeFROM logs"}}\n'
-    )
-    open_query_mirror(bad_utf8)
-    assert len(live_lead_rows(bad_utf8, LEAD)) == 1, \
+    one = [_row(LEAD, 0, "elastic", "query", {"native_query": "FROM logs"})]
+    bad_utf8 = _jsonl(one).replace(b"FROM logs", b"\xff\xfeFROM logs")
+    u = _run_inherited(tmp_path / "utf8", table=bad_utf8, rows=one, verbs=elastic_ok(VerbRecorder()),
+                       run_id="d807-utf8", turns=[DONE])
+    assert len(u.state.lead_rows(LEAD)) == 1, \
         "invalid UTF-8 raised or dropped the row where read_jsonl_rows' errors='replace' keeps it"
 
 
@@ -1323,10 +1368,8 @@ def test_repeat_key_is_the_shipped_request_key(tmp_path):
     assert "seq 0" in r.summary(), \
         "seq 0 is the earliest matching row in this in-order run — the guard named another"
 
-    from defender.scripts.gather_tools.record_query import live_lead_rows
-
-    # The guard's own rows: the host's table, read post-run in this process (#1235 F1).
-    rows = live_lead_rows(r.run_dir, LEAD)
+    # The guard's own rows: the run's state, read post-run in this process (#1235).
+    rows = r.state.lead_rows(LEAD)
     key = _query_rules._request_key("elastic", "sshd-auth-window", {"native_query": "FROM logs"})
     counted = [
         row for row in rows
@@ -1369,7 +1412,7 @@ def test_repeat_guard_never_fires_above_its_own_placement(tmp_path):
     assert {row["exit_code"] for row in rows} == {2}, \
         "a load-error call was recorded as anything other than the infra fault it is"
     assert all(row["exit_code"] != 64 for row in rows), "the guard wrote a trip row above its placement"
-    assert circuit_breaker.is_tripped(r.run_dir, "elastic") is True
+    assert circuit_breaker.is_tripped(r.state, "elastic") is True
     assert "is DOWN" in r.gather_saw, "the third call was not answered by the down-message"
     assert r.gather.calls == 4, "a GatherDeadEnd ended the lead where the infra breaker owns it"
     assert INCOMPLETE_IDIOM not in r.summary()
@@ -1812,14 +1855,16 @@ def test_dead_end_message_names_the_earliest_matching_seq(tmp_path):
     message names the EARLIEST matching row's seq, so it is deterministic under duplicate or
     non-monotonic seqs and it names the occurrence that started the repetition rather than the
     one a concurrent write can shift. Driven over a table whose two matching rows were written
-    out of order (seq 9 first, then seq 5): the message names seq 5."""
+    out of order (seq 9 first, then seq 5 — a branch sibling's inherited prefix, #1235): the
+    message names seq 5."""
     rec = VerbRecorder()
-    r = _run(
-        tmp_path, verbs=named_verbs(rec), run_id="d807-earliest",
-        seed=[
-            _row(LEAD, 9, "elastic", "sshd-auth-window", {"native_query": "FROM logs"}),
-            _row(LEAD, 5, "elastic", "sshd-auth-window", {"native_query": "FROM logs"}),
-        ],
+    prefix = [
+        _row(LEAD, 9, "elastic", "sshd-auth-window", {"native_query": "FROM logs"}),
+        _row(LEAD, 5, "elastic", "sshd-auth-window", {"native_query": "FROM logs"}),
+    ]
+    r = _run_inherited(
+        tmp_path, table=_jsonl(prefix), rows=prefix, verbs=named_verbs(rec),
+        run_id="d807-earliest",
         turns=[q("elastic", "sshd-auth-window", {"native_query": "FROM logs"}), DONE],
     )
     summary = r.summary()
@@ -1828,7 +1873,7 @@ def test_dead_end_message_names_the_earliest_matching_seq(tmp_path):
     assert "seq 9" not in summary, "the message named the latest matching occurrence"
 
     hit = repeat_trip(
-        lead_rows(r.run_dir, LEAD)[:2], LEAD, system="elastic", verb="sshd-auth-window",
+        _file_rows(r.run_dir, LEAD)[:2], LEAD, system="elastic", verb="sshd-auth-window",
         params={"native_query": "FROM logs"},
     )
     assert hit is not None

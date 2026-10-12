@@ -176,9 +176,13 @@ def sibling_dir(tmp_path, name: str = "run-sibling") -> Path:
 
 
 def resume(store, run_dir, message_id, target: Path):
-    """Open the sibling the way the driver does, at `message_id`."""
+    """Open the sibling the way the driver does, at `message_id`, on a fresh run state for
+    `target` (#1235 round 2: seeding takes the sibling's `RunState`, not its run dir)."""
+    from defender.runtime.run_state import RunState
+
     branch = branch_mod()
-    return branch.open_main_session(store, spec_at(store, run_dir, message_id), target)
+    return branch.open_main_session(store, spec_at(store, run_dir, message_id),
+                                    RunState.start(target, target.name))
 
 
 # 1. which leads existed at the branch point

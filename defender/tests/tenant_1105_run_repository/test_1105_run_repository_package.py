@@ -44,10 +44,11 @@ from defender.tests.tenant_1105_run_repository import _spec1105 as H
 PACKAGE_FILES = ("__init__.py", "_layout.py", "_handle.py", "_lookup.py", "_record.py",
                  "_held.py", "_id.py", "_errors.py")
 #: The 53 public names `defender/_run_paths.py` defines at module level at 80888efb (R4-42),
-#: plus #1224's ORACLE_HELD_SUFFIX, minus `resolve_run_bundle` (deleted by #1105 PR 2, F-13),
-#: minus BUDGET and CIRCUIT_BREAKER (#1235: the counters and the breaker are in-memory state, so
-#: neither names a run record any more), with SESSION_POINTER (the in-folder name) replaced by
-#: SESSION_POINTER_SUFFIX (#1235 F2: the case pointer is a sidecar beside the run folder).
+#: minus `resolve_run_bundle` (deleted by #1105 PR 2, F-13), minus BUDGET and CIRCUIT_BREAKER
+#: (#1235: the counters and the breaker are in-memory state, so neither names a run record any
+#: more), with SESSION_POINTER (the in-folder name) replaced by SESSION_POINTER_SUFFIX (#1235
+#: F2: the case pointer is a sidecar beside the run folder). #1224's ORACLE_HELD_SUFFIX came
+#: and went: #1235 made the oracle's held time in-memory state too.
 LAYOUT_NAMES = frozenset({
     "WIRE_LOG_DIR", "WIRE_LOG", "PROVENANCE", "GATE_METADATA_KEY", "ALERT", "REPORT",
     "INVESTIGATION", "EXECUTED_QUERIES", "SOURCE_REFS", "RAW_MARKER", "GATHER_SUMMARIES_DIRNAME",
@@ -57,7 +58,7 @@ LAYOUT_NAMES = frozenset({
     "TOOL_TRACE", "POLICY_DENIALS", "LESSONS_LOADED",
     "SESSION_POINTER_SUFFIX", "RUNTIME_HTML", "BOX_SENTINEL", "RUN_END_SIDECAR_SUFFIX",
     "SCRUB_VERDICT_SUFFIX", "ACCOUNTING_FAILURES_SUFFIX", "TICKET_WRITE_SUFFIX",
-    "ORACLE_HELD_SUFFIX", "SESSIONS_DIRNAME", "RunLayout", "RUN_LAYOUT", "WireLogNames", "WIRE_LOG_NAMES", "RunPaths",
+    "SESSIONS_DIRNAME", "RunLayout", "RUN_LAYOUT", "WireLogNames", "WIRE_LOG_NAMES", "RunPaths",
     "SessionPaths", "LEAD_ID_BODY", "LEAD_ID_RE", "GATHER_RAW_SHAPE", "CASE_ANSWER_KEY_NAMES",
     "is_case_answer_key", "gather_summaries_shape", "artifact_file", "plain_file", "artifact_dir",
     "contained_payload",
@@ -378,8 +379,8 @@ def test_1105_the_package_holds_exactly_its_seven_pinned_submodules():  # name k
         f"{sorted(LAYOUT_NAMES - layout_public)}, extra {sorted(layout_public - LAYOUT_NAMES)}")
 
 
-def test_1105_the_door_serves_exactly_its_68_public_names():  # 70 since the owner rulings, 71 with #1224's ORACLE_HELD_SUFFIX, 72 with #1105 PR 2's declared change 0, 71 once F-13 deleted resolve_run_bundle, 73 with PR 2's review (RunUnreachable, open_requested_run); the spec graph cites this name
-    """defender.run_repository.__all__ is exactly the 71 public names: the layout's 53 (the
+def test_1105_the_door_serves_exactly_its_68_public_names():  # 70 since the owner rulings, 71 with #1224's ORACLE_HELD_SUFFIX, 72 with #1105 PR 2's declared change 0, 71 once F-13 deleted resolve_run_bundle, 73 with PR 2's review (RunUnreachable, open_requested_run), 70 with #1235; the spec graph cites this name
+    """defender.run_repository.__all__ is exactly the 70 public names: the layout's 53 (the
     door's layout surface equals _layout's public names, NM-06), Run, RunRecord, ArchivedWorld,
     RecordHandle, case_ref, RunId, RunsRepository, EpisodeRuns, Listed, RunAddress, RunAbsent
     (#1105 PR 2's declared change 0: they replace PR 1's open_run, list_run_ids, bound_runs and
@@ -397,9 +398,9 @@ def test_1105_the_door_serves_exactly_its_68_public_names():  # 70 since the own
         f"__all__ differs from D1.3's 68 plus the two ruled names: missing "
         f"{sorted((LAYOUT_NAMES | NON_LAYOUT_PUBLIC) - served)}, extra "
         f"{sorted(served - LAYOUT_NAMES - NON_LAYOUT_PUBLIC)}")
-    # 71 since #1235 dropped BUDGET and CIRCUIT_BREAKER (and swapped SESSION_POINTER for
-    # SESSION_POINTER_SUFFIX, one for one).
-    assert len(served) == 71, f"{len(served)} public names, not 71"
+    # 70 since #1235 dropped BUDGET, CIRCUIT_BREAKER and ORACLE_HELD_SUFFIX (and swapped
+    # SESSION_POINTER for SESSION_POINTER_SUFFIX, one for one).
+    assert len(served) == 70, f"{len(served)} public names, not 70"
     layout_public = {n for n in _module_defs(ast.parse(Path(_layout.__file__).read_text(
         "utf-8"))) if not n.startswith("_")}
     assert served - NON_LAYOUT_PUBLIC == layout_public, (

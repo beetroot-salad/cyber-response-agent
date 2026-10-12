@@ -858,14 +858,17 @@ def test_a_fallback_moved_off_its_miss_is_caught(name: str):
 # =============================================================================================
 
 #: The `_io` words the dispatch and the v2/v3 step logs pin into the vocabulary; the lead-author
-#: step found the existing lints missed `guarded_mkdir` and `write_atomic`.
+#: step found the existing lints missed `guarded_mkdir` and `write_atomic`. #1235 deleted
+#: `write_atomic` and `rooted_locked_for_rewrite` (only tests used them), so they left the pin
+#: with `_io`; the patches below that wrote through `write_atomic` now write through
+#: `write_guarded`, the seam it delegated to.
 IO_MUST = frozenset({
     "write_guarded", "read_guarded", "read_bytes_guarded", "read_plain", "read_plain_bytes",
-    "locked_for_rewrite", "guarded_mkdir", "open_guarded", "write_atomic", "append_jsonl",
+    "locked_for_rewrite", "guarded_mkdir", "open_guarded", "append_jsonl",
     "read_text_utf8", "read_text_soft", "read_jsonl_rows", "read_jsonl_rows_report",
     "entry_present", "is_plain_entry", "is_hard_linked", "load_json_artifact", "open_nofollow_fd",
     "open_unnamed", "open_unnamed_at", "sweep_staged", "bind", "hold", "hold_new", "Held", "Bound",
-    "rooted_read", "rooted_write", "rooted_mkdir", "rooted_locked_for_rewrite",
+    "rooted_read", "rooted_write", "rooted_mkdir",
 })
 #: Value judges in the vocabulary by the pin above: a pure body may call these and nothing else.
 IO_VALUE_JUDGES = frozenset({"load_json_artifact", "is_hard_linked", "is_plain_entry"})
@@ -1412,17 +1415,17 @@ REGRESSIONS: dict[str, Regression] = {
     # draft written by plain path under the held mount's spelling.
     "s6-synthesize-drafts-plain-writer": Regression(SYNTH, (
         ("from defender._io import ENTRY_DIR, ENTRY_FILE, Held\n",
-         "from defender._io import ENTRY_DIR, ENTRY_FILE, Held, guarded_mkdir, write_atomic\n", 1),
+         "from defender._io import ENTRY_DIR, ENTRY_FILE, Held, guarded_mkdir, write_guarded\n", 1),
         ("        catalog = lead_neighbors.load_lane_catalog(skills.view(), where=where)\n",
          "        catalog = lead_neighbors.load_catalog(where / CATALOG_FOLDER)\n", 1),
         ("            skills.write(\n                name,\n",
-         "            guarded_mkdir(draft.parent, base=where)\n            write_atomic(\n"
+         "            guarded_mkdir(draft.parent, base=where)\n            write_guarded(\n"
          "                draft,\n", 1),
         ("                mode=\"replace\",\n            )\n", "            )\n", 1),
     ), (("synthesize_drafts", "reader", "lead_neighbors.load_catalog(where / CATALOG_FOLDER)", 1),
         ("synthesize_drafts", "call", "guarded_mkdir(draft.parent, base=where)", 1),
         ("synthesize_drafts", "call",
-         "write_atomic(draft, _draft_skeleton(qid, f'{system}.{suffix}', lead.verb, "
+         "write_guarded(draft, _draft_skeleton(qid, f'{system}.{suffix}', lead.verb, "
          "_draft_params(lead), lead.goal_text, record, engine))", 1))),
     # v1 s6 final.diff, `build_lead_author_deps`: the skills handle built from `paths.skills_dir`.
     "s6-deps-handle-from-path": Regression(LEAD_AUTHOR, (
@@ -1684,14 +1687,14 @@ REGRESSIONS: dict[str, Regression] = {
     # E9: the handle only judges; the draft is written by path at the held mount's spelling.
     "s6v2-E9-writer-writes-by-the-held-spelling": Regression(SYNTH, (
         ("from defender._io import ENTRY_DIR, ENTRY_FILE, Held\n",
-         "from defender._io import ENTRY_DIR, ENTRY_FILE, Held, guarded_mkdir, write_atomic\n", 1),
+         "from defender._io import ENTRY_DIR, ENTRY_FILE, Held, guarded_mkdir, write_guarded\n", 1),
         ("            skills.write(\n                name,\n",
          "            root = skills._where\n            guarded_mkdir((root / name).parent, base=root)\n"
-         "            write_atomic(\n                root / name,\n", 1),
+         "            write_guarded(\n                root / name,\n", 1),
         ("                mode=\"replace\",\n            )\n", "            )\n", 1),
     ), (("synthesize_drafts", "call", "guarded_mkdir((root / name).parent, base=root)", 1),
         ("synthesize_drafts", "call",
-         "write_atomic(root / name, _draft_skeleton(qid, f'{system}.{suffix}', lead.verb, "
+         "write_guarded(root / name, _draft_skeleton(qid, f'{system}.{suffix}', lead.verb, "
          "_draft_params(lead), lead.goal_text, record, engine))", 1),
         ("synthesize_drafts", "private", "skills._where", 1))),
     # --- v2 step 7's adversary, third pass (scratchpad s7v2-adv-patches/) ------------------------
@@ -1841,13 +1844,13 @@ REGRESSIONS: dict[str, Regression] = {
     # E9: the handle writes the draft, and a stale plain write lands beside it (the #1139 merge).
     "s6v3-E9-stale-plain-write-beside-the-handle": Regression(SYNTH, (
         ("from defender._io import ENTRY_DIR, ENTRY_FILE, Held\n",
-         "from defender._io import ENTRY_DIR, ENTRY_FILE, Held, guarded_mkdir, write_atomic\n", 1),
+         "from defender._io import ENTRY_DIR, ENTRY_FILE, Held, guarded_mkdir, write_guarded\n", 1),
         ("                mode=\"replace\",\n            )\n            created.append(draft)\n",
          "                mode=\"replace\",\n            )\n"
-         "            guarded_mkdir(draft.parent, base=where)\n            write_atomic(draft, b'')\n"
+         "            guarded_mkdir(draft.parent, base=where)\n            write_guarded(draft, b'')\n"
          "            created.append(draft)\n", 1),
     ), (("synthesize_drafts", "call", "guarded_mkdir(draft.parent, base=where)", 1),
-        ("synthesize_drafts", "call", "write_atomic(draft, b'')", 1))),
+        ("synthesize_drafts", "call", "write_guarded(draft, b'')", 1))),
     # --- the v3 step 4 adversary (scratchpad adv1134v3s4/), on this base's `_corpus.py` ---------
     # v1: a catalog folder listed again by hand, its warning taken from the second listing.
     "s4v3-v1-catalog-folder-relisted": Regression(CORPUS, (
@@ -2079,7 +2082,7 @@ EVASIONS: dict[str, tuple[str, tuple[tuple[str, str, str], ...]]] = {
         "from os.path import lexists as x\ndef f(p):\n    return x(p)\n",
         (("f", "call", "x(p)"),)),
     "aliased-io-seam": (
-        "from defender._io import write_atomic as wa\ndef f(p, t):\n    wa(p, t)\n",
+        "from defender._io import write_guarded as wa\ndef f(p, t):\n    wa(p, t)\n",
         (("f", "call", "wa(p, t)"),)),
     "function-local-import": (
         "def f(p):\n    import os as q\n    q.remove(p)\n",

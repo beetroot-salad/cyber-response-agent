@@ -135,7 +135,7 @@ def test_a_naive_created_at_does_not_raise_out_of_the_elapsed_check():
     This was F-17's UNCONDITIONAL path: `lead_zero._budget_gate` is not gated on
     `DEFENDER_BUDGET_ENFORCE` and is called inside `resolve_lead_zero`, whose only handler
     catches `BudgetKill` and `RunAborted`. (#1235: the state no longer comes from a file, so the
-    arm that showed `open_budget` preserving a planted stamp retired; the check is driven over
+    arm that showed a run's start preserving a planted stamp retired; the check is driven over
     the state dict directly.)
 
     The stamp is derived from NOW rather than written as a literal date: a literal makes the
@@ -163,29 +163,37 @@ def test_a_naive_origin_is_read_as_utc_not_dropped(tmp_path):
 
 # F-25 — the breaker's verdicts over a healthy state
 #
-# (#1235: the breaker state lives in the run process's memory; the corrupt-nested-shape,
-# non-dict and undecodable-bytes arms planted a `circuit_breaker.json` nothing reads any more,
-# and the "unreadable state reads as tripped" branch they pinned retired with the file.)
+# (#1235: the breaker state lives on the run's `RunState`; the corrupt-nested-shape, non-dict
+# and undecodable-bytes arms planted a `circuit_breaker.json` nothing reads any more, and the
+# "unreadable state reads as tripped" branch they pinned retired with the file.)
+
+
+def _state(tmp_path):
+    from defender.runtime.run_state import RunState
+
+    return RunState.start(tmp_path, "run-878")
 
 
 def test_a_healthy_state_still_reads_and_trips(tmp_path):
     """An ordinary state still counts, still trips at `PER_SYSTEM_FAIL_LIMIT`, and still reports
     a real failure count in `down_message`."""
-    assert cb.is_tripped(tmp_path, "elastic") is False
-    cb.record_outcome(tmp_path, "elastic", 2)
-    assert cb.is_tripped(tmp_path, "elastic") is False
-    cb.record_outcome(tmp_path, "elastic", 2)
-    assert cb.is_tripped(tmp_path, "elastic") is True
-    msg = cb.down_message(tmp_path, "elastic")
+    state = _state(tmp_path)
+    assert cb.is_tripped(state, "elastic") is False
+    cb.record_outcome(state, "elastic", 2)
+    assert cb.is_tripped(state, "elastic") is False
+    cb.record_outcome(state, "elastic", 2)
+    assert cb.is_tripped(state, "elastic") is True
+    msg = cb.down_message(state, "elastic")
     assert "2 connectivity/auth failures" in msg
-    assert cb.is_tripped(tmp_path, "identity") is False, "one system's failures tripped another"
+    assert cb.is_tripped(state, "identity") is False, "one system's failures tripped another"
 
 
 def test_the_run_kill_still_fires_on_a_healthy_state(tmp_path):
     """The other positive control: `RUN_FAIL_KILL_LIMIT` is still reachable. The F-07 fix stops
     ONE class of call from spending it, and that must not have made the kill
     itself unreachable — it is the deliberate abort for a genuinely unreachable environment."""
+    state = _state(tmp_path)
     for i in range(cb.RUN_FAIL_KILL_LIMIT - 1):
-        cb.record_outcome(tmp_path, f"system-{i}", 2)
+        cb.record_outcome(state, f"system-{i}", 2)
     with pytest.raises(cb.RunAborted):
-        cb.record_outcome(tmp_path, "system-last", 2)
+        cb.record_outcome(state, "system-last", 2)

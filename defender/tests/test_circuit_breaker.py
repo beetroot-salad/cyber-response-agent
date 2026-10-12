@@ -43,52 +43,57 @@ def test_no_adapter_has_a_cli_left_to_mistype():
     assert not cb.is_infra_failure(transport.USAGE_EXIT_CODE)
 
 
+def _state(run_dir):
+    """A run's state (#1235 round 2): the breaker lives on the run's one `RunState`."""
+    from defender.runtime.run_state import RunState
+
+    return RunState.start(run_dir, "run-cb")
+
+
 def test_usage_error_does_not_trip_breaker(tmp_path):
     """Exit 64 is the agent's own usage error: it charges nothing. #1235: the breaker is
-    the run process's memory, so "charged nothing" is read off `breaker_state`, not off
-    the absence of a file. Positive control: test_two_infra_failures_trip_breaker, where
-    the same read DOES show the system's failures."""
-    from defender.runtime.circuit_breaker import breaker_state
-
-    cb.record_outcome(tmp_path, "elastic", 64)
-    cb.record_outcome(tmp_path, "elastic", 64)
-    assert not cb.is_tripped(tmp_path, "elastic")
-    state = breaker_state(tmp_path)
-    assert "elastic" not in state["systems"], f"a usage error charged the breaker: {state}"
-    assert state["total_failures"] == 0, state
+    the run's state, so "charged nothing" is read off its `breaker_snapshot`, not off the
+    absence of a file. Positive control: test_two_infra_failures_trip_breaker, where the
+    same read DOES show the system's failures."""
+    state = _state(tmp_path)
+    cb.record_outcome(state, "elastic", 64)
+    cb.record_outcome(state, "elastic", 64)
+    assert not cb.is_tripped(state, "elastic")
+    snapshot = state.breaker_snapshot()
+    assert "elastic" not in snapshot["systems"], f"a usage error charged the breaker: {snapshot}"
+    assert snapshot["total_failures"] == 0, snapshot
 
 
 def test_two_infra_failures_trip_breaker(tmp_path):
-    from defender.runtime.circuit_breaker import breaker_state
+    state = _state(tmp_path)
+    cb.record_outcome(state, "elastic", 2)
+    cb.record_outcome(state, "elastic", 2)
+    assert cb.is_tripped(state, "elastic")
+    snapshot = state.breaker_snapshot()
+    assert snapshot["systems"]["elastic"]["failures"] == 2, snapshot
+    assert "tripped_at" in snapshot["systems"]["elastic"], snapshot
+    assert snapshot["total_failures"] == 2, snapshot
 
-    cb.record_outcome(tmp_path, "elastic", 2)
-    cb.record_outcome(tmp_path, "elastic", 2)
-    assert cb.is_tripped(tmp_path, "elastic")
-    state = breaker_state(tmp_path)
-    assert state["systems"]["elastic"]["failures"] == 2, state
-    assert "tripped_at" in state["systems"]["elastic"], state
-    assert state["total_failures"] == 2, state
 
+def test_a_new_runs_state_starts_with_a_blank_breaker(tmp_path):
+    """A run's breaker starts blank (#1235: `RunState.start` is the run's start): whatever an
+    earlier run over the same folder tripped, the new run begins with no system down.
 
-def test_open_breaker_starts_the_run_with_a_blank_breaker(tmp_path):
-    """`open_breaker` is the run's start (#1235, called beside `open_budget`): whatever this
-    process held for the folder, the run begins with no system down.
+    Positive control: the earlier run's state WAS tripped, so the healthy read of the new one
+    is a fresh start rather than a breaker that never counted."""
+    earlier = _state(tmp_path)
+    cb.record_outcome(earlier, "elastic", 2)
+    cb.record_outcome(earlier, "elastic", 2)
+    assert cb.is_tripped(earlier, "elastic"), "the control never tripped"
 
-    Positive control: before the open, the system WAS tripped, so the healthy read after it
-    is a reset rather than a breaker that never counted."""
-    from defender.runtime.circuit_breaker import breaker_state, open_breaker
-
-    cb.record_outcome(tmp_path, "elastic", 2)
-    cb.record_outcome(tmp_path, "elastic", 2)
-    assert cb.is_tripped(tmp_path, "elastic"), "the control never tripped"
-
-    open_breaker(tmp_path)
-    assert not cb.is_tripped(tmp_path, "elastic"), "a new run inherited a tripped system"
-    assert breaker_state(tmp_path) == {"systems": {}, "total_failures": 0}
+    fresh = _state(tmp_path)
+    assert not cb.is_tripped(fresh, "elastic"), "a new run inherited a tripped system"
+    assert fresh.breaker_snapshot() == {"systems": {}, "total_failures": 0}
+    assert cb.is_tripped(earlier, "elastic"), "starting a new run's state reset the earlier one"
 
 
 def test_a_breaker_file_in_the_run_folder_is_not_the_breaker(tmp_path):
-    """#1235 D3: the breaker lives in the run's process, and no file in the run folder moves
+    """#1235 D3: the breaker lives in the run's state, and no file in the run folder moves
     it. Two real infra failures trip `elastic` and write nothing; a `circuit_breaker.json`
     planted over that run claiming a blank breaker leaves `elastic` down; one claiming a
     healthy `cmdb` tripped does not put `cmdb` down; and unreadable bytes at that name are
@@ -96,29 +101,28 @@ def test_a_breaker_file_in_the_run_folder_is_not_the_breaker(tmp_path):
 
     Positive control on the same folder: `elastic`, tripped by the host's own record, IS
     down, with the down message the host has always given."""
-    from defender.runtime.circuit_breaker import breaker_state
-
     run_dir = tmp_path / "runs" / "run-1235"
     run_dir.mkdir(parents=True)
-    cb.record_outcome(run_dir, "elastic", 2)
-    cb.record_outcome(run_dir, "elastic", 2)
+    state = _state(run_dir)
+    cb.record_outcome(state, "elastic", 2)
+    cb.record_outcome(state, "elastic", 2)
     on_disk = sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*")
                      if not p.is_dir())
     assert on_disk == [], f"the breaker wrote files: {on_disk}"
 
     planted = run_dir / "circuit_breaker.json"
     planted.write_text('{"systems": {}, "total_failures": 0}', encoding="utf-8")
-    assert cb.is_tripped(run_dir, "elastic"), "a planted blank breaker revived a down system"
-    assert "is DOWN for this run" in cb.down_message(run_dir, "elastic")
+    assert cb.is_tripped(state, "elastic"), "a planted blank breaker revived a down system"
+    assert "is DOWN for this run" in cb.down_message(state, "elastic")
 
     planted.write_text('{"systems": {"cmdb": {"failures": 5, "tripped_at": '
                        '"2026-01-01T00:00:00+00:00"}}, "total_failures": 5}', encoding="utf-8")
-    assert not cb.is_tripped(run_dir, "cmdb"), "a planted file put a healthy system down"
+    assert not cb.is_tripped(state, "cmdb"), "a planted file put a healthy system down"
 
     planted.write_bytes(b"\xff\xfe not json")
-    assert not cb.is_tripped(run_dir, "cmdb"), \
+    assert not cb.is_tripped(state, "cmdb"), \
         "unreadable bytes at the old state name still read as tripped"
-    assert cb.is_tripped(run_dir, "elastic"), "the host's own trip was lost"
-    state = breaker_state(run_dir)
-    assert state["systems"]["elastic"]["failures"] == 2, state
-    assert "cmdb" not in state["systems"], state
+    assert cb.is_tripped(state, "elastic"), "the host's own trip was lost"
+    snapshot = state.breaker_snapshot()
+    assert snapshot["systems"]["elastic"]["failures"] == 2, snapshot
+    assert "cmdb" not in snapshot["systems"], snapshot

@@ -13,7 +13,9 @@ THE SURFACE THIS FILE PINS (spell it exactly; a private synonym costs the check,
 entry — schema.md, "Coin ids from the code's name")
 ---------------------------------------------------------------------------------------------
 `defender/runtime/lead_zero.py`
-    `resolve_lead_zero(*, run_dir, defender_dir, alert_path, salt, verbs) -> LeadZeroResult`
+    `resolve_lead_zero(*, run_state, defender_dir, alert_path, verbs, …) -> LeadZeroResult`
+        (#1235 round 2: the run's one `RunState` replaces `run_dir`/`run_id` — the state names
+        the folder and the run, and carries the budget and breaker lead-0's calls charge.)
         ONE ORIENT-time entry point, SYNCHRONOUS (r9/r10, executed: the verbs are plain sync
         functions and `orientation()` is `def … -> str`, so the await cannot live inside it).
         It takes the INJECTED registry because 62 of 95 `drive()` sites omit `verbs=` (g8) and
@@ -73,7 +75,6 @@ from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     hit,
     materialize_alert,
     run,
-    seeding_store_factory,
 )
 from defender.tests.e2e._replay_harness import ReplayFn, Turn, VerbRecorder  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import ROW_KEYS  # noqa: E402
@@ -185,14 +186,14 @@ def test_lead_zero_returns_section_text_entities_and_status(tmp_path):
     def _resolve(name, **kw):
         """One arm, in its OWN run dir with its OWN recorder — see the docstring."""
         run_dir = materialize_alert(tmp_path / name, alert_doc())
-        # Called outside the driver, so the host's queries mirror (#1235) is opened here as
-        # the driver opens it at run start: lead-0's calls go through the query capture.
-        from defender.scripts.gather_tools.record_query import open_query_mirror
+        # Called outside the driver, so the run's state (#1235) is started here as the driver
+        # starts it at run start: lead-0's calls go through the query capture, which records
+        # into it.
+        from defender.runtime.run_state import RunState
 
-        open_query_mirror(run_dir)
         rec = VerbRecorder()
         return lead_zero.resolve_lead_zero(
-            run_dir=run_dir, defender_dir=defender_dir(),
+            run_state=RunState.start(run_dir, f"lz808-{name}"), defender_dir=defender_dir(),
             alert_path=run_dir / "alert.json", tenant=_tenants1106.fixture_run_tenant(), env={},
             verbs=elastic_backend(rec, **kw),
         ), rec
@@ -347,23 +348,40 @@ def test_lead_zero_issues_its_backend_calls_through_the_query_capture_seam(tmp_p
         "no raw payload was persisted — `_persist_payload` is on the same `_record` tail"
     assert (res.run_dir / rows[0]["payload_path"]).is_file()
 
-    def _trip(run_dir):
-        for _ in range(circuit_breaker.PER_SYSTEM_FAIL_LIMIT):
-            circuit_breaker.record_outcome(run_dir, "elastic", 2)
-        assert circuit_breaker.is_tripped(run_dir, "elastic"), \
-            "the seed did not trip elastic — the screen below would have nothing to refuse"
+    # The screen half, over the run's own state (#1235 round 2): the breaker lives on the
+    # run's `RunState`, which the driver creates and no seam hands out before lead-0, so the
+    # entry point is called directly over a state tripped through the REAL primitive — the
+    # same `resolve_lead_zero` the driver calls, the same capture path inside it.
+    from defender.runtime.run_state import RunState
 
-    # Tripped inside the run, after the driver opened its in-process breaker and before lead-0
-    # resolves (#1235: a trip seeded on the folder before `drive` is reset by that open).
-    tripped = run(tmp_path / "tripped", run_id="lz808-tripped",
-                  answer=answer_hits(TWO_ACTORS), in_run=_trip)
-    assert tripped.rec.calls == [], (
+    def _resolve_over(state, rec):
+        return _lead_zero().resolve_lead_zero(
+            run_state=state, defender_dir=defender_dir(),
+            alert_path=state.run_dir / "alert.json", tenant=_tenants1106.fixture_run_tenant(),
+            env={}, verbs=elastic_backend(rec, answer_hits(TWO_ACTORS)))
+
+    tripped_state = RunState.start(
+        materialize_alert(tmp_path / "tripped", alert_doc()), "lz808-tripped")
+    for _ in range(circuit_breaker.PER_SYSTEM_FAIL_LIMIT):
+        circuit_breaker.record_outcome(tripped_state, "elastic", 2)
+    assert circuit_breaker.is_tripped(tripped_state, "elastic"), \
+        "the seed did not trip elastic — the screen below would have nothing to refuse"
+    tripped_rec = VerbRecorder()
+    tripped = _resolve_over(tripped_state, tripped_rec)
+    assert tripped_rec.calls == [], (
         "lead-0 reached the backend through a TRIPPED elastic breaker — the direct-registry "
         "via inherits neither the breaker screen nor the five others (P2, executed), and this "
         "is the observable that says which via lead-0's calls actually take"
     )
-    assert UNAVAILABLE in tripped.section(), \
+    assert UNAVAILABLE in tripped.text, \
         "the down-path response was not rendered as an unavailable slot"
+
+    # Control on the same entry point: an untripped state's resolution reaches the backend.
+    open_rec = VerbRecorder()
+    _resolve_over(RunState.start(
+        materialize_alert(tmp_path / "untripped", alert_doc()), "lz808-untripped"), open_rec)
+    assert open_rec.calls, \
+        "the direct resolution never reaches the backend — the tripped arm above is vacuous"
 
 
 def test_lead_zero_rides_the_injected_verb_registry_seam(tmp_path):
@@ -460,34 +478,49 @@ def test_a_run_ending_arm_inside_lead_zero_still_produces_a_run_summary(tmp_path
     Driven through the REAL breaker: four infra failures are seeded on OTHER systems (so
     elastic's own per-system count stays below `PER_SYSTEM_FAIL_LIMIT` and lead-0's call is
     not screened away before it runs), leaving lead-0's own failure as the fifth — exactly
-    `RUN_FAIL_KILL_LIMIT`, which `record_outcome` answers with `RunAborted` (g10/E2)."""
+    `RUN_FAIL_KILL_LIMIT`, which `record_outcome` answers with `RunAborted` (g10/E2).
+
+    The seed goes through the run's own state (#1235 round 2): no seam hands the driver's
+    `RunState` out before lead-0, so lead-0's FIRST call — the shell fetch, which answers —
+    charges the four failures on `ctx.run_state`, the state its verb context carries, before
+    it returns. Elastic's own count is untouched by it, so the branch call that follows runs
+    and fails on transport as the fifth."""
+    from defender.tests.e2e._replay_harness import FakeVerbs, drive
+
     run_dir_seed = materialize_alert(tmp_path / "seeded", alert_doc())
-
-    def _seed(run_dir):
-        # Seeded inside the run, after the driver opened its in-process breaker and before
-        # lead-0 resolves (#1235: a seed made on the folder before `drive` is reset by that open).
-        for system in ("cmdb", "cmdb", "identity", "identity"):
-            circuit_breaker.record_outcome(run_dir, system, 2)
-        assert not circuit_breaker.is_tripped(run_dir, "elastic"), \
-            "the seed tripped elastic itself — lead-0's call would be screened, not executed"
-
     rec = VerbRecorder()
-    from defender.tests.e2e._replay_harness import drive
+    inner = elastic_backend(rec, answer_raising(TransportFault("transport down"))).verbs("elastic")
+    elastic_tripped_by_seed: list[bool] = []
+
+    def _seeding(name):
+        def _fn(ctx, *, native_query: str, start: str | None = None, end: str | None = None,
+                limit: int = 20, index: str | None = None, sort: str = "desc") -> dict:
+            if not elastic_tripped_by_seed:
+                for system in ("cmdb", "cmdb", "identity", "identity"):
+                    circuit_breaker.record_outcome(ctx.run_state, system, 2)
+                elastic_tripped_by_seed.append(circuit_breaker.is_tripped(ctx.run_state, "elastic"))
+            return inner[name](ctx, native_query=native_query, start=start, end=end,
+                               limit=limit, index=index, sort=sort)
+        return _fn
 
     main = ReplayFn([Turn(text="Investigation complete.")])
     summary = drive(
         run_dir_seed, run_id="lz808-aborted", main=main,
         gather=ReplayFn([Turn(text="correlation summary")]),
-        verbs=elastic_backend(rec, answer_raising(TransportFault("transport down"))),
-        store_factory=seeding_store_factory(_seed),
+        verbs=FakeVerbs({"elastic": {
+            "query": _seeding("query"), "alerts": _seeding("alerts"), "esql": inner["esql"]}}),
     )
 
+    assert elastic_tripped_by_seed == [False], (
+        "the seed never ran (a verb context carrying no `run_state` raises inside the verb, "
+        "which lead-0 degrades as a fault), or tripped elastic itself — lead-0's call would be "
+        f"screened, not executed: {elastic_tripped_by_seed}")
     assert summary is not None, \
         "a run-ending arm inside lead-0 escaped `_user_prompt` — no `_run_summary` at all"
     assert "truncated_by" in summary, f"the run summary is not a run summary: {summary!r}"
     assert (run_dir_seed / "tool_trace.jsonl").is_file(), \
         "the run ended before `write_trace`, so nothing records that it happened"
-    res = Res(run_dir_seed, main, None, rec)
+    res = Res(run_dir_seed, main, None, rec, summary)
     assert res.breaker["total_failures"] == circuit_breaker.RUN_FAIL_KILL_LIMIT, (
         f"lead-0's failure was not the run-ending one — the arm under test never fired: "
         f"{res.breaker}")

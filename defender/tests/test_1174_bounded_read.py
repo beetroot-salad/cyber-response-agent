@@ -517,8 +517,9 @@ def test_o5_an_empty_file_is_an_empty_read(root, reader):
 # memory, and the run handle's two locked `update` members (`budget`, `circuit_breaker`) went
 # with them. The arms that planted unusable `budget.json` / `circuit_breaker.json` content, and
 # the breaker's "unusable state reads as tripped" branch (O10, H3, H8, H9), retired with the
-# files. The hooks' locked update and read (`hooks/_run_dir`) stay — the oracle-held sidecar is
-# written and read through them — so O6/O8 are pinned on those seams over a plain state file.
+# files. The hooks' locked update and read (`hooks/_run_dir`) stay, so O6/O8 are pinned on those
+# seams over a plain state file. (The oracle-held sidecar, written and read through them, left
+# with #1235 too: the oracle's held time is the run's in-memory state.)
 
 
 def _deep(depth: int) -> bytes:
@@ -564,7 +565,7 @@ def load(path: Path) -> Any:
 @pytest.mark.parametrize("kind", UNUSABLE)
 def test_o6_the_hooks_locked_update_heals_unusable_content_to_the_default_with_the_change(
         tmp_path, kind):
-    """`hooks/_run_dir.update_json_locked` (the oracle-held sidecar's writer) on unusable
+    """`hooks/_run_dir.update_json_locked` (the hooks' locked writer) on unusable
     content starts from the default, applies its change and writes, rather than raising."""
     p = tmp_path / "state.json"
     plant_unusable(p, kind)
@@ -615,16 +616,14 @@ def efbig_fault(_fd: int, _n: int) -> bytes:
 
 @pytest.mark.parametrize("fault", [eio, eagain, vanishing_read, efbig_fault],
                          ids=["EIO", "EAGAIN", "vanished", "EFBIG-from-a-fault"])
-@pytest.mark.parametrize("opener", ["path", "rooted"])
-def test_o7_a_read_fault_propagates_out_of_the_update_and_changes_nothing(
-        tmp_path, fault, opener):
+def test_o7_a_read_fault_propagates_out_of_the_update_and_changes_nothing(tmp_path, fault):
     """Healing is decided by type: only the step's own size refusal heals, so an unrelated
-    `EFBIG` raised by a fault propagates like `EIO`."""
+    `EFBIG` raised by a fault propagates like `EIO`. (The rooted opener's arm left with #1235,
+    which deleted `_io.rooted_locked_for_rewrite`.)"""
     p = tmp_path / "state.json"
     p.write_text('{"keep": true}')
     f = FaultOs(read_fault=fault)
-    cm = (_io.locked_for_rewrite(p, os_=f) if opener == "path"
-          else _io.rooted_locked_for_rewrite(tmp_path, "state.json", os_=f))
+    cm = _io.locked_for_rewrite(p, os_=f)
     with pytest.raises(OSError):  # noqa: PT011 — each fault keeps its own errno and words
         _io.locked_json_update(cm, lambda d: d.update(k=1), default=dict, os_=f)
     assert p.read_text() == '{"keep": true}'
@@ -1109,7 +1108,7 @@ def test_h5_a_procfs_file_reads_to_the_same_full_content():
 
 @pytest.mark.parametrize("fault", [eio, eagain, vanishing_read], ids=["EIO", "EAGAIN", "vanished"])
 def test_h6_update_json_locked_propagates_a_read_fault_through_its_seam(tmp_path, fault):
-    """The hooks entry point (the oracle-held sidecar's writer) takes `os_`, so O7 is pinned
+    """The hooks entry point (the locked writer) takes `os_`, so O7 is pinned
     there, not only on `_io`."""
     p = tmp_path / "state.json"
     p.write_text('{"keep": true}')

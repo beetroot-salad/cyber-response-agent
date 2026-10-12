@@ -39,8 +39,6 @@ from defender.run_repository import RunPaths
 from defender.hooks.budget_enforcer import (
     BUDGET_REFUSAL_MESSAGE,
     DEFAULT_LIMITS,
-    read_budget,
-    update_budget_locked,
 )
 from defender.runtime.lead_zero import RESERVED_LEAD_IDS
 from defender.tests.e2e._replay_harness import (
@@ -75,10 +73,10 @@ def caps(**over) -> dict:
     return {**DEFAULT_LIMITS, **over}
 
 
-def budget(run_dir: Path) -> dict:
-    """The run's budget counters: the run process's memory (#1235 — no `budget.json` is
-    written), read post-run in this process, where `drive` ran the run."""
-    return read_budget(run_dir)
+def budget(summary: dict) -> dict:
+    """The run's budget counters: a snapshot of the run's own `RunState`, which `drive` hands
+    back on the summary (#1235 round 2 — no `budget.json`, no table keyed by the folder)."""
+    return summary["run_state"].budget_snapshot()
 
 
 def own_rows(run_dir: Path) -> list[dict]:
@@ -149,11 +147,11 @@ def test_budget_trip_returns_summary_and_writes_trace(tmp_path, enforced):
     assert refusal_stem() in "\n".join(replay.seen), (
         "enforcement did not fire — no refusal was observed, so this control controls nothing"
     )
-    assert budget(run_dir)["tool_calls"] == 1, "the refused call spent the pool"
+    assert budget(summary)["tool_calls"] == 1, "the refused call spent the pool"
     assert summary["requests"] >= 2
     assert (run_dir / "tool_trace.jsonl").is_file()
     assert RunPaths(run_dir).wire_log.is_file()
-    assert budget(run_dir).get("run_id") == "trip", "the run opened no budget of its own"
+    assert budget(summary).get("run_id") == "trip", "the run opened no budget of its own"
 
 
 def test_a_budget_killed_run_carries_truncated_by_budget(tmp_path, enforced):
@@ -196,7 +194,7 @@ def test_only_the_budget_kill_marks_truncated_by_budget(tmp_path, enforced):
     assert summary["truncated_by"] == "request-limit", (
         "a request-limit termination was mislabelled as a budget truncation"
     )
-    assert budget(run_dir)["tool_calls"] < DEFAULT_LIMITS["max_tool_calls"], (
+    assert budget(summary)["tool_calls"] < DEFAULT_LIMITS["max_tool_calls"], (
         "the run hit a budget cap after all — pick a terminator that is not the budget"
     )
 
@@ -291,29 +289,31 @@ def test_budget_kill_and_breaker_kill_are_independent(tmp_path, enforced):
     breaker's record untouched; and a breaker abort on an un-tripped budget still ends
     the run with the budget's counters intact and no truncated_by mark.
 
-    The nonzero breaker state is charged INSIDE the run, through the production
-    `record_outcome`, on MAIN's first request: the driver opens a fresh breaker at run start
-    (#1235), so a charge made before `drive` would be reset, not carried."""
-    from defender.runtime import circuit_breaker
-
+    The nonzero breaker state is charged INSIDE the run, the way production charges it: the
+    run's first call is a gather whose one query hits a dead backend, so `record_outcome` counts
+    one elastic failure on the run's own state (#1235 round 2: the driver starts that state, so
+    nothing seeded before `drive` can reach it). The budget then trips on the tail reads, and
+    the breaker's record at the end is exactly that one charge."""
     run_dir = materialize(tmp_path, GOLDEN)
-    before: dict = {}
-
-    class ChargedBreaker(ReplayFn):
-        def __call__(self, messages, info):  # noqa: ANN001 — the framework's callable protocol
-            if self.calls == 0:
-                circuit_breaker.record_outcome(run_dir, "elastic", 2)
-                before.update(circuit_breaker.breaker_state(run_dir))
-            return super().__call__(messages, info)
-
+    dead = FakeVerbs({"elastic": {"esql": _dead_verb()}})
+    charge = ReplayFn([Turn(tool_calls=[("query", {
+        "system": "elastic", "verb": "esql", "params": {"index": "logs"},
+        "query_id": "elastic.probe"})]), Turn(text="PARTIAL SUMMARY: the backend is down")])
     summary = drive(run_dir, run_id="both",
-                    main=ChargedBreaker(tail_turns(run_dir, 15)),
+                    main=ReplayFn([
+                        Turn(tool_calls=[("gather", {
+                            "lead_id": "l-001", "system": "elastic",
+                            "goal": "g", "what_to_summarize": ["w"]})]),
+                        *tail_turns(run_dir, 15)]),
+                    gather=charge, verbs=dead,
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
                                 grace_seconds=600))
-    assert before.get("total_failures") == 1, "the in-run charge never reached the breaker"
+    assert charge.calls >= 1, "the charging gather never ran, so the breaker was never charged"
     assert summary["truncated_by"] == "budget", "the budget did not fire first"
-    assert circuit_breaker.breaker_state(run_dir) == before, (
-        "the budget kill reached into the breaker's state"
+    assert summary["run_state"].breaker_snapshot() == {
+        "systems": {"elastic": {"failures": 1}}, "total_failures": 1}, (
+        "the breaker's record is not the one in-run charge: the budget kill reached into it, "
+        "or the charge never landed"
     )
 
     other = materialize(tmp_path / "brk", GOLDEN)
@@ -329,10 +329,9 @@ def test_budget_kill_and_breaker_kill_are_independent(tmp_path, enforced):
                         for i in range(1, 7)]),
                     gather=gather, verbs=verbs, limits=caps())
     assert summary["truncated_by"] is None, "the budget wrongly marked a breaker-ended run"
-    assert budget(other)["tool_calls"] < DEFAULT_LIMITS["max_tool_calls"]
-    engaged = circuit_breaker.breaker_state(other)
+    assert budget(summary)["tool_calls"] < DEFAULT_LIMITS["max_tool_calls"]
+    engaged = summary["run_state"].breaker_snapshot()
     assert engaged["total_failures"] > 0, "the breaker never engaged, so arm 2 controls nothing"
-    assert circuit_breaker.record_outcome
 
 
 def _dead_verb():
@@ -365,15 +364,15 @@ def test_stopped_tool_is_refused_not_withdrawn(tmp_path, enforced):
         Turn(tool_calls=[("bash", {"command": "echo again"})]),
         Turn(text="Acknowledged."),
     ])
-    drive(run_dir, run_id="refuse", main=replay,
-          limits=caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600))
+    summary = drive(run_dir, run_id="refuse", main=replay,
+                    limits=caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600))
 
     history = "\n".join(replay.seen)
     assert refusal_stem() in history, "the stopped tool was not refused at the seam"
     assert "Unknown tool name" not in history, (
         "the tool was WITHDRAWN rather than refused — X6's refuted mechanism"
     )
-    assert budget(run_dir)["tool_calls"] == 1, (
+    assert budget(summary)["tool_calls"] == 1, (
         "the refused call's handler ran — the seam did not short-circuit"
     )
 
@@ -407,7 +406,7 @@ def test_repeated_reissue_accumulates_no_retries(tmp_path, enforced):
     assert refusal_stem() in "\n".join(replay.seen), (
         "no refusal was ever delivered — the tool was not budget-stopped at all"
     )
-    assert budget(run_dir)["tool_calls"] == 1, "a refused re-issue advanced the counter"
+    assert budget(summary)["tool_calls"] == 1, "a refused re-issue advanced the counter"
     assert replay.calls >= 25, "the loop died before the re-issues were exhausted"
     assert summary["requests"] >= 25
     assert (run_dir / "tool_trace.jsonl").is_file()
@@ -465,7 +464,7 @@ def test_refused_call_does_not_increment_tool_calls(tmp_path, enforced, capsys):
     X7 (executed) refuted the free version of this: a short-circuit DOES reach
     after_tool_execute — it fired 16 times against 15 short-circuits — so "not
     counted" is a property the implementation must add DELIBERATELY. NF2 then settled
-    the channel: the refusal path calls neither update_budget_locked nor
+    the channel: the refusal path calls neither the counting (`account_call`) nor
     check_budgets, because a refusal is not an executed call. P2 (executed) is why
     silence is the right assertion rather than a stylistic preference: check_budgets
     is PURE — no memory, no per-run "already warned" state — so against a frozen
@@ -477,12 +476,12 @@ def test_refused_call_does_not_increment_tool_calls(tmp_path, enforced, capsys):
         *[Turn(tool_calls=[("bash", {"command": f"echo {i}"})]) for i in range(20)],
         Turn(text="ok"),
     ])
-    drive(run_dir, run_id="silent", main=replay,
-          limits=caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600))
+    summary = drive(run_dir, run_id="silent", main=replay,
+                    limits=caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600))
     err = capsys.readouterr().err
 
     assert refusal_stem() in "\n".join(replay.seen), "no refusal was delivered at all"
-    assert budget(run_dir)["tool_calls"] == 1, "a refusal spent the tail band"
+    assert budget(summary)["tool_calls"] == 1, "a refusal spent the tail band"
     assert err.count("Budget exceeded") == 1, (
         f"the refusal loop re-emitted the exceeded line {err.count('Budget exceeded')}× — "
         "check_budgets was called on refusals (NF2 says the refusal path must not)"
@@ -642,9 +641,9 @@ def test_kill_lands_between_two_report_writes(tmp_path, enforced):
 
 
 def test_main_and_gather_share_one_budget(tmp_path, unenforced):
-    """MAIN and every GATHER subagent increment the ONE budget keyed by run dir, so the
-    caps bound the pool rather than each agent separately — and the state the subagent's
-    calls land in is the same in-memory state MAIN's do (#1235), not a second one: MAIN's
+    """MAIN and every GATHER subagent increment the ONE budget on the run's `RunState`, so
+    the caps bound the pool rather than each agent separately — and the state the subagent's
+    calls land in is the same object MAIN's do (#1235 round 2), not a second one: MAIN's
     bash, MAIN's gather dispatch and the subagent's own query all count in it. No
     `budget.json` is written anywhere."""
     recorder = VerbRecorder()
@@ -661,7 +660,7 @@ def test_main_and_gather_share_one_budget(tmp_path, unenforced):
                                     "query_id": "elastic.probe"})]),
         Turn(text="PARTIAL SUMMARY"),
     ])
-    drive(run_dir, run_id="pool",
+    summary = drive(run_dir, run_id="pool",
           main=ReplayFn([
               Turn(tool_calls=[("bash", {"command": "echo hi"})]),
               Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
@@ -672,7 +671,7 @@ def test_main_and_gather_share_one_budget(tmp_path, unenforced):
 
     assert not list(tmp_path.glob("**/budget.json")), (
         "a budget.json was written: the counters are the run process's memory (#1235)")
-    state = budget(run_dir)
+    state = budget(summary)
     assert state["subagent_spawns"] == 1
     assert state["tool_calls"] >= 3, (
         f"the gather subagent's own query did not spend the shared pool: {state}"
@@ -687,7 +686,7 @@ def test_accounting_runs_regardless_of_posture(tmp_path, monkeypatch, capsys):
     given call did any work.
 
     F3(b) narrowed the quantifier to executed calls and NF2 confirmed the narrowing:
-    the refusal path calls neither update_budget_locked nor check_budgets, and the
+    the refusal path calls neither the counting (`account_call`) nor check_budgets, and the
     stderr-SILENCE assertion that implies lives on
     test_refused_call_does_not_increment_tool_calls rather than here (a reader arriving
     here must not write a second, conflicting assertion about the same channel). Here
@@ -703,9 +702,8 @@ def test_accounting_runs_regardless_of_posture(tmp_path, monkeypatch, capsys):
         else:
             monkeypatch.delenv(FLAG, raising=False)
         rd = materialize(tmp_path / posture, GOLDEN)
-        drive(rd, run_id=posture, main=script(),
-              limits=caps(max_tool_calls=4))
-        states[posture] = budget(rd)
+        states[posture] = budget(drive(rd, run_id=posture, main=script(),
+                                       limits=caps(max_tool_calls=4)))
         warned[posture] = "Budget warning" in capsys.readouterr().err
 
     assert states["off"]["tool_calls"] == states["on"]["tool_calls"] == 3
@@ -735,7 +733,7 @@ def test_flag_off_leaves_run_unenforced(tmp_path, unenforced, capsys):
 
     assert refusal_stem() not in "\n".join(replay.seen), "an unenforced run was refused"
     assert summary["truncated_by"] is None
-    assert budget(run_dir)["tool_calls"] == 2, "the crossed cap stopped the accounting"
+    assert budget(summary)["tool_calls"] == 2, "the crossed cap stopped the accounting"
     assert "Budget exceeded" in err, "the warning-only behaviour was lost"
 
 
@@ -760,11 +758,11 @@ def test_refused_gather_and_the_spawn_counter(tmp_path, enforced):
                                      "goal": "g", "what_to_summarize": ["w"]})]),
         Turn(text="done"),
     ])
-    drive(run_dir, run_id="spawn", main=replay, gather=gather, verbs=verbs,
-          limits=caps(max_subagent_spawns=1, max_tool_calls=500,
-                      wall_clock_timeout=3600, grace_seconds=600))
+    summary = drive(run_dir, run_id="spawn", main=replay, gather=gather, verbs=verbs,
+                    limits=caps(max_subagent_spawns=1, max_tool_calls=500,
+                                wall_clock_timeout=3600, grace_seconds=600))
 
-    assert budget(run_dir)["subagent_spawns"] == 1, (
+    assert budget(summary)["subagent_spawns"] == 1, (
         "a refused gather was charged to the spawn counter"
     )
     assert (run_dir / "gather_raw" / "l-001.lead.json").exists(), (
@@ -800,30 +798,25 @@ def test_subagent_dispatched_into_an_already_stopped_pool(tmp_path, enforced):
     run_dir = materialize(tmp_path, GOLDEN)
     limits = caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600)
 
-    class StoppedPool(ReplayFn):
-        """Spends the pool to its cap through the production `update_budget_locked` on MAIN's
-        first request — inside the run, after the driver opened its fresh budget (#1235: a
-        budget seeded before `drive` would be reset by that open, not carried)."""
-
-        def __call__(self, messages, info):  # noqa: ANN001 — the framework's callable protocol
-            if self.calls == 0:
-                update_budget_locked(run_dir, "stopped", "bash", limits=limits)
-            return super().__call__(messages, info)
-
     gather = ReplayFn([
         Turn(tool_calls=[("query", {"system": "elastic", "verb": "esql",
                                     "params": {"index": "logs"},
                                     "query_id": "elastic.probe"})]),
         Turn(text="PARTIAL SUMMARY: refused before any result"),
     ])
-    main = StoppedPool([
+    # The pool is spent to its cap INSIDE the run, by MAIN's own executed bash (#1235 round 2:
+    # the driver starts the run's state, so nothing seeded before `drive` can reach it).
+    main = ReplayFn([
+        Turn(tool_calls=[("bash", {"command": "echo spend the pool"})]),
         Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "elastic",
                                      "goal": "g", "what_to_summarize": ["w"]})]),
         Turn(text="done"),
     ])
-    drive(run_dir, run_id="stopped", main=main, gather=gather, verbs=verbs,
-          limits=limits)
+    summary = drive(run_dir, run_id="stopped", main=main, gather=gather, verbs=verbs,
+                    limits=limits)
 
+    assert budget(summary)["tool_calls"] == 1, (
+        "the pool was not at its cap when the gather was dispatched, so nothing is observed")
     assert gather.calls == 0, "the subagent's model was invoked on an already-stopped pool"
     assert recorder.calls == [], "the subagent did work inside an already-stopped pool"
     assert own_rows(run_dir) == [], (

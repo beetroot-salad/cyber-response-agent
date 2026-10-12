@@ -41,10 +41,7 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 from pydantic_ai.usage import UsageLimits  # noqa: E402
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.hooks.budget_enforcer import (  # noqa: E402
-    DEFAULT_LIMITS,
-    open_budget,
-)
+from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
 from defender.runtime import driver, observe, permission  # noqa: E402
 from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
@@ -84,10 +81,6 @@ def _run_dir(tmp_path: Path, name: str = "run") -> Path:
     (rd / "gather_raw").mkdir(parents=True)
     (rd / "gather_summaries").mkdir(parents=True)
     (rd / "alert.json").write_text(json.dumps({"rule": {"name": "probe"}}))
-    # #1235: the queries table's live view opens at run start; this fixture is a run that
-    # started, so its writers and guards have one to read.
-    from defender.scripts.gather_tools.record_query import open_query_mirror
-    open_query_mirror(rd)
     return rd
 
 
@@ -235,11 +228,13 @@ def test_report_write_is_refused_and_investigation_write_still_succeeds(tmp_path
     # The driven half, on MAIN's post-#810 surface: `append_block` lands investigation.md, and
     # report.md has no verb to reach it with — the model cannot supply a write path at all, so
     # the second leg is no longer a refused call but an unmakeable one. The gate assertions
-    # above keep pinning the allow-list itself for every caller that CAN name a path.
-    open_budget(run_dir, "r")
+    # above keep pinning the allow-list itself for every caller that CAN name a path. (#1235:
+    # no budget is opened first — the run's budget is the RunState handed to drive_agent.)
+    from defender.runtime.run_state import RunState
+
     drive_agent(MAIN_DEF, run_dir,
                 [[("append_block", {"text": inv_text})]],
-                limits=DEFAULT_LIMITS, enforce=True)
+                limits=DEFAULT_LIMITS, enforce=True, state=RunState.start(run_dir, "r"))
     assert (run_dir / "investigation.md").read_text() == inv_text
     assert not (run_dir / "report.md").exists(), "report.md must not commit from the main loop"
 
@@ -376,8 +371,12 @@ def _drive_one_query(run_dir: Path, params: dict) -> list[dict]:
         make_model=lambda n, e: BuiltModel(FunctionModel(model), None),
         verbs=Verbs(), limits=DEFAULT_LIMITS,
     )
+    # #1235 round 2: the query tool's writer and guards read the run's `RunState` its deps
+    # carry; this agent is driven outside a run, so it carries the state a started run would.
+    from defender.runtime.run_state import RunState
+
     deps = replace(bind(gather_def, run_dir, defender_dir=DEFENDER),
-                   lead_id="l-001")
+                   lead_id="l-001", run_state=RunState.start(run_dir, "r"))
 
     async def _go():
         with override_allow_model_requests(False):

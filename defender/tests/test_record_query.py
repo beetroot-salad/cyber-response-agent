@@ -12,9 +12,10 @@ still imports them:
   - `derive_system` — the generic system-from-argv derivation (no per-system table);
   - and, re-pointed at `QueryCapture`, the seq→write→append INTEGRITY property (a failed
     payload write must not reuse a `(lead_id, seq)`), which the frozen suite does not exercise;
-  - and #1235's in-memory queries mirror (`open_query_mirror`, `live_lead_rows`): the live
-    readers (`repeat_note`, `_next_seq`, the writer's seq, `system_for_payload_operands`) read
-    the rows this process recorded, never `executed_queries.jsonl`, which stays the record.
+  - and #1235's queries rows on the run's `RunState` (round 2, comment 6117481676): the live
+    readers (`repeat_note`, `_next_seq`, the writer's seq, `system_for_payload_operands`) take
+    the state and read the rows it recorded, never `executed_queries.jsonl`, which stays the
+    record; a row enters the state only after its line was written.
 
 The model-visible view left with #832: `build_truncated_view` / `PASSTHROUGH_SAMPLE_COUNT` /
 `_passthrough_max_bytes` are gone, and `payload_view.py` (specced by `test_payload_view.py`)
@@ -108,16 +109,14 @@ def _result_of(payload: str) -> dict:
 
 
 def _write_rows(tmp_path, rows):
-    """The table as a run starts with it: `rows` on disk, then the host's mirror opened over
-    them (#1235) — `repeat_note` reads the mirror, never the file, and a folder whose mirror was
-    never opened is a programming error it refuses."""
-    import json
-    from defender.run_repository import RunPaths
-    log = RunPaths(tmp_path).executed_queries
-    log.parent.mkdir(parents=True, exist_ok=True)
-    log.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
-    ge.open_query_mirror(tmp_path)
-    return tmp_path
+    """A run that starts holding `rows` — a branch sibling's inherited prefix, handed to the
+    run's state the way seeding hands it (`RunState.inherit_rows`, #1235 round 2). Returns the
+    state: `repeat_note` reads it, never `executed_queries.jsonl`."""
+    from defender.runtime.run_state import RunState
+
+    state = RunState.start(tmp_path, "rq")
+    state.inherit_rows(rows)
+    return state
 
 
 #: One recorded payload text, and a second of the SAME serialized length holding other bytes.
@@ -126,21 +125,21 @@ _SAME_LENGTH = '{"total": 2, "hits": ["db-01", "db-02"]}'
 
 
 def test_repeat_note_is_silent_on_the_first_call(tmp_path):
-    _write_rows(tmp_path, [_row(0, params={"q": "a"}, payload=_PAYLOAD)])
+    state = _write_rows(tmp_path, [_row(0, params={"q": "a"}, payload=_PAYLOAD)])
     assert ge.repeat_note(
-        tmp_path, "l-001", seq=0, system="elastic", verb="query",
+        state, "l-001", seq=0, system="elastic", verb="query",
         params={"q": "a"}, **_result_of(_PAYLOAD),
     ) is None
 
 
 def test_repeat_note_names_the_identical_earlier_request(tmp_path):
-    _write_rows(tmp_path, [
+    state = _write_rows(tmp_path, [
         _row(0, params={"q": "a"}, payload=_PAYLOAD),
         _row(1, params={"q": "b"}, payload=_PAYLOAD),
         _row(2, params={"q": "b"}, payload=_PAYLOAD),
     ])
     note = ge.repeat_note(
-        tmp_path, "l-001", seq=2, system="elastic", verb="query",
+        state, "l-001", seq=2, system="elastic", verb="query",
         params={"q": "b"}, **_result_of(_PAYLOAD),
     )
     assert note is not None
@@ -155,12 +154,12 @@ def test_repeat_note_flags_a_changed_request_that_moved_nothing(tmp_path):
     payload came back byte-identical. Nothing in the loop compared the two, and the lead
     spent its remaining 35 turns varying a filter that was never applied.
     """
-    _write_rows(tmp_path, [
+    state = _write_rows(tmp_path, [
         _row(0, params={"q": "host:db-1"}, payload=_PAYLOAD),
         _row(1, params={"q": 'host:db-1 AND message: *"Accepted"*'}, payload=_PAYLOAD),
     ])
     note = ge.repeat_note(
-        tmp_path, "l-001", seq=1, system="elastic", verb="query",
+        state, "l-001", seq=1, system="elastic", verb="query",
         params={"q": 'host:db-1 AND message: *"Accepted"*'}, **_result_of(_PAYLOAD),
     )
     assert note is not None
@@ -178,12 +177,12 @@ def test_a_different_payload_of_the_same_length_is_not_a_no_op(tmp_path):
     recorded runs, the sharpest being a `fim-checksum` of `/etc/passwd` and one of `/etc/shadow`
     at 160 bytes each: the lead was told the checksum of shadow was the checksum of passwd."""
     assert len(_PAYLOAD) == len(_SAME_LENGTH), "the fixture stopped exercising the defect"
-    _write_rows(tmp_path, [
+    state = _write_rows(tmp_path, [
         _row(0, params={"host": "web-1"}, payload=_PAYLOAD),
         _row(1, params={"host": "db-01"}, payload=_SAME_LENGTH),
     ])
     assert ge.repeat_note(
-        tmp_path, "l-001", seq=1, system="elastic", verb="query",
+        state, "l-001", seq=1, system="elastic", verb="query",
         params={"host": "db-01"}, **_result_of(_SAME_LENGTH),
     ) is None
 
@@ -193,30 +192,31 @@ def test_a_row_with_no_recorded_hash_evidences_no_byte_identity(tmp_path):
     statement OF that fact. Silence, not a digest-shaped guess."""
     row = _row(0, params={"q": "a"}, payload=_PAYLOAD)
     del row["payload_sha256"]
-    _write_rows(tmp_path, [row, _row(1, params={"q": "b"}, payload=_PAYLOAD)])
+    state = _write_rows(tmp_path, [row, _row(1, params={"q": "b"}, payload=_PAYLOAD)])
     assert ge.repeat_note(
-        tmp_path, "l-001", seq=1, system="elastic", verb="query",
+        state, "l-001", seq=1, system="elastic", verb="query",
         params={"q": "b"}, **_result_of(_PAYLOAD),
     ) is None
 
 
 def test_repeat_note_ignores_other_leads_and_later_rows(tmp_path):
-    _write_rows(tmp_path, [
+    state = _write_rows(tmp_path, [
         _row(0, params={"q": "a"}, payload=_PAYLOAD, lead="l-002"),
         _row(0, params={"q": "a"}, payload=_SAME_LENGTH),
         _row(1, params={"q": "a"}, payload=_PAYLOAD),
     ])
     assert ge.repeat_note(
-        tmp_path, "l-001", seq=0, system="elastic", verb="query",
+        state, "l-001", seq=0, system="elastic", verb="query",
         params={"q": "a"}, **_result_of(_SAME_LENGTH),
     ) is None
 
 
-def test_repeat_note_survives_a_missing_table(tmp_path):
-    # An absent table opens as no rows (#1235): the mirror is opened, the file is not there.
-    ge.open_query_mirror(tmp_path)
+def test_repeat_note_is_silent_on_a_run_with_no_rows(tmp_path):
+    # A run that recorded nothing (and has no table on disk) has no earlier call to name.
+    from defender.runtime.run_state import RunState
+
     assert ge.repeat_note(
-        tmp_path, "l-001", seq=3, system="elastic", verb="query",
+        RunState.start(tmp_path, "rq"), "l-001", seq=3, system="elastic", verb="query",
         params={"q": "a"}, **_result_of(_PAYLOAD),
     ) is None
 
@@ -266,14 +266,13 @@ def test_the_content_hash_never_folds_two_payloads_together(tmp_path):
     assert ge.payload_sha256("héllo") == ge.payload_sha256("héllo")
 
 
-# ── #1235: the queries table's live reads come from the host's own mirror ─────────────────────
+# ── #1235: the queries table's live reads come from the run's state ─────────────────────────
 #
 # `executed_queries.jsonl` stays the model's view and the learning loop's record, written
 # exactly as before; the DECISIONS read from it live (the repeat guard, the rejection budget,
-# the repeat note, the next seq, a reducer failure's system) read the rows this process
-# recorded, held in memory, keyed by the run folder. `lead_rows` stays the FILE reader.
-# The new names are imported per test (they do not exist before the implementation), from the
-# module's real import path, so `open_query_mirror` and the readers share one registry.
+# the repeat note, the next seq, a reducer failure's system) take the run's `RunState` (#1235
+# round 2) and read the rows it recorded. No file is ever read into it. The new names are
+# imported per test (they do not exist before the implementation).
 
 
 def _live():
@@ -283,18 +282,19 @@ def _live():
 
 
 def _bare_run(tmp_path, name: str = "run"):
-    """A run folder that went through no driver: nothing has opened its mirror."""
+    """A run folder and a fresh state for it, as `run_investigation` starts one."""
     from defender.run_repository import RunPaths
+    from defender.runtime.run_state import RunState
 
     run_dir = tmp_path / name
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
-    return run_dir
+    return run_dir, RunState.start(run_dir, name)
 
 
-def _append(rq, run_dir, *, params, payload=_PAYLOAD, lead=LEAD):
+def _append(rq, state, *, params, payload=_PAYLOAD, lead=LEAD):
     """One executed row through the production writer, its digest derived from `payload`."""
     return rq.append_query_row(
-        run_dir, lead_id=lead, system="elastic", verb="query", query_id="elastic.probe",
+        state, lead_id=lead, system="elastic", verb="query", query_id="elastic.probe",
         params=params, raw_command="elastic query", payload_text=payload, exit_code=0,
         payload_status="ok", payload_digest=rq.payload_digest(payload, "", 0), system_key="",
     )
@@ -316,184 +316,109 @@ def _write_table(run_dir, rows):
     return table
 
 
-def test_a_live_reader_on_a_folder_whose_mirror_was_never_opened_raises(tmp_path):
-    """No lazy load (#1235, `docs/principles.md` §2): every live reader of the queries table,
-    asked about a run folder whose mirror this process never opened, raises `LookupError` —
-    even with a table on disk it could have read. The writer is one of them (it takes its seq
-    from the mirror) and refuses before appending anything.
-
-    Positive control, on the same folder: once `open_query_mirror` has loaded the table, the
-    same calls answer from it — the file's row, seq 1, no note, and a write at seq 1."""
-    rq = _live()
-    run_dir = _bare_run(tmp_path)
-    table = _write_table(run_dir, [_row(0, params={"q": "a"}, payload=_PAYLOAD)])
-    before = table.read_bytes()
-
-    with pytest.raises(LookupError):
-        rq.live_lead_rows(run_dir, LEAD)
-    with pytest.raises(LookupError):
-        rq._next_seq(run_dir, LEAD)
-    with pytest.raises(LookupError):
-        rq.repeat_note(run_dir, LEAD, seq=1, system="elastic", verb="query",
-                       params={"q": "a"}, **_result_of(_PAYLOAD))
-    with pytest.raises(LookupError):
-        _append(rq, run_dir, params={"q": "b"})
-    assert table.read_bytes() == before, "the refused write still appended a row"
-    with pytest.raises(LookupError):
-        rq.system_for_payload_operands(run_dir, [run_dir / "gather_raw" / LEAD / "0.json"])
-    # It reads the table only when an operand IS a run payload; one that is not asks nothing.
-    assert rq.system_for_payload_operands(run_dir, [tmp_path / "elsewhere.json"]) == ""
-
-    rq.open_query_mirror(run_dir)
-    assert [r["seq"] for r in rq.live_lead_rows(run_dir, LEAD)] == [0]
-    assert rq._next_seq(run_dir, LEAD) == 1
-    assert rq.repeat_note(run_dir, LEAD, seq=1, system="elastic", verb="query",
-                          params={"q": "b"}, **_result_of(_SAME_LENGTH)) is None
-    assert rq.system_for_payload_operands(
-        run_dir, [run_dir / "gather_raw" / LEAD / "0.json"]) == "elastic"
-    assert _append(rq, run_dir, params={"q": "b"})["seq"] == 1
-
-
 def test_the_live_readers_answer_from_the_rows_the_host_recorded_not_from_the_file(tmp_path):
-    """A run-folder file cannot move a live decision (#1235 O1, at the reader): once the
-    run's mirror is open, overwriting `executed_queries.jsonl` with planted rows, or truncating
-    it, changes nothing the live readers answer. Planted rows neither feed the next seq nor
-    make a repeat; a truncated table does not reset one.
+    """A run-folder file cannot move a live decision (#1235 O1, at the reader): overwriting
+    `executed_queries.jsonl` with planted rows, or truncating it, changes nothing the live
+    readers answer from the run's state. Planted rows neither feed the next seq nor make a
+    repeat; a truncated table does not reset one.
 
-    Positive controls: the FILE reader (`lead_rows`) does see each plant, so the plant landed;
-    and the planted request, once the host itself records it, does make the note fire."""
+    Positive controls: a reader of the FILE does see each plant, so the plant landed; and the
+    planted request, once the host itself records it, does make the note fire."""
     rq = _live()
-    run_dir = _bare_run(tmp_path)
-    rq.open_query_mirror(run_dir)
-    assert [_append(rq, run_dir, params={"q": "a"})["seq"] for _ in range(2)] == [0, 1]
+    run_dir, state = _bare_run(tmp_path)
+    assert [_append(rq, state, params={"q": "a"})["seq"] for _ in range(2)] == [0, 1]
 
     planted = [_row(s, params={"q": "z"}, payload=_SAME_LENGTH) for s in range(5)]
     _write_table(run_dir, planted)
-    assert [r["seq"] for r in rq.lead_rows(run_dir, LEAD)] == [0, 1, 2, 3, 4], \
+    assert [r["seq"] for r in _table_rows(run_dir)] == [0, 1, 2, 3, 4], \
         "the plant did not land, so nothing below is observed"
-    assert [r["params"] for r in rq.live_lead_rows(run_dir, LEAD)] == [{"q": "a"}] * 2
-    assert rq._next_seq(run_dir, LEAD) == 2, "the planted rows moved the next seq"
-    assert rq.repeat_note(run_dir, LEAD, seq=2, system="elastic", verb="query",
+    assert [r["params"] for r in state.lead_rows(LEAD)] == [{"q": "a"}] * 2
+    assert rq._next_seq(state, LEAD) == 2, "the planted rows moved the next seq"
+    assert rq.repeat_note(state, LEAD, seq=2, system="elastic", verb="query",
                           params={"q": "z"}, **_result_of(_SAME_LENGTH)) is None, \
         "a planted row made a repeat the host never recorded"
 
     _write_table(run_dir, [])
-    assert rq.lead_rows(run_dir, LEAD) == []
-    assert rq._next_seq(run_dir, LEAD) == 2, "truncating the table reset the next seq"
-    note = rq.repeat_note(run_dir, LEAD, seq=2, system="elastic", verb="query",
+    assert _table_rows(run_dir) == []
+    assert rq._next_seq(state, LEAD) == 2, "truncating the table reset the next seq"
+    note = rq.repeat_note(state, LEAD, seq=2, system="elastic", verb="query",
                           params={"q": "a"}, **_result_of(_PAYLOAD))
     assert note is not None, "truncating the table erased a repeat the host recorded"
     assert "REPEAT" in note, "truncating the table erased a repeat the host recorded"
     assert "seq 0" in note, "truncating the table erased a repeat the host recorded"
 
-    z = _append(rq, run_dir, params={"q": "z"}, payload=_SAME_LENGTH)
+    z = _append(rq, state, params={"q": "z"}, payload=_SAME_LENGTH)
     assert z["seq"] == 2
-    note = rq.repeat_note(run_dir, LEAD, seq=3, system="elastic", verb="query",
+    note = rq.repeat_note(state, LEAD, seq=3, system="elastic", verb="query",
                           params={"q": "z"}, **_result_of(_SAME_LENGTH))
     assert note is not None, "the control: a request the host recorded does make the note fire"
     assert "REPEAT" in note, "the control: a request the host recorded does make the note fire"
     assert "seq 2" in note, "the control: a request the host recorded does make the note fire"
 
 
-def test_mirror_rows_are_the_lines_written_not_the_dicts_the_writer_built(tmp_path):
-    """Each mirror row is `json.loads` of the line `append_query_row` wrote — the same value a
-    reader of the file gets back — not the dict the host assembled: the live readers and the
-    record agree byte for byte, and an edit to the writer's returned dict after the write does
-    not reach what the guards read."""
+def test_state_rows_are_the_lines_written_not_the_dicts_the_writer_built(tmp_path):
+    """Each row the state holds is `json.loads` of the line `append_query_row` wrote — the same
+    value a reader of the file gets back — not the dict the host assembled: the live readers and
+    the record agree byte for byte, and an edit to the writer's returned dict after the write
+    does not reach what the guards read."""
     import json
 
     rq = _live()
-    run_dir = _bare_run(tmp_path)
-    rq.open_query_mirror(run_dir)
-    built = _append(rq, run_dir, params={"n": 1.5, "tags": ["x", "y"], "nested": {"k": "v"}})
-    _append(rq, run_dir, params={"q": "b"})
+    run_dir, state = _bare_run(tmp_path)
+    built = _append(rq, state, params={"n": 1.5, "tags": ["x", "y"], "nested": {"k": "v"}})
+    _append(rq, state, params={"q": "b"})
 
     on_disk = _table_rows(run_dir)
     assert len(on_disk) == 2
-    live = rq.live_lead_rows(run_dir, LEAD)
-    assert json.dumps(live) == json.dumps(on_disk), \
-        "the mirror holds something other than the lines the table carries"
+    assert json.dumps(state.lead_rows(LEAD)) == json.dumps(on_disk), \
+        "the state holds something other than the lines the table carries"
 
     built["params"]["nested"]["k"] = "edited after the write"
     built["seq"] = 99
-    assert json.dumps(rq.live_lead_rows(run_dir, LEAD)) == json.dumps(on_disk), \
-        "the mirror aliases the writer's dict: an edit after the write reached the guards"
+    assert json.dumps(state.lead_rows(LEAD)) == json.dumps(on_disk), \
+        "the state aliases the writer's dict: an edit after the write reached the guards"
 
 
-def test_a_row_whose_write_failed_neither_enters_the_mirror_nor_spends_a_seq(tmp_path):
-    """A row enters the mirror only after its line was written. The table is squatted by a
-    directory mid-run (which `write_guarded` refuses under any uid — a chmod would not bind
-    root): the write raises, the mirror keeps only the rows the file holds, and the next seq is
-    the one the failed row would have taken. Once the table is writable again the next row
-    takes that seq, and the mirror and the file agree.
+def test_a_row_whose_write_failed_neither_enters_the_state_nor_spends_a_seq(tmp_path):
+    """R3 (#1235 round 2): appending a row is ONE operation on the run's state, and an
+    exception at any step leaves the state unchanged. The table is squatted by a directory
+    mid-run (which `write_guarded` refuses under any uid — a chmod would not bind root): the
+    write raises, the state keeps only the rows the file holds, and the next seq is the one the
+    failed row would have taken. Params too deep to store are refused before anything,
+    likewise. Once the table is writable again the next row takes that seq, and the state and
+    the file agree.
 
     Positive control: the row written before the fault, and the one after it, are both in."""
-    rq = _live()
-    run_dir = _bare_run(tmp_path)
-    rq.open_query_mirror(run_dir)
-    assert _append(rq, run_dir, params={"q": "a"})["seq"] == 0
-
+    from defender._query_rules import PARAMS_NESTING_LIMIT, ParamsTooDeep
     from defender.run_repository import RunPaths
+
+    rq = _live()
+    run_dir, state = _bare_run(tmp_path)
+    assert _append(rq, state, params={"q": "a"})["seq"] == 0
 
     table = RunPaths(run_dir).executed_queries
     saved = table.read_bytes()
     table.unlink()
     table.mkdir()
     with pytest.raises(OSError, match="non-plain or aliased entry"):
-        _append(rq, run_dir, params={"q": "lost"})
-    assert [r["params"] for r in rq.live_lead_rows(run_dir, LEAD)] == [{"q": "a"}], \
-        "a row whose line was never written entered the mirror"
-    assert rq._next_seq(run_dir, LEAD) == 1, "the failed write spent a seq"
+        _append(rq, state, params={"q": "lost"})
+    assert [r["params"] for r in state.lead_rows(LEAD)] == [{"q": "a"}], \
+        "a row whose line was never written entered the state"
+    assert rq._next_seq(state, LEAD) == 1, "the failed write spent a seq"
 
     table.rmdir()
     table.write_bytes(saved)
-    assert _append(rq, run_dir, params={"q": "c"})["seq"] == 1
-    assert [(r["seq"], r["params"]) for r in rq.live_lead_rows(run_dir, LEAD)] == \
+    deep: dict = {}
+    cursor = deep
+    for _ in range(PARAMS_NESTING_LIMIT + 2):
+        cursor["k"] = {}
+        cursor = cursor["k"]
+    with pytest.raises(ParamsTooDeep):
+        _append(rq, state, params=deep)
+    assert rq._next_seq(state, LEAD) == 1, "a refused params spent a seq"
+    assert table.read_bytes() == saved, "a refused params wrote a line"
+
+    assert _append(rq, state, params={"q": "c"})["seq"] == 1
+    assert [(r["seq"], r["params"]) for r in state.lead_rows(LEAD)] == \
         [(0, {"q": "a"}), (1, {"q": "c"})]
-    assert rq.live_lead_rows(run_dir, LEAD) == _table_rows(run_dir)
-
-
-def test_open_query_mirror_loads_a_damaged_table_the_way_the_guard_used_to_read_it(tmp_path):
-    """`open_query_mirror` is where the table's damage is met now (#1235: the repeat guard's
-    fail-open read of the file moved to this loader). It drops a torn trailing line, keeps a
-    foreign row with no `lead_id` out of every lead, survives a stored `params` that is not a
-    dict and invalid UTF-8, and opens an absent table as no rows.
-
-    It (re)loads: rows added to the file after an open are not in the mirror until the next
-    open, which replaces what the previous one loaded."""
-    from defender._io import append_jsonl, write_guarded
-    from defender.run_repository import RunPaths
-
-    rq = _live()
-    damaged = _bare_run(tmp_path, "damaged")
-    table = RunPaths(damaged).executed_queries
-    append_jsonl(table, [
-        _row(0, params={"q": "a"}, payload=_PAYLOAD),
-        {"seq": 1, "system": "elastic", "verb": "query", "params": {}},
-        {**_row(2, params={}, payload=_PAYLOAD), "params": "not-a-dict"},
-        _row(3, params={"q": "a"}, payload=_PAYLOAD),
-    ])
-    write_guarded(table, '{"lead_id": "l-001", "seq": 4, "sys', mode="append")
-    rq.open_query_mirror(damaged)
-    assert [r["seq"] for r in rq.live_lead_rows(damaged, LEAD)] == [0, 2, 3], \
-        "a torn line, a foreign row or a non-dict params field was not survived"
-    assert rq._next_seq(damaged, LEAD) == 3
-
-    bad_utf8 = _bare_run(tmp_path, "utf8")
-    RunPaths(bad_utf8).executed_queries.write_bytes(
-        b'{"lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "query", '
-        b'"params": {"q": "\xff\xfeFROM logs"}}\n'
-    )
-    rq.open_query_mirror(bad_utf8)
-    assert len(rq.live_lead_rows(bad_utf8, LEAD)) == 1, "invalid UTF-8 was not survived"
-
-    absent = _bare_run(tmp_path, "absent")
-    rq.open_query_mirror(absent)
-    assert rq.live_lead_rows(absent, LEAD) == []
-    assert rq._next_seq(absent, LEAD) == 0
-
-    append_jsonl(RunPaths(absent).executed_queries, [_row(0, params={"q": "a"}, payload=_PAYLOAD)])
-    assert rq.live_lead_rows(absent, LEAD) == [], "the mirror re-read the file without an open"
-    rq.open_query_mirror(absent)
-    assert [r["seq"] for r in rq.live_lead_rows(absent, LEAD)] == [0], \
-        "a second open did not load the table as it now stands"
+    assert state.lead_rows(LEAD) == _table_rows(run_dir)

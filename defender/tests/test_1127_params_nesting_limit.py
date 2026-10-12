@@ -40,10 +40,10 @@ from typing import Any
 import pytest
 import yaml
 
-from defender._io import parse_jsonl_row
+from defender._io import parse_jsonl_row, read_jsonl_rows
 from defender.run_repository import RunPaths
 from defender import _query_rules
-from defender.scripts.gather_tools.record_query import append_query_row, lead_rows
+from defender.scripts.gather_tools.record_query import append_query_row
 from defender._query_rules import params_too_deep
 
 LEAD = "l-001"
@@ -128,40 +128,44 @@ def params_of_depth(depth: int, chain: Callable[[int], Any] = dict_chain) -> dic
 # ── the writer, driven the way every production writer drives it ───────────────────────────
 
 
-def _run_dir(root: Path) -> Path:
-    """A run folder the writer can be driven on: its queries mirror opened as a run start opens
-    it (#1235), since the writer takes each row's seq from the mirror."""
-    from defender.scripts.gather_tools.record_query import open_query_mirror
+def _started(root: Path):  # noqa: ANN202 — a `RunState` (#1235: not imported at module top)
+    """A run the writer can be driven on: a run folder and the run's state, started as a run
+    start starts it (#1235), since the writer takes each row's seq from the state."""
+    from defender.runtime.run_state import RunState
 
-    run_dir = root
-    RunPaths(run_dir).gather_raw.mkdir(parents=True, exist_ok=True)
-    open_query_mirror(run_dir)
-    return run_dir
+    RunPaths(root).gather_raw.mkdir(parents=True, exist_ok=True)
+    return RunState.start(root, "r1127-nesting")
 
 
-def _append(run_dir: Path, params: Any, payload_text: str = "[]") -> dict:
+def _rows(state) -> list[dict]:  # noqa: ANN001
+    """This lead's rows as the FILE holds them — what the table's reader returns."""
+    return [r for r in read_jsonl_rows(RunPaths(state.run_dir).executed_queries)
+            if r.get("lead_id") == LEAD]
+
+
+def _append(state, params: Any, payload_text: str = "[]") -> dict:  # noqa: ANN001
     return append_query_row(
-        run_dir, lead_id=LEAD, system="elastic", verb="query", query_id="elastic.query",
+        state, lead_id=LEAD, system="elastic", verb="query", query_id="elastic.query",
         params=params, raw_command="elastic query", payload_text=payload_text, exit_code=0,
         payload_status="ok", payload_digest="2 bytes", system_key="",
     )
 
 
-def _lines(run_dir: Path) -> list[str]:
+def _lines(state) -> list[str]:  # noqa: ANN001
     """The table's physical lines, read RAW — `read_jsonl_rows` would hide an unreadable one,
     which is exactly the line this suite is about."""
-    table = RunPaths(run_dir).executed_queries
+    table = RunPaths(state.run_dir).executed_queries
     if not table.is_file():
         return []
     return [line for line in table.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def _sidecar(run_dir: Path, seq: int) -> Path:
-    return RunPaths(run_dir).payload(LEAD, seq)
+def _sidecar(state, seq: int) -> Path:  # noqa: ANN001
+    return RunPaths(state.run_dir).payload(LEAD, seq)
 
 
-def _sidecars(run_dir: Path) -> list[Path]:
-    return sorted(RunPaths(run_dir).gather_raw.rglob("*.json"))
+def _sidecars(state) -> list[Path]:  # noqa: ANN001
+    return sorted(RunPaths(state.run_dir).gather_raw.rglob("*.json"))
 
 
 # ── the refusal, judged by what was raised ─────────────────────────────────────────────────
@@ -198,19 +202,19 @@ def assert_refused_as_too_deep(err: Exception | None, what: str) -> None:
         f"{what} was refused with {type(err).__name__}: {str(err)[:200]}"
 
 
-def _write_outcome(run_dir: Path, params: Any) -> str:
+def _write_outcome(run, params: Any) -> str:  # noqa: ANN001 — a `RunState` (#1235)
     """Drive the real writer once: "readable" (one line, its reader accepts it), "unreadable"
     (one line, its reader skips it) or "refused" (`ParamsTooDeep`, and nothing written — no
     line, no sidecar). Any other raise fails the arm."""
-    before, sidecars = _lines(run_dir), _sidecars(run_dir)
-    err = raised(lambda: _append(run_dir, params))
+    before, sidecars = _lines(run), _sidecars(run)
+    err = raised(lambda: _append(run, params))
     if err is not None:
         assert_refused_as_too_deep(err, "the writer")
-        assert _lines(run_dir) == before, "the writer refused the row but still appended a line"
-        assert _sidecars(run_dir) == sidecars, \
+        assert _lines(run) == before, "the writer refused the row but still appended a line"
+        assert _sidecars(run) == sidecars, \
             "the writer refused the row but still persisted a payload sidecar"
         return "refused"
-    after = _lines(run_dir)
+    after = _lines(run)
     assert len(after) == len(before) + 1, "the writer returned without appending exactly one line"
     return "readable" if parse_jsonl_row(after[-1]) is not None else "unreadable"
 
@@ -292,11 +296,11 @@ def test_the_predicate_walks_values_not_keys():
 def test_a_deep_key_is_written_as_a_readable_row(tmp_path):
     """The positive half of the keys arm, on the writer: the deep-keyed params map is written
     and read back as one row, its key as text. A cleaner that counted keys would refuse it."""
-    run_dir = _run_dir(tmp_path)
+    run = _started(tmp_path)
     params = {"filt": {tuple_chain(LIMIT + 50): "v"}}
 
-    assert _write_outcome(run_dir, params) == "readable"
-    rows = lead_rows(run_dir, LEAD)
+    assert _write_outcome(run, params) == "readable"
+    rows = _rows(run)
     assert len(rows) == 1
     assert list(rows[0]["params"]["filt"]) == [str(tuple_chain(LIMIT + 50))], \
         "the deep key did not reach the row as text"
@@ -342,13 +346,13 @@ def test_the_writer_refuses_a_cyclic_value_as_too_deep_and_writes_nothing(tmp_pa
     """B on a cycle: the bounded cleaner refuses it as `ParamsTooDeep` — the cycle is past any
     limit — rather than recursing into `RecursionError`, and nothing reaches the table or the
     payload directory."""
-    run_dir = _run_dir(tmp_path)
+    run = _started(tmp_path)
     value = build()
     assert _is_cyclic(value), "the fixture is not a cycle, so this arm tests nothing"
 
-    assert _write_outcome(run_dir, value) == "refused"
-    assert _lines(run_dir) == []
-    assert _sidecars(run_dir) == []
+    assert _write_outcome(run, value) == "refused"
+    assert _lines(run) == []
+    assert _sidecars(run) == []
 
 
 def _shared_in_sequences(value: Any) -> dict:
@@ -396,16 +400,17 @@ def _is_cyclic(value: Any) -> bool:
 def test_a_row_at_or_under_the_limit_is_written_verbatim_and_read_back(tmp_path, depth):
     """C1's readable side, and #1117's promise that data writers never cut: the params map is
     written WHOLE — equal to the input, not a repr of a cut — and the reader returns it."""
-    run_dir = _run_dir(tmp_path)
+    run = _started(tmp_path)
     params = params_of_depth(depth)
 
-    row = _append(run_dir, params, payload_text='["ok"]')
+    row = _append(run, params, payload_text='["ok"]')
 
     assert row["seq"] == 0
-    rows = lead_rows(run_dir, LEAD)
+    rows = _rows(run)
     assert len(rows) == 1, f"a depth-{depth} params row was written and then not read back"
     assert rows[0]["params"] == params, "the stored params are not the params the call carried"
-    assert _sidecar(run_dir, 0).read_text(encoding="utf-8") == '["ok"]'
+    assert run.lead_rows(LEAD) == rows, "the written row is not the row the run's state holds"
+    assert _sidecar(run, 0).read_text(encoding="utf-8") == '["ok"]'
 
 
 @pytest.mark.parametrize("depth", [LIMIT + 1, LIMIT + 2, FAR])
@@ -413,17 +418,18 @@ def test_a_row_past_the_limit_is_refused_as_too_deep_before_anything_is_written(
     """B: `ParamsTooDeep` — exactly, at one past the limit and at a depth where an unbounded
     walk overflows the stack — with no line, and, because the cleaner runs before
     `persist_payload`, no sidecar for the seq the row would have taken."""
-    run_dir = _run_dir(tmp_path)
+    run = _started(tmp_path)
     params = params_of_depth(depth)
 
     assert_refused_as_too_deep(
-        raised(lambda: _append(run_dir, params, payload_text='["deep"]')),
+        raised(lambda: _append(run, params, payload_text='["deep"]')),
         f"a depth-{depth} params row")
 
-    assert _lines(run_dir) == [], "the refused row still reached the table"
-    assert not _sidecar(run_dir, 0).exists(), \
+    assert _lines(run) == [], "the refused row still reached the table"
+    assert not _sidecar(run, 0).exists(), \
         "the refused row still persisted its payload sidecar — an orphan the next row overwrites"
-    assert lead_rows(run_dir, LEAD) == []
+    assert _rows(run) == []
+    assert run.lead_rows(LEAD) == [], "the refused row still reached the run's state"
 
 
 # ── the differential: predicate ⇔ cleaner ⇔ written line ───────────────────────────────────
@@ -478,7 +484,7 @@ def test_the_predicate_the_cleaner_and_the_written_line_agree_at_every_depth(tmp
         params = build(depth)
         predicted_ok = not params_too_deep(params)
         cleaner_ok = not _cleaner_refuses(params)
-        outcome = _write_outcome(_run_dir(tmp_path / f"d{depth}"), params)
+        outcome = _write_outcome(_started(tmp_path / f"d{depth}"), params)
         if outcome == "refused":
             refused_at.add(depth)
         expected = "readable" if predicted_ok else "refused"
@@ -505,23 +511,23 @@ def test_the_row_after_a_refused_one_takes_the_next_seq_and_overwrites_nothing(t
     `_next_seq` would hand seq 1 out again and the next row would OVERWRITE that sidecar.
     Refused before `persist_payload`, the deep call leaves no seq and no file behind, and every
     sidecar that exists keeps its bytes."""
-    run_dir = _run_dir(tmp_path)
-    first = _append(run_dir, {"native_query": "FROM a"}, payload_text='["first"]')
-    first_bytes = _sidecar(run_dir, 0).read_bytes()
+    run = _started(tmp_path)
+    first = _append(run, {"native_query": "FROM a"}, payload_text='["first"]')
+    first_bytes = _sidecar(run, 0).read_bytes()
 
     assert_refused_as_too_deep(
-        raised(lambda: _append(run_dir, params_of_depth(LIMIT + 1), payload_text='["deep"]')),
+        raised(lambda: _append(run, params_of_depth(LIMIT + 1), payload_text='["deep"]')),
         "the one-past-the-limit row")
-    assert not _sidecar(run_dir, 1).exists(), \
+    assert not _sidecar(run, 1).exists(), \
         "the refused row persisted a sidecar at the seq the next row will be handed"
 
-    second = _append(run_dir, {"native_query": "FROM b"}, payload_text='["second"]')
+    second = _append(run, {"native_query": "FROM b"}, payload_text='["second"]')
 
     assert (first["seq"], second["seq"]) == (0, 1)
-    assert [r["seq"] for r in lead_rows(run_dir, LEAD)] == [0, 1]
-    assert _sidecar(run_dir, 0).read_bytes() == first_bytes, "an earlier sidecar was rewritten"
-    assert _sidecar(run_dir, 1).read_text(encoding="utf-8") == '["second"]'
-    assert all(parse_jsonl_row(line) is not None for line in _lines(run_dir)), \
+    assert [r["seq"] for r in _rows(run)] == [0, 1]
+    assert _sidecar(run, 0).read_bytes() == first_bytes, "an earlier sidecar was rewritten"
+    assert _sidecar(run, 1).read_text(encoding="utf-8") == '["second"]'
+    assert all(parse_jsonl_row(line) is not None for line in _lines(run)), \
         "the table holds a line its own reader skips"
 
 

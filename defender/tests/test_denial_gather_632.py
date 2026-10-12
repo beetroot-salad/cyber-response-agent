@@ -125,15 +125,14 @@ def test_a_denial_reaches_the_model_even_when_its_row_cannot_be_written(tmp_path
     The table is broken from INSIDE the gather leg's first model turn, so lead-0's own rows
     and the dispatch have already landed and only the denied call's write meets the fault.
 
-    #1235: the host's in-memory queries table (what the repeat guard and the rejection budget
-    read) takes a row only after its file write succeeded, so the denied call's unwritten row
-    never enters it either. Positive control on the same address: the same script over an
-    unbroken table puts exactly that `∅.denied` row into the host's table.
+    #1235: the run's state (what the repeat guard and the rejection budget read) takes a row
+    only after its file write succeeded, so the denied call's unwritten row never enters it
+    either. Positive control on the same address: the same script over an unbroken table puts
+    exactly that `∅.denied` row on the run's state.
 
     Observed failing by: the gather loop stopping at one call (the exception ended the lead),
     the refusal text absent from what the model saw, or the unwritten row counted by the host."""
     from defender.run_repository import RunPaths
-    from defender.scripts.gather_tools.record_query import live_lead_rows
     from defender.tests._verb_authorization_632 import _Run
     from defender.tests.e2e._replay_harness import GOLDEN_AB3, ReplayFn, Turn, drive, materialize
 
@@ -162,8 +161,9 @@ def test_a_denial_reaches_the_model_even_when_its_row_cannot_be_written(tmp_path
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     main = _main()
     gather = BreakingReplay([q(*DENIED_PAIR), DONE], run_dir)
-    drive(run_dir, run_id="d0-broken-table", main=main, gather=gather, verbs=_registry(rec))
-    r = _Run(run_dir, main, gather)
+    summary = drive(run_dir, run_id="d0-broken-table", main=main, gather=gather,
+                    verbs=_registry(rec))
+    r = _Run(run_dir, main, gather, summary)
 
     assert rec.calls == [], "the denied verb body ran"
     assert r.gather.calls >= 2, \
@@ -171,14 +171,15 @@ def test_a_denial_reaches_the_model_even_when_its_row_cannot_be_written(tmp_path
     assert "not granted" in r.gather_saw, "the model did not see the refusal"
     assert "esql" in r.gather_saw, "the refusal the model saw does not name the verb"
     assert len(r.own_denials) == 1, "the audit record — written FIRST — is missing"
-    assert live_lead_rows(run_dir, LEAD) == [], \
-        "a row whose file write failed entered the host's queries table"
+    assert summary["run_state"].lead_rows(LEAD) == [], \
+        "a row whose file write failed entered the run's state"
 
     control_dir = materialize(tmp_path / "unbroken", GOLDEN_AB3)
-    drive(control_dir, run_id="d0-unbroken-table", main=_main(),
-          gather=ReplayFn([q(*DENIED_PAIR), DONE]), verbs=_registry(VerbRecorder()))
-    assert [row["query_id"] for row in live_lead_rows(control_dir, LEAD)] == [DENIED_QUERY_ID], \
-        "positive control: over an unbroken table the denied call's row is not in the host's table"
+    control = drive(control_dir, run_id="d0-unbroken-table", main=_main(),
+                    gather=ReplayFn([q(*DENIED_PAIR), DONE]), verbs=_registry(VerbRecorder()))
+    assert [row["query_id"] for row in control["run_state"].lead_rows(LEAD)] == \
+        [DENIED_QUERY_ID], \
+        "positive control: over an unbroken table the denied call's row is not on the run's state"
 
 
 def test_a_denied_verb_is_not_the_unknown_verb_path(tmp_path: Path):
@@ -412,14 +413,14 @@ def test_a_lead_less_call_is_the_same_internal_error_at_every_capture_frame(tmp_
     from defender.runtime import tools
     from defender.runtime.agent_definition import compile_policy_for
     from defender.runtime.query_tool import QueryCapture
-    from defender.scripts.gather_tools.record_query import open_query_mirror
+    from defender.runtime.run_state import RunState
 
-    # The guard reads the host's in-memory queries mirror (#1235), which a run opens at its
-    # start; this folder never goes through the driver, so it is opened here (empty table).
-    open_query_mirror(tmp_path)
+    # The guard reads the run's state (#1235), which a run starts with; this folder never goes
+    # through the driver, so its state is started here (no rows).
     policy = compile_policy_for(T1106.fixture_gather_def(), run_dir=tmp_path, defender_dir=PATHS.defender_dir)
     ident = dict(run_dir=tmp_path, defender_dir=PATHS.defender_dir, run_id=tmp_path.name,
-                 cwd_anchor=tmp_path, policy=policy)
+                 cwd_anchor=tmp_path, policy=policy,
+                 run_state=RunState.start(tmp_path, tmp_path.name))
     capture = QueryCapture(_registry(VerbRecorder()))
 
     with pytest.raises(RuntimeError, match="without a dispatched lead_id"):
@@ -548,7 +549,8 @@ def test_a_denial_is_decided_before_the_availability_short_circuit(tmp_path: Pat
         DONE,
     ], run_id="d56")
 
-    assert circuit_breaker.is_tripped(r.run_dir, "elastic"), "the system never went down"
+    assert circuit_breaker.is_tripped(r.summary["run_state"], "elastic"), \
+        "the system never went down"
     assert len(r.own_denials) == 1, "the availability short-circuit silenced the denial's audit record"
     assert r.own_denials[0]["verb"] == "esql"
     assert len(r.own_evidence) == 2, "the denial against a down system wrote an evidence row"

@@ -887,13 +887,13 @@ def _invoke_queries_table(run_dir: Path) -> Any:
 
     # #1106 M4: gather is bound with a RUN's grant (the playground tenant's), never a
     # process-level one carried by `GATHER_DEF`.
-    from defender.scripts.gather_tools.record_query import open_query_mirror
+    from defender.runtime.run_state import RunState
 
+    # #1235 round 2: the capture records into the run's `RunState` its deps carry
+    # (`driver.run_investigation` starts it); this writer is driven outside a run, so its deps
+    # carry the state a started run would.
     deps = replace(bind(_tenants1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER),
-                   lead_id="l-001")
-    # #1235: the queries table's live view opens at run start (`driver.run_investigation`);
-    # this writer is driven outside a run, so it opens the view a started run would have.
-    open_query_mirror(run_dir)
+                   lead_id="l-001", run_state=RunState.start(run_dir, run_dir.name))
     return asyncio.run(QueryCapture(registry=None)._record(
         deps, system="elastic", verb="search", query_id="elastic.ad-hoc", params={},
         payload=[{"a": 1}], exit_code=0, detail="", system_key="",
@@ -934,12 +934,6 @@ def _invoke_fault_exit_trace(run_dir: Path) -> None:
     demand asks for; the anti-vacuity guard above (a missing symbol reads as
     `raised:AttributeError`) is what still keeps `None` from meaning "nothing happened"."""
     drive_fault_exit_trace(run_dir)
-
-
-def _invoke_write_atomic(run_dir: Path) -> None:
-    from defender import _io
-
-    _io.write_atomic(run_dir / "budget.json", '{"tool_calls": 1}')
 
 
 def _invoke_write_guarded(run_dir: Path) -> None:
@@ -1024,8 +1018,8 @@ CENSUS: tuple[Writer, ...] = (
            _invoke_lesson_load, "runtime/tools/", cite="G15"),
     Writer("start_box", ".box-sentinel", "write_text", "fault-startup",
            _invoke_sentinel_plant, "runtime/box/", cite="X5,G10"),
-    Writer("write_atomic", "budget.json", "tmp-then-replace", "unmeasured",
-           _invoke_write_atomic, "_io.py", cite="B4,C3-fix"),
+    # (#1235 deleted `_io.write_atomic`, whose only writer, the budget record, retired with
+    # it — the budget is the run's in-memory state — so its row "write_atomic", B4/C3-fix, left.)
     Writer("write_guarded", "report.md", "guarded", "unmeasured",
            _invoke_write_guarded, "_io.py", cite="F1"),
     # §7 decision 16: a census row for the tenant record's writer, beside the runs base rather
@@ -1043,8 +1037,9 @@ CENSUS: tuple[Writer, ...] = (
 #: The four posture CLASSES X5 measured — the reason F1's "every call site keeps the posture
 #: it has today" is testable at all, and the thing a collapse-to-one-posture implementation
 #: has to break. They are asserted as a SET the census exhibits, never as a per-row
-#: expectation: X5 named four sites, the census has fifteen rows, and assigning a label to the
-#: other eleven would be an author's prior standing in for a measurement.
+#: expectation: X5 named four sites, the census has fourteen rows (fifteen until #1235 deleted
+#: `write_atomic`), and assigning a label to the others would be an author's prior standing in
+#: for a measurement.
 POSTURES = ("swallow-continue", "return-none", "return-zero", "fault-startup")
 
 

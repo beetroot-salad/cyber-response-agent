@@ -433,8 +433,12 @@ class _Run:
     is asserted against — the evidence table, the payload tree, the breaker, and the
     policy-denial stream."""
 
-    def __init__(self, run_dir: Path, main: ReplayFn, gather: ReplayFn):
+    def __init__(self, run_dir: Path, main: ReplayFn, gather: ReplayFn,
+                 summary: dict | None = None):
         self.run_dir, self.main, self.gather = run_dir, main, gather
+        #: The driver's summary (`run_investigation`'s return); its `run_state` is the run's
+        #: one `RunState` (#1235 round 2), the only place a driven run's breaker is read.
+        self.summary = summary if summary is not None else {}
 
     @property
     def rows(self) -> list[dict]:
@@ -530,18 +534,16 @@ class _Run:
 
     @property
     def breaker(self) -> dict:
-        return breaker_doc(self.run_dir)
+        return breaker_doc(self.summary["run_state"])
 
 
-def breaker_doc(run_dir: Path) -> dict:
-    """The run's circuit-breaker state, read from the run's in-process state (#1235: nothing
-    writes `circuit_breaker.json` any more) — `{"systems": {}, "total_failures": 0}` before the
-    first recorded failure. THE reader, which the harness result classes here and in
-    `e2e/_lead_zero_808.py` expose as `.breaker`. A driven run's state stays readable in this
-    process after the run, until the next run on the same folder opens it again."""
-    from defender.runtime.circuit_breaker import breaker_state
-
-    return breaker_state(run_dir)
+def breaker_doc(state: Any) -> dict:
+    """The run's circuit-breaker state, read off the run's `RunState` (#1235 round 2: nothing
+    writes `circuit_breaker.json`, and no process-wide table keyed by the folder holds it) —
+    `{"systems": {}, "total_failures": 0}` before the first recorded failure. THE reader, which
+    the harness result classes here and in `e2e/_lead_zero_808.py` expose as `.breaker`; a
+    driven run's state is the driver summary's `run_state`."""
+    return state.breaker_snapshot()
 
 
 def q(system: str, verb: str, params: dict | None = None, query_id: str | None = None) -> Turn:
@@ -573,8 +575,8 @@ def run_gather(tmp_path: Path, *, verbs, turns: list[Turn], system: str = "elast
         Turn(text="Investigation complete."),
     ])
     gather = WatchingReplay(turns, run_dir) if watch else ReplayFn(turns)
-    drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
-    return _Run(run_dir, main, gather)
+    summary = drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
+    return _Run(run_dir, main, gather, summary)
 
 
 __all__ = [

@@ -114,8 +114,8 @@ def test_circuit_breaker_kill_switch_aborts_run(tmp_path):
     assert result["output"] is None
     assert main.calls == 1
     assert gather.calls == circuit_breaker.RUN_FAIL_KILL_LIMIT
-    # The breaker's counts are the run process's memory (#1235), read post-run in-process.
-    cb = circuit_breaker.breaker_state(run_dir)
+    # The breaker's counts live on the run's `RunState` (#1235), handed back in the summary.
+    cb = result["run_state"].breaker_snapshot()
     assert cb["total_failures"] == circuit_breaker.RUN_FAIL_KILL_LIMIT
     qlines = _own_qlines(run_dir)
     assert len(qlines) == circuit_breaker.RUN_FAIL_KILL_LIMIT
@@ -182,11 +182,11 @@ def test_tripped_system_dispatch_returns_down_message(tmp_path):
         _q("elastic"),
         Turn(text="gather l-001 incomplete"),
     ])
-    drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=_down("elastic"))
+    result = drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=_down("elastic"))
 
     assert main.calls == 3
     assert gather.calls == 4
-    cb = circuit_breaker.breaker_state(run_dir)
+    cb = result["run_state"].breaker_snapshot()
     assert cb["systems"]["elastic"]["failures"] == circuit_breaker.PER_SYSTEM_FAIL_LIMIT
     qlines = _own_qlines(run_dir)
     assert len(qlines) == circuit_breaker.PER_SYSTEM_FAIL_LIMIT

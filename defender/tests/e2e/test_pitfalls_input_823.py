@@ -130,10 +130,19 @@ class _Box:
 
 
 class _Res:
-    """One driven replay: the run dir, the two replay models, the box, and the table."""
+    """One driven replay: the run dir, the two replay models, the box, the table, and the
+    driver's summary, whose `run_state` is the run's own state (#1235 round 2)."""
 
-    def __init__(self, run_dir: Path, main: ReplayFn, gather: ReplayFn, box: _Box):
+    def __init__(self, run_dir: Path, main: ReplayFn, gather: ReplayFn, box: _Box,
+                 summary: dict | None = None):
         self.run_dir, self.main, self.gather, self.box = run_dir, main, gather, box
+        self.summary_dict = summary
+
+    @property
+    def state(self):  # noqa: ANN201 — `RunState`, imported nowhere at module top (#1235)
+        """The run's `RunState`, as the driver returned it in its summary."""
+        assert self.summary_dict is not None, "this replay kept no driver summary"
+        return self.summary_dict["run_state"]
 
     @property
     def rows(self) -> list[dict]:
@@ -218,9 +227,9 @@ def _run(
         Turn(tool_calls=[_dispatch()]), Turn(text="Investigation complete."),
     ])
     gather = ReplayFn(turns)
-    drive(run_dir, run_id=run_id, main=main, gather=gather,
-          verbs=verbs if verbs is not None else elastic_ok(rec), box=the_box)
-    return _Res(run_dir, main, gather, the_box)
+    summary = drive(run_dir, run_id=run_id, main=main, gather=gather,
+                    verbs=verbs if verbs is not None else elastic_ok(rec), box=the_box)
+    return _Res(run_dir, main, gather, the_box, summary)
 
 
 def _reduce(run_dir: Path, seq: int = 0, lead: str = LEAD, sql: str = "SELECT count(*) FROM data") -> Turn:

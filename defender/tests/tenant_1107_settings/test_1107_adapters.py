@@ -100,13 +100,23 @@ def _max_time(argv: list[str]) -> str | None:
     return argv[argv.index("--max-time") + 1] if "--max-time" in argv else None
 
 
+def _run_state(run_dir: Path):
+    """A run's state over `run_dir` (#1235 round 2): the breaker lives on the run's one
+    `RunState`, no longer in a table keyed by the folder."""
+    from defender.runtime.run_state import RunState
+
+    return RunState.start(run_dir, "t1107")
+
+
 def _breaker_run(run_dir: Path, outcomes: list[tuple[str, int]]) -> tuple[list[int], RunAborted | None]:
-    """Feed `(system, exit_code)` outcomes to the real breaker in order: the running total after
-    each call that did not abort, and the `RunAborted` that stopped the run (None if none did)."""
+    """Feed `(system, exit_code)` outcomes to the real breaker of one run over `run_dir`, in
+    order: the running total after each call that did not abort, and the `RunAborted` that
+    stopped the run (None if none did)."""
+    run_state = _run_state(run_dir)
     totals: list[int] = []
     for system, code in outcomes:
         try:
-            state = circuit_breaker.record_outcome(run_dir, system, code)
+            state = circuit_breaker.record_outcome(run_state, system, code)
         except RunAborted as aborted:
             return totals, aborted
         totals.append(state.get("total_failures", 0))
@@ -650,7 +660,7 @@ def test_s7_nf6_dash_leading_context_is_a_name(tmp_path):
         assert loose == [], f"{value!r} appears as a flag of its own in {argv}"
         assert isinstance(fault, AdapterFault), f"an unknown context must be the system down (exit 2), got {fault!r}"
         assert fault.exit_code == 2, f"an unknown context must be the system down (exit 2), got {fault!r}"
-        state = circuit_breaker.record_outcome(ctx.run_dir, "cmdb", fault.exit_code)
+        state = circuit_breaker.record_outcome(_run_state(ctx.run_dir), "cmdb", fault.exit_code)
         assert state.get("systems", {}).get("cmdb", {}).get("failures") == 1, \
             f"the breaker must count the fault: {state}"
 
@@ -674,7 +684,8 @@ dispositions:
 def _replay(tmp_path: Path, tenant_root: Path, verbs, calls: list[tuple[str, str, dict]],
             *, lead_system: str):
     """Drive a real run through the replay harness: main dispatches one gather lead, gather
-    replays `calls` as `query` tool calls against `verbs`. Returns (run_dir, main, gather)."""
+    replays `calls` as `query` tool calls against `verbs`. Returns (run_dir, main, gather,
+    run_state) — the run's `RunState` as the driver's summary hands it back (#1235)."""
     from defender.tests.e2e._replay_harness import (
         GOLDEN_AB3, ReplayFn, Turn, drive, materialize)
 
@@ -689,9 +700,9 @@ def _replay(tmp_path: Path, tenant_root: Path, verbs, calls: list[tuple[str, str
     gather = ReplayFn(
         [Turn(tool_calls=[("query", {"system": s, "verb": v, "params": p})]) for s, v, p in calls]
         + [Turn(text="Summary: measured the lead.")])
-    drive(run_dir, run_id="t1107b", main=main, gather=gather, verbs=verbs,
-          tenant=S.tenant_folder_of(tenant_root))
-    return run_dir, main, gather
+    summary = drive(run_dir, run_id="t1107b", main=main, gather=gather, verbs=verbs,
+                    tenant=S.tenant_folder_of(tenant_root))
+    return run_dir, main, gather, summary["run_state"]
 
 
 def _own_rows(run_dir: Path) -> list[dict]:
@@ -702,12 +713,10 @@ def _own_rows(run_dir: Path) -> list[dict]:
             if r.get("lead_id") not in RESERVED_LEAD_IDS]
 
 
-def _breaker_doc(run_dir: Path) -> dict:
-    """The run's breaker state, read from the run's in-process state (#1235: nothing writes
+def _breaker_doc(run_state) -> dict:
+    """The run's breaker state, read off the run's `RunState` (#1235: nothing writes
     `circuit_breaker.json` any more); it stays readable here after the driven run."""
-    from defender.runtime.circuit_breaker import breaker_state
-
-    return breaker_state(run_dir)
+    return run_state.breaker_snapshot()
 
 
 def test_sibling_system_calls_share_one_docker_context_partial_failure(tmp_path, monkeypatch):
@@ -733,7 +742,7 @@ def test_sibling_system_calls_share_one_docker_context_partial_failure(tmp_path,
         monkeypatch.setenv("PATH", shim.path_value())
         verbs = FakeVerbs({"cmdb": {"get-host": cmdb_adapter.get_host},
                            "identity": {"health-check": identity_adapter.health_check}})
-        run_dir, _, gather = _replay(where, root, verbs, [
+        run_dir, _, gather, run_state = _replay(where, root, verbs, [
             ("cmdb", "get-host", {"host": "web-1"}), ("identity", "health-check", {})],
             lead_system="cmdb")
 
@@ -741,7 +750,7 @@ def test_sibling_system_calls_share_one_docker_context_partial_failure(tmp_path,
         assert {"cmdb", "identity"} <= set(rows), f"{label}: precondition: both calls were made: {rows}"
         assert rows["identity"]["exit_code"] == 0, f"{label}: the sibling's call was affected: {rows['identity']}"
         assert rows["cmdb"]["exit_code"] == 2, f"{label}: cmdb's transient failure is infra: {rows['cmdb']}"
-        systems = _breaker_doc(run_dir).get("systems", {})
+        systems = _breaker_doc(run_state).get("systems", {})
         assert systems.get("cmdb", {}).get("failures") == 1, \
             f"{label}: the failure must be charged to cmdb alone: {systems}"
         assert "identity" not in systems, f"{label}: the failure must be charged to cmdb alone: {systems}"
@@ -764,11 +773,12 @@ def test_a_stored_fault_is_raised_more_than_once_across_the_run(tmp_path):
     ctx = _ctx(record, tmp_path, shim)
 
     seen = []
+    run_state = _run_state(ctx.run_dir)
     for fn, kw in ((cmdb_adapter.get_host, {"host": "web-1"}), (cmdb_adapter.health_check, {}),
                    (cmdb_adapter.get_host, {"host": "web-2"})):
         fault = _raised(fn, ctx, **kw)
         assert isinstance(fault, AdapterFault), f"a stored fault must raise on every call: {fault!r}"
-        state = circuit_breaker.record_outcome(ctx.run_dir, "cmdb", fault.exit_code)
+        state = circuit_breaker.record_outcome(run_state, "cmdb", fault.exit_code)
         seen.append((type(fault).__name__, fault.exit_code, str(fault),
                      state.get("systems", {}).get("cmdb", {}).get("failures")))
     assert [s[:3] for s in seen] == [seen[0][:3]] * 3, f"each call must observe the same exit-2 outcome: {seen}"
@@ -1012,7 +1022,7 @@ def test_o5_missing_system_config_run_completes(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", shim.path_value())
     verbs = FakeVerbs({"cmdb": {"get-host": cmdb_adapter.get_host},
                        "threat-intel": {"health-check": threat_intel_adapter.health_check}})
-    run_dir, main, gather = _replay(tmp_path, root, verbs, [
+    run_dir, main, gather, run_state = _replay(tmp_path, root, verbs, [
         ("cmdb", "get-host", {"host": "web-1"}), ("threat-intel", "health-check", {})],
         lead_system="cmdb")
 
@@ -1023,8 +1033,8 @@ def test_o5_missing_system_config_run_completes(tmp_path, monkeypatch):
     assert (rows["cmdb"]["exit_code"], rows["cmdb"]["error_class"]) == (2, "infra"), \
         f"cmdb with no config must be an infra fault (exit 2): {rows['cmdb']}"
     assert rows["threat-intel"]["exit_code"] == 0, f"threat-intel must still answer: {rows}"
-    assert _breaker_doc(run_dir).get("systems", {}).get("cmdb", {}).get("failures") == 1, \
-        f"cmdb's fault must count toward its breaker: {_breaker_doc(run_dir)}"
+    assert _breaker_doc(run_state).get("systems", {}).get("cmdb", {}).get("failures") == 1, \
+        f"cmdb's fault must count toward its breaker: {_breaker_doc(run_state)}"
     calls = [S.context_of(a) for a in _argvs(shim)]
     assert calls == [S.context_name(m, "threat-intel")], \
         f"only threat-intel reaches docker, on its own context: {calls}"

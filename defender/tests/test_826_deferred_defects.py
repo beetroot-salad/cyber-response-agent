@@ -151,16 +151,16 @@ def test_the_sort_param_is_visible_to_the_model_on_both_search_verbs():
 
 # ITEM 3 — ask (2)'s repeat notice never fired for a FAILING repeat.
 
-def _write(tmp_path: Path, rows: list[dict]) -> Path:
-    """Seed the queries table, then open the host's in-memory mirror of it (#1235): the live
-    readers (`repeat_note` here) read the mirror, which a run loads at its start — this folder
-    never went through the driver, so the test opens it as the driver would."""
-    from defender._io import append_jsonl
-    from defender.run_repository import RunPaths
+def _write(tmp_path: Path, rows: list[dict]):  # noqa: ANN202 — a `RunState` (#1235)
+    """A run that starts holding `rows` — a branch sibling's inherited prefix, handed to the
+    run's state the way seeding hands it (`RunState.inherit_rows`, #1235 round 2). Returns the
+    state: the live reader (`repeat_note` here) reads it, never `executed_queries.jsonl`."""
+    from defender.runtime.run_state import RunState
 
-    append_jsonl(RunPaths(tmp_path).executed_queries, rows)
-    rq.open_query_mirror(tmp_path)
-    return tmp_path
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    state = RunState.start(tmp_path, "r826")
+    state.inherit_rows(rows)
+    return state
 
 
 def test_a_repeat_whose_calls_keep_failing_is_named(tmp_path):
@@ -172,9 +172,9 @@ def test_a_repeat_whose_calls_keep_failing_is_named(tmp_path):
     The comparison itself needed no change: a failed call's digest is already `_record`'s
     `exit={code}; {detail}` form, so two failures match each other."""
     digest = "exit=1; Elasticsearch query failed (HTTP 400): parse_exception"
-    _write(tmp_path, [_row(0, exit_code=1, digest=digest)])
+    state = _write(tmp_path, [_row(0, exit_code=1, digest=digest)])
     note = rq.repeat_note(
-        tmp_path, LEAD, seq=1, system="elastic", verb="query",
+        state, LEAD, seq=1, system="elastic", verb="query",
         params={"native_query": "FROM logs"}, payload_digest=digest,
         payload_sha256=rq.payload_sha256(""), exit_code=1,
     )
@@ -188,9 +188,9 @@ def test_a_failing_repeat_is_never_told_it_returned_a_payload(tmp_path):
     at all — telling it that "it returned the same payload byte for byte" describes an
     observation it does not have, and the fact that actually matched is the identical ERROR."""
     digest = "exit=64; unknown param(s) ['fields']"
-    _write(tmp_path, [_row(0, exit_code=64, digest=digest)])
+    state = _write(tmp_path, [_row(0, exit_code=64, digest=digest)])
     failing = rq.repeat_note(
-        tmp_path, LEAD, seq=1, system="elastic", verb="query",
+        state, LEAD, seq=1, system="elastic", verb="query",
         params={"native_query": "FROM logs"}, payload_digest=digest,
         payload_sha256=rq.payload_sha256(""), exit_code=64,
     )
@@ -199,9 +199,9 @@ def test_a_failing_repeat_is_never_told_it_returned_a_payload(tmp_path):
     assert "failed the same way" in failing
 
     ok_digest = rq.payload_digest(_SEEDED_PAYLOAD, "", 0)
-    _write(tmp_path / "ok", [_row(0, exit_code=0)])
+    ok_state = _write(tmp_path / "ok", [_row(0, exit_code=0)])
     succeeding = rq.repeat_note(
-        tmp_path / "ok", LEAD, seq=1, system="elastic", verb="query",
+        ok_state, LEAD, seq=1, system="elastic", verb="query",
         params={"native_query": "FROM logs"}, payload_digest=ok_digest,
         payload_sha256=rq.payload_sha256(_SEEDED_PAYLOAD),
     )
@@ -215,9 +215,9 @@ def test_a_changed_request_that_fails_identically_is_a_no_op_too(tmp_path):
     with the identical error did not reach whatever is rejecting it, which is a different
     (and more useful) fact than "the result set did not move"."""
     digest = "exit=64; unknown param(s) ['fields']"
-    _write(tmp_path, [_row(0, exit_code=64, params={"native_query": "a"}, digest=digest)])
+    state = _write(tmp_path, [_row(0, exit_code=64, params={"native_query": "a"}, digest=digest)])
     note = rq.repeat_note(
-        tmp_path, LEAD, seq=1, system="elastic", verb="query",
+        state, LEAD, seq=1, system="elastic", verb="query",
         params={"native_query": "b"}, payload_digest=digest,
         payload_sha256=rq.payload_sha256(""), exit_code=64,
     )
@@ -231,15 +231,15 @@ def test_the_exit_code_selects_wording_and_never_whether_a_note_fires(tmp_path):
     """`exit_code` must not become a second, quieter filter. The rows that match are the rows
     that match; a caller passing the wrong exit code gets the wrong PROSE, never silence."""
     digest = "exit=1; boom"
-    _write(tmp_path, [_row(0, exit_code=1, digest=digest)])
+    state = _write(tmp_path, [_row(0, exit_code=1, digest=digest)])
     kw = dict(
         seq=1, system="elastic", verb="query",
         params={"native_query": "FROM logs"}, payload_digest=digest,
         payload_sha256=rq.payload_sha256(""),
     )
-    assert rq.repeat_note(tmp_path, LEAD, exit_code=1, **kw) is not None
-    assert rq.repeat_note(tmp_path, LEAD, exit_code=0, **kw) is not None
-    assert rq.repeat_note(tmp_path, LEAD, **kw) is not None, "the default changed behaviour"
+    assert rq.repeat_note(state, LEAD, exit_code=1, **kw) is not None
+    assert rq.repeat_note(state, LEAD, exit_code=0, **kw) is not None
+    assert rq.repeat_note(state, LEAD, **kw) is not None, "the default changed behaviour"
 
 
 # ITEM 4 — the argument-schema repeat class had no guard and no record.

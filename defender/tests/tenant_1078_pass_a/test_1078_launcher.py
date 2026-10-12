@@ -863,6 +863,14 @@ def test_g_r7_episode_dir_reader_coherence(tmp_path, monkeypatch, data_root):
 # O4 — a fork's session rows land in its source's store under <root>/T/sessions/ (C67)
 # ======================================================================================
 
+def _sibling_state(sib: Path):  # noqa: ANN202 — a `RunState` (#1235: not imported at top)
+    """A fresh run state for the sibling at `sib`, which seeding takes as its third argument
+    (#1235 round 2, where it was the sibling's run dir)."""
+    from defender.runtime.run_state import RunState
+
+    return RunState.start(sib, sib.name)
+
+
 def test_o4_fork_store_location(tmp_path, data_root):
     """A sibling forked from <root>/T/runs/r1 records a session pointer naming
     <root>/T/sessions/<case>.db, its source's store.
@@ -887,7 +895,7 @@ def test_o4_fork_store_location(tmp_path, data_root):
     sib.mkdir(parents=True)
     store = br.store_factory_for(spec)("minted-case", sib)
     try:
-        session_id, _history = br.open_main_session(store, spec, sib)
+        session_id, _history = br.open_main_session(store, spec, _sibling_state(sib))
         br.attach_case_pointer(store, spec, sib, case_id="minted-case", session_id=session_id)
     finally:
         store.close()

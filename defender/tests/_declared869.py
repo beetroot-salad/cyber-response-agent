@@ -321,8 +321,10 @@ def seed_executed_query(
     rule existed" is not a hypothetical shape — it is whatever `append_query_row` wrote at
     the time. Seeding through that function rather than by hand is what keeps this fixture a
     real historical row instead of the test's own idea of one."""
+    from defender._io import read_jsonl_rows
     from defender.run_repository import RunPaths
-    from defender.scripts.gather_tools.record_query import append_query_row, open_query_mirror
+    from defender.runtime.run_state import RunState
+    from defender.scripts.gather_tools.record_query import append_query_row
 
     gather = RunPaths(run_dir).gather_raw
     gather.mkdir(parents=True, exist_ok=True)
@@ -330,11 +332,13 @@ def seed_executed_query(
         gather / f"{lead_id}.lead.json",
         json.dumps({"goal": goal, "what_to_summarize": []}) + "\n",
     )
-    # Each seeded row is a historical run's write: the writer takes its seq from the run's
-    # queries mirror (#1235), opened over the table as it stands, as a run start opens it.
-    open_query_mirror(run_dir)
+    # Each seeded row is a historical run's write: the writer takes its seq from that run's
+    # state (#1235), which held the table as it stands — a run holds rows it did not write only
+    # as an inherited prefix, so they are handed to it the way seeding hands them (round 2).
+    state = RunState.start(run_dir, "r869-historical")
+    state.inherit_rows(read_jsonl_rows(RunPaths(run_dir).executed_queries))
     return append_query_row(
-        run_dir, lead_id=lead_id, system=system, verb=verb, query_id=query_id,
+        state, lead_id=lead_id, system=system, verb=verb, query_id=query_id,
         params={"query": "FROM logs"}, raw_command=f"{system} {verb}",
         payload_text="[]", exit_code=0, payload_status="ok", payload_digest="2 bytes",
         # `system` is the dispatched name on every row this fixture writes, so the row keys as

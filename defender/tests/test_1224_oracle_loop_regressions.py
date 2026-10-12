@@ -24,7 +24,9 @@ bad argument to an oracle tool fails that call only; a count cell is the answer'
 never a document's field; a pre-flight thread's error stops the other worlds; the family
 recording is parsed once per pre-flight. (#1235 retired the sixth-round arms about `budget.json`
 — box-written oracle fields, a link planted there, a capped call's write: the budget counters
-live in the run process's memory, so there is no record to plant or write.) Seventh round: a sibling's
+live in the run process's memory, so there is no record to plant or write; round 2 retired the
+held record's link-or-garbage arm and the dead-writer clock arm: the oracle-held credit and the
+open turn live on the run's `RunState`, so no file holds them and no other process reaches them.) Seventh round: a sibling's
 re-ask of a pre-branch call is served unchanged or not at all (M01=A), by pre-flight's own rule;
 and (M14 and M12 re-ruled by the implementer, the human having delegated them) a forged row has
 the shape of one real row, never the union of all; an id column is named as one, and a forged
@@ -33,7 +35,6 @@ id collides only with a real identifier.
 from __future__ import annotations
 
 import ast
-import json
 import os
 import re
 import shutil
@@ -48,7 +49,6 @@ import pytest
 
 from defender.learning.branch.estate import oracle as oracle_mod
 from defender.learning.branch.estate.checks import CheckStore, RealData, check_submission
-from defender.run_repository import RunPaths
 from defender.runtime.verbs import CALL_DELIVERY, CallDelivery
 from defender.runtime.box._oracle import OracleBox, stop_oracle_box
 from defender.runtime.box._spec import BoxSpec, _DockerTransport
@@ -724,44 +724,31 @@ def test_an_abandoned_attempts_limiter_wait_does_not_touch_the_next_attempts_clo
     assert limiter.next_attempt_waited, "the next attempt never waited on the limiter"
 
 
-def test_an_oracle_open_mark_left_by_a_dead_process_does_not_stop_the_clock(tmp_path):
+def test_an_oracle_turn_holds_the_clock_only_while_it_is_open(tmp_path):
     """Finding 7: a sibling killed mid-turn left `oracle_open_since` in budget.json, and every
     later read counted `now - opened` as oracle-held, so a resume's elapsed time stood still and
-    the wall-clock limit never tripped. (Sixth round: the open turn is no longer a file record
-    at all, but this process's memory.) A turn a process that has since exited opened holds
-    nothing here; a turn this live process holds still pauses the clock (control)."""
-    import sys
-
+    the wall-clock limit never tripped. (#1235 round 2: the open turn lives on the run's
+    `RunState`, which no other process can reach, so the dead-writer arm is gone.) A fresh
+    state holds nothing and a closed turn stops holding, so the clock runs; a turn open now
+    pauses it (control)."""
     from defender.hooks import budget_enforcer as be
 
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    be.open_budget(run_dir, "r-1")
-    root = Path(be.__file__).resolve().parents[2]
-    subprocess.run(
-        [sys.executable, "-c", "import sys; from pathlib import Path; "
-         "from defender.hooks.budget_enforcer import oracle_turn_opened; "
-         "oracle_turn_opened(Path(sys.argv[1]))", str(run_dir)],
-        check=True, env={**os.environ, "PYTHONPATH": str(root)})
-
-    def elapsed() -> float | None:
-        return be._elapsed({**be.read_budget(run_dir),
-                            be.ENFORCEMENT_HELD_KEY: be.oracle_held(run_dir)})
-
-    first = elapsed()
+    state = S.run_state(tmp_path / "run", "r-1")
+    assert be.oracle_held(state) == 0.0
     time.sleep(0.3)
-    later = elapsed()
-    assert first is not None
-    assert later is not None
-    assert later - first >= 0.25, f"a dead writer's mark froze the clock ({first} -> {later})"
+    assert be.oracle_held(state) == 0.0, "a fresh run's clock is paused"
 
-    be.oracle_turn_opened(run_dir)
+    be.oracle_turn_opened(state)
     try:
-        held = elapsed()
+        opened = be.oracle_held(state)
         time.sleep(0.3)
-        assert elapsed() - held < 0.1, "a live turn no longer holds"
+        assert be.oracle_held(state) - opened >= 0.25, "a live turn no longer holds"
     finally:
-        be.oracle_turn_closed(run_dir)
+        be.oracle_turn_closed(state)
+    closed = be.oracle_held(state)
+    assert closed >= 0.25, "the closed turn's held seconds were not credited"
+    time.sleep(0.3)
+    assert be.oracle_held(state) == closed, "a closed turn still holds the clock"
 
 
 def test_a_failure_closing_the_oracle_mark_does_not_replace_the_unservable_abort(tmp_path,
@@ -771,19 +758,25 @@ def test_a_failure_closing_the_oracle_mark_does_not_replace_the_unservable_abort
     sibling. The abort leaves the turn as itself."""
     from defender.learning.branch.estate import registry as registry_mod
 
-    def broken(_run_dir: Path) -> None:
-        raise OSError("the oracle-held record's lock timed out")
+    closed: list[Any] = []
 
-    # The close must fail mid-turn after the open succeeded; no file fault does that (a run with
-    # no budget makes both a no-op, and permissions do not bind root).
+    def broken(state: Any) -> None:
+        closed.append(state)
+        raise OSError("the oracle-held clock's close failed")
+
+    # The close must fail mid-turn after the open succeeded; nothing but this seam does that
+    # (the clock is the run's in-memory `RunState`, and a context with no state pauses none).
     monkeypatch.setattr(registry_mod, "oracle_turn_closed", broken)  # lint-monkeypatch: ok — only seam for a close that fails after its open
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=S.oracle(S.text_only("no.")),
                            verifier=S.passing_verifier(), retry_cap=1)
+    ctx = est.ctx(tmp_path / "inv", run_state=S.run_state(tmp_path / "inv"))
 
     with pytest.raises(oracle_mod.OracleUnservable):
-        S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
+        S.call(reg, "idp", "query", ctx, q="user:alice")
+    assert closed, "the turn's close never ran, so its failure was not exercised"
+    assert all(c is ctx.run_state for c in closed), "the close was not the run's own clock"
 
 
 def test_an_unpriced_verifier_is_refused_before_the_oracles_first_request(tmp_path):
@@ -1037,13 +1030,13 @@ def test_a_failure_closing_the_clock_mark_leaves_no_row_for_the_answer_it_withhe
     from defender.learning.branch.estate import registry as registry_mod
 
     real_close = registry_mod.oracle_turn_closed
-    closes: list[Path] = []
+    closes: list[Any] = []
 
-    def fails_once(run_dir: Path) -> None:
-        closes.append(run_dir)
+    def fails_once(state: Any) -> None:
+        closes.append(state)
         if len(closes) == 1:
-            raise OSError("the oracle-held record's lock timed out")
-        real_close(run_dir)
+            raise OSError("the oracle-held clock's close failed")
+        real_close(state)
 
     # The close must fail after its open succeeded; no file fault does that (see the
     # round-four close test).
@@ -1053,10 +1046,12 @@ def test_a_failure_closing_the_clock_mark_leaves_no_row_for_the_answer_it_withhe
     ep = S.episode_v2(tmp_path)
     o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
     reg = S.world_registry(ep, "b", est, oracle=o, verifier=S.passing_verifier(), retry_cap=1)
-    ctx = est.ctx(tmp_path / "inv")
+    ctx = est.ctx(tmp_path / "inv", run_state=S.run_state(tmp_path / "inv"))
 
-    with pytest.raises(OSError, match="lock timed out"):
+    with pytest.raises(OSError, match="close failed"):
         S.call(reg, "idp", "query", ctx, q="user:alice")
+    assert closes, "the turn's close never ran, so its failure was not exercised"
+    assert closes[0] is ctx.run_state, "the close was not the run's own clock"
     assert S.ledger_rows(ep, "b") == [], "a row records an answer the investigator never got"
 
     assert S.call(reg, "idp", "query", ctx, q="user:alice") == ALICE_ROWS
@@ -1204,46 +1199,47 @@ def test_a_preflight_world_thread_keeps_the_launch_s_log_context(tmp_path, monke
         {"run_id": "launch-run", "tenant_id": S.FIXTURE_TENANT}] * 2
 
 
-def test_an_accounted_call_cannot_resurrect_a_closed_oracle_mark(tmp_path, monkeypatch):
+def test_an_accounted_call_cannot_resurrect_a_closed_oracle_mark(tmp_path):
     """Fifth-round finding 5: `account_call` read budget.json, then wrote it back with
-    `write_atomic` under a process-local lock, while the oracle-turn marks are written under the
+    an atomic replace under a process-local lock, while the oracle-turn marks are written under the
     file lock. An `oracle_turn_closed` landing between its read and its write was overwritten:
     the open mark came back (the investigator's clock paused for good) and the held seconds were
     lost. (Sixth round: the oracle's clock state left budget.json for host state, so the count
-    and the close no longer share a record; #1235: the count is the run process's memory.) A
-    close landing mid-count still credits its seconds, and the budget state carries no oracle
-    field either way.
+    and the close no longer share a record; #1235: the count and the clock are the run's one
+    `RunState`, under its one lock.) A close racing a count still credits its seconds and stays
+    closed, the count still lands, and the budget state carries no oracle field either way.
 
-    Driven in the problematic order, not raced: the close is started from inside the count, once
-    it has read the state."""
+    Raced, round after round: each round's close and count are released together, so both
+    orders land. (The count no longer has a read-to-write step outside the state's lock to
+    stop it at; that seam left with budget.json.)"""
     from defender.hooks import budget_enforcer as be
 
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    be.open_budget(run_dir, "r-1")
-    be.oracle_turn_opened(run_dir)
-    closer = threading.Thread(target=be.oracle_turn_closed, args=(run_dir,))
-    real_count = be._valid_count
+    def close(gate: threading.Barrier) -> None:
+        gate.wait(timeout=10)
+        be.oracle_turn_closed(state)
 
-    def count_then_close(value: object) -> int | None:
-        if not closer.is_alive() and closer.ident is None:
-            closer.start()
-            closer.join(timeout=0.5)
-        return real_count(value)
+    state = S.run_state(tmp_path / "run", "r-1")
+    held = 0.0
+    for n in range(1, 31):
+        be.oracle_turn_opened(state)
+        time.sleep(0.002)
+        gate = threading.Barrier(2)
+        closer = threading.Thread(target=close, args=(gate,))
+        closer.start()
+        gate.wait(timeout=10)
+        be.account_call(state, "bash", limits=be.DEFAULT_LIMITS, tier="core")
+        closer.join(timeout=10)
+        assert not closer.is_alive()
 
-    # `_valid_count` is the one step every version of the count runs after reading the state.
-    monkeypatch.setattr(be, "_valid_count", count_then_close)  # lint-monkeypatch: ok — the only point between the count's read and its write
-    be.account_call(run_dir, "r-1", "bash", limits=be.DEFAULT_LIMITS, tier="core")
-    closer.join(timeout=10)
-    assert not closer.is_alive()
-
-    state = be.read_budget(run_dir)
-    assert not {"oracle_open_since", be.ORACLE_HELD_KEY} & set(state), (
-        f"the budget state carries oracle clock state: {state}")
-    assert state["tool_calls"] == 1, state
-    sidecar = json.loads(RunPaths(run_dir).oracle_held(tmp_path).read_text(encoding="utf-8"))
-    assert isinstance(sidecar.get(be.ORACLE_HELD_KEY), float), (
-        "the closed turn's held seconds were lost")
+        budget = state.budget_snapshot()
+        assert not {"oracle_open_since", "oracle_held_seconds"} & set(budget), (
+            f"the budget state carries oracle clock state: {budget}")
+        assert budget["tool_calls"] == n, budget
+        now = be.oracle_held(state)
+        assert now > held, f"round {n}: the closed turn's held seconds were lost"
+        held = now
+    time.sleep(0.2)
+    assert be.oracle_held(state) == held, "a closed turn's open mark came back"
 
 
 @pytest.mark.parametrize(("knob", "value", "named"), [
@@ -1320,34 +1316,6 @@ def test_the_oracle_box_binds_nothing_of_the_repository_and_no_env_file(tmp_path
         assert shipped == sorted(box_oracle.RUNNER_FILES), shipped
     finally:
         shutil.rmtree(runner, ignore_errors=True)
-
-
-def test_a_link_or_garbage_at_the_held_record_neither_crashes_nor_pauses(tmp_path):
-    """Sixth-round finding 11, at the new location: the host-only held record is beside the run
-    dir, out of the box's reach, but a link or garbage there still reads as nothing credited
-    (the clock runs; it never pauses) and a turn whose credit cannot be written still closes."""
-    from defender.hooks import budget_enforcer as be
-
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    be.open_budget(run_dir, "r-1")
-    held = RunPaths(run_dir).oracle_held(tmp_path)
-
-    held.write_text("not json {", encoding="utf-8")
-    assert be.oracle_held(run_dir) == 0.0
-    be.oracle_turn_opened(run_dir)
-    be.oracle_turn_closed(run_dir)
-    assert json.loads(held.read_text(encoding="utf-8"))[be.ORACLE_HELD_KEY] >= 0.0
-
-    held.unlink()
-    target = tmp_path / "planted.json"
-    target.write_text(json.dumps({be.ORACLE_HELD_KEY: 1e12}), encoding="utf-8")
-    held.symlink_to(target)
-    assert be.oracle_held(run_dir) == 0.0, "a linked held record paused the clock"
-    be.oracle_turn_opened(run_dir)
-    be.oracle_turn_closed(run_dir)  # the refused write is logged, not raised
-    assert be.oracle_held(run_dir) == 0.0
-    assert json.loads(target.read_text(encoding="utf-8")) == {be.ORACLE_HELD_KEY: 1e12}
 
 
 # -- sixth round --------------------------------------------------------------------------------

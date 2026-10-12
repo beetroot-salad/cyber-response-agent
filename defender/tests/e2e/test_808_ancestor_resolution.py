@@ -279,19 +279,19 @@ def test_a_shell_fetch_that_answers_does_not_stand_in_for_the_ancestor_calls(tmp
     `_(unavailable: … found nothing)`, reintroducing this finding's own defect through the
     branch it did not name."""
     from defender.runtime import lead_zero
-    from defender.scripts.gather_tools.record_query import open_query_mirror
+    from defender.runtime.run_state import RunState
 
     def _resolve(name, alert=None, **kw):
         """One arm in its OWN run dir — the shared-run-dir starvation
         `test_lead_zero_returns_section_text_entities_and_status` documents applies here too: these
         arms carry identical shell predicates."""
         run_dir = materialize_alert(tmp_path / name, alert if alert is not None else alert_doc())
-        # Called outside the driver, so the host's queries mirror (#1235) is opened here as
-        # the driver opens it at run start: lead-0's calls go through the query capture.
-        open_query_mirror(run_dir)
+        # Called outside the driver, so the run's state (#1235) is started here as the driver
+        # starts it at run start: lead-0's calls go through the query capture, which records
+        # into it.
         rec = VerbRecorder()
         result = lead_zero.resolve_lead_zero(
-            run_dir=run_dir, defender_dir=defender_dir(),
+            run_state=RunState.start(run_dir, f"lz808-{name}"), defender_dir=defender_dir(),
             alert_path=run_dir / "alert.json", tenant=_tenants1106.fixture_run_tenant(), env={},
             verbs=elastic_backend(rec, **kw),
         )
@@ -398,17 +398,17 @@ def test_one_ancestor_fetch_answering_does_not_establish_an_absence_for_the_othe
     that absence is real, is the common case, and must keep its plain sentence with no
     failed-fetch note beside it — or the note says nothing by always firing."""
     from defender.runtime import lead_zero
-    from defender.scripts.gather_tools.record_query import open_query_mirror
+    from defender.runtime.run_state import RunState
 
     def _resolve(name, table):
         run_dir = materialize_alert(tmp_path / name, alert_doc(ancestors=[
             ancestor("anc-auth", index=AUTH_BACKING),
             ancestor("anc-falco", index=FALCO_BACKING),
         ]))
-        open_query_mirror(run_dir)  # outside the driver: open it as run start does (#1235)
         rec = VerbRecorder()
         result = lead_zero.resolve_lead_zero(
-            run_dir=run_dir, defender_dir=defender_dir(),
+            # outside the driver: start the run's state as run start does (#1235)
+            run_state=RunState.start(run_dir, f"lz808-{name}"), defender_dir=defender_dir(),
             alert_path=run_dir / "alert.json", tenant=_tenants1106.fixture_run_tenant(), env={},
             verbs=elastic_backend(rec, answer=answer_by_index(table)),
         )
@@ -495,6 +495,7 @@ def test_item_one_stops_at_one_recorded_per_system_failure(tmp_path):
     without the shell failing at all: an implementation that stops when the shell fails passes
     arm A alone and still trips elastic on `d5`'s own four-ancestor two-backing-index shape."""
     from defender.runtime import circuit_breaker
+    from defender.runtime.run_state import RunState
 
     assert circuit_breaker.PER_SYSTEM_FAIL_LIMIT == 2, (
         "the per-system limit moved; re-derive this demand's arithmetic before trusting it — "
@@ -502,11 +503,12 @@ def test_item_one_stops_at_one_recorded_per_system_failure(tmp_path):
     )
     probe_dir = tmp_path / "probe"
     probe_dir.mkdir()
-    circuit_breaker.record_outcome(probe_dir, "elastic", 2)
-    assert not circuit_breaker.is_tripped(probe_dir, "elastic"), \
+    probe = RunState.start(probe_dir, "lz808-probe")
+    circuit_breaker.record_outcome(probe, "elastic", 2)
+    assert not circuit_breaker.is_tripped(probe, "elastic"), \
         "one infra failure now trips the breaker — the cap below is arguing about the wrong number"
-    circuit_breaker.record_outcome(probe_dir, "elastic", 2)
-    assert circuit_breaker.is_tripped(probe_dir, "elastic"), \
+    circuit_breaker.record_outcome(probe, "elastic", 2)
+    assert circuit_breaker.is_tripped(probe, "elastic"), \
         "two infra failures no longer trip elastic; re-derive before relying on the cap"
 
     down = TransportFault("docker exec failed")
@@ -518,7 +520,7 @@ def test_item_one_stops_at_one_recorded_per_system_failure(tmp_path):
             f"prompt — at {circuit_breaker.PER_SYSTEM_FAIL_LIMIT} the breaker trips and every "
             "later elastic lead in this run gets down_message instead of data"
         )
-        assert not circuit_breaker.is_tripped(res.run_dir, "elastic"), \
+        assert not circuit_breaker.is_tripped(res.state, "elastic"), \
             f"[{label}] lead-0 tripped the elastic breaker before the investigation began"
         assert UNAVAILABLE in res.section(), \
             f"[{label}] the failed slots were dropped silently rather than degrading"
