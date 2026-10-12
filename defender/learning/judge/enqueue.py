@@ -276,18 +276,21 @@ class DrawsSkipReport:
 
     `unreadable` is a fault: torn, undecodable, linked, or a stem outside the ASCII-digit
     alphabet (a non-ASCII digit like `'١'` counts here). `skipped` is a non-canonical spelling of
-    an index (`01.yaml`), ignored by design and reported separately from faults."""
+    an index (`01.yaml`), ignored by design and reported separately from faults. `retired` names
+    each document refused for carrying a name #1234 retired (A4), as `<file>: <names>`: never
+    read as the old design meant it."""
 
     unreadable: int = 0
     skipped: int = 0
+    retired: list[str] = field(default_factory=list)
 
 
 def draws_on_disk_report(
     view: Bound, label: str,
 ) -> tuple[dict[int, dict[str, Any]], DrawsSkipReport]:
     """Every draw document of world `label` (`worlds/<label>/judge/`) under the episode root
-    `view` reads, keyed by draw index in numeric order, plus what it skipped — the episode
-    page's reader. The grading pass never reads a draw back: it routes the documents it just
+    `view` reads, keyed by draw index in numeric order, plus what it skipped or refused — the
+    episode page's reader. The grading pass never reads a draw back: it routes the documents it just
     produced."""
     report = DrawsSkipReport()
     # Walked no-follow from the episode root: a link at `worlds/`, `worlds/<label>` or `judge/`
@@ -305,10 +308,12 @@ def draws_on_disk_report(
         except (ValueError, yaml.YAMLError):
             report.unreadable += 1
             continue
-        if isinstance(doc, dict):
-            out[int(Path(name).stem)] = doc
-        else:
+        if not isinstance(doc, dict):
             report.unreadable += 1
+        elif names := retired_keys(doc):
+            report.retired.append(f"{name}: {', '.join(names)}")
+        else:
+            out[int(Path(name).stem)] = doc
     return dict(sorted(out.items())), report
 
 
