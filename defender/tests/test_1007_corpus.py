@@ -39,10 +39,10 @@ from defender.learning.core import drains
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL, LEAD_AUTHOR_DRAIN_LABEL
 from defender.tests import _by_path as P
 from defender.tests import _drain719 as D
-from defender.tests import _judge_921 as J
 from defender.tests import _world_1007 as W
 from defender.tests._curator1134 import author_trees
 from defender.tests.e2e import _box665 as B
+from defender.tests.judge_contrast_1234 import _spec1234 as S
 from defender.tests.e2e.test_922_spine import (
     RepoBranch,
     readonly_sources,
@@ -114,19 +114,23 @@ class TwoLaneRecorder:
 
 def world_queue_row(fid: str = "ep-1/b/0/0", **extra) -> dict:
     row = dict(D.finding_row(fid, run_id="ep-1", direction=W.SUBJECT_WORLD),
-               subject=W.SUBJECT_WORLD, type="fact-story-gap", world="b",
+               subject=W.SUBJECT_WORLD, type="incoherent", world="b",
                systems=[W.SYSTEM], provenance="model",
                subject_anchor="facts", subject_topic="answer shape",
-               judge_outcome="gradable", source_run_dir="episodes/ep-1")
+               citations=["family.yaml#worlds/b"], source_run_dir="episodes/ep-1")
+    row.pop("judge_outcome")          # #1234 A4: a row carrying the retired name is held
     row.update(extra)
     return row
 
 
 def defender_queue_row(fid: str = "ep-1/b/0/1", **extra) -> dict:
     row = dict(D.finding_row(fid, run_id="ep-1", direction="family"),
-               subject=W.SUBJECT_DEFENDER, type="lead-set", judge_outcome="survived",
+               subject=W.SUBJECT_DEFENDER, type="lead-set",
                subject_anchor="l-001", subject_topic="coverage",
+               contrast_evidence=["worlds/b/report.md", "worlds/a/report.md"],
+               on_verdict_path=True, world_label_doubted=False,
                source_run_dir="episodes/ep-1/worlds/b")
+    row.pop("judge_outcome")          # #1234 A4: a row carrying the retired name is held
     row.update(extra)
     return row
 
@@ -694,17 +698,20 @@ def test_nothing_lands_outside_the_declared_write_set(tmp_path, monkeypatch):
     episode grows forever, and no test anywhere would object.
     """
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
-    _base, _src, root = W.configured_layout(tmp_path, monkeypatch)
-    doc = W.family_doc(worlds=[W.base_world(), W.world_doc("b", facts=[W.fact()])])
-    ep = W.episode(tmp_path, doc=doc, root=root)
-    W.archived_world(ep, "b")
-    W.write_served(ep, "b", [W.served_row(world="b")])
-    W.write_outcome(ep)
-    W.write_samples(ep)
+    built = W.contrast_family(tmp_path, monkeypatch)
+    ep = built.ep
     before = {p.relative_to(ep) for p in ep.rglob("*") if p.is_file()}
+    judge = S.judge({"b": S.world_reply("lead-quality", ["idp"], investigator=[S.inv()],
+                                        world=[S.wf("mislabelled")])})
 
-    J.grade_at(ep, judge=W.FakeJudge(W.reply_document()), state=W.learning_state(paths))
+    S.grade(built, judge, state=W.learning_state(paths))
 
+    # The control: the pass graded and queued on BOTH channels, so the write set below is the
+    # one a whole pass leaves rather than the one a refused pass leaves.
+    for channel in (FINDINGS, QUESTIONER_FINDINGS):
+        assert W.queue_rows(paths, channel), (
+            f"the pass queued nothing on {channel.queue}, so the write set below is not a "
+            "whole pass's")
     after = {p.relative_to(ep) for p in ep.rglob("*") if p.is_file()}
     allowed = {Path(W.JUDGE_NAME), Path(W.OUTCOME_NAME), Path(W.SAMPLES_NAME)}
     new = {p for p in after - before
