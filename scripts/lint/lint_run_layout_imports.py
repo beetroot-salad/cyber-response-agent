@@ -91,7 +91,7 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
     ),
     # N-a: the running investigation does not migrate; its record writes are #1165.
     "running-investigation": (
-        "hooks/budget_enforcer.py", "hooks/record_lead.py",
+        "hooks/record_lead.py",
         "runtime/challenge_gate.py", "runtime/close_tool.py",
         "runtime/driver/__init__.py", "runtime/driver/_build.py",
         "runtime/lead_zero/__init__.py", "runtime/lead_zero/_capture.py", "runtime/observe.py",

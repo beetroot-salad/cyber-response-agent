@@ -714,7 +714,7 @@ demands:
     form: clause
     status: retired
     outcome:
-      nl: "RETIRED by #1235 — a foreign run_id in a replaced file cannot reach memory, so the sentinel that told a replaced file from a cold start has nothing to tell (its open-shape half moved into `test_a_second_open_budget_starts_a_fresh_budget_for_the_folder`); `test_budget_state_carries_a_run_scoped_sentinel_from_before_the_first_call`, which discharged this demand, was deleted with the behaviour it pinned."
+      nl: "RETIRED by #1235 — a foreign run_id in a replaced file cannot reach memory, so the sentinel that told a replaced file from a cold start has nothing to tell (its open-shape half moved into `test_a_second_run_state_for_the_folder_starts_a_fresh_budget`); `test_budget_state_carries_a_run_scoped_sentinel_from_before_the_first_call`, which discharged this demand, was deleted with the behaviour it pinned."
     binds: ["budget_json.domain", "budget_json.domain.distinguished[run_id]",
             "budget_json.domain.distinguished[created_at]", "budget_json.identity",
             "interacts(update_budget_locked->budget_json)",
@@ -1174,19 +1174,20 @@ demands:
 
   # --- R27: open_budget idempotence (B4 makes origin stability load-bearing) --
   - {id: open_budget_is_idempotent_on_the_origin, kind: behavior, form: test,
-     discharged_by: test_a_second_open_budget_starts_a_fresh_budget_for_the_folder,
+     discharged_by: test_a_second_run_state_for_the_folder_starts_a_fresh_budget,
      binds: ["budget_json.domain.distinguished[created_at]",
              "budget_json.domain.distinguished[started_at]",
              "budget_json.domain.distinguished[run_id]",
              "interacts(run_investigation->budget_json)",
              "interacts(update_budget_locked->budget_json)"]}
     # #1235 INVERTED THIS DEMAND (the id is kept; it is bound by other nodes). The budget is
-    # the run process's memory, and `open_budget` is the run's start: a second open starts a
-    # FRESH budget for the folder (counters zero, a new origin no earlier than the first, the
-    # new run id), because a run folder is never re-run into (`run_common._setup_state`
-    # refuses). `discharged_by` follows the test to its inverted name; it also asserts the
-    # opened state's run_id, which is what now binds `budget_json.domain.distinguished[run_id]`
-    # (the retired sentinel demand bound it before). The text below is the pre-#1235 reading.
+    # the run process's memory, and `RunState.start` is the run's start (round 2 moved it off
+    # the folder-keyed `open_budget`): a second start for the folder is a FRESH budget
+    # (counters zero, a new origin no earlier than the first, the new run id), because a run
+    # folder is never re-run into (`run_common._setup_state` refuses). `discharged_by` follows
+    # the test to its round-2 name; it also asserts the started state's run_id, which is what
+    # now binds `budget_json.domain.distinguished[run_id]` (the retired sentinel demand bound it
+    # before). The text below is the pre-#1235 reading.
     # R27: several tests call open_budget on an existing run dir, and B4 makes the
     # origin's stability load-bearing, but nothing pinned that a second open preserves
     # created_at / started_at and does not zero accrued counters. Re-originating on a
