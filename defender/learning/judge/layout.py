@@ -31,7 +31,7 @@ from typing import Any, NamedTuple, TypeVar
 from defender._episode_paths import WORLD_LEAVES
 from defender._untrusted import message_salt, wrap
 from defender.learning._prompt import host_heading, stage_user_message
-from defender.learning.branch.ledger import ORACLE, SOURCES
+from defender.learning.branch.ledger import ORACLE, normalized_source
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.judge.render import (
     UNTRUSTED_TAG,
@@ -149,7 +149,8 @@ def _each(values: Any) -> list[Part]:
 def _word(source: Any) -> Part:
     """A ledger decision word: host text when it is one of the ledger's own words (`SOURCES`),
     else framed (the archive can carry anything)."""
-    return source if isinstance(source, str) and source in SOURCES else _run(source)
+    word = normalized_source(source)
+    return word if word is not None else _run(source)
 
 
 def _pick(mapping: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
