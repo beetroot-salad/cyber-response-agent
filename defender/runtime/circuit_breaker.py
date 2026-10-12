@@ -112,7 +112,12 @@ def _shape_ok(doc: dict) -> bool:
     )
 
 
-def record_outcome(run_dir: Path, system: str, exit_code: int) -> dict:
+def record_outcome(
+    run_dir: Path, system: str, exit_code: int, *, counts_toward_run: bool = True,
+) -> dict:
+    """Charge one call's outcome to `system`'s breaker. `counts_toward_run=False` (the
+    harness's correlation lead, #1222 A2) still marks the system down but leaves the run-level
+    failure count alone, so that lead can never end the run."""
     if not system or not is_infra_failure(exit_code):
         return {}
 
@@ -127,7 +132,10 @@ def record_outcome(run_dir: Path, system: str, exit_code: int) -> dict:
             state["systems"][system] = sysrec
         sysrec["failures"] += 1
         prior = state.get("total_failures", 0)
-        state["total_failures"] = (prior if _is_count(prior) else 0) + 1
+        if counts_toward_run:
+            state["total_failures"] = (prior if _is_count(prior) else 0) + 1
+        elif not _is_count(prior):
+            state["total_failures"] = 0
         if sysrec["failures"] >= PER_SYSTEM_FAIL_LIMIT and "tripped_at" not in sysrec:
             sysrec["tripped_at"] = now_iso()
 

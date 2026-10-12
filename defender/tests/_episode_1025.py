@@ -677,11 +677,13 @@ def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = Tr
     T.write_family(ep, manifest)
     # The family stamp is `stamp`'s alone (`write_stamp` below), so `stamp=False` means absent.
     write_outcome(ep, family_stamp=False)
-    # world alerts name the rule the header shows
+    # the episode's copy of the source alert names the rule the header shows
+    from defender.tests._alert_plant import plant_source_copy
+
+    plant_source_copy(ep, json.dumps(
+        {"alert_id": ALERT_ID, "rule": {"id": "v2-falco-authorized-keys-modification",
+                                        "name": ALERT_RULE}}).encode("utf-8"))
     for label in WORLDS:
-        (ep / "worlds" / label / "alert.json").write_text(json.dumps(
-            {"alert_id": ALERT_ID, "rule": {"id": "v2-falco-authorized-keys-modification",
-                                            "name": ALERT_RULE}}), encoding="utf-8")
         _leads(ep / "worlds" / label, label)
     for label, bucket in ((PASSTHROUGH_WORLD, "lead-set"), (GRADED_WORLD, "decision-discipline")):
         draw_document(ep, label, 0, draw_doc(findings=_world_findings_rows(), bucket=bucket,

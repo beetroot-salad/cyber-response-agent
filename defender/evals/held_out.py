@@ -38,10 +38,11 @@ import yaml
 if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender import _alert_input
 from defender._yaml import safe_load
 from defender._model import model
 from defender._report import read_report
-from defender.run_repository import RunPaths
+from defender.run_repository import RUN_LAYOUT, RunPaths
 from defender.run_common import HELD_OUT_FIXTURES as FIXTURES_DIR
 from defender._io import read_text_utf8
 
@@ -65,7 +66,8 @@ def load_held_out_fixtures(fixtures_dir: Path) -> list[HeldOutAlert]:
     for child in sorted(fixtures_dir.iterdir()):
         if not child.is_dir():
             continue
-        alert = RunPaths(child).alert
+        # A fixture is a folder an operator keeps, not a run: its alert is the file by that name.
+        alert = child / RUN_LAYOUT.alert.name
         gt = child / "ground_truth.yaml"
         if not gt.is_file():
             continue
@@ -104,12 +106,18 @@ def index_runs(slugs: list[str], runs_dir: Path) -> dict[str, Path]:
     best: dict[str, tuple[float, str, Path]] = {}
     if not runs_dir.is_dir():
         return {}
-    for d in runs_dir.iterdir():
+    recordless: list[str] = []
+    for d in sorted(runs_dir.iterdir()):
         try:
             if not d.is_dir():
                 continue
             slug = _claimed_slug(d.name, slugs)
             if slug is None:
+                continue
+            # A folder with no readable record is not a run (A8): named, counted, never scored.
+            if _alert_input.read_record(RunPaths(d).alert_record) is None:
+                print(f"warn: {d.name}: no run record — skipped", file=sys.stderr)
+                recordless.append(d.name)
                 continue
             key = (d.stat().st_mtime, d.name)
         except OSError as e:
@@ -118,6 +126,9 @@ def index_runs(slugs: list[str], runs_dir: Path) -> dict[str, Path]:
         prior = best.get(slug)
         if prior is None or key > prior[:2]:
             best[slug] = (*key, d)
+    if recordless:
+        print(f"warn: {len(recordless)} run folder(s) with no run record skipped: "
+              f"{', '.join(recordless)}", file=sys.stderr)
     return {slug: v[2] for slug, v in best.items()}
 
 

@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import inspect
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -428,6 +429,46 @@ def no_orient_shims(argv: list[str], env: dict[str, str]) -> None:
     return None
 
 
+#: What the correlation lead (`l-00c`) says under a replay that does not script it (#1222 C01): a
+#: usable summary from a lead that issued no call (C38), so an incidental replay's lead draws
+#: none of the turns scripted for MAIN's own leads.
+DEFAULT_CORRELATION_SUMMARY = (
+    "Window bound 2026-05-25T13:00:00Z..2026-05-25T17:00:00Z, anchored on the alert's "
+    "timestamp field; no call issued, so no counts to report.")
+_DISPATCHED_LEAD = re.compile(r"\n## Dispatch\n```yaml\n(?:.*\n)*?lead_id: (\S+)\n")
+
+
+def _awaiting(fn):
+    """`fn` as an async model function: a double that answers late hands back an awaitable (a
+    delay or a hang that must be awaited ON THE EVENT LOOP, so a deadline can cut it), which a
+    sync `FunctionModel` function would be handed back unawaited."""
+    async def call(messages, info):
+        out = fn(messages, info)
+        return await out if inspect.isawaitable(out) else out
+
+    call.__name__ = getattr(fn, "__name__", type(fn).__name__)
+    return call
+
+
+def _with_default_correlation(gather, main):
+    """`gather` (or `main`, when none is given) as the gather model, except that the
+    correlation lead's conversation is answered by its own default fake. A `gather` that routes
+    leads itself (`by_lead`, the #1222 `LeadRouter`) or is marked `serves_correlation` (the
+    #808 scenario builder's, whose script is `l-00c`'s) is already that."""
+    if gather is not None and (hasattr(gather, "by_lead") or getattr(gather, "serves_correlation", False)):
+        return gather
+    inner = gather if gather is not None else main
+
+    def fn(messages, info):
+        found = _DISPATCHED_LEAD.search(messages_text(messages))
+        if found is not None and found.group(1) == "l-00c":
+            return ModelResponse(parts=[TextPart(content=DEFAULT_CORRELATION_SUMMARY)])
+        return inner(messages, info)
+
+    fn.__name__ = getattr(inner, "__name__", "gather")
+    return fn
+
+
 def _refuse_conflicting_store_seams(resume, store_factory) -> None:
     """`resume=` and `store_factory=` name the same thing and cannot both be honoured.
 
@@ -555,8 +596,15 @@ def drive(  # noqa: PLR0913, C901 — the harness entry point: one parameter per
     `orient._shim`."""
     _refuse_conflicting_store_seams(resume, store_factory)
     tree = defender_dir if defender_dir is not None else DEFENDER
-    main_built = BuiltModel(FunctionModel(main), None)
-    gather_built = BuiltModel(FunctionModel(gather), None) if gather is not None else None
+    main_built = BuiltModel(FunctionModel(_awaiting(main)), None)
+    # The correlation lead draws its own default fake, never MAIN's leads' script (C01).
+    dispatches_correlation = resume is None and verbs is not None
+    gather_fn = (
+        _with_default_correlation(gather, main)
+        if dispatches_correlation and driver.resolve_main_model() != driver.gather_model()
+        else gather)
+    gather_built = (
+        BuiltModel(FunctionModel(_awaiting(gather_fn)), None) if gather_fn is not None else None)
 
     if gather_built is not None and driver.resolve_main_model() == driver.gather_model():
         raise ValueError(

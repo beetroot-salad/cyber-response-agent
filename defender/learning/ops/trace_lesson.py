@@ -46,6 +46,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender import _alert_input
 from defender._clock import parse_iso_utc
 from defender._corpus import iter_lessons
 from defender.hooks.record_lesson_load import EVIDENCE_READ, exposures
@@ -114,12 +115,16 @@ def _report_disposition(run_dir: Path) -> str:
 
 
 def in_context_cases(
-    lesson_name: str, created_at: datetime | None, runs_dir: Path
+    lesson_name: str, created_at: datetime | None, runs_dir: Path,
+    *, skip: list[Path] | None = None,
 ) -> list[CaseHit]:
+    """`skip` are the run folders with no record (named once by the caller)."""
     hits: list[CaseHit] = []
     if not runs_dir.is_dir():
         return hits
-    for run_dir in sorted(p for p in runs_dir.iterdir() if p.is_dir()):
+    skipped_names = {p.name for p in (_unrecorded(runs_dir) if skip is None else skip)}
+    for run_dir in sorted(p for p in runs_dir.iterdir()
+                          if p.is_dir() and p.name not in skipped_names):
         loaded = RunPaths(run_dir).lessons_loaded
         if not loaded.is_file():
             continue
@@ -135,19 +140,30 @@ def _main_read_count(hits: list[CaseHit]) -> int:
     return sum(1 for h in hits if h.evidence == EVIDENCE_READ)
 
 
+def _unrecorded(runs_dir: Path) -> list[Path]:
+    if not runs_dir.is_dir():
+        return []
+    return [p for p in sorted(runs_dir.iterdir())
+            if p.is_dir() and _alert_input.read_record(RunPaths(p).alert_record) is None]
+
+
 def _print_index(lessons_dir: Path, runs_dir: Path) -> None:
+    unrecorded = _unrecorded(runs_dir)
+    if unrecorded:
+        print(f"warn: {len(unrecorded)} run folder(s) with no run record skipped: "
+              f"{', '.join(one_line(p.name) for p in unrecorded)}", file=sys.stderr)
     skipped: list[Path] = []
     for lesson in iter_lessons(lessons_dir, on_skip=skipped.append):
         name = lesson.path.stem
         raw_created = lesson.fm.get("created_at")  # lint-lesson-text: ok — parsed as a date; a bad value prints through one_line
         created_at = _parse_dt(raw_created)
-        cases = in_context_cases(name, created_at, runs_dir)
+        cases = in_context_cases(name, created_at, runs_dir, skip=unrecorded)
         desc = lesson.line("description")
         if created_at is None:
             desc = f"{desc} ({_unwindowed_reason(raw_created)} — unwindowed count)"
         print(f"{one_line(name)}\t{desc}\t{len(cases)}\t{_main_read_count(cases)}")
     for path in skipped:
-        cases = in_context_cases(path.stem, None, runs_dir)
+        cases = in_context_cases(path.stem, None, runs_dir, skip=unrecorded)
         print(f"{one_line(path.stem)}\t(malformed lesson — unwindowed count)\t{len(cases)}"
               f"\t{_main_read_count(cases)}")
 

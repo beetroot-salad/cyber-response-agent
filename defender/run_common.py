@@ -220,7 +220,8 @@ def _admit_input(alert: Path, *, tenant: _tenant.Tenant, world: ResumeWorld | No
         text, reason = _io.read_guarded(record_path)
         parsed = None if text is None else _alert_input.parse_record(text)
         if text is None or parsed is None or parsed.digest != admitted.digest:
-            sys.exit(f"[run.py] the episode holds no record matching its source alert "
+            sys.exit(f"[run.py] episode {world.episode_dir.name}: its copy of the source alert does not "
+                     f"match the record beside it "
                      f"({reason or 'the record is missing, malformed or for another alert'})")
         return _FrontDoor(raw=raw, record=text)
     try:

@@ -236,6 +236,16 @@ class Episode:
         return WriteRecord(*self._at(LAYOUT.not_comparable))
 
     @property
+    def source_alert(self) -> CreateRecord:
+        """The source run's alert as launch copied it in (#1222 A1): created once."""
+        return CreateRecord(*self._at(LAYOUT.source_alert))
+
+    @property
+    def source_record(self) -> CreateRecord:
+        """The record of that alert, copied beside it: created once."""
+        return CreateRecord(*self._at(LAYOUT.source_record))
+
+    @property
     def learning_html(self) -> WriteRecord:
         return WriteRecord(*self._at(LAYOUT.learning_html))
 

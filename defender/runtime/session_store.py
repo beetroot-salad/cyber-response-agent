@@ -39,6 +39,7 @@ from defender.runtime.run_end import (  # noqa: F401 — re-exports
     TRUNCATED_BY_REQUEST_LIMIT,
     TRUNCATED_BY_RETRY_EXHAUSTED,
     TRUNCATED_BY_STORE,
+    TRUNCATED_BY_TIMED_OUT,
     TRUNCATED_BY_VALUES,
     normalized_truncated_by,
 )

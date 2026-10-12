@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import os
 from dataclasses import field
 from pathlib import Path
 from typing import Annotated
@@ -106,6 +107,11 @@ def _load_one(
 
     run_dir = path.parent
     record_path = RunPaths(run_dir).alert_record
+    # A folder with no readable record is not a run (A8): named and counted, never attributed.
+    if _alert_input.read_record(record_path) is None:
+        if not os.path.lexists(record_path):
+            return None, "no run record (not a run of this version)", warnings
+        return None, "run record unreadable (not a record of this version)", warnings
     companion = Companion(
         case_id=run_dir.name or path.stem,
         source_path=path,

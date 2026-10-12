@@ -31,7 +31,6 @@ from ..agent_role import GATHER_AGENT_ID_PREFIX, AgentRole
 from .. import challenge_gate
 from .. import review_roles
 from ..close_tool import register_close_tool
-from ..circuit_breaker import RunAborted
 from ..permission.policies import _common
 from ..providers import BuiltModel
 from ..tools import (
@@ -45,10 +44,7 @@ from ..verbs import ModuleVerbRegistry
 
 from defender._frontmatter import strip_frontmatter
 from defender.run_repository import RUN_LAYOUT, RunPaths
-from defender.hooks.budget_enforcer import (
-    DEFAULT_LIMITS,
-    BudgetKill,
-)
+from defender.hooks.budget_enforcer import DEFAULT_LIMITS
 from ._prompts import DEFAULT_GATHER_MODEL, DEFAULT_MODEL, DEFAULT_TOOL_RETRIES, GATHER_REQUEST_LIMIT, _main_instructions, enforcement_enabled
 from ._budget import _make_hooks
 from defender._io import read_text_utf8
@@ -303,47 +299,9 @@ def _fold_composer(deps: AgentDeps, decision: _FoldDecision) -> selection.Compos
     return compose
 
 
-def _make_store_render_processor(  # noqa: PLR0913 — the correlation injector rides this seam
+def _make_store_render_processor(
     store: Any, session_id: str, *, fold: bool, request_limit: int,
-    correlation_task: Any = None,
 ):
-    injected = [False]
-
-    async def _inject_correlation() -> None:
-        """Await item 3 before MAIN's second request (never the first) and write its summary
-        into MAIN's session. Written to the store, not `messages`: the render rebuilds the list
-        from the store."""
-        if correlation_task is None or injected[0]:
-            return
-        injected[0] = True
-        try:
-            summary = await correlation_task
-        except (BudgetKill, RunAborted):
-            raise
-        except Exception as e:  # noqa: BLE001 — item 3's own dispatch must never break the run
-            summary = None
-            _logger.warning(f"correlation lead injection skipped: {e!r}")
-        if not summary:
-            return
-        from datetime import UTC, datetime as _dt
-
-        from pydantic_ai.messages import ModelRequest as _MR, UserPromptPart as _UPP
-
-        from .. import lead_zero as _lz
-        from ..session_store import path_row_ids as _path_row_ids
-
-        ids = _path_row_ids(store, session_id)
-        parent = ids[-1] if ids else None
-        row = _MR(
-            parts=[_UPP(content=(
-                f"## Correlation lead ({_lz.L3}) — dispatched automatically at ORIENT time, "
-                "off the ancestors lead-0 resolved\n\n"
-                f"{summary}"
-            ))],
-            timestamp=_dt.now(UTC),
-        )
-        store.append(session_id, [row], agent_id="main", parent_id=parent, synthesized=True)
-
     async def process(ctx: RunContext[AgentDeps], messages: list) -> list:
         # The framework appends this round's request before checking the request limit, so on
         # the doomed round withhold it from the store; otherwise a round that never happens is
@@ -353,8 +311,6 @@ def _make_store_render_processor(  # noqa: PLR0913 — the correlation injector 
             selection.ingest(store, session_id, messages[:-1], agent_id="main")
             return messages
         selection.ingest(store, session_id, messages, agent_id="main")
-        if requests >= 1:
-            await _inject_correlation()
         decision = _fold_decision(ctx.deps.run_dir) if fold else None
         return selection.render(
             store, session_id, messages, agent_id="main", fold=decision is not None,
@@ -387,7 +343,6 @@ def _make_gather_recorder(store: Any, session_id: str, agent_id: str, *, request
 
 def _main_extra_capabilities(
     store: Any, session_id: str, *, request_limit: int | None = None,
-    correlation_task: Any = None,
 ) -> list[ProcessHistory[Any]]:
     """`request_limit` is the run's raised ceiling (base plus the gate's forced turns). The
     default is the raised ceiling of the shipped bounds, never the base, which would withhold
@@ -398,8 +353,7 @@ def _main_extra_capabilities(
         else challenge_gate.raised_request_limit(challenge_gate.default_bounds())
     )
     return [ProcessHistory(_make_store_render_processor(
-        store, session_id, fold=_compaction_enabled(), request_limit=limit,
-        correlation_task=correlation_task))]
+        store, session_id, fold=_compaction_enabled(), request_limit=limit))]
 
 
 def _gather_extra_capabilities(
@@ -417,7 +371,6 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
     *, main_model: str | None = None, verbs: Any = None, limits: dict = DEFAULT_LIMITS,
     store: Any = None, session_id: str | None = None, review_stages: Any = None,
     bounds: challenge_gate.Bounds,
-    correlation_task: Any = None,
     toolset: Any = None,
     catalog: str | None,
     gather_grant: VerbGrant,
@@ -430,7 +383,6 @@ def build_agent(  # noqa: PLR0913 — composition root: config + DI seams + the 
         assert session_id is not None, "a store requires its session_id (build_agent's own contract)"
         extra = _main_extra_capabilities(
             store, session_id, request_limit=challenge_gate.raised_request_limit(bounds),
-            correlation_task=correlation_task,
         )
     _override = " (DEFENDER_GATHER_MODEL override)" if os.environ.get("DEFENDER_GATHER_MODEL") else ""
     _logger.info(f"gather model: {gather_model()}{_override}")

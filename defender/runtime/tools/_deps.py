@@ -184,6 +184,9 @@ class LeadStop:
 
     dead_end: DeadEnd | None = None
     ceiling: int | None = None
+    #: The system whose circuit breaker refused one of this lead's calls, if any. The harness's
+    #: correlation lead reads it to tell "the system was marked down" from "every call failed".
+    breaker_refused: str | None = None
 
     @property
     def door_closed(self) -> bool:
@@ -199,6 +202,10 @@ class LeadStop:
         if self.ceiling is None:
             self.ceiling = request_limit
 
+    def mark_breaker_refused(self, system: str) -> None:
+        if self.breaker_refused is None:
+            self.breaker_refused = system
+
 
 @model(frozen=True)
 class GatherDeps(AgentDeps):
@@ -209,6 +216,10 @@ class GatherDeps(AgentDeps):
     #: Made and read by `_run_gather`. `None` outside a dispatch (e.g. lead zero's harness
     #: calls), where a guard's dead end unwinds as an exception instead.
     stop: LeadStop | None = field(kw_only=True, default=None, compare=False, repr=False)
+    #: True only for the lead the HARNESS dispatches (`l-00c`, #1222), never for a lead MAIN
+    #: dispatches under the same id: its failures mark its system down but are not counted
+    #: toward the run-level failure kill.
+    harness_lead: bool = field(kw_only=True, default=False)
 
 
 def _record_lesson_load(

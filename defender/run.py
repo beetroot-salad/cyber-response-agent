@@ -457,7 +457,7 @@ def resume_world(episode: Episode, world_label: str, *, tenant: Callable[[], Any
         _family.load_family(episode.view()), world_label, episode.dir)
 
 
-def _screened_source_alert(episode_dir: Path) -> Path:
+def _screened_source_alert(episode: Episode) -> Path:
     """The alert a sibling investigates — the source run's, as launch copied it into the
     episode — or the refusal that says it is not a plain file.
 
@@ -465,10 +465,9 @@ def _screened_source_alert(episode_dir: Path) -> Path:
     `materialize_run` follow it. Checked before the copy so outside bytes never become this
     run's alert.
     """
-    from defender._episode_paths import EpisodePaths
     from defender.run_repository import artifact_file
 
-    alert = EpisodePaths(Path(episode_dir)).source_alert
+    alert = episode.source_alert.path
     if not artifact_file(alert):
         sys.exit(
             f"the episode's copy of the source alert {alert} is not a plain file — the alert "
@@ -556,12 +555,14 @@ def _resume_episode_dir(ns: argparse.Namespace) -> Path | None:
     return manifest.parent
 
 
-def _case_input(ns: argparse.Namespace, world: Any) -> tuple[Path, str | None]:
+def _case_input(ns: argparse.Namespace, world: Any,
+                episode: Episode | None) -> tuple[Path, str | None]:
     """The alert this run investigates and its run id: a sibling's from its world (the source
     run's alert, screened before the preflight like other argument errors), else the
     operator's."""
     if world is not None:
-        return _screened_source_alert(Path(world.episode_dir)), world.run_id
+        assert episode is not None  # a sibling is only ever resumed through its held episode
+        return _screened_source_alert(episode), world.run_id
     return ns.alert.resolve(), ns.run_id
 
 
@@ -622,7 +623,7 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
         world = _resume_target(ns, episode=episode, tenant=tenant_of)
         _sibling_tenant_agrees(world, accepted)
 
-        alert, run_id = _case_input(ns, world)
+        alert, run_id = _case_input(ns, world, episode)
 
         # The tenant's settings, resolved before anything is spent; nothing below reads them again.
         tenant = tenant_of()

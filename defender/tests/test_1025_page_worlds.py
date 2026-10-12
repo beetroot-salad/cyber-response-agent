@@ -31,6 +31,7 @@ from pathlib import Path
 import pytest
 
 from defender.tests import _episode_1025 as E
+from defender.tests._alert_plant import plant_source_copy
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests import test_1025_stage_timing as ST
@@ -908,8 +909,7 @@ def test_1025_no_worlds_alert_json_carries_an_alert_id(tmp_path):
     renders.
     """
     ep = E.sample_episode(tmp_path)
-    for label in E.WORLDS:
-        (ep.world(label) / "alert.json").write_text(json.dumps({"rule": {"id": "r1"}}), encoding="utf-8")
+    plant_source_copy(ep.dir, json.dumps({"rule": {"id": "r1"}}).encode("utf-8"))
     header = render(ep).one("header").text()
     assert "not on the record" in header, header
     assert E.EPISODE_ID in header, header
@@ -972,10 +972,9 @@ def test_1025_alert_fields_reach_the_header_frame(tmp_path):
     is visible in the header.
     """
     ep = E.sample_episode(tmp_path)
-    for label in E.WORLDS:
-        (ep.world(label) / "alert.json").write_text(json.dumps(
-            {"alert_id": "id<img src=x onerror=alert(1)>", "rule": {"name": "<b>rule</b> name"}}),
-            encoding="utf-8")
+    plant_source_copy(ep.dir, json.dumps(
+        {"alert_id": "id<img src=x onerror=alert(1)>", "rule": {"name": "<b>rule</b> name"}}
+    ).encode("utf-8"))
     page = render(ep)
     header = page.one("header")
     assert "<b>rule</b> name" in header.text()

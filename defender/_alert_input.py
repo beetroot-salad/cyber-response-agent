@@ -372,19 +372,28 @@ def read_record(record_path: Path) -> AlertRecord | None:
     return None if text is None else parse_record(text)
 
 
-def verified_alert(alert_path: Path, record_path: Path, *, run_name: str) -> tuple[bytes, AlertRecord]:
-    """The stored alert's bytes and the record they match: both read, the bytes' digest compared
-    with the record's. Raises `AlertReplaced` (a fixed reason naming `run_name`, carrying no byte
-    of either file) when the record is missing or malformed, the alert is unreadable, or the
-    digest differs."""
+def verified_input(alert_path: Path, record_path: Path, *, run_name: str) -> tuple[bytes, str]:
+    """The stored alert's bytes and the text of the record they match: both read once, the
+    bytes' digest compared with the record's. Raises `AlertReplaced` (a fixed reason naming
+    `run_name`, carrying no byte of either file) when the record is missing or malformed, the
+    alert is unreadable, or the digest differs."""
     refusal = AlertReplaced(
         f"the alert stored for run {run_name} does not match the digest its record carries "
         "(or one of the two is missing) — the run's input was replaced or damaged, and nothing "
         "is read from it")
-    record = read_record(record_path)
-    if record is None:
+    text, _reason = _io.read_guarded(record_path)
+    record = None if text is None else parse_record(text)
+    if text is None or record is None:
         raise refusal
     raw, _reason = _io.read_bytes_guarded(alert_path)
     if raw is None or digest_of(raw) != record.digest:
         raise refusal
+    return raw, text
+
+
+def verified_alert(alert_path: Path, record_path: Path, *, run_name: str) -> tuple[bytes, AlertRecord]:
+    """The stored alert's bytes and the record they match (see `verified_input`)."""
+    raw, text = verified_input(alert_path, record_path, run_name=run_name)
+    record = parse_record(text)
+    assert record is not None  # verified_input just parsed it
     return raw, record

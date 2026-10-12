@@ -26,6 +26,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._alert_plant import plant_alert
+
 
 def cli_mod():
     """`defender.learning.branch.cli` — imported per test, so a missing target is one failure
@@ -146,6 +148,7 @@ def test_an_existing_episode_is_refused_even_if_only_stale_world_rows_remain(
         primed.append(claimed.dir)
         return PrimeReport()
 
+    plant_alert(tmp_path / "source", {"rule": {"id": "r"}})
     with cli.prepare_episode("episode-001", tmp_path / "source", tenant=tenant_paths,
                              prime=prime) as fresh:
         assert fresh.dir == episodes_root / "episode-001-r2"

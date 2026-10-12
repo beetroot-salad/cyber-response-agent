@@ -22,8 +22,8 @@ from typing import Any
 
 import contextlib
 
-from defender import _alert_input
-from defender._io import Bound, bind
+from defender import _alert_input, _shown
+from defender._io import ENTRY_DIR, ENTRY_FILE, Bound, bind
 from defender._episode_paths import LAYOUT, WORLD_LEAVES, OracleStorePaths
 from defender.run_repository import RUN_LAYOUT
 from defender.hooks.record_lesson_load import (
@@ -233,7 +233,9 @@ def _union_empty_after_a_walk(union_notes: dict[str, Any]) -> bool:
     return not (_union_unattempted(union_notes)
                 or union_notes.get("source_run_excluded")
                 or union_notes.get("skipped_unreadable")
-                or union_notes.get("skipped_unclosed"))
+                or union_notes.get("skipped_unclosed")
+                or union_notes.get("skipped_unrecorded")
+                or union_notes.get("skipped_runs"))
 
 
 def _exclusion_lines(union_notes: dict[str, Any]) -> list[str]:  # noqa: D401
@@ -256,11 +258,17 @@ def _exclusion_lines(union_notes: dict[str, Any]) -> list[str]:  # noqa: D401
                    "sibling union had nothing to match trials against and was never attempted — this is not "
                    "a statement that no sibling trial exists)")
     for key, what in (("skipped_unreadable", "could not be read"),
-                      ("skipped_unclosed", "never reached a close")):
+                      ("skipped_unclosed", "never reached a close"),
+                      ("skipped_unrecorded", "carry no record of the alert, so are not runs")):
         count = union_notes.get(key) or 0
         if count:
             out.append(f"({count} further trial(s) of this alert {what} and are excluded here "
+                       "and from the spread below)" if key != "skipped_unrecorded" else
+                       f"({count} folder(s) under the runs base {what} and are excluded here "
                        "and from the spread below)")
+    # Each skipped folder by name, one inert escaped line apiece: a name is a folder's, not ours.
+    for name, why in union_notes.get("skipped_runs") or []:
+        out.append(f"- skipped {_shown.quoted(name)}: {why}")
     return out
 
 
@@ -321,30 +329,55 @@ def _world_entry(doc: dict[str, Any], label: str) -> dict[str, Any]:
 
 def _sibling_row(
     run: Bound, run_id: str, *, digest: str | None,
-) -> tuple[dict[str, Any] | None, str | None]:
+) -> tuple[dict[str, Any] | None, str | None, str]:
     """Classify one directory under the runs base.
 
-    `(row, None)`: a finished trial of this alert. `(None, key)`: a skipped trial of this
-    alert, `key` naming its count in `union_notes`. `(None, None)`: not a trial of this alert
-    (no record, or a record of another alert), so not counted as a skip either.
+    `(row, None, "")`: a finished trial of this alert. `(None, key, why)`: a skipped folder,
+    `key` naming its count in `union_notes`, `why` the reason shown beside its name.
+    `(None, None, "")`: a run of another alert, not counted as a skip.
 
     A trial is a run whose record carries the episode's digest: the stored alert is not read,
     so one rewritten on the host is still listed. `read_archived_report` never raises, so one
     bad byte in an unrelated run cannot refuse the grade. Both reads are no-follow."""
     record_rec = run.read(RUN_LAYOUT.alert_record)
     if record_rec.absent:
-        return None, None
+        return None, "skipped_unrecorded", "it has no record of the alert"
     record = _alert_input.parse_record(record_rec.text) if record_rec.text else None
     if record is None:
-        return None, "skipped_unreadable"
+        return None, "skipped_unreadable", "its record of the alert cannot be read"
     if record.digest != digest:
-        return None, None
+        return None, None, ""
     read = read_archived_report(run, RUN_LAYOUT.report)
     if read.absent:
-        return None, "skipped_unclosed"
+        return None, "skipped_unclosed", "it never reached a close (no report)"
     if not read.text:
-        return None, "skipped_unreadable"
-    return {"run_id": run_id, "disposition": read.disposition}, None
+        return None, "skipped_unreadable", "its report cannot be read"
+    return {"run_id": run_id, "disposition": read.disposition}, None, ""
+
+
+def _take_entry(
+    runs: Bound, run_id: str, kind: str, *, digest: str, source_run_id: str | None,
+    siblings: list[dict[str, Any]], notes: dict[str, Any],
+) -> None:
+    """File one entry of the runs base: a trial, a named skip, the excluded source run, or
+    nothing (a plain file, a `_`-prefixed bookkeeping folder, a run of another alert)."""
+    if kind == ENTRY_FILE or run_id.startswith("_"):
+        return
+    if kind != ENTRY_DIR:
+        # A link or special file where a run folder would be: never followed, named.
+        notes["skipped_runs"].append((run_id, "not a plain directory (a link or special file)"))
+        return
+    if source_run_id is not None and run_id == source_run_id:
+        notes["source_run_excluded"] = run_id
+        if runs.under(run_id).read(RUN_LAYOUT.alert_record).absent:
+            notes["skipped_runs"].append((run_id, "it has no record of the alert"))
+        return
+    row, skipped, why = _sibling_row(runs.under(run_id), run_id, digest=digest)
+    if row is not None:
+        siblings.append(row)
+    elif skipped is not None:
+        notes[skipped] += 1
+        notes["skipped_runs"].append((run_id, why))
 
 
 def sibling_union(
@@ -356,6 +389,7 @@ def sibling_union(
     "never attempted", not rendered as an empty union."""
     notes: dict[str, Any] = {
         "source_run_excluded": None, "skipped_unreadable": 0, "skipped_unclosed": 0,
+        "skipped_unrecorded": 0, "skipped_runs": [],
         "runs_base_unset": runs_base is None, "runs_base_missing": False,
         "runs_base_unreadable": None,
         "alert_unidentified": digest is None,
@@ -379,15 +413,9 @@ def sibling_union(
             # The runs base need not exist (a tenant with no run yet, or a typo); nobody looked.
             notes["runs_base_missing"] = True
             return siblings, notes
-        for run_id in listing.dirs():
-            if source_run_id is not None and run_id == source_run_id:
-                notes["source_run_excluded"] = run_id
-                continue
-            row, skipped = _sibling_row(runs.under(run_id), run_id, digest=digest)
-            if row is not None:
-                siblings.append(row)
-            elif skipped is not None:
-                notes[skipped] += 1
+        for run_id, kind in sorted((listing.entries or {}).items()):
+            _take_entry(runs, run_id, kind, digest=digest, source_run_id=source_run_id,
+                        siblings=siblings, notes=notes)
     return siblings, notes
 
 

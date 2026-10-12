@@ -47,6 +47,14 @@ from defender._episode_handle import Episode
 from defender.tests import _spec1047 as S
 
 
+def _digest_of(run_dir):
+    """The digest the run's record carries: the union's key for a trial of this run's alert."""
+    from defender import _alert_input
+    from defender.run_repository import RunPaths
+
+    return _alert_input.digest_of(RunPaths(run_dir).alert.read_bytes())
+
+
 def _verified_run_dir(tmp_path, name="run"):
     """A finished run dir the corpus-refusal gate will accept: its alert, its report, and the
     scrub verdict sidecar recording that the reap walk completed."""
@@ -152,11 +160,11 @@ def test_sibling_union_still_short_circuits_when_the_gradable_set_is_empty(tmp_p
     assert [label for label, row in graded.items() if family.is_gradable_row(row)] == [], (
         "an episode whose every non-control world was cut short still has a measuring world")
 
-    rows, _meta = render.sibling_union(None, alert_id=S.ALERT_ID, source_run_id=None)
+    rows, _meta = render.sibling_union(None, digest="0" * 64, source_run_id=None)
     assert rows == [], "the short-circuited union walked something and returned rows"
 
     base, src = S.runs_base(tmp_path / "populated")
-    walked, _meta = render.sibling_union(base, alert_id=S.ALERT_ID, source_run_id=None)
+    walked, _meta = render.sibling_union(base, digest=_digest_of(src), source_run_id=None)
     assert isinstance(walked, list), (
         "the control failed: the union over a real runs base did not answer with rows at all, "
         "so the empty answer above proves nothing about the short-circuit")
@@ -307,7 +315,7 @@ def test_the_sibling_prior_walks_a_runs_base_that_now_holds_run_end_records(tmp_
     (src / "lessons_loaded.jsonl").write_text(
         json.dumps({"lesson_name": lesson, "ts": "2026-09-16T11:00:00Z"}) + "\n",
         encoding="utf-8")
-    before = render.sibling_union(base, alert_id=S.ALERT_ID, source_run_id=None)
+    before = render.sibling_union(base, digest=_digest_of(src), source_run_id=None)
     slugs = [src.name]
     index_before = S.mod("evals.held_out").index_runs(slugs, base)
     traced_before = trace_lesson.in_context_cases(lesson, None, base)
@@ -317,7 +325,7 @@ def test_the_sibling_prior_walks_a_runs_base_that_now_holds_run_end_records(tmp_
     S.plant_sidecar(src, truncated_by="request-limit")
     assert S.sidecar_path(src).parent == base, (
         "the fixture did not put the new leaf under the runs base, so this walks nothing new")
-    assert render.sibling_union(base, alert_id=S.ALERT_ID, source_run_id=None) == before, (
+    assert render.sibling_union(base, digest=_digest_of(src), source_run_id=None) == before, (
         "the sibling prior's walk answered differently once a run-end record sat beside the "
         "run dir")
     assert S.mod("evals.held_out").index_runs(slugs, base) == index_before, (

@@ -59,8 +59,8 @@ in front of you.
   bounds the sample, never the count. Do not reach for `esql` to re-derive a
   number `total` already gave you, and do not report a count as unavailable
   because `truncated` is set.
-- **The documents you were bound from may carry `kibana.alert.rule.*`, and the
-  rule is NOT an axis.** On a sequence alert the ancestor documents are
+- **The alert you were bound from may carry `kibana.alert.rule.*`, and the
+  rule is NOT an axis.** On a sequence alert the alert's own documents are
   themselves alert documents, each naming the rule that fired
   (`kibana.alert.rule.rule_id`, `kibana.alert.rule.name`). Do not AND any
   `kibana.alert.rule.*` term into `${entity_filter}`: this is a count ACROSS
@@ -78,8 +78,8 @@ in front of you.
   LEADING SPACE.** `Failed password for invalid user <u>` lands `user.name` as
   `" dev.dana"` while the sibling `Invalid user <u>` line lands it clean
   (`skills/elastic/SKILL.md` §Gaps, `sshd-auth-history.md` §Pitfalls) — and an
-  alert copies its source document's value verbatim, so an entity resolved off an
-  ancestor document reaches this query space-prefixed. `user.name:" dev.dana"` is
+  alert copies its source document's value verbatim, so an entity read off the
+  alert reaches this query space-prefixed. `user.name:" dev.dana"` is
   a different keyword term from `user.name:"dev.dana"` and matches nothing: a
   space-prefixed entity silently returns `"total": 0`, which reads as "no
   correlated alerts" rather than as a parser quirk. OR both spellings

@@ -454,6 +454,13 @@ def write_family(episode_dir: Path, doc: dict | None = None) -> Path:
     return manifest
 
 
+#: Whether the builders here plant what the front door leaves (#1222): a source run's alert
+#: record, and the episode's copies of them. The older suites are written for runs the front door
+#: made, so `tests/conftest.py` turns it on for them; #1222's own suite plants each of those
+#: itself, including their absence, so it runs with it off.
+PLANT_RECORDS = False
+
+
 def episode(tmp_path: Path, *, doc: dict | None = None,
             episode_id: str = EPISODE_ID, root: Path | None = None) -> Path:
     """An episode dir with its manifest and an empty `served/` — the shape `Step.QUESTIONER`
@@ -482,7 +489,8 @@ def episode(tmp_path: Path, *, doc: dict | None = None,
     if not base.exists():
         base.write_text("", encoding="utf-8")
     write_family(ep, doc)
-    _plant_source_input(ep, (doc or {}).get("source_run_dir"))
+    if PLANT_RECORDS:
+        _plant_source_input(ep, (doc or {}).get("source_run_dir"))
     return ep
 
 
@@ -557,8 +565,12 @@ def current_tenant() -> Any:
 
 
 def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
-              tenant_id: str | None = None) -> tuple[Path, Path]:
+              tenant_id: str | None = None, recorded: bool | None = None) -> tuple[Path, Path]:
     """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir).
+
+    `recorded=False` is a run from before #1222: its alert at the former place and no record, so
+    it is not a run any reader admits. `recorded=True` is the run the front door makes: the alert
+    and its record in the input directory. Left out, `PLANT_RECORDS` decides (see there).
 
     #1078: `base` is a real tenant's runs base (`<data root>/<tenant>/runs`) — the data root
     the autouse `data_root` fixture already pointed this test's `DEFENDER_DATA_ROOT` at, with a
@@ -587,9 +599,13 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
         _tenant.ensure_runs_base_record(base, tenant_id)
     src = base / source_run_id
     (src / "gather_raw").mkdir(parents=True, exist_ok=True)
-    from defender.tests._alert_plant import plant_alert
+    if PLANT_RECORDS if recorded is None else recorded:
+        from defender.tests._alert_plant import plant_alert
 
-    plant_alert(src, {"rule": {"id": "v2-cross-tier-ssh-pivot"}})
+        plant_alert(src, {"rule": {"id": "v2-cross-tier-ssh-pivot"}})
+    else:
+        (src / "alert.json").write_text(json.dumps({"rule": {"id": "v2-cross-tier-ssh-pivot"}}),
+                                        encoding="utf-8")
     (src / "investigation.md").write_text(branchable_investigation(), encoding="utf-8")
     (src / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
     (src / "executed_queries.jsonl").write_text("", encoding="utf-8")
@@ -940,7 +956,7 @@ def configured_layout(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
     (J46) — never one the launcher composes.
     """
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(tmp_path / "configured-data-root"))
-    base, src = runs_base(tmp_path)
+    base, src = runs_base(tmp_path, recorded=True)
     root = tmp_path / "episodes-root"
     monkeypatch.setenv(RUNS_BASE_ENV, str(base))
     monkeypatch.setenv(EPISODES_BASE_ENV, str(root))

@@ -57,7 +57,7 @@ if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VE
 if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender import _alert_input, _io, _provenance
+from defender import _alert_input, _provenance
 from defender._episode_handle import Episode
 from defender._episode_paths import EpisodePaths
 from defender._io import (
@@ -210,21 +210,17 @@ def source_input(source_run_dir: Path) -> tuple[bytes, str]:
     into the episode, and everything downstream reads the copy."""
     run_paths = RunPaths(Path(source_run_dir))
     try:
-        raw, _record = _alert_input.verified_alert(
+        return _alert_input.verified_input(
             run_paths.alert, run_paths.alert_record, run_name=Path(source_run_dir).name)
     except _alert_input.AlertReplaced as replaced:
         raise SourceInputReplaced(f"[branch] {replaced}") from replaced
-    record_text, _reason = _io.read_guarded(run_paths.alert_record)
-    assert record_text is not None  # verified_alert just read it
-    return raw, record_text
 
 
 def _copy_source_input(episode: Episode, raw: bytes, record_text: str) -> None:
     """Put the source run's alert and its record in the episode, once (A1): the judge's whole
     input about the alert, and every sibling's own."""
-    paths = EpisodePaths(episode.dir)
-    _io.rooted_write(episode.dir, paths.rel.source_alert, raw, mode="create")
-    _io.rooted_write(episode.dir, paths.rel.source_record, record_text, mode="create")
+    episode.source_alert.create(raw)
+    episode.source_record.create(record_text)
 
 
 def prepare_episode(
@@ -243,6 +239,8 @@ def prepare_episode(
     `prime` is injectable so a test can observe whether priming ran; it is handed the episode
     this returns.
     """
+    # An id that cannot name a directory is refused first, before anything is read or made.
+    refuse_bad_episode_id(episode_id)
     # Judged before an episode directory is claimed, so a refused source leaves no debris.
     raw, record_text = source_input(Path(source_run_dir))
     root = episodes_root(tenant=tenant)
@@ -1800,7 +1798,7 @@ def _author(  # noqa: PLR0913 — the step's inputs
         source_run_dir=source, episode_dir=episode.dir,
         invoke=questioner,
         leads=questioner_leads(leads),
-        alert=branch.source_alert(source) or {},
+        alert=branch.source_alert(source) or {},  # lint-run-records: ok — the branch package's reader of the source run's alert, not the episode's copy accessor
         frontier=questioner_mod.read_frontier(source, fences_at=fences),
         served_systems=tuple(served),
         samples=samples,

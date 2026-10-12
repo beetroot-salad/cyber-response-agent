@@ -410,7 +410,9 @@ def test_921_finding_row_carries_the_twelve_keys_persist_writes(tmp_path):
     expected_dirs = {f"episodes/{ep.name}/worlds/{label}" for label in ("b", "c")}
 
     for row in rows:
-        assert set(row) == set(J.ROW_KEYS), (
+        # `recorded_signature` (#1222 B2) is the one key beyond the thirteen, present exactly when
+        # the episode's record holds a signature.
+        assert set(row) - {"recorded_signature"} == set(J.ROW_KEYS), (
             f"row keys differ from the queue's shape: {sorted(set(row) ^ set(J.ROW_KEYS))}")
         assert row["direction"] == "family"
         assert row["judge_outcome"] == record["verdict_word"]

@@ -453,10 +453,13 @@ class Res:
 
 def materialize_alert(root: Path, doc: dict) -> Path:
     """The on-disk run dir a driven run starts from — `_replay_harness.materialize`'s shape,
-    but writing a SYNTHESIZED alert rather than copying a golden."""
+    but planting a SYNTHESIZED alert (and the record the front door settles beside it) rather
+    than copying a golden."""
+    from defender.tests import _alert_plant
+
     run_dir = root / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
-    (run_dir / "alert.json").write_text(json.dumps(doc, indent=1), encoding="utf-8")
+    _alert_plant.plant_alert(run_dir, doc)
     return run_dir
 
 
@@ -527,11 +530,12 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
         if verbs is ... else verbs
     )
     main = ReplayFn(main_turns if main_turns is not None else [
-        Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),
+        Turn(tool_calls=[("read_file", {"path": str(RunPaths(run_dir).alert)})]),
         Turn(text="Investigation complete."),
     ])
     gather = ReplayFn(gather_turns if gather_turns is not None
                       else [Turn(text=CORRELATION_SUMMARY)])
+    gather.serves_correlation = True   # this scenario's gather script is `l-00c`'s (#1222)
     if before is not None:
         before(run_dir)
     sink = stores if stores is not None else []

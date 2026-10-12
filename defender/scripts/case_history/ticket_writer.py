@@ -105,6 +105,9 @@ def open_case_ticket(
         case_id = run_dir.name
         payload = case_ticket.alert_to_open_payload(
             record.facts, case_id, mapping=tenant.ticket_mapping)
+        # A receipt from an earlier attempt must not outlive this open: only a refusal below
+        # leaves one, for the record leg to carry on.
+        clear_receipt(run_dir)
         status, body = deps.request(config, "POST", "/tickets", payload, ctx=ctx)
         if status is None:
             _logger.warning(f"open {case_id}: {body}")
@@ -114,6 +117,11 @@ def open_case_ticket(
             _logger.info(f"open {case_id}: created ({status})")
         else:
             _logger.warning(f"open {case_id}: HTTP {status}: {body}")
+            # A store that REFUSED the ticket is said so where the operator looks (the receipt
+            # and the run page), quoting the store's reason; the record leg keeps it.
+            _write_receipt(
+                run_dir, config, case_id, RECEIPT_ERROR,
+                redact_settings_path(f"{OPEN_REFUSED}: HTTP {status}: {body}", tenant.settings))
     except Exception as e:  # noqa: BLE001 — a post-step must never break the run
         _logger.warning(f"open raised, ignored: {e!r}")
 
@@ -124,6 +132,8 @@ def open_case_ticket(
 RECEIPT_COMMENTED = "commented"
 RECEIPT_ESCALATED = "escalated"
 RECEIPT_ERROR = "error"
+#: What the open leg's refusal receipt opens with: the store would not take the case ticket.
+OPEN_REFUSED = "the store refused the case ticket"
 _RECEIPT_OK = frozenset({RECEIPT_COMMENTED, RECEIPT_ESCALATED})
 
 
@@ -245,11 +255,25 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
     if not ok:
         reason = f"{'HTTP ' + status if status else 'transport error'}: {body}"
         reason = redact_settings_path(reason, ctx.tenant.settings)
+        refused = _prior_open_refusal(run_dir)
+        if refused is not None:
+            # The comment fell with the ticket: the cause worth reading is the refusal.
+            reason = f"{refused} (the record comment then failed: {reason})"
         _logger.warning(f"record {case_id}: {reason}")
     else:
         reason = None
         _logger.info(f"record {case_id}: comment posted ({status}, {word})")
     _write_receipt(run_dir, config, case_id, word if ok else RECEIPT_ERROR, reason)
+
+
+def _prior_open_refusal(run_dir: Path) -> str | None:
+    """The open leg's refusal text this attempt left in the receipt, or `None`."""
+    try:
+        prior = json.loads(receipt_path(run_dir).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    reason = prior.get("reason") if isinstance(prior, dict) else None
+    return reason if isinstance(reason, str) and reason.startswith(OPEN_REFUSED) else None
 
 
 def receipt_path(run_dir: Path) -> Path:

@@ -421,7 +421,10 @@ def accepted_episode(tmp_path: Path, *, root: Path | None = None,  # noqa: PLR09
         elif label != "a":
             write_ledger(ep, label, [])
     outcome_record(ep, outcome, family_stamp=family_stamp)
-    plant_source_copy(ep, ALERT_RAW)
+    from defender.tests import _triplet_947
+
+    if _triplet_947.PLANT_RECORDS:
+        plant_source_copy(ep, ALERT_RAW)
     return ep
 
 

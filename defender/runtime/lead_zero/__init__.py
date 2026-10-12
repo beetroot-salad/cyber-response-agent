@@ -1,66 +1,48 @@
-"""Harness-executed lead-0: the work the harness does before MAIN's first ORIENT turn.
+"""The harness-dispatched correlation lead (`l-00c`), run to its end before MAIN's opening message.
 
-It resolves the alert's ancestor documents (item 1) and dispatches one tightly-bounded
-correlation gather lead (item 3), both under the reserved ids ``l-000``/``l-00c`` so the
-learning loop and the review gate cite them like any model-dispatched lead. ``orient.py``
-stays a pure text-assembler that formats the returned block as an ORIENT section.
+The lead reads this run's alert itself (its stored goal is the harness contract plus a pointer to
+the alert file, never alert bytes), is bound by ONE harness deadline, and ends in exactly one way
+MAIN is told of: its framed summary, or one fixed sentence naming why there is none (A2, A4, A7).
+The ending is decided here, once, from what the lead did, never from text a model or provider
+wrote.
 
-  * `_spec`    — ids, statuses and field names.
-  * `_capture` — issuing a call and recording it (budget gate, call ledger, `:L` row).
-  * `_render`  — turning documents into the section the model reads.
-  * `_items`   — ancestor resolution and correlation.
+  * `_spec`    — the reserved id, the ending vocabulary, the correlation grant.
+  * `_agreement` — the run-start check that the configured template and the table agree.
+  * `_capture` — the lead's run-folder bookkeeping (declaring row, spawn spend, queries rows).
+  * `_items`   — the lead's contract and its one dispatch.
 """
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import re
-import sys
-from collections.abc import Mapping
-from dataclasses import dataclass, replace
+import math
+import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
-from defender._io import read_jsonl_rows, read_text_soft, read_text_utf8
+from defender._io import read_text_utf8
 from defender.run_repository import RunPaths
-from defender._untrusted import wrap_fresh
-from defender.hooks.budget_enforcer import (
-    DEFAULT_LIMITS,
-    BudgetKill,
-    read_budget,
-    tail_exhausted,
-    update_budget_locked,
-)
+from defender.hooks.budget_enforcer import BudgetKill
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
-from defender.runtime import circuit_breaker
+from defender.runtime import circuit_breaker, run_end, session_store
 from defender.runtime.verb_grant import GrantError, VerbGrant
-from defender.runtime.verbs import VerbContext
 from ._spec import (
-    ALERT_ID_FIELD,
-    BUILDING_BLOCK_FIELD,
+    CORRELATION_HEADING,
     CORRELATION_REQUEST_LIMIT,
-    ELIDED,
-    GROUP_ID_FIELD,
+    ENDING_CLAIM_COLLIDED,
+    ENDING_CLAIM_FAILED,
+    ENDING_DISPATCH_RAISED,
+    ENDING_EMPTY_OUTPUT,
+    ENDING_EVERY_CALL_FAILED,
+    ENDING_REQUEST_LIMIT,
+    ENDING_TIMED_OUT,
+    ENDING_TRIPPED_BREAKER,
+    ENDING_WITHHELD,
     HARNESS_PROVENANCE,
-    ITEM1_GOAL,
-    ITEM1_SYSTEM,
-    ITEM1_WHAT_TO_SUMMARIZE,
-    L0,
     L3,
-    LEAD_ZERO_HEADING,
-    MESSAGE_CHAR_BUDGET,
     PROVENANCE_KEY,
     RESERVED_LEAD_IDS,
-    SHORTFALL,
-    STATUS_EMPTY,
-    STATUS_FAILED,
-    STATUS_RESOLVED,
-    STATUS_TRUNCATED,
-    UNAVAILABLE,
-    _ANY_RUN_TAG,
-    _FENCE_RUN,
     correlation_grant,
     correlation_system,
 )
@@ -69,282 +51,234 @@ from ._agreement import (
     CorrelationDispatchError,
     resolve_correlation_dispatch,
 )
-from defender._async import run_sync as _run_sync
-
-from ._capture import (
-    LeadZeroResult,
-    _CallLedger,
-    _CaptureDeps,
-    _UNMAPPED_FAULT_EXIT,
-    _breaker_failures,
-    _budget_account,
-    _budget_gate,
-    _build_deps,
-    _capture_issue,
-    _declare_l_finding,
-    _last_row_seq,
-    _record_manual_row,
-    _rows_for,
-    _sanitize,
-)
-from ._render import (
-    _elide,
-    _flatten_doc,
-    _render_doc,
-    _sort_chrono,
-    _unavailable,
-)
-from ._items import (
-    _DS_RE,
-    _correlation_contract,
-    _fetch_batched,
-    _map_backing_index,
-    _resolve_item1,
-    dispatch_correlation,
-)
+from ._capture import _budget_account, _declare_l_finding, _rows_for
+from ._items import LeadEnd, correlation_contract, run_correlation_lead
 
 _logger = logging.getLogger(__name__)
 
+#: The cap-table key of the ONE harness deadline around the whole correlation lead (A7). A key of
+#: the run's `limits`, so an operator's shortened clock is a cap-table edit like any other.
+DEADLINE_KEY = "correlation_deadline"
+#: Its fixed ceiling, in seconds: the default run clock (1200 s) less 120 s, the longest step the
+#: deadline cannot cut (a `bash` call), less MAIN's minimum time (which has no number: zero).
+#: Fixed against the default clock, checked once; never recomputed from a run's own settings.
+DEADLINE_CEILING_S = 1200 - 120
 
-def prepare_correlation_lead(
-    run_dir: Path, alert: dict, ancestor_block: str, status: str,
-    *, dispatch: CorrelationDispatch,
-) -> tuple[str, list[str]] | None:
-    """The synchronous half of item 3: gate on item 1's status (RESOLVED or TRUNCATED), build
-    the contract, and claim `l-00c`'s leads row before MAIN's first turn. Returns
-    `(goal, what_to_summarize)` when item 3 should dispatch, else `None`.
 
-    `dispatch.system is None` (the table grants the lead no query verb) is checked first, so a
-    lead that will never run never owns a leads row. The system and template id come from
-    `dispatch`, the run-start check's result. `ancestor_block` is `LeadZeroResult.text`, so the
-    lead reads the same bytes MAIN reads."""
-    if dispatch.system is None:
-        return None
-    if status not in (STATUS_RESOLVED, STATUS_TRUNCATED):
-        return None
-    contract = _correlation_contract(alert, ancestor_block, dispatch.template_id)
-    if contract is None:
-        return None
-    goal, what = contract
+class CorrelationDeadlineError(ValueError):
+    """The run's correlation deadline is missing or unusable: a setup fault that stops the run
+    before the lead starts. Never replaced by a fallback — a zero is not 'unbounded'."""
+
+
+def correlation_deadline(limits: dict) -> float:
+    """@owns correlation_deadline — the correlation deadline in seconds from the run's cap
+    table, or `CorrelationDeadlineError` naming the setting. The one reader: the run-start
+    check and the dispatch both call it, so the value that was checked is the value used."""
+    if DEADLINE_KEY not in limits:
+        raise CorrelationDeadlineError(
+            f"the cap table has no {DEADLINE_KEY!r}: the correlation lead is bound by one "
+            "deadline and is not run without it")
+    value = limits[DEADLINE_KEY]
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise CorrelationDeadlineError(
+            f"{DEADLINE_KEY} must be a finite number of seconds, got {value!r}")
+    if value <= 0:
+        raise CorrelationDeadlineError(
+            f"{DEADLINE_KEY} must be a positive number of seconds, got {value!r}")
+    if value > DEADLINE_CEILING_S:
+        raise CorrelationDeadlineError(
+            f"{DEADLINE_KEY} {value!r} is above its ceiling of {DEADLINE_CEILING_S} s (the "
+            "default run clock less the longest step the deadline cannot cut)")
+    return float(value)
+
+
+@dataclass(frozen=True)
+class CorrelationOutcome:
+    """How the correlation lead ended: exactly one of `summary` (the lead's framed result) and
+    `ending` (a member of A2's closed list, named to MAIN as one fixed sentence)."""
+
+    summary: str | None = None
+    ending: str | None = None
+    #: The system the lead was dispatched on (names the one marked down, for `tripped_breaker`).
+    system: str | None = None
+
+
+#: One fixed sentence per ending, each saying in its own words why there is no summary. No error
+#: text, host path or alert byte ever enters one (A2): they are constants, not renderings.
+_SENTENCES = {
+    ENDING_DISPATCH_RAISED: (
+        "The correlation lead could not be run: dispatching it raised an error, so no "
+        "correlation summary exists for this alert and none is coming."),
+    ENDING_CLAIM_COLLIDED: (
+        f"The correlation lead did not run: the lead id {L3} was already claimed in this run "
+        "folder, so its claim collided and nothing was dispatched. No correlation summary "
+        "exists for this alert."),
+    ENDING_CLAIM_FAILED: (
+        "The correlation lead did not start: the harness could not write the lead's own "
+        "records or open its session. No correlation summary exists for this alert and none "
+        "is coming."),
+    ENDING_REQUEST_LIMIT: (
+        "The correlation lead was stopped at its own request limit before it could report. "
+        "No correlation summary exists for this alert."),
+    ENDING_EMPTY_OUTPUT: (
+        "The correlation lead finished but wrote nothing, so there is no correlation summary "
+        "for this alert."),
+    ENDING_EVERY_CALL_FAILED: (
+        "Every query the correlation lead issued failed, so it measured nothing and there is "
+        "no correlation summary for this alert."),
+    ENDING_TIMED_OUT: (
+        "The correlation lead timed out: it was still running when the harness's correlation "
+        "deadline passed, so it was cut off and anything it produced late was discarded. "
+        "No correlation summary exists for this alert."),
+}
+
+
+def _sentence(outcome: CorrelationOutcome, grant_home: str) -> str:
+    if outcome.ending == ENDING_WITHHELD:
+        return (
+            f"No correlation was run on this alert and none is coming: the verb-disposition "
+            f"table ({grant_home}) grants the correlation lead no query verb (withheld, or "
+            "never decided for it).")
+    if outcome.ending == ENDING_TRIPPED_BREAKER:
+        return (
+            f"The correlation lead's queries were refused: the circuit breaker marked "
+            f"{outcome.system} as down for this run. There is no correlation summary, and "
+            f"{outcome.system} is unreachable for the rest of the run.")
+    return _SENTENCES[str(outcome.ending)]
+
+
+def render_correlation_section(outcome: CorrelationOutcome, *, grant_home: str) -> str:
+    """The ONE correlation section of MAIN's opening message: a host heading naming the reserved
+    id, the lead's framed summary or its ending's sentence (never both), nothing else."""
+    reserved = (
+        f"The lead id {L3} is reserved by the harness: it was dispatched, or its absence "
+        "decided, before your first turn. Do not attach new work to it.")
+    body = outcome.summary if outcome.summary is not None else _sentence(outcome, grant_home)
+    return f"{CORRELATION_HEADING}\n{reserved}\n\n{body}"
+
+
+def _classify_end(end: LeadEnd, run_dir: Path, system: str) -> str | None:
+    """The ending of a lead that ran to its own end, or `None` for a usable summary. Decided
+    from what the lead did (the harness's stops, the lead's call results), in a fixed order:
+    a refused call names the breaker before any count of failures."""
+    if end.fault_terminator == session_store.TRUNCATED_BY_STORE:
+        raise session_store.StoreError("the correlation lead's session could not be recorded")
+    if end.breaker_refused is not None:
+        return ENDING_TRIPPED_BREAKER
+    summary = (end.summary or "").strip()
+    if end.fault_terminator == session_store.TRUNCATED_BY_REQUEST_LIMIT or (
+            end.ceiling is not None and not summary):
+        return ENDING_REQUEST_LIMIT
+    if end.fault_terminator is not None:
+        return ENDING_DISPATCH_RAISED
+    rows = _rows_for(run_dir, L3)
+    if rows and all(r.get("exit_code") != 0 for r in rows):
+        return ENDING_EVERY_CALL_FAILED
+    if not summary:
+        return ENDING_EMPTY_OUTPUT
+    return None
+
+
+async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit per way the lead fails to start; the dispatch seams
+    *, run_dir: Path, defender_dir: Path, run_id: str, verbs: Any, limits: dict,
+    make_model: Any, logger: Any, box: Any, store: Any, budget_started_monotonic: float,
+    catalog: str | None, dispatch: CorrelationDispatch, tenant: Any, deadline: float,
+) -> CorrelationOutcome:
+    """Run `l-00c` to its end inside `deadline` seconds and say how it ended.
+
+    Every way it fails to run or yields nothing is a returned ending, never a raise (A2); a
+    run-level kill (`BudgetKill`, `RunAborted`), an interrupt, a store fault after the lead
+    began, and a run folder that refuses its produced summary propagate and stop the run."""
+    system = dispatch.system
+    if system is None:
+        return CorrelationOutcome(ending=ENDING_WITHHELD)
+    run_dir = Path(run_dir)
+    pointer = RunPaths(run_dir).alert.relative_to(run_dir).as_posix()
+    goal, what_to_summarize = correlation_contract(pointer, dispatch.template_id)
     claimed = claim_lead({
         "run_dir": str(run_dir), "lead_id": L3, "goal": goal,
-        "what_to_summarize": what, "provenance": HARNESS_PROVENANCE,
+        "what_to_summarize": what_to_summarize, PROVENANCE_KEY: HARNESS_PROVENANCE,
     })
-    if claimed != CLAIMED:
-        # A collision or a failed write: this frame owns nothing, so it does nothing.
-        return None
-    _declare_l_finding(run_dir, L3, "correlation lead", dispatch.system)
-    return goal, what
+    if claimed == ALREADY_CLAIMED:
+        return CorrelationOutcome(ending=ENDING_CLAIM_COLLIDED, system=system)
+    if claimed != CLAIMED or not _declare_l_finding(run_dir, L3, "correlation lead", system):
+        return CorrelationOutcome(ending=ENDING_CLAIM_FAILED, system=system)
+    # Account the spawn explicitly: `subagent_spawns` counts the "gather" tool name, which a
+    # harness dispatch never emits. It spends the run's one budget; nothing is reserved for it.
+    _budget_account(run_dir, run_id, "gather", limits)
+    if circuit_breaker.is_tripped(run_dir, system):
+        return CorrelationOutcome(ending=ENDING_TRIPPED_BREAKER, system=system)
 
+    from ..agent_role import GATHER_AGENT_ID_PREFIX
 
-# the wrap + section assembly
-
-def _render_section(body: str) -> str:
-    """Item 1's whole block inside one untrusted frame. The trusted heading is prepended
-    separately by `render_orient_section`."""
-    return wrap_fresh(body, "untrusted")
-
-
-def render_orient_section(
-    result: LeadZeroResult, run_dir: Path | None = None,
-    *, correlation_system: str | None, grant_home: str,
-) -> str:
-    """The ORIENT section: a trusted heading naming the reserved ids, then item 1's untrusted
-    frame unmodified.
-
-    With `run_dir`, the heading checks the document for `L0`'s declaring row: the seed may have
-    refused to write it, and "do not reuse" would then trap MAIN into an `undeclared lead`
-    refusal whose only fix is writing that row. Checked on disk rather than via a flag so it
-    cannot go stale. `None` (tests only) omits the check; production passes a dir even on the
-    degraded arm, where the seed most likely never ran.
-
-    `correlation_system is None` means the table grants the correlation lead no query verb, so
-    `L3` will never run and the heading says so, pointing at `grant_home` (the tenant and file,
-    never a host path). It has no default because it is per-run (per-tenant)."""
-    heading = (
-        f"{LEAD_ZERO_HEADING} (resolved by the harness before your first turn — reserved "
-        f"lead ids {L0} (this resolution) and {L3} (a correlation lead dispatched off it, "
-        "if any) are already claimed; do not attach new work to them"
-    )
-    if run_dir is not None and not _is_declared(run_dir, L0):
-        heading += (
-            f". NOTE: {L0}'s declaring `:L findings` row is NOT in investigation.md — the "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-            f"harness could not write it. If you cite {L0}, declare it yourself in a `:L "
-            f"findings` block first; that is not reuse"
-        )
-    if correlation_system is None:
-        heading += (
-            f". NOTE: {L3} was NOT dispatched on this run — the verb-disposition table "
-            f"({grant_home}) grants the correlation lead no query verb (withheld, or "
-            "never decided for it), so no correlation was run and none is coming"
-        )
-    return heading + ")\n\n" + result.text
-
-
-def _is_declared(run_dir: Path, lead_id: str) -> bool:
-    """Is `lead_id`'s declaring `:L findings` row on the page right now?
-
-    Uses the real parser and the validator's definition (`_check_lead_refs`): a findings entry
-    with a name. A bare `:R` reference also creates an entry, just without a name, and must not
-    count, or the prompt would contradict the refusal.
-
-    Fails open (returns True) on an unparseable document: this is prompt text, not a gate, and
-    other gates already refuse such a document."""
-    from defender.skills.invlang.parser import parse_dense_companion
-
-    path = RunPaths(run_dir).investigation
-    if not path.is_file():
-        return False
-    try:
-        companion, _warnings = parse_dense_companion(read_text_utf8(path))
-    except Exception as e:  # noqa: BLE001 — prompt prose must not decide a run's fate
-        _logger.warning(f"could not check whether {lead_id} is declared: {e!r}")
-        return True
-    return any(
-        f.get("id") == lead_id and f.get("name")
-        for f in companion.get("findings", [])
-    )
-
-
-# the entry point
-
-def resolve_lead_zero(
-    *, run_dir: Path, defender_dir: Path, alert_path: Path, verbs: Any,
-    limits: dict = DEFAULT_LIMITS, run_id: str | None = None, tenant: Any,
-    env: Mapping[str, str],
-) -> LeadZeroResult:
-    """Item 1's resolution, over the run's record (`tenant`, #1107) and the run's env (`env`,
-    built once by the driver and handed in: nothing in this package builds or reads the
-    environment itself). The tenant's alerts-index fallback reads the record's corpus-engine view."""
-    run_dir = Path(run_dir)
-    defender_dir = Path(defender_dir)
-    resolved_run_id = run_id or run_dir.name
-
-    if verbs is None:
-        unavailable_text = _render_section(
-            _unavailable("no verb registry was injected into this run"))
-        return LeadZeroResult(text=unavailable_text, status=STATUS_FAILED)
-
-    alert_text, err = read_text_soft(Path(alert_path))
-    if alert_text is None:
-        body = _unavailable(f"could not read the alert: {err}")
-        return LeadZeroResult(text=_render_section(body), status=STATUS_FAILED)
-    try:
-        alert = json.loads(alert_text)
-    except (ValueError, TypeError) as e:
-        body = _unavailable(f"the alert is not valid JSON: {e!r}")
-        return LeadZeroResult(text=_render_section(body), status=STATUS_FAILED)
-    if not isinstance(alert, dict):
-        body = _unavailable("the alert is not a JSON object")
-        return LeadZeroResult(text=_render_section(body), status=STATUS_FAILED)
-
-    from ..query_tool import QueryCapture
-
-    capture = QueryCapture(verbs, "gather")
-
-    async def _go():
+    session_id: str | None = None
+    if store is not None:
         try:
-            return await _resolve_item1(
-                run_dir=run_dir, defender_dir=defender_dir, run_id=resolved_run_id,
-                alert=alert, capture=capture, env=dict(env), limits=limits,
-                tenant=tenant,
-            )
-        except (BudgetKill, circuit_breaker.RunAborted, asyncio.CancelledError,
-                KeyboardInterrupt, GeneratorExit):
-            # Control-flow signals propagate; swallowing CancelledError breaks cancellation.
-            raise
-        except BaseException as e:  # noqa: BLE001 — item 1's own faults degrade, never raise
-            return _unavailable(f"{e!r}"), STATUS_FAILED
+            session_id = store.new_session(agent_id=f"{GATHER_AGENT_ID_PREFIX}{L3}")
+        except (sqlite3.Error, session_store.StoreError, OSError) as e:
+            _logger.warning(f"correlation lead's session could not be opened ({e!r})")
+            return CorrelationOutcome(ending=ENDING_CLAIM_FAILED, system=system)
 
-    body, status = _run_sync(_go())
-    return LeadZeroResult(text=_render_section(body), status=status)
+    ends: list[LeadEnd] = []
+    try:
+        async with asyncio.timeout(deadline) as frame:
+            wrapped = await run_correlation_lead(
+                run_dir=run_dir, defender_dir=defender_dir, run_id=run_id, goal=goal,
+                what_to_summarize=what_to_summarize, verbs=verbs, limits=limits,
+                make_model=make_model, logger=logger, box=box, store=store,
+                budget_started_monotonic=budget_started_monotonic, catalog=catalog,
+                dispatch=dispatch, tenant=tenant, session_id=session_id,
+                on_stamp=lambda _reason: None, on_end=ends.append)
+    except TimeoutError:
+        if not frame.expired():
+            return CorrelationOutcome(ending=ENDING_DISPATCH_RAISED, system=system)
+        _stamp_timed_out(store, session_id)
+        return CorrelationOutcome(ending=ENDING_TIMED_OUT, system=system)
+    except (BudgetKill, circuit_breaker.RunAborted, session_store.StoreError, sqlite3.Error,
+            asyncio.CancelledError, KeyboardInterrupt, GeneratorExit, SystemExit):
+        raise
+    except Exception as e:  # noqa: BLE001 — the lead's own dispatch must never break the run
+        _logger.warning(f"correlation lead dispatch failed ({type(e).__name__}); naming it", exc_info=True)
+        return CorrelationOutcome(ending=ENDING_DISPATCH_RAISED, system=system)
+    if not ends:
+        return CorrelationOutcome(ending=ENDING_DISPATCH_RAISED, system=system)
+    ending = _classify_end(ends[-1], run_dir, system)
+    if ending is not None:
+        return CorrelationOutcome(ending=ending, system=system)
+    # A run folder that refuses a produced summary stops the run: it is not the lead's ending.
+    path = RunPaths(run_dir).gather_summary(L3)
+    if read_text_utf8(path) != wrapped:
+        raise OSError("the correlation lead's summary could not be persisted in the run folder")
+    return CorrelationOutcome(summary=wrapped, system=system)
 
 
-#: Re-exports: each name's home is the module it is imported from.
+def _stamp_timed_out(store: Any, session_id: str | None) -> None:
+    """Stamp the lead's session with its ending, best-effort (the store may be the reason)."""
+    if store is None or session_id is None:
+        return
+    try:
+        store.set_truncated_by(session_id, run_end.TRUNCATED_BY_TIMED_OUT)
+    except Exception as e:  # noqa: BLE001 — the store may already be the reason we're here
+        _logger.warning(f"correlation lead truncated_by write skipped: {e!r}")
+
 
 __all__ = [
-    "ALERT_ID_FIELD",
-    "ALREADY_CLAIMED",
-    "Any",
-    "BUILDING_BLOCK_FIELD",
-    "BudgetKill",
-    "CLAIMED",
+    "CORRELATION_HEADING",
     "CORRELATION_REQUEST_LIMIT",
+    "CorrelationDeadlineError",
     "CorrelationDispatch",
     "CorrelationDispatchError",
-    "DEFAULT_LIMITS",
-    "ELIDED",
-    "GROUP_ID_FIELD",
+    "CorrelationOutcome",
+    "DEADLINE_CEILING_S",
+    "DEADLINE_KEY",
     "GrantError",
-    "HARNESS_PROVENANCE",
-    "ITEM1_GOAL",
-    "ITEM1_SYSTEM",
-    "ITEM1_WHAT_TO_SUMMARIZE",
-    "L0",
     "L3",
-    "LEAD_ZERO_HEADING",
-    "LeadZeroResult",
-    "MESSAGE_CHAR_BUDGET",
-    "PROVENANCE_KEY",
-    "Path",
     "RESERVED_LEAD_IDS",
-    "RunPaths",
-    "SHORTFALL",
-    "STATUS_EMPTY",
-    "STATUS_FAILED",
-    "STATUS_RESOLVED",
-    "STATUS_TRUNCATED",
-    "SimpleNamespace",
-    "UNAVAILABLE",
-    "VerbContext",
     "VerbGrant",
-    "_ANY_RUN_TAG",
-    "_CallLedger",
-    "_CaptureDeps",
-    "_DS_RE",
-    "_FENCE_RUN",
-    "_UNMAPPED_FAULT_EXIT",
-    "_breaker_failures",
-    "_budget_account",
-    "_budget_gate",
-    "_build_deps",
-    "_capture_issue",
-    "_correlation_contract",
-    "_declare_l_finding",
-    "_elide",
-    "_fetch_batched",
-    "_flatten_doc",
-    "_is_declared",
-    "_last_row_seq",
-    "_map_backing_index",
-    "_record_manual_row",
-    "_render_doc",
-    "_render_section",
-    "_resolve_item1",
-    "_rows_for",
-    "_run_sync",
-    "_sanitize",
-    "_sort_chrono",
-    "_unavailable",
-    "asyncio",
-    "circuit_breaker",
-    "claim_lead",
+    "correlation_deadline",
     "correlation_grant",
     "correlation_system",
-    "dataclass",
-    "dispatch_correlation",
-    "json",
-    "prepare_correlation_lead",
-    "re",
-    "read_budget",
-    "read_jsonl_rows",
-    "read_text_soft",
-    "render_orient_section",
+    "render_correlation_section",
     "resolve_correlation_dispatch",
-    "replace",
-    "resolve_lead_zero",
-    "sys",
-    "tail_exhausted",
-    "update_budget_locked",
-    "wrap_fresh",
+    "run_correlation",
 ]

@@ -38,10 +38,9 @@ from defender.run_repository import RunPaths
 from defender.hooks import _run_dir
 from defender.hooks import budget_enforcer as BE
 from defender.runtime import circuit_breaker as CB
-from defender.runtime.lead_zero import _capture as CAP
-from defender.runtime.lead_zero._spec import ITEM1_SYSTEM
 from defender.tests import _spec1077 as S
 
+ITEM1_SYSTEM = "elastic"  # the breaker file's system key; the lead_zero constant went with item 1 (#1222)
 MiB = 1024 * 1024
 NAME = "rec.txt"
 ABSENT_TEXT = os.strerror(errno.ENOENT)
@@ -793,18 +792,19 @@ def test_o10_the_breaker_reads_unusable_state_as_tripped(tmp_path, kind):
 
 @pytest.mark.parametrize("kind", UNUSABLE)
 def test_o10_breaker_failures_degrades_without_raising(tmp_path, kind):
-    """`_breaker_failures` reads through `_load`: unusable state degrades only this read (0),
-    never `MemoryError` or `RecursionError`."""
+    """`_load` degrades unusable state to `_unreadable` (read as tripped), never
+    `MemoryError` or `RecursionError`. (`_breaker_failures`, item 1's reader of it, went with
+    item 1, #1222.)"""
     run_dir = run_dir_at(tmp_path)
     plant_unusable(RunPaths(run_dir).circuit_breaker, kind)
-    assert CAP._breaker_failures(run_dir) == 0
+    assert CB._load(run_dir).get("_unreadable") is True
 
 
 def test_o10_control_a_valid_state_reads_as_before(tmp_path):
     run_dir = run_dir_at(tmp_path)
     RunPaths(run_dir).circuit_breaker.write_text(json.dumps(
         {"systems": {ITEM1_SYSTEM: {"failures": 2}}, "total_failures": 2}))
-    assert CAP._breaker_failures(run_dir) == 2
+    assert CB._load(run_dir)["systems"][ITEM1_SYSTEM]["failures"] == 2
     assert CB._load(run_dir).get("_unreadable") is None
     assert CB.is_tripped(run_dir, "never_failed") is False
 
@@ -966,7 +966,6 @@ def test_h3_a_1tib_breaker_state_reads_as_tripped(tmp_path):
     run_dir = run_dir_at(tmp_path)
     sparse(RunPaths(run_dir).circuit_breaker, 1 << 40)
     assert CB.is_tripped(run_dir, "elastic") is True
-    assert CAP._breaker_failures(run_dir) == 0
 
 
 def test_h3_a_valid_state_padded_past_the_limit_reads_as_tripped(tmp_path):
@@ -1309,7 +1308,6 @@ def test_h8_a_falsy_or_non_object_breaker_state_reads_as_tripped(tmp_path, doc):
     run_dir = run_dir_at(tmp_path)
     RunPaths(run_dir).circuit_breaker.write_text(doc)
     assert CB.is_tripped(run_dir, "elastic") is True
-    assert CAP._breaker_failures(run_dir) == 0
 
 
 def test_h9_breaker_failures_does_not_follow_a_link(tmp_path):
@@ -1317,14 +1315,7 @@ def test_h9_breaker_failures_does_not_follow_a_link(tmp_path):
     real = tmp_path / "real.json"
     real.write_text(json.dumps({"systems": {ITEM1_SYSTEM: {"failures": 3}}, "total_failures": 3}))
     RunPaths(run_dir).circuit_breaker.symlink_to(real)
-    assert CAP._breaker_failures(run_dir) == 0
-
-
-def test_h9_breaker_failures_survives_an_overflowing_count(tmp_path):
-    run_dir = run_dir_at(tmp_path)
-    RunPaths(run_dir).circuit_breaker.write_text(
-        f'{{"systems": {{"{ITEM1_SYSTEM}": {{"failures": 1e999}}}}, "total_failures": 1}}')
-    assert CAP._breaker_failures(run_dir) == 0
+    assert CB._load(run_dir).get("_unreadable") is True
 
 
 # -- H10: the rewrite goes through the seam, whole -------------------------------------------

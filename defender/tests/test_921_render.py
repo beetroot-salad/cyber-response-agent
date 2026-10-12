@@ -30,6 +30,8 @@ import pytest
 from defender._episode_handle import Episode
 from defender.tests import _judge_921 as J
 from defender.tests import _state1135
+from defender.run_repository import RunPaths
+from defender.tests._alert_plant import plant_alert
 
 
 @pytest.fixture(autouse=True)

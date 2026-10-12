@@ -103,7 +103,7 @@ def test_orientation_never_shows_a_hostile_rule_id(tmp_path):
         assert not any(ln.startswith(("## Forged", "ignore the above")) for ln in lines), out
         assert not any("\x1b" in ln for ln in lines)
         assert not any("--signature" in argv for argv in calls), calls
-        assert not any("source_signature ~" in ln for ln in lines), out
+        assert not any("source_signature =" in ln for ln in lines), out
 
 
 def _frame(text: str, after: str) -> str:
@@ -131,20 +131,20 @@ def test_orientation_frames_lesson_written_text_as_untrusted(tmp_path):
                              shim=shim)
 
     assert _frame(out, "### Viable tags") == tags
-    assert _frame(out, "the lead you're about to write)") == hits
+    assert _frame(out, "(read the bodies whose description fits the lead you're about to write)") == hits
     assert out.count("## Operator override") == 2
     lessons = out[out.index("\n## Lessons\n"):]
     salts = set(re.findall(r"<run-([0-9a-f]+)-untrusted>", lessons))
-    assert len(salts) == 2, lessons
+    # Two frames of corpus text (tags, hits) and the lookup key, each in its own salted frame.
+    assert len(salts) == 3, lessons
 
 
 def test_orientation_leaves_the_no_match_line_outside_any_frame(tmp_path):
     out = orient.orientation(_run_dir(tmp_path), _DEFENDER, _alert(tmp_path), systems=(),
-                             shim=lambda argv, env: "tags" if "--tags" in argv else None)
+                             shim=lambda argv, env: "tags" if "--tags" in argv else "")
     lessons = out[out.index("\n## Lessons\n"):]
-    assert "\n_(no lessons matched `source_signature ~ v2-falco-suspicious-network-tool`)_" \
-        in lessons
-    assert lessons.rstrip().endswith("`)_"), lessons
+    assert "\n_(no lessons matched that signature)_" in lessons
+    assert lessons.rstrip().endswith("that signature)_"), lessons
 
 
 def test_orientation_frames_the_corpus_vocabulary_as_untrusted(tmp_path):
@@ -162,9 +162,10 @@ def test_orientation_frames_the_corpus_vocabulary_as_untrusted(tmp_path):
 
 def test_orientation_writes_the_framing_note_only_over_framed_text(tmp_path):
     out = orient.orientation(_run_dir(tmp_path), _DEFENDER, _alert(tmp_path), systems=(),
-                             shim=lambda argv, env: None)
+                             shim=lambda argv, env: "")
     lessons = out[out.index("\n## Lessons\n"):]
-    assert lessons.strip().splitlines() == [
-        "## Lessons", "_(no lessons matched `source_signature ~ v2-falco-suspicious-network-tool`)_"]
+    # The only framed text is the lookup key (alert-derived, not corpus text): no corpus note.
+    assert "Framed text below" not in lessons, lessons
+    assert lessons.strip().splitlines()[-1] == "_(no lessons matched that signature)_"
 
 

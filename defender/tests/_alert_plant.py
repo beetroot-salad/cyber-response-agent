@@ -44,9 +44,13 @@ def plant_source_copy(episode_dir: Path, alert: bytes, *,
     from defender._episode_paths import EpisodePaths
 
     paths = EpisodePaths(Path(episode_dir))
-    admitted = _alert_input.admit(alert)
-    facts = _alert_input.derive_facts(
-        admitted.document, _alert_input.AlertMapping(paths=dict(mapping)))
+    try:
+        admitted = _alert_input.admit(alert)
+        digest = admitted.digest
+        facts = _alert_input.derive_facts(
+            admitted.document, _alert_input.AlertMapping(paths=dict(mapping)))
+    except _alert_input.AlertRefused:
+        # A hostile copy a display test wants on the page: the bytes as they are, no facts.
+        digest, facts = _alert_input.digest_of(alert), _alert_input.AlertFacts()
     paths.source_alert.write_bytes(alert)
-    paths.source_record.write_text(
-        _alert_input.record_text(admitted.digest, facts), encoding="utf-8")
+    paths.source_record.write_text(_alert_input.record_text(digest, facts), encoding="utf-8")

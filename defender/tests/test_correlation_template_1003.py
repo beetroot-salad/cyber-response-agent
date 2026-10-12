@@ -382,9 +382,7 @@ def test_the_run_start_frame_reads_the_config_and_catalog_of_the_tree_it_is_hand
 def test_spec_no_longer_spells_the_template_id():
     """The literal is gone from `_spec.py`, and so is any read of the config: the vocabulary
     leaf a dozen modules import for two strings reads no tree, and the id reaches the lead
-    only through the run-start frame. `ITEM1_SYSTEM` legitimately stays a literal (N2 — item
-    1 is harness code on one vendor's fields and is not this issue's), and the budget stays
-    the measured constant (N1)."""
+    only through the run-start frame. The budget stays the measured constant (N1)."""
     from defender.runtime.lead_zero import _spec
 
     source = Path(_spec.__file__).read_text(encoding="utf-8")
@@ -403,7 +401,6 @@ def test_spec_no_longer_spells_the_template_id():
     assert spelled == [], f"the template id is spelled as a literal under runtime/: {spelled}"
     assert not hasattr(_spec, "CORRELATION_TEMPLATE")
     assert "lead_zero_config" not in source, "the vocabulary leaf must not read the config"
-    assert _spec.ITEM1_SYSTEM == "elastic"
     assert _spec.CORRELATION_REQUEST_LIMIT == 8
 
 
@@ -446,10 +443,7 @@ def test_a_withheld_lead_consults_no_template_and_stays_two_state(tmp_path):
     test_the_orient_heading_says_the_lead_was_withheld` pins its text; N5 says no third state
     is threaded through, and this test only checks that arm is still the one taken."""
     from defender.runtime.lead_zero import (
-        L3,
         CorrelationDispatch,
-        LeadZeroResult,
-        render_orient_section,
         resolve_correlation_dispatch,
     )
 
@@ -468,13 +462,6 @@ def test_a_withheld_lead_consults_no_template_and_stays_two_state(tmp_path):
     granted = _shipped_shaped_grant(tmp_path / "granted")
     with pytest.raises(AssertionError, match="WITHHELD lead"):
         resolve_correlation_dispatch(SHIPPED_TEMPLATE_ID, _NeverWalked(), granted)
-
-    # #1106 M4: the note names the run's resolved table — here the one `_grant` planted.
-    table = str(tmp_path / "settings" / "verb-grants.yaml")
-    orient = render_orient_section(LeadZeroResult(text="", status="resolved"), None,
-                                   correlation_system=dispatch.system, grant_home=table)
-    assert L3 in orient, orient
-    assert table in orient, orient
 
 
 # =========================================================================================
