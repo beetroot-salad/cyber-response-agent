@@ -9,8 +9,9 @@ deletion, a run that looks fine and measures nothing.
 failure this table exists to make visible.
 
 There is no `query_id` column: the seam sits below `QueryCapture`, where a model-supplied
-`query_id` is resolved. The run's `executed_queries.jsonl` records it against the same
-`(system, verb, params)`, so correlation is a join.
+`query_id` is resolved. The run's `executed_queries.jsonl` records it against the same call:
+a row written through the query tool carries the call's host-written `call_id` (A12, #1234)
+on both tables, which is the join; their `(system, verb, params)` must agree on it.
 """
 
 from __future__ import annotations

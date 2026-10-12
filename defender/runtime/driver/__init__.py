@@ -345,7 +345,8 @@ def _write_run_end_sidecar(deps: AgentDeps, end: run_end.RunEnd) -> bool:
 #: Exits where the model was stopped before closing but the run still says something about the
 #: case (request ceiling, tool-retry budget): the host closes `unresolved` so a report.md exists.
 #:
-#: Circuit-breaker, budget-kill and store exits are excluded: they are infrastructure faults,
+#: Circuit-breaker, budget-kill, store and failed call-record (`served_ledger`,
+#: `executed_queries`) exits are excluded: they are infrastructure faults,
 #: not findings, and downstream readers treat any report.md as a verdict (the ticket lane
 #: closes the ticket, the scorer counts `unresolved` as wrong). Those runs end with no report.
 #: The set lives in `run_end` because the ticket lane keys on it without importing this module.

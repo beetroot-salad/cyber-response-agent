@@ -21,7 +21,10 @@ target's bytes into the archive as if they were in-run artifacts. The tables go 
 `lead_repository.stage_tables` (its own screened staging); single files through
 `_layout.artifact_file`. The whole world is screened before anything is copied, so a world
 carrying one planted link archives NOTHING rather than a half-world whose missing file reads as a
-run that did not produce one.
+run that did not produce one. One exception: a run the host ended because its query table could
+not be written (the run-end sidecar says `executed_queries`, A12) is not refused for what sits at
+the table's name — that is the record whose write failed. The table is copied when it is a
+regular file and reported refused otherwise (never followed), and the world reads cut short.
 
 Absent and planted are different answers. A missing path is skipped and reported (a sibling
 that died before writing its report still has other artifacts; the launcher's `incomplete`
