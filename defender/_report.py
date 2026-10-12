@@ -99,7 +99,7 @@ def parse_report_text(text: str) -> ReportRead:
         return _no_headline(f"{RUN_LAYOUT.report.name} {e}", text=text, body=text)
     raw = frontmatter.get("disposition")
     disposition = normalized_disposition(raw)
-    if _repeats_disposition(text):
+    if repeats_disposition(text):
         # YAML keeps the last copy silently, so two readers of one report could take different
         # headlines; a report with two is no headline at all (#1234 A3).
         return ReportRead(
@@ -120,8 +120,10 @@ def parse_report_text(text: str) -> ReportRead:
     )
 
 
-def _repeats_disposition(text: str) -> bool:
-    """Does the frontmatter block carry `disposition` as a top-level key more than once?"""
+def repeats_disposition(text: str) -> bool:
+    """Does the frontmatter block carry `disposition` as a top-level key more than once? Shared
+    with every report reader that does not go through `parse_report_text` (`episode.verdicts`),
+    so a report with two headlines is no headline to all of them (#1234 A3, A19)."""
     from defender._frontmatter import split_frontmatter
     from defender._yaml import duplicate_key_paths
 

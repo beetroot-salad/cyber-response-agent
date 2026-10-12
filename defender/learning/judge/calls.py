@@ -25,12 +25,18 @@ parser this function is re-pointed at it and nothing else changes.
 
 from __future__ import annotations
 
+import json
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
+from defender._episode_paths import LAYOUT
+from defender._io import Bound
 from defender._query_rules import DENIED_QUERY_ID
 from defender.learning.branch.ledger import FAULT, REFUSED
+from defender.learning.judge._errors import JudgeRefused
 from defender.learning.judge.family import mapping_key
+from defender.runtime.branch._family import episode_token_for, world_token_for
 
 #: The field both call records carry the host-written id under (A12).
 CALL_ID = "call_id"
@@ -82,15 +88,33 @@ def inherited_denial_key(table_row: Mapping[str, Any], token: str) -> str | None
     return mapping_key(table_row)
 
 
-def inherited_denials(tables: Iterable[tuple[str, Sequence[Mapping[str, Any]]]]) -> frozenset[str]:
-    """The request keys of J3's rows: inherited `∅.denied` rows present in EVERY readable run's
-    table (`(token, rows)` pairs, the control's included). Fewer than two tables decide
-    nothing (A12): the empty set."""
-    per_table = [{key for row in rows if (key := inherited_denial_key(row, token)) is not None}
-                 for token, rows in tables]
+def inherited_denial_rows(tables: Iterable[tuple[str, Sequence[Mapping[str, Any]]]],
+                          ) -> dict[str, tuple[int, Mapping[str, Any]]]:
+    """J3's rows (A12, A14), by request key: inherited `∅.denied` rows present in EVERY table
+    of `tables` (`(token, rows)` pairs, the control's included), each with how many times it
+    stands in every one of them (the smallest count over the tables: the identical prefix the
+    seed copied) and its first row in the first table. Fewer than two tables decide nothing:
+    the empty mapping."""
+    per_table: list[tuple[dict[str, int], dict[str, Mapping[str, Any]]]] = []
+    for token, rows in tables:
+        counts: dict[str, int] = {}
+        first: dict[str, Mapping[str, Any]] = {}
+        for row in rows:
+            key = inherited_denial_key(row, token)
+            if key is not None:
+                counts[key] = counts.get(key, 0) + 1
+                first.setdefault(key, row)
+        per_table.append((counts, first))
     if len(per_table) < 2:
-        return frozenset()
-    return frozenset(set.intersection(*per_table))
+        return {}
+    shared = set.intersection(*(set(counts) for counts, _first in per_table))
+    return {key: (min(counts[key] for counts, _first in per_table), per_table[0][1][key])
+            for key in sorted(shared)}
+
+
+def inherited_denials(tables: Iterable[tuple[str, Sequence[Mapping[str, Any]]]]) -> frozenset[str]:
+    """The request keys of J3's rows (`inherited_denial_rows`)."""
+    return frozenset(inherited_denial_rows(tables))
 
 
 def is_blocked_table_row(table_row: Mapping[str, Any], ledger_rows: Sequence[Mapping[str, Any]],
@@ -118,42 +142,141 @@ def key_fields(row: Mapping[str, Any]) -> dict[str, Any]:
 
 
 #: The run a found gap of the family as a whole names: J3's inherited denial, present in every
-#: run, and a call pre-flight could not replay.
+#: run, and a call pre-flight could not replay. A named gap resting on J3's row carries it too.
 FAMILY_RUN = "family"
 
+#: The field a found-gap entry names an unread census input under, with its cause (NA04).
+UNREAD = "unread"
 
-def found_gaps(runs: Iterable[tuple[str, str, Sequence[Mapping[str, Any]],
-                                    Sequence[Mapping[str, Any]]]], *, j3: frozenset[str],
+
+def _listed(entries: dict[tuple[str, str], tuple[int, Mapping[str, Any]]],
+            key: tuple[str, str], row: Mapping[str, Any], n: int = 1) -> None:
+    count, first = entries.get(key, (0, row))
+    entries[key] = (count + n, first)
+
+
+def _present_tables(bound: Bound, manifest: Mapping[str, Any], *, episode_token: str,
+                    ) -> tuple[list[tuple[str, str, list[dict[str, Any]]]], list[str]]:
+    """Every manifest world's query table that reads whole, as `(label, token, rows)` in
+    manifest order (control first), and why each other present one could not be read. A world
+    with no table at all (not archived) is in neither list."""
+    from defender.learning.judge.family import control_world, non_control_worlds, read_query_table
+
+    tables: list[tuple[str, str, list[dict[str, Any]]]] = []
+    unread: list[str] = []
+    for world in [control_world(dict(manifest)), *non_control_worlds(dict(manifest))]:
+        label = world["world_id"]
+        try:
+            rows = read_query_table(bound, label)
+        except JudgeRefused as refused:
+            unread.append(str(refused))
+            continue
+        if rows is not None:
+            tables.append((label, world_token_for(episode_token, label), rows))
+    return tables, unread
+
+
+def inherited_prefix_outliers(tables: Sequence[tuple[str, str, Sequence[Mapping[str, Any]]]],
+                              ) -> dict[str, str]:
+    """The tables whose inherited rows (A12: every row carrying no id of its run, in order)
+    differ from the others', by label, each with its refusal (A21). Every sibling's table
+    inherits the same pre-branch rows from the one source, so a table whose copy differs (a
+    row missing, added or altered — a box can rewrite its own run's table) is a failed read.
+    The copy a strict majority of the tables share is the family's; with no strict majority
+    (two tables that disagree, say) no copy can be told from its edit, so every table whose
+    copy is not unanimous is refused. `tables` is `(label, token, rows)`."""
+    copies = {label: json.dumps([dict(r) for r in rows if is_inherited(r, token)],
+                                sort_keys=True, default=str)
+              for label, token, rows in tables}
+    if len(set(copies.values())) <= 1:
+        return {}
+    top, n = Counter(copies.values()).most_common(1)[0]
+    family_copy = top if 2 * n > len(copies) else None
+    return {label: (f"world {label!r}: {LAYOUT.world(label).executed_queries} holds inherited "
+                    "(pre-branch) rows that differ from the other readable query tables' — "
+                    "every sibling inherits the same rows from the one source, so this table "
+                    "was edited after its run")
+            for label, copy in copies.items() if copy != family_copy}
+
+
+def readable_tables(bound: Bound, manifest: Mapping[str, Any], *, episode_token: str,
+                    ) -> tuple[list[tuple[str, list[dict[str, Any]]]], list[str]]:
+    """Every manifest world's query table that reads well-formed — whole, and with the
+    inherited rows the family's tables share (`inherited_prefix_outliers`) — as `(token, rows)`
+    pairs in manifest order (control first), and why each other present one could not be read.
+    A world with no table at all (not archived) is in neither list. The tables J3's rows are
+    identified over (A12: "every readable run's table")."""
+    tables, unread = _present_tables(bound, manifest, episode_token=episode_token)
+    outliers = inherited_prefix_outliers(tables)
+    return ([(token, rows) for label, token, rows in tables if label not in outliers],
+            [*unread, *outliers.values()])
+
+
+def table_refusals(bound: Bound, manifest: Mapping[str, Any], *, episode_token: str,
+                   ) -> dict[str, str]:
+    """The worlds whose query table reads whole but whose inherited rows differ from the
+    family's (`inherited_prefix_outliers`), by label: failed reads the usability read cannot
+    see from one run alone (A21)."""
+    return inherited_prefix_outliers(_present_tables(bound, manifest,
+                                                     episode_token=episode_token)[0])
+
+
+def found_gaps(bound: Bound, manifest: Mapping[str, Any], *,
                not_replayable: Iterable[Any] = ()) -> list[dict[str, Any]]:
-    """The user record's found gaps (A2), computed by code, never by the model: every blocked
-    call of every run `(label, token, table rows, ledger rows)`, once per key with its count;
-    J3's inherited denial and pre-flight's `not_replayable` calls once each under the family's
-    run (`FAMILY_RUN`). An inherited table row is J3's or nothing; a run's own calls are read
-    off its ledger (a table row's blocked state is its partner's)."""
-    counts: dict[tuple[str, str], int] = {}
-    rows: dict[tuple[str, str], Mapping[str, Any]] = {}
-    for label, token, table_rows, ledger_rows in runs:
-        for row in ledger_rows:
+    """The user record's found gaps (A2), computed by code from the archive, never by the
+    model, on every pass that read the manifest (graded or stamped).
+
+    @owns unread — a found-gap entry `{run, unread}` naming a census input that could not be
+    read and why (NA04); the page shows it beside the listed entries.
+
+    Every manifest world's served ledger, the control's and every failed, cut-short, excluded
+    or not-archived world's included, is read on its own (`family.read_served_ledger`, whatever
+    that run's query table holds): each blocked row (`refused`/`fault`) is listed once per key
+    `(run, system, verb, params)` with its count. A ledger that cannot be read is one entry
+    under its run naming the cause; it costs no other run its entries. Then the family's own
+    entries under `FAMILY_RUN`: J3's inherited denials, identified over every readable query
+    table (`readable_tables`) and counted as often as each table holds the row — or, with fewer
+    than two readable tables, one entry naming that unread — and pre-flight's `not_replayable`
+    calls. Entries come in manifest order, control first, then the family's."""
+    from defender.learning.judge.family import (
+        control_world, episode_id_of, non_control_worlds, read_served_ledger)
+
+    token = episode_token_for(episode_id_of(dict(manifest)))
+    out: list[dict[str, Any]] = []
+    for world in [control_world(dict(manifest)), *non_control_worlds(dict(manifest))]:
+        label = world["world_id"]
+        try:
+            ledger = read_served_ledger(bound, label, episode_token=token)
+        except JudgeRefused as refused:
+            out.append({"run": label, UNREAD: str(refused)})
+            continue
+        entries: dict[tuple[str, str], tuple[int, Mapping[str, Any]]] = {}
+        for row in ledger:
             if is_blocked_ledger_row(row):
-                key = blocked_call_key(label, row)
-                counts[key] = counts.get(key, 0) + 1
-                rows.setdefault(key, row)
-        for row in table_rows:
-            denial = inherited_denial_key(row, token)
-            if denial is not None and denial in j3:
-                key = (FAMILY_RUN, denial)
-                counts[key] = counts.get(key, 0) + 1
-                rows.setdefault(key, row)
+                _listed(entries, blocked_call_key(label, row), row)
+        out += [{"run": key[0], **key_fields(first), "count": count}
+                for key, (count, first) in entries.items()]
+    family: dict[tuple[str, str], tuple[int, Mapping[str, Any]]] = {}
+    tables, unread_tables = readable_tables(bound, manifest, episode_token=token)
+    if len(tables) < 2:
+        why = "; ".join(unread_tables) or (
+            "no run's table is archived" if not tables else "no other run's table is archived")
+        out.append({"run": FAMILY_RUN, UNREAD: (
+            f"the inherited pre-branch denial is identified across two or more readable query "
+            f"tables, and {len(tables)} could be read ({why})")})
+    for key, (count, first) in inherited_denial_rows(tables).items():
+        _listed(family, (FAMILY_RUN, key), first, count)
     for entry in not_replayable:
         if isinstance(entry, Mapping) and isinstance(entry.get("system"), str):
-            key = blocked_call_key(FAMILY_RUN, entry)
-            counts[key] = counts.get(key, 0) + 1
-            rows.setdefault(key, entry)
-    return [{"run": key[0], **key_fields(rows[key]), "count": counts[key]} for key in counts]
+            _listed(family, blocked_call_key(FAMILY_RUN, entry), entry)
+    out += [{"run": FAMILY_RUN, **key_fields(first), "count": count}
+            for (count, first) in family.values()]
+    return out
 
 
 __all__ = [
-    "BLOCKED_SOURCES", "CALL_ID", "FAMILY_RUN", "blocked_call_key", "found_gaps", "call_id_names_run", "inherited_denial_key",
-    "inherited_denials", "is_blocked_ledger_row", "is_blocked_table_row", "is_inherited",
-    "key_fields", "ledger_partner",
+    "BLOCKED_SOURCES", "CALL_ID", "FAMILY_RUN", "UNREAD", "blocked_call_key", "call_id_names_run",
+    "found_gaps", "inherited_denial_key", "inherited_denial_rows", "inherited_denials",
+    "inherited_prefix_outliers", "is_blocked_ledger_row", "is_blocked_table_row", "is_inherited",
+    "key_fields", "ledger_partner", "readable_tables", "table_refusals",
 ]

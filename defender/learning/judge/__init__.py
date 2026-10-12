@@ -11,15 +11,17 @@ The judge MODEL files findings; code routes them (P-c). Flow, per episode:
    stamp must certify the siblings comparable; the control must be usable (A3).
 2. `runs.read_run_set` — every run through the one usability read (`family.read_world`).
 3. Per planted world, in manifest order, unless its row is already `queued`: `render.render`
-   + `render.world_sections` (A9's cap) + `run._build_prompt`; one model call per draw through
+   + `run._build_prompt` (M3's layout under A9's cap, `layout.world_layout`); one model call per draw through
    the injected `judge=` seam, each reply through `run.validate_reply` (a refused reply is asked
    again within `_REPLY_ATTEMPTS`; a failed call is not), written to `worlds/<X>/judge/<n>.yaml`;
    then `route.combine_draws` (A7) and `route.fate` per filed finding (A13); the world's rows
    are committed `queueing` -> append through `state=` -> `queued` (A6).
 4. The family call, once (a `queued` family row is final): every usable run's computed
-   sections (`render.family_sections`), family-scope world findings only, combined by union,
+   sections (`layout.family_layout`), family-scope world findings only, combined by union,
    committed the same way.
-5. `judge.yaml` written last with the user record's found gaps recomputed (A2).
+5. `judge.yaml` written last. The user record's found gaps (A2) are computed once per pass,
+   right after the manifest read, so every write — a stamp, each A6 commit, the last — carries
+   them.
 """
 
 from __future__ import annotations
@@ -312,11 +314,36 @@ def _write_wire_log(
                         "draw itself is unaffected")
 
 
-def _stamp_not_graded(episode: Episode, word: str, reason: str, *, validity: str | None = None,
-                      worlds: list[dict[str, Any]] | None = None) -> EpisodeGrade:
-    """Write and return a not-graded record: no model call, no findings."""
-    record = EpisodeGrade(episode_dir=episode.dir, validity=validity, worlds=worlds or [],
-                          not_graded=NotGradedStamp(outcome=word, reason=reason))
+def _stamp_not_graded(episode: Episode, word: str, reason: str, *,  # noqa: PLR0913 — the stamp's whole content, one keyword each
+                      validity: str | None = None, worlds: list[dict[str, Any]] | None = None,
+                      found_gaps: list[dict[str, Any]] | None = None,
+                      prior: EpisodeGrade | None = None) -> EpisodeGrade:
+    """Write and return a not-graded record: no model call, no findings — but the found gaps
+    of a pass that read the manifest (A2: a stamped family carries them), and every committed
+    row of the `prior` record verbatim (A6), with its ledger and user entries and the queue
+    counts its appends made, so its queued rows stay on the record and a later pass still
+    skips (or, `queueing`, refuses) it. A carried `queueing` row is named in the reason."""
+    carried, family = _committed(prior)
+    labels = {*carried, *([FAMILY_LABEL] if family is not None else [])}
+    rows = [carried.get(str(r.get("world")), r) for r in worlds or []]
+    listed = {r.get("world") for r in rows}
+    rows += [r for label, r in carried.items() if label not in listed]
+    left = [label for label, r in carried.items() if r.get(STATE_KEY) == QUEUEING]
+    if family is not None and family.get(STATE_KEY) == QUEUEING:
+        left.append(FAMILY_LABEL)
+    if left:
+        reason += (f" — and {', '.join(repr(x) for x in left)} is left {QUEUEING!r} by a stopped "
+                   "pass, carried as it stands: reconcile it before the next grade, which "
+                   "refuses it")
+    user = _carried_user(prior, labels)
+    user[FOUND_GAPS] = list(found_gaps or [])
+    record = EpisodeGrade(episode_dir=episode.dir, validity=validity, worlds=rows, family=family,
+                          user=user, not_graded=NotGradedStamp(outcome=word, reason=reason))
+    if prior is not None and labels:
+        record.dispositions = _carried_ledger(prior, labels)
+        record.enqueued_rows, record.enqueued_to = prior.enqueued_rows, prior.enqueued_to
+        record.world_enqueued_rows = prior.world_enqueued_rows
+        record.world_enqueued_to = prior.world_enqueued_to
     _write_judge_yaml(episode, record)
     return record
 
@@ -364,6 +391,11 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
         # Before anything else: a pass with no draw would commit every world with nothing.
         raise JudgeRefused(f"{DRAWS_KNOB}={configured}: the number of judge draws per world must "
                            "be a positive integer")
+    if (cap := _judge_cap()) < 1:
+        # Before anything else too: a prompt under a non-positive cap would claim a comparison
+        # it no longer contains (A9).
+        raise JudgeRefused(f"{CAP_KNOB}={cap}: the judge's payload cap must be a positive "
+                           "number of characters")
     try:
         with _open_episode(runs, episode_id) as episode:
             resolved_judge = judge if judge is not None else _default_judge_seam(episode.dir)
@@ -412,19 +444,60 @@ def _grade_episode(
     episode: Episode, *, judge: Any, draws: int, git_show: Any, state: LearningState,
 ) -> EpisodeGrade:
     # A not-graded stamp never short-circuits, so a repaired episode can still be graded. A
-    # recorded grade is carried row by row: `queued` rows are final, the rest re-graded.
-    existing = read_grade(episode.dir)
-    prior = existing if existing is not None and existing.not_graded is None else None
-    if prior is not None:
-        _refuse_queueing(prior)
+    # recorded grade — a stamp's included, which carries the committed rows it met — is carried
+    # row by row: `queued` rows are final, a `queueing` row refuses the grade (after the gates,
+    # so a stamp pass still writes its stamp), every other row is re-graded (A6).
     return _Pass(episode, judge=judge, draws=draws, git_show=git_show, state=state,
-                 prior=prior).grade()
+                 prior=read_grade(episode.dir)).grade()
 
 
 def _label_of(finding_id: str) -> str | None:
     """The world half of `<episode>/<world>/<draw>/<index>`."""
     parts = finding_id.rsplit("/", 3)
     return parts[1] if len(parts) == 4 else None
+
+
+def _committed(prior: EpisodeGrade | None) -> tuple[dict[str, dict[str, Any]],
+                                                     dict[str, Any] | None]:
+    """The rows of `prior` every later write carries verbatim (A6): each world row, and the
+    family row, that carries a commit state (`queueing` or `queued`), in recorded order."""
+    if prior is None:
+        return {}, None
+    rows = {r["world"]: r for r in prior.worlds if r.get(STATE_KEY) in (QUEUEING, QUEUED)}
+    family = prior.family if (prior.family or {}).get(STATE_KEY) in (QUEUEING, QUEUED) else None
+    return rows, family
+
+
+def _carried_ledger(prior: EpisodeGrade | None, labels: set[str]) -> list[dict[str, Any]]:
+    """`prior`'s ledger entries for the findings of the carried rows `labels`, in order."""
+    return [e for e in (prior.dispositions if prior is not None else None) or ()
+            if _label_of(str(e.get("finding_id"))) in labels]
+
+
+def _carried_user(prior: EpisodeGrade | None, labels: set[str]) -> dict[str, list[dict[str, Any]]]:
+    """`prior`'s user-record entries of the carried rows `labels` (found gaps excepted: every
+    pass recomputes them, A2)."""
+    user = _empty_user()
+    for name in _USER_LISTS:
+        if name != FOUND_GAPS and prior is not None:
+            user[name] = [e for e in prior.user.get(name) or ()
+                          if isinstance(e, dict) and e.get("world") in labels]
+    return user
+
+
+def _refuse_undeclared_records(manifest: dict[str, Any],
+                               failed: dict[str, dict[str, Any]]) -> None:
+    """Refuse a failed-world entry (a world record, or pre-flight's) for a label the manifest
+    does not declare: it is no world of this family, so it is neither counted toward O5 nor
+    listed as a failed world, and the archive holding it is not graded around it."""
+    declared = {family_mod.control_world(manifest)["world_id"]} | {
+        w["world_id"] for w in family_mod.non_control_worlds(manifest)}
+    undeclared = sorted(label for label in failed if label not in declared)
+    if undeclared:
+        raise JudgeRefused(
+            f"the episode records failed world(s) {undeclared} the manifest ({LAYOUT.family}) "
+            "does not declare: a record for no world of this family is never counted or listed, "
+            "so the pass is refused")
 
 
 class _Pass:
@@ -442,9 +515,15 @@ class _Pass:
         self.git_show = _memoized_show(
             git_show if git_show is not None else render_mod._git_show_default)
         self.rows: dict[str, dict[str, Any]] = {}
+        #: The manifest's planted labels, in order: the order every write lists the rows in.
+        self.order: list[str] = []
+        #: The finding ids the questioner queue held when this pass first looked (`_place`).
+        self.questioner_ids: frozenset[str] | None = None
         self.family: dict[str, Any] | None = prior.family if prior is not None else None
         self.ledger: list[dict[str, Any]] = []
         self.user = _empty_user()
+        #: The pass's found gaps (A2), computed once after the manifest read (`grade`).
+        self.found_gaps: list[dict[str, Any]] = []
         self.enqueued = 0
         self.world_enqueued = 0
         self.knobs: dict[str, Any] = {}
@@ -460,14 +539,24 @@ class _Pass:
         except JudgeRefused as refused:
             if isinstance(refused.__cause__, ManifestPredatesOracle) \
                     and _gate(bound)[0] == outcome_mod.NO_RECORD:
-                return _stamp_not_graded(episode, MANIFEST_REFUSED, str(refused))
+                return _stamp_not_graded(episode, MANIFEST_REFUSED, str(refused),
+                                         prior=self.prior)
             raise
         word, reason, record, failed = _gate(bound)
+        _refuse_undeclared_records(manifest, failed)
+        # The found gaps (A2), once per pass, as soon as the manifest is read and before any
+        # gate can stamp: every write this pass makes — a stamp, each A6 commit, the last
+        # write — carries the same census.
+        not_replayable = (record or {}).get("not_replayable")
+        self.found_gaps = calls_mod.found_gaps(
+            bound, manifest,
+            not_replayable=not_replayable if isinstance(not_replayable, list) else ())
+        found = self.found_gaps
         if word != outcome_mod.ACCEPTED:
             return _stamp_not_graded(
                 episode, word,
                 reason or f"the episode's {LAYOUT.outcome} outcome is {word!r}, not 'accepted'",
-                validity=UNUSABLE if word == outcome_mod.UNUSABLE else None)
+                validity=UNUSABLE if word == outcome_mod.UNUSABLE else None, found_gaps=found, prior=self.prior)
         worlds = family_mod.non_control_worlds(manifest)
         unusable = outcome_mod.unusable_reason(failed)
         if unusable is not None:
@@ -476,17 +565,21 @@ class _Pass:
                 failed_row(w, failed[w["world_id"]]) if w["world_id"] in failed else
                 {"world": w["world_id"], "ungradable": True,
                  "ungradable_reason": "the family is unusable (O5): not judged"}
-                for w in worlds])
+                for w in worlds], found_gaps=found, prior=self.prior)
         not_comparable = outcome_mod.not_comparable_reason(bound)
         if not_comparable is not None:
-            return _stamp_not_graded(episode, NOT_COMPARABLE, not_comparable)
+            return _stamp_not_graded(episode, NOT_COMPARABLE, not_comparable, found_gaps=found, prior=self.prior)
         runs = read_run_set(bound, manifest, episode_dir=episode.dir, failed=failed)
         if runs.control not in runs.usable:
             return _stamp_not_graded(
                 episode, CONTROL_UNUSABLE,
                 f"the control run {runs.control!r} is not usable "
                 f"({runs.excluded.get(runs.control)}): every world is judged against it, so "
-                "none is judged", worlds=[runs.rows[w["world_id"]] for w in worlds])
+                "none is judged", worlds=[runs.rows[w["world_id"]] for w in worlds],
+                found_gaps=found, prior=self.prior)
+        if self.prior is not None:
+            # Past every gate, before any model call or append: only a grading pass meets it.
+            _refuse_queueing(self.prior)
         return self._grade_runs(manifest, record, failed, runs)
 
     # -- the pass ------------------------------------------------------------------------
@@ -506,38 +599,36 @@ class _Pass:
         self.noise = render_mod.render_family_text(record, failed) + \
             render_mod.excluded_text(runs, failed)
 
-        prior_rows = {r["world"]: r for r in (prior.worlds if prior is not None else [])}
-        kept: set[str] = set()
-        for world in family_mod.non_control_worlds(manifest):
-            label = world["world_id"]
-            prior_row = prior_rows.get(label)
-            if prior_row is not None and prior_row.get(STATE_KEY) == QUEUED:
-                self.rows[label] = prior_row
-                kept.add(label)
-                continue
-            row = dict(runs.rows[label])
-            if label not in runs.usable:
-                row.update(measured=False, not_measured_reason=row.get("ungradable_reason"))
-            self.rows[label] = row
+        # A `queued` row is final: carried verbatim with its ledger and user entries and the
+        # counts its appends made; every other row is re-decided (A6). A world's row enters the
+        # record when the loop reaches it, so a write never shows a world not yet attempted.
+        committed, _family = _committed(prior)
+        kept = {label for label, r in committed.items() if r.get(STATE_KEY) == QUEUED}
+        self.order = [w["world_id"] for w in family_mod.non_control_worlds(manifest)]
+        self.rows = {label: committed[label] for label in self.order if label in kept}
         if self.family is not None and self.family.get(STATE_KEY) == QUEUED:
             kept.add(FAMILY_LABEL)
         else:
             self.family = None
-        # A `queued` row's ledger and user entries are final; every other row's are re-decided.
-        if prior is not None:
-            self.ledger = [e for e in prior.dispositions or ()
-                           if _label_of(str(e.get("finding_id"))) in kept]
-            for name in _USER_LISTS:
-                self.user[name] = [e for e in prior.user.get(name) or ()
-                                   if isinstance(e, dict) and e.get("world") in kept]
+        self.ledger = _carried_ledger(prior, kept)
+        self.user = _carried_user(prior, kept)
+        if prior is not None and kept:
+            self.enqueued, self.world_enqueued = prior.enqueued_rows, prior.world_enqueued_rows
 
         self.lessons_commit = _pass_lessons_commit(bound, runs.planted)
         if self.lessons_commit is None and prior is not None:
             self.lessons_commit = prior.lessons_commit
-        for label in list(self.rows):
-            if label not in kept and label in runs.usable:
+        for label in self.order:
+            if label in kept:
+                continue
+            row = dict(runs.rows[label])
+            self.rows[label] = row
+            if label in runs.usable:
                 self._grade_world(label)
-        if FAMILY_LABEL not in kept:
+            else:
+                row.update(measured=False, not_measured_reason=row.get("ungradable_reason"))
+        # A usable control with no usable planted world grades nothing (A3): no family call.
+        if FAMILY_LABEL not in kept and runs.planted:
             self._grade_family()
         return self._write()
 
@@ -556,8 +647,7 @@ class _Pass:
                 lessons_commit=self.lessons_commit, payload_cap=self.cap,
                 facts=self.runs.usable[label], samples=self.samples, manifest=self.manifest,
                 bound=self.bound, family_text=self.noise, runs=self.runs)
-            prompt = run_mod._build_prompt(ctx, sections=render_mod.world_sections(
-                ctx, self.manifest))
+            prompt, placed = run_mod._build_prompt(ctx, self.manifest)
             self.episode.world(label).draws.ensure()
         except (JudgeRefused, OSError, ValueError, TimeoutError) as world_failed:
             reason = f"{type(world_failed).__name__}: {world_failed}"
@@ -568,8 +658,12 @@ class _Pass:
             self.episode, label, judge=self.judge, draws=self.draws, model=self.model,
             effort=self.effort, prompt=prompt, served_systems=self.served_systems,
             shown_its_facts=ctx.shown_its_facts)
+        # g18: a `samples.yaml#<system>` pointer resolves exactly when this prompt showed that
+        # system's section whole (the cap may have cut it), in the resolver and in O16 alike.
+        shown_samples = {system: section for system, section in self.samples.items()
+                         if system in placed.samples_shown}
         scope = self.runs.scope(self.bound, manifest=self.manifest, outcome=self.record,
-                                samples=self.samples, focus=label)
+                                samples=shown_samples, focus=label)
         answered = {n: doc for n, doc in documents.items() if "failure_reason" not in doc}
         filed = {n: route_mod.assess_draw(n, doc, scope) for n, doc in answered.items()}
         verdict = route_mod.combine_draws({
@@ -593,24 +687,28 @@ class _Pass:
         alert_key = self._alert_key([label])
         defender_rows: list[dict[str, Any]] = []
         world_rows: list[dict[str, Any]] = []
+        # The world's user-record entries reach the record at its flip, not before (A6).
+        pending = _empty_user()
         all_filed = [item for n in sorted(filed) for item in filed[n]]
         for item in all_filed:
             fid = f"{self.run_id}/{label}/{item.draw}/{item.index}"
-            lane, why = route_mod.fate(item, focus=label, verdict=verdict, samples=self.samples,
+            lane, why = route_mod.fate(item, focus=label, verdict=verdict, samples=shown_samples,
                                        served_systems=self.served_systems)
             lane, why = self._place(item, fid, lane, why, label=label, verdict=verdict,
                                     alert_key=alert_key, defender_rows=defender_rows,
-                                    world_rows=world_rows)
+                                    world_rows=world_rows, user=pending)
             self.ledger.append(enqueue_mod.disposition_entry(fid, lane, why))
-        self.user[NAMED_GAPS].extend(route_mod.gap_entries(all_filed, verdict, world=label))
-        self._commit(row, defender_rows, world_rows)
+        pending[NAMED_GAPS].extend(route_mod.gap_entries(all_filed, verdict, world=label))
+        self._commit(row, defender_rows, world_rows, user=pending)
 
     def _place(self, item: route_mod.Filed, fid: str, lane: str, why: str | None, *,  # noqa: PLR0913 — one finding's whole hand-over
                label: str, verdict: route_mod.WorldVerdict | None, alert_key: str | None,
                defender_rows: list[dict[str, Any]], world_rows: list[dict[str, Any]],
-               ) -> tuple[str, str | None]:
-        """Turn one finding's lane into its queue row or user-record entry; return the lane it
-        ends in (a row its channel's rule refuses is `unqueueable`, naming why)."""
+               user: dict[str, list[dict[str, Any]]]) -> tuple[str, str | None]:
+        """Turn one finding's lane into its queue row or its entry on `user` (the world's
+        pending user-record lists); return the lane it ends in. A row its channel's rule
+        refuses is `unqueueable`, naming why; so is a design row whose id the questioner queue
+        already holds (A25, below)."""
         a = item.assessment
         finding = item.finding
         if lane in (route_mod.LANE_DEFENDER, route_mod.LANE_QUESTIONER):
@@ -627,6 +725,14 @@ class _Pass:
                     defender_rows.append(row)
                 else:
                     enqueue_mod._validate_world_row(row, episode_dir=self.episode.dir)
+                    if fid in self._questioner_ids():
+                        # A25 (R7): the questioner channel drops a row whose id it holds, and
+                        # this pass's ids are fresh, so the holder is a row a pre-change pass
+                        # queued before it stopped. Named here rather than lost to the dedup.
+                        return route_mod.LANE_UNQUEUEABLE, (
+                            f"the questioner queue already holds a row with id {fid!r} — one a "
+                            "pass before this record queued — so its dedup on finding_id would "
+                            "drop this finding silently; it is recorded here instead")
                     world_rows.append(row)
             except JudgeRefused as refused:
                 return route_mod.LANE_UNQUEUEABLE, str(refused)
@@ -639,18 +745,30 @@ class _Pass:
             if item.kind == route_mod.KIND_GAP:
                 # A keyed listed gap is on `named_gaps` by its blocked call (`gap_entries`).
                 if not a.blocked_keys:
-                    self.user[UNKEYED_NAMED_GAPS].append(entry)
+                    user[UNKEYED_NAMED_GAPS].append(entry)
             elif a.gap_only:
-                self.user[GAP_FINDINGS].append(entry)
+                user[GAP_FINDINGS].append(entry)
             else:
-                self.user[SERVING_FINDINGS].append(entry)
+                user[SERVING_FINDINGS].append(entry)
         return lane, why
 
+    def _questioner_ids(self) -> frozenset[str]:
+        """The finding ids on the questioner queue, read once per pass: every id this pass
+        mints is its own, so only a row an earlier pass queued can hold one."""
+        if self.questioner_ids is None:
+            self.questioner_ids = frozenset(
+                r["finding_id"] for r in self.state.rows(QUESTIONER_FINDINGS)
+                if isinstance(r.get("finding_id"), str))
+        return self.questioner_ids
+
     def _commit(self, row: dict[str, Any], defender_rows: list[dict[str, Any]],
-                world_rows: list[dict[str, Any]]) -> None:
-        """A6: `queueing` written, the rows this pass built from its own draws appended through
-        `state` (`enqueue.enqueue_report`, A8), `queued` written. A stop between the two writes
-        leaves the row `queueing`, which a re-run refuses."""
+                world_rows: list[dict[str, Any]], *,
+                user: dict[str, list[dict[str, Any]]]) -> None:
+        """A6: `queueing` written (the row and its ledger entries), the rows this pass built
+        from its own draws appended through `state` (`enqueue.enqueue_report`, A8), then
+        `queued` written carrying the row's serving findings and named gaps (`user`). A stop
+        between the two writes leaves the row `queueing` with none of them on the record,
+        which a re-run refuses."""
         row[STATE_KEY] = QUEUEING
         self._write()
         report = enqueue_mod.enqueue_report(
@@ -658,6 +776,8 @@ class _Pass:
             drawn=enqueue_mod.DrawnRows(defender=defender_rows, world=world_rows))
         self.enqueued += report.appended
         self.world_enqueued += report.world_appended
+        for name, entries in user.items():
+            self.user[name].extend(entries)
         row[STATE_KEY] = QUEUED
         self._write()
 
@@ -665,9 +785,8 @@ class _Pass:
         family: dict[str, Any] = {"completed_draws": 0, "malformed_replies": 0}
         self.family = family
         try:
-            sections = render_mod.family_sections(self.manifest, self.runs, self.noise,
+            prompt = run_mod._build_family_prompt(self.manifest, self.runs, self.noise,
                                                   cap=self.cap)
-            prompt = run_mod._build_family_prompt(sections=sections)
             self.episode.world(FAMILY_LABEL).draws.ensure()
             completed, documents, malformed, refusal = _run_world_draws(
                 self.episode, FAMILY_LABEL, judge=self.judge, draws=self.draws,
@@ -688,6 +807,7 @@ class _Pass:
                                 samples=None, focus=None)
         alert_key = self._alert_key(self.runs.planted)
         world_rows: list[dict[str, Any]] = []
+        pending = _empty_user()
         for n in sorted(documents):
             if "failure_reason" in documents[n]:
                 continue
@@ -697,19 +817,14 @@ class _Pass:
                                            served_systems=self.served_systems)
                 lane, why = self._place(item, fid, lane, why, label=FAMILY_LABEL, verdict=None,
                                         alert_key=alert_key, defender_rows=[],
-                                        world_rows=world_rows)
+                                        world_rows=world_rows, user=pending)
                 self.ledger.append(enqueue_mod.disposition_entry(fid, lane, why))
-        self._commit(family, [], world_rows)
+        self._commit(family, [], world_rows, user=pending)
 
     def _write(self) -> EpisodeGrade:
-        """The record as it stands, written whole; the found gaps recomputed (A2)."""
-        runs = self.runs
-        not_replayable = (self.record or {}).get("not_replayable")
-        self.user[FOUND_GAPS] = calls_mod.found_gaps(
-            [(label, facts.token, facts.table_rows, facts.ledger_rows)
-             for label, facts in runs.usable.items()],
-            j3=runs.j3, not_replayable=not_replayable if isinstance(not_replayable, list) else ())
-        rows = list(self.rows.values())
+        """The record as it stands, written whole, carrying the pass's found gaps (A2)."""
+        self.user[FOUND_GAPS] = list(self.found_gaps)
+        rows = [self.rows[label] for label in self.order if label in self.rows]
         out = EpisodeGrade(
             episode_dir=self.episode.dir, worlds=rows, validity=USABLE,
             family=self.family, user={k: list(v) for k, v in self.user.items()},
