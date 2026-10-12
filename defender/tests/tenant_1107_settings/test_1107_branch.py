@@ -113,43 +113,9 @@ def _episode_dir(episodes: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------------------------
-# MF-7a / MF-13 — an Elastic part with no docker-exec transport; a box-mounted tenants root.
+# MF-13 — a box-mounted tenants root. (MF-7a, the Elastic part with no docker-exec transport,
+# went with the Elastic view and lead-zero's item 1: #1222 M1; the adapter judges its own keys.)
 # ---------------------------------------------------------------------------------------------
-
-def test_s7_mf7a_elastic_without_docker_exec_is_a_fault(tmp_path, data_root, monkeypatch):
-    """A tenant whose elastic config.env carries every listed Elastic key but no ELASTIC_TRANSPORT
-    (or one other than docker-exec) has record.elastic a ConfigFault, and lead-zero's item 1
-    reports unavailable naming the cause."""
-    monkeypatch.setenv("PATH", S.DockerShim(tmp_path / "docker").path_value())
-    _src, root, folder, _episodes = _layout(tmp_path, data_root, monkeypatch, marker="mf7a")
-
-    # Positive control: the same complete file WITH `ELASTIC_TRANSPORT=docker-exec` is a view.
-    assert isinstance(_resolve(root).elastic, S.record_type("ElasticSettings")), \
-        "the complete file is not a view"
-    for arm, edit in (("absent", lambda: S.drop_key(folder, "elastic", "ELASTIC_TRANSPORT")),
-                      ("ssh", lambda: S.set_key(folder, "elastic", "ELASTIC_TRANSPORT", "ssh"))):
-        edit()
-        fault = _resolve(root).elastic
-        assert isinstance(fault, S.config_fault()), \
-            f"TRANSPORT {arm}: record.elastic is not a ConfigFault: {fault!r}"
-        S.set_key(folder, "elastic", "ELASTIC_TRANSPORT", S.DOCKER_EXEC)
-
-    # Lead-zero's item 1 over the same tenant, for an alert with no signal_index: the complete
-    # tenant issues the shell fetch (the channel can see the difference) ...
-    tenant_dir = S.tenant_folder_of(root, TID)
-    ok = LZ.run(tmp_path / "lz-ok", alert=LZ.alert_doc(signal_index=None), tenant=tenant_dir)
-    assert ok.rec.calls, "control: item 1 issued no backend call over the complete tenant"
-    # ... and the one with no ELASTIC_TRANSPORT reports unavailable, issuing none. The note names
-    # the cause (F11, auto: 'elastic config is bad') — the control's own section can say
-    # "unavailable" too (the fetch found nothing), so the cause and the call count discriminate.
-    S.drop_key(folder, "elastic", "ELASTIC_TRANSPORT")
-    bad = LZ.run(tmp_path / "lz-bad", alert=LZ.alert_doc(signal_index=None), tenant=tenant_dir)
-    assert bad.rec.calls == [], f"item 1 issued {len(bad.rec.calls)} backend call(s)"
-    assert LZ.UNAVAILABLE in bad.section(), \
-        f"item 1 did not report unavailable: {bad.section()[:600]!r}"
-    assert S.BAD_ELASTIC in bad.section(), \
-        f"item 1's note does not name the cause: {bad.section()[:600]!r}"
-
 
 def test_s7_mf13_launcher_refuses_box_mounted_tenants_root(tmp_path, data_root, monkeypatch):
     """The branch launcher passes its box-mounted trees (the episodes base, and the runs base it
@@ -204,32 +170,32 @@ def test_s7_mf13_launcher_refuses_box_mounted_tenants_root(tmp_path, data_root, 
 def test_s60_elastic_events_index_values_carried_forward(tmp_path, data_root, monkeypatch):
     """ELASTIC_EVENTS_INDEX is not validated beyond presence (NF-18): a plain (non-wildcard)
     pattern, a bare '*' and an upper-case/CHANGE-ME pattern are each carried verbatim into
-    record.elastic at resolve, the part still a view (no resolve-time value validation). A VALID
+    the tenant's systems["elastic"] at resolve (no resolve-time value validation). A VALID
     pattern exported under the same key does not reach the record."""
     monkeypatch.setenv("PATH", S.DockerShim(tmp_path / "docker").path_value())
     _src, root, folder, _episodes = _layout(tmp_path, data_root, monkeypatch, marker="s60e")
-    view_type = S.record_type("ElasticSettings")
 
     for value in ("s60e-events", "*", "CHANGE-ME"):
         S.set_key(folder, "elastic", "ELASTIC_EVENTS_INDEX", value)
         if value == "CHANGE-ME":
             monkeypatch.setenv("ELASTIC_EVENTS_INDEX", "s60e-env-*")
-        carried = _resolve(root).elastic
-        assert isinstance(carried, view_type), f"{value!r} faulted the part: {carried!r}"
-        assert carried.events_index == value, \
-            f"{value!r} not carried verbatim: {carried.events_index!r}"
+        carried = _resolve(root).systems["elastic"]
+        assert isinstance(carried, S.record_type("SystemConfig")), \
+            f"{value!r} faulted the part: {carried!r}"
+        assert carried["ELASTIC_EVENTS_INDEX"] == value, \
+            f"{value!r} not carried verbatim: {carried['ELASTIC_EVENTS_INDEX']!r}"
 
 
 def test_s60_elastic_ssl_verify_values_pass_through(tmp_path, data_root, monkeypatch):
     """ELASTIC_SSL_VERIFY is not validated (F3/NF-18, presence-only): 'false', 'TRUE' (uppercase)
-    and 'CHANGE-ME' are each carried into record.elastic as the raw string, with no rejection."""
+    and 'CHANGE-ME' are each carried into the record's systems["elastic"] as the raw string, with no rejection."""
     _src, root, folder, _episodes = _layout(tmp_path, data_root, monkeypatch, marker="ssl")
     for value in ("false", "TRUE", "CHANGE-ME"):
         S.set_key(folder, "elastic", "ELASTIC_SSL_VERIFY", value)
-        carried = _resolve(root).elastic
-        assert isinstance(carried, S.record_type("ElasticSettings")), \
+        carried = _resolve(root).systems["elastic"]
+        assert isinstance(carried, S.record_type("SystemConfig")), \
             f"ELASTIC_SSL_VERIFY={value!r} faulted the part: {carried!r}"
-        assert carried.ssl_verify == value, \
+        assert carried["ELASTIC_SSL_VERIFY"] == value, \
             f"ELASTIC_SSL_VERIFY={value!r} not carried as the raw string: {carried!r}"
 
 
@@ -289,7 +255,7 @@ def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatc
     folder = S.plant(root, TID, marker="mf17")
     manifest = H.family_for(src, tmp_path / "episodes" / T.EPISODE_ID)
     # At launch the Elastic part was whole ...
-    assert isinstance(_resolve(root).elastic, S.record_type("ElasticSettings")), \
+    assert "ELASTIC_ES_CONTAINER" in _resolve(root).systems["elastic"], \
         "the tenant's Elastic part was not whole at launch"
     # ... and is edited bad before the sibling starts.
     S.drop_key(folder, "elastic", "ELASTIC_ES_CONTAINER")
@@ -304,8 +270,8 @@ def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatc
     assert len(rec.lifecycle_calls) == 1, f"lifecycle ran {len(rec.lifecycle_calls)} times"
     record, world = rec.lifecycle_calls[0]["tenant"], rec.lifecycle_calls[0]["world"]
     assert world.label == "b", f"the sibling ran another world: {world!r}"
-    assert isinstance(record.elastic, S.config_fault()), \
-        f"the sibling's own record does not see the edit: {record.elastic!r}"
+    assert "ELASTIC_ES_CONTAINER" not in record.systems["elastic"], \
+        f"the sibling's own record does not see the edit: {record.systems['elastic']!r}"
     # Its Elastic calls fault (O5).
     run_dir = tmp_path / "sibling-run"
     with pytest.raises(S.config_fault()):

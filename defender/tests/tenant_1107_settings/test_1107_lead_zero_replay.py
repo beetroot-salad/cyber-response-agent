@@ -159,16 +159,17 @@ def test_d_agentdeps_record(tmp_path):
         for call in calls:
             record = S.record_on(call.ctx)
             assert record.settings == tenant.settings, (lead, record.settings)
-            assert record.elastic.alerts_index == f"{marker}-alerts-*", (lead, record.elastic)
+            assert record.systems["elastic"]["ELASTIC_ALERTS_INDEX"] == f"{marker}-alerts-*", (
+                lead, record.systems["elastic"])
             assert record.systems["cmdb"]["CMDB_URL_BASE"] == f"http://cmdb-{marker}:8080", lead
 
 
 # ---- a run whose Elastic part is bad completes ---------------------------------------------------
 
 def test_o5_missing_es_container_run_completes(tmp_path, monkeypatch, d9_tenant):
-    """A tenant whose elastic config.env lacks ELASTIC_ES_CONTAINER resolves with record.elastic
-    a ConfigFault, and its investigation runs to completion. Elastic calls fault with
-    ConfigFault."""
+    """A tenant whose elastic config.env lacks ELASTIC_ES_CONTAINER resolves with that key absent
+    from its systems["elastic"], and its investigation runs to completion. Elastic calls fault
+    with ConfigFault."""
     # CX8: the shim, first on the PATH the run env inherits, receives any docker call's argv.
     shim = S.DockerShim(tmp_path / "docker")
     monkeypatch.setenv("PATH", shim.path_value())
@@ -182,7 +183,7 @@ def test_o5_missing_es_container_run_completes(tmp_path, monkeypatch, d9_tenant)
     assert rc == 0, (rc, rec.order)
     assert rec.order.count("lifecycle") == 1, (rc, rec.order)
     record = rec.lifecycle_calls[0]["tenant"]
-    assert isinstance(record.elastic, S.config_fault()), record.elastic
+    assert "ELASTIC_ES_CONTAINER" not in record.systems["elastic"], record.systems["elastic"]
 
     ctx = S.verb_context(record, rec.run_dir_at, shim.env())
     with pytest.raises(S.config_fault()):
@@ -250,7 +251,7 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root):
 
 def test_s7_mf7e_old_manifest_resume_runs_elastic_down(tmp_path, data_root):
     """Resuming a sibling whose manifest records no corpus patterns over a tenant with no elastic
-    folder, or a bad one, proceeds: record.elastic is None or a ConfigFault, the resumed
+    folder, or a bad one, proceeds: the record holds no elastic system or one missing a key, the resumed
     sibling runs with its Elastic reads failing, and nothing refuses the investigation (O5).
 
     #1224: no manifest records patterns any more (`configured_patterns` is refused as
@@ -278,9 +279,9 @@ def test_s7_mf7e_old_manifest_resume_runs_elastic_down(tmp_path, data_root):
         assert "lifecycle" in sibling.order, (arm, rc, sibling.order)
         record = sibling.lifecycle_calls[0]["tenant"]
         if arm == "none":
-            assert record.elastic is None, (arm, record.elastic)
+            assert "elastic" not in record.systems, (arm, sorted(record.systems))
         else:
-            assert isinstance(record.elastic, S.config_fault()), (arm, record.elastic)
+            assert "ELASTIC_ES_CONTAINER" not in record.systems["elastic"], (arm, record.systems)
 
         ctx = S.verb_context(record, sibling.run_dir_at, shim.env())
         with pytest.raises(S.config_fault()):
@@ -293,7 +294,7 @@ def test_s7_mf7e_old_manifest_resume_runs_elastic_down(tmp_path, data_root):
 def test_d_replay_helper_through_resolver(tmp_path, monkeypatch):
     """tests/_tenants1106.run_tenant builds through run_tenant.resolve_run_tenant and nothing
     else (human, early-exit resolution 2). A replay-driven run's RunTenant is the one
-    resolve_run_tenant builds for its tenant folder: the same systems, elastic, ticket_mapping,
+    resolve_run_tenant builds for its tenant folder: the same systems, ticket_mapping,
     grants and correlation."""
     # G54 / test_1078_env.py:343-361: the harness builds with no data root and no runs base.
     H.set_data_root(monkeypatch, None)
@@ -330,8 +331,6 @@ def test_d_replay_helper_through_resolver(tmp_path, monkeypatch):
 
     assert record.settings == tenant.settings
     assert record.systems == resolved.systems
-    assert ([getattr(record.elastic, a) for a in S.ELASTIC_ATTRS]
-            == [getattr(resolved.elastic, a) for a in S.ELASTIC_ATTRS])
     assert type(record.ticket_mapping) is type(resolved.ticket_mapping)
     assert S.open_reporter(record.ticket_mapping) == S.open_reporter(resolved.ticket_mapping)
     assert record.grants == resolved.grants

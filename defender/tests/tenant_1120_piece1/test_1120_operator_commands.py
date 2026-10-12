@@ -39,6 +39,7 @@ from defender.scripts import tenant as tenant_py
 from defender.scripts.adapters import _stub_transport, elastic_adapter
 from defender.skills.connect import validate_scaffold
 from defender.tests import _tenants1106 as T1106
+from defender.tests._alert_plant import plant_alert as plant_alert_with_record
 from defender.tests import _triplet_947 as T947
 from defender.tests.tenant_1078_pass_a import _spec1078 as H78
 from defender.tests.tenant_1120_piece1 import _spec1120 as H
@@ -473,6 +474,7 @@ def test_1120_an_agent_half_off_every_shared_mount_is_refused_naming_the_data_ro
         f"agent half now lives:\n{text}")
 
     on_mount = shared / "data"
+    plant_alert_with_record(shared / "run", {})
     box_mod._create_argv("defender-run-spec1120", shared / "run", H.DEFENDER,
                          box_mod.DEFAULT_SPEC, mounts, tenant_agent=H.agent_dir(on_mount))
 
@@ -496,6 +498,7 @@ def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> N
     assert "DEFENDER_TENANT" not in rendered, rendered
     assert "DEFENDER_DIR" in rendered, rendered
 
+    plant_alert_with_record(tmp_path / "run", {})
     argv = box_mod._create_argv(
         "defender-run-spec1120", tmp_path / "run", H.DEFENDER,
         box_mod.DEFAULT_SPEC, ()).argv
@@ -565,10 +568,6 @@ def test_1120_every_settings_loader_reads_the_accepted_tenants_settings(
     loaded = _stub_transport.load_config(ctx, "ticket", "TICKET")
     assert loaded["URL_BASE"] == "http://spec1120-acme-ticket:8080", loaded
 
-    # #1224 retired the elastic stager and the write door that read this view; the view itself
-    # is what survives, built from the data-root copy.
-    assert (record.elastic.events_index, record.elastic.alerts_index) == (
-        "spec1120-acme-events-*", "spec1120-acme-alerts-*"), record.elastic
 
     report = validate_scaffold.Report()
     validate_scaffold.check_config(report, Path(settings), "ticket")

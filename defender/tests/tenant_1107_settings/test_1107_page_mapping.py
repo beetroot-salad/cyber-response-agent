@@ -38,6 +38,7 @@ from defender.runtime import case_ticket
 from defender.runtime import run_tenant
 from defender.tests import _spec767 as M
 from defender.tests import _tenants1106 as T1106
+from defender.tests._alert_plant import plant_alert as plant_with_record
 from defender.tests import _triplet_947 as T
 from defender.tests._data_root_1078 import current_data_root, ensure_d9_tenant
 from defender.tests.e2e._replay_harness import (
@@ -70,7 +71,9 @@ def _seeded_run(tmp_path: Path, name: str) -> Path:
     """A run dir the renderer accepts: the alert and a real session store behind its pointer."""
     run_dir = tmp_path / "runs" / name
     run_dir.mkdir(parents=True, exist_ok=True)
-    S.plant_alert(run_dir)
+    plant_with_record(run_dir, {"alert_id": "a-1107", "rule": {"id": "r-1107",
+                                                               "description": "spec 1107"},
+                                "timestamp": "2026-09-28T00:00:00Z"})
     S.seed_session_store(run_dir)
     return run_dir
 
@@ -181,7 +184,7 @@ def _mapping_1107() -> str:
 
 
 def _alert_1107(name: str, description: str) -> dict[str, Any]:
-    return {"rule": {"id": "r-1107", "name": name, "description": description},
+    return {"rule": {"id": name, "name": name, "description": description},
             "timestamp": "2026-09-28T01:02:03Z"}
 
 
@@ -443,7 +446,7 @@ def test_d_case_ticket_takes_mapping(tmp_path):
     assert not S.mapping_path(folder).exists(), "the mapping file is still there"
 
     alert = _alert_1107("sig-name-1107", "summary-1107")
-    payload = S.with_mapping(case_ticket.alert_to_open_payload, alert, "case-1107", mapping=mapping)
+    payload = S.with_mapping(case_ticket.alert_to_open_payload, M.facts_of(alert), "case-1107", mapping=mapping)
     assert payload["key"] == "case-1107", payload
     assert payload["reporter"] == "rep-1107", payload
     assert "sig:sig-name-1107" in payload["labels"], payload
@@ -475,16 +478,16 @@ def test_s7_mf11_mutating_callers_copy_locally(tmp_path):
 
     first = _alert_1107("sig-one-1107", "first case")
     second = _alert_1107("sig-two-1107", "second case")
-    one = S.with_mapping(case_ticket.alert_to_open_payload, first, "case-one", mapping=mapping)
+    one = S.with_mapping(case_ticket.alert_to_open_payload, M.facts_of(first), "case-one", mapping=mapping)
     kept = copy.deepcopy(one)
     # A caller does what callers do with a payload: edits it.
     one["labels"].append("planted-1107")
     one["status"] = "planted-1107"
-    two = S.with_mapping(case_ticket.alert_to_open_payload, second, "case-two", mapping=mapping)
+    two = S.with_mapping(case_ticket.alert_to_open_payload, M.facts_of(second), "case-two", mapping=mapping)
     assert two["labels"] == ["sig:sig-two-1107", "evt:2026-09-28T01:02:03Z"], two
     assert two["status"] == "open", two
     assert two["key"] == "case-two", two
-    again = S.with_mapping(case_ticket.alert_to_open_payload, first, "case-one", mapping=mapping)
+    again = S.with_mapping(case_ticket.alert_to_open_payload, M.facts_of(first), "case-one", mapping=mapping)
     assert again == kept, "an edit to one payload reached the next built from the same mapping"
 
     run_dir = M.make_run(tmp_path / "runs", "case-mf11", alert=first)

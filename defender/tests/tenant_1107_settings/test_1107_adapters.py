@@ -283,7 +283,7 @@ def test_d2_docker_context_per_system(tmp_path):
 def test_d2_elastic_containers_no_default(tmp_path):
     """Elastic's docker exec targets the tenant file's ELASTIC_ES_CONTAINER for Elasticsearch
     URLs and its ELASTIC_KIBANA_CONTAINER for Kibana URLs. The write door takes its container
-    from the same key. With either key absent the elastic part is a ConfigFault and elastic
+    from the same key. With either key absent elastic
     calls fault; nothing falls back to 'elasticsearch' or 'kibana' (CX17)."""
     # This slice drives the adapter half only; the write door's half is fork E1's (the door's
     # new signature is not named by the design, so it is not guessed here).
@@ -306,8 +306,6 @@ def test_d2_elastic_containers_no_default(tmp_path):
         root_k, folder_k = _tenant(tmp_path, "ecx", name=name)
         S.drop_key(folder_k, "elastic", key)
         record = S.resolve(root_k)
-        assert isinstance(record.elastic, ConfigFault), \
-            f"{key} absent: record.elastic must be a ConfigFault, got {record.elastic!r}"
         shim_k = S.DockerShim(tmp_path / name / "shim", [_SEARCH])
         ctx_k = _ctx(record, tmp_path / name, shim_k)
         if key == "ELASTIC_ES_CONTAINER":
@@ -530,7 +528,7 @@ def test_s7_mf3_empty_destination_is_config_fault(tmp_path):
     system's calls raise ConfigFault naming the key and spawn no docker child, so docker's own
     deferral of --context '' to DOCKER_CONTEXT or the current context never happens
     (F1/G23/RG1). The same holds for elastic's ELASTIC_ES_CONTAINER and
-    ELASTIC_KIBANA_CONTAINER: an empty value makes record.elastic a ConfigFault and elastic
+    ELASTIC_KIBANA_CONTAINER: an empty value makes elastic
     calls fault. The rule is stated over the value the access method addresses, not over docker
     (transport-agnostic)."""
     # G23: `--context ''` answers rc=0 on the default daemon, or on DOCKER_CONTEXT's name when
@@ -559,8 +557,6 @@ def test_s7_mf3_empty_destination_is_config_fault(tmp_path):
         root, folder = _tenant(tmp_path, "mde", name=name)
         S.set_key(folder, "elastic", key, "")
         record = S.resolve(root)
-        assert isinstance(record.elastic, ConfigFault), \
-            f"{key}='': record.elastic must be a ConfigFault, got {record.elastic!r}"
         shim = S.DockerShim(tmp_path / name / "shim", [_ES_HEALTH, _KB_STATUS])
         ctx = _ctx(record, tmp_path / name, shim)
         if key == "ELASTIC_ES_CONTAINER":
@@ -963,17 +959,14 @@ def test_d7_cli_mode_gone():
     assert "AdapterArgumentParser" not in transport.__all__, "_stub_transport.AdapterArgumentParser outlived build_parser"
 
 
-def test_s7_mf7c_adapter_and_view_judge_independently(tmp_path):
-    """The read adapter keeps its own required-key check. With ELASTIC_KIBANA_CONTAINER absent,
-    record.elastic is a ConfigFault (branching refuses, lead-zero item 1 is unavailable) while
-    the Elasticsearch verbs, whose own required keys are present, still answer. Each reader
-    reports its own view."""
+def test_s7_mf7c_the_adapter_judges_its_own_required_keys(tmp_path):
+    """The read adapter keeps its own required-key check (no record view stands beside it since
+    #1222 M1). With ELASTIC_KIBANA_CONTAINER absent the Elasticsearch verbs, whose own required
+    keys are present, still answer; with KIBANA_URL absent the adapter faults naming it."""
     m = "mf7"
     root, folder = _tenant(tmp_path, m, name="kc")
     S.drop_key(folder, "elastic", "ELASTIC_KIBANA_CONTAINER")
     record = S.resolve(root)
-    assert isinstance(record.elastic, ConfigFault), \
-        f"without ELASTIC_KIBANA_CONTAINER the elastic view must be a ConfigFault: {record.elastic!r}"
     shim = S.DockerShim(tmp_path / "kc" / "shim", [_SEARCH])
     envelope = elastic_adapter.query(_ctx(record, tmp_path / "kc", shim), native_query="*")
     [argv] = _argvs(shim)
@@ -981,12 +974,10 @@ def test_s7_mf7c_adapter_and_view_judge_independently(tmp_path):
     assert S.exec_target(argv) == S.es_container(m), f"the ES verb's child: {argv}"
     assert S.context_of(argv) == S.context_name(m, "elastic"), f"the ES verb's child: {argv}"
 
-    # The other direction: a key the adapter requires and the view does not (KIBANA_URL).
+    # A key the adapter requires of every verb (KIBANA_URL).
     root2, folder2 = _tenant(tmp_path, "mf8", name="ku")
     S.drop_key(folder2, "elastic", "KIBANA_URL")
     record2 = S.resolve(root2)
-    assert isinstance(record2.elastic, S.record_type("ElasticSettings")), \
-        f"the view does not require KIBANA_URL, so it must stand: {record2.elastic!r}"
     shim2 = S.DockerShim(tmp_path / "ku" / "shim", [_SEARCH])
     fault = _raised(elastic_adapter.query, _ctx(record2, tmp_path / "ku", shim2), native_query="*")
     assert isinstance(fault, ConfigFault), f"the adapter requires KIBANA_URL itself and must fault naming it: {fault!r}"

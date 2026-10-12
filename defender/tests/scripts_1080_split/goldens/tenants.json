@@ -460,25 +460,6 @@
    "mapping": {
     "dict": [
      [
-      "source",
-      {
-       "dict": [
-        [
-         "signature",
-         "rule.id"
-        ],
-        [
-         "summary",
-         "rule.description"
-        ],
-        [
-         "event_time",
-         "timestamp"
-        ]
-       ]
-      }
-     ],
-     [
       "open",
       {
        "dict": [
@@ -563,8 +544,8 @@
     "message": "case-history mapping is not a mapping: the tenant's settings/systems/case-history/mapping.yaml"
    },
    "held_on_run_tenant": {
-    "error": "CaseTicketError",
-    "message": "case-history mapping is not a mapping: the tenant's settings/systems/case-history/mapping.yaml"
+    "refused": "TenantRefused",
+    "message": "systems/case-history/mapping.yaml must be a YAML mapping"
    }
   },
   "whitespace_only": {
@@ -573,33 +554,14 @@
     "message": "case-history mapping <DATA_ROOT>/playground/knowledge/settings/systems/case-history/mapping.yaml is not valid YAML: while scanning for the next token\nfound character '\\t' that cannot start any token\n  in \"<unicode string>\", line 2, column 1:\n    \t \n    ^"
    },
    "held_on_run_tenant": {
-    "error": "CaseTicketError",
-    "message": "case-history mapping <DATA_ROOT>/playground/knowledge/settings/systems/case-history/mapping.yaml is not valid YAML: while scanning for the next token\nfound character '\\t' that cannot start any token\n  in \"<unicode string>\", line 2, column 1:\n    \t \n    ^"
+    "refused": "TenantRefused",
+    "message": "systems/case-history/mapping.yaml is not valid YAML"
    }
   },
   "bom_prefixed": {
    "load_case_mapping": {
     "returns": {
      "dict": [
-      [
-       "source",
-       {
-        "dict": [
-         [
-          "signature",
-          "rule.id"
-         ],
-         [
-          "summary",
-          "rule.description"
-         ],
-         [
-          "event_time",
-          "timestamp"
-         ]
-        ]
-       }
-      ],
       [
        "open",
        {
@@ -666,25 +628,6 @@
    "held_on_run_tenant": {
     "mapping": {
      "dict": [
-      [
-       "source",
-       {
-        "dict": [
-         [
-          "signature",
-          "rule.id"
-         ],
-         [
-          "summary",
-          "rule.description"
-         ],
-         [
-          "event_time",
-          "timestamp"
-         ]
-        ]
-       }
-      ],
       [
        "open",
        {
@@ -752,36 +695,17 @@
   "non_utf8": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
-    "message": "case-history mapping <DATA_ROOT>/playground/knowledge/settings/systems/case-history/mapping.yaml is not UTF-8: 'utf-8' codec can't decode byte 0xe9 in position 309: invalid continuation byte"
+    "message": "case-history mapping <DATA_ROOT>/playground/knowledge/settings/systems/case-history/mapping.yaml is not UTF-8: 'utf-8' codec can't decode byte 0xe9 in position 228: invalid continuation byte"
    },
    "held_on_run_tenant": {
-    "error": "CaseTicketError",
-    "message": "case-history mapping <DATA_ROOT>/playground/knowledge/settings/systems/case-history/mapping.yaml is not UTF-8: 'utf-8' codec can't decode byte 0xe9 in position 309: invalid continuation byte"
+    "refused": "TenantRefused",
+    "message": "systems/case-history/mapping.yaml is not UTF-8 text"
    }
   },
   "at_the_bound": {
    "load_case_mapping": {
     "returns": {
      "dict": [
-      [
-       "source",
-       {
-        "dict": [
-         [
-          "signature",
-          "rule.id"
-         ],
-         [
-          "summary",
-          "rule.description"
-         ],
-         [
-          "event_time",
-          "timestamp"
-         ]
-        ]
-       }
-      ],
       [
        "open",
        {
@@ -848,25 +772,6 @@
    "held_on_run_tenant": {
     "mapping": {
      "dict": [
-      [
-       "source",
-       {
-        "dict": [
-         [
-          "signature",
-          "rule.id"
-         ],
-         [
-          "summary",
-          "rule.description"
-         ],
-         [
-          "event_time",
-          "timestamp"
-         ]
-        ]
-       }
-      ],
       [
        "open",
        {
@@ -1008,25 +913,6 @@
     "returns": {
      "dict": [
       [
-       "source",
-       {
-        "dict": [
-         [
-          "signature",
-          "rule.id"
-         ],
-         [
-          "summary",
-          "rule.description"
-         ],
-         [
-          "event_time",
-          "timestamp"
-         ]
-        ]
-       }
-      ],
-      [
        "open",
        {
         "dict": [
@@ -1095,25 +981,6 @@
     "returns": {
      "dict": [
       [
-       "source",
-       {
-        "dict": [
-         [
-          "signature",
-          "rule.id"
-         ],
-         [
-          "summary",
-          "rule.description"
-         ],
-         [
-          "event_time",
-          "timestamp"
-         ]
-        ]
-       }
-      ],
-      [
        "open",
        {
         "dict": [
@@ -1181,25 +1048,6 @@
    "load_case_mapping": {
     "returns": {
      "dict": [
-      [
-       "source",
-       {
-        "dict": [
-         [
-          "signature",
-          "rule.id"
-         ],
-         [
-          "summary",
-          "rule.description"
-         ],
-         [
-          "event_time",
-          "timestamp"
-         ]
-        ]
-       }
-      ],
       [
        "open",
        {
@@ -1296,25 +1144,6 @@
     "returns": {
      "dict": [
       [
-       "source",
-       {
-        "dict": [
-         [
-          "signature",
-          "rule.id"
-         ],
-         [
-          "summary",
-          "rule.description"
-         ],
-         [
-          "event_time",
-          "timestamp"
-         ]
-        ]
-       }
-      ],
-      [
        "open",
        {
         "dict": [
@@ -1375,25 +1204,6 @@
    "load_case_mapping": {
     "returns": {
      "dict": [
-      [
-       "source",
-       {
-        "dict": [
-         [
-          "signature",
-          "rule.id"
-         ],
-         [
-          "summary",
-          "rule.description"
-         ],
-         [
-          "event_time",
-          "timestamp"
-         ]
-        ]
-       }
-      ],
       [
        "open",
        {
@@ -1466,25 +1276,6 @@
     "returns": {
      "dict": [
       [
-       "source",
-       {
-        "dict": [
-         [
-          "signature",
-          "rule.id"
-         ],
-         [
-          "summary",
-          "rule.description"
-         ],
-         [
-          "event_time",
-          "timestamp"
-         ]
-        ]
-       }
-      ],
-      [
        "open",
        {
         "dict": [
@@ -1536,25 +1327,25 @@
   "anchor_and_alias": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
-    "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: line 18: the document reuses a node by alias (*b); write the value out in full"
+    "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: line 14: the document reuses a node by alias (*b); write the value out in full"
    }
   },
   "merge_key": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
-    "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: line 7: the document reuses a node by alias (*b); write the value out in full"
+    "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: line 3: the document reuses a node by alias (*b); write the value out in full"
    }
   },
   "python_object_tag": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
-    "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: could not determine a constructor for the tag 'tag:yaml.org,2002:python/object/apply:os.getcwd'\n  in \"<unicode string>\", line 19, column 7:\n    hook: !!python/object/apply:os.getcwd []\n          ^"
+    "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: could not determine a constructor for the tag 'tag:yaml.org,2002:python/object/apply:os.getcwd'\n  in \"<unicode string>\", line 15, column 7:\n    hook: !!python/object/apply:os.getcwd []\n          ^"
    }
   },
   "python_name_tag": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
-    "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: could not determine a constructor for the tag 'tag:yaml.org,2002:python/name:os.system'\n  in \"<unicode string>\", line 19, column 7:\n    hook: !!python/name:os.system\n          ^"
+    "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: could not determine a constructor for the tag 'tag:yaml.org,2002:python/name:os.system'\n  in \"<unicode string>\", line 15, column 7:\n    hook: !!python/name:os.system\n          ^"
    }
   },
   "invalid_yaml": {
@@ -1572,7 +1363,7 @@
   "two_documents": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
-    "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: expected a single document in the stream\n  in \"<unicode string>\", line 1, column 1:\n    source:\n    ^\nbut found another document\n  in \"<unicode string>\", line 19, column 1:\n    ---\n    ^"
+    "message": "case-history mapping <TMP>/settings/systems/case-history/mapping.yaml is not valid YAML: expected a single document in the stream\n  in \"<unicode string>\", line 1, column 1:\n    open:\n    ^\nbut found another document\n  in \"<unicode string>\", line 15, column 1:\n    ---\n    ^"
    }
   }
  },

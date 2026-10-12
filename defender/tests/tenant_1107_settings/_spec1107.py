@@ -90,9 +90,6 @@ DOCKER_EXEC = "docker-exec"
 SECRETS_ENV = "secrets.env"
 #: The new lint's program name (O7).
 ENV_LINT = "lint_tenant_env_reads"
-#: The two cause phrases O9 / F11 name (demand text, verbatim).
-NO_ELASTIC = "no elastic system configured"
-BAD_ELASTIC = "elastic config is bad"
 #: The page's ticket-line word for a receipt it will not trust (NF-26, demand text).
 RECEIPT_UNREADABLE = "receipt unreadable"
 #: The fault text a system with no folder raises, at base and after (CX5).
@@ -102,11 +99,6 @@ NOT_CONFIGURED = "this tenant's settings do not configure this system"
 RETIRED_FIELD = "settings_dir"
 #: The keyword the replay helper chain stops taking (d_grants_through_tenant_config).
 GRANTS_KW = "grants"
-#: `ElasticSettings`' seven attributes (§7 F0, human) — compared as one vector, since the design
-#: does not say whether the type defines equality.
-ELASTIC_ATTRS: tuple[str, ...] = (
-    "events_index", "alerts_index", "url", "ssl_verify", "es_container", "kibana_container",
-    "docker_context")
 #: The env lint's inline suppression token, in either spelling (coined; the repo's other lints
 #: spell theirs `# lint-monkeypatch: ok — <reason>`). o7_lint_clean_empty_allowlist asserts no
 #: swept file carries it.
@@ -171,12 +163,6 @@ PREFIX: dict[str, str] = {
 #: The six docker-exec-curl stub systems (`_stub_transport.load_config`'s three-key template).
 STUB_SYSTEMS: tuple[str, ...] = (
     "cmdb", "identity", "ticket", "case-history", "change-mgmt", "threat-intel")
-
-#: The keys `ElasticSettings` is all-or-nothing over (d_elastic_view, MF-7 a/b), beside
-#: `ELASTIC_TRANSPORT`, which must equal `docker-exec`.
-ELASTIC_VIEW_KEYS: tuple[str, ...] = (
-    "ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX", "ELASTICSEARCH_URL", "ELASTIC_SSL_VERIFY",
-    "ELASTIC_ES_CONTAINER", "ELASTIC_KIBANA_CONTAINER", "ELASTIC_DOCKER_CONTEXT")
 
 
 def context_name(marker: str, system: str) -> str:
@@ -614,7 +600,12 @@ class RunRecorder:
         self.order.append("materialize")
         run_dir = self.run_dir_at
         run_dir.mkdir(parents=True, exist_ok=True)
-        (run_dir / "alert.json").write_bytes(Path(alert).read_bytes())
+        # The front door settles the alert once (#1222 A1): the folder holds it in the input
+        # directory with its record, the facts derived through the planted tenant's mapping.
+        from defender.tests._alert_plant import plant_alert as _plant_with_record
+
+        _plant_with_record(run_dir, Path(alert).read_bytes(), mapping={
+            "signature": "rule.id", "event_time": "timestamp", "summary": "rule.description"})
         seed_session_store(run_dir)
         return mod("run_repository._handle").Run.at(run_dir)
 
