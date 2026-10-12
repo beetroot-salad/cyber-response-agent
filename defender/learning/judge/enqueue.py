@@ -17,6 +17,7 @@ deduplicated: a world's rows are appended exactly once, by its `queueing` -> `qu
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import field
 from defender._model import model
 from pathlib import Path
 from typing import Any
@@ -161,6 +162,58 @@ def append_world_rows(episode_dir: Path, rows: list[dict[str, Any]], *,
     return state.append(QUESTIONER_FINDINGS, rows)[0]
 
 
+@model
+class DrawnRows:
+    """The rows one A6 commit appends, built by the pass (`build_finding_row`) from the replies
+    it just drew for that world (or the family call) — never read back from draw files on disk
+    (A8). `defender` rows go to the defender channel, `world` rows to the questioner's."""
+
+    defender: list[dict[str, Any]] = field(default_factory=list)
+    world: list[dict[str, Any]] = field(default_factory=list)
+
+
+@model
+class EnqueueReport:
+    """What one `enqueue_report` call appended: rows on the defender channel (`appended`) and
+    on the questioner channel (`world_appended`)."""
+
+    appended: int = 0
+    world_appended: int = 0
+
+
+def enqueue_report(episode_dir: Path, record: dict[str, Any], *, state: LearningState,
+                   drawn: DrawnRows) -> EnqueueReport:
+    """Append one commit's rows: `drawn`, the rows the pass built from the replies it drew for
+    `record` — the world row (or the family row) being committed `queueing` -> `queued` (A6).
+
+    `drawn` is required and must be the pass's own `DrawnRows`: there is no path that rebuilds
+    rows from draw files on disk (A8), so `drawn=None` is refused by name and nothing is
+    appended. Every row must belong to `record` (its `finding_id`'s world half is the row's
+    `world`, `family` for the family row), so one commit never appends another world's rows.
+    Both channels' rows are screened before either is written."""
+    where = _refusal_prefix(episode_dir)
+    if not isinstance(drawn, DrawnRows):
+        raise JudgeRefused(
+            f"{where}enqueue_report takes drawn=, the rows the pass built from the replies it "
+            f"just drew, not {type(drawn).__name__}: rows are never rebuilt from draw files on "
+            "disk (A8)")
+    label = record.get("world") or "family"
+    for row in (*drawn.defender, *drawn.world):
+        parts = str(row.get("finding_id")).rsplit("/", 3)
+        if len(parts) != 4 or parts[1] != label:
+            raise JudgeRefused(
+                f"{where}finding row {row.get('finding_id')!r} is not one of {label!r}'s: one "
+                "commit appends only its own world's rows (A6)")
+    for row in drawn.defender:
+        _validate_row(row, episode_dir=episode_dir)
+    for row in drawn.world:
+        _validate_world_row(row, episode_dir=episode_dir)
+    return EnqueueReport(
+        appended=append_rows(episode_dir, drawn.defender, state=state) if drawn.defender else 0,
+        world_appended=(append_world_rows(episode_dir, drawn.world, state=state)
+                        if drawn.world else 0))
+
+
 def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one keyword each
     *, run_id: str, label: str, draw: str, index: int, subject: str, finding: dict[str, Any],
     alert_rule_key: str | None, citations: Sequence[str] = (), contrast: Sequence[str] = (),
@@ -301,8 +354,8 @@ def check_disposition_entry(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 __all__ = [
-    "DrawsSkipReport", "LANE_DEFENDER", "LANE_UNQUEUEABLE", "LANE_WORLD", "LEDGER_LANES",
-    "WORLD_LABEL_DOUBTED", "append_rows", "append_world_rows", "build_finding_row",
-    "check_disposition_entry", "defender_lane_blocked", "disposition_entry",
-    "draws_on_disk", "draws_on_disk_report",
+    "DrawnRows", "DrawsSkipReport", "EnqueueReport", "LANE_DEFENDER", "LANE_UNQUEUEABLE",
+    "LANE_WORLD", "LEDGER_LANES", "WORLD_LABEL_DOUBTED", "append_rows", "append_world_rows",
+    "build_finding_row", "check_disposition_entry", "defender_lane_blocked",
+    "disposition_entry", "draws_on_disk", "draws_on_disk_report", "enqueue_report",
 ]

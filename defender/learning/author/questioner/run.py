@@ -104,16 +104,24 @@ def questioner_existing_finding_ids(cfg: QuestionerAuthorConfig) -> set[str]:
 def _gate_questioner(
     batch: list[dict], cfg: QuestionerAuthorConfig,
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    """Idempotency, plus the one shape rule a lesson's selection key needs: a world finding
-    carries no defender disposition to gate on, so every row not already attributed to a lesson
-    in this corpus is authored — unless it names no systems.
+    """Idempotency, the retired-name hold, and the one shape rule a lesson's selection key
+    needs: a world finding carries no defender disposition to gate on, so every row not already
+    attributed to a lesson in this corpus is authored — unless it carries a retired name or
+    names no systems.
+
+    A row queued before #1234 carries a retired name (`core/retired`: the family word its
+    appender forced to None, or the retired finding type). It is held naming it (A4, I10) —
+    never authored, never consumed; the drain keeps it queued and inert, and the tick's report
+    line names it with its reason, until an operator moves it.
 
     A row queued before #1224 carries the old selection keys (a pattern and a holding system)
     and no `systems`. A lesson authored from it could select a tenant only by guess, so it is
-    drained without authoring (consumed, never held: the row will never change) and named in a
-    warning (N23). Returns
-    `(held, consumed_pre, to_author)`."""
+    drained without authoring (consumed: the row will never change) and named in a warning
+    (N23). Returns `(held, consumed_pre, to_author)`."""
+    from defender.learning.core.retired import retired_row_names
+
     existing_ids = questioner_existing_finding_ids(cfg)
+    held: list[dict] = []
     consumed: list[dict] = []
     to_author: list[dict] = []
     for entry in batch:
@@ -122,6 +130,12 @@ def _gate_questioner(
             rec = dict(entry)
             rec["consumed_category"] = "consumed_idempotent"
             consumed.append(rec)
+            continue
+        retired = retired_row_names(entry)
+        if retired:
+            rec = dict(entry)
+            rec["held_reason"] = f"retired_name({', '.join(retired)})"
+            held.append(rec)
             continue
         if not names_systems(entry.get("systems")):
             _logger.warning(
@@ -134,7 +148,7 @@ def _gate_questioner(
             consumed.append(rec)
             continue
         to_author.append(entry)
-    return [], consumed, to_author
+    return held, consumed, to_author
 
 
 def build_questioner_user_prompt(
@@ -175,8 +189,8 @@ def invoke_agent(findings: list[dict], batch_id: str, cfg: QuestionerAuthorConfi
 def _write_skip_report_after_rotate(outcome, cfg: QuestionerAuthorConfig) -> None:
     """The tick's closing edge — after both the corpus commit and the queue rotation.
 
-    `gate_held` is reported too, though this gate never holds: a row there would reveal a gate
-    this config doesn't know it has."""
+    `gate_held` names the rows the gate held for a retired name (`_gate_questioner`), each with
+    its reason, on every tick they stay queued."""
     _shared.write_disposition_report(
         cfg.state, cfg.channel, batch_id=outcome.batch_id,
         groups={"skipped": outcome.consumed.get("consumed_skip", []),

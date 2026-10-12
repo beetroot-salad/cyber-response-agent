@@ -43,7 +43,6 @@
 .episode .vd-reason { color: var(--warn); overflow-wrap: anywhere; }
 .episode .vd-family-draw { margin: 6px 0; padding: 8px 12px; border-left: 3px solid var(--accent-learning); background: var(--bg-3); }
 .episode .vd-family-item { overflow-wrap: anywhere; line-height: 1.55; }
-.episode .vd-outcome { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px; color: var(--accent-learning); margin-left: 6px; }
 .episode .vd-family-failed { color: var(--bad); margin: 6px 0; overflow-wrap: anywhere; }
 .episode .vd-lede { margin: 8px 0 14px; color: var(--text); overflow-wrap: anywhere; }
 .episode .vd-tile {
@@ -52,8 +51,6 @@
   background: var(--bg-2); border: 1px solid var(--border);
   font-size: 15px; font-weight: 600; color: var(--text-bright); overflow-wrap: anywhere;
 }
-.episode .vd-word { color: var(--accent-judge); margin-left: 6px; }
-.episode .vd-nonladder { font-size: 11px; font-weight: 400; color: var(--text-dim); }
 .episode .vd-caption { font-size: 11px; font-weight: 400; color: var(--text-dim); margin-top: 4px; line-height: 1.5; }
 .episode .vd-cards { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 12px; }
 .episode .vd-cause {
@@ -105,7 +102,6 @@
 .episode .w-report { margin-top: 6px; color: var(--text); }
 /* Bucket accents — the same seven words the findings rows carry. */
 .episode .bucket-lead-set { color: var(--accent-defender); }
-.episode .bucket-observability { color: var(--accent-oracle); }
 .episode .bucket-decision-discipline { color: var(--accent-judge); }
 .episode .bucket-analyze-discipline { color: var(--accent-learning); }
 .episode .bucket-mechanical { color: var(--accent-raw); }
@@ -128,7 +124,6 @@
   color: var(--text-dim); margin: 2px 8px 0 0;
 }
 .episode .fr-evidence { color: var(--code); }
-.episode .fr-outcome { display: inline-block; font-size: 11px; color: var(--accent-learning); margin: 2px 0 0; }
 .episode .fr-off-roster { font-size: 12px; color: var(--warn); }
 .episode .fr-dropped, .episode .fr-unreadable, .episode .fr-skipped { font-size: 12px; color: var(--warn); padding: 2px 0; overflow-wrap: anywhere; }
 

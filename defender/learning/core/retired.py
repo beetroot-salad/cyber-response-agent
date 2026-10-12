@@ -42,8 +42,18 @@ def retired_keys(record: Mapping[Any, Any], names: Iterable[str] = RETIRED_RECOR
     return sorted(name for name in names if name in record)
 
 
+def retired_row_names(row: Mapping[Any, Any], *, type_key: str = "type") -> list[str]:
+    """`retired_keys(row)`, plus `RETIRED_FINDING_TYPE` when the row's `type_key` field holds it
+    — what a queue gate or record reader names when it refuses a row (A4). A queue row's type
+    is under `type`; a `judge.yaml` world row's under `bucket`."""
+    names = retired_keys(row)
+    if row.get(type_key) == RETIRED_FINDING_TYPE:
+        names.append(RETIRED_FINDING_TYPE)
+    return names
+
+
 __all__ = [
     "EPISODE_OUTCOME", "FAMILY_OUTCOME", "JUDGE_OUTCOME", "RETIRED_FINDING_TYPE",
     "RETIRED_INVESTIGATOR_FIELD", "RETIRED_LANES", "RETIRED_RECORD_FIELDS",
-    "RETIRED_REPLY_WORDS", "VERDICT_WORD", "retired_keys",
+    "RETIRED_REPLY_WORDS", "VERDICT_WORD", "retired_keys", "retired_row_names",
 ]

@@ -41,7 +41,7 @@ from defender._report import ReportRead
 from defender._run_id import is_valid_run_id
 from defender._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
 from defender.run_repository import RUN_LAYOUT, WIRE_LOG_NAMES, RunRefused
-from defender._vocab import normalized_disposition, normalized_judge_outcome
+from defender._vocab import normalized_disposition
 from defender.learning.branch import archive
 from defender.learning.branch import outcome as outcome_mod
 from defender.learning.branch import timing as timing_mod
@@ -85,7 +85,6 @@ _FAMILY_LABEL = "family"
 #: world-subject finding's free-text bucket) is `bucket-other`.
 _BUCKET_CLASS = {
     "lead-set": "bucket-lead-set",
-    "observability": "bucket-observability",
     "decision-discipline": "bucket-decision-discipline",
     "analyze-discipline": "bucket-analyze-discipline",
     "lead-quality": "bucket-lead-quality",
@@ -523,7 +522,7 @@ def _priced(model: Any, usage: Any) -> float | None:
 class _Finding:
     __slots__ = ("row_id", "label", "draw", "index", "subject", "claim", "root_cause",
                  "anchor", "topic", "bucket", "evidence", "world_field", "disposition",
-                 "reason", "stub", "recorded_id", "outcome", "raw")
+                 "reason", "stub", "recorded_id", "raw")
 
     row_id: Any
     label: Any
@@ -541,7 +540,6 @@ class _Finding:
     reason: Any
     stub: Any
     recorded_id: Any
-    outcome: Any
     raw: Any
 
     def __init__(self, **kw: Any) -> None:
@@ -562,8 +560,7 @@ class _Findings:
 
     def __init__(self) -> None:
         self.rows: list[_Finding] = []
-        self.counts = {"defender": 0, "world_author": 0, "unqueueable": 0,
-                       "dropped": 0, "never_eligible": 0}
+        self.counts = {"defender": 0, "world_author": 0, "unqueueable": 0, "dropped": 0}
         self.world_reports: dict[str, DrawsSkipReport] = {}
         self.draw_failures: list[tuple[str, int, str]] = []
         self.dropped: list[tuple[str, int, int]] = []
@@ -1127,8 +1124,7 @@ def _walk_findings(ep: _Episode) -> _Findings:  # noqa: C901, PLR0912, PLR0915
                 rows.append(_Finding(
                     row_id=f"f-{label}-{draw}-{index}", label=label, draw=draw, index=index,
                     subject=subject, disposition=disposition, reason=reason, stub=False,
-                    recorded_id=recorded_id, outcome=doc.get("episode_outcome"),
-                    **_finding_fields(finding)))
+                    recorded_id=recorded_id, **_finding_fields(finding)))
 
 
     # Record-only stubs: a ledger entry whose draw document is absent but whose text the
@@ -1181,8 +1177,6 @@ def _disposition_heading_raw(f: _Finding) -> str:
     if f.disposition == "unqueueable":
         addressee = "defender" if f.subject == SUBJECT_DEFENDER else "world author"
         return f"{addressee}: unqueueable — {_raw(f.reason)}"
-    if f.disposition == "never_eligible":
-        return f"defender: never eligible — verdict {_raw(f.reason)}"
     if f.disposition == "world_ungradable":
         return f"not enqueued — world ungradable: {_raw(f.reason)}"
     if f.disposition == "no_grade_row":
@@ -1377,31 +1371,23 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
     for f in rows:
         if f.label == _FAMILY_LABEL and f.disposition != "never_on_record":
             family_groups.setdefault(f.draw, []).append(f)
-    family_docs = ep.draws[_FAMILY_LABEL][0]
     # Draw keys may be `int` (document), `str` (stub) or `None`; the sort key
     # compares across them so a mixed set cannot raise `TypeError` out of the page.
     for draw in sorted(family_groups, key=_draw_sort_key):
-        doc = family_docs.get(draw) if isinstance(draw, int) else None
-        outcome = str(doc.get("episode_outcome", "")) if isinstance(doc, dict) else ""
-        items = "".join(f'<div class="vd-family-item">{_uv(f.topic)}: {_uv(f.claim)}'
-                        f' <span class="vd-outcome">{_uv(outcome)}</span></div>'
+        items = "".join(f'<div class="vd-family-item">{_uv(f.topic)}: {_uv(f.claim)}</div>'
                         for f in family_groups[draw])
         lede_parts.append(f'<div class="vd-family-draw">{items}</div>')
 
-    family_failed = getattr(grade, "family_failed_reason", None)
+    family_failed = (grade.family or {}).get("draws_failed_reason")
     if family_failed:
         lede_parts.append(f'<div class="vd-family-failed">{_uv(family_failed)}</div>')
 
-    # `is not None`, not `or`: an empty `family_outcome` is the record's word, not an absence.
-    family_outcome = getattr(grade, "family_outcome", None)
-    badge_word = family_outcome if family_outcome is not None else grade.verdict_word
+    # #1234 retired the family word: the badge is the record's own validity (O5).
     queued = grade.enqueued_rows + grade.world_enqueued_rows
-    lede_line = f"{_uv(grade.verdict_word)} · {queued} findings queued"
-    lede_parts.append(f'<div class="vd-lede">{lede_line}</div>')
+    lede_parts.append(f'<div class="vd-lede">{queued} findings queued</div>')
 
-    badge = f'<span class="vd-badge">{_uv(badge_word)}</span>'
-    meta = (f'<span class="vd-meta">{_uv(grade.episode_outcome)} · {_uv(grade.verdict_word)}'
-            f' · validity {_uv(grade.validity)}</span>')
+    badge = f'<span class="vd-badge">{_uv(grade.validity)}</span>'
+    meta = f'<span class="vd-meta">validity {_uv(grade.validity)}</span>'
 
     # The record's own partition, never re-derived here.
     graded = grade.graded_worlds
@@ -1412,14 +1398,9 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
         if row is not None and _normalized_disposition(row.get("verdict")) == \
                 _normalized_disposition(row.get("declared")):
             agree += 1
-    # Asked of the vocabulary's own normalizer (case-insensitive, trimmed) rather than a local
-    # copy of the enum.
-    verdict_note = ("" if normalized_judge_outcome(grade.verdict_word) is not None
-                    else ' <span class="vd-nonladder">(not a family word)</span>')
     tile1 = (
         f'<div class="vd-tile" id="vd-tile-1">{len(graded)} worlds judged · verdict = '
-        f'declared on {agree} of {len(graded)} '
-        f'<span class="vd-word">{_uv(grade.verdict_word)}</span>{verdict_note}</div>')
+        f'declared on {agree} of {len(graded)}</div>')
 
     unjudged_captions = [f"{_uv(w.label)} — {_uv(w.row.get('ungradable_reason'))}"
                          for w in entries.values()
@@ -1432,8 +1413,6 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
     findings_total = len(rows)
     split_parts = [f"{counts['defender']} defender", f"{counts['world_author']} world author",
                   f"{counts['unqueueable']} unqueueable", f"{counts['dropped']} dropped"]
-    if counts["never_eligible"]:
-        split_parts.append(f"{counts['never_eligible']} never eligible")
     # The walk's own count, not `grade.enqueued_rows` (the record's figure, shown separately in
     # the queue accounting).
     tile_queued = counts["defender"] + counts["world_author"]
@@ -1460,10 +1439,7 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
         # the count and the anchor refer to the same rows.
         world_group = [f for f in rows if f.label == w.label and f.subject == SUBJECT_DEFENDER]
         n_findings = len(world_group)
-        if world_group and all(f.disposition == "never_eligible" for f in world_group):
-            footer_word = "never eligible"
-        else:
-            footer_word = "enqueued"
+        footer_word = "enqueued"
         group_n = (ep.findings.group_index.get(_disposition_heading_raw(world_group[0]), 1)
                    if world_group else 1)
         off_roster_note = ("" if w.in_manifest or w.run_dir_name is not None
@@ -1727,9 +1703,6 @@ def _finding_row_html(f: _Finding) -> str:  # noqa: C901 — one row's worth of 
             bits.append(f'<span class="fr-world-field">{_uv(f.world_field)}</span>')
     if f.recorded_id is not None:
         bits.append(f'<span class="fr-recorded-id">{_uv(f.recorded_id)}</span>')
-    if f.outcome is not None:
-        # The draw's own `episode_outcome`, beside its findings.
-        bits.append(f'<span class="fr-outcome">{_uv(f.outcome)}</span>')
     # The row id embeds the world label, so a label failing the id grammar gets no id at all.
     id_attr = f' id="{esc(f.row_id)}"' if _safe_id(f.label) else ""
     # Joined with a space: adjacent inline spans would otherwise glue their words together in

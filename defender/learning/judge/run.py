@@ -407,8 +407,8 @@ def validate_reply(text: str, *, scope: str = "world", served_systems: Any = Non
 
     `scope` is which call the reply came from: `"world"` carries the world's `bucket`,
     `systems` and the three filed lists; `"family"` carries world findings only. A retired name
-    (`episode_outcome`, `verdict_word`, an investigator finding's `evidence`) is refused BY THAT
-    NAME (A4, A17). `served_systems` (the family's recorded list) and `shown_its_facts` (the
+    (`core/retired`: a reply word of `RETIRED_REPLY_WORDS`, an investigator finding's
+    `RETIRED_INVESTIGATOR_FIELD`) is refused BY THAT NAME (A4, A17). `served_systems` (the family's recorded list) and `shown_its_facts` (the
     contrast table's word on the judged world) drive the M20=A and A5 bucket refusals.
 
     The shape rule is `reply_document_text`'s: exactly one document (bare, or in exactly one

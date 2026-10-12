@@ -141,7 +141,7 @@ PIPELINE_FINDING_TYPES = {
 }
 #: A resolution moved past the branch's fence and the verdict still disagreed with the
 #: declared disposition. Produced only by the family judge's appender
-#: (`learning/judge/enqueue.py`), so the queue accepts it but it is kept apart from the four
+#: (`learning/judge/enqueue.py`), so the queue accepts it but it is kept apart from the three
 #: above.
 FAMILY_ONLY_FINDING_TYPES = {"decision-discipline"}
 QUEUEABLE_FINDING_TYPES = PIPELINE_FINDING_TYPES | FAMILY_ONLY_FINDING_TYPES

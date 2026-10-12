@@ -268,14 +268,15 @@ def _gate_family(entry: dict) -> tuple[str, dict] | None:
     The judge queues a family row only for an investigator finding of a measured, unanimous
     world (#1234 A7, A13), so the row's own fields are its ground truth: it must carry a
     non-empty `contrast_evidence`, a boolean `on_verdict_path` and a boolean
-    `world_label_doubted`. A row carrying a retired name (a pre-#1234 row's `judge_outcome`)
-    or missing a new field is held naming it — never authored, never consumed (I10)."""
-    from defender.learning.core.retired import retired_keys
+    `world_label_doubted`. A row carrying a retired name (`core/retired`: a pre-#1234 row's
+    family word, or the retired finding type) or missing a new field is held naming it — never
+    authored, never consumed (I10)."""
+    from defender.learning.core.retired import retired_row_names
 
-    retired = retired_keys(entry)
+    retired = retired_row_names(entry)
     if retired:
         rec = dict(entry)
-        rec["held_reason"] = f"retired_field({', '.join(retired)})"
+        rec["held_reason"] = f"retired_name({', '.join(retired)})"
         return "held", rec
     contrast = entry.get("contrast_evidence")
     missing = [key for key, ok in (

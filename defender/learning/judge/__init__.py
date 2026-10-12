@@ -36,6 +36,11 @@ from pydantic import AfterValidator, TypeAdapter, ValidationError
 # `JudgeRefused` lives in `_errors.py` to avoid an import cycle; re-exported here.
 from defender._model import model  # noqa: E402
 from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS, LearningState  # noqa: E402
+from defender.learning.core.retired import (  # noqa: E402
+    RETIRED_LANES,
+    retired_keys,
+    retired_row_names,
+)
 from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
 from defender._episode_handle import Episode  # noqa: E402
@@ -643,16 +648,16 @@ class _Pass:
 
     def _commit(self, row: dict[str, Any], defender_rows: list[dict[str, Any]],
                 world_rows: list[dict[str, Any]]) -> None:
-        """A6: `queueing` written, the rows appended through `state`, `queued` written. A stop
-        between the two writes leaves the row `queueing`, which a re-run refuses."""
+        """A6: `queueing` written, the rows this pass built from its own draws appended through
+        `state` (`enqueue.enqueue_report`, A8), `queued` written. A stop between the two writes
+        leaves the row `queueing`, which a re-run refuses."""
         row[STATE_KEY] = QUEUEING
         self._write()
-        if defender_rows:
-            self.enqueued += enqueue_mod.append_rows(self.episode.dir, defender_rows,
-                                                     state=self.state)
-        if world_rows:
-            self.world_enqueued += enqueue_mod.append_world_rows(self.episode.dir, world_rows,
-                                                                 state=self.state)
+        report = enqueue_mod.enqueue_report(
+            self.episode.dir, row, state=self.state,
+            drawn=enqueue_mod.DrawnRows(defender=defender_rows, world=world_rows))
+        self.enqueued += report.appended
+        self.world_enqueued += report.world_appended
         row[STATE_KEY] = QUEUED
         self._write()
 
@@ -749,16 +754,60 @@ def _pass_lessons_commit(bound: Bound, labels: list[str]) -> str | None:
 def read_grade(episode_dir: Path) -> EpisodeGrade | None:
     """The episode's recorded grade off `judge.yaml`, or `None` when there is none.
 
-    The one reader, shared with the episode page. Absent fields take defaults and unknown keys
-    (a retired field among them) are ignored, never read; a planted link, a non-mapping or a
-    schema failure is `JudgeRefused`. A `not_graded` stamp reads back as a grade carrying it.
+    The one reader, shared with the episode page and the re-run. A record carrying a name
+    #1234 retired (`_retired_names_in`) is `JudgeRefused` naming it, before anything is read
+    (A4). Otherwise absent fields take defaults and unknown keys are dropped, never read; a
+    planted link, a non-mapping or a schema failure is `JudgeRefused`. A `not_graded` stamp
+    reads back as a grade carrying it.
     """
     episode_dir = Path(episode_dir)
     doc = _existing_grade(episode_dir)
     return None if doc is None else _grade_from_document(episode_dir, doc)
 
 
+def _retired_names_in(doc: dict[str, Any]) -> list[str]:
+    """Every place `doc` (a `judge.yaml` mapping) carries a retired name (`core/retired`): a
+    retired field at top level, on a world row, a world row's draw or the family row; the
+    retired finding type as a world row's or a draw's `bucket`; a retired ledger lane. `[]` for
+    a record of the new shape. Each place reads as `<where>: <names>`."""
+    found: list[str] = []
+
+    def note(where: str, names: list[str]) -> None:
+        if names:
+            found.append(f"{where}: {', '.join(names)}")
+
+    note("top level", retired_keys(doc))
+    worlds = doc.get("worlds")
+    for row in worlds if isinstance(worlds, list) else ():
+        if not isinstance(row, dict):
+            continue
+        where = f"world {row.get('world')!r}"
+        note(where, retired_row_names(row, type_key="bucket"))
+        draws = row.get("draws")
+        for draw in draws if isinstance(draws, list) else ():
+            if isinstance(draw, dict):
+                note(f"{where} draw {draw.get('draw')!r}",
+                     retired_row_names(draw, type_key="bucket"))
+    family = doc.get("family")
+    if isinstance(family, dict):
+        note(f"the {FAMILY_LABEL} row", retired_keys(family))
+    ledger = doc.get("dispositions")
+    for entry in ledger if isinstance(ledger, list) else ():
+        lane = entry.get("lane") if isinstance(entry, dict) else None
+        if isinstance(lane, str) and lane in RETIRED_LANES:
+            note(f"ledger entry {entry.get('finding_id')!r}", [f"lane {lane}"])
+    return found
+
+
 def _grade_from_document(episode_dir: Path, doc: dict[str, Any]) -> EpisodeGrade:
+    retired = _retired_names_in(doc)
+    if retired:
+        # Before the unknown-key drop: a retired field is never read as the old design meant
+        # it, and never silently dropped as though it were merely unknown (A4).
+        raise JudgeRefused(
+            f"{LAYOUT.judge} carries names #1234 retired ({'; '.join(retired)}): a record "
+            "written before the change is refused by name, for the re-run and the page alike — "
+            "move it aside to grade the episode afresh")
     # Strictly validated; a wrong shape is refused, not re-graded (a planted record must not
     # buy model calls — a human deletes the file). `TypeError` too: non-string YAML keys fail
     # as keywords before pydantic runs.
