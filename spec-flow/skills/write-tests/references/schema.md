@@ -1,5 +1,7 @@
 # The spec-coverage graph — schema
 
+Read only for the legacy graph interface used by write-code-from-tests or an explicit graph consumer. **graph-export.md** gives the current export procedure; this language does not require the retired phase pipeline.
+
 The language the spec is written in. Two layers — **demands** (what we require) and **structure** (what exists or will exist) — joined by one relation, `binds`. The demand list is the spec proper; structure is its address space. An **obligation** is a missing demand the gate computes — a structure element the change touches whose contract lacks a binding demand; rules.md owns the definition and the residue types.
 
 ## Slot discipline: every slot declares its evaluator
@@ -7,7 +9,7 @@ The language the spec is written in. Two layers — **demands** (what we require
 Every slot in this schema is one of two kinds, and nothing in between:
 
 - **Formal** (evaluator: a gate rule) — closed vocabulary, typed values, referential integrity. Rules consume *only* these slots (the two flagged exceptions are named in rules.md).
-- **Semantic surface** (evaluator: an LLM, or a person reading the form it surfaces into — a test docstring, a §7 question) — marked `nl:`, written as full sentences with real grammar, because a reader with judgment consumes it, not a query. No rule may reference an `nl:` slot.
+- **Semantic surface** (evaluator: an LLM, or a person reading the form it surfaces into — a test docstring, a design decision) — marked `nl:`, written as full sentences with real grammar, because a reader with judgment consumes it, not a query. No rule may reference an `nl:` slot.
 
 The in-between — prose chopped into key-value fragments that no rule can evaluate ("NL without conjunctions") — is banned, and the ban is checkable: no rule reads an `nl:` slot; no formal slot contains free text. When a value doesn't fit a formal vocabulary, that is a signal to either grow the vocabulary (rare, demand-driven) or admit the content is semantic and write it as a sentence.
 
@@ -34,16 +36,16 @@ Demand:
 Kind semantics:
 
 - **behavior** — driving the entry point under stated conditions produces a specific observable result (return value, written artifact, raised error). Demand #0 — the return-value contract — and most enumerated fault outcomes are behavior demands.
-- **seam** — the declared entry point or injection seam exists with the stated signature (the deps parameter, the constructor argument, the returned handle). This is the demand "pin the seam as a demand" resolves to when the design gives a dependency no seam; it is discharged by construction when every test drives the target through it, and it is what write-code-from-spec's reconciliation reads.
+- **seam** — the declared entry point or injection seam exists with the stated signature (the deps parameter, the constructor argument, the returned handle). This is the demand "pin the seam as a demand" resolves to when the design gives a dependency no seam; it is discharged by construction when every test drives the target through it, and it is what write-code-from-tests's reconciliation reads.
 - **shape** — the payload sent across an edge satisfies its payload facet's invariants.
 - **uniqueness** — writes into a shared sink land on distinct paths / atomically (per the identity facet's `sharing`).
 - **parity** — a constraint enforced on one `via` is enforced on every `via` that reaches the boundary.
 - **domain-outcome** — a specific domain member (or member combination) produces a specific observable result.
 - **survival** — a workflow that depended on a removed element still completes via its substitute.
 - **coherence** — every reader of a changed source agrees with it. `parity`'s sibling one layer over: parity is across the *access surfaces* of one boundary, coherence across its *readers*. Bound per reader edge, never at the boundary — a demand at the source's own altitude is green when two of its three readers moved, which is the bug.
-- **negative** — something must *not* be observable; **requires a paired positive-control demand** on the same address under the complementary condition (checked in the phase-F gate), or it passes vacuously. A negative binds every surface the content could reach — each of the actor's out-edges — or it is silently scoped to only the addresses someone thought to bind.
+- **negative** — something must *not* be observable; **requires a paired positive-control demand** on the same address under the complementary condition (checked during independent contract review), or it passes vacuously. A negative binds every surface the content could reach — each of the actor's out-edges — or it is silently scoped to only the addresses someone thought to bind.
 
-Form assignment: extraction marks a demand `test` when the suite is to pin it — the default, and a **pointer** whose prose lives in the test it names via `discharged_by`; `clause` records a deliberate deferral to prose, carries its own `outcome`, and a clause-only binding on an obligated element leaves the obligation open (it never pre-discharges a rule). `waiver` is a human's recorded decision not to test something — minted only at §7, an examined no, carrying its `outcome`, kept in the artifact.
+Form assignment: extraction marks a demand `test` when the suite is to pin it — the default, and a **pointer** whose prose lives in the test it names via `discharged_by`; `clause` records a deliberate deferral to prose, carries its own `outcome`, and a clause-only binding on an obligated element leaves the obligation open (it never pre-discharges a rule). `waiver` is a human's recorded decision not to test something — recorded only after an explicit human decision, an examined no, carrying its `outcome`, kept in the artifact.
 
 ## Address forms
 
@@ -164,14 +166,14 @@ Every field earns its place by naming its consumer; a field nothing consumes is 
 | `payload.parts` / `.invariants` | R1 trigger + the demanded test's assertion template | rule input + obligation content |
 | `domain.type` / `.default` | R4 obligation content — the baseline column the alternatives cross from | obligation content |
 | `Demand.kind` / `.form`, `binds` | the gate's join (`executable` is derived from `form`) | rule input |
-| `Demand.discharged_by` (form: test) + the named test's docstring | check_binds's prose⊄binds scan; phase-F test-existence check | pointer + rule input |
-| `Demand.outcome` (form: clause / waiver only) | check_binds's prose⊄binds scan for those forms; the cold reconciler | obligation content + readability |
-| `Demand.rejected` (clause/waiver) / a test `# rejected:` / a premise `# fork:` | §7 decision record; a `# fork:` routes a known-decision premise to the fork list regardless of how it was answered | decision channel |
+| `Demand.discharged_by` (form: test) + the named test's docstring | check_binds's prose⊄binds scan; contract review | pointer + rule input |
+| `Demand.outcome` (form: clause / waiver only) | check_binds's prose⊄binds scan for those forms; the independent contract reviewer | obligation content + readability |
+| `Demand.rejected` (clause/waiver) / a test `# rejected:` / a premise `# fork:` | design decision record; legacy `# fork:` annotations preserve unresolved interpretations for disposition | decision channel |
 | element `provenance` | R0 routing; "which artifact do I fix" | completeness forcer |
 | mandatory-with-`unknown` on invariants; `identity.evidence` | forces claim-or-confess, with the claim's source cited | completeness forcer |
 | `id` | graph diff across runs; witness text | identity |
 | `transport` | extraction reliability only | hint (the lone exception) |
-| `nl:` slots, `refinement`, witness strings | the cold reconciler; the test author, where a witness seeds a docstring | readability |
+| `nl:` slots, `refinement`, witness strings | the independent contract reviewer; the test author, where a witness seeds a docstring | readability |
 
 ## Extraction contract
 
@@ -183,13 +185,13 @@ Two extractors populate the graph; their outputs meet at the gate.
 - the consumers of anything the design removes — found by *reading* prompts and call-sites (a prompt line reading "grep, not index" names a consumer of grep), never by signature grep — naming the sweep that established the list;
 - the real semantics of every external tool driven (`--help`, docs — not priors);
 - every config knob: type, default, distinguished members, documented alternatives — and, per documented alternative, whether the shipped default stays valid under it (`crosses_validation`);
-- every **consequence-bearing fact** on a path the change touches — a side-effecting call on a read/write path, an unbounded sink, a shared trace/sink — flagged with the disposition it expects (the premise/claim it feeds, or an explicit `no-consequence`), so a consequence-shaped fact cannot leave the brief as inert narrative (phases/ground-extract.md; the phase-F gate reconciles the flags).
+- every **consequence-bearing fact** on a path the change touches — a side-effecting call on a read/write path, an unbounded sink, a shared trace/sink — flagged with the disposition it expects (the premise/claim it feeds, or an explicit `no-consequence`), so a consequential fact cannot remain inert narrative; independent review reconciles its disposition (review.md).
 
 **Demand extraction (structure, `provenance: design`)** materializes the rest: resolving `binds:` addresses pulls the demanded boundaries, facets, and edges into existence. At spec time the delta *is* this demand-implied structure.
 
 Both extractors fill every invariant field or write `unknown`. Reconciliation is bidirectional (rules.md R0): every normative design sentence binds ≥1 element; every delta element traces to a design sentence.
 
-**Extraction completeness is the gate's single point of failure**: an element missing from the graph is invisible to every rule, and a clean gate then *certifies* the blind spot. `spec-graph trace` now derives the two riskiest censuses from the code — `drivers` (changed module → the entrypoints that reach it) and `resource` (declared sink → writers/readers with path templates) — with an honest floor for what a static walk cannot resolve; the floor lines, boundary-identity keying across passes, and any census the tools don't cover stay on the reader. The brief still names how each list was established (a tool run is the probe), phase D's name reconciliation unifies the two extractions' ids and axes, and the strong author (phases/enumerate.md) is explicitly charged with hunting the brief's edges.
+**Extraction completeness is the gate's single point of failure**: an element missing from the graph is invisible to every rule, and a clean gate then *certifies* the blind spot. `spec-graph trace` now derives the two riskiest censuses from the code — `drivers` (changed module → the entrypoints that reach it) and `resource` (declared sink → writers/readers with path templates) — with an honest floor for what a static walk cannot resolve; the floor lines, boundary-identity keying across passes, and any census the tools don't cover stay on the reader. The brief still names how each list was established (a tool run is the probe), the exporter reconciles ids and axes across the contract and grounding, and independent review challenges missing contexts and interactions (review.md).
 
 ## Worked example — demands first
 

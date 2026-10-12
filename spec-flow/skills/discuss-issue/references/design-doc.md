@@ -1,40 +1,66 @@
-# Closing with the design doc
+# The design and its grounding
 
-You reach here as the discussion settles — but first check *which way* it settled. Won't-fix, or already resolved by a later merge, ends in a short disposition comment — that is the state the issue needs — not in the doc below. Only when the issue is genuinely heading to implementation do you compile what was decided into **one issue comment**: the intent+design doc write-tests consumes.
+Read when drafting, reviewing, or amending a design. Keep the design useful to both the human deciding it and the cold agent turning it into tests. Lead with behavior, models, flows, and trade-offs. Grounding records support those choices; they are not another specification the human must approve.
 
-Write it for the agent that reads it cold, not for the user — the user's version was the conversation. The value is conservation: the typing survives into the spec stage, and a flat prose summary loses exactly what the downstream checks stand on. Scale it to the issue — a one-line fix earns a short doc.
+Scale detail to uncertainty, behavioral coupling, and the consequence of failure. A small settled correction can fit in a few paragraphs. Do not fill empty sections or manufacture alternatives for ceremony.
 
-## The doc — principles, intent, design, claims
+## Human-facing design
 
-- **Principles** — what this design is judged against: the project's principles document (the profile's `conventions.principles` points to it), plus anything this issue adds or overrides — cite the document rather than copying it, and state only the delta. Write this before the design, because it decides it: a mechanism that serves something the principles reject is invented scope, and a set of edge cases that shares one cause wants one design call, not one patch each. No principles document and nothing stated in the discussion → ask the owner; never infer them. write-tests reads this block first and judges every fork against it.
-- **Intent** — the observable obligations the system owes, stakeholder-indexed ("my resources are reachable by me and nobody else" — user; "every action is attributable" — operator), plus **explicit non-obligations**: an examined no stops a rejected reading re-entering later as an assumption. Each obligation names what would observe it failing, carried here so write-tests inherits it instead of re-inventing one; an obligation nothing can observe failing is a fork for the human, not a demand. State obligations surface-general and let the design enumerate, visibly — an obligation quietly narrowed to the surfaces someone happened to list is how the missed case never enters the space.
-- **Design** — the mechanisms chosen, each naming the obligation(s) it discharges. High level is fine. A mechanism serving no obligation is invented scope or an unstated premise made visible — surface it, don't smuggle it. A sentence that is neither obligation nor mechanism is background; mark it as such. Carry the **data model** and the **key flows** explicitly when the change has either: the types that cross the seams, what each owns, what is derived versus stored, and the path a request takes through them. These are what the human decided in the discussion, and they are the part of this doc a person will actually read — everything else downstream is derived from them.
-- **Deep dives, only when they fire.** *Security* — when the change touches an asset: enumerate obligations from the assets (finite, censusable), never from attacks (unbounded); state them as negative universals, and note for the spec that discharge means guard-plus-positive-control, a path census, or safe-by-construction — prose adversarial review does not discharge them. *Scale* — when a hot path or fan-out is in play: typed claims about load and growth, benchmarks deferred honestly rather than mechanization pretended. A dive that doesn't fire is one recorded line ("security: no asset touched") — a considered no, not silence.
+Include these elements where relevant:
 
-## The sweep — probe the doc's claims before it posts
+- **Problem and intended change.** Who experiences the problem, what the feature adds or fixes, and representative before/after behavior. Distinguish existing behavior from proposed behavior.
+- **Scope and intent.** Observable obligations, who relies on each, and what would reveal a violation. Give obligations stable names or IDs for downstream traceability. State deliberate non-obligations and relevant boundaries; do not enumerate every conceivable exclusion. Keep broad promises broad: listing known surfaces does not silently restrict them.
+- **Principles and design properties.** Cite the project's principles document (profile `conventions.principles`) and state additions or overrides. Give each new property its rationale, consequences, and relevant limits. Mark proposed properties until adopted. Properties should guide unlisted cases, not merely praise simplicity or reliability. If principles are absent, clarify the consequential preferences with the human; do not invent project policy.
+- **Data model and ownership.** Entities and identity, relationships, authoritative owners, stored versus derived facts, important invariants, lifecycle, and migration/compatibility where affected. Include enough to decide the model without prescribing incidental field or helper names.
+- **Flows.** How a request or event moves through the system, its boundaries and state transitions, where outcomes become observable, and credible partial-failure/recovery behavior. Discuss retry, cancellation, concurrency, or ordering when they affect a promised property or interact with shared state.
+- **Architecture and decisions.** Chosen mechanisms, the obligations they discharge, and the significant alternatives and trade-offs. Explain why a choice fits this scope and the design properties. Remove a mechanism with no justified purpose or expose the missing requirement. Carry user choices and reasoning accurately; separate adopted decisions from agent recommendations.
+- **Representative scenarios and boundaries.** Use a few cases to demonstrate how the model and properties determine outcomes. An edge case should reveal or test a rule, not become an isolated requirement by default. Name consequential uncertainty and deferred verification explicitly.
 
-Every sentence rests on something already being true of the system. Ask of each: **what must already hold for this to make sense?** Per-sentence — noticing is recall, and recall failing is how known traps ship. Then settle each assumption with the one instrument that can, and record it:
+Use diagrams when they clarify a model or flow. Do not replace the design with an implementation checklist, graph schema, test catalog, or reviewer transcript.
 
-- **referential** — the named symbol / path / flag exists as described; code structure (who calls what, which branch exists). Probe: read, import, or stat it, cited `file:line` — for who-defines a symbol, **symbol-refs** `--defs` resolves it across imports.
-- **behavior** — what existing code or a dependency does on an input: the bug story, a default, an exception taxonomy. Probe: a throwaway run over the input types the boundary admits (`probe_kind: executed`) — never priors, never docs alone, never a read.
-- **census** — "these are all the writers / callers / occurrences." Probe: the search, recorded so it replays — the full hit list, or counts plus the members the doc acts on; when the census is over a *symbol*, **symbol-refs** resolves the reference set past grep's lexical floor.
-- **reachability** — "X cannot reach Y", "this value is constrained." Probe: try to break it. A survivor is *unrefuted*, never confirmed.
-- **neighboring designs** — every issue or PR the doc cites, depends on, or defers to. Read each and record whether its design *conflicts* with this one (two shapes for the same state, two owners for the same path) — `kind: referential`, the issue read is the probe. A cited issue nobody read is how a run discovers, five phases in, that the cleaner design was already on the table.
+For compatibility with existing `write-tests`, retain recognizable **Principles**, **Intent**, and **Design** sections: intent contains the named obligations and explicit non-obligations; design contains models, flows, and mechanisms linked to those obligations. Background facts remain identifiable as background, not accidental requirements. This is design-level typing: distinguish obligations, mechanisms, and background facts. Formal demand kinds, graph addresses, and bindings are derived downstream; these distinctions need no separate demand ledger here.
 
-Record the results in a fenced-YAML `claims:` block in the comment — entries `{id, kind, claim, probe, probe_kind, observed, verdict}`, `probe_kind` one of `executed | read | search` (the instrument actually used — `behavior` demands `executed`, `referential` is content with `read`, `census` is `search`), `verdict` one of `holds | refuted | unrefuted | unprobed | deferred` (reachability's ceiling is `unrefuted`, never a coined "confirmed") — the shape write-tests' ledger inherits verbatim, `probe_kind` included so an inherited claim carries its instrument, not just its verdict. A refuted assumption is frequently the discussion's single most valuable finding: fix the doc before it posts, and say what changed.
+When access or trust changes, identify the affected assets, authoritative actors, and allowed flows; derive obligations from those boundaries rather than enumerate attacks. When a hot path or fan-out changes, state relevant load/growth assumptions and distinguish performance targets from measured behavior. Use these concerns only where the change warrants them; unsupported guarantees remain unresolved.
 
-## The review — a cold read before it posts
+## Supporting grounding
 
-When the design carries a real fork or a fired deep-dive, hand the compiled doc to a fresh subagent at high effort before posting. It reads **cold** — the issue, the doc, and the code, not the discussion that produced them — so it reconstructs intent independently and catches what the author can't: the gap the author no longer sees because they already believe the design. A trivial doc — no fork, no dive — skips it on one recorded line ("review: skipped, no fork"). Charter:
+Record the repository/base revision and relevant external versions or configuration. Verify factual assumptions that support a design decision, a promised property, or a realistic test boundary. Do not perform a mandatory per-sentence sweep of background prose.
 
-- **Conservation** — every obligation has a mechanism that actually discharges it, in full. An obligation with no mechanism, or one only partly covered (the stateless-token design that can't honor "revoke, effective now"), is a finding.
-- **Invented scope** — every mechanism serves a stated obligation. One that serves none is an unstated premise; surface it rather than let it ride.
-- **Narrowing** — a surface-general obligation discharged only on an enumerated subset. Name the surface the enumeration dropped.
-- **Claims** — every is-claim carries a probe whose `probe_kind` matches its kind, in the `claims:` block: a `behavior` claim recorded `probe_kind: read` is a finding, like one left `unprobed`.
-- **Firing** — the security/scale dive fired where the change warrants it, and a skipped dive is a recorded no, not a silence.
+- **Referential:** a symbol, path, flag, branch, or neighboring design exists as described. Read the source and cite it. Read issues/PRs whose designs this one relies on and check for conflicting owners, models, or flows.
+- **Behavior:** current code or a dependency behaves a certain way on an input. Execute a focused probe; source inspection or documentation alone does not establish observed behavior.
+- **Census:** these are all the relevant callers, writers, surfaces, or execution contexts. Record a reproducible search and its scope/results. Follow process boundaries when relevant. Use symbol-reference tooling when lexical search cannot establish the set; a partial search is not an exhaustive census.
+- **Reachability:** a value is constrained, or one actor cannot reach a resource. Try to falsify the claim. Use an executed break-attempt and a positive control showing that the channel works. Failure to find a counterexample is `unrefuted`, not proof.
 
-Reconcile each finding, don't apply it blind — the cold reader can't tell a deliberate exclusion from a narrowing bug, and will flag both. Either it's a real gap and you fix the design, or it's a decision the doc left implicit and you record it as an explicit non-obligation — that recording *is* the fix, and it hands back the context the reviewer was denied. Re-sweep anything a fix touched, then post. A clean review is worth one line in the doc.
+Probe only in an appropriate environment; unavailable or unsafe-to-execute checks remain unresolved. A refuted assumption requires revising the design or explicitly changing the assumption it depends on. Do not leave contradictory verdicts and expectations in the current revision.
 
----
+Retain a fenced YAML **`claims:`** block so existing downstream skills can inherit evidence. Each entry has `{id, kind, claim, probe, probe_kind, observed, verdict}`. Preserve IDs across amendments; update observations when the evidence changes. `probe` identifies the source or reproducing command with relevant input and environment, not an assertion that a check happened.
 
-Post the doc as the issue comment. The occurrence census and the probed claims especially belong there: everything downstream builds on the recorded verdicts, not on whoever re-derives them next.
+- `kind`: `referential | behavior | census | reachability`.
+- `probe_kind`: `executed | read | search`; use the actual instrument. Behavior needs `executed`; a census uses `search`.
+- `verdict`: `holds | refuted | unrefuted | unprobed | deferred`. Reachability's ceiling is `unrefuted`. An unexecuted or failed probe never earns `holds`.
+
+```yaml
+claims:
+  - id: C1
+    kind: behavior
+    claim: "An identical replay currently creates a second record."
+    probe: "<command and input, at the recorded base revision>"
+    probe_kind: executed
+    observed: "<actual output or evidence location>"
+    verdict: holds
+```
+
+Include the actual claims block in the issue/document handoff or a durably linked companion that the next worker can access cold. The current write-tests ledger must inherit the block verbatim; local scratch paths alone are not a durable handoff. Avoid making the human read the ledger to understand the design.
+
+## Readiness and amendments
+
+Name the design revision (commit, document revision, or issue-comment permalink), grounding base, and review disposition. Summarize the material corrections and any unresolved verification that could affect contract authoring. A skipped independent review needs a reason. Known design contradictions or unresolved consequential choices block readiness; bounded implementation details do not. An unresolved factual assumption also blocks readiness when its plausible outcomes require different contracts or architecture. Otherwise record the assumption, how it will be checked, and which downstream role owns that verification.
+
+An amendment records:
+
+- The defect or new evidence and the affected design property.
+- The chosen patch or dissolving change, trade-offs, and who decided it.
+- Changes to obligations, models, flows, architecture, or scope; unchanged commitments remain in force.
+- Which grounding, tests, and implementation regions must be rechecked.
+
+Publish a revised current design with a pointer to its predecessor, rather than leave downstream workers to merge contradictory comments. Revalidate affected evidence against the current base. Contract construction may uncover further holes: readiness is a commitment to this candidate design, not a claim of exhaustive completeness.

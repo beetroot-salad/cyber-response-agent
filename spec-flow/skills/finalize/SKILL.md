@@ -1,13 +1,13 @@
 ---
 name: finalize
-description: "Close out the green PR that write-code-from-spec shipped: apply every fix you're confident in inline, file the rest as follow-up issues, trace what escaped back to the stage that should have held it, feed process findings back to the human, and re-green the PR before the merge gate. Meets the code cold — it does not read the spec's rationale. Use after write-code-from-spec, as the last stage before a human merges."
+description: "Close out the green PR that write-code-from-tests shipped: apply every fix you're confident in inline, file the rest as follow-up issues, trace what escaped back to the stage that should have held it, feed process findings back to the human, and re-green the PR before the merge gate. Meets the code cold — it does not read the spec's rationale. Use after write-code-from-tests, as the last stage before a human merges."
 argument-hint: "[issue # or PR #]"
 effort: xhigh
 ---
 
 # Finalize
 
-`write-code-from-spec`'s mirror: rather than writing code to satisfy a spec, this reads the shipped PR and makes it better — fixing what it can, filing what it can't, feeding what it learns back into the pipeline, and leaving the PR green for the human who merges it. It is the last stage before the merge gate, and the only one whose job is to *disagree* with what came before.
+`write-code-from-tests`'s mirror: rather than writing code to satisfy a spec, this reads the shipped PR and makes it better — fixing what it can, filing what it can't, feeding what it learns back into the pipeline, and leaving the PR green for the human who merges it. It is the last stage before the merge gate, and the only one whose job is to *disagree* with what came before.
 
 ## Meet the code cold
 
