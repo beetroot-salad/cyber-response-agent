@@ -44,6 +44,7 @@ new symbol), because today's dump carries the sentinel's params to the prompt. S
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 import pytest
 
@@ -75,9 +76,14 @@ from defender.tests.test_1017_row_schema import (
 )
 
 #: The section title `questioner._capture_sections` renders the leads under — spelled here
-#: because the shipped path is `titled_section(<this>, questioner_leads(_joined_leads(...)))`,
+#: because the shipped path is `titled_section(<this>, questioner_leads(_joined_leads(...)),
+#: salt=..., tag=UNTRUSTED_TAG)`,
 #: and the marker checks below are made on that text, not on the render's return value.
 SECTION_TITLE = "The joined leads at the branch point"
+
+#: The frame salt the unit tests render `_section` on. `titled_section` frames the body on the
+#: message's salt; the marker checks read the body, so any salt serves.
+TEST_SALT = "test1032"
 
 #: The line `_joined_leads`'s `except` arm logs, as two fixed halves around the
 #: exception's repr. Both halves are asserted, so a rewording that kept "could not join" and
@@ -92,7 +98,8 @@ def _section(run_dir: Path) -> str:
     in this file is made here, on the bytes a model would be shown."""
     return titled_section(
         SECTION_TITLE,
-        lead_repository.questioner_leads(_joined_leads(run_dir, lead_repository.joined)))
+        lead_repository.questioner_leads(_joined_leads(run_dir, lead_repository.joined)),
+        salt=TEST_SALT, tag=UNTRUSTED_TAG)
 
 
 def _questioner_leads(run_dir: Path) -> list[dict]:
@@ -485,8 +492,8 @@ def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, lau
     the #1224 harness `_spec1224`, a recording `FakeAgent` as the questioner) over a source run
     whose table holds the harness's primed capture, a real row with markers in `params`, `raw_command` and
     `payload_path`, and an above-guard sentinel with its own `params` marker. Call 1's prompt is
-    what the questioner was HANDED; its leads section — the one frame whose body OPENS on the
-    section title, cut at that frame's close — carries the real row's params marker, the goal
+    what the questioner was HANDED; its leads section — the section title (host text) and the
+    one frame that directly follows it, cut at that frame's close — carries the real row's params marker, the goal
     and the query id, and carries
     NONE of: the sentinel's marker, either row's `raw_command` / `payload_path` marker, the two
     #1017 markers, the source run's absolute host path (today's `raw_ref` shows it three times
@@ -525,14 +532,17 @@ def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, lau
     assert rc == 0, "the episode did not complete cleanly"
     assert questioner.prompts, "the questioner was never called"
     prompt = questioner.prompts[0]
-    # Anchored on the FRAME, not the title: the frame open tag whose body's first line is the
-    # section title is the one frame this section is (titles go inside frames — the reader
-    # contract's own claim), so host text that happened to mention the title, or a reordered
-    # frame, cannot move the slice onto another section and turn every negative vacuous.
-    opened = f"-{UNTRUSTED_TAG}>\n## {SECTION_TITLE}\n"
-    assert prompt.count(opened) == 1, "the leads section does not open exactly one frame"
-    start = prompt.index(opened) + len(opened)
-    section = f"## {SECTION_TITLE}\n" + prompt[start:prompt.index("</run-", start)]
+    # Anchored on the title AND its FRAME: the host title line directly followed by a frame
+    # open tag is the one frame this section is (#1234 A10: the title is host text outside the
+    # frame, the body alone inside it), so host text that happened to mention the title, or a
+    # reordered frame, cannot move the slice onto another section and turn every negative
+    # vacuous. The slice runs to that frame's own close tag, on the message's salt.
+    opened = re.compile(rf"\n## {re.escape(SECTION_TITLE)}\n<run-([^>\n]+)-{UNTRUSTED_TAG}>\n")
+    found = list(opened.finditer(prompt))
+    assert len(found) == 1, "the leads section does not open exactly one frame"
+    salt = found[0].group(1)
+    close = f"</run-{salt}-{UNTRUSTED_TAG}>"
+    section = prompt[found[0].start():prompt.index(close, found[0].end()) + len(close)]
 
     # `idp.query` is the primed capture's own query id (the source run's one captured call).
     for kept in ("REAL_PARAMS_MARKER", "GOAL_MARKER", "elastic.ad-hoc", "idp.query",
@@ -552,6 +562,6 @@ def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, lau
     # And the section IS the named projection, not a re-rendering of it: the dicts the render
     # returns for this source, rendered the way `_capture_sections` renders them, are the
     # section byte for byte.
-    rendered = titled_section(SECTION_TITLE, _questioner_leads(src))
-    assert section.rstrip("\n") == rendered.rstrip("\n"), \
+    rendered = titled_section(SECTION_TITLE, _questioner_leads(src), salt=salt, tag=UNTRUSTED_TAG)
+    assert section == rendered, \
         "the launcher's section is not the render's own output"

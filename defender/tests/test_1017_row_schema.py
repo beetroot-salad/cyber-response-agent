@@ -378,6 +378,7 @@ def test_the_model_facing_renders_emit_neither_new_column(tmp_path):
     and `orphan`, so the marker half is red on today's code even with the two `repr=False`
     fields still hidden."""
     from defender.learning._prompt import titled_section
+    from defender.learning.branch.questioner import UNTRUSTED_TAG
     from defender.learning.branch.cli import _joined_leads
 
     _lead_file(tmp_path, "GOAL_MARKER")
@@ -403,6 +404,7 @@ def test_the_model_facing_renders_emit_neither_new_column(tmp_path):
         "questioner_joined_leads": titled_section(
             "The joined leads at the branch point",
             lead_repository.questioner_leads(_joined_leads(tmp_path, lead_repository.joined)),
+            salt="test1017", tag=UNTRUSTED_TAG,
         ),
     }
     for name, text in renders.items():
