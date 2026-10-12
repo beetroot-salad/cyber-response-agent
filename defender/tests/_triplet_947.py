@@ -940,7 +940,7 @@ def corpus_document(run_dir: Path) -> Path:
     from defender.run_repository import RunPaths
     from defender.tests._alert_plant import plant_alert
 
-    if not RunPaths(run_dir).alert_record.exists():
+    if PLANT_RECORDS and not RunPaths(run_dir).alert_record.exists():
         plant_alert(run_dir, {"rule": {"id": "v2-cross-tier-ssh-pivot"}})
     return path
 

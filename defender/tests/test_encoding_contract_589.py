@@ -24,7 +24,6 @@ committed, and then warn-skipped as "malformed" by every walk that reads it back
 """
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys

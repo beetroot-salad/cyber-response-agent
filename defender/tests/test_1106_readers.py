@@ -20,7 +20,6 @@ from is not where its settings are, which is the whole of D2.
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
