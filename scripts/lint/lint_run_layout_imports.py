@@ -131,7 +131,8 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
     # N-f: exempt only inside the four readers in `DEFERRED_LEGACY`; #1166 deletes them.
     "deferred_legacy": (_LESSONS, _FORWARD),
     "helpers-only": (
-        "learning/branch/ledger.py", "learning/judge/run.py",
+        # #1234: `learning/judge/run.py` left the row with its last `artifact_file` import.
+        "learning/branch/ledger.py",
         # F-09 (#1105 PR 2): the launcher opens runs by id; it keeps only the predicates.
         _CLI,
     ),
