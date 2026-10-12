@@ -778,7 +778,10 @@ def test_1234_am_named_gap_with_no_blocked_call_key(tmp_path: Path) -> None:
         context = S.gap(S.marker("b", "context"), kept_facts=flagged,
                         evidence=[S.samples_ptr("idp"), S.outcome_ptr()])
         inherited = S.gap(S.marker("b", "j3"), evidence=[built.table("b", 0)])
-        reply = S.world_reply("lead-quality", ["idp"], gaps=[outage, context, inherited])
+        investigator = [S.inv(contrast=[S.conduct("b"), S.conduct("a")],
+                              claim=S.marker("b", "inv"))]
+        reply = S.world_reply("lead-quality", ["idp"], investigator=investigator,
+                              gaps=[outage, context, inherited])
         S.grade(built, S.judge({"b": reply}), draws=2)
         return built
 
@@ -795,7 +798,8 @@ def test_1234_am_named_gap_with_no_blocked_call_key(tmp_path: Path) -> None:
     assert all(m in listed for m in keyless), (
         f"the flagged keyless gaps are not listed in the user record's own list: {listed}")
     for draw in (0, 1):
-        for index in range(3):
+        assert S.lane_of(built, built.finding_id("b", draw, 0)) == LANE["not_measured"], draw
+        for index in range(1, 4):
             lane = S.lane_of(built, built.finding_id("b", draw, index))
             assert lane == LANE["user_record"], (draw, index, lane)
     assert not S.from_world(S.defender_queue(), "b"), "a not-measured world queued a row"
@@ -803,11 +807,14 @@ def test_1234_am_named_gap_with_no_blocked_call_key(tmp_path: Path) -> None:
     control = graded("unflagged-root", flagged=False)
     assert S.row(control, "b").get(MEASURED) is True, "control: unflagged keyless gaps unmeasured b"
     assert S.unkeyed_gaps(control) == [], "control: an unflagged keyless gap was listed"
+    queued = {r.get("finding_id") for r in S.defender_queue()}
     for draw in (0, 1):
-        for index in (0, 1):
+        assert control.finding_id("b", draw, 0) in queued, (
+            f"control: b's investigator finding of draw {draw} was not queued")
+        for index in (1, 2):
             lane = S.lane_of(control, control.finding_id("b", draw, index))
             assert lane == LANE["gap_unkeyed"], (draw, index, lane)
-        assert S.lane_of(control, control.finding_id("b", draw, 2)) == LANE["user_record"]
+        assert S.lane_of(control, control.finding_id("b", draw, 3)) == LANE["user_record"]
 
 
 def test_1234_one_hostile_run_with_a_flood_of_refusal_rows(tmp_path: Path) -> None:
