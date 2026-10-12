@@ -383,12 +383,11 @@ def test_the_motivating_findings_are_in_the_shipped_baseline(real_tree_findings)
     also out of the shipped baseline, so a re-widening comes back as a NEW finding and fails the
     ratchet — which is the regression this direction of the assertion protects.
 
-    `_l0_items._correlation_contract` stays open deliberately: it is the same hand-rolled half
-    of `parse_iso_utc`, but it PARSES ONLY TO VALIDATE and discards the value, so no naive-vs-
-    aware comparison is reachable from it. It is a debt this gate names, not one of #878's five
-    reachable faults, and #878 did not widen its scope to collect it."""
+    (The one site left open at #878, `_l0_items._correlation_contract`, went with the ancestor
+    fetch in #1222; the gate still reports real findings, so the positive control stands on the
+    sites the baseline still names.)"""
     fingerprints = {f.fingerprint for f in real_tree_findings}
-    assert "defender/runtime/lead_zero/_items.py:_correlation_contract:unowned-iso-parse" in fingerprints
+    assert fingerprints, "the gate reports nothing on the real tree, so it has no positive control"
 
     for fixed in (
         "defender/hooks/_run_dir.py:read_json_locked:unnarrowed-parse",

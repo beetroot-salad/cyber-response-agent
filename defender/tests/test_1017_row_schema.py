@@ -1,7 +1,7 @@
 """#1017 — the queries row's ONE schema, and the read surface that projects all of it.
 
 Three symptoms with one root: the row's column set was spelled by hand at the writer
-(`record_query.append_query_row`), at the second writer (`lead_zero._record_manual_row`), at the
+(`record_query.append_query_row`), at the second writer (gone with #1222), at the
 read surface (`lead_repository.QueryRow`) and in the judge's raw dump — so a column added at the
 writer reached a reader only when someone remembered each list. `system_key` (#871) reached none
 of them, and it is half the rejection guard's identity.
