@@ -248,6 +248,39 @@ def test_deleted_cli_shim_named_in_a_prompt_is_flagged(tmp_path):
     assert "skills/gather/SKILL.md:defender-record-query" in fingerprints
 
 
+def test_deleted_markdown_matches_filename_not_ordinary_prose(tmp_path):
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "phases/dissolve.md": "# Resolve findings\n",
+            "notes/prose.txt": "The findings dissolve by absence.\n",
+            "notes/links.txt": "Read phases/dissolve.md, or open `dissolve.md`.\n",
+        },
+        pr_files={"phases/dissolve.md": None},
+    )
+    work = _clone(tmp_path, up)
+
+    fingerprints = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert not any(f.startswith("notes/prose.txt:") for f in fingerprints)
+    assert "notes/links.txt:dissolve.md" in fingerprints
+
+
+def test_surviving_markdown_filename_is_not_flagged(tmp_path):
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "old/guidance.md": "# Old guidance\n",
+            "current/guidance.md": "# Current guidance\n",
+            "notes/links.txt": "Read current/guidance.md.\n",
+        },
+        pr_files={"old/guidance.md": None},
+    )
+    work = _clone(tmp_path, up)
+
+    fingerprints = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert not any(f.startswith("notes/links.txt:") for f in fingerprints)
+
+
 def test_surviving_module_named_in_a_from_package_import_is_not_flagged(tmp_path):
     """`from pkg import mod` puts a MODULE in the target position, where idents are
     collected. Deleting one importer must not make every OTHER importer of that live
