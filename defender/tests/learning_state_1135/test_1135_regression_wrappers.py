@@ -49,15 +49,17 @@ def test_1135_the_e2e_spine_replay_reaches_the_corpus_unchanged(tmp_path: Path, 
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     state = S.LearningState.open(paths)
     graded = S.caught(lambda: J.grade_at(
-        ep, judge=J.FakeJudge(  # the family's word is the family-scope call's (#1224)
+        ep, judge=J.FakeJudge(  # the family-scope call files family findings only (#1234 A17)
             default=J.as_reply_text(J.reply_doc()),
-            family_default=J.as_reply_text(J.family_reply(verdict_word="survived"))),
+            family_default=J.as_reply_text(J.family_reply())),
         draws=1, state=state))
     assert graded is None, f"grade_episode did not grade on the handle it was handed (RF5): {graded!r}"
     record = J.judge_record(ep)
 
     # hop 1: the judge's record says how many rows it enqueued, and the queue carries them
-    assert record.get("episode_outcome") == "gradable", f"the episode graded {record.get('episode_outcome')!r}"
+    # (#1234: the episode word is retired, A17 — every graded world is measured and committed)
+    assert all(row.get("measured") and row.get("state") == "queued"
+               for row in record.get("worlds", [])), f"the episode graded {record.get('worlds')!r}"
     queued = _finding_ids(D.pending(paths, channel))
     assert record.get("enqueued_rows") == len(queued) == 2, \
         f"the graded episode did not put its rows on the shared queue: {queued}"
