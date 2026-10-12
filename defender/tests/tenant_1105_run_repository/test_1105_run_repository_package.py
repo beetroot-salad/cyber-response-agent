@@ -843,11 +843,11 @@ def test_1105_lint_baselines_name_no_deleted_path_and_unused_public_names_cite_p
 
 
 def test_1105_the_spec_flow_profile_names_the_moved_symbols_at_their_new_paths():
-    """Every .claude/spec-flow.json row of the form <file>::<symbol> that named a moved file names
+    """Every archived spec-flow profile row of the form <file>::<symbol> that named a moved file names
     its new submodule path, and that symbol is defined there."""
     from defender.run_repository import Run, contained_payload
 
-    profile = json.loads((H.WORKTREE / ".claude" / "spec-flow.json").read_text("utf-8"))
+    profile = json.loads((H.WORKTREE / "docs/archive/spec-flow-project-config.json").read_text("utf-8"))
     rows: list[str] = []
 
     def walk(value: Any) -> None:

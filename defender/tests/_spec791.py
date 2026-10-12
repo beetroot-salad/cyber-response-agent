@@ -54,7 +54,7 @@ SCRUB_PROPERTY_TEST = DEFENDER / "tests" / "e2e" / "test_540_scrub_lifecycle.py"
 VULTURE_BASELINE = REPO_ROOT / "scripts" / "lint" / "lint_vulture_baseline.json"
 PROJECT_PROFILE = REPO_ROOT / ".claude" / "spec-flow.json"
 HISTORICAL_GRAPH_PROFILE = (
-    REPO_ROOT / "spec-flow/scripts/spec_graph/references/project-config.json")
+    REPO_ROOT / "docs/archive/spec-flow-project-config.json")
 
 # `OLDER_SPEC_GRAPH` (spec_graph_774.yaml) and `LIVE_STAGE_WORD` ("projection") left with
 # #797: the graph is deleted and the live projection stage is retired, so the two demands

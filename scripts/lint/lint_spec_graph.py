@@ -90,7 +90,7 @@ def _findings_for(mods: dict, path: Path, cfg: dict) -> list[str]:
 
 def _scan() -> dict[str, list[str]]:
     mods = _load_checkers()
-    cfg = mods["config"].load(str(CHECKER_DIR / "references" / "project-config.json"))
+    cfg = mods["config"].load(str(REPO_ROOT / "docs" / "archive" / "spec-flow-project-config.json"))
     paths = mods["config"].artifacts(cfg)
     if not paths:
         raise GateBlind("no spec_graph_*.yaml found — nothing to gate is not the same as clean")

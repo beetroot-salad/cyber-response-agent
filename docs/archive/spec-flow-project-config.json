@@ -1,4 +1,5 @@
 {
+  "//": "Historical spec graph configuration. Retired from the active pipeline; retained for interpreting old artifacts.",
   "specGraph": {
     "artifacts": "spec-flow/specs/spec_graph_*.yaml",
     "codeRoots": [

@@ -123,5 +123,5 @@ and `spec-graph nullstub`) use the tests directly and need Python with PyYAML; t
 command discovers an interpreter or falls back to `uv run --with pyyaml python`.
 
 The requirements graph is retired from the pipeline. Existing committed graphs and their
-checkers remain available for historical investigation; the graph-maintenance CI gate is retired and its project configuration is archived beside the tooling. new work does not create, read, or maintain
+checkers remain available for historical investigation; the graph-maintenance CI gate is retired and its project configuration is archived under `docs/archive/`. new work does not create, read, or maintain
 them. Historical graph documentation lives under `scripts/spec_graph/references/`.

@@ -1,7 +1,7 @@
 # spec_graph — historical graph checks and standalone suite checks
 
 The requirements graph is retired from the active pipeline. Graph-only commands remain for
-existing committed artifacts; their corpus CI gate is retired. This repository's former graph configuration is archived at `references/project-config.json`; supply it
+existing committed artifacts; their corpus CI gate is retired. This repository's former graph configuration is archived at `../../../docs/archive/spec-flow-project-config.json`; supply it
 with `--config` when investigating old artifacts. `calls` and `nullstub` also accept suite paths directly and remain
 useful without a graph. Historical schemas and rules are in [references/schema.md](references/schema.md),
 [references/rules.md](references/rules.md), and [references/frontier.md](references/frontier.md).
