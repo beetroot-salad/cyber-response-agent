@@ -10077,3 +10077,5 @@ handoff:
     and trace_lesson._report_disposition directly; neither name is in design.md or design-amendments.md, the ground is s_AM16''s
     `binds` and the NA09 auto-resolved seed. A renamed helper breaks the test visibly, so it is not a silent escape.'
   - 'Phase F: second repair declined per verify contract; B1 deferred to write-code-from-spec'
+  - 'Scale: full mode, one frontier chain — no decomposition (single cohesive delta judge→routing→queues; no sound cut).'
+  - 'Phase E: a probe leaf (AM28) made real Fireworks API calls on its first run (JUDGE_MODEL default with FIREWORKS_API_KEY set); that output was discarded and every later test/probe run unset the API keys. No artifact depends on those calls.'
