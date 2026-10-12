@@ -277,7 +277,10 @@ def test_dc2_the_judges_prompt_carries_no_sibling_view_or_tally(tmp_path):
     assert _launched(got), f"the launch did not run: {got.message!r}"
     prompts = got.judge.prompts
     assert prompts, "the judge was never asked"
-    assert any("THE JUDGED WORLD'S OWN report.md" in p for p in prompts)
+    from defender.learning.judge.layout import FOCUS_VIEW_TITLES
+
+    # #1234 M3/A10: the focus world's report view is titled, in host text, by its world label.
+    assert any(f" — {FOCUS_VIEW_TITLES['report']}" in p for p in prompts)
     for prompt in prompts:
         assert "SIBLING TRIALS" not in prompt, "the prompt still carries the sibling view"
         assert "TRIAL SPREAD" not in prompt, "the prompt still carries the trial spread"

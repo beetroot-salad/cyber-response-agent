@@ -418,20 +418,21 @@ def test_7_the_judge_prompts_views_are_numbered_without_a_gap(tmp_path):
     """With the same-alert siblings view gone (J3), the judge's views are numbered 1..n with
     no gap: in the section titles, and in every prompt a launch hands the judge (each number
     there a title's). Positive control: the prompts carry VIEW 1 and the lessons view. RED
-    before the fix: the lessons view is VIEW 5 after VIEW 3."""
-    from defender.learning.judge import run as judge_run
+    before the fix: the lessons view is VIEW 5 after VIEW 3. (#1234: the titles are the
+    focus section's host view labels, `layout.FOCUS_VIEW_TITLES`, spelled `VIEW <n>: ...`.)"""
+    from defender.learning.judge import layout as judge_layout
 
-    numbers = [int(m.group(1)) for title in judge_run.SECTION_TITLES.values()
-               if (m := re.match(r"VIEW (\d+) —", title))]
+    numbers = [int(m.group(1)) for title in judge_layout.FOCUS_VIEW_TITLES.values()
+               if (m := re.match(r"VIEW (\d+):", title))]
     assert numbers == list(range(1, len(numbers) + 1)), numbers
-    lessons = judge_run.SECTION_TITLES["lessons"]
-    assert lessons.startswith(f"VIEW {len(numbers)} —"), lessons
+    lessons = judge_layout.FOCUS_VIEW_TITLES["lessons"]
+    assert lessons.startswith(f"VIEW {len(numbers)}:"), lessons
 
     est, src = P.launch_source(tmp_path)
     got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src))
     assert got.judge.prompts, "the judge was never asked"
     # The per-world prompts carry the views; the family-level call carries none.
-    viewed = [sorted({int(n) for n in re.findall(r"VIEW (\d+) —", prompt)})
+    viewed = [sorted({int(n) for n in re.findall(r"VIEW (\d+):", prompt)})
               for prompt in got.judge.prompts]
     viewed = [seen for seen in viewed if seen]
     assert viewed, "control: no prompt carries a view"
