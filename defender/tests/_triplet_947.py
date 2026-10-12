@@ -936,6 +936,12 @@ def corpus_document(run_dir: Path) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
     path = run_dir / "investigation.md"
     path.write_text(GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), encoding="utf-8")
+    # A run's record is what makes a folder a run to the corpus reader (#1222 A8).
+    from defender.run_repository import RunPaths
+    from defender.tests._alert_plant import plant_alert
+
+    if not RunPaths(run_dir).alert_record.exists():
+        plant_alert(run_dir, {"rule": {"id": "v2-cross-tier-ssh-pivot"}})
     return path
 
 

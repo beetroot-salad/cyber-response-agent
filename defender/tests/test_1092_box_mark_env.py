@@ -23,6 +23,7 @@ from pydantic import ValidationError
 from pydantic.dataclasses import is_pydantic_dataclass
 
 from defender._io import READ_LIMIT
+from defender.run_repository import RunPaths
 from defender.run_common import run_env
 from defender.runtime import box as box_mod
 from defender.runtime.box import BOX_ENV_ALLOWLIST, BoxRequest, BoxSpec, Mount
@@ -229,6 +230,7 @@ def test_both_docker_run_argv_builders_differ_from_today_only_by_the_marker_env_
     root = tmp_path / "tree"
     defender_dir = plant_tree(root, copy_code=False)
     run_dir = make_run_dir(tmp_path)
+    alert_input = RunPaths(run_dir).alert_input_dir
     name, token, spec = "defender-run-1092", "tok1092", BoxSpec()
     head = [
         "docker", "run", "--detach", "--name", name,
@@ -244,6 +246,8 @@ def test_both_docker_run_argv_builders_differ_from_today_only_by_the_marker_env_
     today_run_dir = [
         *head,
         "--mount", f"type=bind,source={run_dir},target={run_dir}",
+        # #1222 A1: the alert and its record ride in as a read-only DIRECTORY bind over the run folder.
+        "--mount", f"type=bind,source={alert_input},target={alert_input},readonly",
         "--mount", f"type=bind,source={defender_dir},target={defender_dir},readonly",
         "--tmpfs", f"/tmp:rw,noexec,nosuid,mode=1777,size={spec.tmpfs_size}",
         "--workdir", str(run_dir),

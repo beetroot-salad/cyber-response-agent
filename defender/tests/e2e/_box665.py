@@ -30,6 +30,7 @@ import pytest
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL
 from defender.runtime import box as box_mod
 from defender.runtime.scrub import verdict_path
+from defender.tests._alert_plant import plant_alert
 from defender.tests._docker import daemon_reachable, is_dood
 
 DEFENDER = Path(__file__).resolve().parents[2]
@@ -430,7 +431,7 @@ def make_run_dir(tmp_path: Path, *, disposition: str = "inconclusive",
     run_dir.mkdir(parents=True)
     if gather_raw:
         (run_dir / "gather_raw").mkdir()
-    (run_dir / "alert.json").write_text('{"rule": {"key": "spec.rule"}}\n', encoding="utf-8")
+    plant_alert(run_dir, {"rule": {"key": "spec.rule"}})
     (run_dir / "report.md").write_text(
         f"---\ndisposition: {disposition}\n---\n\nspec run\n", encoding="utf-8"
     )

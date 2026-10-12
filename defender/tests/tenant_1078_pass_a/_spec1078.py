@@ -53,6 +53,7 @@ from typing import Any
 import pytest
 
 from defender.tests import _spec1077 as S
+from defender.tests._alert_plant import plant_alert as plant_alert_input
 from defender.tests import _tenants1106 as T1106
 from defender.tests import _triplet_947 as T
 from defender.tests._data_root_1078 import D9_TENANT_ID, DATA_ROOT_ENV
@@ -252,8 +253,7 @@ def source_run(base: Path, run_id: str = T.SOURCE_RUN_ID) -> Path:
     (`<base>/../sessions/`) — `_triplet_947.runs_base`'s source, at a base the test chooses."""
     src = base / run_id
     (src / "gather_raw").mkdir(parents=True, exist_ok=True)
-    (src / "alert.json").write_text(json.dumps({"rule": {"id": "v2-cross-tier-ssh-pivot"}}),
-                                    encoding="utf-8")
+    plant_alert_input(src, {"rule": {"id": "v2-cross-tier-ssh-pivot"}})
     (src / "investigation.md").write_text(T.branchable_investigation(), encoding="utf-8")
     (src / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
     (src / "executed_queries.jsonl").write_text("", encoding="utf-8")

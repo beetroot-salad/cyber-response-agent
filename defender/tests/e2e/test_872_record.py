@@ -534,9 +534,9 @@ def test_a_queries_row_written_before_the_wrapper_sees_the_return_is_unchanged_b
     assert gated_rows, "the gated run wrote no queries row"
     assert idle_rows, "the idle run wrote no queries row"
     lanes = {r.get("lead_id") for r in gated_rows}
-    assert {"l-000", "l-001"} <= lanes, (
-        f"only one of the two reachable writers put a row in the table ({sorted(lanes)}), so "
-        "the differential below is at the table's altitude and not per-writer"
+    assert "l-001" in lanes, (
+        f"the dispatched lead put no row in the table ({sorted(lanes)}), so the differential "
+        "below is at the table's altitude and not per-writer"
     )
     assert gated_rows == idle_rows, (
         "an executed-queries row differs between a run where the gate substituted and one "

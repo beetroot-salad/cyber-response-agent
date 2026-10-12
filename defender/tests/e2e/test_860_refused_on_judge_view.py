@@ -593,7 +593,8 @@ def test_m1_a_real_denial_inside_a_dispatched_lead_is_that_leads_sentinel_row(tm
     (`QUERY_ROW_COLUMNS`). The positive control that the id is the DISPATCHING lead's and not
     a constant: lead-0's own harness-authored `elastic.alerts` attempt (declared, ungranted
     under this registry, issued before main's first turn) leaves the table's first denied row
-    and it carries `l-000`. The audit record is still written, unchanged in shape — no lead
+    and it carries `l-000`. (Item 1 and that attempt went with #1222; the dispatching lead is
+    now the only writer of a denied row in this run.) The audit record is still written, unchanged in shape — no lead
     column grew on it. And the fixture rows this file hand-writes are keyed exactly as the
     real writer keys its row, so the rendered-view scenarios above are stated over the real
     shape.
@@ -614,9 +615,8 @@ def test_m1_a_real_denial_inside_a_dispatched_lead_is_that_leads_sentinel_row(tm
     assert (r.run_dir / own["payload_path"]).read_bytes() == b"", "a denial persisted a payload"
 
     denied_rows = [row for row in r.rows if row["query_id"] == DENIED_QUERY_ID]
-    assert denied_rows[0]["verb"] == "alerts", "lead-0's attempt is not the table's first denied row"
-    assert denied_rows[0]["lead_id"] == "l-000", f"lead-0's row names {denied_rows[0]['lead_id']!r}"
-    assert {row["lead_id"] for row in denied_rows} == {"l-000", LEAD}
+    assert {row["lead_id"] for row in denied_rows} == {LEAD}, \
+        f"a denied row names a lead that did not dispatch it: {denied_rows}"
 
     assert len(r.own_denials) == 1, "the audit record stopped being written"
     assert "lead_id" not in r.own_denials[0], "the audit record grew a lead column"

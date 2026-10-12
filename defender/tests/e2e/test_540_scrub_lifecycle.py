@@ -78,6 +78,7 @@ from defender.runtime.box import (  # noqa: E402
 )
 from defender.scripts import workspace_map as workspace_map_mod  # noqa: E402
 from defender.tests import _tenants1106  # noqa: E402
+from defender.tests._alert_plant import plant_alert  # noqa: E402
 from defender.tests.e2e._box665 import (  # noqa: E402
     BoxLifecycleRecorder,
     drive_worktree_batch,
@@ -111,7 +112,7 @@ def _clean_run_dir(tmp_path: Path) -> Path:
     behind. Regular files and real directories only — the shape the scrub must pass."""
     run = tmp_path / "run"
     (run / "gather_raw" / "l-001").mkdir(parents=True)
-    (run / "alert.json").write_text('{"id": "a-1"}\n', encoding="utf-8")
+    plant_alert(run, {"id": "a-1"})
     (run / "investigation.md").write_text(":L l-001 look here\n", encoding="utf-8")
     (run / "report.md").write_text("---\ndisposition: benign\n---\nfine.\n", encoding="utf-8")
     (run / "executed_queries.jsonl").write_text('{"lead_id": "l-001", "seq": 0}\n', encoding="utf-8")

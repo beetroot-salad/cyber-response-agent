@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._alert_plant import plant_alert
 from defender.tests import _state1135
 from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
@@ -55,7 +56,7 @@ def _sibling_run(tmp_path: Path, root: Path, episodes_root: Path) -> tuple[Path,
         Episode.open(manifest.parent), "b",
         tenant=lambda: H.T1106.run_tenant(H.accept(H.resolve_data_root(), TENANT)))
     run_dir = H.run_common().materialize_run(
-        src / "alert.json", world.run_id, tenant=H.accept(H.resolve_data_root(), TENANT),
+        H.mod("run_repository._layout").RunPaths(src).alert, world.run_id, tenant=H.accept(H.resolve_data_root(), TENANT),
         world=world).run_dir
     return Path(run_dir), episode_dir
 
@@ -232,6 +233,7 @@ def test_run_env_export_clobbers_stale_runs_base(tmp_path, monkeypatch):
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(stale))
     run_dir = tmp_path / "data" / TENANT / "runs" / "r1"
     run_dir.mkdir(parents=True)
+    plant_alert(run_dir)
     box = H.mod("runtime.box")
     assert H.run_common().run_env(H.DEFENDER, run_dir)["DEFENDER_RUNS_BASE"] == \
         str(run_dir.parent)
@@ -254,6 +256,7 @@ def test_box_env_allowlist_survives_knob_retirement(tmp_path):
     assert "DEFENDER_RUNS_BASE" in H.mod("runtime.box_codec").BOX_ENV_ALLOWLIST
     run_dir = tmp_path / "data" / TENANT / "runs" / "r1"
     run_dir.mkdir(parents=True)
+    plant_alert(run_dir)
     argv = H.mod("runtime.box")._create_argv(
         "defender-r1", run_dir, H.DEFENDER, H.mod("runtime.box._spec").DEFAULT_SPEC).argv
     assert f"DEFENDER_RUNS_BASE={run_dir.parent}" in argv, (
@@ -287,6 +290,7 @@ def _lesson(lessons: Path, name: str) -> None:
 def _loaded_run(runs: Path, name: str, lesson: str) -> None:
     rd = runs / name
     rd.mkdir(parents=True)
+    plant_alert(rd)
     (rd / "report.md").write_text("---\ndisposition: benign\n---\nbody\n", encoding="utf-8")
     (rd / "lessons_loaded.jsonl").write_text(
         json.dumps({"lesson_name": lesson, "ts": "2026-06-05T00:00:00+00:00"}) + "\n",
@@ -322,6 +326,7 @@ def test_n9_directory_tools_survive(tmp_path, monkeypatch, capsys):
     (fixtures / "m01-case" / "ground_truth.yaml").write_text(
         "held_out: true\ndisposition: benign\n", encoding="utf-8")
     (runs / "m01-case").mkdir()
+    plant_alert(runs / "m01-case")
     (runs / "m01-case" / "report.md").write_text(
         "---\ndisposition: benign\nconfidence: high\n---\n", encoding="utf-8")
     try:

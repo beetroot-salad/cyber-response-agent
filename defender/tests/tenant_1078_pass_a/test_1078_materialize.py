@@ -161,7 +161,7 @@ def test_d9_run_dir_file_set_unchanged(tmp_path, tenant_root):
     provenance names — and beside the run dir only the runs-base record."""
     run_dir = Path(_materialize(H.plant_alert(tmp_path / "in"), "r1", T_ID))
     paths = H.mod("run_repository._layout").RunPaths(run_dir)
-    assert set(H.entries(run_dir)) == {paths.alert.name, paths.gather_raw.name,
+    assert set(H.entries(run_dir)) == {paths.alert_input_dir.name, paths.gather_raw.name,
                                        paths.provenance.name}
     assert H.entries(run_dir.parent) == sorted([H.RECORD_NAME, "r1"])
 
@@ -345,7 +345,7 @@ def test_d2_sibling_runs_base(tmp_path, tenant_root):
     src, ep, world_b = _sibling_world(tmp_path, tenant_root, "b")
     world_c = H.run_py().resume_world(
         Episode.open(ep), "c", tenant=lambda: H.T1106.run_tenant(H.accept(tenant_root, T_ID)))
-    alert = src / "alert.json"
+    alert = H.mod("run_repository._layout").RunPaths(src).alert
     rb = Path(_materialize(alert, world_b.run_id, T_ID, world=world_b))
     record_path = ep / "runs" / H.RECORD_NAME
     minted = json.loads(record_path.read_text(encoding="utf-8"))
@@ -367,7 +367,7 @@ def test_s7_j24_widened_refusal_on_sibling_path(tmp_path, monkeypatch, tenant_ro
     carry the widened refusal verbatim, and no sibling run dir is made; the control is the
     same sibling with a disjoint learning root."""
     src, ep, world = _sibling_world(tmp_path, tenant_root, "b")
-    alert = src / "alert.json"
+    alert = H.mod("run_repository._layout").RunPaths(src).alert
     for learning in (tenant_root, tenant_root / T_ID / "learning", tmp_path):
         monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(learning))
         widened = H.owner_refusal(H.resolve_data_root)
@@ -453,6 +453,6 @@ def test_o6_old_run_id_fresh_under_tenant(tmp_path, monkeypatch, tenant_root):
     run_dir = Path(_materialize(H.plant_alert(tmp_path / "in"), "x", T_ID))
     assert run_dir == tenant_root / T_ID / "runs" / "x"
     paths = H.mod("run_repository._layout").RunPaths(run_dir)
-    assert set(os.listdir(run_dir)) == {paths.alert.name, paths.gather_raw.name,
+    assert set(os.listdir(run_dir)) == {paths.alert_input_dir.name, paths.gather_raw.name,
                                         paths.provenance.name}, "not a fresh setup"
     assert H.census(old) == before, "the old run X was touched"

@@ -63,6 +63,7 @@ from defender.tests.e2e._box665 import (  # noqa: F401 — re-exported for the t
     drive_worktree_batch,
     requires_live_box,
 )
+from defender.tests._alert_plant import plant_alert
 from defender.tests.e2e._spec771 import requires_daemon, requires_real_box  # noqa: F401
 
 #: The three files the image name is a function of, IN THE ORDER the resolver reads them —
@@ -377,7 +378,7 @@ def make_run_dir(tmp_path: Path, name: str = "run-1092") -> Path:
     """A live run dir with the artifacts a host-side writer needs beside it."""
     run = tmp_path / "runs" / name
     (run / "gather_raw").mkdir(parents=True)
-    (run / "alert.json").write_text('{"id": "a-1092"}\n', encoding="utf-8")
+    plant_alert(run, {"id": "a-1092"})
     return run
 
 

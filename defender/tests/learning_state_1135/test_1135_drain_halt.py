@@ -29,6 +29,7 @@ from typing import Any
 import pytest
 
 from defender.learning.core import drains
+from defender.tests._alert_plant import plant_alert
 from defender.learning.core.cli import _run_stage
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL,
@@ -662,7 +663,7 @@ def cell(name, root):
         if name == "e1":
             os.environ["DEFENDER_LEARNING_STATE_DIR"] = root
             run_dir = Path(spec["run_dir"])
-            out["answer"] = run_common.enqueue_curation(run_dir, run_dir / "alert.json")
+            out["answer"] = run_common.enqueue_curation(run_dir, run_common.RunPaths(run_dir).alert)
             return out
         state = S.LearningState.open(paths)
         if name == "append":
@@ -789,7 +790,7 @@ def test_1135_an_everyday_failure_writing_moving_or_locking_a_state_record(tmp_p
     try:
         run_dir = base / "run" / "case-a"
         run_dir.mkdir(parents=True)
-        (run_dir / "alert.json").write_text('{"rule": {"name": "everyday"}}\n', encoding="utf-8")
+        plant_alert(run_dir, {"rule": {"name": "everyday"}})
         from defender.runtime import scrub as scrub_mod
 
         scrub_mod.scrub(run_dir)  # a certified tree: the enqueue's refusal gate passes it

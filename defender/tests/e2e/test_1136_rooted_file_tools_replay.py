@@ -14,6 +14,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
+from defender.run_repository import RunPaths  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
     ReplayFn,
@@ -36,11 +37,11 @@ def test_a_hard_link_read_is_a_retry_and_the_run_reads_and_appends_on(tmp_path):
     host.parent.mkdir()
     host.write_text(f"{HOST_MARK} do not disclose\n", encoding="utf-8")
     os.link(host, run_dir / "notes.txt")
-    alert_marker = (run_dir / "alert.json").read_text(encoding="utf-8").strip()[:40]
+    alert_marker = RunPaths(run_dir).alert.read_text(encoding="utf-8").strip()[:40]
 
     main = ReplayFn([
         Turn(tool_calls=[("read_file", {"path": "notes.txt"})]),
-        Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),
+        Turn(tool_calls=[("read_file", {"path": str(RunPaths(run_dir).alert)})]),
         Turn(tool_calls=[("append_block", {"text": "+ recovered after a refused read\n"})]),
         Turn(text="done"),
     ])
