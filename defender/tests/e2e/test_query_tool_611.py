@@ -1187,6 +1187,9 @@ ROW_KEYS = {
     # `""` on every row that kept its dispatched system, which is all of them but the
     # above-guard rejections #855 coarsened.
     "system_key",
+    # #1234 A12: the call's host-written id (`record_query.next_call_id`), the one key its
+    # served-ledger rows share.
+    "call_id",
 }
 
 

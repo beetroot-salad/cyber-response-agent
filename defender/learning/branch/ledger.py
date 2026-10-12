@@ -166,6 +166,10 @@ class ServedCall:
     claim: dict | None = None
     verifier_verdict: dict | None = None
     attempts: int | None = None
+    #: The call's host-written id (`record_query.next_call_id`, A12): the query tool's, the
+    #: same id the call's query-table row carries. `None` for a call no query tool allocated
+    #: one to (the family primer's rows, a registry driven directly); the row then has no key.
+    call_id: str | None = None
 
     @field_validator("params", "asked_params")
     @classmethod
@@ -208,7 +212,7 @@ class ServedCall:
             # is decided by `judge/family._grade_world` alone.
             row["differs_from_base"] = self.differs_from_base
             row["base_pattern_digest"] = self.base_pattern_digest
-        for name in ("base_digest", "claim", "verifier_verdict", "attempts"):
+        for name in ("base_digest", "claim", "verifier_verdict", "attempts", "call_id"):
             value = getattr(self, name)
             if value is not None:
                 row[name] = value

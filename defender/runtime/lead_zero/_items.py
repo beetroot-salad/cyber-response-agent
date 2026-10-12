@@ -16,6 +16,7 @@ from defender.hooks.budget_enforcer import (
 )
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
 from defender.runtime import circuit_breaker
+from defender.runtime.run_end import CallRecordWriteFailed
 from defender.runtime.verb_grant import VerbGrant
 from defender.runtime.tenant_settings import elastic_problem
 from defender.runtime.verbs import VerbRegistry, redact_settings_path
@@ -395,7 +396,8 @@ async def dispatch_correlation(  # noqa: C901, PLR0913 — item 3's own dispatch
             gdeps, gather_factory, CORRELATION_REQUEST_LIMIT, request, dispatch.grant,
             stamp_terminator, catalog=catalog, pre_claimed=True,
         )
-    except (BudgetKill, circuit_breaker.RunAborted):
+    except (BudgetKill, circuit_breaker.RunAborted, CallRecordWriteFailed):
+        # A failed call-record write ends the run (A12), as the other two do.
         raise
     except Exception as e:  # noqa: BLE001 — item 3's own dispatch must never break the run
         _logger.warning(f"correlation lead dispatch failed ({e!r}); skipping its summary")

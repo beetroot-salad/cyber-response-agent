@@ -54,6 +54,12 @@ class CallDelivery:
 CALL_DELIVERY: contextvars.ContextVar[CallDelivery | None] = contextvars.ContextVar(
     "verb_call_delivery", default=None)
 
+#: The current call's host-written call id (A12, #1234), set by the query tool before the call
+#: reaches the registry and held until its row is written. The registry writes it on every
+#: served-ledger row of the call; `None` outside a query-tool call (nothing allocated one).
+CALL_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "verb_call_id", default=None)
+
 
 class ServingAbort(Exception):
     """A served verb that will not answer at all: the registry serving it has given up on the
@@ -687,6 +693,7 @@ __all__ = [
     "ModuleVerbRegistry",
     "RegistryError",
     "CALL_DELIVERY",
+    "CALL_ID",
     "CallDelivery",
     "RosterRead",
     "ServingAbort",

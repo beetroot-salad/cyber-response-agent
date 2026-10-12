@@ -35,9 +35,11 @@ from defender.scripts.gather_tools.record_query import (
     RejectionBudgetTrip,
     RepeatTrip,
     append_query_row,
+    bind_call_ids,
     dead_end_reason,
     lead_rows,
     names_something_readable,
+    next_call_id,
     payload_digest,
     payload_status,
     persist_payload as _persist_payload,  # noqa: F401
@@ -62,8 +64,10 @@ from defender._query_rules import (
 )
 
 from . import circuit_breaker
+from .run_end import CallRecordWriteFailed
 from .verbs import (
     CALL_DELIVERY,
+    CALL_ID,
     DENIED,
     GRANTED,
     CallDelivery,
@@ -90,6 +94,9 @@ CONTROL_FLOW_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ToolRetryError,
     # A served verb that gave up on its world (#1224): the sibling ends, nothing is filed.
     ServingAbort,
+    # A call record that could not be written (A12, #1234): the run ends, nothing is filed —
+    # a fault row for it would be one more write of the record that just failed.
+    CallRecordWriteFailed,
 )
 
 DEFAULT_FAULT_EXIT = 2
@@ -379,21 +386,14 @@ class QueryCapture(AbstractCapability[Any]):
         It charges nothing: not an infra exit code (no breaker), and outside both guards'
         domains. `system_key=""` because DENIED only occurs for a system the grant names.
 
-        A failed row write is logged and dropped rather than raised: the denial is a business
-        outcome the model must see and continue past, and the audit record already holds it."""
-        try:
-            await self._record(
-                deps, system=system, verb=verb, query_id=DENIED_QUERY_ID, params=params,
-                payload=None, exit_code=circuit_breaker.DENIED_EXIT_CODE, detail=refusal,
-                system_key="",
-            )
-        except CONTROL_FLOW_EXCEPTIONS:
-            raise
-        except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
-            raise
-        except Exception as write_failed:  # noqa: BLE001 — see the docstring
-            _logger.warning(f"could not record the denied row for {system}.{verb} "
-                            f"({write_failed!r}); the refusal itself is what the model sees")
+        A failed row write is not dropped: it is `CallRecordWriteFailed`, and the run ends
+        (A12) — the call's served-ledger row says it was refused, and a table with no row for
+        it would read as a call never made."""
+        await self._record(
+            deps, system=system, verb=verb, query_id=DENIED_QUERY_ID, params=params,
+            payload=None, exit_code=circuit_breaker.DENIED_EXIT_CODE, detail=refusal,
+            system_key="",
+        )
 
     async def _grant_check(
         self, deps, system: str, verb: str, params: dict,
@@ -511,6 +511,9 @@ class QueryCapture(AbstractCapability[Any]):
     async def wrap_tool_execute(self, ctx, *, call, args, handler, **_):  # noqa: ANN001 — **_ absorbs the framework's tool_def
         if call.tool_name != TOOL_NAME:
             return await handler(args)
+        # The call's id, allocated before anything reaches the registry and held until its
+        # row is written: the registry writes it on the call's served-ledger rows (A12).
+        token = CALL_ID.set(next_call_id(ctx.deps.run_dir))
         try:
             return await self._execute(ctx, args, handler)
         except GatherDeadEnd as e:
@@ -518,6 +521,8 @@ class QueryCapture(AbstractCapability[Any]):
             if failed is e:
                 raise
             raise failed from e
+        finally:
+            CALL_ID.reset(token)
 
     async def _execute(self, ctx, args, handler):  # noqa: ANN001
         """The call itself. Raises `GatherDeadEnd` for a guard's stop; `wrap_tool_execute` owns
@@ -594,8 +599,13 @@ class QueryCapture(AbstractCapability[Any]):
         """Append the row and charge the circuit breaker to its `system`.
 
         A coarsened row charges `""`, which `record_outcome` skips; the rejection guards bound
-        those instead. `system_key` has no default so every writer must state it explicitly."""
+        those instead. `system_key` has no default so every writer must state it explicitly.
+
+        The row carries the call's id (`CALL_ID`, set by `wrap_tool_execute`); a call refused
+        before execution (`_reject`) has none set and is allocated its own here. A failed
+        append raises `CallRecordWriteFailed` through every caller: the run ends (A12)."""
         lead_id = _dispatched_lead(deps)
+        call_id = CALL_ID.get() or next_call_id(deps.run_dir)
 
         text = "" if exit_code != 0 else json.dumps(payload, default=str)
         run_dir = deps.run_dir
@@ -622,6 +632,7 @@ class QueryCapture(AbstractCapability[Any]):
                     else f"exit={exit_code}; {_model_visible(deps, detail).strip()[:160]}"
                 ),
                 system_key=system_key,
+                call_id=call_id,
             )
 
         circuit_breaker.record_outcome(run_dir, system, exit_code)
@@ -964,6 +975,7 @@ from .tools_gather import _payload_note, _tripped_message  # noqa: E402
 __all__ = [
     "CONTROL_FLOW_EXCEPTIONS",
     "DEFAULT_FAULT_EXIT",
+    "bind_call_ids",
     "QueryCapture",
     "TOOL_NAME",
     "UNENFORCED_TYPE",

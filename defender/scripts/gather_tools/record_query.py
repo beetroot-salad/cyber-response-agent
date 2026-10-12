@@ -7,6 +7,7 @@ import json
 import re
 import shlex
 import sys
+import threading
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,7 @@ from defender._query_rules import (
 from defender.run_repository import LEAD_ID_RE, RunPaths  # noqa: F401 — re-export: `tools_gather` imports the pre-dispatch gate from here
 from defender._text import as_int, as_str, is_content_less
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS, error_class_for_exit
+from defender.runtime.run_end import TRUNCATED_BY_EXECUTED_QUERIES, CallRecordWriteFailed
 
 _ADAPTER_RE = re.compile(r"(?:^|/)(\w+)_adapter\.py$")
 _NON_ADAPTER = frozenset({"invlang"})
@@ -202,13 +204,73 @@ QUERY_ROW_COLUMNS: tuple[str, ...] = (
     "payload_digest",
     "payload_sha256",
     "system_key",
+    "call_id",
 )
+
+
+class _RunCallIds:
+    """One run's call-id counter: the run's name and the next call number."""
+
+    def __init__(self, run: str, next_n: int) -> None:
+        self.run = run
+        self.next_n = next_n
+
+
+#: Each run dir's call-id counter, keyed by the run dir as spelled. Shared by every writer in
+#: the process (each gather lead has its own `QueryCapture` over one run dir), so two leads
+#: never take one number.
+_CALL_IDS: dict[str, _RunCallIds] = {}
+_CALL_IDS_LOCK = threading.Lock()
+
+
+def _first_free_call_number(run_dir: Path, run: str) -> int:
+    """One past the highest call number this run's table already holds under `run` (a run
+    resumed in a new process continues its numbering); `0` for a fresh table, or one holding
+    only rows seeded from another run."""
+    try:
+        rows = read_jsonl_rows(RunPaths(run_dir).executed_queries)
+    except OSError:
+        return 0
+    prefix = f"{run}/"
+    taken = [int(cid[len(prefix):]) for r in rows if isinstance(r, dict)
+             and isinstance(cid := r.get("call_id"), str) and cid.startswith(prefix)
+             and cid[len(prefix):].isascii() and cid[len(prefix):].isdigit()]
+    return max(taken, default=-1) + 1
+
+
+def bind_call_ids(run_dir: Path, run: str) -> None:
+    """Name the run whose calls `next_call_id(run_dir)` numbers: a branched world's token
+    (the `world_id` its served-ledger rows carry), else the run id. Called once per run, at its
+    start, by the driver; binding again restarts the count from what the table holds."""
+    if not run or "/" in run:
+        raise ValueError(f"a call id's run part must be non-empty and carry no '/': {run!r}")
+    with _CALL_IDS_LOCK:
+        _CALL_IDS[str(run_dir)] = _RunCallIds(run, _first_free_call_number(run_dir, run))
+
+
+def next_call_id(run_dir: Path) -> str:
+    """@owns call_id — the host-written id of one call of the run in `run_dir` (A12, #1234):
+    `<run>/<n>`, naming the run (`bind_call_ids`; the run dir's name when nothing bound one)
+    and the call (`n`, from 0, one per allocation). The query tool allocates a call's id before
+    the call reaches a registry, so its served-ledger rows and its query-table row carry the
+    same one; a row whose writer passes none is allocated its own (`append_query_row`). No two
+    allocations for one run dir in one process share an id, a repeated identical call's
+    included; a new process continues past the highest id the run's table holds."""
+    key = str(run_dir)
+    with _CALL_IDS_LOCK:
+        ids = _CALL_IDS.get(key)
+        if ids is None:
+            run = Path(run_dir).name
+            ids = _CALL_IDS[key] = _RunCallIds(run, _first_free_call_number(run_dir, run))
+        n = ids.next_n
+        ids.next_n += 1
+        return f"{ids.run}/{n}"
 
 
 def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the caller must decide
     run_dir: Path, *, lead_id: str, system: str, verb: str, query_id: str, params: dict,
     raw_command: str, payload_text: str, exit_code: int, payload_status: str,
-    payload_digest: str, system_key: str,
+    payload_digest: str, system_key: str, call_id: str | None = None,
 ) -> dict:
     """@owns QUERY_ROW_COLUMNS — the single append to the queries table: allocate the lead's
     next seq, persist the payload sidecar, and append one row in `QUERY_ROW_COLUMNS` order.
@@ -222,12 +284,20 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
     should have fingerprinted. It cannot be derived here because the string it fingerprints is
     absent from the row.
 
+    `call_id` is the call's host-written id, the one key its served-ledger rows share (A12):
+    a writer whose call reaches a registry passes the id it allocated before asking
+    (`next_call_id`); left out, the row is allocated its own, so no row is written without
+    one. A failed append of the row is `CallRecordWriteFailed` naming this table: the run ends
+    rather than leave a call no row records.
+
     Atomicity is by thread confinement, not a lock: this function contains no `await`, and the
     synchronous bash tool also runs on the event loop thread, so `(lead_id, seq)` stays unique.
     Moving either writer off-thread would let two threads compute the same `_next_seq` and lose
     a payload sidecar; add a cross-writer lock first."""
     # First, so too-deep params are refused before a seq is taken or a sidecar written.
     stored_params = _json_safe_params(dict(params))
+    if call_id is None:
+        call_id = next_call_id(run_dir)
     seq = _next_seq(run_dir, lead_id)
     payload_rel = persist_payload(run_dir, lead_id, seq, payload_text)
     row: dict[str, Any] = {
@@ -247,6 +317,8 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
         "payload_sha256": payload_sha256(payload_text),
         # Passed in: the raw string it fingerprints must not be on the row.
         "system_key": system_key,
+        # Passed in: allocated before the call reached the registry (`next_call_id`).
+        "call_id": call_id,
     }
     # Compared as a tuple: the on-disk key order is part of the contract.
     if tuple(row) != QUERY_ROW_COLUMNS:
@@ -254,7 +326,12 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
             "internal: append_query_row's row disagrees with QUERY_ROW_COLUMNS: "
             f"{tuple(row)} != {QUERY_ROW_COLUMNS}"
         )
-    write_guarded(RunPaths(run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
+    try:
+        write_guarded(RunPaths(run_dir).executed_queries, json.dumps(row) + "\n", mode="append")
+    except OSError as failed:
+        raise CallRecordWriteFailed(
+            TRUNCATED_BY_EXECUTED_QUERIES,
+            f"{query_id} row {call_id} for lead {lead_id}: {failed!r}") from failed
     return row
 
 

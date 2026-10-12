@@ -24,6 +24,7 @@ from defender.hooks.budget_enforcer import (
     update_budget_locked,
 )
 from defender.runtime import circuit_breaker
+from defender.runtime.run_end import CallRecordWriteFailed
 from defender.runtime.verbs import VerbContext
 from ._spec import ITEM1_SYSTEM, _ANY_RUN_TAG, _FENCE_RUN
 
@@ -149,6 +150,7 @@ def _record_manual_row(
     pushing the breaker over its trip boundary on lead-0's behalf."""
     from defender.scripts.gather_tools.record_query import (
         append_query_row,
+        next_call_id,
         payload_digest,
         payload_status,
         raw_command,
@@ -173,6 +175,9 @@ def _record_manual_row(
         # No model-authored system name on this path (`raw_system` is `""`); the system is
         # the host's own constant.
         system_key=system_fingerprint("", ITEM1_SYSTEM),
+        # This call's own id: the capped path never passes the query tool, which allocates
+        # every other call's.
+        call_id=next_call_id(deps.run_dir),
     )
 
 
@@ -215,9 +220,10 @@ class _CallLedger:
                 envelope = await asyncio.to_thread(fn, vctx, **params)
                 _record_manual_row(deps, verb, params, envelope, exit_code=0)
                 return envelope, ""
-            except (circuit_breaker.RunAborted, asyncio.CancelledError,
+            except (circuit_breaker.RunAborted, CallRecordWriteFailed, asyncio.CancelledError,
                     KeyboardInterrupt, GeneratorExit):
-                # Control-flow signals propagate; they are never the query's fault.
+                # Control-flow signals propagate; they are never the query's fault. A failed
+                # row write ends the run (A12), so it is never re-filed as the call's fault.
                 raise
             except AdapterFault as e:
                 # A mapped fault keeps its own exit code, as in `QueryCapture._record`.

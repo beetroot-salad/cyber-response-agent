@@ -234,7 +234,7 @@ async def _reap_correlation_task(task: Any) -> None:
         pass
 
 
-async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, prompt, deps, store, bounds
+async def _drive_agent(  # noqa: PLR0913, C901 — the loop's own inputs: agent, prompt, deps, store, bounds; one except arm per exit class
     agent: Agent[AgentDeps, str], prompt: str, deps: AgentDeps, store: Any, session_id: str,
     bounds: challenge_gate.Bounds, message_history: list | None = None,
 ) -> tuple[Any, run_end.RunEnd, str | None]:
@@ -279,6 +279,16 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
         _logger.error(f"store append failed ({e!r}); stopping the run")
         truncated_by = session_store.TRUNCATED_BY_STORE
         exit_reason = "StoreAppendError"
+    except (run_end.CallRecordWriteFailed, BaseExceptionGroup) as e:
+        # A call record the run could not write ends it (A12, #1234), stamped with the record
+        # that failed. Concurrent leads may deliver it inside an exception group; a group that
+        # carries none propagates as itself.
+        failed = _call_record_failure(e)
+        if failed is None:
+            raise
+        _logger.error(f"{failed}")
+        truncated_by = failed.record
+        exit_reason = "CallRecordWriteFailed"
     finally:
         _flush_run_end(run, store, session_id, truncated_by)
     # The run-end record is taken before the forced close sets `closed`, and written always
@@ -294,6 +304,28 @@ async def _drive_agent(  # noqa: PLR0913 — the loop's own inputs: agent, promp
             _logger.error("the run-end record could not be written; not forcing a close")
             exit_reason = f"{exit_reason}+RunEndRecordFailed"
     return run, end, exit_reason
+
+
+def _bind_call_ids(run_dir: Path, verbs: Any, run_id: str) -> None:
+    """Name the run in every call id its writers allocate (A12, #1234): the registry's own
+    `call_run` when it serves a branched world (the world token its served-ledger rows carry
+    as `world_id`), else the run id. Bound before any writer runs, lead zero's included."""
+    from ..query_tool import bind_call_ids
+
+    run = getattr(verbs, "call_run", None)
+    bind_call_ids(run_dir, run if isinstance(run, str) and run else run_id)
+
+
+def _call_record_failure(exc: BaseException) -> run_end.CallRecordWriteFailed | None:
+    """The `CallRecordWriteFailed` `exc` is or carries (an exception group may wrap it)."""
+    if isinstance(exc, run_end.CallRecordWriteFailed):
+        return exc
+    if isinstance(exc, BaseExceptionGroup):
+        for inner in exc.exceptions:
+            found = _call_record_failure(inner)
+            if found is not None:
+                return found
+    return None
 
 
 def _write_run_end_sidecar(deps: AgentDeps, end: run_end.RunEnd) -> bool:
@@ -454,6 +486,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     gate_bounds = bounds if bounds is not None else challenge_gate.default_bounds()
     make_model = make_model or providers.build_for_effort
     roster, verbs = _adapters_at_run_start(defender_dir, roster, verbs, tenant)
+    _bind_call_ids(run_dir, verbs, run_id)
     correlation = _correlation_dispatch_at_run_start(
         tenant=tenant, resume=resume, lead_zero_verbs=lead_zero_verbs,
     )

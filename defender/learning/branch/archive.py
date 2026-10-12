@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from defender._episode_handle import Episode
-from defender._io import Bound, entry_present
+from defender._io import Bound, entry_present, read_text_utf8
 from defender._episode_paths import LAYOUT, WorldPaths
 from defender.run_repository import (
     RunPaths,
@@ -51,6 +51,7 @@ from defender.learning.lead_repository import (
     refusing_copy2,
     stage_tables,
 )
+from defender.runtime.run_end import TRUNCATED_BY_EXECUTED_QUERIES, parse_record
 from defender.runtime.run_end import sidecar_path as run_end_sidecar_path
 from defender.runtime.scrub import verdict_path
 
@@ -145,10 +146,29 @@ def _screened_sources(world: str, run_dir: Path,
     paths = RunPaths(run_dir)
     present = [(src, to) for src, to in _single_files(run_dir, dest)
                if _screen(src, world=world)]
-    _screen(paths.executed_queries, world=world)
+    if not _ended_on_table_write(run_dir):
+        _screen(paths.executed_queries, world=world)
     _screen(paths.gather_raw, world=world, is_dir=True)
     _screen(paths.gather_summaries, world=world, is_dir=True)
     return present
+
+
+def _ended_on_table_write(run_dir: Path) -> bool:
+    """Did the host end this run because its query table could not be written (A12, #1234)?
+
+    Read from the run-end sidecar beside the run dir, which no box can write. Such a run's
+    table is the record whose write failed, so whatever is at its name is not refused here:
+    `stage_tables` copies it when it is a regular file and reports it refused otherwise, and the
+    world is archived cut short (its run-end record says so) rather than lost."""
+    sidecar = run_end_sidecar_path(run_dir)
+    if not artifact_file(sidecar):
+        return False
+    try:
+        doc = json.loads(read_text_utf8(sidecar))  # lint-tree-read-follows-link: ok — screened by `artifact_file` above; the sidecar sits beside the run dir, outside the box's bind
+    except (OSError, ValueError, RecursionError):
+        return False
+    end = parse_record(doc)
+    return end is not None and end.truncated_by == TRUNCATED_BY_EXECUTED_QUERIES
 
 
 def _screen_destinations(world: str, dest: WorldPaths, run_dir: Path,

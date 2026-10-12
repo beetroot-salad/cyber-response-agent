@@ -19,6 +19,7 @@ from defender.hooks.budget_enforcer import BudgetKill
 
 from . import circuit_breaker
 from . import permission
+from . import run_end
 from . import session_store
 from . import tools
 from .agent_role import GATHER_AGENT_ID_PREFIX
@@ -569,6 +570,11 @@ async def _run_gather(  # noqa: C901 — one except arm per way a gather run can
     except circuit_breaker.RunAborted:
         # Run-level abort: passes through; the driver stamps the main session likewise.
         stamp(session_store.TRUNCATED_BY_ABORTED)
+        raise
+    except run_end.CallRecordWriteFailed as failed:
+        # A call record could not be written (A12): the run ends, this lead with it, stamped
+        # with the record that failed; the driver stamps the main session likewise.
+        stamp(failed.record)
         raise
 
     terminator, output = _compose(lead_id, stop, summary, fault)

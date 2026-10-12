@@ -35,6 +35,7 @@ from defender.hooks.budget_enforcer import (
 )
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
 from defender.runtime import circuit_breaker
+from defender.runtime.run_end import CallRecordWriteFailed
 from defender.runtime.verb_grant import GrantError, VerbGrant
 from defender.runtime.verbs import VerbContext
 from ._spec import (
@@ -249,8 +250,8 @@ def resolve_lead_zero(
                 alert=alert, capture=capture, env=dict(env), limits=limits,
                 tenant=tenant,
             )
-        except (BudgetKill, circuit_breaker.RunAborted, asyncio.CancelledError,
-                KeyboardInterrupt, GeneratorExit):
+        except (BudgetKill, circuit_breaker.RunAborted, CallRecordWriteFailed,
+                asyncio.CancelledError, KeyboardInterrupt, GeneratorExit):
             # Control-flow signals propagate; swallowing CancelledError breaks cancellation.
             raise
         except BaseException as e:  # noqa: BLE001 — item 1's own faults degrade, never raise
