@@ -112,10 +112,15 @@ def test_the_agent_target_is_a_fixed_absolute_path_outside_the_trees_the_box_alr
             assert not Path(m["target"]).is_relative_to(target), (target, m)
 
 
-def test_the_agent_source_is_translated_through_a_covering_shared_mount():
+def test_the_agent_source_is_translated_through_a_covering_shared_mount(monkeypatch):
     """Under docker-outside-of-docker the agent half, like every bind source, is handed to the
     daemon by the path the DAEMON sees; the target stays the fixed constant."""
     from defender.runtime import box as box_mod
+    from defender.runtime.box import _lifecycle
+
+    # The run dir named below does not exist; its input-directory check has its own tests (#1222).
+    monkeypatch.setattr(  # lint-monkeypatch: ok — the input-directory check has its own tests
+        _lifecycle, "_input_dir_source", lambda run_dir: Path(run_dir) / "alert_input")
 
     shared = ((Path("/workspace"), Path("/home/dev/projects/repo")),)
     argv = box_mod._create_argv(

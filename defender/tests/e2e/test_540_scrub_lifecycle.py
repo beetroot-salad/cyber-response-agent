@@ -1460,8 +1460,11 @@ def test_workspace_map_renders_an_ordinary_filename_intact(tmp_path):
     run = _clean_run_dir(tmp_path)
     lines = workspace_map_mod.workspace_map(run, systems=()).splitlines()
 
-    for name in ("report.md", "investigation.md", "alert.json", "executed_queries.jsonl"):
+    for name in ("report.md", "investigation.md", "executed_queries.jsonl"):
         assert f"- {name}" in lines, f"{name} did not render as its own intact bullet"
+    # The alert lives in the run's input directory now (#1222 A1), which lists as its own bullet.
+    assert any(ln.startswith("- alert_input") for ln in lines), (
+        "the alert's input directory did not render as its own bullet")
 
 
 def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monkeypatch):
