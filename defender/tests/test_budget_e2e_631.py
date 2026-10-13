@@ -306,7 +306,7 @@ def test_budget_kill_and_breaker_kill_are_independent(tmp_path, enforced):
                             "goal": "g", "what_to_summarize": ["w"]})]),
                         *tail_turns(run_dir, 15)]),
                     gather=charge, verbs=dead,
-                    limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
+                    limits=caps(max_tool_calls=2, wall_clock_timeout=3600,
                                 grace_seconds=600))
     assert charge.calls >= 1, "the charging gather never ran, so the breaker was never charged"
     assert summary["truncated_by"] == "budget", "the budget did not fire first"

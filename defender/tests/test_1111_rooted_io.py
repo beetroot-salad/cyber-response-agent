@@ -95,7 +95,7 @@ DEADLINE = 3.0
 ROOTED_OPS = frozenset({"rooted_read", "rooted_write", "rooted_mkdir"})
 
 #: Today's write-once members (`create`; a second write is refused). Not #1111's to change.
-WRITE_ONCE = frozenset({"alert", "provenance", "run_end", "leads"})
+WRITE_ONCE = frozenset({"alert", "alert_record", "provenance", "run_end", "leads"})
 
 #: What a plant can put AT a record's name.
 LEAF_PLANTS = ("hardlink", "symlink", "fifo", "socket", "directory")

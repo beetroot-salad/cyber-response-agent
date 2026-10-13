@@ -251,12 +251,6 @@ def episode_alert(bound: Bound) -> dict[str, Any]:
     return json_mapping_of(read.text) or {}
 
 
-def episode_digest(bound: Bound) -> str | None:
-    """The episode's alert digest (the union's key), or `None` when it has no usable record."""
-    record = episode_record(bound)
-    return None if record is None else record.digest
-
-
 def _render_samples(samples_doc: dict[str, Any], served: list[str]) -> str:
     """The samples record per system (O16): each system's real example answers under its own
     name, per verb, and a system whose section is unavailable shown with its reason. A served

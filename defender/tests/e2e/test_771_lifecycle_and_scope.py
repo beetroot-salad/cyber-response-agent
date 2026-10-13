@@ -649,6 +649,8 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
     # re-probes the kernel rule on every run rather than pinning a one-time observation of it.
     pinned = os.open(str(first), os.O_RDONLY | os.O_DIRECTORY)
     try:
+        from defender.tests._alert_plant import unseal_fixture_input
+        unseal_fixture_input(first)
         shutil.rmtree(first)
         first.mkdir()
         (first / "report.md").write_text("SECOND RUN\n", encoding="utf-8")

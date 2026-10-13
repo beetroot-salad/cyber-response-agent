@@ -5,19 +5,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from defender.runtime.run_state import RunState
 from defender.run_repository import RunPaths
-from defender.hooks.budget_enforcer import count_call
 
 _logger = logging.getLogger(__name__)
-
-
-def _rows_for(state: RunState, lead_id: str) -> list[dict]:
-    return list(state.lead_rows(lead_id))
-
-
-def _budget_account(state: RunState, tool_name: str) -> None:
-    count_call(state, tool_name)
 
 
 def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> bool:

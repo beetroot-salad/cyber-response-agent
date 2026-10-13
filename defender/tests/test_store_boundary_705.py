@@ -180,6 +180,8 @@ def test_the_store_is_unreachable_from_inside_the_box(tmp_path):
     (run_dir / "alert.json").write_text('{"id": "boxed"}', encoding="utf-8")
     (run_dir / "sentinel.txt").write_text("RUN-DIR-IS-READABLE", encoding="utf-8")
 
+    from defender.tests._alert_plant import plant_alert
+    plant_alert(run_dir)
     box = start_box(run_dir, DEFENDER)
     try:
         probe = run_dir / "_probe_store.py"

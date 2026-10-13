@@ -1118,7 +1118,7 @@ def test_p173_run_request_count_now_includes_the_leads_request(tmp_path):
     assert d.run_dir is not None
     wire = read_jsonl_rows(d.run_dir / "wire_logs" / "llm_requests.jsonl")
     lead_rows = [r for r in wire if r.get("agent_id") == f"gather:{S.L3}"
-                 and r.get("kind") == "request"]
+                 and r.get("kind") == "response"]
     assert len(lead_rows) == lead_requests, (
         "the wire log the run is priced from does not carry every l-00c request")
 

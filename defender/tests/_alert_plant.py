@@ -54,3 +54,12 @@ def plant_source_copy(episode_dir: Path, alert: bytes, *,
         digest, facts = _alert_input.digest_of(alert), _alert_input.AlertFacts()
     paths.source_alert.write_bytes(alert)
     paths.source_record.write_text(_alert_input.record_text(digest, facts), encoding="utf-8")
+
+
+def unseal_fixture_input(run_dir: Path) -> None:
+    """Unlock this test's own sealed input for an explicit host mutation or cleanup."""
+    paths = RunPaths(run_dir)
+    paths.alert_input_dir.chmod(0o755)
+    for child in paths.alert_input_dir.iterdir():
+        if child.is_file() and not child.is_symlink():
+            child.chmod(0o644)

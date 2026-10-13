@@ -269,9 +269,10 @@ def test_a_withheld_lead_is_neither_claimed_nor_declared(tmp_path):
     lead_file = tmp_path / "gather_raw" / "l-00c.lead.json"
     withheld = CorrelationDispatch("alpha.correlate", None, VerbGrant(role=HOLDER, entries=()))
 
+    from defender.runtime.run_state import RunState
     outcome = asyncio.run(run_correlation(
-        run_dir=tmp_path, defender_dir=tmp_path, run_id="r", verbs=None, limits={},
-        make_model=None, logger=None, box=None, store=None, budget_started_monotonic=0.0,
+        run_state=RunState(tmp_path, "r"), defender_dir=tmp_path, verbs=None, limits={},
+        make_model=None, logger=None, box=None, store=None,
         catalog=None, dispatch=withheld, tenant=None, deadline=1.0))
 
     assert outcome.ending == ENDING_WITHHELD, outcome

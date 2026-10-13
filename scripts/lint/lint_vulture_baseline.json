@@ -88,6 +88,7 @@
     "defender/scripts/tenant.py: unused attribute 'dont_write_bytecode' (60% confidence)": "false positive: `sys.dont_write_bytecode` is an interpreter flag the import system reads, which vulture cannot see; set so the operator command writes no bytecode cache into the checkout it runs from.",
     "defender/skills/invlang/advisory.py: unused function 'clear_cache' (60% confidence)": "test-only: cache teardown used by tests/test_invlang_advisory.py to isolate cases",
     "defender/skills/invlang/corpus.py: unused variable 'parse_warnings' (60% confidence)": "false-positive: Companion dataclass field, read off instances",
-    "defender/skills/invlang/corpus.py: unused variable 'source_path' (60% confidence)": "false-positive: Companion dataclass field, read off instances"
+    "defender/skills/invlang/corpus.py: unused variable 'source_path' (60% confidence)": "false-positive: Companion dataclass field, read off instances",
+    "defender/runtime/run_state.py: unused method 'last_row' (60% confidence)": "Test-only since #1222 retired ancestor fetching; retained RunState accessor pinned by test_1235_round3.test_row_count_and_last_row_read_the_lead_without_listing_it."
   }
 }

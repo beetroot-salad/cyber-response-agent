@@ -23,7 +23,7 @@ from typing import Any
 
 from defender._io import read_text_utf8
 from defender.run_repository import RunPaths
-from defender.hooks.budget_enforcer import BudgetKill
+from defender.hooks.budget_enforcer import BudgetKill, count_call
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
 from defender.runtime import circuit_breaker, run_end
 from defender.runtime.run_state import RunState
@@ -52,7 +52,7 @@ from ._agreement import (
     CorrelationDispatchError,
     resolve_correlation_dispatch,
 )
-from ._capture import _budget_account, _declare_l_finding, _rows_for
+from ._capture import _declare_l_finding
 from ._items import LeadEnd, correlation_contract, run_correlation_lead
 
 _logger = logging.getLogger(__name__)
@@ -180,7 +180,7 @@ def _classify_end(end: LeadEnd, run_state: RunState, system: str) -> str | None:
         return ENDING_REQUEST_LIMIT
     if end.fault_terminator is not None:
         return ENDING_DISPATCH_RAISED
-    rows = _rows_for(run_state, L3)
+    rows = run_state.lead_rows(L3)
     if rows and all(r.get("exit_code") != 0 for r in rows):
         return ENDING_EVERY_CALL_FAILED
     if not summary:
@@ -216,7 +216,7 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit pe
         return CorrelationOutcome(ending=ENDING_CLAIM_FAILED, system=system)
     # Account the spawn explicitly: `subagent_spawns` counts the "gather" tool name, which a
     # harness dispatch never emits. It spends the run's one budget; nothing is reserved for it.
-    _budget_account(run_state, "gather")
+    count_call(run_state, "gather")
     if circuit_breaker.is_tripped(run_state, system):
         return CorrelationOutcome(ending=ENDING_TRIPPED_BREAKER, system=system)
 

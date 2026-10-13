@@ -179,7 +179,8 @@ def run_dir(runs_base: Path) -> Path:
     escape test try to reach — a live neighbour, not an imagined one)."""
     d = runs_base / "20260718T101500Z-boxspec"
     (d / "gather_raw").mkdir(parents=True)
-    (d / "alert.json").write_text('{"id": "boxspec"}', encoding="utf-8")
+    from defender.tests._alert_plant import plant_alert
+    plant_alert(d, {"id": "boxspec"})
     return d
 
 

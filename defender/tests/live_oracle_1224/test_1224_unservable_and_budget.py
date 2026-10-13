@@ -1437,6 +1437,8 @@ def test_resume_after_the_sibling_was_already_unservable(tmp_path, monkeypatch):
     # a run has been in is refused at materialisation, which would end the resume before
     # anything about the world is asked).
     assert first.run is not None
+    from defender.tests._alert_plant import unseal_fixture_input
+    unseal_fixture_input(first.run.run_dir)
     shutil.rmtree(first.run.run_dir)
 
     o2 = S.oracle(S.submit(BOB_ROWS))

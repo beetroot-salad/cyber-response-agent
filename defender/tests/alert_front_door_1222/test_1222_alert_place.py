@@ -187,6 +187,8 @@ class _HostStep(S.Turn):
 def _replace_alert(run_dir: Path, data: bytes = DECOY_BYTES) -> None:
     """The host replaces the stored alert by an atomic rename inside its own directory, keeping
     the record — the alert's bytes no longer match the recorded digest."""
+    from defender.tests._alert_plant import unseal_fixture_input
+    unseal_fixture_input(run_dir)
     alert = S.alert_file(run_dir)
     tmp = alert.with_name(f".s08-replace-{uuid.uuid4().hex[:8]}")
     tmp.write_bytes(data)
@@ -878,7 +880,7 @@ def test_a1_a_replaced_alert_is_refused_at_the_next_host_read_whatever_the_runti
                         backend=S.Backend(answer=_resolving))
     assert d.tenant is not None
     with pytest.raises(Exception) as restart:  # noqa: PT011 — the refusal's class is the implementer's; its text is asserted
-        S.drive_run(again, d.folder, tenant=d.tenant.run_tenant())
+        S.drive_run(again, d.folder, tenant=d.tenant.accept())
     assert DECOY not in _all_text(again.main.seen), "a restart handed MAIN the replaced alert"
     _assert_names_the_run_and_carries_no_byte(
         _refusal_text(restart.value, None), d.folder, "orientation on a restart")
@@ -1011,15 +1013,21 @@ def _populated(run_dir: Path) -> None:
 
 
 def _missing(run_dir: Path) -> None:
+    from defender.tests._alert_plant import unseal_fixture_input
+    unseal_fixture_input(run_dir)
     shutil.rmtree(S.input_dir(run_dir))
 
 
 def _empty(run_dir: Path) -> None:
+    from defender.tests._alert_plant import unseal_fixture_input
+    unseal_fixture_input(run_dir)
     for child in S.input_dir(run_dir).iterdir():
         child.unlink()
 
 
 def _not_a_directory(run_dir: Path) -> None:
+    from defender.tests._alert_plant import unseal_fixture_input
+    unseal_fixture_input(run_dir)
     where = S.input_dir(run_dir)
     shutil.rmtree(where)
     where.write_text("not a directory\n", encoding="utf-8")
@@ -1028,6 +1036,8 @@ def _not_a_directory(run_dir: Path) -> None:
 def _link(run_dir: Path) -> None:
     """A link at the directory's name, pointing at a directory OUTSIDE the run (PA-10: today the
     box starts and reads the target through it)."""
+    from defender.tests._alert_plant import unseal_fixture_input
+    unseal_fixture_input(run_dir)
     where = S.input_dir(run_dir)
     elsewhere = Path(run_dir).parent.parent / "s08-elsewhere"
     elsewhere.mkdir(parents=True, exist_ok=True)

@@ -42,7 +42,7 @@ from pathlib import Path
 
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._git import REPO_ROOT
-from defender._knowledge import CHECKOUT_KNOWLEDGE
+from defender._knowledge import CHECKOUT_KNOWLEDGE, runtime_knowledge
 from defender._untrusted import wrap_fresh
 from defender._corpus import Lesson
 from defender.runtime.lessons_engine._lessons_common import iter_lessons, use_utf8_stdio
@@ -51,6 +51,11 @@ from defender._io import read_text_utf8
 LESSONS_DIR = CHECKOUT_KNOWLEDGE.lessons_dir
 
 DIMENSIONS = ("source_signature", "telemetry_source", "attack_phase")
+
+
+def _runtime_lessons_dir() -> Path:
+    knowledge = runtime_knowledge()
+    return LESSONS_DIR if knowledge is CHECKOUT_KNOWLEDGE else knowledge.lessons_dir
 
 
 def _emit_match(lesson: Lesson) -> None:
@@ -64,7 +69,7 @@ def cmd_grep(patterns: list[str], signature: str | None = None) -> int:
     except re.error as e:
         print(f"error: bad regex: {e}", file=sys.stderr)
         return 2
-    for lesson in iter_lessons(LESSONS_DIR):
+    for lesson in iter_lessons(_runtime_lessons_dir()):
         # A signature is a key: the whole entry, equal as text, never a pattern over it.
         if signature is not None and signature not in lesson.lines("source_signature"):
             continue
@@ -79,7 +84,7 @@ def cmd_tags(field: str | None) -> int:
     if field and field not in DIMENSIONS:
         print(f"error: unknown dimension {field!r}; choose from {', '.join(DIMENSIONS)}", file=sys.stderr)
         return 2
-    lessons = list(iter_lessons(LESSONS_DIR))
+    lessons = list(iter_lessons(_runtime_lessons_dir()))
     for f in fields:
         counts: dict[str, int] = {}
         for lesson in lessons:
@@ -93,7 +98,7 @@ def cmd_tags(field: str | None) -> int:
 
 def cmd_show(paths: list[str]) -> int:
     rc = 0
-    corpus = LESSONS_DIR.resolve()
+    corpus = _runtime_lessons_dir().resolve()
     for raw_path in paths:
         p = Path(raw_path)
         if not p.is_absolute():
