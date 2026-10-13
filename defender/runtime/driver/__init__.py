@@ -616,7 +616,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     prompt = _opening_prompt(
         resume, run_dir, alert_path, defender_dir,
         systems=tuple(roster.accepted), correlation_section=correlation_section,
-        orient_shim=orient_shim,
+        orient_shim=orient_shim, agent_root=tenant.agent,
     )
 
     agent = build_agent(

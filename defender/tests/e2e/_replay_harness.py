@@ -667,9 +667,6 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         seams["resume"] = resume
     if run_state is not None:
         seams["run_state"] = run_state
-    seams["box"] = box if box is not None else box_mod.unboxed_executor(
-        env=run_common.run_env(tree, run_dir),
-    )
     # #1106: the run's TENANT and its per-run GRANTS are two required inputs of the driver (no
     # grant is fixed per process, and no reader finds the settings folder itself). A scenario
     # names its own tenant when it is about one; every other replay runs as the committed
@@ -685,6 +682,9 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         tenant if tenant is not None else _default_tenant(),
         defender_dir=tree,
         dispatches_lead_zero=resume is None and verbs is not None,
+    )
+    seams["box"] = box if box is not None else box_mod.unboxed_executor(
+        env=run_common.run_env(tree, run_dir, agent_root=run_tenant.agent),
     )
     with override_allow_model_requests(False):
         return asyncio.run(driver.run_investigation(

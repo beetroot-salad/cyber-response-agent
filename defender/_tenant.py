@@ -862,8 +862,3 @@ def _refuse_widened_learning_state_overlap(data_root: Path) -> None:
 def runs_base_for(tenant: Tenant) -> Path:
     """The accepted tenant's runs base, `<root>/<tenant>/runs`."""
     return tenant.runs
-
-
-def agent_dir_for(data_root: Path, tenant_id: str) -> Path:
-    """The agent half for an already identified tenant; no settings are re-read."""
-    return _TenantPaths(data_root, tenant_id).agent

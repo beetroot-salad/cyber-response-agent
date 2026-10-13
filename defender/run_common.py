@@ -323,21 +323,15 @@ def provider_scrubbed_environ() -> dict[str, str]:
     return env
 
 
-def run_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
+def run_env(defender_dir: Path, run_dir: Path, *, agent_root: Path | None = None) -> dict[str, str]:
     env = provider_scrubbed_environ()
     env["DEFENDER_DIR"] = str(defender_dir)
     env["DEFENDER_RUN_DIR"] = str(run_dir)
     from defender._knowledge import AGENT_ROOT_ENV
     env.pop(AGENT_ROOT_ENV, None)
+    if agent_root is not None:
+        env[AGENT_ROOT_ENV] = str(agent_root)
     env["DEFENDER_RUNS_BASE"] = RunPaths(run_dir).runs_base_export()
-    # The container record is outside the run's writable mount. Never choose a tenant's
-    # corpus from a box-writable provenance stamp.
-    try:
-        owner = _tenant.read_tenant(Path(env["DEFENDER_RUNS_BASE"]))
-    except _tenant.TenantRefused:
-        pass  # Standalone fixture folders have no tenant container.
-    else:
-        env[AGENT_ROOT_ENV] = str(_tenant.agent_dir_for(_tenant.resolve_data_root(), owner.tenant_id))
     env["PATH"] = f"{defender_dir / 'bin'}{os.pathsep}{env.get('PATH', '')}"
     # Prepended: host subprocesses also need the operator's own PYTHONPATH entries.
     env["PYTHONPATH"] = _prepend(str(defender_dir.parent), env.get("PYTHONPATH"))

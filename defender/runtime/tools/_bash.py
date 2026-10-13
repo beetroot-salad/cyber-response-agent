@@ -29,7 +29,8 @@ from ._deps import AgentDeps, GatherDeps, _BASH_TIMEOUT_S, _BASH_VERB, _INFRA_EX
 
 def _bash_env(deps: AgentDeps) -> dict[str, str]:
     from defender import run_common
-    return run_common.run_env(deps.defender_dir, deps.run_dir)
+    return run_common.run_env(
+        deps.defender_dir, deps.run_dir, agent_root=getattr(deps.tenant, "agent", None))
 
 
 def _shim_exit_code(rc: int) -> int:
