@@ -3,7 +3,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from defender.run_repository import GATHER_RAW_SHAPE, gather_summaries_shape
+from defender.run_repository import (
+    GATHER_RAW_SHAPE,
+    alert_input_shape,
+    gather_summaries_shape,
+)
 from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS
 from defender.runtime.permission.grant import (
     SEG,
@@ -30,6 +34,9 @@ def read_shapes(
         # can both read it; it lives under `<run>/wire_logs/`.
         under(run, SEG),
         under(run, gather_summaries_shape(SEG)),
+        # The alert and its record: the one directory down the input directory holds (#1222).
+        # A shape of its own, so `wire_logs/` stays out of reach.
+        under(run, alert_input_shape()),
     ]
     if raw:
         # The shared shape, not a local spelling: it must match the lead-id validators, or

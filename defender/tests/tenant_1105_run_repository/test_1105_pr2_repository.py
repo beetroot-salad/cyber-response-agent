@@ -447,7 +447,7 @@ def test_an_absent_container_opens_the_view_but_no_arm_until_the_launcher_create
     record = (ep / "runs" / "_tenant.json").read_bytes()
     t.runs_repository().episode(EP).create_container()
     assert (ep / "runs" / "_tenant.json").read_bytes() == record
-    assert (ep / "runs" / f"{EP}-{LABEL}" / "alert.json").is_file()
+    assert (ep / "runs" / f"{EP}-{LABEL}" / "alert_input" / "alert.json").is_file()
 
 
 def test_an_unreadable_container_is_recorded_not_raised_and_never_written_through(

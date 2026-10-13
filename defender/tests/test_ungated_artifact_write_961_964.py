@@ -585,65 +585,20 @@ def test_the_seed_never_raises_into_a_run_that_has_not_started(tmp_path):
     _declare_l_finding(run, "l-00c", "correlation lead", "elastic")  # must not raise
 
 
-def test_a_skipped_seed_leaves_the_model_a_repair_it_is_not_forbidden_from_making(tmp_path):
-    """#964's decision is only safe if what the MODEL sees is actionable, and by default it was
-    not — it was a trap.
-
-    The seed's own refusal goes to stdout; no model reads it. What MAIN reads is the ORIENT
-    heading, which said the reserved ids were "already claimed; do not reuse them". With the
-    declaring row missing, MAIN cites the id, is refused with `undeclared lead`, and the only
-    repair available is to write the very `:L findings` row it has been told not to write. Told
-    the id is claimed and told not to reuse it, MAIN has no move.
-
-    Both ends are asserted, because either alone leaves the trap half-shut: the heading now
-    says the row is missing and that declaring it is not reuse, and the validator's refusal
-    carries the same instruction for a model that reached it without re-reading ORIENT.
-    """
-    from defender.runtime.lead_zero import (
-        L0, LeadZeroResult, _declare_l_finding, render_orient_section,
-    )
+def test_a_skipped_seed_leaves_the_model_a_repair_it_is_not_forbidden_from_making():
+    """#964's decision is only safe if what the MODEL sees is actionable: a model that cites a
+    reserved id whose declaring row is missing is refused with `undeclared lead`, and that
+    refusal must say declaring the row is a repair, not a reuse of a claimed id. (The ORIENT
+    note that said the same was retired with the ancestor lead, #1222; the refusal is the one
+    place left, and names the correlation lead's id.)"""
+    from defender.runtime.lead_zero import L3
     from defender.skills.invlang.validate import diagnose
 
-    run = tmp_path / "run"
-    run.mkdir()
-    (run / "investigation.md").write_text(_ERROR_DOC, encoding="utf-8")
-    _declare_l_finding(run, L0, "ancestor resolution", "elastic")
-
-    heading = render_orient_section(LeadZeroResult(text="", status="resolved"), run,
-                                    correlation_system="elastic",
-                                    grant_home="settings/verb-grants.yaml of tenant 'playground'")
-    assert "is NOT in investigation.md" in heading
-    assert "declare it yourself" in heading
-    assert "not reuse" in heading
-
-    cited = f"```invlang\n:R attr_updates [resolved_by|target|key|value]\n{L0}|v-1|class|x\n```"
+    cited = f"```invlang\n:R attr_updates [resolved_by|target|key|value]\n{L3}|v-1|class|x\n```"
     undeclared = [d for d in diagnose(cited, None) if "undeclared lead" in d.message]
     assert undeclared, "the fixture must actually reach the undeclared-lead check"
     assert "Declare it in a `:L findings` block" in undeclared[0].message
     assert "not reusing it" in undeclared[0].message
-
-
-def test_the_heading_says_nothing_extra_when_the_seed_landed(tmp_path):
-    """POSITIVE CONTROL, and prompt hygiene: the note appears only when the row is actually
-    missing. A line carried on every run would cost tokens on each one and, worse, would tell
-    a model whose document is fine to go looking for a problem it does not have."""
-    from defender.runtime.lead_zero import (
-        L0, LeadZeroResult, _declare_l_finding, render_orient_section,
-    )
-
-    run = tmp_path / "run"
-    run.mkdir()
-    _declare_l_finding(run, L0, "ancestor resolution", "elastic")
-
-    heading = render_orient_section(LeadZeroResult(text="", status="resolved"), run,
-                                    correlation_system="elastic",
-                                    grant_home="settings/verb-grants.yaml of tenant 'playground'")
-    assert "is NOT in investigation.md" not in heading
-
-    # ...and the degraded arm, which has no run dir to look in, is the heading unchanged.
-    assert "is NOT in investigation.md" not in render_orient_section(
-        LeadZeroResult(text="", status="failed"), correlation_system="elastic",
-        grant_home="settings/verb-grants.yaml of tenant 'playground'")
 
 
 # the third site — the turn-N branch's seed

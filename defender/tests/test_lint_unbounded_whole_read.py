@@ -378,13 +378,18 @@ _REAL_EXCEPTIONS = {
 }
 
 
+#: Guarded APIs that share a name with Path.read_bytes; each remains capped by _io.
+_BOUNDED_MATCHES = {"_alert_input.py"}
+
+
 @pytest.mark.gate
 def test_real_tree_has_no_direct_whole_read():
     """Every production whole-file read goes through `_io`'s capped readers (#1188 amendment 3)
-    but the stdlib-only image module's, and the baseline holds nothing."""
+    except the stdlib-only modules; Bound.read_bytes is a guarded name-only match.
+    The baseline holds nothing."""
     found = _independent_census(DEFENDER)
-    assert {hit.split(":")[0] for hit in found} == _REAL_EXCEPTIONS, found
-    assert len(found) == len(_REAL_EXCEPTIONS), found
+    assert {hit.split(":")[0] for hit in found} == _REAL_EXCEPTIONS | _BOUNDED_MATCHES, found
+    assert len(found) == len(_REAL_EXCEPTIONS) + len(_BOUNDED_MATCHES), found
     entries = json.loads(REAL_BASELINE.read_text(encoding="utf-8"))["entries"]
     assert entries == {}
 

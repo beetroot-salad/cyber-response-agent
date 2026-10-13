@@ -590,6 +590,26 @@
           "stageable_patterns"
         ],
         "note": "DECLARED BY #1224's GROUNDING (base 96e4cdb0). The questioner-lesson corpus `defender/lessons-questioner/` (`_paths.PATHS.lessons_questioner_dir`, rel `defender/lessons-questioner/`), which no resource named before: `drain_worktree` covers the curator's writes only through its `corpus_dir` grep token and scopes itself to defender/skills, and nothing covered the launcher's read. EMPTY WRITER LIST ON PURPOSE: the only writer is the questioner curator MODEL, through the drain worktree's file tools (`learning/author/questioner/run.py::build_questioner_config` sets `corpus_dir=paths.lessons_questioner_dir`; `learning/author/shared.py::commit_corpus` commits it — both already rows of `drain_worktree`), so no symbol writes a lesson file; the curator prompt `learning/author/questioner/prompt.md:14-22,30` dictates the frontmatter (`name, description, pattern, holding_system, bucket, source_finding_ids, created_at`) and NO code validates `pattern`/`holding_system`/`bucket` on write. Readers: the launcher's `_author` (cli.py:1507; `iter_lesson_paths(lessons_dir)` at :1537, default dir chosen at :1230) feeding `branch/questioner._questioner_lessons_section` (:182-215), which selects a lesson by `pattern in stageable_patterns` and ignores `holding_system`; also the learning page (`learning/frontend/serialize.py:131-149`, a display table naming `pattern`/`holding_system`/`bucket`), `hooks/record_lesson_load.py:14` (`LESSON_CORPORA`), `learning/core/config.py:65` (drain label) and `evals/harness.py:42` (creates the dir in a temp tree). Today the corpus holds one file, `example-seed-lesson.md`, with `pattern: __none__` so it is never selected. #1224 (O12/M10) replaces the `pattern`/`holding_system` keys with `systems: [str]` and selects by served-system overlap — rewrite the reader rows, the page table and the curator prompt in the commit that does it."
+      },
+      "defender_lessons": {
+        "writers": [],
+        "readers": [
+          "defender/_corpus.py::iter_lessons",
+          "defender/runtime/lessons_engine/lessons_fm.py::cmd_grep",
+          "defender/runtime/lessons_engine/lessons_fm.py::cmd_tags",
+          "defender/runtime/orient.py::_build_lessons_section",
+          "defender/runtime/lessons_engine/lessons_frontier.py::match_lessons",
+          "defender/runtime/lessons_push.py::corpus_dir",
+          "defender/learning/ops/trace_lesson.py::_print_index"
+        ],
+        "grep": [
+          "lessons_dir",
+          "LESSONS_DIR",
+          "DEFAULT_CORPUS",
+          "source_signature",
+          "defender-lessons"
+        ],
+        "note": "DECLARED BY #1222's GROUNDING (base 301f196c, census region `mapping`, MP07/MP12/MP20). The defender lesson corpus `<checkout>/defender/lessons/` (`CHECKOUT_KNOWLEDGE.lessons_dir`, `_knowledge.py:109`; `DefenderPaths.lessons_dir`, `_paths.py:71-72`). At this base it is CHECKOUT-GLOBAL, not per tenant: no tenant id or data root enters its path (#1108 P2-P4 moves it under the tenant; only P1 has landed). EMPTY WRITER LIST ON PURPOSE, as for `questioner_lessons`: the only writer is the lessons curator MODEL through the drain worktree's file tools (`learning/author/lessons/run.py::build_author_config` sets `corpus_dir=paths.lessons_dir`; `learning/author/shared.py::commit_corpus` commits it), and no code writes or validates a lesson's `source_signature` (the curator copies it from `rule.id` per `learning/author/lessons/prompt.md:15,47-48`). Signature-keyed readers: orientation's host shim `defender-lessons source_signature:.*<re.escape(sig)>` (`orient._build_lessons_section`, run by `lessons_fm.cmd_grep`: re.search, IGNORECASE, ANDed patterns over frontmatter lines only — an unanchored case-insensitive substring match) and MAIN's own in-box `defender-lessons` calls (SKILL.md:297-299). Other readers (`iter_lessons`, `lessons_frontier.match_lessons`, `lessons_push.corpus_dir`, `trace_lesson._print_index`) read the same tree by frontier/lesson name, not by signature. #1222 changes the value grepped (the mapped signature) and the value the curator writes; add the new signature-handoff writer row in the commit that creates it. HARNESS EDGE: `evals/harness.py::materialize` copies a scenario's lessons into a temporary tree's `lessons_dir` (:41,:60) and reads them back (:94) — a writer of this corpus's shape that no import-following census sees."
       }
     }
   },

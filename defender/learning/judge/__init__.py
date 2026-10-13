@@ -509,6 +509,9 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orche
                                 f"'accepted'",
                       validity=UNUSABLE if word == outcome_mod.UNUSABLE else None)
 
+    alert_record = render_mod.episode_record(bound)
+    if alert_record is None:
+        raise JudgeRefused(enqueue_mod.no_record_reason())
     worlds = family_mod.non_control_worlds(manifest)
     unusable = outcome_mod.unusable_reason(failed)
     if unusable is not None:
@@ -646,7 +649,7 @@ def _grade_bound_episode(  # noqa: PLR0913, PLR0915, PLR0912, C901 — one orche
     report = enqueue_mod.enqueue_report(
         episode_dir, {"verdict_word": verdict_word, "worlds": rows},
         state=state, drawn=per_world_draws, family_drawn=family_documents,
-        served_systems=served_systems, samples=samples)
+        served_systems=served_systems, samples=samples, record=alert_record)
 
     record_out = EpisodeGrade(
         episode_dir=episode_dir, worlds=rows, verdict_word=verdict_word,

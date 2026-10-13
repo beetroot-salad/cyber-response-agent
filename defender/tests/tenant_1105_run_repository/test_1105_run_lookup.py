@@ -220,7 +220,7 @@ def test_1105_every_tenant_keyed_function_raises_type_error_before_any_read(tmp_
     H.make_run(elsewhere, "r1")
     os.symlink(elsewhere, t.runs)
     rid, src, arm = RunId.parse("r1"), RunId.parse("r1"), RunId.parse("ep-a")
-    carrier = RunTenant(tenant=t, grants=None, correlation=None, systems={}, elastic=None,
+    carrier = RunTenant(tenant=t, grants=None, correlation=None, systems={},
                         ticket_mapping=None)
 
     not_tenants = (t.id, _tenant.TenantId(t.id), t.runs, carrier)

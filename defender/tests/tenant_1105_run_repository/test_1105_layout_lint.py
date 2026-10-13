@@ -97,7 +97,7 @@ HELPERS = frozenset({"artifact_file", "artifact_dir", "plain_file", "contained_p
 NAMED_GATED = ("RunPaths", "RUN_LAYOUT", "SessionPaths", "WIRE_LOG_NAMES", "GATE_METADATA_KEY",
                "RunLayout", "WireLogNames")
 #: The door's public names that are not layout names (D1.3).
-NON_LAYOUT = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref", "RunId",
+NON_LAYOUT = frozenset({"Run", "RunRecord", "ArchivedWorld", "RecordHandle", "case_ref", "case_ref_of_digest", "RunId",
                         # #1105 PR 2 (declared change 0): the tenant-scoped repository's names
                         # replace PR 1's four Tenant-taking lookups at the door.
                         "RunsRepository", "EpisodeRuns", "Listed", "RunAddress", "RunAbsent",
@@ -1049,12 +1049,12 @@ def class_level():
     return Tenant.runs
 
 
-def _tenant_of() -> Tenant:
+def _tenant_planted_by() -> Tenant:
     raise NotImplementedError
 
 
 def annotated_return():
-    return _tenant_of().runs
+    return _tenant_planted_by().runs
 
 
 @dataclasses.dataclass

@@ -87,6 +87,7 @@ from defender.learning.core import drains
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.runtime import bash_exec, box as box_mod
 from defender.runtime.box._image import HASH_INPUTS
+from defender.tests._alert_plant import plant_alert
 from defender.tests._declared869 import commit_all, init_git
 from defender.tests._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
 from defender.tests._lead_author_1134 import write
@@ -162,6 +163,7 @@ def _run_dir(base: Path) -> Path:
     it, and a fixed name would collide with a concurrent test's box on a shared daemon."""
     run = base / f"run-1188-{uuid.uuid4().hex[:8]}"
     run.mkdir(parents=True)
+    plant_alert(run, {"id": "a-1188"})
     return run
 
 
@@ -285,8 +287,12 @@ from pathlib import Path
 import defender._io as io
 io.READ_LIMIT = 5_000_011
 from defender.runtime import box
+import tempfile
+from defender.run_repository import RunPaths
 spec = box.BoxSpec(rootfs="stock:pinned")
-run = Path("/nonexistent/runs/run-1188")
+run = Path(tempfile.mkdtemp()) / "run-1188"
+RunPaths(run).alert_input_dir.mkdir(parents=True)
+RunPaths(run).alert.write_text("{}")
 inv = box._create_argv("defender-run-1188", run, Path("/nonexistent/defender"), spec).argv
 lane = box._render_argv(box.BoxRequest(name="r-1188", workdir=run, spec=spec)).argv
 def fsize(argv):

@@ -35,6 +35,7 @@ from typing import Any
 
 import pytest
 
+from defender.tests._alert_plant import plant_alert
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
@@ -106,6 +107,7 @@ def _fixtures(tmp_path: Path, slug: str = "slug-one", disposition: str = "benign
 def _scored_run(runs: Path, disposition: str, slug: str = "slug-one") -> Path:
     run = runs / slug
     run.mkdir(parents=True, exist_ok=True)
+    plant_alert(run, {"rule": {"id": slug}})
     (run / "report.md").write_text(T.report_text(disposition), encoding="utf-8")
     return run
 

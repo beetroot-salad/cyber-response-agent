@@ -9,12 +9,13 @@ writer once asked; the agent tag the writer adds is `test_1221_agent_tag.py`'s).
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
+from defender._alert_input import AlertFacts
 from defender.runtime import case_ticket
+from defender.tests._alert_plant import plant_alert
 from defender.tests._tenants1106 import FIXTURE_SETTINGS
 
 #: The mapping the mapper is handed when a test does not plant its own (#1107: the mapper
@@ -29,6 +30,11 @@ ALERT = {
     "timestamp": "2026-05-07T07:15:01.561+0000",
 }
 
+#: The facts the front door records for `ALERT` (#1222): the mapper takes them, never the alert.
+FACTS = AlertFacts(signature="5710", event_time=ALERT["timestamp"],
+                   summary=ALERT["rule"]["description"])
+NO_FACTS = AlertFacts(signature=None, event_time=None, summary=None)
+
 
 def _write_run(tmp_path: Path, *, disposition: str = "benign", reason: str = "Routine.",
                confidence: str = "high", with_alert: bool = True) -> Path:
@@ -39,19 +45,20 @@ def _write_run(tmp_path: Path, *, disposition: str = "benign", reason: str = "Ro
         f"confidence: {confidence}\n---\n{reason}\n"
     )
     if with_alert:
-        run_dir.joinpath("alert.json").write_text(json.dumps(ALERT))
+        plant_alert(run_dir, ALERT, mapping={
+            "signature": "rule.id", "event_time": "timestamp", "summary": "rule.description"})
     return run_dir
 
 
 def test_signature_label_matches_open_label():
-    label = case_ticket.signature_label(ALERT, mapping=SHIPPED)
+    label = case_ticket.signature_label(FACTS, mapping=SHIPPED)
     assert label == "sig:5710"
-    assert label in case_ticket.alert_to_open_payload(ALERT, "c", mapping=SHIPPED)["labels"]
+    assert label in case_ticket.alert_to_open_payload(FACTS, "c", mapping=SHIPPED)["labels"]
 
 
 def test_open_payload_stamps_alert_event_time_label():
-    payload = case_ticket.alert_to_open_payload(ALERT, "c", mapping=SHIPPED)
-    assert case_ticket.alert_event_time(ALERT, mapping=SHIPPED) == ALERT["timestamp"]
+    payload = case_ticket.alert_to_open_payload(FACTS, "c", mapping=SHIPPED)
+    assert case_ticket.alert_event_time(FACTS) == ALERT["timestamp"]
     assert case_ticket.ticket_event_time(payload, mapping=SHIPPED) == ALERT["timestamp"]
 
 
@@ -107,7 +114,7 @@ def test_read_case_record_no_frontmatter_raises(tmp_path: Path):
 
 
 def test_alert_to_open_payload_shape_and_signature_label():
-    payload = case_ticket.alert_to_open_payload(ALERT, "case-1", mapping=SHIPPED)
+    payload = case_ticket.alert_to_open_payload(FACTS, "case-1", mapping=SHIPPED)
     assert payload["key"] == "case-1"
     assert payload["status"] == "open"
     assert payload["summary"] == ALERT["rule"]["description"]
@@ -115,36 +122,32 @@ def test_alert_to_open_payload_shape_and_signature_label():
 
 
 def test_alert_to_open_payload_handles_missing_rule():
-    payload = case_ticket.alert_to_open_payload({}, "case-2", mapping=SHIPPED)
+    payload = case_ticket.alert_to_open_payload(NO_FACTS, "case-2", mapping=SHIPPED)
     assert payload["labels"] == ["sig:unknown"]
     assert payload["status"] == "open"
 
 
 def test_alert_to_open_payload_falls_back_on_empty_strings():
-    alert = {"rule": {"id": "", "description": ""}}
-    payload = case_ticket.alert_to_open_payload(alert, "case-3", mapping=SHIPPED)
+    payload = case_ticket.alert_to_open_payload(NO_FACTS, "case-3", mapping=SHIPPED)
     assert payload["labels"] == ["sig:unknown"]
     assert payload["summary"] == "(no rule description)"
 
 
 def test_mapping_is_file_driven(tmp_path: Path):
     """Load a custom mapping.yaml from a settings folder, hand the mapper the result, and
-    confirm the open payload (label prefix, source path) follows the file."""
+    confirm the open payload (label prefix) follows the file."""
     settings = tmp_path / "settings"
     mapping_dir = settings / "systems" / "case-history"
     mapping_dir.mkdir(parents=True)
     (mapping_dir / "mapping.yaml").write_text(
-        "source:\n"
-        "  signature: detection.ruleId\n"
-        "  summary: detection.name\n"
         "open:\n"
         "  key: '{case_id}'\n"
         "  status: open\n"
         "  labels: ['rule/{signature}']\n"
     )
-    alert = {"detection": {"ruleId": "R-99", "name": "Custom rule"}}
+    facts = AlertFacts(signature="R-99", event_time=None, summary="Custom rule")
     payload = case_ticket.alert_to_open_payload(
-        alert, "c", mapping=case_ticket.load_case_mapping(settings))
+        facts, "c", mapping=case_ticket.load_case_mapping(settings))
     assert payload["labels"] == ["rule/R-99"]
 
 

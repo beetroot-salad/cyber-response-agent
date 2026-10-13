@@ -1,5 +1,5 @@
 kind	table	path	deny	archived_as	subcollection	note	table_note
-alert	1	alert.json	— (deliberately not in the answer key, `run_repository/_layout.py`, the comment on `CASE_ANSWER_KEY_NAMES`)	alert.json	run.facts.alert	input copied by the host	
+alert	1	alert_input/alert.json	— (deliberately not in the answer key, `run_repository/_layout.py`, the comment on `CASE_ANSWER_KEY_NAMES`)	alert.json	run.facts.alert	input copied by the host, into the run's read-only input directory beside its record (#1222)	
 report	1	report.md	confined	report.md	run.documents.report	the close tool is its only writer; no role holds a write grant for it (`close_tool.py:1`)	
 investigation	1	investigation.md	confined	investigation.md	run.documents.investigation	seeds (lead-0, branch resume) write it before the first turn; the document tool during	
 queries	1	executed_queries.jsonl	confined	staged as a table	run.tables.queries	append-only; the gather lane's denial rows land here too	

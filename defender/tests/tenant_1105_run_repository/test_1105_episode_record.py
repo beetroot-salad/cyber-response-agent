@@ -38,6 +38,7 @@ import time
 import types
 from collections import OrderedDict
 from collections.abc import Iterator, Mapping
+import shutil
 from pathlib import Path
 
 from defender import _io, run_common
@@ -306,7 +307,7 @@ def test_1105_the_writer_refuses_every_input_that_would_hide_a_run_or_claim_an_i
     claimer.unlink()
     for what, plant, remove in (
             ("an arm whose name holds a run", lambda: H.make_run(runs, "ep-a"),
-             lambda p: (p / "alert.json").unlink() or p.rmdir()),
+             shutil.rmtree),
             ("an arm whose name holds a sidecar file",
              lambda: H.plant_sidecars(runs, "ep-a", staged=False),
              lambda made: [p.unlink() for p in made])):

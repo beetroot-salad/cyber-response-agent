@@ -14,7 +14,7 @@ body can never false-match a tag query:
 No index: a per-call directory scan is fine at this scale.
 
 Retrieval dimensions (frontmatter list fields):
-  source_signature   alert rule.id(s) the lesson came from / bites
+  source_signature   the signature(s) (the recorded alert key) the lesson came from / bites
   telemetry_source   sensor(s) the check keys on (incl. the absent one it names)
   attack_phase       MITRE ATT&CK tactic(s) where the pitfall bites
 
@@ -23,6 +23,8 @@ Usage:
     defender-lessons 'telemetry_source:.*\\bsshd\\b'     # one frontmatter regex
     defender-lessons 'source_signature:.*v2-cross-tier-ssh-pivot' 'attack_phase:.*persistence'
                                                        # AND across patterns (= piped greps)
+    defender-lessons --signature SIG                   # lessons whose source_signature lists SIG
+                                                       # (exact, case-sensitive, whole entry)
     defender-lessons --tags                            # viable values for every dimension
     defender-lessons --tags telemetry_source           # viable values for one dimension
     defender-lessons --show defender/lessons/foo.md    # print just a lesson's frontmatter
@@ -56,13 +58,16 @@ def _emit_match(lesson: Lesson) -> None:
     print(f"{lesson.path.resolve()}\t{lesson.line('description')}")
 
 
-def cmd_grep(patterns: list[str]) -> int:
+def cmd_grep(patterns: list[str], signature: str | None = None) -> int:
     try:
         regexes = [re.compile(p, re.IGNORECASE) for p in patterns]
     except re.error as e:
         print(f"error: bad regex: {e}", file=sys.stderr)
         return 2
     for lesson in iter_lessons(LESSONS_DIR):
+        # A signature is a key: the whole entry, equal as text, never a pattern over it.
+        if signature is not None and signature not in lesson.lines("source_signature"):
+            continue
         text = lesson.match_text()
         if all(rx.search(text) for rx in regexes):
             _emit_match(lesson)
@@ -125,6 +130,8 @@ def main(argv: list[str]) -> int:
         epilog="frontmatter-only: the body is never matched or printed.",
     )
     ap.add_argument("patterns", nargs="*", help="regex(es) matched against frontmatter; ANDed")
+    ap.add_argument("--signature", metavar="SIG",
+                    help="only lessons whose source_signature lists SIG exactly (case-sensitive)")
     ap.add_argument("--tags", nargs="?", const="", metavar="DIMENSION",
                     help="enumerate viable tag values (all dimensions, or one named)")
     ap.add_argument("--show", nargs="+", metavar="PATH",
@@ -135,7 +142,7 @@ def main(argv: list[str]) -> int:
         return cmd_tags(ns.tags or None)
     if ns.show:
         return cmd_show(ns.show)
-    return cmd_grep(ns.patterns)
+    return cmd_grep(ns.patterns, ns.signature)
 
 if __name__ == "__main__":  # lint-log-setup: ok — a model tool — its stderr is read back by the model as plain text
     sys.exit(main(sys.argv))

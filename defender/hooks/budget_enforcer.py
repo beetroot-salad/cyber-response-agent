@@ -16,6 +16,12 @@ DEFAULT_LIMITS = {
     "wall_clock_timeout": 1200,
     "max_subagent_spawns": 40,
     "grace_seconds": 120,
+    # The ONE harness deadline around the whole correlation lead, in seconds (#1222 A7). Half
+    # the run clock: the lead's eight requests and their backend calls (each bounded by its
+    # transport, 40 s) finish well inside it, and it stays far under the ceiling
+    # (`lead_zero.DEADLINE_CEILING_S`, the clock less the 120 s a `bash` call cannot be cut
+    # in). Chosen from the bounds, not measured timings: no real correlation timings exist yet.
+    "correlation_deadline": 600,
 }
 WARNING_THRESHOLD = 0.75
 

@@ -32,7 +32,6 @@ pytest.importorskip("pydantic_ai")
 from defender._io import append_jsonl, read_jsonl_rows  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.learning.lead_repository import joined, load_queries  # noqa: E402
-from defender.runtime import lead_zero  # noqa: E402
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS  # noqa: E402
 from defender import _query_rules  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
@@ -40,7 +39,6 @@ from defender.scripts.gather_tools.record_query import QUERY_ROW_COLUMNS
 from defender._query_rules import ABOVE_GUARD_QUERY_ID
 from defender.tests import _judge_921 as J  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
-    DEFENDER,
     GOLDEN_AB3,
     VerbRecorder,
     materialize,
@@ -82,13 +80,14 @@ def _corrected(rec: VerbRecorder) -> int:
 
 def test_every_writer_of_the_table_leaves_rows_keyed_exactly_as_declared(tmp_path):
     """O6/D1 — a live run reaching all three `append_query_row` callers (an executed query, a
-    failed reducer shim on the bash lane, an above-guard rejection) plus lead-0's own row, and
-    `lead_zero._record_manual_row` driven directly: EVERY row's key tuple — order included —
-    equals `record_query.QUERY_ROW_COLUMNS`. Order too, because one constructor leaves one byte
-    order and two hand-spelled literals that agree on the SET can still differ on it.
+    failed reducer shim on the bash lane, an above-guard rejection): EVERY row's key tuple —
+    order included — equals `record_query.QUERY_ROW_COLUMNS`. Order too, because one constructor
+    leaves one byte order and two hand-spelled literals that agree on the SET can still differ
+    on it. (Lead-0's own writer is gone with the ancestor fetch, #1222: every row now comes
+    through `append_query_row`.)
 
     Observed failing by: the declaration missing, or a writer whose row keys (or their order)
-    differ from it — `_record_manual_row`'s inline dict is the writer this exists for."""
+    differ from it."""
     run_dir = materialize(tmp_path / "live", GOLDEN_AB3)
     r = _run(tmp_path / "live", run_dir=run_dir, run_id="d1017-writers", turns=[
         q("elastic", "query", PARAMS), _reduce(run_dir),
@@ -97,30 +96,9 @@ def test_every_writer_of_the_table_leaves_rows_keyed_exactly_as_declared(tmp_pat
     kinds = {row["query_id"] for row in r.own_rows}
     assert kinds == {"elastic.query", _query_rules.BASH_SHIM_QUERY_ID, ABOVE_GUARD_QUERY_ID}, \
         f"the three writer paths did not all leave a row: {kinds}"
-    assert any(row["lead_id"] in lead_zero.RESERVED_LEAD_IDS for row in r.rows), \
-        "lead-0 left no row, so the universal below does not reach its writer"
     for row in r.rows:
         assert tuple(row) == QUERY_ROW_COLUMNS, \
             f"{row['lead_id']}/{row['query_id']}: keys {tuple(row)} != the declared columns"
-
-    manual = materialize(tmp_path / "manual", GOLDEN_AB3)
-    # A folder no driver opened: the writer allocates its seq from the run's own state, never
-    # from the file (#1235), so this direct call builds the state a driver would and threads it.
-    from defender.runtime.run_state import RunState
-
-    state = RunState(manual, "d1017-second-writer")
-    lead_zero._record_manual_row(
-        lead_zero._CaptureDeps(
-            run_dir=manual, defender_dir=DEFENDER, run_id="d1017-second-writer",
-            lead_id="l-000", run_state=state,
-        ),
-        "search", {"index": "logs"}, {"rows": [{"a": 1}]}, exit_code=0,
-    )
-    rows = [row for row in read_jsonl_rows(RunPaths(manual).executed_queries)
-            if row.get("lead_id") == "l-000"]
-    assert len(rows) == 1, "the second writer left no row"
-    assert tuple(rows[0]) == QUERY_ROW_COLUMNS, \
-        "the second writer's row is keyed (or ordered) differently from the declaration"
 
 
 def test_the_suites_frozen_key_set_is_the_writers_declaration():

@@ -39,7 +39,7 @@ from defender.tests._data_root_1078 import current_data_root, ensure_d9_tenant
 from defender.tests.tenant_1107_settings import _spec1107 as S
 
 TID = S.PLAYGROUND_ID
-RECORD_TYPES = ("SystemConfig", "ElasticSettings", "CaseMapping")
+RECORD_TYPES = ("SystemConfig", "CaseMapping")
 
 
 def _resolve(root: Path, tenant_id: str = TID) -> object:
@@ -72,9 +72,7 @@ def test_d0_return_contract(tmp_path):  # noqa: PLR0915 — one contract, every 
     and resolve_run_tenant return the existing frozen RunTenant, grown by three fields built in
     resolve_run_tenant (which resolve_tenant delegates to): systems, a read-only Mapping from each
     folder name under settings/systems/ to a SystemConfig or a ConfigFault, where a SystemConfig is
-    a read-only Mapping[str, str] of the file's keys exactly as written; elastic, an ElasticSettings
-    or a ConfigFault or None, whose ElasticSettings exposes events_index, alerts_index, url,
-    ssl_verify (the raw string), es_container, kibana_container and docker_context; and
+    a read-only Mapping[str, str] of the file's keys exactly as written; and
     ticket_mapping, a CaseMapping or a CaseTicketError. (A fourth, the secret lookup, moved with
     credential delivery to #1163.) Neither resolver
     raises for a system fault: TenantRefused (defender._tenant) keeps only its current
@@ -119,16 +117,11 @@ def test_d0_return_contract(tmp_path):  # noqa: PLR0915 — one contract, every 
         cmdb["CMDB_URL_BASE"] = "http://elsewhere:1"  # type: ignore[index]
     assert set(dict(rec_direct.systems)) == set(dict(rec.systems)), sorted(rec_direct.systems)
 
-    # elastic: an ElasticSettings exposing the seven named attributes, ssl_verify the raw string.
-    ElasticSettings = S.record_type("ElasticSettings")
-    assert isinstance(rec.elastic, ElasticSettings), type(rec.elastic)
-    assert rec.elastic.events_index == "d0-events-*"
-    assert rec.elastic.alerts_index == "d0-alerts-*"
-    assert rec.elastic.url == "https://es-d0:9200"
-    assert rec.elastic.ssl_verify == "true"
-    assert rec.elastic.es_container == S.es_container("d0")
-    assert rec.elastic.kibana_container == S.kibana_container("d0")
-    assert rec.elastic.docker_context == S.context_name("d0", "elastic")
+    # The Elastic part has no view of its own (#1222 M1): its keys ride `systems["elastic"]`,
+    # read by the adapter alone.
+    assert rec.systems["elastic"]["ELASTIC_EVENTS_INDEX"] == "d0-events-*"
+    assert rec.systems["elastic"]["ELASTICSEARCH_URL"] == "https://es-d0:9200"
+    assert not hasattr(rec, "elastic")
 
     # ticket_mapping: a CaseMapping.
     assert isinstance(rec.ticket_mapping, S.record_type("CaseMapping")), type(rec.ticket_mapping)
@@ -219,9 +212,9 @@ def test_d0_return_contract(tmp_path):  # noqa: PLR0915 — one contract, every 
 
 def test_d_record_fields_from_resolver():
     """resolve_tenant over a tenant folder returns the same RunTenant type, now carrying systems (one
-    entry per folder under settings/systems/), elastic and ticket_mapping, all built by
+    entry per folder under settings/systems/) and ticket_mapping, all built by
     resolve_run_tenant. For the committed fixture tenant every systems entry is a SystemConfig,
-    elastic is an ElasticSettings and ticket_mapping is a CaseMapping."""
+    ticket_mapping is a CaseMapping."""
     # #1120: the committed tenant is the fixture (`knowledge/tenant-fixture/`), set up under
     # this test's data root as `playground`; `run_tenant_for` is the record builder over the
     # accepted tenant that `resolve_tenant` delegates to.
@@ -237,15 +230,11 @@ def test_d_record_fields_from_resolver():
     SystemConfig = S.record_type("SystemConfig")
     for name, entry in rec.systems.items():
         assert isinstance(entry, SystemConfig), (name, entry)
-    assert isinstance(rec.elastic, S.record_type("ElasticSettings")), rec.elastic
     assert isinstance(rec.ticket_mapping, S.record_type("CaseMapping")), rec.ticket_mapping
     # Built by resolve_run_tenant: the frame resolve_tenant delegates to gives the same fields.
     assert set(built.systems) == set(rec.systems)
     for name in rec.systems:
         assert dict(built.systems[name]) == dict(rec.systems[name]), name
-    attrs = ("events_index", "alerts_index", "url", "ssl_verify", "es_container",
-             "kibana_container", "docker_context")
-    assert [getattr(built.elastic, a) for a in attrs] == [getattr(rec.elastic, a) for a in attrs]
 
 
 def test_d_systems_verbatim(tmp_path):
@@ -321,73 +310,14 @@ def test_d_no_folder_fault_text(tmp_path):
     assert S.NOT_CONFIGURED in str(late.value), str(late.value)
 
 
-def test_d_elastic_view(tmp_path):
-    """record.elastic is None when the tenant has no systems/elastic/ folder. It is a ConfigFault when
-    that folder's config.env is missing, or when it lacks any of ELASTIC_EVENTS_INDEX,
-    ELASTIC_ALERTS_INDEX, ELASTICSEARCH_URL, ELASTIC_SSL_VERIFY, ELASTIC_ES_CONTAINER,
-    ELASTIC_KIBANA_CONTAINER or ELASTIC_DOCKER_CONTEXT, when any of them is present but blank
-    (F3/NF-18: presence and non-blank only; values such as CHANGE-ME are carried), or when
-    ELASTIC_TRANSPORT is absent or other than docker-exec (MF-7 a, human). Otherwise it is an
-    ElasticSettings that carries those values from the file. resolve_tenant raises in none of these
-    cases. The part is all-or-nothing over that key set (MF-7 b, human): a missing Kibana container
-    makes it a ConfigFault even for a tenant that uses only Elasticsearch."""
-    ConfigFault = S.config_fault()
-    ElasticSettings = S.record_type("ElasticSettings")
-    root = tmp_path / "tenants"
-
-    def elastic_of(tenant_id: str, *, text: str | None, folder_too: bool = True) -> object:
-        configs = S.config_texts(tenant_id)
-        configs.pop("elastic")
-        folder = S.plant(root, tenant_id, marker=tenant_id, configs=configs)
-        if folder_too:
-            (S.settings_of(folder) / "systems" / "elastic").mkdir(parents=True, exist_ok=True)
-        if text is not None:
-            S.write_config(folder, "elastic", text)
-        return _resolve(root, tenant_id).elastic  # never raises
-
-    full = S.config_texts("ev")["elastic"]
-
-    def without(key: str) -> str:
-        return "".join(ln + "\n" for ln in full.splitlines() if not ln.startswith(f"{key}="))
-
-    def with_value(key: str, value: str) -> str:
-        return without(key) + f'{key}="{value}"\n'
-
-    assert elastic_of("no-folder", text=None, folder_too=False) is None
-    assert isinstance(elastic_of("no-file", text=None), ConfigFault)
-
-    good = elastic_of("good", text=full)
-    assert isinstance(good, ElasticSettings), good
-    assert (good.events_index, good.alerts_index, good.url, good.ssl_verify) == (
-        "ev-events-*", "ev-alerts-*", "https://es-ev:9200", "true")
-    assert (good.es_container, good.kibana_container, good.docker_context) == (
-        S.es_container("ev"), S.kibana_container("ev"), S.context_name("ev", "elastic"))
-
-    for i, key in enumerate(S.ELASTIC_VIEW_KEYS):
-        missing = elastic_of(f"miss-{i}", text=without(key))
-        assert isinstance(missing, ConfigFault), (key, missing)
-        blank = elastic_of(f"blank-{i}", text=with_value(key, ""))
-        assert isinstance(blank, ConfigFault), (key, blank)
-    # MF-7 a (human): ELASTIC_TRANSPORT = docker-exec is part of the view.
-    assert isinstance(elastic_of("no-transport", text=without("ELASTIC_TRANSPORT")), ConfigFault)
-    assert isinstance(elastic_of("http-transport",
-                                 text=with_value("ELASTIC_TRANSPORT", "http")), ConfigFault)
-    # MF-7 b (human): all-or-nothing — a tenant using only Elasticsearch still needs Kibana's.
-    assert isinstance(elastic_of("no-kibana", text=without("ELASTIC_KIBANA_CONTAINER")),
-                      ConfigFault)
-    # F3/NF-18: presence and non-blank only — placeholders are carried, not validated.
-    carried = elastic_of("carried", text=with_value(
-        "ELASTICSEARCH_URL", "CHANGE-ME").replace('ELASTIC_SSL_VERIFY="true"',
-                                                  'ELASTIC_SSL_VERIFY="maybe"'))
-    assert isinstance(carried, ElasticSettings), carried
-    assert carried.url == "CHANGE-ME", carried
-    assert carried.ssl_verify == "maybe", carried
-
-
 def test_d_ticket_mapping_kept(tmp_path):
     """resolve_tenant loads systems/case-history/mapping.yaml once into ticket_mapping. A valid file
     becomes a CaseMapping. A file that is not YAML, not a mapping, or fails the lifecycle check (a
     templated open.status) is kept as its CaseTicketError and is never raised at resolve.
+
+    #1222 A5: a file that is not YAML or not a mapping never reaches the record: the one tenant
+    check refuses it in acceptance, with a fixed reason naming the file (the spec's tenant-check
+    suite pins the wording). A lifecycle fault is still kept.
 
     #1221's amendment: the lifecycle check is the literal-open.status rule alone. A mapping whose
     open.status equals its legacy released.status is no longer a fault — nothing reads `released:`
@@ -397,8 +327,6 @@ def test_d_ticket_mapping_kept(tmp_path):
     cases = {
         "valid": T1106.mapping_text(),
         "open-is-released": T1106.mapping_text(open_status="closed"),  # == the legacy released
-        "not-yaml": "open: [unclosed\n  status: : :\n",
-        "not-a-mapping": "- open\n- released\n",
         "lifecycle": T1106.mapping_text(open_status="{summary}"),  # a templated open.status
     }
     got = {}
@@ -409,31 +337,32 @@ def test_d_ticket_mapping_kept(tmp_path):
 
     for good in ("valid", "open-is-released"):
         assert isinstance(got[good], S.record_type("CaseMapping")), (good, got[good])
-    for bad in ("not-yaml", "not-a-mapping", "lifecycle"):
-        assert isinstance(got[bad], CaseTicketError), (bad, got[bad])
+    assert isinstance(got["lifecycle"], CaseTicketError), got["lifecycle"]
+
+    TenantRefused = S.tenant_refused()
+    for tenant_id, text in {"not-yaml": "open: [unclosed\n  status: : :\n",
+                            "not-a-mapping": "- open\n- released\n"}.items():
+        folder = S.plant(root, tenant_id, marker=tenant_id)
+        S.mapping_path(folder).write_text(text, encoding="utf-8")
+        with pytest.raises(TenantRefused):
+            _resolve(root, tenant_id)
 
 
 def test_o5_resolve_keeps_system_faults(tmp_path):
     """resolve_tenant never raises because of a system's config. A missing or undecodable config.env, a
-    missing or bad elastic part, and a bad mapping are each returned as the record's fault entry.
+    mapping with a templated open.status are each returned as the record's fault entry.
     TenantRefused (defender._tenant) keeps only its current tenant-acceptance reasons."""
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="o5")
     S.config_path(folder, "cmdb").unlink()
     S.write_config(folder, "identity", b"IDENTITY_URL_BASE=\xff\n")
-    S.drop_key(folder, "elastic", "ELASTIC_ES_CONTAINER")
-    S.mapping_path(folder).write_text("- not\n- a mapping\n", encoding="utf-8")
+    S.mapping_path(folder).write_text(
+        T1106.mapping_text(open_status="{summary}"), encoding="utf-8")
     rec = _resolve(root)  # never raises because of a system's config
     ConfigFault = S.config_fault()
     assert isinstance(rec.systems["cmdb"], ConfigFault), rec.systems["cmdb"]
     assert isinstance(rec.systems["identity"], ConfigFault), rec.systems["identity"]
-    assert isinstance(rec.elastic, ConfigFault), rec.elastic
     assert isinstance(rec.ticket_mapping, S.case_ticket_error()), rec.ticket_mapping
-
-    configs = S.config_texts("o5b")
-    configs.pop("elastic")
-    S.plant(root, "no-elastic", marker="o5b", configs=configs)
-    assert _resolve(root, "no-elastic").elastic is None
 
     # TenantRefused keeps its tenant-acceptance reasons, each still refusing.
     TenantRefused = S.tenant_refused()
@@ -476,7 +405,6 @@ def test_s7_nf22_systems_keyed_by_exact_directory_name(tmp_path):
     assert set(rec.systems) == expected, (sorted(rec.systems), sorted(expected))
     assert "cmdb" not in rec.systems
     assert "elastic" not in rec.systems
-    assert rec.elastic is None, rec.elastic
     with pytest.raises(S.config_fault()) as raised:
         transport.load_config(_ctx(rec, tmp_path), "cmdb", "CMDB")
     assert S.NOT_CONFIGURED in str(raised.value), str(raised.value)
@@ -519,8 +447,7 @@ def test_s7_nf16_unreadable_config_env_kept_as_fault(tmp_path):
 
 def test_s7_rg4_non_utf8_is_config_fault(tmp_path):
     """Non-UTF-8 bytes are that system down, never an uncaught UnicodeDecodeError. A non-UTF-8
-    config.env leaves its system a ConfigFault in systems (and elastic's makes record.elastic a
-    ConfigFault) while resolve_tenant returns normally. At base the readers raise
+    config.env leaves its system a ConfigFault in systems while resolve_tenant returns normally. At base the readers raise
     UnicodeDecodeError (RG4). (The secrets.env arm moved with credential delivery to #1163.)"""
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="rg4")
@@ -536,7 +463,7 @@ def test_s7_rg4_non_utf8_is_config_fault(tmp_path):
 
     ConfigFault = S.config_fault()
     assert isinstance(rec.systems["cmdb"], ConfigFault), rec.systems["cmdb"]
-    assert isinstance(rec.elastic, ConfigFault), rec.elastic
+    assert isinstance(rec.systems["elastic"], ConfigFault), rec.systems["elastic"]
 
 
 def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
@@ -626,7 +553,7 @@ def _closure(module: str) -> tuple[int, str, set[str]]:
 
 def test_d1096_record_types_outside_closure():
     """Importing defender.runtime.bash_exec in a fresh interpreter, and separately
-    defender.runtime.box_codec, loads no module that defines SystemConfig, ElasticSettings or
+    defender.runtime.box_codec, loads no module that defines SystemConfig or
     CaseMapping."""
     closures = {}
     for module in ("defender.runtime.bash_exec", "defender.runtime.box_codec"):
@@ -643,7 +570,7 @@ def test_d1096_record_types_outside_closure():
 
 
 def test_d1096_record_types_importable():
-    """Importing the record's module (runtime.run_tenant) makes SystemConfig, ElasticSettings and
+    """Importing the record's module (runtime.run_tenant) makes SystemConfig and
     CaseMapping available."""
     import importlib
 
@@ -654,7 +581,7 @@ def test_d1096_record_types_importable():
 
 
 def test_o1_resolver_ignores_env(tmp_path, monkeypatch):
-    """With those variables exported, resolve_tenant's systems and elastic carry the tenant file's
+    """With those variables exported, resolve_tenant's systems carry the tenant file's
     values."""
     exported = {
         "CMDB_URL_BASE": "http://from-env:1",
@@ -680,12 +607,10 @@ def test_o1_resolver_ignores_env(tmp_path, monkeypatch):
     assert cmdb["CMDB_URL_BASE"] == "http://cmdb-o1r:8080", dict(cmdb)
     assert cmdb["CMDB_DOCKER_CONTEXT"] == S.context_name("o1r", "cmdb"), dict(cmdb)
     assert rec.systems["ticket"]["TICKET_KEY_PATTERN"] == "O1R-[0-9]+"
-    assert rec.elastic.events_index == "o1r-events-*"
-    assert rec.elastic.alerts_index == "o1r-alerts-*"
-    assert rec.elastic.url == "https://es-o1r:9200"
-    assert rec.elastic.ssl_verify == "true"
-    assert rec.elastic.es_container == S.es_container("o1r")
-    assert rec.elastic.docker_context == S.context_name("o1r", "elastic")
+    elastic = rec.systems["elastic"]
+    assert elastic["ELASTIC_EVENTS_INDEX"] == "o1r-events-*"
+    assert elastic["ELASTICSEARCH_URL"] == "https://es-o1r:9200"
+    assert elastic["ELASTIC_DOCKER_CONTEXT"] == S.context_name("o1r", "elastic")
 
 
 def test_resolve_does_not_judge_an_access_method(tmp_path, caplog):
@@ -762,7 +687,6 @@ def test_d2_shipped_tenants_complete():
     faulted = {name: str(entry) for name, entry in rec.systems.items()
                if isinstance(entry, ConfigFault)}
     assert not faulted, faulted
-    assert isinstance(rec.elastic, S.record_type("ElasticSettings")), rec.elastic
 
 
 def test_defender_policy_over_a_tenant_whose_systems_are_broken(tmp_path, capsys):
@@ -776,7 +700,6 @@ def test_defender_policy_over_a_tenant_whose_systems_are_broken(tmp_path, capsys
     broken = S.plant(root, "broken", marker="pol")
     S.config_path(broken, "cmdb").unlink()
     S.write_config(broken, "identity", b"IDENTITY_URL_BASE=\xff\n")
-    S.drop_key(broken, "elastic", "ELASTICSEARCH_URL")
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     base = ["show", "gather", "--run-dir", str(run_dir)]
@@ -792,7 +715,6 @@ def test_defender_policy_over_a_tenant_whose_systems_are_broken(tmp_path, capsys
     ConfigFault = S.config_fault()
     assert isinstance(rec.systems["cmdb"], ConfigFault), rec.systems["cmdb"]
     assert isinstance(rec.systems["identity"], ConfigFault), rec.systems["identity"]
-    assert isinstance(rec.elastic, ConfigFault), rec.elastic
     assert rec.grants.gather == _resolve(root, "healthy").grants.gather
 
 

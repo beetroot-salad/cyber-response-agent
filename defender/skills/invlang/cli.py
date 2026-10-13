@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 from defender._io import use_utf8_stdio
+from defender._shown import quoted
 
 from .advisory import VALID_CLASSES, advisory_recall
 from .corpus import load_corpus
@@ -206,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
             max_hypotheses_per_lead=args.max_hypotheses_per_lead,
         )
     elif args.cmd == "hypothesis-vocabulary":
-        return _handle_hypothesis_vocabulary_cmd(args, corpus)
+        return _handle_hypothesis_vocabulary_cmd(args, corpus, report)
     elif args.cmd == "hypothesis-shape":
         return _handle_hypothesis_shape_cmd(args, corpus)
     else:
@@ -217,12 +219,23 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _handle_hypothesis_vocabulary_cmd(args, corpus) -> int:
+def _handle_hypothesis_vocabulary_cmd(args, corpus, report) -> int:
     out = _hypothesis_vocabulary(corpus, args.signature, args.top_k)
     if args.as_json:
         json.dump(out, sys.stdout, indent=2)
     else:
         sys.stdout.write(_render_vocab(out, args.signature))
+        norecord = [p for p, why in report.skipped if why.startswith("no run record")]
+        if norecord:
+            # Runs that predate the record are not a corpus of this version: counted, not hidden.
+            sys.stdout.write(
+                f"\n_({len(norecord)} past run folder(s) skipped for having no run record: "
+                f"{', '.join(quoted(p.parent.name) for p in norecord)})_")
+        if os.environ.get("DEFENDER_BOX"):
+            # Past runs are not mounted in the sandbox: an empty listing here is not a finding.
+            sys.stdout.write(
+                "\n_(in the sandbox this lookup cannot see past runs, so the listing above is "
+                "not evidence that there are none)_")
     sys.stdout.write("\n")
     return 0
 

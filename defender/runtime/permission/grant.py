@@ -48,7 +48,7 @@ def cat_input_files(argv: list[str]) -> list[str] | None:
 
 
 _SHIM_FLAGS: dict[str, tuple[str, ...]] = {
-    "defender-lessons": ("--tags", "--show"),
+    "defender-lessons": ("--tags", "--show", "--signature"),
     "defender-invlang": (
         "--attached-to-type", "--class", "--contains", "--disposition", "--final-weight",
         "--frontier", "--hyp", "--json", "--max-hypotheses-per-lead", "--min-support",

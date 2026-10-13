@@ -22,6 +22,8 @@ RED against b8a63e66: none of the seams below exists, the launcher runs siblings
 """
 from __future__ import annotations
 
+from defender.run_repository import Run
+
 import json
 import re
 from pathlib import Path
@@ -31,6 +33,7 @@ import pytest
 from defender import _episode_handle as EH
 from defender._episode_handle import Episode
 from defender._io import bind
+from defender.run_repository import RunPaths
 from defender.tests import _triplet_947 as T
 from defender.tests.live_oracle_1224 import _spec1224 as S
 
@@ -171,7 +174,7 @@ def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_pa
     for out_of_range in ("-1", str(10 ** 9)):
         refuses([out_of_range])
     # the alert is PRESENT — the launcher reads it for the questioner's own prompt
-    refuses([str(T.BRANCH_MESSAGE_ID)], prepare=lambda: (src / "alert.json").unlink())
+    refuses([str(T.BRANCH_MESSAGE_ID)], prepare=lambda: RunPaths(src).alert.unlink())
 
 
 def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_it(tmp_path):
@@ -183,8 +186,8 @@ def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_i
     base, src = T.runs_base(tmp_path)
     secret = tmp_path / "root-private-key"
     secret.write_text("ROOT-PRIVATE-KEY", encoding="utf-8")
-    (src / "alert.json").unlink()
-    (src / "alert.json").symlink_to(secret)
+    RunPaths(src).alert.unlink()
+    RunPaths(src).alert.symlink_to(secret)
     agent = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
     with pytest.raises(T.refusals()) as refusal:
         _cli().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
@@ -741,7 +744,7 @@ def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
     def attempt():
         barrier.wait()
         try:
-            with cli.prepare_episode(T.EPISODE_ID, src, data_root=_tenant_paths().data_root) as episode:
+            with cli.prepare_episode(T.EPISODE_ID, Run.at(src), data_root=_tenant_paths().data_root) as episode:
                 results.append(episode)
         except Exception as e:  # noqa: BLE001 — the refusal is the observation
             results.append(e)

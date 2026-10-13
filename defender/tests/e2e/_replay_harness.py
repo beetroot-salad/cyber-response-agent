@@ -49,8 +49,8 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import inspect
 import re
-import shutil
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -181,7 +181,7 @@ class NeverEndsModel:
 
     def __init__(self, run_dir: Path):
         self.calls = 0
-        self._alert = str(run_dir / "alert.json")
+        self._alert = str(RunPaths(run_dir).alert)
 
     def __call__(self, messages, info) -> ModelResponse:
         self.calls += 1
@@ -385,9 +385,17 @@ def materialize(tmp_path: Path, golden: Path) -> Path:
     run_dir = tmp_path / "run"
     paths = RunPaths(run_dir)
     paths.gather_raw.mkdir(parents=True)
-    shutil.copy(golden / "alert.json", paths.alert)
+    plant_alert(run_dir, (golden / "alert.json").read_bytes())
     _provenance.write(paths.provenance, _harness_provenance())
     return run_dir
+
+
+def plant_alert(run_dir: Path, raw: bytes) -> None:
+    """The alert and its record in the run's input directory, as `materialize_run` leaves them
+    (the committed tenants' mapping derives the facts)."""
+    from defender.tests import _alert_plant
+
+    _alert_plant.plant_alert(run_dir, raw)
 
 
 @functools.cache
@@ -420,6 +428,48 @@ def normalize(text: str, *, run_dir: Path, run_id: str) -> str:
 def no_orient_shims(argv: list[str], env: dict[str, str]) -> None:
     """`drive`'s default ORIENT shim runner: every shim-backed section is absent."""
     return None
+
+
+#: What the correlation lead (`l-00c`) says under a replay that does not script it (#1222 C01): a
+#: usable summary from a lead that issued no call (C38), so an incidental replay's lead draws
+#: none of the turns scripted for MAIN's own leads.
+DEFAULT_CORRELATION_SUMMARY = (
+    "Window bound 2026-05-25T13:00:00Z..2026-05-25T17:00:00Z, anchored on the alert's "
+    "timestamp field; no call issued, so no counts to report.")
+_DISPATCHED_LEAD = re.compile(r"\n## Dispatch\n```yaml\n(?:.*\n)*?lead_id: (\S+)\n")
+
+
+def _awaiting(fn):
+    """`fn` as an async model function: a double that answers late hands back an awaitable (a
+    delay or a hang that must be awaited ON THE EVENT LOOP, so a deadline can cut it), which a
+    sync `FunctionModel` function would be handed back unawaited."""
+    async def call(messages, info):
+        # The double runs on a worker thread, as a sync `FunctionModel` function always has: a
+        # double that blocks (waits on another lead) must not stall the event loop.
+        out = await asyncio.to_thread(fn, messages, info)
+        return await out if inspect.isawaitable(out) else out
+
+    call.__name__ = getattr(fn, "__name__", type(fn).__name__)
+    return call
+
+
+def _with_default_correlation(gather, main):
+    """`gather` (or `main`, when none is given) as the gather model, except that the
+    correlation lead's conversation is answered by its own default fake. A `gather` that routes
+    leads itself (`by_lead`, the #1222 `LeadRouter`) or is marked `serves_correlation` (the
+    #808 scenario builder's, whose script is `l-00c`'s) is already that."""
+    if gather is not None and (hasattr(gather, "by_lead") or getattr(gather, "serves_correlation", False)):
+        return gather
+    inner = gather if gather is not None else main
+
+    def fn(messages, info):
+        found = _DISPATCHED_LEAD.search(messages_text(messages))
+        if found is not None and found.group(1) == "l-00c":
+            return ModelResponse(parts=[TextPart(content=DEFAULT_CORRELATION_SUMMARY)])
+        return inner(messages, info)
+
+    fn.__name__ = getattr(inner, "__name__", "gather")
+    return fn
 
 
 def _refuse_conflicting_store_seams(resume, store_factory) -> None:
@@ -577,8 +627,15 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
     hands none)."""
     _refuse_conflicting_store_seams(resume, store_factory)
     tree = defender_dir if defender_dir is not None else DEFENDER
-    main_built = BuiltModel(FunctionModel(main), None)
-    gather_built = BuiltModel(FunctionModel(gather), None) if gather is not None else None
+    main_built = BuiltModel(FunctionModel(_awaiting(main)), None)
+    # The correlation lead draws its own default fake, never MAIN's leads' script (C01).
+    dispatches_correlation = resume is None and verbs is not None
+    gather_fn = (
+        _with_default_correlation(gather, main)
+        if dispatches_correlation and driver.resolve_main_model() != driver.gather_model()
+        else gather)
+    gather_built = (
+        BuiltModel(FunctionModel(_awaiting(gather_fn)), None) if gather_fn is not None else None)
 
     if gather_built is not None and driver.resolve_main_model() == driver.gather_model():
         raise ValueError(
@@ -610,9 +667,6 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         seams["resume"] = resume
     if run_state is not None:
         seams["run_state"] = run_state
-    seams["box"] = box if box is not None else box_mod.unboxed_executor(
-        env=run_common.run_env(tree, run_dir),
-    )
     # #1106: the run's TENANT and its per-run GRANTS are two required inputs of the driver (no
     # grant is fixed per process, and no reader finds the settings folder itself). A scenario
     # names its own tenant when it is about one; every other replay runs as the committed
@@ -629,9 +683,12 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         defender_dir=tree,
         dispatches_lead_zero=resume is None and verbs is not None,
     )
+    seams["box"] = box if box is not None else box_mod.unboxed_executor(
+        env=run_common.run_env(tree, run_dir),
+    )
     with override_allow_model_requests(False):
         return asyncio.run(driver.run_investigation(
-            alert_path=run_dir / "alert.json", run_dir=run_dir, run_id=run_id,
+            alert_path=RunPaths(run_dir).alert, run_dir=run_dir, run_id=run_id,
             defender_dir=tree, make_model=make_model, tenant=run_tenant,
             orient_shim=orient_shim if orient_shim is not None else no_orient_shims, **seams,
         ))

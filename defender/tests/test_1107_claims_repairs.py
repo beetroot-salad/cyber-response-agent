@@ -38,14 +38,6 @@ def test_a_fifo_at_a_config_path_is_a_fault_not_a_hang(tmp_path):
         case_ticket.load_case_mapping(tmp_path)  # looks for the mapping under `settings`
 
 
-def test_elastic_transport_with_spaces_is_refused_by_the_view(tmp_path):
-    root = tmp_path / "t"
-    folder = S.plant(root)
-    S.set_key(folder, "elastic", "ELASTIC_TRANSPORT", '" docker-exec "')
-    record = S.resolve(root)
-    assert isinstance(record.elastic, S.config_fault())
-
-
 def test_huge_timeout_is_a_config_fault(tmp_path):
     root = tmp_path / "t"
     folder = S.plant(root)

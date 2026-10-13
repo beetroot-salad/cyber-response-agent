@@ -18,6 +18,7 @@ import pytest
 
 from defender import _log
 from defender.tests import _triplet_947 as T
+from defender.run_repository import RunPaths
 
 
 @pytest.fixture
@@ -118,10 +119,11 @@ def test_a_reused_pool_thread_does_not_carry_the_previous_jobs_run(emit):
     assert [ln["run_id"] for ln in lines()] == ["first", None]
 
 
-def test_lead_zero_s_thread_hop_keeps_the_run_bound():
-    """Lead-0 runs its coroutine on a pool thread when a loop is already running (inside the
-    driver); what it logs there must still name the run."""
-    from defender.runtime.lead_zero import _run_sync
+def test_the_sync_bridges_thread_hop_keeps_the_run_bound():
+    """The sync-to-async bridge runs its coroutine on a pool thread when a loop is already
+    running (inside the driver); what it logs there must still name the run. (Lead-0 used this
+    hop until #1222 made the correlation lead a coroutine the driver awaits.)"""
+    from defender._async import run_sync as _run_sync
 
     async def inner():
         return dict(_log.current_context())
@@ -354,7 +356,7 @@ def test_run_main_binds_the_run_id_and_tenant_for_the_whole_run(tmp_path, monkey
         (kw["run_dir"] / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
         return {"output": "done", "requests": 1, "truncated_by": None}
 
-    T.mod("run").main([str(src / "alert.json"), "--tenant", base.parent.name, "--no-learn"],
+    T.mod("run").main([str(RunPaths(src).alert), "--tenant", base.parent.name, "--no-learn"],
                       lifecycle=lifecycle, visualize=lambda p, **kw: None, preflight=T.no_preflight)
     tenant = json.loads((base / "_tenant.json").read_text(encoding="utf-8"))["tenant_id"]
     assert seen["ctx"] == {"run_id": seen["run_dir"].name, "tenant_id": tenant}
@@ -373,7 +375,7 @@ def test_a_run_s_crash_is_logged_while_the_run_is_still_bound(tmp_path, monkeypa
 
     capsys.readouterr()
     with pytest.raises(RuntimeError, match="lifecycle blew up"):
-        T.mod("run").main([str(src / "alert.json"), "--tenant", base.parent.name, "--no-learn"],
+        T.mod("run").main([str(RunPaths(src).alert), "--tenant", base.parent.name, "--no-learn"],
                           lifecycle=lifecycle, visualize=lambda p, **kw: None,
                           preflight=T.no_preflight)
     tenant = json.loads((base / "_tenant.json").read_text(encoding="utf-8"))["tenant_id"]

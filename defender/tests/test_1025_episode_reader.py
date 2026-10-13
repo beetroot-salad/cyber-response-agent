@@ -577,7 +577,7 @@ def test_json_mapping_answers_a_mapping_and_none_for_everything_else(tmp_path):
 def test_json_mapping_refuses_a_planted_link_and_reads_the_same_bytes_as_a_regular_file(
         tmp_path):
     """`json_mapping` is ONE home for the link policy as well as the tolerance policy: three of
-    its five callers (`_world_alert_id`, `episode_alert`, `_read_provenance`) have no `lstat`
+    its five callers (`episode_alert`, `_read_provenance` and the old per-world alert reader's callers) have no `lstat`
     screen of their own, and `provenance.json` is screened nowhere else in the judge — so a
     bare `read_text` here followed a link planted at `worlds/<X>/provenance.json` and handed the
     pass an attacker-chosen `commit` to `git show` every lesson at.

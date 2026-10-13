@@ -45,6 +45,8 @@ upper-case-head O4.8.1 rows, and every leaf-plant row checked with `assert_refus
 """
 from __future__ import annotations
 
+from defender.run_repository import Run
+
 import errno
 import json
 import logging
@@ -316,7 +318,7 @@ def test_o4_5_prepare_episode_returns_the_held_episode_and_the_claim_is_released
     cli, src, tenant, ep = _prime_setup(tmp_path)
     prime = Primed()
     with umask(0o022):
-        got = cli.prepare_episode(T.EPISODE_ID, src, data_root=tenant.data_root, prime=prime)
+        got = cli.prepare_episode(T.EPISODE_ID, Run.at(src), data_root=tenant.data_root, prime=prime)
     with got as episode:
         assert isinstance(episode, S.Episode()), f"prepare_episode returned {got!r}"
         assert Path(episode.dir) == ep
@@ -422,7 +424,7 @@ def test_o4_5_a_claim_release_refused_in_finally_never_masks_the_primers_excepti
 
     caplog.set_level(logging.WARNING)
     with pytest.raises(PrimerFailed) as failed:
-        cli.prepare_episode(T.EPISODE_ID, src, data_root=tenant.data_root, prime=Primed(swap_then_fail))
+        cli.prepare_episode(T.EPISODE_ID, Run.at(src), data_root=tenant.data_root, prime=Primed(swap_then_fail))
     assert still_planted["check"](), f"the {kind} plant was changed by the claim's release"
     assert S.warned(caplog, ".priming"), "the refused release was not logged"
     assert failed.value is not None
@@ -443,7 +445,7 @@ def test_o4_5_a_link_planted_at_the_claim_is_left_in_place_by_its_release(
         claim.symlink_to(target)
 
     caplog.set_level(logging.WARNING)
-    with cli.prepare_episode(T.EPISODE_ID, src, data_root=tenant.data_root, prime=Primed(swap)) as got:
+    with cli.prepare_episode(T.EPISODE_ID, Run.at(src), data_root=tenant.data_root, prime=Primed(swap)) as got:
         assert Path(got.dir) == ep
     claim = ep / "served" / ".priming"
     assert claim.is_symlink(), "the link planted at the claim was removed"

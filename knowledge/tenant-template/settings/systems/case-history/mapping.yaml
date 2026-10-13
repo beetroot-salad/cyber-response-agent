@@ -6,17 +6,10 @@
 # Edit THIS FILE to change the convention; no code change required.
 #
 # Templates use {placeholders}: case_id, signature, summary, disposition, cause,
-# narrative, event_time. `source.*` are dotted paths into alert.json.
-
-# Where to read facts from the internal model (alert.json).
-source:
-  signature: rule.id
-  summary: rule.description
-  # The SIEM event time — when the activity happened, NOT when we investigated it.
-  # Stamped onto the open ticket (the `evt:` label) so a later run can window
-  # candidates by alert time; the server-set `created` is materialize time and
-  # drifts from this under replay/backtest.
-  event_time: timestamp
+# narrative, event_time. signature, summary and event_time are the run's recorded facts, mapped
+# from the alert by the tenant's `alert-mapping.yaml` (a top-level `source:` section here is
+# refused). The event time is when the activity happened, NOT when we investigated it: stamped
+# onto the open ticket (the `evt:` label) so a later run can window candidates by alert time.
 
 # POST /tickets — the bridge create: an OPEN ticket, when the alert is raised.
 # Keys are external ticket fields (TicketCreate); values are rendered templates.

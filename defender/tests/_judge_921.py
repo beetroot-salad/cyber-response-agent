@@ -123,6 +123,7 @@ from defender.tests._triplet_947 import (  # noqa: F401 — re-exported vocabula
 #: ledger, the episode's pair key and the review's own drift list all mint through. Re-exported
 #: so a fixture that has to plant a recorded key mints it the way the recorder does rather than
 #: hand-writing a `json.dumps` that matches only by luck of dict order.
+from defender.tests._alert_plant import plant_alert, plant_source_copy  # noqa: E402
 from defender.learning.branch.ledger import request_key  # noqa: E402
 from defender import _yaml
 
@@ -134,6 +135,10 @@ HOLDING_SYSTEM = "elastic"
 #: is model-writable by construction (run1/G9), which is why the union's own demands drive it
 #: as data rather than trusting it.
 ALERT_ID = "v2-cross-tier-ssh-pivot"
+#: The alert every judge fixture investigates, as bytes: the episode's launch copy and the runs
+#: that are trials of it hold exactly these (#1222 — a trial is a run whose record's digest is
+#: the episode's).
+ALERT_RAW = json.dumps({"alert_id": ALERT_ID, "rule": {"id": ALERT_ID}}).encode("utf-8")
 
 #: The learning loop's state root — the tree the shared findings queue lives under. Named here
 #: because every scenario in this suite has to point it inside its own `tmp_path`: the judge's
@@ -420,6 +425,10 @@ def accepted_episode(tmp_path: Path, *, root: Path | None = None,  # noqa: PLR09
         elif label != "a":
             write_ledger(ep, label, [])
     outcome_record(ep, outcome, family_stamp=family_stamp)
+    from defender.tests import _triplet_947
+
+    if _triplet_947.PLANT_RECORDS:
+        plant_source_copy(ep, ALERT_RAW)
     return ep
 
 
@@ -466,6 +475,7 @@ def grade_at(episode_dir: Path, *, runs: Any = None, **kw: Any) -> Any:
     through unchanged; nothing is defaulted."""
     episode_dir = Path(episode_dir)
     repository = judge_runs() if runs is None else runs
+    kw.pop("runs_base", None)  # The same-alert union retired in #1105 PR 2 (J3).
     with episodes_base(episode_dir.parent):
         return mod("learning.judge").grade_episode(repository, episode_dir.name, **kw)
 
@@ -758,8 +768,7 @@ class FakeSibling:
         (run_dir / "lessons_loaded.jsonl").write_text(
             json.dumps({"lesson_name": "L1", "loaded_at": "2026-07-28T17:00:00Z",
                         "path": "defender/lessons/L1.md"}) + "\n", encoding="utf-8")
-        (run_dir / "alert.json").write_text(
-            json.dumps({"alert_id": ALERT_ID, "rule": {"id": ALERT_ID}}), encoding="utf-8")
+        plant_alert(run_dir, ALERT_RAW)
         # A real sibling that queried nothing still leaves its own (empty) served ledger behind
         # — `Ledger` has exactly one writer per world file, and this is what a quiet world's own
         # ledger looks like. Writing NOTHING here (as opposed to writing zero rows) is a

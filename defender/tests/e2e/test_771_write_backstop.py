@@ -49,6 +49,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
+from defender.run_repository import RunPaths
 from defender import _io  # noqa: E402
 from defender.agents import MAIN_DEF  # noqa: E402
 from defender.hooks import record_lead  # noqa: E402
@@ -496,7 +497,7 @@ def test_orphaned_staged_files_are_swept_through_the_same_primitive(tmp_path):
         "the sweep did not report what it removed, so a silent no-op reads as a clean tree"
     )
     assert snapshot_outside(elsewhere) == before, "the sweep followed an alias out of the tree"
-    assert (run / "alert.json").is_file(), "the sweep removed a real artifact"
+    assert RunPaths(run).alert.is_file(), "the sweep removed a real artifact"
 
 
 # the four postures F1 preserved, and §7 D3's exemption

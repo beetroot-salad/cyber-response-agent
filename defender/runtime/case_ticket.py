@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-import contextlib
-import json
 import re
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from defender import _alert_input
+from defender._alert_input import AlertFacts
 from defender._model import model
 from defender._report import ReportUnreadable, require_report
 from defender.run_repository import RunPaths
 from defender.runtime.tenant_settings import pointer_to, read_regular_bytes
-from defender._io import read_text_utf8
 
 
 #: The mapping's path inside a tenant's `settings/` folder, which every reader is handed.
@@ -240,20 +239,9 @@ def _ctx(**kw: str) -> dict[str, str]:
     return base
 
 
-def _signature_id(alert: dict[str, Any], mapping: dict[str, Any]) -> str:
-    path = _dig(mapping, "source.signature") or "rule.id"
-    val = _dig(alert, str(path))
-    return str(val) if val else _SIGNATURE_FALLBACK
-
-
-def _event_time(alert: dict[str, Any], mapping: dict[str, Any]) -> str:
-    path = _dig(mapping, "source.event_time") or "timestamp"
-    val = _dig(alert, str(path))
-    return str(val) if val else ""
-
-
-def alert_event_time(alert: dict[str, Any], *, mapping: CaseMapping | CaseTicketError) -> str | None:
-    return _event_time(alert, _thawed(mapping)) or None
+def alert_event_time(facts: AlertFacts) -> str | None:
+    """The alert's recorded event time, or `None` — the record's, never re-derived."""
+    return facts.event_time
 
 
 def read_case_record(run_dir: Path, *, mapping: CaseMapping | CaseTicketError) -> CaseRecord:
@@ -269,12 +257,11 @@ def read_case_record(run_dir: Path, *, mapping: CaseMapping | CaseTicketError) -
     case_id = run_dir.name
     cause = str(fm.get("cause") or "")
 
-    plain = _thawed(mapping)
-    signature_id = _SIGNATURE_FALLBACK
-    alert_path = RunPaths(run_dir).alert
-    if alert_path.is_file():
-        with contextlib.suppress(json.JSONDecodeError, OSError):
-            signature_id = _signature_id(json.loads(read_text_utf8(alert_path)), plain)
+    _thawed(mapping)
+    # The signature is the run's recorded one (A1): never read off the alert again. A folder
+    # with no usable record has none, and the existing fallback label stands.
+    record = _alert_input.read_record(RunPaths(run_dir).alert_record)
+    signature_id = (record.signature if record is not None else None) or _SIGNATURE_FALLBACK
 
     return CaseRecord(
         case_id=case_id,
@@ -285,18 +272,23 @@ def read_case_record(run_dir: Path, *, mapping: CaseMapping | CaseTicketError) -
     )
 
 
+def _open_ctx(facts: AlertFacts, case_id: str) -> dict[str, str]:
+    """The open leg's render context from the run's recorded facts: an absent signature reads
+    as the fallback label, an absent summary as its marker, an absent event time as empty (its
+    bare label is dropped below)."""
+    return _ctx(
+        case_id=case_id,
+        signature=facts.signature or _SIGNATURE_FALLBACK,
+        summary=facts.summary or _SUMMARY_FALLBACK,
+        event_time=facts.event_time or "",
+    )
+
+
 def alert_to_open_payload(
-    alert: dict[str, Any], case_id: str, *, mapping: CaseMapping | CaseTicketError,
+    facts: AlertFacts, case_id: str, *, mapping: CaseMapping | CaseTicketError,
 ) -> dict[str, Any]:
     plain = _thawed(mapping)
-    signature = _signature_id(alert, plain)
-    summary = _dig(alert, str(_dig(plain, "source.summary") or "rule.description"))
-    ctx = _ctx(
-        case_id=case_id,
-        signature=signature,
-        summary=str(summary) if summary else _SUMMARY_FALLBACK,
-        event_time=_event_time(alert, plain),
-    )
+    ctx = _open_ctx(facts, case_id)
     payload = _render(plain.get("open") or {}, ctx)
     if isinstance(payload.get("labels"), list):
         bare = {p for p in _open_label_prefixes(plain) if p}
@@ -329,11 +321,9 @@ def _open_label_prefix(mapping: dict[str, Any], placeholder: str) -> str | None:
     return None
 
 
-def signature_label(alert: dict[str, Any], *, mapping: CaseMapping | CaseTicketError) -> str | None:
+def signature_label(facts: AlertFacts, *, mapping: CaseMapping | CaseTicketError) -> str | None:
     plain = _thawed(mapping)
-    signature = _signature_id(alert, plain)
-    labels = _render(_dig(plain, "open.labels") or [], _ctx(signature=signature),
-                     "open.labels")
+    labels = _render(_dig(plain, "open.labels") or [], _open_ctx(facts, ""), "open.labels")
     prefix = _open_label_prefix(plain, "signature")
     if prefix:
         for lbl in labels:

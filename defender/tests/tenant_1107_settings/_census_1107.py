@@ -9,7 +9,7 @@ files is green for any implementation).
 
   * `elastic_key_reads`  (d4, F12)     — a read of an `ELASTIC_*` / `ELASTICSEARCH_URL` key's VALUE
     out of a mapping (a `SystemConfig`, a parsed config file, an env) in runtime/, learning/ or
-    run.py, outside the module that defines `ElasticSettings` (the view).
+    run.py (the Elastic view that once exempted its own module went with #1222's M1).
   * `settings_copies`    (S3)          — a copy / link / byte-transfer whose SOURCE derives from a
     tenant's `settings` folder (`RunTenant.settings`, a `settings_dir`, a `settings/` path).
   * `settings_dir_hits`  (F7)          — every `settings_dir` identifier outside F7's allow-list.
@@ -239,17 +239,11 @@ def _outside_main(tree: ast.Module) -> Iterator[ast.AST]:
 # d4 — Elastic keys interpreted only through the view (F12).
 # ======================================================================================
 
-def _defines(tree: ast.AST, cls: str) -> bool:
-    return any(isinstance(n, ast.ClassDef) and n.name == cls for n in ast.walk(tree))
-
-
 def elastic_key_reads(root: Path) -> tuple[int, list[str]]:
     files = platform_py(root)
     found: list[str] = []
     for path in files:
         tree = _parse(path)
-        if _defines(tree, "ElasticSettings"):
-            continue  # the view: the one place platform code interprets the keys (D4)
         binds = _const_bindings(tree)
         for node, keys in _lookups(tree, binds):
             hits = sorted(k for k in keys if _ELASTIC_KEY.match(k))

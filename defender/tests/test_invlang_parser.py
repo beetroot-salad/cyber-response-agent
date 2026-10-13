@@ -24,6 +24,7 @@ from defender.skills.invlang.parser import (
     parse_dense_companion,
 )
 from defender.skills.invlang.validate import validate_companion
+from defender.tests._alert_plant import plant_alert
 
 
 
@@ -892,17 +893,17 @@ def _mixed_corpus(tmp_path):
     case_a = tmp_path / "case-a"
     case_a.mkdir()
     (case_a / "investigation.md").write_text(_CONFORMANT)
-    (case_a / "alert.json").write_text('{"rule": {"id": "100001"}}')
+    plant_alert(case_a, {"rule": {"id": "100001"}})
 
     case_b = tmp_path / "case-b"
     case_b.mkdir()
     (case_b / "investigation.md").write_text(_UNQUOTED_PIPE_IN_ATTRS)
-    (case_b / "alert.json").write_text('{"rule": {"id": "100001"}}')
+    plant_alert(case_b, {"rule": {"id": "100001"}})
 
     case_c = tmp_path / "case-c"
     case_c.mkdir()
     (case_c / "investigation.md").write_text("# no fences here\n")
-    (case_c / "alert.json").write_text('{"rule": {"id": "5710"}}')
+    plant_alert(case_c, {"rule": {"id": "5710"}})
     return tmp_path
 
 
@@ -932,8 +933,8 @@ def test_load_report_detail_names_the_case_behind_each_count(tmp_path):
 
     terse = report.detail_lines(verbose=False)
     assert terse == [
-        "  skipped case-c: no ```invlang fences found",
-        "  partial case-b: 1 row(s) skipped",
+        "  skipped 'case-c': no ```invlang fences found",
+        "  partial 'case-b': 1 row(s) skipped",
     ]
 
     verbose = report.detail_lines(verbose=True)
@@ -951,7 +952,7 @@ def test_load_report_detail_is_empty_for_a_clean_corpus(tmp_path):
     case = tmp_path / "case-a"
     case.mkdir()
     (case / "investigation.md").write_text(_CONFORMANT)
-    (case / "alert.json").write_text('{"rule": {"id": "100001"}}')
+    plant_alert(case, {"rule": {"id": "100001"}})
 
     _, report = load_corpus(tmp_path)
 
@@ -971,8 +972,8 @@ def test_cli_prints_the_load_detail_to_stderr_and_quiet_suppresses_it(tmp_path):
     loud = subprocess.run([*argv, "--verbose", "sequence"], capture_output=True, text=True,
                           check=False, cwd=repo_root)
     assert loud.returncode == 0, loud.stderr
-    assert "skipped case-c: no ```invlang fences found" in loud.stderr
-    assert "partial case-b: 1 row(s) skipped" in loud.stderr
+    assert "skipped 'case-c': no ```invlang fences found" in loud.stderr
+    assert "partial 'case-b': 1 row(s) skipped" in loud.stderr
 
     quiet = subprocess.run([*argv, "--quiet", "sequence"], capture_output=True, text=True,
                            check=False, cwd=repo_root)

@@ -45,6 +45,7 @@ from defender._frontmatter import (
 from defender.learning.author.lessons.run import AuthorConfig, disposition_for
 from defender.learning.core.config import RunUnprocessable
 from defender.learning.core.validate import normalize_disposition
+from defender.tests._alert_plant import plant_alert
 
 
 def _load_tl():
@@ -108,6 +109,7 @@ def _mk_lesson(lessons: Path, stem: str, *, body_frontmatter: str) -> Path:
 def _mk_run(runs: Path, name: str, *, disposition: str, loads: list[dict]) -> Path:
     rd = runs / name
     rd.mkdir(parents=True)
+    plant_alert(rd)
     (rd / "report.md").write_text(
         f"---\ndisposition: {disposition}\n---\nbody\n", encoding="utf-8"
     )

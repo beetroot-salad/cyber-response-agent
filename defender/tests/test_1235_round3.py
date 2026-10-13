@@ -229,13 +229,8 @@ def _clocked(run_dir: Path, *, wall_back: float, mono_back: float, credited: flo
 
 
 def _lead_zero_kills(state: RunState) -> bool:
-    from defender.runtime.lead_zero._capture import _budget_gate
-
-    try:
-        _budget_gate(state, _CLOCK_LIMITS)
-    except BudgetKill:
-        return True
-    return False
+    from defender.hooks.budget_enforcer import enforcement_state, tail_exhausted
+    return tail_exhausted(enforcement_state(state), _CLOCK_LIMITS)
 
 
 def _hook_kills(run_dir: Path, state: RunState) -> bool:

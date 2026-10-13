@@ -107,7 +107,7 @@ def _down(*systems: str) -> FakeVerbs:
 
 
 def _read_alert_turns(run_dir: Path, n: int) -> list[Turn]:
-    return [Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})])
+    return [Turn(tool_calls=[("read_file", {"path": str(RunPaths(run_dir).alert)})])
             for _ in range(n)]
 
 
@@ -235,7 +235,7 @@ def test_node_iteration_and_node_hooks_are_untouched(tmp_path):
     run_dir = materialize(tmp_path, GOLDEN)
     opened: list = []
     drive(run_dir, run_id="no-hooks",
-          main=ReplayFn([Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),
+          main=ReplayFn([Turn(tool_calls=[("read_file", {"path": str(RunPaths(run_dir).alert)})]),
                          Turn(text="done")]),
           store_factory=store_factory(tmp_path, sink=opened))
     assert sql(opened[0], "SELECT COUNT(*) FROM message")[0][0] > 0, (
@@ -512,7 +512,7 @@ def test_the_request_logging_guard_stays_around_the_log_path_only(tmp_path):
                 return ModelResponse(parts=[
                     TextPart(content=json.loads('"\\ud800"')),
                     ToolCallPart(tool_name="read_file",
-                                args={"path": str(run_dir / "alert.json")}),
+                                args={"path": str(RunPaths(run_dir).alert)}),
                 ])
             return ModelResponse(parts=[TextPart(content="Investigation complete.")])
 

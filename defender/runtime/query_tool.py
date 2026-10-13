@@ -631,7 +631,9 @@ class QueryCapture(AbstractCapability[Any]):
                 system_key=system_key,
             )
         finally:
-            circuit_breaker.record_outcome(state, system, exit_code)
+            circuit_breaker.record_outcome(
+                state, system, exit_code,
+                counts_toward_run=not getattr(deps, "harness_lead", False))
         return row, text
 
     def _model_view(self, deps, row: dict, text: str, exit_code: int, detail: str) -> str:

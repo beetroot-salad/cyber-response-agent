@@ -40,6 +40,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
+from defender.run_repository import RunPaths  # noqa: E402
 from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     CORRELATION_SUMMARY,
     L3,
@@ -110,14 +111,6 @@ def _rebind_verb(tree: Path, verb: str) -> None:
     text = path.read_text(encoding="utf-8")
     assert text.count("\nverb: alerts\n") == 1, "the shipped template's front matter moved"
     path.write_text(text.replace("\nverb: alerts\n", f"\nverb: {verb}\n"), encoding="utf-8")
-
-
-def _authored(text: str) -> str:
-    """Everything OUTSIDE the untrusted frame — the harness's own words. The same cut
-    `test_808_correlation_lead` makes to tell a document naming the rule (evidence) from the
-    harness naming it (a narrowing)."""
-    framed = re.compile(r"<run-[0-9a-zA-Z]*-untrusted>.*?</run-[0-9a-zA-Z]*-untrusted>", re.DOTALL)
-    return framed.sub("", text)
 
 
 # =========================================================================================
@@ -195,6 +188,12 @@ def test_a_run_that_will_not_dispatch_the_lead_is_not_refused_for_its_template(t
     source = run(
         tmp_path / "source", run_id="lz1003-source", answer=answer_hits(ANCESTORS),
         stores=sink, store_factory=store_factory(tmp_path, sink=sink),
+        # one real call by `l-00c`: a branch needs a query that reached a system (#1222)
+        gather_turns=[
+            Turn(tool_calls=[("query", {"system": "elastic", "verb": "alerts",
+                                        "params": {"native_query": "user.name:dev.dana"}})]),
+            Turn(text=CORRELATION_SUMMARY),
+        ],
         main_turns=[
             *[Turn(tool_calls=[("append_block", {"text": chunk})])
               for chunk in _split_at_fences(
@@ -283,16 +282,18 @@ def test_the_config_is_read_from_the_tree_the_run_reads(tmp_path):
 # =========================================================================================
 
 def test_the_authored_contract_carries_no_vendor_field_names_or_envelope_shape(tmp_path):
-    """The lead's goal and `what_to_summarize`, OUTSIDE the untrusted frame, name no
-    `kibana.` field and none of the envelope words `hits` / `total` / `truncated` — those
-    are the template's to say (its Goal and Pitfalls already do). What stays is the neutral
-    frame: the breadth instruction the 808 suite anchors on, and the configured id.
+    """The lead's goal and `what_to_summarize` name no `kibana.` field and none of the
+    envelope words `hits` / `total` / `truncated` — those are the template's to say (its Goal
+    and Pitfalls already do). What stays is the neutral frame: the breadth instruction the 808
+    suite anchors on, and the configured id.
 
-    Two positive controls keep the scan honest: the frame is non-empty and CARRIES a
-    `kibana.` token (an ancestor document naming the rule that fired), so the split is
-    proven to remove something; and the unstripped goal does contain the token, so "absent
-    from the authored text" is the strip's work and not a scenario that never put it in."""
-    res = run(tmp_path, run_id="lz1003-prose", alert=alert_doc(rule_id=RULE_ID),
+    Since #1222 (A3) the stored goal holds the contract and a run-relative pointer to the alert
+    and NO alert byte, so there is no untrusted frame to strip: the scan runs over the WHOLE
+    goal. The positive control is that the alert this scenario admits does carry the vendor
+    tokens (the rule field and its id), so "absent from the goal" is the contract's doing and
+    not a scenario that never had them."""
+    doc = alert_doc(rule_id=RULE_ID)
+    res = run(tmp_path, run_id="lz1003-prose", alert=doc,
               answer=answer_hits([
                   hit(ts="2026-05-25T15:26:10.000Z", user="dev.dana",
                       **{"kibana.alert.rule.rule_id": RULE_ID,
@@ -304,10 +305,11 @@ def test_the_authored_contract_carries_no_vendor_field_names_or_envelope_shape(t
     assert isinstance(what, list), sidecar
     assert what, sidecar
 
-    assert "kibana." in goal, "the scenario no longer puts a vendor field inside the evidence frame"
-    authored_goal = _authored(goal)
-    assert authored_goal != goal, "the frame strip removed nothing — the split is not doing work"
-    assert authored_goal.strip(), "the frame strip ate the harness's own text"
+    admitted = RunPaths(res.run_dir).alert.read_text(encoding="utf-8")
+    assert RULE_ID in admitted, "the scenario's admitted alert no longer carries the rule"
+    assert RULE_ID not in goal, "an alert byte reached the stored goal"
+    assert not re.search(r"<run-[0-9a-zA-Z]*-untrusted>", goal), "the goal carries a frame"
+    assert RunPaths(res.run_dir).alert.relative_to(res.run_dir).as_posix() in goal, goal
 
     # The field family by any spelling (`kibana.`, `alert.rule`), the vendor's index, and the
     # vendor's envelope by name or by its fields: a paraphrase that keeps "the alerts index"
@@ -316,13 +318,13 @@ def test_the_authored_contract_carries_no_vendor_field_names_or_envelope_shape(t
     # concept the design keeps.
     vendor = re.compile(r"\bkibana\.|\balert\.rule\b|\balerts index\b", re.IGNORECASE)
     envelope = re.compile(r"\b(?:hits|total|truncated|envelope)\b", re.IGNORECASE)
-    for label, text in (("goal", authored_goal), *((f"what_to_summarize[{i}]", w) for i, w in enumerate(what))):
+    for label, text in (("goal", goal), *((f"what_to_summarize[{i}]", w) for i, w in enumerate(what))):
         assert vendor.search(text) is None, f"a vendor field name in the authored {label}:\n{text}"
         assert envelope.search(text) is None, f"an envelope word in the authored {label}:\n{text}"
 
-    assert "not narrow to this alert's own rule" in authored_goal, authored_goal
+    assert "not narrow to this alert's own rule" in goal, goal
     # The design's replacement sentences, pinned POSITIVELY: the concept survives the token
     # scan only if it is actually said in the neutral form (prose split pieces 1 and 3).
-    assert "correlation over PRIOR ALERTS" in authored_goal, authored_goal
-    assert "the template says where its count is read" in authored_goal.lower(), authored_goal
-    assert SHIPPED_TEMPLATE_ID in authored_goal, authored_goal
+    assert "correlation over PRIOR ALERTS" in goal, goal
+    assert "the template says where its count is read" in goal.lower(), goal
+    assert SHIPPED_TEMPLATE_ID in goal, goal

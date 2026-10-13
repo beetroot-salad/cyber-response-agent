@@ -503,6 +503,11 @@ class RunRecorder:
         self.order.append("materialize")
         self.materialize_calls.append({"alert": alert, "run_id": run_id, **kw})
         self.run_dir_at.mkdir(parents=True, exist_ok=True)
+        # Run start settles the alert once (#1222): the folder holds it with its record, which
+        # the box mount needs.
+        from defender.tests._alert_plant import plant_alert as plant_with_record
+
+        plant_with_record(self.run_dir_at, Path(alert).read_bytes())
         return SimpleNamespace(run_dir=self.run_dir_at)
 
     def lifecycle(self, **kw: Any) -> dict[str, Any]:

@@ -446,6 +446,8 @@ def test_run_paths_accessor_set_is_exactly_its_artifacts_after_the_meta_accessor
         "source_refs", "gather_summaries", "lead_author", "tool_trace", "policy_denials",
         "lessons_loaded",
         "runtime_html", "box_sentinel",
+        # #1222 A1: the read-only input directory, and the record beside the alert
+        "alert_input_dir", "alert_record",
     }, f"the artifact accessor set drifted: {sorted(accessors)}"
     # #1235 F2: the case pointer is a sidecar beside the run dir — a method taking the runs
     # base, not a property resolving a name inside the folder.

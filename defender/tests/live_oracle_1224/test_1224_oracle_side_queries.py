@@ -105,12 +105,12 @@ from defender.scripts.adapters.confinement import confine_index
 
 _STATE = Path({state!r})
 SYSTEM = "logsrc"
-PATTERNS = ("logs-*",)
+CONFINE_PATTERNS = ("logs-*",)
 
 
 @verb()
 def search(ctx: VerbContext, *, index: str = "logs-*", q: str = "*") -> dict:
-    resolved = confine_index(index, PATTERNS)
+    resolved = confine_index(index, CONFINE_PATTERNS)
     as_of = getattr(ctx, "as_of", None)
     row = {{"system": SYSTEM, "verb": "search", "params": {{"index": index, "q": q}},
            "as_of": None if as_of is None else as_of.isoformat(),

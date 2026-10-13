@@ -385,12 +385,11 @@ def test_the_motivating_findings_are_in_the_shipped_baseline(real_tree_findings)
     deleted by #1235 round 3 with their last production caller, so there is no code left for
     their fingerprints to name.
 
-    `_l0_items._correlation_contract` stays open deliberately: it is the same hand-rolled half
-    of `parse_iso_utc`, but it PARSES ONLY TO VALIDATE and discards the value, so no naive-vs-
-    aware comparison is reachable from it. It is a debt this gate names, not one of #878's five
-    reachable faults, and #878 did not widen its scope to collect it."""
+    (The one site left open at #878, `_l0_items._correlation_contract`, went with the ancestor
+    fetch in #1222; the gate still reports real findings, so the positive control stands on the
+    sites the baseline still names.)"""
     fingerprints = {f.fingerprint for f in real_tree_findings}
-    assert "defender/runtime/lead_zero/_items.py:_correlation_contract:unowned-iso-parse" in fingerprints
+    assert fingerprints, "the gate reports nothing on the real tree, so it has no positive control"
 
     fixed = "defender/hooks/budget_enforcer.py:_wall_origin:unowned-iso-parse"
     assert fixed not in fingerprints, f"{fixed} was re-widened after #878 narrowed it"

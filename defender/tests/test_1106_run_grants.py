@@ -230,20 +230,24 @@ def test_the_narrowed_correlation_registry_names_its_inner_registrys_table(tmp_p
 def test_the_withheld_lead_heading_names_the_runs_table(tmp_path):
     """ORIENT's note for a withheld lead names the run's tenant's table (for the model — the
     tenant and the file, not the host path); with a target, no note. `correlation_system` is the RUN's value — there is no process-level default for it."""
-    from defender.runtime.lead_zero import L3, LeadZeroResult, render_orient_section
-
+    from defender.runtime.lead_zero import (
+        ENDING_WITHHELD,
+        L3,
+        CorrelationOutcome,
+        render_correlation_section,
+    )
     from defender.runtime.run_tenant import table_pointer
 
     b = T.place_tenant(tmp_path / "tenants", "bravo", table=T.TABLE_B)
     grants = T.run_grants(b / "settings")
     pointer = table_pointer("bravo")
-    result = LeadZeroResult(text="", status="resolved")
-    withheld = render_orient_section(
-        result, None, correlation_system=grants.correlation_system, grant_home=pointer)
+    assert grants.correlation_system is None
+    withheld = render_correlation_section(
+        CorrelationOutcome(ending=ENDING_WITHHELD), grant_home=pointer)
     assert L3 in withheld, withheld
     assert pointer in withheld, withheld
-    dispatched = render_orient_section(
-        result, None, correlation_system="elastic", grant_home=pointer)
+    dispatched = render_correlation_section(
+        CorrelationOutcome(summary="s", system="elastic"), grant_home=pointer)
     assert pointer not in dispatched, dispatched
 
 

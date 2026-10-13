@@ -37,9 +37,14 @@ import re
 
 import pytest
 
+from defender._tenant import TenantRefused
+
 from defender.runtime import case_ticket
 from defender.scripts.case_history import ticket_writer
+from defender.tests._alert_plant import plant_alert
 from defender.tests._spec767 import (
+    ALERT_MAPPING,
+    facts_of,
     AGENT_AUTHOR,
     OPEN_STATUS,
     CLOSED_STATUS,
@@ -191,7 +196,7 @@ def test_767_open_payload_status_and_labels(tmp_path, monkeypatch):
 
     hostile = {"rule": {"id": CLOSED_STATUS, "description": CLOSED_STATUS},
                "timestamp": CLOSED_STATUS}
-    payload = case_ticket.alert_to_open_payload(hostile, "case-1", mapping=current_mapping())
+    payload = case_ticket.alert_to_open_payload(facts_of(hostile), "case-1", mapping=current_mapping())
 
     assert payload["status"] == OPEN_STATUS, "an alert field moved the open's status"
     assert payload["labels"] == [f"sig:{CLOSED_STATUS}", f"evt:{CLOSED_STATUS}"]
@@ -199,7 +204,7 @@ def test_767_open_payload_status_and_labels(tmp_path, monkeypatch):
     # Positive control on the same address: the ordinary alert still ships its labels, so the
     # assertion above is not green merely because the label set is empty.
     ordinary = case_ticket.alert_to_open_payload(
-        {"rule": {"id": "5710", "description": "sshd"}, "timestamp": "2026-05-07T07:15:01Z"},
+        facts_of({"rule": {"id": "5710", "description": "sshd"}, "timestamp": "2026-05-07T07:15:01Z"}),
         "case-2", mapping=current_mapping(),
     )
     assert ordinary["labels"] == ["sig:5710", "evt:2026-05-07T07:15:01Z"]
@@ -402,7 +407,7 @@ def test_767_alert_content_cannot_reach_the_lifecycle(tmp_path, monkeypatch):
                     else mapping_doc(extra_open={"labels": labels}))
         loaded = case_ticket.load_case_mapping(current_settings())
         assert loaded["open"]["labels"], f"{why}: the loader refused a label template"
-        payload = case_ticket.alert_to_open_payload(hostile, "c", mapping=current_mapping())
+        payload = case_ticket.alert_to_open_payload(facts_of(hostile), "c", mapping=current_mapping())
         assert payload["status"] == OPEN_STATUS, f"{why}: an alert moved the open's status"
 
     # The open/released collision is no longer a refusal: the legacy section is ignored.
@@ -413,7 +418,7 @@ def test_767_alert_content_cannot_reach_the_lifecycle(tmp_path, monkeypatch):
         "reads `released:` any more (#1221, amended)"
     )
     calm = case_ticket.alert_to_open_payload(
-        {"rule": {"id": "5710", "description": "sshd"}, "timestamp": "t"}, "c",
+        facts_of({"rule": {"id": "5710", "description": "sshd"}, "timestamp": "t"}), "c",
         mapping=current_mapping())
     assert calm["status"] == CLOSED_STATUS, "the open did not carry the mapping's own literal"
 
@@ -434,7 +439,7 @@ def test_767_an_unsafe_open_status_is_refused_where_the_case_is_opened(
 
     use_mapping(monkeypatch, root, mapping_doc(open_status="{summary}"))
     with pytest.raises(case_ticket.CaseTicketError):
-        case_ticket.alert_to_open_payload(alert, "c", mapping=current_mapping())
+        case_ticket.alert_to_open_payload(facts_of(alert), "c", mapping=current_mapping())
     run_dir = make_run(tmp_path, name="run-templated", alert=alert)
     store = FakeStore()
     open_ticket(run_dir, store)
@@ -479,7 +484,7 @@ def test_767_the_shipped_mapping_loads_and_a_broken_one_skips_the_write(
     loaded = case_ticket.load_case_mapping(current_settings())
     assert loaded["open"]["labels"], "the shipped mapping was refused"
     assert case_ticket.alert_to_open_payload(
-        {"rule": {"id": "5710"}}, "c", mapping=current_mapping())["status"] == OPEN_STATUS, (
+        facts_of({"rule": {"id": "5710"}}), "c", mapping=current_mapping())["status"] == OPEN_STATUS, (
         "the shipped mapping opens a case in a status other than `open`"
     )
 
@@ -654,7 +659,7 @@ def test_767_unreadable_report_still_comments(tmp_path, monkeypatch):
     # The missing file is the same family, reached without writing a report at all.
     missing = tmp_path / "run-missing"
     missing.mkdir()
-    missing.joinpath("alert.json").write_text("{}", encoding="utf-8")
+    plant_alert(missing, {}, mapping=ALERT_MAPPING)
     missing_store = FakeStore()
     record(missing, missing_store)
     assert missing_store.comment_body() == next(iter(sentences.values()))
@@ -896,7 +901,7 @@ def test_767_a_body_claiming_approval_does_not_approve(tmp_path, monkeypatch):
     hostile_alert = {"rule": {"id": "{summary}", "description": "{case_id}"},
                      "timestamp": "{signature}"}
     open_payload = case_ticket.alert_to_open_payload(
-        hostile_alert, "case-1", mapping=current_mapping())
+        facts_of(hostile_alert), "case-1", mapping=current_mapping())
     assert open_payload["labels"] == ["sig:{summary}", "evt:{signature}"], (
         "a substituted alert value was re-interpreted as a template (FK53)"
     )
@@ -1114,11 +1119,11 @@ def test_767_non_dict_mapping_is_refused_by_the_existing_check(tmp_path, monkeyp
         "any content refusal"
     )
 
-    run_dir = make_run(tmp_path)
-    store = FakeStore()
-    assert record(run_dir, store) is None
-    assert store.calls == [], "a non-dict mapping still produced a write"
-    assert "WARN" in capsys.readouterr().err
+    # Since #1222 the one tenant check refuses such a mapping at acceptance, before any run: the
+    # writer is never handed it, so there is no write to skip.
+    with pytest.raises(TenantRefused) as refused:
+        current_record()
+    assert "systems/case-history/mapping.yaml must be a YAML mapping" in str(refused.value)
 
 
 # =======================================================================================

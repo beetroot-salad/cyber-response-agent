@@ -28,6 +28,7 @@ from defender.tests._fold_936 import (
     _rows,
 )
 from defender.tests._lessons_corpus import _main_deps, _write_lesson
+from defender.tests._alert_plant import plant_alert
 from defender.tests.tenant_1105_run_repository import _spec1105 as H1105  # #1105 PR 2 (J8, declared change 10)
 
 DEFENDER = Path(__file__).resolve().parents[1]
@@ -211,6 +212,7 @@ def _mk_lesson(lessons: Path, stem: str, *, created_at: str | None = None) -> Pa
 def _mk_run(runs: Path, name: str, rows: list[dict], *, disposition: str = "benign") -> Path:
     rd = runs / name
     rd.mkdir(parents=True)
+    plant_alert(rd)
     (rd / "report.md").write_text(f"---\ndisposition: {disposition}\n---\nbody\n", encoding="utf-8")
     (rd / "lessons_loaded.jsonl").write_text(
         "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")

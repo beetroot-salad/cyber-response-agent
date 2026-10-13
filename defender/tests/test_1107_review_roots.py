@@ -89,7 +89,6 @@ def test_settings_faults_name_no_host_path(tmp_path):
     S.write_config(folder, "identity", b"IDENTITY_URL_BASE=\xff\n")
     S.drop_key(folder, "cmdb", "CMDB_URL_BASE")
     S.drop_key(folder, "elastic", "ELASTIC_EVENTS_INDEX")
-    S.mapping_path(folder).write_text("- not\n- a mapping\n", encoding="utf-8")
     record = S.resolve(root)
     shim = S.DockerShim(tmp_path / "shim")
     ctx = _ctx(record, tmp_path, shim)
@@ -99,8 +98,17 @@ def test_settings_faults_name_no_host_path(tmp_path):
         "missing key": str(_raised(cmdb_adapter.health_check, ctx)),
         "elastic key": str(_raised(elastic_adapter.query, ctx, native_query="*")),
         "no folder": str(_raised(transport.system_entry, ctx, "no-such-system")),
-        "mapping": str(record.ticket_mapping),
     }
+    # The unreadable case-history mapping is no longer a stored fault: the one tenant check
+    # refuses the folder (#1222 A5), naming the file by its settings-relative path.
+    from defender._tenant import TenantRefused
+
+    bad_root, bad_folder = _tenant(tmp_path, "pth2")
+    S.mapping_path(bad_folder).write_text("- not\n- a mapping\n", encoding="utf-8")
+    with pytest.raises(TenantRefused) as refused:
+        S.resolve(bad_root)
+    assert "systems/case-history/mapping.yaml" in str(refused.value)
+    assert str(tmp_path) not in str(refused.value)
     host = str(tmp_path)
     for arm, text in texts.items():
         assert host not in text, f"{arm}: the fault names the host path: {text!r}"
@@ -246,7 +254,8 @@ def test_stored_faults_carry_no_traceback_or_cause(tmp_path):
     cfg = S.config_path(folder, "cmdb")
     cfg.unlink()
     cfg.mkdir()  # unreadable as a file: an OSError underneath the fault
-    S.mapping_path(folder).write_text("- not a mapping\n", encoding="utf-8")
+    # A mapping that parses (so the tenant check admits the folder) but breaks the lifecycle rule.
+    S.mapping_path(folder).write_text("open:\n  status: '{x}'\n", encoding="utf-8")
     record = S.resolve(root)
     for kept in (record.systems["cmdb"], record.ticket_mapping):
         assert isinstance(kept, Exception), kept

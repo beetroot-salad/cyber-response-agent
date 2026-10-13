@@ -58,7 +58,7 @@ if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VE
 if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender import _provenance
+from defender import _alert_input, _provenance
 from defender._episode_handle import Episode
 from defender._episodes_root import (
     EPISODES_BASE_ENV,
@@ -117,6 +117,12 @@ class LauncherRefused(SystemExit):
     explanation rather than a traceback."""
 
 
+class SourceInputReplaced(LauncherRefused, Exception):
+    """The source run's stored alert does not match its record (#1222 A1). An operator's exit
+    like every launcher refusal, and ALSO an `Exception`, so a caller that guards a launch with
+    `except Exception` sees the refusal instead of the process leaving."""
+
+
 # ---------------------------------------------------------------------------------------
 # where an episode lives
 # ---------------------------------------------------------------------------------------
@@ -153,8 +159,27 @@ MAX_LAUNCHES = 99
 _PRIME_ALLOWING_EMPTY = functools.partial(prime_base, allow_empty=True)
 
 
+def source_input(source: Run) -> tuple[bytes, str]:
+    """The source run's alert bytes and its record's text, the bytes checked against the digest
+    the record carries — or the launcher's refusal, naming the run and carrying no byte of
+    either file. The ONE read of the source's input a launch makes; what it returns is copied
+    into the episode, and everything downstream reads the copy."""
+    try:
+        return _alert_input.verified_input(
+            source.facts.alert.path, source.facts.alert_record.path, run_name=str(source.id))
+    except _alert_input.AlertReplaced as replaced:
+        raise SourceInputReplaced(f"[branch] {replaced}") from replaced
+
+
+def _copy_source_input(episode: Episode, raw: bytes, record_text: str) -> None:
+    """Put the source run's alert and its record in the episode, once (A1): the judge's whole
+    input about the alert, and every sibling's own."""
+    episode.source_alert.create(raw)
+    episode.source_record.create(record_text)
+
+
 def prepare_episode(
-    episode_id: str, source_run_dir: Path, *, data_root: Path,
+    episode_id: str, source: Run, *, data_root: Path,
     prime: Callable[[Path, Episode], PrimeReport] = _PRIME_ALLOWING_EMPTY,
 ) -> Episode:
     """Claim a fresh episode directory, prime the family's base into it once, and hand it back
@@ -173,10 +198,18 @@ def prepare_episode(
     injectable so a test can observe whether priming ran; it is handed the episode this
     returns.
     """
+    # An id that cannot name a directory is refused first, before anything is read or made.
+    try:
+        refuse_bad_episode_id(episode_id)
+    except EpisodeRefused as refused:
+        raise _owner_refusal(refused) from refused
+    # Judged before an episode directory is claimed, so a refused source leaves no debris.
+    raw, record_text = source_input(source)
     try:
         root = episodes_root(data_root)
     except EpisodeRefused as refused:
         raise _owner_refusal(refused) from refused
+
     for n in range(1, MAX_LAUNCHES + 1):
         candidate = episode_id if n == 1 else f"{episode_id}-r{n}"
         try:
@@ -191,7 +224,8 @@ def prepare_episode(
             f"[branch] {MAX_LAUNCHES} episodes of {episode_id!r} already exist under {root} — "
             "a launch never reuses one; remove the ones you no longer need")
     try:
-        _prime_once(episode, episode.dir.name, Path(source_run_dir), prime)
+        _copy_source_input(episode, raw, record_text)
+        _prime_once(episode, episode.dir.name, source.run_dir, prime)
     except BaseException:
         episode.close()
         raise
@@ -281,14 +315,6 @@ def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a mode
         source_who=f"source run {source_run_dir}", allow_dirty=allow_dirty).refusal
     if refusal is not None:
         raise LauncherRefused(f"[branch] {refusal}")
-    # The source run dir is a prior box's rw bind, so a link planted at `alert.json` would copy
-    # its target's bytes into the questioner's prompt.
-    alert = source.facts.alert.path
-    if not artifact_file(alert):
-        raise LauncherRefused(
-            f"[branch] source alert {alert} is not a plain file — it is the case input the "
-            "questioner is shown and every sibling investigates, and a link wearing its name "
-            "would put bytes from outside the source run into a model-facing prompt")
     rc = preflight(model, branching=True)
     if rc:
         raise LauncherRefused(
@@ -1509,7 +1535,7 @@ def _launch(  # noqa: PLR0913 — see `main`
 
         roster = read_roster(adapters_under(_DEFENDER_DIR))
 
-    episode = prepare_episode(episode_id, source.run_dir, data_root=data_root)
+    episode = prepare_episode(episode_id, source, data_root=data_root)
     # Set once the first sibling is about to start: past it, the abort message below ("no
     # sibling started") would be false, so anything raised later is re-raised unchanged.
     started = threading.Event()
@@ -1789,7 +1815,7 @@ def _author(  # noqa: PLR0913 — the step's inputs
         source_run_dir=source_run_dir, episode_dir=episode.dir,
         invoke=questioner,
         leads=questioner_leads(leads),
-        alert=branch.source_alert(source_run_dir) or {},
+        alert=branch.source_alert(source_run_dir) or {},  # lint-run-records: ok — the branch package's reader of the source run's alert, not the episode's copy accessor
         frontier=questioner_mod.read_frontier(source_run_dir, fences_at=fences),
         served_systems=tuple(served),
         samples=samples,

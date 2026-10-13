@@ -1,4 +1,4 @@
-"""The judge's appender: thirteen-key finding rows onto the defender and questioner queues.
+"""The judge's appender: thirteen-key finding rows (fourteen when the run recorded a signature) onto the defender and questioner queues.
 
 Refuses a row missing `finding_id`/`run_id`/`direction` before it reaches the shared findings
 gate (where it would raise a bare `KeyError` and stuck-record the whole keyed batch), and
@@ -24,8 +24,8 @@ from defender._yaml import safe_load as _yaml_safe_load
 from defender._text import is_content_less
 from defender._vocab import normalized_judge_outcome
 from defender._episode_paths import LAYOUT
+from defender import _alert_input
 from defender.learning.core.config import QUEUEABLE_FINDING_TYPES
-from defender.learning.core.persist import derive_alert_rule_key
 from defender.learning.core.state import (
     FINDINGS,
     QUESTIONER_FINDINGS,
@@ -35,7 +35,7 @@ from defender.learning.core.state import (
 )
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.judge.family import is_gradable_row, read_manifest, read_samples_record
-from defender.learning.judge.render import episode_alert
+from defender.learning.judge.render import episode_record
 #: Imported, not re-spelled, so the appender's guard and `run.py`'s selector cannot drift.
 from defender.learning.judge.run import (
     SUBJECT_DEFENDER,
@@ -46,6 +46,24 @@ from defender.learning.judge.run import (
 
 #: Outcomes whose episode is never a defender failure to author from.
 _UNQUEUEABLE_VERDICTS = frozenset({"discard", "corpus-contradiction"})
+
+
+#: The key a finding files under when its episode's alert carries no recorded signature.
+UNKEYED = "unkeyed"
+
+
+def no_record_reason() -> str:
+    """The refusal for an episode whose copy of the source run's alert record is missing or not
+    one (launched before the change, or damaged): a fixed sentence, no byte of either file."""
+    return (f"the episode holds no readable record of the alert it investigates "
+            f"({LAYOUT.source_record}) — it was launched before the alert's record existed, or "
+            "its copy was damaged; relaunch it")
+
+
+def rule_key_of(record: _alert_input.AlertRecord | None) -> str:
+    """The episode's recorded signature verbatim, or `unkeyed` — the alert's bytes are not read."""
+    signature = None if record is None else record.facts.signature
+    return signature if signature is not None else UNKEYED
 
 
 def _validate_row(row: dict[str, Any], *, episode_dir: Path | None = None) -> None:
@@ -200,7 +218,7 @@ def append_world_rows_report(episode_dir: Path, rows: list[dict[str, Any]], *,
 def _resolving_citations(finding: dict[str, Any]) -> list[str]:
     """A finding's evidence pointers minus the ones `_draw_document` recorded as not resolving.
 
-    The unresolved ones stay off the row (the queue shape is fixed at thirteen keys) and remain
+    The unresolved ones stay off the row (the queue shape is fixed at thirteen keys, fourteen with `recorded_signature`) and remain
     readable on the draw document `source_run_dir` names."""
     # Model-authored YAML: neither key is known to be a list, and a bare string would iterate
     # into one-character citations. `str()` because YAML scalars like dates are not
@@ -216,7 +234,7 @@ def _resolving_citations(finding: dict[str, Any]) -> list[str]:
 def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one keyword each
     *, run_id: str, label: str, draw: str, index: int, subject: str, finding: dict[str, Any],
     alert_rule_key: str, judge_outcome: str, provenance: str = "model",
-    systems: list[str] | None = None,
+    systems: list[str] | None = None, recorded_signature: str | None = None,
 ) -> dict[str, Any]:
     """The thirteen-key `FindingRow` for one finding of one draw of one world, plus
     `world`/`systems` (`_row_systems`)/`provenance` for `subject: world`.
@@ -224,6 +242,11 @@ def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one key
     @owns finding_id
     @owns source_run_dir
     @owns direction
+    @owns recorded_signature
+
+    `recorded_signature` is the run's recorded signature, verbatim, in a field of its own: the
+    only place the lesson author takes a lesson's `source_signature` from. Absent when the run
+    has none; rows queued before the change never had it.
 
     `finding_id` is `{run_id}/{label}/{draw}/{index}`: deterministic across retries over the
     same draw files, since queue idempotency keys on it alone. `label="family"` keys a
@@ -253,6 +276,8 @@ def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one key
         "source_run_dir": (
             f"episodes/{run_id}" if label == "family" else f"episodes/{run_id}/worlds/{label}"),
     }
+    if recorded_signature is not None:
+        row["recorded_signature"] = recorded_signature
     if subject == SUBJECT_WORLD:
         row["world"] = None if label == "family" else label
         # The question-writer's lessons are selected by these names, so they are the pass's
@@ -500,6 +525,7 @@ def enqueue_report(  # noqa: PLR0913 — one pass's whole hand-over
     drawn: dict[str, dict[int, dict[str, Any]]] | None = None,
     family_drawn: dict[int, dict[str, Any]] | None = None,
     served_systems: list[str] | None = None, samples: dict[str, Any] | None = None,
+    record: _alert_input.AlertRecord | None = None,
 ) -> EnqueueReport:
     """Every finding of every completed draw -> one `FindingRow`, partitioned by `subject`
     onto the defender channel or the questioner channel.
@@ -508,14 +534,22 @@ def enqueue_report(  # noqa: PLR0913 — one pass's whole hand-over
     per-world rows. `drawn`/`family_drawn` are the draws the caller just produced; `None` falls
     back to the draw directories on disk (a bare re-enqueue). `served_systems` and `samples` are
     the pass's already-read manifest list and samples record; each is read here when `None`.
+    `record` is the episode's record of its alert as the pass read it (one snapshot keys the
+    union and the findings alike); a bare re-enqueue reads it here, and an episode with none is
+    refused, naming the missing record, before any row is built.
 
     A blocked defender lane (`discard`/`corpus-contradiction`) does not stop the world lane,
     whose findings are about the instrument, not the investigator."""
     episode_dir = Path(episode_dir)
     # One root handle for the pass's reads: the alert, and any draws read back from disk.
     with bind(episode_dir) as view:
+        if record is None:
+            record = episode_record(view)
+        if record is None:
+            raise JudgeRefused(no_record_reason())
         return _enqueue_report(
             view, episode_dir, grade, state=state, drawn=drawn, family_drawn=family_drawn,
+            record=record,
             served_systems=served_systems if served_systems is not None else _family_systems(view),
             samples=samples if samples is not None else read_samples_record(view))
 
@@ -524,7 +558,7 @@ def _enqueue_report(  # noqa: C901, PLR0912, PLR0913, PLR0915 — see `enqueue_r
     view: Bound, episode_dir: Path, grade: Any, *, state: LearningState,
     drawn: dict[str, dict[int, dict[str, Any]]] | None,
     family_drawn: dict[int, dict[str, Any]] | None,
-    served_systems: list[str], samples: dict[str, Any],
+    served_systems: list[str], samples: dict[str, Any], record: _alert_input.AlertRecord,
 ) -> EnqueueReport:
     verdict_word = grade["verdict_word"] if isinstance(grade, dict) else grade.verdict_word
     world_rows = grade["worlds"] if isinstance(grade, dict) else grade.worlds
@@ -534,9 +568,10 @@ def _enqueue_report(  # noqa: C901, PLR0912, PLR0913, PLR0915 — see `enqueue_r
         w["world"] for w in world_rows if is_gradable_row(w) and isinstance(w.get("world"), str)))
     row_of = {w["world"]: w for w in world_rows if isinstance(w, dict) and "world" in w}
     run_id = episode_dir.name
-    # The one rule for which world's alert is the episode's (`episode_alert`, which the
-    # episode page reads too), so the rule key and the page name the same alert.
-    alert_rule_key = derive_alert_rule_key(episode_alert(view, graded_labels))
+    # The one rule for which world's alert is the episode's, shared with the orchestration so
+    # the rule key and the sibling union agree.
+    alert_rule_key = rule_key_of(record)
+    recorded_signature = None if record is None else record.facts.signature
     defender_blocked = defender_lane_blocked(verdict_word)
 
     defender_rows: list[dict[str, Any]] = []
@@ -565,6 +600,7 @@ def _enqueue_report(  # noqa: C901, PLR0912, PLR0913, PLR0915 — see `enqueue_r
             row = build_finding_row(
                 run_id=run_id, label="family", draw=str(draw), index=index,
                 subject=SUBJECT_WORLD, finding=finding, alert_rule_key=alert_rule_key,
+                recorded_signature=recorded_signature,
                 judge_outcome=verdict_word, provenance="model", systems=served_systems)
             _add_row(row, validator=_validate_world_row, sink=world_rows_out,
                      lane=LANE_WORLD, ledger=ledger, episode_dir=episode_dir)
@@ -599,6 +635,7 @@ def _enqueue_report(  # noqa: C901, PLR0912, PLR0913, PLR0915 — see `enqueue_r
                     row = build_finding_row(
                         run_id=run_id, label=label, draw=str(draw), index=index,
                         subject=SUBJECT_WORLD, finding=finding, alert_rule_key=alert_rule_key,
+                recorded_signature=recorded_signature,
                         judge_outcome=verdict_word, provenance="model",
                         systems=_draw_systems(draw_doc))
                     _add_row(row, validator=_validate_world_row, sink=world_rows_out,
@@ -623,6 +660,7 @@ def _enqueue_report(  # noqa: C901, PLR0912, PLR0913, PLR0915 — see `enqueue_r
                 row = build_finding_row(
                     run_id=run_id, label=label, draw=str(draw), index=index,
                     subject=SUBJECT_DEFENDER, finding=finding, alert_rule_key=alert_rule_key,
+                recorded_signature=recorded_signature,
                     judge_outcome=verdict_word)
                 _add_row(row, validator=_validate_row, sink=defender_rows,
                          lane=LANE_DEFENDER, ledger=ledger, episode_dir=episode_dir)

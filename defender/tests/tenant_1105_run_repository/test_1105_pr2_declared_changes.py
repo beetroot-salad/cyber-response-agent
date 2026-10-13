@@ -891,7 +891,7 @@ def test_dc9_a_manifest_without_source_run_dir_resumes(tmp_path):
     rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), rec)
     assert refused is None, f"refused: {P.refusal_text(refused)} {err}"
     assert rc == 0, f"refused: {P.refusal_text(refused)} {err}"
-    assert (rec.run_dir / "alert.json").read_bytes() == (src / "alert.json").read_bytes()
+    assert (rec.run_dir / "alert_input" / "alert.json").read_bytes() == (src / "alert_input" / "alert.json").read_bytes()
 
 
 def test_dc9_an_old_manifests_source_run_dir_is_never_read(tmp_path):
@@ -917,7 +917,7 @@ def test_dc9_an_old_manifests_source_run_dir_is_never_read(tmp_path):
         rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), rec)
         assert refused is None, f"{named}: refused {P.refusal_text(refused)} {err}"
         assert rc == 0, f"{named}: refused {P.refusal_text(refused)} {err}"
-        assert (rec.run_dir / "alert.json").read_bytes() == (src / "alert.json").read_bytes(), (
+        assert (rec.run_dir / "alert_input" / "alert.json").read_bytes() == (src / "alert_input" / "alert.json").read_bytes(), (
             f"the old field steered the source to {named}")
 
 
@@ -998,6 +998,8 @@ def test_dc10_the_tracer_walks_the_tenants_runs_and_refuses_a_stray(tmp_path, d9
     P.plant_record(runs, d9_tenant)
     run = runs / "20260605t000000z-case-a"
     run.mkdir()
+    from defender.tests._alert_plant import plant_alert
+    plant_alert(run)
     (run / "report.md").write_text("---\ndisposition: benign\n---\nbody\n", encoding="utf-8")
     (run / "lessons_loaded.jsonl").write_text(
         json.dumps({"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}) + "\n",

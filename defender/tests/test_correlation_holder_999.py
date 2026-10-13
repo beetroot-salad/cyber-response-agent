@@ -258,36 +258,43 @@ def test_a_grant_with_no_query_verb_has_no_dispatch_target():
 
 
 def test_a_withheld_lead_is_neither_claimed_nor_declared(tmp_path):
-    """`prepare_correlation_lead` returns before `claim_lead`: no `l-00c` row lands in the
-    leads table for a lead that will never run. The positive control claims. The dispatch
-    identity is handed in as the run-start check resolves it (#1003): `system=None` is the
-    withheld arm."""
-    from defender.runtime.lead_zero import STATUS_RESOLVED, CorrelationDispatch, prepare_correlation_lead
+    """`run_correlation` returns the `withheld` ending before any claim: no `l-00c` row lands
+    in the leads table for a lead that will never run. The dispatch identity is handed in as the
+    run-start check resolves it (#1003): `system=None` is the withheld arm. (The claiming arm is
+    observed end to end by `alert_front_door_1222/test_1222_correlation_endings`.)"""
+    import asyncio
 
-    alert = {"alert_timestamp": "2026-01-01T00:00:00Z"}
+    from defender.runtime.lead_zero import ENDING_WITHHELD, CorrelationDispatch, run_correlation
+
     lead_file = tmp_path / "gather_raw" / "l-00c.lead.json"
     withheld = CorrelationDispatch("alpha.correlate", None, VerbGrant(role=HOLDER, entries=()))
-    granted = CorrelationDispatch(
-        "alpha.correlate", "alpha", VerbGrant(role=HOLDER, entries=(("alpha", "lookup", "r"),)),
-    )
 
-    assert prepare_correlation_lead(tmp_path, alert, "block", STATUS_RESOLVED, dispatch=withheld) is None
+    from defender.runtime.run_state import RunState
+    outcome = asyncio.run(run_correlation(
+        run_state=RunState(tmp_path, "r"), defender_dir=tmp_path, verbs=None, limits={},
+        make_model=None, logger=None, box=None, store=None,
+        catalog=None, dispatch=withheld, tenant=None, deadline=1.0))
+
+    assert outcome.ending == ENDING_WITHHELD, outcome
+    assert outcome.summary is None, outcome
     assert not lead_file.exists(), "a withheld lead must not claim its row"
-
-    assert prepare_correlation_lead(tmp_path, alert, "block", STATUS_RESOLVED, dispatch=granted) is not None
-    assert lead_file.exists(), "positive control: with a dispatch target the row is claimed"
 
 
 def test_the_orient_heading_says_the_lead_was_withheld():
-    """MAIN reads why `l-00c` is absent — a trusted line naming the table — rather than the
-    ordinary 'if any'. With a target, the heading is exactly what it was."""
-    from defender.runtime.lead_zero import L3, LeadZeroResult, render_orient_section
+    """MAIN reads why `l-00c` is absent — a trusted line naming the table — rather than a
+    summary. With a summary, the table is not named."""
+    from defender.runtime.lead_zero import (
+        ENDING_WITHHELD,
+        L3,
+        CorrelationOutcome,
+        render_correlation_section,
+    )
 
     # #1106 M4: the note names the RUN's resolved table (`grant_home`), not a fixed constant.
     table = str(dispositions_path(SETTINGS))
-    result = LeadZeroResult(text="", status="resolved")
-    withheld = render_orient_section(result, None, correlation_system=None, grant_home=table)
+    withheld = render_correlation_section(
+        CorrelationOutcome(ending=ENDING_WITHHELD), grant_home=table)
     assert L3 in withheld, withheld
     assert table in withheld, withheld
-    assert table not in render_orient_section(
-        result, None, correlation_system="alpha", grant_home=table)
+    assert table not in render_correlation_section(
+        CorrelationOutcome(summary="a framed summary", system="alpha"), grant_home=table)

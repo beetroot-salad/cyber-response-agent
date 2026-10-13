@@ -455,21 +455,22 @@ def resume_world(episode: Episode, world_label: str, *, tenant: Callable[[], Any
         _family.load_family(episode.view()), world_label, episode.dir)
 
 
-def _screened_source_alert(source: Run) -> Path:
-    """The source run's alert, or the refusal that says it is not a plain file.
+def _screened_source_alert(episode: Episode) -> Path:
+    """The alert a sibling investigates — the source run's, as launch copied it into the
+    episode — or the refusal that says it is not a plain file.
 
-    The source run dir was a box's writable bind, so `alert.json` may be a planted link, and
-    `materialize_run` follows links. Checked before the copy so outside bytes never become
-    this run's alert.
+    The episode dir is the launcher's own, but a link planted at the copy's name would have
+    `materialize_run` follow it. Checked before the copy so outside bytes never become this
+    run's alert.
     """
     from defender.run_repository import artifact_file
 
-    alert = source.facts.alert.path
+    alert = episode.source_alert.path
     if not artifact_file(alert):
         sys.exit(
-            f"source alert {alert} is not a plain file — the alert is the case input this "
-            "sibling investigates, and a link wearing its name would copy bytes from outside "
-            "the source run into this run dir")
+            f"the episode's copy of the source alert {alert} is not a plain file — the alert "
+            "is the case input this sibling investigates, and a link wearing its name would "
+            "copy bytes from outside the episode into this run dir")
     return alert
 
 
@@ -592,13 +593,14 @@ def _open_episode_runs(ns: argparse.Namespace, accepted: _tenant.Tenant,
         sys.exit(f"[run.py] --episode {ns.episode} for tenant {accepted.id!r}: {refused}")
 
 
-def _case_input(ns: argparse.Namespace, world: Any, source: Run | None) -> tuple[Path, str | None]:
+def _case_input(ns: argparse.Namespace, world: Any,
+                episode: Episode | None) -> tuple[Path, str | None]:
     """The alert this run investigates and its run id: a sibling's from its world (the source
     run's alert, screened before the preflight like other argument errors), else the
     operator's."""
     if world is not None:
-        assert source is not None
-        return _screened_source_alert(source), world.run_id
+        assert episode is not None  # a sibling is only ever resumed through its held episode
+        return _screened_source_alert(episode), world.run_id
     return ns.alert.resolve(), ns.run_id
 
 
@@ -669,9 +671,8 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
         source = (None if world is None
                   else _open_world_source(accepted.runs_repository(), world))
 
-        alert, run_id = _case_input(ns, world, source)
-
-        # The tenant's settings, resolved before anything is spent; nothing below reads them again.
+        # The tenant's settings (and with them the one tenant check), resolved before the input
+        # is read and before anything is spent; nothing below reads them again.
         tenant = tenant_of()
 
         model = driver.resolve_main_model(ns.model)
@@ -681,6 +682,10 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
         if rc:
             return rc
         seams = _world_seams(world, oracle=oracle, verifier=verifier, source=source)
+
+        # The input is read after the tenant check and the role preflight: a tenant the check
+        # refuses is told so before anything about its input is.
+        alert, run_id = _case_input(ns, world, episode)
 
         # The handle, not just its directory: the post-run step saves the run page through it.
         run = (materialize(alert, run_id, tenant=accepted, model=model) if world is None

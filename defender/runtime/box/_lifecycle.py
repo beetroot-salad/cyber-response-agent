@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import stat
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any
@@ -28,6 +29,7 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
     RunTainted,
     scrub,
     verdict_path,
+    mark_unsandboxed,
     write_did_not_run,
 )
 from ._spec import ALIAS_PROFILE_PATH, BoxExecutor, BoxRequest, BoxSpec, Mount
@@ -56,6 +58,25 @@ _BOX_ULIMITS: tuple[str, ...] = (
 )
 
 
+def _input_dir_source(run_dir: Path) -> Path:
+    """The run's input directory (the alert and its record), checked to be a real, populated
+    directory before it is bound read-only over the writable run folder. A missing, empty or
+    non-directory source, or a link at its name, is a `BoxFault` naming the directory: a bind
+    source that is not that directory would hand the box a tree the host did not set up, and
+    there is no fallback to a writable bind."""
+    where = Path(run_dir) / RUN_LAYOUT.alert_input_dir
+    try:
+        mode = where.lstat().st_mode
+        populated = stat.S_ISDIR(mode) and any(where.iterdir())
+    except OSError:
+        populated = False
+    if not populated:
+        raise BoxFault(
+            f"the run's input directory {RUN_LAYOUT.alert_input_dir} is missing, empty, not a "
+            "directory, or a link — the box is not started over it")
+    return where
+
+
 def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus its tenant's half
     name: str, run_dir: Path, defender_dir: Path, spec: BoxSpec,
     mounts: Sequence[tuple[Path, Path]] = (), start_token: str = "",
@@ -78,6 +99,7 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
     rootfs = resolve_rootfs(spec.rootfs, defender_dir)
     env_pairs = {**infra_env(defender_dir, run_dir), **_LOCALE_ENV, **_BOX_MARK_ENV}
     run_src = _daemon_source(run_dir, mounts)
+    input_dir = _input_dir_source(run_dir)
     defender_src = _daemon_source(defender_dir, mounts)
     argv = [
         "docker", "run", "--detach", "--name", name,
@@ -89,6 +111,9 @@ def _create_argv(  # noqa: PLR0913 — the run's geography: its two trees plus i
         "--security-opt", f"seccomp={ALIAS_PROFILE_PATH}",
         *_BOX_ULIMITS,
         "--mount", f"type=bind,source={run_src},target={run_dir}",
+        # Over the writable run folder, a directory of its own: a file bind is undone by a host
+        # rename, a directory bind is not (#1222 A1).
+        "--mount", f"type=bind,source={_daemon_source(input_dir, mounts)},target={input_dir},readonly",
         "--mount", f"type=bind,source={defender_src},target={defender_dir},readonly",
     ]
     if tenant_agent is not None:
@@ -548,7 +573,11 @@ def stop_and_scrub(
             f"be leaked, and {tree} was NOT scrubbed (the walk needs a provably dead box).",
         )
     if box_down:
-        scrub_tree(tree)
+        try:
+            scrub_tree(tree)
+        finally:
+            if not getattr(box, "sandboxed", True):
+                mark_unsandboxed(tree)
         # Crash-orphaned staged files are never overwritten by name, so sweep them. Only after
         # the walk (which must see them); a tainted tree never gets here.
         swept = sweep_staged(tree)

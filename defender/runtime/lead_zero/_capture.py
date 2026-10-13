@@ -1,261 +1,27 @@
-"""Lead-0: issuing a turn-zero call and recording what came back.
-
-The budget gate, the per-run call ledger, and the declaring `:L findings` row a harness
-lead must own before it may write anything.
-"""
+"""The correlation lead's run-folder bookkeeping: its queries rows, the spend of its spawn, and
+the declaring `:L findings` row the harness lead must own before it may write anything."""
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
-from defender._model import model
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Annotated, Any
 
-from pydantic import SkipValidation
-
-from defender._io import read_text_utf8
 from defender.run_repository import RunPaths
-from defender.hooks.budget_enforcer import (
-    BudgetKill,
-    enforcement_state,
-    tail_exhausted,
-)
-from defender.runtime import circuit_breaker
-from defender.runtime.run_state import RunState, run_state_of
-from defender.runtime.verbs import VerbContext
-from ._spec import ITEM1_SYSTEM, _ANY_RUN_TAG, _FENCE_RUN
 
 _logger = logging.getLogger(__name__)
 
 
-@model(frozen=True)
-class LeadZeroResult:
-    """Item 1's result. `text` is the rendered block (sanitized, elided, wrapped); item 3's
-    contract carries the same bytes so the correlation lead picks its own axes off them.
-
-    No extracted-entity field: a fixed host/user/source-ip triple fits only host-level auth
-    sources and is noise elsewhere (e.g. container sources that all report one shared host)."""
-
-    text: str
-    status: str
-
-
-def _sanitize(text: Any) -> str:
-    """Defang `<run-…-…>`-shaped delimiters and markdown fence runs in external content
-    before it is interpolated into text that crosses an agent boundary.
-
-    The delimiter half matters for item 3's goal, which is handed to the gather subagent
-    unframed (the ORIENT frame re-mints its own delimiter on collision). Characters are
-    replaced, never deleted, so the evidence stays visible."""
-    if not isinstance(text, str):
-        text = str(text)
-    text = _ANY_RUN_TAG.sub(lambda m: m.group(0).replace("<", "‹").replace(">", "›"), text)
-    return _FENCE_RUN.sub(lambda m: "ˋ" * len(m.group(0)), text)
-
-
-@model(frozen=True)
-class _CaptureDeps:
-    run_dir: Path
-    defender_dir: Path
-    run_id: str
-    lead_id: str
-    #: The run's one live state (#1235): lead-0's rows, breaker charges and counts land in it,
-    #: as MAIN's and every gather lead's do. `SkipValidation`: the run's object, never a copy.
-    run_state: Annotated[RunState, SkipValidation]
-    box: Any = None
-    #: The run's tenant record (#1107) — what item 1's verb context hands the adapter. `None`
-    #: only for a caller with no run (a direct test of the recorder); a verb built over it is
-    #: refused by `VerbContext`.
-    tenant: Annotated[Any, SkipValidation] = None
-
-
-def _last_row_seq(state: RunState, lead_id: str) -> int:
-    """The queries-table `seq` of the last call under `lead_id`, which documents from that
-    call are elided against (a document's position in the block is not its payload's seq).
-    `-1` when no row exists."""
-    row = state.last_row(lead_id)
-    seq = row.get("seq") if row is not None else None
-    return seq if isinstance(seq, int) else -1
-
-
-async def _capture_issue(
-    capture: Any, deps: _CaptureDeps, verb: str, params: dict, env: dict,
-) -> tuple[dict | None, str]:
-    """Issue one call through the real `QueryCapture.wrap_tool_execute`, so every screen runs
-    as for a model-dispatched query.
-
-    Returns `(envelope_or_None, raw_result_text)`; `None` covers both a screened call and one
-    that was attempted but failed."""
-    before = deps.run_state.row_count(deps.lead_id)
-    call = SimpleNamespace(tool_name="query")
-    args = {"system": ITEM1_SYSTEM, "verb": verb, "params": params}
-    # Kept so a later write failure can recover the result without re-issuing the call.
-    captured: list[Any] = []
-
-    async def handler(_args: dict) -> Any:
-        fn = capture._registry.verbs(ITEM1_SYSTEM)[verb]
-        vctx = VerbContext(defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=env,
-                           tenant=_tenant_of(deps), run_state=deps.run_state)
-        result = await asyncio.to_thread(fn, vctx, **params)
-        captured.append(result)
-        return result
-
-    ctx = SimpleNamespace(deps=deps)
-    try:
-        text = await capture.wrap_tool_execute(ctx, call=call, args=args, handler=handler)
-    except (OSError, ValueError):
-        # A queries-table line that cannot land (the row is in the run's state all the same) or
-        # a row refused before it is recorded costs the record, not the evidence, and must not
-        # trigger a second backend call.
-        envelope = captured[0] if captured else None
-        return (envelope if isinstance(envelope, dict) else None), ""
-    if deps.run_state.row_count(deps.lead_id) <= before:
-        return None, text
-    row = deps.run_state.last_row(deps.lead_id)
-    if row is None or row.get("exit_code") != 0:
-        return None, text
-    payload_path = row.get("payload_path")
-    if not isinstance(payload_path, str):
-        # The sidecar payload failed to persist; use the in-memory result.
-        envelope = captured[0] if captured else None
-        return (envelope if isinstance(envelope, dict) else None), text
-    try:
-        data = json.loads(read_text_utf8(deps.run_dir / payload_path))
-    except (OSError, ValueError):
-        return None, text
-    if not isinstance(data, dict):
-        return None, text
-    return data, text
-
-
-#: The capped path's exit code for an unmapped fault. Mirrors `query_tool.DEFAULT_FAULT_EXIT`
-#: without importing it, since that is internal to the model-facing capture.
-_UNMAPPED_FAULT_EXIT = 2
-
-
-def _record_manual_row(
-    deps: _CaptureDeps, verb: str, params: dict, payload: Any, *, exit_code: int,
-) -> None:
-    """Write a queries-table row through `record_query.append_query_row`, the shared row
-    constructor, so the columns always match `QUERY_ROW_COLUMNS`. Derived columns come from
-    the column owner's helpers; only the display digest and `system` are decided here.
-
-    Does not feed `circuit_breaker.record_outcome`, so capped calls keep running without
-    pushing the breaker over its trip boundary on lead-0's behalf."""
-    from defender.scripts.gather_tools.record_query import (
-        append_query_row,
-        payload_digest,
-        payload_status,
-        raw_command,
-        system_fingerprint,
-    )
-
-    text = json.dumps(payload, default=str) if exit_code == 0 else ""
-    append_query_row(
-        run_state_of(deps),
-        lead_id=deps.lead_id,
-        system=ITEM1_SYSTEM,
-        verb=verb,
-        query_id=f"{ITEM1_SYSTEM}.{verb}",
-        params=params,
-        raw_command=raw_command(ITEM1_SYSTEM, verb, params),
-        payload_text=text,
-        exit_code=exit_code,
-        payload_status=payload_status(exit_code, payload),
-        payload_digest=(
-            payload_digest(text, "", 0) if exit_code == 0 else f"exit={exit_code}; capped"
-        ),
-        # No model-authored system name on this path (`raw_system` is `""`); the system is
-        # the host's own constant.
-        system_key=system_fingerprint("", ITEM1_SYSTEM),
-    )
-
-
-class _CallLedger:
-    """Tracks item 1's contribution to the per-system breaker, so later infra failures can
-    still be issued without being recorded past the cap."""
-
-    def __init__(self, state: RunState):
-        self.state = state
-        self.capped = False
-
-    async def call(self, capture, deps, verb, params, env):
-        from defender.scripts.adapters.faults import AdapterFault
-
-        before = self.state.breaker_failures(ITEM1_SYSTEM)
-        if self.capped:
-            # Past the cap: bypass QueryCapture's `record_outcome`, still writing a row.
-            try:
-                fn = capture._registry.verbs(ITEM1_SYSTEM)[verb]
-                vctx = VerbContext(defender_dir=deps.defender_dir, run_dir=deps.run_dir, env=env,
-                                   tenant=_tenant_of(deps), run_state=deps.run_state)
-                envelope = await asyncio.to_thread(fn, vctx, **params)
-            except (circuit_breaker.RunAborted, asyncio.CancelledError,
-                    KeyboardInterrupt, GeneratorExit):
-                # Control-flow signals propagate; they are never the query's fault.
-                raise
-            except AdapterFault as e:
-                # A mapped fault keeps its own exit code, as in `QueryCapture._record`.
-                _record_manual_row(deps, verb, params, None, exit_code=e.exit_code)
-                return None, ""
-            except BaseException:  # noqa: BLE001 — an unmapped capped-call fault must not raise
-                _record_manual_row(deps, verb, params, None, exit_code=_UNMAPPED_FAULT_EXIT)
-                return None, ""
-            # Outside the `try`: the call succeeded, and its row is already in the state when the
-            # view write is refused — that OSError is not the call's fault and must not record a
-            # second row for it (one backend call, one row).
-            _record_manual_row(deps, verb, params, envelope, exit_code=0)
-            return envelope, ""
-        envelope, text = await _capture_issue(capture, deps, verb, params, env)
-        after = self.state.breaker_failures(ITEM1_SYSTEM)
-        if after > before:
-            self.capped = True
-        return envelope, text
-
-
-def _tenant_of(deps: Any) -> Any:
-    """The run's tenant record a lead-0 verb is handed — refused, not guessed, when the deps were
-    built without one (#1106: there is no checkout copy to fall back to)."""
-    tenant = getattr(deps, "tenant", None)
-    if tenant is None:
-        raise TypeError("lead-0's verb context needs the run's tenant record")
-    return tenant
-
-
-def _build_deps(
-    state: RunState, defender_dir: Path, lead_id: str, tenant: Any,
-) -> _CaptureDeps:
-    return _CaptureDeps(
-        run_dir=state.run_dir, defender_dir=defender_dir, run_id=state.run_id, lead_id=lead_id,
-        run_state=state, tenant=tenant,
-    )
-
-
-def _budget_gate(state: RunState, limits: dict) -> None:
-    """Refuse lead-0's next call once the run's budget tail is spent, read off the clock the
-    budget hooks read (`enforcement_state`: the monotonic origin beside the wall one, less the
-    oracle-held seconds), so lead-0 and the hooks agree on the same state. Not gated on
-    `DEFENDER_BUDGET_ENFORCE`: lead-0 is harness work, not a model tool refusal."""
-    if tail_exhausted(enforcement_state(state), limits):
-        raise BudgetKill("lead-0's own call refused: the run's budget tail is exhausted")
-
-
-def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> None:
-    """Write lead-0's declaring `:L findings` row into `investigation.md` before MAIN's first
-    turn; without it, a citation of the reserved id is refused as an undeclared lead.
-
-    `system` comes from the caller because the two reserved ids get it from different
-    authorities (item 1's constant, item 3's dispatch), which can diverge.
+def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> bool:
+    """Write the harness lead's declaring `:L findings` row into `investigation.md` before
+    MAIN's first turn; without it, a citation of the reserved id is refused as an undeclared
+    lead. True when the row is on disk; False when it could not be written, which the caller
+    names as the lead's own ending (it does not start).
 
     This write bypasses `permission.decide_write`, so the content schema is applied here via
     `validate_artifact`, keeping "a committed investigation parses" true. A seed that fails
-    validation is not written: the id stays undeclared and MAIN gets a recoverable
-    `undeclared lead` refusal instead of unvalidated bytes. Best-effort: never raises."""
+    validation is not written. Never raises."""
     from defender._artifact_schema import validate_artifact
     from defender.run_repository import RUN_LAYOUT
-    from defender._io import write_guarded
+    from defender._io import read_text_utf8, write_guarded
 
     path = RunPaths(run_dir).investigation
     block = (
@@ -276,7 +42,9 @@ def _declare_l_finding(run_dir: Path, lead_id: str, name: str, system: str) -> N
                 f"would not pass validation, so nothing was written and the id stays "
                 f"undeclared: {reason}"
             )
-            return
+            return False
         write_guarded(path, proposed)
-    except (OSError, ValueError) as e:  # noqa: BLE001 — best-effort; never breaks the run
+    except (OSError, ValueError) as e:  # noqa: BLE001 — never breaks the run
         _logger.warning(f"could not declare {lead_id} in investigation.md: {e!r}")  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+        return False
+    return True

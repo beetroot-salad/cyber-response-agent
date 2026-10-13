@@ -525,7 +525,10 @@ def test_1120_a_first_setup_applies_every_folder_rule_before_it_writes_the_row(
         proc = H.setup(tenant_py, root)
     except subprocess.TimeoutExpired:
         pytest.fail(f"setup blocked on {named} instead of refusing it (a FIFO opened for reading)")
-    text = H.assert_refused(proc, str(named))
+    # The case-history mapping is refused by the one tenant check (#1222 A5): a fixed reason
+    # naming the file relative to settings/, never the host path.
+    needle = "systems/case-history/mapping.yaml" if named.name == "mapping.yaml" else str(named)
+    text = H.assert_refused(proc, needle)
     assert "the data root is not empty" not in text, (
         f"the refusal is the one-tenant guard's; it must admit the placed knowledge (MF1) and "
         f"the folder rule must refuse {named}:\n{text}")

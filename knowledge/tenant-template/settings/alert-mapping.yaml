@@ -1,0 +1,18 @@
+# The tenant's alert mapping (#1222): where the facts the harness needs are read from, as dotted
+# paths into the run's alert (a walk over JSON objects only). REQUIRED: a tenant without this file
+# is refused at acceptance, setup, `check` and run start.
+#
+# The harness reads the alert through this file ONCE, when the run starts, and records the three
+# facts beside the alert; every later reader (orientation, the case ticket, the corpus, the
+# learning judge, the lesson writer) takes them from that record.
+#
+#   signature   the rule key lessons and the corpus are matched on. Must be a key: ASCII letters,
+#               digits and . _ : / @ + = - (no leading dash, at most 128 characters), a JSON
+#               string or an integer. Anything else records no signature.
+#   event_time  when the activity happened; carried as it is, never parsed.
+#   summary     one line of what fired.
+#
+# Leave a key out to map nothing for it; an unmapped fact is simply absent.
+signature: rule.id
+event_time: alert_timestamp
+summary: rule.description

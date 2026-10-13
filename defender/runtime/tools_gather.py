@@ -63,6 +63,11 @@ GatherFactory = Callable[[str, str, int], Any]
 def _tripped_message(deps: GatherDeps, system: str | None) -> str | None:
     state = run_state_of(deps)
     if system and circuit_breaker.is_tripped(state, system):
+        # Remembered on the lead's stop, so the harness's correlation lead can name "a call was
+        # refused by the breaker" apart from "every call failed" (#1222 A2).
+        stop = getattr(deps, "stop", None)
+        if stop is not None:
+            stop.mark_breaker_refused(system)
         return circuit_breaker.down_message(state, system)
     return None
 
@@ -362,16 +367,12 @@ _LEAD_REUSE_RETRY = (
     "reuse an id)."
 )
 
-#: No leads row was written. The dispatch must not proceed: an unclaimed id is invisible to the
-#: reuse gate, so repeated sessions would overwrite `gather_summaries/{lead_id}.md`. Shape
-#: errors are refused before the claim, so this is a failed run-dir write and the id is still
-#: free, hence "retry this lead".
-_LEAD_UNCLAIMED_RETRY = (
-    "lead_id {lead_id!r} could not be claimed: the leads-table row could not be WRITTEN, so "
-    "this dispatch was not run and the id is still free. Re-dispatch this same lead_id. If it "
-    "fails the same way again the run dir is not writable — say so and reason from what the "
-    "other leads captured rather than spending a new :L row per attempt."
-)
+class LeadRecordFault(session_store.StoreError):
+    """No leads row could be written for a lead MAIN dispatched: the run folder refused the
+    run's own record (#1222 C40). Shape errors are refused before the claim, so this is a
+    host-side write fault no re-dispatch can fix, and an unclaimed id is invisible to the reuse
+    gate (repeated sessions would overwrite `gather_summaries/{lead_id}.md`). It ends the run
+    through the store exit rather than asking the model to retry."""
 
 
 def _persist_gather_summary(run_dir: Path, lead_id: str, wrapped: str) -> None:
@@ -444,12 +445,18 @@ def _compose(
     return ending.terminator, f"{ending.notice}\n\n{body}"
 
 
-async def _run_gather(  # noqa: C901 — one except arm per way a gather run can end
+async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gather run can end
     deps: AgentDeps, gather_factory: GatherFactory, request_limit: int, request: GatherRequest,
     verb_grant: VerbGrant, stamp_terminator: Callable[[str, str], None] | None = None,
     *, catalog: str | None, pre_claimed: bool = False,
+    on_end: Callable[[Any], None] | None = None,
 ) -> str:
     """Run one gather lead and return main's wrapped result.
+
+    `on_end`, when given, is called once with a `lead_zero._items.LeadEnd` (the lead's own
+    summary, how a fault ended its session, what the harness's stops recorded) just before the
+    result is composed: the harness's correlation lead decides its ending from it, since the
+    composed text mixes the notice and the summary.
 
     `stamp_terminator(agent_id, reason)` records how the session ended; the composition root
     supplies it because the session is opened inside the factory. `None` skips stamping.
@@ -497,7 +504,9 @@ async def _run_gather(  # noqa: C901 — one except arm per way a gather run can
         if claimed == ALREADY_CLAIMED:
             raise ModelRetry(_LEAD_REUSE_RETRY.format(lead_id=lead_id))
         if claimed != CLAIMED:
-            raise ModelRetry(_LEAD_UNCLAIMED_RETRY.format(lead_id=lead_id))
+            raise LeadRecordFault(
+                f"lead {lead_id!r} could not be claimed: the run's leads table could not be "
+                "written")
 
     state = run_state_of(deps)
     if circuit_breaker.is_tripped(state, system):
@@ -527,6 +536,7 @@ async def _run_gather(  # noqa: C901 — one except arm per way a gather run can
         run_state=deps.run_state,
         stop=stop,
         tenant=deps.tenant,
+        harness_lead=getattr(deps, "harness_lead", False),
     )
     prompt = _gather_prompt(deps, request, catalog, verb_grant)
 
@@ -575,6 +585,13 @@ async def _run_gather(  # noqa: C901 — one except arm per way a gather run can
         stamp(session_store.TRUNCATED_BY_ABORTED)
         raise
 
+    if on_end is not None:
+        from defender.runtime.lead_zero._items import LeadEnd
+
+        on_end(LeadEnd(
+            summary=summary, fault_terminator=fault.terminator if fault is not None else None,
+            ceiling=stop.ceiling, dead_end=stop.dead_end is not None,
+            breaker_refused=stop.breaker_refused))
     terminator, output = _compose(lead_id, stop, summary, fault)
     stamp(terminator)
     wrapped = wrap_fresh(output, "untrusted")

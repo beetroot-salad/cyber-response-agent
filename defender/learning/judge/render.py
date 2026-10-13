@@ -22,6 +22,7 @@ from typing import Any
 
 import contextlib
 
+from defender import _alert_input
 from defender._io import Bound, bind
 from defender._episode_paths import LAYOUT, WORLD_LEAVES, OracleStorePaths
 from defender.hooks.record_lesson_load import (
@@ -230,26 +231,20 @@ def _world_entry(doc: dict[str, Any], label: str) -> dict[str, Any]:
     raise JudgeRefused(f"the manifest declares no world {label!r}")
 
 
-def episode_alert(bound: Bound, labels: list[str]) -> dict[str, Any]:
-    """The alert this episode's worlds all investigate: the first world's `alert.json` that
-    carries an `alert_id`, else the first that parses.
+def episode_record(bound: Bound) -> _alert_input.AlertRecord | None:
+    """The record of the alert this episode's worlds all investigate: the copy launch put in the
+    episode (A1), or `None` when there is none or it is not one.
 
-    The enqueue's `alert_rule_key` keys on it.
-    """
-    fallback: dict[str, Any] = {}
-    for label in labels:
-        # A label off box-writable `judge.yaml` may not be a path component; skip it.
-        try:
-            data = json_mapping(bound, LAYOUT.world(label).alert)
-        except ValueError:
-            continue
-        if data is None:
-            continue
-        if data.get("alert_id") is not None:
-            return data
-        if not fallback:
-            fallback = data
-    return fallback
+    Shared by the sibling union and the enqueue's rule key, so both key on the same record."""
+    read = bound.read(LAYOUT.source_record)
+    return _alert_input.parse_alert_record(read.text) if read.text else None
+
+
+def episode_alert(bound: Bound) -> dict[str, Any]:
+    """The alert document the episode's copy holds, for display; `{}` when there is none, it is
+    not one JSON object, or its bytes are not the record's digest."""
+    return _alert_input.verified_document(
+        bound, LAYOUT.source_alert, LAYOUT.source_record) or {}
 
 
 def _render_samples(samples_doc: dict[str, Any], served: list[str]) -> str:

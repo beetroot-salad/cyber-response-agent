@@ -57,7 +57,9 @@ class RunAborted(Exception):
 # for the whole of it.
 
 
-def record_outcome(state: RunState, system: str, exit_code: int) -> dict:
+def record_outcome(
+    state: RunState, system: str, exit_code: int, *, counts_toward_run: bool = True,
+) -> dict:
     """Charge an infra failure (exit 2 / 124) to `system`, tripping it at
     `PER_SYSTEM_FAIL_LIMIT`. Returns the breaker after, a copy; `{}` when nothing was charged.
     `RunAborted` once the run's failures reach `RUN_FAIL_KILL_LIMIT`."""
@@ -66,7 +68,8 @@ def record_outcome(state: RunState, system: str, exit_code: int) -> dict:
     with state.lock:
         sysrec = state.breaker["systems"].setdefault(system, {"failures": 0})
         sysrec["failures"] += 1
-        state.breaker["total_failures"] += 1
+        if counts_toward_run:
+            state.breaker["total_failures"] += 1
         if sysrec["failures"] >= PER_SYSTEM_FAIL_LIMIT and "tripped_at" not in sysrec:
             sysrec["tripped_at"] = now_iso()
         # Inside the charge's lock (it is reentrant), so the copy is the breaker this charge left.

@@ -1,7 +1,5 @@
-"""Lead-0 vocabulary: lead ids, statuses, field names. Imports none of its siblings."""
+"""Lead-0 vocabulary: the correlation lead's id, provenance and endings. Imports none of its siblings."""
 from __future__ import annotations
-
-import re
 
 from defender.runtime.agent_role import CORRELATION_GRANT_HOLDER
 from defender.runtime.verb_dispositions import (
@@ -12,9 +10,8 @@ from defender.runtime.verb_dispositions import (
 from defender.runtime.verb_grant import GrantError, VerbGrant
 
 
-L0 = "l-000"
 L3 = "l-00c"
-RESERVED_LEAD_IDS = (L0, L3)
+RESERVED_LEAD_IDS = (L3,)
 CORRELATION_REQUEST_LIMIT = 8
 
 
@@ -50,44 +47,23 @@ def correlation_system(grant: VerbGrant) -> str | None:
     return systems[0]
 
 
-#: Item 1's own system, not the run's `correlation_system`. Every item-1 backend call names it,
-#: so its `:L findings` row must too; the correlation system can name a different vendor.
-ITEM1_SYSTEM = "elastic"
-
 PROVENANCE_KEY = "provenance"
 HARNESS_PROVENANCE = "harness"
 
-LEAD_ZERO_HEADING = "## Alert ancestors"
+#: The heading of the one correlation section in MAIN's opening message (A4, M1). It names the
+#: reserved id; the outcome (the lead's framed summary, or one ending's sentence) sits under it.
+CORRELATION_HEADING = f"## Correlation lead ({L3})"
 
-STATUS_FAILED = "failed"
-STATUS_EMPTY = "succeeded-empty"
-STATUS_TRUNCATED = "succeeded-truncated"
-#: Every requested ancestor document resolved.
-STATUS_RESOLVED = "succeeded-resolved"
+#: A2's closed list of the lead's own endings, in the order the classifier tries them.
+ENDING_WITHHELD = "withheld"
+ENDING_DISPATCH_RAISED = "dispatch_raised"
+ENDING_CLAIM_COLLIDED = "claim_collided"
+ENDING_CLAIM_FAILED = "claim_failed"
+ENDING_REQUEST_LIMIT = "request_limit"
+ENDING_TRIPPED_BREAKER = "tripped_breaker"
+ENDING_EMPTY_OUTPUT = "empty_output"
+ENDING_EVERY_CALL_FAILED = "every_call_failed"
+ENDING_TIMED_OUT = "timed_out"
 
-UNAVAILABLE = "_(unavailable:"
-SHORTFALL = "_(incomplete:"
-ELIDED = "_(elided:"
-
-#: The per-document `message` rendering budget. Any value that keeps the block materially
-#: smaller than a large payload will do; the exact number is not load-bearing.
-MESSAGE_CHAR_BUDGET = 4000
-
-ALERT_ID_FIELD = "kibana.alert.uuid"
-GROUP_ID_FIELD = "kibana.alert.group.id"
-BUILDING_BLOCK_FIELD = "kibana.alert.building_block_type"
-
-ITEM1_GOAL = (
-    "Resolve this alert's ancestor documents (the constituent events of its EQL sequence, "
-    "or the ancestor_events batch) so MAIN has their timestamp/message/structured fields at "
-    "ORIENT without spending a lead or a gather round on it."
-)
-ITEM1_WHAT_TO_SUMMARIZE = [
-    "each resolved ancestor document's timestamp, message and structured fields",
-]
-
-_ANY_RUN_TAG = re.compile(r"</?run-[0-9a-zA-Z]*-[a-z-]+>")
-#: A markdown code-fence run. Item 3's goal is emitted inside a fenced block, so a fence run in
-#: attacker-authored content would close it early and let the text pose as harness prose.
-
-_FENCE_RUN = re.compile(r"`{3,}")
+#: The run-level end the correlation lead's own deadline names on its session
+#: (`session_store.TRUNCATED_BY_TIMED_OUT`).

@@ -36,9 +36,12 @@ TRUNCATED_BY_ABORTED = "aborted"
 TRUNCATED_BY_BUDGET = "budget"
 TRUNCATED_BY_STORE = "store"
 TRUNCATED_BY_DEAD_END = "dead-end"
+#: Lead-only, like `dead-end`: the correlation lead was cut at the harness's correlation
+#: deadline (#1222 A7). MAIN's own session is never stamped with it.
+TRUNCATED_BY_TIMED_OUT = "timed-out"
 TRUNCATED_BY_VALUES = (
     TRUNCATED_BY_REQUEST_LIMIT, TRUNCATED_BY_RETRY_EXHAUSTED, TRUNCATED_BY_ABORTED,
-    TRUNCATED_BY_BUDGET, TRUNCATED_BY_STORE, TRUNCATED_BY_DEAD_END,
+    TRUNCATED_BY_BUDGET, TRUNCATED_BY_STORE, TRUNCATED_BY_DEAD_END, TRUNCATED_BY_TIMED_OUT,
 )
 
 #: Exits where the model spent its budget without closing, so the host writes an `unresolved`
@@ -114,6 +117,7 @@ __all__ = [
     "TRUNCATED_BY_REQUEST_LIMIT",
     "TRUNCATED_BY_RETRY_EXHAUSTED",
     "TRUNCATED_BY_STORE",
+    "TRUNCATED_BY_TIMED_OUT",
     "TRUNCATED_BY_VALUES",
     "RunEnd",
     "normalized_truncated_by",

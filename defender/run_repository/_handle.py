@@ -24,13 +24,12 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-import hashlib
 import json
 from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from defender import _artifact_schema, _episode_paths, _provenance, _report
+from defender import _alert_input, _artifact_schema, _episode_paths, _provenance, _report
 from defender import _io as _real_io
 from defender import _tenant
 from defender.run_repository import _layout
@@ -43,7 +42,7 @@ GROUPS = ("tables", "facts", "documents", "observability", "session")
 #: Must mirror `defender/tests/_spec1077.py::GROUP_MEMBERS`, the spec for this table.
 GROUP_MEMBERS: dict[str, tuple[str, ...]] = {
     "tables": ("queries", "policy_denials", "leads", "payloads", "ticket_reads"),
-    "facts": ("alert", "provenance", "run_end", "scrub_verdict"),
+    "facts": ("alert", "alert_record", "provenance", "run_end", "scrub_verdict"),
     "documents": ("investigation", "report", "gather_summaries", "lead_author", "source_refs"),
     "observability": (
         "wire_log", "review_trace", "forward_check_trace", "tool_trace", "review_record",
@@ -53,7 +52,7 @@ GROUP_MEMBERS: dict[str, tuple[str, ...]] = {
 MEMBER_ACCESSOR: dict[str, str] = {
     "queries": "executed_queries", "policy_denials": "policy_denials", "leads": "lead_claim",
     "payloads": "payload", "ticket_reads": "ticket_read",
-    "alert": "alert", "provenance": "provenance", "run_end": "run_end_sidecar",
+    "alert": "alert", "alert_record": "alert_record", "provenance": "provenance", "run_end": "run_end_sidecar",
     "scrub_verdict": "scrub_verdict",
     "investigation": "investigation", "report": "report",
     "gather_summaries": "gather_summary", "lead_author": "lead_author",
@@ -72,7 +71,7 @@ MEMBER_ACCESSOR: dict[str, str] = {
 MEMBER_VERB: dict[str, str | None] = {
     "queries": "append", "policy_denials": "append", "leads": "write", "payloads": "write",
     "ticket_reads": "write",
-    "alert": "write", "provenance": "write", "run_end": "write", "scrub_verdict": "write",
+    "alert": "write", "alert_record": "write", "provenance": "write", "run_end": "write", "scrub_verdict": "write",
     "investigation": "write", "report": "write", "gather_summaries": "write",
     "lead_author": None, "source_refs": "write",
     "wire_log": "append", "review_trace": "append", "forward_check_trace": "append",
@@ -89,7 +88,7 @@ UPWARD_ACCESSORS = (
 _SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "ticket_write", "session_pointer")
 #: Written once through the exclusive lane (a second lead claim must collide). The scrub
 #: verdict is a fact too but is rewritten, so it uses `replace` like every other `write`.
-_WRITE_ONCE_MEMBERS = frozenset({"alert", "provenance", "run_end", "leads"})
+_WRITE_ONCE_MEMBERS = frozenset({"alert", "alert_record", "provenance", "run_end", "leads"})
 #: The two model-authored documents, held to their content schema at every write.
 _SCHEMA_GATED_MEMBERS = {"investigation": RUN_LAYOUT.investigation.name,
                          "report": RUN_LAYOUT.report.name}
@@ -415,8 +414,7 @@ class Run:
         prov = self._provenance(faults)
         exit_class = self._exit_class(owner, faults) if self.runs_base is not None else None
         disposition, review_outcome = self._report_fields()
-        alert_bytes, _reason = self._io.rooted_read(
-            self.run_dir, RUN_LAYOUT.alert, binary=True)
+        alert_ref = self._alert_ref()
         return RunRecord(
             tenant_id=prov.tenant_id if prov is not None else None,
             world_id=prov.world_id if prov is not None else None,
@@ -424,7 +422,7 @@ class Run:
             dirty=prov.dirty if prov is not None else None,
             model=prov.model if prov is not None else None,
             run_id=self.run_dir.name,
-            alert_ref=case_ref(alert_bytes) if alert_bytes is not None else None,
+            alert_ref=alert_ref,
             # Lineage comes from the stamp, never a `family.yaml` guessed from the runs base.
             parent_run_id=prov.parent_run_id if prov is not None else None,
             fork_turn=prov.fork_turn if prov is not None else None,
@@ -433,6 +431,23 @@ class Run:
             review_outcome=review_outcome,
             faults=tuple(faults),
         )
+
+    def _alert_ref(self) -> str | None:
+        """The run's curation key, from its record's digest — `None` for a folder with no
+        record. A stored alert whose bytes no longer match the record is refused
+        (`AlertReplaced`, naming the run): the key must never follow replaced bytes."""
+        record_text, _reason = self._io.rooted_read(self.run_dir, RUN_LAYOUT.alert_record)
+        record = None if record_text is None else _alert_input.parse_alert_record(record_text)
+        if record is None:
+            return None
+        alert_bytes, _reason = self._io.rooted_read(
+            self.run_dir, RUN_LAYOUT.alert, binary=True)
+        if alert_bytes is not None and _alert_input.digest_of(alert_bytes) != record.digest:
+            raise _alert_input.AlertReplaced(
+                f"the alert stored for run {self.run_dir.name} does not match the digest its "
+                "record carries — the run's input was replaced or damaged, and nothing is "
+                "read from it")
+        return case_ref_of_digest(record.digest)
 
     def _provenance(self, faults: list[str]) -> _provenance.RunProvenance | None:
         raw, _reason = self._io.rooted_read(self.run_dir, RUN_LAYOUT.provenance)
@@ -483,9 +498,15 @@ class Run:
         outcome = fm.get("outcome") if isinstance(fm, dict) else None
         return read.disposition, (outcome if isinstance(outcome, str) else None)
 
+def case_ref_of_digest(digest: str) -> str:
+    """The curation key a run is known by: `case-<the alert's sha256 digest>[:16]`, the digest
+    its record carries."""
+    return f"case-{digest[:16]}"
+
+
 def case_ref(alert_bytes: bytes) -> str:
-    """The curation key a run is known by: `case-<sha256 of the alert's bytes>[:16]`."""
-    return f"case-{hashlib.sha256(alert_bytes).hexdigest()[:16]}"
+    """`case_ref_of_digest` for alert bytes in hand."""
+    return case_ref_of_digest(_alert_input.digest_of(alert_bytes))
 
 
 # ---------------------------------------------------------------------------------------

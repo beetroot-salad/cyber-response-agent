@@ -468,9 +468,10 @@ def closed_run_dir(tmp_path: Path, *, disposition: str = "malicious", report: bo
     F-K's unreachable sub-case has: a forced-close-set exit whose own forced close failed."""
     run_dir = Path(tmp_path) / name
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "alert.json").write_text(
-        json.dumps({"rule": {"id": ALERT_ID, "description": "lateral movement from web1"},
-                    "timestamp": "2026-09-16T11:00:00Z"}), encoding="utf-8")
+    from defender.tests._alert_plant import plant_alert
+
+    plant_alert(run_dir, {"rule": {"id": ALERT_ID, "description": "lateral movement from web1"},
+                          "timestamp": "2026-09-16T11:00:00Z"})
     if report:
         (run_dir / "report.md").write_text(report_text(disposition), encoding="utf-8")
     return run_dir

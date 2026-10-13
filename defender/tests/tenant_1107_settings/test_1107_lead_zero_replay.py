@@ -1,7 +1,6 @@
 """#1107 — lead-zero and the replay lane over the tenant settings record (slice E2).
 
-Lead-zero's item 1 reads the run's record (`record.elastic`) rather than the tenant's files, and
-reports an unconfigured or bad Elastic part through an explicit "unavailable" branch; both
+Both
 `AgentDeps` copies (MAIN's and lead-zero's) carry the record to their leads; the replay helper
 chain builds its `RunTenant` through `resolve_run_tenant` alone, its grants from the tenant
 folder; a resumed run or sibling re-resolves at its own start; and the three tests that exported
@@ -27,7 +26,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime import driver, run_tenant  # noqa: E402
+from defender.runtime import run_tenant  # noqa: E402
 from defender.scripts.adapters import (  # noqa: E402
     _stub_transport,
     elastic_adapter,
@@ -121,120 +120,11 @@ def _fresh(tmp_path: Path, name: str) -> Path:
     return path
 
 
-# ---- lead-zero item 1 reads the record ---------------------------------------------------------
-
-def test_c_lead_zero_reads_record(tmp_path):
-    """resolve_lead_zero takes the record, lead-zero's capture deps carry it, and item 1's
-    alerts-index fallback reads record.elastic. With ELASTIC_ALERTS_INDEX edited in the file
-    after the record is built, item 1's shell fetch still uses the value as built."""
-    built, edited = "c1107-built-alerts-*", "c1107-edited-alerts-*"
-    _root, folder, tenant = _plant(
-        tmp_path, "c1107", configs=S.config_texts("c1107", alerts_index=built))
-    in_file: list[str] = []
-
-    # `drive()` builds the run's record BEFORE the driver starts, and `run_investigation` opens
-    # the store (this factory) BEFORE `_opening_prompt` resolves item 1 — so the edit lands after
-    # the record is built and before item 1 falls back to the alerts index.
-    def edit_then_open(case_id: str, run_dir: Path) -> Any:
-        S.set_key(folder, "elastic", "ELASTIC_ALERTS_INDEX", edited)
-        in_file.append(S.config_path(folder, "elastic").read_text(encoding="utf-8"))
-        return driver._default_store_factory(case_id, run_dir)
-
-    res = LZ.run(tmp_path / "lz", run_id="c1107-lz", alert=LZ.alert_doc(signal_index=None),
-                 answer=LZ.answer_hits([LZ.hit(ts="2026-05-25T15:22:00.000Z")]),
-                 tenant=tenant, store_factory=edit_then_open)
-
-    assert in_file, ("the edit never landed before item 1 ran — the scenario cannot tell the record from the "
-        f"file: {in_file!r}")
-    assert f'ELASTIC_ALERTS_INDEX="{edited}"' in in_file[0], ("the edit never landed before item 1 ran — the scenario cannot tell the record from the "
-        f"file: {in_file!r}")
-    assert res.shell_call.params["index"] == built, (
-        f"item 1's shell fetch used {res.shell_call.params['index']!r}: it re-read the tenant's "
-        f"config.env after the record was built instead of reading record.elastic ({built!r})")
-    entry = S.mod("runtime.lead_zero").resolve_lead_zero
-    assert S.RETIRED_FIELD not in inspect.signature(entry).parameters, (
-        f"resolve_lead_zero still takes {S.RETIRED_FIELD}: {inspect.signature(entry)}")
-    for call in res.rec.calls:
-        record = S.record_on(call.ctx)
-        assert record.settings == tenant.settings, (call.verb, record.settings)
-        assert record.elastic.alerts_index == built, (
-            f"lead-zero's {call.verb} call carried a record whose alerts index is "
-            f"{record.elastic.alerts_index!r}, not the value as built")
-
-
-def test_o9_lead_zero_unavailable_explicit(tmp_path):
-    """With record.elastic None, and separately with it a ConfigFault, an alert that has no
-    signal_index gets item 1 reported 'unavailable' through an explicit branch. The note names
-    the cause, 'no elastic system configured' or 'elastic config is bad' (F11 resolved auto). No
-    shell fetch is issued, nothing is raised into item 1's broad except, and the investigation
-    continues (C10, CX4)."""
-    # rejected: the broad `except Exception` in _resolve_item1 as the mechanism
-    root_none, folder_none, tenant_none = _plant(tmp_path, "o9none")
-    shutil.rmtree(S.config_path(folder_none, "elastic").parent)
-    root_bad, folder_bad, tenant_bad = _plant(tmp_path, "o9bad")
-    # d_elastic_view: ELASTIC_ES_CONTAINER is one of the all-or-nothing keys (no default, CX17).
-    S.drop_key(folder_bad, "elastic", "ELASTIC_ES_CONTAINER")
-
-    for arm, root, tenant, cause in (("none", root_none, tenant_none, S.NO_ELASTIC),
-                                     ("bad", root_bad, tenant_bad, S.BAD_ELASTIC)):
-        record = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
-                                           dispatches_lead_zero=True)
-        if arm == "none":
-            assert record.elastic is None, (arm, record.elastic)
-        else:
-            assert isinstance(record.elastic, S.config_fault()), (arm, record.elastic)
-
-        res = LZ.run(tmp_path / f"lz-{arm}", run_id=f"o9-{arm}",
-                     alert=LZ.alert_doc(signal_index=None), tenant=tenant)
-        section = res.section()
-        assert LZ.UNAVAILABLE in section, f"[{arm}] item 1 was not reported unavailable:\n{section}"
-        assert cause in section, f"[{arm}] the unavailable note does not name {cause!r}:\n{section}"
-        # Nothing raised into the broad except: neither its own note nor the outer frame's repr
-        # of a raised fault (`_unavailable(f"{e!r}")`) is what item 1 reports.
-        assert BROAD_EXCEPT_NOTE not in section, f"[{arm}] the broad except answered:\n{section}"
-        assert "ConfigFault(" not in section, f"[{arm}] a raised fault's repr reached the note"
-        assert res.rec.calls == [], (
-            f"[{arm}] item 1 issued backend calls with no alerts index to fetch from: "
-            f"{[(c.verb, c.params) for c in res.rec.calls]}")
-        assert len(res.main.seen) >= 2, f"[{arm}] the investigation stopped at item 1"
-
-
-def test_s7_nf20_lead_zero_note_names_no_host_path(tmp_path):
-    """Lead-zero item 1's "unavailable" note names the cause class ("no elastic system
-    configured" / "elastic config is bad"); any fault text it carries passes the settings-path
-    redaction, so message zero never holds the tenant's host settings path, as given or
-    resolved, only SETTINGS_POINTER."""
-    link_none, folder_none, given_none = _linked_root(tmp_path, "nf20none")
-    shutil.rmtree(S.config_path(folder_none, "elastic").parent)
-    link_bad, folder_bad, given_bad = _linked_root(tmp_path, "nf20bad")
-    # The folder stays and its config.env goes: the fault that stands for it names the file —
-    # by the settings pointer since #1156's review, never by its host path.
-    S.config_path(folder_bad, "elastic").unlink()
-
-    for arm, link, given, cause in (("none", link_none, given_none, S.NO_ELASTIC),
-                                    ("bad", link_bad, given_bad, S.BAD_ELASTIC)):
-        assert given.is_dir(), f"the settings path as given names no folder: {given}"
-        resolved = given.resolve()
-        assert str(given) != str(resolved), "the tenants root is not reached through a link"
-        record = run_tenant.resolve_tenant(link, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
-                                           dispatches_lead_zero=True)
-        if arm == "bad":
-            # The record's Elastic fault names the file, by the pointer and not the host path.
-            fault_text = str(record.elastic)
-            assert isinstance(record.elastic, S.config_fault()), (arm, record.elastic)
-            assert S.settings_pointer() in fault_text, (
-                f"the elastic fault does not name the file by the settings pointer: {fault_text!r}")
-            for spelling in (str(resolved), str(given)):
-                assert spelling not in fault_text, (
-                    f"the elastic fault names the host settings path: {fault_text!r}")
-
-        res = LZ.run(tmp_path / f"lz-{arm}", run_id=f"nf20-{arm}",
-                     alert=LZ.alert_doc(signal_index=None), tenant=S.tenant_folder_of(link))
-        assert cause in res.section(), f"[{arm}] message zero's note does not name {cause!r}"
-        message_zero = res.message_zero
-        for spelling in (given, resolved, link, link.resolve()):
-            assert str(spelling) not in message_zero, (
-                f"[{arm}] message zero holds the tenant's host path {spelling}")
+# Lead-zero's item 1 — the ancestor fetch that read `record.elastic`'s alerts index and reported
+# "unavailable" for an unconfigured or bad Elastic part — was deleted by #1222 (D1), and with it
+# its three tests here (`c_lead_zero_reads_record`, `o9_lead_zero_unavailable_explicit`,
+# `s7_nf20_lead_zero_note_names_no_host_path`). The correlation lead reads no tenant file at
+# run start; its endings name no host path (`alert_front_door_1222/test_1222_correlation_endings`).
 
 
 # ---- both AgentDeps copies carry the record ------------------------------------------------------
@@ -272,6 +162,7 @@ def test_d_agentdeps_record(tmp_path):
                       Turn(text="Investigation complete."),
                   ],
                   gather_turns=[
+                      Turn(text=LZ.CORRELATION_SUMMARY),   # `l-00c` answers first (#1222)
                       Turn(tool_calls=[("query", {"system": "elastic", "verb": "query",
                                                   "params": {"native_query": main_query}})]),
                       Turn(text="Summary: the host's events."),
@@ -283,16 +174,17 @@ def test_d_agentdeps_record(tmp_path):
         for call in calls:
             record = S.record_on(call.ctx)
             assert record.settings == tenant.settings, (lead, record.settings)
-            assert record.elastic.alerts_index == f"{marker}-alerts-*", (lead, record.elastic)
+            assert record.systems["elastic"]["ELASTIC_ALERTS_INDEX"] == f"{marker}-alerts-*", (
+                lead, record.systems["elastic"])
             assert record.systems["cmdb"]["CMDB_URL_BASE"] == f"http://cmdb-{marker}:8080", lead
 
 
 # ---- a run whose Elastic part is bad completes ---------------------------------------------------
 
 def test_o5_missing_es_container_run_completes(tmp_path, monkeypatch, d9_tenant):
-    """A tenant whose elastic config.env lacks ELASTIC_ES_CONTAINER resolves with record.elastic
-    a ConfigFault, and its investigation runs to completion. Elastic calls fault with
-    ConfigFault, and lead-zero's item 1 reports unavailable."""
+    """A tenant whose elastic config.env lacks ELASTIC_ES_CONTAINER resolves with that key absent
+    from its systems["elastic"], and its investigation runs to completion. Elastic calls fault
+    with ConfigFault."""
     # CX8: the shim, first on the PATH the run env inherits, receives any docker call's argv.
     shim = S.DockerShim(tmp_path / "docker")
     monkeypatch.setenv("PATH", shim.path_value())
@@ -306,19 +198,12 @@ def test_o5_missing_es_container_run_completes(tmp_path, monkeypatch, d9_tenant)
     assert rc == 0, (rc, rec.order)
     assert rec.order.count("lifecycle") == 1, (rc, rec.order)
     record = rec.lifecycle_calls[0]["tenant"]
-    assert isinstance(record.elastic, S.config_fault()), record.elastic
+    assert "ELASTIC_ES_CONTAINER" not in record.systems["elastic"], record.systems["elastic"]
 
     ctx = S.verb_context(record, rec.run_dir_at, shim.env())
     with pytest.raises(S.config_fault()):
         elastic_adapter.query(ctx, native_query='host.name:"o5"')
     assert shim.calls() == [], f"an Elastic call reached docker: {shim.calls()}"
-
-    res = LZ.run(tmp_path / "lz", run_id="o5-lz", alert=LZ.alert_doc(signal_index=None),
-                 tenant=tenant)
-    section = res.section()
-    assert LZ.UNAVAILABLE in section, section
-    assert S.BAD_ELASTIC in section, section
-    assert len(res.main.seen) >= 2, "the investigation stopped at item 1"
 
 
 # ---- resumed runs re-resolve at their own start --------------------------------------------------
@@ -381,7 +266,7 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root, monkeypatch)
 
 def test_s7_mf7e_old_manifest_resume_runs_elastic_down(tmp_path, data_root, monkeypatch):
     """Resuming a sibling whose manifest records no corpus patterns over a tenant with no elastic
-    folder, or a bad one, proceeds: record.elastic is None or a ConfigFault, the resumed
+    folder, or a bad one, proceeds: the record holds no elastic system or one missing a key, the resumed
     sibling runs with its Elastic reads failing, and nothing refuses the investigation (O5).
 
     #1224: no manifest records patterns any more (`configured_patterns` is refused as
@@ -409,9 +294,9 @@ def test_s7_mf7e_old_manifest_resume_runs_elastic_down(tmp_path, data_root, monk
         assert "lifecycle" in sibling.order, (arm, rc, sibling.order)
         record = sibling.lifecycle_calls[0]["tenant"]
         if arm == "none":
-            assert record.elastic is None, (arm, record.elastic)
+            assert "elastic" not in record.systems, (arm, sorted(record.systems))
         else:
-            assert isinstance(record.elastic, S.config_fault()), (arm, record.elastic)
+            assert "ELASTIC_ES_CONTAINER" not in record.systems["elastic"], (arm, record.systems)
 
         ctx = S.verb_context(record, sibling.run_dir_at, shim.env())
         with pytest.raises(S.config_fault()):
@@ -424,7 +309,7 @@ def test_s7_mf7e_old_manifest_resume_runs_elastic_down(tmp_path, data_root, monk
 def test_d_replay_helper_through_resolver(tmp_path, monkeypatch):
     """tests/_tenants1106.run_tenant builds through run_tenant.resolve_run_tenant and nothing
     else (human, early-exit resolution 2). A replay-driven run's RunTenant is the one
-    resolve_run_tenant builds for its tenant folder: the same systems, elastic, ticket_mapping,
+    resolve_run_tenant builds for its tenant folder: the same systems, ticket_mapping,
     grants and correlation."""
     # G54 / test_1078_env.py:343-361: the harness builds with no data root and no runs base.
     H.set_data_root(monkeypatch, None)
@@ -447,17 +332,20 @@ def test_d_replay_helper_through_resolver(tmp_path, monkeypatch):
 
     run_dir = LZ.materialize_alert(tmp_path / "replay", LZ.alert_doc())
     rec = VerbRecorder()
+    lead = ReplayFn([
+              Turn(tool_calls=[("query", {"system": "elastic", "verb": "alerts",
+                                          "params": {"native_query": "user.name:dev.dana"}})]),
+              Turn(text=LZ.CORRELATION_SUMMARY),
+          ])
+    lead.serves_correlation = True   # this script is `l-00c`'s (#1222)
     drive(run_dir, run_id="rh1107", tenant=tenant,
-          main=ReplayFn([Turn(text="Investigation complete.")]),
-          gather=ReplayFn([Turn(text=LZ.CORRELATION_SUMMARY)]),
+          main=ReplayFn([Turn(text="Investigation complete.")]), gather=lead,
           verbs=LZ.elastic_backend(rec, LZ.answer_hits([])))
-    assert rec.calls, "lead-zero issued no verb call — the run's record was never observed"
+    assert rec.calls, "the correlation lead issued no verb call — the run's record was never observed"
     record = S.record_on(rec.calls[0].ctx)
 
     assert record.settings == tenant.settings
     assert record.systems == resolved.systems
-    assert ([getattr(record.elastic, a) for a in S.ELASTIC_ATTRS]
-            == [getattr(resolved.elastic, a) for a in S.ELASTIC_ATTRS])
     assert type(record.ticket_mapping) is type(resolved.ticket_mapping)
     assert S.open_reporter(record.ticket_mapping) == S.open_reporter(resolved.ticket_mapping)
     assert record.grants == resolved.grants

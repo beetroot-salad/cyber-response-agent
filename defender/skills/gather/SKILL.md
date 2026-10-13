@@ -19,7 +19,7 @@ A fenced YAML block — the `## Dispatch` section, the LAST section of your disp
 message, after the indexes — carries:
 
 - `defender_dir` — repo root; anchor `Read`/`Bash` to `{defender_dir}/...`.
-- `run_dir` — the run's working dir; `alert.json` is at `{run_dir}/alert.json`.
+- `run_dir` — the run's working dir; this run's alert is the read-only file `alert_input/alert.json`, a path relative to it.
 - `lead_id` — the `l-NNN` id; the harness uses it as the queries-table FK. You
   never pass it to the `query` tool — just run your query.
 - `system` — system of record (a `skills/` subdir). The catalog of templates is
@@ -34,7 +34,7 @@ message, after the indexes — carries:
 
 ### 1. ORIENT
 
-Read `{run_dir}/alert.json` and the lead. Confirm the lead actually wants
+Read the alert (`alert_input/alert.json`, relative to the run dir) and the lead. Confirm the lead actually wants
 `{system}`. Each system exposes its own verbs: the SIEM aggregates
 through the `esql` verb (an ES|QL pipe against the `logs-*` data streams) and
 filters through `query`/`alerts`; other systems have their own verbs (e.g.
@@ -46,8 +46,8 @@ connectivity, exit codes, and the pitfalls recorded there.
 
 **You own the retrieval — the time window included.** The lead names the
 question and its anchors (a timestamp, an identity, a host); it does not name
-your filters, your fields, or your window. Derive the window from `alert.json`
-and those anchors. A window the lead happens to state is the defender's
+your filters, your fields, or your window. Derive the window from the alert
+(`alert_input/alert.json`) and those anchors. A window the lead happens to state is the defender's
 declared *intent*, not a constraint on you: when the evidence sits outside it,
 widen and say so. Nothing that answers the lead's question is out of scope.
 

@@ -6,6 +6,7 @@ import re
 import stat
 from pathlib import Path, PurePosixPath
 
+from defender import _alert_input
 from defender._io import ALIAS_READ_REFUSAL, _mark_alias, is_plain_entry
 from defender._run_id import refuse_bad_case_id
 
@@ -47,6 +48,11 @@ GATE_METADATA_KEY = "json"
 # ======================================================================================
 
 ALERT = "alert.json"
+#: The read-only input directory the run's alert and its record sit in (#1222 A1): a DIRECTORY
+#: the box binds read-only, because a single-file bind is undone by a host rename.
+ALERT_INPUT_DIRNAME = "alert_input"
+#: The run's record, beside the alert: its byte digest and the three facts derived at run start.
+ALERT_RECORD = _alert_input.RECORD_FILE
 REPORT = "report.md"
 INVESTIGATION = "investigation.md"
 EXECUTED_QUERIES = "executed_queries.jsonl"
@@ -130,8 +136,16 @@ class RunLayout:
     # -- content the run produced -----------------------------------------------------------
 
     @property
+    def alert_input_dir(self) -> PurePosixPath:
+        return PurePosixPath(ALERT_INPUT_DIRNAME)
+
+    @property
     def alert(self) -> PurePosixPath:
-        return PurePosixPath(ALERT)
+        return self.alert_input_dir / ALERT
+
+    @property
+    def alert_record(self) -> PurePosixPath:
+        return self.alert_input_dir / ALERT_RECORD
 
     @property
     def report(self) -> PurePosixPath:
@@ -301,7 +315,7 @@ WIRE_LOG_NAMES = WireLogNames()
 class RunPaths:
     """One run's directories and its accessors — every name a run reads or writes.
 
-    15 accessors (a census test checks this count against the set it pins).
+    17 accessors (a census test checks this count against the set it pins).
 
     Accessors resolve relative to ``run_dir``, except the four sidecars, `sessions_dir` and
     `session_db`, which take the runs base explicitly.
@@ -319,8 +333,16 @@ class RunPaths:
     # -- content the run produced -----------------------------------------------------------
 
     @property
+    def alert_input_dir(self) -> Path:
+        return self.run_dir / RUN_LAYOUT.alert_input_dir
+
+    @property
     def alert(self) -> Path:
         return self.run_dir / RUN_LAYOUT.alert
+
+    @property
+    def alert_record(self) -> Path:
+        return self.run_dir / RUN_LAYOUT.alert_record
 
     @property
     def report(self) -> Path:
@@ -543,6 +565,13 @@ def gather_summaries_shape(segment: str) -> str:
     a read grant, so an unescaped metacharacter would silently widen it.
     """
     return f"{re.escape(GATHER_SUMMARIES_DIRNAME)}/{segment}"
+
+def alert_input_shape() -> str:
+    """The run's alert and its record, `alert_input/<alert|record>`, as a regex fragment with
+    every name escaped (it builds a read grant)."""
+    return (f"{re.escape(ALERT_INPUT_DIRNAME)}/"
+            f"(?:{re.escape(ALERT)}|{re.escape(ALERT_RECORD)})")
+
 
 # `resolve()` on a hostile operand — a symlink cycle, an embedded NUL, a name past PATH_MAX.
 _RESOLVE_ERRORS = (OSError, RuntimeError, ValueError)
