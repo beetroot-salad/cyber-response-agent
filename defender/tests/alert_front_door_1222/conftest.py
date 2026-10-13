@@ -15,6 +15,7 @@ environment and none writes outside its tmp dir. `monkeypatch.setenv` only — n
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -43,7 +44,11 @@ def _checkout_corpus_1222(tmp_path: Path, request: pytest.FixtureRequest):
     checkout = build_once_copy("1222.product-checkout", S.prepare_checkout,
                                tmp_path / "product" / "defender")
     token = S.LESSON_CHECKOUT.set(checkout)
+    # Adapter bootstraps may prepend this checkout while loading their real modules.
+    # Restore the import boundary before another test inspects the namespace package.
+    original_path = list(sys.path)
     try:
         yield
     finally:
+        sys.path[:] = original_path
         S.LESSON_CHECKOUT.reset(token)
