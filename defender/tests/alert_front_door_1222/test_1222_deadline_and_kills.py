@@ -347,6 +347,10 @@ def _budget_kill_during_lead(tmp: Path, tenant: S.Planted, monkeypatch: pytest.M
 
 
 def _assert_budget_kill_during_lead(d: S.Drive, stores: list) -> None:
+    result, = (r for r in read_jsonl_rows(RunPaths(d.folder).tool_trace)
+               if r.get("type") == "result")
+    assert result["duration_ms"] >= KILL_DELAY_S * 1000 - 1
+
     _assert_lead_ran(d)
     assert d.router.requests(L3) >= 1, "the lead never made its model request"
     _assert_main_never_asked(d, "a budget kill was raised at the lead's own tool call")
@@ -1196,3 +1200,19 @@ def test_p175_main_lead_named_l00c_when_no_harness_claim_exist(tmp_path: Path) -
         _assert_killed(d, _run_end().TRUNCATED_BY_ABORTED, "RunAborted")
         assert _session_ending(stores, lead) == _run_end().TRUNCATED_BY_ABORTED, (
             f"MAIN's {lead} reached the kill count and its session does not read as aborted")
+
+
+def test_run_duration_includes_correlation_and_main(tmp_path: Path) -> None:
+    """The trace covers the interval from the lead's first request through MAIN's last."""
+    delay = 0.3
+    main = S.MainScript(fault=S.LeadFault(delay=delay))
+    d = S.run_alert(tmp_path, main=main, leads={L3: [S.text(SUMMARY)]},
+                    lead_faults={L3: S.LeadFault(delay=delay)})
+    _assert_lead_ran(d)
+    assert d.raised is None
+    assert main.started
+    minimum_ms = (main.started[-1] + delay - d.router.started(L3)[0]) * 1000
+    result, = (r for r in read_jsonl_rows(RunPaths(d.folder).tool_trace)
+               if r.get("type") == "result")
+    # The persisted duration is rounded to whole milliseconds.
+    assert result["duration_ms"] >= minimum_ms - 1

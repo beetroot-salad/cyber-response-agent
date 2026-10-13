@@ -47,10 +47,10 @@ does, and keep it in the convention below.
 - `source_signature` — the run's recorded signature, copied verbatim and unquoted
   from the `recorded_signature` field of the finding's row, and from that field
   alone: a row without the field gives you no signature to write, so you never
-  invent or derive one. A finding keyed `unkeyed` has no signature either: write
-  no `source_signature` key at all for a lesson whose findings have none (not
-  null, not `[]`). When you fold, list each finding's own recorded signature
-  and never one it does not carry.
+  invent or derive one. Omit `source_signature` only when none of the contributing
+  findings carries `recorded_signature` (not null, not `[]`). A recorded signature
+  spelled `unkeyed` is a literal signature: copy it like any other value. When you
+  fold, list each finding's own recorded signature and never one it does not carry.
 - `telemetry_source` — the sensor the lesson's check keys on (`sshd`,
   `zeek`, `auditd`, `fim`, `cmdb`, `identity`, `ssh-ca`,
   `host-state`, `change-mgmt`, …). For "this source can't see X / isn't in

@@ -52,6 +52,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from defender import _tenant, _yaml
 from defender.tests import _drain719 as D
 from defender.tests import _judge_921 as J
@@ -1467,7 +1469,8 @@ def test_p073_queue_rows_from_before_the_change_drained_after(tmp_path):
     assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
 
 
-def test_b2_finding_rows_carry_the_signature_in_a_field_old_rows_lack(tmp_path):
+@pytest.mark.parametrize("sig", ["SIG-B2:r3.q", "unkeyed"])
+def test_b2_finding_rows_carry_the_signature_in_a_field_old_rows_lack(tmp_path, sig):
     """A finding row the judge enqueues for a run with a recorded signature carries that
     signature, verbatim, in its own field (`S.QUEUE_SIGNATURE_FIELD`, coined) -- a field rows
     queued before the change lack; the rows reach the curator with that field as written, and
@@ -1481,7 +1484,7 @@ def test_b2_finding_rows_carry_the_signature_in_a_field_old_rows_lack(tmp_path):
     word-level pins: an implementer whose correct wording trips one loosens the word list to
     their own words and never removes the check (§7 round 3, B5).
     """
-    sig, world = "SIG-B2:r3.q", "R-B2-WORLD"
+    world = "R-B2-WORLD"
     rows, copied = _judged(tmp_path, signature=sig, world_rule=world)
     assert rows, "the judge enqueued no finding"
     written = {r["finding_id"]: r.get(S.QUEUE_SIGNATURE_FIELD) for r in rows}
@@ -1503,7 +1506,8 @@ def test_b2_finding_rows_carry_the_signature_in_a_field_old_rows_lack(tmp_path):
     assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
 
 
-def test_p074_lesson_round_trip_for_a_signature_whose_slug_dif(tmp_path):
+@pytest.mark.parametrize("sig", ["Rule:Brute/Force@v2", "unkeyed"])
+def test_p074_lesson_round_trip_for_a_signature_whose_slug_dif(tmp_path, sig):
     """The curator writes the recorded signature verbatim as source_signature, and a later run's
     orientation lists that lesson.
 
@@ -1512,7 +1516,6 @@ def test_p074_lesson_round_trip_for_a_signature_whose_slug_dif(tmp_path):
     writes with that value (unquoted) as the drain commits it; a later run of an alert whose
     `rule.id` is that signature, with the committed lesson in the isolated checkout corpus.
     """
-    sig = "Rule:Brute/Force@v2"
     rows, copied = _judged(tmp_path, signature=sig, world_rule="R-P074-WORLD")
     assert rows, "the judge enqueued no finding"
     curator = _Curator({"fd-p074": _author_lesson("fd-p074", [sig], _ids(rows))})

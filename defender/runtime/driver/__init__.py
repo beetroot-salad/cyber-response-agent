@@ -432,7 +432,7 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
     correlation: CorrelationDispatch, *, run_dir: Path, defender_dir: Path, run_id: str,
     verbs: Any, limits: dict, make_model: MakeModel, logger: Any, box: Any, store: Any,
     session_id: str, case_id: str, model_name: str | None, run_state: RunState,
-    catalog: str | None, tenant: RunTenant, deadline: float,
+    catalog: str | None, tenant: RunTenant, deadline: float, run_started: float,
 ) -> tuple[str | None, dict | None]:
     """Run the correlation lead to its end and return `(the correlation section of MAIN's
     opening message, None)`, or `(None, the run summary)` when a run-level stop arrived first.
@@ -442,13 +442,11 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
     lead's summary releases the wire log and the store, then propagates."""
     from .. import lead_zero as lead_zero_mod
 
-    started = time.time()
-
     def stop(truncated_by: str, exit_reason: str) -> dict:
         return _stop_before_main(
             run_dir=run_dir, logger=logger, store=store, session_id=session_id,
             truncated_by=truncated_by, exit_reason=exit_reason, model_name=model_name,
-            case_id=case_id, wall_ms=(time.time() - started) * 1000.0)
+            case_id=case_id, wall_ms=(time.monotonic() - run_started) * 1000.0)
 
     try:
         outcome = await lead_zero_mod.run_correlation(
@@ -592,6 +590,9 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             exit_reason=type(e).__name__, case_id=case_id, store_path=None,
         )
 
+    # One execution clock covers correlation and MAIN, including a stop before MAIN.
+    run_started = time.monotonic()
+
     # The correlation lead runs to its end BEFORE the opening message is built (A4): the message
     # carries its framed summary or the one sentence naming its ending, and nothing about
     # correlation arrives later. `correlation` is `None` when this run dispatches none.
@@ -610,7 +611,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
             verbs=lead_zero_verbs, limits=limits, make_model=make_model, logger=logger, box=box,
             store=store, session_id=session_id, case_id=case_id, model_name=model_name,
             catalog=correlation_catalog,
-            tenant=tenant, run_state=state, deadline=correlation_deadline)
+            tenant=tenant, run_state=state, deadline=correlation_deadline, run_started=run_started)
         if stopped is not None:
             return stopped
     prompt = _opening_prompt(
@@ -634,11 +635,10 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         run_state=state,
     )
 
-    t0 = time.time()
     run, end, exit_reason = await _drive_releasing_log(
         logger, agent, prompt, deps, store, session_id, gate_bounds, resume_history,
     )
-    wall_ms = (time.time() - t0) * 1000.0
+    wall_ms = (time.monotonic() - run_started) * 1000.0
 
     result = run.result if run is not None else None
     try:
