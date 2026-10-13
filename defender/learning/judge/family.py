@@ -932,6 +932,10 @@ def _read_oracle_store(bound: Bound, world: dict[str, Any]) -> list[dict[str, An
         raise JudgeRefused(f"world {label!r}: {name} holds {torn} line(s) that do not parse "
                            "as a row")
     own = {f.get("fact_id") for f in world.get("facts") or () if isinstance(f, dict)}
+    for index, row in enumerate(rows):
+        if not isinstance(row.get("fact_id"), str):
+            raise JudgeRefused(f"world {label!r}: {name} row {index} has a malformed fact_id "
+                               f"({row.get('fact_id')!r}); expected a string")
     foreign = [row.get("fact_id") for row in rows if row.get("fact_id") not in own]
     if foreign:
         raise JudgeRefused(f"world {label!r}: {name} holds forged rows for facts this world "

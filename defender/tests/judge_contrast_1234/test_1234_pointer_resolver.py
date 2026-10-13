@@ -770,6 +770,21 @@ def test_1234_two_spellings_of_one_run_offered_as_a_two_run_pair(tmp_path: Path)
     assert lanes == [NO_PAIR] * len(spellings) + [DEFENDER]
     queued = {r.get("finding_id") for r in S.from_world(S.defender_queue(), "b")}
     assert queued == {built.finding_id("b", 0, len(spellings))}
+    assert _cites(built.finding_id("b", 0, len(spellings))) == {
+        S.conduct("b"), S.conduct("a")}
+
+
+@pytest.mark.parametrize("path", ["family.yaml", "./family.yaml", "x/../family.yaml",
+                                 ".//family.yaml/"])
+def test_1234_plan_spellings_reach_questioner(tmp_path: Path, path: str) -> None:
+    """Every accepted spelling of a plan pointer survives routing and queue validation."""
+    built = S.family(tmp_path)
+    _run(built, {"b": _reply(world=[_wf([path + "#worlds/b"])])})
+    fid = built.finding_id("b", 0, 0)
+    assert S.lane_of(built, fid) == QUESTIONER
+    row = _row_on(S.questioner_queue(), fid)
+    assert row is not None
+    assert row[CITATIONS] == [S.plan_ptr("b")]
 
 
 # --------------------------------------------------------------------------------------

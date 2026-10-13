@@ -86,6 +86,7 @@ class Resolution:
     inherited ordinary (pre-branch, not blocked) table row (A20). `blocked_key` is the blocked
     call's key (A2)."""
 
+    #: Canonical episode-relative spelling; Assessment.filed retains the authored spelling.
     pointer: str
     kind: str
     run: str | None
@@ -225,6 +226,7 @@ def _resolves(  # noqa: C901 — one rule per pointer class, kept in the one res
     if any(ch in pointer for ch in "\x00\n\r*?~") or "://" in pointer:
         return None
     parts, fragment = parsed
+    pointer = "/".join(parts) + ("#" + fragment if fragment is not None else "")
     head = parts[0]
     if head == str(LAYOUT.worlds) and len(parts) >= 3:
         return _world_pointer(scope, pointer, parts, fragment)
@@ -313,7 +315,7 @@ class Assessment:
 
     @property
     def citations(self) -> list[str]:
-        """The resolving pointers, in filed order: a queue row's `citations` (A1)."""
+        """Canonical resolving pointers, in filed order: a queue row's `citations` (A1)."""
         return [r.pointer for r in self.resolving]
 
 

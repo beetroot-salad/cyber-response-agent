@@ -317,6 +317,22 @@ def _on(leaf: str, plant: Callable[[Path, Path], Any]) -> Damage:
     return damage
 
 
+@pytest.mark.parametrize("fact_id", [[], {}, ["f-c"], {"id": "f-c"}, None, 1])
+def test_1234_malformed_forged_fact_id_excludes_only_its_world(tmp_path, fact_id):
+    built = S.family(tmp_path, S.triad(d=_D))
+    S.rewrite_jsonl(built.oracle_path("c"),
+                    lambda rows: [{**row, "fact_id": fact_id} for row in rows])
+    judge = S.judge({"b": S.world_reply("lead-quality", ["idp"], investigator=[
+        S.inv(contrast=[S.conduct("b"), S.conduct("a")])])})
+    S.grade(built, judge)
+    _assert_malformed(built, "c", "forged.jsonl")
+    assert "fact_id" in S.row(built, "c")[UNGRADABLE_REASON]
+    assert not judge.called("c")
+    _assert_out_of_references(judge, "c")
+    assert judge.called("b")
+    assert S.from_world(S.defender_queue(), "b")
+
+
 def _to_host_rows(path: Path, tmp_path: Path) -> Any:
     return S.plant_symlink(path, _host_rows(tmp_path))
 
