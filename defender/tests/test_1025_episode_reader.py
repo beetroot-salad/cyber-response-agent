@@ -398,9 +398,11 @@ def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_pat
     # world's table shares makes b's table refused as edited.
     token = J.world_token("b")
     rows = [
-        {"lead_id": "l-001", "query_id": "q1", "params": {"index": "logs-*"},
+        {"lead_id": "l-001", "system": "elastic", "verb": "query",
+         "query_id": "q1", "params": {"index": "logs-*"},
          "payload_digest": "d1", "call_id": f"{token}/1"},
-        {"lead_id": "l-001", "query_id": "q2", "params": {"index": "logs-2"},
+        {"lead_id": "l-001", "system": "elastic", "verb": "query",
+         "query_id": "q2", "params": {"index": "logs-2"},
          "payload_digest": "d2", "call_id": f"{token}/2"},
     ]
     _write_issued(world_dir, rows)
