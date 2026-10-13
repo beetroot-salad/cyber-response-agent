@@ -212,6 +212,10 @@ class EpisodeGrade:
     enqueued_to: str = ""
     world_enqueued_rows: int = 0
     world_enqueued_to: str = ""
+    #: The unreadable lines (a torn trailing row, say) the latest append saw on the defender /
+    #: questioner queue: skipped and counted, never raised on (#921 F-11).
+    queue_malformed_rows: int = 0
+    world_queue_malformed_rows: int = 0
     draws: dict[str, int] = field(default_factory=dict)
     knobs: dict[str, Any] = field(default_factory=dict)
     lessons_commit: str | None = None
@@ -392,6 +396,8 @@ def _stamp_not_graded(episode: Episode, word: str, reason: str, *,  # noqa: PLR0
         record.enqueued_rows, record.enqueued_to = prior.enqueued_rows, prior.enqueued_to
         record.world_enqueued_rows = prior.world_enqueued_rows
         record.world_enqueued_to = prior.world_enqueued_to
+        record.queue_malformed_rows = prior.queue_malformed_rows
+        record.world_queue_malformed_rows = prior.world_queue_malformed_rows
     _write_judge_yaml(episode, record)
     return record
 
@@ -574,6 +580,8 @@ class _Pass:
         self.found_gaps: list[dict[str, Any]] = []
         self.enqueued = 0
         self.world_enqueued = 0
+        self.queue_malformed = 0
+        self.world_queue_malformed = 0
         self.knobs: dict[str, Any] = {}
         self.lessons_commit: str | None = None
         self.run_id = Path(episode.dir).name
@@ -639,7 +647,7 @@ class _Pass:
         self.model, self.effort, self.cap = _judge_model(), _judge_effort(), _judge_cap()
         self.knobs = {"draws": self.draws, "model": self.model, "effort": self.effort,
                       "payload_cap": self.cap}
-        self.manifest, self.record, self.runs = manifest, record, runs
+        self.manifest, self.record, self.run_set = manifest, record, runs
         self.served_systems = run_mod.served_systems_of(manifest)
         self.samples = family_mod.read_samples_record(bound)
         # The noise context: pre-flight's record (its failed worlds named there once), then
@@ -662,6 +670,8 @@ class _Pass:
         self.user = _carried_user(prior, kept)
         if prior is not None and kept:
             self.enqueued, self.world_enqueued = prior.enqueued_rows, prior.world_enqueued_rows
+            self.queue_malformed = prior.queue_malformed_rows
+            self.world_queue_malformed = prior.world_queue_malformed_rows
 
         self.lessons_commit = _pass_lessons_commit(bound, runs.planted)
         if self.lessons_commit is None and prior is not None:
@@ -672,12 +682,12 @@ class _Pass:
             row = dict(runs.rows[label])
             self.rows[label] = row
             if label in runs.usable:
-                self._grade_world(label)
+                self._judge_world(label)
             else:
                 row.update(measured=False, not_measured_reason=row.get("ungradable_reason"))
         # A usable control with no usable planted world grades nothing (A3): no family call.
         if FAMILY_LABEL not in kept and runs.planted:
-            self._grade_family()
+            self._judge_family()
         return self._write()
 
     def _alert_key(self, labels: list[str]) -> str | None:
@@ -687,14 +697,14 @@ class _Pass:
         alert = render_mod.episode_alert(self.bound, labels)
         return derive_alert_rule_key(alert) if alert else None
 
-    def _grade_world(self, label: str) -> None:
+    def _judge_world(self, label: str) -> None:
         row = self.rows[label]
         try:
             ctx = render_mod.render(
                 self.episode.dir, label, git_show=self.git_show,
                 lessons_commit=self.lessons_commit, payload_cap=self.cap,
-                facts=self.runs.usable[label], samples=self.samples, manifest=self.manifest,
-                bound=self.bound, family_text=self.noise, runs=self.runs)
+                facts=self.run_set.usable[label], samples=self.samples, manifest=self.manifest,
+                bound=self.bound, family_text=self.noise, runs=self.run_set)
             prompt, placed = run_mod._build_prompt(ctx, self.manifest)
             self.episode.world(label).draws.ensure()
         except (JudgeRefused, OSError, ValueError, TimeoutError) as world_failed:
@@ -710,7 +720,7 @@ class _Pass:
         # system's section whole (the cap may have cut it), in the resolver and in O16 alike.
         shown_samples = {system: section for system, section in self.samples.items()
                          if system in placed.samples_shown}
-        scope = self.runs.scope(self.bound, manifest=self.manifest, outcome=self.record,
+        scope = self.run_set.scope(self.bound, manifest=self.manifest, outcome=self.record,
                                 samples=shown_samples, focus=label)
         answered = {n: doc for n, doc in documents.items() if "failure_reason" not in doc}
         filed = {n: route_mod.assess_draw(n, doc, scope) for n, doc in answered.items()}
@@ -830,16 +840,20 @@ class _Pass:
             drawn=enqueue_mod.DrawnRows(defender=defender_rows, world=world_rows))
         self.enqueued += report.appended
         self.world_enqueued += report.world_appended
+        if report.malformed is not None:
+            self.queue_malformed = report.malformed
+        if report.world_malformed is not None:
+            self.world_queue_malformed = report.world_malformed
         for name, entries in user.items():
             self.user[name].extend(entries)
         row[STATE_KEY] = QUEUED
         self._write()
 
-    def _grade_family(self) -> None:
+    def _judge_family(self) -> None:
         family: dict[str, Any] = {"completed_draws": 0, "malformed_replies": 0}
         self.family = family
         try:
-            prompt = run_mod._build_family_prompt(self.manifest, self.runs, self.noise,
+            prompt = run_mod._build_family_prompt(self.manifest, self.run_set, self.noise,
                                                   cap=self.cap)
             self.episode.world(FAMILY_LABEL).draws.ensure()
             completed, documents, malformed, refusal = _run_world_draws(
@@ -861,9 +875,9 @@ class _Pass:
             if refusal is not None and not failures:
                 family["malformed_reason"] = refusal
             return
-        scope = self.runs.scope(self.bound, manifest=self.manifest, outcome=self.record,
+        scope = self.run_set.scope(self.bound, manifest=self.manifest, outcome=self.record,
                                 samples=None, focus=None)
-        alert_key = self._alert_key(self.runs.planted)
+        alert_key = self._alert_key(self.run_set.planted)
         world_rows: list[dict[str, Any]] = []
         pending = _empty_user()
         for n in sorted(documents):
@@ -890,6 +904,8 @@ class _Pass:
             enqueued_rows=self.enqueued, enqueued_to=self.state.describe(FINDINGS),
             world_enqueued_rows=self.world_enqueued,
             world_enqueued_to=self.state.describe(QUESTIONER_FINDINGS),
+            queue_malformed_rows=self.queue_malformed,
+            world_queue_malformed_rows=self.world_queue_malformed,
             draws={"configured": self.draws,
                    "completed": max((r.get("completed_draws") or 0 for r in rows), default=0)},
             knobs=self.knobs, lessons_commit=self.lessons_commit)

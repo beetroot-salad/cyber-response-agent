@@ -82,6 +82,7 @@
 .episode .w-state { color: var(--text-dim); font-style: italic; }
 .episode .w-verdict { font-size: 15px; font-weight: 700; color: var(--accent-judge); }
 .episode .w-declared { color: var(--text-dim); }
+.episode .w-commit { margin: 6px 0; color: var(--text-dim); font-size: 12px; }
 .episode .w-reason { color: var(--warn); }
 .episode .w-unreadable, .episode .w-skipped { font-size: 12px; color: var(--warn); }
 .episode .w-ladder, .episode .w-chip {

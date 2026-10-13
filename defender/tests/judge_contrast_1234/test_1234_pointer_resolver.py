@@ -299,7 +299,7 @@ def _c_row_names(built: Any, path: Path) -> bool:
     """Does c's world row say it is not gradable, naming the refused file?"""
     row_c = S.row(built, "c")
     said = row_c.get(MALFORMED) or row_c.get(UNGRADABLE)
-    return bool(said) and path.name in json.dumps(said, default=str)
+    return bool(said) and path.name in str(row_c.get("ungradable_reason", ""))
 
 
 def _manifest_case(built: Any, *, damaged: bool) -> dict[str, Any]:
@@ -1053,15 +1053,15 @@ def test_1234_am_plan_pointer_naming_another_worlds_entry(tmp_path: Path) -> Non
     design."""
     built = S.family(tmp_path)
     _run(built, {"b": _reply(world=[
-        _wf([S.plan_ptr("c")], tag="c-entry"),
+        _wf([S.plan_ptr("c")], tag="c-entry-only"),
         _wf([S.plan_ptr("c"), S.conduct("b")], tag="c-entry-and-b"),
-        _wf([PLAN_NO_ENTRY], tag="no-entry"),
+        _wf([PLAN_NO_ENTRY], tag="no-entry-only"),
         _wf([PLAN_NO_ENTRY, S.conduct("b")], tag="no-entry-and-b")])})
 
     fid = [built.finding_id("b", 0, i) for i in range(4)]
     assert [S.lane_of(built, f) for f in fid] == [OTHER_RUN, QUESTIONER, UNRESOLVED, USER_RECORD]
     assert {r.get("finding_id"): r.get("world") for r in S.questioner_queue()} == {fid[1]: "b"}
-    assert [_surfaces(built, S.marker("b", t)) for t in ("c-entry", "no-entry")] == [[], []]
+    assert [_surfaces(built, S.marker("b", t)) for t in ("c-entry-only", "no-entry-only")] == [[], []]
 
 
 # --------------------------------------------------------------------------------------

@@ -398,7 +398,7 @@ FOCUS_VIEW_TITLES: dict[str, str] = {
 
 
 def _focus_views(ctx: JudgeContext) -> dict[str, Block]:
-    run, focus = ctx.runs[0], ctx.focus
+    run, focus = ctx.run_views[0], ctx.focus
     bodies: dict[str, list[Part]] = {
         "manifest": ["its manifest entry: ", _run(_entry(run)), "\n", *_fact_parts(run.facts)],
         "calls": _focus_calls(run),
@@ -509,17 +509,17 @@ def world_layout(ctx: JudgeContext, doc: dict[str, Any]) -> WorldLayout:
     `JudgeRefused` naming the cap when the rows that never give and the notice each other block
     would keep alone exceed it."""
     cap = ctx.payload_cap
-    computed = computed_sections(doc, ctx.runs, ctx.fact_surfaces, ctx.aligned_rows,
+    computed = computed_sections(doc, ctx.run_views, ctx.fact_surfaces, ctx.aligned_rows,
                                  focus=ctx.world_label)
     (header_title, header_blocks), rest = computed[0], computed[1:]
     # The header's blocks: the family's, the judged world's, then each reference run's.
-    ref_headers = {run.label: block for run, block in zip(ctx.runs[1:], header_blocks[2:],
+    ref_headers = {run.label: block for run, block in zip(ctx.run_views[1:], header_blocks[2:],
                                                          strict=True)}
-    focus_run = ctx.runs[0]
+    focus_run = ctx.run_views[0]
     focus_answers = {_answer_key(e): focus_run.answers.get(e["call"])
                      for e in ctx.focus_calls if e.get("call") is not None}
     references = {run.label: _reference_block(run, focus_answers, ctx.reference_calls[run.label])
-                  for run in ctx.runs[1:]}
+                  for run in ctx.run_views[1:]}
     views = _focus_views(ctx)
     calls = views.pop("calls")
     noise: dict[str, Block] = {"noise": (None, list(ctx.noise))}

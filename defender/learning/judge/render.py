@@ -358,7 +358,7 @@ def render(  # noqa: PLR0913 — the keyword tail is the per-pass hand-over that
         views = [run_view(doc, runs, label) for label in labels]
         surfaces = fact_surfaces(doc, runs, labels)
         return JudgeContext(
-            world_label=world_label, runs=views, fact_surfaces=surfaces, focus=focus,
+            world_label=world_label, run_views=views, fact_surfaces=surfaces, focus=focus,
             noise=family_text, aligned_rows=aligned_lead_rows(views, surfaces),
             samples=samples_doc, base_story=doc.get("base_story"), payload_cap=payload_cap)
 
@@ -733,7 +733,7 @@ class JudgeContext:
     log."""
 
     world_label: str
-    runs: list[RunView]
+    run_views: list[RunView]
     fact_surfaces: list[dict[str, Any]]
     focus: JudgeInput
     noise: Annotated[list[Any], SkipValidation]
@@ -745,17 +745,17 @@ class JudgeContext:
     @property
     def contrast_rows(self) -> dict[str, dict[str, Any]]:
         """Run label -> that run's contrast row (the focus's included)."""
-        return {run.label: run.contrast for run in self.runs}
+        return {run.label: run.contrast for run in self.run_views}
 
     @property
     def focus_calls(self) -> list[dict[str, Any]]:
         """Section 6's call list: the judged world's joined calls."""
-        return self.runs[0].calls
+        return self.run_views[0].calls
 
     @property
     def reference_calls(self) -> dict[str, list[dict[str, Any]]]:
         """Section 5's call lists, by reference run."""
-        return {run.label: run.calls for run in self.runs[1:]}
+        return {run.label: run.calls for run in self.run_views[1:]}
 
     @property
     def shown_its_facts(self) -> bool:

@@ -1471,7 +1471,9 @@ def _render_verdict(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — th
         # the count and the anchor refer to the same rows.
         world_group = [f for f in rows if f.label == w.label and f.subject == SUBJECT_DEFENDER]
         n_findings = len(world_group)
-        footer_word = "enqueued"
+        footer_word = ("not measured" if row.get("measured") is False else
+                       "enqueued" if all(f.disposition == "defender" for f in world_group)
+                       else "not queued")
         group_n = (ep.findings.group_index.get(_disposition_heading_raw(world_group[0]), 1)
                    if world_group else 1)
         off_roster_note = ("" if w.in_manifest or w.run_dir_name is not None

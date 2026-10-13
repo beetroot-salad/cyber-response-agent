@@ -73,7 +73,7 @@ class RunSet:
         labels = list(self.usable) if focus is None else [focus, *self.references(focus)]
         return PointerScope(
             bound=bound, episode_token=self.episode_token,
-            runs={label: self.usable[label] for label in labels}, manifest=manifest,
+            run_facts={label: self.usable[label] for label in labels}, manifest=manifest,
             outcome=dict(outcome or {}), samples=None if focus is None else dict(samples or {}),
             j3=self.j3)
 

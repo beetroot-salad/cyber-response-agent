@@ -172,7 +172,7 @@ def _host_hits(text: str, pattern: re.Pattern[str], lo: int = 0, hi: int | None 
     for a, b in _host_spans(text):
         a, b = max(a, lo), min(b, end)
         if a < b:
-            hits.extend(a + m.start() for m in pattern.finditer(text, a, b))
+            hits.extend(m.start() for m in pattern.finditer(text, a, b))
     return sorted(hits)
 
 

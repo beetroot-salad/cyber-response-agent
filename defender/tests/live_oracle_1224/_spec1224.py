@@ -323,10 +323,8 @@ as_reply_text = J.as_reply_text
 
 
 def judge_reply(*, systems: tuple[str, ...] = ("idp",), bucket: str = "lead-set") -> str:
-    """A judge reply in the coined v2 shape: a world-scope `bucket` and `systems`, plus the
-    family-scope `verdict_word`, so one default answers both scopes."""
-    return as_reply_text(J.reply_doc(findings=[], bucket=bucket, systems=list(systems),
-                                     verdict_word="caught"))
+    """A world-scope judge reply with its own bucket and systems (#1234)."""
+    return as_reply_text(J.reply_doc(findings=[], bucket=bucket, systems=list(systems)))
 
 
 def judge_label(agent_id: str) -> str | None:

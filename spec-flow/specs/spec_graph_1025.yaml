@@ -392,12 +392,13 @@ demands:
 
   - id: d17_badge_and_meta_line
     kind: behavior
-    form: test
+    form: clause
     source: "amendment: badge and meta line"
     binds:
       - "interacts(render_episode->sec_verdict)"
       - "judge_yaml.domain.distinguished[family_outcome=None]"
-    discharged_by: test_1025_the_badge_is_family_outcome_falling_back_to_verdict_word_and_the_meta_line_carries_episode_outcome_and_verdict_word
+    status: retired
+    outcome: {nl: "RETIRED by #1234 — #1234 retired the family word (`family_outcome` / `verdict_word`, A4) and the per-draw `episode_outcome` (A17): the badge and the meta line carry the record's own O5 word, `validity`, pinned by `test_1025_the_badge_is_the_records_validity_and_names_no_retired_family_word`; `test_1025_the_badge_is_family_outcome_falling_back_to_verdict_word_and_the_meta_line_carries_episode_outcome_and_verdict_word`, which discharged this demand, was rewritten into it."}
     seed_docstring: >-
       Sample badge reads `discard`, meta `gradable · undecidable`; live-996 badge reads
       `survived` (its `family_outcome` is None), meta `gradable · survived`.
@@ -453,13 +454,14 @@ demands:
 
   - id: d21_no_grade_record_still_renders
     kind: domain-outcome
-    form: test
+    form: clause
     source: "fk-5; correction 5 (a failed judge leaves no judge.yaml and the launcher then renders)"
     binds:
       - "judge_yaml.domain.distinguished[absent]"
       - "interacts(render_episode->sec_verdict)"
       - "interacts(render_episode->sec_stages)"
-    discharged_by: test_1025_an_episode_with_no_judge_yaml_still_renders_its_stages_and_worlds_and_says_there_is_no_grade_record
+    status: retired
+    outcome: {nl: "RETIRED by #1234 — #1234 A6 writes `judge.yaml` before the appends, so a judge pass that fails at the enqueue no longer leaves an episode with no grade record: the record names the world being committed in state `queueing` and the page says it is in progress, pinned by `test_1025_an_episode_whose_judge_failed_at_the_enqueue_still_renders_its_stages_and_worlds_and_says_which_world_is_in_progress`; `test_1025_an_episode_with_no_judge_yaml_still_renders_its_stages_and_worlds_and_says_there_is_no_grade_record`, which discharged this demand, was rewritten into it."}
     seed_docstring: >-
       A launcher-produced episode whose judge pass failed (no `judge.yaml`) renders: the band
       says no grade record, every world is "not graded", the stage table has its rows, and
@@ -2238,13 +2240,14 @@ demands:
     discharged_by: test_1025_draw_index_beyond_the_recorded_completed_draw_count
   - id: r_subject_field_holds_a_value_outside_defender_and_world
     kind: domain-outcome
-    form: test
+    form: clause
     source: "§7 J9f (auto); 45-dispositions fork family J9f; 70-resolutions.md"
     binds:
       - "draw_documents.domain.distinguished[subject-outside-vocabulary]"
       - "interacts(render_episode->sec_findings)"
       - "interacts(render_episode->sec_verdict)"
-    discharged_by: test_1025_subject_field_holds_a_value_outside_defender_and_world
+    status: retired
+    outcome: {nl: "RETIRED by #1234 — #1234 M4 retired the per-finding `subject`: a finding's addressee is the reply list it is filed under, so no subject field remains to hold an outside value; `test_1025_subject_field_holds_a_value_outside_defender_and_world`, which discharged this demand, was deleted with the behaviour it pinned."}
   - id: r_a_finding_that_is_not_a_mapping
     kind: domain-outcome
     form: test
@@ -2279,14 +2282,15 @@ demands:
     discharged_by: test_1025_a_world_finding_refused_for_citing_an_unavailable_sample
   - id: r_the_episode_level_verdicts_justification
     kind: behavior
-    form: test
+    form: clause
     source: "§7 J10 (human); 45-dispositions fork family J10; 70-resolutions.md"
     binds:
       - "interacts(render_episode->sec_verdict)"
       - "interacts(render_episode->sec_findings)"
       - "interacts(render_episode->draw_documents)"
       - "judge_yaml.domain.distinguished[family_outcome=None]"
-    discharged_by: test_1025_the_episode_level_verdicts_justification
+    status: retired
+    outcome: {nl: "RETIRED by #1234 — #1234 A17 retired the per-draw `episode_outcome` word and its justification; `test_1025_the_episode_level_verdicts_justification`, which discharged this demand, was deleted with the behaviour it pinned."}
   - id: r_record_fields_no_slot_binds
     kind: negative
     form: test
@@ -2334,7 +2338,7 @@ demands:
     binds:
       - "judge_yaml.domain.distinguished[verdict_word=unknown]"
       - "interacts(render_episode->sec_verdict)"
-    discharged_by: test_1025_verdict_word_outside_the_five_known_values
+    discharged_by: test_1025_validity_word_outside_the_known_values  # renamed by #1234's migration: `verdict_word` is retired (A4); the band's one record word is `validity`, and a word outside its known values still renders raw, escaped, driving no class
   - id: r_bucket_value_outside_the_closed_or_open_vocabularies
     kind: domain-outcome
     form: test

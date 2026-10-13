@@ -47,8 +47,8 @@ ALLOWED: dict[tuple[str, str], tuple[int, str]] = {
     ("api/app.py", "lessons"): (1, _KEY),
     ("learning/frontend/build.py", "lessons"): (1, _KEY),
     ("learning/frontend/serialize.py", "lessons"): (2, _KEY),
-    ("learning/judge/render.py", "lessons"): (1, _KEY),
-    ("learning/judge/run.py", "lessons"): (1, _KEY),
+    ("learning/judge/layout.py", "lessons"): (2, _KEY),
+    ("learning/branch/questioner/__init__.py", "lessons"): (2, _KEY),
     ("evals/harness.py", "lessons"):
         (2, "a scenario's own `lessons/` folder and the results folder, not a knowledge root"),
     ("learning/author/lessons/run.py", "lessons"):

@@ -146,23 +146,40 @@ def _validate_world_row(row: dict[str, Any], *, episode_dir: Path | None = None)
 
 def append_rows(episode_dir: Path, rows: list[dict[str, Any]], *,
                 state: LearningState) -> int:
-    """Append `rows` to the defender findings channel through `state`; how many were appended.
-    Every row is screened first, so one bad row refuses the whole append before any write.
-    `episode_dir` is only for refusal text; the queue is never derived from it."""
+    """Append `rows` to the defender findings channel through `state`; how many were appended
+    (`append_rows_report` without its malformed count)."""
+    return append_rows_report(episode_dir, rows, state=state)[0]
+
+
+def append_rows_report(episode_dir: Path, rows: list[dict[str, Any]], *,
+                       state: LearningState) -> tuple[int, int]:
+    """Append `rows` to the defender findings channel through `state`; return `(appended,
+    malformed lines seen)` — the unreadable lines `state.append` counted on the queue under its
+    append lock (a torn trailing row is one, closed rather than concatenated onto). Every row
+    is screened first, so one bad row refuses the whole append before any write. `episode_dir`
+    is only for refusal text; the queue is never derived from it."""
     rows = list(rows)
     for row in rows:
         _validate_row(row, episode_dir=episode_dir)
-    return state.append(FINDINGS, rows)[0]
+    return state.append(FINDINGS, rows)
 
 
 def append_world_rows(episode_dir: Path, rows: list[dict[str, Any]], *,
                       state: LearningState) -> int:
     """Append `rows` to the questioner findings channel through `state`; how many were
-    appended. A row whose `finding_id` the queue already holds is not appended again."""
+    appended (`append_world_rows_report` without its malformed count)."""
+    return append_world_rows_report(episode_dir, rows, state=state)[0]
+
+
+def append_world_rows_report(episode_dir: Path, rows: list[dict[str, Any]], *,
+                             state: LearningState) -> tuple[int, int]:
+    """Append `rows` to the questioner findings channel through `state`; return `(appended,
+    malformed lines seen)` on that queue, as `append_rows_report` does. A row whose
+    `finding_id` the queue already holds is not appended again."""
     rows = list(rows)
     for row in rows:
         _validate_world_row(row, episode_dir=episode_dir)
-    return state.append(QUESTIONER_FINDINGS, rows, dedup_key="finding_id")[0]
+    return state.append(QUESTIONER_FINDINGS, rows, dedup_key="finding_id")
 
 
 @model
@@ -178,10 +195,14 @@ class DrawnRows:
 @model
 class EnqueueReport:
     """What one `enqueue_report` call appended: rows on the defender channel (`appended`) and
-    on the questioner channel (`world_appended`)."""
+    on the questioner channel (`world_appended`), with the unreadable lines each append saw on
+    its queue (`malformed`, `world_malformed`; `None` where that channel had no rows to append,
+    so its queue was not read)."""
 
     appended: int = 0
     world_appended: int = 0
+    malformed: int | None = None
+    world_malformed: int | None = None
 
 
 def enqueue_report(episode_dir: Path, record: dict[str, Any], *, state: LearningState,
@@ -211,10 +232,14 @@ def enqueue_report(episode_dir: Path, record: dict[str, Any], *, state: Learning
         _validate_row(row, episode_dir=episode_dir)
     for row in drawn.world:
         _validate_world_row(row, episode_dir=episode_dir)
-    return EnqueueReport(
-        appended=append_rows(episode_dir, drawn.defender, state=state) if drawn.defender else 0,
-        world_appended=(append_world_rows(episode_dir, drawn.world, state=state)
-                        if drawn.world else 0))
+    report = EnqueueReport()
+    if drawn.defender:
+        report.appended, report.malformed = append_rows_report(
+            episode_dir, drawn.defender, state=state)
+    if drawn.world:
+        report.world_appended, report.world_malformed = append_world_rows_report(
+            episode_dir, drawn.world, state=state)
+    return report
 
 
 def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one keyword each
@@ -363,7 +388,7 @@ def check_disposition_entry(entry: dict[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "DrawnRows", "DrawsSkipReport", "EnqueueReport", "LANE_DEFENDER", "LANE_UNQUEUEABLE",
-    "LANE_WORLD", "LEDGER_LANES", "WORLD_LABEL_DOUBTED", "append_rows", "append_world_rows",
-    "build_finding_row", "check_disposition_entry", "defender_lane_blocked",
+    "LANE_WORLD", "LEDGER_LANES", "WORLD_LABEL_DOUBTED", "append_rows", "append_rows_report",
+    "append_world_rows", "append_world_rows_report", "build_finding_row", "check_disposition_entry", "defender_lane_blocked",
     "disposition_entry", "draws_on_disk", "draws_on_disk_report", "enqueue_report",
 ]

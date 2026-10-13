@@ -71,7 +71,7 @@ class PointerScope:
 
     bound: Annotated[Bound, SkipValidation]
     episode_token: str
-    runs: Annotated[dict[str, WorldFacts], SkipValidation]
+    run_facts: Annotated[dict[str, WorldFacts], SkipValidation]
     manifest: Annotated[dict[str, Any], SkipValidation]
     outcome: Annotated[dict[str, Any], SkipValidation] = field(default_factory=dict)
     samples: Annotated[dict[str, Any] | None, SkipValidation] = None
@@ -135,7 +135,7 @@ def _world_pointer(scope: PointerScope, pointer: str, parts: list[str],
                    fragment: str | None) -> Resolution | None:
     """`worlds/<X>/<leaf>`: conduct or context of run X, when X is in the scope."""
     label, leaf = parts[1], "/".join(parts[2:])
-    run = scope.runs.get(label)
+    run = scope.run_facts.get(label)
     if run is None or not leaf:
         return None
     if leaf in _CONDUCT_LEAVES:
@@ -171,7 +171,7 @@ def _served_pointer(scope: PointerScope, pointer: str, name: str,
                     fragment: str | None) -> Resolution | None:
     """`served/<token>.<X>.jsonl#<row>`: a ledger row of run X (conduct; blocked when it is a
     `refused`/`fault` row). `served/base.jsonl` is the family tier, never a run."""
-    for label, run in scope.runs.items():
+    for label, run in scope.run_facts.items():
         if name != f"{run.token}.jsonl":
             continue
         index = _row_index(fragment, run.ledger_rows)
@@ -220,7 +220,7 @@ def _resolves(pointer: Any, scope: PointerScope) -> Resolution | None:  # noqa: 
         return _world_pointer(scope, pointer, parts, fragment)
     if head == str(LAYOUT.served) and len(parts) == 2:
         return _served_pointer(scope, pointer, parts[1], fragment)
-    if len(parts) >= 3 and parts[1] in scope.runs \
+    if len(parts) >= 3 and parts[1] in scope.run_facts \
             and "/".join(parts[:2]) == str(LAYOUT.oracle_dir(parts[1])):
         name = "/".join(parts)
         return Resolution(pointer=pointer, kind=BUILT, run=parts[1]) \

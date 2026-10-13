@@ -1123,7 +1123,7 @@ def wf(bucket: str = "unreachable", *, systems: Sequence[str] | None = ("idp",),
         "bucket": bucket, "claim": claim, "root_cause": root_cause, "anchor": anchor,
         "topic": topic, EVIDENCE: list(evidence) if evidence is not None else [plan_ptr("b")]}
     if systems is not None:
-        doc["systems"] = list(systems)
+        doc["systems"] = list(systems) if isinstance(systems, (list, tuple)) else systems
     doc.update(over)
     return doc
 

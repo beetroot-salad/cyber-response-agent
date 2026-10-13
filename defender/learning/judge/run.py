@@ -546,21 +546,22 @@ _DECISION_GLOSSARY = (
     "- `fault`: the system's adapter could not load; nothing was asked: a BLOCKED call.\n\n"
 )
 
-#: The pointer grammar the judge is told (A1): every pointer is episode-relative.
-_POINTER_RULES = (
-    "EVERY EVIDENCE POINTER IS EPISODE-RELATIVE, never prose and never a quotation, optionally "  # lint-run-records: ok — the pointer grammar the model writes; it must spell each record's own name (A1)
-    "with a `#fragment`:\n"
-    "- a run's conduct: `worlds/<run>/report.md`, `worlds/<run>/investigation.md`, "
-    "`worlds/<run>/gather_summaries/<lead>.md`, `worlds/<run>/executed_queries.jsonl#<row>` "
-    "and its served answers `served/<token>.<run>.jsonl#<row>` (row = 0-based line index);\n"
-    "- a run's built layer: `oracle/<run>/forged.jsonl#<row>`;\n"
-    "- the plan: `family.yaml#worlds/<run>` (one world's entry) or `family.yaml#discriminator` "
-    "(the family-level part);\n"
-    "- context: `samples.yaml#<system>`, `outcome.yaml#<key>`.\n"
-    "A pointer outside these, or into a run that is not one of the runs below, does not "
-    "resolve, and A FINDING WHOSE POINTERS ALL FAIL TO RESOLVE IS DROPPED. Cite family.yaml only "
-    "where the flaw is in the plan — what the questioner designed — never for context.\n\n"
-)
+def _pointer_rules() -> str:
+    """Host-owned episode-relative pointer grammar (A1)."""
+    return (
+        "EVERY EVIDENCE POINTER IS EPISODE-RELATIVE, never prose and never a quotation, optionally "  # lint-run-records: ok — the pointer grammar the model writes; it must spell each record's own name (A1)
+        "with a `#fragment`:\n"
+        "- a run's conduct: `worlds/<run>/report.md`, `worlds/<run>/investigation.md`, "
+        "`worlds/<run>/gather_summaries/<lead>.md`, `worlds/<run>/executed_queries.jsonl#<row>` "
+        "and its served answers `served/<token>.<run>.jsonl#<row>` (row = 0-based line index);\n"
+        "- a run's built layer: `oracle/<run>/forged.jsonl#<row>`;\n"
+        f"- the plan: `{LAYOUT.family}#worlds/<run>` (one world's entry) or `{LAYOUT.family}#discriminator` "
+        "(the family-level part);\n"
+        f"- context: `{LAYOUT.samples}#<system>`, `{LAYOUT.outcome}#<key>`.\n"
+        "A pointer outside these, or into a run that is not one of the runs below, does not "
+        f"resolve, and A FINDING WHOSE POINTERS ALL FAIL TO RESOLVE IS DROPPED. Cite {LAYOUT.family} only "
+        "where the flaw is in the plan — what the questioner designed — never for context.\n\n"
+    )
 
 
 def _build_prompt(ctx: JudgeContext, manifest: dict[str, Any]) -> tuple[str, WorldLayout]:
@@ -576,7 +577,7 @@ def _build_prompt(ctx: JudgeContext, manifest: dict[str, Any]) -> tuple[str, Wor
 def _world_task(ctx: JudgeContext) -> str:
     """Section 1 of the world call: the task and the taxonomy."""
     label = ctx.world_label
-    references = ", ".join(run.label for run in ctx.runs[1:]) or "none"
+    references = ", ".join(run.label for run in ctx.run_views[1:]) or "none"
     never_shown = "" if ctx.shown_its_facts else (
         f"World {label} was never shown its facts: its contrast row records no altered answer "
         "served to it, so analyze-discipline and decision-discipline are unavailable to it — "
@@ -612,7 +613,7 @@ def _world_task(ctx: JudgeContext) -> str:
         f"faulted call): `{GAP_WHAT}`, `{GAP_HOW}`, `{EVIDENCE}` (pointers at the blocked "
         f"calls) and `{KEPT_FACTS}` (a boolean: is this gap why the facts did not reach the "
         "investigator). A gap is never an investigator finding.\n\n"
-        f"{_POINTER_RULES}"
+        f"{_pointer_rules()}"
         "Before findings, run three passes and report each as its own table: correlations, "
         "scope_checks, derivations. Cap any table at 20 rows. Quote any YAML scalar containing a "
         "colon.\n\n"
@@ -638,7 +639,7 @@ def _build_family_prompt(manifest: dict[str, Any], runs: RunSet, noise: list[Any
         "verdict on a difference meant to move it). Each world finding's bucket is one of:\n"
         f"{_guidance(WORLD_FINDING_BUCKETS, _WORLD_FINDING_GUIDANCE, 'world-finding bucket')}\n"
         f"{_DECISION_GLOSSARY}"
-        f"{_POINTER_RULES}"
+        f"{_pointer_rules()}"
         "Reply as one YAML mapping, bare — not inside a code fence, with nothing before or after "
         f"it: noise_floor_note, correlations, scope_checks, derivations, {WORLD_FINDINGS} (each: "
         f"bucket, systems — the systems the flaw is about, each once — claim, root_cause, "
