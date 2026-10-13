@@ -469,7 +469,11 @@ def _read_world_ledger(
 def read_query_table(bound: Bound, label: str) -> list[dict[str, Any]] | None:
     """World `label`'s archived query table, every line a row; `None` when nothing is at the
     name (a world not archived); `JudgeRefused` naming the file and the refusal (a link, a
-    FIFO, a directory, an oversize file, a torn line)."""
+    FIFO, a directory, an oversize file, a torn line, or malformed call fields).
+
+    Unlike the tolerant lead reader, grading must preserve the raw call identity rather than
+    coerce it. Validate the fields used by the computed views before admitting any rows,
+    including unserved calls that have no ledger partner to check them against."""
     table_name = LAYOUT.world(label).executed_queries
     table, torn_table, table_read = bound.read_jsonl(table_name)
     if table_read.absent:
@@ -480,6 +484,13 @@ def read_query_table(bound: Bound, label: str) -> list[dict[str, Any]] | None:
         raise JudgeRefused(f"world {label!r}: {table_name} holds {torn_table} line(s) that do "
                            "not parse as a row")
     _refuse_unwritable(table, label=label, name=table_name)
+    for index, row in enumerate(table):
+        for column in ("lead_id", "system", "verb", "query_id", "params"):
+            expected = dict if column == "params" else str
+            if not isinstance(row.get(column), expected):
+                raise JudgeRefused(
+                    f"world {label!r}: {table_name} row {index} has malformed {column} "
+                    f"({row.get(column)!r}); expected {expected.__name__}")
     return table
 
 

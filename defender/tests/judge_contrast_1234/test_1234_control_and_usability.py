@@ -333,6 +333,23 @@ def test_1234_malformed_forged_fact_id_excludes_only_its_world(tmp_path, fact_id
     assert S.from_world(S.defender_queue(), "b")
 
 
+@pytest.mark.parametrize("field", ["system", "verb", "lead_id", "query_id", "params"])
+@pytest.mark.parametrize("value", [[], None, 1])
+def test_1234_malformed_unserved_query_excludes_only_its_world(tmp_path, field, value):
+    """Unserved calls must pass the archive boundary before computed views use their fields."""
+    built = S.family(tmp_path, S.triad(c={"calls": [S.CallRow(source=None)]}, d=_D))
+    S.rewrite_jsonl(built.table_path("c"),
+                    lambda rows: [{**row, field: value} for row in rows])
+    judge = S.judge({"b": S.world_reply("lead-quality", ["idp"], investigator=[
+        S.inv(contrast=[S.conduct("b"), S.conduct("a")])])})
+    S.grade(built, judge)
+    _assert_malformed(built, "c", "executed_queries.jsonl")
+    assert field in S.row(built, "c")[UNGRADABLE_REASON]
+    assert not judge.called("c")
+    _assert_out_of_references(judge, "c")
+    assert S.from_world(S.defender_queue(), "b")
+
+
 def _to_host_rows(path: Path, tmp_path: Path) -> Any:
     return S.plant_symlink(path, _host_rows(tmp_path))
 
